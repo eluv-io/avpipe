@@ -12,7 +12,7 @@ INCDIRS=-I${ELV_TOOLCHAIN_DIST_PLATFORM}/include -I../utils/include -Iinclude
 OBJS=$(SRCS:%.c=$(BINDIR)/%.o)
 
 LIBDIRS=-L${ELV_TOOLCHAIN_DIST_PLATFORM}/lib -L../utils/lib
-FLAGS=-O0 -ggdb -Wall -fPIC
+FLAGS=-O0 -ggdb -Wall -fPIC -DAUDIO
 
 all: etx
 
@@ -29,7 +29,7 @@ clean:
 	@rm -rf $(BINDIR) $(LIBDIR)
 
 tags:
-	ctags -R .
+	ctags -R . ../../elv-toolchain/FFmpeg/FFmpeg ../utils
 
 check-env:
 ifndef ELV_TOOLCHAIN_DIST_PLATFORM

@@ -14,6 +14,7 @@
 #include "elv_xc_test.h"
 #include "elv_xc_utils.h"
 #include "elv_log.h"
+#include "elv_time.h"
 
 #include <stdio.h>
 #include <fcntl.h>
@@ -509,9 +510,12 @@ decode_packet(
     AVFrame *frame,
     AVFrame *filt_frame,
     int stream_index,
-    txparams_t *p)
+    txparams_t *p,
+    int do_instrument)
 {
     int ret;
+    struct timeval tv;
+    u_int64_t since;
     AVCodecContext *codec_context = decoder_context->codec_context[stream_index];
     int response = avcodec_send_packet(codec_context, packet);
     //elv_dbg("SS-DECODE send_packet pts=%d dts=%d duration=%d", packet->pts, packet->dts, packet->duration);
@@ -522,12 +526,18 @@ decode_packet(
     }
 
     while (response >= 0) {
+        elv_get_time(&tv);
         response = avcodec_receive_frame(codec_context, frame);
         if (response == AVERROR(EAGAIN) || response == AVERROR_EOF) {
             break;
         } else if (response < 0) {
             elv_err("Failure while receiving a frame from the decoder: %s", av_err2str(response));
             return response;
+        }
+
+        if (do_instrument) {
+            elv_since(&tv, &since);
+            elv_log("INSTRMNT avcodec_receive_frame time=%"PRId64, since);
         }
 
         if (response >= 0) {
@@ -548,20 +558,32 @@ decode_packet(
 #endif
 
                 /* push the decoded frame into the filtergraph */
+                elv_get_time(&tv);
                 if (av_buffersrc_add_frame_flags(decoder_context->buffersrc_ctx, frame, AV_BUFFERSRC_FLAG_KEEP_REF) < 0) {
                     elv_err("Failure in feeding the filtergraph");
                     break;
                 }
+                if (do_instrument) {
+                    elv_since(&tv, &since);
+                    elv_log("INSTRMNT av_buffersrc_add_frame_flags time=%"PRId64, since);
+                }
 
                 /* pull filtered frames from the filtergraph */
                 while (1) {
+                    elv_get_time(&tv);
                     ret = av_buffersink_get_frame(decoder_context->buffersink_ctx, filt_frame);
                     if (ret == AVERROR(EAGAIN) || ret == AVERROR_EOF) {
                         break;
                     }
+
                     if (ret < 0) {
                         assert(0);
                         return -1;
+                    }
+
+                    if (do_instrument) {
+                        elv_since(&tv, &since);
+                        elv_log("INSTRMNT av_buffersink_get_frame time=%"PRId64, since);
                     }
 
 #if 0
@@ -576,10 +598,16 @@ decode_packet(
 
                     /* To allow for packet reordering frames can come with pts past the desired duration */
                     if (p->duration_ts == -1 || frame_to_encode->pts < p->start_time_ts + p->duration_ts) {
+                        elv_get_time(&tv);
                         encode_frame(decoder_context, encoder_context, frame_to_encode, stream_index);
+                        if (do_instrument) {
+                            elv_since(&tv, &since);
+                            elv_log("INSTRMNT encode_frame time=%"PRId64, since);
+                        }
                     } else {
                         elv_dbg("SS-ENCODE skip frame pts=%d filt_frame pts=%d", frame->pts, filt_frame->pts);
                     }
+
                     av_frame_unref(filt_frame);
                 }
             }
@@ -593,10 +621,14 @@ static int
 tx(
     txctx_t *decoder_context,
     txctx_t *encoder_context,
-    txparams_t *params)
+    txparams_t *params,
+    int do_instrument)
 {
     /* Set scale filter */
     char filter_str[128];
+    struct timeval tv;
+    u_int64_t since;
+
     sprintf(filter_str, "scale=%d:%d",
         encoder_context->codec_context[encoder_context->video_stream_index]->width,
         encoder_context->codec_context[encoder_context->video_stream_index]->height);
@@ -667,6 +699,7 @@ tx(
                 }
             }
 
+            elv_get_time(&tv);
             response = decode_packet(
                 decoder_context,
                 encoder_context,
@@ -674,8 +707,14 @@ tx(
                 input_frame,
                 filt_frame,
                 input_packet->stream_index,
-                params
+                params,
+                do_instrument
             );
+
+            if (do_instrument) {
+                elv_since(&tv, &since);
+                elv_log("INSTRMNT decode_packet time=%"PRId64, since);
+            }
 
             av_packet_unref(input_packet);
 
@@ -748,12 +787,12 @@ main(
     //av_log_set_level(AV_LOG_DEBUG);
 
     if ( argc == 1 ) {
-        printf("Usage: %s <in-filename> <out-filename>\nNeed to pass a input and output filenames\n", argv[0]);
+        printf("Usage: %s <in-filename> <out-filename>\nNeed to pass input and output filenames\n", argv[0]);
         return -1;
     }
 
-    elv_logger_open(NULL, "etx", 10, 1000000, elv_log_file | elv_log_stdout);
-    elv_set_log_level(elv_log_debug);
+    elv_logger_open(NULL, "etx", 10, 10*1024*1024, elv_log_file);
+    elv_set_log_level(elv_log_log);
 
     txctx_t *decoder_context = calloc(1, sizeof(txctx_t));
     decoder_context->file_name = argv[1];
@@ -771,7 +810,7 @@ main(
         return -1;
     }
 
-    if (tx(decoder_context, encoder_context, &p) < 0) {
+    if (tx(decoder_context, encoder_context, &p, 1) < 0) {
         elv_err("Error in transcoding");
         return -1;
     }

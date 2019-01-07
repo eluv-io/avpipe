@@ -118,6 +118,7 @@ elv_io_open(
         buf_writer_t *w = (buf_writer_t *) calloc(1, sizeof(buf_writer_t));
         stream_index = (int) strtol(stream_opt->value, &endptr, 10);
         assert(stream_index == 0 || stream_index == 1);
+        elv_log("XXX stream_index=%d", stream_index);
         sprintf(segname, "./O/%s%s-%05d.m4s", segbase, stream_opt->value, ++out_handler[stream_index].chunk_idx);
         w->fd = open(segname, O_RDWR | O_CREAT | O_TRUNC, 0644);
         if (w->fd < 0) {
