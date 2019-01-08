@@ -2,13 +2,13 @@
  * elv_filters.c
  */
 
-#include "elv_xc_test.h"
+#include "elv_xc.h"
 
 int
 init_filters(
     const char *filters_descr,
-    txctx_t *decoder_context,
-    txctx_t *encoder_context)
+    coderctx_t *decoder_context,
+    coderctx_t *encoder_context)
 {
     AVCodecContext *dec_codec_ctx = decoder_context->codec_context[decoder_context->video_stream_index];
 

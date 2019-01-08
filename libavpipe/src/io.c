@@ -9,7 +9,7 @@
 #include <libavfilter/buffersink.h>
 #include <libavfilter/buffersrc.h>
 
-#include "elv_xc_test.h"
+#include "elv_xc.h"
 #include "elv_xc_utils.h"
 #include "elv_log.h"
 

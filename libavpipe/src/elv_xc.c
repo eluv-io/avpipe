@@ -4,14 +4,13 @@
  * Build:
  *
  * ELV_TOOLCHAIN_DIST_PLATFORM=...
- * gcc -Wall -L $ELV_TOOLCHAIN_DIST_PLATFORM/lib -I $ELV_TOOLCHAIN_DIST_PLATFORM/include/ elv_xc_test.c -lavcodec -lavformat -lavfilter -lavdevice -lswresample -lswscale -lavutil -o tx
- *
+ * make
  *
  */
 
 #include <libavutil/log.h>
 
-#include "elv_xc_test.h"
+#include "elv_xc.h"
 #include "elv_xc_utils.h"
 #include "elv_log.h"
 #include "elv_time.h"
@@ -112,7 +111,7 @@ prepare_input(
 
 static int
 prepare_decoder(
-    txctx_t *decoder_context,
+    coderctx_t *decoder_context,
     txparams_t *params)
 {
 
@@ -211,8 +210,8 @@ prepare_decoder(
 
 static int
 prepare_video_encoder(
-    txctx_t *encoder_context,
-    txctx_t *decoder_context,
+    coderctx_t *encoder_context,
+    coderctx_t *decoder_context,
     txparams_t *params)
 {
     int index = decoder_context->video_stream_index;
@@ -333,8 +332,8 @@ prepare_video_encoder(
 #ifdef AUDIO
 static int
 prepare_audio_encoder(
-    txctx_t *encoder_context,
-    txctx_t *decoder_context,
+    coderctx_t *encoder_context,
+    coderctx_t *decoder_context,
     txparams_t *params)
 {
     int index = decoder_context->audio_stream_index;
@@ -396,8 +395,8 @@ prepare_audio_encoder(
 
 static int
 prepare_encoder(
-    txctx_t *encoder_context,
-    txctx_t *decoder_context,
+    coderctx_t *encoder_context,
+    coderctx_t *decoder_context,
     txparams_t *params)
 {
     /* Allocate an AVFormatContext for output. */
@@ -434,8 +433,8 @@ prepare_encoder(
 
 static int
 encode_frame(
-    txctx_t *decoder_context,
-    txctx_t *encoder_context,
+    coderctx_t *decoder_context,
+    coderctx_t *encoder_context,
     AVFrame *frame,
     int stream_index)
 {
@@ -504,8 +503,8 @@ encode_frame(
 
 static int
 decode_packet(
-    txctx_t *decoder_context,
-    txctx_t *encoder_context,
+    coderctx_t *decoder_context,
+    coderctx_t *encoder_context,
     AVPacket *packet,
     AVFrame *frame,
     AVFrame *filt_frame,
@@ -617,17 +616,18 @@ decode_packet(
     return 0;
 }
 
-static int
+int
 tx(
-    txctx_t *decoder_context,
-    txctx_t *encoder_context,
-    txparams_t *params,
+    txctx_t *txctx,
     int do_instrument)
 {
     /* Set scale filter */
     char filter_str[128];
     struct timeval tv;
     u_int64_t since;
+    coderctx_t *decoder_context = &txctx->decoder_ctx;
+    coderctx_t *encoder_context = &txctx->encoder_ctx;
+    txparams_t *params = txctx->params;
 
     sprintf(filter_str, "scale=%d:%d",
         encoder_context->codec_context[encoder_context->video_stream_index]->width,
@@ -754,68 +754,38 @@ tx(
     return 0;
 }
 
-/*
- * Test basic decoding and encoding
- *
- * Usage: <FILE-IN> <FILE-OUT>
- */
 int
-main(
-    int argc,
-    char *argv[])
+tx_init(
+    txctx_t **txctx,
+    char *in_filename,
+    char *out_filename,
+    txparams_t *params)
 {
+    txctx_t *p_txctx = (txctx_t *) calloc(1, sizeof(txctx_t));
 
-    /* Parameters */
-    txparams_t p = {
-        .video_bitrate = 2560000,           /* not used if using CRF */
-        .audio_bitrate = 64000,
-        .sample_rate = 44100,               /* Audio sampling rate */
-        .crf_str = "23",                    /* 1 best -> 23 standard middle -> 52 poor */
-        .start_time_ts = 0,                 /* same units as input stream PTS */
-        //.duration_ts = 1001 * 60 * 12,      /* same units as input stream PTS */
-        .duration_ts = -1,                  /* -1 means entire input stream */
-        .start_segment_str = "1",           /* 1-based */
-        .seg_duration_ts = 1001 * 60,       /* same units as input stream PTS */
-        .seg_duration_fr = 60,              /* in frames-per-secoond units */
-        .seg_duration_secs_str = "2.002",
-        .codec = "libx264",
-        .enc_height = 720,                  /* -1 means use source height, other values 2160, 720 */
-        .enc_width = 1280                   /* -1 means use source width, other values 3840, 1280 */
-    };
-
-    // Set AV libs log level
-    //av_log_set_level(AV_LOG_DEBUG);
-
-    if ( argc == 1 ) {
-        printf("Usage: %s <in-filename> <out-filename>\nNeed to pass input and output filenames\n", argv[0]);
-        return -1;
-    }
-
-    elv_logger_open(NULL, "etx", 10, 10*1024*1024, elv_log_file);
-    elv_set_log_level(elv_log_log);
-
-    txctx_t *decoder_context = calloc(1, sizeof(txctx_t));
-    decoder_context->file_name = argv[1];
-
-    if (prepare_decoder(decoder_context, &p)) {
+    p_txctx->decoder_ctx.file_name = in_filename;
+    if (prepare_decoder(&p_txctx->decoder_ctx, params)) {
         elv_err("Failed prepared decoder");
         return -1;
     }
 
-    txctx_t *encoder_context = calloc(1, sizeof(txctx_t));
-    encoder_context->file_name = argv[2];
-
-    if (prepare_encoder(encoder_context, decoder_context, &p)) {
+    p_txctx->encoder_ctx.file_name = out_filename;
+    if (prepare_encoder(&p_txctx->encoder_ctx, &p_txctx->decoder_ctx, params)) {
         elv_err("Failure in preparing output");
         return -1;
     }
 
-    if (tx(decoder_context, encoder_context, &p, 1) < 0) {
-        elv_err("Error in transcoding");
-        return -1;
-    }
+    p_txctx->params = params;
+    *txctx = p_txctx;
+    return 0;
+}
 
-    elv_dbg("Releasing all the resources");
+int
+tx_fini(
+    txctx_t **txctx)
+{
+    coderctx_t *decoder_context = &(*txctx)->decoder_ctx;
+    coderctx_t *encoder_context = &(*txctx)->encoder_ctx;
 
     /* note: the internal buffer could have changed, and be != avio_ctx_buffer */
     if (decoder_context->format_context->pb) {
@@ -834,8 +804,8 @@ main(
     avcodec_free_context(&encoder_context->codec_context[0]);
     avcodec_free_context(&encoder_context->codec_context[1]);
 
-    free(decoder_context);
-    free(encoder_context);
+    free(*txctx);
+    *txctx = NULL;
 
     return 0;
 }
