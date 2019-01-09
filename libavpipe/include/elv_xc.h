@@ -1,5 +1,5 @@
 /*
- * elv_xc_test.h
+ * elv_xc.h
  */
 
 #pragma once
@@ -19,7 +19,8 @@ typedef struct ioctx_t {
     int64_t read_pos;
 } ioctx_t;
 
-typedef struct txctx_t {
+/* Decoder/encoder context, keeps both video and audio stream ffmpeg contexts */
+typedef struct coderctx_t {
     char *file_name;
     AVFormatContext *format_context;
 
@@ -38,7 +39,7 @@ typedef struct txctx_t {
     AVFilterGraph *filter_graph;
 
     int pts;        /* Decoder/encoder pts */
-} txctx_t;
+} coderctx_t;
 
 typedef struct txparams_t {
     int start_time_ts;
@@ -55,6 +56,12 @@ typedef struct txparams_t {
     int enc_height;
     int enc_width;
 } txparams_t;
+
+typedef struct txctx_t {
+    coderctx_t decoder_ctx;
+    coderctx_t encoder_ctx;
+    txparams_t *params;
+} txctx_t;
 
 /*
  * Implements AVIOContext interface for writing
@@ -81,8 +88,8 @@ typedef struct out_handler_t_ {
 int
 init_filters(
     const char *filters_descr,
-    txctx_t *decoder_context,
-    txctx_t *encoder_context);
+    coderctx_t *decoder_context,
+    coderctx_t *encoder_context);
 
 int
 elv_io_open(
@@ -96,3 +103,20 @@ void
 elv_io_close(
     struct AVFormatContext *s,
     AVIOContext *pb);
+
+int
+tx_init(
+    txctx_t **txctx,
+    char *in_filename,
+    char *out_filename,
+    txparams_t *params);
+
+int
+tx_fini(
+    txctx_t **txctx);
+
+int
+tx(
+    txctx_t *txctx,
+    int do_instrument);
+

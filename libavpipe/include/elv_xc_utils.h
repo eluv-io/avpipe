@@ -1,7 +1,7 @@
 
 #pragma once
 
-#include "elv_xc_test.h"
+#include "elv_xc.h"
 
 void
 dbg(const char *fmt, ...);
@@ -19,11 +19,11 @@ dump_packet(
 
 void
 dump_decoder(
-    txctx_t *d);
+    coderctx_t *d);
 
 void
 dump_encoder(
-    txctx_t *d);
+    coderctx_t *d);
 
 void
 dump_codec_context(
@@ -48,5 +48,5 @@ save_gray_frame(
 
 void
 dump_stats(
-    txctx_t *decoder_context,
-    txctx_t *encoder_context);
+    coderctx_t *decoder_context,
+    coderctx_t *encoder_context);

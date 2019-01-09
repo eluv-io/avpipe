@@ -8,7 +8,7 @@
 #include <libavutil/log.h>
 
 #include "elv_xc_utils.h"
-#include "elv_xc_test.h"
+#include "elv_xc.h"
 #include "elv_log.h"
 
 #include <sys/time.h>
@@ -43,7 +43,7 @@ dump_packet(
 
 void
 dump_decoder(
-    txctx_t *d)
+    coderctx_t *d)
 {
     elv_log("DECODER nb_streams=%d\n",
         d->format_context->nb_streams
@@ -62,7 +62,7 @@ dump_decoder(
 
 void
 dump_encoder(
-    txctx_t *d)
+    coderctx_t *d)
 {
     elv_log("ENCODER nb_streams=%d\n",
         d->format_context->nb_streams
@@ -157,8 +157,8 @@ save_gray_frame(
 
 void
 dump_stats(
-    txctx_t *decoder_context,
-    txctx_t *encoder_context)
+    coderctx_t *decoder_context,
+    coderctx_t *encoder_context)
 {
     static long t0 = 0;
     struct timeval t;
