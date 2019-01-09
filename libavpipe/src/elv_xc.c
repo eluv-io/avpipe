@@ -23,86 +23,25 @@
 #include <sys/uio.h>
 #include <unistd.h>
 
-int
-in_read_packet(
-    void *opaque,
-    uint8_t *buf,
-    int buf_size)
-{
-    ioctx_t *c = (ioctx_t *)opaque;
-    elv_dbg("IN READ buf_size=%d fd=%d", buf_size, c->fd);
-
-    int r = read(c->fd, buf, buf_size);
-    if (r >= 0) {
-        c->read_bytes += r;
-        c->read_pos += r;
-    }
-    elv_dbg("IN READ read=%d pos=%"PRId64" total=%"PRId64, r, c->read_pos, c->read_bytes);
-
-    return r;
-}
-
-int
-in_write_packet(
-    void *opaque,
-    uint8_t *buf,
-    int buf_size)
-{
-    elv_dbg("IN WRITE");
-    return 0;
-}
-
-int64_t
-in_seek(
-    void *opaque,
-    int64_t offset,
-    int whence)
-{
-    ioctx_t *c = (ioctx_t *)opaque;
-    int rc = lseek(c->fd, offset, whence);
-    whence = whence & 0xFFFF; /* Mask out AVSEEK_SIZE and AVSEEK_FORCE */
-    switch (whence) {
-    case SEEK_SET:
-        c->read_pos = offset; break;
-    case SEEK_CUR:
-        c->read_pos += offset; break;
-    case SEEK_END:
-        c->read_pos = c->sz - offset; break;
-    default:
-        elv_dbg("IN SEEK - weird seek\n");
-    }
-
-    elv_dbg("IN SEEK offset=%d whence=%d rc=%d", offset, whence, rc);
-    return rc;
-}
-
 static int
 prepare_input(
     char *fin,
+    avpipe_io_handler_t *in_handlers,
     AVFormatContext *format_ctx)
 {
     unsigned char *bufin;
     ioctx_t *inctx;
     AVIOContext *avioctx;
     int bufin_sz = 64 * 1024;
-    int fd = open(fin, O_RDONLY);
-    if (fd < 0) {
-        return -1;
-    }
 
     inctx = (ioctx_t *)malloc(sizeof(ioctx_t));
-    inctx->fd = fd;
-
-    struct stat stb;
-    int rc = fstat(fd, &stb);
-    if (rc < 0)
+    /* TODO: refactor fin out */
+    if (in_handlers->avpipe_opener(fin, inctx) < 0)
         return -1;
-
-    inctx->sz = stb.st_size;
 
     bufin = (unsigned char *) av_malloc(64*1024); /* Must be malloc'd - will be realloc'd by avformat */
     avioctx = avio_alloc_context(bufin, bufin_sz, 0, (void *)inctx,
-        in_read_packet, in_write_packet, in_seek);
+        in_handlers->avpipe_reader, in_handlers->avpipe_writer, in_handlers->avpipe_seeker);
 
     avioctx->written = inctx->sz; /* Fake avio_size() to avoid calling seek to find size */
     format_ctx->pb = avioctx;
@@ -112,6 +51,7 @@ prepare_input(
 static int
 prepare_decoder(
     coderctx_t *decoder_context,
+    avpipe_io_handler_t *in_handlers,
     txparams_t *params)
 {
 
@@ -126,10 +66,8 @@ prepare_decoder(
         return -1;
     }
 
-#if 1
     /* Set our custom reader */
-    prepare_input(decoder_context->file_name, decoder_context->format_context);
-#endif
+    prepare_input(decoder_context->file_name, in_handlers, decoder_context->format_context);
 
     /* Allocate AVFormatContext in format_context and find input file format */
     if (avformat_open_input(&decoder_context->format_context, decoder_context->file_name, NULL, NULL) != 0) {
@@ -397,8 +335,11 @@ static int
 prepare_encoder(
     coderctx_t *encoder_context,
     coderctx_t *decoder_context,
+    avpipe_io_handler_t *out_handlers,
     txparams_t *params)
 {
+    out_tracker_t *out_tracker;
+
     /* Allocate an AVFormatContext for output. */
     avformat_alloc_output_context2(&encoder_context->format_context, NULL, NULL, encoder_context->file_name);
     if (!encoder_context->format_context) {
@@ -426,7 +367,9 @@ prepare_encoder(
     }
 
     /* Allocate an array of 2 out_handler_t: one for video and one for audio output stream */
-    encoder_context->format_context->avpipe_opaque = (out_handler_t *) calloc(2, sizeof(out_handler_t));
+    out_tracker = (out_tracker_t *) calloc(2, sizeof(out_tracker_t));
+    out_tracker->out_handlers = out_handlers;
+    encoder_context->format_context->avpipe_opaque = out_tracker;
 
     return 0;
 }
@@ -757,20 +700,22 @@ tx(
 int
 tx_init(
     txctx_t **txctx,
+    avpipe_io_handler_t *in_handlers,
     char *in_filename,
+    avpipe_io_handler_t *out_handlers,
     char *out_filename,
     txparams_t *params)
 {
     txctx_t *p_txctx = (txctx_t *) calloc(1, sizeof(txctx_t));
 
     p_txctx->decoder_ctx.file_name = in_filename;
-    if (prepare_decoder(&p_txctx->decoder_ctx, params)) {
+    if (prepare_decoder(&p_txctx->decoder_ctx, in_handlers, params)) {
         elv_err("Failed prepared decoder");
         return -1;
     }
 
     p_txctx->encoder_ctx.file_name = out_filename;
-    if (prepare_encoder(&p_txctx->encoder_ctx, &p_txctx->decoder_ctx, params)) {
+    if (prepare_encoder(&p_txctx->encoder_ctx, &p_txctx->decoder_ctx, out_handlers, params)) {
         elv_err("Failure in preparing output");
         return -1;
     }

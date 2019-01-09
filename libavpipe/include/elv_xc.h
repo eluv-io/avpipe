@@ -11,13 +11,56 @@
 #include <libavutil/opt.h>
 
 typedef struct ioctx_t {
+    /* Application specific IO context */
+    void *opaque;
+
+    /* fd is used when doing file IO on the stream */
     int fd;
+    unsigned char* buf;
+    int bufsz;
+
+    /* Size of input, should be set in in_handler-> avpipe_opener_f() */
     int sz;
 
-    /* Read counters */
+    /* Read/write counters, used by input/output handlers */
     int64_t read_bytes;
     int64_t read_pos;
+    int64_t write_bytes;
+    int64_t write_pos;
+
+    /* Output handlers specific data */
+    int stream_index;
 } ioctx_t;
+
+typedef int
+(*avpipe_opener_f)(
+    char *filename,
+    ioctx_t *ioctx);
+
+typedef int
+(*avpipe_reader_f)(
+    void *opaque,
+    uint8_t *buf,
+    int buf_size);
+
+typedef int
+(*avpipe_writer_f)(
+    void *opaque,
+    uint8_t *buf,
+    int buf_size);
+
+typedef int64_t
+(*avpipe_seeker_f)(
+    void *opaque,
+    int64_t offset,
+    int whence);
+
+typedef struct avpipe_io_handler_t {
+    avpipe_opener_f avpipe_opener;
+    avpipe_reader_f avpipe_reader;
+    avpipe_writer_f avpipe_writer;
+    avpipe_seeker_f avpipe_seeker;
+} avpipe_io_handler_t;
 
 /* Decoder/encoder context, keeps both video and audio stream ffmpeg contexts */
 typedef struct coderctx_t {
@@ -66,24 +109,11 @@ typedef struct txctx_t {
 /*
  * Implements AVIOContext interface for writing
  */
-typedef struct buf_writer_t_ {
-    struct out_handler_t_ *out_handler;
-    int fd;
-
-    unsigned char* buf;
-    int bufsz;
-
-    int rpos;
-    int wpos;
-
-    int bytes_read;
-    int bytes_written;
-} buf_writer_t;
-
-typedef struct out_handler_t_ {
-    buf_writer_t *last_buf_writer;
+typedef struct out_tracker_t {
+    avpipe_io_handler_t *out_handlers;
+    ioctx_t *last_outctx;
     int chunk_idx;
-} out_handler_t;
+} out_tracker_t;
 
 int
 init_filters(
@@ -107,7 +137,9 @@ elv_io_close(
 int
 tx_init(
     txctx_t **txctx,
+    avpipe_io_handler_t *in_handlers,
     char *in_filename,
+    avpipe_io_handler_t *out_handlers,
     char *out_filename,
     txparams_t *params);
 

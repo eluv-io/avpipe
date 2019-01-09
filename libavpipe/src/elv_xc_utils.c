@@ -165,7 +165,7 @@ dump_stats(
     long ti;
     AVIOContext *avioctx;
     ioctx_t *inctx;
-    out_handler_t *out_handler = (out_handler_t *) encoder_context->format_context->avpipe_opaque;
+    out_tracker_t *out_tracker = (out_tracker_t *) encoder_context->format_context->avpipe_opaque;
 
     gettimeofday(&t, NULL);
     ti = t.tv_sec * 1000 + t.tv_usec / 1000;
@@ -177,5 +177,5 @@ dump_stats(
 
     elv_log("STATS t=%02d.%03d read_pos=%"PRId64" read_pts=%d seg_index=%d seg_pos=%d seg_pts=%d\n",
         (int)(ti - t0) / 1000, (int)(ti - t0) % 1000, inctx->read_pos, decoder_context->pts / 1001,
-        out_handler->chunk_idx, out_handler->last_buf_writer ? out_handler->last_buf_writer->bytes_written:0, encoder_context->pts / 1001);
+        out_tracker->chunk_idx, out_tracker->last_outctx ? out_tracker->last_outctx->write_bytes:0, encoder_context->pts / 1001);
 }
