@@ -25,19 +25,13 @@
 
 static int
 prepare_input(
-    char *fin,
     avpipe_io_handler_t *in_handlers,
+    ioctx_t *inctx,
     AVFormatContext *format_ctx)
 {
     unsigned char *bufin;
-    ioctx_t *inctx;
     AVIOContext *avioctx;
     int bufin_sz = 64 * 1024;
-
-    inctx = (ioctx_t *)malloc(sizeof(ioctx_t));
-    /* TODO: refactor fin out */
-    if (in_handlers->avpipe_opener(fin, inctx) < 0)
-        return -1;
 
     bufin = (unsigned char *) av_malloc(64*1024); /* Must be malloc'd - will be realloc'd by avformat */
     avioctx = avio_alloc_context(bufin, bufin_sz, 0, (void *)inctx,
@@ -52,6 +46,7 @@ static int
 prepare_decoder(
     coderctx_t *decoder_context,
     avpipe_io_handler_t *in_handlers,
+    ioctx_t *inctx,
     txparams_t *params)
 {
 
@@ -67,10 +62,10 @@ prepare_decoder(
     }
 
     /* Set our custom reader */
-    prepare_input(decoder_context->file_name, in_handlers, decoder_context->format_context);
+    prepare_input(in_handlers, inctx, decoder_context->format_context);
 
     /* Allocate AVFormatContext in format_context and find input file format */
-    if (avformat_open_input(&decoder_context->format_context, decoder_context->file_name, NULL, NULL) != 0) {
+    if (avformat_open_input(&decoder_context->format_context, "bogus.mp4", NULL, NULL) != 0) {
         elv_err("Could not open input file");
         return -1;
     }
@@ -306,7 +301,7 @@ prepare_audio_encoder(
         encoder_context->codec_context[index]->sample_rate = decoder_context->codec_context[index]->sample_rate;
     else
         encoder_context->codec_context[index]->sample_rate = params->sample_rate;
-    
+
     if (decoder_context->codec[index]->sample_fmts)
         encoder_context->codec_context[index]->sample_fmt = decoder_context->codec[index]->sample_fmts[0];
     encoder_context->codec_context[index]->channel_layout = decoder_context->codec_context[index]->channel_layout;
@@ -358,13 +353,6 @@ prepare_encoder(
         return -1;
     }
 #endif
-
-    if (!(encoder_context->format_context->oformat->flags & AVFMT_NOFILE)) {
-        if (avio_open(&encoder_context->format_context->pb, encoder_context->file_name, AVIO_FLAG_WRITE) < 0) {
-            elv_dbg("could not open the output file");
-            return -1;
-        }
-    }
 
     /* Allocate an array of 2 out_handler_t: one for video and one for audio output stream */
     out_tracker = (out_tracker_t *) calloc(2, sizeof(out_tracker_t));
@@ -701,15 +689,14 @@ int
 tx_init(
     txctx_t **txctx,
     avpipe_io_handler_t *in_handlers,
-    char *in_filename,
+    ioctx_t *inctx,
     avpipe_io_handler_t *out_handlers,
     char *out_filename,
     txparams_t *params)
 {
     txctx_t *p_txctx = (txctx_t *) calloc(1, sizeof(txctx_t));
 
-    p_txctx->decoder_ctx.file_name = in_filename;
-    if (prepare_decoder(&p_txctx->decoder_ctx, in_handlers, params)) {
+    if (prepare_decoder(&p_txctx->decoder_ctx, in_handlers, inctx, params)) {
         elv_err("Failed prepared decoder");
         return -1;
     }

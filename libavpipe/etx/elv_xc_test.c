@@ -226,7 +226,12 @@ main(
     out_handlers.avpipe_writer = out_write_packet;
     out_handlers.avpipe_seeker = out_seek;
 
-    if (tx_init(&txctx, &in_handlers, argv[1], &out_handlers, argv[2], &p) < 0)
+    ioctx_t *inctx = (ioctx_t *)calloc(1, sizeof(ioctx_t));
+
+    if (in_handlers.avpipe_opener(argv[1], inctx) < 0)
+        return -1;
+
+    if (tx_init(&txctx, &in_handlers, inctx, &out_handlers, argv[2], &p) < 0)
         return 1;
 
     if (tx(txctx, 0) < 0) {
