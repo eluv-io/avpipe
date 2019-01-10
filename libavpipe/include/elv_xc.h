@@ -34,7 +34,7 @@ typedef struct ioctx_t {
 
 typedef int
 (*avpipe_opener_f)(
-    char *filename,
+    const char *filename,
     ioctx_t *ioctx);
 
 typedef int
@@ -138,7 +138,7 @@ int
 tx_init(
     txctx_t **txctx,
     avpipe_io_handler_t *in_handlers,
-    char *in_filename,
+    ioctx_t *inctx,
     avpipe_io_handler_t *out_handlers,
     char *out_filename,
     txparams_t *params);

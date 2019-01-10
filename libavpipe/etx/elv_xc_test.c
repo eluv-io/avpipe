@@ -14,7 +14,7 @@
 
 int
 in_opener(
-    char *filename,
+    const char *filename,
     ioctx_t *inctx)
 {
     struct stat stb;
@@ -89,15 +89,22 @@ in_seek(
 
 int
 out_opener(
-    char *filename,
+    const char *url,
     ioctx_t *outctx)
 {
-    const char *segbase = "hunk-stream";
     char segname[128];
-    out_tracker_t *out_tracker = (out_tracker_t *) outctx->opaque;
 
-    sprintf(segname, "./%s/%s%d-%05d.m4s",
-        filename, segbase, outctx->stream_index, ++out_tracker[outctx->stream_index].chunk_idx);
+    if (strstr(url, "chunk")) {
+        const char *segbase = "chunk-stream";
+        out_tracker_t *out_tracker = (out_tracker_t *) outctx->opaque;
+
+        sprintf(segname, "./%s/%s%d-%05d.m4s",
+            "/O", segbase, outctx->stream_index, ++out_tracker[outctx->stream_index].chunk_idx);
+    } else {
+        /* Manifest and init segments */
+        sprintf(segname, "%s", url);
+    }
+
     outctx->fd = open(segname, O_RDWR | O_CREAT | O_TRUNC, 0644);
     if (outctx->fd < 0) {
         elv_err("Failed to open segment file %s (%d)", segname, errno);
@@ -226,7 +233,12 @@ main(
     out_handlers.avpipe_writer = out_write_packet;
     out_handlers.avpipe_seeker = out_seek;
 
-    if (tx_init(&txctx, &in_handlers, argv[1], &out_handlers, argv[2], &p) < 0)
+    ioctx_t *inctx = (ioctx_t *)calloc(1, sizeof(ioctx_t));
+
+    if (in_handlers.avpipe_opener(argv[1], inctx) < 0)
+        return -1;
+
+    if (tx_init(&txctx, &in_handlers, inctx, &out_handlers, argv[2], &p) < 0)
         return 1;
 
     if (tx(txctx, 0) < 0) {

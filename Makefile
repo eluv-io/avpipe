@@ -2,7 +2,7 @@ SUBDIRS=utils libavpipe
 
 all clean: check-env
 	@for dir in $(SUBDIRS); do \
-	@echo "Making $@ in $$dir..."; \
+	echo "Making $@ in $$dir..."; \
 	(cd $$dir; make $@) || exit 1; \
 	done
 
