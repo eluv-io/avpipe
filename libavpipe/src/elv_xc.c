@@ -81,14 +81,13 @@ prepare_decoder(
         decoder_context->stream[i] = decoder_context->format_context->streams[i];
 
         if (decoder_context->format_context->streams[i]->codecpar->codec_type == AVMEDIA_TYPE_VIDEO) {
+            /* Video */
             decoder_context->video_stream_index = i;
             elv_dbg("STREAM %d Video, codec_id=%s", i, avcodec_get_name(decoder_context->codec_parameters[i]->codec_id));
         } else if (decoder_context->format_context->streams[i]->codecpar->codec_type == AVMEDIA_TYPE_AUDIO) {
+            /* Audio */
             decoder_context->audio_stream_index = i;
             elv_dbg("STREAM %d Audio, codec_id=%s", i, avcodec_get_name(decoder_context->codec_parameters[i]->codec_id));
-#ifndef AUDIO
-            continue;
-#endif
         } else {
             elv_dbg("STREAM UNKNOWN type=%d", decoder_context->format_context->streams[i]->codecpar->codec_type);
             continue;
@@ -110,12 +109,10 @@ prepare_decoder(
         }
         dump_codec_context(decoder_context->codec_context[i]);
 
-#if 1
         if (avcodec_parameters_to_context(decoder_context->codec_context[i], decoder_context->codec_parameters[i]) < 0) {
             elv_err("Failed to copy codec params to codec context");
             return -1;
         }
-#endif
 
         /* Open the decoder (initialize the decoder codec_context[i] using given codec[i]). */
         if (avcodec_open2(decoder_context->codec_context[i], decoder_context->codec[i], NULL) < 0) {
@@ -130,12 +127,12 @@ prepare_decoder(
         */
         decoder_context->codec_context[i]->time_base = decoder_context->stream[i]->time_base;
 
-        printf("DECODER OBJECTS ========================================================= \n");
+        elv_log("DECODER OBJECTS DUMP BEGIN ======================================================== \n");
         dump_decoder(decoder_context);
         dump_stream(decoder_context->stream[i]);
         dump_codec_parameters(decoder_context->codec_parameters[i]);
         dump_codec_context(decoder_context->codec_context[i]);
-        printf("DECODER OBJECTS ========================================================= \n");
+        elv_log("DECODER OBJECTS DUMP END ========================================================= \n");
     }
 
     return 0;
@@ -158,11 +155,9 @@ prepare_video_encoder(
     encoder_context->stream[index] = avformat_new_stream(encoder_context->format_context, NULL);
     encoder_context->codec[index] = avcodec_find_encoder_by_name(params->codec);
 
-#if 1
     /* Custom output buffer */
     encoder_context->format_context->io_open = elv_io_open;
     encoder_context->format_context->io_close = elv_io_close;
-#endif
 
     if (!encoder_context->codec[index]) {
         elv_dbg("could not find the proper codec");
@@ -254,15 +249,15 @@ prepare_video_encoder(
     encoder_context->stream[index]->time_base = decoder_context->stream[decoder_context->video_stream_index]->time_base;
     encoder_context->stream[index]->avg_frame_rate = decoder_context->stream[decoder_context->video_stream_index]->avg_frame_rate;
 
-    printf("ENCODER OBJECTS ========================================================= \n");
+    elv_log("ENCODER OBJECTS DUMP BEGIN ========================================================= \n");
     dump_encoder(encoder_context);
     dump_stream(encoder_context->stream[encoder_context->video_stream_index]);
     dump_codec_context(encoder_context->codec_context[encoder_context->video_stream_index]);
+    elv_log("ENCODER OBJECTS DUMP END ========================================================= \n");
 
     return 0;
 }
 
-#ifdef AUDIO
 static int
 prepare_audio_encoder(
     coderctx_t *encoder_context,
@@ -324,7 +319,6 @@ prepare_audio_encoder(
 
     return 0;
 }
-#endif
 
 static int
 prepare_encoder(
@@ -347,12 +341,10 @@ prepare_encoder(
         return -1;
     }
 
-#ifdef AUDIO
     if (prepare_audio_encoder(encoder_context, decoder_context, params)) {
         elv_err("Failure in preparing audio copy");
         return -1;
     }
-#endif
 
     /* Allocate an array of 2 out_handler_t: one for video and one for audio output stream */
     out_tracker = (out_tracker_t *) calloc(2, sizeof(out_tracker_t));
@@ -615,6 +607,7 @@ tx(
 
     while (av_read_frame(decoder_context->format_context, input_packet) >= 0) {
         if (input_packet->stream_index == decoder_context->video_stream_index) {
+            // Video packet
             dump_packet("IN ", input_packet);
 
             // Stop when we reached the desired duration (duration -1 means 'entire input stream')
@@ -655,8 +648,7 @@ tx(
 
             dump_stats(decoder_context, encoder_context);
         } else {
-#ifdef AUDIO
-            // just copying audio stream
+            // Audio packet: just copying audio stream
             av_packet_rescale_ts(input_packet,
                 decoder_context->stream[input_packet->stream_index]->time_base,
                 encoder_context->stream[input_packet->stream_index]->time_base
@@ -667,7 +659,6 @@ tx(
                 return -1;
             }
             elv_dbg("\tfinish copying packets without reencoding");
-#endif
         }
     }
 

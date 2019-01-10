@@ -34,7 +34,7 @@ elv_io_open(
     int flags,
     AVDictionary **options)
 {
-    int ret;
+    int ret = 0;
 
     elv_dbg("OUT io_open url=%s", url);
 
@@ -51,8 +51,10 @@ elv_io_open(
         outctx->stream_index = (int) strtol(stream_opt->value, &endptr, 10);
         assert(outctx->stream_index == 0 || outctx->stream_index == 1);
 
-        /* TODO: refactor "/O", pass it from application */
-        out_handlers->avpipe_opener(url, outctx);
+        if (out_handlers->avpipe_opener(url, outctx) < 0) {
+            free(outctx);
+            return -1;
+        }
 
         AVIOContext *avioctx = avio_alloc_context(outctx->buf, outctx->sz, AVIO_FLAG_WRITE, (void *)outctx,
             out_handlers->avpipe_reader, out_handlers->avpipe_writer, out_handlers->avpipe_seeker);
@@ -64,7 +66,6 @@ elv_io_open(
 
         elv_dbg("OUT open stream_index=%d, avioctx=%p, avioctx->opaque=%p, outctx=%p, outtracker[0]->last_outctx=%p, outtracker[1]->last_outctx=%p",
             outctx->stream_index, avioctx, avioctx->opaque, outctx, out_tracker[0].last_outctx, out_tracker[1].last_outctx);
-        ret = 0;
     } else {
 
         ioctx_t *outctx = (ioctx_t *) calloc(1, sizeof(ioctx_t));
@@ -72,7 +73,10 @@ elv_io_open(
         outctx->stream_index = 0; /* FIXME */
 
         /* Manifest or init segments */
-        out_handlers->avpipe_opener(url, outctx);
+        if (out_handlers->avpipe_opener(url, outctx) < 0) {
+            free(outctx);
+            return -1;
+        }
 
         AVIOContext *avioctx = avio_alloc_context(outctx->buf, outctx->bufsz, AVIO_FLAG_WRITE, (void *)outctx,
             out_handlers->avpipe_reader, out_handlers->avpipe_writer, out_handlers->avpipe_seeker);
@@ -80,9 +84,7 @@ elv_io_open(
         avioctx->seekable = 0;
         avioctx->direct = 1;
         (*pb) = avioctx;
-        ret = 0;
     }
-
 
     return ret;
 }
