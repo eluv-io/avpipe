@@ -34,7 +34,7 @@ typedef struct ioctx_t {
 
 typedef int
 (*avpipe_opener_f)(
-    char *filename,
+    const char *filename,
     ioctx_t *ioctx);
 
 typedef int
