@@ -93,16 +93,14 @@ elv_io_close(
     AVIOContext *pb)
 {
     out_tracker_t *out_tracker = (out_tracker_t *) format_ctx->avpipe_opaque;
+    ioctx_t *outctx;
+
     elv_dbg("OUT close avioctx=%p, avioctx->opaque=%p outtracker[0]->last_outctx=%p, outtracker[1]->last_outctx=%p",
         pb, pb->opaque, out_tracker[0].last_outctx, out_tracker[1].last_outctx);
-    if (pb->opaque == out_tracker[0].last_outctx || pb->opaque == out_tracker[1].last_outctx) {
-        ioctx_t *outctx = (ioctx_t *)pb->opaque;
-        elv_dbg("OUT io_close custom writer fd=%d\n", outctx->fd);
-        (void)close(outctx->fd);
-        free(outctx->buf);
-        free(outctx);
-    } else {
-        avio_close(pb);
-    }
+    outctx = (ioctx_t *)pb->opaque;
+    elv_dbg("OUT io_close custom writer fd=%d\n", outctx->fd);
+    (void)close(outctx->fd);
+    free(outctx->buf);
+    free(outctx);
     return;
 }
