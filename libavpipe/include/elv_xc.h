@@ -10,12 +10,18 @@
 #include <libavfilter/buffersrc.h>
 #include <libavutil/opt.h>
 
+typedef enum avpipe_buftype_t {
+    avpipe_input_stream,
+    avpipe_init_stream,     // init_stream
+    avpipe_manifest,        // dash.mpd
+    avpipe_segment          // chunk-stream
+} avpipe_buftype_t;
+
 typedef struct ioctx_t {
     /* Application specific IO context */
     void *opaque;
 
-    /* fd is used when doing file IO on the stream */
-    int fd;
+    avpipe_buftype_t type;
     unsigned char* buf;
     int bufsz;
 
@@ -25,16 +31,21 @@ typedef struct ioctx_t {
     /* Read/write counters, used by input/output handlers */
     int64_t read_bytes;
     int64_t read_pos;
-    int64_t write_bytes;
+    int64_t written_bytes;
     int64_t write_pos;
 
     /* Output handlers specific data */
-    int stream_index;
+    int stream_index;       // usually video=0 and audio=1
+    int seg_index;          // segment index if this ioctx is a segment
 } ioctx_t;
 
 typedef int
 (*avpipe_opener_f)(
-    const char *filename,
+    const char *url,
+    ioctx_t *ioctx);
+
+typedef int
+(*avpipe_closer_f)(
     ioctx_t *ioctx);
 
 typedef int
@@ -57,6 +68,7 @@ typedef int64_t
 
 typedef struct avpipe_io_handler_t {
     avpipe_opener_f avpipe_opener;
+    avpipe_closer_f avpipe_closer;
     avpipe_reader_f avpipe_reader;
     avpipe_writer_f avpipe_writer;
     avpipe_seeker_f avpipe_seeker;
@@ -64,7 +76,7 @@ typedef struct avpipe_io_handler_t {
 
 /* Decoder/encoder context, keeps both video and audio stream ffmpeg contexts */
 typedef struct coderctx_t {
-    char *file_name;
+    //char *file_name;
     AVFormatContext *format_context;
 
     AVCodec *codec[2];
@@ -112,7 +124,7 @@ typedef struct txctx_t {
 typedef struct out_tracker_t {
     avpipe_io_handler_t *out_handlers;
     ioctx_t *last_outctx;
-    int chunk_idx;
+    int seg_index;
 } out_tracker_t;
 
 int
@@ -140,7 +152,6 @@ tx_init(
     avpipe_io_handler_t *in_handlers,
     ioctx_t *inctx,
     avpipe_io_handler_t *out_handlers,
-    char *out_filename,
     txparams_t *params);
 
 int

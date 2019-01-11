@@ -47,9 +47,11 @@ elv_io_open(
         AVDictionaryEntry *stream_opt = av_dict_get(*options, "stream_index", 0, 0);
         ioctx_t *outctx = (ioctx_t *) calloc(1, sizeof(ioctx_t));
 
-        outctx->opaque = out_tracker;
+        outctx->type = avpipe_segment;
         outctx->stream_index = (int) strtol(stream_opt->value, &endptr, 10);
         assert(outctx->stream_index == 0 || outctx->stream_index == 1);
+        out_tracker[outctx->stream_index].seg_index++;
+        outctx->seg_index = out_tracker[outctx->stream_index].seg_index;
 
         if (out_handlers->avpipe_opener(url, outctx) < 0) {
             free(outctx);
@@ -64,14 +66,20 @@ elv_io_open(
         (*pb) = avioctx;
         out_tracker[outctx->stream_index].last_outctx = outctx;
 
-        elv_dbg("OUT open stream_index=%d, avioctx=%p, avioctx->opaque=%p, outctx=%p, outtracker[0]->last_outctx=%p, outtracker[1]->last_outctx=%p",
-            outctx->stream_index, avioctx, avioctx->opaque, outctx, out_tracker[0].last_outctx, out_tracker[1].last_outctx);
+        elv_dbg("OUT open stream_index=%d, seg_index=%d avioctx=%p, avioctx->opaque=%p, outctx=%p, outtracker[0]->last_outctx=%p, outtracker[1]->last_outctx=%p",
+            outctx->stream_index, outctx->seg_index, avioctx, avioctx->opaque, outctx, out_tracker[0].last_outctx, out_tracker[1].last_outctx);
     } else {
 
         ioctx_t *outctx = (ioctx_t *) calloc(1, sizeof(ioctx_t));
-        outctx->opaque = out_tracker;
         outctx->stream_index = 0; /* FIXME */
 
+        if (!url || url[0] == '\0') {
+            outctx->type = avpipe_manifest;
+        } else {
+            outctx->type = avpipe_init_stream;
+        }
+
+        elv_dbg("OUT url=%s, type=%d", url, outctx->type);
         /* Manifest or init segments */
         if (out_handlers->avpipe_opener(url, outctx) < 0) {
             free(outctx);
@@ -95,14 +103,12 @@ elv_io_close(
     AVIOContext *pb)
 {
     out_tracker_t *out_tracker = (out_tracker_t *) format_ctx->avpipe_opaque;
-    ioctx_t *outctx;
+    avpipe_io_handler_t *out_handlers = out_tracker->out_handlers;
+    ioctx_t *outctx = (ioctx_t *)pb->opaque;
 
     elv_dbg("OUT close avioctx=%p, avioctx->opaque=%p outtracker[0]->last_outctx=%p, outtracker[1]->last_outctx=%p",
         pb, pb->opaque, out_tracker[0].last_outctx, out_tracker[1].last_outctx);
-    outctx = (ioctx_t *)pb->opaque;
-    elv_dbg("OUT io_close custom writer fd=%d\n", outctx->fd);
-    (void)close(outctx->fd);
-    free(outctx->buf);
+    out_handlers->avpipe_closer(outctx);
     free(outctx);
     return;
 }

@@ -14,11 +14,11 @@
 
 int
 in_opener(
-    const char *filename,
+    const char *url,
     ioctx_t *inctx)
 {
     struct stat stb;
-    int fd = open(filename, O_RDONLY);
+    int fd = open(url, O_RDONLY);
     if (fd < 0) {
         return -1;
     }
@@ -29,6 +29,14 @@ in_opener(
         return -1;
 
     inctx->sz = stb.st_size;
+    return 0;
+}
+
+int
+in_closer(
+    ioctx_t *inctx)
+{
+    (void) inctx;
     return 0;
 }
 
@@ -93,27 +101,45 @@ out_opener(
     ioctx_t *outctx)
 {
     char segname[128];
+    int fd;
 
-    if (strstr(url, "chunk")) {
-        const char *segbase = "chunk-stream";
-        out_tracker_t *out_tracker = (out_tracker_t *) outctx->opaque;
+    /* If there is no url, just allocate the buffers. The data will be copied to the buffers */
+    switch (outctx->type) {
+    case avpipe_manifest:
+        /* Manifest */
+        sprintf(segname, "./O/%s", "dash.mpd");
+        break;
 
-        sprintf(segname, "./%s/%s%d-%05d.m4s",
-            "/O", segbase, outctx->stream_index, ++out_tracker[outctx->stream_index].chunk_idx);
-    } else {
-        /* Manifest and init segments */
-        sprintf(segname, "%s", url);
+    case avpipe_init_stream:
+        /* Init segments */
+        sprintf(segname, "./O/%s", url);
+        break;
+
+    case avpipe_segment:
+        {
+            const char *segbase = "chunk-stream";
+
+            sprintf(segname, "./%s/%s%d-%05d.mp4",
+                "/O", segbase, outctx->stream_index, outctx->seg_index);
+        }
+        break;
+
+    default:
+        return -1;
     }
 
-    outctx->fd = open(segname, O_RDWR | O_CREAT | O_TRUNC, 0644);
-    if (outctx->fd < 0) {
+    fd = open(segname, O_RDWR | O_CREAT | O_TRUNC, 0644);
+    if (fd < 0) {
         elv_err("Failed to open segment file %s (%d)", segname, errno);
         return -1;
     }
 
+    outctx->opaque = (int *) malloc(sizeof(int));
+    *((int *)(outctx->opaque)) = fd;
+
     outctx->bufsz = 1 * 1024 * 1024;
     outctx->buf = (unsigned char *)malloc(outctx->bufsz); /* Must be malloc'd - will be realloc'd by avformat */
-    elv_dbg("OUT out_opener outctx=%p fd=%d\n", outctx, outctx->fd);
+    elv_dbg("OUT out_opener outctx=%p fd=%d\n", outctx, fd);
     return 0;
 }
 
@@ -124,13 +150,17 @@ out_read_packet(
     int buf_size)
 {
     ioctx_t *outctx = (ioctx_t *)opaque;
-    elv_dbg("OUT READ buf_size=%d fd=%d", buf_size, outctx->fd);
+    int fd = *(int *)outctx->opaque;
+    int bread;
 
-    int bread = read(outctx->fd, buf, buf_size);
+    elv_dbg("OUT READ buf_size=%d fd=%d", buf_size, fd);
+
+    bread = read(fd, buf, buf_size);
     if (bread >= 0) {
         outctx->read_bytes += bread;
         outctx->read_pos += bread;
     }
+
     elv_dbg("OUT READ read=%d pos=%d total=%d", bread, outctx->read_pos, outctx->read_bytes);
 
     return bread;
@@ -143,13 +173,34 @@ out_write_packet(
     int buf_size)
 {
     ioctx_t *outctx = (ioctx_t *)opaque;
+    int fd = *(int *)outctx->opaque;
+    int bwritten;
 
-    int bwritten = write(outctx->fd, buf, buf_size);
-    if (bwritten >= 0) {
-        outctx->write_bytes += bwritten;
-        outctx->write_pos += bwritten;
+    if (fd < 0) {
+        /* If there is no space in outctx->buf, reallocate the buffer */
+        if (outctx->bufsz-outctx->written_bytes < buf_size) {
+            unsigned char *tmp = (unsigned char *) calloc(1, outctx->bufsz*2);
+            memcpy(tmp, outctx->buf, outctx->written_bytes);
+            outctx->bufsz = outctx->bufsz*2;
+            free(outctx->buf);
+            outctx->buf = tmp;
+            elv_log("XXX growing the buffer to %d", outctx->bufsz);
+        }
+
+        elv_log("XXX2 MEMORY write sz=%d", buf_size);
+        memcpy(outctx->buf+outctx->written_bytes, buf, buf_size);
+        outctx->written_bytes += buf_size;
+        outctx->write_pos += buf_size;
     }
-    elv_dbg("OUT WRITE fd=%d size=%d written=%d pos=%d total=%d", outctx->fd, buf_size, bwritten, outctx->write_pos, outctx->write_bytes);
+    else {
+        bwritten = write(fd, buf, buf_size);
+        if (bwritten >= 0) {
+            outctx->written_bytes += bwritten;
+            outctx->write_pos += bwritten;
+        }
+    }
+
+    elv_dbg("OUT WRITE fd=%d size=%d written=%d pos=%d total=%d", fd, buf_size, bwritten, outctx->write_pos, outctx->written_bytes);
     return bwritten;
 }
 
@@ -160,8 +211,9 @@ out_seek(
     int whence)
 {
     ioctx_t *outctx = (ioctx_t *)opaque;
+    int fd = *(int *)outctx->opaque;
 
-    int rc = lseek(outctx->fd, offset, whence);
+    int rc = lseek(fd, offset, whence);
     whence = whence & 0xFFFF; /* Mask out AVSEEK_SIZE and AVSEEK_FORCE */
     switch (whence) {
     case SEEK_SET:
@@ -178,6 +230,17 @@ out_seek(
 
     elv_dbg("OUT SEEK offset=%d whence=%d rc=%d", offset, whence, rc);
     return rc;
+}
+
+int
+out_closer(
+    ioctx_t *outctx)
+{
+    int fd = *((int *)(outctx->opaque));
+    elv_dbg("OUT io_close custom writer fd=%d\n", fd);
+    close(fd);
+    free(outctx->buf);
+    return 0;
 }
 
 /*
@@ -215,8 +278,8 @@ main(
     // Set AV libs log level
     //av_log_set_level(AV_LOG_DEBUG);
 
-    if ( argc == 1 ) {
-        printf("Usage: %s <in-filename> <out-filename>\nNeed to pass input and output filenames\n", argv[0]);
+    if ( argc != 2 ) {
+        printf("Usage: %s <in-filename>\nNeed to pass input filenames\n", argv[0]);
         return -1;
     }
 
@@ -224,11 +287,13 @@ main(
     elv_set_log_level(elv_log_log);
 
     in_handlers.avpipe_opener = in_opener;
+    in_handlers.avpipe_closer = in_closer;
     in_handlers.avpipe_reader = in_read_packet;
     in_handlers.avpipe_writer = in_write_packet;
     in_handlers.avpipe_seeker = in_seek;
 
     out_handlers.avpipe_opener = out_opener;
+    out_handlers.avpipe_closer = out_closer;
     out_handlers.avpipe_reader = out_read_packet;
     out_handlers.avpipe_writer = out_write_packet;
     out_handlers.avpipe_seeker = out_seek;
@@ -238,7 +303,7 @@ main(
     if (in_handlers.avpipe_opener(argv[1], inctx) < 0)
         return -1;
 
-    if (tx_init(&txctx, &in_handlers, inctx, &out_handlers, argv[2], &p) < 0)
+    if (tx_init(&txctx, &in_handlers, inctx, &out_handlers, &p) < 0)
         return 1;
 
     if (tx(txctx, 0) < 0) {

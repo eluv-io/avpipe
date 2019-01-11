@@ -76,6 +76,8 @@ prepare_decoder(
         return -1;
     }
 
+    dump_decoder(decoder_context);
+
     for (int i = 0; i < decoder_context->format_context->nb_streams; i++) {
         decoder_context->codec_parameters[i] = decoder_context->format_context->streams[i]->codecpar;
         decoder_context->stream[i] = decoder_context->format_context->streams[i];
@@ -127,12 +129,9 @@ prepare_decoder(
         */
         decoder_context->codec_context[i]->time_base = decoder_context->stream[i]->time_base;
 
-        elv_log("DECODER OBJECTS DUMP BEGIN ======================================================== \n");
-        dump_decoder(decoder_context);
         dump_stream(decoder_context->stream[i]);
         dump_codec_parameters(decoder_context->codec_parameters[i]);
         dump_codec_context(decoder_context->codec_context[i]);
-        elv_log("DECODER OBJECTS DUMP END ========================================================= \n");
     }
 
     return 0;
@@ -249,12 +248,6 @@ prepare_video_encoder(
     encoder_context->stream[index]->time_base = decoder_context->stream[decoder_context->video_stream_index]->time_base;
     encoder_context->stream[index]->avg_frame_rate = decoder_context->stream[decoder_context->video_stream_index]->avg_frame_rate;
 
-    elv_log("ENCODER OBJECTS DUMP BEGIN ========================================================= \n");
-    dump_encoder(encoder_context);
-    dump_stream(encoder_context->stream[encoder_context->video_stream_index]);
-    dump_codec_context(encoder_context->codec_context[encoder_context->video_stream_index]);
-    elv_log("ENCODER OBJECTS DUMP END ========================================================= \n");
-
     return 0;
 }
 
@@ -276,6 +269,7 @@ prepare_audio_encoder(
         return -1;
     }
 
+    encoder_context->audio_stream_index = index;
     encoder_context->last_dts = AV_NOPTS_VALUE;
     encoder_context->stream[index] = avformat_new_stream(encoder_context->format_context, NULL);
     encoder_context->codec[index] = avcodec_find_encoder(decoder_context->codec_context[index]->codec_id);
@@ -329,8 +323,12 @@ prepare_encoder(
 {
     out_tracker_t *out_tracker;
 
-    /* Allocate an AVFormatContext for output. */
-    avformat_alloc_output_context2(&encoder_context->format_context, NULL, NULL, encoder_context->file_name);
+    /*
+     * Allocate an AVFormatContext for output.
+     * Setting 3th paramter to "dash" determines the output file format and avoids guessing
+     * output file format using filename in ffmpeg library.
+     */
+    avformat_alloc_output_context2(&encoder_context->format_context, NULL, "dash", NULL);
     if (!encoder_context->format_context) {
         elv_dbg("could not allocate memory for output format");
         return -1;
@@ -350,6 +348,12 @@ prepare_encoder(
     out_tracker = (out_tracker_t *) calloc(2, sizeof(out_tracker_t));
     out_tracker->out_handlers = out_handlers;
     encoder_context->format_context->avpipe_opaque = out_tracker;
+
+    dump_encoder(encoder_context);
+    dump_stream(encoder_context->stream[encoder_context->video_stream_index]);
+    dump_codec_context(encoder_context->codec_context[encoder_context->video_stream_index]);
+    dump_stream(encoder_context->stream[encoder_context->audio_stream_index]);
+    dump_codec_context(encoder_context->codec_context[encoder_context->audio_stream_index]);
 
     return 0;
 }
@@ -440,7 +444,7 @@ decode_packet(
     u_int64_t since;
     AVCodecContext *codec_context = decoder_context->codec_context[stream_index];
     int response = avcodec_send_packet(codec_context, packet);
-    //elv_dbg("SS-DECODE send_packet pts=%d dts=%d duration=%d", packet->pts, packet->dts, packet->duration);
+    elv_dbg("DECODE send_packet pts=%d dts=%d duration=%d", packet->pts, packet->dts, packet->duration);
 
     if (response < 0) {
         elv_err("Failure while sending a packet to the decoder: %s", av_err2str(response));
@@ -682,7 +686,6 @@ tx_init(
     avpipe_io_handler_t *in_handlers,
     ioctx_t *inctx,
     avpipe_io_handler_t *out_handlers,
-    char *out_filename,
     txparams_t *params)
 {
     txctx_t *p_txctx = (txctx_t *) calloc(1, sizeof(txctx_t));
@@ -692,7 +695,6 @@ tx_init(
         return -1;
     }
 
-    p_txctx->encoder_ctx.file_name = out_filename;
     if (prepare_encoder(&p_txctx->encoder_ctx, &p_txctx->decoder_ctx, out_handlers, params)) {
         elv_err("Failure in preparing output");
         return -1;

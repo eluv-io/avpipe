@@ -177,5 +177,5 @@ dump_stats(
 
     elv_log("STATS t=%02d.%03d read_pos=%"PRId64" read_pts=%d seg_index=%d seg_pos=%d seg_pts=%d\n",
         (int)(ti - t0) / 1000, (int)(ti - t0) % 1000, inctx->read_pos, decoder_context->pts / 1001,
-        out_tracker->chunk_idx, out_tracker->last_outctx ? out_tracker->last_outctx->write_bytes:0, encoder_context->pts / 1001);
+        out_tracker->seg_index, out_tracker->last_outctx ? out_tracker->last_outctx->written_bytes:0, encoder_context->pts / 1001);
 }
