@@ -36,7 +36,10 @@ int
 in_closer(
     ioctx_t *inctx)
 {
-    (void) inctx;
+    int fd = *((int *)(inctx->opaque));
+    elv_dbg("IN io_close custom writer fd=%d\n", fd);
+    free(inctx->opaque);
+    close(fd);
     return 0;
 }
 
@@ -239,6 +242,7 @@ out_closer(
     int fd = *((int *)(outctx->opaque));
     elv_dbg("OUT io_close custom writer fd=%d\n", fd);
     close(fd);
+    free(outctx->opaque);
     free(outctx->buf);
     return 0;
 }
@@ -279,7 +283,7 @@ main(
     //av_log_set_level(AV_LOG_DEBUG);
 
     if ( argc != 2 ) {
-        printf("Usage: %s <in-filename>\nNeed to pass input filenames\n", argv[0]);
+        printf("Usage: %s <filename>\nNeed to pass input filename (output goes to directory ./O)\n", argv[0]);
         return -1;
     }
 

@@ -109,7 +109,6 @@ prepare_decoder(
             elv_err("Failed to allocated memory for AVCodecContext");
             return -1;
         }
-        dump_codec_context(decoder_context->codec_context[i]);
 
         if (avcodec_parameters_to_context(decoder_context->codec_context[i], decoder_context->codec_parameters[i]) < 0) {
             elv_err("Failed to copy codec params to codec context");
