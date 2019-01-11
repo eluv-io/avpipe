@@ -194,6 +194,7 @@ out_write_packet(
         memcpy(outctx->buf+outctx->written_bytes, buf, buf_size);
         outctx->written_bytes += buf_size;
         outctx->write_pos += buf_size;
+        bwritten = buf_size;
     }
     else {
         bwritten = write(fd, buf, buf_size);
