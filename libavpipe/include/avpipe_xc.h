@@ -1,5 +1,5 @@
 /*
- * elv_xc.h
+ * avpipe_xc.h
  */
 
 #pragma once
@@ -76,7 +76,6 @@ typedef struct avpipe_io_handler_t {
 
 /* Decoder/encoder context, keeps both video and audio stream ffmpeg contexts */
 typedef struct coderctx_t {
-    //char *file_name;
     AVFormatContext *format_context;
 
     AVCodec *codec[2];
@@ -118,48 +117,52 @@ typedef struct txctx_t {
     txparams_t *params;
 } txctx_t;
 
-/*
- * Implements AVIOContext interface for writing
- */
 typedef struct out_tracker_t {
-    avpipe_io_handler_t *out_handlers;
-    ioctx_t *last_outctx;
+    struct avpipe_io_handler_t *out_handlers;
+    struct ioctx_t *last_outctx;
     int seg_index;
 } out_tracker_t;
 
+/**
+ * @brief   Allocates and initializes a txctx_t (transcoder context) for piplining the input stream.
+ *
+ * @param   txctx           Points to allocated and initialized memory (different fields are initialized by ffmpeg).
+ * @param   in_handlers     A pointer to input handlers. Must be properly set up by the application.
+ * @param   inctx           A pointer to ioctx_t for input stream. This has to be allocated and initialized
+ *                          by the application before calling this function.
+ * @param   out_handlers    A pointer to output handlers. Must be properly set up by the application.
+ * @param   params          A pointer to the parameters for transcoding.
+ *
+ * @return  Returns 0 if the initialization of an avpipe txctx_t is successful, otherwise returns -1 on error.
+ */
 int
-init_filters(
-    const char *filters_descr,
-    coderctx_t *decoder_context,
-    coderctx_t *encoder_context);
-
-int
-elv_io_open(
-    struct AVFormatContext *s,
-    AVIOContext **pb,
-    const char *url,
-    int flags,
-    AVDictionary **options);
-
-void
-elv_io_close(
-    struct AVFormatContext *s,
-    AVIOContext *pb);
-
-int
-tx_init(
+avpipe_init(
     txctx_t **txctx,
     avpipe_io_handler_t *in_handlers,
     ioctx_t *inctx,
     avpipe_io_handler_t *out_handlers,
     txparams_t *params);
 
+/**
+ * @brief   Frees the memory and other resources allocated by ffmpeg.
+ *
+ * @param   txctx       A pointer to the trascoding context that would be destructed.
+ * @return  Returns 0.
+ */
 int
-tx_fini(
+avpipe_fini(
     txctx_t **txctx);
 
+/**
+ * @brief   Starts transcoding.
+ *
+ * @param   txctx           A pointer to transcoding context.
+ * @param   do_intrument    If 0 there will be no instrumentation, otherwise it does some instrumentation
+ *                          for some ffmpeg functions.
+ * @return  Returns 0 if transcoding is successful, otherwise -1.
+ */
 int
-tx(
+avpipe_tx(
     txctx_t *txctx,
     int do_instrument);
 

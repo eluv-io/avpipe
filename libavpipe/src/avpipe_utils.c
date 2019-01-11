@@ -1,5 +1,5 @@
 /*
- * elv_xc_utils.c
+ * avpipe_utils.c
  */
 
 #include <libavcodec/avcodec.h>
@@ -7,8 +7,8 @@
 #include <libavutil/opt.h>
 #include <libavutil/log.h>
 
-#include "elv_xc_utils.h"
-#include "elv_xc.h"
+#include "avpipe_utils.h"
+#include "avpipe_xc.h"
 #include "elv_log.h"
 
 #include <sys/time.h>

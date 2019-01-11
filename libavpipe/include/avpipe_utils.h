@@ -1,10 +1,7 @@
 
 #pragma once
 
-#include "elv_xc.h"
-
-void
-dbg(const char *fmt, ...);
+#include "avpipe_xc.h"
 
 void
 dump_frame(

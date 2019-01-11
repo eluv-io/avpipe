@@ -9,7 +9,7 @@
 #include <fcntl.h>
 #include <libavutil/log.h>
 
-#include "elv_xc.h"
+#include "avpipe_xc.h"
 #include "elv_log.h"
 
 int
@@ -307,16 +307,16 @@ main(
     if (in_handlers.avpipe_opener(argv[1], inctx) < 0)
         return -1;
 
-    if (tx_init(&txctx, &in_handlers, inctx, &out_handlers, &p) < 0)
+    if (avpipe_init(&txctx, &in_handlers, inctx, &out_handlers, &p) < 0)
         return 1;
 
-    if (tx(txctx, 0) < 0) {
+    if (avpipe_tx(txctx, 0) < 0) {
         elv_err("Error in transcoding");
         return -1;
     }
 
     elv_dbg("Releasing all the resources");
-    tx_fini(&txctx);
+    avpipe_fini(&txctx);
 
     return 0;
 }

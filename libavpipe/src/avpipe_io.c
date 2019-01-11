@@ -1,5 +1,5 @@
 /*
- * io.c
+ * avpipe_io.c
  */
 
 #include <libavcodec/avcodec.h>
@@ -9,8 +9,8 @@
 #include <libavfilter/buffersink.h>
 #include <libavfilter/buffersrc.h>
 
-#include "elv_xc.h"
-#include "elv_xc_utils.h"
+#include "avpipe_xc.h"
+#include "avpipe_utils.h"
 #include "elv_log.h"
 
 #include <stdio.h>

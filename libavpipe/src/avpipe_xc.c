@@ -10,8 +10,8 @@
 
 #include <libavutil/log.h>
 
-#include "elv_xc.h"
-#include "elv_xc_utils.h"
+#include "avpipe_xc.h"
+#include "avpipe_utils.h"
 #include "elv_log.h"
 #include "elv_time.h"
 
@@ -22,6 +22,25 @@
 #include <sys/stat.h>
 #include <sys/uio.h>
 #include <unistd.h>
+
+extern int
+init_filters(
+    const char *filters_descr,
+    coderctx_t *decoder_context,
+    coderctx_t *encoder_context);
+
+extern int
+elv_io_open(
+    struct AVFormatContext *s,
+    AVIOContext **pb,
+    const char *url,
+    int flags,
+    AVDictionary **options);
+
+extern void
+elv_io_close(
+    struct AVFormatContext *s,
+    AVIOContext *pb);
 
 static int
 prepare_input(
@@ -543,7 +562,7 @@ decode_packet(
 }
 
 int
-tx(
+avpipe_tx(
     txctx_t *txctx,
     int do_instrument)
 {
@@ -680,7 +699,7 @@ tx(
 }
 
 int
-tx_init(
+avpipe_init(
     txctx_t **txctx,
     avpipe_io_handler_t *in_handlers,
     ioctx_t *inctx,
@@ -705,7 +724,7 @@ tx_init(
 }
 
 int
-tx_fini(
+avpipe_fini(
     txctx_t **txctx)
 {
     coderctx_t *decoder_context = &(*txctx)->decoder_ctx;

@@ -1,4 +1,4 @@
-SRCS=elv_xc.c elv_xc_utils.c elv_filters.c io.c
+SRCS=avpipe_xc.c avpipe_utils.c avpipe_filters.c avpipe_io.c
 ETX_SRCS=elv_xc_test.c
 
 AVLIBS=-lavpipe -lavcodec -lavformat -lavfilter -lavdevice -lswresample -lswscale -lavutil -lpostproc -lutils -lm -ldl -lpthread
