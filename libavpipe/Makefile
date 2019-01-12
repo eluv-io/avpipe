@@ -16,7 +16,7 @@ ETX_OBJS=$(ETX_SRCS:%.c=$(BINDIR)/%.o)
 LIBDIRS=-L${ELV_TOOLCHAIN_DIST_PLATFORM}/lib -L../utils/lib -L./lib
 FLAGS=-O0 -ggdb -Wall -fPIC -DAUDIO
 
-all: avpipelib etx
+all: avpipelib etx goetx
 
 avpipelib: $(OBJS)
 	@(if [ ! -d $(LIBDIR) ]; then mkdir $(LIBDIR); fi)
@@ -26,6 +26,10 @@ avpipelib: $(OBJS)
 etx: $(ETX_OBJS)
 	@echo Making etx
 	gcc $? ${LIBDIRS} ${AVLIBS} -o $(BINDIR)/etx
+
+goetx: avpipelib
+	@echo Making goetx
+	@(cd goetx; make)
 
 $(BINDIR)/%.o: src/%.c
 	@(if [ ! -d $(BINDIR) ]; then mkdir $(BINDIR); fi)
@@ -38,6 +42,7 @@ $(BINDIR)/elv_xc_test.o: etx/elv_xc_test.c
 
 clean:
 	@rm -rf $(BINDIR) $(LIBDIR)
+	(cd goetx; make clean)
 
 tags:
 	ctags -R . ../../elv-toolchain/FFmpeg/FFmpeg ../utils
