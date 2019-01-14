@@ -1,4 +1,4 @@
-SRCS=elv_log.c elv_time.c
+SRCS=elv_log.c elv_time.c elv_channel.c
 
 BINDIR=bin
 LIBDIR=lib
