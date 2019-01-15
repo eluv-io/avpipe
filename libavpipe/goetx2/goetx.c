@@ -11,6 +11,18 @@
 
 #include "avpipe_xc.h"
 #include "elv_log.h"
+#include "elv_channel.h"
+#include "goetx.h"
+
+
+int InOpenerX(char*);
+int InReaderX(char*, int);
+int InSeekerX(int64_t offset, int whence);
+int InCloserX();
+int OutOpenerX(int, char *);
+int OutWriterX(int, char *, int);
+int OutSeekerX(int, int64_t offset, int whence);
+int OutCloserX(int);
 
 int
 in_opener(
@@ -29,8 +41,11 @@ in_opener(
         return -1;
 
     inctx->sz = stb.st_size;
-    elv_dbg("IN OPEN fd=%d url=%s", fd, url);
-    return 0;
+
+    int rc = InOpenerX((char *) url);
+    elv_dbg("IN OPEN fd=%d", fd);
+
+    return rc;
 }
 
 int
@@ -41,6 +56,8 @@ in_closer(
     elv_dbg("IN io_close custom writer fd=%d\n", fd);
     free(inctx->opaque);
     close(fd);
+
+    InCloserX();
     return 0;
 }
 
@@ -51,16 +68,37 @@ in_read_packet(
     int buf_size)
 {
     ioctx_t *c = (ioctx_t *)opaque;
-    int fd = *((int *)(c->opaque));
-    elv_dbg("IN READ buf=%p buf_size=%d fd=%d", buf, buf_size, fd);
+    int r;
 
-    int r = read(fd, buf, buf_size);
+    elv_dbg("IN READ buf=%p, size=%d", buf, buf_size);
+#ifdef CHECK_C_READ
+    char *buf2 = (char *) calloc(1, buf_size);
+    int fd = *((int *)(c->opaque));
+    elv_dbg("IN READ buf_size=%d fd=%d", buf_size, fd);
+    int n = read(fd, buf2, buf_size);
+#endif
+    
+    r = InReaderX((char *)buf, buf_size);
     if (r >= 0) {
         c->read_bytes += r;
         c->read_pos += r;
     }
-    elv_dbg("IN READ read=%d pos=%"PRId64" total=%"PRId64, r, c->read_pos, c->read_bytes);
 
+#ifdef CHECK_C_READ
+    if ( r == n) {
+        for (int i=0; i<r; i++) {
+            if ( i< 10)
+                elv_log("i=%d, buf=%d, buf2=%d", i, buf[i], buf2[i]);
+            if ( buf[i] != buf2[i]) {
+                elv_log("NOOOO! buffers don't match");
+                break;
+            }
+        }
+    }
+    free(buf2);
+#endif
+
+    elv_dbg("IN READ read=%d pos=%"PRId64" total=%"PRId64, r, c->read_pos, c->read_bytes);
     return r;
 }
 
@@ -70,7 +108,7 @@ in_write_packet(
     uint8_t *buf,
     int buf_size)
 {
-    elv_dbg("IN WRITE");
+    elv_err("IN WRITE");
     return 0;
 }
 
@@ -82,7 +120,8 @@ in_seek(
 {
     ioctx_t *c = (ioctx_t *)opaque;
     int fd = *((int *)(c->opaque));
-    int rc = lseek(fd, offset, whence);
+
+    int64_t rc = InSeekerX(offset, whence);
     whence = whence & 0xFFFF; /* Mask out AVSEEK_SIZE and AVSEEK_FORCE */
     switch (whence) {
     case SEEK_SET:
@@ -95,7 +134,8 @@ in_seek(
         elv_dbg("IN SEEK - weird seek\n");
     }
 
-    elv_dbg("IN SEEK offset=%d whence=%d rc=%d", offset, whence, rc);
+    elv_dbg("IN SEEK fd=%d, offset=%d, whence=%d, rc=%d", fd, offset, whence, rc);
+
     return rc;
 }
 
@@ -105,7 +145,7 @@ out_opener(
     ioctx_t *outctx)
 {
     char segname[128];
-    int fd;
+    int fd = (outctx->seg_index-1)*2 + outctx->stream_index;
 
     /* If there is no url, just allocate the buffers. The data will be copied to the buffers */
     switch (outctx->type) {
@@ -132,19 +172,15 @@ out_opener(
         return -1;
     }
 
-    fd = open(segname, O_RDWR | O_CREAT | O_TRUNC, 0644);
-    if (fd < 0) {
-        elv_err("Failed to open segment file %s (%d)", segname, errno);
-        return -1;
-    }
-
     outctx->opaque = (int *) malloc(sizeof(int));
     *((int *)(outctx->opaque)) = fd;
-
     outctx->bufsz = 1 * 1024 * 1024;
     outctx->buf = (unsigned char *)malloc(outctx->bufsz); /* Must be malloc'd - will be realloc'd by avformat */
-    elv_dbg("OUT out_opener outctx=%p fd=%d\n", outctx, fd);
-    return 0;
+    elv_dbg("OUT out_opener outctx=%p\n", outctx);
+
+    int rc = OutOpenerX(fd, segname);
+
+    return rc;
 }
 
 int
@@ -153,21 +189,9 @@ out_read_packet(
     uint8_t *buf,
     int buf_size)
 {
-    ioctx_t *outctx = (ioctx_t *)opaque;
-    int fd = *(int *)outctx->opaque;
-    int bread;
+    elv_err("OUT READ called");
 
-    elv_dbg("OUT READ buf_size=%d fd=%d", buf_size, fd);
-
-    bread = read(fd, buf, buf_size);
-    if (bread >= 0) {
-        outctx->read_bytes += bread;
-        outctx->read_pos += bread;
-    }
-
-    elv_dbg("OUT READ read=%d pos=%d total=%d", bread, outctx->read_pos, outctx->read_bytes);
-
-    return bread;
+    return 0;
 }
 
 int
@@ -178,35 +202,15 @@ out_write_packet(
 {
     ioctx_t *outctx = (ioctx_t *)opaque;
     int fd = *(int *)outctx->opaque;
-    int bwritten;
-
-    if (fd < 0) {
-        /* If there is no space in outctx->buf, reallocate the buffer */
-        if (outctx->bufsz-outctx->written_bytes < buf_size) {
-            unsigned char *tmp = (unsigned char *) calloc(1, outctx->bufsz*2);
-            memcpy(tmp, outctx->buf, outctx->written_bytes);
-            outctx->bufsz = outctx->bufsz*2;
-            free(outctx->buf);
-            outctx->buf = tmp;
-            elv_log("XXX growing the buffer to %d", outctx->bufsz);
-        }
-
-        elv_log("XXX2 MEMORY write sz=%d", buf_size);
-        memcpy(outctx->buf+outctx->written_bytes, buf, buf_size);
-        outctx->written_bytes += buf_size;
-        outctx->write_pos += buf_size;
-        bwritten = buf_size;
+    int bwritten = OutWriterX(fd, buf, buf_size);
+    if (bwritten >= 0) {
+        outctx->written_bytes += bwritten;
+        outctx->write_pos += bwritten;
     }
-    else {
-        bwritten = write(fd, buf, buf_size);
-        if (bwritten >= 0) {
-            outctx->written_bytes += bwritten;
-            outctx->write_pos += bwritten;
-        }
-    }
-
-    elv_dbg("OUT WRITE fd=%d size=%d written=%d pos=%d total=%d", fd, buf_size, bwritten, outctx->write_pos, outctx->written_bytes);
-    return bwritten;
+    
+    elv_dbg("OUT WRITE size=%d written=%d pos=%d total=%d", buf_size, bwritten, outctx->write_pos, outctx->written_bytes);
+    
+    return buf_size;
 }
 
 int64_t
@@ -217,23 +221,21 @@ out_seek(
 {
     ioctx_t *outctx = (ioctx_t *)opaque;
     int fd = *(int *)outctx->opaque;
-
-    int rc = lseek(fd, offset, whence);
+    int rc = OutSeekerX(fd, offset, whence);
     whence = whence & 0xFFFF; /* Mask out AVSEEK_SIZE and AVSEEK_FORCE */
     switch (whence) {
     case SEEK_SET:
-        outctx->read_pos = offset; break;
+        outctx->write_pos = offset; break;
     case SEEK_CUR:
-        outctx->read_pos += offset; break;
+        outctx->write_pos += offset; break;
     case SEEK_END:
-        outctx->read_pos = -1;
-        elv_dbg("IN SEEK - SEEK_END not yet implemented\n");
-        break;
+        outctx->write_pos = outctx->sz - offset; break;
     default:
-        elv_err("OUT SEEK - weird seek\n");
+        elv_dbg("OUT SEEK - weird seek\n");
     }
 
-    elv_dbg("OUT SEEK offset=%d whence=%d rc=%d", offset, whence, rc);
+    elv_dbg("OUT SEEK offset=%d whence=%d", offset, whence);
+
     return rc;
 }
 
@@ -241,55 +243,29 @@ int
 out_closer(
     ioctx_t *outctx)
 {
-    int fd = *((int *)(outctx->opaque));
-    elv_dbg("OUT io_close custom writer fd=%d\n", fd);
-    close(fd);
+    int fd = *(int *)outctx->opaque;
+    int rc = OutCloserX(fd);
     free(outctx->opaque);
     free(outctx->buf);
-    return 0;
+    return rc;
 }
 
 /*
  * Test basic decoding and encoding
- *
- * Usage: <FILE-IN> <FILE-OUT>
  */
 int
-main(
-    int argc,
-    char *argv[])
+tx(
+    txparams_t *params,
+    char *filename)
 {
     txctx_t *txctx;
     avpipe_io_handler_t in_handlers;
     avpipe_io_handler_t out_handlers;
 
-    /* Parameters */
-    txparams_t p = {
-        .video_bitrate = 2560000,           /* not used if using CRF */
-        .audio_bitrate = 64000,
-        .sample_rate = 44100,               /* Audio sampling rate */
-        .crf_str = "23",                    /* 1 best -> 23 standard middle -> 52 poor */
-        .start_time_ts = 0,                 /* same units as input stream PTS */
-        //.duration_ts = 1001 * 60 * 12,      /* same units as input stream PTS */
-        .duration_ts = -1,                  /* -1 means entire input stream */
-        .start_segment_str = "1",           /* 1-based */
-        .seg_duration_ts = 1001 * 60,       /* same units as input stream PTS */
-        .seg_duration_fr = 60,              /* in frames-per-secoond units */
-        .seg_duration_secs_str = "2.002",
-        .codec = "libx264",
-        .enc_height = 720,                  /* -1 means use source height, other values 2160, 720 */
-        .enc_width = 1280                   /* -1 means use source width, other values 3840, 1280 */
-    };
-
-    // Set AV libs log level
-    //av_log_set_level(AV_LOG_DEBUG);
-
-    if ( argc != 2 ) {
-        printf("Usage: %s <filename>\nNeed to pass input filename (output goes to directory ./O)\n", argv[0]);
+    if (!filename || filename[0] == '\0' )
         return -1;
-    }
 
-    elv_logger_open(NULL, "etx", 10, 10*1024*1024, elv_log_file);
+    elv_logger_open(NULL, "goetx", 10, 10*1024*1024, elv_log_file);
     elv_set_log_level(elv_log_debug);
 
     in_handlers.avpipe_opener = in_opener;
@@ -306,10 +282,10 @@ main(
 
     ioctx_t *inctx = (ioctx_t *)calloc(1, sizeof(ioctx_t));
 
-    if (in_handlers.avpipe_opener(argv[1], inctx) < 0)
+    if (in_handlers.avpipe_opener(filename, inctx) < 0)
         return -1;
 
-    if (avpipe_init(&txctx, &in_handlers, inctx, &out_handlers, &p) < 0)
+    if (avpipe_init(&txctx, &in_handlers, inctx, &out_handlers, params) < 0)
         return 1;
 
     if (avpipe_tx(txctx, 0) < 0) {
