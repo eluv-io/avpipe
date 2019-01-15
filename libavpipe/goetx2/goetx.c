@@ -19,10 +19,10 @@ int InOpenerX(char*);
 int InReaderX(char*, int);
 int InSeekerX(int64_t offset, int whence);
 int InCloserX();
-int OutOpenerX(char *);
-int OutWriterX(char *, int);
-int OutSeekerX(int64_t offset, int whence);
-int OutCloserX();
+int OutOpenerX(int, char *);
+int OutWriterX(int, char *, int);
+int OutSeekerX(int, int64_t offset, int whence);
+int OutCloserX(int);
 
 int
 in_opener(
@@ -143,6 +143,7 @@ out_opener(
     ioctx_t *outctx)
 {
     char segname[128];
+    int fd = (outctx->seg_index-1)*2 + outctx->stream_index;
 
     /* If there is no url, just allocate the buffers. The data will be copied to the buffers */
     switch (outctx->type) {
@@ -169,11 +170,13 @@ out_opener(
         return -1;
     }
 
+    outctx->opaque = (int *) malloc(sizeof(int));
+    *((int *)(outctx->opaque)) = fd;
     outctx->bufsz = 1 * 1024 * 1024;
     outctx->buf = (unsigned char *)malloc(outctx->bufsz); /* Must be malloc'd - will be realloc'd by avformat */
     elv_dbg("OUT out_opener outctx=%p\n", outctx);
 
-    int rc = OutOpenerX(segname);
+    int rc = OutOpenerX(fd, segname);
 
     return rc;
 }
@@ -196,7 +199,8 @@ out_write_packet(
     int buf_size)
 {
     ioctx_t *outctx = (ioctx_t *)opaque;
-    int bwritten = OutWriterX(buf, buf_size);
+    int fd = *(int *)outctx->opaque;
+    int bwritten = OutWriterX(fd, buf, buf_size);
     if (bwritten >= 0) {
         outctx->written_bytes += bwritten;
         outctx->write_pos += bwritten;
@@ -214,7 +218,8 @@ out_seek(
     int whence)
 {
     ioctx_t *outctx = (ioctx_t *)opaque;
-    int rc = OutSeekerX(offset, whence);
+    int fd = *(int *)outctx->opaque;
+    int rc = OutSeekerX(fd, offset, whence);
     whence = whence & 0xFFFF; /* Mask out AVSEEK_SIZE and AVSEEK_FORCE */
     switch (whence) {
     case SEEK_SET:
@@ -236,8 +241,10 @@ int
 out_closer(
     ioctx_t *outctx)
 {
-    int rc = OutCloserX();
-
+    int fd = *(int *)outctx->opaque;
+    int rc = OutCloserX(fd);
+    free(outctx->opaque);
+    free(outctx->buf);
     return rc;
 }
 
