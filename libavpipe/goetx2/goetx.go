@@ -5,9 +5,6 @@ package main
 // #include <stdlib.h>
 // #include "avpipe_xc.h"
 // #include "goetx.h"
-// #include "elv_channel.h"
-// extern elv_channel_t *chanReq;
-// extern elv_channel_t *chanRep;
 import "C"
 import (
 	"flag"
@@ -37,9 +34,7 @@ type etxAVPipeIOHandler struct {
 
 //export InOpenerX
 func InOpenerX(url *C.char) C.int {
-
 	globex.Lock()
-
 	filename := C.GoString((*C.char)(unsafe.Pointer(url)))
 	f, err := os.Open(filename)
 	fmt.Fprintf(os.Stdout, "XXX2 InOpener Got filename=%s\n", filename)
@@ -58,8 +53,6 @@ func InOpenerX(url *C.char) C.int {
 
 //export InReaderX
 func InReaderX(buf *C.char, sz C.int) C.int {
-
-	//h := handler(fd)
 	globex.Lock()
 	h := gIOHandler
 	fmt.Println("InReaderX", "h", h, "buf", buf, "sz=", sz)
@@ -72,7 +65,7 @@ func InReaderX(buf *C.char, sz C.int) C.int {
 	if n > 0 {
 		C.memcpy(unsafe.Pointer(buf), unsafe.Pointer(&gobuf[0]), C.size_t(n))
 	}
-	fmt.Println("InReaderX gobuf=", gobuf[0:10])
+
 	return C.int(n) // PENDING err
 }
 
@@ -196,11 +189,8 @@ func OutCloserX(fd C.int) C.int {
 }
 
 func (h *etxAVPipeIOHandler) OutCloser(fd C.int) error {
-	fmt.Fprintf(os.Stdout, "XXX OutCloser\n")
 	err := h.filetable[fd].Close()
-	if err != nil {
-		fmt.Fprintf(os.Stdout, "XXX OutCloser error=%v", err)
-	}
+	fmt.Fprintf(os.Stdout, "XXX OutCloser error=%v", err)
 	return err
 }
 

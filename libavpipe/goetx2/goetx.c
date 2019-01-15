@@ -71,11 +71,12 @@ in_read_packet(
     int r;
 
     elv_dbg("IN READ buf=%p, size=%d", buf, buf_size);
-
+#ifdef CHECK_C_READ
     char *buf2 = (char *) calloc(1, buf_size);
     int fd = *((int *)(c->opaque));
     elv_dbg("IN READ buf_size=%d fd=%d", buf_size, fd);
     int n = read(fd, buf2, buf_size);
+#endif
     
     r = InReaderX((char *)buf, buf_size);
     if (r >= 0) {
@@ -83,6 +84,7 @@ in_read_packet(
         c->read_pos += r;
     }
 
+#ifdef CHECK_C_READ
     if ( r == n) {
         for (int i=0; i<r; i++) {
             if ( i< 10)
@@ -93,10 +95,10 @@ in_read_packet(
             }
         }
     }
+    free(buf2);
+#endif
 
     elv_dbg("IN READ read=%d pos=%"PRId64" total=%"PRId64, r, c->read_pos, c->read_bytes);
-    free(buf2);
-
     return r;
 }
 
