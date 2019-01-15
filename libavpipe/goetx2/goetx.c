@@ -14,10 +14,15 @@
 #include "elv_channel.h"
 #include "goetx.h"
 
-elv_channel_t *chanReq;
-elv_channel_t *chanRep;
 
-int InReaderX(int, char*, int);
+int InOpenerX(char*);
+int InReaderX(char*, int);
+int InSeekerX(int64_t offset, int whence);
+int InCloserX();
+int OutOpenerX(char *);
+int OutWriterX(char *, int);
+int OutSeekerX(int64_t offset, int whence);
+int OutCloserX();
 
 int
 in_opener(
@@ -37,12 +42,10 @@ in_opener(
 
     inctx->sz = stb.st_size;
 
-    avpipe_msg_t *msg = (avpipe_msg_t *) calloc(1, sizeof(avpipe_msg_t));
-    msg->mtype = avpipe_in_opener;
-    msg->opaque = strdup(url);
-    elv_channel_send(chanReq, msg);
+    int rc = InOpenerX((char *) url);
+    elv_dbg("IN OPEN fd=%d", fd);
 
-    return 0;
+    return rc;
 }
 
 int
@@ -53,6 +56,8 @@ in_closer(
     elv_dbg("IN io_close custom writer fd=%d\n", fd);
     free(inctx->opaque);
     close(fd);
+
+    InCloserX();
     return 0;
 }
 
@@ -63,41 +68,36 @@ in_read_packet(
     int buf_size)
 {
     ioctx_t *c = (ioctx_t *)opaque;
-    uint8_t buf2[64*1024];
+    int r;
+
+    elv_dbg("IN READ buf=%p, size=%d", buf, buf_size);
+
+    char *buf2 = (char *) calloc(1, buf_size);
     int fd = *((int *)(c->opaque));
-    avpipe_msg_reply_t *reply;
-    int n;
-
     elv_dbg("IN READ buf_size=%d fd=%d", buf_size, fd);
-
-    int r = read(fd, buf2, buf_size);
-    /* TODO: move this to go handlers
+    int n = read(fd, buf2, buf_size);
+    
+    r = InReaderX((char *)buf, buf_size);
     if (r >= 0) {
         c->read_bytes += r;
         c->read_pos += r;
     }
+
+    if ( r == n) {
+        for (int i=0; i<r; i++) {
+            if ( i< 10)
+                elv_log("i=%d, buf=%d, buf2=%d", i, buf[i], buf2[i]);
+            if ( buf[i] != buf2[i]) {
+                elv_log("NOOOO! buffers don't match");
+                break;
+            }
+        }
+    }
+
     elv_dbg("IN READ read=%d pos=%"PRId64" total=%"PRId64, r, c->read_pos, c->read_bytes);
-    */
+    free(buf2);
 
-#if 0
-    avpipe_msg_t *msg = (avpipe_msg_t *) calloc(1, sizeof(avpipe_msg_t));
-    msg->mtype = avpipe_in_reader;
-    msg->opaque = opaque;
-    msg->buf = buf;
-    msg->buf_size = buf_size;
-    elv_channel_send(chanReq, msg);
-
-    reply = (avpipe_msg_reply_t *) elv_channel_receive(chanRep);
-    n = reply->rc;
-    elv_log("IN READ reply n=%d", n);
-    free(reply);
-#else
-    n = InReaderX(0, (char *)buf, buf_size);
-    elv_log("IN READ reply n=%d", n);
-#endif
-
-    /* TODO: read the return value properly */
-    return n;
+    return r;
 }
 
 int
@@ -117,13 +117,9 @@ in_seek(
     int whence)
 {
     ioctx_t *c = (ioctx_t *)opaque;
+    int fd = *((int *)(c->opaque));
 
-    avpipe_msg_t *msg = (avpipe_msg_t *) calloc(1, sizeof(avpipe_msg_t));
-    msg->mtype = avpipe_in_seeker;
-    msg->offset = offset;
-    msg->whence = whence;
-    elv_channel_send(chanReq, msg);
-
+    int64_t rc = InSeekerX(offset, whence);
     whence = whence & 0xFFFF; /* Mask out AVSEEK_SIZE and AVSEEK_FORCE */
     switch (whence) {
     case SEEK_SET:
@@ -136,9 +132,9 @@ in_seek(
         elv_dbg("IN SEEK - weird seek\n");
     }
 
-    elv_dbg("IN SEEK offset=%d whence=%d", offset, whence);
+    elv_dbg("IN SEEK fd=%d, offset=%d, whence=%d, rc=%d", fd, offset, whence, rc);
 
-    return c->read_pos;
+    return rc;
 }
 
 int
@@ -177,12 +173,9 @@ out_opener(
     outctx->buf = (unsigned char *)malloc(outctx->bufsz); /* Must be malloc'd - will be realloc'd by avformat */
     elv_dbg("OUT out_opener outctx=%p\n", outctx);
 
-    avpipe_msg_t *msg = (avpipe_msg_t *) calloc(1, sizeof(avpipe_msg_t));
-    msg->mtype = avpipe_out_opener;
-    msg->opaque = strdup(segname);
-    elv_channel_send(chanReq, msg);
+    int rc = OutOpenerX(segname);
 
-    return 0;
+    return rc;
 }
 
 int
@@ -202,20 +195,14 @@ out_write_packet(
     uint8_t *buf,
     int buf_size)
 {
-    /* TODO move this to go 
+    ioctx_t *outctx = (ioctx_t *)opaque;
+    int bwritten = OutWriterX(buf, buf_size);
     if (bwritten >= 0) {
         outctx->written_bytes += bwritten;
         outctx->write_pos += bwritten;
     }
     
     elv_dbg("OUT WRITE size=%d written=%d pos=%d total=%d", buf_size, bwritten, outctx->write_pos, outctx->written_bytes);
-    */
-
-    avpipe_msg_t *msg = (avpipe_msg_t *) calloc(1, sizeof(avpipe_msg_t));
-    msg->mtype = avpipe_out_writer;
-    msg->buf = buf;
-    msg->buf_size = buf_size;
-    elv_channel_send(chanReq, msg);
     
     return buf_size;
 }
@@ -226,27 +213,32 @@ out_seek(
     int64_t offset,
     int whence)
 {
+    ioctx_t *outctx = (ioctx_t *)opaque;
+    int rc = OutSeekerX(offset, whence);
+    whence = whence & 0xFFFF; /* Mask out AVSEEK_SIZE and AVSEEK_FORCE */
+    switch (whence) {
+    case SEEK_SET:
+        outctx->write_pos = offset; break;
+    case SEEK_CUR:
+        outctx->write_pos += offset; break;
+    case SEEK_END:
+        outctx->write_pos = outctx->sz - offset; break;
+    default:
+        elv_dbg("OUT SEEK - weird seek\n");
+    }
+
     elv_dbg("OUT SEEK offset=%d whence=%d", offset, whence);
 
-    avpipe_msg_t *msg = (avpipe_msg_t *) calloc(1, sizeof(avpipe_msg_t));
-    msg->mtype = avpipe_out_seeker;
-    msg->offset = offset;
-    msg->whence = whence;
-    elv_channel_send(chanReq, msg);
-
-    return 0;
+    return rc;
 }
 
 int
 out_closer(
     ioctx_t *outctx)
 {
-    avpipe_msg_t *msg = (avpipe_msg_t *) calloc(1, sizeof(avpipe_msg_t));
-    msg->mtype = avpipe_out_closer;
-    msg->buf = outctx->buf;
-    elv_channel_send(chanReq, msg);
+    int rc = OutCloserX();
 
-    return 0;
+    return rc;
 }
 
 /*

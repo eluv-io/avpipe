@@ -18,59 +18,95 @@ import (
 )
 
 var globex sync.Mutex
-var globHandler *etxAVPipeInputHandler
+var gInHandler *etxAVPipeInputHandler
+var gOutHandler *etxAVPipeOutputHandler
+
+//export InOpenerX
+func InOpenerX(url *C.char) C.int {
+
+	globex.Lock()
+
+	filename := C.GoString((*C.char)(unsafe.Pointer(url)))
+	f, err := os.Open(filename)
+	fmt.Fprintf(os.Stdout, "XXX2 InOpener Got filename=%s\n", filename)
+	h := &etxAVPipeInputHandler{file: f}
+
+	gInHandler = h
+	fmt.Println("newAVPipeInputHandler", "h", gInHandler)
+	globex.Unlock()
+
+	if err != nil {
+		return -1
+	}
+
+	return 0
+}
 
 //export InReaderX
-func InReaderX(fd int, buf *C.char, sz C.int) C.int {
+func InReaderX(buf *C.char, sz C.int) C.int {
 
 	//h := handler(fd)
 	globex.Lock()
-	h := globHandler
-	fmt.Println("InReaderX", "h", h)
+	h := gInHandler
+	fmt.Println("InReaderX", "h", h, "buf", buf, "sz=", sz)
 	globex.Unlock()
 
-	gobuf := C.GoBytes(unsafe.Pointer(buf), sz)
+	//gobuf := C.GoBytes(unsafe.Pointer(buf), sz)
+	//gobuf := (*[1 << 30]C.char)(unsafe.Pointer(buf))[:sz:sz]
+	gobuf := make([]byte, sz)
 
-	n, _ := h.inReader(gobuf)
+	n, _ := h.InReader(gobuf)
+	if n > 0 {
+		C.memcpy(unsafe.Pointer(buf), unsafe.Pointer(&gobuf[0]), C.size_t(n))
+	}
+	fmt.Println("InReaderX gobuf=", gobuf[0:10])
 	return C.int(n) // PENDING err
 }
 
-func (h *etxAVPipeInputHandler) inReader(buf []byte) (int, error) {
+func (h *etxAVPipeInputHandler) InReader(buf []byte) (int, error) {
 	n, err := h.file.Read(buf)
-	fmt.Println("inReader", "buf_size", len(buf), "n", n, "err", err)
+	fmt.Println("InReader", "buf_size", len(buf), "n", n, "err", err)
 	return n, err
 }
 
-// AVPipeInputHandler the corresponding handler will be called with the eventHandler function
-type AVPipeInputHandler interface {
-	InWriter(msg *C.avpipe_msg_t) error
-	InReader(msg *C.avpipe_msg_t, ch2 *C.elv_channel_t) error
-	InSeeker(msg *C.avpipe_msg_t) error
-	InCloser(msg *C.avpipe_msg_t) error
+func (h *etxAVPipeInputHandler) InWriter(buf []byte) (int, error) {
+	fmt.Fprintf(os.Stdout, "ERROR unexpected InWriter\n")
+	return 0, nil
 }
 
-type etxAVPipeInputHandler struct {
-	file *os.File
-}
-
-func newAVPipeInputHandler(msg *C.avpipe_msg_t) (AVPipeInputHandler, error) {
-
+//export InSeekerX
+func InSeekerX(offset C.int64_t, whence C.int) C.int64_t {
 	globex.Lock()
-
-	filename := C.GoString((*C.char)(unsafe.Pointer(msg.opaque)))
-	f, err := os.Open(filename)
-	fmt.Fprintf(os.Stdout, "XXX2 InOpener Got type=%d, filename=%s\n", msg.mtype, filename)
-	h := &etxAVPipeInputHandler{file: f}
-
-	globHandler = h
-	fmt.Println("newAVPipeInputHandler", "h", globHandler)
+	h := gInHandler
+	fmt.Println("InSeekerX", "h", h)
 	globex.Unlock()
 
-	return h, err
+	n, err := h.InSeeker(offset, whence)
+	if err != nil {
+		return -1
+	}
+	return C.int64_t(n)
 }
 
-func (h *etxAVPipeInputHandler) InCloser(msg *C.avpipe_msg_t) error {
-	fmt.Fprintf(os.Stdout, "XXX InCloser type=%d\n", msg.mtype)
+func (h *etxAVPipeInputHandler) InSeeker(offset C.int64_t, whence C.int) (int64, error) {
+	n, err := h.file.Seek(int64(offset), int(whence))
+	fmt.Fprintf(os.Stdout, "XXX InSeeker offset=%d, whence=%d, n=%d\n", offset, whence, n)
+	return n, err
+}
+
+//export InCloserX
+func InCloserX() C.int {
+	h := gInHandler
+	err := h.InCloser()
+	if err != nil {
+		return C.int(-1)
+	}
+
+	return C.int(0)
+}
+
+func (h *etxAVPipeInputHandler) InCloser() error {
+	fmt.Fprintf(os.Stdout, "XXX InCloser\n")
 	err := h.file.Close()
 	if err != nil {
 		fmt.Fprintf(os.Stdout, "XXX InCloser error=%v", err)
@@ -78,125 +114,114 @@ func (h *etxAVPipeInputHandler) InCloser(msg *C.avpipe_msg_t) error {
 	return err
 }
 
-func (h *etxAVPipeInputHandler) InReader(msg *C.avpipe_msg_t, ch2 *C.elv_channel_t) error {
-	buf := make([]byte, 64*1024)
-	n, err := h.file.Read(buf)
-	if n > 0 {
-		C.memcpy(unsafe.Pointer(msg.buf), unsafe.Pointer(&buf[0]), C.size_t(n))
-		msg.buf_size = C.int(n)
+// AVPipeInputHandler the corresponding handler will be called with the eventHandler function
+type AVPipeInputHandler interface {
+	InWriter(buf []byte) (int, error)
+	InReader(buf []byte) (int, error)
+	InSeeker(offset C.int64_t, whence C.int) error
+	InCloser() error
+}
+
+type etxAVPipeInputHandler struct {
+	file *os.File
+}
+
+//export OutOpenerX
+func OutOpenerX(url *C.char) C.int {
+
+	globex.Lock()
+
+	filename := C.GoString((*C.char)(unsafe.Pointer(url)))
+	f, err := os.OpenFile(filename, os.O_RDWR|os.O_CREATE|os.O_TRUNC, 0644)
+	fmt.Fprintf(os.Stdout, "XXX2 OutOpener Got filename=%s\n", filename)
+	h := &etxAVPipeOutputHandler{file: f}
+
+	gOutHandler = h
+	globex.Unlock()
+
+	if err != nil {
+		return -1
 	}
 
-	var reply *C.avpipe_msg_reply_t
-	//reply = (*C.avpipe_msg_reply_t)(C.calloc(1, C.sizeof(C.avpipe_msg_reply_t)))
-	reply = (*C.avpipe_msg_reply_t)(C.calloc(1, 4))
-	reply.rc = C.int(n)
-	C.elv_channel_send(ch2, unsafe.Pointer(reply))
-
-	fmt.Fprintf(os.Stdout, "XXX InReader type=%d, buf_size=%d, n=%d\n", msg.mtype, msg.buf_size, n)
-	return err
+	return 0
 }
 
-func (h *etxAVPipeInputHandler) InWriter(msg *C.avpipe_msg_t) error {
-	fmt.Fprintf(os.Stdout, "XXX InWriter type=%d\n", msg.mtype)
-	return nil
+func (h *etxAVPipeOutputHandler) OutReader(buf []byte) (int, error) {
+	fmt.Fprintf(os.Stdout, "XXX OutReader\n")
+	return 0, nil
 }
 
-func (h *etxAVPipeInputHandler) InSeeker(msg *C.avpipe_msg_t) error {
-	offset := int64(msg.offset)
-	whence := int(msg.whence)
-	_, err := h.file.Seek(offset, whence)
-	fmt.Fprintf(os.Stdout, "XXX InSeeker type=%d\n", msg.mtype)
+//export OutWriterX
+func OutWriterX(buf *C.char, sz C.int) C.int {
+
+	//h := handler(fd)
+	globex.Lock()
+	h := gOutHandler
+	fmt.Println("OutWriterX", "h", h)
+	globex.Unlock()
+
+	gobuf := C.GoBytes(unsafe.Pointer(buf), sz)
+
+	n, err := h.OutWriter(gobuf)
+	if err != nil {
+		return -1
+	}
+
+	return C.int(n)
+}
+
+func (h *etxAVPipeOutputHandler) OutWriter(buf []byte) (int, error) {
+	n, err := h.file.Write(buf)
+	fmt.Fprintf(os.Stdout, "XXX OutWriter written=%d\n", n)
+	return n, err
+}
+
+//export OutSeekerX
+func OutSeekerX(offset C.int64_t, whence C.int) C.int {
+	h := gOutHandler
+	n, err := h.OutSeeker(offset, whence)
+	if err != nil {
+		return -1
+	}
+	return C.int(n)
+}
+
+func (h *etxAVPipeOutputHandler) OutSeeker(offset C.int64_t, whence C.int) (int64, error) {
+	n, err := h.file.Seek(int64(offset), int(whence))
+	fmt.Fprintf(os.Stdout, "XXX OutSeeker\n")
+	return n, err
+}
+
+//export OutCloserX
+func OutCloserX() C.int {
+	h := gOutHandler
+	err := h.OutCloser()
+	if err != nil {
+		return C.int(-1)
+	}
+
+	return C.int(0)
+}
+
+func (h *etxAVPipeOutputHandler) OutCloser() error {
+	fmt.Fprintf(os.Stdout, "XXX OutCloser\n")
+	err := h.file.Close()
+	if err != nil {
+		fmt.Fprintf(os.Stdout, "XXX OutCloser error=%v", err)
+	}
 	return err
 }
 
 // AVPipeOutputHandler the corresponding handler will be called with the eventHandler function
 type AVPipeOutputHandler interface {
-	OutWriter(msg *C.avpipe_msg_t) error
-	OutReader(msg *C.avpipe_msg_t) error
-	OutSeeker(msg *C.avpipe_msg_t) error
-	OutCloser(msg *C.avpipe_msg_t) error
+	OutWriter(buf []byte) (int, error)
+	OutReader(buf []byte) (int, error)
+	OutSeeker(offset C.int64_t, whence C.int) (int64, error)
+	OutCloser() error
 }
 
 type etxAVPipeOutputHandler struct {
 	file *os.File
-}
-
-func newAVPipeOutputHandler(msg *C.avpipe_msg_t) (AVPipeOutputHandler, error) {
-	filename := C.GoString((*C.char)(unsafe.Pointer(msg.opaque)))
-	fmt.Fprintf(os.Stdout, "XXX OutOpener type=%d, filename=%s\n", msg.mtype, filename)
-	f, err := os.OpenFile(filename, os.O_RDWR|os.O_CREATE|os.O_TRUNC, 0644)
-	return &etxAVPipeOutputHandler{file: f}, err
-}
-
-func (h *etxAVPipeOutputHandler) OutCloser(msg *C.avpipe_msg_t) error {
-	fmt.Fprintf(os.Stdout, "XXX OutCloser type=%d\n", msg.mtype)
-	err := h.file.Close()
-	if err != nil {
-		fmt.Fprintf(os.Stdout, "XXX OutCloser error=%v", err)
-	}
-	C.free(unsafe.Pointer(msg.buf))
-	return err
-}
-
-func (h *etxAVPipeOutputHandler) OutReader(msg *C.avpipe_msg_t) error {
-	fmt.Fprintf(os.Stdout, "XXX OutReader type=%d\n", msg.mtype)
-	return nil
-}
-
-func (h *etxAVPipeOutputHandler) OutWriter(msg *C.avpipe_msg_t) error {
-	buf_size := int(msg.buf_size)
-	buf := make([]byte, buf_size)
-	C.memcpy(unsafe.Pointer(&buf[0]), unsafe.Pointer(msg.buf), C.size_t(buf_size))
-	n, err := h.file.Write(buf)
-	fmt.Fprintf(os.Stdout, "XXX OutWriter type=%d, written=%d\n", msg.mtype, n)
-	return err
-}
-
-func (h *etxAVPipeOutputHandler) OutSeeker(msg *C.avpipe_msg_t) error {
-	offset := int64(msg.offset)
-	whence := int(msg.whence)
-	_, err := h.file.Seek(offset, whence)
-	fmt.Fprintf(os.Stdout, "XXX OutSeeker type=%d\n", msg.mtype)
-	return err
-}
-
-func eventHandler(ch *C.elv_channel_t, ch2 *C.elv_channel_t) error {
-	var inputHandler AVPipeInputHandler
-	var outputHandler AVPipeOutputHandler
-	var err error
-
-	for {
-		var msg *C.avpipe_msg_t
-		var ptr unsafe.Pointer
-
-		//fmt.Fprintf(os.Stdout, "XXX1 Before call\n")
-		ptr = C.elv_channel_receive(ch)
-		msg = (*C.avpipe_msg_t)(ptr)
-
-		switch msg.mtype {
-		case C.avpipe_in_opener:
-			inputHandler, err = newAVPipeInputHandler(msg)
-		case C.avpipe_in_closer:
-			inputHandler.InCloser(msg)
-		case C.avpipe_in_reader:
-			inputHandler.InReader(msg, ch2)
-		case C.avpipe_in_writer:
-			inputHandler.InWriter(msg)
-		case C.avpipe_out_opener:
-			outputHandler, err = newAVPipeOutputHandler(msg)
-		case C.avpipe_out_closer:
-			outputHandler.OutCloser(msg)
-		case C.avpipe_out_reader:
-			outputHandler.OutReader(msg)
-		case C.avpipe_out_writer:
-			outputHandler.OutWriter(msg)
-
-		}
-
-		C.free(ptr)
-	}
-
-	return err
 }
 
 // TxParams should match with txparams_t in C library
@@ -257,11 +282,6 @@ func main() {
 		encHeight:          720,
 		encWidth:           1280,
 	}
-
-	C.elv_channel_init(&C.chanReq, 10)
-	C.elv_channel_init(&C.chanRep, 10)
-
-	go eventHandler(C.chanReq, C.chanRep)
 
 	err := C.tx((*C.txparams_t)(unsafe.Pointer(params)), C.CString(filename.value))
 	if err != 0 {

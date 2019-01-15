@@ -35,17 +35,3 @@ typedef enum avpipe_handler_type_t {
     avpipe_out_seeker,
     avpipe_out_closer
 } avpipe_handler_type_t;
-
-typedef struct avpipe_msg_t {
-    avpipe_handler_type_t mtype;
-    void *opaque;
-    uint8_t *buf;
-    int buf_size;
-    int64_t offset;
-    int whence;
-} avpipe_msg_t;
-
-typedef struct avpipe_msg_reply_t {
-    int rc;     // Return code of remote function call
-} avpipe_msg_reply_t;
-
