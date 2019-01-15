@@ -21,6 +21,7 @@
 #include <sys/uio.h>
 #include <unistd.h>
 #include <errno.h>
+#include <ctype.h>
 
 
 /*
@@ -71,12 +72,20 @@ elv_io_open(
     } else {
 
         ioctx_t *outctx = (ioctx_t *) calloc(1, sizeof(ioctx_t));
-        outctx->stream_index = 0; /* FIXME */
+        outctx->stream_index = 0;
 
         if (!url || url[0] == '\0') {
             outctx->type = avpipe_manifest;
+            outctx->seg_index = 0;      // Manifest file has stream_index and seg_index = 0
         } else {
+            int i = 0;
             outctx->type = avpipe_init_stream;
+            while (i < strlen(url) && !isdigit(url[i]))
+                i++;
+            if (i < strlen(url)) {
+                outctx->stream_index = url[i] - '0';
+            }
+            outctx->seg_index = -1;     // Special index for init-stream0 and init-stream1
         }
 
         elv_dbg("OUT url=%s, type=%d", url, outctx->type);

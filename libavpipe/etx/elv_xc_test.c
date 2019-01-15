@@ -29,6 +29,7 @@ in_opener(
         return -1;
 
     inctx->sz = stb.st_size;
+    elv_dbg("IN OPEN fd=%d url=%s", fd, url);
     return 0;
 }
 
@@ -51,7 +52,7 @@ in_read_packet(
 {
     ioctx_t *c = (ioctx_t *)opaque;
     int fd = *((int *)(c->opaque));
-    elv_dbg("IN READ buf_size=%d fd=%d", buf_size, fd);
+    elv_dbg("IN READ buf=%p buf_size=%d fd=%d", buf, buf_size, fd);
 
     int r = read(fd, buf, buf_size);
     if (r >= 0) {
@@ -289,7 +290,7 @@ main(
     }
 
     elv_logger_open(NULL, "etx", 10, 10*1024*1024, elv_log_file);
-    elv_set_log_level(elv_log_log);
+    elv_set_log_level(elv_log_debug);
 
     in_handlers.avpipe_opener = in_opener;
     in_handlers.avpipe_closer = in_closer;
