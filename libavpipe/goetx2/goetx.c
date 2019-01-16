@@ -18,10 +18,12 @@ int64_t NewAVPipeIOHandler(char*);
 int AVPipeReadInput(int64_t, char*, int);
 int AVPipeSeekInput(int64_t, int64_t offset, int whence);
 int AVPipeCloseInput(int64_t);
-int AVPipeOpenOutput(int64_t, int, char *);
+int AVPipeOpenOutput(int64_t, int, int, char *);
 int AVPipeWriteOutput(int64_t, int, char *, int);
 int AVPipeSeekOutput(int64_t, int, int64_t offset, int whence);
 int AVPipeCloseOutput(int64_t, int);
+
+#define INVALID_FD      (-4)
 
 int
 in_opener(
@@ -162,7 +164,7 @@ out_opener(
 {
     char segname[128];
     ioctx_t *inctx = outctx->inctx;
-    int fd = (outctx->seg_index-1)*2 + outctx->stream_index;
+    int fd;
     int64_t h;
 
     h = *((int64_t *)(inctx->opaque));
@@ -191,16 +193,18 @@ out_opener(
         return -1;
     }
 
+    outctx->bufsz = 1 * 1024 * 1024;
+    outctx->buf = (unsigned char *)malloc(outctx->bufsz); /* Must be malloc'd - will be realloc'd by avformat */
+    
+    fd = AVPipeOpenOutput(h, outctx->stream_index, outctx->seg_index, segname);
+    elv_dbg("OUT out_opener outctx=%p, fd=%d\n", outctx, fd);
+    if (fd < INVALID_FD)
+        return -1;
+
     outctx->opaque = (int *) malloc(sizeof(int));
     *((int *)(outctx->opaque)) = fd;
 
-    outctx->bufsz = 1 * 1024 * 1024;
-    outctx->buf = (unsigned char *)malloc(outctx->bufsz); /* Must be malloc'd - will be realloc'd by avformat */
-    elv_dbg("OUT out_opener outctx=%p\n", outctx);
-
-    int rc = AVPipeOpenOutput(h, fd, segname);
-
-    return rc;
+    return 0;
 }
 
 int
