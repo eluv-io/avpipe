@@ -53,6 +53,7 @@ elv_io_open(
         assert(outctx->stream_index == 0 || outctx->stream_index == 1);
         out_tracker[outctx->stream_index].seg_index++;
         outctx->seg_index = out_tracker[outctx->stream_index].seg_index;
+        outctx->inctx = out_tracker[outctx->stream_index].inctx;
 
         if (out_handlers->avpipe_opener(url, outctx) < 0) {
             free(outctx);
@@ -73,6 +74,7 @@ elv_io_open(
 
         ioctx_t *outctx = (ioctx_t *) calloc(1, sizeof(ioctx_t));
         outctx->stream_index = 0;
+        outctx->inctx = out_tracker[0].inctx;
 
         if (!url || url[0] == '\0') {
             outctx->type = avpipe_manifest;

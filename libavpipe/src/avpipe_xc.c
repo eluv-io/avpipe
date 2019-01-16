@@ -337,6 +337,7 @@ prepare_encoder(
     coderctx_t *encoder_context,
     coderctx_t *decoder_context,
     avpipe_io_handler_t *out_handlers,
+    ioctx_t *inctx,
     txparams_t *params)
 {
     out_tracker_t *out_tracker;
@@ -364,7 +365,10 @@ prepare_encoder(
 
     /* Allocate an array of 2 out_handler_t: one for video and one for audio output stream */
     out_tracker = (out_tracker_t *) calloc(2, sizeof(out_tracker_t));
-    out_tracker->out_handlers = out_handlers;
+    out_tracker[0].out_handlers = out_handlers;
+    out_tracker[0].inctx = inctx;
+    out_tracker[1].out_handlers = out_handlers;
+    out_tracker[1].inctx = inctx;
     encoder_context->format_context->avpipe_opaque = out_tracker;
 
     dump_encoder(encoder_context);
@@ -713,7 +717,7 @@ avpipe_init(
         return -1;
     }
 
-    if (prepare_encoder(&p_txctx->encoder_ctx, &p_txctx->decoder_ctx, out_handlers, params)) {
+    if (prepare_encoder(&p_txctx->encoder_ctx, &p_txctx->decoder_ctx, out_handlers, inctx, params)) {
         elv_err("Failure in preparing output");
         return -1;
     }

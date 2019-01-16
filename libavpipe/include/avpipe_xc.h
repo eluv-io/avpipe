@@ -37,6 +37,12 @@ typedef struct ioctx_t {
     /* Output handlers specific data */
     int stream_index;       // usually video=0 and audio=1
     int seg_index;          // segment index if this ioctx is a segment
+
+    /* Pointer to input context of a transcoding session.
+     * A transcoding session has one input (i.e one mp4 file) and
+     * multiple output (i.e multiple segment files, dash and init_stream files).
+     */
+    struct ioctx_t *inctx;
 } ioctx_t;
 
 typedef int
@@ -119,8 +125,9 @@ typedef struct txctx_t {
 
 typedef struct out_tracker_t {
     struct avpipe_io_handler_t *out_handlers;
-    struct ioctx_t *last_outctx;
+    ioctx_t *last_outctx;
     int seg_index;
+    ioctx_t *inctx;     // Points to input context
 } out_tracker_t;
 
 /**
