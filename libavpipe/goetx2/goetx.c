@@ -14,50 +14,62 @@
 #include "elv_channel.h"
 #include "goetx.h"
 
-
-int InOpenerX(char*);
-int InReaderX(char*, int);
-int InSeekerX(int64_t offset, int whence);
-int InCloserX();
-int OutOpenerX(int, char *);
-int OutWriterX(int, char *, int);
-int OutSeekerX(int, int64_t offset, int whence);
-int OutCloserX(int);
+int64_t NewAVPipeIOHandler(char*);
+int AVPipeReadInput(int64_t, char*, int);
+int AVPipeSeekInput(int64_t, int64_t offset, int whence);
+int AVPipeCloseInput(int64_t);
+int AVPipeOpenOutput(int64_t, int, char *);
+int AVPipeWriteOutput(int64_t, int, char *, int);
+int AVPipeSeekOutput(int64_t, int, int64_t offset, int whence);
+int AVPipeCloseOutput(int64_t, int);
 
 int
 in_opener(
     const char *url,
     ioctx_t *inctx)
 {
+#ifdef CHECK_C_READ
     struct stat stb;
     int fd = open(url, O_RDONLY);
     if (fd < 0) {
         return -1;
     }
 
-    inctx->opaque = (int *) calloc(1, sizeof(int));
-    *((int *)(inctx->opaque)) = fd;
+    /* Allocate space for both the AVPipeHandler and fd */
+    inctx->opaque = (int *) calloc(1, sizeof(int)+sizeof(int64_t));
+    *((int *)(((int64_t)inctx->opaque)+1)) = fd;
     if (fstat(fd, &stb) < 0)
         return -1;
 
     inctx->sz = stb.st_size;
-
-    int rc = InOpenerX((char *) url);
     elv_dbg("IN OPEN fd=%d", fd);
+#else
+    inctx->opaque = (void *) calloc(1, sizeof(int64_t));
+#endif
 
-    return rc;
+    int64_t h = NewAVPipeIOHandler((char *) url);
+    if (h <= 0 )
+        return -1;
+    elv_log("XXX h=%d", h);
+
+    *((int64_t *)(inctx->opaque)) = h;
+    return 0;
 }
 
 int
 in_closer(
     ioctx_t *inctx)
 {
-    int fd = *((int *)(inctx->opaque));
-    elv_dbg("IN io_close custom writer fd=%d\n", fd);
+#ifdef CHECK_C_READ
+    int fd = *((int *)(((int64_t *)inctx->opaque)+1));
+    elv_dbg("IN io_close custom reader fd=%d", fd);
     free(inctx->opaque);
     close(fd);
+#endif
 
-    InCloserX();
+    int64_t h = *((int64_t *)(inctx->opaque));
+    elv_dbg("IN io_close custom reader h=%d", h);
+    AVPipeCloseInput(h);
     return 0;
 }
 
@@ -69,16 +81,18 @@ in_read_packet(
 {
     ioctx_t *c = (ioctx_t *)opaque;
     int r;
+    int64_t h;
 
     elv_dbg("IN READ buf=%p, size=%d", buf, buf_size);
 #ifdef CHECK_C_READ
     char *buf2 = (char *) calloc(1, buf_size);
-    int fd = *((int *)(c->opaque));
+    int fd = *((int *)(c->opaque+1));
     elv_dbg("IN READ buf_size=%d fd=%d", buf_size, fd);
     int n = read(fd, buf2, buf_size);
 #endif
-    
-    r = InReaderX((char *)buf, buf_size);
+
+    h = *((int64_t *)(c->opaque));
+    r = AVPipeReadInput(h, (char *)buf, buf_size);
     if (r >= 0) {
         c->read_bytes += r;
         c->read_pos += r;
@@ -118,10 +132,12 @@ in_seek(
     int64_t offset,
     int whence)
 {
+    int64_t h;
     ioctx_t *c = (ioctx_t *)opaque;
-    int fd = *((int *)(c->opaque));
+    int64_t rc;
 
-    int64_t rc = InSeekerX(offset, whence);
+    h = *((int64_t *)(c->opaque));
+    rc = AVPipeSeekInput(h, offset, whence);
     whence = whence & 0xFFFF; /* Mask out AVSEEK_SIZE and AVSEEK_FORCE */
     switch (whence) {
     case SEEK_SET:
@@ -134,7 +150,7 @@ in_seek(
         elv_dbg("IN SEEK - weird seek\n");
     }
 
-    elv_dbg("IN SEEK fd=%d, offset=%d, whence=%d, rc=%d", fd, offset, whence, rc);
+    elv_dbg("IN SEEK offset=%d, whence=%d, rc=%d", offset, whence, rc);
 
     return rc;
 }
@@ -145,8 +161,11 @@ out_opener(
     ioctx_t *outctx)
 {
     char segname[128];
+    ioctx_t *inctx = outctx->inctx;
     int fd = (outctx->seg_index-1)*2 + outctx->stream_index;
+    int64_t h;
 
+    h = *((int64_t *)(inctx->opaque));
     /* If there is no url, just allocate the buffers. The data will be copied to the buffers */
     switch (outctx->type) {
     case avpipe_manifest:
@@ -174,11 +193,12 @@ out_opener(
 
     outctx->opaque = (int *) malloc(sizeof(int));
     *((int *)(outctx->opaque)) = fd;
+
     outctx->bufsz = 1 * 1024 * 1024;
     outctx->buf = (unsigned char *)malloc(outctx->bufsz); /* Must be malloc'd - will be realloc'd by avformat */
     elv_dbg("OUT out_opener outctx=%p\n", outctx);
 
-    int rc = OutOpenerX(fd, segname);
+    int rc = AVPipeOpenOutput(h, fd, segname);
 
     return rc;
 }
@@ -190,7 +210,6 @@ out_read_packet(
     int buf_size)
 {
     elv_err("OUT READ called");
-
     return 0;
 }
 
@@ -201,8 +220,10 @@ out_write_packet(
     int buf_size)
 {
     ioctx_t *outctx = (ioctx_t *)opaque;
+    ioctx_t *inctx = outctx->inctx;
+    int64_t h = *((int64_t *)(inctx->opaque));
     int fd = *(int *)outctx->opaque;
-    int bwritten = OutWriterX(fd, buf, buf_size);
+    int bwritten = AVPipeWriteOutput(h, fd, buf, buf_size);
     if (bwritten >= 0) {
         outctx->written_bytes += bwritten;
         outctx->write_pos += bwritten;
@@ -220,8 +241,10 @@ out_seek(
     int whence)
 {
     ioctx_t *outctx = (ioctx_t *)opaque;
+    ioctx_t *inctx = outctx->inctx;
+    int64_t h = *((int64_t *)(inctx->opaque));
     int fd = *(int *)outctx->opaque;
-    int rc = OutSeekerX(fd, offset, whence);
+    int rc = AVPipeSeekOutput(h, fd, offset, whence);
     whence = whence & 0xFFFF; /* Mask out AVSEEK_SIZE and AVSEEK_FORCE */
     switch (whence) {
     case SEEK_SET:
@@ -244,7 +267,9 @@ out_closer(
     ioctx_t *outctx)
 {
     int fd = *(int *)outctx->opaque;
-    int rc = OutCloserX(fd);
+    ioctx_t *inctx = outctx->inctx;
+    int64_t h = *((int64_t *)(inctx->opaque));
+    int rc = AVPipeCloseOutput(h, fd);
     free(outctx->opaque);
     free(outctx->buf);
     return rc;

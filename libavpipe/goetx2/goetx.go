@@ -14,9 +14,6 @@ import (
 	"unsafe"
 )
 
-var globex sync.Mutex
-var gIOHandler *etxAVPipeIOHandler
-
 // AVPipeInputHandler the corresponding handler will be called with the eventHandler function
 type AVPipeIOHandler interface {
 	InReader(buf []byte) (int, error)
@@ -28,35 +25,38 @@ type AVPipeIOHandler interface {
 }
 
 type etxAVPipeIOHandler struct {
-	file      *os.File
-	filetable map[C.int]*os.File
+	file      *os.File           // Input file
+	filetable map[C.int]*os.File // Map of output files
 }
 
-//export InOpenerX
-func InOpenerX(url *C.char) C.int {
-	globex.Lock()
+// Global table of handlers
+var gHandlers map[int64]*etxAVPipeIOHandler = make(map[int64]*etxAVPipeIOHandler)
+var gHandleNum int64
+var gMutex sync.Mutex
+
+//export NewAVPipeIOHandler
+func NewAVPipeIOHandler(url *C.char) C.int64_t {
 	filename := C.GoString((*C.char)(unsafe.Pointer(url)))
 	f, err := os.Open(filename)
 	fmt.Fprintf(os.Stdout, "XXX2 InOpener Got filename=%s\n", filename)
 	h := &etxAVPipeIOHandler{file: f, filetable: make(map[C.int]*os.File)}
-
-	gIOHandler = h
-	fmt.Println("newAVPipeInputHandler", "h", gIOHandler)
-	globex.Unlock()
+	fmt.Println("newAVPipeInputHandler h=%v", h)
 
 	if err != nil {
-		return -1
+		return C.int64_t(-1)
 	}
 
-	return 0
+	gMutex.Lock()
+	defer gMutex.Unlock()
+	gHandleNum++
+	gHandlers[gHandleNum] = h
+	return C.int64_t(gHandleNum)
 }
 
-//export InReaderX
-func InReaderX(buf *C.char, sz C.int) C.int {
-	globex.Lock()
-	h := gIOHandler
+//export AVPipeReadInput
+func AVPipeReadInput(handler C.int64_t, buf *C.char, sz C.int) C.int {
+	h := gHandlers[int64(handler)]
 	fmt.Println("InReaderX", "h", h, "buf", buf, "sz=", sz)
-	globex.Unlock()
 
 	//gobuf := C.GoBytes(unsafe.Pointer(buf), sz)
 	gobuf := make([]byte, sz)
@@ -75,12 +75,10 @@ func (h *etxAVPipeIOHandler) InReader(buf []byte) (int, error) {
 	return n, err
 }
 
-//export InSeekerX
-func InSeekerX(offset C.int64_t, whence C.int) C.int64_t {
-	globex.Lock()
-	h := gIOHandler
+//export AVPipeSeekInput
+func AVPipeSeekInput(handler C.int64_t, offset C.int64_t, whence C.int) C.int64_t {
+	h := gHandlers[int64(handler)]
 	fmt.Println("InSeekerX", "h", h)
-	globex.Unlock()
 
 	n, err := h.InSeeker(offset, whence)
 	if err != nil {
@@ -95,10 +93,13 @@ func (h *etxAVPipeIOHandler) InSeeker(offset C.int64_t, whence C.int) (int64, er
 	return n, err
 }
 
-//export InCloserX
-func InCloserX() C.int {
-	h := gIOHandler
+//export AVPipeCloseInput
+func AVPipeCloseInput(handler C.int64_t) C.int {
+	h := gHandlers[int64(handler)]
 	err := h.InCloser()
+
+	// Remove the handler from global table
+	gHandlers[int64(handler)] = nil
 	if err != nil {
 		return C.int(-1)
 	}
@@ -115,16 +116,13 @@ func (h *etxAVPipeIOHandler) InCloser() error {
 	return err
 }
 
-//export OutOpenerX
-func OutOpenerX(fd C.int, url *C.char) C.int {
-
-	globex.Lock()
-
+//export AVPipeOpenOutput
+func AVPipeOpenOutput(handler C.int64_t, fd C.int, url *C.char) C.int {
+	h := gHandlers[int64(handler)]
 	filename := C.GoString((*C.char)(unsafe.Pointer(url)))
 	f, err := os.OpenFile(filename, os.O_RDWR|os.O_CREATE|os.O_TRUNC, 0644)
 	fmt.Fprintf(os.Stdout, "XXX2 OutOpener fd=%d, filename=%s\n", fd, filename)
-	gIOHandler.filetable[fd] = f
-	globex.Unlock()
+	h.filetable[fd] = f
 
 	if err != nil {
 		return -1
@@ -133,14 +131,10 @@ func OutOpenerX(fd C.int, url *C.char) C.int {
 	return 0
 }
 
-//export OutWriterX
-func OutWriterX(fd C.int, buf *C.char, sz C.int) C.int {
-
-	//h := handler(fd)
-	globex.Lock()
-	h := gIOHandler
+//export AVPipeWriteOutput
+func AVPipeWriteOutput(handler C.int64_t, fd C.int, buf *C.char, sz C.int) C.int {
+	h := gHandlers[int64(handler)]
 	fmt.Println("OutWriterX", "h", h)
-	globex.Unlock()
 
 	if h.filetable[fd] == nil {
 		panic("OutWriterX filetable entry is NULL")
@@ -161,9 +155,9 @@ func (h *etxAVPipeIOHandler) OutWriter(fd C.int, buf []byte) (int, error) {
 	return n, err
 }
 
-//export OutSeekerX
-func OutSeekerX(fd C.int, offset C.int64_t, whence C.int) C.int {
-	h := gIOHandler
+//export AVPipeSeekOutput
+func AVPipeSeekOutput(handler C.int64_t, fd C.int, offset C.int64_t, whence C.int) C.int {
+	h := gHandlers[int64(handler)]
 	n, err := h.OutSeeker(fd, offset, whence)
 	if err != nil {
 		return C.int(-1)
@@ -177,9 +171,9 @@ func (h *etxAVPipeIOHandler) OutSeeker(fd C.int, offset C.int64_t, whence C.int)
 	return n, err
 }
 
-//export OutCloserX
-func OutCloserX(fd C.int) C.int {
-	h := gIOHandler
+//export AVPipeCloseOutput
+func AVPipeCloseOutput(handler C.int64_t, fd C.int) C.int {
+	h := gHandlers[int64(handler)]
 	err := h.OutCloser(fd)
 	if err != nil {
 		return C.int(-1)
