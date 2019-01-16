@@ -7,6 +7,7 @@ package main
 // #include "goetx.h"
 import "C"
 import (
+	"eluvio/log"
 	"flag"
 	"fmt"
 	"os"
@@ -34,17 +35,22 @@ var gHandlers map[int64]*etxAVPipeIOHandler = make(map[int64]*etxAVPipeIOHandler
 var gHandleNum int64
 var gMutex sync.Mutex
 
+func InitAVPipeIOHandler() {
+
+}
+
 //export NewAVPipeIOHandler
 func NewAVPipeIOHandler(url *C.char) C.int64_t {
 	filename := C.GoString((*C.char)(unsafe.Pointer(url)))
-	f, err := os.Open(filename)
-	fmt.Fprintf(os.Stdout, "XXX2 InOpener Got filename=%s\n", filename)
-	h := &etxAVPipeIOHandler{file: f, filetable: make(map[C.int]*os.File)}
-	fmt.Println("newAVPipeInputHandler h=%v", h)
+	log.Debug("NewAVPipeIOHandler() filename", filename)
 
+	f, err := os.Open(filename)
 	if err != nil {
 		return C.int64_t(-1)
 	}
+
+	h := &etxAVPipeIOHandler{file: f, filetable: make(map[C.int]*os.File)}
+	log.Debug("NewAVPipeIOHandler() filename", filename, "h", h)
 
 	gMutex.Lock()
 	defer gMutex.Unlock()
@@ -56,7 +62,7 @@ func NewAVPipeIOHandler(url *C.char) C.int64_t {
 //export AVPipeReadInput
 func AVPipeReadInput(handler C.int64_t, buf *C.char, sz C.int) C.int {
 	h := gHandlers[int64(handler)]
-	fmt.Println("InReaderX", "h", h, "buf", buf, "sz=", sz)
+	log.Debug("AVPipeReadInput()", "h", h, "buf", buf, "sz=", sz)
 
 	//gobuf := C.GoBytes(unsafe.Pointer(buf), sz)
 	gobuf := make([]byte, sz)
@@ -71,14 +77,14 @@ func AVPipeReadInput(handler C.int64_t, buf *C.char, sz C.int) C.int {
 
 func (h *etxAVPipeIOHandler) InReader(buf []byte) (int, error) {
 	n, err := h.file.Read(buf)
-	fmt.Println("InReader", "buf_size", len(buf), "n", n, "err", err)
+	log.Debug("InReader()", "buf_size", len(buf), "n", n, "error", err)
 	return n, err
 }
 
 //export AVPipeSeekInput
 func AVPipeSeekInput(handler C.int64_t, offset C.int64_t, whence C.int) C.int64_t {
 	h := gHandlers[int64(handler)]
-	fmt.Println("InSeekerX", "h", h)
+	log.Debug("AVPipeSeekInput()", "h", h)
 
 	n, err := h.InSeeker(offset, whence)
 	if err != nil {
@@ -89,7 +95,7 @@ func AVPipeSeekInput(handler C.int64_t, offset C.int64_t, whence C.int) C.int64_
 
 func (h *etxAVPipeIOHandler) InSeeker(offset C.int64_t, whence C.int) (int64, error) {
 	n, err := h.file.Seek(int64(offset), int(whence))
-	fmt.Fprintf(os.Stdout, "XXX InSeeker offset=%d, whence=%d, n=%d\n", offset, whence, n)
+	log.Debug("InSeeker() offset=%d, whence=%d, n=%d", offset, whence, n)
 	return n, err
 }
 
@@ -108,10 +114,10 @@ func AVPipeCloseInput(handler C.int64_t) C.int {
 }
 
 func (h *etxAVPipeIOHandler) InCloser() error {
-	fmt.Fprintf(os.Stdout, "XXX InCloser\n")
+	log.Debug("InCloser()")
 	err := h.file.Close()
 	if err != nil {
-		fmt.Fprintf(os.Stdout, "XXX InCloser error=%v", err)
+		log.Error("InCloser() error=", err)
 	}
 	return err
 }
@@ -121,10 +127,11 @@ func AVPipeOpenOutput(handler C.int64_t, fd C.int, url *C.char) C.int {
 	h := gHandlers[int64(handler)]
 	filename := C.GoString((*C.char)(unsafe.Pointer(url)))
 	f, err := os.OpenFile(filename, os.O_RDWR|os.O_CREATE|os.O_TRUNC, 0644)
-	fmt.Fprintf(os.Stdout, "XXX2 OutOpener fd=%d, filename=%s\n", fd, filename)
+	log.Debug("AVPipeOpenOutput() fd=%d, filename=%s", fd, filename)
 	h.filetable[fd] = f
 
 	if err != nil {
+		log.Error("AVPipeOpenOutput()", "filename", filename, "error", err)
 		return -1
 	}
 
@@ -134,7 +141,7 @@ func AVPipeOpenOutput(handler C.int64_t, fd C.int, url *C.char) C.int {
 //export AVPipeWriteOutput
 func AVPipeWriteOutput(handler C.int64_t, fd C.int, buf *C.char, sz C.int) C.int {
 	h := gHandlers[int64(handler)]
-	fmt.Println("OutWriterX", "h", h)
+	log.Debug("AVPipeWriteOutput", "h", h)
 
 	if h.filetable[fd] == nil {
 		panic("OutWriterX filetable entry is NULL")
@@ -151,7 +158,7 @@ func AVPipeWriteOutput(handler C.int64_t, fd C.int, buf *C.char, sz C.int) C.int
 
 func (h *etxAVPipeIOHandler) OutWriter(fd C.int, buf []byte) (int, error) {
 	n, err := h.filetable[fd].Write(buf)
-	fmt.Fprintf(os.Stdout, "XXX OutWriter written=%d\n", n)
+	log.Debug("OutWriter written", n, "error", err)
 	return n, err
 }
 
@@ -167,7 +174,7 @@ func AVPipeSeekOutput(handler C.int64_t, fd C.int, offset C.int64_t, whence C.in
 
 func (h *etxAVPipeIOHandler) OutSeeker(fd C.int, offset C.int64_t, whence C.int) (int64, error) {
 	n, err := h.filetable[fd].Seek(int64(offset), int(whence))
-	fmt.Fprintf(os.Stdout, "XXX OutSeeker\n")
+	log.Debug("OutSeeker err", err)
 	return n, err
 }
 
@@ -184,7 +191,7 @@ func AVPipeCloseOutput(handler C.int64_t, fd C.int) C.int {
 
 func (h *etxAVPipeIOHandler) OutCloser(fd C.int) error {
 	err := h.filetable[fd].Close()
-	fmt.Fprintf(os.Stdout, "XXX OutCloser error=%v", err)
+	log.Debug("OutCloser() error", err)
 	return err
 }
 
