@@ -1,4 +1,4 @@
-TOP_DIR=`pwd`
+TOP_DIR?=$(shell pwd)
 
 all: goetx
 
