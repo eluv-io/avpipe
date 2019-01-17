@@ -2,6 +2,8 @@
  * avpipe_xc.h
  */
 
+#ifndef AVPIPE_XC_H
+#define AVPIPE_XC_H
 #pragma once
 
 #include <libavcodec/avcodec.h>
@@ -172,4 +174,4 @@ int
 avpipe_tx(
     txctx_t *txctx,
     int do_instrument);
-
+#endif

@@ -26,7 +26,8 @@ all: libs
 libs: $(OBJS)
 	@(if [ ! -d $(LIBDIR) ]; then mkdir $(LIBDIR); fi)
 	@echo Making libutils.a
-	@ld -r -o $(LIBDIR)/libutils.a $?
+	@ar cr $(LIBDIR)/libutils.a $?
+	@ranlib $(LIBDIR)/libutils.a
 
 sharedlibs: $(OBJS)
 	@(if [ ! -d $(LIBDIR) ]; then mkdir $(LIBDIR); fi)

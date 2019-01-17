@@ -21,7 +21,8 @@ all: avpipelib etx goetx
 avpipelib: $(OBJS)
 	@(if [ ! -d $(LIBDIR) ]; then mkdir $(LIBDIR); fi)
 	@echo Making avpipelib
-	@@ld -r -o $(LIBDIR)/libavpipe.a $?
+	@ar cr $(LIBDIR)/libavpipe.a $?
+	@ranlib $(LIBDIR)/libavpipe.a
 
 etx: $(ETX_OBJS)
 	@echo Making etx

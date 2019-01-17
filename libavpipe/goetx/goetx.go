@@ -1,7 +1,6 @@
 package main
 
 // #cgo CFLAGS: -I../include -I../../utils/include
-// #include "avpipe_xc.h"
 // #include "goetx.h"
 import "C"
 import (

@@ -1,5 +1,3 @@
-#ifndef _GOETX_H_
-#define _GOETX_H_
 #pragma once
 
 #include "avpipe_xc.h"
@@ -22,5 +20,3 @@ typedef struct TxParams {
     int encHeight;
     int encWidth;
 } TxParams;
-
-#endif
