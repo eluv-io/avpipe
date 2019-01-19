@@ -13,10 +13,12 @@
 #include <libavutil/opt.h>
 
 typedef enum avpipe_buftype_t {
-    avpipe_input_stream,
-    avpipe_init_stream,     // init_stream
-    avpipe_manifest,        // dash.mpd
-    avpipe_segment          // chunk-stream
+    avpipe_input_stream = 0,
+    avpipe_manifest = 1,                // dash.mpd
+    avpipe_video_init_stream = 2,       // video init_stream
+    avpipe_audio_init_stream = 3,       // audio init_stream
+    avpipe_video_segment = 4,           // video chunk-stream
+    avpipe_audio_segment = 5            // audio chunk-stream
 } avpipe_buftype_t;
 
 typedef struct ioctx_t {
@@ -130,6 +132,10 @@ typedef struct out_tracker_t {
     ioctx_t *last_outctx;
     int seg_index;
     ioctx_t *inctx;     // Points to input context
+
+    /** Needed to detect type of encoding frame */
+    int video_stream_index;
+    int audio_stream_index;
 } out_tracker_t;
 
 /**

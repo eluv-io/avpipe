@@ -1,10 +1,11 @@
 package main
 
 import (
+	"avpipe"
 	"flag"
 	"fmt"
+	"io"
 	"os"
-	"avpipe"
 )
 
 //Implement AVPipeInputOpener
@@ -33,6 +34,9 @@ type avPipeEtxInput struct {
 
 func (i *avPipeEtxInput) Read(buf []byte) (int, error) {
 	n, err := i.file.Read(buf)
+	if err == io.EOF {
+		return 0, nil
+	}
 	return n, err
 }
 
@@ -50,14 +54,29 @@ func (i *avPipeEtxInput) Close() error {
 type avPipeEtxOutputOpener struct {
 }
 
-func (oo *avPipeEtxOutputOpener) Open(stream_index, seg_index int, url string) (avpipe.AVPipeOutputInterface, error) {
-	f, err := os.OpenFile(url, os.O_RDWR|os.O_CREATE|os.O_TRUNC, 0644)
+func (oo *avPipeEtxOutputOpener) Open(stream_index, seg_index int, out_type avpipe.AVType) (avpipe.AVPipeOutputInterface, error) {
+	var filename string
+
+	switch out_type {
+	case avpipe.DASHVideoInit:
+		fallthrough
+	case avpipe.DASHAudioInit:
+		filename = fmt.Sprintf("./O/init-stream%d.mp4", stream_index)
+	case avpipe.DASHManifest:
+		filename = fmt.Sprintf("./O/dash.mpd")
+	case avpipe.DASHVideoSegment:
+		fallthrough
+	case avpipe.DASHAudioSegment:
+		filename = fmt.Sprintf("./O/chunk-stream%d-%05d.mp4", stream_index, seg_index)
+	}
+
+	f, err := os.OpenFile(filename, os.O_RDWR|os.O_CREATE|os.O_TRUNC, 0644)
 	if err != nil {
 		return nil, err
 	}
 
 	h := &avPipeEtxOutput{
-		url:          url,
+		url:          filename,
 		stream_index: stream_index,
 		seg_index:    seg_index,
 		file:         f}
@@ -131,23 +150,23 @@ func main() {
 		return
 	}
 
-/*
-    TODO: pass params from go to C
-	params := &C.TxParams{
-		startTimeTs:        0,
-		durationTs:         -1,
-		startSegmentStr:    C.CString("1"),
-		videoBitrate:       2560000,
-		audioBitrate:       64000,
-		sampleRate:         44100,
-		crfStr:             C.CString("23"),
-		segDurationTs:      1001 * 60,
-		segDurationFr:      60,
-		segDurationSecsStr: C.CString("2.002"),
-		codec:              C.CString("libx264"),
-		encHeight:          720,
-		encWidth:           1280,
-	} */
+	/*
+	       TODO: pass params from go to C
+	   	params := &C.TxParams{
+	   		startTimeTs:        0,
+	   		durationTs:         -1,
+	   		startSegmentStr:    C.CString("1"),
+	   		videoBitrate:       2560000,
+	   		audioBitrate:       64000,
+	   		sampleRate:         44100,
+	   		crfStr:             C.CString("23"),
+	   		segDurationTs:      1001 * 60,
+	   		segDurationFr:      60,
+	   		segDurationSecsStr: C.CString("2.002"),
+	   		codec:              C.CString("libx264"),
+	   		encHeight:          720,
+	   		encWidth:           1280,
+	   	} */
 
 	avpipe.InitAVPipeIOHandler(&avPipeEtxInputOpener{url: filename.value}, &avPipeEtxOutputOpener{})
 	err := avpipe.Tx(nil, filename.value)

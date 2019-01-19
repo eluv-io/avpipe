@@ -20,7 +20,7 @@ int64_t NewAVPipeIOHandler(char*);
 int AVPipeReadInput(int64_t, char*, int);
 int AVPipeSeekInput(int64_t, int64_t offset, int whence);
 int AVPipeCloseInput(int64_t);
-int AVPipeOpenOutput(int64_t, int, int, char *);
+int AVPipeOpenOutput(int64_t, int, int, int);
 int AVPipeWriteOutput(int64_t, int, char *, int);
 int AVPipeSeekOutput(int64_t, int, int64_t offset, int whence);
 int AVPipeCloseOutput(int64_t, int);
@@ -54,7 +54,7 @@ in_opener(
     int64_t h = NewAVPipeIOHandler((char *) url);
     if (h <= 0 )
         return -1;
-    elv_log("XXX h=%d", h);
+    elv_dbg("IN OPEN h=%d", h);
 
     *((int64_t *)(inctx->opaque)) = h;
     return 0;
@@ -170,35 +170,12 @@ out_opener(
     int64_t h;
 
     h = *((int64_t *)(inctx->opaque));
-    /* If there is no url, just allocate the buffers. The data will be copied to the buffers */
-    switch (outctx->type) {
-    case avpipe_manifest:
-        /* Manifest */
-        sprintf(segname, "./O/%s", "dash.mpd");
-        break;
-
-    case avpipe_init_stream:
-        /* Init segments */
-        sprintf(segname, "./O/%s", url);
-        break;
-
-    case avpipe_segment:
-        {
-            const char *segbase = "chunk-stream";
-
-            sprintf(segname, "./%s/%s%d-%05d.mp4",
-                "/O", segbase, outctx->stream_index, outctx->seg_index);
-        }
-        break;
-
-    default:
-        return -1;
-    }
-
+    
+    /* Allocate the buffers. The data will be copied to the buffers */
     outctx->bufsz = 1 * 1024 * 1024;
     outctx->buf = (unsigned char *)malloc(outctx->bufsz); /* Must be malloc'd - will be realloc'd by avformat */
     
-    fd = AVPipeOpenOutput(h, outctx->stream_index, outctx->seg_index, segname);
+    fd = AVPipeOpenOutput(h, outctx->stream_index, outctx->seg_index, outctx->type);
     elv_dbg("OUT out_opener outctx=%p, fd=%d\n", outctx, fd);
     if (fd < MIN_VALID_FD)
         return -1;
@@ -296,7 +273,7 @@ tx(
     if (!filename || filename[0] == '\0' )
         return -1;
 
-    elv_logger_open(NULL, "goetx", 10, 10*1024*1024, elv_log_file);
+    elv_logger_open(NULL, "avpipe", 10, 10*1024*1024, elv_log_file);
     elv_set_log_level(elv_log_debug);
 
     in_handlers.avpipe_opener = in_opener;

@@ -10,16 +10,6 @@ import (
 	"io"
 )
 
-type AVType int
-
-const (
-	DASHManifest AVType = iota
-	DASHVideoInit
-	DASHVideoSegment
-	DASHAudioInit
-	DASHAUdioSegment
-)
-
 type AVParams map[string]string
 
 type AVPipeOpener interface {

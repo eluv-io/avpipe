@@ -12,6 +12,16 @@ import (
 	"unsafe"
 )
 
+type AVType int
+
+const (
+	DASHManifest AVType = iota
+	DASHVideoInit
+	DASHVideoSegment
+	DASHAudioInit
+	DASHAudioSegment
+)
+
 // AVPipeInputHandler the corresponding handlers will be called from the C interface functions
 type AVPipeIOHandler interface {
 	InReader(buf []byte) (int, error)
@@ -33,7 +43,7 @@ type AVPipeInputInterface interface {
 }
 
 type AVPipeOutputOpener interface {
-	Open(stream_index, seg_index int, url string) (AVPipeOutputInterface, error)
+	Open(stream_index, seg_index int, out_type AVType) (AVPipeOutputInterface, error)
 }
 
 type AVPipeOutputInterface interface {
@@ -68,10 +78,6 @@ func NewAVPipeIOHandler(url *C.char) C.int64_t {
 	filename := C.GoString((*C.char)(unsafe.Pointer(url)))
 	log.Debug("NewAVPipeIOHandler() url", filename)
 
-	/* TODO: these should be set by Init function */
-	//gInputOpener = &avPipeEtxInputOpener{url: filename}
-	//gOutputOpener = &avPipeEtxOutputOpener{}
-
 	input, err := gInputOpener.Open(filename)
 	if err != nil {
 		return C.int64_t(-1)
@@ -95,9 +101,13 @@ func AVPipeReadInput(handler C.int64_t, buf *C.char, sz C.int) C.int {
 	//gobuf := C.GoBytes(unsafe.Pointer(buf), sz)
 	gobuf := make([]byte, sz)
 
-	n, _ := h.InReader(gobuf)
+	n, err := h.InReader(gobuf)
 	if n > 0 {
 		C.memcpy(unsafe.Pointer(buf), unsafe.Pointer(&gobuf[0]), C.size_t(n))
+	}
+
+	if err != nil {
+		return C.int(-1)
 	}
 
 	return C.int(n) // PENDING err
@@ -148,17 +158,34 @@ func (h *etxAVPipeIOHandler) InCloser() error {
 }
 
 //export AVPipeOpenOutput
-func AVPipeOpenOutput(handler C.int64_t, stream_index, seg_index C.int, url *C.char) C.int {
+func AVPipeOpenOutput(handler C.int64_t, stream_index, seg_index, stream_type C.int) C.int {
+	var out_type AVType
+
 	h := gHandlers[int64(handler)]
-	filename := C.GoString((*C.char)(unsafe.Pointer(url)))
-	etxOut, err := gOutputOpener.Open(int(stream_index), int(seg_index), filename)
+	switch stream_type {
+	case C.avpipe_video_init_stream:
+		out_type = DASHVideoInit
+	case C.avpipe_audio_init_stream:
+		out_type = DASHAudioInit
+	case C.avpipe_manifest:
+		out_type = DASHManifest
+	case C.avpipe_video_segment:
+		out_type = DASHVideoSegment
+	case C.avpipe_audio_segment:
+		out_type = DASHAudioSegment
+	default:
+		log.Error("AVPipeOpenOutput()", "invalid stream type", stream_type)
+		return C.int(-1)
+	}
+
+	etxOut, err := gOutputOpener.Open(int(stream_index), int(seg_index), out_type)
 	if err != nil {
-		log.Error("AVPipeOpenOutput()", "url", C.GoString((*C.char)(unsafe.Pointer(url))), "error", err)
+		log.Error("AVPipeOpenOutput()", "out_type", out_type, "error", err)
 		return C.int(-1)
 	}
 
 	fd := int(seg_index-1)*2 + int(stream_index)
-	log.Debug("AVPipeOpenOutput() fd=%d, filename=%s", fd, filename)
+	log.Debug("AVPipeOpenOutput() fd=%d, stream_index=%d, seg_index=%d, out_type=%d", fd, stream_index, seg_index, out_type)
 	h.filetable[fd] = etxOut
 
 	return C.int(fd)
@@ -222,22 +249,22 @@ func (h *etxAVPipeIOHandler) OutCloser(fd C.int) error {
 }
 
 func Tx(params *C.TxParams, url string) int {
-    cparams := &C.TxParams{
-        startTimeTs:        0,
-        durationTs:         -1,
-        startSegmentStr:    C.CString("1"),
-        videoBitrate:       2560000,
-        audioBitrate:       64000,
-        sampleRate:         44100,
-        crfStr:             C.CString("23"),
-        segDurationTs:      1001 * 60,
-        segDurationFr:      60,
-        segDurationSecsStr: C.CString("2.002"),
-        codec:              C.CString("libx264"),
-        encHeight:          720,
-        encWidth:           1280,
-    }
+	cparams := &C.TxParams{
+		startTimeTs:        0,
+		durationTs:         -1,
+		startSegmentStr:    C.CString("1"),
+		videoBitrate:       2560000,
+		audioBitrate:       64000,
+		sampleRate:         44100,
+		crfStr:             C.CString("23"),
+		segDurationTs:      1001 * 60,
+		segDurationFr:      60,
+		segDurationSecsStr: C.CString("2.002"),
+		codec:              C.CString("libx264"),
+		encHeight:          720,
+		encWidth:           1280,
+	}
 
-    rc := C.tx((*C.txparams_t)(unsafe.Pointer(cparams)), C.CString(url))
-    return int(rc);
+	rc := C.tx((*C.txparams_t)(unsafe.Pointer(cparams)), C.CString(url))
+	return int(rc)
 }

@@ -48,9 +48,12 @@ elv_io_open(
         AVDictionaryEntry *stream_opt = av_dict_get(*options, "stream_index", 0, 0);
         ioctx_t *outctx = (ioctx_t *) calloc(1, sizeof(ioctx_t));
 
-        outctx->type = avpipe_segment;
         outctx->stream_index = (int) strtol(stream_opt->value, &endptr, 10);
         assert(outctx->stream_index == 0 || outctx->stream_index == 1);
+        if (outctx->stream_index == out_tracker[outctx->stream_index].video_stream_index)
+            outctx->type = avpipe_video_segment;
+        else
+            outctx->type = avpipe_audio_segment;
         out_tracker[outctx->stream_index].seg_index++;
         outctx->seg_index = out_tracker[outctx->stream_index].seg_index;
         outctx->inctx = out_tracker[outctx->stream_index].inctx;
@@ -81,12 +84,15 @@ elv_io_open(
             outctx->seg_index = 0;      // Manifest file has stream_index and seg_index = 0
         } else {
             int i = 0;
-            outctx->type = avpipe_init_stream;
             while (i < strlen(url) && !isdigit(url[i]))
                 i++;
             if (i < strlen(url)) {
                 outctx->stream_index = url[i] - '0';
             }
+            if (outctx->stream_index == out_tracker[outctx->stream_index].video_stream_index)
+                outctx->type = avpipe_video_init_stream;
+            else
+                outctx->type = avpipe_audio_init_stream;
             outctx->seg_index = -1;     // Special index for init-stream0 and init-stream1
         }
 

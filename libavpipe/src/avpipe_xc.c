@@ -168,6 +168,7 @@ prepare_video_encoder(
         return 0;
     }
 
+    encoder_context->video_stream_index = index;
     encoder_context->last_dts = AV_NOPTS_VALUE;
     encoder_context->stream[index] = avformat_new_stream(encoder_context->format_context, NULL);
     encoder_context->codec[index] = avcodec_find_encoder_by_name(params->codec);
@@ -365,10 +366,10 @@ prepare_encoder(
 
     /* Allocate an array of 2 out_handler_t: one for video and one for audio output stream */
     out_tracker = (out_tracker_t *) calloc(2, sizeof(out_tracker_t));
-    out_tracker[0].out_handlers = out_handlers;
-    out_tracker[0].inctx = inctx;
-    out_tracker[1].out_handlers = out_handlers;
-    out_tracker[1].inctx = inctx;
+    out_tracker[0].out_handlers = out_tracker[1].out_handlers = out_handlers;
+    out_tracker[0].inctx = out_tracker[1].inctx = inctx;
+    out_tracker[0].video_stream_index = out_tracker[1].video_stream_index = decoder_context->video_stream_index;
+    out_tracker[0].audio_stream_index = out_tracker[1].audio_stream_index = decoder_context->audio_stream_index;
     encoder_context->format_context->avpipe_opaque = out_tracker;
 
     dump_encoder(encoder_context);
