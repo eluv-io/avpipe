@@ -16,7 +16,7 @@
 #include "elv_channel.h"
 #include "avpipe_handler.h"
 
-int64_t NewAVPipeIOHandler(char*);
+int64_t NewIOHandler(char*);
 int AVPipeReadInput(int64_t, char*, int);
 int AVPipeSeekInput(int64_t, int64_t offset, int whence);
 int AVPipeCloseInput(int64_t);
@@ -51,7 +51,7 @@ in_opener(
     inctx->opaque = (void *) calloc(1, sizeof(int64_t));
 #endif
 
-    int64_t h = NewAVPipeIOHandler((char *) url);
+    int64_t h = NewIOHandler((char *) url);
     if (h <= 0 )
         return -1;
     elv_dbg("IN OPEN h=%d", h);

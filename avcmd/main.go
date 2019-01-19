@@ -9,30 +9,30 @@ import (
 )
 
 //Implement AVPipeInputOpener
-type avPipeEtxInputOpener struct {
+type avcmdInputOpener struct {
 	url string
 }
 
-func (io *avPipeEtxInputOpener) Open(url string) (avpipe.AVPipeInputInterface, error) {
+func (io *avcmdInputOpener) Open(url string) (avpipe.InputHandler, error) {
 	f, err := os.Open(url)
 	if err != nil {
 		return nil, err
 	}
 
 	io.url = url
-	etxInput := &avPipeEtxInput{
+	etxInput := &avcmdInput{
 		file: f,
 	}
 
 	return etxInput, nil
 }
 
-// Implement AVPipeInputInterface
-type avPipeEtxInput struct {
+// Implement InputHandler
+type avcmdInput struct {
 	file *os.File // Input file
 }
 
-func (i *avPipeEtxInput) Read(buf []byte) (int, error) {
+func (i *avcmdInput) Read(buf []byte) (int, error) {
 	n, err := i.file.Read(buf)
 	if err == io.EOF {
 		return 0, nil
@@ -40,21 +40,21 @@ func (i *avPipeEtxInput) Read(buf []byte) (int, error) {
 	return n, err
 }
 
-func (i *avPipeEtxInput) Seek(offset int64, whence int) (int64, error) {
+func (i *avcmdInput) Seek(offset int64, whence int) (int64, error) {
 	n, err := i.file.Seek(int64(offset), int(whence))
 	return n, err
 }
 
-func (i *avPipeEtxInput) Close() error {
+func (i *avcmdInput) Close() error {
 	err := i.file.Close()
 	return err
 }
 
 //Implement AVPipeOutputOpener
-type avPipeEtxOutputOpener struct {
+type avcmdOutputOpener struct {
 }
 
-func (oo *avPipeEtxOutputOpener) Open(stream_index, seg_index int, out_type avpipe.AVType) (avpipe.AVPipeOutputInterface, error) {
+func (oo *avcmdOutputOpener) Open(stream_index, seg_index int, out_type avpipe.AVType) (avpipe.OutputHandler, error) {
 	var filename string
 
 	switch out_type {
@@ -75,7 +75,7 @@ func (oo *avPipeEtxOutputOpener) Open(stream_index, seg_index int, out_type avpi
 		return nil, err
 	}
 
-	h := &avPipeEtxOutput{
+	h := &avcmdOutput{
 		url:          filename,
 		stream_index: stream_index,
 		seg_index:    seg_index,
@@ -84,25 +84,25 @@ func (oo *avPipeEtxOutputOpener) Open(stream_index, seg_index int, out_type avpi
 	return h, nil
 }
 
-// Implement AVPipeOutputInterface
-type avPipeEtxOutput struct {
+// Implement OutputHandler
+type avcmdOutput struct {
 	url          string
 	stream_index int
 	seg_index    int
 	file         *os.File
 }
 
-func (o *avPipeEtxOutput) Write(buf []byte) (int, error) {
+func (o *avcmdOutput) Write(buf []byte) (int, error) {
 	n, err := o.file.Write(buf)
 	return n, err
 }
 
-func (o *avPipeEtxOutput) Seek(offset int64, whence int) (int64, error) {
+func (o *avcmdOutput) Seek(offset int64, whence int) (int64, error) {
 	n, err := o.file.Seek(offset, whence)
 	return n, err
 }
 
-func (o *avPipeEtxOutput) Close() error {
+func (o *avcmdOutput) Close() error {
 	err := o.file.Close()
 	return err
 }
@@ -168,7 +168,7 @@ func main() {
 	   		encWidth:           1280,
 	   	} */
 
-	avpipe.InitAVPipeIOHandler(&avPipeEtxInputOpener{url: filename.value}, &avPipeEtxOutputOpener{})
+	avpipe.InitIOHandler(&avcmdInputOpener{url: filename.value}, &avcmdOutputOpener{})
 	err := avpipe.Tx(nil, filename.value)
 	if err != 0 {
 		fmt.Fprintf(os.Stderr, "Failed transcoding %s\n", filename.value)

@@ -32,39 +32,40 @@ type IOHandler interface {
 	OutCloser(fd C.int) error
 }
 
-type AVPipeInputOpener interface {
-	Open(url string) (AVPipeInputInterface, error)
+type InputOpener interface {
+	Open(url string) (InputHandler, error)
 }
 
-type AVPipeInputInterface interface {
+type InputHandler interface {
 	Read(buf []byte) (int, error)
 	Seek(offset int64, whence int) (int64, error)
 	Close() error
 }
 
-type AVPipeOutputOpener interface {
-	Open(stream_index, seg_index int, out_type AVType) (AVPipeOutputInterface, error)
+type OutputOpener interface {
+	Open(stream_index, seg_index int, out_type AVType) (OutputHandler, error)
 }
 
-type AVPipeOutputInterface interface {
+type OutputHandler interface {
 	Write(buf []byte) (int, error)
 	Seek(offset int64, whence int) (int64, error)
 	Close() error
 }
 
+// Implement IOHandler
 type ioHandler struct {
-	input     AVPipeInputInterface          // Input file
-	outTable map[int]AVPipeOutputInterface // Map of integer handle to output interfaces
+	input     InputHandler          // Input file
+	outTable map[int]OutputHandler  // Map of integer handle to output interfaces
 }
 
 // Global table of handlers
 var gHandlers map[int64]*ioHandler = make(map[int64]*ioHandler)
 var gHandleNum int64
 var gMutex sync.Mutex
-var gInputOpener AVPipeInputOpener
-var gOutputOpener AVPipeOutputOpener
+var gInputOpener InputOpener
+var gOutputOpener OutputOpener
 
-func InitIOHandler(inputOpener AVPipeInputOpener, outputOpener AVPipeOutputOpener) {
+func InitIOHandler(inputOpener InputOpener, outputOpener OutputOpener) {
 	gInputOpener = inputOpener
 	gOutputOpener = outputOpener
 }
@@ -83,7 +84,7 @@ func NewIOHandler(url *C.char) C.int64_t {
 		return C.int64_t(-1)
 	}
 
-	h := &ioHandler{input: input, outTable: make(map[int]AVPipeOutputInterface)}
+	h := &ioHandler{input: input, outTable: make(map[int]OutputHandler)}
 	log.Debug("NewIOHandler() url", filename, "h", h)
 
 	gMutex.Lock()
