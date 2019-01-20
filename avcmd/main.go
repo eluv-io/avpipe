@@ -1,11 +1,12 @@
 package main
 
 import (
-	"avpipe"
 	"flag"
 	"fmt"
 	"io"
 	"os"
+
+	"github.com/qluvio/avpipe"
 )
 
 //Implement AVPipeInputOpener
@@ -169,6 +170,7 @@ func main() {
 	   	} */
 
 	avpipe.InitIOHandler(&avcmdInputOpener{url: filename.value}, &avcmdOutputOpener{})
+
 	err := avpipe.Tx(nil, filename.value)
 	if err != 0 {
 		fmt.Fprintf(os.Stderr, "Failed transcoding %s\n", filename.value)

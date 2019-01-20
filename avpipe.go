@@ -13,7 +13,7 @@ import (
 type AVParams map[string]string
 
 type AVPipeOpener interface {
-	Open(t AVType, segno int) (io.WriteCloser, error)
+	Open(t AVType, streamidx, segno int) (io.WriteCloser, error)
 }
 
 type AVPipe struct {
@@ -58,7 +58,7 @@ func (avp *AVPipe) Run() error {
 			if rd > 0 {
 
 				if avp.wseg == nil {
-					avp.wseg, err = avp.opener.Open(DASHVideoSegment, 0)
+					avp.wseg, err = avp.opener.Open(DASHVideoSegment, 0, 0)
 					if err != nil {
 						return err
 					}

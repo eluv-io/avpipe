@@ -8,6 +8,7 @@
 #include <unistd.h>
 #include <fcntl.h>
 #include <libavutil/log.h>
+#include <errno.h>
 
 #include "avpipe_xc.h"
 #include "elv_log.h"
@@ -20,6 +21,7 @@ in_opener(
     struct stat stb;
     int fd = open(url, O_RDONLY);
     if (fd < 0) {
+        elv_err("Failed to open input url=%s error=%d", url, errno);
         return -1;
     }
 
@@ -283,13 +285,13 @@ main(
         .enc_width = 1280                   /* -1 means use source width, other values 3840, 1280 */
     };
 
-    // Set AV libs log level
-    //av_log_set_level(AV_LOG_DEBUG);
-
     if ( argc != 2 ) {
         printf("Usage: %s <filename>\nNeed to pass input filename (output goes to directory ./O)\n", argv[0]);
         return -1;
     }
+
+    // Set AV libs log level
+    //av_log_set_level(AV_LOG_DEBUG);
 
     elv_logger_open(NULL, "etx", 10, 10*1024*1024, elv_log_file);
     elv_set_log_level(elv_log_debug);

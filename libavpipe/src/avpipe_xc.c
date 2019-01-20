@@ -674,7 +674,7 @@ avpipe_tx(
             }
 
             dump_stats(decoder_context, encoder_context);
-        } else {
+        } else if (input_packet->stream_index == decoder_context->audio_stream_index) {
             // Audio packet: just copying audio stream
             av_packet_rescale_ts(input_packet,
                 decoder_context->stream[input_packet->stream_index]->time_base,
@@ -686,6 +686,8 @@ avpipe_tx(
                 return -1;
             }
             elv_dbg("\tfinish copying packets without reencoding");
+        } else {
+            elv_dbg("Unhandled stream - not video or audio");
         }
     }
 
