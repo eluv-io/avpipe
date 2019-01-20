@@ -22,7 +22,7 @@ const (
 	DASHAudioSegment
 )
 
-// AVPipeInputHandler the corresponding handlers will be called from the C interface functions
+// InputHandler the corresponding handlers will be called from the C interface functions
 type IOHandler interface {
 	InReader(buf []byte) (int, error)
 	InSeeker(offset C.int64_t, whence C.int) error
@@ -40,6 +40,7 @@ type InputHandler interface {
 	Read(buf []byte) (int, error)
 	Seek(offset int64, whence int) (int64, error)
 	Close() error
+	Size() int64
 }
 
 type OutputOpener interface {
@@ -54,8 +55,8 @@ type OutputHandler interface {
 
 // Implement IOHandler
 type ioHandler struct {
-	input     InputHandler          // Input file
-	outTable map[int]OutputHandler  // Map of integer handle to output interfaces
+	input    InputHandler          // Input file
+	outTable map[int]OutputHandler // Map of integer handle to output interfaces
 }
 
 // Global table of handlers
@@ -71,7 +72,7 @@ func InitIOHandler(inputOpener InputOpener, outputOpener OutputOpener) {
 }
 
 //export NewIOHandler
-func NewIOHandler(url *C.char) C.int64_t {
+func NewIOHandler(url *C.char, size *C.int64_t) C.int64_t {
 	if gInputOpener == nil || gOutputOpener == nil {
 		log.Error("Input or output opener(s) are not set")
 		return C.int64_t(-1)
@@ -83,6 +84,8 @@ func NewIOHandler(url *C.char) C.int64_t {
 	if err != nil {
 		return C.int64_t(-1)
 	}
+
+	*size = C.int64_t(input.Size())
 
 	h := &ioHandler{input: input, outTable: make(map[int]OutputHandler)}
 	log.Debug("NewIOHandler() url", filename, "h", h)

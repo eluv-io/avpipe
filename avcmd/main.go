@@ -51,6 +51,14 @@ func (i *avcmdInput) Close() error {
 	return err
 }
 
+func (i *avcmdInput) Size() int64 {
+	fi, err := i.file.Stat()
+	if err != nil {
+		return -1
+	}
+	return fi.Size()
+}
+
 //Implement AVPipeOutputOpener
 type avcmdOutputOpener struct {
 }

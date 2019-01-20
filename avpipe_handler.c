@@ -16,7 +16,7 @@
 #include "elv_channel.h"
 #include "avpipe_handler.h"
 
-int64_t NewIOHandler(char*);
+int64_t NewIOHandler(char*, int64_t *);
 int AVPipeReadInput(int64_t, char*, int);
 int AVPipeSeekInput(int64_t, int64_t offset, int whence);
 int AVPipeCloseInput(int64_t);
@@ -32,6 +32,8 @@ in_opener(
     const char *url,
     ioctx_t *inctx)
 {
+    int64_t size;
+
 #ifdef CHECK_C_READ
     struct stat stb;
     int fd = open(url, O_RDONLY);
@@ -51,10 +53,13 @@ in_opener(
     inctx->opaque = (void *) calloc(1, sizeof(int64_t));
 #endif
 
-    int64_t h = NewIOHandler((char *) url);
+    int64_t h = NewIOHandler((char *) url, &size);
     if (h <= 0 )
         return -1;
-    elv_dbg("IN OPEN h=%d", h);
+
+    if (size > 0)
+        inctx->sz = size;
+    elv_dbg("IN OPEN h=%"PRId64", size=%"PRId64, h, size);
 
     *((int64_t *)(inctx->opaque)) = h;
     return 0;
