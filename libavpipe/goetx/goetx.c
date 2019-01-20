@@ -113,12 +113,14 @@ out_opener(
         sprintf(segname, "./O/%s", "dash.mpd");
         break;
 
-    case avpipe_init_stream:
+    case avpipe_video_init_stream:
+    case avpipe_audio_init_stream:
         /* Init segments */
         sprintf(segname, "./O/%s", url);
         break;
 
-    case avpipe_segment:
+    case avpipe_video_segment:
+    case avpipe_audio_segment:
         {
             const char *segbase = "chunk-stream";
 
