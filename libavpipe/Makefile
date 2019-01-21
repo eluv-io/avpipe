@@ -1,3 +1,4 @@
+TOP_DIR ?= $(shell pwd)
 SRCS=avpipe_xc.c avpipe_utils.c avpipe_filters.c avpipe_io.c
 ETX_SRCS=elv_xc_test.c
 
@@ -5,6 +6,7 @@ AVLIBS=-lavpipe -lavcodec -lavformat -lavfilter -lavdevice -lswresample -lswscal
 
 BINDIR=bin
 LIBDIR=lib
+INCDIR=include
 
 OSNAME := $(shell uname -s)
 
@@ -17,6 +19,14 @@ LIBDIRS=-L${ELV_TOOLCHAIN_DIST_PLATFORM}/lib -L../utils/lib -L./lib
 FLAGS=-O0 -ggdb -Wall -fPIC -DAUDIO
 
 all: avpipelib etx goetx
+
+install: all
+	@(if [ ! -d $(TOP_DIR)/../$(LIBDIR) ]; then mkdir $(TOP_DIR)/../$(LIBDIR); fi)
+	@echo Installing avpipelib
+	@cp $(LIBDIR)/* $(TOP_DIR)/../$(LIBDIR)
+	@(if [ ! -d $(TOP_DIR)/../$(INCDIR) ]; then mkdir $(TOP_DIR)/../$(INCDIR); fi)
+	@echo Installing includes
+	@cp $(INCDIR)/* $(TOP_DIR)/../$(INCDIR)
 
 avpipelib: $(OBJS)
 	@(if [ ! -d $(LIBDIR) ]; then mkdir $(LIBDIR); fi)
@@ -43,7 +53,7 @@ $(BINDIR)/elv_xc_test.o: etx/elv_xc_test.c
 
 clean:
 	@rm -rf $(BINDIR) $(LIBDIR)
-	(cd goetx; make clean)
+	@(cd goetx; echo "Making clean goetx"; make clean)
 
 tags:
 	ctags -R . ../../elv-toolchain/FFmpeg/FFmpeg ../utils

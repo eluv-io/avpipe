@@ -9,8 +9,8 @@ goetx:
 	mkdir -p ./O
 
 cleanall: clean
-	rm -rf *.log ./O
+	@rm -rf *.log ./O
 
 clean:
-	rm -rf goetx _obj
+	@rm -rf goetx _obj
 

@@ -8,7 +8,7 @@ OBJS=$(SRCS:%.c=$(BINDIR)/%.o)
 
 INCDIRS=-I${ELV_TOOLCHAIN_DIST_PLATFORM}/include -I${TOP_DIR}/utils/include -I${TOP_DIR}/libavpipe/include
 
-all clean: check-env lclean
+all clean install: check-env lclean
 	@for dir in $(SUBDIRS); do \
 	echo "Making $@ in $$dir..."; \
 	(cd $$dir; make $@) || exit 1; \
@@ -30,7 +30,7 @@ $(BINDIR)/%.o: %.c
 	gcc ${FLAGS} ${INCDIRS} -c $< -o $@
 
 lclean:
-	@rm -rf lib bin
+	@rm -rf lib bin include
 
 check-env:
 ifndef ELV_TOOLCHAIN_DIST_PLATFORM
