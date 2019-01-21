@@ -1,3 +1,19 @@
+/*
+ * avpipe.go
+ *
+ * This package has four main interfaces that has to be implemented by the client code:
+ *
+ * 1) InputOpener: is the input factory interface that needs an implementation to generate an InputHandler.
+ *
+ * 2) InputHandler: is the input handler with Read/Seek/Size/Close methods. An implementation of this
+ *    interface is needed by ffmpeg to process input streams properly.
+ *
+ * 3) OutputOpener: is the output factory interface that needs an implementation to generate an OutputHandler.
+ *
+ * 4) OutputHandler: is the output handler with Write/Seek/Close methods. An implementation of this
+ *    interface is needed by ffmpeg to write endoded streams properly. 
+ *
+ */
 package avpipe
 
 // #cgo CFLAGS: -I./libavpipe/include -I./utils/include
@@ -22,7 +38,7 @@ const (
 	DASHAudioSegment
 )
 
-// InputHandler the corresponding handlers will be called from the C interface functions
+// IOHandler the corresponding handlers will be called from the C interface functions
 type IOHandler interface {
 	InReader(buf []byte) (int, error)
 	InSeeker(offset C.int64_t, whence C.int) error
@@ -37,9 +53,16 @@ type InputOpener interface {
 }
 
 type InputHandler interface {
+	// Reads from input stream into buf
 	Read(buf []byte) (int, error)
+
+	// Seeks to specific offset of the input.
 	Seek(offset int64, whence int) (int64, error)
+
+	// Closes the input.
 	Close() error
+
+	// Returns the size of input, if the size is not known returns 0 or -1.
 	Size() int64
 }
 
@@ -48,8 +71,13 @@ type OutputOpener interface {
 }
 
 type OutputHandler interface {
+	// Writes encoded stream to the output.
 	Write(buf []byte) (int, error)
+
+	// Seeks to specific offset of the output.
 	Seek(offset int64, whence int) (int64, error)
+
+	// Closes the output.
 	Close() error
 }
 
@@ -196,7 +224,7 @@ func AVPipeOpenOutput(handler C.int64_t, stream_index, seg_index, stream_type C.
 }
 
 //export AVPipeWriteOutput
-func AVPipeWriteOutput(handler C.int64_t, fd C.int, buf *C.char, sz C.int) C.int {
+func AVPipeWriteOutput(handler C.int64_t, fd C.int, buf *C.uint8_t, sz C.int) C.int {
 	h := gHandlers[int64(handler)]
 	log.Debug("AVPipeWriteOutput", "h", h)
 

@@ -21,7 +21,7 @@ int AVPipeReadInput(int64_t, char*, int);
 int AVPipeSeekInput(int64_t, int64_t offset, int whence);
 int AVPipeCloseInput(int64_t);
 int AVPipeOpenOutput(int64_t, int, int, int);
-int AVPipeWriteOutput(int64_t, int, char *, int);
+int AVPipeWriteOutput(int64_t, int, uint8_t *, int);
 int AVPipeSeekOutput(int64_t, int, int64_t offset, int whence);
 int AVPipeCloseOutput(int64_t, int);
 
