@@ -11,7 +11,7 @@ fi
 
 script_dir="$( cd "$( dirname ${BASH_SOURCE[0]} )" && pwd )"
 
-elvdev_dir=$1
+elvdev_dir=$1/..
 avpipe_dir=$script_dir
 godev_dir="$( cd "$( dirname ${BASH_SOURCE[0]} )/../../../.." && pwd )"
 

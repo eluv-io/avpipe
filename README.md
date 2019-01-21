@@ -4,8 +4,8 @@
 
 ### Prerequisites
 
-- toolchain - top directory $ELV_TOOLCHAIN
-- content-fabric (for utilities such as eluvio/log and eluvio/errors) - top directory $ELV_CONTENT_FABRIC
+- toolchain - top directory (called `YOUR-ELV-TOOLCHAIN`)
+- content-fabric (for utilities such as eluvio/log and eluvio/errors) (called `YOUR-CONTENT-FABRIC`)
 
 ### Clone avpipe
 
@@ -22,8 +22,8 @@ Call init scripts to set up the necessary environment variables
 Note `init-env.sh` takes as arugment the top level workspace directory that contains `content-fabric`
 
 ```bash
-source $ELV_CONTENT_FABRIC/init-cgoenv.sh $ELV_TOOLCHAIN/dist/darwin-10.14
-source init-env.sh $ELV_CONTENT_FABRIC/..
+source <YOUR-CONTENT-FABRIC>/init-cgoenv.sh <YOUR-ELV-TOOLCHAIN>/dist/darwin-10.14
+source init-env.sh <YOUR-CONTENT-FABRIC>
 ```
 
 ### Build C library
