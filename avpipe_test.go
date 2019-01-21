@@ -16,7 +16,7 @@ type MyOpener struct {
 	event chan (io.ReadCloser)
 }
 
-func (o MyOpener) Open(t AVType, segno int) (io.WriteCloser, error) {
+func (o MyOpener) Open(t AVType, streamidx, segno int) (io.WriteCloser, error) {
 	pr, pw := io.Pipe()
 	o.event <- pr
 	return pw, nil

@@ -11,7 +11,7 @@
  * 3) OutputOpener: is the output factory interface that needs an implementation to generate an OutputHandler.
  *
  * 4) OutputHandler: is the output handler with Write/Seek/Close methods. An implementation of this
- *    interface is needed by ffmpeg to write endoded streams properly. 
+ *    interface is needed by ffmpeg to write endoded streams properly.
  *
  */
 package avpipe
@@ -31,7 +31,8 @@ import (
 type AVType int
 
 const (
-	DASHManifest AVType = iota
+	Unknown AVType = iota
+	DASHManifest
 	DASHVideoInit
 	DASHVideoSegment
 	DASHAudioInit
