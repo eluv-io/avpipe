@@ -126,7 +126,7 @@ func NewIOHandler(url *C.char, size *C.int64_t) C.int64_t {
 }
 
 //export AVPipeReadInput
-func AVPipeReadInput(handler C.int64_t, buf *C.char, sz C.int) C.int {
+func AVPipeReadInput(handler C.int64_t, buf *C.uint8_t, sz C.int) C.int {
 	h := gHandlers[int64(handler)]
 	log.Debug("AVPipeReadInput()", "h", h, "buf", buf, "sz=", sz)
 

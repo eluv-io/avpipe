@@ -17,7 +17,7 @@
 #include "avpipe_handler.h"
 
 int64_t NewIOHandler(char*, int64_t *);
-int AVPipeReadInput(int64_t, char*, int);
+int AVPipeReadInput(int64_t, uint8_t *, int);
 int AVPipeSeekInput(int64_t, int64_t offset, int whence);
 int AVPipeCloseInput(int64_t);
 int AVPipeOpenOutput(int64_t, int, int, int);
@@ -101,7 +101,7 @@ in_read_packet(
 #endif
 
     h = *((int64_t *)(c->opaque));
-    r = AVPipeReadInput(h, (char *)buf, buf_size);
+    r = AVPipeReadInput(h, buf, buf_size);
     if (r >= 0) {
         c->read_bytes += r;
         c->read_pos += r;
