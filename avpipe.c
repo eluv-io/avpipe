@@ -14,7 +14,7 @@
 #include "avpipe_xc.h"
 #include "elv_log.h"
 #include "elv_channel.h"
-#include "avpipe_handler.h"
+#include "avpipe.h"
 
 int64_t NewIOHandler(char*, int64_t *);
 int AVPipeReadInput(int64_t, uint8_t *, int);

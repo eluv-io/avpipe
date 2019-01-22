@@ -20,7 +20,7 @@ package avpipe
 // #include <string.h>
 // #include <stdlib.h>
 // #include "avpipe_xc.h"
-// #include "avpipe_handler.h"
+// #include "avpipe.h"
 import "C"
 import (
 	"eluvio/log"
