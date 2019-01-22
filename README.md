@@ -33,19 +33,9 @@ source init-env.sh <YOUR-CONTENT-FABRIC>
 Then build:
 
 ```bash
-  make
+  make install
 ```
 
-Manually copy includes and libs
-
-```bash
-  mkdir include
-  cp libavpipe/include/* include/
-  cp utils/include/* include/
-
-  mkdir lib
-  cp libavpipe/lib/* lib/
-  cp utils/lib/* lib/
 ```
 
 Build and test Go code
