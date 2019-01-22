@@ -1,160 +1,168 @@
 package avpipe_test
 
 import (
+	"fmt"
 	"io"
-	"sync"
+	"os"
 	"testing"
 
-	. "github.com/qluvio/avpipe"
+	"github.com/qluvio/avpipe"
 )
 
-const str1 string = "This is a text simulating the input of the AVPipe"
-const expectedReader1 int = 7000
-
-/* Implements AVPipeOpener */
-type MyOpener struct {
-	event chan (io.ReadCloser)
+//Implement AVPipeInputOpener
+type fileInputOpener struct {
+	url string
 }
 
-func (o MyOpener) Open(t AVType, streamidx, segno int) (io.WriteCloser, error) {
-	pr, pw := io.Pipe()
-	o.event <- pr
-	return pw, nil
-}
-
-func drainSingleOutputSingleWrite(t *testing.T, o *MyOpener) {
-
-	/* Wait for a writer to be open */
-	select {
-	case r := <-o.event:
-		buf := make([]byte, 1024)
-		rd, err := r.Read(buf)
-		if err != nil || rd != len(str1) || string(buf[:rd]) != str1 {
-			t.Fail()
-		}
-		r.Close()
+func (io *fileInputOpener) Open(url string) (avpipe.InputHandler, error) {
+	f, err := os.Open(url)
+	if err != nil {
+		return nil, err
 	}
+
+	io.url = url
+	etxInput := &fileInput{
+		file: f,
+	}
+
+	return etxInput, nil
 }
 
-func drainReader(t *testing.T, r io.ReadCloser) (int, error) {
-	defer r.Close()
-
-	br := 0 /* total bytes read */
-	buf := make([]byte, 1024)
-
-	for {
-		rd, err := r.Read(buf)
-		if err == io.EOF {
-			return br, nil
-		}
-		if err != nil {
-			return br, err
-		}
-		br = br + rd
-	}
+// Implement InputHandler
+type fileInput struct {
+	file *os.File // Input file
 }
 
-func drainMultiOutput(t *testing.T, o *MyOpener, wg *sync.WaitGroup) {
-
-	for {
-		/* Wait for a writer to be open */
-		select {
-		case r := <-o.event:
-			if r == nil {
-				wg.Done()
-				return
-			}
-			rd, err := drainReader(t, r)
-			if err != nil {
-				t.Fail()
-			}
-			if rd != expectedReader1 {
-				t.Fail()
-			}
-			wg.Done()
-		}
+func (i *fileInput) Read(buf []byte) (int, error) {
+	n, err := i.file.Read(buf)
+	if err == io.EOF {
+		return 0, nil
 	}
+	return n, err
+}
+
+func (i *fileInput) Seek(offset int64, whence int) (int64, error) {
+	n, err := i.file.Seek(int64(offset), int(whence))
+	return n, err
+}
+
+func (i *fileInput) Close() error {
+	err := i.file.Close()
+	return err
+}
+
+func (i *fileInput) Size() int64 {
+	fi, err := i.file.Stat()
+	if err != nil {
+		return -1
+	}
+	return fi.Size()
+}
+
+//Implement AVPipeOutputOpener
+type fileOutputOpener struct {
+}
+
+func (oo *fileOutputOpener) Open(stream_index, seg_index int, out_type avpipe.AVType) (avpipe.OutputHandler, error) {
+	var filename string
+
+	switch out_type {
+	case avpipe.DASHVideoInit:
+		fallthrough
+	case avpipe.DASHAudioInit:
+		filename = fmt.Sprintf("./O/init-stream%d.mp4", stream_index)
+	case avpipe.DASHManifest:
+		filename = fmt.Sprintf("./O/dash.mpd")
+	case avpipe.DASHVideoSegment:
+		fallthrough
+	case avpipe.DASHAudioSegment:
+		filename = fmt.Sprintf("./O/chunk-stream%d-%05d.mp4", stream_index, seg_index)
+	}
+
+	f, err := os.OpenFile(filename, os.O_RDWR|os.O_CREATE|os.O_TRUNC, 0644)
+	if err != nil {
+		return nil, err
+	}
+
+	h := &fileOutput{
+		url:          filename,
+		stream_index: stream_index,
+		seg_index:    seg_index,
+		file:         f}
+
+	return h, nil
+}
+
+// Implement OutputHandler
+type fileOutput struct {
+	url          string
+	stream_index int
+	seg_index    int
+	file         *os.File
+}
+
+func (o *fileOutput) Write(buf []byte) (int, error) {
+	n, err := o.file.Write(buf)
+	return n, err
+}
+
+func (o *fileOutput) Seek(offset int64, whence int) (int64, error) {
+	n, err := o.file.Seek(offset, whence)
+	return n, err
+}
+
+func (o *fileOutput) Close() error {
+	err := o.file.Close()
+	return err
+}
+
+// TxParams should match with txparams_t in C library
+type TxParams struct {
+	startTimeTs        int32
+	durationTs         int32
+	startSegmentStr    []byte
+	videoBitrate       int32
+	audioBitrate       int32
+	sampleRate         int32
+	crfStr             []byte
+	segDurationTs      int32
+	segDurationFr      int32
+	segDurationSecsStr []byte
+	codec              []byte
+	encHeight          int32
+	encWidth           int32
 }
 
 func TestSingleOutputSingleWrite(t *testing.T) {
+	filename := "./media/ErsteChristmas.mp4"
 
-	/* Create the source reader */
-	sr, sw := io.Pipe()
-	defer sr.Close()
+	/*
+	       TODO: pass params from go to C
+	   	params := &C.TxParams{
+	   		startTimeTs:        0,
+	   		durationTs:         -1,
+	   		startSegmentStr:    C.CString("1"),
+	   		videoBitrate:       2560000,
+	   		audioBitrate:       64000,
+	   		sampleRate:         44100,
+	   		crfStr:             C.CString("23"),
+	   		segDurationTs:      1001 * 60,
+	   		segDurationFr:      60,
+	   		segDurationSecsStr: C.CString("2.002"),
+	   		codec:              C.CString("libx264"),
+	   		encHeight:          720,
+	   		encWidth:           1280,
+	   	} */
 
-	/* Create the output 'opener' */
-	o := &MyOpener{}
-	o.event = make(chan io.ReadCloser, 1)
-
-	params := AVParams{
-		"segment_duration": "2000",
-		"start_segment":    "0",
+	// Create output directory if it doesn't exist
+	if _, err := os.Stat("./O"); os.IsNotExist(err) {
+		os.Mkdir("./O", 0755);
 	}
 
-	avp, err := NewAVPipe(sr, o, &params)
-	if err != nil {
+	avpipe.InitIOHandler(&fileInputOpener{url: filename}, &fileOutputOpener{})
+
+	err := avpipe.Tx(nil, filename)
+	if err != 0 {
 		t.Fail()
 	}
-	defer avp.Close()
-
-	/* Wait for output and read it once available */
-	go drainSingleOutputSingleWrite(t, o)
-
-	/* Write something to input stream */
-	go func() {
-		sw.Write([]byte(str1))
-		sw.Close()
-	}()
-
-	err = avp.Run()
-	if err != nil {
-		t.Fail()
-	}
-}
-
-func TestMultiOutput(t *testing.T) {
-
-	/* Create the source reader */
-	sr, sw := io.Pipe()
-	defer sr.Close()
-
-	/* Create the output 'opener' */
-	o := &MyOpener{}
-	o.event = make(chan io.ReadCloser, 1)
-
-	params := AVParams{
-		"segment_duration":  "2000",
-		"start_segment":     "0",
-		"test_segment_size": "7000",
-	}
-
-	wg := &sync.WaitGroup{}
-	wg.Add(4 + 1)
-
-	avp, err := NewAVPipe(sr, o, &params)
-	if err != nil {
-		t.Fail()
-	}
-	defer avp.Close()
-
-	/* Wait for output and read it once available */
-	go drainMultiOutput(t, o, wg)
-
-	/* Write 4 buffers to the input stream */
-	buf := make([]byte, 10240)
-	go func() {
-		sw.Write(buf[:7000])
-		sw.Write(buf[:7000])
-		sw.Write(buf[:7000])
-		sw.Write(buf[:7000])
-		sw.Close()
-	}()
-
-	err = avp.Run()
-	if err != nil && err != io.EOF {
-		t.Fail()
-	}
-	o.event <- nil
-
-	wg.Wait()
 }
