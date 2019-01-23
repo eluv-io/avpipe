@@ -24,7 +24,7 @@ init_filters(
     enum AVPixelFormat pix_fmts[] = { AV_PIX_FMT_YUV422P /* AV_PIX_FMT_GRAY8 */, AV_PIX_FMT_NONE };
 
     /* If the codec is nvenc, replace AV_PIX_FMT_YUV422P with AV_PIX_FMT_YUV420P */
-    if (params->codec && strcmp(params->codec, "h264_nvenc")) {
+    if (params->codec && !strcmp(params->codec, "h264_nvenc")) {
         pix_fmts[0] = AV_PIX_FMT_YUV420P;
         elv_warn("Replace pixel format to AV_PIX_FMT_YUV420P for campatibility with NVENC codec");
     }
