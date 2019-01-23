@@ -27,7 +27,8 @@ extern int
 init_filters(
     const char *filters_descr,
     coderctx_t *decoder_context,
-    coderctx_t *encoder_context);
+    coderctx_t *encoder_context,
+    txparams_t *params);
 
 extern int
 elv_io_open(
@@ -460,7 +461,8 @@ decode_packet(
     AVFrame *filt_frame,
     int stream_index,
     txparams_t *p,
-    int do_instrument)
+    int do_instrument,
+    int bypass_filtering)
 {
     int ret;
     struct timeval tv;
@@ -484,6 +486,14 @@ decode_packet(
             return response;
         }
 
+        dump_frame("IN ", codec_context->frame_number, frame);
+
+        if (bypass_filtering) {
+            encode_frame(decoder_context, encoder_context, frame, stream_index);
+            av_frame_unref(frame);
+            continue;
+        }
+
         if (do_instrument) {
             elv_since(&tv, &since);
             elv_log("INSTRMNT avcodec_receive_frame time=%"PRId64, since);
@@ -498,7 +508,6 @@ decode_packet(
                     elv_dbg("FRAME SET num=%d pts=%d", frame->coded_picture_number, frame->pts);
                 }
 
-                dump_frame("IN ", codec_context->frame_number, frame);
                 decoder_context->pts = frame->pts;
 #if 0
                 // TEST ONLY - save gray scale frame
@@ -584,7 +593,7 @@ avpipe_tx(
         encoder_context->codec_context[encoder_context->video_stream_index]->height);
     elv_dbg("FILTER scale=%s", filter_str);
 
-    if (init_filters(filter_str, decoder_context, encoder_context) < 0) {
+    if (init_filters(filter_str, decoder_context, encoder_context, txctx->params) < 0) {
         elv_err("Failed to initialize the filter");
         return -1;
     }
@@ -659,7 +668,8 @@ avpipe_tx(
                 filt_frame,
                 input_packet->stream_index,
                 params,
-                do_instrument
+                do_instrument,
+		0                 // bypass_filtering
             );
 
             if (do_instrument) {
