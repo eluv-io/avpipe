@@ -135,6 +135,14 @@ prepare_decoder(
             return -1;
         }
 
+        /* Enable multi-threading - if thread_count is 0 the library will determine number of threads as a
+         * function of the number of CPUs
+         * By observation the default active_thrad_type is 0 which disables multi-threading and
+         * furher thread_count is 1 which forces 1 thread.
+         */
+        decoder_context->codec_context[i]->active_thread_type = 1;
+        decoder_context->codec_context[i]->thread_count = 8;
+
         /* Open the decoder (initialize the decoder codec_context[i] using given codec[i]). */
         if (avcodec_open2(decoder_context->codec_context[i], decoder_context->codec[i], NULL) < 0) {
             elv_err("Failed to open codec through avcodec_open2, codec_id=%s", avcodec_get_name(decoder_context->codec_parameters[i]->codec_id));
@@ -669,7 +677,7 @@ avpipe_tx(
                 input_packet->stream_index,
                 params,
                 do_instrument,
-		0                 // bypass_filtering
+                0                 // bypass_filtering
             );
 
             if (do_instrument) {
