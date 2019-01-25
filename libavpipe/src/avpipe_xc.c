@@ -137,7 +137,7 @@ prepare_decoder(
 
         /* Enable multi-threading - if thread_count is 0 the library will determine number of threads as a
          * function of the number of CPUs
-         * By observation the default active_thrad_type is 0 which disables multi-threading and
+         * By observation the default active_thread_type is 0 which disables multi-threading and
          * furher thread_count is 1 which forces 1 thread.
          */
         decoder_context->codec_context[i]->active_thread_type = 1;
@@ -397,6 +397,7 @@ encode_frame(
     AVFrame *frame,
     int stream_index)
 {
+    int ret;
     AVFormatContext *format_context = encoder_context->format_context;
     AVCodecContext *codec_context = encoder_context->codec_context[stream_index];
     AVPacket *output_packet = av_packet_alloc();
@@ -405,9 +406,10 @@ encode_frame(
         return -1;
     }
 
-    int ret;
-
     ret = avcodec_send_frame(codec_context, frame);
+    if (ret < 0) {
+        elv_err("Failed to send frame for encoding err=%d", ret);
+    }
 
     while (ret >= 0) {
         /* The packet must be initialized before receiving */
@@ -418,6 +420,7 @@ encode_frame(
         ret = avcodec_receive_packet(codec_context, output_packet);
 
         if (ret == AVERROR(EAGAIN) || ret == AVERROR_EOF) {
+            elv_dbg("encode_frame() EAGAIN in receiving packet");
             break;
         } else if (ret < 0) {
             elv_err("Failure while receiving a packet from the encoder: %s", av_err2str(ret));
@@ -452,7 +455,7 @@ encode_frame(
         ret = av_interleaved_write_frame(format_context, output_packet);
 
         if (ret != 0) {
-            elv_err("%d while receiving a packet from the decoder: %s", ret, av_err2str(ret));
+            elv_err("Error %d while receiving a packet from the decoder: %s", ret, av_err2str(ret));
         }
     }
     av_packet_unref(output_packet);
@@ -488,6 +491,7 @@ decode_packet(
         elv_get_time(&tv);
         response = avcodec_receive_frame(codec_context, frame);
         if (response == AVERROR(EAGAIN) || response == AVERROR_EOF) {
+            elv_dbg("decode_packet() EAGAIN in receiving packet");
             break;
         } else if (response < 0) {
             elv_err("Failure while receiving a frame from the decoder: %s", av_err2str(response));
@@ -539,6 +543,7 @@ decode_packet(
                     elv_get_time(&tv);
                     ret = av_buffersink_get_frame(decoder_context->buffersink_ctx, filt_frame);
                     if (ret == AVERROR(EAGAIN) || ret == AVERROR_EOF) {
+                        elv_dbg("av_buffersink_get_frame() ret=EAGAIN");
                         break;
                     }
 
@@ -571,7 +576,7 @@ decode_packet(
                             elv_log("INSTRMNT encode_frame time=%"PRId64, since);
                         }
                     } else {
-                        elv_dbg("SS-ENCODE skip frame pts=%d filt_frame pts=%d", frame->pts, filt_frame->pts);
+                        elv_dbg("ENCODE skiping frame pts=%d filt_frame pts=%d", frame->pts, filt_frame->pts);
                     }
 
                     av_frame_unref(filt_frame);
@@ -703,7 +708,7 @@ avpipe_tx(
                 elv_err("Failure in copying audio stream");
                 return -1;
             }
-            elv_dbg("\tfinish copying packets without reencoding");
+            elv_dbg("Finish copying audio packets without reencoding");
         } else {
             elv_dbg("Unhandled stream - not video or audio");
         }
