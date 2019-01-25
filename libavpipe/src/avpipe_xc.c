@@ -420,7 +420,7 @@ encode_frame(
         ret = avcodec_receive_packet(codec_context, output_packet);
 
         if (ret == AVERROR(EAGAIN) || ret == AVERROR_EOF) {
-            elv_dbg("encode_frame() EAGAIN in receiving packet");
+            //elv_dbg("encode_frame() EAGAIN in receiving packet");
             break;
         } else if (ret < 0) {
             elv_err("Failure while receiving a packet from the encoder: %s", av_err2str(ret));
@@ -464,7 +464,7 @@ encode_frame(
 }
 
 static int
-decode_packet(
+transcode_packet(
     coderctx_t *decoder_context,
     coderctx_t *encoder_context,
     AVPacket *packet,
@@ -491,7 +491,6 @@ decode_packet(
         elv_get_time(&tv);
         response = avcodec_receive_frame(codec_context, frame);
         if (response == AVERROR(EAGAIN) || response == AVERROR_EOF) {
-            elv_dbg("decode_packet() EAGAIN in receiving packet");
             break;
         } else if (response < 0) {
             elv_err("Failure while receiving a frame from the decoder: %s", av_err2str(response));
@@ -520,7 +519,7 @@ decode_packet(
                     elv_dbg("FRAME SET num=%d pts=%d", frame->coded_picture_number, frame->pts);
                 }
 
-                decoder_context->pts = frame->pts;
+                decoder_context->pts = packet->pts;
 #if 0
                 // TEST ONLY - save gray scale frame
                 save_gray_frame(frame->data[0], frame->linesize[0], frame->width, frame->height,
@@ -543,7 +542,7 @@ decode_packet(
                     elv_get_time(&tv);
                     ret = av_buffersink_get_frame(decoder_context->buffersink_ctx, filt_frame);
                     if (ret == AVERROR(EAGAIN) || ret == AVERROR_EOF) {
-                        elv_dbg("av_buffersink_get_frame() ret=EAGAIN");
+                        //elv_dbg("av_buffersink_get_frame() ret=EAGAIN");
                         break;
                     }
 
@@ -582,9 +581,82 @@ decode_packet(
                     av_frame_unref(filt_frame);
                 }
             }
+            else {
+                elv_dbg("SKIP frame codec_type=%d", codec_context->codec_type);
+            }
             av_frame_unref(frame);
         }
     }
+    return 0;
+}
+
+static int
+flush_decoder(
+    coderctx_t *decoder_context,
+    coderctx_t *encoder_context,
+    int stream_index,
+    txparams_t *p)
+{
+    int ret;
+    AVFrame *frame, *filt_frame;
+    AVCodecContext *codec_context = decoder_context->codec_context[stream_index];
+    int response = avcodec_send_packet(codec_context, NULL);	/* Passing NULL means flush the decoder buffers */
+
+    while (response >=0) {
+        frame = av_frame_alloc();
+        filt_frame = av_frame_alloc();
+try_receive:
+        response = avcodec_receive_frame(codec_context, frame);
+        if (response == AVERROR(EAGAIN)) {
+            goto try_receive;;
+	}
+
+        if (response == AVERROR_EOF) {
+            elv_log("1 GOT EOF");
+            continue;
+        }
+
+        if (codec_context->codec_type == AVMEDIA_TYPE_VIDEO) {
+
+            /* Force an I frame at beginning of each segment */
+            if (frame->pts % p->seg_duration_ts == 0) {
+                frame->pict_type = AV_PICTURE_TYPE_I;
+                elv_dbg("FRAME SET num=%d pts=%d", frame->coded_picture_number, frame->pts);
+            }
+
+            /* push the decoded frame into the filtergraph */
+            if (av_buffersrc_add_frame_flags(decoder_context->buffersrc_ctx, frame, AV_BUFFERSRC_FLAG_KEEP_REF) < 0) {
+                elv_err("Failure in feeding the filtergraph");
+                break;
+            }
+            /* pull filtered frames from the filtergraph */
+            while (1) {
+                ret = av_buffersink_get_frame(decoder_context->buffersink_ctx, filt_frame);
+                if (ret == AVERROR(EAGAIN)) {
+                    break;
+                }
+
+                if (ret == AVERROR_EOF) {
+                    elv_log("2 GOT EOF");
+                    break;
+                }
+
+                dump_frame("FILT ", codec_context->frame_number, filt_frame);
+
+                AVFrame *frame_to_encode = filt_frame;
+
+                /* To allow for packet reordering frames can come with pts past the desired duration */
+                if (p->duration_ts == -1 || frame_to_encode->pts < p->start_time_ts + p->duration_ts) {
+                    encode_frame(decoder_context, encoder_context, frame_to_encode, stream_index);
+                } else {
+                    elv_dbg("ENCODE skiping frame pts=%d filt_frame pts=%d", frame->pts, filt_frame->pts);
+                }
+            }
+        }
+        av_frame_unref(filt_frame);
+        av_frame_unref(frame);
+    }
+
     return 0;
 }
 
@@ -673,7 +745,7 @@ avpipe_tx(
             }
 
             elv_get_time(&tv);
-            response = decode_packet(
+            response = transcode_packet(
                 decoder_context,
                 encoder_context,
                 input_packet,
@@ -687,7 +759,7 @@ avpipe_tx(
 
             if (do_instrument) {
                 elv_since(&tv, &since);
-                elv_log("INSTRMNT decode_packet time=%"PRId64, since);
+                elv_log("INSTRMNT transcode_packet time=%"PRId64, since);
             }
 
             av_packet_unref(input_packet);
@@ -714,9 +786,13 @@ avpipe_tx(
         }
     }
 
-    // flush all frames
+    /*
+     * Flush all frames, first flush decoder buffers, then encoder buffers by passing NULL frame.
+     * TODO: should I do it for the audio stream too?
+     */
+    flush_decoder(decoder_context, encoder_context, encoder_context->video_stream_index, params);
     encode_frame(decoder_context, encoder_context, NULL, encoder_context->video_stream_index);
-    // TODO: should I do it for the audio stream too?
+
 
     dump_stats(decoder_context, encoder_context);
 

@@ -37,7 +37,7 @@ elv_io_open(
 {
     int ret = 0;
 
-    elv_dbg("OUT io_open url=%s", url);
+    elv_dbg("OUT elv_io_open url=%s", url);
 
     out_tracker_t *out_tracker = (out_tracker_t *) format_ctx->avpipe_opaque;
     avpipe_io_handler_t *out_handlers = out_tracker->out_handlers;
@@ -123,7 +123,7 @@ elv_io_close(
     avpipe_io_handler_t *out_handlers = out_tracker->out_handlers;
     ioctx_t *outctx = (ioctx_t *)pb->opaque;
 
-    elv_dbg("OUT close avioctx=%p, avioctx->opaque=%p outtracker[0]->last_outctx=%p, outtracker[1]->last_outctx=%p",
+    elv_dbg("OUT elv_io_close avioctx=%p, avioctx->opaque=%p outtracker[0]->last_outctx=%p, outtracker[1]->last_outctx=%p",
         pb, pb->opaque, out_tracker[0].last_outctx, out_tracker[1].last_outctx);
     out_handlers->avpipe_closer(outctx);
     free(outctx);

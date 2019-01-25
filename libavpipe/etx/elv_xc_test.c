@@ -147,7 +147,7 @@ out_opener(
 
     outctx->bufsz = 1 * 1024 * 1024;
     outctx->buf = (unsigned char *)malloc(outctx->bufsz); /* Must be malloc'd - will be realloc'd by avformat */
-    elv_dbg("OUT out_opener outctx=%p fd=%d\n", outctx, fd);
+    elv_dbg("OUT OPEN outctx=%p type=%d, fd=%d\n", outctx, outctx->type, fd);
     return 0;
 }
 
@@ -246,7 +246,7 @@ out_closer(
     ioctx_t *outctx)
 {
     int fd = *((int *)(outctx->opaque));
-    elv_dbg("OUT io_close custom writer fd=%d\n", fd);
+    elv_dbg("OUT CLOSE custom writer fd=%d\n", fd);
     close(fd);
     free(outctx->opaque);
     free(outctx->buf);
@@ -280,7 +280,9 @@ main(
         .seg_duration_ts = 1001 * 60,       /* same units as input stream PTS */
         .seg_duration_fr = 60,              /* in frames-per-secoond units */
         .seg_duration_secs_str = "2.002",
+        //.seg_duration_secs_str = "30.015",
         .codec = "libx264",
+	//.codec = "h264_videotoolbox", 
         .enc_height = 720,                  /* -1 means use source height, other values 2160, 720 */
         .enc_width = 1280                   /* -1 means use source width, other values 3840, 1280 */
     };
