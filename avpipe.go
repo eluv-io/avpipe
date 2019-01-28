@@ -310,8 +310,8 @@ func Tx(params *C.TxParams, url string) int {
 		segDurationFr:      60,
 		segDurationSecsStr: C.CString("2.002"),
 		codec:              C.CString("libx264"),
-		encHeight:          720,
-		encWidth:           1280,
+		encHeight:          1080, //720,
+		encWidth:           1920, //1280,
 	}
 
 	rc := C.tx((*C.txparams_t)(unsafe.Pointer(cparams)), C.CString(url))

@@ -757,7 +757,7 @@ avpipe_tx(
                 input_packet->stream_index,
                 params,
                 do_instrument,
-                0                 // bypass_filtering
+                1                 // bypass_filtering
             );
 
             if (do_instrument) {
