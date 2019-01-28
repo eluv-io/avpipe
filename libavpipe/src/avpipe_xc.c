@@ -58,6 +58,9 @@ prepare_input(
         in_handlers->avpipe_reader, in_handlers->avpipe_writer, in_handlers->avpipe_seeker);
 
     avioctx->written = inctx->sz; /* Fake avio_size() to avoid calling seek to find size */
+    avioctx->seekable = 0;
+    avioctx->direct = 0;
+    avioctx->buffer_size = 256 * 1024;  // avoid seeks - avio_seek() seeks internal buffer */
     format_ctx->pb = avioctx;
     return 0;
 }

@@ -1,8 +1,8 @@
 /*
  * avpipe_handler.c
  *
- * Implements generic C handlers needed by libavpipe. 
- * 
+ * Implements generic C handlers needed by libavpipe.
+ *
  */
 
 #include <sys/types.h>
@@ -175,11 +175,11 @@ out_opener(
     int64_t h;
 
     h = *((int64_t *)(inctx->opaque));
-    
+
     /* Allocate the buffers. The data will be copied to the buffers */
     outctx->bufsz = 1 * 1024 * 1024;
     outctx->buf = (unsigned char *)malloc(outctx->bufsz); /* Must be malloc'd - will be realloc'd by avformat */
-    
+
     fd = AVPipeOpenOutput(h, outctx->stream_index, outctx->seg_index, outctx->type);
     elv_dbg("OUT out_opener outctx=%p, fd=%d\n", outctx, fd);
     if (fd < MIN_VALID_FD)
@@ -216,9 +216,9 @@ out_write_packet(
         outctx->written_bytes += bwritten;
         outctx->write_pos += bwritten;
     }
-    
+
     elv_dbg("OUT WRITE size=%d written=%d pos=%d total=%d", buf_size, bwritten, outctx->write_pos, outctx->written_bytes);
-    
+
     return buf_size;
 }
 
