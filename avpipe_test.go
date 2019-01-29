@@ -116,52 +116,33 @@ func (o *fileOutput) Close() error {
 	return err
 }
 
-// TxParams should match with txparams_t in C library
-type TxParams struct {
-	startTimeTs        int32
-	durationTs         int32
-	startSegmentStr    []byte
-	videoBitrate       int32
-	audioBitrate       int32
-	sampleRate         int32
-	crfStr             []byte
-	segDurationTs      int32
-	segDurationFr      int32
-	segDurationSecsStr []byte
-	codec              []byte
-	encHeight          int32
-	encWidth           int32
-}
-
 func TestSingleOutputSingleWrite(t *testing.T) {
 	filename := "./media/ErsteChristmas.mp4"
 
-	/*
-	       TODO: pass params from go to C
-	   	params := &C.TxParams{
-	   		startTimeTs:        0,
-	   		durationTs:         -1,
-	   		startSegmentStr:    C.CString("1"),
-	   		videoBitrate:       2560000,
-	   		audioBitrate:       64000,
-	   		sampleRate:         44100,
-	   		crfStr:             C.CString("23"),
-	   		segDurationTs:      1001 * 60,
-	   		segDurationFr:      60,
-	   		segDurationSecsStr: C.CString("2.002"),
-	   		codec:              C.CString("libx264"),
-	   		encHeight:          720,
-	   		encWidth:           1280,
-	   	} */
+	params := &avpipe.TxParams{
+		StartTimeTs:        0,
+		DurationTs:         -1,
+		StartSegmentStr:    "1",
+		VideoBitrate:       2560000,
+		AudioBitrate:       64000,
+		SampleRate:         44100,
+		CrfStr:             "23",
+		SegDurationTs:      1001 * 60,
+		SegDurationFr:      60,
+		SegDurationSecsStr: "2.002",
+		Codec:              "libx264",
+		EncHeight:          720,
+		EncWidth:           1280,
+	}
 
 	// Create output directory if it doesn't exist
 	if _, err := os.Stat("./O"); os.IsNotExist(err) {
-		os.Mkdir("./O", 0755);
+		os.Mkdir("./O", 0755)
 	}
 
 	avpipe.InitIOHandler(&fileInputOpener{url: filename}, &fileOutputOpener{})
 
-	err := avpipe.Tx(nil, filename)
+	err := avpipe.Tx(params, filename)
 	if err != 0 {
 		t.Fail()
 	}

@@ -39,6 +39,23 @@ const (
 	DASHAudioSegment
 )
 
+// TxParams should match with txparams_t in C library
+type TxParams struct {
+	StartTimeTs        int32
+	DurationTs         int32
+	StartSegmentStr    string
+	VideoBitrate       int32
+	AudioBitrate       int32
+	SampleRate         int32 // Audio sampling rate
+	CrfStr             string
+	SegDurationTs      int32
+	SegDurationFr      int32
+	SegDurationSecsStr string
+	Codec              string
+	EncHeight          int32
+	EncWidth           int32
+}
+
 // IOHandler the corresponding handlers will be called from the C interface functions
 type IOHandler interface {
 	InReader(buf []byte) (int, error)
@@ -297,21 +314,28 @@ func (h *ioHandler) OutCloser(fd C.int) error {
 	return err
 }
 
-func Tx(params *C.TxParams, url string) int {
-	cparams := &C.TxParams{
-		startTimeTs:        0,
-		durationTs:         -1,
-		startSegmentStr:    C.CString("1"),
-		videoBitrate:       2560000,
-		audioBitrate:       64000,
-		sampleRate:         44100,
-		crfStr:             C.CString("23"),
-		segDurationTs:      1001 * 60,
-		segDurationFr:      60,
-		segDurationSecsStr: C.CString("2.002"),
-		codec:              C.CString("libx264"),
-		encHeight:          1080, //720,
-		encWidth:           1920, //1280,
+func Tx(params *TxParams, url string) int {
+
+	// Convert TxParams to C.txparams_t
+	if params == nil {
+		log.Error("Failed transcoding, params is not set.")
+		return -1
+	}
+
+	cparams := &C.txparams_t{
+		start_time_ts:         C.int(params.StartTimeTs),
+		duration_ts:           C.int(params.DurationTs),
+		start_segment_str:     C.CString(params.StartSegmentStr),
+		video_bitrate:         C.int(params.VideoBitrate),
+		audio_bitrate:         C.int(params.AudioBitrate),
+		sample_rate:           C.int(params.SampleRate),
+		crf_str:               C.CString(params.CrfStr),
+		seg_duration_ts:       C.int(params.SegDurationTs),
+		seg_duration_fr:       C.int(params.SegDurationFr),
+		seg_duration_secs_str: C.CString(params.SegDurationSecsStr),
+		codec:                 C.CString(params.Codec),
+		enc_height:            C.int(params.EncHeight),
+		enc_width:             C.int(params.EncWidth),
 	}
 
 	rc := C.tx((*C.txparams_t)(unsafe.Pointer(cparams)), C.CString(url))

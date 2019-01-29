@@ -21,7 +21,14 @@ if ! test -d $elvdev_dir/content-fabric; then
 fi
 
 export GOPATH=$godev_dir:$elvdev_dir/content-fabric
-export ELV_TOOLCHAIN_DIST_PLATFORM=$elvdev_dir/elv-toolchain/dist/darwin-10.14
+if [[ -z "${ELV_TOOLCHAIN_DIST_PLATFORM}" ]]; then
+    if [ "$(uname)" == "Darwin" ]; then
+        export ELV_TOOLCHAIN_DIST_PLATFORM=$elvdev_dir/elv-toolchain/dist/darwin-10.14
+    else
+        LINUX=`ls $elvdev_dir/elv-toolchain/dist | grep linux`
+        export ELV_TOOLCHAIN_DIST_PLATFORM=$elvdev_dir/elv-toolchain/dist/${LINUX}
+    fi
+fi
 
 export CGO_CFLAGS="$CGO_CFLAGS -I${ELV_TOOLCHAIN_DIST_PLATFORM}/include -I$avpipe_dir/include"
 export CGO_LDFLAGS="$CGO_LDFLAGS -L${ELV_TOOLCHAIN_DIST_PLATFORM}/lib -L$avpipe_dir/lib \
