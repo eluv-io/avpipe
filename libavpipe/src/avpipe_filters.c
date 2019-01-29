@@ -20,8 +20,14 @@ init_filters(
     const AVFilter *buffersink = avfilter_get_by_name("buffersink");
     AVFilterInOut *outputs = avfilter_inout_alloc();
     AVFilterInOut *inputs  = avfilter_inout_alloc();
-    AVRational time_base = decoder_context->format_context->streams[decoder_context->video_stream_index]->time_base;
+    AVRational time_base;
     enum AVPixelFormat pix_fmts[] = { AV_PIX_FMT_YUV422P /* AV_PIX_FMT_GRAY8 */, AV_PIX_FMT_NONE };
+
+    /* If there is no video stream, then return */
+    if (decoder_context->video_stream_index < 0)
+        return 0;
+
+    time_base = decoder_context->format_context->streams[decoder_context->video_stream_index]->time_base;
 
     /* If the codec is nvenc, replace AV_PIX_FMT_YUV422P with AV_PIX_FMT_YUV420P */
     if (params->codec && !strcmp(params->codec, "h264_nvenc")) {

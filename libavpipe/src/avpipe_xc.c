@@ -328,6 +328,11 @@ prepare_audio_encoder(
     encoder_context->codec_context[index]->bit_rate = params->audio_bitrate;
     encoder_context->codec_context[index]->channels = av_get_channel_layout_nb_channels(encoder_context->codec_context[index]->channel_layout);
 
+    // DASH segment duration (in seconds) - notice it is set on the format context not codec
+    av_opt_set(encoder_context->format_context->priv_data, "seg_duration", params->seg_duration_secs_str,
+        AV_OPT_FLAG_AUDIO_PARAM | AV_OPT_FLAG_ENCODING_PARAM);
+    av_opt_set(encoder_context->format_context->priv_data, "start_segment", params->start_segment_str, 0);
+
     /* Open audio encoder codec */
     if (avcodec_open2(encoder_context->codec_context[index], encoder_context->codec[index], NULL) < 0) {
         elv_dbg("Could not open encoder for audio");
