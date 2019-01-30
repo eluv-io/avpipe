@@ -1,9 +1,8 @@
+include ./rules.make
+
 TOP_DIR ?= $(shell pwd)
 SUBDIRS=utils libavpipe etx avcmd goetx
 
-BINDIR=bin
-LIBDIR=lib
-INCDIR=include
 SRCS=avpipe_handler.c
 OBJS=$(SRCS:%.c=$(BINDIR)/%.o)
 
