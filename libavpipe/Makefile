@@ -1,8 +1,6 @@
 TOP_DIR ?= $(shell pwd)
 SRCS=avpipe_xc.c avpipe_utils.c avpipe_filters.c avpipe_io.c
 
-AVLIBS=-lavpipe -lavcodec -lavformat -lavfilter -lavdevice -lswresample -lswscale -lavutil -lpostproc -lutils -lm -ldl -lpthread
-
 BINDIR=bin
 LIBDIR=lib
 INCDIR=include
@@ -13,10 +11,9 @@ INCDIRS=-I${ELV_TOOLCHAIN_DIST_PLATFORM}/include -I../utils/include -Iinclude
 
 OBJS=$(SRCS:%.c=$(BINDIR)/%.o)
 
-LIBDIRS=-L${ELV_TOOLCHAIN_DIST_PLATFORM}/lib -L../utils/lib -L./lib
-FLAGS=-O0 -ggdb -Wall -fPIC -DAUDIO
+FLAGS=-O0 -ggdb -Wall -fPIC
 
-all: avpipelib goetx install
+all: avpipelib install
 
 install:
 	@(if [ ! -d $(TOP_DIR)/../$(LIBDIR) ]; then mkdir $(TOP_DIR)/../$(LIBDIR); fi)
@@ -32,10 +29,6 @@ avpipelib: $(OBJS)
 	@ar cr $(LIBDIR)/libavpipe.a $?
 	@ranlib $(LIBDIR)/libavpipe.a
 
-goetx: avpipelib
-	@echo Making goetx
-	@(cd goetx; make)
-
 $(BINDIR)/%.o: src/%.c
 	@(if [ ! -d $(BINDIR) ]; then mkdir $(BINDIR); fi)
 	@echo "Compiling " $<
@@ -43,7 +36,6 @@ $(BINDIR)/%.o: src/%.c
 
 clean:
 	@rm -rf $(BINDIR) $(LIBDIR)
-	@(cd goetx; echo "Making clean goetx"; make clean)
 
 tags:
 	ctags -R . ../../elv-toolchain/FFmpeg/FFmpeg ../utils

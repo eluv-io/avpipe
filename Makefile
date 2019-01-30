@@ -1,5 +1,5 @@
 TOP_DIR ?= $(shell pwd)
-SUBDIRS=utils libavpipe etx avcmd
+SUBDIRS=utils libavpipe etx avcmd goetx
 
 BINDIR=bin
 LIBDIR=lib
