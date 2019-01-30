@@ -16,7 +16,7 @@
  */
 package avpipe
 
-// #cgo CFLAGS: -I./libavpipe/include -I./utils/include
+// #cgo CFLAGS: -I./include
 // #include <string.h>
 // #include <stdlib.h>
 // #include "avpipe_xc.h"

@@ -23,9 +23,9 @@ ifeq ($(OSNAME), Linux)
 	SHARED_LIB=libutils.so
 endif
 
-all: libs
+all: libs install
 
-install: all
+install:
 	@(if [ ! -d $(TOP_DIR)/../$(LIBDIR) ]; then mkdir $(TOP_DIR)/../$(LIBDIR); fi)
 	@echo Installing libutils.a
 	@cp $(LIBDIR)/* $(TOP_DIR)/../$(LIBDIR)

@@ -18,9 +18,9 @@ ETX_OBJS=$(ETX_SRCS:%.c=$(BINDIR)/%.o)
 LIBDIRS=-L${ELV_TOOLCHAIN_DIST_PLATFORM}/lib -L../utils/lib -L./lib
 FLAGS=-O0 -ggdb -Wall -fPIC -DAUDIO
 
-all: avpipelib etx goetx
+all: avpipelib etx goetx install
 
-install: all
+install:
 	@(if [ ! -d $(TOP_DIR)/../$(LIBDIR) ]; then mkdir $(TOP_DIR)/../$(LIBDIR); fi)
 	@echo Installing avpipelib
 	@cp $(LIBDIR)/* $(TOP_DIR)/../$(LIBDIR)

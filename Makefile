@@ -3,20 +3,33 @@ SUBDIRS=utils libavpipe avcmd
 
 BINDIR=bin
 LIBDIR=lib
+INCDIR=include
 SRCS=avpipe_handler.c
 OBJS=$(SRCS:%.c=$(BINDIR)/%.o)
 
-INCDIRS=-I${ELV_TOOLCHAIN_DIST_PLATFORM}/include -I${TOP_DIR}/utils/include -I${TOP_DIR}/libavpipe/include
-
-all clean install: check-env lclean
+all install: copy_libs check-env
 	@for dir in $(SUBDIRS); do \
 	echo "Making $@ in $$dir..."; \
 	(cd $$dir; make $@) || exit 1; \
 	done
 
+clean: lclean
+	@for dir in $(SUBDIRS); do \
+	echo "Making $@ in $$dir..."; \
+	(cd $$dir; make $@) || exit 1; \
+	done
+
+copy_libs:
+	@(if [ ! -d $(LIBDIR) ]; then mkdir $(LIBDIR); fi)
+	@(if [ ! -d $(INCDIR) ]; then mkdir $(INCDIR); fi)
+	cp ${ELV_TOOLCHAIN_DIST_PLATFORM}/lib/libav*.a ${LIBDIR}
+	cp ${ELV_TOOLCHAIN_DIST_PLATFORM}/lib/libswresample.a ${LIBDIR}
+	cp ${ELV_TOOLCHAIN_DIST_PLATFORM}/lib/libswscale.a ${LIBDIR}
+	cp ${ELV_TOOLCHAIN_DIST_PLATFORM}/lib/libpostproc.a ${LIBDIR}
+	cp -r ${ELV_TOOLCHAIN_DIST_PLATFORM}/include/* ${INCDIR}
+
 avpipe:
-	CGO_CFLAGS="-I./libavpipe/include -I./utils/include -I${ELV_TOOLCHAIN_DIST_PLATFORM}/include" CGO_LDFLAGS="-L${ELV_TOOLCHAIN_DIST_PLATFORM}/lib -L${TOP_DIR}/utils/lib -L${TOP_DIR}/libavpipe/lib -lavpipe -lavcodec -lavformat -lavfilter -lavdevice -lswresample -lswscale -lavutil -lpostproc -lutils -lm -ldl -lpthread" go build -v
-	#CGO_CFLAGS="-I./libavpipe/include -I./utils/include -I${ELV_TOOLCHAIN_DIST_PLATFORM}/include" CGO_LDFLAGS="-L${ELV_TOOLCHAIN_DIST_PLATFORM}/lib -L${TOP_DIR}/utils/lib -L${TOP_DIR}/libavpipe/lib -lavcodec -lavformat -lavfilter -lavdevice -lswresample -lswscale -lavutil -lpostproc -lm -ldl -lpthread" go build -v
+	CGO_CFLAGS="-I./include" CGO_LDFLAGS="-L${TOP_DIR}/lib -lavcodec -lavformat -lavfilter -lavpipe -lavdevice -lswresample -lswscale -lavutil -lpostproc -lutils -lz -lm -ldl -lvdpau -lva -lX11 -lpthread" go build -v
 	mkdir -p ./O
 
 libavpipego: $(OBJS)
