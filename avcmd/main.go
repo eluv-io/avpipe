@@ -143,6 +143,7 @@ func main() {
 	}
 
 	params := &avpipe.TxParams{
+		Format:             "dash",
 		StartTimeTs:        0,
 		DurationTs:         -1,
 		StartSegmentStr:    "1",

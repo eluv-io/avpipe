@@ -269,6 +269,7 @@ main(
 
     /* Parameters */
     txparams_t p = {
+        .format = "dash",
         .video_bitrate = 2560000,           /* not used if using CRF */
         .audio_bitrate = 64000,
         .sample_rate = 44100,               /* Audio sampling rate */

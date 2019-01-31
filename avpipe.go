@@ -41,6 +41,7 @@ const (
 
 // TxParams should match with txparams_t in C library
 type TxParams struct {
+	Format             string
 	StartTimeTs        int32
 	DurationTs         int32
 	StartSegmentStr    string
@@ -323,6 +324,7 @@ func Tx(params *TxParams, url string) int {
 	}
 
 	cparams := &C.txparams_t{
+		format:                C.CString(params.Format),
 		start_time_ts:         C.int(params.StartTimeTs),
 		duration_ts:           C.int(params.DurationTs),
 		start_segment_str:     C.CString(params.StartSegmentStr),

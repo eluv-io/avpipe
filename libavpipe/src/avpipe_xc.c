@@ -259,6 +259,9 @@ prepare_video_encoder(
         encoder_codec_context->flags |= AV_CODEC_FLAG_GLOBAL_HEADER;
     }
 
+    /* Enable hls playlist format if output format is set to "hls" */
+    if (!strcmp(params->format, "hls"))
+        av_opt_set(encoder_context->format_context->priv_data, "hls_playlist", "1", 0);
     /* Open video encoder (initialize the encoder codec_context[i] using given codec[i]). */
     if (avcodec_open2(encoder_context->codec_context[index], encoder_context->codec[index], &encoder_options) < 0) {
         elv_dbg("Could not open encoder for video");
@@ -821,6 +824,16 @@ avpipe_init(
     txparams_t *params)
 {
     txctx_t *p_txctx = (txctx_t *) calloc(1, sizeof(txctx_t));
+
+    if (!params) {
+        elv_err("Parameters are not set");
+        return -1;
+    }
+
+    if (strcmp(params->format, "dash") && strcmp(params->format, "hls")) {
+        elv_err("Output format can be only \"dash\" or \"hls\"");
+        return -1;
+    }
 
     if (prepare_decoder(&p_txctx->decoder_ctx, in_handlers, inctx, params)) {
         elv_err("Failed prepared decoder");

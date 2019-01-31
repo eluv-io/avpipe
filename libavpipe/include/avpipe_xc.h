@@ -106,6 +106,7 @@ typedef struct coderctx_t {
 } coderctx_t;
 
 typedef struct txparams_t {
+    char *format;
     int start_time_ts;
     int duration_ts;
     char *start_segment_str;
