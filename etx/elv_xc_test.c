@@ -118,7 +118,9 @@ out_opener(
 
     case avpipe_video_init_stream:
     case avpipe_audio_init_stream:
-        /* Init segments */
+    case avpipe_video_m3u:
+    case avpipe_audio_m3u:
+        /* Init segments, or m3u files */
         sprintf(segname, "./O/%s", url);
         break;
 
@@ -128,7 +130,7 @@ out_opener(
             const char *segbase = "chunk-stream";
 
             sprintf(segname, "./%s/%s%d-%05d.mp4",
-                "/O", segbase, outctx->stream_index, outctx->seg_index);
+                "O", segbase, outctx->stream_index, outctx->seg_index);
         }
         break;
 
@@ -147,7 +149,7 @@ out_opener(
 
     outctx->bufsz = 1 * 1024 * 1024;
     outctx->buf = (unsigned char *)malloc(outctx->bufsz); /* Must be malloc'd - will be realloc'd by avformat */
-    elv_dbg("OUT OPEN outctx=%p type=%d, fd=%d\n", outctx, outctx->type, fd);
+    elv_dbg("OUT OPEN outctx=%p, path=%s, type=%d, fd=%d\n", outctx, segname, outctx->type, fd);
     return 0;
 }
 
@@ -269,7 +271,7 @@ main(
 
     /* Parameters */
     txparams_t p = {
-        .format = "dash",
+        .format = "hls",
         .video_bitrate = 2560000,           /* not used if using CRF */
         .audio_bitrate = 64000,
         .sample_rate = 44100,               /* Audio sampling rate */

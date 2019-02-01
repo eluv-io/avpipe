@@ -89,10 +89,18 @@ elv_io_open(
             if (i < strlen(url)) {
                 outctx->stream_index = url[i] - '0';
             }
-            if (outctx->stream_index == out_tracker[outctx->stream_index].video_stream_index)
-                outctx->type = avpipe_video_init_stream;
-            else
-                outctx->type = avpipe_audio_init_stream;
+            if (!strncmp(url, "media", 5)) {
+                if (outctx->stream_index == out_tracker[outctx->stream_index].video_stream_index)
+                    outctx->type = avpipe_video_m3u;
+                else
+                    outctx->type = avpipe_audio_m3u;
+            }
+            else {
+                if (outctx->stream_index == out_tracker[outctx->stream_index].video_stream_index)
+                    outctx->type = avpipe_video_init_stream;
+                else
+                    outctx->type = avpipe_audio_init_stream;
+            }
             outctx->seg_index = -1;     // Special index for init-stream0 and init-stream1
         }
 

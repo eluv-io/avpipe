@@ -368,7 +368,7 @@ prepare_encoder(
      * Setting 3th paramter to "dash" determines the output file format and avoids guessing
      * output file format using filename in ffmpeg library.
      */
-    avformat_alloc_output_context2(&encoder_context->format_context, NULL, "dash", NULL);
+    avformat_alloc_output_context2(&encoder_context->format_context, NULL, "dash", "");
     if (!encoder_context->format_context) {
         elv_dbg("could not allocate memory for output format");
         return -1;

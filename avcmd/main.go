@@ -77,6 +77,10 @@ func (oo *avcmdOutputOpener) Open(stream_index, seg_index int, out_type avpipe.A
 		fallthrough
 	case avpipe.DASHAudioSegment:
 		filename = fmt.Sprintf("./O/chunk-stream%d-%05d.mp4", stream_index, seg_index)
+	case avpipe.HLSVideoM3U:
+		fallthrough
+	case avpipe.HLSAudioM3U:
+		filename = fmt.Sprintf("./O/media_%d.m3u8", stream_index)
 	}
 
 	f, err := os.OpenFile(filename, os.O_RDWR|os.O_CREATE|os.O_TRUNC, 0644)
@@ -143,7 +147,7 @@ func main() {
 	}
 
 	params := &avpipe.TxParams{
-		Format:             "dash",
+		Format:             "hls",
 		StartTimeTs:        0,
 		DurationTs:         -1,
 		StartSegmentStr:    "1",

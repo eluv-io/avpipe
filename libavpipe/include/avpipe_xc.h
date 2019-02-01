@@ -18,7 +18,9 @@ typedef enum avpipe_buftype_t {
     avpipe_video_init_stream = 2,       // video init_stream
     avpipe_audio_init_stream = 3,       // audio init_stream
     avpipe_video_segment = 4,           // video chunk-stream
-    avpipe_audio_segment = 5            // audio chunk-stream
+    avpipe_audio_segment = 5,           // audio chunk-stream
+    avpipe_video_m3u = 6,               // video m3u
+    avpipe_audio_m3u = 7                // audio m3u
 } avpipe_buftype_t;
 
 typedef struct ioctx_t {

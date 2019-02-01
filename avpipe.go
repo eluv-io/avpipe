@@ -37,6 +37,8 @@ const (
 	DASHVideoSegment
 	DASHAudioInit
 	DASHAudioSegment
+	HLSVideoM3U
+	HLSAudioM3U
 )
 
 // TxParams should match with txparams_t in C library
@@ -233,6 +235,10 @@ func AVPipeOpenOutput(handler C.int64_t, stream_index, seg_index, stream_type C.
 		out_type = DASHVideoSegment
 	case C.avpipe_audio_segment:
 		out_type = DASHAudioSegment
+	case C.avpipe_video_m3u:
+		out_type = HLSVideoM3U
+	case C.avpipe_audio_m3u:
+		out_type = HLSAudioM3U
 	default:
 		log.Error("AVPipeOpenOutput()", "invalid stream type", stream_type)
 		return C.int(-1)
