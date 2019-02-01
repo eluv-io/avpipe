@@ -116,6 +116,11 @@ out_opener(
         sprintf(segname, "./O/%s", "dash.mpd");
         break;
 
+    case avpipe_master_m3u:
+        /* HLS master mt38 */
+        sprintf(segname, "./O/%s", "master.m3u8");
+        break;
+
     case avpipe_video_init_stream:
     case avpipe_audio_init_stream:
     case avpipe_video_m3u:

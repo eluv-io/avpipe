@@ -77,6 +77,8 @@ func (oo *avcmdOutputOpener) Open(stream_index, seg_index int, out_type avpipe.A
 		fallthrough
 	case avpipe.DASHAudioSegment:
 		filename = fmt.Sprintf("./O/chunk-stream%d-%05d.mp4", stream_index, seg_index)
+	case avpipe.HLSMasterM3U:
+		filename = fmt.Sprintf("./O/master.m3u8")
 	case avpipe.HLSVideoM3U:
 		fallthrough
 	case avpipe.HLSAudioM3U:

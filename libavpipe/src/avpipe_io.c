@@ -89,7 +89,10 @@ elv_io_open(
             if (i < strlen(url)) {
                 outctx->stream_index = url[i] - '0';
             }
-            if (!strncmp(url, "media", 5)) {
+            if (!strncmp(url, "master", 6)) {
+                outctx->type = avpipe_master_m3u;
+            }
+            else if (!strncmp(url, "media", 5)) {
                 if (outctx->stream_index == out_tracker[outctx->stream_index].video_stream_index)
                     outctx->type = avpipe_video_m3u;
                 else
