@@ -20,10 +20,10 @@ int64_t NewIOHandler(char*, int64_t *);
 int AVPipeReadInput(int64_t, uint8_t *, int);
 int AVPipeSeekInput(int64_t, int64_t offset, int whence);
 int AVPipeCloseInput(int64_t);
-int AVPipeOpenOutput(int64_t, int, int, int);
-int AVPipeWriteOutput(int64_t, int, uint8_t *, int);
-int AVPipeSeekOutput(int64_t, int, int64_t offset, int whence);
-int AVPipeCloseOutput(int64_t, int);
+int64_t AVPipeOpenOutput(int64_t, int, int, int);
+int AVPipeWriteOutput(int64_t, int64_t, uint8_t *, int);
+int AVPipeSeekOutput(int64_t, int64_t, int64_t offset, int whence);
+int AVPipeCloseOutput(int64_t, int64_t);
 
 #define MIN_VALID_FD      (-4)
 
@@ -169,9 +169,8 @@ out_opener(
     const char *url,
     ioctx_t *outctx)
 {
-    char segname[128];
     ioctx_t *inctx = outctx->inctx;
-    int fd;
+    int64_t fd;
     int64_t h;
 
     h = *((int64_t *)(inctx->opaque));
@@ -181,12 +180,12 @@ out_opener(
     outctx->buf = (unsigned char *)malloc(outctx->bufsz); /* Must be malloc'd - will be realloc'd by avformat */
 
     fd = AVPipeOpenOutput(h, outctx->stream_index, outctx->seg_index, outctx->type);
-    elv_dbg("OUT out_opener outctx=%p, fd=%d\n", outctx, fd);
+    elv_dbg("OUT out_opener outctx=%p, fd=%"PRId64, outctx, fd);
     if (fd < MIN_VALID_FD)
         return -1;
 
-    outctx->opaque = (int *) malloc(sizeof(int));
-    *((int *)(outctx->opaque)) = fd;
+    outctx->opaque = (int *) malloc(sizeof(int64_t));
+    *((int64_t *)(outctx->opaque)) = fd;
 
     return 0;
 }
@@ -210,14 +209,14 @@ out_write_packet(
     ioctx_t *outctx = (ioctx_t *)opaque;
     ioctx_t *inctx = outctx->inctx;
     int64_t h = *((int64_t *)(inctx->opaque));
-    int fd = *(int *)outctx->opaque;
+    int64_t fd = *(int64_t *)outctx->opaque;
     int bwritten = AVPipeWriteOutput(h, fd, buf, buf_size);
     if (bwritten >= 0) {
         outctx->written_bytes += bwritten;
         outctx->write_pos += bwritten;
     }
 
-    elv_dbg("OUT WRITE size=%d written=%d pos=%d total=%d", buf_size, bwritten, outctx->write_pos, outctx->written_bytes);
+    elv_dbg("OUT WRITE fd="PRId64", size=%d written=%d pos=%d total=%d", fd, buf_size, bwritten, outctx->write_pos, outctx->written_bytes);
 
     return buf_size;
 }
@@ -231,7 +230,7 @@ out_seek(
     ioctx_t *outctx = (ioctx_t *)opaque;
     ioctx_t *inctx = outctx->inctx;
     int64_t h = *((int64_t *)(inctx->opaque));
-    int fd = *(int *)outctx->opaque;
+    int64_t fd = *(int64_t *)outctx->opaque;
     int rc = AVPipeSeekOutput(h, fd, offset, whence);
     whence = whence & 0xFFFF; /* Mask out AVSEEK_SIZE and AVSEEK_FORCE */
     switch (whence) {
@@ -245,7 +244,7 @@ out_seek(
         elv_dbg("OUT SEEK - weird seek\n");
     }
 
-    elv_dbg("OUT SEEK offset=%d whence=%d", offset, whence);
+    elv_dbg("OUT SEEK fd="PRId64" offset=%d whence=%d", fd, offset, whence);
 
     return rc;
 }
@@ -254,7 +253,7 @@ int
 out_closer(
     ioctx_t *outctx)
 {
-    int fd = *(int *)outctx->opaque;
+    int64_t fd = *(int64_t *)outctx->opaque;
     ioctx_t *inctx = outctx->inctx;
     int64_t h = *((int64_t *)(inctx->opaque));
     int rc = AVPipeCloseOutput(h, fd);

@@ -63,7 +63,7 @@ func (i *avcmdInput) Size() int64 {
 type avcmdOutputOpener struct {
 }
 
-func (oo *avcmdOutputOpener) Open(stream_index, seg_index int, out_type avpipe.AVType) (avpipe.OutputHandler, error) {
+func (oo *avcmdOutputOpener) Open(h, fd int64, stream_index, seg_index int, out_type avpipe.AVType) (avpipe.OutputHandler, error) {
 	var filename string
 
 	switch out_type {
@@ -90,13 +90,13 @@ func (oo *avcmdOutputOpener) Open(stream_index, seg_index int, out_type avpipe.A
 		return nil, err
 	}
 
-	h := &avcmdOutput{
+	oh := &avcmdOutput{
 		url:          filename,
 		stream_index: stream_index,
 		seg_index:    seg_index,
 		file:         f}
 
-	return h, nil
+	return oh, nil
 }
 
 // Implement OutputHandler

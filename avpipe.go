@@ -89,7 +89,7 @@ type InputHandler interface {
 }
 
 type OutputOpener interface {
-	Open(stream_index, seg_index int, out_type AVType) (OutputHandler, error)
+	Open(h, fd int64, stream_index, seg_index int, out_type AVType) (OutputHandler, error)
 }
 
 type OutputHandler interface {
@@ -106,12 +106,13 @@ type OutputHandler interface {
 // Implement IOHandler
 type ioHandler struct {
 	input    InputHandler          // Input file
-	outTable map[int]OutputHandler // Map of integer handle to output interfaces
+	outTable map[int64]OutputHandler // Map of integer handle to output interfaces
 }
 
 // Global table of handlers
 var gHandlers map[int64]*ioHandler = make(map[int64]*ioHandler)
 var gHandleNum int64
+var gFd int64
 var gMutex sync.Mutex
 var gInputOpener InputOpener
 var gOutputOpener OutputOpener
@@ -137,7 +138,7 @@ func NewIOHandler(url *C.char, size *C.int64_t) C.int64_t {
 
 	*size = C.int64_t(input.Size())
 
-	h := &ioHandler{input: input, outTable: make(map[int]OutputHandler)}
+	h := &ioHandler{input: input, outTable: make(map[int64]OutputHandler)}
 	log.Debug("NewIOHandler()", "url", filename, "size", size)
 
 	gMutex.Lock()
@@ -219,11 +220,13 @@ func (h *ioHandler) InCloser() error {
 }
 
 //export AVPipeOpenOutput
-func AVPipeOpenOutput(handler C.int64_t, stream_index, seg_index, stream_type C.int) C.int {
+func AVPipeOpenOutput(handler C.int64_t, stream_index, seg_index, stream_type C.int) C.int64_t {
 	var out_type AVType
 
 	gMutex.Lock()
 	h := gHandlers[int64(handler)]
+	gFd++
+	fd := gFd
 	gMutex.Unlock()
 	switch stream_type {
 	case C.avpipe_video_init_stream:
@@ -244,31 +247,30 @@ func AVPipeOpenOutput(handler C.int64_t, stream_index, seg_index, stream_type C.
 		out_type = HLSAudioM3U
 	default:
 		log.Error("AVPipeOpenOutput()", "invalid stream type", stream_type)
-		return C.int(-1)
+		return C.int64_t(-1)
 	}
 
-	etxOut, err := gOutputOpener.Open(int(stream_index), int(seg_index), out_type)
+	etxOut, err := gOutputOpener.Open(int64(handler), fd, int(stream_index), int(seg_index), out_type)
 	if err != nil {
 		log.Error("AVPipeOpenOutput()", "out_type", out_type, "error", err)
-		return C.int(-1)
+		return C.int64_t(-1)
 	}
 
-	fd := int(seg_index-1)*2 + int(stream_index)
 	log.Debug("AVPipeOpenOutput()", "fd", fd, "stream_index", stream_index, "seg_index", seg_index, "out_type", out_type)
 	h.outTable[fd] = etxOut
 
-	return C.int(fd)
+	return C.int64_t(fd)
 }
 
 //export AVPipeWriteOutput
-func AVPipeWriteOutput(handler C.int64_t, fd C.int, buf *C.uint8_t, sz C.int) C.int {
+func AVPipeWriteOutput(handler C.int64_t, fd C.int64_t, buf *C.uint8_t, sz C.int) C.int {
 	gMutex.Lock()
 	h := gHandlers[int64(handler)]
 
 	gMutex.Unlock()
 	log.Debug("AVPipeWriteOutput", "fd", fd, "sz", sz)
 
-	if h.outTable[int(fd)] == nil {
+	if h.outTable[int64(fd)] == nil {
 		panic("OutWriterX outTable entry is NULL")
 	}
 
@@ -281,14 +283,14 @@ func AVPipeWriteOutput(handler C.int64_t, fd C.int, buf *C.uint8_t, sz C.int) C.
 	return C.int(n)
 }
 
-func (h *ioHandler) OutWriter(fd C.int, buf []byte) (int, error) {
-	n, err := h.outTable[int(fd)].Write(buf)
+func (h *ioHandler) OutWriter(fd C.int64_t, buf []byte) (int, error) {
+	n, err := h.outTable[int64(fd)].Write(buf)
 	log.Debug("OutWriter written", "n", n, "error", err)
 	return n, err
 }
 
 //export AVPipeSeekOutput
-func AVPipeSeekOutput(handler C.int64_t, fd C.int, offset C.int64_t, whence C.int) C.int {
+func AVPipeSeekOutput(handler C.int64_t, fd C.int64_t, offset C.int64_t, whence C.int) C.int {
 	gMutex.Lock()
 	h := gHandlers[int64(handler)]
 	gMutex.Unlock()
@@ -299,14 +301,14 @@ func AVPipeSeekOutput(handler C.int64_t, fd C.int, offset C.int64_t, whence C.in
 	return C.int(n)
 }
 
-func (h *ioHandler) OutSeeker(fd C.int, offset C.int64_t, whence C.int) (int64, error) {
-	n, err := h.outTable[int(fd)].Seek(int64(offset), int(whence))
+func (h *ioHandler) OutSeeker(fd C.int64_t, offset C.int64_t, whence C.int) (int64, error) {
+	n, err := h.outTable[int64(fd)].Seek(int64(offset), int(whence))
 	log.Debug("OutSeeker", "err", err)
 	return n, err
 }
 
 //export AVPipeCloseOutput
-func AVPipeCloseOutput(handler C.int64_t, fd C.int) C.int {
+func AVPipeCloseOutput(handler C.int64_t, fd C.int64_t) C.int {
 	gMutex.Lock()
 	h := gHandlers[int64(handler)]
 	gMutex.Unlock()
@@ -318,12 +320,14 @@ func AVPipeCloseOutput(handler C.int64_t, fd C.int) C.int {
 	return C.int(0)
 }
 
-func (h *ioHandler) OutCloser(fd C.int) error {
-	err := h.outTable[int(fd)].Close()
-	log.Debug("OutCloser()", "fd", int(fd), "error", err)
+func (h *ioHandler) OutCloser(fd C.int64_t) error {
+	err := h.outTable[int64(fd)].Close()
+	log.Debug("OutCloser()", "fd", int64(fd), "error", err)
 	return err
 }
 
+// params: transcoding parameters
+// url: input filename that has to be transcoded
 func Tx(params *TxParams, url string) int {
 
 	// Convert TxParams to C.txparams_t

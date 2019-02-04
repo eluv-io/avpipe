@@ -61,22 +61,29 @@ func (i *fileInput) Size() int64 {
 
 //Implement AVPipeOutputOpener
 type fileOutputOpener struct {
+	dir string
 }
 
-func (oo *fileOutputOpener) Open(stream_index, seg_index int, out_type avpipe.AVType) (avpipe.OutputHandler, error) {
+func (oo *fileOutputOpener) Open(h, fd int64, stream_index, seg_index int, out_type avpipe.AVType) (avpipe.OutputHandler, error) {
 	var filename string
 
 	switch out_type {
 	case avpipe.DASHVideoInit:
 		fallthrough
 	case avpipe.DASHAudioInit:
-		filename = fmt.Sprintf("./O/init-stream%d.mp4", stream_index)
+		filename = fmt.Sprintf("./%s/init-stream%d.mp4", oo.dir, stream_index)
 	case avpipe.DASHManifest:
-		filename = fmt.Sprintf("./O/dash.mpd")
+		filename = fmt.Sprintf("./%s/dash.mpd", oo.dir)
 	case avpipe.DASHVideoSegment:
 		fallthrough
 	case avpipe.DASHAudioSegment:
-		filename = fmt.Sprintf("./O/chunk-stream%d-%05d.mp4", stream_index, seg_index)
+		filename = fmt.Sprintf("./%s/chunk-stream%d-%05d.mp4", oo.dir, stream_index, seg_index)
+	case avpipe.HLSMasterM3U:
+		filename = fmt.Sprintf("./%s/master.m3u8", oo.dir)
+	case avpipe.HLSVideoM3U:
+		fallthrough
+	case avpipe.HLSAudioM3U:
+		filename = fmt.Sprintf("./%s/media_%d.m3u8", oo.dir, stream_index)
 	}
 
 	f, err := os.OpenFile(filename, os.O_RDWR|os.O_CREATE|os.O_TRUNC, 0644)
@@ -84,13 +91,59 @@ func (oo *fileOutputOpener) Open(stream_index, seg_index int, out_type avpipe.AV
 		return nil, err
 	}
 
-	h := &fileOutput{
+	oh := &fileOutput{
 		url:          filename,
 		stream_index: stream_index,
 		seg_index:    seg_index,
 		file:         f}
 
-	return h, nil
+	return oh, nil
+}
+
+//Implement AVPipeOutputOpener
+type concurrentOutputOpener struct {
+	dir string
+}
+
+func (coo *concurrentOutputOpener) Open(h, fd int64, stream_index, seg_index int, out_type avpipe.AVType) (avpipe.OutputHandler, error) {
+	var filename string
+	dir := fmt.Sprintf("%s/O%d", coo.dir, h)
+
+	if _, err := os.Stat(dir); os.IsNotExist(err) {
+		os.Mkdir(dir, 0755)
+	}
+
+	switch out_type {
+	case avpipe.DASHVideoInit:
+		fallthrough
+	case avpipe.DASHAudioInit:
+		filename = fmt.Sprintf("./%s/init-stream%d.mp4", dir, stream_index)
+	case avpipe.DASHManifest:
+		filename = fmt.Sprintf("./%s/dash.mpd", dir)
+	case avpipe.DASHVideoSegment:
+		fallthrough
+	case avpipe.DASHAudioSegment:
+		filename = fmt.Sprintf("./%s/chunk-stream%d-%05d.mp4", dir, stream_index, seg_index)
+	case avpipe.HLSMasterM3U:
+		filename = fmt.Sprintf("./%s/master.m3u8", dir)
+	case avpipe.HLSVideoM3U:
+		fallthrough
+	case avpipe.HLSAudioM3U:
+		filename = fmt.Sprintf("./%s/media_%d.m3u8", dir, stream_index)
+	}
+
+	f, err := os.OpenFile(filename, os.O_RDWR|os.O_CREATE|os.O_TRUNC, 0644)
+	if err != nil {
+		return nil, err
+	}
+
+	oh := &fileOutput{
+		url:          filename,
+		stream_index: stream_index,
+		seg_index:    seg_index,
+		file:         f}
+
+	return oh, nil
 }
 
 // Implement OutputHandler
@@ -116,10 +169,11 @@ func (o *fileOutput) Close() error {
 	return err
 }
 
-func TestSingleOutputSingleWrite(t *testing.T) {
+func TestSingleTranscode(t *testing.T) {
 	filename := "./media/ErsteChristmas.mp4"
 
 	params := &avpipe.TxParams{
+		Format:             "hls",
 		StartTimeTs:        0,
 		DurationTs:         -1,
 		StartSegmentStr:    "1",
@@ -140,10 +194,53 @@ func TestSingleOutputSingleWrite(t *testing.T) {
 		os.Mkdir("./O", 0755)
 	}
 
-	avpipe.InitIOHandler(&fileInputOpener{url: filename}, &fileOutputOpener{})
+	avpipe.InitIOHandler(&fileInputOpener{url: filename}, &fileOutputOpener{dir: "O"})
 
 	err := avpipe.Tx(params, filename)
 	if err != 0 {
 		t.Fail()
+	}
+}
+
+func TestConcurrentTranscode(t *testing.T) {
+	filename := "./media/rocky.mp4"
+
+	params := &avpipe.TxParams{
+		Format:             "hls",
+		StartTimeTs:        0,
+		DurationTs:         -1,
+		StartSegmentStr:    "1",
+		VideoBitrate:       2560000,
+		AudioBitrate:       64000,
+		SampleRate:         44100,
+		CrfStr:             "23",
+		SegDurationTs:      1001 * 60,
+		SegDurationFr:      60,
+		SegDurationSecsStr: "2.002",
+		Codec:              "libx264",
+		EncHeight:          720,
+		EncWidth:           1280,
+	}
+
+	// Create output directory if it doesn't exist
+	if _, err := os.Stat("./C"); os.IsNotExist(err) {
+		os.Mkdir("./C", 0755)
+	}
+
+	avpipe.InitIOHandler(&fileInputOpener{url: filename}, &concurrentOutputOpener{dir: "C"})
+
+	done := make(chan struct{})
+	for i := 0; i < 3; i++ {
+		go func(params *avpipe.TxParams, filename string) {
+			err := avpipe.Tx(params, filename)
+			if err != 0 {
+				t.Fail()
+			}
+			done <- struct{}{} // Signal the main goroutinr
+		}(params, filename)
+	}
+
+	for i := 0; i < 3; i++ {
+		<-done // Wait for background goroutines to finish
 	}
 }
