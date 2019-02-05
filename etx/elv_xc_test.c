@@ -9,9 +9,13 @@
 #include <fcntl.h>
 #include <libavutil/log.h>
 #include <errno.h>
+#include <pthread.h>
 
 #include "avpipe_xc.h"
 #include "elv_log.h"
+
+static int opened_inputs = 0;
+static pthread_mutex_t lock = PTHREAD_MUTEX_INITIALIZER;
 
 int
 in_opener(
@@ -25,10 +29,17 @@ in_opener(
         return -1;
     }
 
-    inctx->opaque = (int *) calloc(1, sizeof(int));
+    inctx->opaque = (int *) calloc(1, 2*sizeof(int));
     *((int *)(inctx->opaque)) = fd;
-    if (fstat(fd, &stb) < 0)
+    if (fstat(fd, &stb) < 0) {
+        free(inctx->opaque);
         return -1;
+    }
+
+    pthread_mutex_lock(&lock);
+    opened_inputs++;
+    *((int *)(inctx->opaque)+1) = opened_inputs;
+    pthread_mutex_unlock(&lock);
 
     inctx->sz = stb.st_size;
     elv_dbg("IN OPEN fd=%d url=%s", fd, url);
@@ -107,18 +118,27 @@ out_opener(
     ioctx_t *outctx)
 {
     char segname[128];
+    char dir[256];
     int fd;
+    ioctx_t *inctx = outctx->inctx;
+    int gfd = *((int *)(inctx->opaque)+1);
+    struct stat st = {0};
+
+    sprintf(dir, "./O/O%d", gfd);
+    if (stat(dir, &st) == -1) {
+        mkdir(dir, 0700);
+    }
 
     /* If there is no url, just allocate the buffers. The data will be copied to the buffers */
     switch (outctx->type) {
     case avpipe_manifest:
         /* Manifest */
-        sprintf(segname, "./O/%s", "dash.mpd");
+        sprintf(segname, "%s/%s", dir, "dash.mpd");
         break;
 
     case avpipe_master_m3u:
         /* HLS master mt38 */
-        sprintf(segname, "./O/%s", "master.m3u8");
+        sprintf(segname, "%s/%s", dir, "master.m3u8");
         break;
 
     case avpipe_video_init_stream:
@@ -126,7 +146,7 @@ out_opener(
     case avpipe_video_m3u:
     case avpipe_audio_m3u:
         /* Init segments, or m3u files */
-        sprintf(segname, "./O/%s", url);
+        sprintf(segname, "%s/%s", dir, url);
         break;
 
     case avpipe_video_segment:
@@ -135,7 +155,7 @@ out_opener(
             const char *segbase = "chunk-stream";
 
             sprintf(segname, "./%s/%s%d-%05d.mp4",
-                "O", segbase, outctx->stream_index, outctx->seg_index);
+                dir, segbase, outctx->stream_index, outctx->seg_index);
         }
         break;
 
@@ -260,14 +280,55 @@ out_closer(
     return 0;
 }
 
+typedef struct tx_thread_params_t {
+    char *filename;
+    int repeats;
+    txparams_t *txparams;
+    avpipe_io_handler_t *in_handlers;
+    avpipe_io_handler_t *out_handlers;
+} tx_thread_params_t;
+
+void *
+tx_thread_func(
+    void *thread_params)
+{
+    tx_thread_params_t *params = (tx_thread_params_t *) thread_params;
+    txctx_t *txctx;
+    int i;
+
+    for (i=0; i<params->repeats; i++) {
+        ioctx_t *inctx = (ioctx_t *)calloc(1, sizeof(ioctx_t));
+
+        if (params->in_handlers->avpipe_opener(params->filename, inctx) < 0)
+            continue;
+
+        if (avpipe_init(&txctx, params->in_handlers, inctx, params->out_handlers, params->txparams) < 0)
+            continue;
+
+        if (avpipe_tx(txctx, 0) < 0) {
+            elv_err("Error in transcoding");
+            continue;
+        }
+
+        /* Close input handler resources */
+        params->in_handlers->avpipe_closer(inctx);
+
+        elv_dbg("Releasing all the resources");
+        avpipe_fini(&txctx);
+    }
+
+    return 0;
+}
+
 static void
 usage(
     char *progname
 )
 {
-    printf("Usage: %s -r <repeats> -f <filename>\n"
-            "\t-r : optional, default is 1 repeat (must be bigger than 1)\n"
-            "\t-f : mandatory, need to pass input filename (output goes to directory ./O)\n", progname);
+    printf("Usage: %s -r <repeats> -t <n_threads> -f <filename>\n"
+            "\t-r : (optional) default is 1 repeat, must be bigger than 1\n"
+            "\t-t : (optional) default is 1 thread, must be bigger than 1\n"
+            "\t-f : (mandatory) input filename for transcoding. Output goes to directory ./O\n", progname);
 }
 
 /*
@@ -280,10 +341,13 @@ main(
     int argc,
     char *argv[])
 {
-    txctx_t *txctx;
+    pthread_t *tids;
+    tx_thread_params_t thread_params;
     avpipe_io_handler_t in_handlers;
     avpipe_io_handler_t out_handlers;
-    int repeat = 1;
+    struct stat st = {0};
+    int repeats = 1;
+    int n_threads = 1;
     char *filename = NULL;
     int i;
 
@@ -303,7 +367,7 @@ main(
         .seg_duration_secs_str = "2.002",
         //.seg_duration_secs_str = "30.015",
         .codec = "libx264",
-	//.codec = "h264_videotoolbox", 
+        //.codec = "h264_videotoolbox", 
         .enc_height = 720,                  /* -1 means use source height, other values 2160, 720 */
         .enc_width = 1280                   /* -1 means use source width, other values 3840, 1280 */
     };
@@ -314,12 +378,12 @@ main(
         case '-':
             switch ((int) argv[i][1]) {
             case 'r':
-                if (sscanf(argv[i+1], "%d", &repeat) != 1) {
+                if (sscanf(argv[i+1], "%d", &repeats) != 1) {
                     usage(argv[0]);
                     return 1;
                 }
 
-                if ( repeat < 1 ) {
+                if ( repeats < 1 ) {
                     usage(argv[0]);
                     return -1;
                 }
@@ -327,6 +391,18 @@ main(
 
             case 'f':
                 filename = argv[i+1];
+                break;
+
+            case 't':
+                if (sscanf(argv[i+1], "%d", &n_threads) != 1) {
+                    usage(argv[0]);
+                    return 1;
+                }
+
+                if ( n_threads < 1 ) {
+                    usage(argv[0]);
+                    return -1;
+                }
                 break;
 
             default:
@@ -347,6 +423,10 @@ main(
         return -1;
     }
 
+    /* Create O dir if doesn't exist */
+    if (stat("./O", &st) == -1)
+        mkdir("./O", 0700);
+
     // Set AV libs log level
     //av_log_set_level(AV_LOG_DEBUG);
 
@@ -365,26 +445,23 @@ main(
     out_handlers.avpipe_writer = out_write_packet;
     out_handlers.avpipe_seeker = out_seek;
 
-    for (i=0; i<repeat; i++) {
-        ioctx_t *inctx = (ioctx_t *)calloc(1, sizeof(ioctx_t));
+    thread_params.filename = strdup(filename);
+    thread_params.repeats = repeats;
+    thread_params.txparams = &p;
+    thread_params.in_handlers = &in_handlers;
+    thread_params.out_handlers = &out_handlers;
 
-        if (in_handlers.avpipe_opener(filename, inctx) < 0)
-            return -1;
+    tids = (pthread_t *) calloc(1, n_threads*sizeof(pthread_t));
 
-        if (avpipe_init(&txctx, &in_handlers, inctx, &out_handlers, &p) < 0)
-            return 1;
-
-        if (avpipe_tx(txctx, 0) < 0) {
-            elv_err("Error in transcoding");
-            return -1;
-        }
-
-        /* Close input handler resources */
-        in_handlers.avpipe_closer(inctx);
-
-        elv_dbg("Releasing all the resources");
-        avpipe_fini(&txctx);
+    for (i=0; i<n_threads; i++) {
+        pthread_create(&tids[i], NULL, tx_thread_func, &thread_params);
     }
+
+    for (i=0; i<n_threads; i++) {
+        pthread_join(tids[i], NULL);
+    }
+
+    free(tids);
 
     return 0;
 }
