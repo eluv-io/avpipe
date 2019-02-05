@@ -173,6 +173,7 @@ prepare_video_encoder(
     coderctx_t *decoder_context,
     txparams_t *params)
 {
+    int rc = 0;
     int index = decoder_context->video_stream_index;
 
     if (index < 0) {
@@ -263,8 +264,8 @@ prepare_video_encoder(
     if (!strcmp(params->format, "hls"))
         av_opt_set(encoder_context->format_context->priv_data, "hls_playlist", "1", 0);
     /* Open video encoder (initialize the encoder codec_context[i] using given codec[i]). */
-    if (avcodec_open2(encoder_context->codec_context[index], encoder_context->codec[index], &encoder_options) < 0) {
-        elv_dbg("Could not open encoder for video");
+    if ((rc = avcodec_open2(encoder_context->codec_context[index], encoder_context->codec[index], &encoder_options)) < 0) {
+        elv_dbg("Could not open encoder for video, err=%d", rc);
         return -1;
     }
 

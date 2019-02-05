@@ -203,6 +203,7 @@ func TestSingleTranscode(t *testing.T) {
 }
 
 func TestConcurrentTranscode(t *testing.T) {
+	nThreads := 10
 	filename := "./media/rocky.mp4"
 
 	params := &avpipe.TxParams{
@@ -230,17 +231,18 @@ func TestConcurrentTranscode(t *testing.T) {
 	avpipe.InitIOHandler(&fileInputOpener{url: filename}, &concurrentOutputOpener{dir: "C"})
 
 	done := make(chan struct{})
-	for i := 0; i < 3; i++ {
+	for i := 0; i < nThreads; i++ {
 		go func(params *avpipe.TxParams, filename string) {
 			err := avpipe.Tx(params, filename)
+			done <- struct{}{} // Signal the main goroutinr
 			if err != 0 {
 				t.Fail()
 			}
-			done <- struct{}{} // Signal the main goroutinr
 		}(params, filename)
 	}
 
-	for i := 0; i < 3; i++ {
+	for i := 0; i < nThreads; i++ {
 		<-done // Wait for background goroutines to finish
+		fmt.Printf("Go signal i=%d\n", i)
 	}
 }

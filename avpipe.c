@@ -181,8 +181,11 @@ out_opener(
 
     fd = AVPipeOpenOutput(h, outctx->stream_index, outctx->seg_index, outctx->type);
     elv_dbg("OUT out_opener outctx=%p, fd=%"PRId64, outctx, fd);
-    if (fd < MIN_VALID_FD)
+    if (fd < 0) {
+	elv_err("AVPIPE OUT OPEN failed stream_index=%d, seg_index=%d, type=%d",
+            outctx->stream_index, outctx->seg_index, outctx->type);
         return -1;
+    }
 
     outctx->opaque = (int *) malloc(sizeof(int64_t));
     *((int64_t *)(outctx->opaque)) = fd;
@@ -277,7 +280,7 @@ tx(
     if (!filename || filename[0] == '\0' )
         return -1;
 
-    elv_logger_open(NULL, "avpipe", 10, 10*1024*1024, elv_log_file);
+    elv_logger_open(NULL, "avpipe", 10, 100*1024*1024, elv_log_file);
     elv_set_log_level(elv_log_debug);
 
     in_handlers.avpipe_opener = in_opener;
@@ -304,6 +307,9 @@ tx(
         elv_err("Error in transcoding");
         return -1;
     }
+
+    /* Close input handler resources */
+    in_handlers.avpipe_closer(inctx);
 
     elv_dbg("Releasing all the resources");
     avpipe_fini(&txctx);

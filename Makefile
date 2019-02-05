@@ -12,6 +12,8 @@ all install: copy_libs check-env
 	(cd $$dir; make $@) || exit 1; \
 	done
 
+dynamic: copy_libs_all all
+
 clean: lclean
 	@for dir in $(SUBDIRS); do \
 	echo "Making $@ in $$dir..."; \
@@ -25,6 +27,15 @@ copy_libs:
 	cp ${ELV_TOOLCHAIN_DIST_PLATFORM}/lib/libswresample.a ${LIBDIR}
 	cp ${ELV_TOOLCHAIN_DIST_PLATFORM}/lib/libswscale.a ${LIBDIR}
 	cp ${ELV_TOOLCHAIN_DIST_PLATFORM}/lib/libpostproc.a ${LIBDIR}
+	cp -r ${ELV_TOOLCHAIN_DIST_PLATFORM}/include/* ${INCDIR}
+
+copy_libs_all:
+	@(if [ ! -d $(LIBDIR) ]; then mkdir $(LIBDIR); fi)
+	@(if [ ! -d $(INCDIR) ]; then mkdir $(INCDIR); fi)
+	cp ${ELV_TOOLCHAIN_DIST_PLATFORM}/lib/libav* ${LIBDIR}
+	cp ${ELV_TOOLCHAIN_DIST_PLATFORM}/lib/libswresample* ${LIBDIR}
+	cp ${ELV_TOOLCHAIN_DIST_PLATFORM}/lib/libswscale* ${LIBDIR}
+	cp ${ELV_TOOLCHAIN_DIST_PLATFORM}/lib/libpostproc* ${LIBDIR}
 	cp -r ${ELV_TOOLCHAIN_DIST_PLATFORM}/include/* ${INCDIR}
 
 avpipe:

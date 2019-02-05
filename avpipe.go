@@ -23,6 +23,7 @@ package avpipe
 // #include "avpipe.h"
 import "C"
 import (
+	"fmt"
 	"eluvio/log"
 	"sync"
 	"unsafe"
@@ -215,7 +216,7 @@ func AVPipeCloseInput(handler C.int64_t) C.int {
 
 func (h *ioHandler) InCloser() error {
 	err := h.input.Close()
-	log.Error("InCloser()", "error", err)
+	log.Debug("InCloser()", "error", err)
 	return err
 }
 
@@ -271,7 +272,8 @@ func AVPipeWriteOutput(handler C.int64_t, fd C.int64_t, buf *C.uint8_t, sz C.int
 	log.Debug("AVPipeWriteOutput", "fd", fd, "sz", sz)
 
 	if h.outTable[int64(fd)] == nil {
-		panic("OutWriterX outTable entry is NULL")
+		msg := fmt.Sprintf("OutWriterX outTable entry is NULL, fd=%d", fd)
+		panic(msg)
 	}
 
 	gobuf := C.GoBytes(unsafe.Pointer(buf), sz)
