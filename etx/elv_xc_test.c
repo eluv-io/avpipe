@@ -260,6 +260,16 @@ out_closer(
     return 0;
 }
 
+static void
+usage(
+    char *progname
+)
+{
+    printf("Usage: %s -r <repeats> -f <filename>\n"
+            "\t-r : optional, default is 1 repeat (must be bigger than 1)\n"
+            "\t-f : mandatory, need to pass input filename (output goes to directory ./O)\n", progname);
+}
+
 /*
  * Test basic decoding and encoding
  *
@@ -273,6 +283,9 @@ main(
     txctx_t *txctx;
     avpipe_io_handler_t in_handlers;
     avpipe_io_handler_t out_handlers;
+    int repeat = 1;
+    char *filename = NULL;
+    int i;
 
     /* Parameters */
     txparams_t p = {
@@ -295,8 +308,42 @@ main(
         .enc_width = 1280                   /* -1 means use source width, other values 3840, 1280 */
     };
 
-    if ( argc != 2 ) {
-        printf("Usage: %s <filename>\nNeed to pass input filename (output goes to directory ./O)\n", argv[0]);
+    i = 1;
+    while (i < argc) {
+        switch ((int) argv[i][0]) {
+        case '-':
+            switch ((int) argv[i][1]) {
+            case 'r':
+                if (sscanf(argv[i+1], "%d", &repeat) != 1) {
+                    usage(argv[0]);
+                    return 1;
+                }
+
+                if ( repeat < 1 ) {
+                    usage(argv[0]);
+                    return -1;
+                }
+                break;
+
+            case 'f':
+                filename = argv[i+1];
+                break;
+
+            default:
+                usage(argv[0]);
+                return -1;
+            }
+            i += 2;
+            break;
+
+        default:
+            usage(argv[0]);
+            return -1;
+        }
+    }
+
+    if (filename == NULL) {
+        usage(argv[0]);
         return -1;
     }
 
@@ -318,21 +365,26 @@ main(
     out_handlers.avpipe_writer = out_write_packet;
     out_handlers.avpipe_seeker = out_seek;
 
-    ioctx_t *inctx = (ioctx_t *)calloc(1, sizeof(ioctx_t));
+    for (i=0; i<repeat; i++) {
+        ioctx_t *inctx = (ioctx_t *)calloc(1, sizeof(ioctx_t));
 
-    if (in_handlers.avpipe_opener(argv[1], inctx) < 0)
-        return -1;
+        if (in_handlers.avpipe_opener(filename, inctx) < 0)
+            return -1;
 
-    if (avpipe_init(&txctx, &in_handlers, inctx, &out_handlers, &p) < 0)
-        return 1;
+        if (avpipe_init(&txctx, &in_handlers, inctx, &out_handlers, &p) < 0)
+            return 1;
 
-    if (avpipe_tx(txctx, 0) < 0) {
-        elv_err("Error in transcoding");
-        return -1;
+        if (avpipe_tx(txctx, 0) < 0) {
+            elv_err("Error in transcoding");
+            return -1;
+        }
+
+        /* Close input handler resources */
+        in_handlers.avpipe_closer(inctx);
+
+        elv_dbg("Releasing all the resources");
+        avpipe_fini(&txctx);
     }
-
-    elv_dbg("Releasing all the resources");
-    avpipe_fini(&txctx);
 
     return 0;
 }
