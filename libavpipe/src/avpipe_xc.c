@@ -869,6 +869,9 @@ avpipe_fini(
     avformat_close_input(&decoder_context->format_context);
     //avformat_free_context(decoder_context->format_context);
 
+    /* Free filter graph resources */
+    avfilter_graph_free(&decoder_context->filter_graph);
+
     //avformat_close_input(&encoder_context->format_context);
     avformat_free_context(encoder_context->format_context);
 
