@@ -72,7 +72,7 @@ prepare_decoder(
     ioctx_t *inctx,
     txparams_t *params)
 {
-
+    int rc;
     decoder_context->last_dts = AV_NOPTS_VALUE;
 
     decoder_context->video_stream_index = -1;
@@ -147,8 +147,8 @@ prepare_decoder(
         decoder_context->codec_context[i]->thread_count = 8;
 
         /* Open the decoder (initialize the decoder codec_context[i] using given codec[i]). */
-        if (avcodec_open2(decoder_context->codec_context[i], decoder_context->codec[i], NULL) < 0) {
-            elv_err("Failed to open codec through avcodec_open2, codec_id=%s", avcodec_get_name(decoder_context->codec_parameters[i]->codec_id));
+        if ((rc = avcodec_open2(decoder_context->codec_context[i], decoder_context->codec[i], NULL)) < 0) {
+            elv_err("Failed to open codec through avcodec_open2, err=%d, codec_id=%s", rc, avcodec_get_name(decoder_context->codec_parameters[i]->codec_id));
             return -1;
         }
 
@@ -837,7 +837,7 @@ avpipe_init(
     }
 
     if (prepare_decoder(&p_txctx->decoder_ctx, in_handlers, inctx, params)) {
-        elv_err("Failed prepared decoder");
+        elv_err("Failure in preparing decoder");
         return -1;
     }
 
@@ -865,15 +865,34 @@ avpipe_fini(
         av_freep(&avioctx);
     }
 
+    /* Corresponds to avformat_open_input */
     avformat_close_input(&decoder_context->format_context);
-    avformat_free_context(decoder_context->format_context);
-    avcodec_free_context(&decoder_context->codec_context[0]);
-    avcodec_free_context(&decoder_context->codec_context[1]);
+    //avformat_free_context(decoder_context->format_context);
 
-    avformat_close_input(&encoder_context->format_context);
+    //avformat_close_input(&encoder_context->format_context);
     avformat_free_context(encoder_context->format_context);
-    avcodec_free_context(&encoder_context->codec_context[0]);
-    avcodec_free_context(&encoder_context->codec_context[1]);
+
+    if (decoder_context->codec_context[0]) {
+        /* Corresponds to avcodec_open2() */
+        avcodec_close(decoder_context->codec_context[0]);
+        avcodec_free_context(&decoder_context->codec_context[0]);
+    }
+    if (decoder_context->codec_context[1]) {
+        /* Corresponds to avcodec_open2() */
+        avcodec_close(decoder_context->codec_context[1]);
+        avcodec_free_context(&decoder_context->codec_context[1]);
+    }
+
+    if (encoder_context->codec_context[0]) {
+        /* Corresponds to avcodec_open2() */
+        avcodec_close(encoder_context->codec_context[0]);
+        avcodec_free_context(&encoder_context->codec_context[0]);
+    }
+    if (encoder_context->codec_context[1]) {
+        /* Corresponds to avcodec_open2() */
+        avcodec_close(encoder_context->codec_context[1]);
+        avcodec_free_context(&encoder_context->codec_context[1]);
+    }
 
     free(*txctx);
     *txctx = NULL;
