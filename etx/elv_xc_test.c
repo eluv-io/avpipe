@@ -325,9 +325,10 @@ usage(
     char *progname
 )
 {
-    printf("Usage: %s -r <repeats> -t <n_threads> -f <filename>\n"
-            "\t-r : (optional) default is 1 repeat, must be bigger than 1\n"
-            "\t-t : (optional) default is 1 thread, must be bigger than 1\n"
+    printf("Usage: %s -c <codec> -r <repeats> -t <n_threads> -f <filename>\n"
+            "\t-r : (optional) number of repeats. Default is 1 repeat, must be bigger than 1\n"
+            "\t-t : (optional) transcoding threads. Default is 1 thread, must be bigger than 1\n"
+            "\t-c : (optional) codec name. Default is \"libx264\", can be: \"libx264\", \"h264_nvenc\", \"h264_videotoolbox\"\n"
             "\t-f : (mandatory) input filename for transcoding. Output goes to directory ./O\n", progname);
 }
 
@@ -367,7 +368,6 @@ main(
         .seg_duration_secs_str = "2.002",
         //.seg_duration_secs_str = "30.015",
         .codec = "libx264",
-        //.codec = "h264_videotoolbox", 
         .enc_height = 720,                  /* -1 means use source height, other values 2160, 720 */
         .enc_width = 1280                   /* -1 means use source width, other values 3840, 1280 */
     };
@@ -377,7 +377,7 @@ main(
         switch ((int) argv[i][0]) {
         case '-':
             switch ((int) argv[i][1]) {
-            case 'r':
+            case 'r':   /* repeats */
                 if (sscanf(argv[i+1], "%d", &repeats) != 1) {
                     usage(argv[0]);
                     return 1;
@@ -389,11 +389,15 @@ main(
                 }
                 break;
 
-            case 'f':
+            case 'c':
+                p.codec = argv[i+1];
+                break;
+
+            case 'f':   /* filename */
                 filename = argv[i+1];
                 break;
 
-            case 't':
+            case 't':   /* thread numbers */
                 if (sscanf(argv[i+1], "%d", &n_threads) != 1) {
                     usage(argv[0]);
                     return 1;
@@ -430,7 +434,7 @@ main(
     // Set AV libs log level
     //av_log_set_level(AV_LOG_DEBUG);
 
-    elv_logger_open(NULL, "etx", 10, 10*1024*1024, elv_log_file);
+    elv_logger_open(NULL, "etx", 10, 100*1024*1024, elv_log_file);
     elv_set_log_level(elv_log_debug);
 
     in_handlers.avpipe_opener = in_opener;
