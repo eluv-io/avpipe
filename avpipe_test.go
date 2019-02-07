@@ -202,6 +202,56 @@ func TestSingleTranscode(t *testing.T) {
 	}
 }
 
+func doTranscode(t *testing.T, p *avpipe.TxParams, nThreads int, filename string, reportFailuire string) {
+	// Create output directory if it doesn't exist
+	if _, err := os.Stat("./O"); os.IsNotExist(err) {
+		os.Mkdir("./O", 0755)
+	}
+
+	avpipe.InitIOHandler(&fileInputOpener{url: filename}, &concurrentOutputOpener{dir: "O"})
+
+	done := make(chan struct{})
+	for i := 0; i < nThreads; i++ {
+		go func(params *avpipe.TxParams, filename string) {
+			err := avpipe.Tx(params, filename)
+			done <- struct{}{} // Signal the main goroutinr
+			if err != 0 && reportFailuire == "" {
+				t.Fail()
+			} else if err != 0 {
+				fmt.Printf("%s\n", reportFailuire)
+			}
+		}(p, filename)
+	}
+
+	for i := 0; i < nThreads; i++ {
+		<-done // Wait for background goroutines to finish
+	}
+}
+
+func TestNvidiaTranscode(t *testing.T) {
+	nThreads := 10
+	filename := "./media/rocky.mp4"
+
+	params := &avpipe.TxParams{
+		Format:             "hls",
+		StartTimeTs:        0,
+		DurationTs:         -1,
+		StartSegmentStr:    "1",
+		VideoBitrate:       2560000,
+		AudioBitrate:       64000,
+		SampleRate:         44100,
+		CrfStr:             "23",
+		SegDurationTs:      1001 * 60,
+		SegDurationFr:      60,
+		SegDurationSecsStr: "2.002",
+		Codec:              "h264_nvenc",
+		EncHeight:          720,
+		EncWidth:           1280,
+	}
+
+	doTranscode(t, params, nThreads, filename, "H264_NVIDIA encoder might not be enabled or hardware might not be available")
+}
+
 func TestConcurrentTranscode(t *testing.T) {
 	nThreads := 10
 	filename := "./media/rocky.mp4"
@@ -223,26 +273,6 @@ func TestConcurrentTranscode(t *testing.T) {
 		EncWidth:           1280,
 	}
 
-	// Create output directory if it doesn't exist
-	if _, err := os.Stat("./C"); os.IsNotExist(err) {
-		os.Mkdir("./C", 0755)
-	}
+	doTranscode(t, params, nThreads, filename, "")
 
-	avpipe.InitIOHandler(&fileInputOpener{url: filename}, &concurrentOutputOpener{dir: "C"})
-
-	done := make(chan struct{})
-	for i := 0; i < nThreads; i++ {
-		go func(params *avpipe.TxParams, filename string) {
-			err := avpipe.Tx(params, filename)
-			done <- struct{}{} // Signal the main goroutinr
-			if err != 0 {
-				t.Fail()
-			}
-		}(params, filename)
-	}
-
-	for i := 0; i < nThreads; i++ {
-		<-done // Wait for background goroutines to finish
-		fmt.Printf("Go signal i=%d\n", i)
-	}
 }
