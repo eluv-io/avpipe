@@ -102,7 +102,7 @@ in_read_packet(
 
     h = *((int64_t *)(c->opaque));
     r = AVPipeReadInput(h, buf, buf_size);
-    if (r >= 0) {
+    if (r > 0) {
         c->read_bytes += r;
         c->read_pos += r;
     }
@@ -122,7 +122,7 @@ in_read_packet(
 #endif
 
     elv_dbg("IN READ read=%d pos=%"PRId64" total=%"PRId64, r, c->read_pos, c->read_bytes);
-    return r;
+    return r > 0 ? r : -1;
 }
 
 int
@@ -216,7 +216,7 @@ out_write_packet(
     int bwritten = AVPipeWriteOutput(h, fd, buf, buf_size);
     if (bwritten >= 0) {
         outctx->written_bytes += bwritten;
-        outctx->write_pos += bwritten;
+        Goutctx->write_pos += bwritten;
     }
 
     elv_dbg("OUT WRITE fd="PRId64", size=%d written=%d pos=%d total=%d", fd, buf_size, bwritten, outctx->write_pos, outctx->written_bytes);

@@ -74,7 +74,7 @@ in_read_packet(
     }
     elv_dbg("IN READ read=%d pos=%"PRId64" total=%"PRId64, r, c->read_pos, c->read_bytes);
 
-    return r;
+    return r > 0 ? r : -1;
 }
 
 int
