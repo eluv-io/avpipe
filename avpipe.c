@@ -216,7 +216,7 @@ out_write_packet(
     int bwritten = AVPipeWriteOutput(h, fd, buf, buf_size);
     if (bwritten >= 0) {
         outctx->written_bytes += bwritten;
-        Goutctx->write_pos += bwritten;
+        outctx->write_pos += bwritten;
     }
 
     elv_dbg("OUT WRITE fd="PRId64", size=%d written=%d pos=%d total=%d", fd, buf_size, bwritten, outctx->write_pos, outctx->written_bytes);
