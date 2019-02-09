@@ -281,6 +281,7 @@ out_closer(
 }
 
 typedef struct tx_thread_params_t {
+    int thread_number;
     char *filename;
     int repeats;
     txparams_t *txparams;
@@ -296,17 +297,23 @@ tx_thread_func(
     txctx_t *txctx;
     int i;
 
+    elv_log("TRANSCODER THREAD %d STARTS", params->thread_number);
+
     for (i=0; i<params->repeats; i++) {
         ioctx_t *inctx = (ioctx_t *)calloc(1, sizeof(ioctx_t));
 
-        if (params->in_handlers->avpipe_opener(params->filename, inctx) < 0)
+        if (params->in_handlers->avpipe_opener(params->filename, inctx) < 0) {
+            elv_err("THREAD %d, iteration %d failed to open avpipe output", params->thread_number, i+1);
             continue;
+        }
 
-        if (avpipe_init(&txctx, params->in_handlers, inctx, params->out_handlers, params->txparams) < 0)
+        if (avpipe_init(&txctx, params->in_handlers, inctx, params->out_handlers, params->txparams) < 0) {
+            elv_err("THREAD %d, iteration %d, failed to initialize avpipe", params->thread_number, i+1);
             continue;
+        }
 
         if (avpipe_tx(txctx, 0) < 0) {
-            elv_err("Error in transcoding");
+            elv_err("THREAD %d, iteration %d error in transcoding", params->thread_number, i+1);
             continue;
         }
 
@@ -316,6 +323,8 @@ tx_thread_func(
         elv_dbg("Releasing all the resources");
         avpipe_fini(&txctx);
     }
+
+    elv_log("TRANSCODER THREAD %d ENDS", params->thread_number);
 
     return 0;
 }
@@ -458,7 +467,10 @@ main(
     tids = (pthread_t *) calloc(1, n_threads*sizeof(pthread_t));
 
     for (i=0; i<n_threads; i++) {
-        pthread_create(&tids[i], NULL, tx_thread_func, &thread_params);
+        tx_thread_params_t *p = (tx_thread_params_t *) malloc(sizeof(tx_thread_params_t));
+        *p = thread_params;
+        p->thread_number = i+1;
+        pthread_create(&tids[i], NULL, tx_thread_func, p);
     }
 
     for (i=0; i<n_threads; i++) {
