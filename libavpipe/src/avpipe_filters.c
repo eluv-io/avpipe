@@ -48,6 +48,9 @@ init_filters(
         time_base.num, time_base.den,
         dec_codec_ctx->sample_aspect_ratio.num, dec_codec_ctx->sample_aspect_ratio.den);
 
+    /* video_stream_index should be the same in both encoder and decoder context */
+    pix_fmts[0] = encoder_context->codec_context[decoder_context->video_stream_index]->pix_fmt;
+
     ret = avfilter_graph_create_filter(&decoder_context->buffersrc_ctx, buffersrc, "in",
                                        args, NULL, decoder_context->filter_graph);
     if (ret < 0) {

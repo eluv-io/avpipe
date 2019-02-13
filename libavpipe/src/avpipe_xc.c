@@ -152,6 +152,8 @@ prepare_decoder(
             return -1;
         }
 
+        elv_log("Input pixel_format=%d", decoder_context->codec_context[i]->pix_fmt);
+
         /* Video - set context parameters manually */
         /* Setting the frame_rate here causes slight changes to rates - leaving it unset works perfectly
           decoder_context->codec_context[i]->framerate = av_guess_frame_rate(
@@ -174,6 +176,8 @@ prepare_video_encoder(
     txparams_t *params)
 {
     int rc = 0;
+    int i;
+    int found_pix_fmt = 0;
     int index = decoder_context->video_stream_index;
 
     if (index < 0) {
@@ -263,6 +267,21 @@ prepare_video_encoder(
     /* Enable hls playlist format if output format is set to "hls" */
     if (!strcmp(params->format, "hls"))
         av_opt_set(encoder_context->format_context->priv_data, "hls_playlist", "1", 0);
+
+    /* Search for input pixel format in list of encoder pixel formats. */ 
+    for (i=0; encoder_context->codec[index]->pix_fmts[i] > 0; i++) {
+        if (encoder_context->codec[index]->pix_fmts[i] == decoder_context->codec_context[index]->pix_fmt)
+            found_pix_fmt = 1;
+    }
+
+    /* If encoder supports the input pixel format then keep it, otherwise set encoder pixel format to AV_PIX_FMT_YUV422P */
+    if (found_pix_fmt)
+        encoder_context->codec_context[index]->pix_fmt = decoder_context->codec_context[index]->pix_fmt;
+    else
+        encoder_context->codec_context[index]->pix_fmt = AV_PIX_FMT_YUV422P;
+
+    elv_log("Output pixel_format=%d", encoder_context->codec_context[index]->pix_fmt);
+
     /* Open video encoder (initialize the encoder codec_context[i] using given codec[i]). */
     if ((rc = avcodec_open2(encoder_context->codec_context[index], encoder_context->codec[index], &encoder_options)) < 0) {
         elv_dbg("Could not open encoder for video, err=%d", rc);
@@ -766,7 +785,7 @@ avpipe_tx(
                 input_packet->stream_index,
                 params,
                 do_instrument,
-                1                 // bypass_filtering
+                0                 // bypass_filtering
             );
 
             if (do_instrument) {
