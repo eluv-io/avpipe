@@ -29,12 +29,6 @@ init_filters(
 
     time_base = decoder_context->format_context->streams[decoder_context->video_stream_index]->time_base;
 
-    /* If the codec is nvenc, replace AV_PIX_FMT_YUV422P with AV_PIX_FMT_YUV420P */
-    if (params->codec && !strcmp(params->codec, "h264_nvenc")) {
-        pix_fmts[0] = AV_PIX_FMT_YUV420P;
-        elv_warn("Replace pixel format to AV_PIX_FMT_YUV420P for campatibility with NVENC codec");
-    }
-
     decoder_context->filter_graph = avfilter_graph_alloc();
     if (!outputs || !inputs || !decoder_context->filter_graph) {
         ret = AVERROR(ENOMEM);

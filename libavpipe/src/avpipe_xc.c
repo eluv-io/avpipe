@@ -274,9 +274,14 @@ prepare_video_encoder(
             found_pix_fmt = 1;
     }
 
-    /* If encoder supports the input pixel format then keep it, otherwise set encoder pixel format to AV_PIX_FMT_YUV422P */
+    /* If encoder supports the input pixel format then keep it,
+     * otherwise set encoder pixel format to AV_PIX_FMT_YUV420P/AV_PIX_FMT_YUV422P.
+     */
     if (found_pix_fmt)
         encoder_context->codec_context[index]->pix_fmt = decoder_context->codec_context[index]->pix_fmt;
+    else if (!strcmp(params->codec, "h264_nvenc"))
+        /* If the codec is nvenc, set pixel format to AV_PIX_FMT_YUV420P */
+        encoder_context->codec_context[index]->pix_fmt = AV_PIX_FMT_YUV420P;
     else
         encoder_context->codec_context[index]->pix_fmt = AV_PIX_FMT_YUV422P;
 
