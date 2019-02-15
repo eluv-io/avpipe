@@ -175,13 +175,15 @@ avpipe_fini(
 /**
  * @brief   Starts transcoding.
  *
- * @param   txctx           A pointer to transcoding context.
- * @param   do_intrument    If 0 there will be no instrumentation, otherwise it does some instrumentation
- *                          for some ffmpeg functions.
+ * @param   txctx               A pointer to transcoding context.
+ * @param   do_intrument        If 0 there will be no instrumentation, otherwise it does some instrumentation
+ *                              for some ffmpeg functions.
+ * @param   bypass_filtering    If 0 means do filtering, otherwise bypass it.
  * @return  Returns 0 if transcoding is successful, otherwise -1.
  */
 int
 avpipe_tx(
     txctx_t *txctx,
-    int do_instrument);
+    int do_instrument,
+    int bypass_filtering);
 #endif

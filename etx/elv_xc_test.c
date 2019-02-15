@@ -284,6 +284,7 @@ typedef struct tx_thread_params_t {
     int thread_number;
     char *filename;
     int repeats;
+    int bypass_filtering;
     txparams_t *txparams;
     avpipe_io_handler_t *in_handlers;
     avpipe_io_handler_t *out_handlers;
@@ -312,7 +313,7 @@ tx_thread_func(
             continue;
         }
 
-        if (avpipe_tx(txctx, 0) < 0) {
+        if (avpipe_tx(txctx, 0, params->bypass_filtering) < 0) {
             elv_err("THREAD %d, iteration %d error in transcoding", params->thread_number, i+1);
             continue;
         }
@@ -334,11 +335,12 @@ usage(
     char *progname
 )
 {
-    printf("Usage: %s -c <codec> -r <repeats> -t <n_threads> -f <filename>\n"
-            "\t-r : (optional) number of repeats. Default is 1 repeat, must be bigger than 1\n"
-            "\t-t : (optional) transcoding threads. Default is 1 thread, must be bigger than 1\n"
-            "\t-c : (optional) codec name. Default is \"libx264\", can be: \"libx264\", \"h264_nvenc\", \"h264_videotoolbox\"\n"
-            "\t-f : (mandatory) input filename for transcoding. Output goes to directory ./O\n", progname);
+    printf("Usage: %s -bypass <0|1> -c <codec> -r <repeats> -t <n_threads> -f <filename>\n"
+            "\t-bypass : (optional) bypass filtering. Default is 0, must be 0 or 1\n"
+            "\t-r :      (optional) number of repeats. Default is 1 repeat, must be bigger than 1\n"
+            "\t-t :      (optional) transcoding threads. Default is 1 thread, must be bigger than 1\n"
+            "\t-c :      (optional) codec name. Default is \"libx264\", can be: \"libx264\", \"h264_nvenc\", \"h264_videotoolbox\"\n"
+            "\t-f :      (mandatory) input filename for transcoding. Output goes to directory ./O\n", progname);
 }
 
 /*
@@ -359,6 +361,7 @@ main(
     int repeats = 1;
     int n_threads = 1;
     char *filename = NULL;
+    int bypass_filtering = 0;         // bypass filtering
     int i;
 
     /* Parameters */
@@ -418,6 +421,24 @@ main(
                 }
                 break;
 
+            case 'b':
+                if (!strcmp(argv[i], "-bypass") || !strcmp(argv[i], "-b")) {
+                    if (sscanf(argv[i+1], "%d", &bypass_filtering) != 1) {
+                        usage(argv[0]);
+                        return 1;
+                    }
+
+                    if (bypass_filtering != 0 && bypass_filtering != 1) {
+                        usage(argv[0]);
+                        return 1;
+                    }
+                }
+                else {
+                    usage(argv[0]);
+                    return 1;
+                }
+                break;
+
             default:
                 usage(argv[0]);
                 return -1;
@@ -463,6 +484,7 @@ main(
     thread_params.txparams = &p;
     thread_params.in_handlers = &in_handlers;
     thread_params.out_handlers = &out_handlers;
+    thread_params.bypass_filtering = bypass_filtering;
 
     tids = (pthread_t *) calloc(1, n_threads*sizeof(pthread_t));
 

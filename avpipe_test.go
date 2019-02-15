@@ -214,7 +214,7 @@ func doTranscode(t *testing.T, p *avpipe.TxParams, nThreads int, filename string
 	for i := 0; i < nThreads; i++ {
 		go func(params *avpipe.TxParams, filename string) {
 			err := avpipe.Tx(params, filename)
-			done <- struct{}{} // Signal the main goroutinr
+			done <- struct{}{} // Signal the main goroutine
 			if err != 0 && reportFailuire == "" {
 				t.Fail()
 			} else if err != 0 {

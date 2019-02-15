@@ -699,7 +699,8 @@ try_receive:
 int
 avpipe_tx(
     txctx_t *txctx,
-    int do_instrument)
+    int do_instrument,
+    int bypass_filtering)
 {
     /* Set scale filter */
     char filter_str[128];
@@ -790,7 +791,7 @@ avpipe_tx(
                 input_packet->stream_index,
                 params,
                 do_instrument,
-                0                 // bypass_filtering
+                bypass_filtering
             );
 
             if (do_instrument) {

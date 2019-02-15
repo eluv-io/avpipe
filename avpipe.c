@@ -303,7 +303,7 @@ tx(
     if (avpipe_init(&txctx, &in_handlers, inctx, &out_handlers, params) < 0)
         return -1;
 
-    if (avpipe_tx(txctx, 0) < 0) {
+    if (avpipe_tx(txctx, 0, 0) < 0) {
         elv_err("Error in transcoding");
         return -1;
     }

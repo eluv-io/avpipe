@@ -23,8 +23,8 @@ package avpipe
 // #include "avpipe.h"
 import "C"
 import (
-	"fmt"
 	"eluvio/log"
+	"fmt"
 	"sync"
 	"unsafe"
 )
@@ -76,7 +76,8 @@ type InputOpener interface {
 }
 
 type InputHandler interface {
-	// Reads from input stream into buf
+	// Reads from input stream into buf.
+	// Returns (0, nil) to indicate EOF.
 	Read(buf []byte) (int, error)
 
 	// Seeks to specific offset of the input.
@@ -106,7 +107,7 @@ type OutputHandler interface {
 
 // Implement IOHandler
 type ioHandler struct {
-	input    InputHandler          // Input file
+	input    InputHandler            // Input file
 	outTable map[int64]OutputHandler // Map of integer handle to output interfaces
 }
 
