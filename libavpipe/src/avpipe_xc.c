@@ -60,7 +60,7 @@ prepare_input(
     avioctx->written = inctx->sz; /* Fake avio_size() to avoid calling seek to find size */
     avioctx->seekable = 0;
     avioctx->direct = 0;
-    avioctx->buffer_size = 256 * 1024;  // avoid seeks - avio_seek() seeks internal buffer */
+    avioctx->buffer_size = 512 * 1024;  // avoid seeks - avio_seek() seeks internal buffer */
     format_ctx->pb = avioctx;
     return 0;
 }
@@ -268,8 +268,8 @@ prepare_video_encoder(
     if (!strcmp(params->format, "hls"))
         av_opt_set(encoder_context->format_context->priv_data, "hls_playlist", "1", 0);
 
-    /* Search for input pixel format in list of encoder pixel formats. */ 
-    for (i=0; encoder_context->codec[index]->pix_fmts[i] > 0; i++) {
+    /* Search for input pixel format in list of encoder pixel formats. */
+    for (i=0; encoder_context->codec[index]->pix_fmts[i] >= 0; i++) {
         if (encoder_context->codec[index]->pix_fmts[i] == decoder_context->codec_context[index]->pix_fmt)
             found_pix_fmt = 1;
     }

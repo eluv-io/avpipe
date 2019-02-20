@@ -23,11 +23,13 @@ package avpipe
 // #include "avpipe.h"
 import "C"
 import (
-	"eluvio/log"
+	elog "eluvio/log"
 	"fmt"
 	"sync"
 	"unsafe"
 )
+
+var log = elog.Get("/eluvio/avpipe")
 
 type AVType int
 
