@@ -284,7 +284,7 @@ typedef struct tx_thread_params_t {
     int thread_number;
     char *filename;
     int repeats;
-    int bypass_filtering;
+    int bypass_transcoding;
     txparams_t *txparams;
     avpipe_io_handler_t *in_handlers;
     avpipe_io_handler_t *out_handlers;
@@ -308,12 +308,12 @@ tx_thread_func(
             continue;
         }
 
-        if (avpipe_init(&txctx, params->in_handlers, inctx, params->out_handlers, params->txparams) < 0) {
+        if (avpipe_init(&txctx, params->in_handlers, inctx, params->out_handlers, params->txparams, params->bypass_transcoding) < 0) {
             elv_err("THREAD %d, iteration %d, failed to initialize avpipe", params->thread_number, i+1);
             continue;
         }
 
-        if (avpipe_tx(txctx, 0, params->bypass_filtering) < 0) {
+        if (avpipe_tx(txctx, 0, params->bypass_transcoding) < 0) {
             elv_err("THREAD %d, iteration %d error in transcoding", params->thread_number, i+1);
             continue;
         }
@@ -336,7 +336,7 @@ usage(
 )
 {
     printf("Usage: %s -bypass <0|1> -c <codec> -r <repeats> -t <n_threads> -f <filename>\n"
-            "\t-bypass : (optional) bypass filtering. Default is 0, must be 0 or 1\n"
+            "\t-bypass : (optional) bypass transcoding. Default is 0, must be 0 or 1\n"
             "\t-r :      (optional) number of repeats. Default is 1 repeat, must be bigger than 1\n"
             "\t-t :      (optional) transcoding threads. Default is 1 thread, must be bigger than 1\n"
             "\t-c :      (optional) codec name. Default is \"libx264\", can be: \"libx264\", \"h264_nvenc\", \"h264_videotoolbox\"\n"
@@ -361,7 +361,7 @@ main(
     int repeats = 1;
     int n_threads = 1;
     char *filename = NULL;
-    int bypass_filtering = 0;         // bypass filtering
+    int bypass_transcoding = 0;         // bypass transcoding
     int i;
 
     /* Parameters */
@@ -423,12 +423,12 @@ main(
 
             case 'b':
                 if (!strcmp(argv[i], "-bypass") || !strcmp(argv[i], "-b")) {
-                    if (sscanf(argv[i+1], "%d", &bypass_filtering) != 1) {
+                    if (sscanf(argv[i+1], "%d", &bypass_transcoding) != 1) {
                         usage(argv[0]);
                         return 1;
                     }
 
-                    if (bypass_filtering != 0 && bypass_filtering != 1) {
+                    if (bypass_transcoding != 0 && bypass_transcoding != 1) {
                         usage(argv[0]);
                         return 1;
                     }
@@ -484,7 +484,7 @@ main(
     thread_params.txparams = &p;
     thread_params.in_handlers = &in_handlers;
     thread_params.out_handlers = &out_handlers;
-    thread_params.bypass_filtering = bypass_filtering;
+    thread_params.bypass_transcoding = bypass_transcoding;
 
     tids = (pthread_t *) calloc(1, n_threads*sizeof(pthread_t));
 
