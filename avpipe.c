@@ -219,7 +219,7 @@ out_write_packet(
         outctx->write_pos += bwritten;
     }
 
-    elv_dbg("OUT WRITE fd="PRId64", size=%d written=%d pos=%d total=%d", fd, buf_size, bwritten, outctx->write_pos, outctx->written_bytes);
+    elv_dbg("OUT WRITE fd=%"PRId64", size=%d written=%d pos=%d total=%d", fd, buf_size, bwritten, outctx->write_pos, outctx->written_bytes);
 
     return buf_size;
 }
