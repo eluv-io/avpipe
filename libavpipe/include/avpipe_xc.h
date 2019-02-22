@@ -151,6 +151,8 @@ typedef struct out_tracker_t {
  *                          by the application before calling this function.
  * @param   out_handlers    A pointer to output handlers. Must be properly set up by the application.
  * @param   params          A pointer to the parameters for transcoding.
+ * @param   bypass_transcode    If it is != 0 then will bypass initialization needed for transcoding,
+ *                          otherwise does initialization for transcoding.
  *
  * @return  Returns 0 if the initialization of an avpipe txctx_t is successful, otherwise returns -1 on error.
  */
@@ -160,7 +162,8 @@ avpipe_init(
     avpipe_io_handler_t *in_handlers,
     ioctx_t *inctx,
     avpipe_io_handler_t *out_handlers,
-    txparams_t *params);
+    txparams_t *params,
+    int bypass_transcode);
 
 /**
  * @brief   Frees the memory and other resources allocated by ffmpeg.
@@ -178,12 +181,12 @@ avpipe_fini(
  * @param   txctx               A pointer to transcoding context.
  * @param   do_intrument        If 0 there will be no instrumentation, otherwise it does some instrumentation
  *                              for some ffmpeg functions.
- * @param   bypass_filtering    If 0 means do filtering, otherwise bypass it.
+ * @param   bypass_transcode    If 0 means do filtering, otherwise bypass it.
  * @return  Returns 0 if transcoding is successful, otherwise -1.
  */
 int
 avpipe_tx(
     txctx_t *txctx,
     int do_instrument,
-    int bypass_filtering);
+    int bypass_transcode);
 #endif

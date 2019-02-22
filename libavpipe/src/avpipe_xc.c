@@ -173,7 +173,8 @@ static int
 prepare_video_encoder(
     coderctx_t *encoder_context,
     coderctx_t *decoder_context,
-    txparams_t *params)
+    txparams_t *params,
+    int bypass_transcode)
 {
     int rc = 0;
     int i;
@@ -197,6 +198,24 @@ prepare_video_encoder(
     if (!encoder_context->codec[index]) {
         elv_dbg("could not find the proper codec");
         return -1;
+    }
+
+    if (bypass_transcode) {
+        AVStream *in_stream = decoder_context->stream[index];
+        AVStream *out_stream = encoder_context->stream[index];
+	AVCodecParameters *in_codecpar = in_stream->codecpar;
+
+        rc = avcodec_parameters_copy(out_stream->codecpar, in_codecpar);
+        if (rc < 0) {
+            elv_err("BYPASS failed to copy codec parameters\n");
+            return -1;
+        }
+        out_stream->codecpar->codec_tag = 0;
+
+        av_opt_set(encoder_context->format_context->priv_data, "seg_duration", params->seg_duration_secs_str,
+            AV_OPT_FLAG_ENCODING_PARAM | AV_OPT_SEARCH_CHILDREN);
+        av_opt_set(encoder_context->format_context->priv_data, "start_segment", params->start_segment_str, 0);
+	return 0;
     }
 
     encoder_context->codec_context[index] = avcodec_alloc_context3(encoder_context->codec[index]);
@@ -384,7 +403,8 @@ prepare_encoder(
     coderctx_t *decoder_context,
     avpipe_io_handler_t *out_handlers,
     ioctx_t *inctx,
-    txparams_t *params)
+    txparams_t *params,
+    int bypass_transcode)
 {
     out_tracker_t *out_tracker;
 
@@ -399,7 +419,7 @@ prepare_encoder(
         return -1;
     }
 
-    if (prepare_video_encoder(encoder_context, decoder_context, params)) {
+    if (prepare_video_encoder(encoder_context, decoder_context, params, bypass_transcode)) {
         elv_err("Failure in preparing video encoder");
         return -1;
     }
@@ -509,15 +529,32 @@ transcode_packet(
     int stream_index,
     txparams_t *p,
     int do_instrument,
-    int bypass_filtering)
+    int bypass_transcode)
 {
     int ret;
     struct timeval tv;
     u_int64_t since;
     AVCodecContext *codec_context = decoder_context->codec_context[stream_index];
-    int response = avcodec_send_packet(codec_context, packet);
+    int response;
     elv_dbg("DECODE send_packet pts=%d dts=%d duration=%d", packet->pts, packet->dts, packet->duration);
 
+    if (bypass_transcode) {
+	AVStream *in_stream = decoder_context->stream[packet->stream_index];
+	AVStream *out_stream = encoder_context->stream[packet->stream_index];
+        packet->pts = av_rescale_q_rnd(packet->pts, in_stream->time_base, out_stream->time_base, AV_ROUND_NEAR_INF|AV_ROUND_PASS_MINMAX);
+        packet->dts = av_rescale_q_rnd(packet->dts, in_stream->time_base, out_stream->time_base, AV_ROUND_NEAR_INF|AV_ROUND_PASS_MINMAX);
+        packet->duration = av_rescale_q(packet->duration, in_stream->time_base, out_stream->time_base);
+
+	dump_packet("BYPASS ", packet);
+        if (av_interleaved_write_frame(encoder_context->format_context, packet) < 0) {
+            elv_err("Failure in copying audio stream");
+            return -1;
+        }
+
+	return 0;
+    }
+
+    response = avcodec_send_packet(codec_context, packet);
     if (response < 0) {
         elv_err("Failure while sending a packet to the decoder: %s", av_err2str(response));
         return response;
@@ -535,11 +572,14 @@ transcode_packet(
 
         dump_frame("IN ", codec_context->frame_number, frame);
 
-        if (bypass_filtering) {
+#if 0
+	/* Only bypass filtering */
+        if (bypass_filter) {
             encode_frame(decoder_context, encoder_context, frame, stream_index);
             av_frame_unref(frame);
             continue;
         }
+#endif
 
         if (do_instrument) {
             elv_since(&tv, &since);
@@ -700,7 +740,7 @@ int
 avpipe_tx(
     txctx_t *txctx,
     int do_instrument,
-    int bypass_filtering)
+    int bypass_transcode)
 {
     /* Set scale filter */
     char filter_str[128];
@@ -710,12 +750,14 @@ avpipe_tx(
     coderctx_t *encoder_context = &txctx->encoder_ctx;
     txparams_t *params = txctx->params;
 
-    sprintf(filter_str, "scale=%d:%d",
-        encoder_context->codec_context[encoder_context->video_stream_index]->width,
-        encoder_context->codec_context[encoder_context->video_stream_index]->height);
-    elv_dbg("FILTER scale=%s", filter_str);
+    if (!bypass_transcode) {
+        sprintf(filter_str, "scale=%d:%d",
+            encoder_context->codec_context[encoder_context->video_stream_index]->width,
+            encoder_context->codec_context[encoder_context->video_stream_index]->height);
+        elv_dbg("FILTER scale=%s", filter_str);
+    }
 
-    if (init_filters(filter_str, decoder_context, encoder_context, txctx->params) < 0) {
+    if (!bypass_transcode && init_filters(filter_str, decoder_context, encoder_context, txctx->params) < 0) {
         elv_err("Failed to initialize the filter");
         return -1;
     }
@@ -791,7 +833,7 @@ avpipe_tx(
                 input_packet->stream_index,
                 params,
                 do_instrument,
-                bypass_filtering
+                bypass_transcode
             );
 
             if (do_instrument) {
@@ -828,7 +870,8 @@ avpipe_tx(
      * TODO: should I do it for the audio stream too?
      */
     flush_decoder(decoder_context, encoder_context, encoder_context->video_stream_index, params);
-    encode_frame(decoder_context, encoder_context, NULL, encoder_context->video_stream_index);
+    if (!bypass_transcode)
+        encode_frame(decoder_context, encoder_context, NULL, encoder_context->video_stream_index);
 
 
     dump_stats(decoder_context, encoder_context);
@@ -847,7 +890,8 @@ avpipe_init(
     avpipe_io_handler_t *in_handlers,
     ioctx_t *inctx,
     avpipe_io_handler_t *out_handlers,
-    txparams_t *params)
+    txparams_t *params,
+    int bypass_transcode)
 {
     txctx_t *p_txctx = (txctx_t *) calloc(1, sizeof(txctx_t));
 
@@ -866,7 +910,7 @@ avpipe_init(
         return -1;
     }
 
-    if (prepare_encoder(&p_txctx->encoder_ctx, &p_txctx->decoder_ctx, out_handlers, inctx, params)) {
+    if (prepare_encoder(&p_txctx->encoder_ctx, &p_txctx->decoder_ctx, out_handlers, inctx, params, bypass_transcode)) {
         elv_err("Failure in preparing output");
         return -1;
     }

@@ -83,6 +83,9 @@ void
 dump_codec_context(
     AVCodecContext *cc)
 {
+    if (!cc)
+        return;
+
     elv_log("CODEC CONTEXT codec type=%d id=%d "
         "time_base=%d/%d framerate=%d/%d tpf=%d delay=%d "
         "width=%d height=%d aspect_ratio=%d/%d coded_width=%d coded_height=%d gop=%d "
