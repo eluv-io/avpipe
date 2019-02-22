@@ -266,12 +266,15 @@ out_closer(
 }
 
 /*
- * Test basic decoding and encoding
+ * 1) Initializes avpipe with appropriate parameters.
+ * 2) Invokes avpipe trnascoding.
+ * 3) Releases avpipe resources.
  */
 int
 tx(
     txparams_t *params,
-    char *filename)
+    char *filename,
+    int bypass_transcoding)
 {
     txctx_t *txctx;
     avpipe_io_handler_t in_handlers;
@@ -300,7 +303,7 @@ tx(
     if (in_handlers.avpipe_opener(filename, inctx) < 0)
         return -1;
 
-    if (avpipe_init(&txctx, &in_handlers, inctx, &out_handlers, params) < 0)
+    if (avpipe_init(&txctx, &in_handlers, inctx, &out_handlers, params, bypass_transcoding) < 0)
         return -1;
 
     if (avpipe_tx(txctx, 0, 0) < 0) {

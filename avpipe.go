@@ -333,7 +333,7 @@ func (h *ioHandler) OutCloser(fd C.int64_t) error {
 
 // params: transcoding parameters
 // url: input filename that has to be transcoded
-func Tx(params *TxParams, url string) int {
+func Tx(params *TxParams, url string, bypass_transcoding bool) int {
 
 	// Convert TxParams to C.txparams_t
 	if params == nil {
@@ -358,6 +358,13 @@ func Tx(params *TxParams, url string) int {
 		enc_width:             C.int(params.EncWidth),
 	}
 
-	rc := C.tx((*C.txparams_t)(unsafe.Pointer(cparams)), C.CString(url))
+	var bypass int
+	if bypass_transcoding {
+		bypass = 1
+	} else {
+		bypass = 0
+	}
+
+	rc := C.tx((*C.txparams_t)(unsafe.Pointer(cparams)), C.CString(url), C.int(bypass))
 	return int(rc)
 }

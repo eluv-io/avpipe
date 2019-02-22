@@ -167,7 +167,7 @@ func main() {
 
 	avpipe.InitIOHandler(&avcmdInputOpener{url: filename.value}, &avcmdOutputOpener{})
 
-	err := avpipe.Tx(params, filename.value)
+	err := avpipe.Tx(params, filename.value, false)
 	if err != 0 {
 		fmt.Fprintf(os.Stderr, "Failed transcoding %s\n", filename.value)
 	}
