@@ -1,5 +1,5 @@
 /*
- * Test a/v transcoding pipeline
+ * Audio/video transcoding pipeline
  *
  * Build:
  *
@@ -199,11 +199,12 @@ prepare_video_encoder(
         elv_dbg("could not find the proper codec");
         return -1;
     }
+    elv_log("Found encoder %s", params->codec);
 
     if (bypass_transcode) {
         AVStream *in_stream = decoder_context->stream[index];
         AVStream *out_stream = encoder_context->stream[index];
-	AVCodecParameters *in_codecpar = in_stream->codecpar;
+        AVCodecParameters *in_codecpar = in_stream->codecpar;
 
         rc = avcodec_parameters_copy(out_stream->codecpar, in_codecpar);
         if (rc < 0) {
@@ -215,7 +216,7 @@ prepare_video_encoder(
         av_opt_set(encoder_context->format_context->priv_data, "seg_duration", params->seg_duration_secs_str,
             AV_OPT_FLAG_ENCODING_PARAM | AV_OPT_SEARCH_CHILDREN);
         av_opt_set(encoder_context->format_context->priv_data, "start_segment", params->start_segment_str, 0);
-	return 0;
+        return 0;
     }
 
     encoder_context->codec_context[index] = avcodec_alloc_context3(encoder_context->codec[index]);
@@ -539,19 +540,19 @@ transcode_packet(
     elv_dbg("DECODE send_packet pts=%d dts=%d duration=%d", packet->pts, packet->dts, packet->duration);
 
     if (bypass_transcode) {
-	AVStream *in_stream = decoder_context->stream[packet->stream_index];
-	AVStream *out_stream = encoder_context->stream[packet->stream_index];
+        AVStream *in_stream = decoder_context->stream[packet->stream_index];
+        AVStream *out_stream = encoder_context->stream[packet->stream_index];
         packet->pts = av_rescale_q_rnd(packet->pts, in_stream->time_base, out_stream->time_base, AV_ROUND_NEAR_INF|AV_ROUND_PASS_MINMAX);
         packet->dts = av_rescale_q_rnd(packet->dts, in_stream->time_base, out_stream->time_base, AV_ROUND_NEAR_INF|AV_ROUND_PASS_MINMAX);
         packet->duration = av_rescale_q(packet->duration, in_stream->time_base, out_stream->time_base);
 
-	dump_packet("BYPASS ", packet);
+	    dump_packet("BYPASS ", packet);
         if (av_interleaved_write_frame(encoder_context->format_context, packet) < 0) {
             elv_err("Failure in copying audio stream");
             return -1;
         }
 
-	return 0;
+        return 0;
     }
 
     response = avcodec_send_packet(codec_context, packet);
@@ -573,7 +574,7 @@ transcode_packet(
         dump_frame("IN ", codec_context->frame_number, frame);
 
 #if 0
-	/* Only bypass filtering */
+        /* Only bypass filtering */
         if (bypass_filter) {
             encode_frame(decoder_context, encoder_context, frame, stream_index);
             av_frame_unref(frame);
@@ -681,11 +682,10 @@ flush_decoder(
     while (response >=0) {
         frame = av_frame_alloc();
         filt_frame = av_frame_alloc();
-try_receive:
         response = avcodec_receive_frame(codec_context, frame);
         if (response == AVERROR(EAGAIN)) {
-            goto try_receive;;
-	}
+            break;
+	    }
 
         if (response == AVERROR_EOF) {
             elv_log("1 GOT EOF");
@@ -924,43 +924,52 @@ int
 avpipe_fini(
     txctx_t **txctx)
 {
-    coderctx_t *decoder_context = &(*txctx)->decoder_ctx;
-    coderctx_t *encoder_context = &(*txctx)->encoder_ctx;
+    coderctx_t *decoder_context;
+    coderctx_t *encoder_context;
+
+    if (!txctx)
+        return 0;
+
+    decoder_context = &(*txctx)->decoder_ctx;
+    encoder_context = &(*txctx)->encoder_ctx;
 
     /* note: the internal buffer could have changed, and be != avio_ctx_buffer */
-    if (decoder_context->format_context->pb) {
+    if (decoder_context && decoder_context->format_context->pb) {
         AVIOContext *avioctx = (AVIOContext *) decoder_context->format_context->pb;
         av_freep(&avioctx->buffer);
         av_freep(&avioctx);
     }
 
     /* Corresponds to avformat_open_input */
-    avformat_close_input(&decoder_context->format_context);
+    if (decoder_context && decoder_context->format_context)
+        avformat_close_input(&decoder_context->format_context);
     //avformat_free_context(decoder_context->format_context);
 
     /* Free filter graph resources */
-    avfilter_graph_free(&decoder_context->filter_graph);
+    if (decoder_context && decoder_context->filter_graph)
+        avfilter_graph_free(&decoder_context->filter_graph);
 
     //avformat_close_input(&encoder_context->format_context);
-    avformat_free_context(encoder_context->format_context);
+    if (encoder_context && encoder_context->format_context)
+        avformat_free_context(encoder_context->format_context);
 
-    if (decoder_context->codec_context[0]) {
+    if (decoder_context && decoder_context->codec_context[0]) {
         /* Corresponds to avcodec_open2() */
         avcodec_close(decoder_context->codec_context[0]);
         avcodec_free_context(&decoder_context->codec_context[0]);
     }
-    if (decoder_context->codec_context[1]) {
+    if (decoder_context && decoder_context->codec_context[1]) {
         /* Corresponds to avcodec_open2() */
         avcodec_close(decoder_context->codec_context[1]);
         avcodec_free_context(&decoder_context->codec_context[1]);
     }
 
-    if (encoder_context->codec_context[0]) {
+    if (encoder_context && encoder_context->codec_context[0]) {
         /* Corresponds to avcodec_open2() */
         avcodec_close(encoder_context->codec_context[0]);
         avcodec_free_context(&encoder_context->codec_context[0]);
     }
-    if (encoder_context->codec_context[1]) {
+    if (encoder_context && encoder_context->codec_context[1]) {
         /* Corresponds to avcodec_open2() */
         avcodec_close(encoder_context->codec_context[1]);
         avcodec_free_context(&encoder_context->codec_context[1]);
