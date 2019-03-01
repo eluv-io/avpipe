@@ -865,6 +865,12 @@ avpipe_tx(
         }
     }
 
+    if (response < 0) {
+        av_packet_free(&input_packet);
+        av_frame_free(&input_frame);
+        return response;
+    }
+
     /*
      * Flush all frames, first flush decoder buffers, then encoder buffers by passing NULL frame.
      * TODO: should I do it for the audio stream too?

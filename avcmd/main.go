@@ -14,7 +14,7 @@ type avcmdInputOpener struct {
 	url string
 }
 
-func (io *avcmdInputOpener) Open(url string) (avpipe.InputHandler, error) {
+func (io *avcmdInputOpener) Open(fd int64, url string) (avpipe.InputHandler, error) {
 	f, err := os.Open(url)
 	if err != nil {
 		return nil, err

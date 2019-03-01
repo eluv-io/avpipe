@@ -74,7 +74,9 @@ type IOHandler interface {
 }
 
 type InputOpener interface {
-	Open(url string) (InputHandler, error)
+	// fd determines uniquely opening input.
+	// url determines input string for transcoding
+	Open(fd int64, url string) (InputHandler, error)
 }
 
 type InputHandler interface {
@@ -93,6 +95,8 @@ type InputHandler interface {
 }
 
 type OutputOpener interface {
+	// h determines uniquely opening input.
+	// fd determines uniquely opening output.
 	Open(h, fd int64, stream_index, seg_index int, out_type AVType) (OutputHandler, error)
 }
 
@@ -135,7 +139,12 @@ func NewIOHandler(url *C.char, size *C.int64_t) C.int64_t {
 	filename := C.GoString((*C.char)(unsafe.Pointer(url)))
 	log.Debug("NewIOHandler()", "url", filename)
 
-	input, err := gInputOpener.Open(filename)
+	gMutex.Lock()
+	gHandleNum++
+	fd := gHandleNum
+	gMutex.Unlock()
+
+	input, err := gInputOpener.Open(fd, filename)
 	if err != nil {
 		return C.int64_t(-1)
 	}
@@ -147,9 +156,8 @@ func NewIOHandler(url *C.char, size *C.int64_t) C.int64_t {
 
 	gMutex.Lock()
 	defer gMutex.Unlock()
-	gHandleNum++
-	gHandlers[gHandleNum] = h
-	return C.int64_t(gHandleNum)
+	gHandlers[fd] = h
+	return C.int64_t(fd)
 }
 
 //export AVPipeReadInput

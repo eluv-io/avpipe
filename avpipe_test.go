@@ -14,7 +14,7 @@ type fileInputOpener struct {
 	url string
 }
 
-func (io *fileInputOpener) Open(url string) (avpipe.InputHandler, error) {
+func (io *fileInputOpener) Open(fd int64, url string) (avpipe.InputHandler, error) {
 	f, err := os.Open(url)
 	if err != nil {
 		return nil, err
@@ -202,7 +202,7 @@ func TestSingleTranscode(t *testing.T) {
 	}
 }
 
-func doTranscode(t *testing.T, p *avpipe.TxParams, nThreads int, filename string, reportFailuire string) {
+func doTranscode(t *testing.T, p *avpipe.TxParams, nThreads int, filename string, reportFailure string) {
 	// Create output directory if it doesn't exist
 	if _, err := os.Stat("./O"); os.IsNotExist(err) {
 		os.Mkdir("./O", 0755)
@@ -215,10 +215,10 @@ func doTranscode(t *testing.T, p *avpipe.TxParams, nThreads int, filename string
 		go func(params *avpipe.TxParams, filename string) {
 			err := avpipe.Tx(params, filename, false)
 			done <- struct{}{} // Signal the main goroutine
-			if err != 0 && reportFailuire == "" {
+			if err != 0 && reportFailure == "" {
 				t.Fail()
 			} else if err != 0 {
-				fmt.Printf("%s\n", reportFailuire)
+				fmt.Printf("%s\n", reportFailure)
 			}
 		}(p, filename)
 	}
