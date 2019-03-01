@@ -895,29 +895,40 @@ avpipe_init(
 {
     txctx_t *p_txctx = (txctx_t *) calloc(1, sizeof(txctx_t));
 
-    if (!params) {
-        elv_err("Parameters are not set");
-        return -1;
+    if (!txctx) {
+        elv_err("Trancoding context is NULL");
+        goto avpipe_init_failed;
     }
 
-    if (strcmp(params->format, "dash") && strcmp(params->format, "hls")) {
+    if (!params) {
+        elv_err("Parameters are not set");
+        goto avpipe_init_failed;
+    }
+
+    if (!params->format || (strcmp(params->format, "dash") && strcmp(params->format, "hls"))) {
         elv_err("Output format can be only \"dash\" or \"hls\"");
-        return -1;
+        goto avpipe_init_failed;
     }
 
     if (prepare_decoder(&p_txctx->decoder_ctx, in_handlers, inctx, params)) {
         elv_err("Failure in preparing decoder");
-        return -1;
+        goto avpipe_init_failed;
     }
 
     if (prepare_encoder(&p_txctx->encoder_ctx, &p_txctx->decoder_ctx, out_handlers, inctx, params, bypass_transcode)) {
         elv_err("Failure in preparing output");
-        return -1;
+        goto avpipe_init_failed;
     }
 
     p_txctx->params = params;
     *txctx = p_txctx;
     return 0;
+
+avpipe_init_failed:
+    if (txctx)
+        *txctx = NULL;
+    free(p_txctx);
+    return -1;
 }
 
 int
@@ -927,17 +938,19 @@ avpipe_fini(
     coderctx_t *decoder_context;
     coderctx_t *encoder_context;
 
-    if (!txctx)
+    if (!txctx || !(*txctx))
         return 0;
 
     decoder_context = &(*txctx)->decoder_ctx;
     encoder_context = &(*txctx)->encoder_ctx;
 
     /* note: the internal buffer could have changed, and be != avio_ctx_buffer */
-    if (decoder_context && decoder_context->format_context->pb) {
+    if (decoder_context && decoder_context->format_context) {
         AVIOContext *avioctx = (AVIOContext *) decoder_context->format_context->pb;
-        av_freep(&avioctx->buffer);
-        av_freep(&avioctx);
+        if (avioctx) {
+            av_freep(&avioctx->buffer);
+            av_freep(&avioctx);
+        }
     }
 
     /* Corresponds to avformat_open_input */
@@ -953,23 +966,23 @@ avpipe_fini(
     if (encoder_context && encoder_context->format_context)
         avformat_free_context(encoder_context->format_context);
 
-    if (decoder_context && decoder_context->codec_context[0]) {
+    if (decoder_context && decoder_context->codec_context && decoder_context->codec_context[0]) {
         /* Corresponds to avcodec_open2() */
         avcodec_close(decoder_context->codec_context[0]);
         avcodec_free_context(&decoder_context->codec_context[0]);
     }
-    if (decoder_context && decoder_context->codec_context[1]) {
+    if (decoder_context && decoder_context->codec_context && decoder_context->codec_context[1]) {
         /* Corresponds to avcodec_open2() */
         avcodec_close(decoder_context->codec_context[1]);
         avcodec_free_context(&decoder_context->codec_context[1]);
     }
 
-    if (encoder_context && encoder_context->codec_context[0]) {
+    if (encoder_context && encoder_context->codec_context && encoder_context->codec_context[0]) {
         /* Corresponds to avcodec_open2() */
         avcodec_close(encoder_context->codec_context[0]);
         avcodec_free_context(&encoder_context->codec_context[0]);
     }
-    if (encoder_context && encoder_context->codec_context[1]) {
+    if (encoder_context && encoder_context->codec_context && encoder_context->codec_context[1]) {
         /* Corresponds to avcodec_open2() */
         avcodec_close(encoder_context->codec_context[1]);
         avcodec_free_context(&encoder_context->codec_context[1]);

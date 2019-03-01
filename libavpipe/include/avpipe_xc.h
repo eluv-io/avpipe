@@ -144,6 +144,7 @@ typedef struct out_tracker_t {
 
 /**
  * @brief   Allocates and initializes a txctx_t (transcoder context) for piplining the input stream.
+ *          In case of failure avpipe_fini() should be called to avoid resource leak.
  *
  * @param   txctx           Points to allocated and initialized memory (different fields are initialized by ffmpeg).
  * @param   in_handlers     A pointer to input handlers. Must be properly set up by the application.
@@ -177,6 +178,7 @@ avpipe_fini(
 
 /**
  * @brief   Starts transcoding.
+ *          In case of failure avpipe_fini() should be called to avoid resource leak.
  *
  * @param   txctx               A pointer to transcoding context.
  * @param   do_intrument        If 0 there will be no instrumentation, otherwise it does some instrumentation

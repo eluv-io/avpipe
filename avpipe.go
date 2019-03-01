@@ -156,6 +156,10 @@ func NewIOHandler(url *C.char, size *C.int64_t) C.int64_t {
 func AVPipeReadInput(handler C.int64_t, buf *C.uint8_t, sz C.int) C.int {
 	gMutex.Lock()
 	h := gHandlers[int64(handler)]
+	if h == nil {
+		gMutex.Unlock()
+		return C.int(-1)
+	}
 	gMutex.Unlock()
 
 	log.Debug("AVPipeReadInput()", "handler", handler, "buf", buf, "sz", sz)
@@ -185,6 +189,10 @@ func (h *ioHandler) InReader(buf []byte) (int, error) {
 func AVPipeSeekInput(handler C.int64_t, offset C.int64_t, whence C.int) C.int64_t {
 	gMutex.Lock()
 	h := gHandlers[int64(handler)]
+	if h == nil {
+		gMutex.Unlock()
+		return C.int64_t(-1)
+	}
 	gMutex.Unlock()
 	log.Debug("AVPipeSeekInput()", "h", h)
 
@@ -205,6 +213,9 @@ func (h *ioHandler) InSeeker(offset C.int64_t, whence C.int) (int64, error) {
 func AVPipeCloseInput(handler C.int64_t) C.int {
 	gMutex.Lock()
 	h := gHandlers[int64(handler)]
+	if h == nil {
+		return C.int(-1)
+	}
 	err := h.InCloser()
 
 	// Remove the handler from global table
@@ -229,6 +240,10 @@ func AVPipeOpenOutput(handler C.int64_t, stream_index, seg_index, stream_type C.
 
 	gMutex.Lock()
 	h := gHandlers[int64(handler)]
+	if h == nil {
+		gMutex.Unlock()
+		return C.int64_t(-1)
+	}
 	gFd++
 	fd := gFd
 	gMutex.Unlock()
@@ -270,7 +285,10 @@ func AVPipeOpenOutput(handler C.int64_t, stream_index, seg_index, stream_type C.
 func AVPipeWriteOutput(handler C.int64_t, fd C.int64_t, buf *C.uint8_t, sz C.int) C.int {
 	gMutex.Lock()
 	h := gHandlers[int64(handler)]
-
+	if h == nil {
+		gMutex.Unlock()
+		return C.int(-1)
+	}
 	gMutex.Unlock()
 	log.Debug("AVPipeWriteOutput", "fd", fd, "sz", sz)
 
@@ -298,6 +316,10 @@ func (h *ioHandler) OutWriter(fd C.int64_t, buf []byte) (int, error) {
 func AVPipeSeekOutput(handler C.int64_t, fd C.int64_t, offset C.int64_t, whence C.int) C.int {
 	gMutex.Lock()
 	h := gHandlers[int64(handler)]
+	if h == nil {
+		gMutex.Unlock()
+		return C.int(-1)
+	}
 	gMutex.Unlock()
 	n, err := h.OutSeeker(fd, offset, whence)
 	if err != nil {
@@ -316,6 +338,10 @@ func (h *ioHandler) OutSeeker(fd C.int64_t, offset C.int64_t, whence C.int) (int
 func AVPipeCloseOutput(handler C.int64_t, fd C.int64_t) C.int {
 	gMutex.Lock()
 	h := gHandlers[int64(handler)]
+	if h == nil {
+		gMutex.Unlock()
+		return C.int(-1)
+	}
 	gMutex.Unlock()
 	err := h.OutCloser(fd)
 	if err != nil {

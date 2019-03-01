@@ -277,6 +277,7 @@ tx(
     int bypass_transcoding)
 {
     txctx_t *txctx;
+    int rc = 0;
     avpipe_io_handler_t in_handlers;
     avpipe_io_handler_t out_handlers;
 
@@ -300,22 +301,29 @@ tx(
 
     ioctx_t *inctx = (ioctx_t *)calloc(1, sizeof(ioctx_t));
 
-    if (in_handlers.avpipe_opener(filename, inctx) < 0)
-        return -1;
+    if (in_handlers.avpipe_opener(filename, inctx) < 0) {
+        rc = -1;
+        goto end_tx;
+    }
 
-    if (avpipe_init(&txctx, &in_handlers, inctx, &out_handlers, params, bypass_transcoding) < 0)
-        return -1;
+    if (avpipe_init(&txctx, &in_handlers, inctx, &out_handlers, params, bypass_transcoding) < 0) {
+        rc = -1;
+        goto end_tx;
+    }
 
     if (avpipe_tx(txctx, 0, 0) < 0) {
         elv_err("Error in transcoding");
-        return -1;
+        rc = -1;
+        goto end_tx;
     }
 
+end_tx:
     /* Close input handler resources */
     in_handlers.avpipe_closer(inctx);
 
     elv_dbg("Releasing all the resources");
     avpipe_fini(&txctx);
 
-    return 0;
+    free(inctx);
+    return rc;
 }
