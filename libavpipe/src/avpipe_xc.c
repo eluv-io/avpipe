@@ -102,6 +102,7 @@ prepare_decoder(
     dump_decoder(decoder_context);
 
     for (int i = 0; i < decoder_context->format_context->nb_streams; i++) {
+        /* Copy codec params from stream format context */
         decoder_context->codec_parameters[i] = decoder_context->format_context->streams[i]->codecpar;
         decoder_context->stream[i] = decoder_context->format_context->streams[i];
 
@@ -119,8 +120,10 @@ prepare_decoder(
         }
 
         /* Initialize codec and codec context */
-        decoder_context->codec[i] = avcodec_find_decoder(decoder_context->codec_parameters[i]->codec_id);
-        //decoder_context->codec[i] = avcodec_find_decoder_by_name(p->codec);
+        if (params->dcodec != NULL && params->dcodec[0] != '\0')
+            decoder_context->codec[i] = avcodec_find_decoder_by_name(params->dcodec);
+        else
+            decoder_context->codec[i] = avcodec_find_decoder(decoder_context->codec_parameters[i]->codec_id);
 
         if (!decoder_context->codec[i]) {
             elv_err("Unsupported codec");
@@ -189,7 +192,7 @@ prepare_video_encoder(
     encoder_context->video_stream_index = index;
     encoder_context->last_dts = AV_NOPTS_VALUE;
     encoder_context->stream[index] = avformat_new_stream(encoder_context->format_context, NULL);
-    encoder_context->codec[index] = avcodec_find_encoder_by_name(params->codec);
+    encoder_context->codec[index] = avcodec_find_encoder_by_name(params->ecodec);
 
     /* Custom output buffer */
     encoder_context->format_context->io_open = elv_io_open;
@@ -199,7 +202,7 @@ prepare_video_encoder(
         elv_dbg("could not find the proper codec");
         return -1;
     }
-    elv_log("Found encoder %s", params->codec);
+    elv_log("Found encoder %s", params->ecodec);
 
     if (bypass_transcode) {
         AVStream *in_stream = decoder_context->stream[index];
@@ -299,7 +302,7 @@ prepare_video_encoder(
      */
     if (found_pix_fmt)
         encoder_context->codec_context[index]->pix_fmt = decoder_context->codec_context[index]->pix_fmt;
-    else if (!strcmp(params->codec, "h264_nvenc"))
+    else if (!strcmp(params->ecodec, "h264_nvenc"))
         /* If the codec is nvenc, set pixel format to AV_PIX_FMT_YUV420P */
         encoder_context->codec_context[index]->pix_fmt = AV_PIX_FMT_YUV420P;
     else

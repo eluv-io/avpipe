@@ -120,7 +120,8 @@ typedef struct txparams_t {
     int seg_duration_ts;
     int seg_duration_fr;
     char *seg_duration_secs_str;
-    char *codec;
+    char *ecodec;                   // Video/audio encoder
+    char *dcodec;                   // Video/audio decoder
     int enc_height;
     int enc_width;
 } txparams_t;

@@ -339,7 +339,8 @@ usage(
             "\t-bypass : (optional) bypass transcoding. Default is 0, must be 0 or 1\n"
             "\t-r :      (optional) number of repeats. Default is 1 repeat, must be bigger than 1\n"
             "\t-t :      (optional) transcoding threads. Default is 1 thread, must be bigger than 1\n"
-            "\t-c :      (optional) codec name. Default is \"libx264\", can be: \"libx264\", \"h264_nvenc\", \"h264_videotoolbox\"\n"
+            "\t-e :      (optional) encoder name. Default is \"libx264\", can be: \"libx264\", \"h264_nvenc\", \"h264_videotoolbox\"\n"
+            "\t-d :      (optional) decoder name. Default is \"h264\", can be: \"h264\", \"h264_cuvid\"\n"
             "\t-f :      (mandatory) input filename for transcoding. Output goes to directory ./O\n", progname);
 }
 
@@ -379,7 +380,8 @@ main(
         .seg_duration_fr = 60,              /* in frames-per-secoond units */
         .seg_duration_secs_str = "2.002",
         //.seg_duration_secs_str = "30.015",
-        .codec = "libx264",
+        .ecodec = "libx264",
+        .dcodec = "",
         .enc_height = 720,                  /* -1 means use source height, other values 2160, 720 */
         .enc_width = 1280                   /* -1 means use source width, other values 3840, 1280 */
     };
@@ -401,8 +403,12 @@ main(
                 }
                 break;
 
-            case 'c':
-                p.codec = argv[i+1];
+            case 'e':
+                p.ecodec = argv[i+1];
+                break;
+
+            case 'd':
+                p.dcodec = argv[i+1];
                 break;
 
             case 'f':   /* filename */

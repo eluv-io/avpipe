@@ -160,7 +160,7 @@ func main() {
 		SegDurationTs:      1001 * 60,
 		SegDurationFr:      60,
 		SegDurationSecsStr: "2.002",
-		Codec:              "libx264",
+		Ecodec:             "libx264",
 		EncHeight:          720,
 		EncWidth:           1280,
 	}
