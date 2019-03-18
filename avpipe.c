@@ -311,7 +311,7 @@ tx(
         goto end_tx;
     }
 
-    if (avpipe_tx(txctx, 0, 0) < 0) {
+    if (avpipe_tx(txctx, 0, bypass_transcoding) < 0) {
         elv_err("Error in transcoding");
         rc = -1;
         goto end_tx;
