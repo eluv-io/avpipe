@@ -24,7 +24,7 @@ func main() {
 
 	err = cmdRoot.Execute()
 	if err != nil {
-		fmt.Println(err)
+		fmt.Printf("Command failed\n")
 		os.Exit(1)
 	}
 }
