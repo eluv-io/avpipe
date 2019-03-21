@@ -16,6 +16,10 @@ typedef enum elv_log_appender_t {
     elv_log_stdout = 2
 } elv_log_appender_t;
 
+typedef int
+(*elv_logger_f)(
+    char *msg);
+
 /**
  * @brief   Initializes the Eluvio logger. If the application doesn't initialize the logger,
  *          any subsequent calls to elv_dbg()/elv_log()/elv_warn()/elv_err() will append the
@@ -130,3 +134,16 @@ int
 elv_err(
     const char *fmt, ...);
 
+
+/*
+ * @brief   Sets the callback log function for the specified log level
+ *
+ * @param   level       Log level
+ * @param   logger_f    Log function to be called for specified log level
+ *
+ * @return  0 if successful, otherwise 1.
+ */
+int
+elv_set_log_func(
+    elv_log_level_t level,
+    elv_logger_f logger_f);

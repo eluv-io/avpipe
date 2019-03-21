@@ -31,6 +31,7 @@ typedef struct elv_logger_t {
     u_int32_t _n_rotate;            // Current rotation number
     int _fd;
     u_int32_t _total_written;       // Total bytes written to the current log file
+    elv_logger_f elv_logger[elv_log_error+1];   // Array of loggers for different log levels
 } elv_logger_t;
 
 
@@ -242,17 +243,22 @@ int
 elv_log(
     const char *fmt, ...)
 {
-    int len;
+    int len = 0;
     char buf[LOG_BUFF_SIZE];
     va_list args;
 
     if (_logger._log_level > elv_log_log)
         return 0;
 
-    len = _set_log_header(buf, "LOG");
+    if (_logger.elv_logger[elv_log_log] == NULL)
+        len = _set_log_header(buf, "LOG");
+    
     va_start(args, fmt);
     len += vsnprintf(buf+len, LOG_BUFF_SIZE-len, fmt, args);
     va_end(args);
+
+    if (_logger.elv_logger[elv_log_log] != NULL)
+        return _logger.elv_logger[elv_log_log](buf);
 
     return _flush_log(buf, len);
 }
@@ -261,17 +267,22 @@ int
 elv_dbg(
     const char *fmt, ...)
 {
-    int len;
+    int len = 0;
     char buf[LOG_BUFF_SIZE];
     va_list args;
 
     if (_logger._log_level > elv_log_debug)
         return 0;
 
-    len = _set_log_header(buf, "DBG");
+    if (_logger.elv_logger[elv_log_debug] == NULL)
+        len = _set_log_header(buf, "DBG");
+
     va_start(args, fmt);
     len += vsnprintf(buf+len, LOG_BUFF_SIZE-len, fmt, args);
     va_end(args);
+
+    if (_logger.elv_logger[elv_log_debug] != NULL)
+        return _logger.elv_logger[elv_log_debug](buf);
 
     return _flush_log(buf, len);
 }
@@ -280,7 +291,7 @@ int
 elv_warn(
     const char *fmt, ...)
 {
-    int len;
+    int len = 0;
     char buf[LOG_BUFF_SIZE];
     va_list args;
 
@@ -309,4 +320,15 @@ elv_err(
     va_end(args);
 
     return _flush_log(buf, len);
+}
+
+int
+elv_set_log_func(
+    elv_log_level_t level,
+    elv_logger_f logger_f)
+{
+    if (level > elv_log_error)
+        return 1;
+    _logger.elv_logger[level] = logger_f;
+    return 0;
 }

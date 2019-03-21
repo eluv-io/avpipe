@@ -24,6 +24,11 @@ int64_t AVPipeOpenOutput(int64_t, int, int, int);
 int AVPipeWriteOutput(int64_t, int64_t, uint8_t *, int);
 int AVPipeSeekOutput(int64_t, int64_t, int64_t offset, int whence);
 int AVPipeCloseOutput(int64_t, int64_t);
+int CLog(char *);
+int CDebug(char *);
+int CInfo(char *);
+int CWarn(char *);
+int CError(char *);
 
 #define MIN_VALID_FD      (-4)
 
@@ -263,6 +268,15 @@ out_closer(
     free(outctx->opaque);
     free(outctx->buf);
     return rc;
+}
+
+void
+set_loggers()
+{
+    elv_set_log_func(elv_log_log, CLog);
+    elv_set_log_func(elv_log_debug, CDebug);
+    elv_set_log_func(elv_log_warning, CWarn);
+    elv_set_log_func(elv_log_error, CError);
 }
 
 /*

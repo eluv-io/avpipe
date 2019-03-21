@@ -21,6 +21,7 @@ package avpipe
 // #include <stdlib.h>
 // #include "avpipe_xc.h"
 // #include "avpipe.h"
+// #include "elv_log.h"
 import "C"
 import (
 	elog "eluvio/log"
@@ -364,6 +365,45 @@ func (h *ioHandler) OutCloser(fd C.int64_t) error {
 	err := h.outTable[int64(fd)].Close()
 	log.Debug("OutCloser()", "fd", int64(fd), "error", err)
 	return err
+}
+
+//export CLog
+func CLog(msg *C.char) C.int {
+    m := C.GoString((*C.char)(unsafe.Pointer(msg)))
+    log.Info(m)
+    return C.int(0)
+}
+
+//export CDebug
+func CDebug(msg *C.char) C.int {
+    m := C.GoString((*C.char)(unsafe.Pointer(msg)))
+    log.Debug(m)
+    return C.int(0)
+}
+
+//export CInfo
+func CInfo(msg *C.char) C.int {
+    m := C.GoString((*C.char)(unsafe.Pointer(msg)))
+    log.Info(m)
+    return C.int(0)
+}
+
+//export CWarn
+func CWarn(msg *C.char) C.int {
+    m := C.GoString((*C.char)(unsafe.Pointer(msg)))
+    log.Warn(m)
+    return C.int(0)
+}
+
+//export CError
+func CError(msg *C.char) C.int {
+    m := C.GoString((*C.char)(unsafe.Pointer(msg)))
+    log.Error(m)
+    return C.int(0)
+}
+
+func SetCLoggers() {
+    C.set_loggers()
 }
 
 // params: transcoding parameters
