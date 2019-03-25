@@ -53,6 +53,8 @@ prepare_input(
     AVIOContext *avioctx;
     int bufin_sz = 64 * 1024;
 
+    int avioctxBufSize = 1024 * 1024;
+
     bufin = (unsigned char *) av_malloc(64*1024); /* Must be malloc'd - will be realloc'd by avformat */
     avioctx = avio_alloc_context(bufin, bufin_sz, 0, (void *)inctx,
         in_handlers->avpipe_reader, in_handlers->avpipe_writer, in_handlers->avpipe_seeker);
@@ -60,7 +62,7 @@ prepare_input(
     avioctx->written = inctx->sz; /* Fake avio_size() to avoid calling seek to find size */
     avioctx->seekable = 0;
     avioctx->direct = 0;
-    avioctx->buffer_size = 512 * 1024;  // avoid seeks - avio_seek() seeks internal buffer */
+    avioctx->buffer_size = inctx->sz < avioctxBufSize ? inctx->sz : avioctxBufSize; // avoid seeks - avio_seek() seeks internal buffer */
     format_ctx->pb = avioctx;
     return 0;
 }
@@ -549,7 +551,7 @@ transcode_packet(
         packet->dts = av_rescale_q_rnd(packet->dts, in_stream->time_base, out_stream->time_base, AV_ROUND_NEAR_INF|AV_ROUND_PASS_MINMAX);
         packet->duration = av_rescale_q(packet->duration, in_stream->time_base, out_stream->time_base);
 
-	    dump_packet("BYPASS ", packet);
+        dump_packet("BYPASS ", packet);
         if (av_interleaved_write_frame(encoder_context->format_context, packet) < 0) {
             elv_err("Failure in copying audio stream");
             return -1;

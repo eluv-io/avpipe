@@ -154,7 +154,7 @@ func NewIOHandler(url *C.char, size *C.int64_t) C.int64_t {
 	*size = C.int64_t(input.Size())
 
 	h := &ioHandler{input: input, outTable: make(map[int64]OutputHandler)}
-	log.Debug("NewIOHandler()", "url", filename, "size", size)
+	log.Debug("NewIOHandler()", "url", filename, "size", *size)
 
 	gMutex.Lock()
 	defer gMutex.Unlock()
