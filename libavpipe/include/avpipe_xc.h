@@ -21,7 +21,8 @@ typedef enum avpipe_buftype_t {
     avpipe_audio_segment = 5,           // audio chunk-stream
     avpipe_master_m3u = 6,              // hls master m3u
     avpipe_video_m3u = 7,               // video m3u
-    avpipe_audio_m3u = 8                // audio m3u
+    avpipe_audio_m3u = 8,               // audio m3u
+    avpipe_aes_128_key = 9
 } avpipe_buftype_t;
 
 typedef struct ioctx_t {
@@ -108,6 +109,11 @@ typedef struct coderctx_t {
     int pts;        /* Decoder/encoder pts */
 } coderctx_t;
 
+typedef enum crypt_scheme_t {
+    crypt_none,
+    crypt_aes128
+} crypt_scheme_t;
+
 typedef struct txparams_t {
     char *format;
     int start_time_ts;
@@ -124,6 +130,10 @@ typedef struct txparams_t {
     char *dcodec;                   // Video/audio decoder
     int enc_height;
     int enc_width;
+    crypt_scheme_t crypt_scheme;    // Content protection / DRM / encryption [Optional, Default: crypt_none]
+    char *crypt_key;                // 16-byte AES key in hex [Optional, Default: Generated]
+    char *crypt_url;                // Specify a key URL in the manifest [Optional, Default: key.bin]
+    char *crypt_iv;                 // 16-byte AES IV in hex [Opitonal, Default: Generated]
 } txparams_t;
 
 typedef struct txctx_t {

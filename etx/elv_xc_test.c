@@ -145,6 +145,7 @@ out_opener(
     case avpipe_audio_init_stream:
     case avpipe_video_m3u:
     case avpipe_audio_m3u:
+    case avpipe_aes_128_key:
         /* Init segments, or m3u files */
         sprintf(segname, "%s/%s", dir, url);
         break;
@@ -341,6 +342,10 @@ usage(
             "\t-t :      (optional) transcoding threads. Default is 1 thread, must be bigger than 1\n"
             "\t-e :      (optional) encoder name. Default is \"libx264\", can be: \"libx264\", \"h264_nvenc\", \"h264_videotoolbox\"\n"
             "\t-d :      (optional) decoder name. Default is \"h264\", can be: \"h264\", \"h264_cuvid\"\n"
+            "\t-c :      (optional) encryption scheme. Default is \"none\", can be: \"aes-128\"\n"
+            "\t-k :      (optional) 128-bit AES key, as hex\n"
+            "\t-i :      (optional) 128-bit AES IV, as hex\n"
+            "\t-u :      (optional) specify a key URL in the manifest\n"
             "\t-f :      (mandatory) input filename for transcoding. Output goes to directory ./O\n", progname);
 }
 
@@ -383,7 +388,11 @@ main(
         .ecodec = "libx264",
         .dcodec = "",
         .enc_height = 720,                  /* -1 means use source height, other values 2160, 720 */
-        .enc_width = 1280                   /* -1 means use source width, other values 3840, 1280 */
+        .enc_width = 1280,                  /* -1 means use source width, other values 3840, 1280 */
+        .crypt_scheme = crypt_none,
+        .crypt_key = NULL,
+        .crypt_url = NULL,
+        .crypt_iv = NULL
     };
 
     i = 1;
@@ -443,6 +452,23 @@ main(
                     usage(argv[0]);
                     return 1;
                 }
+                break;
+
+            case 'c':
+                if (strcmp(argv[i+1], "aes-128") == 0)
+                    p.crypt_scheme = crypt_aes128;
+                break;
+
+            case 'k':
+                p.crypt_key = argv[i+1];
+                break;
+
+            case 'i':
+                p.crypt_iv = argv[i+1];
+                break;
+
+            case 'u':
+                p.crypt_url = argv[i+1];
                 break;
 
             default:
