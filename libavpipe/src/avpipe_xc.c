@@ -293,6 +293,16 @@ prepare_video_encoder(
     if (!strcmp(params->format, "hls"))
         av_opt_set(encoder_context->format_context->priv_data, "hls_playlist", "1", 0);
 
+    if (params->crypt_scheme == crypt_aes128) {
+        av_opt_set(encoder_context->format_context->priv_data, "hls_enc", "1", 0);
+        if (params->crypt_iv != NULL)
+            av_opt_set(encoder_context->format_context->priv_data, "hls_enc_iv", params->crypt_iv, 0);
+        if (params->crypt_key != NULL)
+            av_opt_set(encoder_context->format_context->priv_data, "hls_enc_key", params->crypt_key, 0);
+        if (params->crypt_url != NULL)
+            av_opt_set(encoder_context->format_context->priv_data, "hls_enc_key_url", params->crypt_url, 0);
+    }
+
     /* Search for input pixel format in list of encoder pixel formats. */
     for (i=0; encoder_context->codec[index]->pix_fmts[i] >= 0; i++) {
         if (encoder_context->codec[index]->pix_fmts[i] == decoder_context->codec_context[index]->pix_fmt)
@@ -977,23 +987,23 @@ avpipe_fini(
     if (encoder_context && encoder_context->format_context)
         avformat_free_context(encoder_context->format_context);
 
-    if (decoder_context && decoder_context->codec_context && decoder_context->codec_context[0]) {
+    if (decoder_context && decoder_context->codec_context[0]) {
         /* Corresponds to avcodec_open2() */
         avcodec_close(decoder_context->codec_context[0]);
         avcodec_free_context(&decoder_context->codec_context[0]);
     }
-    if (decoder_context && decoder_context->codec_context && decoder_context->codec_context[1]) {
+    if (decoder_context && decoder_context->codec_context[1]) {
         /* Corresponds to avcodec_open2() */
         avcodec_close(decoder_context->codec_context[1]);
         avcodec_free_context(&decoder_context->codec_context[1]);
     }
 
-    if (encoder_context && encoder_context->codec_context && encoder_context->codec_context[0]) {
+    if (encoder_context && encoder_context->codec_context[0]) {
         /* Corresponds to avcodec_open2() */
         avcodec_close(encoder_context->codec_context[0]);
         avcodec_free_context(&encoder_context->codec_context[0]);
     }
-    if (encoder_context && encoder_context->codec_context && encoder_context->codec_context[1]) {
+    if (encoder_context && encoder_context->codec_context[1]) {
         /* Corresponds to avcodec_open2() */
         avcodec_close(encoder_context->codec_context[1]);
         avcodec_free_context(&encoder_context->codec_context[1]);

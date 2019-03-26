@@ -77,6 +77,7 @@ elv_io_open(
 
         ioctx_t *outctx = (ioctx_t *) calloc(1, sizeof(ioctx_t));
         outctx->stream_index = 0;
+        outctx->seg_index = -1;     // Special index for init-stream0 and init-stream1
         outctx->inctx = out_tracker[0].inctx;
 
         if (!url || url[0] == '\0') {
@@ -89,7 +90,11 @@ elv_io_open(
             if (i < strlen(url)) {
                 outctx->stream_index = url[i] - '0';
             }
-            if (!strncmp(url, "master", 6)) {
+            if (!strncmp(url + strlen(url) - 3, "mpd", 3)) {
+                outctx->type = avpipe_manifest;
+                outctx->seg_index = 0;
+            }
+            else if (!strncmp(url, "master", 6)) {
                 outctx->type = avpipe_master_m3u;
             }
             else if (!strncmp(url, "media", 5)) {
@@ -98,13 +103,15 @@ elv_io_open(
                 else
                     outctx->type = avpipe_audio_m3u;
             }
-            else {
+            else if (!strncmp(url, "init", 4)) {
                 if (outctx->stream_index == out_tracker[outctx->stream_index].video_stream_index)
                     outctx->type = avpipe_video_init_stream;
                 else
                     outctx->type = avpipe_audio_init_stream;
             }
-            outctx->seg_index = -1;     // Special index for init-stream0 and init-stream1
+            else if (!strncmp(url, "key.bin", 7)) {
+                outctx->type = avpipe_aes_128_key;
+            }
         }
 
         elv_dbg("OUT url=%s, type=%d", url, outctx->type);

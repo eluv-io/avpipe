@@ -36,8 +36,6 @@ Then build:
   make install
 ```
 
-```
-
 Build and test Go code
 
 ```bash
