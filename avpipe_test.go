@@ -184,7 +184,7 @@ func TestSingleTranscode(t *testing.T) {
 		SegDurationTs:      1001 * 60,
 		SegDurationFr:      60,
 		SegDurationSecsStr: "2.002",
-		Codec:              "libx264",
+		Ecodec:             "libx264",
 		EncHeight:          720,
 		EncWidth:           1280,
 	}
@@ -244,7 +244,7 @@ func TestNvidiaTranscode(t *testing.T) {
 		SegDurationTs:      1001 * 60,
 		SegDurationFr:      60,
 		SegDurationSecsStr: "2.002",
-		Codec:              "h264_nvenc",
+		Ecodec:             "h264_nvenc",
 		EncHeight:          720,
 		EncWidth:           1280,
 	}
@@ -268,7 +268,7 @@ func TestConcurrentTranscode(t *testing.T) {
 		SegDurationTs:      1001 * 60,
 		SegDurationFr:      60,
 		SegDurationSecsStr: "2.002",
-		Codec:              "libx264",
+		Ecodec:             "libx264",
 		EncHeight:          720,
 		EncWidth:           1280,
 	}
