@@ -116,6 +116,14 @@ prepare_decoder(
             /* Audio */
             decoder_context->audio_stream_index = i;
             elv_dbg("STREAM %d Audio, codec_id=%s", i, avcodec_get_name(decoder_context->codec_parameters[i]->codec_id));
+
+            /* If the buffer size is too big, ffmpeg might assert in aviobuf.c:581
+             * To avoid this assertion, reset the buffer size to something smaller.
+             */
+            {
+                AVIOContext *avioctx = (AVIOContext *)decoder_context->format_context->pb;
+                avioctx->buffer_size = 128*1024;
+            }
         } else {
             elv_dbg("STREAM UNKNOWN type=%d", decoder_context->format_context->streams[i]->codecpar->codec_type);
             continue;
