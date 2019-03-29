@@ -54,8 +54,8 @@ elv_io_open(
             outctx->type = avpipe_video_segment;
         else
             outctx->type = avpipe_audio_segment;
-        out_tracker[outctx->stream_index].seg_index++;
         outctx->seg_index = out_tracker[outctx->stream_index].seg_index;
+        out_tracker[outctx->stream_index].seg_index++;
         outctx->inctx = out_tracker[outctx->stream_index].inctx;
 
         if (out_handlers->avpipe_opener(url, outctx) < 0) {

@@ -22,6 +22,7 @@
 #include <sys/stat.h>
 #include <sys/uio.h>
 #include <unistd.h>
+#include <stdlib.h>
 
 extern int
 init_filters(
@@ -459,6 +460,7 @@ prepare_encoder(
     out_tracker[0].inctx = out_tracker[1].inctx = inctx;
     out_tracker[0].video_stream_index = out_tracker[1].video_stream_index = decoder_context->video_stream_index;
     out_tracker[0].audio_stream_index = out_tracker[1].audio_stream_index = decoder_context->audio_stream_index;
+    out_tracker[0].seg_index = out_tracker[1].seg_index = atoi(params->start_segment_str);
     encoder_context->format_context->avpipe_opaque = out_tracker;
 
     dump_encoder(encoder_context);
