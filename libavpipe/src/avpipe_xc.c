@@ -570,6 +570,8 @@ transcode_packet(
         packet->pts = av_rescale_q_rnd(packet->pts, in_stream->time_base, out_stream->time_base, AV_ROUND_NEAR_INF|AV_ROUND_PASS_MINMAX);
         packet->dts = av_rescale_q_rnd(packet->dts, in_stream->time_base, out_stream->time_base, AV_ROUND_NEAR_INF|AV_ROUND_PASS_MINMAX);
         packet->duration = av_rescale_q(packet->duration, in_stream->time_base, out_stream->time_base);
+        packet->pts += p->start_pts;
+        packet->dts += p->start_pts;
 
         dump_packet("BYPASS ", packet);
         if (av_interleaved_write_frame(encoder_context->format_context, packet) < 0) {
@@ -580,6 +582,8 @@ transcode_packet(
         return 0;
     }
 
+    packet->pts += p->start_pts;
+    packet->dts += p->start_pts;
     response = avcodec_send_packet(codec_context, packet);
     if (response < 0) {
         elv_err("Failure while sending a packet to the decoder: %s", av_err2str(response));
@@ -807,7 +811,7 @@ avpipe_tx(
 
     int response = 0;
 
-    elv_dbg("START TIME %d DURATION %d", params->start_time_ts, params->duration_ts);
+    elv_dbg("START TIME %d, START PTS %d (output), DURATION %d", params->start_time_ts, params->start_pts, params->duration_ts);
 
     /* Seek to start position */
     if (params->start_time_ts != -1) {
@@ -875,11 +879,16 @@ avpipe_tx(
             dump_stats(decoder_context, encoder_context);
         } else if (input_packet->stream_index == decoder_context->audio_stream_index) {
             // Audio packet: just copying audio stream
+            dump_packet("AUDIO IN 1", input_packet);
             av_packet_rescale_ts(input_packet,
                 decoder_context->stream[input_packet->stream_index]->time_base,
                 encoder_context->stream[input_packet->stream_index]->time_base
             );
+            dump_packet("AUDIO IN 2", input_packet);
+            input_packet->pts += params->start_pts;
+            input_packet->dts += params->start_pts;
 
+            dump_packet("AUDIO IN 3", input_packet);
             if (av_interleaved_write_frame(encoder_context->format_context, input_packet) < 0) {
                 elv_err("Failure in copying audio stream");
                 return -1;
@@ -938,6 +947,11 @@ avpipe_init(
 
     if (!params->format || (strcmp(params->format, "dash") && strcmp(params->format, "hls"))) {
         elv_err("Output format can be only \"dash\" or \"hls\"");
+        goto avpipe_init_failed;
+    }
+
+    if (params->start_pts < 0) {
+        elv_err("Start PTS can not be negative");
         goto avpipe_init_failed;
     }
 

@@ -117,6 +117,7 @@ typedef enum crypt_scheme_t {
 typedef struct txparams_t {
     char *format;
     int start_time_ts;
+    int start_pts;
     int duration_ts;
     char *start_segment_str;
     int video_bitrate;

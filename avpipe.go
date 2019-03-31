@@ -50,6 +50,7 @@ const (
 type TxParams struct {
 	Format             string
 	StartTimeTs        int32
+	StartPts           int32 // Start PTS for output
 	DurationTs         int32
 	StartSegmentStr    string
 	VideoBitrate       int32
@@ -419,6 +420,7 @@ func Tx(params *TxParams, url string, bypass_transcoding bool) int {
 	cparams := &C.txparams_t{
 		format:                C.CString(params.Format),
 		start_time_ts:         C.int(params.StartTimeTs),
+		start_pts:             C.int(params.StartPts),
 		duration_ts:           C.int(params.DurationTs),
 		start_segment_str:     C.CString(params.StartSegmentStr),
 		video_bitrate:         C.int(params.VideoBitrate),
