@@ -336,17 +336,22 @@ usage(
     char *progname
 )
 {
-    printf("Usage: %s -bypass <0|1> -c <codec> -r <repeats> -t <n_threads> -f <filename>\n"
-            "\t-bypass : (optional) bypass transcoding. Default is 0, must be 0 or 1\n"
-            "\t-r :      (optional) number of repeats. Default is 1 repeat, must be bigger than 1\n"
-            "\t-t :      (optional) transcoding threads. Default is 1 thread, must be bigger than 1\n"
-            "\t-e :      (optional) encoder name. Default is \"libx264\", can be: \"libx264\", \"h264_nvenc\", \"h264_videotoolbox\"\n"
-            "\t-d :      (optional) decoder name. Default is \"h264\", can be: \"h264\", \"h264_cuvid\"\n"
-            "\t-c :      (optional) encryption scheme. Default is \"none\", can be: \"aes-128\"\n"
-            "\t-k :      (optional) 128-bit AES key, as hex\n"
-            "\t-i :      (optional) 128-bit AES IV, as hex\n"
-            "\t-u :      (optional) specify a key URL in the manifest\n"
-            "\t-f :      (mandatory) input filename for transcoding. Output goes to directory ./O\n", progname);
+    printf("Usage: %s <params>\n"
+            "\t-bypass :            (optional) bypass transcoding. Default is 0, must be 0 or 1\n"
+            "\t-r :                 (optional) number of repeats. Default is 1 repeat, must be bigger than 1\n"
+            "\t-t :                 (optional) transcoding threads. Default is 1 thread, must be bigger than 1\n"
+            "\t-e :                 (optional) encoder name. Default is \"libx264\", can be: \"libx264\", \"h264_nvenc\", \"h264_videotoolbox\"\n"
+            "\t-d :                 (optional) decoder name. Default is \"h264\", can be: \"h264\", \"h264_cuvid\"\n"
+            "\t-c :                 (optional) encryption scheme. Default is \"none\", can be: \"aes-128\"\n"
+            "\t-k :                 (optional) 128-bit AES key, as hex\n"
+            "\t-i :                 (optional) 128-bit AES IV, as hex\n"
+            "\t-u :                 (optional) specify a key URL in the manifest\n"
+            "\t-start-pts :         (optional) starting PTS for output. Default is 0\n"
+            "\t-start-segment :     (optional) start segment number >= 1, Default is 1\n"
+            "\t-seg-duration-ts :   (mandatory) segment duration time base (positive integer).\n"
+            "\t-seg-duration-fr :   (mandatory) segment duration frame (positive integer).\n"
+            "\t-timescale :         (mandatory) timescale based on time base (positive integer).\n"
+            "\t-f :                 (mandatory) input filename for transcoding. Output goes to directory ./O\n", progname);
 }
 
 /*
@@ -366,8 +371,15 @@ main(
     struct stat st = {0};
     int repeats = 1;
     int n_threads = 1;
+    int pts = 0;
     char *filename = NULL;
     int bypass_transcoding = 0;         // bypass transcoding
+    int seg_duration_ts = 0;
+    int seg_duration_fr = 0;
+    int timescale = 0;
+    char seg_duration_str[10];
+    int start_segment = 1;
+    char start_segment_str[10];
     int i;
 
     /* Parameters */
@@ -378,13 +390,15 @@ main(
         .sample_rate = 44100,               /* Audio sampling rate */
         .crf_str = "23",                    /* 1 best -> 23 standard middle -> 52 poor */
         .start_time_ts = 0,                 /* same units as input stream PTS */
+        .start_pts = 0,
         //.duration_ts = 1001 * 60 * 12,      /* same units as input stream PTS */
         .duration_ts = -1,                  /* -1 means entire input stream */
         .start_segment_str = "1",           /* 1-based */
         .seg_duration_ts = 1001 * 60,       /* same units as input stream PTS */
-        .seg_duration_fr = 60,              /* in frames-per-secoond units */
+        //.seg_duration_ts = 96256,       /* same units as input stream PTS */
+        .seg_duration_fr = 30,              /* in frames-per-secoond units */
+        //.seg_duration_fr = 2048,
         .seg_duration_secs_str = "2.002",
-        //.seg_duration_secs_str = "30.015",
         .ecodec = "libx264",
         .dcodec = "",
         .enc_height = 720,                  /* -1 means use source height, other values 2160, 720 */
@@ -408,7 +422,7 @@ main(
 
                 if ( repeats < 1 ) {
                     usage(argv[0]);
-                    return -1;
+                    return 1;
                 }
                 break;
 
@@ -425,6 +439,14 @@ main(
                 break;
 
             case 't':   /* thread numbers */
+                if (!strcmp(argv[i], "-timescale")) {
+                    if (sscanf(argv[i+1], "%d", &timescale) != 1) {
+                        usage(argv[0]);
+                        return 1;
+                    }
+                    break;
+                }
+
                 if (sscanf(argv[i+1], "%d", &n_threads) != 1) {
                     usage(argv[0]);
                     return 1;
@@ -432,7 +454,7 @@ main(
 
                 if ( n_threads < 1 ) {
                     usage(argv[0]);
-                    return -1;
+                    return 1;
                 }
                 break;
 
@@ -471,6 +493,52 @@ main(
                 p.crypt_url = argv[i+1];
                 break;
 
+            case 's':
+                if (!strcmp(argv[i], "-seg-duration-ts")) {
+                    if (sscanf(argv[i+1], "%d", &seg_duration_ts) != 1) {
+                        usage(argv[0]);
+                        return 1;
+                    }
+
+                    if (seg_duration_ts <= 0) {
+                        usage(argv[0]);
+                        return 1;
+                    }
+                    break;
+                }
+
+
+                if (!strcmp(argv[i], "-seg-duration-fr")) {
+                    if (sscanf(argv[i+1], "%d", &seg_duration_fr) != 1) {
+                        usage(argv[0]);
+                        return 1;
+                    }
+
+                    if (seg_duration_fr <= 0) {
+                        usage(argv[0]);
+                        return 1;
+                    }
+                    break;
+                }
+
+                if (!strcmp(argv[i], "-start-pts")) {
+                    if (sscanf(argv[i+1], "%d", &pts) != 1) {
+                        usage(argv[0]);
+                        return 1;
+                    }
+                    break;
+                }
+
+                if (!strcmp(argv[i], "-start-segment")) {
+                    if (sscanf(argv[i+1], "%d", &start_segment) != 1) {
+                        usage(argv[0]);
+                        return 1;
+                    }
+                    break;
+                }
+
+                break;
+
             default:
                 usage(argv[0]);
                 return -1;
@@ -488,6 +556,22 @@ main(
         usage(argv[0]);
         return -1;
     }
+
+    if (seg_duration_ts <= 0 || seg_duration_fr <= 0 || timescale <= 0 || start_segment < 1) {
+        usage(argv[0]);
+        return -1;
+    }
+
+    sprintf(seg_duration_str, "%.4f", ((float)seg_duration_ts)/timescale);
+    sprintf(start_segment_str, "%d", start_segment);
+
+    p.start_pts = pts;
+    p.seg_duration_secs_str = seg_duration_str;
+    p.seg_duration_ts = seg_duration_ts;
+    p.seg_duration_fr = seg_duration_fr;
+    p.start_segment_str = start_segment_str;
+    elv_log("seg_duration_str=%s, seg_duration_ts=%d, seg_duration_fr=%d, start_pts=%d, start_segment=%s",
+        seg_duration_str, p.seg_duration_ts, p.seg_duration_fr, p.start_pts, p.start_segment_str);
 
     /* Create O dir if doesn't exist */
     if (stat("./O", &st) == -1)
