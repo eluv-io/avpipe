@@ -570,8 +570,6 @@ main(
     p.seg_duration_ts = seg_duration_ts;
     p.seg_duration_fr = seg_duration_fr;
     p.start_segment_str = start_segment_str;
-    elv_log("seg_duration_str=%s, seg_duration_ts=%d, seg_duration_fr=%d, start_pts=%d, start_segment=%s",
-        seg_duration_str, p.seg_duration_ts, p.seg_duration_fr, p.start_pts, p.start_segment_str);
 
     /* Create O dir if doesn't exist */
     if (stat("./O", &st) == -1)
@@ -582,6 +580,9 @@ main(
 
     elv_logger_open(NULL, "etx", 10, 100*1024*1024, elv_log_file);
     elv_set_log_level(elv_log_debug);
+
+    elv_log("seg_duration_str=%s, seg_duration_ts=%d, seg_duration_fr=%d, start_pts=%d, start_segment=%s",
+        seg_duration_str, p.seg_duration_ts, p.seg_duration_fr, p.start_pts, p.start_segment_str);
 
     in_handlers.avpipe_opener = in_opener;
     in_handlers.avpipe_closer = in_closer;
