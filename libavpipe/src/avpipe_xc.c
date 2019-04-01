@@ -477,7 +477,8 @@ encode_frame(
     coderctx_t *decoder_context,
     coderctx_t *encoder_context,
     AVFrame *frame,
-    int stream_index)
+    int stream_index,
+    txparams_t *params)
 {
     int ret;
     AVFormatContext *format_context = encoder_context->format_context;
@@ -532,6 +533,8 @@ encode_frame(
             decoder_context->stream[stream_index]->time_base,
             encoder_context->stream[stream_index]->time_base
         );
+    	output_packet->pts += params->start_pts;
+    	output_packet->dts += params->start_pts;
 
         /* mux encoded frame */
         ret = av_interleaved_write_frame(format_context, output_packet);
@@ -570,6 +573,7 @@ transcode_packet(
         packet->pts = av_rescale_q_rnd(packet->pts, in_stream->time_base, out_stream->time_base, AV_ROUND_NEAR_INF|AV_ROUND_PASS_MINMAX);
         packet->dts = av_rescale_q_rnd(packet->dts, in_stream->time_base, out_stream->time_base, AV_ROUND_NEAR_INF|AV_ROUND_PASS_MINMAX);
         packet->duration = av_rescale_q(packet->duration, in_stream->time_base, out_stream->time_base);
+
         packet->pts += p->start_pts;
         packet->dts += p->start_pts;
 
@@ -582,8 +586,6 @@ transcode_packet(
         return 0;
     }
 
-    packet->pts += p->start_pts;
-    packet->dts += p->start_pts;
     response = avcodec_send_packet(codec_context, packet);
     if (response < 0) {
         elv_err("Failure while sending a packet to the decoder: %s", av_err2str(response));
@@ -675,7 +677,7 @@ transcode_packet(
                     /* To allow for packet reordering frames can come with pts past the desired duration */
                     if (p->duration_ts == -1 || frame_to_encode->pts < p->start_time_ts + p->duration_ts) {
                         elv_get_time(&tv);
-                        encode_frame(decoder_context, encoder_context, frame_to_encode, stream_index);
+                        encode_frame(decoder_context, encoder_context, frame_to_encode, stream_index, p);
                         if (do_instrument) {
                             elv_since(&tv, &since);
                             elv_log("INSTRMNT encode_frame time=%"PRId64, since);
@@ -752,7 +754,7 @@ flush_decoder(
 
                 /* To allow for packet reordering frames can come with pts past the desired duration */
                 if (p->duration_ts == -1 || frame_to_encode->pts < p->start_time_ts + p->duration_ts) {
-                    encode_frame(decoder_context, encoder_context, frame_to_encode, stream_index);
+                    encode_frame(decoder_context, encoder_context, frame_to_encode, stream_index, p);
                 } else {
                     elv_dbg("ENCODE skiping frame pts=%d filt_frame pts=%d", frame->pts, filt_frame->pts);
                 }
@@ -814,7 +816,7 @@ avpipe_tx(
     elv_dbg("START TIME %d, START PTS %d (output), DURATION %d", params->start_time_ts, params->start_pts, params->duration_ts);
 
     /* Seek to start position */
-    if (params->start_time_ts != -1) {
+    if (params->start_time_ts > 0) {
         if (av_seek_frame(decoder_context->format_context,
                 decoder_context->video_stream_index, params->start_time_ts, SEEK_SET) < 0) {
             elv_err("Failed seeking to desired start frame");
@@ -911,7 +913,7 @@ avpipe_tx(
      */
     flush_decoder(decoder_context, encoder_context, encoder_context->video_stream_index, params);
     if (!bypass_transcode)
-        encode_frame(decoder_context, encoder_context, NULL, encoder_context->video_stream_index);
+        encode_frame(decoder_context, encoder_context, NULL, encoder_context->video_stream_index, params);
 
 
     dump_stats(decoder_context, encoder_context);
