@@ -116,7 +116,8 @@ type OutputHandler interface {
 
 // Implement IOHandler
 type ioHandler struct {
-	input    InputHandler            // Input file
+	input    InputHandler // Input file
+	mutex    *sync.Mutex
 	outTable map[int64]OutputHandler // Map of integer handle to output interfaces
 }
 
@@ -154,7 +155,7 @@ func NewIOHandler(url *C.char, size *C.int64_t) C.int64_t {
 
 	*size = C.int64_t(input.Size())
 
-	h := &ioHandler{input: input, outTable: make(map[int64]OutputHandler)}
+	h := &ioHandler{input: input, outTable: make(map[int64]OutputHandler), mutex: &sync.Mutex{}}
 	log.Debug("NewIOHandler()", "url", filename, "size", *size)
 
 	gMutex.Lock()
@@ -245,6 +246,20 @@ func (h *ioHandler) InCloser() error {
 	return err
 }
 
+func (h *ioHandler) putOutTable(fd int64, outHandler OutputHandler) {
+	h.mutex.Lock()
+	defer h.mutex.Unlock()
+
+	h.outTable[fd] = outHandler
+}
+
+func (h *ioHandler) getOutTable(fd int64) OutputHandler {
+	h.mutex.Lock()
+	defer h.mutex.Unlock()
+
+	return h.outTable[fd]
+}
+
 //export AVPipeOpenOutput
 func AVPipeOpenOutput(handler C.int64_t, stream_index, seg_index, stream_type C.int) C.int64_t {
 	var out_type AVType
@@ -280,14 +295,14 @@ func AVPipeOpenOutput(handler C.int64_t, stream_index, seg_index, stream_type C.
 		return C.int64_t(-1)
 	}
 
-	etxOut, err := gOutputOpener.Open(int64(handler), fd, int(stream_index), int(seg_index), out_type)
+	outHandler, err := gOutputOpener.Open(int64(handler), fd, int(stream_index), int(seg_index), out_type)
 	if err != nil {
 		log.Error("AVPipeOpenOutput()", "out_type", out_type, "error", err)
 		return C.int64_t(-1)
 	}
 
 	log.Debug("AVPipeOpenOutput()", "fd", fd, "stream_index", stream_index, "seg_index", seg_index, "out_type", out_type)
-	h.outTable[fd] = etxOut
+	h.putOutTable(fd, outHandler)
 
 	return C.int64_t(fd)
 }
@@ -303,7 +318,7 @@ func AVPipeWriteOutput(handler C.int64_t, fd C.int64_t, buf *C.uint8_t, sz C.int
 	gMutex.Unlock()
 	log.Debug("AVPipeWriteOutput", "fd", fd, "sz", sz)
 
-	if h.outTable[int64(fd)] == nil {
+	if h.getOutTable(int64(fd)) == nil {
 		msg := fmt.Sprintf("OutWriterX outTable entry is NULL, fd=%d", fd)
 		panic(msg)
 	}
@@ -318,7 +333,8 @@ func AVPipeWriteOutput(handler C.int64_t, fd C.int64_t, buf *C.uint8_t, sz C.int
 }
 
 func (h *ioHandler) OutWriter(fd C.int64_t, buf []byte) (int, error) {
-	n, err := h.outTable[int64(fd)].Write(buf)
+	outHandler := h.getOutTable(int64(fd))
+	n, err := outHandler.Write(buf)
 	log.Debug("OutWriter written", "n", n, "error", err)
 	return n, err
 }
@@ -340,7 +356,8 @@ func AVPipeSeekOutput(handler C.int64_t, fd C.int64_t, offset C.int64_t, whence 
 }
 
 func (h *ioHandler) OutSeeker(fd C.int64_t, offset C.int64_t, whence C.int) (int64, error) {
-	n, err := h.outTable[int64(fd)].Seek(int64(offset), int(whence))
+	outHandler := h.getOutTable(int64(fd))
+	n, err := outHandler.Seek(int64(offset), int(whence))
 	log.Debug("OutSeeker", "err", err)
 	return n, err
 }
@@ -363,48 +380,49 @@ func AVPipeCloseOutput(handler C.int64_t, fd C.int64_t) C.int {
 }
 
 func (h *ioHandler) OutCloser(fd C.int64_t) error {
-	err := h.outTable[int64(fd)].Close()
+	outHandler := h.getOutTable(int64(fd))
+	err := outHandler.Close()
 	log.Debug("OutCloser()", "fd", int64(fd), "error", err)
 	return err
 }
 
 //export CLog
 func CLog(msg *C.char) C.int {
-    m := C.GoString((*C.char)(unsafe.Pointer(msg)))
-    log.Info(m)
-    return C.int(0)
+	m := C.GoString((*C.char)(unsafe.Pointer(msg)))
+	log.Info(m)
+	return C.int(0)
 }
 
 //export CDebug
 func CDebug(msg *C.char) C.int {
-    m := C.GoString((*C.char)(unsafe.Pointer(msg)))
-    log.Debug(m)
-    return C.int(0)
+	m := C.GoString((*C.char)(unsafe.Pointer(msg)))
+	log.Debug(m)
+	return C.int(0)
 }
 
 //export CInfo
 func CInfo(msg *C.char) C.int {
-    m := C.GoString((*C.char)(unsafe.Pointer(msg)))
-    log.Info(m)
-    return C.int(0)
+	m := C.GoString((*C.char)(unsafe.Pointer(msg)))
+	log.Info(m)
+	return C.int(0)
 }
 
 //export CWarn
 func CWarn(msg *C.char) C.int {
-    m := C.GoString((*C.char)(unsafe.Pointer(msg)))
-    log.Warn(m)
-    return C.int(0)
+	m := C.GoString((*C.char)(unsafe.Pointer(msg)))
+	log.Warn(m)
+	return C.int(0)
 }
 
 //export CError
 func CError(msg *C.char) C.int {
-    m := C.GoString((*C.char)(unsafe.Pointer(msg)))
-    log.Error(m)
-    return C.int(0)
+	m := C.GoString((*C.char)(unsafe.Pointer(msg)))
+	log.Error(m)
+	return C.int(0)
 }
 
 func SetCLoggers() {
-    C.set_loggers()
+	C.set_loggers()
 }
 
 // params: transcoding parameters

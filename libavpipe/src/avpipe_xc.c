@@ -812,6 +812,7 @@ avpipe_tx(
     }
 
     int response = 0;
+    int rc = 0;
 
     elv_dbg("START TIME %d, START PTS %d (output), DURATION %d", params->start_time_ts, params->start_pts, params->duration_ts);
 
@@ -836,7 +837,7 @@ avpipe_tx(
     int frame_duration = params->seg_duration_ts / params->seg_duration_fr;
     int extra_pts = 5 * frame_duration; /* decode extra frames to allow for reordering */
 
-    while (av_read_frame(decoder_context->format_context, input_packet) >= 0) {
+    while ((rc = av_read_frame(decoder_context->format_context, input_packet)) >= 0) {
         if (input_packet->stream_index == decoder_context->video_stream_index) {
             // Video packet
             dump_packet("IN ", input_packet);
@@ -875,6 +876,7 @@ avpipe_tx(
             av_packet_unref(input_packet);
 
             if (response < 0) {
+                elv_dbg("Stop transcoding, rc=%d", response);
                 break;
             }
 
@@ -900,6 +902,8 @@ avpipe_tx(
             elv_dbg("Unhandled stream - not video or audio");
         }
     }
+
+    elv_dbg("av_read_frame() rc=%d", rc);
 
     if (response < 0) {
         av_packet_free(&input_packet);
