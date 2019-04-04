@@ -133,7 +133,7 @@ typedef struct txparams_t {
     int enc_width;
     crypt_scheme_t crypt_scheme;    // Content protection / DRM / encryption [Optional, Default: crypt_none]
     char *crypt_key;                // 16-byte AES key in hex [Optional, Default: Generated]
-    char *crypt_url;                // Specify a key URL in the manifest [Optional, Default: key.bin]
+    char *crypt_key_url;            // Specify a key URL in the manifest [Optional, Default: key.bin]
     char *crypt_iv;                 // 16-byte AES IV in hex [Opitonal, Default: Generated]
 } txparams_t;
 

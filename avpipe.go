@@ -44,6 +44,17 @@ const (
 	HLSMasterM3U
 	HLSVideoM3U
 	HLSAudioM3U
+	AES128Key
+)
+
+// CryptScheme is the content encryption scheme
+type CryptScheme int
+
+const (
+	// CryptNone - clear
+	CryptNone CryptScheme = iota
+	// CryptAES128 - AES-128
+	CryptAES128
 )
 
 // TxParams should match with txparams_t in C library
@@ -64,6 +75,10 @@ type TxParams struct {
 	Dcodec             string // Video decoder
 	EncHeight          int32
 	EncWidth           int32
+	CryptScheme        CryptScheme
+	CryptKey           string
+	CryptKeyURL        string
+	CryptIV            string
 }
 
 // IOHandler the corresponding handlers will be called from the C interface functions
@@ -290,6 +305,8 @@ func AVPipeOpenOutput(handler C.int64_t, stream_index, seg_index, stream_type C.
 		out_type = HLSVideoM3U
 	case C.avpipe_audio_m3u:
 		out_type = HLSAudioM3U
+	case C.avpipe_aes_128_key:
+		out_type = AES128Key
 	default:
 		log.Error("AVPipeOpenOutput()", "invalid stream type", stream_type)
 		return C.int64_t(-1)
@@ -452,6 +469,10 @@ func Tx(params *TxParams, url string, bypass_transcoding bool) int {
 		dcodec:                C.CString(params.Dcodec),
 		enc_height:            C.int(params.EncHeight),
 		enc_width:             C.int(params.EncWidth),
+		crypt_scheme:          C.crypt_scheme_t(params.CryptScheme),
+		crypt_key:             C.CString(params.CryptKey),
+		crypt_key_url:         C.CString(params.CryptKeyURL),
+		crypt_iv:              C.CString(params.CryptIV),
 	}
 
 	var bypass int

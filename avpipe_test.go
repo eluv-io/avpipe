@@ -84,6 +84,8 @@ func (oo *fileOutputOpener) Open(h, fd int64, stream_index, seg_index int, out_t
 		fallthrough
 	case avpipe.HLSAudioM3U:
 		filename = fmt.Sprintf("./%s/media_%d.m3u8", oo.dir, stream_index)
+	case avpipe.AES128Key:
+		filename = fmt.Sprintf("./%s/key.bin", oo.dir)
 	}
 
 	f, err := os.OpenFile(filename, os.O_RDWR|os.O_CREATE|os.O_TRUNC, 0644)
@@ -130,6 +132,8 @@ func (coo *concurrentOutputOpener) Open(h, fd int64, stream_index, seg_index int
 		fallthrough
 	case avpipe.HLSAudioM3U:
 		filename = fmt.Sprintf("./%s/media_%d.m3u8", dir, stream_index)
+	case avpipe.AES128Key:
+		filename = fmt.Sprintf("./%s/key.bin", dir)
 	}
 
 	f, err := os.OpenFile(filename, os.O_RDWR|os.O_CREATE|os.O_TRUNC, 0644)

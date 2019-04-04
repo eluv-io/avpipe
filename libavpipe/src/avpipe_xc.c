@@ -308,8 +308,8 @@ prepare_video_encoder(
             av_opt_set(encoder_context->format_context->priv_data, "hls_enc_iv", params->crypt_iv, 0);
         if (params->crypt_key != NULL)
             av_opt_set(encoder_context->format_context->priv_data, "hls_enc_key", params->crypt_key, 0);
-        if (params->crypt_url != NULL)
-            av_opt_set(encoder_context->format_context->priv_data, "hls_enc_key_url", params->crypt_url, 0);
+        if (params->crypt_key_url != NULL)
+            av_opt_set(encoder_context->format_context->priv_data, "hls_enc_key_url", params->crypt_key_url, 0);
     }
 
     /* Search for input pixel format in list of encoder pixel formats. */

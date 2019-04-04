@@ -1,51 +1,38 @@
 # avpipe
 
-## Build
+# Build
 
-### Prerequisites
+## Prerequisites
 
-- a workspace containing 
-  - elv-toolchain
-  - elv-crypto
-  - content-fabric (for utilities such as eluvio/log and eluvio/errors) (called `YOUR-CONTENT-FABRIC`)
+A workspace containing 
+ - elv-toolchain
+ - elv-crypto
+ - content-fabric (for utilities such as eluvio/log and eluvio/errors)
 
-### Clone avpipe
+## Clone avpipe
 
-Make a "Go" top level directory - `$GODEV`
+1. Make a "Go" top level directory - `$GODEV`
+1. Make directory `$GODEV/src/github.com/qluvio`
+1. `git clone` inside directory `$GODEV/src/github.com/qluvio`
 
-Make directory `$GODEV/src/github.com/qluvio`
-
-`git clone` inside directory `$GODEV/src/github.com/qluvio`
-
-### Set environemnt
-
-Call init scripts to set up the necessary environment variables
-
-Note `init-env.sh` takes as arugment the top level workspace directory that contains `content-fabric`
+## Set Environment
 
 ```bash
-source init-env.sh <YOUR-CONTENT-FABRIC>
+source init-env.sh <content-fabric-path>
 ```
 
-### Build C library
-
-
-Then build:
+## Build and Test
 
 ```bash
   make install
-```
-
-Build and test Go code
-
-```bash
   go install ./...
   go test ./...
 ```
+Binaries are installed under $GODEV/bin
 
-Installs bineries under $GODEV/bin
+<br>
 
-## Design
+# Design
 
 ### Parameters
 
