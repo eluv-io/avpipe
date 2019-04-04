@@ -89,6 +89,8 @@ func (oo *avcmdOutputOpener) Open(h, fd int64, stream_index, seg_index int, out_
 		fallthrough
 	case avpipe.HLSAudioM3U:
 		filename = fmt.Sprintf("./%s/media_%d.m3u8", dir, stream_index)
+	case avpipe.AES128Key:
+		filename = fmt.Sprintf("./%s/key.bin", dir)
 	}
 
 	f, err := os.OpenFile(filename, os.O_RDWR|os.O_CREATE|os.O_TRUNC, 0644)
@@ -144,6 +146,10 @@ func InitTranscode(cmdRoot *cobra.Command) error {
 	cmdTranscode.PersistentFlags().Int32P("threads", "t", 1, "transcoding threads")
 	cmdTranscode.PersistentFlags().StringP("encoder", "e", "libx264", "encoder codec, default is 'libx264', can be: 'libx264', 'h264_nvenc', 'h264_videotoolbox'")
 	cmdTranscode.PersistentFlags().StringP("decoder", "d", "h264", "decoder codec, default is 'h264', can be: 'h264', 'h264_cuvid'")
+	cmdTranscode.PersistentFlags().StringP("crypt-scheme", "c", "none", "encryption scheme, default is 'none', can be: 'aes-128'")
+	cmdTranscode.PersistentFlags().StringP("crypt-key", "k", "", "128-bit AES key, as 32 char hex")
+	cmdTranscode.PersistentFlags().StringP("crypt-iv", "i", "", "128-bit AES IV, as 32 char hex")
+	cmdTranscode.PersistentFlags().StringP("crypt-key-url", "u", "", "specify a key URL in the manifest")
 
 	return nil
 }
@@ -175,6 +181,20 @@ func doTranscode(cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("Decoder is needed after -d")
 	}
 
+	cryptScheme := avpipe.CryptNone
+	val := cmd.Flag("crypt-scheme").Value.String()
+	if len(val) > 0 {
+		if val == "aes-128" {
+			cryptScheme = avpipe.CryptAES128
+		} else if val != "none" {
+			return fmt.Errorf("Invalid crypt-scheme")
+		}
+	}
+
+	cryptKey := cmd.Flag("crypt-key").Value.String()
+	cryptIV := cmd.Flag("crypt-iv").Value.String()
+	cryptKeyURL := cmd.Flag("crypt-key-url").Value.String()
+
 	dir := "O"
 	if _, err := os.Stat(dir); os.IsNotExist(err) {
 		os.Mkdir(dir, 0755)
@@ -196,6 +216,10 @@ func doTranscode(cmd *cobra.Command, args []string) error {
 		Dcodec:             decoder,
 		EncHeight:          2160, // -1 means use source height, other values 2160, 720
 		EncWidth:           3840, // -1 means use source width, other values 3840, 1280
+		CryptScheme:        cryptScheme,
+		CryptKey:           cryptKey,
+		CryptKeyURL:        cryptKeyURL,
+		CryptIV:            cryptIV,
 	}
 
 	avpipe.InitIOHandler(&avcmdInputOpener{url: filename}, &avcmdOutputOpener{dir: dir})

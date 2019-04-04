@@ -405,7 +405,7 @@ main(
         .enc_width = 1280,                  /* -1 means use source width, other values 3840, 1280 */
         .crypt_scheme = crypt_none,
         .crypt_key = NULL,
-        .crypt_url = NULL,
+        .crypt_key_url = NULL,
         .crypt_iv = NULL
     };
 
@@ -490,7 +490,7 @@ main(
                 break;
 
             case 'u':
-                p.crypt_url = argv[i+1];
+                p.crypt_key_url = argv[i+1];
                 break;
 
             case 's':
