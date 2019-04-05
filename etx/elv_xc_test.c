@@ -401,8 +401,8 @@ main(
         .seg_duration_secs_str = "2.002",
         .ecodec = "libx264",
         .dcodec = "",
-        .enc_height = 720,                  /* -1 means use source height, other values 2160, 720 */
-        .enc_width = 1280,                  /* -1 means use source width, other values 3840, 1280 */
+        .enc_height = 2160,                  /* -1 means use source height, other values 2160, 720 */
+        .enc_width = 1840,                  /* -1 means use source width, other values 3840, 1280 */
         .crypt_scheme = crypt_none,
         .crypt_key = NULL,
         .crypt_key_url = NULL,
