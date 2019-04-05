@@ -225,6 +225,9 @@ prepare_video_encoder(
             elv_err("BYPASS failed to copy codec parameters\n");
             return -1;
         }
+
+        /* Set output stream timebase when bypass encoding */
+        out_stream->time_base = in_stream->time_base;
         out_stream->codecpar->codec_tag = 0;
 
         av_opt_set(encoder_context->format_context->priv_data, "seg_duration", params->seg_duration_secs_str,
@@ -524,7 +527,6 @@ encode_frame(
         if (!output_packet->duration && encoder_context->last_dts != AV_NOPTS_VALUE) {
             output_packet->duration = output_packet->dts - encoder_context->last_dts;
         }
-        dump_packet("OUT", output_packet);
         encoder_context->last_dts = output_packet->dts;
         encoder_context->pts = output_packet->dts;
 
@@ -535,6 +537,8 @@ encode_frame(
         );
     	output_packet->pts += params->start_pts;
     	output_packet->dts += params->start_pts;
+
+        dump_packet("OUT", output_packet);
 
         /* mux encoded frame */
         ret = av_interleaved_write_frame(format_context, output_packet);
@@ -568,11 +572,30 @@ transcode_packet(
     elv_dbg("DECODE send_packet pts=%d dts=%d duration=%d", packet->pts, packet->dts, packet->duration);
 
     if (bypass_transcode) {
-        AVStream *in_stream = decoder_context->stream[packet->stream_index];
-        AVStream *out_stream = encoder_context->stream[packet->stream_index];
-        packet->pts = av_rescale_q_rnd(packet->pts, in_stream->time_base, out_stream->time_base, AV_ROUND_NEAR_INF|AV_ROUND_PASS_MINMAX);
-        packet->dts = av_rescale_q_rnd(packet->dts, in_stream->time_base, out_stream->time_base, AV_ROUND_NEAR_INF|AV_ROUND_PASS_MINMAX);
-        packet->duration = av_rescale_q(packet->duration, in_stream->time_base, out_stream->time_base);
+        /*
+         * The following code does an estimation of next pts and dts, but it is not accurate and
+         * causes player to hang when avpipe bypasses transcoding:
+         *
+         *  AVStream *in_stream = decoder_context->stream[packet->stream_index];
+         *  AVStream *out_stream = encoder_context->stream[packet->stream_index];
+         *  packet->pts = av_rescale_q_rnd(packet->pts, in_stream->time_base, out_stream->time_base, AV_ROUND_NEAR_INF|AV_ROUND_PASS_MINMAX);
+         *  packet->dts = av_rescale_q_rnd(packet->dts, in_stream->time_base, out_stream->time_base, AV_ROUND_NEAR_INF|AV_ROUND_PASS_MINMAX);
+         *  packet->duration = av_rescale_q(packet->duration, in_stream->time_base, out_stream->time_base);
+         *
+         * This function returns frame time stamp (but needs frame):
+         *  - av_frame_get_best_effort_timestamp()
+         * 
+         * The following fields are interesting (but not initialized yet properly):
+         *  - in_stream->start_time
+         *  - in_stream->time_base // it always 1
+         *  - codec_context->ticks_per_frame
+         *
+         * The following fields are valid at this point:
+         *  - in_stream->avg_frame_rate.num
+         *  - in_stream->avg_frame_rate.den
+         *  - packet->duration
+         *
+         */
 
         packet->pts += p->start_pts;
         packet->dts += p->start_pts;
@@ -831,7 +854,8 @@ avpipe_tx(
         encoder_context->format_context->duration = params->duration_ts;
 
     if (params->seg_duration_ts % params->seg_duration_fr != 0) {
-        elv_err("Frame duration is not an integer");
+        elv_err("Frame duration is not an integer, seg_duration_ts=%d, seg_duration_fr=%d",
+            params->seg_duration_ts, params->seg_duration_fr);
         return -1;
     }
     int frame_duration = params->seg_duration_ts / params->seg_duration_fr;
