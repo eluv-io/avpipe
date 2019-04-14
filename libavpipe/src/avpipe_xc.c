@@ -120,11 +120,11 @@ prepare_decoder(
 
             /* If the buffer size is too big, ffmpeg might assert in aviobuf.c:581
              * To avoid this assertion, reset the buffer size to something smaller.
-             */
             {
                 AVIOContext *avioctx = (AVIOContext *)decoder_context->format_context->pb;
                 avioctx->buffer_size = 128*1024;
             }
+            */
         } else {
             elv_dbg("STREAM UNKNOWN type=%d", decoder_context->format_context->streams[i]->codecpar->codec_type);
             continue;
@@ -907,16 +907,14 @@ avpipe_tx(
             dump_stats(decoder_context, encoder_context);
         } else if (input_packet->stream_index == decoder_context->audio_stream_index) {
             // Audio packet: just copying audio stream
-            dump_packet("AUDIO IN 1", input_packet);
             av_packet_rescale_ts(input_packet,
                 decoder_context->stream[input_packet->stream_index]->time_base,
                 encoder_context->stream[input_packet->stream_index]->time_base
             );
-            dump_packet("AUDIO IN 2", input_packet);
             input_packet->pts += params->start_pts;
             input_packet->dts += params->start_pts;
 
-            dump_packet("AUDIO IN 3", input_packet);
+            dump_packet("AUDIO IN", input_packet);
             if (av_interleaved_write_frame(encoder_context->format_context, input_packet) < 0) {
                 elv_err("Failure in copying audio stream");
                 return -1;
