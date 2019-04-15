@@ -100,6 +100,7 @@ typedef struct coderctx_t {
     int audio_stream_index;
 
     int64_t last_dts;
+    int64_t last_key_frame;     /* pts of last key frame */
 
     /* Filter graph, valid for decoder */
     AVFilterContext *buffersink_ctx;

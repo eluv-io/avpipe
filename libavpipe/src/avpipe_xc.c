@@ -475,6 +475,19 @@ prepare_encoder(
     return 0;
 }
 
+static void
+set_key_flag(
+    AVPacket *packet,
+    coderctx_t *encoder_context,
+    txparams_t *params)
+{
+    if (packet->pts >= encoder_context->last_key_frame + params->seg_duration_ts) {
+        packet->flags |= AV_PKT_FLAG_KEY;
+        elv_dbg("PACKET SET KEY flag pts=%d", packet->pts);
+        encoder_context->last_key_frame = packet->pts;
+    }
+}
+
 static int
 encode_frame(
     coderctx_t *decoder_context,
@@ -535,6 +548,9 @@ encode_frame(
             decoder_context->stream[stream_index]->time_base,
             encoder_context->stream[stream_index]->time_base
         );
+
+        set_key_flag(output_packet, encoder_context, params);
+
     	output_packet->pts += params->start_pts;
     	output_packet->dts += params->start_pts;
 
@@ -597,6 +613,8 @@ transcode_packet(
          *
          */
 
+        set_key_flag(packet, encoder_context, p);
+
         packet->pts += p->start_pts;
         packet->dts += p->start_pts;
 
@@ -627,15 +645,6 @@ transcode_packet(
 
         dump_frame("IN ", codec_context->frame_number, frame);
 
-#if 0
-        /* Only bypass filtering */
-        if (bypass_filter) {
-            encode_frame(decoder_context, encoder_context, frame, stream_index);
-            av_frame_unref(frame);
-            continue;
-        }
-#endif
-
         if (do_instrument) {
             elv_since(&tv, &since);
             elv_log("INSTRMNT avcodec_receive_frame time=%"PRId64, since);
@@ -644,18 +653,7 @@ transcode_packet(
         if (response >= 0) {
             if (codec_context->codec_type == AVMEDIA_TYPE_VIDEO) {
 
-                /* Force an I frame at beginning of each segment */
-                if (frame->pts % p->seg_duration_ts == 0) {
-                    frame->pict_type = AV_PICTURE_TYPE_I;
-                    elv_dbg("FRAME SET num=%d pts=%d", frame->coded_picture_number, frame->pts);
-                }
-
                 decoder_context->pts = packet->pts;
-#if 0
-                // TEST ONLY - save gray scale frame
-                save_gray_frame(frame->data[0], frame->linesize[0], frame->width, frame->height,
-                    "frame-in", codec_context->frame_number);
-#endif
 
                 /* push the decoded frame into the filtergraph */
                 elv_get_time(&tv);
