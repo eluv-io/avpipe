@@ -24,6 +24,8 @@
 #include <unistd.h>
 #include <stdlib.h>
 
+#define AUDIO_BUF_SIZE  (128*1024)
+
 extern int
 init_filters(
     const char *filters_descr,
@@ -120,11 +122,12 @@ prepare_decoder(
 
             /* If the buffer size is too big, ffmpeg might assert in aviobuf.c:581
              * To avoid this assertion, reset the buffer size to something smaller.
+             */
             {
                 AVIOContext *avioctx = (AVIOContext *)decoder_context->format_context->pb;
-                avioctx->buffer_size = 128*1024;
+                if (avioctx->buffer_size > AUDIO_BUF_SIZE)
+                    avioctx->buffer_size = AUDIO_BUF_SIZE;
             }
-            */
         } else {
             elv_dbg("STREAM UNKNOWN type=%d", decoder_context->format_context->streams[i]->codecpar->codec_type);
             continue;
