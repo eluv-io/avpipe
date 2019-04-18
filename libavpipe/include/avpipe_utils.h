@@ -47,3 +47,6 @@ void
 dump_stats(
     coderctx_t *decoder_context,
     coderctx_t *encoder_context);
+
+void
+connect_ffmpeg_log();

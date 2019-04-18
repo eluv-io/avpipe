@@ -182,3 +182,34 @@ dump_stats(
         (int)(ti - t0) / 1000, (int)(ti - t0) % 1000, inctx->read_pos, decoder_context->pts / 1001,
         out_tracker->seg_index, out_tracker->last_outctx ? out_tracker->last_outctx->written_bytes:0, encoder_context->pts / 1001);
 }
+
+static void
+ffmpeg_log_handler(void* ptr, int level, const char* fmt, va_list vl) {
+    elv_log_level_t elv_level;
+    switch (level) {
+    case AV_LOG_QUIET:
+        return;
+    case AV_LOG_PANIC:
+    case AV_LOG_FATAL:
+    case AV_LOG_ERROR:
+        elv_level = elv_log_error;
+        break;
+    case AV_LOG_WARNING:
+        elv_level = elv_log_warning;
+        break;
+    case AV_LOG_INFO:
+        elv_level = elv_log_log;
+        break;
+    case AV_LOG_DEBUG:
+    case AV_LOG_VERBOSE:
+    default:
+        elv_level = elv_log_debug;
+    }
+
+    elv_vlog(elv_level, " FF", fmt, vl);
+}
+
+void
+connect_ffmpeg_log() {
+    av_log_set_callback(ffmpeg_log_handler);
+}

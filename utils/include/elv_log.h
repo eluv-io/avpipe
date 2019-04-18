@@ -86,6 +86,10 @@ void
 elv_set_log_appender(
     elv_log_appender_t appender);
 
+int
+elv_vlog(
+    int level, const char *prefix, const char *fmt, va_list vl);
+
 /*
  * @brief   Logs a message with log level elv_log_log.
  *

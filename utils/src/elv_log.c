@@ -37,7 +37,23 @@ typedef struct elv_logger_t {
 
 static elv_logger_t _logger;
 
-bool
+static const char *get_level_str(int level)
+{
+    switch (level) {
+    case elv_log_debug:
+        return "DBG";
+    case elv_log_log:
+        return "LOG";
+    case elv_log_warning:
+        return "WARN";
+    case elv_log_error:
+        return "ERR";
+    default:
+        return "ERR";
+    }
+}
+
+static bool
 elv_file_exist(
     char *filename)
 {
@@ -70,7 +86,7 @@ _find_last_log(
     return 0;
 }
 
-void
+static void
 _panic(
     const char *msg)
 {
@@ -169,10 +185,11 @@ elv_set_log_appender(
     _logger._appender = appender;
 }
 
-int
+static int
 _set_log_header(
     char *buf,
-    const char *level_str)
+    const char *level_str,
+    const char *prefix)
 {
     struct timeval tval;
     time_t t;
@@ -187,8 +204,8 @@ _set_log_header(
     t = time(NULL);
     lt = localtime(&t);   
 
-    return sprintf(buf, "%04d-%02d-%02d %02d:%02d:%02d.%03d %s ",
-        lt->tm_year+1900, lt->tm_mon, lt->tm_mday, lt->tm_hour, lt->tm_min, lt->tm_sec, msec, level_str);
+    return sprintf(buf, "%04d-%02d-%02d %02d:%02d:%02d.%03d %s%s ",
+        lt->tm_year+1900, lt->tm_mon, lt->tm_mday, lt->tm_hour, lt->tm_min, lt->tm_sec, msec, level_str, prefix);
 }
 
 static int
@@ -240,86 +257,67 @@ _flush_log(
 }
 
 int
-elv_log(
-    const char *fmt, ...)
+elv_vlog(int level, const char *prefix, const char *fmt, va_list vl)
 {
     int len = 0;
     char buf[LOG_BUFF_SIZE];
-    va_list args;
 
-    if (_logger._log_level > elv_log_log)
+    if (_logger._log_level > level)
         return 0;
 
-    if (_logger.elv_logger[elv_log_log] == NULL)
-        len = _set_log_header(buf, "LOG");
+    if (_logger.elv_logger[level] == NULL)
+        len = _set_log_header(buf, get_level_str(level), prefix);
     
-    va_start(args, fmt);
-    len += vsnprintf(buf+len, LOG_BUFF_SIZE-len, fmt, args);
-    va_end(args);
+    len += vsnprintf(buf+len, LOG_BUFF_SIZE-len, fmt, vl);
 
-    if (_logger.elv_logger[elv_log_log] != NULL)
-        return _logger.elv_logger[elv_log_log](buf);
+    if (_logger.elv_logger[level] != NULL)
+        return _logger.elv_logger[level](buf);
 
     return _flush_log(buf, len);
+}
+
+int
+elv_log(
+    const char *fmt, ...)
+{
+    va_list vl;
+    va_start(vl, fmt);
+    int rc = elv_vlog(elv_log_log, "", fmt, vl);
+    va_end(vl);
+    return rc;
 }
 
 int
 elv_dbg(
     const char *fmt, ...)
 {
-    int len = 0;
-    char buf[LOG_BUFF_SIZE];
-    va_list args;
-
-    if (_logger._log_level > elv_log_debug)
-        return 0;
-
-    if (_logger.elv_logger[elv_log_debug] == NULL)
-        len = _set_log_header(buf, "DBG");
-
-    va_start(args, fmt);
-    len += vsnprintf(buf+len, LOG_BUFF_SIZE-len, fmt, args);
-    va_end(args);
-
-    if (_logger.elv_logger[elv_log_debug] != NULL)
-        return _logger.elv_logger[elv_log_debug](buf);
-
-    return _flush_log(buf, len);
+    va_list vl;
+    va_start(vl, fmt);
+    int rc = elv_vlog(elv_log_debug, "", fmt, vl);
+    va_end(vl);
+    return rc;
 }
 
 int
 elv_warn(
     const char *fmt, ...)
 {
-    int len = 0;
-    char buf[LOG_BUFF_SIZE];
-    va_list args;
-
-    if (_logger._log_level > elv_log_warning)
-        return 0;
-
-    len = _set_log_header(buf, "WARN");
-    va_start(args, fmt);
-    len += vsnprintf(buf+len, LOG_BUFF_SIZE-len, fmt, args);
-    va_end(args);
-
-    return _flush_log(buf, len);
+    va_list vl;
+    va_start(vl, fmt);
+    int rc = elv_vlog(elv_log_warning, "", fmt, vl);
+    va_end(vl);
+    return rc;
 }
 
 int
 elv_err(
     const char *fmt, ...)
 {
-    int len;
-    char buf[LOG_BUFF_SIZE];
-    va_list args;
-
-    len = _set_log_header(buf, "ERR");
-    va_start(args, fmt);
-    len += vsnprintf(buf+len, LOG_BUFF_SIZE-len, fmt, args);
-    va_end(args);
-
-    return _flush_log(buf, len);
+    va_list vl;
+    va_start(vl, fmt);
+    int rc = elv_vlog(elv_log_error, "", fmt, vl);
+    va_end(vl);
+    return rc;
 }
 
 int

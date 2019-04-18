@@ -12,6 +12,7 @@
 #include <pthread.h>
 
 #include "avpipe_xc.h"
+#include "avpipe_utils.h"
 #include "elv_log.h"
 
 static int opened_inputs = 0;
@@ -575,8 +576,9 @@ main(
     if (stat("./O", &st) == -1)
         mkdir("./O", 0700);
 
-    // Set AV libs log level
+    // Set AV libs log level and handle using elv_log
     //av_log_set_level(AV_LOG_DEBUG);
+    connect_ffmpeg_log();
 
     elv_logger_open(NULL, "etx", 10, 100*1024*1024, elv_log_file);
     elv_set_log_level(elv_log_debug);
