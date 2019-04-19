@@ -14,6 +14,7 @@
 #include <string.h>
 #include <errno.h>
 #include <fcntl.h>
+#include <pthread.h>
 
 #include "elv_log.h"
 
@@ -32,8 +33,8 @@ typedef struct elv_logger_t {
     int _fd;
     u_int32_t _total_written;       // Total bytes written to the current log file
     elv_logger_f elv_logger[elv_log_error+1];   // Array of loggers for different log levels
+    pthread_mutex_t _flush_lock;
 } elv_logger_t;
-
 
 static elv_logger_t _logger;
 
@@ -148,6 +149,9 @@ elv_logger_open(
 
     elv_log("Log level is set to %s", _get_level_str(_logger._log_level));
     _logger._initialized = true;
+
+    pthread_mutex_init(&_logger._flush_lock, NULL);
+
     return 0;
 }
 
@@ -227,7 +231,6 @@ _rotate_log()
     return 0;
 }
 
-/* TODO: make this thread safe */
 static int
 _flush_log(
     char *buf,
@@ -241,6 +244,22 @@ _flush_log(
         len++;
     }
 
+    /*
+     * TODO
+     * 
+     * elv-reza: This locking works and protects the race, but not perfect.
+     * Basically, you don't need to wait for closing the log file, which can be
+     * slow. You can split the locking in two sections, one before rotating the
+     * log file and one inside rotate_log() and reduce the locking time (by
+     * avoiding lock around close function) so the other threads can still do
+     * logging. It needs some re-arranging the code.
+     * 
+     * elv-peter: Ideally we need to reexamine the entirety of the logging code
+     * wrt multithreading and make it more foolproof, document usage and
+     * expectations, and add unit/performance tests.
+     */
+    pthread_mutex_lock(&_logger._flush_lock);
+
     if (_logger._appender & elv_log_stdout || !_logger._initialized)
         fprintf(stdout, "%s", buf);
 
@@ -252,6 +271,8 @@ _flush_log(
 
     if (_logger._total_written > _logger._rotate_size)
         _rotate_log();
+
+    pthread_mutex_unlock(&_logger._flush_lock);
 
     return rc;
 }
@@ -282,7 +303,7 @@ elv_log(
 {
     va_list vl;
     va_start(vl, fmt);
-    int rc = elv_vlog(elv_log_log, "", fmt, vl);
+    int rc = elv_vlog(elv_log_log, " PI", fmt, vl);
     va_end(vl);
     return rc;
 }
@@ -293,7 +314,7 @@ elv_dbg(
 {
     va_list vl;
     va_start(vl, fmt);
-    int rc = elv_vlog(elv_log_debug, "", fmt, vl);
+    int rc = elv_vlog(elv_log_debug, " PI", fmt, vl);
     va_end(vl);
     return rc;
 }
@@ -304,7 +325,7 @@ elv_warn(
 {
     va_list vl;
     va_start(vl, fmt);
-    int rc = elv_vlog(elv_log_warning, "", fmt, vl);
+    int rc = elv_vlog(elv_log_warning, " PI", fmt, vl);
     va_end(vl);
     return rc;
 }
@@ -315,7 +336,7 @@ elv_err(
 {
     va_list vl;
     va_start(vl, fmt);
-    int rc = elv_vlog(elv_log_error, "", fmt, vl);
+    int rc = elv_vlog(elv_log_error, " PI", fmt, vl);
     va_end(vl);
     return rc;
 }

@@ -577,7 +577,7 @@ main(
         mkdir("./O", 0700);
 
     // Set AV libs log level and handle using elv_log
-    //av_log_set_level(AV_LOG_DEBUG);
+    av_log_set_level(AV_LOG_DEBUG);
     connect_ffmpeg_log();
 
     elv_logger_open(NULL, "etx", 10, 100*1024*1024, elv_log_file);
