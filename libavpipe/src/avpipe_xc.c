@@ -233,8 +233,14 @@ prepare_video_encoder(
         out_stream->time_base = in_stream->time_base;
         out_stream->codecpar->codec_tag = 0;
 
+#if 0
+        /* Deprecated instead use seg_duration_ts */
         av_opt_set(encoder_context->format_context->priv_data, "seg_duration", params->seg_duration_secs_str,
             AV_OPT_FLAG_ENCODING_PARAM | AV_OPT_SEARCH_CHILDREN);
+#else
+        av_opt_set_int(encoder_context->format_context->priv_data, "seg_duration_ts", params->seg_duration_ts,
+            AV_OPT_FLAG_ENCODING_PARAM | AV_OPT_SEARCH_CHILDREN);
+#endif
         av_opt_set(encoder_context->format_context->priv_data, "start_segment", params->start_segment_str, 0);
         return 0;
     }
@@ -279,8 +285,14 @@ prepare_video_encoder(
     av_opt_set(encoder_codec_context->priv_data, "crf", params->crf_str, AV_OPT_FLAG_ENCODING_PARAM | AV_OPT_SEARCH_CHILDREN);
 
     // DASH segment duration (in seconds) - notice it is set on the format context not codec
+#if 0
+    /* Deprecated instead use seg_duration_ts */
     av_opt_set(encoder_context->format_context->priv_data, "seg_duration", params->seg_duration_secs_str,
         AV_OPT_FLAG_ENCODING_PARAM | AV_OPT_SEARCH_CHILDREN);
+#else
+    av_opt_set_int(encoder_context->format_context->priv_data, "seg_duration_ts", params->seg_duration_ts,
+        AV_OPT_FLAG_ENCODING_PARAM | AV_OPT_SEARCH_CHILDREN);
+#endif
     av_opt_set(encoder_context->format_context->priv_data, "start_segment", params->start_segment_str, 0);
 
     //av_opt_set(encoder_context->format_context->priv_data, "use_timeline", "0",
@@ -407,8 +419,14 @@ prepare_audio_encoder(
     encoder_context->codec_context[index]->channels = av_get_channel_layout_nb_channels(encoder_context->codec_context[index]->channel_layout);
 
     // DASH segment duration (in seconds) - notice it is set on the format context not codec
+#if 0
+    /* Deprecated instead use seg_duration_ts */
     av_opt_set(encoder_context->format_context->priv_data, "seg_duration", params->seg_duration_secs_str,
         AV_OPT_FLAG_AUDIO_PARAM | AV_OPT_FLAG_ENCODING_PARAM);
+#else
+    av_opt_set_int(encoder_context->format_context->priv_data, "seg_duration_ts", params->seg_duration_ts,
+        AV_OPT_FLAG_ENCODING_PARAM | AV_OPT_SEARCH_CHILDREN);
+#endif
     av_opt_set(encoder_context->format_context->priv_data, "start_segment", params->start_segment_str, 0);
 
     /* Open audio encoder codec */
