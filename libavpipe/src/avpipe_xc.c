@@ -320,16 +320,6 @@ prepare_video_encoder(
     if (!strcmp(params->format, "hls"))
         av_opt_set(encoder_context->format_context->priv_data, "hls_playlist", "1", 0);
 
-    if (params->crypt_scheme == crypt_aes128) {
-        av_opt_set(encoder_context->format_context->priv_data, "hls_enc", "1", 0);
-        if (params->crypt_iv != NULL)
-            av_opt_set(encoder_context->format_context->priv_data, "hls_enc_iv", params->crypt_iv, 0);
-        if (params->crypt_key != NULL)
-            av_opt_set(encoder_context->format_context->priv_data, "hls_enc_key", params->crypt_key, 0);
-        if (params->crypt_key_url != NULL)
-            av_opt_set(encoder_context->format_context->priv_data, "hls_enc_key_url", params->crypt_key_url, 0);
-    }
-
     /* Search for input pixel format in list of encoder pixel formats. */
     for (i=0; encoder_context->codec[index]->pix_fmts[i] >= 0; i++) {
         if (encoder_context->codec[index]->pix_fmts[i] == decoder_context->codec_context[index]->pix_fmt)
@@ -466,6 +456,17 @@ prepare_encoder(
     if (!encoder_context->format_context) {
         elv_dbg("could not allocate memory for output format");
         return -1;
+    }
+
+    // Encryption applies to both audio and video
+    if (params->crypt_scheme == crypt_aes128) {
+        av_opt_set(encoder_context->format_context->priv_data, "hls_enc", "1", 0);
+        if (params->crypt_iv != NULL)
+            av_opt_set(encoder_context->format_context->priv_data, "hls_enc_iv", params->crypt_iv, 0);
+        if (params->crypt_key != NULL)
+            av_opt_set(encoder_context->format_context->priv_data, "hls_enc_key", params->crypt_key, 0);
+        if (params->crypt_key_url != NULL)
+            av_opt_set(encoder_context->format_context->priv_data, "hls_enc_key_url", params->crypt_key_url, 0);
     }
 
     if (prepare_video_encoder(encoder_context, decoder_context, params, bypass_transcode)) {

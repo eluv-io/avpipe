@@ -11,6 +11,7 @@
 #include <fcntl.h>
 #include <libavutil/log.h>
 
+#include "avpipe_utils.h"
 #include "avpipe_xc.h"
 #include "elv_log.h"
 #include "elv_channel.h"
@@ -298,8 +299,12 @@ tx(
     if (!filename || filename[0] == '\0' )
         return -1;
 
+    // Set AV libs log level and handle using elv_log
+    // av_log_set_level(AV_LOG_DEBUG);
+    connect_ffmpeg_log();
+
     elv_logger_open(NULL, "avpipe", 10, 100*1024*1024, elv_log_file);
-    elv_set_log_level(elv_log_debug);
+    // elv_set_log_level(elv_log_debug);
 
     in_handlers.avpipe_opener = in_opener;
     in_handlers.avpipe_closer = in_closer;

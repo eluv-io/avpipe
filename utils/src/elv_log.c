@@ -147,10 +147,10 @@ elv_logger_open(
     if (_logger._fd < 0)
         return errno;
 
-    elv_log("Log level is set to %s", _get_level_str(_logger._log_level));
-    _logger._initialized = true;
-
     pthread_mutex_init(&_logger._flush_lock, NULL);
+
+    _logger._initialized = true;
+    elv_dbg("avpipe log initialized dir=%s appname=%s", _logger._dirname, _logger._appname);
 
     return 0;
 }
@@ -174,6 +174,7 @@ elv_set_log_level(
     elv_log_level_t level)
 {
     _logger._log_level = level;
+    elv_log("avpipe log level set to %s", _get_level_str(level));
 }
 
 elv_log_appender_t
@@ -192,8 +193,7 @@ elv_set_log_appender(
 static int
 _set_log_header(
     char *buf,
-    const char *level_str,
-    const char *prefix)
+    const char *level_str)
 {
     struct timeval tval;
     time_t t;
@@ -208,8 +208,8 @@ _set_log_header(
     t = time(NULL);
     lt = localtime(&t);   
 
-    return sprintf(buf, "%04d-%02d-%02d %02d:%02d:%02d.%03d %s%s ",
-        lt->tm_year+1900, lt->tm_mon, lt->tm_mday, lt->tm_hour, lt->tm_min, lt->tm_sec, msec, level_str, prefix);
+    return sprintf(buf, "%04d-%02d-%02d %02d:%02d:%02d.%03d %s ",
+        lt->tm_year+1900, lt->tm_mon, lt->tm_mday, lt->tm_hour, lt->tm_min, lt->tm_sec, msec, level_str);
 }
 
 static int
@@ -287,12 +287,16 @@ elv_vlog(int level, const char *prefix, const char *fmt, va_list vl)
         return 0;
 
     if (_logger.elv_logger[level] == NULL)
-        len = _set_log_header(buf, get_level_str(level), prefix);
+        len = _set_log_header(buf, get_level_str(level));
     
+    len += snprintf(buf+len, LOG_BUFF_SIZE-len, "%s ", prefix);
     len += vsnprintf(buf+len, LOG_BUFF_SIZE-len, fmt, vl);
 
-    if (_logger.elv_logger[level] != NULL)
+    if (_logger.elv_logger[level] != NULL) {
+        // Trim newline
+        if (buf[len-1] == '\n') buf[len-1] = '\0';
         return _logger.elv_logger[level](buf);
+    }
 
     return _flush_log(buf, len);
 }
@@ -303,7 +307,7 @@ elv_log(
 {
     va_list vl;
     va_start(vl, fmt);
-    int rc = elv_vlog(elv_log_log, " PI", fmt, vl);
+    int rc = elv_vlog(elv_log_log, "PI", fmt, vl);
     va_end(vl);
     return rc;
 }
@@ -314,7 +318,7 @@ elv_dbg(
 {
     va_list vl;
     va_start(vl, fmt);
-    int rc = elv_vlog(elv_log_debug, " PI", fmt, vl);
+    int rc = elv_vlog(elv_log_debug, "PI", fmt, vl);
     va_end(vl);
     return rc;
 }
@@ -325,7 +329,7 @@ elv_warn(
 {
     va_list vl;
     va_start(vl, fmt);
-    int rc = elv_vlog(elv_log_warning, " PI", fmt, vl);
+    int rc = elv_vlog(elv_log_warning, "PI", fmt, vl);
     va_end(vl);
     return rc;
 }
@@ -336,7 +340,7 @@ elv_err(
 {
     va_list vl;
     va_start(vl, fmt);
-    int rc = elv_vlog(elv_log_error, " PI", fmt, vl);
+    int rc = elv_vlog(elv_log_error, "PI", fmt, vl);
     va_end(vl);
     return rc;
 }

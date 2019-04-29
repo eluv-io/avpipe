@@ -206,7 +206,7 @@ ffmpeg_log_handler(void* ptr, int level, const char* fmt, va_list vl) {
         elv_level = elv_log_debug;
     }
 
-    elv_vlog(elv_level, " FF", fmt, vl);
+    elv_vlog(elv_level, "FF", fmt, vl);
 }
 
 void
