@@ -284,6 +284,10 @@ prepare_video_encoder(
     /* Added to fix/improve encoding quality of the first frame - PENDING(SSS) research */
     av_opt_set(encoder_codec_context->priv_data, "crf", params->crf_str, AV_OPT_FLAG_ENCODING_PARAM | AV_OPT_SEARCH_CHILDREN);
 
+    // Level defaults to 6.2 which causes problems - PTT
+    // encoder_codec_context->level = 40;
+    // encoder_codec_context->profile = FF_PROFILE_H264_HIGH;
+
     // DASH segment duration (in seconds) - notice it is set on the format context not codec
 #if 0
     /* Deprecated instead use seg_duration_ts */
@@ -459,14 +463,53 @@ prepare_encoder(
     }
 
     // Encryption applies to both audio and video
-    if (params->crypt_scheme == crypt_aes128) {
-        av_opt_set(encoder_context->format_context->priv_data, "hls_enc", "1", 0);
+    switch (params->crypt_scheme) {
+    case crypt_aes128:
+        av_opt_set(encoder_context->format_context->priv_data, "hls_enc", "1",
+                   0);
         if (params->crypt_iv != NULL)
-            av_opt_set(encoder_context->format_context->priv_data, "hls_enc_iv", params->crypt_iv, 0);
+            av_opt_set(encoder_context->format_context->priv_data, "hls_enc_iv",
+                       params->crypt_iv, 0);
         if (params->crypt_key != NULL)
-            av_opt_set(encoder_context->format_context->priv_data, "hls_enc_key", params->crypt_key, 0);
+            av_opt_set(encoder_context->format_context->priv_data,
+                       "hls_enc_key", params->crypt_key, 0);
         if (params->crypt_key_url != NULL)
-            av_opt_set(encoder_context->format_context->priv_data, "hls_enc_key_url", params->crypt_key_url, 0);
+            av_opt_set(encoder_context->format_context->priv_data,
+                       "hls_enc_key_url", params->crypt_key_url, 0);
+        break;
+    case crypt_cenc:
+        av_opt_set(encoder_context->format_context->priv_data,
+                   "encryption_scheme", "cenc", 0);
+        break;
+    case crypt_cbc1:
+        av_opt_set(encoder_context->format_context->priv_data,
+                   "encryption_scheme", "cbc1", 0);
+        break;
+    case crypt_cens:
+        av_opt_set(encoder_context->format_context->priv_data,
+                   "encryption_scheme", "cens", 0);
+        break;
+    case crypt_cbcs:
+        av_opt_set(encoder_context->format_context->priv_data,
+                   "encryption_scheme", "cbcs", 0);
+        break;
+    case crypt_none:
+        break;
+    default:
+        elv_err("Unimplemented crypt scheme: %d", params->crypt_scheme);
+    }
+
+    switch (params->crypt_scheme) {
+    case crypt_cenc:
+    case crypt_cbc1:
+    case crypt_cens:
+    case crypt_cbcs:
+        av_opt_set(encoder_context->format_context->priv_data, "encryption_kid",
+                   params->crypt_kid, 0);
+        av_opt_set(encoder_context->format_context->priv_data, "encryption_key",
+                   params->crypt_key, 0);
+    default:
+        break;
     }
 
     if (prepare_video_encoder(encoder_context, decoder_context, params, bypass_transcode)) {

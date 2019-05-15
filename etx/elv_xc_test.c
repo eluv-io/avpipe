@@ -343,10 +343,11 @@ usage(
             "\t-t :                 (optional) transcoding threads. Default is 1 thread, must be bigger than 1\n"
             "\t-e :                 (optional) encoder name. Default is \"libx264\", can be: \"libx264\", \"h264_nvenc\", \"h264_videotoolbox\"\n"
             "\t-d :                 (optional) decoder name. Default is \"h264\", can be: \"h264\", \"h264_cuvid\"\n"
-            "\t-c :                 (optional) encryption scheme. Default is \"none\", can be: \"aes-128\"\n"
-            "\t-k :                 (optional) 128-bit AES key, as hex\n"
-            "\t-i :                 (optional) 128-bit AES IV, as hex\n"
-            "\t-u :                 (optional) specify a key URL in the manifest\n"
+            "\t-crypt-scheme :      (optional) encryption scheme. Default is \"none\", can be: \"aes-128\", \"cenc\", \"cbc1\", \"cens\", \"cbcs\"\n"
+            "\t-crypt-key :         (optional) 128-bit AES key, as hex\n"
+            "\t-crypt-kid :         (optional) 16-byte key ID, as hex\n"
+            "\t-crypt-iv :          (optional) 128-bit AES IV, as hex\n"
+            "\t-crypt-url :         (optional) specify a key URL in the HLS manifest\n"
             "\t-start-pts :         (optional) starting PTS for output. Default is 0\n"
             "\t-start-segment :     (optional) start segment number >= 1, Default is 1\n"
             "\t-seg-duration-ts :   (mandatory) segment duration time base (positive integer).\n"
@@ -399,14 +400,15 @@ main(
         .seg_duration_secs_str = "2.002",   /* deprecated, not used */
         .ecodec = "libx264",
         .dcodec = "",
-        .enc_height = 2160,                 /* -1 means use source height, other values 2160, 1080, 720 */
-        .enc_width = 1840,                  /* -1 means use source width, other values 3840, 1920, 1280 */
-        .crypt_scheme = crypt_none,
+        .enc_height = -1,                   /* -1 means use source height, other values 2160, 1080, 720 */
+        .enc_width = -1,                    /* -1 means use source width, other values 3840, 1920, 1280 */
+        .crypt_iv = NULL,
         .crypt_key = NULL,
+        .crypt_kid = NULL,
         .crypt_key_url = NULL,
-        .crypt_iv = NULL
+        .crypt_scheme = crypt_none
     };
-
+    
     i = 1;
     while (i < argc) {
         switch ((int) argv[i][0]) {
@@ -475,20 +477,33 @@ main(
                 break;
 
             case 'c':
-                if (strcmp(argv[i+1], "aes-128") == 0)
-                    p.crypt_scheme = crypt_aes128;
-                break;
-
-            case 'k':
-                p.crypt_key = argv[i+1];
-                break;
-
-            case 'i':
-                p.crypt_iv = argv[i+1];
-                break;
-
-            case 'u':
-                p.crypt_key_url = argv[i+1];
+                if (strcmp(argv[i], "-crypt-scheme") == 0) {
+                    if (strcmp(argv[i+1], "aes-128") == 0) {
+                        p.crypt_scheme = crypt_aes128;
+                    } else if (strcmp(argv[i+1], "cenc") == 0) {
+                        p.crypt_scheme = crypt_cenc;
+                    } else if (strcmp(argv[i+1], "cbc1") == 0) {
+                        p.crypt_scheme = crypt_cbc1;
+                    } else if (strcmp(argv[i+1], "cens") == 0) {
+                        p.crypt_scheme = crypt_cens;
+                    } else if (strcmp(argv[i+1], "cbcs") == 0) {
+                        p.crypt_scheme = crypt_cbcs;
+                    } else {
+                        usage(argv[0]);
+                        return 1;
+                    }
+                } else if (strcmp(argv[i], "-crypt-key") == 0) {
+                    p.crypt_key = argv[i+1];
+                } else if (strcmp(argv[i], "-crypt-kid") == 0) {
+                    p.crypt_kid = argv[i+1];
+                } else if (strcmp(argv[i], "-crypt-iv") == 0) {
+                    p.crypt_iv = argv[i+1];
+                } else if (strcmp(argv[i], "-crypt-url") == 0) {
+                    p.crypt_key_url = argv[i+1];
+                } else {
+                    usage(argv[0]);
+                    return 1;
+                }
                 break;
 
             case 's':
@@ -502,11 +517,7 @@ main(
                         usage(argv[0]);
                         return 1;
                     }
-                    break;
-                }
-
-
-                if (!strcmp(argv[i], "-seg-duration-fr")) {
+                } else if (!strcmp(argv[i], "-seg-duration-fr")) {
                     if (sscanf(argv[i+1], "%d", &seg_duration_fr) != 1) {
                         usage(argv[0]);
                         return 1;
@@ -516,27 +527,22 @@ main(
                         usage(argv[0]);
                         return 1;
                     }
-                    break;
-                }
-
-                if (!strcmp(argv[i], "-start-pts")) {
+                } else if (!strcmp(argv[i], "-start-pts")) {
                     if (sscanf(argv[i+1], "%d", &pts) != 1) {
                         usage(argv[0]);
                         return 1;
                     }
-                    break;
-                }
-
-                if (!strcmp(argv[i], "-start-segment")) {
+                } else if (!strcmp(argv[i], "-start-segment")) {
                     if (sscanf(argv[i+1], "%d", &start_segment) != 1) {
                         usage(argv[0]);
                         return 1;
                     }
-                    break;
+                } else {
+                    usage(argv[0]);
+                    return 1;
                 }
-
                 break;
-
+                
             default:
                 usage(argv[0]);
                 return -1;
