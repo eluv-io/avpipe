@@ -24,9 +24,10 @@ source init-env.sh <content-fabric-path>
 ## Build and Test
 
 ```bash
-  make install
-  go install ./...
-  go test ./...
+make
+make install
+go install ./...
+go test ./...
 ```
 Binaries are installed under $GODEV/bin
 

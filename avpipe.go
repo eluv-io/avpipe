@@ -1,19 +1,15 @@
 /*
- * avpipe.go
- *
- * This package has four main interfaces that has to be implemented by the client code:
- *
- * 1) InputOpener: is the input factory interface that needs an implementation to generate an InputHandler.
- *
- * 2) InputHandler: is the input handler with Read/Seek/Size/Close methods. An implementation of this
- *    interface is needed by ffmpeg to process input streams properly.
- *
- * 3) OutputOpener: is the output factory interface that needs an implementation to generate an OutputHandler.
- *
- * 4) OutputHandler: is the output handler with Write/Seek/Close methods. An implementation of this
- *    interface is needed by ffmpeg to write encoded streams properly.
- *
- */
+Package avpipe ...
+
+This package has four main interfaces that has to be implemented by the client code:
+
+1) InputOpener: is the input factory interface that needs an implementation to generate an InputHandler.
+2) InputHandler: is the input handler with Read/Seek/Size/Close methods. An implementation of this
+   interface is needed by ffmpeg to process input streams properly.
+3) OutputOpener: is the output factory interface that needs an implementation to generate an OutputHandler.
+4) OutputHandler: is the output handler with Write/Seek/Close methods. An implementation of this
+   interface is needed by ffmpeg to write encoded streams properly.
+*/
 package avpipe
 
 // #cgo CFLAGS: -I./include
@@ -32,18 +28,29 @@ import (
 
 var log = elog.Get("/eluvio/avpipe")
 
+// AVType ...
 type AVType int
 
 const (
+	// Unknown ...
 	Unknown AVType = iota
+	// DASHManifest ...
 	DASHManifest
+	// DASHVideoInit ...
 	DASHVideoInit
+	// DASHVideoSegment ...
 	DASHVideoSegment
+	// DASHAudioInit ...
 	DASHAudioInit
+	// DASHAudioSegment ...
 	DASHAudioSegment
+	// HLSMasterM3U ...
 	HLSMasterM3U
+	// HLSVideoM3U ...
 	HLSVideoM3U
+	// HLSAudioM3U ...
 	HLSAudioM3U
+	// AES128Key ...
 	AES128Key
 )
 
@@ -55,6 +62,14 @@ const (
 	CryptNone CryptScheme = iota
 	// CryptAES128 - AES-128
 	CryptAES128
+	// CryptCENC - CENC AES-CTR
+	CryptCENC
+	// CryptCBC1 - CENC AES-CBC
+	CryptCBC1
+	// CryptCENS - CENC AES-CTR Pattern
+	CryptCENS
+	// CryptCBCS - CENC AES-CBC Pattern
+	CryptCBCS
 )
 
 // TxParams should match with txparams_t in C library
@@ -75,13 +90,14 @@ type TxParams struct {
 	Dcodec             string // Video decoder
 	EncHeight          int32
 	EncWidth           int32
-	CryptScheme        CryptScheme
-	CryptKey           string
-	CryptKeyURL        string
 	CryptIV            string
+	CryptKey           string
+	CryptKID           string
+	CryptKeyURL        string
+	CryptScheme        CryptScheme
 }
 
-// IOHandler the corresponding handlers will be called from the C interface functions
+// IOHandler defines handlers that will be called from the C interface functions
 type IOHandler interface {
 	InReader(buf []byte) (int, error)
 	InSeeker(offset C.int64_t, whence C.int) error
@@ -469,10 +485,11 @@ func Tx(params *TxParams, url string, bypass_transcoding bool) int {
 		dcodec:                C.CString(params.Dcodec),
 		enc_height:            C.int(params.EncHeight),
 		enc_width:             C.int(params.EncWidth),
-		crypt_scheme:          C.crypt_scheme_t(params.CryptScheme),
-		crypt_key:             C.CString(params.CryptKey),
-		crypt_key_url:         C.CString(params.CryptKeyURL),
 		crypt_iv:              C.CString(params.CryptIV),
+		crypt_key:             C.CString(params.CryptKey),
+		crypt_kid:             C.CString(params.CryptKID),
+		crypt_key_url:         C.CString(params.CryptKeyURL),
+		crypt_scheme:          C.crypt_scheme_t(params.CryptScheme),
 	}
 
 	var bypass int

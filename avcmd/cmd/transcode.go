@@ -146,10 +146,11 @@ func InitTranscode(cmdRoot *cobra.Command) error {
 	cmdTranscode.PersistentFlags().Int32P("threads", "t", 1, "transcoding threads")
 	cmdTranscode.PersistentFlags().StringP("encoder", "e", "libx264", "encoder codec, default is 'libx264', can be: 'libx264', 'h264_nvenc', 'h264_videotoolbox'")
 	cmdTranscode.PersistentFlags().StringP("decoder", "d", "h264", "decoder codec, default is 'h264', can be: 'h264', 'h264_cuvid'")
-	cmdTranscode.PersistentFlags().StringP("crypt-scheme", "c", "none", "encryption scheme, default is 'none', can be: 'aes-128'")
-	cmdTranscode.PersistentFlags().StringP("crypt-key", "k", "", "128-bit AES key, as 32 char hex")
-	cmdTranscode.PersistentFlags().StringP("crypt-iv", "i", "", "128-bit AES IV, as 32 char hex")
-	cmdTranscode.PersistentFlags().StringP("crypt-key-url", "u", "", "specify a key URL in the manifest")
+	cmdTranscode.PersistentFlags().String("crypt-iv", "", "128-bit AES IV, as 32 char hex")
+	cmdTranscode.PersistentFlags().String("crypt-key", "", "128-bit AES key, as 32 char hex")
+	cmdTranscode.PersistentFlags().String("crypt-kid", "", "16-byte key ID, as 32 char hex")
+	cmdTranscode.PersistentFlags().String("crypt-key-url", "", "specify a key URL in the manifest")
+	cmdTranscode.PersistentFlags().String("crypt-scheme", "none", "encryption scheme, default is 'none', can be: 'aes-128', 'cbc1', 'cbcs', 'cenc', 'cens'")
 
 	return nil
 }
@@ -184,15 +185,26 @@ func doTranscode(cmd *cobra.Command, args []string) error {
 	cryptScheme := avpipe.CryptNone
 	val := cmd.Flag("crypt-scheme").Value.String()
 	if len(val) > 0 {
-		if val == "aes-128" {
+		switch val {
+		case "aes-128":
 			cryptScheme = avpipe.CryptAES128
-		} else if val != "none" {
-			return fmt.Errorf("Invalid crypt-scheme")
+		case "cenc":
+			cryptScheme = avpipe.CryptCENC
+		case "cbc1":
+			cryptScheme = avpipe.CryptCBC1
+		case "cens":
+			cryptScheme = avpipe.CryptCENS
+		case "cbcs":
+			cryptScheme = avpipe.CryptCBCS
+		case "none":
+			break
+		default:
+			return fmt.Errorf("Invalid crypt-scheme: %s", val)
 		}
 	}
-
-	cryptKey := cmd.Flag("crypt-key").Value.String()
 	cryptIV := cmd.Flag("crypt-iv").Value.String()
+	cryptKey := cmd.Flag("crypt-key").Value.String()
+	cryptKID := cmd.Flag("crypt-kid").Value.String()
 	cryptKeyURL := cmd.Flag("crypt-key-url").Value.String()
 
 	dir := "O"
@@ -216,10 +228,11 @@ func doTranscode(cmd *cobra.Command, args []string) error {
 		Dcodec:             decoder,
 		EncHeight:          2160, // -1 means use source height, other values 2160, 720
 		EncWidth:           3840, // -1 means use source width, other values 3840, 1280
-		CryptScheme:        cryptScheme,
-		CryptKey:           cryptKey,
-		CryptKeyURL:        cryptKeyURL,
 		CryptIV:            cryptIV,
+		CryptKey:           cryptKey,
+		CryptKID:           cryptKID,
+		CryptKeyURL:        cryptKeyURL,
+		CryptScheme:        cryptScheme,
 	}
 
 	avpipe.InitIOHandler(&avcmdInputOpener{url: filename}, &avcmdOutputOpener{dir: dir})
