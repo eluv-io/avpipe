@@ -1,14 +1,16 @@
 /*
-Package avpipe ...
+Package avpipe has four main interfaces that has to be implemented by the client code:
 
-This package has four main interfaces that has to be implemented by the client code:
+  1) InputOpener: is the input factory interface that needs an implementation to generate an InputHandler.
 
-1) InputOpener: is the input factory interface that needs an implementation to generate an InputHandler.
-2) InputHandler: is the input handler with Read/Seek/Size/Close methods. An implementation of this
-   interface is needed by ffmpeg to process input streams properly.
-3) OutputOpener: is the output factory interface that needs an implementation to generate an OutputHandler.
-4) OutputHandler: is the output handler with Write/Seek/Close methods. An implementation of this
-   interface is needed by ffmpeg to write encoded streams properly.
+  2) InputHandler: is the input handler with Read/Seek/Size/Close methods. An implementation of this
+     interface is needed by ffmpeg to process input streams properly.
+
+  3) OutputOpener: is the output factory interface that needs an implementation to generate an OutputHandler.
+
+  4) OutputHandler: is the output handler with Write/Seek/Close methods. An implementation of this
+     interface is needed by ffmpeg to write encoded streams properly.
+
 */
 package avpipe
 
@@ -32,25 +34,25 @@ var log = elog.Get("/eluvio/avpipe")
 type AVType int
 
 const (
-	// Unknown ...
+	// Unknown 0
 	Unknown AVType = iota
-	// DASHManifest ...
+	// DASHManifest 1
 	DASHManifest
-	// DASHVideoInit ...
+	// DASHVideoInit 2
 	DASHVideoInit
-	// DASHVideoSegment ...
+	// DASHVideoSegment 3
 	DASHVideoSegment
-	// DASHAudioInit ...
+	// DASHAudioInit 4
 	DASHAudioInit
-	// DASHAudioSegment ...
+	// DASHAudioSegment 5
 	DASHAudioSegment
-	// HLSMasterM3U ...
+	// HLSMasterM3U 6
 	HLSMasterM3U
-	// HLSVideoM3U ...
+	// HLSVideoM3U 7
 	HLSVideoM3U
-	// HLSAudioM3U ...
+	// HLSAudioM3U 8
 	HLSAudioM3U
-	// AES128Key ...
+	// AES128Key 9
 	AES128Key
 )
 
