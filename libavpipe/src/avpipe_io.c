@@ -77,7 +77,7 @@ elv_io_open(
         ioctx_t *outctx = (ioctx_t *) calloc(1, sizeof(ioctx_t));
         outctx->stream_index = 0;
         outctx->inctx = out_tracker[0].inctx;
-        outctx->seg_index = 0;      // Manifest file has stream_index and seg_index = 0
+        outctx->seg_index = 0;      // init segment has stream_index and seg_index = 0
         if (!url || url[0] == '\0') {
             outctx->type = avpipe_manifest;
         } else {
@@ -89,22 +89,24 @@ elv_io_open(
             }
             if (!strncmp(url + strlen(url) - 3, "mpd", 3)) {
                 outctx->type = avpipe_manifest;
+                outctx->seg_index = -1;     // Special index for manifest
             }
             else if (!strncmp(url, "master", 6)) {
                 outctx->type = avpipe_master_m3u;
+                outctx->seg_index = -1;     // Special index for manifest
             }
             else if (!strncmp(url, "media", 5)) {
                 if (outctx->stream_index == out_tracker[outctx->stream_index].video_stream_index)
                     outctx->type = avpipe_video_m3u;
                 else
                     outctx->type = avpipe_audio_m3u;
+                outctx->seg_index = -1;     // Special index for manifest
             }
             else if (!strncmp(url, "init", 4)) {
                 if (outctx->stream_index == out_tracker[outctx->stream_index].video_stream_index)
                     outctx->type = avpipe_video_init_stream;
                 else
                     outctx->type = avpipe_audio_init_stream;
-                outctx->seg_index = -1;     // Special index for init-stream0 and init-stream1
             }
             else if (!strncmp(url, "key.bin", 7)) {
                 outctx->type = avpipe_aes_128_key;
