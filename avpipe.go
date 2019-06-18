@@ -460,6 +460,11 @@ func SetCLoggers() {
 	C.set_loggers()
 }
 
+// GetVersion ...
+func Version() int {
+	return int(C.version())
+}
+
 // params: transcoding parameters
 // url: input filename that has to be transcoded
 func Tx(params *TxParams, url string, bypass_transcoding bool) int {

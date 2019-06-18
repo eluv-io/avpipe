@@ -36,7 +36,7 @@ typedef struct elv_logger_t {
     pthread_mutex_t _flush_lock;
 } elv_logger_t;
 
-static elv_logger_t _logger;
+static elv_logger_t _logger = {0};
 
 static const char *get_level_str(int level)
 {
@@ -283,11 +283,12 @@ elv_vlog(int level, const char *prefix, const char *fmt, va_list vl)
     int len = 0;
     char buf[LOG_BUFF_SIZE];
 
-    if (_logger._log_level > level)
-        return 0;
-
-    if (_logger.elv_logger[level] == NULL)
+    if (_logger.elv_logger[level] == NULL) {
+        // Only filter if the handler function is not set
+        if (_logger._log_level > level) return 0;
+        
         len = _set_log_header(buf, get_level_str(level));
+    }
     
     len += snprintf(buf+len, LOG_BUFF_SIZE-len, "%s ", prefix);
     len += vsnprintf(buf+len, LOG_BUFF_SIZE-len, fmt, vl);
@@ -350,8 +351,6 @@ elv_set_log_func(
     elv_log_level_t level,
     elv_logger_f logger_f)
 {
-    if (level > elv_log_error)
-        return 1;
     _logger.elv_logger[level] = logger_f;
     return 0;
 }

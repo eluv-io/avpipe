@@ -7,3 +7,6 @@ tx(txparams_t *params, char *filename, int bypass_filtering);
 
 void
 set_loggers();
+
+int
+version();

@@ -285,7 +285,7 @@ prepare_video_encoder(
     if ( params->crf_str && strlen(params->crf_str) > 0 )
         av_opt_set(encoder_codec_context->priv_data, "crf", params->crf_str, AV_OPT_FLAG_ENCODING_PARAM | AV_OPT_SEARCH_CHILDREN);
 
-    // Level defaults to 6.2 which causes problems - PTT
+    // TODO: Get parameters from offering/playout
     // encoder_codec_context->level = 40;
     // encoder_codec_context->profile = FF_PROFILE_H264_HIGH;
 

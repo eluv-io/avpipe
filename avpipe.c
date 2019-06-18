@@ -299,10 +299,10 @@ tx(
     if (!filename || filename[0] == '\0' )
         return -1;
 
-    // Set AV libs log level and handle using elv_log
+    // Note: If log handler functions are set, log levels set through
+    //       av_log_set_level and elv_set_log_level are ignored
     // av_log_set_level(AV_LOG_DEBUG);
     connect_ffmpeg_log();
-
     elv_logger_open(NULL, "avpipe", 10, 100*1024*1024, elv_log_file);
     // elv_set_log_level(elv_log_debug);
 
@@ -345,4 +345,12 @@ end_tx:
 
     free(inctx);
     return rc;
+}
+
+// TODO: Something better than manually updating this. Currently useful for
+//       checking if fabric builds with expected version. 
+int
+version()
+{
+    return 1;
 }
