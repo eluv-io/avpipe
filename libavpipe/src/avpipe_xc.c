@@ -282,7 +282,8 @@ prepare_video_encoder(
 #endif
 
     /* Added to fix/improve encoding quality of the first frame - PENDING(SSS) research */
-    av_opt_set(encoder_codec_context->priv_data, "crf", params->crf_str, AV_OPT_FLAG_ENCODING_PARAM | AV_OPT_SEARCH_CHILDREN);
+    if ( params->crf_str && strlen(params->crf_str) > 0 ) 
+        av_opt_set(encoder_codec_context->priv_data, "crf", params->crf_str, AV_OPT_FLAG_ENCODING_PARAM | AV_OPT_SEARCH_CHILDREN);
 
     // Level defaults to 6.2 which causes problems - PTT
     // encoder_codec_context->level = 40;
