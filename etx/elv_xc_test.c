@@ -379,7 +379,6 @@ main(
     int seg_duration_ts = 0;
     int seg_duration_fr = 0;
     int timescale = 0;
-    char seg_duration_str[10];
     int start_segment = 1;
     char start_segment_str[10];
     int i;
@@ -388,6 +387,8 @@ main(
     txparams_t p = {
         .format = "hls",
         .video_bitrate = 2560000,           /* not used if using CRF */
+        .rc_max_rate = 6700000,
+        .rc_buffer_size = 4500000,
         .audio_bitrate = 64000,
         .sample_rate = 44100,               /* Audio sampling rate */
         .crf_str = "23",                    /* 1 best -> 23 standard middle -> 52 poor */
@@ -397,7 +398,6 @@ main(
         .start_segment_str = "1",           /* 1-based */
         .seg_duration_ts = 0,               /* input argument, same units as input stream PTS */
         .seg_duration_fr = 30,              /* input argument, in frames-per-secoond units */
-        .seg_duration_secs_str = "2.002",   /* deprecated, not used */
         .ecodec = "libx264",
         .dcodec = "",
         .enc_height = -1,                   /* -1 means use source height, other values 2160, 1080, 720 */
@@ -408,7 +408,7 @@ main(
         .crypt_key_url = NULL,
         .crypt_scheme = crypt_none
     };
-    
+
     i = 1;
     while (i < argc) {
         switch ((int) argv[i][0]) {
@@ -542,7 +542,7 @@ main(
                     return 1;
                 }
                 break;
-                
+
             default:
                 usage(argv[0]);
                 return -1;
@@ -566,11 +566,9 @@ main(
         return -1;
     }
 
-    sprintf(seg_duration_str, "%.4f", ((float)seg_duration_ts)/timescale);
     sprintf(start_segment_str, "%d", start_segment);
 
     p.start_pts = pts;
-    p.seg_duration_secs_str = seg_duration_str;
     p.seg_duration_ts = seg_duration_ts;
     p.seg_duration_fr = seg_duration_fr;
     p.start_segment_str = start_segment_str;
@@ -586,8 +584,8 @@ main(
     elv_logger_open(NULL, "etx", 10, 100*1024*1024, elv_log_file);
     elv_set_log_level(elv_log_debug);
 
-    elv_log("seg_duration_str=%s, seg_duration_ts=%d, seg_duration_fr=%d, start_pts=%d, start_segment=%s",
-        seg_duration_str, p.seg_duration_ts, p.seg_duration_fr, p.start_pts, p.start_segment_str);
+    elv_log("seg_duration_ts=%d, seg_duration_fr=%d, start_pts=%d, start_segment=%s",
+        p.seg_duration_ts, p.seg_duration_fr, p.start_pts, p.start_segment_str);
 
     in_handlers.avpipe_opener = in_opener;
     in_handlers.avpipe_closer = in_closer;

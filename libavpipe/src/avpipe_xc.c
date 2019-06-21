@@ -282,7 +282,7 @@ prepare_video_encoder(
 #endif
 
     /* Added to fix/improve encoding quality of the first frame - PENDING(SSS) research */
-    if ( params->crf_str && strlen(params->crf_str) > 0 ) 
+    if ( params->crf_str && strlen(params->crf_str) > 0 )
         av_opt_set(encoder_codec_context->priv_data, "crf", params->crf_str, AV_OPT_FLAG_ENCODING_PARAM | AV_OPT_SEARCH_CHILDREN);
 
     // Level defaults to 6.2 which causes problems - PTT
@@ -309,6 +309,8 @@ prepare_video_encoder(
     encoder_codec_context->time_base = decoder_context->codec_context[index]->time_base;
     encoder_codec_context->sample_aspect_ratio = decoder_context->codec_context[index]->sample_aspect_ratio;
     encoder_codec_context->bit_rate = params->video_bitrate;
+    encoder_codec_context->rc_buffer_size = params->rc_buffer_size;
+    encoder_codec_context->rc_max_rate = params->rc_max_rate;
 
     if (encoder_context->codec[index]->pix_fmts) {
         encoder_codec_context->pix_fmt = encoder_context->codec[index]->pix_fmts[0];

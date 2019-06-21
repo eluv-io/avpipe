@@ -129,6 +129,8 @@ typedef struct txparams_t {
     int audio_bitrate;
     int sample_rate;                // Audio sampling rate
     char *crf_str;
+    int rc_max_rate;                // Rate control - max rate
+    int rc_buffer_size;             // Rate control - buffer size
     int seg_duration_ts;
     int seg_duration_fr;
     char *seg_duration_secs_str;
