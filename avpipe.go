@@ -87,7 +87,6 @@ type TxParams struct {
 	CrfStr             string
 	SegDurationTs      int32
 	SegDurationFr      int32
-	SegDurationSecsStr string
 	Ecodec             string // Video encoder
 	Dcodec             string // Video decoder
 	EncHeight          int32
@@ -487,7 +486,6 @@ func Tx(params *TxParams, url string, bypass_transcoding bool) int {
 		crf_str:               C.CString(params.CrfStr),
 		seg_duration_ts:       C.int(params.SegDurationTs),
 		seg_duration_fr:       C.int(params.SegDurationFr),
-		seg_duration_secs_str: C.CString(params.SegDurationSecsStr),
 		ecodec:                C.CString(params.Ecodec),
 		dcodec:                C.CString(params.Dcodec),
 		enc_height:            C.int(params.EncHeight),

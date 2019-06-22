@@ -213,26 +213,25 @@ func doTranscode(cmd *cobra.Command, args []string) error {
 	}
 
 	params := &avpipe.TxParams{
-		Format:             "hls",
-		StartTimeTs:        0,
-		DurationTs:         -1,
-		StartSegmentStr:    "1",
-		VideoBitrate:       2560000,
-		AudioBitrate:       64000,
-		SampleRate:         44100,
-		CrfStr:             "23",
-		SegDurationTs:      1001 * 60,
-		SegDurationFr:      60,
-		SegDurationSecsStr: "2.002",
-		Ecodec:             encoder,
-		Dcodec:             decoder,
-		EncHeight:          2160, // -1 means use source height, other values 2160, 720
-		EncWidth:           3840, // -1 means use source width, other values 3840, 1280
-		CryptIV:            cryptIV,
-		CryptKey:           cryptKey,
-		CryptKID:           cryptKID,
-		CryptKeyURL:        cryptKeyURL,
-		CryptScheme:        cryptScheme,
+		Format:          "hls",
+		StartTimeTs:     0,
+		DurationTs:      -1,
+		StartSegmentStr: "1",
+		VideoBitrate:    2560000,
+		AudioBitrate:    64000,
+		SampleRate:      44100,
+		CrfStr:          "23",
+		SegDurationTs:   1001 * 60,
+		SegDurationFr:   60,
+		Ecodec:          encoder,
+		Dcodec:          decoder,
+		EncHeight:       2160, // -1 means use source height, other values 2160, 720
+		EncWidth:        3840, // -1 means use source width, other values 3840, 1280
+		CryptIV:         cryptIV,
+		CryptKey:        cryptKey,
+		CryptKID:        cryptKID,
+		CryptKeyURL:     cryptKeyURL,
+		CryptScheme:     cryptScheme,
 	}
 
 	avpipe.InitIOHandler(&avcmdInputOpener{url: filename}, &avcmdOutputOpener{dir: dir})

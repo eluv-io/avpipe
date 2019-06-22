@@ -177,20 +177,19 @@ func TestSingleTranscode(t *testing.T) {
 	filename := "./media/ErsteChristmas.mp4"
 
 	params := &avpipe.TxParams{
-		Format:             "hls",
-		StartTimeTs:        0,
-		DurationTs:         -1,
-		StartSegmentStr:    "1",
-		VideoBitrate:       2560000,
-		AudioBitrate:       64000,
-		SampleRate:         44100,
-		CrfStr:             "23",
-		SegDurationTs:      1001 * 60,
-		SegDurationFr:      60,
-		SegDurationSecsStr: "2.002",
-		Ecodec:             "libx264",
-		EncHeight:          720,
-		EncWidth:           1280,
+		Format:          "hls",
+		StartTimeTs:     0,
+		DurationTs:      -1,
+		StartSegmentStr: "1",
+		VideoBitrate:    2560000,
+		AudioBitrate:    64000,
+		SampleRate:      44100,
+		CrfStr:          "23",
+		SegDurationTs:   1001 * 60,
+		SegDurationFr:   60,
+		Ecodec:          "libx264",
+		EncHeight:       720,
+		EncWidth:        1280,
 	}
 
 	// Create output directory if it doesn't exist
@@ -237,20 +236,19 @@ func TestNvidiaTranscode(t *testing.T) {
 	filename := "./media/rocky.mp4"
 
 	params := &avpipe.TxParams{
-		Format:             "hls",
-		StartTimeTs:        0,
-		DurationTs:         -1,
-		StartSegmentStr:    "1",
-		VideoBitrate:       2560000,
-		AudioBitrate:       64000,
-		SampleRate:         44100,
-		CrfStr:             "23",
-		SegDurationTs:      1001 * 60,
-		SegDurationFr:      60,
-		SegDurationSecsStr: "2.002",
-		Ecodec:             "h264_nvenc",
-		EncHeight:          720,
-		EncWidth:           1280,
+		Format:          "hls",
+		StartTimeTs:     0,
+		DurationTs:      -1,
+		StartSegmentStr: "1",
+		VideoBitrate:    2560000,
+		AudioBitrate:    64000,
+		SampleRate:      44100,
+		CrfStr:          "23",
+		SegDurationTs:   1001 * 60,
+		SegDurationFr:   60,
+		Ecodec:          "h264_nvenc",
+		EncHeight:       720,
+		EncWidth:        1280,
 	}
 
 	doTranscode(t, params, nThreads, filename, "H264_NVIDIA encoder might not be enabled or hardware might not be available")
@@ -261,20 +259,19 @@ func TestConcurrentTranscode(t *testing.T) {
 	filename := "./media/rocky.mp4"
 
 	params := &avpipe.TxParams{
-		Format:             "hls",
-		StartTimeTs:        0,
-		DurationTs:         -1,
-		StartSegmentStr:    "1",
-		VideoBitrate:       2560000,
-		AudioBitrate:       64000,
-		SampleRate:         44100,
-		CrfStr:             "23",
-		SegDurationTs:      1001 * 60,
-		SegDurationFr:      60,
-		SegDurationSecsStr: "2.002",
-		Ecodec:             "libx264",
-		EncHeight:          720,
-		EncWidth:           1280,
+		Format:          "hls",
+		StartTimeTs:     0,
+		DurationTs:      -1,
+		StartSegmentStr: "1",
+		VideoBitrate:    2560000,
+		AudioBitrate:    64000,
+		SampleRate:      44100,
+		CrfStr:          "23",
+		SegDurationTs:   1001 * 60,
+		SegDurationFr:   60,
+		Ecodec:          "libx264",
+		EncHeight:       720,
+		EncWidth:        1280,
 	}
 
 	doTranscode(t, params, nThreads, filename, "")
