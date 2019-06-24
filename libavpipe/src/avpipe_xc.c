@@ -383,7 +383,7 @@ prepare_audio_encoder(
     }
 
     if (!decoder_context->codec_context[index]) {
-        printf("Decoder codec context is NULL!\n");
+        elv_err("Decoder codec context is NULL!\n");
         return -1;
     }
 
@@ -392,7 +392,7 @@ prepare_audio_encoder(
     encoder_context->stream[index] = avformat_new_stream(encoder_context->format_context, NULL);
     encoder_context->codec[index] = avcodec_find_encoder(decoder_context->codec_context[index]->codec_id);
     if (!encoder_context->codec[index]) {
-        printf("Codec not found, codec_id=%s\n", avcodec_get_name(decoder_context->codec_context[index]->codec_id));
+        elv_err("Codec not found, codec_id=%s\n", avcodec_get_name(decoder_context->codec_context[index]->codec_id));
         return -1;
     }
 
@@ -1049,6 +1049,12 @@ avpipe_init(
         goto avpipe_init_failed;
     }
 
+    /* Infer rc parameters */
+    if (params->video_bitrate > 0) {
+        params->rc_max_rate = params->video_bitrate * 1;
+        params->rc_buffer_size = params->video_bitrate;
+    }
+
     if (prepare_decoder(&p_txctx->decoder_ctx, in_handlers, inctx, params)) {
         elv_err("Failure in preparing decoder");
         goto avpipe_init_failed;
@@ -1061,6 +1067,38 @@ avpipe_init(
 
     p_txctx->params = params;
     *txctx = p_txctx;
+
+    char buf[1024];
+    sprintf(buf,
+        "format=%s "
+        "start_time_ts=%d "
+        "start_pts=%d "
+        "duration_ts=%d "
+        "start_segment_str=%s "
+        "video_bitrate=%d "
+        "audio_bitrate=%d "
+        "sample_rate=%d "
+        "crf_str=%s "
+        "rc_max_rate=%d "
+        "rc_buffer_size=%d "
+        "seg_duration_ts=%d "
+        "seg_duration_fr=%d "
+        "ecodec=%s "
+        "dcodec=%s "
+        "enc_height=%d "
+        "enc_width=%d "
+        "crypt_iv=%s "
+        "crypt_key=%s "
+        "crypt_kid=%s "
+        "crypt_key_url=%s "
+        "crypt_scheme=%d ",
+        params->format, params->start_time_ts, params->start_pts, params->duration_ts, params->start_segment_str,
+        params->video_bitrate, params->audio_bitrate, params->sample_rate, params->crf_str,
+        params->rc_max_rate, params->rc_buffer_size,
+        params->seg_duration_ts, params->seg_duration_fr, params->ecodec, params->dcodec, params->enc_height, params->enc_width,
+        params->crypt_iv, params->crypt_key, params->crypt_kid, params->crypt_key_url, params->crypt_scheme);
+    elv_log("AVPIPE TXPARAMS %s", buf);
+
     return 0;
 
 avpipe_init_failed:
