@@ -199,7 +199,7 @@ func TestSingleTranscode(t *testing.T) {
 
 	avpipe.InitIOHandler(&fileInputOpener{url: filename}, &fileOutputOpener{dir: "O"})
 
-	err := avpipe.Tx(params, filename, false)
+	err := avpipe.Tx(params, filename, false, false)
 	if err != 0 {
 		t.Fail()
 	}
@@ -216,7 +216,7 @@ func doTranscode(t *testing.T, p *avpipe.TxParams, nThreads int, filename string
 	done := make(chan struct{})
 	for i := 0; i < nThreads; i++ {
 		go func(params *avpipe.TxParams, filename string) {
-			err := avpipe.Tx(params, filename, false)
+			err := avpipe.Tx(params, filename, false, false)
 			done <- struct{}{} // Signal the main goroutine
 			if err != 0 && reportFailure == "" {
 				t.Fail()
