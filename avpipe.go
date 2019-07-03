@@ -76,26 +76,26 @@ const (
 
 // TxParams should match with txparams_t in C library
 type TxParams struct {
-	Format             string
-	StartTimeTs        int32
-	StartPts           int32 // Start PTS for output
-	DurationTs         int32
-	StartSegmentStr    string
-	VideoBitrate       int32
-	AudioBitrate       int32
-	SampleRate         int32 // Audio sampling rate
-	CrfStr             string
-	SegDurationTs      int32
-	SegDurationFr      int32
-	Ecodec             string // Video encoder
-	Dcodec             string // Video decoder
-	EncHeight          int32
-	EncWidth           int32
-	CryptIV            string
-	CryptKey           string
-	CryptKID           string
-	CryptKeyURL        string
-	CryptScheme        CryptScheme
+	Format          string
+	StartTimeTs     int32
+	StartPts        int32 // Start PTS for output
+	DurationTs      int32
+	StartSegmentStr string
+	VideoBitrate    int32
+	AudioBitrate    int32
+	SampleRate      int32 // Audio sampling rate
+	CrfStr          string
+	SegDurationTs   int32
+	SegDurationFr   int32
+	Ecodec          string // Video encoder
+	Dcodec          string // Video decoder
+	EncHeight       int32
+	EncWidth        int32
+	CryptIV         string
+	CryptKey        string
+	CryptKID        string
+	CryptKeyURL     string
+	CryptScheme     CryptScheme
 }
 
 // IOHandler defines handlers that will be called from the C interface functions
@@ -431,28 +431,28 @@ func CLog(msg *C.char) C.int {
 func CDebug(msg *C.char) C.int {
 	m := C.GoString((*C.char)(unsafe.Pointer(msg)))
 	log.Debug(m)
-	return C.int(0)
+	return C.int(len(m))
 }
 
 //export CInfo
 func CInfo(msg *C.char) C.int {
 	m := C.GoString((*C.char)(unsafe.Pointer(msg)))
 	log.Info(m)
-	return C.int(0)
+	return C.int(len(m))
 }
 
 //export CWarn
 func CWarn(msg *C.char) C.int {
 	m := C.GoString((*C.char)(unsafe.Pointer(msg)))
 	log.Warn(m)
-	return C.int(0)
+	return C.int(len(m))
 }
 
 //export CError
 func CError(msg *C.char) C.int {
 	m := C.GoString((*C.char)(unsafe.Pointer(msg)))
 	log.Error(m)
-	return C.int(0)
+	return C.int(len(m))
 }
 
 func SetCLoggers() {
@@ -466,7 +466,7 @@ func Version() int {
 
 // params: transcoding parameters
 // url: input filename that has to be transcoded
-func Tx(params *TxParams, url string, bypass_transcoding bool) int {
+func Tx(params *TxParams, url string, bypassTranscoding bool, debugFrameLevel bool) int {
 
 	// Convert TxParams to C.txparams_t
 	if params == nil {
@@ -475,35 +475,42 @@ func Tx(params *TxParams, url string, bypass_transcoding bool) int {
 	}
 
 	cparams := &C.txparams_t{
-		format:                C.CString(params.Format),
-		start_time_ts:         C.int(params.StartTimeTs),
-		start_pts:             C.int(params.StartPts),
-		duration_ts:           C.int(params.DurationTs),
-		start_segment_str:     C.CString(params.StartSegmentStr),
-		video_bitrate:         C.int(params.VideoBitrate),
-		audio_bitrate:         C.int(params.AudioBitrate),
-		sample_rate:           C.int(params.SampleRate),
-		crf_str:               C.CString(params.CrfStr),
-		seg_duration_ts:       C.int(params.SegDurationTs),
-		seg_duration_fr:       C.int(params.SegDurationFr),
-		ecodec:                C.CString(params.Ecodec),
-		dcodec:                C.CString(params.Dcodec),
-		enc_height:            C.int(params.EncHeight),
-		enc_width:             C.int(params.EncWidth),
-		crypt_iv:              C.CString(params.CryptIV),
-		crypt_key:             C.CString(params.CryptKey),
-		crypt_kid:             C.CString(params.CryptKID),
-		crypt_key_url:         C.CString(params.CryptKeyURL),
-		crypt_scheme:          C.crypt_scheme_t(params.CryptScheme),
+		format:            C.CString(params.Format),
+		start_time_ts:     C.int(params.StartTimeTs),
+		start_pts:         C.int(params.StartPts),
+		duration_ts:       C.int(params.DurationTs),
+		start_segment_str: C.CString(params.StartSegmentStr),
+		video_bitrate:     C.int(params.VideoBitrate),
+		audio_bitrate:     C.int(params.AudioBitrate),
+		sample_rate:       C.int(params.SampleRate),
+		crf_str:           C.CString(params.CrfStr),
+		seg_duration_ts:   C.int(params.SegDurationTs),
+		seg_duration_fr:   C.int(params.SegDurationFr),
+		ecodec:            C.CString(params.Ecodec),
+		dcodec:            C.CString(params.Dcodec),
+		enc_height:        C.int(params.EncHeight),
+		enc_width:         C.int(params.EncWidth),
+		crypt_iv:          C.CString(params.CryptIV),
+		crypt_key:         C.CString(params.CryptKey),
+		crypt_kid:         C.CString(params.CryptKID),
+		crypt_key_url:     C.CString(params.CryptKeyURL),
+		crypt_scheme:      C.crypt_scheme_t(params.CryptScheme),
 	}
 
 	var bypass int
-	if bypass_transcoding {
+	if bypassTranscoding {
 		bypass = 1
 	} else {
 		bypass = 0
 	}
 
-	rc := C.tx((*C.txparams_t)(unsafe.Pointer(cparams)), C.CString(url), C.int(bypass))
+	var debugFrameLevelInt int
+	if debugFrameLevel {
+		debugFrameLevelInt = 1
+	} else {
+		debugFrameLevelInt = 0
+	}
+
+	rc := C.tx((*C.txparams_t)(unsafe.Pointer(cparams)), C.CString(url), C.int(bypass), C.int(debugFrameLevelInt))
 	return int(rc)
 }

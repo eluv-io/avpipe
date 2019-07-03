@@ -562,7 +562,8 @@ encode_frame(
     coderctx_t *encoder_context,
     AVFrame *frame,
     int stream_index,
-    txparams_t *params)
+    txparams_t *params,
+    int debug_frame_level)
 {
     int ret;
     AVFormatContext *format_context = encoder_context->format_context;
@@ -622,7 +623,8 @@ encode_frame(
     	output_packet->pts += params->start_pts;
     	output_packet->dts += params->start_pts;
 
-        dump_packet("OUT", output_packet);
+        if (debug_frame_level)
+            dump_packet("OUT", output_packet);
 
         /* mux encoded frame */
         ret = av_interleaved_write_frame(format_context, output_packet);
@@ -646,7 +648,8 @@ transcode_packet(
     int stream_index,
     txparams_t *p,
     int do_instrument,
-    int bypass_transcode)
+    int bypass_transcode,
+    int debug_frame_level)
 {
     int ret;
     struct timeval tv;
@@ -686,7 +689,8 @@ transcode_packet(
         packet->pts += p->start_pts;
         packet->dts += p->start_pts;
 
-        dump_packet("BYPASS ", packet);
+        if (debug_frame_level)
+            dump_packet("BYPASS ", packet);
         if (av_interleaved_write_frame(encoder_context->format_context, packet) < 0) {
             elv_err("Failure in copying audio stream");
             return -1;
@@ -710,8 +714,9 @@ transcode_packet(
             elv_err("Failure while receiving a frame from the decoder: %s", av_err2str(response));
             return response;
         }
-
-        dump_frame("IN ", codec_context->frame_number, frame);
+  
+        if (debug_frame_level)
+            dump_frame("IN ", codec_context->frame_number, frame);
 
         if (do_instrument) {
             elv_since(&tv, &since);
@@ -759,14 +764,15 @@ transcode_packet(
                         "frame-filt", codec_context->frame_number);
 #endif
 
-                    dump_frame("FILT ", codec_context->frame_number, filt_frame);
+                    if (debug_frame_level)
+                        dump_frame("FILT ", codec_context->frame_number, filt_frame);
 
                     AVFrame *frame_to_encode = filt_frame;
 
                     /* To allow for packet reordering frames can come with pts past the desired duration */
                     if (p->duration_ts == -1 || frame_to_encode->pts < p->start_time_ts + p->duration_ts) {
                         elv_get_time(&tv);
-                        encode_frame(decoder_context, encoder_context, frame_to_encode, stream_index, p);
+                        encode_frame(decoder_context, encoder_context, frame_to_encode, stream_index, p, debug_frame_level);
                         if (do_instrument) {
                             elv_since(&tv, &since);
                             elv_log("INSTRMNT encode_frame time=%"PRId64, since);
@@ -792,7 +798,8 @@ flush_decoder(
     coderctx_t *decoder_context,
     coderctx_t *encoder_context,
     int stream_index,
-    txparams_t *p)
+    txparams_t *p,
+    int debug_frame_level)
 {
     int ret;
     AVFrame *frame, *filt_frame;
@@ -837,13 +844,14 @@ flush_decoder(
                     break;
                 }
 
-                dump_frame("FILT ", codec_context->frame_number, filt_frame);
+                if (debug_frame_level)
+                    dump_frame("FILT ", codec_context->frame_number, filt_frame);
 
                 AVFrame *frame_to_encode = filt_frame;
 
                 /* To allow for packet reordering frames can come with pts past the desired duration */
                 if (p->duration_ts == -1 || frame_to_encode->pts < p->start_time_ts + p->duration_ts) {
-                    encode_frame(decoder_context, encoder_context, frame_to_encode, stream_index, p);
+                    encode_frame(decoder_context, encoder_context, frame_to_encode, stream_index, p, debug_frame_level);
                 } else {
                     elv_dbg("ENCODE skiping frame pts=%d filt_frame pts=%d", frame->pts, filt_frame->pts);
                 }
@@ -860,7 +868,8 @@ int
 avpipe_tx(
     txctx_t *txctx,
     int do_instrument,
-    int bypass_transcode)
+    int bypass_transcode,
+    int debug_frame_level)
 {
     /* Set scale filter */
     char filter_str[128];
@@ -930,7 +939,8 @@ avpipe_tx(
     while ((rc = av_read_frame(decoder_context->format_context, input_packet)) >= 0) {
         if (input_packet->stream_index == decoder_context->video_stream_index) {
             // Video packet
-            dump_packet("IN ", input_packet);
+            if (debug_frame_level)
+                dump_packet("IN ", input_packet);
 
             // Stop when we reached the desired duration (duration -1 means 'entire input stream')
             if (params->duration_ts != -1 &&
@@ -955,7 +965,8 @@ avpipe_tx(
                 input_packet->stream_index,
                 params,
                 do_instrument,
-                bypass_transcode
+                bypass_transcode,
+                debug_frame_level
             );
 
             if (do_instrument) {
@@ -980,7 +991,8 @@ avpipe_tx(
             input_packet->pts += params->start_pts;
             input_packet->dts += params->start_pts;
 
-            dump_packet("AUDIO IN", input_packet);
+            if (debug_frame_level)
+                dump_packet("AUDIO IN", input_packet);
             if (av_interleaved_write_frame(encoder_context->format_context, input_packet) < 0) {
                 elv_err("Failure in copying audio stream");
                 return -1;
@@ -1003,9 +1015,9 @@ avpipe_tx(
      * Flush all frames, first flush decoder buffers, then encoder buffers by passing NULL frame.
      * TODO: should I do it for the audio stream too?
      */
-    flush_decoder(decoder_context, encoder_context, encoder_context->video_stream_index, params);
+    flush_decoder(decoder_context, encoder_context, encoder_context->video_stream_index, params, debug_frame_level);
     if (!bypass_transcode)
-        encode_frame(decoder_context, encoder_context, NULL, encoder_context->video_stream_index, params);
+        encode_frame(decoder_context, encoder_context, NULL, encoder_context->video_stream_index, params, debug_frame_level);
 
 
     dump_stats(decoder_context, encoder_context);

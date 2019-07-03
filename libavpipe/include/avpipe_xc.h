@@ -209,5 +209,6 @@ int
 avpipe_tx(
     txctx_t *txctx,
     int do_instrument,
-    int bypass_transcode);
+    int bypass_transcode,
+    int debug_frame_level);
 #endif
