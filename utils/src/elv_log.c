@@ -122,6 +122,8 @@ elv_logger_open(
     elv_log_appender_t appender)
 {
     char buf[1024];
+    if ( _logger._initialized )
+        return 0;
 
     if (dir && dir[0] != 0)
         _logger._dirname = strdup(dir);
