@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"strconv"
 
 	"github.com/qluvio/avpipe"
 	"github.com/spf13/cobra"
@@ -141,11 +142,24 @@ func InitTranscode(cmdRoot *cobra.Command) error {
 
 	cmdRoot.AddCommand(cmdTranscode)
 
-	cmdTranscode.PersistentFlags().StringP("filename", "f", "", "filename to be transcoded")
+	cmdTranscode.PersistentFlags().StringP("filename", "f", "", "(mandatory) filename to be transcoded")
 	cmdTranscode.PersistentFlags().BoolP("bypass", "b", false, "bypass transcoding")
 	cmdTranscode.PersistentFlags().Int32P("threads", "t", 1, "transcoding threads")
 	cmdTranscode.PersistentFlags().StringP("encoder", "e", "libx264", "encoder codec, default is 'libx264', can be: 'libx264', 'h264_nvenc', 'h264_videotoolbox'")
 	cmdTranscode.PersistentFlags().StringP("decoder", "d", "h264", "decoder codec, default is 'h264', can be: 'h264', 'h264_cuvid'")
+	cmdTranscode.PersistentFlags().StringP("format", "", "dash", "package format, can be 'dash' or 'hls'.")
+	cmdTranscode.PersistentFlags().Int32P("crf", "", 23, "mutually exclusive with video-bitrate.")
+	cmdTranscode.PersistentFlags().Int32P("start-time-ts", "", 0, "")
+	cmdTranscode.PersistentFlags().Int32P("start-pts", "", 0, "starting PTS for output")
+	cmdTranscode.PersistentFlags().Int32P("sample-rate", "", -1, "")
+	cmdTranscode.PersistentFlags().Int32P("start-segment", "", 1, "start segment number >= 1.")
+	cmdTranscode.PersistentFlags().Int32P("video-bitrate", "", -1, "mutually exclusive with crf.")
+	cmdTranscode.PersistentFlags().Int32P("audio-bitrate", "", -1, "Default: -1")
+	cmdTranscode.PersistentFlags().Int32P("enc-height", "", -1, "default -1 means use source height")
+	cmdTranscode.PersistentFlags().Int32P("enc-width", "", -1, "default -1 means use source width")
+	cmdTranscode.PersistentFlags().Int32P("duration-ts", "", -1, "default -1 means entire stream")
+	cmdTranscode.PersistentFlags().Int32P("seg-duration-ts", "", 0, "(mandatory) segment duration time base (positive integer)")
+	cmdTranscode.PersistentFlags().Int32P("seg-duration-fr", "", 0, "(mandatory) segment duration frame (positive integer)")
 	cmdTranscode.PersistentFlags().String("crypt-iv", "", "128-bit AES IV, as 32 char hex")
 	cmdTranscode.PersistentFlags().String("crypt-key", "", "128-bit AES key, as 32 char hex")
 	cmdTranscode.PersistentFlags().String("crypt-kid", "", "16-byte key ID, as 32 char hex")
@@ -182,6 +196,74 @@ func doTranscode(cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("Decoder is needed after -d")
 	}
 
+	format := cmd.Flag("format").Value.String()
+	if format != "dash" && format != "hls" {
+		return fmt.Errorf("Pakage format is not valid, can be 'dash' or 'hls'")
+	}
+
+	crf, err := cmd.Flags().GetInt32("crf")
+	if err != nil || crf < 0 || crf > 51 {
+		return fmt.Errorf("crf is not valid, should be in 0..51")
+	}
+
+	startTimeTs, err := cmd.Flags().GetInt32("start-time-ts")
+	if err != nil {
+		return fmt.Errorf("start-time-ts is not valid")
+	}
+
+	startPts, err := cmd.Flags().GetInt32("start-pts")
+	if err != nil || startPts < 0 {
+		return fmt.Errorf("start-pts is not valid, must be >=0")
+	}
+
+	sampleRate, err := cmd.Flags().GetInt32("sample-rate")
+	if err != nil {
+		return fmt.Errorf("sample-rate is not valid")
+	}
+
+	startSegment, err := cmd.Flags().GetInt32("start-segment")
+	if err != nil {
+		return fmt.Errorf("start-segment is not valid")
+	}
+
+	videoBitrate, err := cmd.Flags().GetInt32("video-bitrate")
+	if err != nil {
+		return fmt.Errorf("video-bitrate is not valid")
+	}
+
+	audioBitrate, err := cmd.Flags().GetInt32("audio-bitrate")
+	if err != nil {
+		return fmt.Errorf("audio-bitrate is not valid")
+	}
+
+	encHeight, err := cmd.Flags().GetInt32("enc-height")
+	if err != nil {
+		return fmt.Errorf("enc-height is not valid")
+	}
+
+	encWidth, err := cmd.Flags().GetInt32("enc-width")
+	if err != nil {
+		return fmt.Errorf("enc-width is not valid")
+	}
+
+	durationTs, err := cmd.Flags().GetInt32("duration-ts")
+	if err != nil {
+		return fmt.Errorf("Duration ts is not valid")
+	}
+
+	segDurationTs, err := cmd.Flags().GetInt32("seg-duration-ts")
+	if err != nil || segDurationTs == 0 {
+		return fmt.Errorf("Seg duration ts is not valid")
+	}
+
+	segDurationFr, err := cmd.Flags().GetInt32("seg-duration-fr")
+	if err != nil || segDurationFr == 0 {
+		return fmt.Errorf("Seg duration fr is not valid")
+	}
+
+	crfStr := strconv.Itoa(int(crf))
+	startSegmentStr := strconv.Itoa(int(startSegment))
+
 	cryptScheme := avpipe.CryptNone
 	val := cmd.Flag("crypt-scheme").Value.String()
 	if len(val) > 0 {
@@ -213,20 +295,21 @@ func doTranscode(cmd *cobra.Command, args []string) error {
 	}
 
 	params := &avpipe.TxParams{
-		Format:          "hls",
-		StartTimeTs:     0,
-		DurationTs:      -1,
-		StartSegmentStr: "1",
-		VideoBitrate:    2560000,
-		AudioBitrate:    64000,
-		SampleRate:      44100,
-		CrfStr:          "23",
-		SegDurationTs:   1001 * 60,
-		SegDurationFr:   60,
+		Format:          format,
+		StartTimeTs:     startTimeTs,
+		StartPts:        startPts,
+		DurationTs:      durationTs,
+		StartSegmentStr: startSegmentStr,
+		VideoBitrate:    videoBitrate,
+		AudioBitrate:    audioBitrate,
+		SampleRate:      sampleRate,
+		CrfStr:          crfStr,
+		SegDurationTs:   segDurationTs,
+		SegDurationFr:   segDurationFr,
 		Ecodec:          encoder,
 		Dcodec:          decoder,
-		EncHeight:       2160, // -1 means use source height, other values 2160, 720
-		EncWidth:        3840, // -1 means use source width, other values 3840, 1280
+		EncHeight:       encHeight, // -1 means use source height, other values 2160, 720
+		EncWidth:        encWidth,  // -1 means use source width, other values 3840, 1280
 		CryptIV:         cryptIV,
 		CryptKey:        cryptKey,
 		CryptKID:        cryptKID,
