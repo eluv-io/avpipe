@@ -2,7 +2,7 @@
  This module is designed to generate stress load on one/multiple avpipe server persistent cache.
  Generating load test on a server persistent cache has two phases:
  1) Generate data and force the server to store segments in persistent cache using following command:
-    avcmd stress init -c stress.json
+    avcmd stress warmup -c stress.json
  2) Generate load against the segments that are saved in persistent cache using following command:
     avcmd stress run -c stress.json
 */
