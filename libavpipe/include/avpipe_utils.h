@@ -44,7 +44,7 @@ save_gray_frame(
     int number);
 
 void
-dump_stats(
+dump_coders(
     coderctx_t *decoder_context,
     coderctx_t *encoder_context);
 
