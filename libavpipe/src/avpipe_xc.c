@@ -981,7 +981,7 @@ avpipe_tx(
                 break;
             }
 
-            dump_stats(decoder_context, encoder_context);
+            dump_coders(decoder_context, encoder_context);
         } else if (input_packet->stream_index == decoder_context->audio_stream_index) {
             // Audio packet: just copying audio stream
             av_packet_rescale_ts(input_packet,
@@ -1020,7 +1020,7 @@ avpipe_tx(
         encode_frame(decoder_context, encoder_context, NULL, encoder_context->video_stream_index, params, debug_frame_level);
 
 
-    dump_stats(decoder_context, encoder_context);
+    dump_coders(decoder_context, encoder_context);
 
     av_packet_free(&input_packet);
     av_frame_free(&input_frame);
