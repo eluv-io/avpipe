@@ -303,6 +303,10 @@ prepare_video_encoder(
     //av_opt_set(encoder_context->format_context->priv_data, "use_timeline", "0",
     //    AV_OPT_FLAG_ENCODING_PARAM | AV_OPT_SEARCH_CHILDREN);
 
+    // Set fragmented MP4 flag if format is fmp4
+    if (!strcmp(params->format, "fmp4"))
+        av_opt_set(encoder_context->format_context->priv_data, "movflags", "frag_every_frame", 0);
+
     /* Set codec context parameters */
     encoder_codec_context->height = params->enc_height != -1 ? params->enc_height : decoder_context->codec_context[index]->height;
     encoder_codec_context->width = params->enc_width != -1 ? params->enc_width : decoder_context->codec_context[index]->width;
@@ -453,13 +457,23 @@ prepare_encoder(
     int bypass_transcode)
 {
     out_tracker_t *out_tracker;
+    char *filename = "";
+    char *format = params->format;
+
+    if (!strcmp(params->format, "mp4"))
+        filename = "mp4-stream.mp4";
+    else if (!strcmp(params->format, "fmp4")) {
+        filename = "fmp4-stream.mp4";
+        /* fmp4 is actually mp4 format with a fragmented flag */
+        format = "mp4";
+    }
 
     /*
      * Allocate an AVFormatContext for output.
      * Setting 3th paramter to "dash" determines the output file format and avoids guessing
      * output file format using filename in ffmpeg library.
      */
-    avformat_alloc_output_context2(&encoder_context->format_context, NULL, "dash", "");
+    avformat_alloc_output_context2(&encoder_context->format_context, NULL, format, filename);
     if (!encoder_context->format_context) {
         elv_dbg("could not allocate memory for output format");
         return -1;
@@ -1051,8 +1065,12 @@ avpipe_init(
         goto avpipe_init_failed;
     }
 
-    if (!params->format || (strcmp(params->format, "dash") && strcmp(params->format, "hls"))) {
-        elv_err("Output format can be only \"dash\" or \"hls\"");
+    if (!params->format || 
+        (strcmp(params->format, "dash") &&
+         strcmp(params->format, "hls") &&
+         strcmp(params->format, "mp4") &&
+         strcmp(params->format, "fmp4"))) {
+        elv_err("Output format can be only \"dash\", \"hls\", \"mp4\", or \"fmp4\"");
         goto avpipe_init_failed;
     }
 
