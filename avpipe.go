@@ -56,6 +56,8 @@ const (
 	AES128Key
 	// MP4Stream 10
 	MP4Stream
+	// FMP4Stream 11 (Fragmented MP4)
+	FMP4Stream
 )
 
 // CryptScheme is the content encryption scheme
@@ -328,6 +330,8 @@ func AVPipeOpenOutput(handler C.int64_t, stream_index, seg_index, stream_type C.
 		out_type = AES128Key
 	case C.avpipe_mp4_stream:
 		out_type = MP4Stream
+	case C.avpipe_fmp4_stream:
+		out_type = FMP4Stream
 	default:
 		log.Error("AVPipeOpenOutput()", "invalid stream type", stream_type)
 		return C.int64_t(-1)

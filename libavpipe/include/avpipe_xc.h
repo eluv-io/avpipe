@@ -23,7 +23,8 @@ typedef enum avpipe_buftype_t {
     avpipe_video_m3u = 7,               // video m3u
     avpipe_audio_m3u = 8,               // audio m3u
     avpipe_aes_128_key = 9,             // AES key
-    avpipe_mp4_stream = 10
+    avpipe_mp4_stream = 10,             // mp4 stream
+    avpipe_fmp4_stream = 11             // fragmented mp4 stream
 } avpipe_buftype_t;
 
 typedef struct ioctx_t {

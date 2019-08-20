@@ -93,7 +93,9 @@ func (oo *avcmdOutputOpener) Open(h, fd int64, stream_index, seg_index int, out_
 	case avpipe.AES128Key:
 		filename = fmt.Sprintf("./%s/key.bin", dir)
 	case avpipe.MP4Stream:
-		filename = fmt.Sprintf("%s/live-stream.mp4", dir)
+		filename = fmt.Sprintf("%s/mp4-stream.mp4", dir)
+	case avpipe.FMP4Stream:
+		filename = fmt.Sprintf("%s/fmp4-stream.mp4", dir)
 	}
 
 	f, err := os.OpenFile(filename, os.O_RDWR|os.O_CREATE|os.O_TRUNC, 0644)
@@ -149,7 +151,7 @@ func InitTranscode(cmdRoot *cobra.Command) error {
 	cmdTranscode.PersistentFlags().Int32P("threads", "t", 1, "transcoding threads")
 	cmdTranscode.PersistentFlags().StringP("encoder", "e", "libx264", "encoder codec, default is 'libx264', can be: 'libx264', 'h264_nvenc', 'h264_videotoolbox'")
 	cmdTranscode.PersistentFlags().StringP("decoder", "d", "h264", "decoder codec, default is 'h264', can be: 'h264', 'h264_cuvid'")
-	cmdTranscode.PersistentFlags().StringP("format", "", "dash", "package format, can be 'dash', 'hls' or 'mp4'.")
+	cmdTranscode.PersistentFlags().StringP("format", "", "dash", "package format, can be 'dash', 'hls', 'mp4', or 'fmp4'.")
 	cmdTranscode.PersistentFlags().Int32P("crf", "", 23, "mutually exclusive with video-bitrate.")
 	cmdTranscode.PersistentFlags().Int32P("start-time-ts", "", 0, "")
 	cmdTranscode.PersistentFlags().Int32P("start-pts", "", 0, "starting PTS for output")
@@ -199,8 +201,8 @@ func doTranscode(cmd *cobra.Command, args []string) error {
 	}
 
 	format := cmd.Flag("format").Value.String()
-	if format != "dash" && format != "hls" && format != "mp4" {
-		return fmt.Errorf("Pakage format is not valid, can be 'dash', 'hls', or mp4")
+	if format != "dash" && format != "hls" && format != "mp4" && format != "fmp4" {
+		return fmt.Errorf("Pakage format is not valid, can be 'dash', 'hls', 'mp4', or 'fmp4'")
 	}
 
 	crf, err := cmd.Flags().GetInt32("crf")

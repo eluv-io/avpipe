@@ -148,6 +148,7 @@ out_opener(
     case avpipe_audio_m3u:
     case avpipe_aes_128_key:
     case avpipe_mp4_stream:
+    case avpipe_fmp4_stream:
         /* Init segments, or m3u files */
         sprintf(segname, "%s/%s", dir, url);
         break;
@@ -356,7 +357,7 @@ usage(
         "\t-e :                 (optional) encoder name. Default is \"libx264\", can be: \"libx264\", \"h264_nvenc\", \"h264_videotoolbox\"\n"
         "\t-enc-height :        (optional) Default: -1 (use source height)\n"
         "\t-enc-width :         (optional) Default: -1 (use source width)\n"
-        "\t-format :            (optional) package format. Default is \"dash\", can be: \"dash\", \"hls\", and \"mp4\"\n"
+        "\t-format :            (optional) package format. Default is \"dash\", can be: \"dash\", \"hls\", \"mp4\", or \"fmp4\"\n"
         "\t-sample-rate :       (optional) Default: -1\n"
         "\t-rc-buffer-size :    (optional)\n"
         "\t-rc-max-rate :       (optional)\n"
@@ -511,6 +512,8 @@ main(
                     p.format = "hls";
                 } else if (strcmp(argv[i+1], "mp4") == 0) {
                     p.format = "mp4";
+                } else if (strcmp(argv[i+1], "fmp4") == 0) {
+                    p.format = "fmp4";
                 } else {
                     usage(argv[0], argv[i], EXIT_FAILURE);
                 }
