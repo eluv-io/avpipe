@@ -112,6 +112,9 @@ elv_io_open(
                 outctx->type = avpipe_aes_128_key;
                 outctx->seg_index = -2;
             }
+            else if (!strncmp(url, "live", 4)) {
+                outctx->type = avpipe_mp4_stream;
+            }
         }
 
         elv_dbg("OUT url=%s, type=%d", url, outctx->type);
@@ -124,7 +127,10 @@ elv_io_open(
         AVIOContext *avioctx = avio_alloc_context(outctx->buf, outctx->bufsz, AVIO_FLAG_WRITE, (void *)outctx,
             out_handlers->avpipe_reader, out_handlers->avpipe_writer, out_handlers->avpipe_seeker);
 
-        avioctx->seekable = 0;
+        if (outctx->type == avpipe_mp4_stream)
+            avioctx->seekable = 1;
+        else
+            avioctx->seekable = 0;
         avioctx->direct = 1;
         (*pb) = avioctx;
     }

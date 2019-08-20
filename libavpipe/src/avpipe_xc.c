@@ -453,13 +453,17 @@ prepare_encoder(
     int bypass_transcode)
 {
     out_tracker_t *out_tracker;
+    char *filename = "";
+
+    if (!strcmp(params->format, "mp4"))
+        filename = "live-stream.mp4";
 
     /*
      * Allocate an AVFormatContext for output.
      * Setting 3th paramter to "dash" determines the output file format and avoids guessing
      * output file format using filename in ffmpeg library.
      */
-    avformat_alloc_output_context2(&encoder_context->format_context, NULL, "dash", "");
+    avformat_alloc_output_context2(&encoder_context->format_context, NULL, params->format, filename);
     if (!encoder_context->format_context) {
         elv_dbg("could not allocate memory for output format");
         return -1;
@@ -1051,8 +1055,8 @@ avpipe_init(
         goto avpipe_init_failed;
     }
 
-    if (!params->format || (strcmp(params->format, "dash") && strcmp(params->format, "hls"))) {
-        elv_err("Output format can be only \"dash\" or \"hls\"");
+    if (!params->format || (strcmp(params->format, "dash") && strcmp(params->format, "hls") && strcmp(params->format, "mp4"))) {
+        elv_err("Output format can be only \"dash\", \"hls\", or \"mp4\"");
         goto avpipe_init_failed;
     }
 
