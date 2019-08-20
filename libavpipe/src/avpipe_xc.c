@@ -1070,7 +1070,7 @@ avpipe_init(
          strcmp(params->format, "hls") &&
          strcmp(params->format, "mp4") &&
          strcmp(params->format, "fmp4"))) {
-        elv_err("Output format can be only \"dash\", \"hls\", or \"mp4\"");
+        elv_err("Output format can be only \"dash\", \"hls\", \"mp4\", or \"fmp4\"");
         goto avpipe_init_failed;
     }
 
