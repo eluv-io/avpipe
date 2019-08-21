@@ -36,6 +36,8 @@ type testCtx struct {
 	r io.Reader
 }
 
+var bytesRead, bytesWritten, rwDiffMax int
+
 func TestToolFmp4(t *testing.T) {
 
 	sourceUrlStr := testUrl
@@ -68,10 +70,8 @@ func TestToolFmp4(t *testing.T) {
 		StartTimeTs:     0,
 		DurationTs:      -1,
 		StartSegmentStr: "1",
-		VideoBitrate:    2560000,
-		AudioBitrate:    64000,
-		SampleRate:      44100,
-		CrfStr:          "23",
+		VideoBitrate:    8100000,
+		CrfStr:          "20",
 		SegDurationTs:   1001 * 60,
 		SegDurationFr:   60,
 		Ecodec:          "libx264",
@@ -111,7 +111,9 @@ func (i *inputCtx) Read(buf []byte) (int, error) {
 	if err == io.EOF {
 		return 0, nil
 	}
-	fmt.Println("IN_READ DONE", "len", len(buf), "n", n, "err", err)
+	bytesRead += n
+	fmt.Println("IN_READ DONE", "len", len(buf), "n", n,
+		"bytesRead", bytesRead, "bytesWritten", bytesWritten, "err", err)
 	return n, err
 }
 
@@ -147,7 +149,19 @@ func (oo *outputOpener) Open(h, fd int64, stream_index, seg_index int, out_type 
 func (o *outputCtx) Write(buf []byte) (int, error) {
 	fmt.Println("OUT_WRITE", "len", len(buf))
 	n, err := o.w.Write(buf)
-	fmt.Println("OUT_WRITE DONE", "len", len(buf), "n", n, "err", err)
+	if err != nil {
+		return n, err
+	}
+	if bytesWritten == 0 {
+		rwDiffMax = bytesRead - bytesWritten
+		fmt.Println("OUT_WRITE FIRST", "bytesRead", bytesRead, "bytesWritten", bytesWritten, "diff", rwDiffMax)
+	}
+	bytesWritten += n
+	if bytesRead-bytesWritten > rwDiffMax {
+		rwDiffMax = bytesRead - bytesWritten
+	}
+	fmt.Println("OUT_WRITE DONE", "len", len(buf), "n", n, "err", err,
+		"bytesRead", bytesRead, "bytesWritten", bytesWritten, "diff", rwDiffMax)
 	return n, err
 }
 
