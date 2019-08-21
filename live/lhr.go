@@ -3,6 +3,7 @@
 package live
 
 import (
+	"errors"
 	"github.com/grafov/m3u8"
 	"io"
 	"log"
@@ -92,8 +93,6 @@ func (lhr *LiveHlsReader) saveToFile(u *url.URL) error {
 }
 
 func (lhr *LiveHlsReader) readSegment(u *url.URL, w io.Writer) error {
-	fileName := path.Base(u.Path)
-
 	content, err := lhr.openUrl(u)
 	if err != nil {
 		return err
@@ -105,8 +104,6 @@ func (lhr *LiveHlsReader) readSegment(u *url.URL, w io.Writer) error {
 		return err
 	}
 
-	log.Print("Copy ", fileName, "\n")
-
 	return nil
 
 }
@@ -115,18 +112,17 @@ func (lhr *LiveHlsReader) readMasterPlaylist(u *url.URL) ([]*m3u8.Variant, error
 
 	content, err := lhr.openUrl(u)
 	if err != nil {
-		log.Fatal("Failed to read playlist " + err.Error())
+		return nil, err
 	}
 	defer content.Close()
 
 	playlist, listType, err := m3u8.DecodeFrom(content, true)
 	if err != nil {
-		log.Fatal("Failed to decode playlist " + err.Error())
+		return nil, err
 	}
 
 	if listType != m3u8.MASTER {
-		log.Fatal("Invalid playlist")
-		return nil, nil
+		return nil, errors.New("Invalid playlist")
 	}
 
 	masterPlaylist := playlist.(*m3u8.MasterPlaylist)
@@ -136,23 +132,23 @@ func (lhr *LiveHlsReader) readMasterPlaylist(u *url.URL) ([]*m3u8.Variant, error
 func (lhr *LiveHlsReader) readPlaylist(u *url.URL, startSequence, numSegments int, w io.Writer) (int, int, error) {
 
 	if numSegments <= 0 {
-		log.Fatal("Invalid parameter")
+		return -1, -1, errors.New("Invalid parameter")
 	}
 
 	log.Println("Reading playlist", "startSequence", startSequence, "numSegments", numSegments)
 	content, err := lhr.openUrl(u)
 	if err != nil {
-		log.Fatal("Failed to read playlist " + err.Error())
+		return -1, -1, err
 	}
 	defer content.Close()
 
 	playlist, listType, err := m3u8.DecodeFrom(content, true)
 	if err != nil {
-		log.Fatal("Failed to decode playlist " + err.Error())
+		return -1, -1, err
 	}
 
 	if listType != m3u8.MEDIA {
-		log.Fatal("Invalid playlist")
+		return -1, -1, err
 	}
 
 	mediaPlaylist := playlist.(*m3u8.MediaPlaylist)

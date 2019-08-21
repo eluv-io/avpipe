@@ -59,6 +59,8 @@ func TestToolFmp4(t *testing.T) {
 
 	go func() {
 		lhr.Fill(-1, 1, pw)
+		fmt.Println("FILL DONE")
+		pw.Close()
 	}()
 
 	params := &avpipe.TxParams{
@@ -109,6 +111,7 @@ func (i *inputCtx) Read(buf []byte) (int, error) {
 	if err == io.EOF {
 		return 0, nil
 	}
+	fmt.Println("IN_READ DONE", "len", len(buf), "n", n, "err", err)
 	return n, err
 }
 
@@ -124,7 +127,7 @@ func (i *inputCtx) Close() error {
 
 func (i *inputCtx) Size() int64 {
 	fmt.Println("IN_SIZE")
-	return 120000000
+	return -1
 }
 
 type outputOpener struct {
@@ -142,8 +145,10 @@ func (oo *outputOpener) Open(h, fd int64, stream_index, seg_index int, out_type 
 }
 
 func (o *outputCtx) Write(buf []byte) (int, error) {
-	fmt.Println("OUT_WRITE")
-	return o.w.Write(buf)
+	fmt.Println("OUT_WRITE", "len", len(buf))
+	n, err := o.w.Write(buf)
+	fmt.Println("OUT_WRITE DONE", "len", len(buf), "n", n, "err", err)
+	return n, err
 }
 
 func (o *outputCtx) Seek(offset int64, whence int) (int64, error) {
