@@ -38,6 +38,10 @@ type testCtx struct {
 
 var bytesRead, bytesWritten, rwDiffMax int
 
+func makeOneMez(t *testing.T) {
+
+}
+
 func TestToolFmp4(t *testing.T) {
 
 	sourceUrlStr := testUrl
@@ -60,7 +64,7 @@ func TestToolFmp4(t *testing.T) {
 	lhr := NewLiveHlsReader(sourceUrl)
 
 	go func() {
-		lhr.Fill(-1, 1, pw)
+		lhr.Fill(-1, 3, pw)
 		fmt.Println("FILL DONE")
 		pw.Close()
 	}()

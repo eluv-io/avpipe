@@ -3,16 +3,20 @@
 package live
 
 import (
-	"errors"
-	"github.com/grafov/m3u8"
 	"io"
-	"log"
 	"net/http"
 	"net/url"
 	"os"
 	"path"
 	"time"
+
+	"github.com/grafov/m3u8"
+
+	"eluvio/errors"
+	elog "eluvio/log"
 )
+
+var log = elog.Get("/eluvio/avpipe/live")
 
 type LiveHlsReader struct {
 	sequence          int
@@ -45,7 +49,7 @@ func (lhr *LiveHlsReader) openUrl(u *url.URL) (io.ReadCloser, error) {
 	}
 
 	if resp.StatusCode != 200 {
-		log.Println("Failed HTTP", "status", resp.StatusCode, "URL", u.String())
+		log.Error("Failed HTTP", "status", resp.StatusCode, "URL", u.String())
 		return nil, nil
 	}
 
@@ -87,7 +91,7 @@ func (lhr *LiveHlsReader) saveToFile(u *url.URL) error {
 		return err
 	}
 
-	log.Println("Saved file", fileName)
+	log.Info("Saved file", fileName)
 
 	return nil
 }
@@ -122,7 +126,7 @@ func (lhr *LiveHlsReader) readMasterPlaylist(u *url.URL) ([]*m3u8.Variant, error
 	}
 
 	if listType != m3u8.MASTER {
-		return nil, errors.New("Invalid playlist")
+		return nil, errors.E("Invalid playlist")
 	}
 
 	masterPlaylist := playlist.(*m3u8.MasterPlaylist)
@@ -132,10 +136,10 @@ func (lhr *LiveHlsReader) readMasterPlaylist(u *url.URL) ([]*m3u8.Variant, error
 func (lhr *LiveHlsReader) readPlaylist(u *url.URL, startSequence, numSegments int, w io.Writer) (int, int, error) {
 
 	if numSegments <= 0 {
-		return -1, -1, errors.New("Invalid parameter")
+		return -1, -1, errors.E("Invalid parameter")
 	}
 
-	log.Println("Reading playlist", "startSequence", startSequence, "numSegments", numSegments)
+	log.Info("Reading playlist", "startSequence", startSequence, "numSegments", numSegments)
 	content, err := lhr.openUrl(u)
 	if err != nil {
 		return -1, -1, err
@@ -188,18 +192,19 @@ func (lhr *LiveHlsReader) readPlaylist(u *url.URL, startSequence, numSegments in
 // and writes it out to the provided io.Writer
 // If startSequence is -1, it starts with the first sequence it gets
 // The sequence number is 0-based (i.e. the first segment has sequence number 0)
-func (lhr *LiveHlsReader) Fill(startSequence, numSegments int, w io.Writer) error {
+// Returns nextSequence
+func (lhr *LiveHlsReader) Fill(startSequence, numSegments int, w io.Writer) (int, error) {
 
 	variants, err := lhr.readMasterPlaylist(lhr.url)
 	if err != nil {
-		return err
+		return startSequence, err
 	}
 
 	for n := 0; n < numSegments; {
 
 		for _, variant := range variants {
 			if variant == nil {
-				log.Println("WARNING: invalid variant (nil)")
+				log.Warn("WARNING: invalid variant (nil)")
 				continue
 			}
 
@@ -207,20 +212,20 @@ func (lhr *LiveHlsReader) Fill(startSequence, numSegments int, w io.Writer) erro
 			// read the one we are supposed to
 			msURL, err := resolve(variant.URI, lhr.url)
 			if err != nil {
-				log.Fatal("Failed to resolve URL " + err.Error())
+				log.Error("Failed to resolve URL", err, "url", lhr.url)
 			}
 			numRead, lastSeq, err := lhr.readPlaylist(msURL, startSequence, numSegments-n, w)
 			if err != nil {
-				log.Fatal("Failed to read playlist " + err.Error())
+				log.Error("Failed to read playlist", err, "url", lhr.url)
 			}
 			if numRead > 0 {
 				n += numRead
 				startSequence = lastSeq + 1
 			} else {
-				// Wait for a new segment
-				time.Sleep(time.Duration(1000 * time.Millisecond))
+				// Wait for a new segment - typically segments are 2 sec or longer
+				time.Sleep(time.Duration(200 * time.Millisecond))
 			}
 		}
 	}
-	return nil
+	return startSequence, nil
 }
