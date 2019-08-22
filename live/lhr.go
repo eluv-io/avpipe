@@ -4,7 +4,7 @@ package live
 
 import (
 	"errors"
-	"github.com/grafov/m3u8"
+	"fmt"
 	"io"
 	"log"
 	"net/http"
@@ -12,6 +12,8 @@ import (
 	"os"
 	"path"
 	"time"
+
+	"github.com/grafov/m3u8"
 )
 
 type LiveHlsReader struct {
@@ -46,7 +48,7 @@ func (lhr *LiveHlsReader) openUrl(u *url.URL) (io.ReadCloser, error) {
 
 	if resp.StatusCode != 200 {
 		log.Println("Failed HTTP", "status", resp.StatusCode, "URL", u.String())
-		return nil, nil
+		return nil, fmt.Errorf("HTTP status=%d", resp.StatusCode)
 	}
 
 	return resp.Body, nil
