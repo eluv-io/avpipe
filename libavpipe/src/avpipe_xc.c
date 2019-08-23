@@ -460,7 +460,13 @@ prepare_encoder(
     char *filename = "";
     char *format = params->format;
 
-    if (!strcmp(params->format, "mp4"))
+    /*
+     * TODO: passing "hls" format needs some development in FF to produce stream index for audio/video.
+     * I will keep hls as before to go to dashenc.c
+     */
+    if (!strcmp(params->format, "hls"))
+        format = "dash";
+    else if (!strcmp(params->format, "mp4"))
         filename = "mp4-stream.mp4";
     else if (!strcmp(params->format, "fmp4")) {
         filename = "fmp4-stream.mp4";
