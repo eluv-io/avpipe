@@ -163,9 +163,14 @@ func (lhr *LiveHlsReader) readPlaylist(u *url.URL, startSequence, numSegments in
 	numRead := 0
 	lastSeqNo := -1
 
+	if startSequence == -1 {
+		startSequence = seqNo + 3 // PENDING(SSS) hardcoded - we need to start at the live edge (end of manifest)
+		log.Info("LHR SEG FIRST SEQNO", "manifest seq", seqNo, "start seq", startSequence, "segs", len(mediaPlaylist.Segments))
+	}
+
 	for _, segment := range mediaPlaylist.Segments {
 		if segment == nil {
-			continue // Strangely the API returns an nil segment at the end
+			continue // Strangely the API returns a nil segment at the end
 		}
 		if seqNo < startSequence {
 			seqNo++
@@ -184,6 +189,7 @@ func (lhr *LiveHlsReader) readPlaylist(u *url.URL, startSequence, numSegments in
 		numRead++
 		lastSeqNo = seqNo
 		seqNo++
+		log.Info("LHR SEG READ", "lastSeqNo", lastSeqNo, "numRead", numRead, "url", segment.URI)
 	}
 	return numRead, lastSeqNo, nil
 }

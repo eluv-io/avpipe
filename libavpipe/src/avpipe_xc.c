@@ -304,8 +304,14 @@ prepare_video_encoder(
     //    AV_OPT_FLAG_ENCODING_PARAM | AV_OPT_SEARCH_CHILDREN);
 
     // Set fragmented MP4 flag if format is fmp4
-    if (!strcmp(params->format, "fmp4"))
+    if (!strcmp(params->format, "fmp4")) {
         av_opt_set(encoder_context->format_context->priv_data, "movflags", "frag_every_frame", 0);
+
+        // PENDING(SSS) - must use the same config as mez maker
+        av_opt_set(&encoder_options, "keyint", "50", 0); // PENDING(SSS) hardcoded 50
+        av_opt_set(&encoder_options, "min-keyint", "50", 0);
+        av_opt_set(&encoder_options, "no-scenecut", "-1", 0);
+    }
 
     /* Set codec context parameters */
     encoder_codec_context->height = params->enc_height != -1 ? params->enc_height : decoder_context->codec_context[index]->height;
