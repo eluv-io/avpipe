@@ -240,6 +240,8 @@ prepare_video_encoder(
 #else
         av_opt_set_int(encoder_context->format_context->priv_data, "seg_duration_ts", params->seg_duration_ts,
             AV_OPT_FLAG_ENCODING_PARAM | AV_OPT_SEARCH_CHILDREN);
+        av_opt_set_int(encoder_context->format_context->priv_data, "frame_duration_ts", params->frame_duration_ts,
+            AV_OPT_FLAG_ENCODING_PARAM | AV_OPT_SEARCH_CHILDREN);
 #endif
         av_opt_set(encoder_context->format_context->priv_data, "start_segment", params->start_segment_str, 0);
         return 0;
@@ -297,6 +299,8 @@ prepare_video_encoder(
 #else
     av_opt_set_int(encoder_context->format_context->priv_data, "seg_duration_ts", params->seg_duration_ts,
         AV_OPT_FLAG_ENCODING_PARAM | AV_OPT_SEARCH_CHILDREN);
+    av_opt_set_int(encoder_context->format_context->priv_data, "frame_duration_ts", params->frame_duration_ts,
+        AV_OPT_FLAG_ENCODING_PARAM | AV_OPT_SEARCH_CHILDREN);
 #endif
     av_opt_set(encoder_context->format_context->priv_data, "start_segment", params->start_segment_str, 0);
 
@@ -311,6 +315,7 @@ prepare_video_encoder(
         av_opt_set(&encoder_options, "keyint", "50", 0); // PENDING(SSS) hardcoded 50
         av_opt_set(&encoder_options, "min-keyint", "50", 0);
         av_opt_set(&encoder_options, "no-scenecut", "-1", 0);
+        // av_opt_set(&encoder_options, "bframes", "0", 0);  // Hopefully not needed
     }
 
     /* Set codec context parameters */
@@ -1077,7 +1082,7 @@ avpipe_init(
         goto avpipe_init_failed;
     }
 
-    if (!params->format || 
+    if (!params->format ||
         (strcmp(params->format, "dash") &&
          strcmp(params->format, "hls") &&
          strcmp(params->format, "mp4") &&

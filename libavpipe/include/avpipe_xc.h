@@ -135,6 +135,7 @@ typedef struct txparams_t {
     int rc_buffer_size;             // Rate control - buffer size
     int seg_duration_ts;
     int seg_duration_fr;
+    int frame_duration_ts;          // Check: seg_duration_ts / frame_duration_ts = seg_duration_fr
     char *ecodec;                   // Video/audio encoder
     char *dcodec;                   // Video/audio decoder
     int enc_height;
