@@ -702,7 +702,7 @@ transcode_packet(
          *
          * This function returns frame time stamp (but needs frame):
          *  - av_frame_get_best_effort_timestamp()
-         * 
+         *
          * The following fields are interesting (but not initialized yet properly):
          *  - in_stream->start_time
          *  - in_stream->time_base // it always 1
@@ -745,7 +745,7 @@ transcode_packet(
             elv_err("Failure while receiving a frame from the decoder: %s", av_err2str(response));
             return response;
         }
-  
+
         if (debug_frame_level)
             dump_frame("IN ", codec_context->frame_number, frame);
 
@@ -801,7 +801,7 @@ transcode_packet(
                     AVFrame *frame_to_encode = filt_frame;
 
                     /* To allow for packet reordering frames can come with pts past the desired duration */
-                    if (p->duration_ts == -1 || frame_to_encode->pts < p->start_time_ts + p->duration_ts) {
+                    if (p->duration_ts == -1 || frame_to_encode->pts - decoder_context->input_start_pts < p->start_time_ts + p->duration_ts) {
                         elv_get_time(&tv);
                         encode_frame(decoder_context, encoder_context, frame_to_encode, stream_index, p, debug_frame_level);
                         if (do_instrument) {
@@ -809,7 +809,7 @@ transcode_packet(
                             elv_log("INSTRMNT encode_frame time=%"PRId64, since);
                         }
                     } else {
-                        elv_dbg("ENCODE skiping frame pts=%d filt_frame pts=%d", frame->pts, filt_frame->pts);
+                        elv_dbg("ENCODE skipping frame pts=%d filt_frame pts=%d", frame->pts, filt_frame->pts);
                     }
 
                     av_frame_unref(filt_frame);
@@ -881,10 +881,10 @@ flush_decoder(
                 AVFrame *frame_to_encode = filt_frame;
 
                 /* To allow for packet reordering frames can come with pts past the desired duration */
-                if (p->duration_ts == -1 || frame_to_encode->pts < p->start_time_ts + p->duration_ts) {
+                if (p->duration_ts == -1 || frame_to_encode->pts - decoder_context->input_start_pts < p->start_time_ts + p->duration_ts) {
                     encode_frame(decoder_context, encoder_context, frame_to_encode, stream_index, p, debug_frame_level);
                 } else {
-                    elv_dbg("ENCODE skiping frame pts=%d filt_frame pts=%d", frame->pts, filt_frame->pts);
+                    elv_dbg("ENCODE skipping frame pts=%d filt_frame pts=%d", frame->pts, filt_frame->pts);
                 }
             }
         }
@@ -967,19 +967,25 @@ avpipe_tx(
     int frame_duration = params->seg_duration_ts / params->seg_duration_fr;
     int extra_pts = 5 * frame_duration; /* decode extra frames to allow for reordering */
 
+    decoder_context->input_start_pts = -1;
+
     while ((rc = av_read_frame(decoder_context->format_context, input_packet)) >= 0) {
         if (input_packet->stream_index == decoder_context->video_stream_index) {
             // Video packet
             if (debug_frame_level)
                 dump_packet("IN ", input_packet);
 
+            if (decoder_context->input_start_pts == -1)
+                decoder_context->input_start_pts = input_packet->pts;
+            int input_packet_rel_pts = input_packet->pts - decoder_context->input_start_pts;
+
             // Stop when we reached the desired duration (duration -1 means 'entire input stream')
             if (params->duration_ts != -1 &&
-                input_packet->pts >= params->start_time_ts + params->duration_ts) {
+                input_packet_rel_pts >= params->start_time_ts + params->duration_ts) {
                 elv_dbg("DURATION OVER param start_time=%d duration=%d pkt pts=%d\n",
                     params->start_time_ts, params->duration_ts, input_packet->pts);
                 /* Allow up to 5 reoredered packets */
-                if (input_packet->pts >= params->start_time_ts + params->duration_ts + extra_pts) {
+                if (input_packet_rel_pts >= params->start_time_ts + params->duration_ts + extra_pts) {
                     elv_dbg("DURATION BREAK param start_time=%d duration=%d pkt pts=%d\n",
                         params->start_time_ts, params->duration_ts, input_packet->pts);
                     break;
