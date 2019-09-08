@@ -799,9 +799,11 @@ transcode_packet(
                         dump_frame("FILT ", codec_context->frame_number, filt_frame);
 
                     AVFrame *frame_to_encode = filt_frame;
+                    int frame_in_pts_offset = frame_to_encode->pts - decoder_context->input_start_pts;
+                    int valid_ts = p->start_time_ts + p->duration_ts;
 
                     /* To allow for packet reordering frames can come with pts past the desired duration */
-                    if (p->duration_ts == -1 || frame_to_encode->pts - decoder_context->input_start_pts < p->start_time_ts + p->duration_ts) {
+                    if (p->duration_ts == -1 || frame_in_pts_offset < valid_ts) {
                         elv_get_time(&tv);
                         encode_frame(decoder_context, encoder_context, frame_to_encode, stream_index, p, debug_frame_level);
                         if (do_instrument) {
