@@ -811,7 +811,8 @@ transcode_packet(
                             elv_log("INSTRMNT encode_frame time=%"PRId64, since);
                         }
                     } else {
-                        elv_dbg("ENCODE skipping frame pts=%d filt_frame pts=%d", frame->pts, filt_frame->pts);
+                        elv_dbg("ENCODE skipping frame pts=%d filt_frame pts=%d, frame_in_pts_offset=%d, valid_ts=%d",
+                            frame->pts, filt_frame->pts, frame_in_pts_offset, valid_ts);
                     }
 
                     av_frame_unref(filt_frame);
@@ -881,12 +882,15 @@ flush_decoder(
                     dump_frame("FILT ", codec_context->frame_number, filt_frame);
 
                 AVFrame *frame_to_encode = filt_frame;
+                int frame_in_pts_offset = frame_to_encode->pts - decoder_context->input_start_pts;
+                int valid_ts = p->start_time_ts + p->duration_ts;
 
                 /* To allow for packet reordering frames can come with pts past the desired duration */
-                if (p->duration_ts == -1 || frame_to_encode->pts - decoder_context->input_start_pts < p->start_time_ts + p->duration_ts) {
+                if (p->duration_ts == -1 || frame_in_pts_offset < valid_ts) {
                     encode_frame(decoder_context, encoder_context, frame_to_encode, stream_index, p, debug_frame_level);
                 } else {
-                    elv_dbg("ENCODE skipping frame pts=%d filt_frame pts=%d", frame->pts, filt_frame->pts);
+                    elv_dbg("ENCODE skipping frame pts=%d filt_frame pts=%d, frame_in_pts_offset=%d, valid_ts=%d",
+                        frame->pts, filt_frame->pts, frame_in_pts_offset, valid_ts);
                 }
             }
         }
