@@ -27,7 +27,7 @@ func TestToolTs(t *testing.T) {
 
 	lhr := NewLiveHlsReader(sourceUrl)
 
-	lhr.Fill(-1, 12, f)
+	lhr.Fill(-1, 0, 30, f)
 
 }
 
@@ -64,7 +64,7 @@ func TestToolFmp4(t *testing.T) {
 	lhr := NewLiveHlsReader(sourceUrl)
 
 	go func() {
-		lhr.Fill(-1, 3, pw)
+		lhr.Fill(-1, 0, 30, pw)
 		fmt.Println("FILL DONE")
 		pw.Close()
 	}()
@@ -72,12 +72,12 @@ func TestToolFmp4(t *testing.T) {
 	params := &avpipe.TxParams{
 		Format:          "fmp4",
 		StartTimeTs:     0,
-		DurationTs:      -1,
+		DurationTs:      2700000,
 		StartSegmentStr: "1",
 		VideoBitrate:    8100000,
 		CrfStr:          "20",
-		SegDurationTs:   1001 * 60,
-		SegDurationFr:   60,
+		SegDurationTs:   180000,
+		SegDurationFr:   50,
 		Ecodec:          "libx264",
 		EncHeight:       1080,
 		EncWidth:        1920,
