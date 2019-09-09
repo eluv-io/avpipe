@@ -25,6 +25,7 @@
 #include <stdlib.h>
 
 #define AUDIO_BUF_SIZE  (128*1024)
+#define INPUT_IS_SEEKABLE 0
 
 extern int
 init_filters(
@@ -588,6 +589,35 @@ set_key_flag(
 }
 
 static int
+should_skip_encoding(
+    coderctx_t *decoder_context,
+    txparams_t *p,
+    AVFrame *frame
+)
+{
+    int skip = 0;
+
+    int frame_in_pts_offset = frame->pts - decoder_context->input_start_pts;
+    int valid_ts = p->start_time_ts + p->duration_ts;
+
+    /* Drop frames before the desired 'start_time' */
+    if (p->start_time_ts > 0 && frame_in_pts_offset < p->start_time_ts) {
+        elv_dbg("ENCODE skip frame early pts=%d filt_frame pts=%d, frame_in_pts_offset=%d, start_time_ts=%d",
+            frame->pts, frame_in_pts_offset, p->start_time_ts);
+        skip = 1;
+    }
+
+    /* To allow for packet reordering frames can come with pts past the desired duration */
+    if (p->duration_ts > 0 && frame_in_pts_offset >= valid_ts) {
+        elv_dbg("ENCODE skip frame late pts=%d filt_frame pts=%d, frame_in_pts_offset=%d, valid_ts=%d",
+            frame->pts, frame_in_pts_offset, valid_ts);
+        skip = 1;
+    }
+
+    return skip;
+}
+
+static int
 encode_frame(
     coderctx_t *decoder_context,
     coderctx_t *encoder_context,
@@ -798,21 +828,17 @@ transcode_packet(
                     if (debug_frame_level)
                         dump_frame("FILT ", codec_context->frame_number, filt_frame);
 
-                    AVFrame *frame_to_encode = filt_frame;
-                    int frame_in_pts_offset = frame_to_encode->pts - decoder_context->input_start_pts;
-                    int valid_ts = p->start_time_ts + p->duration_ts;
 
-                    /* To allow for packet reordering frames can come with pts past the desired duration */
-                    if (p->duration_ts == -1 || frame_in_pts_offset < valid_ts) {
+                    AVFrame *frame_to_encode = filt_frame;
+                    int skip = should_skip_encoding(decoder_context, p, filt_frame);
+
+                    if (!skip) {
                         elv_get_time(&tv);
                         encode_frame(decoder_context, encoder_context, frame_to_encode, stream_index, p, debug_frame_level);
                         if (do_instrument) {
                             elv_since(&tv, &since);
                             elv_log("INSTRMNT encode_frame time=%"PRId64, since);
                         }
-                    } else {
-                        elv_dbg("ENCODE skipping frame pts=%d filt_frame pts=%d, frame_in_pts_offset=%d, valid_ts=%d",
-                            frame->pts, filt_frame->pts, frame_in_pts_offset, valid_ts);
                     }
 
                     av_frame_unref(filt_frame);
@@ -882,15 +908,10 @@ flush_decoder(
                     dump_frame("FILT ", codec_context->frame_number, filt_frame);
 
                 AVFrame *frame_to_encode = filt_frame;
-                int frame_in_pts_offset = frame_to_encode->pts - decoder_context->input_start_pts;
-                int valid_ts = p->start_time_ts + p->duration_ts;
+                int skip = should_skip_encoding(decoder_context, p, filt_frame);
 
-                /* To allow for packet reordering frames can come with pts past the desired duration */
-                if (p->duration_ts == -1 || frame_in_pts_offset < valid_ts) {
+                if (!skip) {
                     encode_frame(decoder_context, encoder_context, frame_to_encode, stream_index, p, debug_frame_level);
-                } else {
-                    elv_dbg("ENCODE skipping frame pts=%d filt_frame pts=%d, frame_in_pts_offset=%d, valid_ts=%d",
-                        frame->pts, filt_frame->pts, frame_in_pts_offset, valid_ts);
                 }
             }
         }
@@ -951,6 +972,7 @@ avpipe_tx(
 
     elv_dbg("START TIME %d, START PTS %d (output), DURATION %d", params->start_time_ts, params->start_pts, params->duration_ts);
 
+#if INPUT_IS_SEEKABLE
     /* Seek to start position */
     if (params->start_time_ts > 0) {
         if (av_seek_frame(decoder_context->format_context,
@@ -959,6 +981,7 @@ avpipe_tx(
             return -1;
         }
     }
+#endif
 
     if (params->start_time_ts != -1)
         encoder_context->format_context->start_time = params->start_time_ts;
