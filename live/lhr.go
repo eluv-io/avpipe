@@ -1,5 +1,3 @@
-// LiveHlsReader provides a reader interface to a live HLS stream - it reads a specified number of segments
-// on outputs one aggregate MPEG-TS buffer
 package live
 
 import (
@@ -18,7 +16,9 @@ import (
 
 var log = elog.Get("/eluvio/avpipe/live")
 
-type LiveHlsReader struct {
+// HLSReader provides a reader interface to a live HLS stream - it reads a
+//   specified number of segments on outputs one aggregate MPEG-TS buffer
+type HLSReader struct {
 	sequence          int
 	client            http.Client
 	url               *url.URL
@@ -26,9 +26,9 @@ type LiveHlsReader struct {
 	numSegmentsRead   int
 }
 
-func NewLiveHlsReader(url *url.URL) *LiveHlsReader {
-
-	lhr := LiveHlsReader{
+// NewHLSReader ...
+func NewHLSReader(url *url.URL) *HLSReader {
+	lhr := HLSReader{
 		sequence: -1,
 		client:   http.Client{},
 		url:      url,
@@ -36,8 +36,7 @@ func NewLiveHlsReader(url *url.URL) *LiveHlsReader {
 	return &lhr
 }
 
-func (lhr *LiveHlsReader) openUrl(u *url.URL) (io.ReadCloser, error) {
-
+func (lhr *HLSReader) openURL(u *url.URL) (io.ReadCloser, error) {
 	req, err := http.NewRequest("GET", u.String(), nil)
 	if err != nil {
 		return nil, err
@@ -46,11 +45,8 @@ func (lhr *LiveHlsReader) openUrl(u *url.URL) (io.ReadCloser, error) {
 	resp, err := lhr.client.Do(req)
 	if err != nil {
 		return nil, err
-	}
-
-	if resp.StatusCode != 200 {
-		log.Error("Failed HTTP", "status", resp.StatusCode, "URL", u.String())
-		return nil, nil
+	} else if resp.StatusCode != 200 {
+		return nil, errors.E("AVLR HTTP GET failed", "status", resp.StatusCode, "URL", u.String())
 	}
 
 	return resp.Body, nil
@@ -58,7 +54,6 @@ func (lhr *LiveHlsReader) openUrl(u *url.URL) (io.ReadCloser, error) {
 
 // resolve returns an absolute URL
 func resolve(urlStr string, base *url.URL) (*url.URL, error) {
-
 	url, err := url.Parse(urlStr)
 	if err != nil {
 		return nil, err
@@ -71,7 +66,7 @@ func resolve(urlStr string, base *url.URL) (*url.URL, error) {
 	return base.ResolveReference(url), nil
 }
 
-func (lhr *LiveHlsReader) saveToFile(u *url.URL) error {
+func (lhr *HLSReader) saveToFile(u *url.URL) error {
 	fileName := path.Base(u.Path)
 
 	out, err := os.Create(fileName)
@@ -80,7 +75,7 @@ func (lhr *LiveHlsReader) saveToFile(u *url.URL) error {
 	}
 	defer out.Close()
 
-	content, err := lhr.openUrl(u)
+	content, err := lhr.openURL(u)
 	if err != nil {
 		return err
 	}
@@ -91,31 +86,35 @@ func (lhr *LiveHlsReader) saveToFile(u *url.URL) error {
 		return err
 	}
 
-	log.Info("Saved file", fileName)
+	log.Info("AVLR saved file", fileName)
 
 	return nil
 }
 
-func (lhr *LiveHlsReader) readSegment(u *url.URL, w io.Writer) (written int64, err error) {
-	log.Debug("AVLR readSegment start", "u", u)
-	content, err := lhr.openUrl(u)
+func (lhr *HLSReader) readSegment(u *url.URL, w io.Writer) (written int64, err error) {
+	log.Info("AVLR readSegment start", "u", u)
+	t := time.Now()
+	content, err := lhr.openURL(u)
+	if content != nil {
+		defer content.Close()
+	}
 	if err != nil {
 		return 0, err
 	}
-	defer content.Close()
 
 	written, err = io.Copy(w, content)
-	log.Debug("AVLR readSegment end", "written", written, "err", err)
+	log.Info("AVLR readSegment end", "written", written, "err", err, "timeSpent", time.Since(t))
 	return
 }
 
-func (lhr *LiveHlsReader) readMasterPlaylist(u *url.URL) ([]*m3u8.Variant, error) {
-
-	content, err := lhr.openUrl(u)
+func (lhr *HLSReader) readMasterPlaylist(u *url.URL) ([]*m3u8.Variant, error) {
+	content, err := lhr.openURL(u)
+	if content != nil {
+		defer content.Close()
+	}
 	if err != nil {
 		return nil, err
 	}
-	defer content.Close()
 
 	playlist, listType, err := m3u8.DecodeFrom(content, true)
 	if err != nil {
@@ -123,7 +122,7 @@ func (lhr *LiveHlsReader) readMasterPlaylist(u *url.URL) ([]*m3u8.Variant, error
 	}
 
 	if listType != m3u8.MASTER {
-		return nil, errors.E("Invalid playlist")
+		return nil, errors.E("AVLR invalid playlist")
 	}
 
 	masterPlaylist := playlist.(*m3u8.MasterPlaylist)
@@ -136,12 +135,12 @@ func (lhr *LiveHlsReader) readMasterPlaylist(u *url.URL) ([]*m3u8.Variant, error
 // to continue next time. durationReadSec is the length of video processed.
 //
 // PENDING(PT) - ideally we can control this with something more precise than duration
-func (lhr *LiveHlsReader) readPlaylist(u *url.URL, startSeqNo int,
+func (lhr *HLSReader) readPlaylist(u *url.URL, startSeqNo int,
 	startSec float64, durationSec float64, w io.Writer) (
 	nextSeqNo int, nextStartSec float64, durationReadSec float64, err error) {
 
-	log.Debug("AVLR readPlaylist start", "u", u, "startSeqNo", startSeqNo, "startSec", startSec, "durationSec", durationSec)
-	content, err := lhr.openUrl(u)
+	log.Debug("AVLR readPlaylist start", "startSeqNo", startSeqNo, "startSec", startSec, "durationSec", durationSec)
+	content, err := lhr.openURL(u)
 	if err != nil {
 		return startSeqNo, startSec, 0, err
 	}
@@ -151,8 +150,8 @@ func (lhr *LiveHlsReader) readPlaylist(u *url.URL, startSeqNo int,
 	if err != nil {
 		return startSeqNo, startSec, 0, err
 	} else if listType != m3u8.MEDIA {
-		log.Warn("Unexpected playlist type", "listType", listType)
-		return startSeqNo, startSec, 0, nil
+		return startSeqNo, startSec, 0,
+			errors.E("AVLR unexpected playlist type", "listType", listType)
 	}
 
 	mediaPlaylist := playlist.(*m3u8.MediaPlaylist)
@@ -201,28 +200,31 @@ func (lhr *LiveHlsReader) readPlaylist(u *url.URL, startSeqNo int,
 
 		msURL, err := resolve(segment.URI, u)
 		if err != nil {
-			log.Fatal("Failed to retrieve segment URL " + err.Error())
+			log.Error("AVLR Failed to resolve segment URL", "err", err, "segment.URI", segment.URI)
+			continue // nextSeqNo will fix itself in the following section
 		}
 
 		// Assert of sorts
 		if nextSeqNo != int(segment.SeqId) {
-			log.Warn("nextSeqNo should equal segment.SeqId", "nextSeqNo", nextSeqNo, "segment.SeqId", segment.SeqId)
+			log.Warn("AVLR nextSeqNo should equal segment.SeqId", "nextSeqNo", nextSeqNo, "segment.SeqId", segment.SeqId)
 			nextSeqNo = int(segment.SeqId)
 		}
 
 		segRemainingSec := durationSec - durationReadSec
 		log.Info("AVLR processing ingest segment", "seqNo", nextSeqNo, "segment.Duration", segment.Duration, "segRemainingSec",
-			segRemainingSec, "durationReadSec", durationReadSec, "url", segment.URI)
+			segRemainingSec, "durationReadSec", durationReadSec, "URI", segment.URI)
 
 		// lhr.saveToFile(msURL)
 		written, err := lhr.readSegment(msURL, w)
 		if err != nil {
 			// Transcoded part of a segment - ErrClosedPipe when avpipe closes the pipe
 			if !(err == io.EOF || err == io.ErrClosedPipe) || segment.Duration < segRemainingSec {
-				log.Error("AVLR failed to read requested duration", "written", written, "err", err)
+				log.Error("AVLR failed to read requested duration", "written", written, "err", err,
+					"nextSeqNo", nextSeqNo, "nextStartSec", 0, "durationReadSec", durationReadSec)
 				return nextSeqNo, 0, durationReadSec, err
 			}
-			log.Info("AVLR successfully read requested duration, ending with a partial segment", "written", written, "err", err)
+			log.Info("AVLR successfully read requested duration, ending with a partial segment", "written", written, "err", err,
+				"nextSeqNo", nextSeqNo, "nextStartSec", segRemainingSec, "durationReadSec", durationSec)
 			return nextSeqNo, segRemainingSec, durationSec, nil
 		}
 
@@ -230,7 +232,7 @@ func (lhr *LiveHlsReader) readPlaylist(u *url.URL, startSeqNo int,
 		startSec = 0
 		nextSeqNo++
 		if durationReadSec >= durationSec {
-			log.Info("AVLR successfully read requested duration", "seqNo", nextSeqNo, "durationReadSec", durationReadSec)
+			log.Info("AVLR successfully read requested duration", "nextSeqNo", nextSeqNo, "nextStartSec", 0, "durationReadSec", durationSec)
 			if durationReadSec > durationSec {
 				log.Warn("AVLR read more than requested duration", "durationSec", durationSec, "durationReadSec", durationReadSec)
 			}
@@ -238,7 +240,7 @@ func (lhr *LiveHlsReader) readPlaylist(u *url.URL, startSeqNo int,
 		}
 	}
 
-	log.Info("AVLR read all available segments", "nextSeqNo", nextSeqNo, "durationReadSec", durationReadSec)
+	log.Info("AVLR read all available segments", "nextSeqNo", nextSeqNo, "nextStartSec", startSec, "durationReadSec", durationReadSec)
 	return nextSeqNo, startSec, durationReadSec, nil
 }
 
@@ -246,10 +248,10 @@ func (lhr *LiveHlsReader) readPlaylist(u *url.URL, startSeqNo int,
 // and writes it out to the provided io.Writer
 // If startSeqNo is -1, it starts with the first sequence it gets
 // The sequence number is 0-based (i.e. the first segment has sequence number 0)
-func (lhr *LiveHlsReader) Fill(startSeqNo int, startSec float64, durationSec float64, w io.Writer) (
+func (lhr *HLSReader) Fill(startSeqNo int, startSec float64, durationSec float64, w io.Writer) (
 	nextSeqNo int, nextStartSec float64, err error) {
 
-	log.Info("AVLR Fill start", "startSeqNo", startSeqNo, "startSec", startSec, "durationSec", durationSec)
+	log.Info("AVLR Fill start", "startSeqNo", startSeqNo, "startSec", startSec, "durationSec", durationSec, "playlist", lhr.url)
 
 	variants, err := lhr.readMasterPlaylist(lhr.url)
 	if err != nil {
@@ -272,16 +274,20 @@ func (lhr *LiveHlsReader) Fill(startSeqNo int, startSec float64, durationSec flo
 			break
 		}
 	}
+	if msURL == nil {
+		return startSeqNo, startSec, errors.E("AVLR media playlist not found")
+	}
+	log.Info("AVLR media playlist found", "URL", msURL)
 
 	for {
 		var durationReadSec float64
 		nextSeqNo, nextStartSec, durationReadSec, err =
 			lhr.readPlaylist(msURL, startSeqNo, startSec, durationSec, w)
 		if err != nil {
-			log.Error("AVLR failed to read playlist", "url", msURL, "nextSeqNo", nextSeqNo, "nextStartSec", nextStartSec, "err", err)
+			log.Error("AVLR failed to read playlist", "nextSeqNo", nextSeqNo, "nextStartSec", nextStartSec, "err", err)
 			return
 		}
-		log.Debug("AVLR readPlaylist returned", "nextSeqNo", nextSeqNo, "nextStartSec", nextStartSec, "durationReadSec", durationReadSec, "err", err)
+		// log.Debug("AVLR readPlaylist returned", "nextSeqNo", nextSeqNo, "nextStartSec", nextStartSec, "durationReadSec", durationReadSec, "err", err)
 
 		if durationReadSec >= durationSec {
 			log.Info("AVLR Fill done", "nextSeqNo", nextSeqNo, "nextStartSec", nextStartSec, "err", err)

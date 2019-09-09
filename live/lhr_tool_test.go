@@ -25,7 +25,7 @@ func TestToolTs(t *testing.T) {
 	f, err := os.Create(pipe)
 	defer f.Close()
 
-	lhr := NewLiveHlsReader(sourceUrl)
+	lhr := NewHLSReader(sourceUrl)
 
 	lhr.Fill(-1, 0, 30, f)
 
@@ -61,7 +61,7 @@ func TestToolFmp4(t *testing.T) {
 	readCtx := testCtx{r: pr}
 	writeCtx := testCtx{w: f}
 
-	lhr := NewLiveHlsReader(sourceUrl)
+	lhr := NewHLSReader(sourceUrl)
 
 	go func() {
 		lhr.Fill(-1, 0, 30, pw)
