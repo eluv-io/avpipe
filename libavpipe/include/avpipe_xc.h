@@ -137,6 +137,7 @@ typedef struct txparams_t {
     int seg_duration_ts;
     int seg_duration_fr;
     int frame_duration_ts;          // Check: seg_duration_ts / frame_duration_ts = seg_duration_fr
+    int start_fragment_index;
     char *ecodec;                   // Video/audio encoder
     char *dcodec;                   // Video/audio decoder
     int enc_height;
