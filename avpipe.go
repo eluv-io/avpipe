@@ -80,27 +80,28 @@ const (
 
 // TxParams should match with txparams_t in C library
 type TxParams struct {
-	Format          string
-	StartTimeTs     int32
-	StartPts        int32 // Start PTS for output
-	DurationTs      int32
-	StartSegmentStr string
-	VideoBitrate    int32
-	AudioBitrate    int32
-	SampleRate      int32 // Audio sampling rate
-	CrfStr          string
-	SegDurationTs   int32
-	SegDurationFr   int32
-	FrameDurationTs int32
-	Ecodec          string // Video encoder
-	Dcodec          string // Video decoder
-	EncHeight       int32
-	EncWidth        int32
-	CryptIV         string
-	CryptKey        string
-	CryptKID        string
-	CryptKeyURL     string
-	CryptScheme     CryptScheme
+	Format             string
+	StartTimeTs        int32
+	StartPts           int32 // Start PTS for output
+	DurationTs         int32
+	StartSegmentStr    string
+	VideoBitrate       int32
+	AudioBitrate       int32
+	SampleRate         int32 // Audio sampling rate
+	CrfStr             string
+	SegDurationTs      int32
+	SegDurationFr      int32
+	FrameDurationTs    int32
+	StartFragmentIndex int32
+	Ecodec             string // Video encoder
+	Dcodec             string // Video decoder
+	EncHeight          int32
+	EncWidth           int32
+	CryptIV            string
+	CryptKey           string
+	CryptKID           string
+	CryptKeyURL        string
+	CryptScheme        CryptScheme
 }
 
 // IOHandler defines handlers that will be called from the C interface functions
@@ -484,27 +485,28 @@ func Tx(params *TxParams, url string, bypassTranscoding bool, debugFrameLevel bo
 	}
 
 	cparams := &C.txparams_t{
-		format:            C.CString(params.Format),
-		start_time_ts:     C.int(params.StartTimeTs),
-		start_pts:         C.int(params.StartPts),
-		duration_ts:       C.int(params.DurationTs),
-		start_segment_str: C.CString(params.StartSegmentStr),
-		video_bitrate:     C.int(params.VideoBitrate),
-		audio_bitrate:     C.int(params.AudioBitrate),
-		sample_rate:       C.int(params.SampleRate),
-		crf_str:           C.CString(params.CrfStr),
-		seg_duration_ts:   C.int(params.SegDurationTs),
-		seg_duration_fr:   C.int(params.SegDurationFr),
-		frame_duration_ts: C.int(params.FrameDurationTs),
-		ecodec:            C.CString(params.Ecodec),
-		dcodec:            C.CString(params.Dcodec),
-		enc_height:        C.int(params.EncHeight),
-		enc_width:         C.int(params.EncWidth),
-		crypt_iv:          C.CString(params.CryptIV),
-		crypt_key:         C.CString(params.CryptKey),
-		crypt_kid:         C.CString(params.CryptKID),
-		crypt_key_url:     C.CString(params.CryptKeyURL),
-		crypt_scheme:      C.crypt_scheme_t(params.CryptScheme),
+		format:               C.CString(params.Format),
+		start_time_ts:        C.int(params.StartTimeTs),
+		start_pts:            C.int(params.StartPts),
+		duration_ts:          C.int(params.DurationTs),
+		start_segment_str:    C.CString(params.StartSegmentStr),
+		video_bitrate:        C.int(params.VideoBitrate),
+		audio_bitrate:        C.int(params.AudioBitrate),
+		sample_rate:          C.int(params.SampleRate),
+		crf_str:              C.CString(params.CrfStr),
+		seg_duration_ts:      C.int(params.SegDurationTs),
+		seg_duration_fr:      C.int(params.SegDurationFr),
+		frame_duration_ts:    C.int(params.FrameDurationTs),
+		start_fragment_index: C.int(params.StartFragmentIndex),
+		ecodec:               C.CString(params.Ecodec),
+		dcodec:               C.CString(params.Dcodec),
+		enc_height:           C.int(params.EncHeight),
+		enc_width:            C.int(params.EncWidth),
+		crypt_iv:             C.CString(params.CryptIV),
+		crypt_key:            C.CString(params.CryptKey),
+		crypt_kid:            C.CString(params.CryptKID),
+		crypt_key_url:        C.CString(params.CryptKeyURL),
+		crypt_scheme:         C.crypt_scheme_t(params.CryptScheme),
 	}
 
 	var bypass int
