@@ -70,16 +70,20 @@ func (lhr *HLSReader) saveToFile(u *url.URL) error {
 	fileName := path.Base(u.Path)
 
 	out, err := os.Create(fileName)
+	if out != nil {
+		defer out.Close()
+	}
 	if err != nil {
 		return err
 	}
-	defer out.Close()
 
 	content, err := lhr.openURL(u)
+	if content != nil {
+		defer content.Close()
+	}
 	if err != nil {
 		return err
 	}
-	defer content.Close()
 
 	_, err = io.Copy(out, content)
 	if err != nil {
@@ -141,10 +145,12 @@ func (lhr *HLSReader) readPlaylist(u *url.URL, startSeqNo int,
 
 	log.Debug("AVLR readPlaylist start", "startSeqNo", startSeqNo, "startSec", startSec, "durationSec", durationSec)
 	content, err := lhr.openURL(u)
+	if content != nil {
+		defer content.Close()
+	}
 	if err != nil {
 		return startSeqNo, startSec, 0, err
 	}
-	defer content.Close()
 
 	playlist, listType, err := m3u8.DecodeFrom(content, true)
 	if err != nil {
@@ -164,8 +170,13 @@ func (lhr *HLSReader) readPlaylist(u *url.URL, startSeqNo int,
 			// No more segments
 			if startSeqNo == -1 {
 				// First segment in the recording
-				startSeqNo = edgeSeqNo
-				startIndex = i - 1
+				if edgeSeqNo <= 1 {
+					// Make sure startSeqNo is valid (at least 1)
+					log.Info("AVLR waiting for live edge move ahead before initializing", "edgeSeqNo", edgeSeqNo)
+					return startSeqNo, startSec, 0, nil
+				}
+				startSeqNo = edgeSeqNo - 1
+				startIndex = i - 2
 				log.Info("AVLR initializing recording at live edge", "seqNo", edgeSeqNo)
 			} else if startIndex == -1 {
 				// Segment not found in the playlist
@@ -189,6 +200,10 @@ func (lhr *HLSReader) readPlaylist(u *url.URL, startSeqNo int,
 	}
 	if durationToEdge > 0 {
 		log.Warn("AVLR falling behind live edge", "durationToEdge", durationToEdge, "edgeSeqNo", edgeSeqNo)
+	}
+	if startIndex < 0 {
+		log.Warn("AVLR playlist smaller than expected", "startIndex", startIndex, "edgeSeqNo", edgeSeqNo)
+		return startSeqNo, startSec, 0, nil
 	}
 
 	nextSeqNo = startSeqNo

@@ -128,6 +128,7 @@ func (i *inputCtx) Seek(offset int64, whence int) (int64, error) {
 
 func (i *inputCtx) Close() error {
 	fmt.Println("IN_CLOSE")
+	i.r.(*io.PipeReader).Close()
 	return nil
 }
 
