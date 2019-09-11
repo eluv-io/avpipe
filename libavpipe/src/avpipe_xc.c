@@ -1007,6 +1007,21 @@ avpipe_tx(
     decoder_context->input_start_pts = -1;
 
     while ((rc = av_read_frame(decoder_context->format_context, input_packet)) >= 0) {
+
+        int input_packet_rel_pts = input_packet->pts - decoder_context->input_start_pts;
+        // Stop when we reached the desired duration (duration -1 means 'entire input stream')
+        if (params->duration_ts != -1 &&
+            input_packet_rel_pts >= params->start_time_ts + params->duration_ts) {
+            elv_dbg("DURATION OVER param start_time=%d duration=%d pkt pts=%d\n",
+                params->start_time_ts, params->duration_ts, input_packet->pts);
+            /* Allow up to 5 reoredered packets */
+            if (input_packet_rel_pts >= params->start_time_ts + params->duration_ts + extra_pts) {
+                elv_dbg("DURATION BREAK param start_time=%d duration=%d pkt pts=%d\n",
+                    params->start_time_ts, params->duration_ts, input_packet->pts);
+                break;
+            }
+        }
+
         if (input_packet->stream_index == decoder_context->video_stream_index) {
             // Video packet
             if (debug_frame_level)
@@ -1014,20 +1029,6 @@ avpipe_tx(
 
             if (decoder_context->input_start_pts == -1)
                 decoder_context->input_start_pts = input_packet->pts;
-            int input_packet_rel_pts = input_packet->pts - decoder_context->input_start_pts;
-
-            // Stop when we reached the desired duration (duration -1 means 'entire input stream')
-            if (params->duration_ts != -1 &&
-                input_packet_rel_pts >= params->start_time_ts + params->duration_ts) {
-                elv_dbg("DURATION OVER param start_time=%d duration=%d pkt pts=%d\n",
-                    params->start_time_ts, params->duration_ts, input_packet->pts);
-                /* Allow up to 5 reoredered packets */
-                if (input_packet_rel_pts >= params->start_time_ts + params->duration_ts + extra_pts) {
-                    elv_dbg("DURATION BREAK param start_time=%d duration=%d pkt pts=%d\n",
-                        params->start_time_ts, params->duration_ts, input_packet->pts);
-                    break;
-                }
-            }
 
             elv_get_time(&tv);
             response = transcode_packet(
