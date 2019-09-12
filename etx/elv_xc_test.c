@@ -362,6 +362,7 @@ usage(
         "\t-rc-buffer-size :    (optional)\n"
         "\t-rc-max-rate :       (optional)\n"
         "\t-start-pts :         (optional) starting PTS for output. Default is 0\n"
+        "\t-start-frag-index :  (optional) start fragment index of first segment. Default is 0\n"
         "\t-start-segment :     (optional) start segment number >= 1, Default is 1\n"
         "\t-start-time-ts :     (optional) Default: 0\n"
         "\t-video-bitrate :     (optional) mutually exclusive with crf. Default: -1 (unused)\n"
@@ -419,6 +420,7 @@ main(
         .start_pts = 0,
         .start_segment_str = "1",           /* 1-based */
         .start_time_ts = 0,                 /* same units as input stream PTS */
+        .start_fragment_index = 0,          /* Default is zero */
         .video_bitrate = -1                 /* not used if using CRF */
     };
 
@@ -560,6 +562,10 @@ main(
                 }
             } else if (!strcmp(argv[i], "-start-segment")) {
                 p.start_segment_str = argv[i+1];
+            } else if (!strcmp(argv[i], "-start-frag-index")) {
+                if (sscanf(argv[i+1], "%d", &p.start_fragment_index) != 1) {
+                    usage(argv[0], argv[i], EXIT_FAILURE);
+                }
             } else if (!strcmp(argv[i], "-start-time-ts")) {
                 if (sscanf(argv[i+1], "%d", &p.start_time_ts) != 1) {
                     usage(argv[0], argv[i], EXIT_FAILURE);

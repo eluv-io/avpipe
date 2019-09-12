@@ -234,18 +234,12 @@ prepare_video_encoder(
         out_stream->time_base = in_stream->time_base;
         out_stream->codecpar->codec_tag = 0;
 
-#if 0
-        /* Deprecated instead use seg_duration_ts */
-        av_opt_set(encoder_context->format_context->priv_data, "seg_duration", params->seg_duration_secs_str,
-            AV_OPT_FLAG_ENCODING_PARAM | AV_OPT_SEARCH_CHILDREN);
-#else
         av_opt_set_int(encoder_context->format_context->priv_data, "seg_duration_ts", params->seg_duration_ts,
             AV_OPT_FLAG_ENCODING_PARAM | AV_OPT_SEARCH_CHILDREN);
         av_opt_set_int(encoder_context->format_context->priv_data, "frame_duration_ts", params->frame_duration_ts,
             AV_OPT_FLAG_ENCODING_PARAM | AV_OPT_SEARCH_CHILDREN);
         av_opt_set_int(encoder_context->format_context->priv_data, "start_fragment_index", params->start_fragment_index,
             AV_OPT_FLAG_ENCODING_PARAM | AV_OPT_SEARCH_CHILDREN);
-#endif
         av_opt_set(encoder_context->format_context->priv_data, "start_segment", params->start_segment_str, 0);
         return 0;
     }
@@ -294,19 +288,13 @@ prepare_video_encoder(
     // encoder_codec_context->level = 40;
     // encoder_codec_context->profile = FF_PROFILE_H264_HIGH;
 
-    // DASH segment duration (in seconds) - notice it is set on the format context not codec
-#if 0
-    /* Deprecated instead use seg_duration_ts */
-    av_opt_set(encoder_context->format_context->priv_data, "seg_duration", params->seg_duration_secs_str,
-        AV_OPT_FLAG_ENCODING_PARAM | AV_OPT_SEARCH_CHILDREN);
-#else
+    // Segment duration (in ts) - notice it is set on the format context not codec
     av_opt_set_int(encoder_context->format_context->priv_data, "seg_duration_ts", params->seg_duration_ts,
         AV_OPT_FLAG_ENCODING_PARAM | AV_OPT_SEARCH_CHILDREN);
     av_opt_set_int(encoder_context->format_context->priv_data, "frame_duration_ts", params->frame_duration_ts,
         AV_OPT_FLAG_ENCODING_PARAM | AV_OPT_SEARCH_CHILDREN);
     av_opt_set_int(encoder_context->format_context->priv_data, "start_fragment_index", params->start_fragment_index,
         AV_OPT_FLAG_ENCODING_PARAM | AV_OPT_SEARCH_CHILDREN);
-#endif
     av_opt_set(encoder_context->format_context->priv_data, "start_segment", params->start_segment_str, 0);
 
     //av_opt_set(encoder_context->format_context->priv_data, "use_timeline", "0",
@@ -435,19 +423,13 @@ prepare_audio_encoder(
     encoder_context->codec_context[index]->bit_rate = params->audio_bitrate;
     encoder_context->codec_context[index]->channels = av_get_channel_layout_nb_channels(encoder_context->codec_context[index]->channel_layout);
 
-    // DASH segment duration (in seconds) - notice it is set on the format context not codec
-#if 0
-    /* Deprecated instead use seg_duration_ts */
-    av_opt_set(encoder_context->format_context->priv_data, "seg_duration", params->seg_duration_secs_str,
-        AV_OPT_FLAG_AUDIO_PARAM | AV_OPT_FLAG_ENCODING_PARAM);
-#else
+    // Segment duration (in ts) - notice it is set on the format context not codec
     av_opt_set_int(encoder_context->format_context->priv_data, "seg_duration_ts", params->seg_duration_ts,
         AV_OPT_FLAG_ENCODING_PARAM | AV_OPT_SEARCH_CHILDREN);
     av_opt_set_int(encoder_context->format_context->priv_data, "frame_duration_ts", params->frame_duration_ts,
         AV_OPT_FLAG_ENCODING_PARAM | AV_OPT_SEARCH_CHILDREN);
     av_opt_set_int(encoder_context->format_context->priv_data, "start_fragment_index", params->start_fragment_index,
         AV_OPT_FLAG_ENCODING_PARAM | AV_OPT_SEARCH_CHILDREN);
-#endif
     av_opt_set(encoder_context->format_context->priv_data, "start_segment", params->start_segment_str, 0);
 
     /* Open audio encoder codec */
@@ -1007,6 +989,21 @@ avpipe_tx(
     decoder_context->input_start_pts = -1;
 
     while ((rc = av_read_frame(decoder_context->format_context, input_packet)) >= 0) {
+
+        int input_packet_rel_pts = input_packet->pts - decoder_context->input_start_pts;
+        // Stop when we reached the desired duration (duration -1 means 'entire input stream')
+        if (params->duration_ts != -1 &&
+            input_packet_rel_pts >= params->start_time_ts + params->duration_ts) {
+            elv_dbg("DURATION OVER param start_time=%d duration=%d pkt pts=%d\n",
+                params->start_time_ts, params->duration_ts, input_packet->pts);
+            /* Allow up to 5 reoredered packets */
+            if (input_packet_rel_pts >= params->start_time_ts + params->duration_ts + extra_pts) {
+                elv_dbg("DURATION BREAK param start_time=%d duration=%d pkt pts=%d\n",
+                    params->start_time_ts, params->duration_ts, input_packet->pts);
+                break;
+            }
+        }
+
         if (input_packet->stream_index == decoder_context->video_stream_index) {
             // Video packet
             if (debug_frame_level)
@@ -1014,20 +1011,6 @@ avpipe_tx(
 
             if (decoder_context->input_start_pts == -1)
                 decoder_context->input_start_pts = input_packet->pts;
-            int input_packet_rel_pts = input_packet->pts - decoder_context->input_start_pts;
-
-            // Stop when we reached the desired duration (duration -1 means 'entire input stream')
-            if (params->duration_ts != -1 &&
-                input_packet_rel_pts >= params->start_time_ts + params->duration_ts) {
-                elv_dbg("DURATION OVER param start_time=%d duration=%d pkt pts=%d\n",
-                    params->start_time_ts, params->duration_ts, input_packet->pts);
-                /* Allow up to 5 reoredered packets */
-                if (input_packet_rel_pts >= params->start_time_ts + params->duration_ts + extra_pts) {
-                    elv_dbg("DURATION BREAK param start_time=%d duration=%d pkt pts=%d\n",
-                        params->start_time_ts, params->duration_ts, input_packet->pts);
-                    break;
-                }
-            }
 
             elv_get_time(&tv);
             response = transcode_packet(

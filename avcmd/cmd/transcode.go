@@ -157,6 +157,7 @@ func InitTranscode(cmdRoot *cobra.Command) error {
 	cmdTranscode.PersistentFlags().Int32P("start-pts", "", 0, "starting PTS for output")
 	cmdTranscode.PersistentFlags().Int32P("sample-rate", "", -1, "")
 	cmdTranscode.PersistentFlags().Int32P("start-segment", "", 1, "start segment number >= 1.")
+	cmdTranscode.PersistentFlags().Int32P("start-frag-index", "", 1, "start fragment index >= 1.")
 	cmdTranscode.PersistentFlags().Int32P("video-bitrate", "", -1, "mutually exclusive with crf.")
 	cmdTranscode.PersistentFlags().Int32P("audio-bitrate", "", -1, "Default: -1")
 	cmdTranscode.PersistentFlags().Int32P("enc-height", "", -1, "default -1 means use source height")
@@ -230,6 +231,11 @@ func doTranscode(cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("start-segment is not valid")
 	}
 
+	startFragmentIndex, err := cmd.Flags().GetInt32("start-frag-index")
+	if err != nil {
+		return fmt.Errorf("start-frag-index is not valid")
+	}
+
 	videoBitrate, err := cmd.Flags().GetInt32("video-bitrate")
 	if err != nil {
 		return fmt.Errorf("video-bitrate is not valid")
@@ -299,26 +305,27 @@ func doTranscode(cmd *cobra.Command, args []string) error {
 	}
 
 	params := &avpipe.TxParams{
-		Format:          format,
-		StartTimeTs:     startTimeTs,
-		StartPts:        startPts,
-		DurationTs:      durationTs,
-		StartSegmentStr: startSegmentStr,
-		VideoBitrate:    videoBitrate,
-		AudioBitrate:    audioBitrate,
-		SampleRate:      sampleRate,
-		CrfStr:          crfStr,
-		SegDurationTs:   segDurationTs,
-		SegDurationFr:   segDurationFr,
-		Ecodec:          encoder,
-		Dcodec:          decoder,
-		EncHeight:       encHeight, // -1 means use source height, other values 2160, 720
-		EncWidth:        encWidth,  // -1 means use source width, other values 3840, 1280
-		CryptIV:         cryptIV,
-		CryptKey:        cryptKey,
-		CryptKID:        cryptKID,
-		CryptKeyURL:     cryptKeyURL,
-		CryptScheme:     cryptScheme,
+		Format:             format,
+		StartTimeTs:        startTimeTs,
+		StartPts:           startPts,
+		DurationTs:         durationTs,
+		StartSegmentStr:    startSegmentStr,
+		StartFragmentIndex: startFragmentIndex,
+		VideoBitrate:       videoBitrate,
+		AudioBitrate:       audioBitrate,
+		SampleRate:         sampleRate,
+		CrfStr:             crfStr,
+		SegDurationTs:      segDurationTs,
+		SegDurationFr:      segDurationFr,
+		Ecodec:             encoder,
+		Dcodec:             decoder,
+		EncHeight:          encHeight, // -1 means use source height, other values 2160, 720
+		EncWidth:           encWidth,  // -1 means use source width, other values 3840, 1280
+		CryptIV:            cryptIV,
+		CryptKey:           cryptKey,
+		CryptKID:           cryptKID,
+		CryptKeyURL:        cryptKeyURL,
+		CryptScheme:        cryptScheme,
 	}
 
 	avpipe.InitIOHandler(&avcmdInputOpener{url: filename}, &avcmdOutputOpener{dir: dir})
