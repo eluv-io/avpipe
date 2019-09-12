@@ -990,6 +990,9 @@ avpipe_tx(
 
     while ((rc = av_read_frame(decoder_context->format_context, input_packet)) >= 0) {
 
+        if (decoder_context->input_start_pts == -1)
+            decoder_context->input_start_pts = input_packet->pts;
+
         int input_packet_rel_pts = input_packet->pts - decoder_context->input_start_pts;
         // Stop when we reached the desired duration (duration -1 means 'entire input stream')
         if (params->duration_ts != -1 &&
@@ -1008,9 +1011,6 @@ avpipe_tx(
             // Video packet
             if (debug_frame_level)
                 dump_packet("IN ", input_packet);
-
-            if (decoder_context->input_start_pts == -1)
-                decoder_context->input_start_pts = input_packet->pts;
 
             elv_get_time(&tv);
             response = transcode_packet(
