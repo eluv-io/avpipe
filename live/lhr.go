@@ -273,26 +273,24 @@ func (lhr *HLSReader) Fill(startSeqNo int, startSec float64, durationSec float64
 		return startSeqNo, startSec, err
 	}
 
-	var msURL *url.URL
-	for _, variant := range variants {
-		if variant == nil {
-			log.Warn("AVLR skipping invalid variant (nil)")
-			continue
+	// Choose the variant with the highest bandwidth
+	var variant *m3u8.Variant
+	for _, v := range variants {
+		if variant == nil || v.Bandwidth > variant.Bandwidth {
+			variant = v
 		}
-		// PENDING(SSS) - check if we have multiple variants and if so only
-		// read the one we are supposed to
+	}
+	if variant == nil {
+		return startSeqNo, startSec,
+			errors.E("AVLR variant not found in master playlist", "URL", lhr.url)
+	}
 
-		msURL, err = resolve(variant.URI, lhr.url)
-		if err != nil {
-			log.Error("AVLR failed to resolve URL", "err", err, "url", lhr.url)
-		} else {
-			break
-		}
+	msURL, err := resolve(variant.URI, lhr.url)
+	if err != nil || msURL == nil {
+		return startSeqNo, startSec,
+			errors.E("AVLR failed to resolve variant URL", "err", err, "variant.URI", variant.URI, "URL", lhr.url)
 	}
-	if msURL == nil {
-		return startSeqNo, startSec, errors.E("AVLR media playlist not found")
-	}
-	log.Info("AVLR media playlist found", "URL", msURL)
+	log.Info("AVLR media playlist found", "URL", msURL, "bandwidth", variant.Bandwidth, "resolution", variant.Resolution)
 
 	for {
 		var durationReadSec float64

@@ -10,7 +10,8 @@ import (
 	"github.com/qluvio/avpipe"
 )
 
-var testUrl string = "http://origin1.sedev02_newsdemuxclear.stage-cdhls.skydvn.com/cdsedev04demuxclearnews/13012/cd.m3u8"
+// Old Sky stream: http://origin1.sedev02_newsdemuxclear.stage-cdhls.skydvn.com/cdsedev04demuxclearnews/13012/cd.m3u8
+var testUrl string = "http://origin1.skynews.mobile.skydvn.com/skynews/1404/latest.m3u8"
 
 func TestToolTs(t *testing.T) {
 
