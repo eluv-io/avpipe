@@ -537,14 +537,18 @@ prepare_encoder(
         break;
     }
 
-    if (prepare_video_encoder(encoder_context, decoder_context, params, bypass_transcode)) {
-        elv_err("Failure in preparing video encoder");
-        return -1;
+    if (params->tx_type & tx_video) {
+        if (prepare_video_encoder(encoder_context, decoder_context, params, bypass_transcode)) {
+            elv_err("Failure in preparing video encoder");
+            return -1;
+        }
     }
 
-    if (prepare_audio_encoder(encoder_context, decoder_context, params)) {
-        elv_err("Failure in preparing audio copy");
-        return -1;
+    if (params->tx_type & tx_audio) {
+        if (prepare_audio_encoder(encoder_context, decoder_context, params)) {
+            elv_err("Failure in preparing audio copy");
+            return -1;
+        }
     }
 
     /* Allocate an array of 2 out_handler_t: one for video and one for audio output stream */
