@@ -152,6 +152,7 @@ func InitTranscode(cmdRoot *cobra.Command) error {
 	cmdTranscode.PersistentFlags().StringP("encoder", "e", "libx264", "encoder codec, default is 'libx264', can be: 'libx264', 'h264_nvenc', 'h264_videotoolbox'")
 	cmdTranscode.PersistentFlags().StringP("decoder", "d", "h264", "decoder codec, default is 'h264', can be: 'h264', 'h264_cuvid'")
 	cmdTranscode.PersistentFlags().StringP("format", "", "dash", "package format, can be 'dash', 'hls', 'mp4', or 'fmp4'.")
+	cmdTranscode.PersistentFlags().StringP("tx-type", "", "all", "transcoding type, can be 'all', 'video', or 'audio'.")
 	cmdTranscode.PersistentFlags().Int32P("crf", "", 23, "mutually exclusive with video-bitrate.")
 	cmdTranscode.PersistentFlags().Int32P("start-time-ts", "", 0, "")
 	cmdTranscode.PersistentFlags().Int32P("start-pts", "", 0, "starting PTS for output")
@@ -204,6 +205,20 @@ func doTranscode(cmd *cobra.Command, args []string) error {
 	format := cmd.Flag("format").Value.String()
 	if format != "dash" && format != "hls" && format != "mp4" && format != "fmp4" {
 		return fmt.Errorf("Pakage format is not valid, can be 'dash', 'hls', 'mp4', or 'fmp4'")
+	}
+
+	txTypeStr := cmd.Flag("tx-type").Value.String()
+	if txTypeStr != "all" && txTypeStr != "video" && txTypeStr != "audio" {
+		return fmt.Errorf("Transcoding type is not valid, can be 'all', 'video', or 'audio'")
+	}
+	var txType avpipe.TxType
+	switch txTypeStr {
+	case "all":
+		txType = avpipe.TxAll
+	case "video":
+		txType = avpipe.TxVideo
+	case "audio":
+		txType = avpipe.TxAudio
 	}
 
 	crf, err := cmd.Flags().GetInt32("crf")
@@ -326,6 +341,7 @@ func doTranscode(cmd *cobra.Command, args []string) error {
 		CryptKID:           cryptKID,
 		CryptKeyURL:        cryptKeyURL,
 		CryptScheme:        cryptScheme,
+		TxType:             txType,
 	}
 
 	avpipe.InitIOHandler(&avcmdInputOpener{url: filename}, &avcmdOutputOpener{dir: dir})

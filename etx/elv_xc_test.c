@@ -334,6 +334,23 @@ tx_thread_func(
     return 0;
 }
 
+static tx_type_t
+tx_type_from_string(
+    char *tx_type_str
+)
+{
+    if (!strcmp(tx_type_str, "all"))
+        return tx_all;
+
+    if (!strcmp(tx_type_str, "video"))
+        return tx_video;
+
+    if (!strcmp(tx_type_str, "audio"))
+        return tx_audio;
+
+    return tx_none;
+}
+
 static void
 usage(
     char *progname,
@@ -368,6 +385,7 @@ usage(
         "\t-video-bitrate :     (optional) mutually exclusive with crf. Default: -1 (unused)\n"
         "\t-r :                 (optional) number of repeats. Default is 1 repeat, must be bigger than 1\n"
         "\t-t :                 (optional) transcoding threads. Default is 1 thread, must be bigger than 1\n"
+        "\t-tx-type :           (optional) transcoding type. Default is \"all\", can be \"video\", \"audio\", or \"all\" \n"
         "\t-seg-duration-ts :   (mandatory) segment duration time base (positive integer).\n"
         "\t-seg-duration-fr :   (mandatory) segment duration frame (positive integer).\n"
         "\t-f :                 (mandatory) input filename for transcoding. Output goes to directory ./O\n",
@@ -421,7 +439,8 @@ main(
         .start_segment_str = "1",           /* 1-based */
         .start_time_ts = 0,                 /* same units as input stream PTS */
         .start_fragment_index = 0,          /* Default is zero */
-        .video_bitrate = -1                 /* not used if using CRF */
+        .video_bitrate = -1,                /* not used if using CRF */
+        .tx_type = tx_all
     };
 
     i = 1;
@@ -575,7 +594,12 @@ main(
             }
             break;
         case 't':
-            if (sscanf(argv[i+1], "%d", &n_threads) != 1) {
+            if (!strcmp(argv[i], "-tx-type")) {
+                if (strcmp(argv[i+1], "all") && strcmp(argv[i+1], "video") && strcmp(argv[i+1], "audio")) {
+                    usage(argv[0], argv[i], EXIT_FAILURE);
+                }
+                p.tx_type = tx_type_from_string(argv[i+1]);
+            } else if (sscanf(argv[i+1], "%d", &n_threads) != 1) {
                 usage(argv[0], argv[i], EXIT_FAILURE);
             }
             if ( n_threads < 1 ) usage(argv[0], argv[i], EXIT_FAILURE);

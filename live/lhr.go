@@ -90,7 +90,7 @@ func (lhr *HLSReader) saveToFile(u *url.URL) error {
 		return err
 	}
 
-	log.Info("AVLR saved file", fileName)
+	log.Info("AVLR", "saved file", fileName)
 
 	return nil
 }
@@ -229,7 +229,7 @@ func (lhr *HLSReader) readPlaylist(u *url.URL, startSeqNo int,
 		log.Info("AVLR processing ingest segment", "seqNo", nextSeqNo, "segment.Duration", segment.Duration, "segRemainingSec",
 			segRemainingSec, "durationReadSec", durationReadSec, "URI", segment.URI)
 
-		// lhr.saveToFile(msURL)
+		//lhr.saveToFile(msURL)
 		written, err := lhr.readSegment(msURL, w)
 		if err != nil {
 			// Transcoded part of a segment - ErrClosedPipe when avpipe closes the pipe
@@ -290,7 +290,8 @@ func (lhr *HLSReader) Fill(startSeqNo int, startSec float64, durationSec float64
 		return startSeqNo, startSec,
 			errors.E("AVLR failed to resolve variant URL", "err", err, "variant.URI", variant.URI, "URL", lhr.url)
 	}
-	log.Info("AVLR media playlist found", "URL", msURL, "bandwidth", variant.Bandwidth, "resolution", variant.Resolution)
+	log.Info("AVLR media playlist found", "URL", msURL, "bandwidth", variant.Bandwidth, "resolution", variant.Resolution,
+		"average_bandwidth", variant.AverageBandwidth, "Audio", variant.Audio, "Video", variant.Video)
 
 	for {
 		var durationReadSec float64

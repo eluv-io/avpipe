@@ -170,7 +170,7 @@ prepare_decoder(
             return -1;
         }
 
-        elv_log("Input pixel_format=%d", decoder_context->codec_context[i]->pix_fmt);
+        elv_log("Input stream=%d pixel_format=%d", i, decoder_context->codec_context[i]->pix_fmt);
 
         /* Video - set context parameters manually */
         /* Setting the frame_rate here causes slight changes to rates - leaving it unset works perfectly
@@ -707,7 +707,7 @@ transcode_packet(
     u_int64_t since;
     AVCodecContext *codec_context = decoder_context->codec_context[stream_index];
     int response;
-    elv_dbg("DECODE send_packet pts=%d dts=%d duration=%d", packet->pts, packet->dts, packet->duration);
+    elv_dbg("DECODE stream_index=%d send_packet pts=%d dts=%d duration=%d", stream_index, packet->pts, packet->dts, packet->duration);
 
     if (bypass_transcode) {
         /*
@@ -1008,53 +1008,61 @@ avpipe_tx(
         }
 
         if (input_packet->stream_index == decoder_context->video_stream_index) {
-            // Video packet
-            if (debug_frame_level)
-                dump_packet("IN ", input_packet);
+            if (params->tx_type & tx_video) {
+                // Video packet
+                if (debug_frame_level)
+                    dump_packet("IN ", input_packet);
 
-            elv_get_time(&tv);
-            response = transcode_packet(
-                decoder_context,
-                encoder_context,
-                input_packet,
-                input_frame,
-                filt_frame,
-                input_packet->stream_index,
-                params,
-                do_instrument,
-                bypass_transcode,
-                debug_frame_level
-            );
+                elv_get_time(&tv);
+                response = transcode_packet(
+                    decoder_context,
+                    encoder_context,
+                    input_packet,
+                    input_frame,
+                    filt_frame,
+                    input_packet->stream_index,
+                    params,
+                    do_instrument,
+                    bypass_transcode,
+                    debug_frame_level
+                );
 
-            if (do_instrument) {
-                elv_since(&tv, &since);
-                elv_log("INSTRMNT transcode_packet time=%"PRId64, since);
+                if (do_instrument) {
+                    elv_since(&tv, &since);
+                    elv_log("INSTRMNT transcode_packet time=%"PRId64, since);
+                }
+
+                av_packet_unref(input_packet);
+
+                if (response < 0) {
+                    elv_dbg("Stop transcoding, rc=%d", response);
+                    break;
+                }
+
+                dump_coders(decoder_context, encoder_context);
+            } else {
+                elv_dbg("Skip transcoding video packet");
             }
-
-            av_packet_unref(input_packet);
-
-            if (response < 0) {
-                elv_dbg("Stop transcoding, rc=%d", response);
-                break;
-            }
-
-            dump_coders(decoder_context, encoder_context);
         } else if (input_packet->stream_index == decoder_context->audio_stream_index) {
-            // Audio packet: just copying audio stream
-            av_packet_rescale_ts(input_packet,
-                decoder_context->stream[input_packet->stream_index]->time_base,
-                encoder_context->stream[input_packet->stream_index]->time_base
-            );
-            input_packet->pts += params->start_pts;
-            input_packet->dts += params->start_pts;
+            if (params->tx_type & tx_audio) {
+                // Audio packet: just copying audio stream
+                av_packet_rescale_ts(input_packet,
+                    decoder_context->stream[input_packet->stream_index]->time_base,
+                    encoder_context->stream[input_packet->stream_index]->time_base
+                );
+                input_packet->pts += params->start_pts;
+                input_packet->dts += params->start_pts;
 
-            if (debug_frame_level)
-                dump_packet("AUDIO IN", input_packet);
-            if (av_interleaved_write_frame(encoder_context->format_context, input_packet) < 0) {
-                elv_err("Failure in copying audio stream");
-                return -1;
+                if (debug_frame_level)
+                    dump_packet("AUDIO IN", input_packet);
+                if (av_interleaved_write_frame(encoder_context->format_context, input_packet) < 0) {
+                    elv_err("Failure in copying audio stream");
+                    return -1;
+                }
+                elv_dbg("Finish copying audio packet without reencoding");
+            } else {
+                elv_dbg("Skip copying audio packet");
             }
-            elv_dbg("Finish copying audio packets without reencoding");
         } else {
             elv_dbg("Unhandled stream - not video or audio");
         }
@@ -1073,7 +1081,7 @@ avpipe_tx(
      * TODO: should I do it for the audio stream too?
      */
     flush_decoder(decoder_context, encoder_context, encoder_context->video_stream_index, params, debug_frame_level);
-    if (!bypass_transcode)
+    if (!bypass_transcode && (params->tx_type & tx_video))
         encode_frame(decoder_context, encoder_context, NULL, encoder_context->video_stream_index, params, debug_frame_level);
 
 

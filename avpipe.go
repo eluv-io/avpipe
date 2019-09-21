@@ -60,6 +60,15 @@ const (
 	FMP4Stream
 )
 
+type TxType int
+
+const (
+	TxNone TxType = iota
+	TxVideo
+	TxAudio
+	TxAll
+)
+
 // CryptScheme is the content encryption scheme
 type CryptScheme int
 
@@ -102,6 +111,7 @@ type TxParams struct {
 	CryptKID           string
 	CryptKeyURL        string
 	CryptScheme        CryptScheme
+	TxType             TxType
 }
 
 // IOHandler defines handlers that will be called from the C interface functions
@@ -507,6 +517,7 @@ func Tx(params *TxParams, url string, bypassTranscoding bool, debugFrameLevel bo
 		crypt_kid:            C.CString(params.CryptKID),
 		crypt_key_url:        C.CString(params.CryptKeyURL),
 		crypt_scheme:         C.crypt_scheme_t(params.CryptScheme),
+		tx_type:              C.tx_type_t(params.TxType),
 	}
 
 	var bypass int
