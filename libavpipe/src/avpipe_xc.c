@@ -1129,6 +1129,11 @@ avpipe_init(
         goto avpipe_init_failed;
     }
 
+    // By default transcode 'everything'
+    if (params->tx_type == tx_none) {
+        params->tx_type = tx_all;
+    }
+
     if (params->start_pts < 0) {
         elv_err("Start PTS can not be negative");
         goto avpipe_init_failed;

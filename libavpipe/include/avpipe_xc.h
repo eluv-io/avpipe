@@ -154,7 +154,7 @@ typedef struct txparams_t {
     char *crypt_kid;                // 16-byte UUID in hex [Optional, required for CENC]
     char *crypt_key_url;            // Specify a key URL in the manifest [Optional, Default: key.bin]
     crypt_scheme_t crypt_scheme;    // Content protection / DRM / encryption [Optional, Default: crypt_none]
-    tx_type_t tx_type;
+    tx_type_t tx_type;              // Default: 0 means transcode 'everything'
 } txparams_t;
 
 typedef struct txctx_t {
