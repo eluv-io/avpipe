@@ -234,6 +234,9 @@ prepare_video_encoder(
         out_stream->time_base = in_stream->time_base;
         out_stream->codecpar->codec_tag = 0;
 
+        if (!strcmp(params->format, "fmp4"))
+            av_opt_set(encoder_context->format_context->priv_data, "movflags", "frag_every_frame", 0);
+
         av_opt_set_int(encoder_context->format_context->priv_data, "seg_duration_ts", params->seg_duration_ts,
             AV_OPT_FLAG_ENCODING_PARAM | AV_OPT_SEARCH_CHILDREN);
         av_opt_set_int(encoder_context->format_context->priv_data, "frame_duration_ts", params->frame_duration_ts,
@@ -431,6 +434,10 @@ prepare_audio_encoder(
     av_opt_set_int(encoder_context->format_context->priv_data, "start_fragment_index", params->start_fragment_index,
         AV_OPT_FLAG_ENCODING_PARAM | AV_OPT_SEARCH_CHILDREN);
     av_opt_set(encoder_context->format_context->priv_data, "start_segment", params->start_segment_str, 0);
+
+    if (!strcmp(params->format, "fmp4")) {
+        av_opt_set(encoder_context->format_context->priv_data, "movflags", "frag_every_frame", 0);
+    }
 
     /* Open audio encoder codec */
     if (avcodec_open2(encoder_context->codec_context[index], encoder_context->codec[index], NULL) < 0) {
@@ -931,14 +938,16 @@ avpipe_tx(
     coderctx_t *encoder_context = &txctx->encoder_ctx;
     txparams_t *params = txctx->params;
 
-    if (!bypass_transcode) {
+    if (!bypass_transcode && (params->tx_type & tx_video)) {
         sprintf(filter_str, "scale=%d:%d",
             encoder_context->codec_context[encoder_context->video_stream_index]->width,
             encoder_context->codec_context[encoder_context->video_stream_index]->height);
         elv_dbg("FILTER scale=%s", filter_str);
     }
 
-    if (!bypass_transcode && init_filters(filter_str, decoder_context, encoder_context, txctx->params) < 0) {
+    if (!bypass_transcode &&
+        (params->tx_type & tx_video) &&
+        init_filters(filter_str, decoder_context, encoder_context, txctx->params) < 0) {
         elv_err("Failed to initialize the filter");
         return -1;
     }
@@ -1057,10 +1066,14 @@ avpipe_tx(
                 input_packet->pts += params->start_pts;
                 input_packet->dts += params->start_pts;
 
+                encoder_context->last_dts = input_packet->dts;
+
                 if (debug_frame_level)
                     dump_packet("AUDIO IN", input_packet);
+
                 if (av_interleaved_write_frame(encoder_context->format_context, input_packet) < 0) {
-                    elv_err("Failure in copying audio stream");
+                    elv_err("Failure in copying audio stream, index=%d, decoder_index=%d",
+                        input_packet->stream_index, decoder_context->audio_stream_index);
                     return -1;
                 }
                 elv_dbg("Finish copying audio packet without reencoding");
