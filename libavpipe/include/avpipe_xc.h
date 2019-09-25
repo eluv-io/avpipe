@@ -130,11 +130,11 @@ typedef enum tx_type_t {
 } tx_type_t;
 
 typedef struct txparams_t {
-    char *format;
-    int start_time_ts;
-    int start_pts;
-    int duration_ts;
-    char *start_segment_str;
+    char *format;                   // Output format [Required, Values: dash, hls, mp4, fmp4]
+    int start_time_ts;              // Transcode the source starting from this time
+    int start_pts;                  // Starting PTS for output
+    int duration_ts;                // Transcode time period [-1 for entire source length from start_time_ts]
+    char *start_segment_str;        // Specify index of the first segment  TODO: change type to int
     int video_bitrate;
     int audio_bitrate;
     int sample_rate;                // Audio sampling rate
@@ -149,7 +149,7 @@ typedef struct txparams_t {
     char *dcodec;                   // Video/audio decoder
     int enc_height;
     int enc_width;
-    char *crypt_iv;                 // 16-byte AES IV in hex [Opitonal, Default: Generated]
+    char *crypt_iv;                 // 16-byte AES IV in hex [Optional, Default: Generated]
     char *crypt_key;                // 16-byte AES key in hex [Optional, Default: Generated]
     char *crypt_kid;                // 16-byte UUID in hex [Optional, required for CENC]
     char *crypt_key_url;            // Specify a key URL in the manifest [Optional, Default: key.bin]

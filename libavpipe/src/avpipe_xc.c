@@ -593,13 +593,10 @@ static int
 should_skip_encoding(
     coderctx_t *decoder_context,
     txparams_t *p,
-    AVFrame *frame
-)
+    AVFrame *frame)
 {
     int skip = 0;
-
-    int frame_in_pts_offset = frame->pts - decoder_context->input_start_pts;
-    int valid_ts = p->start_time_ts + p->duration_ts;
+    const int frame_in_pts_offset = frame->pts - decoder_context->input_start_pts;
 
     /* Drop frames before the desired 'start_time' */
     if (p->start_time_ts > 0 && frame_in_pts_offset < p->start_time_ts) {
@@ -609,10 +606,13 @@ should_skip_encoding(
     }
 
     /* To allow for packet reordering frames can come with pts past the desired duration */
-    if (p->duration_ts > 0 && frame_in_pts_offset >= valid_ts) {
-        elv_dbg("ENCODE skip frame late pts=%d filt_frame pts=%d, frame_in_pts_offset=%d, valid_ts=%d",
-            frame->pts, frame_in_pts_offset, valid_ts);
-        skip = 1;
+    if (p->duration_ts > 0) {
+        const int max_valid_ts = p->start_time_ts + p->duration_ts;
+        if (frame_in_pts_offset >= max_valid_ts) {
+            elv_dbg("ENCODE skip frame late pts=%d filt_frame pts=%d, frame_in_pts_offset=%d, max_valid_ts=%d",
+                frame->pts, frame_in_pts_offset, max_valid_ts);
+            skip = 1;
+        }
     }
 
     return skip;
@@ -1112,6 +1112,7 @@ avpipe_tx(
     return 0;
 }
 
+// TODO: properly validate all params
 int
 avpipe_init(
     txctx_t **txctx,

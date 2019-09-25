@@ -87,31 +87,31 @@ const (
 	CryptCBCS
 )
 
-// TxParams should match with txparams_t in C library
+// TxParams should match with txparams_t in avpipe_xc.h
 type TxParams struct {
-	Format             string
-	StartTimeTs        int32
-	StartPts           int32 // Start PTS for output
-	DurationTs         int32
-	StartSegmentStr    string
-	VideoBitrate       int32
-	AudioBitrate       int32
-	SampleRate         int32 // Audio sampling rate
-	CrfStr             string
-	SegDurationTs      int32
-	SegDurationFr      int32
-	FrameDurationTs    int32
-	StartFragmentIndex int32
-	Ecodec             string // Video encoder
-	Dcodec             string // Video decoder
-	EncHeight          int32
-	EncWidth           int32
-	CryptIV            string
-	CryptKey           string
-	CryptKID           string
-	CryptKeyURL        string
-	CryptScheme        CryptScheme
-	TxType             TxType
+	Format             string      `json:"format,omitempty"`
+	StartTimeTs        int32       `json:"start_time_ts,omitempty"`
+	StartPts           int32       `json:"start_pts,omitempty"` // Start PTS for output
+	DurationTs         int32       `json:"duration_ts,omitempty"`
+	StartSegmentStr    string      `json:"start_segment_str,omitempty"`
+	VideoBitrate       int32       `json:"video_bitrate,omitempty"`
+	AudioBitrate       int32       `json:"audio_bitrate,omitempty"`
+	SampleRate         int32       `json:"sample_rate,omitempty"` // Audio sampling rate
+	CrfStr             string      `json:"crf_str,omitempty"`
+	SegDurationTs      int32       `json:"seg_duration_ts,omitempty"`
+	SegDurationFr      int32       `json:"seg_duration_fr,omitempty"`
+	FrameDurationTs    int32       `json:"frame_duration_ts,omitempty"`
+	StartFragmentIndex int32       `json:"start_fragment_index,omitempty"`
+	Ecodec             string      `json:"ecodec,omitempty"` // Video encoder
+	Dcodec             string      `json:"dcodec,omitempty"` // Video decoder
+	EncHeight          int32       `json:"enc_height,omitempty"`
+	EncWidth           int32       `json:"enc_width,omitempty"`
+	CryptIV            string      `json:"crypt_iv,omitempty"`
+	CryptKey           string      `json:"crypt_key,omitempty"`
+	CryptKID           string      `json:"crypt_kid,omitempty"`
+	CryptKeyURL        string      `json:"crypt_key_url,omitempty"`
+	CryptScheme        CryptScheme `json:"crypt_scheme,omitempty"`
+	TxType             TxType      `json:"tx_type,omitempty"`
 }
 
 // IOHandler defines handlers that will be called from the C interface functions

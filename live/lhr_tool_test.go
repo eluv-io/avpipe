@@ -77,18 +77,29 @@ func TestToolFmp4(t *testing.T) {
 	avpipe.InitIOHandler(&inputOpener{tc: readCtx}, &outputOpener{tc: writeCtx})
 
 	videoParams := &avpipe.TxParams{
-		Format:          "fmp4",
-		StartTimeTs:     0,
+		Format:      "fmp4",
+		StartTimeTs: 0,
+		// StartPts           int32
 		DurationTs:      2700000,
 		StartSegmentStr: "1",
-		VideoBitrate:    8100000,
-		CrfStr:          "20",
-		SegDurationTs:   180000,
-		SegDurationFr:   50,
-		Ecodec:          "libx264",
-		EncHeight:       1080,
-		EncWidth:        1920,
-		TxType:          avpipe.TxVideo,
+		VideoBitrate:    4784976,
+		// AudioBitrate:  128000,
+		// SampleRate:    48000,
+		// CrfStr:        "20",
+		SegDurationTs: 180000,
+		SegDurationFr: 50,
+		// FrameDurationTs    int32
+		// StartFragmentIndex int32
+		Ecodec: "libx264",
+		// Dcodec             string
+		EncHeight: 720,
+		EncWidth:  1280,
+		// CryptIV            string
+		// CryptKey           string
+		// CryptKID           string
+		// CryptKeyURL        string
+		// CryptScheme        CryptScheme
+		TxType: avpipe.TxVideo,
 	}
 
 	xcparams := fmt.Sprintf("%+v", *videoParams)
