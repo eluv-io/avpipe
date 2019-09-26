@@ -119,6 +119,9 @@ void
 dump_stream(
     AVStream *s)
 {
+    if (!s)
+        return;
+
     AVRational codec_time_base = av_stream_get_codec_timebase(s);
 
     elv_log("STREAM idx=%d id=%d "

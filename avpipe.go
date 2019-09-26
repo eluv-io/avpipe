@@ -60,6 +60,15 @@ const (
 	FMP4Stream
 )
 
+type TxType int
+
+const (
+	TxNone TxType = iota
+	TxVideo
+	TxAudio
+	TxAll
+)
+
 // CryptScheme is the content encryption scheme
 type CryptScheme int
 
@@ -78,28 +87,31 @@ const (
 	CryptCBCS
 )
 
-// TxParams should match with txparams_t in C library
+// TxParams should match with txparams_t in avpipe_xc.h
 type TxParams struct {
-	Format          string
-	StartTimeTs     int32
-	StartPts        int32 // Start PTS for output
-	DurationTs      int32
-	StartSegmentStr string
-	VideoBitrate    int32
-	AudioBitrate    int32
-	SampleRate      int32 // Audio sampling rate
-	CrfStr          string
-	SegDurationTs   int32
-	SegDurationFr   int32
-	Ecodec          string // Video encoder
-	Dcodec          string // Video decoder
-	EncHeight       int32
-	EncWidth        int32
-	CryptIV         string
-	CryptKey        string
-	CryptKID        string
-	CryptKeyURL     string
-	CryptScheme     CryptScheme
+	Format             string      `json:"format,omitempty"`
+	StartTimeTs        int32       `json:"start_time_ts,omitempty"`
+	StartPts           int32       `json:"start_pts,omitempty"` // Start PTS for output
+	DurationTs         int32       `json:"duration_ts,omitempty"`
+	StartSegmentStr    string      `json:"start_segment_str,omitempty"`
+	VideoBitrate       int32       `json:"video_bitrate,omitempty"`
+	AudioBitrate       int32       `json:"audio_bitrate,omitempty"`
+	SampleRate         int32       `json:"sample_rate,omitempty"` // Audio sampling rate
+	CrfStr             string      `json:"crf_str,omitempty"`
+	SegDurationTs      int32       `json:"seg_duration_ts,omitempty"`
+	SegDurationFr      int32       `json:"seg_duration_fr,omitempty"`
+	FrameDurationTs    int32       `json:"frame_duration_ts,omitempty"`
+	StartFragmentIndex int32       `json:"start_fragment_index,omitempty"`
+	Ecodec             string      `json:"ecodec,omitempty"` // Video encoder
+	Dcodec             string      `json:"dcodec,omitempty"` // Video decoder
+	EncHeight          int32       `json:"enc_height,omitempty"`
+	EncWidth           int32       `json:"enc_width,omitempty"`
+	CryptIV            string      `json:"crypt_iv,omitempty"`
+	CryptKey           string      `json:"crypt_key,omitempty"`
+	CryptKID           string      `json:"crypt_kid,omitempty"`
+	CryptKeyURL        string      `json:"crypt_key_url,omitempty"`
+	CryptScheme        CryptScheme `json:"crypt_scheme,omitempty"`
+	TxType             TxType      `json:"tx_type,omitempty"`
 }
 
 // IOHandler defines handlers that will be called from the C interface functions
@@ -483,26 +495,29 @@ func Tx(params *TxParams, url string, bypassTranscoding bool, debugFrameLevel bo
 	}
 
 	cparams := &C.txparams_t{
-		format:            C.CString(params.Format),
-		start_time_ts:     C.int(params.StartTimeTs),
-		start_pts:         C.int(params.StartPts),
-		duration_ts:       C.int(params.DurationTs),
-		start_segment_str: C.CString(params.StartSegmentStr),
-		video_bitrate:     C.int(params.VideoBitrate),
-		audio_bitrate:     C.int(params.AudioBitrate),
-		sample_rate:       C.int(params.SampleRate),
-		crf_str:           C.CString(params.CrfStr),
-		seg_duration_ts:   C.int(params.SegDurationTs),
-		seg_duration_fr:   C.int(params.SegDurationFr),
-		ecodec:            C.CString(params.Ecodec),
-		dcodec:            C.CString(params.Dcodec),
-		enc_height:        C.int(params.EncHeight),
-		enc_width:         C.int(params.EncWidth),
-		crypt_iv:          C.CString(params.CryptIV),
-		crypt_key:         C.CString(params.CryptKey),
-		crypt_kid:         C.CString(params.CryptKID),
-		crypt_key_url:     C.CString(params.CryptKeyURL),
-		crypt_scheme:      C.crypt_scheme_t(params.CryptScheme),
+		format:               C.CString(params.Format),
+		start_time_ts:        C.int(params.StartTimeTs),
+		start_pts:            C.int(params.StartPts),
+		duration_ts:          C.int(params.DurationTs),
+		start_segment_str:    C.CString(params.StartSegmentStr),
+		video_bitrate:        C.int(params.VideoBitrate),
+		audio_bitrate:        C.int(params.AudioBitrate),
+		sample_rate:          C.int(params.SampleRate),
+		crf_str:              C.CString(params.CrfStr),
+		seg_duration_ts:      C.int(params.SegDurationTs),
+		seg_duration_fr:      C.int(params.SegDurationFr),
+		frame_duration_ts:    C.int(params.FrameDurationTs),
+		start_fragment_index: C.int(params.StartFragmentIndex),
+		ecodec:               C.CString(params.Ecodec),
+		dcodec:               C.CString(params.Dcodec),
+		enc_height:           C.int(params.EncHeight),
+		enc_width:            C.int(params.EncWidth),
+		crypt_iv:             C.CString(params.CryptIV),
+		crypt_key:            C.CString(params.CryptKey),
+		crypt_kid:            C.CString(params.CryptKID),
+		crypt_key_url:        C.CString(params.CryptKeyURL),
+		crypt_scheme:         C.crypt_scheme_t(params.CryptScheme),
+		tx_type:              C.tx_type_t(params.TxType),
 	}
 
 	var bypass int

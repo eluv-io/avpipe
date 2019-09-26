@@ -1,6 +1,7 @@
 package avpipe_test
 
 import (
+	"encoding/json"
 	"fmt"
 	"io"
 	"os"
@@ -276,4 +277,34 @@ func TestConcurrentTranscode(t *testing.T) {
 
 	doTranscode(t, params, nThreads, filename, "")
 
+}
+
+func TestMarshalParams(t *testing.T) {
+	params := &avpipe.TxParams{
+		VideoBitrate:  8000000,
+		SegDurationTs: 180000,
+		SegDurationFr: 50,
+		EncHeight:     720,
+		EncWidth:      1280,
+		TxType:        avpipe.TxVideo,
+	}
+	bytes, err := json.Marshal(params)
+	if err != nil {
+		t.Error(err)
+	}
+	fmt.Println(string(bytes))
+	// TODO: Add asserts
+}
+
+func TestUnmarshalParams(t *testing.T) {
+	var params avpipe.TxParams
+	bytes := []byte(`{"video_bitrate":8000000,"seg_duration_ts":180000,"seg_duration_fr":50,"enc_height":720,"enc_width":1280,"tx_type":1}`)
+	err := json.Unmarshal(bytes, &params)
+	if err != nil {
+		t.Error(err)
+	}
+	if params.TxType != avpipe.TxVideo {
+		t.Error("Unexpected TxType", params.TxType)
+	}
+	// TODO: More checks
 }

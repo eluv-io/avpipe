@@ -76,6 +76,7 @@ elv_io_open(
     } else {
         ioctx_t *outctx = (ioctx_t *) calloc(1, sizeof(ioctx_t));
         outctx->stream_index = 0;
+
         outctx->inctx = out_tracker[0].inctx;
         outctx->seg_index = 0;      // init segment has stream_index and seg_index = 0
         if (!url || url[0] == '\0') {
@@ -119,7 +120,7 @@ elv_io_open(
                 outctx->type = avpipe_fmp4_stream;
             }
         }
-
+ 
         elv_dbg("OUT url=%s, type=%d", url, outctx->type);
         /* Manifest or init segments */
         if (out_handlers->avpipe_opener(url, outctx) < 0) {
