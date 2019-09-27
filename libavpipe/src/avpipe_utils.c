@@ -107,7 +107,7 @@ dump_codec_parameters(
 {
     elv_log("CODEC PARAMETERS codec type=%d id=%d format=%d tag=%d "
         "bit_rate=%d "
-        "width+%d height=%d frame_size=%d"
+        "width=%d height=%d frame_size=%d"
         "\n",
         cp->codec_type, cp->codec_id, cp->format, cp->codec_tag,
         (int)cp->bit_rate,

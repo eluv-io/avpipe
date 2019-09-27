@@ -24,6 +24,7 @@ import "C"
 import (
 	elog "eluvio/log"
 	"fmt"
+	"math/big"
 	"sync"
 	"unsafe"
 )
@@ -112,6 +113,37 @@ type TxParams struct {
 	CryptKeyURL        string      `json:"crypt_key_url,omitempty"`
 	CryptScheme        CryptScheme `json:"crypt_scheme,omitempty"`
 	TxType             TxType      `json:"tx_type,omitempty"`
+}
+
+type AVMediaType int
+
+const (
+	AVMEDIA_TYPE_VIDEO      = 0
+	AVMEDIA_TYPE_AUDIO      = 1
+	AVMEDIA_TYPE_DATA       = 2 ///< Opaque data information usually continuous
+	AVMEDIA_TYPE_SUBTITLE   = 3
+	AVMEDIA_TYPE_ATTACHMENT = 4 ///< Opaque data information usually sparse
+	AVMEDIA_TYPE_NB         = 5
+)
+
+type ProbeInfo struct {
+	CodecType          AVMediaType
+	CodecID            int
+	CodecName          string
+	DurationTs         int
+	TimeBase           *big.Rat
+	NBFrames           int64
+	StartTime          int64
+	AvgFrameRate       *big.Rat
+	FrameRate          *big.Rat
+	TicksPerFrame      int
+	BitRate            int64
+	Has_B_Frames       bool
+	Width, Height      int // Video only
+	PixFmt             int // Video only, it matches with enum AVPixelFormat in FFmpeg
+	SampleAspectRatio  *big.Rat
+	DisplayAspectRatio *big.Rat
+	FieldOrder         int
 }
 
 // IOHandler defines handlers that will be called from the C interface functions
@@ -536,4 +568,76 @@ func Tx(params *TxParams, url string, bypassTranscoding bool, debugFrameLevel bo
 
 	rc := C.tx((*C.txparams_t)(unsafe.Pointer(cparams)), C.CString(url), C.int(bypass), C.int(debugFrameLevelInt))
 	return int(rc)
+}
+
+func AVMediaTypeName(mediaType AVMediaType) string {
+	switch mediaType {
+	case AVMEDIA_TYPE_VIDEO:
+		return "video"
+	case AVMEDIA_TYPE_AUDIO:
+		return "audio"
+	case AVMEDIA_TYPE_DATA:
+		return "data"
+	case AVMEDIA_TYPE_SUBTITLE:
+		return "subtitle"
+	case AVMEDIA_TYPE_ATTACHMENT:
+		return "attachment"
+	}
+
+	return "none"
+}
+
+func Probe(url string) (error, []ProbeInfo) {
+	var cprobes *C.txprobe_t
+	rc := C.probe(C.CString(url), (**C.txprobe_t)(unsafe.Pointer(&cprobes)))
+	if int(rc) <= 0 {
+		return fmt.Errorf("Probing failed"), nil
+	}
+
+	probeInfo := make([]ProbeInfo, int(rc))
+	probeArray := (*[1 << 10]C.txprobe_t)(unsafe.Pointer(cprobes))
+	for i := 0; i < int(rc); i++ {
+		probeInfo[i].CodecType = AVMediaType(probeArray[i].codec_type)
+		probeInfo[i].CodecID = int(probeArray[i].codec_id)
+		probeInfo[i].CodecName = C.GoString((*C.char)(unsafe.Pointer(&probeArray[i].codec_name)))
+		probeInfo[i].DurationTs = int(probeArray[i].duration_ts)
+		probeInfo[i].TimeBase = big.NewRat(int64(probeArray[i].time_base.num), int64(probeArray[i].time_base.den))
+		probeInfo[i].NBFrames = int64(probeArray[i].nb_frames)
+		probeInfo[i].StartTime = int64(probeArray[i].start_time)
+		if int64(probeArray[i].avg_frame_rate.den) != 0 {
+			probeInfo[i].AvgFrameRate = big.NewRat(int64(probeArray[i].avg_frame_rate.num), int64(probeArray[i].avg_frame_rate.den))
+		} else {
+			probeInfo[i].AvgFrameRate = big.NewRat(int64(probeArray[i].avg_frame_rate.num), int64(1))
+		}
+		if int64(probeArray[i].frame_rate.den) != 0 {
+			probeInfo[i].FrameRate = big.NewRat(int64(probeArray[i].frame_rate.num), int64(probeArray[i].frame_rate.den))
+		} else {
+			probeInfo[i].FrameRate = big.NewRat(int64(probeArray[i].frame_rate.num), int64(1))
+		}
+		probeInfo[i].TicksPerFrame = int(probeArray[i].ticks_per_frame)
+		probeInfo[i].BitRate = int64(probeArray[i].bit_rate)
+		if probeArray[i].has_b_frames > 0 {
+			probeInfo[i].Has_B_Frames = true
+		} else {
+			probeInfo[i].Has_B_Frames = false
+		}
+		probeInfo[i].Width = int(probeArray[i].width)
+		probeInfo[i].Height = int(probeArray[i].height)
+		probeInfo[i].PixFmt = int(probeArray[i].pix_fmt)
+		if int64(probeArray[i].sample_aspect_ratio.den) != 0 {
+			probeInfo[i].SampleAspectRatio = big.NewRat(int64(probeArray[i].sample_aspect_ratio.num), int64(probeArray[i].sample_aspect_ratio.den))
+		} else {
+			probeInfo[i].SampleAspectRatio = big.NewRat(int64(probeArray[i].sample_aspect_ratio.num), int64(1))
+		}
+		if int64(probeArray[i].display_aspect_ratio.den) != 0 {
+			probeInfo[i].DisplayAspectRatio = big.NewRat(int64(probeArray[i].display_aspect_ratio.num), int64(probeArray[i].display_aspect_ratio.den))
+		} else {
+			probeInfo[i].DisplayAspectRatio = big.NewRat(int64(probeArray[i].display_aspect_ratio.num), int64(1))
+		}
+		probeInfo[i].FieldOrder = int(probeArray[i].field_order)
+	}
+
+	C.free(unsafe.Pointer(cprobes))
+
+	return nil, probeInfo
 }

@@ -8,6 +8,7 @@ import (
 	"testing"
 
 	"github.com/qluvio/avpipe"
+	"github.com/stretchr/testify/assert"
 )
 
 //Implement AVPipeInputOpener
@@ -307,4 +308,31 @@ func TestUnmarshalParams(t *testing.T) {
 		t.Error("Unexpected TxType", params.TxType)
 	}
 	// TODO: More checks
+}
+
+func TestProbe(t *testing.T) {
+	filename := "./media/ErsteChristmas.mp4"
+
+	avpipe.InitIOHandler(&fileInputOpener{url: filename}, &concurrentOutputOpener{dir: "O"})
+	err, probeInfo := avpipe.Probe(filename)
+	assert.NoError(t, err)
+	assert.Equal(t, 2, len(probeInfo))
+
+	assert.Equal(t, 27, probeInfo[0].CodecID)
+	assert.Equal(t, "h264", probeInfo[0].CodecName)
+	assert.Equal(t, int64(2428), probeInfo[0].NBFrames)
+	assert.Equal(t, int64(0), probeInfo[0].StartTime)
+	assert.Equal(t, int64(506151), probeInfo[0].BitRate)
+	assert.Equal(t, 1280, probeInfo[0].Width)
+	assert.Equal(t, 720, probeInfo[0].Height)
+	assert.Equal(t, int64(12800), probeInfo[0].TimeBase.Denom().Int64())
+
+	assert.Equal(t, 86018, probeInfo[1].CodecID)
+	assert.Equal(t, "aac", probeInfo[1].CodecName)
+	assert.Equal(t, int64(4183), probeInfo[1].NBFrames)
+	assert.Equal(t, int64(0), probeInfo[1].StartTime)
+	assert.Equal(t, int64(127999), probeInfo[1].BitRate)
+	assert.Equal(t, 0, probeInfo[1].Width)
+	assert.Equal(t, 0, probeInfo[1].Height)
+	assert.Equal(t, int64(44100), probeInfo[1].TimeBase.Denom().Int64())
 }

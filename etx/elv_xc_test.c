@@ -8,6 +8,7 @@
 #include <unistd.h>
 #include <fcntl.h>
 #include <libavutil/log.h>
+#include <libavutil/pixdesc.h>
 #include <errno.h>
 #include <pthread.h>
 
@@ -351,6 +352,82 @@ tx_type_from_string(
     return tx_none;
 }
 
+static int
+do_probe(
+    char *filename
+)
+{
+    ioctx_t inctx;
+    avpipe_io_handler_t in_handlers;
+    txprobe_t *probes;
+    int rc;
+
+    in_handlers.avpipe_opener = in_opener;
+    in_handlers.avpipe_closer = in_closer;
+    in_handlers.avpipe_reader = in_read_packet;
+    in_handlers.avpipe_writer = in_write_packet;
+    in_handlers.avpipe_seeker = in_seek;
+
+    if (in_handlers.avpipe_opener(filename, &inctx) < 0) {
+        rc = -1;
+        goto end_probe;
+    }
+
+    rc = avpipe_probe(&in_handlers, &inctx, &probes);
+    if (rc < 0) {
+        printf("Error: avpipe probe failed on file %s with no valid stream.\n", filename);
+        goto end_probe;
+    }
+
+    for (int i=0; i<rc; i++) {
+        printf("Stream[%d]\n"
+                "\tcodec_type: %s\n"
+                "\tcodec_id: %d\n"
+                "\tcodec_name: %s\n"
+                "\tduration_ts: %d\n"
+                "\ttime_base: %d/%d\n"
+                "\tnb_frames: %"PRId64"\n"
+                "\tstart_time: %"PRId64"\n"
+                "\tavg_frame_rate: %d/%d\n"
+                "\tframe_rate: %d/%d\n"
+                "\tticks_per_frame: %d\n"
+                "\tbit_rate: %"PRId64"\n"
+                "\twidth: %d\n"
+                "\theight: %d\n"
+                "\tpix_fmt: %s\n"
+                "\thas_b_frames: %d\n"
+                "\tfield_order: %d\n"
+                "\tsample_aspect_ratio: %d/%d\n"
+                "\tdisplay_aspect_ratio: %d/%d\n",
+                i,
+                av_get_media_type_string(probes[i].codec_type),
+                probes[i].codec_id,
+                probes[i].codec_name,
+                probes[i].duration_ts,
+                probes[i].time_base.num,probes[i].time_base.den,
+                probes[i].nb_frames,
+                probes[i].start_time,
+                probes[i].avg_frame_rate.num, probes[i].avg_frame_rate.den,
+                probes[i].frame_rate.num, probes[i].frame_rate.den,
+                probes[i].ticks_per_frame,
+                probes[i].bit_rate,
+                probes[i].width,
+                probes[i].height,
+                av_get_pix_fmt_name(probes[i].pix_fmt) != NULL ? av_get_pix_fmt_name(probes[i].pix_fmt) : "-",
+                probes[i].has_b_frames,
+                probes[i].field_order,
+                probes[i].sample_aspect_ratio.num, probes[i].sample_aspect_ratio.den,
+                probes[i].display_aspect_ratio.num, probes[i].display_aspect_ratio.den
+                );
+    }
+
+end_probe:
+    elv_dbg("Releasing probe resources");
+    /* Close input handler resources */
+    in_handlers.avpipe_closer(&inctx);
+    return rc;
+}
+
 static void
 usage(
     char *progname,
@@ -385,6 +462,7 @@ usage(
         "\t-video-bitrate :     (optional) mutually exclusive with crf. Default: -1 (unused)\n"
         "\t-r :                 (optional) number of repeats. Default is 1 repeat, must be bigger than 1\n"
         "\t-t :                 (optional) transcoding threads. Default is 1 thread, must be bigger than 1\n"
+        "\t-command :           (optional) directing command of etx, can be \"transcode\" or \"probe\" (default is transcode).\n"
         "\t-tx-type :           (optional) transcoding type. Default is \"all\", can be \"video\", \"audio\", or \"all\" \n"
         "\t-seg-duration-ts :   (mandatory) segment duration time base (positive integer).\n"
         "\t-seg-duration-fr :   (mandatory) segment duration frame (positive integer).\n"
@@ -413,6 +491,7 @@ main(
     char *filename = NULL;
     int bypass_transcoding = 0;
     int start_segment = -1;
+    char *command = "transcode";
     int i;
 
     /* Parameters */
@@ -471,7 +550,12 @@ main(
             }
             break;
         case 'c':
-            if (!strcmp(argv[i], "-crf")) {
+            if (!strcmp(argv[i], "-command")) {
+                command = argv[i+1];
+                if (!strcmp(command, "transcode") && !strcmp(command, "probe")) {
+                    usage(argv[0], argv[i], EXIT_FAILURE);
+                }
+            } else if (!strcmp(argv[i], "-crf")) {
                 p.crf_str = argv[i+1];
             } else if (strcmp(argv[i], "-crypt-iv") == 0) {
                 p.crypt_iv = argv[i+1];
@@ -622,6 +706,18 @@ main(
     if (filename == NULL) {
         usage(argv[0], "-f", EXIT_FAILURE);
     }
+
+    // Set AV libs log level and handle using elv_log
+    av_log_set_level(AV_LOG_DEBUG);
+    connect_ffmpeg_log();
+
+    elv_logger_open(NULL, "etx", 10, 100*1024*1024, elv_log_file);
+    elv_set_log_level(elv_log_debug);
+
+    if (!strcmp(command, "probe")) {
+        return do_probe(filename);
+    }
+
     if (sscanf(p.start_segment_str, "%d", &start_segment) != 1) {
         usage(argv[0], "-start_segment", EXIT_FAILURE);
     }
@@ -632,13 +728,6 @@ main(
     /* Create O dir if doesn't exist */
     if (stat("./O", &st) == -1)
         mkdir("./O", 0700);
-
-    // Set AV libs log level and handle using elv_log
-    av_log_set_level(AV_LOG_DEBUG);
-    connect_ffmpeg_log();
-
-    elv_logger_open(NULL, "etx", 10, 100*1024*1024, elv_log_file);
-    elv_set_log_level(elv_log_debug);
 
     elv_log("txparams:\n"
             "  audio_bitrate=%d\n"

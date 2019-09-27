@@ -348,6 +348,40 @@ end_tx:
     return rc;
 }
 
+int
+probe(
+    char *filename,
+    txprobe_t **txprobe)
+{
+    ioctx_t inctx;
+    avpipe_io_handler_t in_handlers;
+    txprobe_t *probes;
+    int rc;
+
+    in_handlers.avpipe_opener = in_opener;
+    in_handlers.avpipe_closer = in_closer;
+    in_handlers.avpipe_reader = in_read_packet;
+    in_handlers.avpipe_writer = in_write_packet;
+    in_handlers.avpipe_seeker = in_seek;
+
+    if (in_handlers.avpipe_opener(filename, &inctx) < 0) {
+        rc = -1;
+        goto end_probe;
+    }
+
+    rc = avpipe_probe(&in_handlers, &inctx, &probes);
+    if (rc < 0)
+        goto end_probe;
+
+    *txprobe = probes;
+
+end_probe:
+    elv_dbg("Releasing probe resources");
+    /* Close input handler resources */
+    in_handlers.avpipe_closer(&inctx);
+    return rc;
+}
+
 // TODO: Something better than manually updating this. Currently useful for
 //       checking if fabric builds with expected version. 
 int

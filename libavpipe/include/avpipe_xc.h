@@ -157,6 +157,28 @@ typedef struct txparams_t {
     tx_type_t tx_type;              // Default: 0 means transcode 'everything'
 } txparams_t;
 
+#define MAX_CODEC_NAME  256
+
+typedef struct txprobe_t {
+    int codec_type;             // Audio or Video
+    int codec_id;
+    char codec_name[MAX_CODEC_NAME+1];
+    int duration_ts;
+    AVRational time_base;
+    int64_t nb_frames;
+    int64_t start_time;
+    AVRational avg_frame_rate;
+    AVRational frame_rate;
+    int ticks_per_frame;
+    int64_t bit_rate;
+    int has_b_frames;
+    int width, height;              // Video only
+    enum AVPixelFormat pix_fmt;     // Video only
+    AVRational sample_aspect_ratio;
+    AVRational display_aspect_ratio;
+    enum AVFieldOrder field_order;
+} txprobe_t;
+
 typedef struct txctx_t {
     coderctx_t decoder_ctx;
     coderctx_t encoder_ctx;
@@ -207,6 +229,21 @@ avpipe_init(
 int
 avpipe_fini(
     txctx_t **txctx);
+
+/**
+ * @brief   Probes object stream specified by input handler.
+ *
+ * @param   in_handlers     A pointer to input handlers that direct the probe
+ * @param   inctx           A pointer to ioctx_t for input stream. This has to be allocated and initialized
+ *                          by the application before calling this function.
+ * @param   txprob          A pointer to the txprobe_t that could contain probing info.
+ * @return  Returns <=0 if probing is failed, otherwise number of streams that are probed.
+ */
+int
+avpipe_probe(
+    avpipe_io_handler_t *in_handlers,
+    ioctx_t *inctx,
+    txprobe_t **txprobe);
 
 /**
  * @brief   Starts transcoding.
