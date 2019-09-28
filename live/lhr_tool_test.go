@@ -1,6 +1,11 @@
 package live
 
 import (
+	"bytes"
+	"crypto/aes"
+	"crypto/cipher"
+	"crypto/rand"
+	"encoding/hex"
 	"fmt"
 	"io"
 	"math/big"
@@ -11,8 +16,10 @@ import (
 	"github.com/qluvio/avpipe"
 )
 
-// Old Sky stream: http://origin1.sedev02_newsdemuxclear.stage-cdhls.skydvn.com/cdsedev04demuxclearnews/13012/cd.m3u8
-var testUrl string = "http://origin1.skynews.mobile.skydvn.com/skynews/1404/latest.m3u8"
+// Sky 1080 stream: http://origin1.sedev02_newsdemuxclear.stage-cdhls.skydvn.com/cdsedev04demuxclearnews/13012/cd.m3u8
+// Sky 720 stream: http://origin1.skynews.mobile.skydvn.com/skynews/1404/latest.m3u8
+// Fox stream: https://content.uplynk.com/channel/089cd376140c40d3a64c7c1dcccb4467.m3u8
+var testUrl string = "https://content.uplynk.com/channel/089cd376140c40d3a64c7c1dcccb4467.m3u8"
 
 func TestToolTs(t *testing.T) {
 
@@ -79,30 +86,44 @@ func TestToolFmp4(t *testing.T) {
 
 	avpipe.InitIOHandler(&inputOpener{tc: readCtx}, &outputOpener{tc: writeCtx})
 
+	// videoParams := &avpipe.TxParams{
+	// 	Format:      "fmp4",
+	// 	StartTimeTs: 0,
+	// 	// StartPts           int32
+	// 	DurationTs:      2700000,
+	// 	StartSegmentStr: "1",
+	// 	VideoBitrate:    3189984,
+	// 	// AudioBitrate:  128000,
+	// 	// SampleRate:    48000,
+	// 	// CrfStr:        "20",
+	// 	SegDurationTs: 180000,
+	// 	SegDurationFr: 50,
+	// 	// FrameDurationTs    int32
+	// 	// StartFragmentIndex int32
+	// 	Ecodec: "libx264",
+	// 	// Dcodec             string
+	// 	EncHeight: 720,
+	// 	EncWidth:  1280,
+	// 	// CryptIV            string
+	// 	// CryptKey           string
+	// 	// CryptKID           string
+	// 	// CryptKeyURL        string
+	// 	// CryptScheme        CryptScheme
+	// 	TxType: avpipe.TxVideo,
+	// }
+
 	videoParams := &avpipe.TxParams{
-		Format:      "fmp4",
-		StartTimeTs: 0,
-		// StartPts           int32
-		DurationTs:      2700000,
+		Format:          "fmp4",
+		StartTimeTs:     0,
+		DurationTs:      2702700, //5405400
 		StartSegmentStr: "1",
-		VideoBitrate:    4784976,
-		// AudioBitrate:  128000,
-		// SampleRate:    48000,
-		// CrfStr:        "20",
-		SegDurationTs: 180000,
-		SegDurationFr: 50,
-		// FrameDurationTs    int32
-		// StartFragmentIndex int32
-		Ecodec: "libx264",
-		// Dcodec             string
-		EncHeight: 720,
-		EncWidth:  1280,
-		// CryptIV            string
-		// CryptKey           string
-		// CryptKID           string
-		// CryptKeyURL        string
-		// CryptScheme        CryptScheme
-		TxType: avpipe.TxVideo,
+		VideoBitrate:    6000000,
+		SegDurationTs:   180180, //360360
+		SegDurationFr:   120,
+		Ecodec:          "libx264",
+		EncHeight:       720,
+		EncWidth:        1280,
+		TxType:          avpipe.TxVideo,
 	}
 
 	xcparams := fmt.Sprintf("%+v", *videoParams)
@@ -221,4 +242,59 @@ func (o *outputCtx) Seek(offset int64, whence int) (int64, error) {
 func (o *outputCtx) Close() error {
 	log.Debug("AVL OUT_CLOSE")
 	return nil
+}
+
+func TestDecrypt(t *testing.T) {
+	encDec(t, []byte(""))
+	encDec(t, []byte("1"))
+	encDec(t, []byte("exampleplaintext")) // 16
+	encDec(t, []byte("abcdefghijklmnopqrstuvwxyz"))
+}
+
+func encDec(t *testing.T, plaintext []byte) {
+	paddedplaintext := padPKCS5(plaintext, aes.BlockSize)
+
+	var key []byte
+	var err error
+	if key, err = hex.DecodeString("6368616e676520746869732070617373"); err != nil {
+		t.Error(err)
+	}
+
+	iv := make([]byte, aes.BlockSize)
+	if _, err := io.ReadFull(rand.Reader, iv); err != nil {
+		t.Error(err)
+	}
+
+	var block cipher.Block
+	if block, err = aes.NewCipher(key); err != nil {
+		t.Error(err)
+	}
+	mode := cipher.NewCBCEncrypter(block, iv)
+
+	ciphertext := make([]byte, len(paddedplaintext))
+	mode.CryptBlocks(ciphertext, paddedplaintext)
+	// fmt.Printf("%x\n", ciphertext)
+
+	var dec bytes.Buffer
+	var dw *decryptWriter
+	if dw, err = newDecryptWriter(&dec, key, iv); err != nil {
+		t.Error("newDecryptWriter")
+	}
+	if _, err = dw.Write(ciphertext); err != nil {
+		t.Error("dw.Write")
+	}
+	if _, err = dw.Flush(); err != nil {
+		t.Error("dw.Flush")
+	}
+	// fmt.Println(dec.String())
+	if bytes.Compare(plaintext, dec.Bytes()) != 0 {
+		t.Error(string(plaintext), dec.String())
+	}
+}
+
+func padPKCS5(src []byte, blockSize int) []byte {
+	srclen := len(src)
+	padlen := (blockSize - (srclen % blockSize))
+	padding := bytes.Repeat([]byte{byte(padlen)}, padlen)
+	return append(src, padding...)
 }

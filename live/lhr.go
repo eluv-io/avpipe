@@ -1,12 +1,17 @@
 package live
 
 import (
+	"crypto/aes"
+	"crypto/cipher"
+	"encoding/hex"
 	"io"
+	"io/ioutil"
 	"math/big"
 	"net/http"
 	"net/url"
 	"os"
 	"path"
+	"strings"
 	"time"
 
 	"github.com/grafov/m3u8"
@@ -96,19 +101,58 @@ func (lhr *HLSReader) saveToFile(u *url.URL) error {
 	return nil
 }
 
-func (lhr *HLSReader) readSegment(u *url.URL, w io.Writer) (written int64, err error) {
-	log.Info("AVLR readSegment start", "u", u)
+func (lhr *HLSReader) readSegment(u *url.URL, s *m3u8.MediaSegment, w io.Writer) (written int64, err error) {
+	log.Debug("AVLR readSegment start", "segment", s)
+
+	msURL, err := resolve(s.URI, u)
+	if err != nil {
+		log.Error("AVLR Failed to resolve segment URL", "err", err, "segment.URI", s.URI)
+		return
+	}
+
+	var dw *decryptWriter
+	if s.Key != nil {
+		var key []byte
+		if key, err = downloadKey(u, s.Key.URI); err != nil {
+			log.Error("AVLR Failed to download AES key", "err", err, "s.Key.URI", s.Key.URI)
+			return
+		} else if len(key) != 16 { // assuming s.Key.Method is AES-128
+			return 0, errors.E("Bad AES key size", "len", len(key), "s.Key.URI", s.Key.URI)
+		}
+
+		var iv []byte
+		if len(s.Key.IV) > 0 {
+			if iv, err = hex.DecodeString(strings.TrimPrefix(strings.TrimPrefix(s.Key.IV, "0x"), "0X")); err != nil {
+				log.Error("AVLR Failed to decode AES IV", "err", err, "s.Key.IV", s.Key.IV)
+				return
+			}
+		}
+
+		if dw, err = newDecryptWriter(w, key, iv); err != nil {
+			return
+		}
+	}
+
 	t := time.Now()
-	content, err := lhr.openURL(u)
+	content, err := lhr.openURL(msURL)
+	if err != nil {
+		return
+	}
 	if content != nil {
 		defer content.Close()
 	}
-	if err != nil {
-		return 0, err
-	}
 
-	written, err = io.Copy(w, content)
-	log.Info("AVLR readSegment end", "written", written, "err", err, "timeSpent", time.Since(t))
+	if s.Key != nil {
+		if written, err = io.Copy(dw, content); err != nil {
+			return
+		}
+		var n int
+		n, err = dw.Flush()
+		written += int64(n)
+	} else {
+		written, err = io.Copy(w, content)
+	}
+	log.Debug("AVLR readSegment end", "written", written, "err", err, "timeSpent", time.Since(t))
 	return
 }
 
@@ -214,12 +258,6 @@ func (lhr *HLSReader) readPlaylist(u *url.URL, startSeqNo int,
 			break
 		}
 
-		msURL, err := resolve(segment.URI, u)
-		if err != nil {
-			log.Error("AVLR Failed to resolve segment URL", "err", err, "segment.URI", segment.URI)
-			continue // nextSeqNo will fix itself in the following section
-		}
-
 		// Assert of sorts
 		if nextSeqNo != int(segment.SeqId) {
 			log.Warn("AVLR nextSeqNo should equal segment.SeqId", "nextSeqNo", nextSeqNo, "segment.SeqId", segment.SeqId)
@@ -231,7 +269,7 @@ func (lhr *HLSReader) readPlaylist(u *url.URL, startSeqNo int,
 			segRemainingSec, "durationReadSec", durationReadSec, "URI", segment.URI)
 
 		//lhr.saveToFile(msURL)
-		written, err := lhr.readSegment(msURL, w)
+		written, err := lhr.readSegment(u, segment, w)
 		if err != nil {
 			// Transcoded part of a segment - ErrClosedPipe when avpipe closes the pipe
 			if !(err == io.EOF || err == io.ErrClosedPipe) || segment.Duration < segRemainingSec {
@@ -305,6 +343,7 @@ func (lhr *HLSReader) Fill(startSeqNo int, startSec float64, durationSecRat *big
 			lhr.readPlaylist(msURL, startSeqNo, startSec, durationSec, w)
 		if err != nil {
 			log.Error("AVLR failed to read playlist", "nextSeqNo", nextSeqNo, "nextStartSec", nextStartSec, "err", err)
+			// TODO: Report errors to the user
 			return
 		}
 		// log.Debug("AVLR readPlaylist returned", "nextSeqNo", nextSeqNo, "nextStartSec", nextStartSec, "durationReadSec", durationReadSec, "err", err)
@@ -322,4 +361,81 @@ func (lhr *HLSReader) Fill(startSeqNo int, startSec float64, durationSecRat *big
 			time.Sleep(time.Duration(1000 * time.Millisecond))
 		}
 	}
+}
+
+// TODO: Move to common/utils
+
+func unpadPKCS5(src []byte) []byte {
+	srclen := len(src)
+	padlen := int(src[srclen-1])
+	return src[:(srclen - padlen)]
+}
+
+type decryptWriter struct {
+	cipher    cipher.BlockMode
+	writer    io.Writer
+	remainder []byte
+}
+
+// Write writes len(p) bytes from p to the underlying data stream.
+// It returns the number of bytes written from p (0 <= n <= len(p))
+// and any error encountered that caused the write to stop early.
+// Write must return a non-nil error if it returns n < len(p).
+// Write must not modify the slice data, even temporarily.
+//
+// Implementations must not retain p.
+func (dw *decryptWriter) Write(p []byte) (n int, err error) {
+	src := append(dw.remainder, p...)
+
+	// Decrypt only multiples of the AES block size. Always hold onto a block
+	// (1 to 16 bytes) to remove padding later.
+	writeLen := len(src)
+	remainder := writeLen % dw.cipher.BlockSize()
+	if remainder == 0 {
+		remainder = dw.cipher.BlockSize()
+	}
+	writeLen = writeLen - remainder
+	dw.cipher.CryptBlocks(src, src[:writeLen])
+	dw.remainder = src[writeLen:]
+	n, err = dw.writer.Write(src[:writeLen])
+	return len(p), err // lie about len written to satisfy io.Writer interface
+}
+
+// Flush MUST be called at the end to take care of un-padding
+func (dw *decryptWriter) Flush() (n int, err error) {
+	if len(dw.remainder) != dw.cipher.BlockSize() {
+		return 0, errors.E("Expected a 16 byte block remainder", len(dw.remainder))
+	}
+	dw.cipher.CryptBlocks(dw.remainder, dw.remainder)
+	return dw.writer.Write(unpadPKCS5(dw.remainder))
+}
+
+func newDecryptWriter(writer io.Writer, key []byte, iv []byte) (*decryptWriter, error) {
+	dw := &decryptWriter{
+		cipher: nil,
+		writer: writer,
+	}
+
+	block, err := aes.NewCipher(key)
+	if err != nil {
+		return dw, err
+	}
+	dw.cipher = cipher.NewCBCDecrypter(block, iv)
+
+	return dw, nil
+}
+
+func downloadKey(u *url.URL, keyURI string) (body []byte, err error) {
+	keyURL, err := resolve(keyURI, u)
+	if err != nil {
+		log.Error("AVLR Failed to key URL", "err", err, "keyURI", keyURI)
+		return
+	}
+
+	resp, err := http.Get(keyURL.String())
+	if err != nil {
+		return
+	}
+	defer resp.Body.Close()
+	return ioutil.ReadAll(resp.Body)
 }

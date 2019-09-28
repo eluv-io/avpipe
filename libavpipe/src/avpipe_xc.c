@@ -308,8 +308,8 @@ prepare_video_encoder(
         av_opt_set(encoder_context->format_context->priv_data, "movflags", "frag_every_frame", 0);
 
         // PENDING(SSS) - must use the same config as mez maker
-        av_opt_set(&encoder_options, "keyint", "50", 0); // PENDING(SSS) hardcoded 50
-        av_opt_set(&encoder_options, "min-keyint", "50", 0);
+        av_opt_set(&encoder_options, "keyint", "60", 0); // PENDING(SSS) hardcoded 50
+        av_opt_set(&encoder_options, "min-keyint", "60", 0);
         av_opt_set(&encoder_options, "no-scenecut", "-1", 0);
         // av_opt_set(&encoder_options, "bframes", "0", 0);  // Hopefully not needed
     }
