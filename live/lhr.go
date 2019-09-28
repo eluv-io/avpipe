@@ -305,10 +305,7 @@ func (lhr *HLSReader) readPlaylist(u *url.URL, startSeqNo int,
 func (lhr *HLSReader) Fill(startSeqNo int, startSec float64, durationSecRat *big.Rat, w io.Writer) (
 	nextSeqNo int, nextStartSec float64, err error) {
 
-	durationSec, exact := durationSecRat.Float64()
-	if !exact {
-		return 0, 0, errors.E("Fill - invalid parameter", "durationSecRat", durationSecRat)
-	}
+	durationSec, _ := durationSecRat.Float64()
 
 	log.Info("AVLR Fill start", "startSeqNo", startSeqNo, "startSec", startSec, "durationSec", durationSec, "playlist", lhr.url)
 
@@ -321,7 +318,9 @@ func (lhr *HLSReader) Fill(startSeqNo int, startSec float64, durationSecRat *big
 	var variant *m3u8.Variant
 	for _, v := range variants {
 		if variant == nil || v.Bandwidth > variant.Bandwidth {
-			variant = v
+			if v.FrameRate <= 30 { // PENDING(SSS) Temporary to avoid Fox stream frames with fractional ts duration
+				variant = v
+			}
 		}
 	}
 	if variant == nil {

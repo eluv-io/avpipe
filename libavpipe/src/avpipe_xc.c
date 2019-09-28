@@ -658,7 +658,13 @@ encode_frame(
         }
 
         /* prepare packet for muxing */
-        output_packet->stream_index = stream_index;
+        if (params->tx_type == tx_all) {
+            /* Preserve the stream index of the input */
+            output_packet->stream_index = stream_index;
+        } else {
+            /* The output has only one stream */
+            output_packet->stream_index = 0;
+        }
 
         /*
          * Set packet duration manually if not set by the encoder.

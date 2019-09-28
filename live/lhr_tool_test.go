@@ -37,7 +37,7 @@ func TestToolTs(t *testing.T) {
 
 	lhr := NewHLSReader(sourceUrl)
 
-	mezDurationRat := big.NewRat(int64(30), int64(1))
+	mezDurationRat := big.NewRat(int64(2702700), int64(90000)) // Fox stream
 	lhr.Fill(-1, 0, mezDurationRat, f)
 
 }
@@ -78,7 +78,8 @@ func TestToolFmp4(t *testing.T) {
 	lhr := NewHLSReader(sourceUrl)
 
 	go func() {
-		mezDurationRat := big.NewRat(int64(30), int64(1))
+		mezDurationRat := big.NewRat(int64(2702700), int64(90000)) // Fox stream
+		//mezDurationRat := big.NewRat(int64(30), int64(1))
 		lhr.Fill(-1, 0, mezDurationRat, pw)
 		log.Info("AVL FILL DONE")
 		pw.Close()
@@ -119,7 +120,7 @@ func TestToolFmp4(t *testing.T) {
 		StartSegmentStr: "1",
 		VideoBitrate:    6000000,
 		SegDurationTs:   180180, //360360
-		SegDurationFr:   120,
+		SegDurationFr:   60,
 		Ecodec:          "libx264",
 		EncHeight:       720,
 		EncWidth:        1280,
