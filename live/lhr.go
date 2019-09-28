@@ -2,6 +2,7 @@ package live
 
 import (
 	"io"
+	"math/big"
 	"net/http"
 	"net/url"
 	"os"
@@ -263,8 +264,13 @@ func (lhr *HLSReader) readPlaylist(u *url.URL, startSeqNo int,
 // and writes it out to the provided io.Writer
 // If startSeqNo is -1, it starts with the first sequence it gets
 // The sequence number is 0-based (i.e. the first segment has sequence number 0)
-func (lhr *HLSReader) Fill(startSeqNo int, startSec float64, durationSec float64, w io.Writer) (
+func (lhr *HLSReader) Fill(startSeqNo int, startSec float64, durationSecRat *big.Rat, w io.Writer) (
 	nextSeqNo int, nextStartSec float64, err error) {
+
+	durationSec, exact := durationSecRat.Float64()
+	if !exact {
+		return 0, 0, errors.E("Fill - invalid parameter", "durationSecRat", durationSecRat)
+	}
 
 	log.Info("AVLR Fill start", "startSeqNo", startSeqNo, "startSec", startSec, "durationSec", durationSec, "playlist", lhr.url)
 

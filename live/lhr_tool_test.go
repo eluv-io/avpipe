@@ -3,6 +3,7 @@ package live
 import (
 	"fmt"
 	"io"
+	"math/big"
 	"net/url"
 	"os"
 	"testing"
@@ -29,7 +30,8 @@ func TestToolTs(t *testing.T) {
 
 	lhr := NewHLSReader(sourceUrl)
 
-	lhr.Fill(-1, 0, 30, f)
+	mezDurationRat := big.NewRat(int64(30), int64(1))
+	lhr.Fill(-1, 0, mezDurationRat, f)
 
 }
 
@@ -69,7 +71,8 @@ func TestToolFmp4(t *testing.T) {
 	lhr := NewHLSReader(sourceUrl)
 
 	go func() {
-		lhr.Fill(-1, 0, 30, pw)
+		mezDurationRat := big.NewRat(int64(30), int64(1))
+		lhr.Fill(-1, 0, mezDurationRat, pw)
 		log.Info("AVL FILL DONE")
 		pw.Close()
 	}()
