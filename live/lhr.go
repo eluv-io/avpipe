@@ -11,6 +11,7 @@ import (
 	"net/url"
 	"os"
 	"path"
+	"strconv"
 	"strings"
 	"time"
 
@@ -21,6 +22,9 @@ import (
 )
 
 var log = elog.Get("/eluvio/avpipe/live")
+
+// TESTSaveToDir save manifests and segments to this path if not empty string
+var TESTSaveToDir string
 
 // HLSReader provides a reader interface to a live HLS stream - it reads a
 //   specified number of segments on outputs one aggregate MPEG-TS buffer
@@ -42,13 +46,13 @@ func NewHLSReader(url *url.URL) *HLSReader {
 	return &lhr
 }
 
-func (lhr *HLSReader) openURL(u *url.URL) (io.ReadCloser, error) {
+func openURL(client http.Client, u *url.URL) (io.ReadCloser, error) {
 	req, err := http.NewRequest("GET", u.String(), nil)
 	if err != nil {
 		return nil, err
 	}
 
-	resp, err := lhr.client.Do(req)
+	resp, err := client.Do(req)
 	if err != nil {
 		return nil, err
 	} else if resp.StatusCode != 200 {
@@ -72,36 +76,68 @@ func resolve(urlStr string, base *url.URL) (*url.URL, error) {
 	return base.ResolveReference(url), nil
 }
 
-func (lhr *HLSReader) saveToFile(u *url.URL) error {
-	fileName := path.Base(u.Path)
-
-	out, err := os.Create(fileName)
-	if out != nil {
-		defer out.Close()
+func saveToFile(client http.Client, u *url.URL, savePath string) (err error) {
+	log.Info("AVLR Saving file to", "path", savePath)
+	if err = os.MkdirAll(path.Dir(savePath), 0755); err != nil {
+		return
 	}
+	var file *os.File
+	if file, err = os.Create(savePath); err != nil {
+		return
+	}
+	defer file.Close()
+
+	var content io.ReadCloser
+	if content, err = openURL(client, u); err != nil {
+		return
+	}
+	defer content.Close()
+
+	written, err := io.Copy(file, content)
 	if err != nil {
-		return err
+		return
 	}
-
-	content, err := lhr.openURL(u)
-	if content != nil {
-		defer content.Close()
-	}
-	if err != nil {
-		return err
-	}
-
-	_, err = io.Copy(out, content)
-	if err != nil {
-		return err
-	}
-
-	log.Info("AVLR", "saved file", fileName)
+	log.Info("AVLR Saved file", "path", savePath, "written", written)
 
 	return nil
 }
 
-func (lhr *HLSReader) readSegment(u *url.URL, s *m3u8.MediaSegment, w io.Writer) (written int64, err error) {
+func saveManifestToFile(client http.Client, u *url.URL, parentPath string) (
+	err error) {
+
+	savePath := path.Join(parentPath, "manifest", u.Path)
+	saveDir := path.Dir(savePath)
+	saveFile := path.Base(savePath)
+	saveFile = strings.Join([]string{strconv.FormatInt(time.Now().Unix(), 10), saveFile}, "-")
+	savePath = path.Join(saveDir, saveFile)
+	return saveToFile(client, u, savePath)
+}
+
+func saveSegment(
+	client http.Client, u *url.URL, s *m3u8.MediaSegment, parentPath string) (
+	written int64, err error) {
+
+	msURL, err := resolve(s.URI, u)
+	if err != nil {
+		return
+	}
+	savePath := path.Join(parentPath, msURL.Path)
+	log.Info("AVLR Saving segment to", "path", savePath)
+	if err = os.MkdirAll(path.Dir(savePath), 0755); err != nil {
+		return
+	}
+	var file *os.File
+	if file, err = os.Create(savePath); err != nil {
+		return
+	}
+	defer file.Close()
+	return readSegment(client, u, s, file)
+}
+
+func readSegment(
+	client http.Client, u *url.URL, s *m3u8.MediaSegment, w io.Writer) (
+	written int64, err error) {
+
 	log.Debug("AVLR readSegment start", "segment", s)
 
 	msURL, err := resolve(s.URI, u)
@@ -134,13 +170,11 @@ func (lhr *HLSReader) readSegment(u *url.URL, s *m3u8.MediaSegment, w io.Writer)
 	}
 
 	t := time.Now()
-	content, err := lhr.openURL(msURL)
-	if err != nil {
+	var content io.ReadCloser
+	if content, err = openURL(client, msURL); err != nil {
 		return
 	}
-	if content != nil {
-		defer content.Close()
-	}
+	defer content.Close()
 
 	if s.Key != nil {
 		if written, err = io.Copy(dw, content); err != nil {
@@ -156,14 +190,19 @@ func (lhr *HLSReader) readSegment(u *url.URL, s *m3u8.MediaSegment, w io.Writer)
 	return
 }
 
-func (lhr *HLSReader) readMasterPlaylist(u *url.URL) ([]*m3u8.Variant, error) {
-	content, err := lhr.openURL(u)
-	if content != nil {
-		defer content.Close()
+func readMasterPlaylist(client http.Client, u *url.URL) ([]*m3u8.Variant, error) {
+	if len(TESTSaveToDir) > 0 {
+		err := saveManifestToFile(client, u, TESTSaveToDir)
+		if err != nil {
+			log.Error("AVLR readMasterPlaylist saveManifestToFile", "err", err)
+		}
 	}
+
+	content, err := openURL(client, u)
 	if err != nil {
 		return nil, err
 	}
+	defer content.Close()
 
 	playlist, listType, err := m3u8.DecodeFrom(content, true)
 	if err != nil {
@@ -189,7 +228,15 @@ func (lhr *HLSReader) readPlaylist(u *url.URL, startSeqNo int,
 	nextSeqNo int, nextStartSec float64, durationReadSec float64, err error) {
 
 	log.Debug("AVLR readPlaylist start", "startSeqNo", startSeqNo, "startSec", startSec, "durationSec", durationSec)
-	content, err := lhr.openURL(u)
+
+	if len(TESTSaveToDir) > 0 {
+		err := saveManifestToFile(lhr.client, u, TESTSaveToDir)
+		if err != nil {
+			log.Error("AVLR readPlaylist saveManifestToFile", "err", err)
+		}
+	}
+
+	content, err := openURL(lhr.client, u)
 	if content != nil {
 		defer content.Close()
 	}
@@ -268,8 +315,12 @@ func (lhr *HLSReader) readPlaylist(u *url.URL, startSeqNo int,
 		log.Info("AVLR processing ingest segment", "seqNo", nextSeqNo, "segment.Duration", segment.Duration, "segRemainingSec",
 			segRemainingSec, "durationReadSec", durationReadSec, "URI", segment.URI)
 
-		//lhr.saveToFile(msURL)
-		written, err := lhr.readSegment(u, segment, w)
+		var written int64
+		if len(TESTSaveToDir) == 0 {
+			written, err = readSegment(lhr.client, u, segment, w)
+		} else {
+			written, err = saveSegment(lhr.client, u, segment, TESTSaveToDir)
+		}
 		if err != nil {
 			// Transcoded part of a segment - ErrClosedPipe when avpipe closes the pipe
 			if !(err == io.EOF || err == io.ErrClosedPipe) || segment.Duration < segRemainingSec {
@@ -302,14 +353,15 @@ func (lhr *HLSReader) readPlaylist(u *url.URL, startSeqNo int,
 // and writes it out to the provided io.Writer
 // If startSeqNo is -1, it starts with the first sequence it gets
 // The sequence number is 0-based (i.e. the first segment has sequence number 0)
-func (lhr *HLSReader) Fill(startSeqNo int, startSec float64, durationSecRat *big.Rat, w io.Writer) (
+func (lhr *HLSReader) Fill(
+	startSeqNo int, startSec float64, durationSecRat *big.Rat, w io.Writer) (
 	nextSeqNo int, nextStartSec float64, err error) {
 
 	durationSec, _ := durationSecRat.Float64()
 
 	log.Info("AVLR Fill start", "startSeqNo", startSeqNo, "startSec", startSec, "durationSec", durationSec, "playlist", lhr.url)
 
-	variants, err := lhr.readMasterPlaylist(lhr.url)
+	variants, err := readMasterPlaylist(lhr.client, lhr.url)
 	if err != nil {
 		return startSeqNo, startSec, err
 	}
@@ -357,7 +409,7 @@ func (lhr *HLSReader) Fill(startSeqNo int, startSec float64, durationSecRat *big
 		} else {
 			// Wait for a new segment - typically segments are 2 sec or longer
 			// PENDING(PT) HLS spec says to base the wait time on segment duration
-			time.Sleep(time.Duration(1000 * time.Millisecond))
+			time.Sleep(time.Duration(4000 * time.Millisecond))
 		}
 	}
 }
@@ -431,6 +483,7 @@ func downloadKey(u *url.URL, keyURI string) (body []byte, err error) {
 		return
 	}
 
+	log.Debug("AVLR HTTP GET AES key", "url", keyURL.String())
 	resp, err := http.Get(keyURL.String())
 	if err != nil {
 		return
