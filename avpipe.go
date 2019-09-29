@@ -92,6 +92,7 @@ const (
 type TxParams struct {
 	Format             string      `json:"format,omitempty"`
 	StartTimeTs        int32       `json:"start_time_ts,omitempty"`
+	SkipOverPts        int32       `json:"skip_over_pts"`
 	StartPts           int32       `json:"start_pts,omitempty"` // Start PTS for output
 	DurationTs         int32       `json:"duration_ts,omitempty"`
 	StartSegmentStr    string      `json:"start_segment_str,omitempty"`
@@ -518,7 +519,7 @@ func Version() int {
 
 // params: transcoding parameters
 // url: input filename that has to be transcoded
-func Tx(params *TxParams, url string, bypassTranscoding bool, debugFrameLevel bool) int {
+func Tx(params *TxParams, url string, bypassTranscoding bool, debugFrameLevel bool, lastInputPts *int) int {
 
 	// Convert TxParams to C.txparams_t
 	if params == nil {
@@ -529,6 +530,7 @@ func Tx(params *TxParams, url string, bypassTranscoding bool, debugFrameLevel bo
 	cparams := &C.txparams_t{
 		format:               C.CString(params.Format),
 		start_time_ts:        C.int(params.StartTimeTs),
+		skip_over_pts:        C.int(params.SkipOverPts),
 		start_pts:            C.int(params.StartPts),
 		duration_ts:          C.int(params.DurationTs),
 		start_segment_str:    C.CString(params.StartSegmentStr),
@@ -566,7 +568,13 @@ func Tx(params *TxParams, url string, bypassTranscoding bool, debugFrameLevel bo
 		debugFrameLevelInt = 0
 	}
 
-	rc := C.tx((*C.txparams_t)(unsafe.Pointer(cparams)), C.CString(url), C.int(bypass), C.int(debugFrameLevelInt))
+	var lastInputPtsC C.int
+
+	rc := C.tx((*C.txparams_t)(unsafe.Pointer(cparams)), C.CString(url), C.int(bypass), C.int(debugFrameLevelInt),
+		&lastInputPtsC)
+
+	*lastInputPts = int(lastInputPtsC)
+
 	return int(rc)
 }
 

@@ -627,6 +627,14 @@ should_skip_encoding(
         }
     }
 
+    /* Skip beginning based on input packet pts */
+    if (p->skip_over_pts > 0) {
+        if (frame->pts <= p->skip_over_pts) {
+            elv_dbg("ENCODE skip frame early pts=%d filt_frame pts=%d, frame_in_pts_offset=%d, skip_over_pts=%d",
+                frame->pts, frame_in_pts_offset, p->skip_over_pts);
+            skip = 1;
+        }
+    }
     return skip;
 }
 
@@ -653,8 +661,10 @@ encode_frame(
         elv_err("Failed to send frame for encoding err=%d", ret);
     }
 
-    if (frame)
+    if (frame) {
         encoder_context->input_last_pts_sent_encode = frame->pts;
+    }
+
     while (ret >= 0) {
 
         /* The packet must be initialized before receiving */
@@ -693,7 +703,7 @@ encode_frame(
             output_packet->duration = output_packet->dts - encoder_context->last_dts;
         }
         encoder_context->last_dts = output_packet->dts;
-        encoder_context->pts = output_packet->dts;
+        encoder_context->pts = output_packet->pts; // WHy was this dts?
         encoder_context->input_last_pts_encoded = output_packet->pts;
 
         /* Rescale using the stream time_base (not the codec context) */
@@ -950,7 +960,8 @@ avpipe_tx(
     txctx_t *txctx,
     int do_instrument,
     int bypass_transcode,
-    int debug_frame_level)
+    int debug_frame_level,
+    int *last_input_pts)
 {
     /* Set scale filter */
     char filter_str[128];
@@ -1132,7 +1143,14 @@ avpipe_tx(
 
     av_write_trailer(encoder_context->format_context);
 
-    elv_log("avpipe_tx done last pts=%d pts_read=%d pts_sent_encode=%d pts_encoded=%d");
+    elv_log("avpipe_tx done last pts=%d input_start_pts=%d dts=%d pts_read=%d pts_sent_encode=%d pts_encoded=%d",
+        encoder_context->pts, encoder_context->input_start_pts,
+        encoder_context->last_dts,
+        encoder_context->input_last_pts_read,
+        encoder_context->input_last_pts_sent_encode,
+        encoder_context->input_last_pts_encoded);
+
+    *last_input_pts = encoder_context->input_last_pts_sent_encode;
 
     return 0;
 }

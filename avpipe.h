@@ -3,7 +3,7 @@
 #include "avpipe_xc.h"
 
 int
-tx(txparams_t *params, char *filename, int bypass_filtering, int debug_frame_level);
+tx(txparams_t *params, char *filename, int bypass_filtering, int debug_frame_level, int *last_input_pts);
 
 int
 probe(char *filename, txprobe_t **txprobe);

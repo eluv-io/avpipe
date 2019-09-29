@@ -350,7 +350,9 @@ func doTranscode(cmd *cobra.Command, args []string) error {
 
 	for i := 0; i < int(nThreads); i++ {
 		go func(params *avpipe.TxParams, filename string, bypass bool) {
-			rc := avpipe.Tx(params, filename, bypass, true)
+
+			var lastInputPts int
+			rc := avpipe.Tx(params, filename, bypass, true, &lastInputPts)
 			if rc != 0 {
 				done <- fmt.Errorf("Failed transcoding %s", filename)
 			} else {

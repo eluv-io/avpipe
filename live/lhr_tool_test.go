@@ -121,7 +121,8 @@ func TestToolFmp4(t *testing.T) {
 	videoParams := &avpipe.TxParams{
 		Format:          "fmp4",
 		StartTimeTs:     0,
-		DurationTs:      5405400, //5405400
+		SkipOverPts:     0,
+		DurationTs:      2702700, //5405400
 		StartSegmentStr: "1",
 		VideoBitrate:    1557559,
 		SegDurationTs:   180180, //360360
@@ -134,8 +135,9 @@ func TestToolFmp4(t *testing.T) {
 
 	xcparams := fmt.Sprintf("%+v", *videoParams)
 	log.Info("AVLIVE transcoding start", "xcparams", xcparams)
-	errTx := avpipe.Tx(videoParams, "video_out.mp4", false, true)
-	log.Info("AVLIVE Video TX DONE", "err", errTx)
+	var lastInputPts int
+	errTx := avpipe.Tx(videoParams, "video_out.mp4", false, true, &lastInputPts)
+	log.Info("AVLIVE Video TX DONE", "err", errTx, "last pts", lastInputPts)
 
 	/* TODO: Make audio transcoding functional.
 	audioParams := &avpipe.TxParams{

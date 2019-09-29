@@ -318,7 +318,8 @@ tx_thread_func(
             continue;
         }
 
-        if (avpipe_tx(txctx, 0, params->bypass_transcoding, 1) < 0) {
+        int last_input_pts;
+        if (avpipe_tx(txctx, 0, params->bypass_transcoding, 1, &last_input_pts) < 0) {
             elv_err("THREAD %d, iteration %d error in transcoding", params->thread_number, i+1);
             continue;
         }
