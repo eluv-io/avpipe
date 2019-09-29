@@ -35,7 +35,7 @@ type HLSReader struct {
 	playlistURL     *url.URL
 	playlistPollSec float64    // How often to poll for the manifest - HLS spec says half the duration
 	nextSeqNo       int        // The next segment sequence number to record (the first sequence number in a stream is 0)
-	nextSkipOverPts int        // Start recording from this frame in the segment
+	NextSkipOverPts int        // Start recording from this frame in the segment
 	segments        []*segInfo // Segments recorded
 }
 

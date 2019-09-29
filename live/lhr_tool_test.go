@@ -130,7 +130,7 @@ func recordFmp4(t *testing.T, lhr *HLSReader, fileName string) {
 	videoParams.SkipOverPts = int32(lhr.nextSkipOverPts)
 	log.Info("AVL Tx start", "videoParams", fmt.Sprintf("%+v", *videoParams))
 	errTx := avpipe.Tx(videoParams, "video_out.mp4", false, true, &lhr.nextSkipOverPts)
-	log.Info("AVL Tx done", "err", errTx, "last pts", lhr.nextSkipOverPts)
+	log.Info("AVL Tx done", "err", errTx, "last pts", lhr.NextSkipOverPts)
 
 	if errTx != 0 {
 		t.Error("AVL transcode video", "err", err)
