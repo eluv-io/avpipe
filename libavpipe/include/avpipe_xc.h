@@ -103,6 +103,9 @@ typedef struct coderctx_t {
 
     int64_t last_dts;
     int64_t last_key_frame;     /* pts of last key frame */
+    int64_t input_last_pts_read;
+    int64_t input_last_pts_sent_encode;
+    int64_t input_last_pts_encoded;
 
     /* Filter graph, valid for decoder */
     AVFilterContext *buffersink_ctx;

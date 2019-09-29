@@ -108,6 +108,12 @@ prepare_decoder(
     dump_decoder(decoder_context);
 
     for (int i = 0; i < decoder_context->format_context->nb_streams; i++) {
+
+        if (i > 1) {
+            elv_err("STREAM support limited to 2");
+            break;
+        }
+
         /* Copy codec params from stream format context */
         decoder_context->codec_parameters[i] = decoder_context->format_context->streams[i]->codecpar;
         decoder_context->stream[i] = decoder_context->format_context->streams[i];
@@ -116,10 +122,15 @@ prepare_decoder(
             /* Video */
             decoder_context->video_stream_index = i;
             elv_dbg("STREAM %d Video, codec_id=%s", i, avcodec_get_name(decoder_context->codec_parameters[i]->codec_id));
+            if (!(params->tx_type & tx_video))
+                continue;
+
         } else if (decoder_context->format_context->streams[i]->codecpar->codec_type == AVMEDIA_TYPE_AUDIO) {
             /* Audio */
             decoder_context->audio_stream_index = i;
             elv_dbg("STREAM %d Audio, codec_id=%s", i, avcodec_get_name(decoder_context->codec_parameters[i]->codec_id));
+            if (!(params->tx_type & tx_audio))
+                continue;
 
             /* If the buffer size is too big, ffmpeg might assert in aviobuf.c:581
              * To avoid this assertion, reset the buffer size to something smaller.
@@ -130,7 +141,7 @@ prepare_decoder(
                     avioctx->buffer_size = AUDIO_BUF_SIZE;
             }
         } else {
-            elv_dbg("STREAM UNKNOWN type=%d", decoder_context->format_context->streams[i]->codecpar->codec_type);
+            elv_err("STREAM UNKNOWN type=%d", decoder_context->format_context->streams[i]->codecpar->codec_type);
             continue;
         }
 
@@ -146,6 +157,7 @@ prepare_decoder(
         }
 
         decoder_context->codec_context[i] = avcodec_alloc_context3(decoder_context->codec[i]);
+
         if (!decoder_context->codec_context[i]) {
             elv_err("Failed to allocated memory for AVCodecContext");
             return -1;
@@ -641,7 +653,10 @@ encode_frame(
         elv_err("Failed to send frame for encoding err=%d", ret);
     }
 
+    if (frame)
+        encoder_context->input_last_pts_sent_encode = frame->pts;
     while (ret >= 0) {
+
         /* The packet must be initialized before receiving */
         av_init_packet(output_packet);
         output_packet->data = NULL;
@@ -679,6 +694,7 @@ encode_frame(
         }
         encoder_context->last_dts = output_packet->dts;
         encoder_context->pts = output_packet->dts;
+        encoder_context->input_last_pts_encoded = output_packet->pts;
 
         /* Rescale using the stream time_base (not the codec context) */
         av_packet_rescale_ts(output_packet,
@@ -688,8 +704,8 @@ encode_frame(
 
         set_key_flag(output_packet, encoder_context, params);
 
-    	output_packet->pts += params->start_pts;
-    	output_packet->dts += params->start_pts;
+        output_packet->pts += params->start_pts;  // PENDING(SSS) Don't we have to compensate for 'relative pts'?
+        output_packet->dts += params->start_pts;
 
         if (debug_frame_level)
             dump_packet("OUT", output_packet);
@@ -883,7 +899,7 @@ flush_decoder(
 
         if (response == AVERROR_EOF) {
             elv_log("1 GOT EOF");
-            continue;
+            continue; // PENDING(SSS) why continue and not break?
         }
 
         if (codec_context->codec_type == AVMEDIA_TYPE_VIDEO) {
@@ -1026,6 +1042,8 @@ avpipe_tx(
             }
         }
 
+        encoder_context->input_last_pts_read = input_packet->pts;
+
         if (input_packet->stream_index == decoder_context->video_stream_index) {
             if (params->tx_type & tx_video) {
                 // Video packet
@@ -1107,13 +1125,14 @@ avpipe_tx(
     if (!bypass_transcode && (params->tx_type & tx_video))
         encode_frame(decoder_context, encoder_context, NULL, encoder_context->video_stream_index, params, debug_frame_level);
 
-
     dump_coders(decoder_context, encoder_context);
 
     av_packet_free(&input_packet);
     av_frame_free(&input_frame);
 
     av_write_trailer(encoder_context->format_context);
+
+    elv_log("avpipe_tx done last pts=%d pts_read=%d pts_sent_encode=%d pts_encoded=%d");
 
     return 0;
 }
