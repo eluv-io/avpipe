@@ -16,30 +16,70 @@ import (
 	"github.com/qluvio/avpipe"
 )
 
+var verboseLogging bool = false
+
 // Sky 1080 stream: http://origin1.sedev02_newsdemuxclear.stage-cdhls.skydvn.com/cdsedev04demuxclearnews/13012/cd.m3u8
 // Sky 720 stream: http://origin1.skynews.mobile.skydvn.com/skynews/1404/latest.m3u8
-// Fox stream: https://content.uplynk.com/channel/089cd376140c40d3a64c7c1dcccb4467.m3u8
-var testUrl string = "https://content.uplynk.com/channel/089cd376140c40d3a64c7c1dcccb4467.m3u8"
+// videoParams := &avpipe.TxParams{
+// 	Format:      "fmp4",
+// 	StartTimeTs: 0,
+// 	// StartPts           int32
+// 	DurationTs:      2700000,
+// 	StartSegmentStr: "1",
+// 	VideoBitrate:    3189984,
+// 	// AudioBitrate:  128000,
+// 	// SampleRate:    48000,
+// 	// CrfStr:        "20",
+// 	SegDurationTs: 180000,
+// 	SegDurationFr: 50,
+// 	// FrameDurationTs    int32
+// 	// StartFragmentIndex int32
+// 	Ecodec: "libx264",
+// 	// Dcodec             string
+// 	EncHeight: 720,
+// 	EncWidth:  1280,
+// 	// CryptIV            string
+// 	// CryptKey           string
+// 	// CryptKID           string
+// 	// CryptKeyURL        string
+// 	// CryptScheme        CryptScheme
+// 	TxType: avpipe.TxVideo,
+// }
+
+// Fox stream
+var manifestURLStr string = "https://content.uplynk.com/channel/089cd376140c40d3a64c7c1dcccb4467.m3u8"
+var recordingDuration *big.Rat = big.NewRat(int64(2702700), int64(90000))
+var videoParams *avpipe.TxParams = &avpipe.TxParams{
+	Format:          "fmp4",
+	SkipOverPts:     0,
+	DurationTs:      2702700, //5405400
+	StartSegmentStr: "1",
+	VideoBitrate:    1557559,
+	SegDurationTs:   180180, //360360
+	SegDurationFr:   60,     //120
+	Ecodec:          "libx264",
+	EncHeight:       432,
+	EncWidth:        768,
+	TxType:          avpipe.TxVideo,
+}
+
+var outFileName string = "lhr_out"
 
 func TestToolTs(t *testing.T) {
-
 	avpipe.SetCLoggers()
-	sourceUrlStr := testUrl
-	pipe := "lhr_out.ts"
 
-	sourceUrl, err := url.Parse(sourceUrlStr)
+	manifestURL, err := url.Parse(manifestURLStr)
 	if err != nil {
 		t.Fail()
 	}
 
-	f, err := os.Create(pipe)
+	f, err := os.Create(outFileName + ".ts")
 	defer f.Close()
 
-	lhr := NewHLSReader(sourceUrl)
-
-	mezDurationRat := big.NewRat(int64(2702700), int64(90000)) // Fox stream
-	lhr.Fill(-1, 0, mezDurationRat, f)
-
+	lhr := NewHLSReader(manifestURL)
+	if err = lhr.Fill(recordingDuration, f); err != nil {
+		t.Error(err)
+	}
 }
 
 type testCtx struct {
@@ -49,12 +89,7 @@ type testCtx struct {
 
 var bytesRead, bytesWritten, rwDiffMax int
 
-func makeOneMez(t *testing.T) {
-
-}
-
 func TestToolFmp4(t *testing.T) {
-
 	log.SetDebug()
 	avpipe.SetCLoggers()
 
@@ -63,103 +98,45 @@ func TestToolFmp4(t *testing.T) {
 	//     go test -timeout 24h --run TestToolFmp4
 	//TESTSaveToDir = "/temp/fox"
 
-	sourceUrlStr := testUrl
-	pipe := "lhr_out.mp4"
-
-	sourceUrl, err := url.Parse(sourceUrlStr)
+	manifestURL, err := url.Parse(manifestURLStr)
 	if err != nil {
-		t.Fail()
+		t.Error(err)
 	}
+	lhr := NewHLSReader(manifestURL)
 
-	// Final output - the fmp4 stream
-	f, err := os.Create(pipe)
-	defer f.Close()
+	// lhr contains the recording state so use a single instance
+	recordFmp4(t, lhr, outFileName+"_1.mp4")
+	recordFmp4(t, lhr, outFileName+"_2.mp4")
+}
+
+func recordFmp4(t *testing.T, lhr *HLSReader, fileName string) {
+	file, err := os.Create(fileName)
+	if err != nil {
+		t.Error("AVL file create", "err", err)
+	}
+	defer file.Close()
 
 	pr, pw := io.Pipe()
-
 	readCtx := testCtx{r: pr}
-	writeCtx := testCtx{w: f}
-
-	lhr := NewHLSReader(sourceUrl)
+	writeCtx := testCtx{w: file}
 
 	go func() {
-		mezDurationRat := big.NewRat(int64(2702700), int64(90000)) // Fox stream
-		//mezDurationRat := big.NewRat(int64(30), int64(1))
-		lhr.Fill(-1, 0, mezDurationRat, pw)
-		log.Info("AVL FILL DONE")
+		lhr.Fill(recordingDuration, pw)
+		log.Info("AVL Fill done")
 		pw.Close()
 	}()
 
 	avpipe.InitIOHandler(&inputOpener{tc: readCtx}, &outputOpener{tc: writeCtx})
+	videoParams.SkipOverPts = int32(lhr.nextSkipOverPts)
+	log.Info("AVL Tx start", "videoParams", fmt.Sprintf("%+v", *videoParams))
+	errTx := avpipe.Tx(videoParams, "video_out.mp4", false, true, &lhr.nextSkipOverPts)
+	log.Info("AVL Tx done", "err", errTx, "last pts", lhr.nextSkipOverPts)
 
-	// videoParams := &avpipe.TxParams{
-	// 	Format:      "fmp4",
-	// 	StartTimeTs: 0,
-	// 	// StartPts           int32
-	// 	DurationTs:      2700000,
-	// 	StartSegmentStr: "1",
-	// 	VideoBitrate:    3189984,
-	// 	// AudioBitrate:  128000,
-	// 	// SampleRate:    48000,
-	// 	// CrfStr:        "20",
-	// 	SegDurationTs: 180000,
-	// 	SegDurationFr: 50,
-	// 	// FrameDurationTs    int32
-	// 	// StartFragmentIndex int32
-	// 	Ecodec: "libx264",
-	// 	// Dcodec             string
-	// 	EncHeight: 720,
-	// 	EncWidth:  1280,
-	// 	// CryptIV            string
-	// 	// CryptKey           string
-	// 	// CryptKID           string
-	// 	// CryptKeyURL        string
-	// 	// CryptScheme        CryptScheme
-	// 	TxType: avpipe.TxVideo,
-	// }
-
-	videoParams := &avpipe.TxParams{
-		Format:          "fmp4",
-		StartTimeTs:     0,
-		SkipOverPts:     0,
-		DurationTs:      2702700, //5405400
-		StartSegmentStr: "1",
-		VideoBitrate:    1557559,
-		SegDurationTs:   180180, //360360
-		SegDurationFr:   60,     //120
-		Ecodec:          "libx264",
-		EncHeight:       432,
-		EncWidth:        768,
-		TxType:          avpipe.TxVideo,
+	if errTx != 0 {
+		t.Error("AVL transcode video", "err", err)
 	}
 
-	xcparams := fmt.Sprintf("%+v", *videoParams)
-	log.Info("AVLIVE transcoding start", "xcparams", xcparams)
-	var lastInputPts int
-	errTx := avpipe.Tx(videoParams, "video_out.mp4", false, true, &lastInputPts)
-	log.Info("AVLIVE Video TX DONE", "err", errTx, "last pts", lastInputPts)
-
-	/* TODO: Make audio transcoding functional.
-	audioParams := &avpipe.TxParams{
-		Format:          "fmp4",
-		StartTimeTs:     0,
-		DurationTs:      2700000,
-		StartSegmentStr: "1",
-		VideoBitrate:    8100000,
-		CrfStr:          "20",
-		SegDurationTs:   180000,
-		SegDurationFr:   50,
-		Ecodec:          "libx264",
-		EncHeight:       720,
-		EncWidth:        1280,
-		TxType:          avpipe.TxAudio,
-	}
-
-	xcparams := fmt.Sprintf("%+v", *audioParams)
-	log.Info("AVLIVE transcoding start", "xcparams", xcparams)
-	errTx := avpipe.Tx(audioParams, "audio_out.mp4", false, true)
-	log.Info("AVLIVE Audio TX DONE", "err", errTx)*/
-
+	// TODO: avpipe.Tx(audioParams, ...
 }
 
 //Implement AVPipeInputOpener
@@ -182,14 +159,18 @@ func (io *inputOpener) Open(fd int64, url string) (avpipe.InputHandler, error) {
 }
 
 func (i *inputCtx) Read(buf []byte) (int, error) {
-	log.Debug("AVL IN_READ", "len", len(buf))
+	if verboseLogging {
+		log.Debug("AVL IN_READ", "len", len(buf))
+	}
 	n, err := i.r.Read(buf)
 	if err == io.EOF {
 		return 0, nil
 	}
 	bytesRead += n
-	log.Debug("AVL IN_READ DONE", "len", len(buf), "n", n,
-		"bytesRead", bytesRead, "bytesWritten", bytesWritten, "err", err)
+	if verboseLogging {
+		log.Debug("AVL IN_READ DONE", "len", len(buf), "n", n,
+			"bytesRead", bytesRead, "bytesWritten", bytesWritten, "err", err)
+	}
 	return n, err
 }
 
@@ -224,7 +205,9 @@ func (oo *outputOpener) Open(h, fd int64, stream_index, seg_index int, out_type 
 }
 
 func (o *outputCtx) Write(buf []byte) (int, error) {
-	log.Debug("AVL OUT_WRITE", "len", len(buf))
+	if verboseLogging {
+		log.Debug("AVL OUT_WRITE", "len", len(buf))
+	}
 	n, err := o.w.Write(buf)
 	if err != nil {
 		return n, err
@@ -237,8 +220,10 @@ func (o *outputCtx) Write(buf []byte) (int, error) {
 	if bytesRead-bytesWritten > rwDiffMax {
 		rwDiffMax = bytesRead - bytesWritten
 	}
-	log.Debug("AVL OUT_WRITE DONE", "len", len(buf), "n", n, "err", err,
-		"bytesRead", bytesRead, "bytesWritten", bytesWritten, "diff", rwDiffMax)
+	if verboseLogging {
+		log.Debug("AVL OUT_WRITE DONE", "len", len(buf), "n", n, "err", err,
+			"bytesRead", bytesRead, "bytesWritten", bytesWritten, "diff", rwDiffMax)
+	}
 	return n, err
 }
 
