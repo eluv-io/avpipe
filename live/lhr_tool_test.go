@@ -58,6 +58,11 @@ func TestToolFmp4(t *testing.T) {
 	log.SetDebug()
 	avpipe.SetCLoggers()
 
+	// Save stream files instead of transcoding if specified
+	//   Make sure go test timeout is big enough:
+	//     go test -timeout 24h --run TestToolFmp4
+	//TESTSaveToDir = "/temp/fox"
+
 	sourceUrlStr := testUrl
 	pipe := "lhr_out.mp4"
 
@@ -116,14 +121,14 @@ func TestToolFmp4(t *testing.T) {
 	videoParams := &avpipe.TxParams{
 		Format:          "fmp4",
 		StartTimeTs:     0,
-		DurationTs:      2702700, //5405400
+		DurationTs:      5405400, //5405400
 		StartSegmentStr: "1",
-		VideoBitrate:    6000000,
+		VideoBitrate:    1557559,
 		SegDurationTs:   180180, //360360
-		SegDurationFr:   60,
+		SegDurationFr:   60,     //120
 		Ecodec:          "libx264",
-		EncHeight:       720,
-		EncWidth:        1280,
+		EncHeight:       432,
+		EncWidth:        768,
 		TxType:          avpipe.TxVideo,
 	}
 
