@@ -607,14 +607,20 @@ should_skip_encoding(
     txparams_t *p,
     AVFrame *frame)
 {
-    int skip = 0;
     const int frame_in_pts_offset = frame->pts - decoder_context->input_start_pts;
 
     /* Drop frames before the desired 'start_time' */
     if (p->start_time_ts > 0 && frame_in_pts_offset < p->start_time_ts) {
         elv_dbg("ENCODE skip frame early pts=%d filt_frame pts=%d, frame_in_pts_offset=%d, start_time_ts=%d",
-            frame->pts, frame_in_pts_offset, p->start_time_ts);
-        skip = 1;
+            frame->pts, frame->pts, frame_in_pts_offset, p->start_time_ts);
+        return 1;
+    }
+
+    /* Skip beginning based on input packet pts */
+    if (p->skip_over_pts > 0 && frame->pts <= p->skip_over_pts) {
+        elv_dbg("ENCODE skip frame early pts=%d filt_frame pts=%d, frame_in_pts_offset=%d, skip_over_pts=%d",
+            frame->pts, frame->pts, frame_in_pts_offset, p->skip_over_pts);
+        return 1;
     }
 
     /* To allow for packet reordering frames can come with pts past the desired duration */
@@ -622,20 +628,12 @@ should_skip_encoding(
         const int max_valid_ts = p->start_time_ts + p->duration_ts;
         if (frame_in_pts_offset >= max_valid_ts) {
             elv_dbg("ENCODE skip frame late pts=%d filt_frame pts=%d, frame_in_pts_offset=%d, max_valid_ts=%d",
-                frame->pts, frame_in_pts_offset, max_valid_ts);
-            skip = 1;
+                frame->pts, frame->pts, frame_in_pts_offset, max_valid_ts);
+            return 1;
         }
     }
 
-    /* Skip beginning based on input packet pts */
-    if (p->skip_over_pts > 0) {
-        if (frame->pts <= p->skip_over_pts) {
-            elv_dbg("ENCODE skip frame early pts=%d filt_frame pts=%d, frame_in_pts_offset=%d, skip_over_pts=%d",
-                frame->pts, frame_in_pts_offset, p->skip_over_pts);
-            skip = 1;
-        }
-    }
-    return skip;
+    return 0;
 }
 
 static int
@@ -1006,7 +1004,9 @@ avpipe_tx(
     int response = 0;
     int rc = 0;
 
-    elv_dbg("START TIME %d, START PTS %d (output), DURATION %d", params->start_time_ts, params->start_pts, params->duration_ts);
+    elv_dbg("START TIME %d SKIP_PTS %d, START PTS %d (output), DURATION %d",
+        params->start_time_ts, params->skip_over_pts,
+        params->start_pts, params->duration_ts);
 
 #if INPUT_IS_SEEKABLE
     /* Seek to start position */
@@ -1133,6 +1133,7 @@ avpipe_tx(
      * TODO: should I do it for the audio stream too?
      */
     flush_decoder(decoder_context, encoder_context, encoder_context->video_stream_index, params, debug_frame_level);
+
     if (!bypass_transcode && (params->tx_type & tx_video))
         encode_frame(decoder_context, encoder_context, NULL, encoder_context->video_stream_index, params, debug_frame_level);
 
