@@ -17,7 +17,9 @@ func Probe(cmdRoot *cobra.Command) error {
 
 	cmdRoot.AddCommand(cmdProbe)
 
-	cmdProbe.PersistentFlags().StringP("filename", "f", "", "(mandatory) filename to be transcoded")
+	cmdProbe.PersistentFlags().StringP("filename", "f", "", "(mandatory) filename to be probed")
+	cmdProbe.PersistentFlags().BoolP("seekable", "", false, "(optional) seekable stream")
+
 	return nil
 }
 
@@ -28,9 +30,15 @@ func doProbe(cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("Filename is needed after -f")
 	}
 
+	seekable, err := cmd.Flags().GetBool("seekable")
+	if err != nil {
+		return fmt.Errorf("Invalid seekable flag")
+	}
+	log.Debug("doProbe", "seekable", seekable, "filename", filename)
+
 	avpipe.InitIOHandler(&avcmdInputOpener{url: filename}, &avcmdOutputOpener{dir: ""})
 
-	err, probeInfos := avpipe.Probe(filename)
+	probeInfos, err := avpipe.Probe(filename, seekable)
 	if err != nil {
 		return fmt.Errorf("Probing failed. file=%s", filename)
 	}

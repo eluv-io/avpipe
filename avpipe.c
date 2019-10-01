@@ -19,7 +19,7 @@
 
 int64_t NewIOHandler(char*, int64_t *);
 int AVPipeReadInput(int64_t, uint8_t *, int);
-int AVPipeSeekInput(int64_t, int64_t offset, int whence);
+int64_t AVPipeSeekInput(int64_t, int64_t offset, int whence);
 int AVPipeCloseInput(int64_t);
 int64_t AVPipeOpenOutput(int64_t, int, int, int);
 int AVPipeWriteOutput(int64_t, int64_t, uint8_t *, int);
@@ -165,7 +165,7 @@ in_seek(
         elv_dbg("IN SEEK - weird seek\n");
     }
 
-    elv_dbg("IN SEEK offset=%d, whence=%d, rc=%d", offset, whence, rc);
+    elv_dbg("IN SEEK offset=%"PRId64", whence=%d, rc=%"PRId64, offset, whence, rc);
 
     return rc;
 }
@@ -351,6 +351,7 @@ end_tx:
 int
 probe(
     char *filename,
+    int seekable,
     txprobe_t **txprobe)
 {
     ioctx_t inctx;
@@ -369,7 +370,7 @@ probe(
         goto end_probe;
     }
 
-    rc = avpipe_probe(&in_handlers, &inctx, &probes);
+    rc = avpipe_probe(&in_handlers, &inctx, seekable, &probes);
     if (rc < 0)
         goto end_probe;
 

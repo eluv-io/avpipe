@@ -97,7 +97,7 @@ in_seek(
 {
     ioctx_t *c = (ioctx_t *)opaque;
     int fd = *((int *)(c->opaque));
-    int rc = lseek(fd, offset, whence);
+    int64_t rc = lseek(fd, offset, whence);
     whence = whence & 0xFFFF; /* Mask out AVSEEK_SIZE and AVSEEK_FORCE */
     switch (whence) {
     case SEEK_SET:
@@ -110,7 +110,7 @@ in_seek(
         elv_dbg("IN SEEK - weird seek\n");
     }
 
-    elv_dbg("IN SEEK offset=%d whence=%d rc=%d", offset, whence, rc);
+    elv_dbg("IN SEEK offset=%"PRId64" whence=%d rc=%"PRId64, offset, whence, rc);
     return rc;
 }
 
@@ -354,7 +354,8 @@ tx_type_from_string(
 
 static int
 do_probe(
-    char *filename
+    char *filename,
+    int seekable
 )
 {
     ioctx_t inctx;
@@ -373,7 +374,7 @@ do_probe(
         goto end_probe;
     }
 
-    rc = avpipe_probe(&in_handlers, &inctx, &probes);
+    rc = avpipe_probe(&in_handlers, &inctx, seekable, &probes);
     if (rc < 0) {
         printf("Error: avpipe probe failed on file %s with no valid stream.\n", filename);
         goto end_probe;
@@ -440,6 +441,7 @@ usage(
         "Usage: %s <params>\n"
         "\t-audio-bitrate :     (optional) Default: -1\n"
         "\t-bypass :            (optional) bypass transcoding. Default is 0, must be 0 or 1\n"
+        "\t-seekable :          (optional) seekable stream. Default is 0, must be 0 or 1\n"
         "\t-crf :               (optional) mutually exclusive with video-bitrate. Default: 23\n"
         "\t-crypt-iv :          (optional) 128-bit AES IV, as hex\n"
         "\t-crypt-key :         (optional) 128-bit AES key, as hex\n"
@@ -490,6 +492,7 @@ main(
     int n_threads = 1;
     char *filename = NULL;
     int bypass_transcoding = 0;
+    int seekable = 0;
     int start_segment = -1;
     char *command = "transcode";
     int i;
@@ -519,7 +522,8 @@ main(
         .start_time_ts = 0,                 /* same units as input stream PTS */
         .start_fragment_index = 0,          /* Default is zero */
         .video_bitrate = -1,                /* not used if using CRF */
-        .tx_type = tx_all
+        .tx_type = tx_all,
+        .seekable = 0
     };
 
     i = 1;
@@ -647,7 +651,14 @@ main(
             }
             break;
         case 's':
-            if (!strcmp(argv[i], "-sample-rate")) {
+            if (!strcmp(argv[i], "-seekable")) {
+                if (sscanf(argv[i+1], "%d", &seekable) != 1) {
+                    usage(argv[0], argv[i], EXIT_FAILURE);
+                }
+                if (seekable != 0 && seekable != 1) {
+                    usage(argv[0], argv[i], EXIT_FAILURE);
+                }
+            } else if (!strcmp(argv[i], "-sample-rate")) {
                 if (sscanf(argv[i+1], "%d", &p.sample_rate) != 1) {
                     usage(argv[0], argv[i], EXIT_FAILURE);
                 }
@@ -715,7 +726,7 @@ main(
     elv_set_log_level(elv_log_debug);
 
     if (!strcmp(command, "probe")) {
-        return do_probe(filename);
+        return do_probe(filename, seekable);
     }
 
     if (sscanf(p.start_segment_str, "%d", &start_segment) != 1) {

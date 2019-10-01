@@ -51,7 +51,8 @@ static int
 prepare_input(
     avpipe_io_handler_t *in_handlers,
     ioctx_t *inctx,
-    AVFormatContext *format_ctx)
+    AVFormatContext *format_ctx,
+    int seekable)
 {
     unsigned char *bufin;
     AVIOContext *avioctx;
@@ -64,7 +65,7 @@ prepare_input(
         in_handlers->avpipe_reader, in_handlers->avpipe_writer, in_handlers->avpipe_seeker);
 
     avioctx->written = inctx->sz; /* Fake avio_size() to avoid calling seek to find size */
-    avioctx->seekable = 0;
+    avioctx->seekable = seekable;
     avioctx->direct = 0;
     avioctx->buffer_size = inctx->sz < avioctxBufSize ? inctx->sz : avioctxBufSize; // avoid seeks - avio_seek() seeks internal buffer */
     format_ctx->pb = avioctx;
@@ -76,7 +77,8 @@ prepare_decoder(
     coderctx_t *decoder_context,
     avpipe_io_handler_t *in_handlers,
     ioctx_t *inctx,
-    txparams_t *params)
+    txparams_t *params,
+    int seekable)
 {
     int rc;
     decoder_context->last_dts = AV_NOPTS_VALUE;
@@ -91,7 +93,7 @@ prepare_decoder(
     }
 
     /* Set our custom reader */
-    prepare_input(in_handlers, inctx, decoder_context->format_context);
+    prepare_input(in_handlers, inctx, decoder_context->format_context, seekable);
 
     /* Allocate AVFormatContext in format_context and find input file format */
     if (avformat_open_input(&decoder_context->format_context, "bogus.mp4", NULL, NULL) != 0) {
@@ -1116,6 +1118,7 @@ int
 avpipe_probe(
     avpipe_io_handler_t *in_handlers,
     ioctx_t *inctx,
+    int seekable,
     txprobe_t **txprobe)
 {
     coderctx_t decoder_ctx;
@@ -1128,7 +1131,8 @@ avpipe_probe(
         goto avpipe_probe_end;
     }
 
-    if (prepare_decoder(&decoder_ctx, in_handlers, inctx, NULL)) {
+    elv_log("AAA seekable=%d", seekable);
+    if (prepare_decoder(&decoder_ctx, in_handlers, inctx, NULL, seekable)) {
         elv_err("avpipe_probe failed to prepare decoder");
         rc = -1;
         goto avpipe_probe_end;
@@ -1226,7 +1230,7 @@ avpipe_init(
         params->rc_buffer_size = params->video_bitrate;
     }
 
-    if (prepare_decoder(&p_txctx->decoder_ctx, in_handlers, inctx, params)) {
+    if (prepare_decoder(&p_txctx->decoder_ctx, in_handlers, inctx, params, params->seekable)) {
         elv_err("Failure in preparing decoder");
         goto avpipe_init_failed;
     }

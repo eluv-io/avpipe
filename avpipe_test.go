@@ -314,7 +314,7 @@ func TestProbe(t *testing.T) {
 	filename := "./media/ErsteChristmas.mp4"
 
 	avpipe.InitIOHandler(&fileInputOpener{url: filename}, &concurrentOutputOpener{dir: "O"})
-	err, probeInfo := avpipe.Probe(filename)
+	probeInfo, err := avpipe.Probe(filename)
 	assert.NoError(t, err)
 	assert.Equal(t, 2, len(probeInfo))
 

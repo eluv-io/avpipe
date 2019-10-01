@@ -113,6 +113,7 @@ type TxParams struct {
 	CryptKeyURL        string      `json:"crypt_key_url,omitempty"`
 	CryptScheme        CryptScheme `json:"crypt_scheme,omitempty"`
 	TxType             TxType      `json:"tx_type,omitempty"`
+	Seekable           bool        `json:"seekable"`
 }
 
 type AVMediaType int
@@ -127,23 +128,24 @@ const (
 )
 
 type ProbeInfo struct {
-	CodecType          AVMediaType
-	CodecID            int
-	CodecName          string
-	DurationTs         int
-	TimeBase           *big.Rat
-	NBFrames           int64
-	StartTime          int64
-	AvgFrameRate       *big.Rat
-	FrameRate          *big.Rat
-	TicksPerFrame      int
-	BitRate            int64
-	Has_B_Frames       bool
-	Width, Height      int // Video only
-	PixFmt             int // Video only, it matches with enum AVPixelFormat in FFmpeg
-	SampleAspectRatio  *big.Rat
-	DisplayAspectRatio *big.Rat
-	FieldOrder         int
+	CodecType          AVMediaType `json:"codec_type"`
+	CodecID            int         `json:"codec_id,omitempty"`
+	CodecName          string      `json:"codec_name,omitempty"`
+	DurationTs         int         `json:"duration_ts,omitempty"`
+	TimeBase           *big.Rat    `json:"time_base,omitempty"`
+	NBFrames           int64       `json:"nb_frames,omitempty"`
+	StartTime          int64       `json:"start_time"`
+	AvgFrameRate       *big.Rat    `json:"avg_frame_rate,omitempty"`
+	FrameRate          *big.Rat    `json:"frame_rate,omitempty"`
+	TicksPerFrame      int         `json:"ticks_per_frame,omitempty"`
+	BitRate            int64       `json:"bit_rate,omitempty"`
+	Has_B_Frames       bool        `json:"has_b_frame"`
+	Width              int         `json:"width,omitempty"`  // Video only
+	Height             int         `json:"height,omitempty"` // Video only
+	PixFmt             int         `json:"pix_fmt"`          // Video only, it matches with enum AVPixelFormat in FFmpeg
+	SampleAspectRatio  *big.Rat    `json:"sample_aspect_ratio,omitempty"`
+	DisplayAspectRatio *big.Rat    `json:"display_aspect_ratio,omitempty"`
+	FieldOrder         int         `json:"field_order,omitempty"`
 }
 
 // IOHandler defines handlers that will be called from the C interface functions
@@ -559,6 +561,12 @@ func Tx(params *TxParams, url string, bypassTranscoding bool, debugFrameLevel bo
 		bypass = 0
 	}
 
+	if params.Seekable {
+		cparams.seekable = C.int(1)
+	} else {
+		cparams.seekable = C.int(0)
+	}
+
 	var debugFrameLevelInt int
 	if debugFrameLevel {
 		debugFrameLevelInt = 1
@@ -587,11 +595,19 @@ func AVMediaTypeName(mediaType AVMediaType) string {
 	return "none"
 }
 
-func Probe(url string) (error, []ProbeInfo) {
+func Probe(url string, seekable bool) ([]ProbeInfo, error) {
 	var cprobes *C.txprobe_t
-	rc := C.probe(C.CString(url), (**C.txprobe_t)(unsafe.Pointer(&cprobes)))
+	var cseekable C.int
+
+	if seekable {
+		cseekable = C.int(1)
+	} else {
+		cseekable = C.int(0)
+	}
+
+	rc := C.probe(C.CString(url), cseekable, (**C.txprobe_t)(unsafe.Pointer(&cprobes)))
 	if int(rc) <= 0 {
-		return fmt.Errorf("Probing failed"), nil
+		return nil, fmt.Errorf("Probing failed")
 	}
 
 	probeInfo := make([]ProbeInfo, int(rc))
@@ -639,5 +655,5 @@ func Probe(url string) (error, []ProbeInfo) {
 
 	C.free(unsafe.Pointer(cprobes))
 
-	return nil, probeInfo
+	return probeInfo, nil
 }
