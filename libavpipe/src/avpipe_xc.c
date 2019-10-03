@@ -1122,7 +1122,8 @@ avpipe_probe(
     txprobe_t **txprobe)
 {
     coderctx_t decoder_ctx;
-    txprobe_t *probes;
+    stream_info_t *stream_probes;
+    txprobe_t *probe;
     int rc;
 
     if (!in_handlers) {
@@ -1131,7 +1132,6 @@ avpipe_probe(
         goto avpipe_probe_end;
     }
 
-    elv_log("AAA seekable=%d", seekable);
     if (prepare_decoder(&decoder_ctx, in_handlers, inctx, NULL, seekable)) {
         elv_err("avpipe_probe failed to prepare decoder");
         rc = -1;
@@ -1145,7 +1145,8 @@ avpipe_probe(
     }
 
     int nb_skipped_streams = 0;
-    probes = (txprobe_t *)calloc(1, sizeof(txprobe_t)*nb_streams);
+    probe = (txprobe_t *)calloc(1, sizeof(txprobe_t));
+    stream_probes = (stream_info_t *)calloc(1, sizeof(stream_info_t)*nb_streams);
     for (int i=0; i<nb_streams; i++) {
         AVStream *s = decoder_ctx.format_context->streams[i];
         AVCodecContext *codec_context = decoder_ctx.codec_context[i];
@@ -1155,28 +1156,33 @@ avpipe_probe(
             nb_skipped_streams++;
             continue;
         }
-        probes[i].codec_type = codec->type;
-        probes[i].codec_id = codec->id;
-        strncpy(probes[i].codec_name, codec->name, MAX_CODEC_NAME);
-        probes[i].codec_name[MAX_CODEC_NAME] = '\0';
-        probes[i].duration_ts = (int)s->duration;
-        probes[i].time_base = s->time_base;
-        probes[i].nb_frames = s->nb_frames;
-        probes[i].start_time = s->start_time;
-        probes[i].avg_frame_rate = s->avg_frame_rate;
-        probes[i].display_aspect_ratio = s->display_aspect_ratio;
-        probes[i].frame_rate = codec_context->framerate;
-        probes[i].ticks_per_frame = codec_context->ticks_per_frame;
-        probes[i].bit_rate = codec_context->bit_rate;
-        probes[i].has_b_frames = codec_context->has_b_frames;
-        probes[i].width = codec_context->width;
-        probes[i].height = codec_context->height;
-        probes[i].pix_fmt = codec_context->pix_fmt;
-        probes[i].sample_aspect_ratio = codec_context->sample_aspect_ratio;
-        probes[i].field_order = codec_context->field_order;
+        stream_probes[i].codec_type = codec->type;
+        stream_probes[i].codec_id = codec->id;
+        strncpy(stream_probes[i].codec_name, codec->name, MAX_CODEC_NAME);
+        stream_probes[i].codec_name[MAX_CODEC_NAME] = '\0';
+        stream_probes[i].duration_ts = (int)s->duration;
+        stream_probes[i].time_base = s->time_base;
+        stream_probes[i].nb_frames = s->nb_frames;
+        stream_probes[i].start_time = s->start_time;
+        stream_probes[i].avg_frame_rate = s->avg_frame_rate;
+        stream_probes[i].display_aspect_ratio = s->display_aspect_ratio;
+        stream_probes[i].frame_rate = codec_context->framerate;
+        stream_probes[i].ticks_per_frame = codec_context->ticks_per_frame;
+        stream_probes[i].bit_rate = codec_context->bit_rate;
+        stream_probes[i].has_b_frames = codec_context->has_b_frames;
+        stream_probes[i].width = codec_context->width;
+        stream_probes[i].height = codec_context->height;
+        stream_probes[i].pix_fmt = codec_context->pix_fmt;
+        stream_probes[i].sample_aspect_ratio = codec_context->sample_aspect_ratio;
+        stream_probes[i].field_order = codec_context->field_order;
+
+        if (probe->container_info.duration < ((float)stream_probes[i].duration_ts)/stream_probes[i].time_base.den)
+            probe->container_info.duration = ((float)stream_probes[i].duration_ts)/stream_probes[i].time_base.den;
     }
 
-    *txprobe = probes;
+    probe->stream_info = stream_probes;
+    probe->container_info.format_name = strdup(decoder_ctx.format_context->iformat->name);
+    *txprobe = probe;
     rc = nb_streams - nb_skipped_streams;
 
 avpipe_probe_end:

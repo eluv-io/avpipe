@@ -161,7 +161,7 @@ typedef struct txparams_t {
 
 #define MAX_CODEC_NAME  256
 
-typedef struct txprobe_t {
+typedef struct stream_info_t {
     int codec_type;             // Audio or Video
     int codec_id;
     char codec_name[MAX_CODEC_NAME+1];
@@ -179,6 +179,16 @@ typedef struct txprobe_t {
     AVRational sample_aspect_ratio;
     AVRational display_aspect_ratio;
     enum AVFieldOrder field_order;
+} stream_info_t;
+
+typedef struct container_info_t {
+    float duration;
+    char *format_name;
+} container_info_t;
+
+typedef struct txprobe_t {
+    container_info_t container_info;
+    stream_info_t *stream_info;    // An array of stream_info_t (usually 2)
 } txprobe_t;
 
 typedef struct txctx_t {

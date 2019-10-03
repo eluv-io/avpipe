@@ -127,7 +127,7 @@ const (
 	AVMEDIA_TYPE_NB         = 5
 )
 
-type ProbeInfo struct {
+type StreamInfo struct {
 	CodecType          AVMediaType `json:"codec_type"`
 	CodecID            int         `json:"codec_id,omitempty"`
 	CodecName          string      `json:"codec_name,omitempty"`
@@ -146,6 +146,16 @@ type ProbeInfo struct {
 	SampleAspectRatio  *big.Rat    `json:"sample_aspect_ratio,omitempty"`
 	DisplayAspectRatio *big.Rat    `json:"display_aspect_ratio,omitempty"`
 	FieldOrder         int         `json:"field_order,omitempty"`
+}
+
+type ContainerInfo struct {
+	Duration   float64 `json:"duration"`
+	FormatName string  `json:"format_name"`
+}
+
+type ProbeInfo struct {
+	ContainerInfo ContainerInfo
+	StreamInfo    []StreamInfo
 }
 
 // IOHandler defines handlers that will be called from the C interface functions
@@ -595,8 +605,8 @@ func AVMediaTypeName(mediaType AVMediaType) string {
 	return "none"
 }
 
-func Probe(url string, seekable bool) ([]ProbeInfo, error) {
-	var cprobes *C.txprobe_t
+func Probe(url string, seekable bool) (*ProbeInfo, error) {
+	var cprobe *C.txprobe_t
 	var cseekable C.int
 
 	if seekable {
@@ -605,55 +615,60 @@ func Probe(url string, seekable bool) ([]ProbeInfo, error) {
 		cseekable = C.int(0)
 	}
 
-	rc := C.probe(C.CString(url), cseekable, (**C.txprobe_t)(unsafe.Pointer(&cprobes)))
+	rc := C.probe(C.CString(url), cseekable, (**C.txprobe_t)(unsafe.Pointer(&cprobe)))
 	if int(rc) <= 0 {
 		return nil, fmt.Errorf("Probing failed")
 	}
 
-	probeInfo := make([]ProbeInfo, int(rc))
-	probeArray := (*[1 << 10]C.txprobe_t)(unsafe.Pointer(cprobes))
+	probeInfo := &ProbeInfo{}
+	probeInfo.StreamInfo = make([]StreamInfo, int(rc))
+	probeArray := (*[1 << 10]C.stream_info_t)(unsafe.Pointer(cprobe.stream_info))
 	for i := 0; i < int(rc); i++ {
-		probeInfo[i].CodecType = AVMediaType(probeArray[i].codec_type)
-		probeInfo[i].CodecID = int(probeArray[i].codec_id)
-		probeInfo[i].CodecName = C.GoString((*C.char)(unsafe.Pointer(&probeArray[i].codec_name)))
-		probeInfo[i].DurationTs = int(probeArray[i].duration_ts)
-		probeInfo[i].TimeBase = big.NewRat(int64(probeArray[i].time_base.num), int64(probeArray[i].time_base.den))
-		probeInfo[i].NBFrames = int64(probeArray[i].nb_frames)
-		probeInfo[i].StartTime = int64(probeArray[i].start_time)
+		probeInfo.StreamInfo[i].CodecType = AVMediaType(probeArray[i].codec_type)
+		probeInfo.StreamInfo[i].CodecID = int(probeArray[i].codec_id)
+		probeInfo.StreamInfo[i].CodecName = C.GoString((*C.char)(unsafe.Pointer(&probeArray[i].codec_name)))
+		probeInfo.StreamInfo[i].DurationTs = int(probeArray[i].duration_ts)
+		probeInfo.StreamInfo[i].TimeBase = big.NewRat(int64(probeArray[i].time_base.num), int64(probeArray[i].time_base.den))
+		probeInfo.StreamInfo[i].NBFrames = int64(probeArray[i].nb_frames)
+		probeInfo.StreamInfo[i].StartTime = int64(probeArray[i].start_time)
 		if int64(probeArray[i].avg_frame_rate.den) != 0 {
-			probeInfo[i].AvgFrameRate = big.NewRat(int64(probeArray[i].avg_frame_rate.num), int64(probeArray[i].avg_frame_rate.den))
+			probeInfo.StreamInfo[i].AvgFrameRate = big.NewRat(int64(probeArray[i].avg_frame_rate.num), int64(probeArray[i].avg_frame_rate.den))
 		} else {
-			probeInfo[i].AvgFrameRate = big.NewRat(int64(probeArray[i].avg_frame_rate.num), int64(1))
+			probeInfo.StreamInfo[i].AvgFrameRate = big.NewRat(int64(probeArray[i].avg_frame_rate.num), int64(1))
 		}
 		if int64(probeArray[i].frame_rate.den) != 0 {
-			probeInfo[i].FrameRate = big.NewRat(int64(probeArray[i].frame_rate.num), int64(probeArray[i].frame_rate.den))
+			probeInfo.StreamInfo[i].FrameRate = big.NewRat(int64(probeArray[i].frame_rate.num), int64(probeArray[i].frame_rate.den))
 		} else {
-			probeInfo[i].FrameRate = big.NewRat(int64(probeArray[i].frame_rate.num), int64(1))
+			probeInfo.StreamInfo[i].FrameRate = big.NewRat(int64(probeArray[i].frame_rate.num), int64(1))
 		}
-		probeInfo[i].TicksPerFrame = int(probeArray[i].ticks_per_frame)
-		probeInfo[i].BitRate = int64(probeArray[i].bit_rate)
+		probeInfo.StreamInfo[i].TicksPerFrame = int(probeArray[i].ticks_per_frame)
+		probeInfo.StreamInfo[i].BitRate = int64(probeArray[i].bit_rate)
 		if probeArray[i].has_b_frames > 0 {
-			probeInfo[i].Has_B_Frames = true
+			probeInfo.StreamInfo[i].Has_B_Frames = true
 		} else {
-			probeInfo[i].Has_B_Frames = false
+			probeInfo.StreamInfo[i].Has_B_Frames = false
 		}
-		probeInfo[i].Width = int(probeArray[i].width)
-		probeInfo[i].Height = int(probeArray[i].height)
-		probeInfo[i].PixFmt = int(probeArray[i].pix_fmt)
+		probeInfo.StreamInfo[i].Width = int(probeArray[i].width)
+		probeInfo.StreamInfo[i].Height = int(probeArray[i].height)
+		probeInfo.StreamInfo[i].PixFmt = int(probeArray[i].pix_fmt)
 		if int64(probeArray[i].sample_aspect_ratio.den) != 0 {
-			probeInfo[i].SampleAspectRatio = big.NewRat(int64(probeArray[i].sample_aspect_ratio.num), int64(probeArray[i].sample_aspect_ratio.den))
+			probeInfo.StreamInfo[i].SampleAspectRatio = big.NewRat(int64(probeArray[i].sample_aspect_ratio.num), int64(probeArray[i].sample_aspect_ratio.den))
 		} else {
-			probeInfo[i].SampleAspectRatio = big.NewRat(int64(probeArray[i].sample_aspect_ratio.num), int64(1))
+			probeInfo.StreamInfo[i].SampleAspectRatio = big.NewRat(int64(probeArray[i].sample_aspect_ratio.num), int64(1))
 		}
 		if int64(probeArray[i].display_aspect_ratio.den) != 0 {
-			probeInfo[i].DisplayAspectRatio = big.NewRat(int64(probeArray[i].display_aspect_ratio.num), int64(probeArray[i].display_aspect_ratio.den))
+			probeInfo.StreamInfo[i].DisplayAspectRatio = big.NewRat(int64(probeArray[i].display_aspect_ratio.num), int64(probeArray[i].display_aspect_ratio.den))
 		} else {
-			probeInfo[i].DisplayAspectRatio = big.NewRat(int64(probeArray[i].display_aspect_ratio.num), int64(1))
+			probeInfo.StreamInfo[i].DisplayAspectRatio = big.NewRat(int64(probeArray[i].display_aspect_ratio.num), int64(1))
 		}
-		probeInfo[i].FieldOrder = int(probeArray[i].field_order)
+		probeInfo.StreamInfo[i].FieldOrder = int(probeArray[i].field_order)
 	}
 
-	C.free(unsafe.Pointer(cprobes))
+	probeInfo.ContainerInfo.FormatName = C.GoString((*C.char)(unsafe.Pointer(cprobe.container_info.format_name)))
+	probeInfo.ContainerInfo.Duration = float64(cprobe.container_info.duration)
+
+	C.free(unsafe.Pointer(cprobe.stream_info))
+	C.free(unsafe.Pointer(cprobe))
 
 	return probeInfo, nil
 }

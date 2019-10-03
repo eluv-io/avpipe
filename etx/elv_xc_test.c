@@ -360,7 +360,7 @@ do_probe(
 {
     ioctx_t inctx;
     avpipe_io_handler_t in_handlers;
-    txprobe_t *probes;
+    txprobe_t *probe;
     int rc;
 
     in_handlers.avpipe_opener = in_opener;
@@ -374,7 +374,7 @@ do_probe(
         goto end_probe;
     }
 
-    rc = avpipe_probe(&in_handlers, &inctx, seekable, &probes);
+    rc = avpipe_probe(&in_handlers, &inctx, seekable, &probe);
     if (rc < 0) {
         printf("Error: avpipe probe failed on file %s with no valid stream.\n", filename);
         goto end_probe;
@@ -401,26 +401,31 @@ do_probe(
                 "\tsample_aspect_ratio: %d/%d\n"
                 "\tdisplay_aspect_ratio: %d/%d\n",
                 i,
-                av_get_media_type_string(probes[i].codec_type),
-                probes[i].codec_id,
-                probes[i].codec_name,
-                probes[i].duration_ts,
-                probes[i].time_base.num,probes[i].time_base.den,
-                probes[i].nb_frames,
-                probes[i].start_time,
-                probes[i].avg_frame_rate.num, probes[i].avg_frame_rate.den,
-                probes[i].frame_rate.num, probes[i].frame_rate.den,
-                probes[i].ticks_per_frame,
-                probes[i].bit_rate,
-                probes[i].width,
-                probes[i].height,
-                av_get_pix_fmt_name(probes[i].pix_fmt) != NULL ? av_get_pix_fmt_name(probes[i].pix_fmt) : "-",
-                probes[i].has_b_frames,
-                probes[i].field_order,
-                probes[i].sample_aspect_ratio.num, probes[i].sample_aspect_ratio.den,
-                probes[i].display_aspect_ratio.num, probes[i].display_aspect_ratio.den
+                av_get_media_type_string(probe->stream_info[i].codec_type),
+                probe->stream_info[i].codec_id,
+                probe->stream_info[i].codec_name,
+                probe->stream_info[i].duration_ts,
+                probe->stream_info[i].time_base.num,probe->stream_info[i].time_base.den,
+                probe->stream_info[i].nb_frames,
+                probe->stream_info[i].start_time,
+                probe->stream_info[i].avg_frame_rate.num, probe->stream_info[i].avg_frame_rate.den,
+                probe->stream_info[i].frame_rate.num, probe->stream_info[i].frame_rate.den,
+                probe->stream_info[i].ticks_per_frame,
+                probe->stream_info[i].bit_rate,
+                probe->stream_info[i].width,
+                probe->stream_info[i].height,
+                av_get_pix_fmt_name(probe->stream_info[i].pix_fmt) != NULL ? av_get_pix_fmt_name(probe->stream_info[i].pix_fmt) : "-",
+                probe->stream_info[i].has_b_frames,
+                probe->stream_info[i].field_order,
+                probe->stream_info[i].sample_aspect_ratio.num, probe->stream_info[i].sample_aspect_ratio.den,
+                probe->stream_info[i].display_aspect_ratio.num, probe->stream_info[i].display_aspect_ratio.den
                 );
     }
+    printf("Container\n"
+        "\tformat_name: %s\n"
+        "\tduration: %.5f\n",
+        probe->container_info.format_name,
+        probe->container_info.duration);
 
 end_probe:
     elv_dbg("Releasing probe resources");
