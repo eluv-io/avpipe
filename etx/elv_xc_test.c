@@ -594,7 +594,7 @@ main(
             break;
         case 'd':
             if (!strcmp(argv[i], "-duration-ts")) {
-                if (sscanf(argv[i+1], "%d", &p.duration_ts) != 1) {
+                if (sscanf(argv[i+1], "%"PRId64, &p.duration_ts) != 1) {
                     usage(argv[0], argv[i], EXIT_FAILURE);
                 }
             } else if (strlen(argv[i]) > 2) {
@@ -676,7 +676,7 @@ main(
                     usage(argv[0], argv[i], EXIT_FAILURE);
                 }
             } else if (!strcmp(argv[i], "-start-pts")) {
-                if (sscanf(argv[i+1], "%d", &p.start_pts) != 1) {
+                if (sscanf(argv[i+1], "%"PRId64, &p.start_pts) != 1) {
                     usage(argv[0], argv[i], EXIT_FAILURE);
                 }
             } else if (!strcmp(argv[i], "-start-segment")) {
@@ -686,7 +686,7 @@ main(
                     usage(argv[0], argv[i], EXIT_FAILURE);
                 }
             } else if (!strcmp(argv[i], "-start-time-ts")) {
-                if (sscanf(argv[i+1], "%d", &p.start_time_ts) != 1) {
+                if (sscanf(argv[i+1], "%"PRId64, &p.start_time_ts) != 1) {
                     usage(argv[0], argv[i], EXIT_FAILURE);
                 }
             } else {

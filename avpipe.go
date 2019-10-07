@@ -91,9 +91,9 @@ const (
 // TxParams should match with txparams_t in avpipe_xc.h
 type TxParams struct {
 	Format             string      `json:"format,omitempty"`
-	StartTimeTs        int32       `json:"start_time_ts,omitempty"`
-	StartPts           int32       `json:"start_pts,omitempty"` // Start PTS for output
-	DurationTs         int32       `json:"duration_ts,omitempty"`
+	StartTimeTs        int64       `json:"start_time_ts,omitempty"`
+	StartPts           int64       `json:"start_pts,omitempty"` // Start PTS for output
+	DurationTs         int64       `json:"duration_ts,omitempty"`
 	StartSegmentStr    string      `json:"start_segment_str,omitempty"`
 	VideoBitrate       int32       `json:"video_bitrate,omitempty"`
 	AudioBitrate       int32       `json:"audio_bitrate,omitempty"`
@@ -540,9 +540,9 @@ func Tx(params *TxParams, url string, bypassTranscoding bool, debugFrameLevel bo
 
 	cparams := &C.txparams_t{
 		format:               C.CString(params.Format),
-		start_time_ts:        C.int(params.StartTimeTs),
-		start_pts:            C.int(params.StartPts),
-		duration_ts:          C.int(params.DurationTs),
+		start_time_ts:        C.int64_t(params.StartTimeTs),
+		start_pts:            C.int64_t(params.StartPts),
+		duration_ts:          C.int64_t(params.DurationTs),
 		start_segment_str:    C.CString(params.StartSegmentStr),
 		video_bitrate:        C.int(params.VideoBitrate),
 		audio_bitrate:        C.int(params.AudioBitrate),

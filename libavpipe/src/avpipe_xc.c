@@ -586,7 +586,7 @@ set_key_flag(
 {
     if (packet->pts >= encoder_context->last_key_frame + params->seg_duration_ts) {
         packet->flags |= AV_PKT_FLAG_KEY;
-        elv_dbg("PACKET SET KEY flag pts=%d", packet->pts);
+        elv_dbg("PACKET SET KEY flag pts=%"PRId64, packet->pts);
         encoder_context->last_key_frame = packet->pts;
     }
 }
@@ -602,7 +602,7 @@ should_skip_encoding(
 
     /* Drop frames before the desired 'start_time' */
     if (p->start_time_ts > 0 && frame_in_pts_offset < p->start_time_ts) {
-        elv_dbg("ENCODE skip frame early pts=%d filt_frame pts=%d, frame_in_pts_offset=%d, start_time_ts=%d",
+        elv_dbg("ENCODE skip frame early pts=%"PRId64" filt_frame pts=%"PRId64", frame_in_pts_offset=%d, start_time_ts=%d",
             frame->pts, frame_in_pts_offset, p->start_time_ts);
         skip = 1;
     }
@@ -611,7 +611,7 @@ should_skip_encoding(
     if (p->duration_ts > 0) {
         const int max_valid_ts = p->start_time_ts + p->duration_ts;
         if (frame_in_pts_offset >= max_valid_ts) {
-            elv_dbg("ENCODE skip frame late pts=%d filt_frame pts=%d, frame_in_pts_offset=%d, max_valid_ts=%d",
+            elv_dbg("ENCODE skip frame late pts=%"PRId64" filt_frame pts=%"PRId64", frame_in_pts_offset=%d, max_valid_ts=%d",
                 frame->pts, frame_in_pts_offset, max_valid_ts);
             skip = 1;
         }
@@ -720,7 +720,7 @@ transcode_packet(
     u_int64_t since;
     AVCodecContext *codec_context = decoder_context->codec_context[stream_index];
     int response;
-    elv_dbg("DECODE stream_index=%d send_packet pts=%d dts=%d duration=%d", stream_index, packet->pts, packet->dts, packet->duration);
+    elv_dbg("DECODE stream_index=%d send_packet pts=%"PRId64" dts=%"PRId64" duration=%d", stream_index, packet->pts, packet->dts, packet->duration);
 
     if (bypass_transcode) {
         /*
@@ -887,7 +887,7 @@ flush_decoder(
             /* Force an I frame at beginning of each segment */
             if (frame->pts % p->seg_duration_ts == 0) {
                 frame->pict_type = AV_PICTURE_TYPE_I;
-                elv_dbg("FRAME SET num=%d pts=%d", frame->coded_picture_number, frame->pts);
+                elv_dbg("FRAME SET num=%d pts=%"PRId64, frame->coded_picture_number, frame->pts);
             }
 
             /* push the decoded frame into the filtergraph */
@@ -1012,11 +1012,11 @@ avpipe_tx(
         // Stop when we reached the desired duration (duration -1 means 'entire input stream')
         if (params->duration_ts != -1 &&
             input_packet_rel_pts >= params->start_time_ts + params->duration_ts) {
-            elv_dbg("DURATION OVER param start_time=%d duration=%d pkt pts=%d\n",
+            elv_dbg("DURATION OVER param start_time=%"PRId64" duration=%"PRId64" pkt pts=%"PRId64"\n",
                 params->start_time_ts, params->duration_ts, input_packet->pts);
             /* Allow up to 5 reoredered packets */
             if (input_packet_rel_pts >= params->start_time_ts + params->duration_ts + extra_pts) {
-                elv_dbg("DURATION BREAK param start_time=%d duration=%d pkt pts=%d\n",
+                elv_dbg("DURATION BREAK param start_time=%"PRId64" duration=%"PRId64" pkt pts=%"PRId64"\n",
                     params->start_time_ts, params->duration_ts, input_packet->pts);
                 break;
             }
@@ -1252,9 +1252,9 @@ avpipe_init(
     char buf[1024];
     sprintf(buf,
         "format=%s "
-        "start_time_ts=%d "
-        "start_pts=%d "
-        "duration_ts=%d "
+        "start_time_ts=%"PRId64" "
+        "start_pts=%"PRId64" "
+        "duration_ts=%"PRId64" "
         "start_segment_str=%s "
         "video_bitrate=%d "
         "audio_bitrate=%d "

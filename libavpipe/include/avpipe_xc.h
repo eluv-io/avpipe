@@ -109,8 +109,8 @@ typedef struct coderctx_t {
     AVFilterContext *buffersrc_ctx;
     AVFilterGraph *filter_graph;
 
-    int pts;        /* Decoder/encoder pts */
-    int input_start_pts;  /* In case input stream starts at PTS > 0 */
+    int64_t pts;              /* Decoder/encoder pts */
+    int64_t input_start_pts;  /* In case input stream starts at PTS > 0 */
 } coderctx_t;
 
 typedef enum crypt_scheme_t {
@@ -131,9 +131,9 @@ typedef enum tx_type_t {
 
 typedef struct txparams_t {
     char *format;                   // Output format [Required, Values: dash, hls, mp4, fmp4]
-    int start_time_ts;              // Transcode the source starting from this time
-    int start_pts;                  // Starting PTS for output
-    int duration_ts;                // Transcode time period [-1 for entire source length from start_time_ts]
+    int64_t start_time_ts;          // Transcode the source starting from this time
+    int64_t start_pts;              // Starting PTS for output
+    int64_t duration_ts;            // Transcode time period [-1 for entire source length from start_time_ts]
     char *start_segment_str;        // Specify index of the first segment  TODO: change type to int
     int video_bitrate;
     int audio_bitrate;

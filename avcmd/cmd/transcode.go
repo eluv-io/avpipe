@@ -226,12 +226,12 @@ func doTranscode(cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("crf is not valid, should be in 0..51")
 	}
 
-	startTimeTs, err := cmd.Flags().GetInt32("start-time-ts")
+	startTimeTs, err := cmd.Flags().GetInt64("start-time-ts")
 	if err != nil {
 		return fmt.Errorf("start-time-ts is not valid")
 	}
 
-	startPts, err := cmd.Flags().GetInt32("start-pts")
+	startPts, err := cmd.Flags().GetInt64("start-pts")
 	if err != nil || startPts < 0 {
 		return fmt.Errorf("start-pts is not valid, must be >=0")
 	}
@@ -271,7 +271,7 @@ func doTranscode(cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("enc-width is not valid")
 	}
 
-	durationTs, err := cmd.Flags().GetInt32("duration-ts")
+	durationTs, err := cmd.Flags().GetInt64("duration-ts")
 	if err != nil {
 		return fmt.Errorf("Duration ts is not valid")
 	}
