@@ -11,8 +11,8 @@ import (
 
 	"github.com/grafov/m3u8"
 
-	"eluvio/errors"
-	elog "eluvio/log"
+	"github.com/qluvio/content-fabric/errors"
+	elog "github.com/qluvio/content-fabric/log"
 )
 
 var log = elog.Get("/eluvio/avpipe/live")

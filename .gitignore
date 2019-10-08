@@ -65,3 +65,4 @@ dkms.conf
 /goetx/goetx
 O/
 *.log
+!go.mod

@@ -5,7 +5,7 @@ import (
 	"os"
 	"path/filepath"
 
-	elog "eluvio/log"
+	elog "github.com/qluvio/content-fabric/log"
 
 	"github.com/qluvio/avpipe"
 	"github.com/qluvio/avpipe/avcmd/cmd"

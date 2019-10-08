@@ -22,7 +22,7 @@ package avpipe
 // #include "elv_log.h"
 import "C"
 import (
-	elog "eluvio/log"
+	elog "github.com/qluvio/content-fabric/log"
 	"fmt"
 	"math/big"
 	"sync"
