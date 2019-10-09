@@ -385,12 +385,14 @@ do_probe(
                 "\tcodec_type: %s\n"
                 "\tcodec_id: %d\n"
                 "\tcodec_name: %s\n"
-                "\tduration_ts: %d\n"
+                "\tduration_ts: %"PRId64"\n"
                 "\ttime_base: %d/%d\n"
                 "\tnb_frames: %"PRId64"\n"
                 "\tstart_time: %"PRId64"\n"
                 "\tavg_frame_rate: %d/%d\n"
                 "\tframe_rate: %d/%d\n"
+                "\tsample_rate: %d\n"
+                "\tchannels: %d\n"
                 "\tticks_per_frame: %d\n"
                 "\tbit_rate: %"PRId64"\n"
                 "\twidth: %d\n"
@@ -398,8 +400,8 @@ do_probe(
                 "\tpix_fmt: %s\n"
                 "\thas_b_frames: %d\n"
                 "\tfield_order: %d\n"
-                "\tsample_aspect_ratio: %d/%d\n"
-                "\tdisplay_aspect_ratio: %d/%d\n",
+                "\tsample_aspect_ratio: %d:%d\n"
+                "\tdisplay_aspect_ratio: %d:%d\n",
                 i,
                 av_get_media_type_string(probe->stream_info[i].codec_type),
                 probe->stream_info[i].codec_id,
@@ -410,6 +412,8 @@ do_probe(
                 probe->stream_info[i].start_time,
                 probe->stream_info[i].avg_frame_rate.num, probe->stream_info[i].avg_frame_rate.den,
                 probe->stream_info[i].frame_rate.num, probe->stream_info[i].frame_rate.den,
+                probe->stream_info[i].sample_rate,
+                probe->stream_info[i].channels,
                 probe->stream_info[i].ticks_per_frame,
                 probe->stream_info[i].bit_rate,
                 probe->stream_info[i].width,

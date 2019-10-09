@@ -132,6 +132,7 @@ prepare_decoder(
                     avioctx->buffer_size = AUDIO_BUF_SIZE;
             }
         } else {
+            decoder_context->codec[i] = NULL;
             elv_dbg("STREAM UNKNOWN type=%d", decoder_context->format_context->streams[i]->codecpar->codec_type);
             continue;
         }
@@ -1151,8 +1152,9 @@ avpipe_probe(
         AVStream *s = decoder_ctx.format_context->streams[i];
         AVCodecContext *codec_context = decoder_ctx.codec_context[i];
         AVCodec *codec = decoder_ctx.codec[i];
+        AVRational sar, dar;
 
-        if (codec->type != AVMEDIA_TYPE_VIDEO && codec->type != AVMEDIA_TYPE_AUDIO) {
+        if (!codec || (codec->type != AVMEDIA_TYPE_VIDEO && codec->type != AVMEDIA_TYPE_AUDIO)) {
             nb_skipped_streams++;
             continue;
         }
@@ -1165,15 +1167,30 @@ avpipe_probe(
         stream_probes[i].nb_frames = s->nb_frames;
         stream_probes[i].start_time = s->start_time;
         stream_probes[i].avg_frame_rate = s->avg_frame_rate;
-        stream_probes[i].display_aspect_ratio = s->display_aspect_ratio;
-        stream_probes[i].frame_rate = codec_context->framerate;
+
+        // Find sample asperct ratio and diplay aspect ratio
+        sar = av_guess_sample_aspect_ratio(decoder_ctx.format_context, s, NULL);
+        if (sar.num) {
+            stream_probes[i].sample_aspect_ratio = sar;
+            av_reduce(&dar.num, &dar.den,
+                      codec_context->width  * sar.num,
+                      codec_context->height * sar.den,
+                      1024*1024);
+            stream_probes[i].display_aspect_ratio = dar;
+        } else {
+            stream_probes[i].sample_aspect_ratio = codec_context->sample_aspect_ratio;
+            stream_probes[i].display_aspect_ratio = s->display_aspect_ratio;
+        }
+
+        stream_probes[i].frame_rate = s->r_frame_rate;
         stream_probes[i].ticks_per_frame = codec_context->ticks_per_frame;
         stream_probes[i].bit_rate = codec_context->bit_rate;
         stream_probes[i].has_b_frames = codec_context->has_b_frames;
+        stream_probes[i].sample_rate = codec_context->sample_rate;
+        stream_probes[i].channels = codec_context->channels;
         stream_probes[i].width = codec_context->width;
         stream_probes[i].height = codec_context->height;
         stream_probes[i].pix_fmt = codec_context->pix_fmt;
-        stream_probes[i].sample_aspect_ratio = codec_context->sample_aspect_ratio;
         stream_probes[i].field_order = codec_context->field_order;
 
         if (probe->container_info.duration < ((float)stream_probes[i].duration_ts)/stream_probes[i].time_base.den)

@@ -165,12 +165,14 @@ typedef struct stream_info_t {
     int codec_type;             // Audio or Video
     int codec_id;
     char codec_name[MAX_CODEC_NAME+1];
-    int duration_ts;
+    int64_t duration_ts;
     AVRational time_base;
     int64_t nb_frames;
     int64_t start_time;
     AVRational avg_frame_rate;
-    AVRational frame_rate;
+    AVRational frame_rate;      // Same as r_frame_rate
+    int sample_rate;            // Audio only, samples per second
+    int channels;               // Audio only, number of audio channels
     int ticks_per_frame;
     int64_t bit_rate;
     int has_b_frames;

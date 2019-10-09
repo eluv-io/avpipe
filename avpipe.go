@@ -22,11 +22,12 @@ package avpipe
 // #include "elv_log.h"
 import "C"
 import (
-	elog "github.com/qluvio/content-fabric/log"
 	"fmt"
 	"math/big"
 	"sync"
 	"unsafe"
+
+	elog "github.com/qluvio/content-fabric/log"
 )
 
 var log = elog.Get("/eluvio/avpipe")
@@ -131,12 +132,14 @@ type StreamInfo struct {
 	CodecType          AVMediaType `json:"codec_type"`
 	CodecID            int         `json:"codec_id,omitempty"`
 	CodecName          string      `json:"codec_name,omitempty"`
-	DurationTs         int         `json:"duration_ts,omitempty"`
+	DurationTs         int64       `json:"duration_ts,omitempty"`
 	TimeBase           *big.Rat    `json:"time_base,omitempty"`
 	NBFrames           int64       `json:"nb_frames,omitempty"`
 	StartTime          int64       `json:"start_time"`
 	AvgFrameRate       *big.Rat    `json:"avg_frame_rate,omitempty"`
 	FrameRate          *big.Rat    `json:"frame_rate,omitempty"`
+	SampleRate         int         `json:sample_rate, omitempty`
+	Channels           int         `json:channels, omitempty`
 	TicksPerFrame      int         `json:"ticks_per_frame,omitempty"`
 	BitRate            int64       `json:"bit_rate,omitempty"`
 	Has_B_Frames       bool        `json:"has_b_frame"`
@@ -627,7 +630,7 @@ func Probe(url string, seekable bool) (*ProbeInfo, error) {
 		probeInfo.StreamInfo[i].CodecType = AVMediaType(probeArray[i].codec_type)
 		probeInfo.StreamInfo[i].CodecID = int(probeArray[i].codec_id)
 		probeInfo.StreamInfo[i].CodecName = C.GoString((*C.char)(unsafe.Pointer(&probeArray[i].codec_name)))
-		probeInfo.StreamInfo[i].DurationTs = int(probeArray[i].duration_ts)
+		probeInfo.StreamInfo[i].DurationTs = int64(probeArray[i].duration_ts)
 		probeInfo.StreamInfo[i].TimeBase = big.NewRat(int64(probeArray[i].time_base.num), int64(probeArray[i].time_base.den))
 		probeInfo.StreamInfo[i].NBFrames = int64(probeArray[i].nb_frames)
 		probeInfo.StreamInfo[i].StartTime = int64(probeArray[i].start_time)
@@ -641,6 +644,8 @@ func Probe(url string, seekable bool) (*ProbeInfo, error) {
 		} else {
 			probeInfo.StreamInfo[i].FrameRate = big.NewRat(int64(probeArray[i].frame_rate.num), int64(1))
 		}
+		probeInfo.StreamInfo[i].SampleRate = int(probeArray[i].sample_rate)
+		probeInfo.StreamInfo[i].Channels = int(probeArray[i].channels)
 		probeInfo.StreamInfo[i].TicksPerFrame = int(probeArray[i].ticks_per_frame)
 		probeInfo.StreamInfo[i].BitRate = int64(probeArray[i].bit_rate)
 		if probeArray[i].has_b_frames > 0 {

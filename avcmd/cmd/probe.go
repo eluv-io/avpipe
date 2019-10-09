@@ -54,6 +54,8 @@ func doProbe(cmd *cobra.Command, args []string) error {
 		fmt.Printf("\tstart_time: %d\n", info.StartTime)
 		fmt.Printf("\tavg_frame_rate: %d/%d\n", info.AvgFrameRate.Num(), info.AvgFrameRate.Denom())
 		fmt.Printf("\tframe_rate: %d/%d\n", info.FrameRate.Num(), info.FrameRate.Denom())
+		fmt.Printf("\tSampleRate: %d\n", info.SampleRate)
+		fmt.Printf("\tchannels: %d\n", info.Channels)
 		fmt.Printf("\tticks_per_frame: %d\n", info.TicksPerFrame)
 		fmt.Printf("\tbit_rate: %d\n", info.BitRate)
 		fmt.Printf("\thas_b_frames: %v\n", info.Has_B_Frames)
@@ -64,8 +66,8 @@ func doProbe(cmd *cobra.Command, args []string) error {
 		} else {
 			fmt.Printf("\tpix_fmt: -\n")
 		}
-		fmt.Printf("\tsample_aspect_ratoi: %d/%d\n", info.SampleAspectRatio.Num(), info.SampleAspectRatio.Denom())
-		fmt.Printf("\tdisplay_aspect_ratoi: %d/%d\n", info.DisplayAspectRatio.Num(), info.DisplayAspectRatio.Denom())
+		fmt.Printf("\tsample_aspect_ratio: %d:%d\n", info.SampleAspectRatio.Num(), info.SampleAspectRatio.Denom())
+		fmt.Printf("\tdisplay_aspect_ratio: %d:%d\n", info.DisplayAspectRatio.Num(), info.DisplayAspectRatio.Denom())
 		fmt.Printf("\tfield_order: %d\n", info.FieldOrder)
 	}
 
