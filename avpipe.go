@@ -163,9 +163,9 @@ type StreamInfo struct {
 	StartTime          int64       `json:"start_time"`
 	AvgFrameRate       *big.Rat    `json:"avg_frame_rate,omitempty"`
 	FrameRate          *big.Rat    `json:"frame_rate,omitempty"`
-	SampleRate         int         `json:sample_rate, omitempty`
-	Channels           int         `json:channels, omitempty`
-	ChannelLayout      int         `json:channel_layout, omitempty`
+	SampleRate         int         `json:sample_rate,omitempty`
+	Channels           int         `json:channels,omitempty`
+	ChannelLayout      int         `json:channel_layout,omitempty`
 	TicksPerFrame      int         `json:"ticks_per_frame,omitempty"`
 	BitRate            int64       `json:"bit_rate,omitempty"`
 	Has_B_Frames       bool        `json:"has_b_frame"`
@@ -616,23 +616,6 @@ func Tx(params *TxParams, url string, bypassTranscoding bool, debugFrameLevel bo
 
 	rc := C.tx((*C.txparams_t)(unsafe.Pointer(cparams)), C.CString(url), C.int(bypass), C.int(debugFrameLevelInt))
 	return int(rc)
-}
-
-func AVMediaTypeName(mediaType AVMediaType) string {
-	switch mediaType {
-	case AVMEDIA_TYPE_VIDEO:
-		return "video"
-	case AVMEDIA_TYPE_AUDIO:
-		return "audio"
-	case AVMEDIA_TYPE_DATA:
-		return "data"
-	case AVMEDIA_TYPE_SUBTITLE:
-		return "subtitle"
-	case AVMEDIA_TYPE_ATTACHMENT:
-		return "attachment"
-	}
-
-	return "none"
 }
 
 func ChannelLayoutName(channelLayout int) string {
