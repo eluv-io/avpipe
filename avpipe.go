@@ -118,7 +118,6 @@ type TxParams struct {
 }
 
 type AVMediaType int
-
 const (
 	AVMEDIA_TYPE_VIDEO      = 0
 	AVMEDIA_TYPE_AUDIO      = 1
@@ -127,9 +126,35 @@ const (
 	AVMEDIA_TYPE_ATTACHMENT = 4 ///< Opaque data information usually sparse
 	AVMEDIA_TYPE_NB         = 5
 )
+var AVMediaTypeNames = map[AVMediaType]string{
+	AVMEDIA_TYPE_VIDEO:      "video",
+	AVMEDIA_TYPE_AUDIO:      "audio",
+	AVMEDIA_TYPE_DATA:       "data",
+	AVMEDIA_TYPE_SUBTITLE:   "subtitle",
+	AVMEDIA_TYPE_ATTACHMENT: "attachment",
+	AVMEDIA_TYPE_NB:         "nb",
+}
+
+type AVFieldOrder int
+const (
+    AV_FIELD_UNKNOWN      = 0
+    AV_FIELD_PROGRESSIVE  = 1
+    AV_FIELD_TT           = 2 //< Top coded_first, top displayed first
+    AV_FIELD_BB           = 3 //< Bottom coded first, bottom displayed first
+    AV_FIELD_TB           = 4 //< Top coded first, bottom displayed first
+    AV_FIELD_BT           = 5 //< Bottom coded first, top displayed first
+)
+var AVFieldOrderNames = map[AVFieldOrder]string{
+	AV_FIELD_UNKNOWN:     "",
+	AV_FIELD_PROGRESSIVE: "progressive",
+	AV_FIELD_TT:          "tt",
+	AV_FIELD_BB:          "bb",
+	AV_FIELD_TB:          "tb",
+	AV_FIELD_BT:          "bt",
+}
 
 type StreamInfo struct {
-	CodecType          AVMediaType `json:"codec_type"`
+	CodecType          string      `json:"codec_type"`
 	CodecID            int         `json:"codec_id,omitempty"`
 	CodecName          string      `json:"codec_name,omitempty"`
 	DurationTs         int64       `json:"duration_ts,omitempty"`
@@ -149,7 +174,7 @@ type StreamInfo struct {
 	PixFmt             int         `json:"pix_fmt"`          // Video only, it matches with enum AVPixelFormat in FFmpeg
 	SampleAspectRatio  *big.Rat    `json:"sample_aspect_ratio,omitempty"`
 	DisplayAspectRatio *big.Rat    `json:"display_aspect_ratio,omitempty"`
-	FieldOrder         int         `json:"field_order,omitempty"`
+	FieldOrder         string      `json:"field_order,omitempty"`
 }
 
 type ContainerInfo struct {
@@ -157,9 +182,10 @@ type ContainerInfo struct {
 	FormatName string  `json:"format_name"`
 }
 
+// PENDING: use legacy_imf_dash_extract/media.Probe?
 type ProbeInfo struct {
-	ContainerInfo ContainerInfo
-	StreamInfo    []StreamInfo
+	ContainerInfo ContainerInfo `json:"format"`
+	StreamInfo    []StreamInfo  `json:"streams"`
 }
 
 // IOHandler defines handlers that will be called from the C interface functions
@@ -638,7 +664,7 @@ func Probe(url string, seekable bool) (*ProbeInfo, error) {
 	probeInfo.StreamInfo = make([]StreamInfo, int(rc))
 	probeArray := (*[1 << 10]C.stream_info_t)(unsafe.Pointer(cprobe.stream_info))
 	for i := 0; i < int(rc); i++ {
-		probeInfo.StreamInfo[i].CodecType = AVMediaType(probeArray[i].codec_type)
+		probeInfo.StreamInfo[i].CodecType = AVMediaTypeNames[AVMediaType(probeArray[i].codec_type)]
 		probeInfo.StreamInfo[i].CodecID = int(probeArray[i].codec_id)
 		probeInfo.StreamInfo[i].CodecName = C.GoString((*C.char)(unsafe.Pointer(&probeArray[i].codec_name)))
 		probeInfo.StreamInfo[i].DurationTs = int64(probeArray[i].duration_ts)
@@ -678,7 +704,7 @@ func Probe(url string, seekable bool) (*ProbeInfo, error) {
 		} else {
 			probeInfo.StreamInfo[i].DisplayAspectRatio = big.NewRat(int64(probeArray[i].display_aspect_ratio.num), int64(1))
 		}
-		probeInfo.StreamInfo[i].FieldOrder = int(probeArray[i].field_order)
+		probeInfo.StreamInfo[i].FieldOrder = AVFieldOrderNames[AVFieldOrder(probeArray[i].field_order)]
 	}
 
 	probeInfo.ContainerInfo.FormatName = C.GoString((*C.char)(unsafe.Pointer(cprobe.container_info.format_name)))
