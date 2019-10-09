@@ -161,6 +161,12 @@ typedef struct txparams_t {
 
 #define MAX_CODEC_NAME  256
 
+typedef struct channel_layout_info_t {
+    const char *name;
+    int         nb_channels;
+    uint64_t    layout;
+} channel_layout_info_t;
+
 typedef struct stream_info_t {
     int codec_type;             // Audio or Video
     int codec_id;
@@ -173,6 +179,7 @@ typedef struct stream_info_t {
     AVRational frame_rate;      // Same as r_frame_rate
     int sample_rate;            // Audio only, samples per second
     int channels;               // Audio only, number of audio channels
+    int channel_layout;         // Audio channel layout
     int ticks_per_frame;
     int64_t bit_rate;
     int has_b_frames;
@@ -243,6 +250,17 @@ avpipe_init(
 int
 avpipe_fini(
     txctx_t **txctx);
+
+/*
+ * @brief   Returns channel layout name.
+ *
+ * @param   channel_layout  Channel layout id.
+ *
+ * @return  Returns channel layout info if it can find channel layout with corresponding layout id, otherwise NULL.
+ */
+const channel_layout_info_t*
+avpipe_channel_layout_info(
+    int channel_layout);
 
 /**
  * @brief   Probes object stream specified by input handler.

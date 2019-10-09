@@ -381,6 +381,8 @@ do_probe(
     }
 
     for (int i=0; i<rc; i++) {
+        const channel_layout_info_t *channel_layout_info = avpipe_channel_layout_info(probe->stream_info[i].channel_layout);
+
         printf("Stream[%d]\n"
                 "\tcodec_type: %s\n"
                 "\tcodec_id: %d\n"
@@ -393,6 +395,7 @@ do_probe(
                 "\tframe_rate: %d/%d\n"
                 "\tsample_rate: %d\n"
                 "\tchannels: %d\n"
+                "\tchannel_layout: %s\n"
                 "\tticks_per_frame: %d\n"
                 "\tbit_rate: %"PRId64"\n"
                 "\twidth: %d\n"
@@ -414,6 +417,7 @@ do_probe(
                 probe->stream_info[i].frame_rate.num, probe->stream_info[i].frame_rate.den,
                 probe->stream_info[i].sample_rate,
                 probe->stream_info[i].channels,
+                channel_layout_info != NULL ? channel_layout_info->name : "-",
                 probe->stream_info[i].ticks_per_frame,
                 probe->stream_info[i].bit_rate,
                 probe->stream_info[i].width,

@@ -140,6 +140,7 @@ type StreamInfo struct {
 	FrameRate          *big.Rat    `json:"frame_rate,omitempty"`
 	SampleRate         int         `json:sample_rate, omitempty`
 	Channels           int         `json:channels, omitempty`
+	ChannelLayout      int         `json:channel_layout, omitempty`
 	TicksPerFrame      int         `json:"ticks_per_frame,omitempty"`
 	BitRate            int64       `json:"bit_rate,omitempty"`
 	Has_B_Frames       bool        `json:"has_b_frame"`
@@ -608,6 +609,16 @@ func AVMediaTypeName(mediaType AVMediaType) string {
 	return "none"
 }
 
+func ChannelLayoutName(channelLayout int) string {
+	channelLayoutInfo := C.avpipe_channel_layout_info(C.int(channelLayout))
+	if unsafe.Pointer(channelLayoutInfo) != C.NULL {
+		channelLayoutName := C.GoString((*C.char)(unsafe.Pointer(channelLayoutInfo.name)))
+		return channelLayoutName
+	}
+
+	return ""
+}
+
 func Probe(url string, seekable bool) (*ProbeInfo, error) {
 	var cprobe *C.txprobe_t
 	var cseekable C.int
@@ -646,6 +657,7 @@ func Probe(url string, seekable bool) (*ProbeInfo, error) {
 		}
 		probeInfo.StreamInfo[i].SampleRate = int(probeArray[i].sample_rate)
 		probeInfo.StreamInfo[i].Channels = int(probeArray[i].channels)
+		probeInfo.StreamInfo[i].ChannelLayout = int(probeArray[i].channel_layout)
 		probeInfo.StreamInfo[i].TicksPerFrame = int(probeArray[i].ticks_per_frame)
 		probeInfo.StreamInfo[i].BitRate = int64(probeArray[i].bit_rate)
 		if probeArray[i].has_b_frames > 0 {
