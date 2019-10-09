@@ -45,7 +45,7 @@ func doProbe(cmd *cobra.Command, args []string) error {
 
 	for i, info := range probe.StreamInfo {
 		fmt.Printf("Stream[%d]\n", i)
-		fmt.Printf("\tcodec_type: %s\n", avpipe.AVMediaTypeName(info.CodecType))
+		fmt.Printf("\tcodec_type: %s\n", info.CodecType)
 		fmt.Printf("\tcodec_id: %d\n", info.CodecID)
 		fmt.Printf("\tcodec_name: %s\n", info.CodecName)
 		fmt.Printf("\tduration_ts: %d\n", info.DurationTs)
@@ -66,7 +66,7 @@ func doProbe(cmd *cobra.Command, args []string) error {
 		}
 		fmt.Printf("\tsample_aspect_ratoi: %d/%d\n", info.SampleAspectRatio.Num(), info.SampleAspectRatio.Denom())
 		fmt.Printf("\tdisplay_aspect_ratoi: %d/%d\n", info.DisplayAspectRatio.Num(), info.DisplayAspectRatio.Denom())
-		fmt.Printf("\tfield_order: %d\n", info.FieldOrder)
+		fmt.Printf("\tfield_order: %s\n", info.FieldOrder)
 	}
 
 	fmt.Printf("Container\n")

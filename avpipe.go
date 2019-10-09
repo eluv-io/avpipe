@@ -125,7 +125,7 @@ const (
 	AVMEDIA_TYPE_ATTACHMENT = 4 ///< Opaque data information usually sparse
 	AVMEDIA_TYPE_NB         = 5
 )
-var avMediaTypeToString = map[AVMediaType]string{
+var AVMediaTypeNames = map[AVMediaType]string{
 	AVMEDIA_TYPE_VIDEO:      "video",
 	AVMEDIA_TYPE_AUDIO:      "audio",
 	AVMEDIA_TYPE_DATA:       "data",
@@ -143,7 +143,7 @@ const (
     AV_FIELD_TB           = 4 //< Top coded first, bottom displayed first
     AV_FIELD_BT           = 5 //< Bottom coded first, top displayed first
 )
-var avFieldOrderToString = map[AVFieldOrder]string{
+var AVFieldOrderNames = map[AVFieldOrder]string{
 	AV_FIELD_UNKNOWN:     "",
 	AV_FIELD_PROGRESSIVE: "progressive",
 	AV_FIELD_TT:          "tt",
@@ -614,23 +614,6 @@ func Tx(params *TxParams, url string, bypassTranscoding bool, debugFrameLevel bo
 	return int(rc)
 }
 
-func AVMediaTypeName(mediaType AVMediaType) string {
-	switch mediaType {
-	case AVMEDIA_TYPE_VIDEO:
-		return "video"
-	case AVMEDIA_TYPE_AUDIO:
-		return "audio"
-	case AVMEDIA_TYPE_DATA:
-		return "data"
-	case AVMEDIA_TYPE_SUBTITLE:
-		return "subtitle"
-	case AVMEDIA_TYPE_ATTACHMENT:
-		return "attachment"
-	}
-
-	return "none"
-}
-
 func Probe(url string, seekable bool) (*ProbeInfo, error) {
 	var cprobe *C.txprobe_t
 	var cseekable C.int
@@ -650,7 +633,7 @@ func Probe(url string, seekable bool) (*ProbeInfo, error) {
 	probeInfo.StreamInfo = make([]StreamInfo, int(rc))
 	probeArray := (*[1 << 10]C.stream_info_t)(unsafe.Pointer(cprobe.stream_info))
 	for i := 0; i < int(rc); i++ {
-		probeInfo.StreamInfo[i].CodecType = avMediaTypeToString[AVMediaType(probeArray[i].codec_type)]
+		probeInfo.StreamInfo[i].CodecType = AVMediaTypeNames[AVMediaType(probeArray[i].codec_type)]
 		probeInfo.StreamInfo[i].CodecID = int(probeArray[i].codec_id)
 		probeInfo.StreamInfo[i].CodecName = C.GoString((*C.char)(unsafe.Pointer(&probeArray[i].codec_name)))
 		probeInfo.StreamInfo[i].DurationTs = int(probeArray[i].duration_ts)
@@ -687,7 +670,7 @@ func Probe(url string, seekable bool) (*ProbeInfo, error) {
 		} else {
 			probeInfo.StreamInfo[i].DisplayAspectRatio = big.NewRat(int64(probeArray[i].display_aspect_ratio.num), int64(1))
 		}
-		probeInfo.StreamInfo[i].FieldOrder = avFieldOrderToString[AVFieldOrder(probeArray[i].field_order)]
+		probeInfo.StreamInfo[i].FieldOrder = AVFieldOrderNames[AVFieldOrder(probeArray[i].field_order)]
 	}
 
 	probeInfo.ContainerInfo.FormatName = C.GoString((*C.char)(unsafe.Pointer(cprobe.container_info.format_name)))
