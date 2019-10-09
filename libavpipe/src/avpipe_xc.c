@@ -132,6 +132,7 @@ prepare_decoder(
                     avioctx->buffer_size = AUDIO_BUF_SIZE;
             }
         } else {
+            decoder_context->codec[i] = NULL;
             elv_dbg("STREAM UNKNOWN type=%d", decoder_context->format_context->streams[i]->codecpar->codec_type);
             continue;
         }
@@ -1114,6 +1115,49 @@ avpipe_tx(
     return 0;
 }
 
+const channel_layout_info_t channel_layout_map[] = {
+    { "mono",        1,  AV_CH_LAYOUT_MONO },
+    { "stereo",      2,  AV_CH_LAYOUT_STEREO },
+    { "2.1",         3,  AV_CH_LAYOUT_2POINT1 },
+    { "3.0",         3,  AV_CH_LAYOUT_SURROUND },
+    { "3.0(back)",   3,  AV_CH_LAYOUT_2_1 },
+    { "4.0",         4,  AV_CH_LAYOUT_4POINT0 },
+    { "quad",        4,  AV_CH_LAYOUT_QUAD },
+    { "quad(side)",  4,  AV_CH_LAYOUT_2_2 },
+    { "3.1",         4,  AV_CH_LAYOUT_3POINT1 },
+    { "5.0",         5,  AV_CH_LAYOUT_5POINT0_BACK },
+    { "5.0(side)",   5,  AV_CH_LAYOUT_5POINT0 },
+    { "4.1",         5,  AV_CH_LAYOUT_4POINT1 },
+    { "5.1",         6,  AV_CH_LAYOUT_5POINT1_BACK },
+    { "5.1(side)",   6,  AV_CH_LAYOUT_5POINT1 },
+    { "6.0",         6,  AV_CH_LAYOUT_6POINT0 },
+    { "6.0(front)",  6,  AV_CH_LAYOUT_6POINT0_FRONT },
+    { "hexagonal",   6,  AV_CH_LAYOUT_HEXAGONAL },
+    { "6.1",         7,  AV_CH_LAYOUT_6POINT1 },
+    { "6.1(back)",   7,  AV_CH_LAYOUT_6POINT1_BACK },
+    { "6.1(front)",  7,  AV_CH_LAYOUT_6POINT1_FRONT },
+    { "7.0",         7,  AV_CH_LAYOUT_7POINT0 },
+    { "7.0(front)",  7,  AV_CH_LAYOUT_7POINT0_FRONT },
+    { "7.1",         8,  AV_CH_LAYOUT_7POINT1 },
+    { "7.1(wide)",   8,  AV_CH_LAYOUT_7POINT1_WIDE_BACK },
+    { "7.1(wide-side)",   8,  AV_CH_LAYOUT_7POINT1_WIDE },
+    { "octagonal",   8,  AV_CH_LAYOUT_OCTAGONAL },
+    { "hexadecagonal", 16, AV_CH_LAYOUT_HEXADECAGONAL },
+    { "downmix",     2,  AV_CH_LAYOUT_STEREO_DOWNMIX, },
+};
+
+const channel_layout_info_t*
+avpipe_channel_layout_info(
+    int channel_layout)
+{
+    for (int i = 0; i < sizeof(channel_layout_map)/sizeof(channel_layout_map[0]); i++) {
+        if (channel_layout_map[i].layout == channel_layout)
+            return &channel_layout_map[i];
+    }
+
+    return NULL;
+}
+
 int
 avpipe_probe(
     avpipe_io_handler_t *in_handlers,
@@ -1151,8 +1195,9 @@ avpipe_probe(
         AVStream *s = decoder_ctx.format_context->streams[i];
         AVCodecContext *codec_context = decoder_ctx.codec_context[i];
         AVCodec *codec = decoder_ctx.codec[i];
+        AVRational sar, dar;
 
-        if (codec->type != AVMEDIA_TYPE_VIDEO && codec->type != AVMEDIA_TYPE_AUDIO) {
+        if (!codec || (codec->type != AVMEDIA_TYPE_VIDEO && codec->type != AVMEDIA_TYPE_AUDIO)) {
             nb_skipped_streams++;
             continue;
         }
@@ -1165,15 +1210,34 @@ avpipe_probe(
         stream_probes[i].nb_frames = s->nb_frames;
         stream_probes[i].start_time = s->start_time;
         stream_probes[i].avg_frame_rate = s->avg_frame_rate;
-        stream_probes[i].display_aspect_ratio = s->display_aspect_ratio;
-        stream_probes[i].frame_rate = codec_context->framerate;
+
+        // Find sample asperct ratio and diplay aspect ratio
+        sar = av_guess_sample_aspect_ratio(decoder_ctx.format_context, s, NULL);
+        if (sar.num) {
+            stream_probes[i].sample_aspect_ratio = sar;
+            av_reduce(&dar.num, &dar.den,
+                      codec_context->width  * sar.num,
+                      codec_context->height * sar.den,
+                      1024*1024);
+            stream_probes[i].display_aspect_ratio = dar;
+        } else {
+            stream_probes[i].sample_aspect_ratio = codec_context->sample_aspect_ratio;
+            stream_probes[i].display_aspect_ratio = s->display_aspect_ratio;
+        }
+
+        stream_probes[i].frame_rate = s->r_frame_rate;
         stream_probes[i].ticks_per_frame = codec_context->ticks_per_frame;
         stream_probes[i].bit_rate = codec_context->bit_rate;
         stream_probes[i].has_b_frames = codec_context->has_b_frames;
+        stream_probes[i].sample_rate = codec_context->sample_rate;
+        stream_probes[i].channels = codec_context->channels;
+        if (codec->type == AVMEDIA_TYPE_AUDIO)
+            stream_probes[i].channel_layout = codec_context->channel_layout;
+        else
+            stream_probes[i].channel_layout = -1;
         stream_probes[i].width = codec_context->width;
         stream_probes[i].height = codec_context->height;
         stream_probes[i].pix_fmt = codec_context->pix_fmt;
-        stream_probes[i].sample_aspect_ratio = codec_context->sample_aspect_ratio;
         stream_probes[i].field_order = codec_context->field_order;
 
         if (probe->container_info.duration < ((float)stream_probes[i].duration_ts)/stream_probes[i].time_base.den)
