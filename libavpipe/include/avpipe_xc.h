@@ -12,6 +12,8 @@
 #include <libavfilter/buffersrc.h>
 #include <libavutil/opt.h>
 
+#define MAX_STREAMS	16
+
 typedef enum avpipe_buftype_t {
     avpipe_input_stream = 0,
     avpipe_manifest = 1,                // dash.mpd
@@ -94,10 +96,10 @@ typedef struct avpipe_io_handler_t {
 typedef struct coderctx_t {
     AVFormatContext *format_context;
 
-    AVCodec *codec[2];
-    AVStream *stream[2];
-    AVCodecParameters *codec_parameters[2];
-    AVCodecContext *codec_context[2];
+    AVCodec *codec[MAX_STREAMS];
+    AVStream *stream[MAX_STREAMS];
+    AVCodecParameters *codec_parameters[MAX_STREAMS];
+    AVCodecContext *codec_context[MAX_STREAMS];
     int video_stream_index;
     int audio_stream_index;
 

@@ -110,13 +110,13 @@ prepare_decoder(
 
     dump_decoder(decoder_context);
 
-    for (int i = 0; i < decoder_context->format_context->nb_streams; i++) {
+    for (int i = 0; i < decoder_context->format_context->nb_streams && i < MAX_STREAMS; i++) {
 
-        if (i > 1) {
-            elv_err("STREAM support limited to 2");
-            break;
-        }
-
+        //if (i > 1) {
+        //    elv_err("STREAM support limited to 2");
+        //    break;
+        //}
+      
         /* Copy codec params from stream format context */
         decoder_context->codec_parameters[i] = decoder_context->format_context->streams[i]->codecpar;
         decoder_context->stream[i] = decoder_context->format_context->streams[i];
