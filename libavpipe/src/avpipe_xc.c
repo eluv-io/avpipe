@@ -109,7 +109,7 @@ prepare_decoder(
 
     dump_decoder(decoder_context);
 
-    for (int i = 0; i < decoder_context->format_context->nb_streams; i++) {
+    for (int i = 0; i < decoder_context->format_context->nb_streams && i < MAX_STREAMS; i++) {
         /* Copy codec params from stream format context */
         decoder_context->codec_parameters[i] = decoder_context->format_context->streams[i]->codecpar;
         decoder_context->stream[i] = decoder_context->format_context->streams[i];
