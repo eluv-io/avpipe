@@ -97,7 +97,7 @@ in_seek(
 {
     ioctx_t *c = (ioctx_t *)opaque;
     int fd = *((int *)(c->opaque));
-    int rc = lseek(fd, offset, whence);
+    int64_t rc = lseek(fd, offset, whence);
     whence = whence & 0xFFFF; /* Mask out AVSEEK_SIZE and AVSEEK_FORCE */
     switch (whence) {
     case SEEK_SET:
@@ -110,7 +110,7 @@ in_seek(
         elv_dbg("IN SEEK - weird seek\n");
     }
 
-    elv_dbg("IN SEEK offset=%d whence=%d rc=%d", offset, whence, rc);
+    elv_dbg("IN SEEK offset=%"PRId64" whence=%d rc=%"PRId64, offset, whence, rc);
     return rc;
 }
 
@@ -318,7 +318,7 @@ tx_thread_func(
             continue;
         }
 
-        int last_input_pts;
+        int64_t last_input_pts;
         if (avpipe_tx(txctx, 0, params->bypass_transcoding, 1, &last_input_pts) < 0) {
             elv_err("THREAD %d, iteration %d error in transcoding", params->thread_number, i+1);
             continue;
@@ -355,12 +355,13 @@ tx_type_from_string(
 
 static int
 do_probe(
-    char *filename
+    char *filename,
+    int seekable
 )
 {
     ioctx_t inctx;
     avpipe_io_handler_t in_handlers;
-    txprobe_t *probes;
+    txprobe_t *probe;
     int rc;
 
     in_handlers.avpipe_opener = in_opener;
@@ -374,23 +375,28 @@ do_probe(
         goto end_probe;
     }
 
-    rc = avpipe_probe(&in_handlers, &inctx, &probes);
+    rc = avpipe_probe(&in_handlers, &inctx, seekable, &probe);
     if (rc < 0) {
         printf("Error: avpipe probe failed on file %s with no valid stream.\n", filename);
         goto end_probe;
     }
 
     for (int i=0; i<rc; i++) {
+        const channel_layout_info_t *channel_layout_info = avpipe_channel_layout_info(probe->stream_info[i].channel_layout);
+
         printf("Stream[%d]\n"
                 "\tcodec_type: %s\n"
                 "\tcodec_id: %d\n"
                 "\tcodec_name: %s\n"
-                "\tduration_ts: %d\n"
+                "\tduration_ts: %"PRId64"\n"
                 "\ttime_base: %d/%d\n"
                 "\tnb_frames: %"PRId64"\n"
                 "\tstart_time: %"PRId64"\n"
                 "\tavg_frame_rate: %d/%d\n"
                 "\tframe_rate: %d/%d\n"
+                "\tsample_rate: %d\n"
+                "\tchannels: %d\n"
+                "\tchannel_layout: %s\n"
                 "\tticks_per_frame: %d\n"
                 "\tbit_rate: %"PRId64"\n"
                 "\twidth: %d\n"
@@ -398,29 +404,37 @@ do_probe(
                 "\tpix_fmt: %s\n"
                 "\thas_b_frames: %d\n"
                 "\tfield_order: %d\n"
-                "\tsample_aspect_ratio: %d/%d\n"
-                "\tdisplay_aspect_ratio: %d/%d\n",
+                "\tsample_aspect_ratio: %d:%d\n"
+                "\tdisplay_aspect_ratio: %d:%d\n",
                 i,
-                av_get_media_type_string(probes[i].codec_type),
-                probes[i].codec_id,
-                probes[i].codec_name,
-                probes[i].duration_ts,
-                probes[i].time_base.num,probes[i].time_base.den,
-                probes[i].nb_frames,
-                probes[i].start_time,
-                probes[i].avg_frame_rate.num, probes[i].avg_frame_rate.den,
-                probes[i].frame_rate.num, probes[i].frame_rate.den,
-                probes[i].ticks_per_frame,
-                probes[i].bit_rate,
-                probes[i].width,
-                probes[i].height,
-                av_get_pix_fmt_name(probes[i].pix_fmt) != NULL ? av_get_pix_fmt_name(probes[i].pix_fmt) : "-",
-                probes[i].has_b_frames,
-                probes[i].field_order,
-                probes[i].sample_aspect_ratio.num, probes[i].sample_aspect_ratio.den,
-                probes[i].display_aspect_ratio.num, probes[i].display_aspect_ratio.den
+                av_get_media_type_string(probe->stream_info[i].codec_type),
+                probe->stream_info[i].codec_id,
+                probe->stream_info[i].codec_name,
+                probe->stream_info[i].duration_ts,
+                probe->stream_info[i].time_base.num,probe->stream_info[i].time_base.den,
+                probe->stream_info[i].nb_frames,
+                probe->stream_info[i].start_time,
+                probe->stream_info[i].avg_frame_rate.num, probe->stream_info[i].avg_frame_rate.den,
+                probe->stream_info[i].frame_rate.num, probe->stream_info[i].frame_rate.den,
+                probe->stream_info[i].sample_rate,
+                probe->stream_info[i].channels,
+                channel_layout_info != NULL ? channel_layout_info->name : "-",
+                probe->stream_info[i].ticks_per_frame,
+                probe->stream_info[i].bit_rate,
+                probe->stream_info[i].width,
+                probe->stream_info[i].height,
+                av_get_pix_fmt_name(probe->stream_info[i].pix_fmt) != NULL ? av_get_pix_fmt_name(probe->stream_info[i].pix_fmt) : "-",
+                probe->stream_info[i].has_b_frames,
+                probe->stream_info[i].field_order,
+                probe->stream_info[i].sample_aspect_ratio.num, probe->stream_info[i].sample_aspect_ratio.den,
+                probe->stream_info[i].display_aspect_ratio.num, probe->stream_info[i].display_aspect_ratio.den
                 );
     }
+    printf("Container\n"
+        "\tformat_name: %s\n"
+        "\tduration: %.5f\n",
+        probe->container_info.format_name,
+        probe->container_info.duration);
 
 end_probe:
     elv_dbg("Releasing probe resources");
@@ -441,6 +455,7 @@ usage(
         "Usage: %s <params>\n"
         "\t-audio-bitrate :     (optional) Default: -1\n"
         "\t-bypass :            (optional) bypass transcoding. Default is 0, must be 0 or 1\n"
+        "\t-seekable :          (optional) seekable stream. Default is 0, must be 0 or 1\n"
         "\t-crf :               (optional) mutually exclusive with video-bitrate. Default: 23\n"
         "\t-crypt-iv :          (optional) 128-bit AES IV, as hex\n"
         "\t-crypt-key :         (optional) 128-bit AES key, as hex\n"
@@ -491,6 +506,7 @@ main(
     int n_threads = 1;
     char *filename = NULL;
     int bypass_transcoding = 0;
+    int seekable = 0;
     int start_segment = -1;
     char *command = "transcode";
     int i;
@@ -520,7 +536,8 @@ main(
         .start_time_ts = 0,                 /* same units as input stream PTS */
         .start_fragment_index = 0,          /* Default is zero */
         .video_bitrate = -1,                /* not used if using CRF */
-        .tx_type = tx_all
+        .tx_type = tx_all,
+        .seekable = 0
     };
 
     i = 1;
@@ -586,7 +603,7 @@ main(
             break;
         case 'd':
             if (!strcmp(argv[i], "-duration-ts")) {
-                if (sscanf(argv[i+1], "%d", &p.duration_ts) != 1) {
+                if (sscanf(argv[i+1], "%"PRId64, &p.duration_ts) != 1) {
                     usage(argv[0], argv[i], EXIT_FAILURE);
                 }
             } else if (strlen(argv[i]) > 2) {
@@ -648,7 +665,14 @@ main(
             }
             break;
         case 's':
-            if (!strcmp(argv[i], "-sample-rate")) {
+            if (!strcmp(argv[i], "-seekable")) {
+                if (sscanf(argv[i+1], "%d", &seekable) != 1) {
+                    usage(argv[0], argv[i], EXIT_FAILURE);
+                }
+                if (seekable != 0 && seekable != 1) {
+                    usage(argv[0], argv[i], EXIT_FAILURE);
+                }
+            } else if (!strcmp(argv[i], "-sample-rate")) {
                 if (sscanf(argv[i+1], "%d", &p.sample_rate) != 1) {
                     usage(argv[0], argv[i], EXIT_FAILURE);
                 }
@@ -661,7 +685,7 @@ main(
                     usage(argv[0], argv[i], EXIT_FAILURE);
                 }
             } else if (!strcmp(argv[i], "-start-pts")) {
-                if (sscanf(argv[i+1], "%d", &p.start_pts) != 1) {
+                if (sscanf(argv[i+1], "%"PRId64, &p.start_pts) != 1) {
                     usage(argv[0], argv[i], EXIT_FAILURE);
                 }
             } else if (!strcmp(argv[i], "-start-segment")) {
@@ -671,7 +695,7 @@ main(
                     usage(argv[0], argv[i], EXIT_FAILURE);
                 }
             } else if (!strcmp(argv[i], "-start-time-ts")) {
-                if (sscanf(argv[i+1], "%d", &p.start_time_ts) != 1) {
+                if (sscanf(argv[i+1], "%"PRId64, &p.start_time_ts) != 1) {
                     usage(argv[0], argv[i], EXIT_FAILURE);
                 }
             } else {
@@ -716,7 +740,7 @@ main(
     elv_set_log_level(elv_log_debug);
 
     if (!strcmp(command, "probe")) {
-        return do_probe(filename);
+        return do_probe(filename, seekable);
     }
 
     if (sscanf(p.start_segment_str, "%d", &start_segment) != 1) {

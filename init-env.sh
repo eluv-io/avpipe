@@ -1,8 +1,9 @@
 #
 # Initialize Go and CGO build environment
 #
-# Argumantes: <content-fabric-top-dir>
+# Arguments: <content-fabric-top-dir>
 #
+# TODO: Go build fails if $1 (fabric dir) is a relative path
 
 if test $# -lt 1; then
     echo "Required arguments: <CONTENT-FABRIC-TOP-DIR>"
@@ -13,17 +14,11 @@ script_dir="$( cd "$( dirname ${BASH_SOURCE[0]} )" && pwd )"
 
 elvdev_dir=$1/..
 avpipe_dir=$script_dir
-godev_dir="$( cd "$( dirname ${BASH_SOURCE[0]} )/../../../.." && pwd )"
 
-if ! test -d $elvdev_dir/content-fabric; then
-    echo "CONTENT-FABRIC-TOP-DIR doesn't contain directory 'content-fabric'"
-    return
-fi
-
-export GOPATH=$godev_dir:$elvdev_dir/content-fabric
 if [[ -z "${ELV_TOOLCHAIN_DIST_PLATFORM}" ]]; then
     if [ "$(uname)" == "Darwin" ]; then
-        export ELV_TOOLCHAIN_DIST_PLATFORM=$elvdev_dir/elv-toolchain/dist/darwin-10.14
+        DARWIN=`ls $elvdev_dir/elv-toolchain/dist | grep darwin`
+        export ELV_TOOLCHAIN_DIST_PLATFORM=$elvdev_dir/elv-toolchain/dist/${DARWIN}
     else
         LINUX=`ls $elvdev_dir/elv-toolchain/dist | grep linux`
         export ELV_TOOLCHAIN_DIST_PLATFORM=$elvdev_dir/elv-toolchain/dist/${LINUX}

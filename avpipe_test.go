@@ -201,7 +201,7 @@ func TestSingleTranscode(t *testing.T) {
 
 	avpipe.InitIOHandler(&fileInputOpener{url: filename}, &fileOutputOpener{dir: "O"})
 
-	var lastInputPts int
+	var lastInputPts int64
 	err := avpipe.Tx(params, filename, false, false, &lastInputPts)
 	if err != 0 {
 		t.Fail()
@@ -219,7 +219,7 @@ func doTranscode(t *testing.T, p *avpipe.TxParams, nThreads int, filename string
 	done := make(chan struct{})
 	for i := 0; i < nThreads; i++ {
 		go func(params *avpipe.TxParams, filename string) {
-			var lastInputPts int
+			var lastInputPts int64
 			err := avpipe.Tx(params, filename, false, false, &lastInputPts)
 			done <- struct{}{} // Signal the main goroutine
 			if err != 0 && reportFailure == "" {
@@ -316,25 +316,25 @@ func TestProbe(t *testing.T) {
 	filename := "./media/ErsteChristmas.mp4"
 
 	avpipe.InitIOHandler(&fileInputOpener{url: filename}, &concurrentOutputOpener{dir: "O"})
-	err, probeInfo := avpipe.Probe(filename)
+	probe, err := avpipe.Probe(filename, true)
 	assert.NoError(t, err)
-	assert.Equal(t, 2, len(probeInfo))
+	assert.Equal(t, 2, len(probe.StreamInfo))
 
-	assert.Equal(t, 27, probeInfo[0].CodecID)
-	assert.Equal(t, "h264", probeInfo[0].CodecName)
-	assert.Equal(t, int64(2428), probeInfo[0].NBFrames)
-	assert.Equal(t, int64(0), probeInfo[0].StartTime)
-	assert.Equal(t, int64(506151), probeInfo[0].BitRate)
-	assert.Equal(t, 1280, probeInfo[0].Width)
-	assert.Equal(t, 720, probeInfo[0].Height)
-	assert.Equal(t, int64(12800), probeInfo[0].TimeBase.Denom().Int64())
+	assert.Equal(t, 27, probe.StreamInfo[0].CodecID)
+	assert.Equal(t, "h264", probe.StreamInfo[0].CodecName)
+	assert.Equal(t, int64(2428), probe.StreamInfo[0].NBFrames)
+	assert.Equal(t, int64(0), probe.StreamInfo[0].StartTime)
+	assert.Equal(t, int64(506151), probe.StreamInfo[0].BitRate)
+	assert.Equal(t, 1280, probe.StreamInfo[0].Width)
+	assert.Equal(t, 720, probe.StreamInfo[0].Height)
+	assert.Equal(t, int64(12800), probe.StreamInfo[0].TimeBase.Denom().Int64())
 
-	assert.Equal(t, 86018, probeInfo[1].CodecID)
-	assert.Equal(t, "aac", probeInfo[1].CodecName)
-	assert.Equal(t, int64(4183), probeInfo[1].NBFrames)
-	assert.Equal(t, int64(0), probeInfo[1].StartTime)
-	assert.Equal(t, int64(127999), probeInfo[1].BitRate)
-	assert.Equal(t, 0, probeInfo[1].Width)
-	assert.Equal(t, 0, probeInfo[1].Height)
-	assert.Equal(t, int64(44100), probeInfo[1].TimeBase.Denom().Int64())
+	assert.Equal(t, 86018, probe.StreamInfo[1].CodecID)
+	assert.Equal(t, "aac", probe.StreamInfo[1].CodecName)
+	assert.Equal(t, int64(4183), probe.StreamInfo[1].NBFrames)
+	assert.Equal(t, int64(0), probe.StreamInfo[1].StartTime)
+	assert.Equal(t, int64(127999), probe.StreamInfo[1].BitRate)
+	assert.Equal(t, 0, probe.StreamInfo[1].Width)
+	assert.Equal(t, 0, probe.StreamInfo[1].Height)
+	assert.Equal(t, int64(44100), probe.StreamInfo[1].TimeBase.Denom().Int64())
 }

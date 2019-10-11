@@ -9,7 +9,7 @@
 package cmd
 
 import (
-	elog "eluvio/log"
+	elog "github.com/qluvio/content-fabric/log"
 	"encoding/json"
 	"fmt"
 	"io/ioutil"

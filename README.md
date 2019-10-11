@@ -4,7 +4,7 @@
 
 ## Prerequisites
 
-A workspace containing 
+A workspace containing
  - elv-toolchain
  - elv-crypto
  - content-fabric (for utilities such as eluvio/log and eluvio/errors)

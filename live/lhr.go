@@ -18,8 +18,8 @@ import (
 
 	"github.com/grafov/m3u8"
 
-	"eluvio/errors"
-	elog "eluvio/log"
+	"github.com/qluvio/content-fabric/errors"
+	elog "github.com/qluvio/content-fabric/log"
 )
 
 var log = elog.Get("/eluvio/avpipe/live")
@@ -35,7 +35,7 @@ type HLSReader struct {
 	playlistURL     *url.URL
 	playlistPollSec float64    // How often to poll for the manifest - HLS spec says half the duration
 	nextSeqNo       int        // The next segment sequence number to record (the first sequence number in a stream is 0)
-	NextSkipOverPts int        // Start recording from this frame in the segment
+	NextSkipOverPts int64      // Start recording from this frame in the segment
 	segments        []*segInfo // Segments recorded
 }
 
@@ -56,6 +56,8 @@ func NewHLSReader(masterURL *url.URL) *HLSReader {
 	return lhr
 }
 
+// durationReadSec is the sum of all the ingest segment duration used to create
+// this part (video clip)
 func (lhr *HLSReader) durationReadSec() (total float64) {
 	for _, segment := range lhr.segments {
 		total += segment.duration
@@ -64,24 +66,21 @@ func (lhr *HLSReader) durationReadSec() (total float64) {
 }
 
 // prepareNext determines the nextSeqNo to use on the next call to Fill, and
-// cleans up segInfo no longer needed
+// TODO: cleans up segInfo no longer needed
 func (lhr *HLSReader) prepareNext(durationFilled float64) {
-	keepIndex := len(lhr.segments)
+	indexOfSegmentsToKeep := len(lhr.segments)
 	var durationRead float64
 	for i, segment := range lhr.segments {
-		// Use duration to determine how many segments were needed to fill the last
-		// recording. This could be wrong if the manifest lies badly.
+		// Use duration to determine how many segments were needed to fill the
+		// last recording. This could be wrong if the manifest lies badly.
 		durationRead += segment.duration
-		if durationRead >= durationFilled {
-			segment.seqNo = lhr.nextSeqNo
-		}
-		// Remove segments before nextSeqNo
-		if segment.seqNo >= lhr.nextSeqNo {
-			keepIndex = i
+		if durationRead > durationFilled {
+			lhr.nextSeqNo = segment.seqNo
+			indexOfSegmentsToKeep = i
 			break
 		}
 	}
-	lhr.segments = lhr.segments[keepIndex:]
+	lhr.segments = lhr.segments[indexOfSegmentsToKeep:]
 }
 
 func openURL(client http.Client, u *url.URL) (io.ReadCloser, error) {
@@ -101,11 +100,11 @@ func openURL(client http.Client, u *url.URL) (io.ReadCloser, error) {
 }
 
 // resolve returns an absolute URL
-func resolve(urlStr string, base *url.URL) (url *url.URL, err error) {
-	if url, err = url.Parse(urlStr); err != nil || url.IsAbs() {
+func resolve(urlStr string, base *url.URL) (u *url.URL, err error) {
+	if u, err = url.Parse(urlStr); err != nil || u.IsAbs() {
 		return
 	}
-	return base.ResolveReference(url), nil
+	return base.ResolveReference(u), nil
 }
 
 func saveToFile(client http.Client, u *url.URL, savePath string) (err error) {
@@ -117,13 +116,13 @@ func saveToFile(client http.Client, u *url.URL, savePath string) (err error) {
 	if file, err = os.Create(savePath); err != nil {
 		return
 	}
-	defer file.Close()
+	defer closeCloser(file)
 
 	var content io.ReadCloser
 	if content, err = openURL(client, u); err != nil {
 		return
 	}
-	defer content.Close()
+	defer closeCloser(content)
 
 	written, err := io.Copy(file, content)
 	if err != nil {
@@ -140,6 +139,7 @@ func saveManifestToFile(client http.Client, u *url.URL, parentPath string) (
 	savePath := path.Join(parentPath, "manifest", u.Path)
 	saveDir := path.Dir(savePath)
 	saveFile := path.Base(savePath)
+	// Prepend timestamp to save snapshots of the changing live manifest
 	saveFile = strings.Join([]string{strconv.FormatInt(time.Now().Unix(), 10), saveFile}, "-")
 	savePath = path.Join(saveDir, saveFile)
 	return saveToFile(client, u, savePath)
@@ -162,7 +162,7 @@ func saveSegment(
 	if file, err = os.Create(savePath); err != nil {
 		return
 	}
-	defer file.Close()
+	defer closeCloser(file)
 	return readSegment(client, u, s, file)
 }
 
@@ -174,24 +174,26 @@ func readSegment(
 
 	msURL, err := resolve(s.URI, u)
 	if err != nil {
-		log.Error("AVLR Failed to resolve segment URL", "err", err, "segment.URI", s.URI)
+		log.Error("AVLR Failed to resolve segment URL", "err", err, "uri", s.URI)
 		return
 	}
 
+	// Handle AES-128 encryption
+	// Key should only be set if it changed from the last segment
 	var dw *decryptWriter
 	if s.Key != nil {
 		var key []byte
-		if key, err = downloadKey(u, s.Key.URI); err != nil {
-			log.Error("AVLR Failed to download AES key", "err", err, "s.Key.URI", s.Key.URI)
+		if key, err = httpGetBytes(u, s.Key.URI); err != nil {
+			log.Error("AVLR Failed to download AES key", "err", err, "uri", s.Key.URI)
 			return
-		} else if len(key) != 16 { // assuming s.Key.Method is AES-128
-			return 0, errors.E("Bad AES key size", "len", len(key), "s.Key.URI", s.Key.URI)
+		} else if len(key) != 16 { // Assumption: s.Key.Method is AES-128
+			return 0, errors.E("Bad AES key size", "len", len(key), "uri", s.Key.URI)
 		}
 
 		var iv []byte
 		if len(s.Key.IV) > 0 {
 			if iv, err = hex.DecodeString(strings.TrimPrefix(strings.TrimPrefix(s.Key.IV, "0x"), "0X")); err != nil {
-				log.Error("AVLR Failed to decode AES IV", "err", err, "s.Key.IV", s.Key.IV)
+				log.Error("AVLR Failed to decode AES IV", "err", err, "iv", s.Key.IV)
 				return
 			}
 		}
@@ -206,7 +208,7 @@ func readSegment(
 	if content, err = openURL(client, msURL); err != nil {
 		return
 	}
-	defer content.Close()
+	defer closeCloser(content)
 
 	if s.Key != nil {
 		if written, err = io.Copy(dw, content); err != nil {
@@ -235,7 +237,7 @@ func readMasterPlaylist(client http.Client, u *url.URL) ([]*m3u8.Variant, error)
 	if err != nil {
 		return nil, err
 	}
-	defer content.Close()
+	defer closeCloser(content)
 
 	playlist, listType, err := m3u8.DecodeFrom(content, true)
 	if err != nil {
@@ -250,7 +252,9 @@ func readMasterPlaylist(client http.Client, u *url.URL) ([]*m3u8.Variant, error)
 
 // readPlaylist HTTP GET the HLS media playlist and record segments up to
 // durationSec. Starts reading at sequence number lhr.nextSeqNo.
-func (lhr *HLSReader) readPlaylist(u *url.URL, durationSec float64, w io.Writer) (complete bool, err error) {
+func (lhr *HLSReader) readPlaylist(u *url.URL, durationSec float64, w io.Writer) (
+	complete bool, err error) {
+
 	log.Debug("AVLR readPlaylist start", "nextSeqNo", lhr.nextSeqNo, "durationSec", durationSec)
 
 	if len(TESTSaveToDir) > 0 {
@@ -263,7 +267,7 @@ func (lhr *HLSReader) readPlaylist(u *url.URL, durationSec float64, w io.Writer)
 	if content, err = openURL(lhr.client, u); err != nil {
 		return
 	}
-	defer content.Close()
+	defer closeCloser(content)
 
 	playlist, listType, err := m3u8.DecodeFrom(content, true)
 	if err != nil {
@@ -287,7 +291,7 @@ func (lhr *HLSReader) readPlaylist(u *url.URL, durationSec float64, w io.Writer)
 				}
 				lhr.nextSeqNo = edgeSeqNo - 1
 				startIndex = i - 2
-				log.Info("AVLR initializing recording at live edge", "seqNo", edgeSeqNo)
+				log.Info("AVLR initializing recording at live edge", "seqNo", lhr.nextSeqNo)
 			} else if startIndex == -1 { // Segment not found in the playlist
 				if lhr.nextSeqNo < edgeSeqNo {
 					lhr.nextSeqNo = edgeSeqNo
@@ -335,7 +339,7 @@ func (lhr *HLSReader) readPlaylist(u *url.URL, durationSec float64, w io.Writer)
 		}
 		lhr.segments = append(lhr.segments, s)
 
-		log.Info("AVLR processing ingest segment", "seqNo", lhr.nextSeqNo, "segment.Duration", segment.Duration, "URI", segment.URI)
+		log.Debug("AVLR processing ingest segment", "seqNo", lhr.nextSeqNo, "segment.Duration", segment.Duration, "URI", segment.URI)
 		var written int64
 		if len(TESTSaveToDir) == 0 {
 			written, err = readSegment(lhr.client, u, segment, w)
@@ -348,14 +352,20 @@ func (lhr *HLSReader) readPlaylist(u *url.URL, durationSec float64, w io.Writer)
 				return
 			}
 			// Transcoded part of a segment
-			log.Info("AVLR successfully read requested duration, ending with a partial segment", "written", written, "err", err)
+			log.Debug("AVLR successfully read requested duration, ending with a partial segment", "written", written, "err", err)
+			return true, nil
+		}
+		if lhr.durationReadSec() > durationSec+mediaPlaylist.TargetDuration {
+			// If this occurs avpipe is either not stopping at the specified
+			// duration, or transcoding slower than expected
+			log.Info("AVLR successfully read requested duration + 2x source segment duration", "nextSeqNo", lhr.nextSeqNo, "durationReadSec", lhr.durationReadSec())
 			return true, nil
 		}
 
 		lhr.nextSeqNo++
 	}
 
-	log.Warn("AVLR unexpected execution path")
+	log.Debug("AVLR read all available segments", "nextSeqNo", lhr.nextSeqNo, "durationReadSec", lhr.durationReadSec())
 	return
 }
 
@@ -364,9 +374,9 @@ func (lhr *HLSReader) readPlaylist(u *url.URL, durationSec float64, w io.Writer)
 func (lhr *HLSReader) Fill(durationSecRat *big.Rat, w io.Writer) (err error) {
 	durationSec, _ := durationSecRat.Float64()
 
-	log.Info("AVLR Fill start", "durationSec", durationSec)
+	log.Debug("AVLR Fill start", "durationSec", durationSec)
 
-	// TODO: Move to another function
+	// TODO: Move playlist handling to another function
 	if lhr.playlistURL == nil {
 		// Read the master playlist only once. Some servers will return a new
 		// session token with each HTTP request for the master. We save the variant
@@ -392,25 +402,33 @@ func (lhr *HLSReader) Fill(durationSecRat *big.Rat, w io.Writer) (err error) {
 		if lhr.playlistURL, err = resolve(variant.URI, lhr.masterURL); err != nil {
 			return errors.E("AVLR failed to resolve variant URL", "err", err, "variant.URI", variant.URI, "URL", lhr.masterURL)
 		}
-		log.Info("AVLR media playlist found", "URL", lhr.playlistURL, "bandwidth", variant.Bandwidth, "resolution", variant.Resolution, "average_bandwidth", variant.AverageBandwidth, "Audio", variant.Audio, "Video", variant.Video)
+		log.Debug("AVLR media playlist found", "URL", lhr.playlistURL, "bandwidth", variant.Bandwidth, "resolution", variant.Resolution, "average_bandwidth", variant.AverageBandwidth, "Audio", variant.Audio, "Video", variant.Video)
 	}
 
 	for {
 		var complete bool
 		if complete, err = lhr.readPlaylist(lhr.playlistURL, durationSec, w); err != nil {
-			// TODO retry
+			// TODO retry?
 			return
 		}
 		if complete {
 			lhr.prepareNext(durationSec)
-			log.Info("AVLR Fill done")
+			log.Debug("AVLR Fill done")
 			return nil
 		}
 		time.Sleep(time.Duration(lhr.playlistPollSec * float64(time.Second)))
 	}
 }
 
-// TODO: Move to common/utils
+// TODO: Move code below to common/utils
+
+// closeCloser lets us catch close errors when deferred
+func closeCloser(c io.Closer) {
+	err := c.Close()
+	if err != nil {
+		log.Error("Close error", "err", err)
+	}
+}
 
 func unpadPKCS5(src []byte) []byte {
 	srclen := len(src)
@@ -472,18 +490,17 @@ func newDecryptWriter(writer io.Writer, key []byte, iv []byte) (*decryptWriter, 
 	return dw, nil
 }
 
-func downloadKey(u *url.URL, keyURI string) (body []byte, err error) {
-	keyURL, err := resolve(keyURI, u)
+func httpGetBytes(base *url.URL, uri string) (body []byte, err error) {
+	u, err := resolve(uri, base)
 	if err != nil {
-		log.Error("AVLR Failed to key URL", "err", err, "keyURI", keyURI)
 		return
 	}
 
-	log.Debug("AVLR HTTP GET AES key", "url", keyURL.String())
-	resp, err := http.Get(keyURL.String())
+	log.Debug("AVLR HTTP GET", "url", u.String())
+	resp, err := http.Get(u.String())
 	if err != nil {
 		return
 	}
-	defer resp.Body.Close()
+	defer closeCloser(resp.Body)
 	return ioutil.ReadAll(resp.Body)
 }

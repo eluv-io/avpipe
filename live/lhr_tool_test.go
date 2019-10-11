@@ -14,59 +14,49 @@ import (
 	"testing"
 
 	"github.com/qluvio/avpipe"
+	elog "github.com/qluvio/content-fabric/log"
 )
 
 var verboseLogging bool = false
 
 // Sky 1080 stream: http://origin1.sedev02_newsdemuxclear.stage-cdhls.skydvn.com/cdsedev04demuxclearnews/13012/cd.m3u8
 // Sky 720 stream: http://origin1.skynews.mobile.skydvn.com/skynews/1404/latest.m3u8
-// videoParams := &avpipe.TxParams{
-// 	Format:      "fmp4",
-// 	StartTimeTs: 0,
-// 	// StartPts           int32
-// 	DurationTs:      2700000,
-// 	StartSegmentStr: "1",
-// 	VideoBitrate:    3189984,
-// 	// AudioBitrate:  128000,
-// 	// SampleRate:    48000,
-// 	// CrfStr:        "20",
-// 	SegDurationTs: 180000,
-// 	SegDurationFr: 50,
-// 	// FrameDurationTs    int32
-// 	// StartFragmentIndex int32
-// 	Ecodec: "libx264",
-// 	// Dcodec             string
-// 	EncHeight: 720,
-// 	EncWidth:  1280,
-// 	// CryptIV            string
-// 	// CryptKey           string
-// 	// CryptKID           string
-// 	// CryptKeyURL        string
-// 	// CryptScheme        CryptScheme
-// 	TxType: avpipe.TxVideo,
-// }
-
-// Fox stream
-var manifestURLStr string = "https://content.uplynk.com/channel/089cd376140c40d3a64c7c1dcccb4467.m3u8"
-var recordingDuration *big.Rat = big.NewRat(int64(2702700), int64(90000))
+var manifestURLStr string = "http://origin1.skynews.mobile.skydvn.com/skynews/1404/latest.m3u8"
+var recordingDuration *big.Rat = big.NewRat(int64(2700000), int64(90000))
 var videoParams *avpipe.TxParams = &avpipe.TxParams{
 	Format:          "fmp4",
-	SkipOverPts:     0,
-	DurationTs:      2702700, //5405400
+	DurationTs:      2700000,
 	StartSegmentStr: "1",
-	VideoBitrate:    1557559,
-	SegDurationTs:   180180, //360360
-	SegDurationFr:   60,     //120
+	VideoBitrate:    3189984, // 8234400
+	SegDurationTs:   180000,
+	SegDurationFr:   50,
 	Ecodec:          "libx264",
-	EncHeight:       432,
-	EncWidth:        768,
+	EncHeight:       720,  // 1080
+	EncWidth:        1280, // 1920
 	TxType:          avpipe.TxVideo,
 }
+
+// Fox stream
+//var manifestURLStr string = "https://content.uplynk.com/channel/089cd376140c40d3a64c7c1dcccb4467.m3u8"
+//var recordingDuration *big.Rat = big.NewRat(int64(2702700), int64(90000))
+//var videoParams *avpipe.TxParams = &avpipe.TxParams{
+//	Format:          "fmp4",
+//	SkipOverPts:     0,
+//	DurationTs:      2702700, //5405400
+//	StartSegmentStr: "1",
+//	VideoBitrate:    1557559,
+//	SegDurationTs:   180180, //360360
+//	SegDurationFr:   60,     //120
+//	Ecodec:          "libx264",
+//	EncHeight:       432,
+//	EncWidth:        768,
+//	TxType:          avpipe.TxVideo,
+//}
 
 var outFileName string = "lhr_out"
 
 func TestToolTs(t *testing.T) {
-	avpipe.SetCLoggers()
+	setupLogging()
 
 	manifestURL, err := url.Parse(manifestURLStr)
 	if err != nil {
@@ -90,8 +80,7 @@ type testCtx struct {
 var bytesRead, bytesWritten, rwDiffMax int
 
 func TestToolFmp4(t *testing.T) {
-	log.SetDebug()
-	avpipe.SetCLoggers()
+	setupLogging()
 
 	// Save stream files instead of transcoding if specified
 	//   Make sure go test timeout is big enough:
@@ -127,16 +116,16 @@ func recordFmp4(t *testing.T, lhr *HLSReader, fileName string) {
 	}()
 
 	avpipe.InitIOHandler(&inputOpener{tc: readCtx}, &outputOpener{tc: writeCtx})
-	videoParams.SkipOverPts = int32(lhr.nextSkipOverPts)
+	videoParams.SkipOverPts = lhr.NextSkipOverPts
 	log.Info("AVL Tx start", "videoParams", fmt.Sprintf("%+v", *videoParams))
-	errTx := avpipe.Tx(videoParams, "video_out.mp4", false, true, &lhr.nextSkipOverPts)
+	errTx := avpipe.Tx(videoParams, "video_out.mp4", false, true, &lhr.NextSkipOverPts)
 	log.Info("AVL Tx done", "err", errTx, "last pts", lhr.NextSkipOverPts)
 
 	if errTx != 0 {
 		t.Error("AVL transcode video", "err", err)
 	}
 
-	// TODO: avpipe.Tx(audioParams, ...
+	// TODO: Audio - avpipe.Tx(audioParams, ...
 }
 
 //Implement AVPipeInputOpener
@@ -179,10 +168,10 @@ func (i *inputCtx) Seek(offset int64, whence int) (int64, error) {
 	return -1, nil
 }
 
-func (i *inputCtx) Close() error {
+func (i *inputCtx) Close() (err error) {
 	log.Debug("AVL IN_CLOSE")
-	i.r.(*io.PipeReader).Close()
-	return nil
+	err = i.r.(*io.PipeReader).Close()
+	return
 }
 
 func (i *inputCtx) Size() int64 {
@@ -271,13 +260,13 @@ func encDec(t *testing.T, plaintext []byte) {
 	var dec bytes.Buffer
 	var dw *decryptWriter
 	if dw, err = newDecryptWriter(&dec, key, iv); err != nil {
-		t.Error("newDecryptWriter")
+		t.Error("newDecryptWriter", "err", err)
 	}
 	if _, err = dw.Write(ciphertext); err != nil {
-		t.Error("dw.Write")
+		t.Error("dw.Write", "err", err)
 	}
 	if _, err = dw.Flush(); err != nil {
-		t.Error("dw.Flush")
+		t.Error("dw.Flush", "err", err)
 	}
 	// fmt.Println(dec.String())
 	if bytes.Compare(plaintext, dec.Bytes()) != 0 {
@@ -290,4 +279,16 @@ func padPKCS5(src []byte, blockSize int) []byte {
 	padlen := (blockSize - (srclen % blockSize))
 	padding := bytes.Repeat([]byte{byte(padlen)}, padlen)
 	return append(src, padding...)
+}
+
+func setupLogging() {
+	elog.SetDefault(&elog.Config{
+		Level:   "debug",
+		Handler: "text",
+		File: &elog.LumberjackConfig{
+			Filename:  "lhr.log",
+			LocalTime: true,
+		},
+	})
+	avpipe.SetCLoggers()
 }

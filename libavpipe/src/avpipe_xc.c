@@ -51,7 +51,8 @@ static int
 prepare_input(
     avpipe_io_handler_t *in_handlers,
     ioctx_t *inctx,
-    AVFormatContext *format_ctx)
+    AVFormatContext *format_ctx,
+    int seekable)
 {
     unsigned char *bufin;
     AVIOContext *avioctx;
@@ -64,7 +65,7 @@ prepare_input(
         in_handlers->avpipe_reader, in_handlers->avpipe_writer, in_handlers->avpipe_seeker);
 
     avioctx->written = inctx->sz; /* Fake avio_size() to avoid calling seek to find size */
-    avioctx->seekable = 0;
+    avioctx->seekable = seekable;
     avioctx->direct = 0;
     avioctx->buffer_size = inctx->sz < avioctxBufSize ? inctx->sz : avioctxBufSize; // avoid seeks - avio_seek() seeks internal buffer */
     format_ctx->pb = avioctx;
@@ -76,7 +77,8 @@ prepare_decoder(
     coderctx_t *decoder_context,
     avpipe_io_handler_t *in_handlers,
     ioctx_t *inctx,
-    txparams_t *params)
+    txparams_t *params,
+    int seekable)
 {
     int rc;
     decoder_context->last_dts = AV_NOPTS_VALUE;
@@ -91,11 +93,12 @@ prepare_decoder(
     }
 
     /* Set our custom reader */
-    prepare_input(in_handlers, inctx, decoder_context->format_context);
+    prepare_input(in_handlers, inctx, decoder_context->format_context, seekable);
 
     /* Allocate AVFormatContext in format_context and find input file format */
-    if (avformat_open_input(&decoder_context->format_context, "bogus.mp4", NULL, NULL) != 0) {
-        elv_err("Could not open input file");
+    rc = avformat_open_input(&decoder_context->format_context, "bogus.mp4", NULL, NULL);
+    if (rc != 0) {
+        elv_err("Could not open input file, err=%d", rc);
         return -1;
     }
 
@@ -122,14 +125,14 @@ prepare_decoder(
             /* Video */
             decoder_context->video_stream_index = i;
             elv_dbg("STREAM %d Video, codec_id=%s", i, avcodec_get_name(decoder_context->codec_parameters[i]->codec_id));
-            if (!(params->tx_type & tx_video))
+            if (params != NULL && !(params->tx_type & tx_video))
                 continue;
 
         } else if (decoder_context->format_context->streams[i]->codecpar->codec_type == AVMEDIA_TYPE_AUDIO) {
             /* Audio */
             decoder_context->audio_stream_index = i;
             elv_dbg("STREAM %d Audio, codec_id=%s", i, avcodec_get_name(decoder_context->codec_parameters[i]->codec_id));
-            if (!(params->tx_type & tx_audio))
+            if (params != NULL && !(params->tx_type & tx_audio))
                 continue;
 
             /* If the buffer size is too big, ffmpeg might assert in aviobuf.c:581
@@ -141,23 +144,23 @@ prepare_decoder(
                     avioctx->buffer_size = AUDIO_BUF_SIZE;
             }
         } else {
-            elv_err("STREAM UNKNOWN type=%d", decoder_context->format_context->streams[i]->codecpar->codec_type);
+            decoder_context->codec[i] = NULL;
+            elv_dbg("STREAM UNKNOWN type=%d", decoder_context->format_context->streams[i]->codecpar->codec_type);
             continue;
         }
 
         /* Initialize codec and codec context */
-        if (params != NULL && params->dcodec != NULL && params->dcodec[0] != '\0')
+        if (params != NULL && params->dcodec != NULL && params->dcodec[0] != '\0') {
             decoder_context->codec[i] = avcodec_find_decoder_by_name(params->dcodec);
-        else
+        } else {
             decoder_context->codec[i] = avcodec_find_decoder(decoder_context->codec_parameters[i]->codec_id);
-
+        }
         if (!decoder_context->codec[i]) {
             elv_err("Unsupported codec");
             return -1;
         }
 
         decoder_context->codec_context[i] = avcodec_alloc_context3(decoder_context->codec[i]);
-
         if (!decoder_context->codec_context[i]) {
             elv_err("Failed to allocated memory for AVCodecContext");
             return -1;
@@ -320,9 +323,9 @@ prepare_video_encoder(
         av_opt_set(encoder_context->format_context->priv_data, "movflags", "frag_every_frame", 0);
 
         // PENDING(SSS) - must use the same config as mez maker
-        av_opt_set(&encoder_options, "keyint", "60", 0); // PENDING(SSS) hardcoded 50
-        av_opt_set(&encoder_options, "min-keyint", "60", 0);
-        av_opt_set(&encoder_options, "no-scenecut", "-1", 0);
+        av_opt_set_int(&encoder_options, "keyint", params->seg_duration_fr, 0);
+        av_opt_set_int(&encoder_options, "min-keyint", params->seg_duration_fr, 0);
+        av_opt_set_int(&encoder_options, "no-scenecut", -1, 0);
         // av_opt_set(&encoder_options, "bframes", "0", 0);  // Hopefully not needed
     }
 
@@ -596,7 +599,7 @@ set_key_flag(
 {
     if (packet->pts >= encoder_context->last_key_frame + params->seg_duration_ts) {
         packet->flags |= AV_PKT_FLAG_KEY;
-        elv_dbg("PACKET SET KEY flag pts=%d", packet->pts);
+        elv_dbg("PACKET SET KEY flag pts=%"PRId64, packet->pts);
         encoder_context->last_key_frame = packet->pts;
     }
 }
@@ -611,15 +614,15 @@ should_skip_encoding(
 
     /* Drop frames before the desired 'start_time' */
     if (p->start_time_ts > 0 && frame_in_pts_offset < p->start_time_ts) {
-        elv_dbg("ENCODE skip frame early pts=%d filt_frame pts=%d, frame_in_pts_offset=%d, start_time_ts=%d",
-            frame->pts, frame->pts, frame_in_pts_offset, p->start_time_ts);
+        elv_dbg("ENCODE skip frame early pts=%" PRId64 ", frame_in_pts_offset=%" PRId64 ", start_time_ts=%" PRId64,
+            frame->pts, frame_in_pts_offset, p->start_time_ts);
         return 1;
     }
 
     /* Skip beginning based on input packet pts */
     if (p->skip_over_pts > 0 && frame->pts <= p->skip_over_pts) {
-        elv_dbg("ENCODE skip frame early pts=%d filt_frame pts=%d, frame_in_pts_offset=%d, skip_over_pts=%d",
-            frame->pts, frame->pts, frame_in_pts_offset, p->skip_over_pts);
+        elv_dbg("ENCODE skip frame early pts=%" PRId64 ", frame_in_pts_offset=%" PRId64 ", skip_over_pts=%" PRId64,
+            frame->pts, frame_in_pts_offset, p->skip_over_pts);
         return 1;
     }
 
@@ -627,8 +630,8 @@ should_skip_encoding(
     if (p->duration_ts > 0) {
         const int max_valid_ts = p->start_time_ts + p->duration_ts;
         if (frame_in_pts_offset >= max_valid_ts) {
-            elv_dbg("ENCODE skip frame late pts=%d filt_frame pts=%d, frame_in_pts_offset=%d, max_valid_ts=%d",
-                frame->pts, frame->pts, frame_in_pts_offset, max_valid_ts);
+            elv_dbg("ENCODE skip frame late pts=%" PRId64 ", frame_in_pts_offset=%" PRId64 ", max_valid_ts=%" PRId64,
+                frame->pts, frame_in_pts_offset, max_valid_ts);
             return 1;
         }
     }
@@ -664,7 +667,6 @@ encode_frame(
     }
 
     while (ret >= 0) {
-
         /* The packet must be initialized before receiving */
         av_init_packet(output_packet);
         output_packet->data = NULL;
@@ -748,7 +750,7 @@ transcode_packet(
     u_int64_t since;
     AVCodecContext *codec_context = decoder_context->codec_context[stream_index];
     int response;
-    elv_dbg("DECODE stream_index=%d send_packet pts=%d dts=%d duration=%d", stream_index, packet->pts, packet->dts, packet->duration);
+    elv_dbg("DECODE stream_index=%d send_packet pts=%"PRId64" dts=%"PRId64" duration=%d", stream_index, packet->pts, packet->dts, packet->duration);
 
     if (bypass_transcode) {
         /*
@@ -915,7 +917,7 @@ flush_decoder(
             /* Force an I frame at beginning of each segment */
             if (frame->pts % p->seg_duration_ts == 0) {
                 frame->pict_type = AV_PICTURE_TYPE_I;
-                elv_dbg("FRAME SET num=%d pts=%d", frame->coded_picture_number, frame->pts);
+                elv_dbg("FRAME SET num=%d pts=%"PRId64, frame->coded_picture_number, frame->pts);
             }
 
             /* push the decoded frame into the filtergraph */
@@ -959,7 +961,7 @@ avpipe_tx(
     int do_instrument,
     int bypass_transcode,
     int debug_frame_level,
-    int *last_input_pts)
+    int64_t *last_input_pts)
 {
     /* Set scale filter */
     char filter_str[128];
@@ -1043,11 +1045,11 @@ avpipe_tx(
         // Stop when we reached the desired duration (duration -1 means 'entire input stream')
         if (params->duration_ts != -1 &&
             input_packet_rel_pts >= params->start_time_ts + params->duration_ts) {
-            elv_dbg("DURATION OVER param start_time=%d duration=%d pkt pts=%d\n",
+            elv_dbg("DURATION OVER param start_time=%"PRId64" duration=%"PRId64" pkt pts=%"PRId64"\n",
                 params->start_time_ts, params->duration_ts, input_packet->pts);
             /* Allow up to 5 reoredered packets */
             if (input_packet_rel_pts >= params->start_time_ts + params->duration_ts + extra_pts) {
-                elv_dbg("DURATION BREAK param start_time=%d duration=%d pkt pts=%d\n",
+                elv_dbg("DURATION BREAK param start_time=%"PRId64" duration=%"PRId64" pkt pts=%"PRId64"\n",
                     params->start_time_ts, params->duration_ts, input_packet->pts);
                 break;
             }
@@ -1156,14 +1158,59 @@ avpipe_tx(
     return 0;
 }
 
+const channel_layout_info_t channel_layout_map[] = {
+    { "mono",        1,  AV_CH_LAYOUT_MONO },
+    { "stereo",      2,  AV_CH_LAYOUT_STEREO },
+    { "2.1",         3,  AV_CH_LAYOUT_2POINT1 },
+    { "3.0",         3,  AV_CH_LAYOUT_SURROUND },
+    { "3.0(back)",   3,  AV_CH_LAYOUT_2_1 },
+    { "4.0",         4,  AV_CH_LAYOUT_4POINT0 },
+    { "quad",        4,  AV_CH_LAYOUT_QUAD },
+    { "quad(side)",  4,  AV_CH_LAYOUT_2_2 },
+    { "3.1",         4,  AV_CH_LAYOUT_3POINT1 },
+    { "5.0",         5,  AV_CH_LAYOUT_5POINT0_BACK },
+    { "5.0(side)",   5,  AV_CH_LAYOUT_5POINT0 },
+    { "4.1",         5,  AV_CH_LAYOUT_4POINT1 },
+    { "5.1",         6,  AV_CH_LAYOUT_5POINT1_BACK },
+    { "5.1(side)",   6,  AV_CH_LAYOUT_5POINT1 },
+    { "6.0",         6,  AV_CH_LAYOUT_6POINT0 },
+    { "6.0(front)",  6,  AV_CH_LAYOUT_6POINT0_FRONT },
+    { "hexagonal",   6,  AV_CH_LAYOUT_HEXAGONAL },
+    { "6.1",         7,  AV_CH_LAYOUT_6POINT1 },
+    { "6.1(back)",   7,  AV_CH_LAYOUT_6POINT1_BACK },
+    { "6.1(front)",  7,  AV_CH_LAYOUT_6POINT1_FRONT },
+    { "7.0",         7,  AV_CH_LAYOUT_7POINT0 },
+    { "7.0(front)",  7,  AV_CH_LAYOUT_7POINT0_FRONT },
+    { "7.1",         8,  AV_CH_LAYOUT_7POINT1 },
+    { "7.1(wide)",   8,  AV_CH_LAYOUT_7POINT1_WIDE_BACK },
+    { "7.1(wide-side)",   8,  AV_CH_LAYOUT_7POINT1_WIDE },
+    { "octagonal",   8,  AV_CH_LAYOUT_OCTAGONAL },
+    { "hexadecagonal", 16, AV_CH_LAYOUT_HEXADECAGONAL },
+    { "downmix",     2,  AV_CH_LAYOUT_STEREO_DOWNMIX, },
+};
+
+const channel_layout_info_t*
+avpipe_channel_layout_info(
+    int channel_layout)
+{
+    for (int i = 0; i < sizeof(channel_layout_map)/sizeof(channel_layout_map[0]); i++) {
+        if (channel_layout_map[i].layout == channel_layout)
+            return &channel_layout_map[i];
+    }
+
+    return NULL;
+}
+
 int
 avpipe_probe(
     avpipe_io_handler_t *in_handlers,
     ioctx_t *inctx,
+    int seekable,
     txprobe_t **txprobe)
 {
     coderctx_t decoder_ctx;
-    txprobe_t *probes;
+    stream_info_t *stream_probes;
+    txprobe_t *probe;
     int rc;
 
     if (!in_handlers) {
@@ -1172,7 +1219,7 @@ avpipe_probe(
         goto avpipe_probe_end;
     }
 
-    if (prepare_decoder(&decoder_ctx, in_handlers, inctx, NULL)) {
+    if (prepare_decoder(&decoder_ctx, in_handlers, inctx, NULL, seekable)) {
         elv_err("avpipe_probe failed to prepare decoder");
         rc = -1;
         goto avpipe_probe_end;
@@ -1185,38 +1232,64 @@ avpipe_probe(
     }
 
     int nb_skipped_streams = 0;
-    probes = (txprobe_t *)calloc(1, sizeof(txprobe_t)*nb_streams);
+    probe = (txprobe_t *)calloc(1, sizeof(txprobe_t));
+    stream_probes = (stream_info_t *)calloc(1, sizeof(stream_info_t)*nb_streams);
     for (int i=0; i<nb_streams; i++) {
         AVStream *s = decoder_ctx.format_context->streams[i];
         AVCodecContext *codec_context = decoder_ctx.codec_context[i];
         AVCodec *codec = decoder_ctx.codec[i];
+        AVRational sar, dar;
 
-        if (codec->type != AVMEDIA_TYPE_VIDEO && codec->type != AVMEDIA_TYPE_AUDIO) {
+        if (!codec || (codec->type != AVMEDIA_TYPE_VIDEO && codec->type != AVMEDIA_TYPE_AUDIO)) {
             nb_skipped_streams++;
             continue;
         }
-        probes[i].codec_type = codec->type;
-        probes[i].codec_id = codec->id;
-        strncpy(probes[i].codec_name, codec->name, MAX_CODEC_NAME);
-        probes[i].codec_name[MAX_CODEC_NAME] = '\0';
-        probes[i].duration_ts = (int)s->duration;
-        probes[i].time_base = s->time_base;
-        probes[i].nb_frames = s->nb_frames;
-        probes[i].start_time = s->start_time;
-        probes[i].avg_frame_rate = s->avg_frame_rate;
-        probes[i].display_aspect_ratio = s->display_aspect_ratio;
-        probes[i].frame_rate = codec_context->framerate;
-        probes[i].ticks_per_frame = codec_context->ticks_per_frame;
-        probes[i].bit_rate = codec_context->bit_rate;
-        probes[i].has_b_frames = codec_context->has_b_frames;
-        probes[i].width = codec_context->width;
-        probes[i].height = codec_context->height;
-        probes[i].pix_fmt = codec_context->pix_fmt;
-        probes[i].sample_aspect_ratio = codec_context->sample_aspect_ratio;
-        probes[i].field_order = codec_context->field_order;
+        stream_probes[i].codec_type = codec->type;
+        stream_probes[i].codec_id = codec->id;
+        strncpy(stream_probes[i].codec_name, codec->name, MAX_CODEC_NAME);
+        stream_probes[i].codec_name[MAX_CODEC_NAME] = '\0';
+        stream_probes[i].duration_ts = (int)s->duration;
+        stream_probes[i].time_base = s->time_base;
+        stream_probes[i].nb_frames = s->nb_frames;
+        stream_probes[i].start_time = s->start_time;
+        stream_probes[i].avg_frame_rate = s->avg_frame_rate;
+
+        // Find sample asperct ratio and diplay aspect ratio
+        sar = av_guess_sample_aspect_ratio(decoder_ctx.format_context, s, NULL);
+        if (sar.num) {
+            stream_probes[i].sample_aspect_ratio = sar;
+            av_reduce(&dar.num, &dar.den,
+                      codec_context->width  * sar.num,
+                      codec_context->height * sar.den,
+                      1024*1024);
+            stream_probes[i].display_aspect_ratio = dar;
+        } else {
+            stream_probes[i].sample_aspect_ratio = codec_context->sample_aspect_ratio;
+            stream_probes[i].display_aspect_ratio = s->display_aspect_ratio;
+        }
+
+        stream_probes[i].frame_rate = s->r_frame_rate;
+        stream_probes[i].ticks_per_frame = codec_context->ticks_per_frame;
+        stream_probes[i].bit_rate = codec_context->bit_rate;
+        stream_probes[i].has_b_frames = codec_context->has_b_frames;
+        stream_probes[i].sample_rate = codec_context->sample_rate;
+        stream_probes[i].channels = codec_context->channels;
+        if (codec->type == AVMEDIA_TYPE_AUDIO)
+            stream_probes[i].channel_layout = codec_context->channel_layout;
+        else
+            stream_probes[i].channel_layout = -1;
+        stream_probes[i].width = codec_context->width;
+        stream_probes[i].height = codec_context->height;
+        stream_probes[i].pix_fmt = codec_context->pix_fmt;
+        stream_probes[i].field_order = codec_context->field_order;
+
+        if (probe->container_info.duration < ((float)stream_probes[i].duration_ts)/stream_probes[i].time_base.den)
+            probe->container_info.duration = ((float)stream_probes[i].duration_ts)/stream_probes[i].time_base.den;
     }
 
-    *txprobe = probes;
+    probe->stream_info = stream_probes;
+    probe->container_info.format_name = strdup(decoder_ctx.format_context->iformat->name);
+    *txprobe = probe;
     rc = nb_streams - nb_skipped_streams;
 
 avpipe_probe_end:
@@ -1270,7 +1343,7 @@ avpipe_init(
         params->rc_buffer_size = params->video_bitrate;
     }
 
-    if (prepare_decoder(&p_txctx->decoder_ctx, in_handlers, inctx, params)) {
+    if (prepare_decoder(&p_txctx->decoder_ctx, in_handlers, inctx, params, params->seekable)) {
         elv_err("Failure in preparing decoder");
         goto avpipe_init_failed;
     }
@@ -1286,9 +1359,9 @@ avpipe_init(
     char buf[1024];
     sprintf(buf,
         "format=%s "
-        "start_time_ts=%d "
-        "start_pts=%d "
-        "duration_ts=%d "
+        "start_time_ts=%"PRId64" "
+        "start_pts=%"PRId64" "
+        "duration_ts=%"PRId64" "
         "start_segment_str=%s "
         "video_bitrate=%d "
         "audio_bitrate=%d "

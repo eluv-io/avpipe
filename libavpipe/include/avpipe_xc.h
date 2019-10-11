@@ -113,8 +113,8 @@ typedef struct coderctx_t {
     AVFilterContext *buffersrc_ctx;
     AVFilterGraph *filter_graph;
 
-    int pts;        /* Decoder/encoder pts */
-    int input_start_pts;  /* In case input stream starts at PTS > 0 */
+    int64_t pts;              /* Decoder/encoder pts */
+    int64_t input_start_pts;  /* In case input stream starts at PTS > 0 */
 } coderctx_t;
 
 typedef enum crypt_scheme_t {
@@ -135,10 +135,10 @@ typedef enum tx_type_t {
 
 typedef struct txparams_t {
     char *format;                   // Output format [Required, Values: dash, hls, mp4, fmp4]
-    int start_time_ts;              // Transcode the source starting from this time
-    int skip_over_pts;              // Like start_time_ts but expressed in input pts
-    int start_pts;                  // Starting PTS for output
-    int duration_ts;                // Transcode time period [-1 for entire source length from start_time_ts]
+    int64_t start_time_ts;          // Transcode the source starting from this time
+    int64_t skip_over_pts;              // Like start_time_ts but expressed in input pts
+    int64_t start_pts;              // Starting PTS for output
+    int64_t duration_ts;            // Transcode time period [-1 for entire source length from start_time_ts]
     char *start_segment_str;        // Specify index of the first segment  TODO: change type to int
     int video_bitrate;
     int audio_bitrate;
@@ -160,20 +160,31 @@ typedef struct txparams_t {
     char *crypt_key_url;            // Specify a key URL in the manifest [Optional, Default: key.bin]
     crypt_scheme_t crypt_scheme;    // Content protection / DRM / encryption [Optional, Default: crypt_none]
     tx_type_t tx_type;              // Default: 0 means transcode 'everything'
+    int seekable;                   // Default: 0 means not seekable. A non seekable stream with moov box in
+                                    //          the end causes a lot of reads up to moov atom.
 } txparams_t;
 
 #define MAX_CODEC_NAME  256
 
-typedef struct txprobe_t {
+typedef struct channel_layout_info_t {
+    const char *name;
+    int         nb_channels;
+    uint64_t    layout;
+} channel_layout_info_t;
+
+typedef struct stream_info_t {
     int codec_type;             // Audio or Video
     int codec_id;
     char codec_name[MAX_CODEC_NAME+1];
-    int duration_ts;
+    int64_t duration_ts;
     AVRational time_base;
     int64_t nb_frames;
     int64_t start_time;
     AVRational avg_frame_rate;
-    AVRational frame_rate;
+    AVRational frame_rate;      // Same as r_frame_rate
+    int sample_rate;            // Audio only, samples per second
+    int channels;               // Audio only, number of audio channels
+    int channel_layout;         // Audio channel layout
     int ticks_per_frame;
     int64_t bit_rate;
     int has_b_frames;
@@ -182,6 +193,16 @@ typedef struct txprobe_t {
     AVRational sample_aspect_ratio;
     AVRational display_aspect_ratio;
     enum AVFieldOrder field_order;
+} stream_info_t;
+
+typedef struct container_info_t {
+    float duration;
+    char *format_name;
+} container_info_t;
+
+typedef struct txprobe_t {
+    container_info_t container_info;
+    stream_info_t *stream_info;    // An array of stream_info_t (usually 2)
 } txprobe_t;
 
 typedef struct txctx_t {
@@ -235,12 +256,24 @@ int
 avpipe_fini(
     txctx_t **txctx);
 
+/*
+ * @brief   Returns channel layout name.
+ *
+ * @param   channel_layout  Channel layout id.
+ *
+ * @return  Returns channel layout info if it can find channel layout with corresponding layout id, otherwise NULL.
+ */
+const channel_layout_info_t*
+avpipe_channel_layout_info(
+    int channel_layout);
+
 /**
  * @brief   Probes object stream specified by input handler.
  *
  * @param   in_handlers     A pointer to input handlers that direct the probe
  * @param   inctx           A pointer to ioctx_t for input stream. This has to be allocated and initialized
  *                          by the application before calling this function.
+ * @param   seekable        A flag to specify whether input stream is seakable or no
  * @param   txprob          A pointer to the txprobe_t that could contain probing info.
  * @return  Returns <=0 if probing is failed, otherwise number of streams that are probed.
  */
@@ -248,6 +281,7 @@ int
 avpipe_probe(
     avpipe_io_handler_t *in_handlers,
     ioctx_t *inctx,
+    int seekable,
     txprobe_t **txprobe);
 
 /**
@@ -266,5 +300,5 @@ avpipe_tx(
     int do_instrument,
     int bypass_transcode,
     int debug_frame_level,
-    int *last_input_pts);
+    int64_t *last_input_pts);
 #endif

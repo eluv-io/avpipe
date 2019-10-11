@@ -10,7 +10,8 @@ INCDIR=include
 OSNAME := $(shell uname -s)
 
 ifeq ($(OSNAME), Darwin)
-	LIBS=-lavpipe \
+	LIBS=-L/usr/local/lib \
+		-lavpipe \
 		-lavformat \
 		-lavfilter \
 		-lavcodec \

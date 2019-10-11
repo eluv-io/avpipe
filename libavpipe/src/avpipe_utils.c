@@ -19,7 +19,7 @@ dump_frame(
     int num,
     AVFrame *frame)
 {
-    elv_log("FRAME %s [%d] pts=%d pkt_dts=%d pkt_duration=%d be_time_stamp=%d key=%d "
+    elv_dbg("FRAME %s [%d] pts=%d pkt_dts=%d pkt_duration=%d be_time_stamp=%d key=%d "
         "pkt_size=%d "
         "width=%d height=%d linesize=%d "
         "format=%d coded_pic_num=%d "
@@ -36,7 +36,7 @@ dump_packet(
     char *msg,
     AVPacket *p)
 {
-    elv_log("PACKET %s pts=%d dts=%d duration=%d pos=%d size=%d stream_index=%d\n", msg,
+    elv_dbg("PACKET %s pts=%d dts=%d duration=%d pos=%d size=%d stream_index=%d\n", msg,
         (int)p->pts, (int)p->dts, (int)p->duration, (int)p->pos, p->size, p->stream_index
     );
 }
@@ -45,12 +45,12 @@ void
 dump_decoder(
     coderctx_t *d)
 {
-    elv_log("DECODER nb_streams=%d\n",
+    elv_dbg("DECODER nb_streams=%d\n",
         d->format_context->nb_streams
     );
     for (int i = 0; i < d->format_context->nb_streams; i++) {
         AVStream *s = d->format_context->streams[i];
-        elv_log("DECODER[%d] codec_type=%d start_time=%d duration=%d time_base=%d/%d frame_rate=%d/%d\n", i,
+        elv_dbg("DECODER[%d] codec_type=%d start_time=%d duration=%d time_base=%d/%d frame_rate=%d/%d\n", i,
             s->codecpar->codec_type,
             (int)s->start_time, (int)s->duration,
             s->time_base.num, s->time_base.den,
@@ -64,12 +64,12 @@ void
 dump_encoder(
     coderctx_t *d)
 {
-    elv_log("ENCODER nb_streams=%d\n",
+    elv_dbg("ENCODER nb_streams=%d\n",
         d->format_context->nb_streams
     );
     for (int i = 0; i < d->format_context->nb_streams; i++) {
         AVStream *s = d->format_context->streams[i];
-        elv_log("ENCODER[%d] codec_type=%d start_time=%d duration=%d time_base=%d/%d frame_rate=%d/%d\n", i,
+        elv_dbg("ENCODER[%d] codec_type=%d start_time=%d duration=%d time_base=%d/%d frame_rate=%d/%d\n", i,
             s->codecpar->codec_type,
             (int)s->start_time, (int)s->duration,
             s->time_base.num, s->time_base.den,
@@ -86,7 +86,7 @@ dump_codec_context(
     if (!cc)
         return;
 
-    elv_log("CODEC CONTEXT codec type=%d id=%d "
+    elv_dbg("CODEC CONTEXT codec type=%d id=%d "
         "time_base=%d/%d framerate=%d/%d tpf=%d delay=%d "
         "width=%d height=%d aspect_ratio=%d/%d coded_width=%d coded_height=%d gop=%d "
         "keyint_min=%d refs=%d "
@@ -105,7 +105,7 @@ void
 dump_codec_parameters(
     AVCodecParameters *cp)
 {
-    elv_log("CODEC PARAMETERS codec type=%d id=%d format=%d tag=%d "
+    elv_dbg("CODEC PARAMETERS codec type=%d id=%d format=%d tag=%d "
         "bit_rate=%d "
         "width=%d height=%d frame_size=%d"
         "\n",
@@ -124,7 +124,7 @@ dump_stream(
 
     AVRational codec_time_base = av_stream_get_codec_timebase(s);
 
-    elv_log("STREAM idx=%d id=%d "
+    elv_dbg("STREAM idx=%d id=%d "
         "time_base=%d/%d start_time=%d duration=%d nb_frames=%d "
         "codec_time_base=%d/%d "
         "r_frame_rate=%d/%d avg_frame_rate=%d/%d "

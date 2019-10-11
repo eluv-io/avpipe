@@ -22,11 +22,12 @@ package avpipe
 // #include "elv_log.h"
 import "C"
 import (
-	elog "eluvio/log"
 	"fmt"
 	"math/big"
 	"sync"
 	"unsafe"
+
+	elog "github.com/qluvio/content-fabric/log"
 )
 
 var log = elog.Get("/eluvio/avpipe")
@@ -91,10 +92,10 @@ const (
 // TxParams should match with txparams_t in avpipe_xc.h
 type TxParams struct {
 	Format             string      `json:"format,omitempty"`
-	StartTimeTs        int32       `json:"start_time_ts,omitempty"`
-	SkipOverPts        int32       `json:"skip_over_pts"`
-	StartPts           int32       `json:"start_pts,omitempty"` // Start PTS for output
-	DurationTs         int32       `json:"duration_ts,omitempty"`
+	StartTimeTs        int64       `json:"start_time_ts,omitempty"`
+	SkipOverPts        int64       `json:"skip_over_pts,omitempty"`
+	StartPts           int64       `json:"start_pts,omitempty"` // Start PTS for output
+	DurationTs         int64       `json:"duration_ts,omitempty"`
 	StartSegmentStr    string      `json:"start_segment_str,omitempty"`
 	VideoBitrate       int32       `json:"video_bitrate,omitempty"`
 	AudioBitrate       int32       `json:"audio_bitrate,omitempty"`
@@ -114,10 +115,10 @@ type TxParams struct {
 	CryptKeyURL        string      `json:"crypt_key_url,omitempty"`
 	CryptScheme        CryptScheme `json:"crypt_scheme,omitempty"`
 	TxType             TxType      `json:"tx_type,omitempty"`
+	Seekable           bool        `json:"seekable"`
 }
 
 type AVMediaType int
-
 const (
 	AVMEDIA_TYPE_VIDEO      = 0
 	AVMEDIA_TYPE_AUDIO      = 1
@@ -126,25 +127,66 @@ const (
 	AVMEDIA_TYPE_ATTACHMENT = 4 ///< Opaque data information usually sparse
 	AVMEDIA_TYPE_NB         = 5
 )
+var AVMediaTypeNames = map[AVMediaType]string{
+	AVMEDIA_TYPE_VIDEO:      "video",
+	AVMEDIA_TYPE_AUDIO:      "audio",
+	AVMEDIA_TYPE_DATA:       "data",
+	AVMEDIA_TYPE_SUBTITLE:   "subtitle",
+	AVMEDIA_TYPE_ATTACHMENT: "attachment",
+	AVMEDIA_TYPE_NB:         "nb",
+}
 
+type AVFieldOrder int
+const (
+    AV_FIELD_UNKNOWN      = 0
+    AV_FIELD_PROGRESSIVE  = 1
+    AV_FIELD_TT           = 2 //< Top coded_first, top displayed first
+    AV_FIELD_BB           = 3 //< Bottom coded first, bottom displayed first
+    AV_FIELD_TB           = 4 //< Top coded first, bottom displayed first
+    AV_FIELD_BT           = 5 //< Bottom coded first, top displayed first
+)
+var AVFieldOrderNames = map[AVFieldOrder]string{
+	AV_FIELD_UNKNOWN:     "",
+	AV_FIELD_PROGRESSIVE: "progressive",
+	AV_FIELD_TT:          "tt",
+	AV_FIELD_BB:          "bb",
+	AV_FIELD_TB:          "tb",
+	AV_FIELD_BT:          "bt",
+}
+
+type StreamInfo struct {
+	CodecType          string      `json:"codec_type"`
+	CodecID            int         `json:"codec_id,omitempty"`
+	CodecName          string      `json:"codec_name,omitempty"`
+	DurationTs         int64       `json:"duration_ts,omitempty"`
+	TimeBase           *big.Rat    `json:"time_base,omitempty"`
+	NBFrames           int64       `json:"nb_frames,omitempty"`
+	StartTime          int64       `json:"start_time"`
+	AvgFrameRate       *big.Rat    `json:"avg_frame_rate,omitempty"`
+	FrameRate          *big.Rat    `json:"frame_rate,omitempty"`
+	SampleRate         int         `json:"sample_rate,omitempty"`
+	Channels           int         `json:"channels,omitempty"`
+	ChannelLayout      int         `json:"channel_layout,omitempty"`
+	TicksPerFrame      int         `json:"ticks_per_frame,omitempty"`
+	BitRate            int64       `json:"bit_rate,omitempty"`
+	Has_B_Frames       bool        `json:"has_b_frame"`
+	Width              int         `json:"width,omitempty"`  // Video only
+	Height             int         `json:"height,omitempty"` // Video only
+	PixFmt             int         `json:"pix_fmt"`          // Video only, it matches with enum AVPixelFormat in FFmpeg
+	SampleAspectRatio  *big.Rat    `json:"sample_aspect_ratio,omitempty"`
+	DisplayAspectRatio *big.Rat    `json:"display_aspect_ratio,omitempty"`
+	FieldOrder         string      `json:"field_order,omitempty"`
+}
+
+type ContainerInfo struct {
+	Duration   float64 `json:"duration"`
+	FormatName string  `json:"format_name"`
+}
+
+// PENDING: use legacy_imf_dash_extract/media.Probe?
 type ProbeInfo struct {
-	CodecType          AVMediaType
-	CodecID            int
-	CodecName          string
-	DurationTs         int
-	TimeBase           *big.Rat
-	NBFrames           int64
-	StartTime          int64
-	AvgFrameRate       *big.Rat
-	FrameRate          *big.Rat
-	TicksPerFrame      int
-	BitRate            int64
-	Has_B_Frames       bool
-	Width, Height      int // Video only
-	PixFmt             int // Video only, it matches with enum AVPixelFormat in FFmpeg
-	SampleAspectRatio  *big.Rat
-	DisplayAspectRatio *big.Rat
-	FieldOrder         int
+	ContainerInfo ContainerInfo `json:"format"`
+	StreamInfo    []StreamInfo  `json:"streams"`
 }
 
 // IOHandler defines handlers that will be called from the C interface functions
@@ -519,7 +561,7 @@ func Version() int {
 
 // params: transcoding parameters
 // url: input filename that has to be transcoded
-func Tx(params *TxParams, url string, bypassTranscoding bool, debugFrameLevel bool, lastInputPts *int) int {
+func Tx(params *TxParams, url string, bypassTranscoding bool, debugFrameLevel bool, lastInputPts *int64) int {
 
 	// Convert TxParams to C.txparams_t
 	if params == nil {
@@ -529,10 +571,10 @@ func Tx(params *TxParams, url string, bypassTranscoding bool, debugFrameLevel bo
 
 	cparams := &C.txparams_t{
 		format:               C.CString(params.Format),
-		start_time_ts:        C.int(params.StartTimeTs),
-		skip_over_pts:        C.int(params.SkipOverPts),
-		start_pts:            C.int(params.StartPts),
-		duration_ts:          C.int(params.DurationTs),
+		start_time_ts:        C.int64_t(params.StartTimeTs),
+		skip_over_pts:        C.int64_t(params.SkipOverPts),
+		start_pts:            C.int64_t(params.StartPts),
+		duration_ts:          C.int64_t(params.DurationTs),
 		start_segment_str:    C.CString(params.StartSegmentStr),
 		video_bitrate:        C.int(params.VideoBitrate),
 		audio_bitrate:        C.int(params.AudioBitrate),
@@ -561,6 +603,12 @@ func Tx(params *TxParams, url string, bypassTranscoding bool, debugFrameLevel bo
 		bypass = 0
 	}
 
+	if params.Seekable {
+		cparams.seekable = C.int(1)
+	} else {
+		cparams.seekable = C.int(0)
+	}
+
 	var debugFrameLevelInt int
 	if debugFrameLevel {
 		debugFrameLevelInt = 1
@@ -568,84 +616,91 @@ func Tx(params *TxParams, url string, bypassTranscoding bool, debugFrameLevel bo
 		debugFrameLevelInt = 0
 	}
 
-	var lastInputPtsC C.int
-
+	var lastInputPtsC C.longlong
 	rc := C.tx((*C.txparams_t)(unsafe.Pointer(cparams)), C.CString(url), C.int(bypass), C.int(debugFrameLevelInt),
 		&lastInputPtsC)
-
-	*lastInputPts = int(lastInputPtsC)
+	*lastInputPts = int64(lastInputPtsC)
 
 	return int(rc)
 }
 
-func AVMediaTypeName(mediaType AVMediaType) string {
-	switch mediaType {
-	case AVMEDIA_TYPE_VIDEO:
-		return "video"
-	case AVMEDIA_TYPE_AUDIO:
-		return "audio"
-	case AVMEDIA_TYPE_DATA:
-		return "data"
-	case AVMEDIA_TYPE_SUBTITLE:
-		return "subtitle"
-	case AVMEDIA_TYPE_ATTACHMENT:
-		return "attachment"
+func ChannelLayoutName(channelLayout int) string {
+	channelLayoutInfo := C.avpipe_channel_layout_info(C.int(channelLayout))
+	if unsafe.Pointer(channelLayoutInfo) != C.NULL {
+		channelLayoutName := C.GoString((*C.char)(unsafe.Pointer(channelLayoutInfo.name)))
+		return channelLayoutName
 	}
 
-	return "none"
+	return ""
 }
 
-func Probe(url string) (error, []ProbeInfo) {
-	var cprobes *C.txprobe_t
-	rc := C.probe(C.CString(url), (**C.txprobe_t)(unsafe.Pointer(&cprobes)))
-	if int(rc) <= 0 {
-		return fmt.Errorf("Probing failed"), nil
+func Probe(url string, seekable bool) (*ProbeInfo, error) {
+	var cprobe *C.txprobe_t
+	var cseekable C.int
+
+	if seekable {
+		cseekable = C.int(1)
+	} else {
+		cseekable = C.int(0)
 	}
 
-	probeInfo := make([]ProbeInfo, int(rc))
-	probeArray := (*[1 << 10]C.txprobe_t)(unsafe.Pointer(cprobes))
+	rc := C.probe(C.CString(url), cseekable, (**C.txprobe_t)(unsafe.Pointer(&cprobe)))
+	if int(rc) <= 0 {
+		return nil, fmt.Errorf("Probing failed")
+	}
+
+	probeInfo := &ProbeInfo{}
+	probeInfo.StreamInfo = make([]StreamInfo, int(rc))
+	probeArray := (*[1 << 10]C.stream_info_t)(unsafe.Pointer(cprobe.stream_info))
 	for i := 0; i < int(rc); i++ {
-		probeInfo[i].CodecType = AVMediaType(probeArray[i].codec_type)
-		probeInfo[i].CodecID = int(probeArray[i].codec_id)
-		probeInfo[i].CodecName = C.GoString((*C.char)(unsafe.Pointer(&probeArray[i].codec_name)))
-		probeInfo[i].DurationTs = int(probeArray[i].duration_ts)
-		probeInfo[i].TimeBase = big.NewRat(int64(probeArray[i].time_base.num), int64(probeArray[i].time_base.den))
-		probeInfo[i].NBFrames = int64(probeArray[i].nb_frames)
-		probeInfo[i].StartTime = int64(probeArray[i].start_time)
+		probeInfo.StreamInfo[i].CodecType = AVMediaTypeNames[AVMediaType(probeArray[i].codec_type)]
+		probeInfo.StreamInfo[i].CodecID = int(probeArray[i].codec_id)
+		probeInfo.StreamInfo[i].CodecName = C.GoString((*C.char)(unsafe.Pointer(&probeArray[i].codec_name)))
+		probeInfo.StreamInfo[i].DurationTs = int64(probeArray[i].duration_ts)
+		probeInfo.StreamInfo[i].TimeBase = big.NewRat(int64(probeArray[i].time_base.num), int64(probeArray[i].time_base.den))
+		probeInfo.StreamInfo[i].NBFrames = int64(probeArray[i].nb_frames)
+		probeInfo.StreamInfo[i].StartTime = int64(probeArray[i].start_time)
 		if int64(probeArray[i].avg_frame_rate.den) != 0 {
-			probeInfo[i].AvgFrameRate = big.NewRat(int64(probeArray[i].avg_frame_rate.num), int64(probeArray[i].avg_frame_rate.den))
+			probeInfo.StreamInfo[i].AvgFrameRate = big.NewRat(int64(probeArray[i].avg_frame_rate.num), int64(probeArray[i].avg_frame_rate.den))
 		} else {
-			probeInfo[i].AvgFrameRate = big.NewRat(int64(probeArray[i].avg_frame_rate.num), int64(1))
+			probeInfo.StreamInfo[i].AvgFrameRate = big.NewRat(int64(probeArray[i].avg_frame_rate.num), int64(1))
 		}
 		if int64(probeArray[i].frame_rate.den) != 0 {
-			probeInfo[i].FrameRate = big.NewRat(int64(probeArray[i].frame_rate.num), int64(probeArray[i].frame_rate.den))
+			probeInfo.StreamInfo[i].FrameRate = big.NewRat(int64(probeArray[i].frame_rate.num), int64(probeArray[i].frame_rate.den))
 		} else {
-			probeInfo[i].FrameRate = big.NewRat(int64(probeArray[i].frame_rate.num), int64(1))
+			probeInfo.StreamInfo[i].FrameRate = big.NewRat(int64(probeArray[i].frame_rate.num), int64(1))
 		}
-		probeInfo[i].TicksPerFrame = int(probeArray[i].ticks_per_frame)
-		probeInfo[i].BitRate = int64(probeArray[i].bit_rate)
+		probeInfo.StreamInfo[i].SampleRate = int(probeArray[i].sample_rate)
+		probeInfo.StreamInfo[i].Channels = int(probeArray[i].channels)
+		probeInfo.StreamInfo[i].ChannelLayout = int(probeArray[i].channel_layout)
+		probeInfo.StreamInfo[i].TicksPerFrame = int(probeArray[i].ticks_per_frame)
+		probeInfo.StreamInfo[i].BitRate = int64(probeArray[i].bit_rate)
 		if probeArray[i].has_b_frames > 0 {
-			probeInfo[i].Has_B_Frames = true
+			probeInfo.StreamInfo[i].Has_B_Frames = true
 		} else {
-			probeInfo[i].Has_B_Frames = false
+			probeInfo.StreamInfo[i].Has_B_Frames = false
 		}
-		probeInfo[i].Width = int(probeArray[i].width)
-		probeInfo[i].Height = int(probeArray[i].height)
-		probeInfo[i].PixFmt = int(probeArray[i].pix_fmt)
+		probeInfo.StreamInfo[i].Width = int(probeArray[i].width)
+		probeInfo.StreamInfo[i].Height = int(probeArray[i].height)
+		probeInfo.StreamInfo[i].PixFmt = int(probeArray[i].pix_fmt)
 		if int64(probeArray[i].sample_aspect_ratio.den) != 0 {
-			probeInfo[i].SampleAspectRatio = big.NewRat(int64(probeArray[i].sample_aspect_ratio.num), int64(probeArray[i].sample_aspect_ratio.den))
+			probeInfo.StreamInfo[i].SampleAspectRatio = big.NewRat(int64(probeArray[i].sample_aspect_ratio.num), int64(probeArray[i].sample_aspect_ratio.den))
 		} else {
-			probeInfo[i].SampleAspectRatio = big.NewRat(int64(probeArray[i].sample_aspect_ratio.num), int64(1))
+			probeInfo.StreamInfo[i].SampleAspectRatio = big.NewRat(int64(probeArray[i].sample_aspect_ratio.num), int64(1))
 		}
 		if int64(probeArray[i].display_aspect_ratio.den) != 0 {
-			probeInfo[i].DisplayAspectRatio = big.NewRat(int64(probeArray[i].display_aspect_ratio.num), int64(probeArray[i].display_aspect_ratio.den))
+			probeInfo.StreamInfo[i].DisplayAspectRatio = big.NewRat(int64(probeArray[i].display_aspect_ratio.num), int64(probeArray[i].display_aspect_ratio.den))
 		} else {
-			probeInfo[i].DisplayAspectRatio = big.NewRat(int64(probeArray[i].display_aspect_ratio.num), int64(1))
+			probeInfo.StreamInfo[i].DisplayAspectRatio = big.NewRat(int64(probeArray[i].display_aspect_ratio.num), int64(1))
 		}
-		probeInfo[i].FieldOrder = int(probeArray[i].field_order)
+		probeInfo.StreamInfo[i].FieldOrder = AVFieldOrderNames[AVFieldOrder(probeArray[i].field_order)]
 	}
 
-	C.free(unsafe.Pointer(cprobes))
+	probeInfo.ContainerInfo.FormatName = C.GoString((*C.char)(unsafe.Pointer(cprobe.container_info.format_name)))
+	probeInfo.ContainerInfo.Duration = float64(cprobe.container_info.duration)
 
-	return nil, probeInfo
+	C.free(unsafe.Pointer(cprobe.stream_info))
+	C.free(unsafe.Pointer(cprobe))
+
+	return probeInfo, nil
 }
