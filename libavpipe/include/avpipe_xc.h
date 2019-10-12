@@ -168,12 +168,6 @@ typedef struct txparams_t {
 
 #define MAX_CODEC_NAME  256
 
-typedef struct channel_layout_info_t {
-    const char *name;
-    int         nb_channels;
-    uint64_t    layout;
-} channel_layout_info_t;
-
 typedef struct stream_info_t {
     int codec_type;             // Audio or Video
     int codec_id;
@@ -261,13 +255,16 @@ avpipe_fini(
 /*
  * @brief   Returns channel layout name.
  *
+ * @param   nb_channels     Number of channels.
  * @param   channel_layout  Channel layout id.
  *
- * @return  Returns channel layout info if it can find channel layout with corresponding layout id, otherwise NULL.
+ * @return  Returns channel layout name if it can find channel layout with corresponding layout id, otherwise empty string.
  */
-const channel_layout_info_t*
-avpipe_channel_layout_info(
+const char*
+avpipe_channel_name(
+    int nb_channels,
     int channel_layout);
+
 
 /**
  * @brief   Probes object stream specified by input handler.

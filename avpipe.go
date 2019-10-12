@@ -616,18 +616,17 @@ func Tx(params *TxParams, url string, bypassTranscoding bool, debugFrameLevel bo
 		debugFrameLevelInt = 0
 	}
 
-	var lastInputPtsC C.longlong
-	rc := C.tx((*C.txparams_t)(unsafe.Pointer(cparams)), C.CString(url), C.int(bypass), C.int(debugFrameLevelInt),
-		&lastInputPtsC)
+	var lastInputPtsC C.int64_t
+	rc := C.tx((*C.txparams_t)(unsafe.Pointer(cparams)), C.CString(url), C.int(bypass), C.int(debugFrameLevelInt), (*C.int64_t)(unsafe.Pointer(&lastInputPtsC)))
 	*lastInputPts = int64(lastInputPtsC)
 
 	return int(rc)
 }
 
-func ChannelLayoutName(channelLayout int) string {
-	channelLayoutInfo := C.avpipe_channel_layout_info(C.int(channelLayout))
-	if unsafe.Pointer(channelLayoutInfo) != C.NULL {
-		channelLayoutName := C.GoString((*C.char)(unsafe.Pointer(channelLayoutInfo.name)))
+func ChannelLayoutName(nbChannels, channelLayout int) string {
+	channelName := C.avpipe_channel_name(C.int(nbChannels), C.int(channelLayout))
+	if unsafe.Pointer(channelName) != C.NULL {
+		channelLayoutName := C.GoString((*C.char)(unsafe.Pointer(channelName)))
 		return channelLayoutName
 	}
 

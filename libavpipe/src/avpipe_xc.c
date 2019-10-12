@@ -1152,6 +1152,17 @@ avpipe_tx(
     return 0;
 }
 
+typedef struct channel_layout_info_t {
+    const char *name;
+    int         nb_channels;
+    uint64_t    layout;
+} channel_layout_info_t;
+
+typedef struct channel_name_t {
+    const char *name;
+    const char *description;
+} channel_name_t;
+
 const channel_layout_info_t channel_layout_map[] = {
     { "mono",        1,  AV_CH_LAYOUT_MONO },
     { "stereo",      2,  AV_CH_LAYOUT_STEREO },
@@ -1183,16 +1194,78 @@ const channel_layout_info_t channel_layout_map[] = {
     { "downmix",     2,  AV_CH_LAYOUT_STEREO_DOWNMIX, },
 };
 
-const channel_layout_info_t*
-avpipe_channel_layout_info(
+static const struct channel_name_t channel_names[] = {
+     [0] = { "FL",        "front left"            },
+     [1] = { "FR",        "front right"           },
+     [2] = { "FC",        "front center"          },
+     [3] = { "LFE",       "low frequency"         },
+     [4] = { "BL",        "back left"             },
+     [5] = { "BR",        "back right"            },
+     [6] = { "FLC",       "front left-of-center"  },
+     [7] = { "FRC",       "front right-of-center" },
+     [8] = { "BC",        "back center"           },
+     [9] = { "SL",        "side left"             },
+    [10] = { "SR",        "side right"            },
+    [11] = { "TC",        "top center"            },
+    [12] = { "TFL",       "top front left"        },
+    [13] = { "TFC",       "top front center"      },
+    [14] = { "TFR",       "top front right"       },
+    [15] = { "TBL",       "top back left"         },
+    [16] = { "TBC",       "top back center"       },
+    [17] = { "TBR",       "top back right"        },
+    [29] = { "DL",        "downmix left"          },
+    [30] = { "DR",        "downmix right"         },
+    [31] = { "WL",        "wide left"             },
+    [32] = { "WR",        "wide right"            },
+    [33] = { "SDL",       "surround direct left"  },
+    [34] = { "SDR",       "surround direct right" },
+    [35] = { "LFE2",      "low frequency 2"       },
+};
+
+
+static const channel_layout_info_t*
+get_channel_layout_info(
+    int nb_channels,
     int channel_layout)
 {
     for (int i = 0; i < sizeof(channel_layout_map)/sizeof(channel_layout_map[0]); i++) {
-        if (channel_layout_map[i].layout == channel_layout)
+        if (nb_channels == channel_layout_map[i].nb_channels &&
+            channel_layout_map[i].layout == channel_layout)
             return &channel_layout_map[i];
     }
 
     return NULL;
+}
+
+static const char*
+get_channel_name(
+    int channel_layout)
+{
+    if (channel_layout < 0 || channel_layout >= sizeof(channel_names)/sizeof(channel_names[0]))
+        return NULL;
+    return channel_names[channel_layout].name;
+}
+
+const char*
+avpipe_channel_name(
+    int nb_channels,
+    int channel_layout)
+{
+    const channel_layout_info_t *info = get_channel_layout_info(nb_channels, channel_layout);
+    if (info != NULL) {
+        return info->name;
+    }
+
+    for (int i = 0, ch = 0; i < 64; i++) {
+        if ((channel_layout & (UINT64_C(1) << i))) {
+            const char *name = get_channel_name(i);
+            if (name)
+                return name;
+            ch++;
+        }
+    }
+
+    return "";
 }
 
 int
