@@ -3,6 +3,7 @@
 #
 # Arguments: <content-fabric-top-dir>
 #
+# TODO: Go build fails if $1 (fabric dir) is a relative path
 
 if test $# -lt 1; then
     echo "Required arguments: <CONTENT-FABRIC-TOP-DIR>"

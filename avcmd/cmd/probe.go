@@ -69,7 +69,7 @@ func doProbe(cmd *cobra.Command, args []string) error {
 		}
 		fmt.Printf("\tsample_aspect_ratio: %d:%d\n", info.SampleAspectRatio.Num(), info.SampleAspectRatio.Denom())
 		fmt.Printf("\tdisplay_aspect_ratio: %d:%d\n", info.DisplayAspectRatio.Num(), info.DisplayAspectRatio.Denom())
-		fmt.Printf("\tfield_order: %d\n", info.FieldOrder)
+		fmt.Printf("\tfield_order: %s\n", info.FieldOrder)
 	}
 
 	fmt.Printf("Container\n")

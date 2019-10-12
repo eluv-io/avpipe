@@ -93,6 +93,7 @@ const (
 type TxParams struct {
 	Format             string      `json:"format,omitempty"`
 	StartTimeTs        int64       `json:"start_time_ts,omitempty"`
+	SkipOverPts        int64       `json:"skip_over_pts,omitempty"`
 	StartPts           int64       `json:"start_pts,omitempty"` // Start PTS for output
 	DurationTs         int64       `json:"duration_ts,omitempty"`
 	StartSegmentStr    string      `json:"start_segment_str,omitempty"`
@@ -163,9 +164,9 @@ type StreamInfo struct {
 	StartTime          int64       `json:"start_time"`
 	AvgFrameRate       *big.Rat    `json:"avg_frame_rate,omitempty"`
 	FrameRate          *big.Rat    `json:"frame_rate,omitempty"`
-	SampleRate         int         `json:sample_rate,omitempty`
-	Channels           int         `json:channels,omitempty`
-	ChannelLayout      int         `json:channel_layout,omitempty`
+	SampleRate         int         `json:"sample_rate,omitempty"`
+	Channels           int         `json:"channels,omitempty"`
+	ChannelLayout      int         `json:"channel_layout,omitempty"`
 	TicksPerFrame      int         `json:"ticks_per_frame,omitempty"`
 	BitRate            int64       `json:"bit_rate,omitempty"`
 	Has_B_Frames       bool        `json:"has_b_frame"`
@@ -560,7 +561,7 @@ func Version() int {
 
 // params: transcoding parameters
 // url: input filename that has to be transcoded
-func Tx(params *TxParams, url string, bypassTranscoding bool, debugFrameLevel bool) int {
+func Tx(params *TxParams, url string, bypassTranscoding bool, debugFrameLevel bool, lastInputPts *int64) int {
 
 	// Convert TxParams to C.txparams_t
 	if params == nil {
@@ -571,6 +572,7 @@ func Tx(params *TxParams, url string, bypassTranscoding bool, debugFrameLevel bo
 	cparams := &C.txparams_t{
 		format:               C.CString(params.Format),
 		start_time_ts:        C.int64_t(params.StartTimeTs),
+		skip_over_pts:        C.int64_t(params.SkipOverPts),
 		start_pts:            C.int64_t(params.StartPts),
 		duration_ts:          C.int64_t(params.DurationTs),
 		start_segment_str:    C.CString(params.StartSegmentStr),
@@ -614,7 +616,11 @@ func Tx(params *TxParams, url string, bypassTranscoding bool, debugFrameLevel bo
 		debugFrameLevelInt = 0
 	}
 
-	rc := C.tx((*C.txparams_t)(unsafe.Pointer(cparams)), C.CString(url), C.int(bypass), C.int(debugFrameLevelInt))
+	var lastInputPtsC C.longlong
+	rc := C.tx((*C.txparams_t)(unsafe.Pointer(cparams)), C.CString(url), C.int(bypass), C.int(debugFrameLevelInt),
+		&lastInputPtsC)
+	*lastInputPts = int64(lastInputPtsC)
+
 	return int(rc)
 }
 

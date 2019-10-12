@@ -105,6 +105,10 @@ typedef struct coderctx_t {
 
     int64_t last_dts;
     int64_t last_key_frame;     /* pts of last key frame */
+    int64_t input_last_pts_read;
+    int64_t input_last_pts_sent_encode;
+    int64_t input_last_pos_sent_encode;
+    int64_t input_last_pts_encoded;
 
     /* Filter graph, valid for decoder */
     AVFilterContext *buffersink_ctx;
@@ -134,6 +138,7 @@ typedef enum tx_type_t {
 typedef struct txparams_t {
     char *format;                   // Output format [Required, Values: dash, hls, mp4, fmp4]
     int64_t start_time_ts;          // Transcode the source starting from this time
+    int64_t skip_over_pts;              // Like start_time_ts but expressed in input pts
     int64_t start_pts;              // Starting PTS for output
     int64_t duration_ts;            // Transcode time period [-1 for entire source length from start_time_ts]
     char *start_segment_str;        // Specify index of the first segment  TODO: change type to int
@@ -296,5 +301,6 @@ avpipe_tx(
     txctx_t *txctx,
     int do_instrument,
     int bypass_transcode,
-    int debug_frame_level);
+    int debug_frame_level,
+    int64_t *last_input_pts);
 #endif

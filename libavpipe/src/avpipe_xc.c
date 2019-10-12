@@ -96,8 +96,9 @@ prepare_decoder(
     prepare_input(in_handlers, inctx, decoder_context->format_context, seekable);
 
     /* Allocate AVFormatContext in format_context and find input file format */
-    if (avformat_open_input(&decoder_context->format_context, "bogus.mp4", NULL, NULL) != 0) {
-        elv_err("Could not open input file");
+    rc = avformat_open_input(&decoder_context->format_context, "bogus.mp4", NULL, NULL);
+    if (rc != 0) {
+        elv_err("Could not open input file, err=%d", rc);
         return -1;
     }
 
@@ -118,10 +119,15 @@ prepare_decoder(
             /* Video */
             decoder_context->video_stream_index = i;
             elv_dbg("STREAM %d Video, codec_id=%s", i, avcodec_get_name(decoder_context->codec_parameters[i]->codec_id));
+            if (params != NULL && !(params->tx_type & tx_video))
+                continue;
+
         } else if (decoder_context->format_context->streams[i]->codecpar->codec_type == AVMEDIA_TYPE_AUDIO) {
             /* Audio */
             decoder_context->audio_stream_index = i;
             elv_dbg("STREAM %d Audio, codec_id=%s", i, avcodec_get_name(decoder_context->codec_parameters[i]->codec_id));
+            if (params != NULL && !(params->tx_type & tx_audio))
+                continue;
 
             /* If the buffer size is too big, ffmpeg might assert in aviobuf.c:581
              * To avoid this assertion, reset the buffer size to something smaller.
@@ -138,11 +144,11 @@ prepare_decoder(
         }
 
         /* Initialize codec and codec context */
-        if (params != NULL && params->dcodec != NULL && params->dcodec[0] != '\0')
+        if (params != NULL && params->dcodec != NULL && params->dcodec[0] != '\0') {
             decoder_context->codec[i] = avcodec_find_decoder_by_name(params->dcodec);
-        else
+        } else {
             decoder_context->codec[i] = avcodec_find_decoder(decoder_context->codec_parameters[i]->codec_id);
-
+        }
         if (!decoder_context->codec[i]) {
             elv_err("Unsupported codec");
             return -1;
@@ -311,9 +317,9 @@ prepare_video_encoder(
         av_opt_set(encoder_context->format_context->priv_data, "movflags", "frag_every_frame", 0);
 
         // PENDING(SSS) - must use the same config as mez maker
-        av_opt_set(&encoder_options, "keyint", "50", 0); // PENDING(SSS) hardcoded 50
-        av_opt_set(&encoder_options, "min-keyint", "50", 0);
-        av_opt_set(&encoder_options, "no-scenecut", "-1", 0);
+        av_opt_set_int(&encoder_options, "keyint", params->seg_duration_fr, 0);
+        av_opt_set_int(&encoder_options, "min-keyint", params->seg_duration_fr, 0);
+        av_opt_set_int(&encoder_options, "no-scenecut", -1, 0);
         // av_opt_set(&encoder_options, "bframes", "0", 0);  // Hopefully not needed
     }
 
@@ -598,27 +604,33 @@ should_skip_encoding(
     txparams_t *p,
     AVFrame *frame)
 {
-    int skip = 0;
     const int frame_in_pts_offset = frame->pts - decoder_context->input_start_pts;
 
     /* Drop frames before the desired 'start_time' */
     if (p->start_time_ts > 0 && frame_in_pts_offset < p->start_time_ts) {
-        elv_dbg("ENCODE skip frame early pts=%"PRId64" filt_frame pts=%"PRId64", frame_in_pts_offset=%d, start_time_ts=%d",
+        elv_dbg("ENCODE skip frame early pts=%" PRId64 ", frame_in_pts_offset=%" PRId64 ", start_time_ts=%" PRId64,
             frame->pts, frame_in_pts_offset, p->start_time_ts);
-        skip = 1;
+        return 1;
+    }
+
+    /* Skip beginning based on input packet pts */
+    if (p->skip_over_pts > 0 && frame->pts <= p->skip_over_pts) {
+        elv_dbg("ENCODE skip frame early pts=%" PRId64 ", frame_in_pts_offset=%" PRId64 ", skip_over_pts=%" PRId64,
+            frame->pts, frame_in_pts_offset, p->skip_over_pts);
+        return 1;
     }
 
     /* To allow for packet reordering frames can come with pts past the desired duration */
     if (p->duration_ts > 0) {
         const int max_valid_ts = p->start_time_ts + p->duration_ts;
         if (frame_in_pts_offset >= max_valid_ts) {
-            elv_dbg("ENCODE skip frame late pts=%"PRId64" filt_frame pts=%"PRId64", frame_in_pts_offset=%d, max_valid_ts=%d",
+            elv_dbg("ENCODE skip frame late pts=%" PRId64 ", frame_in_pts_offset=%" PRId64 ", max_valid_ts=%" PRId64,
                 frame->pts, frame_in_pts_offset, max_valid_ts);
-            skip = 1;
+            return 1;
         }
     }
 
-    return skip;
+    return 0;
 }
 
 static int
@@ -644,6 +656,10 @@ encode_frame(
         elv_err("Failed to send frame for encoding err=%d", ret);
     }
 
+    if (frame) {
+        encoder_context->input_last_pts_sent_encode = frame->pts;
+    }
+
     while (ret >= 0) {
         /* The packet must be initialized before receiving */
         av_init_packet(output_packet);
@@ -661,7 +677,13 @@ encode_frame(
         }
 
         /* prepare packet for muxing */
-        output_packet->stream_index = stream_index;
+        if (params->tx_type == tx_all) {
+            /* Preserve the stream index of the input */
+            output_packet->stream_index = stream_index;
+        } else {
+            /* The output has only one stream */
+            output_packet->stream_index = 0;
+        }
 
         /*
          * Set packet duration manually if not set by the encoder.
@@ -675,7 +697,8 @@ encode_frame(
             output_packet->duration = output_packet->dts - encoder_context->last_dts;
         }
         encoder_context->last_dts = output_packet->dts;
-        encoder_context->pts = output_packet->dts;
+        encoder_context->pts = output_packet->pts; // WHy was this dts?
+        encoder_context->input_last_pts_encoded = output_packet->pts;
 
         /* Rescale using the stream time_base (not the codec context) */
         av_packet_rescale_ts(output_packet,
@@ -685,8 +708,8 @@ encode_frame(
 
         set_key_flag(output_packet, encoder_context, params);
 
-    	output_packet->pts += params->start_pts;
-    	output_packet->dts += params->start_pts;
+        output_packet->pts += params->start_pts;  // PENDING(SSS) Don't we have to compensate for 'relative pts'?
+        output_packet->dts += params->start_pts;
 
         if (debug_frame_level)
             dump_packet("OUT", output_packet);
@@ -880,7 +903,7 @@ flush_decoder(
 
         if (response == AVERROR_EOF) {
             elv_log("1 GOT EOF");
-            continue;
+            continue; // PENDING(SSS) why continue and not break?
         }
 
         if (codec_context->codec_type == AVMEDIA_TYPE_VIDEO) {
@@ -931,7 +954,8 @@ avpipe_tx(
     txctx_t *txctx,
     int do_instrument,
     int bypass_transcode,
-    int debug_frame_level)
+    int debug_frame_level,
+    int64_t *last_input_pts)
 {
     /* Set scale filter */
     char filter_str[128];
@@ -976,7 +1000,9 @@ avpipe_tx(
     int response = 0;
     int rc = 0;
 
-    elv_dbg("START TIME %d, START PTS %d (output), DURATION %d", params->start_time_ts, params->start_pts, params->duration_ts);
+    elv_dbg("START TIME %d SKIP_PTS %d, START PTS %d (output), DURATION %d",
+        params->start_time_ts, params->skip_over_pts,
+        params->start_pts, params->duration_ts);
 
 #if INPUT_IS_SEEKABLE
     /* Seek to start position */
@@ -1022,6 +1048,8 @@ avpipe_tx(
                 break;
             }
         }
+
+        encoder_context->input_last_pts_read = input_packet->pts;
 
         if (input_packet->stream_index == decoder_context->video_stream_index) {
             if (params->tx_type & tx_video) {
@@ -1101,9 +1129,9 @@ avpipe_tx(
      * TODO: should I do it for the audio stream too?
      */
     flush_decoder(decoder_context, encoder_context, encoder_context->video_stream_index, params, debug_frame_level);
+
     if (!bypass_transcode && (params->tx_type & tx_video))
         encode_frame(decoder_context, encoder_context, NULL, encoder_context->video_stream_index, params, debug_frame_level);
-
 
     dump_coders(decoder_context, encoder_context);
 
@@ -1111,6 +1139,15 @@ avpipe_tx(
     av_frame_free(&input_frame);
 
     av_write_trailer(encoder_context->format_context);
+
+    elv_log("avpipe_tx done last pts=%d input_start_pts=%d dts=%d pts_read=%d pts_sent_encode=%d pts_encoded=%d",
+        encoder_context->pts, encoder_context->input_start_pts,
+        encoder_context->last_dts,
+        encoder_context->input_last_pts_read,
+        encoder_context->input_last_pts_sent_encode,
+        encoder_context->input_last_pts_encoded);
+
+    *last_input_pts = encoder_context->input_last_pts_sent_encode;
 
     return 0;
 }
