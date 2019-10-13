@@ -542,7 +542,7 @@ main(
 
     i = 1;
     while (i < argc) {
-        if ((int) argv[i][0] != '-') {
+        if ((int) argv[i][0] != '-' || i+1 >= argc) {
             usage(argv[0], argv[i], EXIT_FAILURE);
         }
         switch ((int) argv[i][1]) {
