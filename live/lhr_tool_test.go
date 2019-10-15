@@ -96,6 +96,7 @@ func TestToolFmp4(t *testing.T) {
 	// lhr contains the recording state so use a single instance
 	recordFmp4(t, lhr, outFileName+"_1.mp4")
 	recordFmp4(t, lhr, outFileName+"_2.mp4")
+	recordFmp4(t, lhr, outFileName+"_3.mp4")
 }
 
 func recordFmp4(t *testing.T, lhr *HLSReader, fileName string) {

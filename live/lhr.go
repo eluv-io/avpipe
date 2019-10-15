@@ -33,7 +33,7 @@ type HLSReader struct {
 	client          http.Client
 	masterURL       *url.URL
 	playlistURL     *url.URL
-	playlistPollSec float64    // How often to poll for the manifest - HLS spec says half the duration
+	playlistPollSec float64    // How often to poll for the manifest - HLS spec says half the advertised duration
 	nextSeqNo       int        // The next segment sequence number to record (the first sequence number in a stream is 0)
 	NextSkipOverPts int64      // Start recording from this frame in the segment
 	segments        []*segInfo // Segments recorded
@@ -67,14 +67,16 @@ func (lhr *HLSReader) durationReadSec() (total float64) {
 
 // prepareNext determines the nextSeqNo to use on the next call to Fill, and
 // TODO: cleans up segInfo no longer needed
-func (lhr *HLSReader) prepareNext(durationFilled float64) {
+func (lhr *HLSReader) prepareNext() {
 	indexOfSegmentsToKeep := len(lhr.segments)
-	var durationRead float64
-	for i, segment := range lhr.segments {
-		// Use duration to determine how many segments were needed to fill the
-		// last recording. This could be wrong if the manifest lies badly.
-		durationRead += segment.duration
-		if durationRead > durationFilled {
+	var durationOverlap float64
+	for i := len(lhr.segments)-1; i >=0; i-- {
+		segment := lhr.segments[i]
+		durationOverlap += segment.duration
+		// TODO: We're assuming transcoding keeps up. Check if controlling
+		//       ffmpeg input buffer size can ensure this.
+		// Reuse at least half the last target duration in the next part
+		if durationOverlap > lhr.playlistPollSec {
 			lhr.nextSeqNo = segment.seqNo
 			indexOfSegmentsToKeep = i
 			break
@@ -355,7 +357,7 @@ func (lhr *HLSReader) readPlaylist(u *url.URL, durationSec float64, w io.Writer)
 			log.Debug("AVLR successfully read requested duration, ending with a partial segment", "written", written, "err", err)
 			return true, nil
 		}
-		if lhr.durationReadSec() > durationSec+mediaPlaylist.TargetDuration {
+		if lhr.durationReadSec() >= durationSec+(2*mediaPlaylist.TargetDuration) {
 			// If this occurs avpipe is either not stopping at the specified
 			// duration, or transcoding slower than expected
 			log.Info("AVLR successfully read requested duration + 2x source segment duration", "nextSeqNo", lhr.nextSeqNo, "durationReadSec", lhr.durationReadSec())
@@ -412,7 +414,7 @@ func (lhr *HLSReader) Fill(durationSecRat *big.Rat, w io.Writer) (err error) {
 			return
 		}
 		if complete {
-			lhr.prepareNext(durationSec)
+			lhr.prepareNext()
 			log.Debug("AVLR Fill done")
 			return nil
 		}
