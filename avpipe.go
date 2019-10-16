@@ -60,6 +60,8 @@ const (
 	MP4Stream
 	// FMP4Stream 11 (Fragmented MP4)
 	FMP4Stream
+	// MP4Segment 12
+	MP4Segment
 )
 
 type TxType int
@@ -101,7 +103,8 @@ type TxParams struct {
 	AudioBitrate       int32       `json:"audio_bitrate,omitempty"`
 	SampleRate         int32       `json:"sample_rate,omitempty"` // Audio sampling rate
 	CrfStr             string      `json:"crf_str,omitempty"`
-	SegDurationTs      int32       `json:"seg_duration_ts,omitempty"`
+	SegDurationTs      int64       `json:"seg_duration_ts,omitempty"`
+	SegDuration        string      `json:"seg_duration,omitempty"`
 	SegDurationFr      int32       `json:"seg_duration_fr,omitempty"`
 	FrameDurationTs    int32       `json:"frame_duration_ts,omitempty"`
 	StartFragmentIndex int32       `json:"start_fragment_index,omitempty"`
@@ -119,6 +122,7 @@ type TxParams struct {
 }
 
 type AVMediaType int
+
 const (
 	AVMEDIA_TYPE_VIDEO      = 0
 	AVMEDIA_TYPE_AUDIO      = 1
@@ -127,6 +131,7 @@ const (
 	AVMEDIA_TYPE_ATTACHMENT = 4 ///< Opaque data information usually sparse
 	AVMEDIA_TYPE_NB         = 5
 )
+
 var AVMediaTypeNames = map[AVMediaType]string{
 	AVMEDIA_TYPE_VIDEO:      "video",
 	AVMEDIA_TYPE_AUDIO:      "audio",
@@ -137,14 +142,16 @@ var AVMediaTypeNames = map[AVMediaType]string{
 }
 
 type AVFieldOrder int
+
 const (
-    AV_FIELD_UNKNOWN      = 0
-    AV_FIELD_PROGRESSIVE  = 1
-    AV_FIELD_TT           = 2 //< Top coded_first, top displayed first
-    AV_FIELD_BB           = 3 //< Bottom coded first, bottom displayed first
-    AV_FIELD_TB           = 4 //< Top coded first, bottom displayed first
-    AV_FIELD_BT           = 5 //< Bottom coded first, top displayed first
+	AV_FIELD_UNKNOWN     = 0
+	AV_FIELD_PROGRESSIVE = 1
+	AV_FIELD_TT          = 2 //< Top coded_first, top displayed first
+	AV_FIELD_BB          = 3 //< Bottom coded first, bottom displayed first
+	AV_FIELD_TB          = 4 //< Top coded first, bottom displayed first
+	AV_FIELD_BT          = 5 //< Bottom coded first, top displayed first
 )
+
 var AVFieldOrderNames = map[AVFieldOrder]string{
 	AV_FIELD_UNKNOWN:     "",
 	AV_FIELD_PROGRESSIVE: "progressive",
@@ -155,27 +162,27 @@ var AVFieldOrderNames = map[AVFieldOrder]string{
 }
 
 type StreamInfo struct {
-	CodecType          string      `json:"codec_type"`
-	CodecID            int         `json:"codec_id,omitempty"`
-	CodecName          string      `json:"codec_name,omitempty"`
-	DurationTs         int64       `json:"duration_ts,omitempty"`
-	TimeBase           *big.Rat    `json:"time_base,omitempty"`
-	NBFrames           int64       `json:"nb_frames,omitempty"`
-	StartTime          int64       `json:"start_time"`
-	AvgFrameRate       *big.Rat    `json:"avg_frame_rate,omitempty"`
-	FrameRate          *big.Rat    `json:"frame_rate,omitempty"`
-	SampleRate         int         `json:"sample_rate,omitempty"`
-	Channels           int         `json:"channels,omitempty"`
-	ChannelLayout      int         `json:"channel_layout,omitempty"`
-	TicksPerFrame      int         `json:"ticks_per_frame,omitempty"`
-	BitRate            int64       `json:"bit_rate,omitempty"`
-	Has_B_Frames       bool        `json:"has_b_frame"`
-	Width              int         `json:"width,omitempty"`  // Video only
-	Height             int         `json:"height,omitempty"` // Video only
-	PixFmt             int         `json:"pix_fmt"`          // Video only, it matches with enum AVPixelFormat in FFmpeg
-	SampleAspectRatio  *big.Rat    `json:"sample_aspect_ratio,omitempty"`
-	DisplayAspectRatio *big.Rat    `json:"display_aspect_ratio,omitempty"`
-	FieldOrder         string      `json:"field_order,omitempty"`
+	CodecType          string   `json:"codec_type"`
+	CodecID            int      `json:"codec_id,omitempty"`
+	CodecName          string   `json:"codec_name,omitempty"`
+	DurationTs         int64    `json:"duration_ts,omitempty"`
+	TimeBase           *big.Rat `json:"time_base,omitempty"`
+	NBFrames           int64    `json:"nb_frames,omitempty"`
+	StartTime          int64    `json:"start_time"` // in TS unit
+	AvgFrameRate       *big.Rat `json:"avg_frame_rate,omitempty"`
+	FrameRate          *big.Rat `json:"frame_rate,omitempty"`
+	SampleRate         int      `json:"sample_rate,omitempty"`
+	Channels           int      `json:"channels,omitempty"`
+	ChannelLayout      int      `json:"channel_layout,omitempty"`
+	TicksPerFrame      int      `json:"ticks_per_frame,omitempty"`
+	BitRate            int64    `json:"bit_rate,omitempty"`
+	Has_B_Frames       bool     `json:"has_b_frame"`
+	Width              int      `json:"width,omitempty"`  // Video only
+	Height             int      `json:"height,omitempty"` // Video only
+	PixFmt             int      `json:"pix_fmt"`          // Video only, it matches with enum AVPixelFormat in FFmpeg
+	SampleAspectRatio  *big.Rat `json:"sample_aspect_ratio,omitempty"`
+	DisplayAspectRatio *big.Rat `json:"display_aspect_ratio,omitempty"`
+	FieldOrder         string   `json:"field_order,omitempty"`
 }
 
 type ContainerInfo struct {
@@ -419,6 +426,8 @@ func AVPipeOpenOutput(handler C.int64_t, stream_index, seg_index, stream_type C.
 		out_type = MP4Stream
 	case C.avpipe_fmp4_stream:
 		out_type = FMP4Stream
+	case C.avpipe_mp4_segment:
+		out_type = MP4Segment
 	default:
 		log.Error("AVPipeOpenOutput()", "invalid stream type", stream_type)
 		return C.int64_t(-1)
@@ -580,7 +589,8 @@ func Tx(params *TxParams, url string, bypassTranscoding bool, debugFrameLevel bo
 		audio_bitrate:        C.int(params.AudioBitrate),
 		sample_rate:          C.int(params.SampleRate),
 		crf_str:              C.CString(params.CrfStr),
-		seg_duration_ts:      C.int(params.SegDurationTs),
+		seg_duration_ts:      C.int64_t(params.SegDurationTs),
+		seg_duration:         C.CString(params.SegDuration),
 		seg_duration_fr:      C.int(params.SegDurationFr),
 		frame_duration_ts:    C.int(params.FrameDurationTs),
 		start_fragment_index: C.int(params.StartFragmentIndex),
@@ -618,7 +628,9 @@ func Tx(params *TxParams, url string, bypassTranscoding bool, debugFrameLevel bo
 
 	var lastInputPtsC C.int64_t
 	rc := C.tx((*C.txparams_t)(unsafe.Pointer(cparams)), C.CString(url), C.int(bypass), C.int(debugFrameLevelInt), (*C.int64_t)(unsafe.Pointer(&lastInputPtsC)))
-	*lastInputPts = int64(lastInputPtsC)
+	if lastInputPts != nil {
+		*lastInputPts = int64(lastInputPtsC)
+	}
 
 	return int(rc)
 }

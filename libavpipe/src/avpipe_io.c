@@ -118,10 +118,16 @@ elv_io_open(
             }
             else if (!strncmp(url, "fmp4", 4)) {
                 outctx->type = avpipe_fmp4_stream;
+            } else if (strstr(url, "segment")) {
+                outctx->type = avpipe_mp4_segment;
+                outctx->seg_index = out_tracker[outctx->stream_index].seg_index;
+                out_tracker[outctx->stream_index].seg_index++;
+                outctx->inctx = out_tracker[outctx->stream_index].inctx;
             }
+
         }
  
-        elv_dbg("OUT url=%s, type=%d", url, outctx->type);
+        elv_dbg("OUT url=%s, type=%d, seg-index=%d", url, outctx->type, outctx->seg_index);
         /* Manifest or init segments */
         if (out_handlers->avpipe_opener(url, outctx) < 0) {
             free(outctx);
@@ -132,7 +138,7 @@ elv_io_open(
             out_handlers->avpipe_reader, out_handlers->avpipe_writer, out_handlers->avpipe_seeker);
 
         /* libavformat expects seekable streams for mp4 */
-        if (outctx->type == avpipe_mp4_stream)
+        if (outctx->type == avpipe_mp4_stream || outctx->type == avpipe_mp4_segment)
             avioctx->seekable = 1;
         else
             avioctx->seekable = 0;

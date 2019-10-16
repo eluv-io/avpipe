@@ -164,6 +164,15 @@ out_opener(
         }
         break;
 
+    case avpipe_mp4_segment:
+        {
+            const char *segbase = "segment";
+
+            sprintf(segname, "./%s/%s%d-%05d.mp4",
+                dir, segbase, outctx->stream_index, outctx->seg_index);
+        }
+        break;
+
     default:
         return -1;
     }
@@ -467,7 +476,8 @@ usage(
         "\t-e :                 (optional) encoder name. Default is \"libx264\", can be: \"libx264\", \"h264_nvenc\", \"h264_videotoolbox\"\n"
         "\t-enc-height :        (optional) Default: -1 (use source height)\n"
         "\t-enc-width :         (optional) Default: -1 (use source width)\n"
-        "\t-format :            (optional) package format. Default is \"dash\", can be: \"dash\", \"hls\", \"mp4\", or \"fmp4\"\n"
+        "\t-format :            (optional) package format. Default is \"dash\", can be: \"dash\", \"hls\", \"mp4\", \"segment\" or \"fmp4\"\n"
+        "\t                                Using \"segment\" format produces self contained mp4 segments\n"
         "\t-sample-rate :       (optional) Default: -1\n"
         "\t-rc-buffer-size :    (optional)\n"
         "\t-rc-max-rate :       (optional)\n"
@@ -480,8 +490,9 @@ usage(
         "\t-t :                 (optional) transcoding threads. Default is 1 thread, must be bigger than 1\n"
         "\t-command :           (optional) directing command of etx, can be \"transcode\" or \"probe\" (default is transcode).\n"
         "\t-tx-type :           (optional) transcoding type. Default is \"all\", can be \"video\", \"audio\", or \"all\" \n"
-        "\t-seg-duration-ts :   (mandatory) segment duration time base (positive integer).\n"
-        "\t-seg-duration-fr :   (mandatory) segment duration frame (positive integer).\n"
+        "\t-seg-duration-ts :   (mandatory if format is not \"segment\") segment duration time base (positive integer).\n"
+        "\t-seg-duration :      (mandatory if format is \"segment\") segment duration secs (positive integer). It is used for making mp4 segments.\n"
+        "\t-seg-duration-fr :   (mandatory if format is not \"segment\") segment duration frame (positive integer).\n"
         "\t-f :                 (mandatory) input filename for transcoding. Output goes to directory ./O\n",
         bad_flag, progname);
     exit(status);
@@ -637,6 +648,8 @@ main(
                     p.format = "mp4";
                 } else if (strcmp(argv[i+1], "fmp4") == 0) {
                     p.format = "fmp4";
+                } else if (strcmp(argv[i+1], "segment") == 0) {
+                    p.format = "segment";
                 } else {
                     usage(argv[0], argv[i], EXIT_FAILURE);
                 }
@@ -681,9 +694,15 @@ main(
                     usage(argv[0], argv[i], EXIT_FAILURE);
                 }
             } else if (!strcmp(argv[i], "-seg-duration-ts")) {
-                if (sscanf(argv[i+1], "%d", &p.seg_duration_ts) != 1) {
+                if (sscanf(argv[i+1], "%"PRId64, &p.seg_duration_ts) != 1) {
                     usage(argv[0], argv[i], EXIT_FAILURE);
                 }
+            } else if (!strcmp(argv[i], "-seg-duration")) {
+                int64_t seg_duration;
+                if (sscanf(argv[i+1], "%"PRId64, &seg_duration) != 1) {
+                    usage(argv[0], argv[i], EXIT_FAILURE);
+                }
+                p.seg_duration = argv[i+1];
             } else if (!strcmp(argv[i], "-start-pts")) {
                 if (sscanf(argv[i+1], "%"PRId64, &p.start_pts) != 1) {
                     usage(argv[0], argv[i], EXIT_FAILURE);
@@ -746,8 +765,11 @@ main(
     if (sscanf(p.start_segment_str, "%d", &start_segment) != 1) {
         usage(argv[0], "-start_segment", EXIT_FAILURE);
     }
-    if (p.seg_duration_ts <= 0 || p.seg_duration_fr <= 0 || start_segment < 1) {
+    if (strcmp(p.format, "segment") && (p.seg_duration_ts <= 0 || p.seg_duration_fr <= 0 || start_segment < 1)) {
         usage(argv[0], "seg_duration_ts, seg_duration_fr, start_segment", EXIT_FAILURE);
+    }
+    if (!strcmp(p.format, "segment") && (p.seg_duration == NULL || start_segment < 1)) {
+        usage(argv[0], "seg_duration, start_segment", EXIT_FAILURE);
     }
 
     /* Create O dir if doesn't exist */
@@ -772,7 +794,8 @@ main(
             "  rc_max_rate=%d\n"
             "  sample_rate=%d\n"
             "  seg_duration_fr=%d\n"
-            "  seg_duration_ts=%d\n"
+            "  seg_duration_ts=%"PRId64"\n"
+            "  seg_duration=%"PRId64"\n"
             "  start_pts=%d\n"
             "  start_segment_str=%s\n"
             "  start_time_ts=%d\n"
@@ -780,7 +803,7 @@ main(
         p.audio_bitrate, p.crf_str, p.crypt_iv, p.crypt_key, p.crypt_key_url,
         p.crypt_kid, p.crypt_scheme, p.dcodec, p.duration_ts, p.ecodec,
         p.enc_height, p.enc_width, p.format, p.rc_buffer_size, p.rc_max_rate,
-        p.sample_rate, p.seg_duration_fr, p.seg_duration_ts, p.start_pts,
+        p.sample_rate, p.seg_duration_fr, p.seg_duration_ts, p.seg_duration, p.start_pts,
         p.start_segment_str, p.start_time_ts, p.video_bitrate);
 
     in_handlers.avpipe_opener = in_opener;

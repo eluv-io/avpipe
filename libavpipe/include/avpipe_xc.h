@@ -26,7 +26,8 @@ typedef enum avpipe_buftype_t {
     avpipe_audio_m3u = 8,               // audio m3u
     avpipe_aes_128_key = 9,             // AES key
     avpipe_mp4_stream = 10,             // mp4 stream
-    avpipe_fmp4_stream = 11             // fragmented mp4 stream
+    avpipe_fmp4_stream = 11,            // fragmented mp4 stream
+    avpipe_mp4_segment = 12             // segmented mp4 stream
 } avpipe_buftype_t;
 
 typedef struct ioctx_t {
@@ -148,7 +149,8 @@ typedef struct txparams_t {
     char *crf_str;
     int rc_max_rate;                // Rate control - max rate
     int rc_buffer_size;             // Rate control - buffer size
-    int seg_duration_ts;
+    int64_t seg_duration_ts;        // In ts units. It is used for transcoding and producing dash mp4 files
+    char *seg_duration;             // In sec units. It is used for transcoding and producing mp4 segments
     int seg_duration_fr;
     int frame_duration_ts;          // Check: seg_duration_ts / frame_duration_ts = seg_duration_fr
     int start_fragment_index;

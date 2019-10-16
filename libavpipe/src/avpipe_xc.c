@@ -111,19 +111,20 @@ prepare_decoder(
     dump_decoder(decoder_context);
 
     for (int i = 0; i < decoder_context->format_context->nb_streams && i < MAX_STREAMS; i++) {
-        /* Copy codec params from stream format context */
-        decoder_context->codec_parameters[i] = decoder_context->format_context->streams[i]->codecpar;
-        decoder_context->stream[i] = decoder_context->format_context->streams[i];
 
         if (decoder_context->format_context->streams[i]->codecpar->codec_type == AVMEDIA_TYPE_VIDEO) {
-            /* Video */
+            /* Video, copy codec params from stream format context */
+            decoder_context->codec_parameters[i] = decoder_context->format_context->streams[i]->codecpar;
+            decoder_context->stream[i] = decoder_context->format_context->streams[i];
             decoder_context->video_stream_index = i;
             elv_dbg("STREAM %d Video, codec_id=%s", i, avcodec_get_name(decoder_context->codec_parameters[i]->codec_id));
             if (params != NULL && !(params->tx_type & tx_video))
                 continue;
 
         } else if (decoder_context->format_context->streams[i]->codecpar->codec_type == AVMEDIA_TYPE_AUDIO) {
-            /* Audio */
+            /* Audio, copy codec params from stream format context */
+            decoder_context->codec_parameters[i] = decoder_context->format_context->streams[i]->codecpar;
+            decoder_context->stream[i] = decoder_context->format_context->streams[i];
             decoder_context->audio_stream_index = i;
             elv_dbg("STREAM %d Audio, codec_id=%s", i, avcodec_get_name(decoder_context->codec_parameters[i]->codec_id));
             if (params != NULL && !(params->tx_type & tx_audio))
@@ -246,6 +247,11 @@ prepare_video_encoder(
         if (!strcmp(params->format, "fmp4"))
             av_opt_set(encoder_context->format_context->priv_data, "movflags", "frag_every_frame", 0);
 
+        if (!strcmp(params->format, "segment")) {
+            elv_dbg("setting segment_time to %s", params->seg_duration);
+            av_opt_set(encoder_context->format_context->priv_data, "segment_time", params->seg_duration, 0);
+        }
+
         av_opt_set_int(encoder_context->format_context->priv_data, "seg_duration_ts", params->seg_duration_ts,
             AV_OPT_FLAG_ENCODING_PARAM | AV_OPT_SEARCH_CHILDREN);
         av_opt_set_int(encoder_context->format_context->priv_data, "frame_duration_ts", params->frame_duration_ts,
@@ -320,8 +326,16 @@ prepare_video_encoder(
         av_opt_set_int(&encoder_options, "keyint", params->seg_duration_fr, 0);
         av_opt_set_int(&encoder_options, "min-keyint", params->seg_duration_fr, 0);
         av_opt_set_int(&encoder_options, "no-scenecut", -1, 0);
+        // av_opt_set(&encoder_options, "force_key_frames", "expr:gt(t,n_forced*2-0.01)*lt(t,n_forced*2+0.01)", 0);
         // av_opt_set(&encoder_options, "bframes", "0", 0);  // Hopefully not needed
     }
+
+    if (!strcmp(params->format, "segment")) {
+        av_opt_set(encoder_context->format_context->priv_data, "movflags", "frag_every_frame", 0);
+        elv_dbg("setting segment_time to %s", params->seg_duration);
+        av_opt_set(encoder_context->format_context->priv_data, "segment_time", params->seg_duration, 0);
+    }
+
 
     /* Set codec context parameters */
     encoder_codec_context->height = params->enc_height != -1 ? params->enc_height : decoder_context->codec_context[index]->height;
@@ -490,6 +504,8 @@ prepare_encoder(
         filename = "fmp4-stream.mp4";
         /* fmp4 is actually mp4 format with a fragmented flag */
         format = "mp4";
+    } else if (!strcmp(params->format, "segment")) {
+        filename = "segment-%05d.mp4";
     }
 
     /*
@@ -591,9 +607,13 @@ set_key_flag(
     coderctx_t *encoder_context,
     txparams_t *params)
 {
+    /* Don't set any flag if format is "segment" */
+    if (!strcmp(params->format, "segment"))
+        return;
+
     if (packet->pts >= encoder_context->last_key_frame + params->seg_duration_ts) {
+        elv_dbg("PACKET SET KEY flag, flag=%d pts=%"PRId64, packet->flags, packet->pts);
         packet->flags |= AV_PKT_FLAG_KEY;
-        elv_dbg("PACKET SET KEY flag pts=%"PRId64, packet->pts);
         encoder_context->last_key_frame = packet->pts;
     }
 }
@@ -1020,12 +1040,14 @@ avpipe_tx(
     if (params->duration_ts != -1)
         encoder_context->format_context->duration = params->duration_ts;
 
-    if (params->seg_duration_ts % params->seg_duration_fr != 0) {
+    if (strcmp(params->format, "segment") && params->seg_duration_ts % params->seg_duration_fr != 0) {
         elv_err("Frame duration is not an integer, seg_duration_ts=%d, seg_duration_fr=%d",
             params->seg_duration_ts, params->seg_duration_fr);
         return -1;
     }
-    int frame_duration = params->seg_duration_ts / params->seg_duration_fr;
+    int frame_duration = 0;
+    if (params->seg_duration_fr > 0)
+        frame_duration = params->seg_duration_ts / params->seg_duration_fr;
     int extra_pts = 5 * frame_duration; /* decode extra frames to allow for reordering */
 
     decoder_context->input_start_pts = -1;
@@ -1101,6 +1123,10 @@ avpipe_tx(
 
                 if (debug_frame_level)
                     dump_packet("AUDIO IN", input_packet);
+
+                // Set stream_index to 0 since we only can transcode either video or audio at a time.
+                // TODO: make this working when there are 2 or more streams (RM)
+                input_packet->stream_index = 0;
 
                 if (av_interleaved_write_frame(encoder_context->format_context, input_packet) < 0) {
                     elv_err("Failure in copying audio stream, index=%d, decoder_index=%d",
@@ -1389,8 +1415,9 @@ avpipe_init(
         (strcmp(params->format, "dash") &&
          strcmp(params->format, "hls") &&
          strcmp(params->format, "mp4") &&
-         strcmp(params->format, "fmp4"))) {
-        elv_err("Output format can be only \"dash\", \"hls\", \"mp4\", or \"fmp4\"");
+         strcmp(params->format, "fmp4") &&
+         strcmp(params->format, "segment"))) {
+        elv_err("Output format can be only \"dash\", \"hls\", \"mp4\", \"segment\", or \"fmp4\"");
         goto avpipe_init_failed;
     }
 
@@ -1420,6 +1447,9 @@ avpipe_init(
         goto avpipe_init_failed;
     }
 
+    if (params->seg_duration_ts == 0 && !strcmp(params->format, "segment"))
+        params->seg_duration_ts = 1;
+
     p_txctx->params = params;
     *txctx = p_txctx;
 
@@ -1436,7 +1466,8 @@ avpipe_init(
         "crf_str=%s "
         "rc_max_rate=%d "
         "rc_buffer_size=%d "
-        "seg_duration_ts=%d "
+        "seg_duration_ts=%"PRId64" "
+        "seg_duration=%s "
         "seg_duration_fr=%d "
         "ecodec=%s "
         "dcodec=%s "
@@ -1450,7 +1481,7 @@ avpipe_init(
         params->format, params->start_time_ts, params->start_pts, params->duration_ts, params->start_segment_str,
         params->video_bitrate, params->audio_bitrate, params->sample_rate, params->crf_str,
         params->rc_max_rate, params->rc_buffer_size,
-        params->seg_duration_ts, params->seg_duration_fr, params->ecodec, params->dcodec, params->enc_height, params->enc_width,
+        params->seg_duration_ts, params->seg_duration, params->seg_duration_fr, params->ecodec, params->dcodec, params->enc_height, params->enc_width,
         params->crypt_iv, params->crypt_key, params->crypt_kid, params->crypt_key_url, params->crypt_scheme);
     elv_log("AVPIPE TXPARAMS %s", buf);
 
@@ -1498,26 +1529,18 @@ avpipe_fini(
     if (encoder_context && encoder_context->format_context)
         avformat_free_context(encoder_context->format_context);
 
-    if (decoder_context && decoder_context->codec_context[0]) {
-        /* Corresponds to avcodec_open2() */
-        avcodec_close(decoder_context->codec_context[0]);
-        avcodec_free_context(&decoder_context->codec_context[0]);
-    }
-    if (decoder_context && decoder_context->codec_context[1]) {
-        /* Corresponds to avcodec_open2() */
-        avcodec_close(decoder_context->codec_context[1]);
-        avcodec_free_context(&decoder_context->codec_context[1]);
-    }
+    for (int i=0; i<MAX_STREAMS; i++) {
+        if (decoder_context && decoder_context->codec_context[i]) {
+            /* Corresponds to avcodec_open2() */
+            avcodec_close(decoder_context->codec_context[i]);
+            avcodec_free_context(&decoder_context->codec_context[i]);
+        }
 
-    if (encoder_context && encoder_context->codec_context[0]) {
-        /* Corresponds to avcodec_open2() */
-        avcodec_close(encoder_context->codec_context[0]);
-        avcodec_free_context(&encoder_context->codec_context[0]);
-    }
-    if (encoder_context && encoder_context->codec_context[1]) {
-        /* Corresponds to avcodec_open2() */
-        avcodec_close(encoder_context->codec_context[1]);
-        avcodec_free_context(&encoder_context->codec_context[1]);
+        if (encoder_context && encoder_context->codec_context[i]) {
+            /* Corresponds to avcodec_open2() */
+            avcodec_close(encoder_context->codec_context[i]);
+            avcodec_free_context(&encoder_context->codec_context[i]);
+        }
     }
 
     free(*txctx);
