@@ -173,6 +173,15 @@ out_opener(
         }
         break;
 
+    case avpipe_fmp4_segment:
+        {
+            const char *segbase = "fsegment";
+
+            sprintf(segname, "./%s/%s%d-%05d.mp4",
+                dir, segbase, outctx->stream_index, outctx->seg_index);
+        }
+        break;
+
     default:
         return -1;
     }
