@@ -62,6 +62,8 @@ const (
 	FMP4Stream
 	// MP4Segment 12
 	MP4Segment
+	// FMP4Segment 13
+	FMP4Segment
 )
 
 type TxType int
@@ -428,6 +430,8 @@ func AVPipeOpenOutput(handler C.int64_t, stream_index, seg_index, stream_type C.
 		out_type = FMP4Stream
 	case C.avpipe_mp4_segment:
 		out_type = MP4Segment
+	case C.avpipe_fmp4_segment:
+		out_type = FMP4Segment
 	default:
 		log.Error("AVPipeOpenOutput()", "invalid stream type", stream_type)
 		return C.int64_t(-1)

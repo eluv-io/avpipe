@@ -98,6 +98,8 @@ func (oo *avcmdOutputOpener) Open(h, fd int64, stream_index, seg_index int, out_
 		filename = fmt.Sprintf("%s/fmp4-stream.mp4", dir)
 	case avpipe.MP4Segment:
 		filename = fmt.Sprintf("%s/segment%d-%05d.mp4", dir, stream_index, seg_index)
+	case avpipe.FMP4Segment:
+		filename = fmt.Sprintf("%s/fmp4-segment%d-%05d.mp4", dir, stream_index, seg_index)
 	}
 
 	f, err := os.OpenFile(filename, os.O_RDWR|os.O_CREATE|os.O_TRUNC, 0644)
@@ -153,7 +155,7 @@ func InitTranscode(cmdRoot *cobra.Command) error {
 	cmdTranscode.PersistentFlags().Int32P("threads", "t", 1, "transcoding threads")
 	cmdTranscode.PersistentFlags().StringP("encoder", "e", "libx264", "encoder codec, default is 'libx264', can be: 'libx264', 'h264_nvenc', 'h264_videotoolbox'")
 	cmdTranscode.PersistentFlags().StringP("decoder", "d", "h264", "decoder codec, default is 'h264', can be: 'h264', 'h264_cuvid'")
-	cmdTranscode.PersistentFlags().StringP("format", "", "dash", "package format, can be 'dash', 'hls', 'mp4', 'segment' or 'fmp4'.")
+	cmdTranscode.PersistentFlags().StringP("format", "", "dash", "package format, can be 'dash', 'hls', 'mp4', 'fmp4', 'segment' or 'fmp4-segment'.")
 	cmdTranscode.PersistentFlags().StringP("tx-type", "", "all", "transcoding type, can be 'all', 'video', or 'audio'.")
 	cmdTranscode.PersistentFlags().Int32P("crf", "", 23, "mutually exclusive with video-bitrate.")
 	cmdTranscode.PersistentFlags().Int64P("start-time-ts", "", 0, "")
@@ -206,8 +208,8 @@ func doTranscode(cmd *cobra.Command, args []string) error {
 	}
 
 	format := cmd.Flag("format").Value.String()
-	if format != "dash" && format != "hls" && format != "mp4" && format != "fmp4" && format != "segment" {
-		return fmt.Errorf("Pakage format is not valid, can be 'dash', 'hls', 'mp4', 'segment' or 'fmp4'")
+	if format != "dash" && format != "hls" && format != "mp4" && format != "fmp4" && format != "segment" && format != "fmp4-segment" {
+		return fmt.Errorf("Pakage format is not valid, can be 'dash', 'hls', 'mp4', 'fmp4', 'segment', or 'fmp4-segment'")
 	}
 
 	txTypeStr := cmd.Flag("tx-type").Value.String()
@@ -280,7 +282,7 @@ func doTranscode(cmd *cobra.Command, args []string) error {
 	}
 
 	segDurationTs, err := cmd.Flags().GetInt64("seg-duration-ts")
-	if err != nil || (format != "segment" && segDurationTs == 0) {
+	if err != nil || (format != "segment" && format != "fmp4-segment" && segDurationTs == 0) {
 		return fmt.Errorf("Seg duration ts is not valid")
 	}
 
@@ -290,7 +292,7 @@ func doTranscode(cmd *cobra.Command, args []string) error {
 	}
 
 	segDurationFr, err := cmd.Flags().GetInt32("seg-duration-fr")
-	if err != nil || (format != "segment" && segDurationFr == 0) {
+	if err != nil || (format != "segment" && format != "fmp4-segment" && segDurationFr == 0) {
 		return fmt.Errorf("Seg duration fr is not valid")
 	}
 

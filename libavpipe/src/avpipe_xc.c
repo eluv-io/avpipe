@@ -248,8 +248,19 @@ prepare_video_encoder(
             av_opt_set(encoder_context->format_context->priv_data, "movflags", "frag_every_frame", 0);
 
         if (!strcmp(params->format, "segment")) {
-            elv_dbg("setting segment_time to %s", params->seg_duration);
+            elv_dbg("setting \"segment\" segment_time to %s", params->seg_duration);
             av_opt_set(encoder_context->format_context->priv_data, "segment_time", params->seg_duration, 0);
+            av_opt_set(encoder_context->format_context->priv_data, "reset_timestamps", "on", 0);
+            // If I set faststart in the flags then ffmpeg generates some zero size files, which I need to dig into it more (RM).
+            // av_opt_set(encoder_context->format_context->priv_data, "segment_format_options", "movflags=faststart", 0);
+            // So lets use flag_every_frame option instead.
+            av_opt_set(encoder_context->format_context->priv_data, "segment_format_options", "movflags=frag_every_frame", 0);
+        }
+
+        if (!strcmp(params->format, "fmp4-segment")) {
+            elv_dbg("setting \"fmp4-segment\" segment_time to %s", params->seg_duration);
+            av_opt_set(encoder_context->format_context->priv_data, "segment_time", params->seg_duration, 0);
+            av_opt_set(encoder_context->format_context->priv_data, "segment_format_options", "movflags=frag_every_frame", 0);
         }
 
         av_opt_set_int(encoder_context->format_context->priv_data, "seg_duration_ts", params->seg_duration_ts,
@@ -331,11 +342,20 @@ prepare_video_encoder(
     }
 
     if (!strcmp(params->format, "segment")) {
-        av_opt_set(encoder_context->format_context->priv_data, "movflags", "frag_every_frame", 0);
-        elv_dbg("setting segment_time to %s", params->seg_duration);
+        elv_dbg("setting \"segment\" segment_time to %s", params->seg_duration);
         av_opt_set(encoder_context->format_context->priv_data, "segment_time", params->seg_duration, 0);
+        av_opt_set(encoder_context->format_context->priv_data, "reset_timestamps", "on", 0);
+        // If I set faststart in the flags then ffmpeg generates some zero size files, which I need to dig into it more (RM).
+        // av_opt_set(encoder_context->format_context->priv_data, "segment_format_options", "movflags=faststart", 0);
+        // So lets use flag_every_frame option instead.
+        av_opt_set(encoder_context->format_context->priv_data, "segment_format_options", "movflags=frag_every_frame", 0);
     }
 
+    if (!strcmp(params->format, "fmp4-segment")) {
+        elv_dbg("setting \"fmp4-segment\" segment_time to %s", params->seg_duration);
+        av_opt_set(encoder_context->format_context->priv_data, "segment_time", params->seg_duration, 0);
+        av_opt_set(encoder_context->format_context->priv_data, "segment_format_options", "movflags=frag_every_frame", 0);
+    }
 
     /* Set codec context parameters */
     encoder_codec_context->height = params->enc_height != -1 ? params->enc_height : decoder_context->codec_context[index]->height;
@@ -506,6 +526,9 @@ prepare_encoder(
         format = "mp4";
     } else if (!strcmp(params->format, "segment")) {
         filename = "segment-%05d.mp4";
+    } else if (!strcmp(params->format, "fmp4-segment")) {
+        format = "segment";
+        filename = "fsegment-%05d.mp4"; // Fragmented mp4 segment
     }
 
     /*
@@ -583,7 +606,10 @@ prepare_encoder(
         }
     }
 
-    /* Allocate an array of 2 out_handler_t: one for video and one for audio output stream */
+    /*
+     * Allocate an array of 2 out_handler_t: one for video and one for audio output stream.
+     * TODO: needs to allocate up to number of streams when transcoding multiple streams at the same time (RM)
+     */
     out_tracker = (out_tracker_t *) calloc(2, sizeof(out_tracker_t));
     out_tracker[0].out_handlers = out_tracker[1].out_handlers = out_handlers;
     out_tracker[0].inctx = out_tracker[1].inctx = inctx;
@@ -608,7 +634,7 @@ set_key_flag(
     txparams_t *params)
 {
     /* Don't set any flag if format is "segment" */
-    if (!strcmp(params->format, "segment"))
+    if (!strcmp(params->format, "segment") || !strcmp(params->format, "fmp4-segment"))
         return;
 
     if (packet->pts >= encoder_context->last_key_frame + params->seg_duration_ts) {
@@ -1040,7 +1066,9 @@ avpipe_tx(
     if (params->duration_ts != -1)
         encoder_context->format_context->duration = params->duration_ts;
 
-    if (strcmp(params->format, "segment") && params->seg_duration_ts % params->seg_duration_fr != 0) {
+    if (strcmp(params->format, "segment") &&
+        strcmp(params->format, "fmp4-segment") &&
+        params->seg_duration_ts % params->seg_duration_fr != 0) {
         elv_err("Frame duration is not an integer, seg_duration_ts=%d, seg_duration_fr=%d",
             params->seg_duration_ts, params->seg_duration_fr);
         return -1;
@@ -1416,8 +1444,9 @@ avpipe_init(
          strcmp(params->format, "hls") &&
          strcmp(params->format, "mp4") &&
          strcmp(params->format, "fmp4") &&
-         strcmp(params->format, "segment"))) {
-        elv_err("Output format can be only \"dash\", \"hls\", \"mp4\", \"segment\", or \"fmp4\"");
+         strcmp(params->format, "segment") &&
+         strcmp(params->format, "fmp4-segment"))) {
+        elv_err("Output format can be only \"dash\", \"hls\", \"mp4\", \"fmp4\", \"segment\", or \"fmp4-segment\"");
         goto avpipe_init_failed;
     }
 
@@ -1447,7 +1476,9 @@ avpipe_init(
         goto avpipe_init_failed;
     }
 
-    if (params->seg_duration_ts == 0 && !strcmp(params->format, "segment"))
+    if (params->seg_duration_ts == 0 &&
+        !strcmp(params->format, "segment") &&
+        !strcmp(params->format, "fmp4-segment"))
         params->seg_duration_ts = 1;
 
     p_txctx->params = params;

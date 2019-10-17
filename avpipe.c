@@ -253,7 +253,7 @@ out_seek(
         elv_dbg("OUT SEEK - weird seek\n");
     }
 
-    elv_dbg("OUT SEEK fd="PRId64" offset=%d whence=%d", fd, offset, whence);
+    elv_dbg("OUT SEEK fd=%"PRId64" offset=%d whence=%d", fd, offset, whence);
 
     return rc;
 }

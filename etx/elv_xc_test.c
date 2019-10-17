@@ -476,8 +476,10 @@ usage(
         "\t-e :                 (optional) encoder name. Default is \"libx264\", can be: \"libx264\", \"h264_nvenc\", \"h264_videotoolbox\"\n"
         "\t-enc-height :        (optional) Default: -1 (use source height)\n"
         "\t-enc-width :         (optional) Default: -1 (use source width)\n"
-        "\t-format :            (optional) package format. Default is \"dash\", can be: \"dash\", \"hls\", \"mp4\", \"segment\" or \"fmp4\"\n"
-        "\t                                Using \"segment\" format produces self contained mp4 segments\n"
+        "\t-format :            (optional) package format. Default is \"dash\", can be: \"dash\", \"hls\", \"mp4\", \"fmp4\", \"segment\", or \"fmp4-segment\"\n"
+        "\t                                Using \"segment\" format produces self contained mp4 segments with start pts from 0 for each segment\n"
+        "\t                                Using \"fmp4-segment\" format produces self contained mp4 segments with continious pts.\n"
+        "\t                                Using \"fmp4-segment\" generates segments that are appropriate for live streaming.\n"
         "\t-sample-rate :       (optional) Default: -1\n"
         "\t-rc-buffer-size :    (optional)\n"
         "\t-rc-max-rate :       (optional)\n"
@@ -650,6 +652,8 @@ main(
                     p.format = "fmp4";
                 } else if (strcmp(argv[i+1], "segment") == 0) {
                     p.format = "segment";
+                } else if (strcmp(argv[i+1], "fmp4-segment") == 0) {
+                    p.format = "fmp4-segment";
                 } else {
                     usage(argv[0], argv[i], EXIT_FAILURE);
                 }
@@ -765,10 +769,14 @@ main(
     if (sscanf(p.start_segment_str, "%d", &start_segment) != 1) {
         usage(argv[0], "-start_segment", EXIT_FAILURE);
     }
-    if (strcmp(p.format, "segment") && (p.seg_duration_ts <= 0 || p.seg_duration_fr <= 0 || start_segment < 1)) {
+    if (strcmp(p.format, "segment") &&
+        strcmp(p.format, "fmp4-segment") &&
+        (p.seg_duration_ts <= 0 || p.seg_duration_fr <= 0 || start_segment < 1)) {
         usage(argv[0], "seg_duration_ts, seg_duration_fr, start_segment", EXIT_FAILURE);
     }
-    if (!strcmp(p.format, "segment") && (p.seg_duration == NULL || start_segment < 1)) {
+    if (!strcmp(p.format, "segment") &&
+        !strcmp(p.format, "fmp4-segment") &&
+        (p.seg_duration == NULL || start_segment < 1)) {
         usage(argv[0], "seg_duration, start_segment", EXIT_FAILURE);
     }
 
