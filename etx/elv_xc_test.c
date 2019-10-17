@@ -393,6 +393,9 @@ do_probe(
     for (int i=0; i<rc; i++) {
         const char *channel_name = avpipe_channel_name(probe->stream_info[i].channels, probe->stream_info[i].channel_layout);
 
+        if (probe->stream_info[i].codec_type != AVMEDIA_TYPE_AUDIO)
+            channel_name = NULL;
+
         printf("Stream[%d]\n"
                 "\tcodec_type: %s\n"
                 "\tcodec_id: %d\n"
