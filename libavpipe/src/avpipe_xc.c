@@ -96,7 +96,7 @@ prepare_decoder(
     prepare_input(in_handlers, inctx, decoder_context->format_context, seekable);
 
     /* Allocate AVFormatContext in format_context and find input file format */
-    rc = avformat_open_input(&decoder_context->format_context, "bogus.mp4", NULL, NULL);
+    rc = avformat_open_input(&decoder_context->format_context, inctx->url, NULL, NULL);
     if (rc != 0) {
         elv_err("Could not open input file, err=%d", rc);
         return -1;

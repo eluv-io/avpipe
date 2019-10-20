@@ -38,6 +38,12 @@ in_opener(
         return -1;
     }
 
+    if (url != NULL)
+        inctx->url = strdup(url);
+    else
+        /* Default file input would be assumed to be mp4 */
+        inctx->url = "bogus.mp4";
+
     pthread_mutex_lock(&lock);
     opened_inputs++;
     *((int *)(inctx->opaque)+1) = opened_inputs;

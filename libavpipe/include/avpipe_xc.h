@@ -35,6 +35,9 @@ typedef struct ioctx_t {
     /* Application specific IO context */
     void *opaque;
 
+    /* Input filename or url */
+    char *url;
+
     avpipe_buftype_t type;
     unsigned char* buf;
     int bufsz;

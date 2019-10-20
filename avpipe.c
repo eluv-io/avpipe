@@ -59,6 +59,12 @@ in_opener(
     inctx->opaque = (void *) calloc(1, sizeof(int64_t));
 #endif
 
+    if (url != NULL)
+        inctx->url = strdup(url);
+    else
+        /* Default file input would be assumed to be mp4 */
+        inctx->url = "bogus.mp4";
+
     int64_t h = NewIOHandler((char *) url, &size);
     if (h <= 0 )
         return -1;
