@@ -121,7 +121,9 @@ typedef struct coderctx_t {
     AVFilterGraph *filter_graph;
 
     int64_t pts;              /* Decoder/encoder pts */
-    int64_t input_start_pts;  /* In case input stream starts at PTS > 0 */
+    int64_t video_input_start_pts;  /* In case input stream starts at PTS > 0 */
+    int64_t audio_input_start_pts;  /* In case input stream starts at PTS > 0 */
+
 } coderctx_t;
 
 typedef enum crypt_scheme_t {

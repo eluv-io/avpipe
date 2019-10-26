@@ -27,6 +27,12 @@
 #define AUDIO_BUF_SIZE  (128*1024)
 #define INPUT_IS_SEEKABLE 0
 
+#ifdef MPEGTS
+#define THREAD_COUNT 16
+#else
+#define THREAD_COUNT 8
+#endif
+
 extern int
 init_filters(
     const char *filters_descr,
@@ -172,7 +178,7 @@ prepare_decoder(
          * furher thread_count is 1 which forces 1 thread.
          */
         decoder_context->codec_context[i]->active_thread_type = 1;
-        decoder_context->codec_context[i]->thread_count = 8;
+        decoder_context->codec_context[i]->thread_count = THREAD_COUNT;
 
         /* Open the decoder (initialize the decoder codec_context[i] using given codec[i]). */
         if ((rc = avcodec_open2(decoder_context->codec_context[i], decoder_context->codec[i], NULL)) < 0) {
@@ -331,6 +337,10 @@ prepare_video_encoder(
     //av_opt_set(encoder_context->format_context->priv_data, "use_timeline", "0",
     //    AV_OPT_FLAG_ENCODING_PARAM | AV_OPT_SEARCH_CHILDREN);
 
+#ifdef MPEGTS
+    av_opt_set(&encoder_options, "bframes", "0", 0);  // Hopefully not needed
+#endif
+
     // Set fragmented MP4 flag if format is fmp4
     if (!strcmp(params->format, "fmp4")) {
         av_opt_set(encoder_context->format_context->priv_data, "movflags", "frag_every_frame", 0);
@@ -357,6 +367,10 @@ prepare_video_encoder(
         elv_dbg("setting \"fmp4-segment\" segment_time to %s", params->seg_duration);
         av_opt_set(encoder_context->format_context->priv_data, "segment_time", params->seg_duration, 0);
         av_opt_set(encoder_context->format_context->priv_data, "segment_format_options", "movflags=frag_every_frame", 0);
+
+#ifdef MPEGTS
+        av_opt_set_int(encoder_context->format_context->priv_data, "break_non_keyframes", 1, 0);
+#endif
     }
 
     /* Set codec context parameters */
@@ -637,8 +651,14 @@ set_key_flag(
     txparams_t *params)
 {
     /* Don't set any flag if format is "segment" */
-    if (!strcmp(params->format, "segment") || !strcmp(params->format, "fmp4-segment"))
+    if (!strcmp(params->format, "segment") || !strcmp(params->format, "fmp4-segment")) {
+#ifdef MPEGTS
+        elv_dbg("PACKET SET KEY flag, flag=%d pts=%"PRId64, packet->flags, packet->pts);
+        packet->flags |= AV_PKT_FLAG_KEY;
+#else
         return;
+#endif
+    }
 
     if (packet->pts >= encoder_context->last_key_frame + params->seg_duration_ts) {
         elv_dbg("PACKET SET KEY flag, flag=%d pts=%"PRId64, packet->flags, packet->pts);
@@ -653,7 +673,7 @@ should_skip_encoding(
     txparams_t *p,
     AVFrame *frame)
 {
-    const int frame_in_pts_offset = frame->pts - decoder_context->input_start_pts;
+    const int frame_in_pts_offset = frame->pts - decoder_context->video_input_start_pts; // Only called for the video stream
 
     /* Drop frames before the desired 'start_time' */
     if (p->start_time_ts > 0 && frame_in_pts_offset < p->start_time_ts) {
@@ -821,7 +841,7 @@ transcode_packet(
          *
          */
 
-        set_key_flag(packet, encoder_context, p);
+        set_key_flag(packet, encoder_context, p); // SS BUG - can't just set key flag in bypass
 
         packet->pts += p->start_pts;
         packet->dts += p->start_pts;
@@ -1081,34 +1101,69 @@ avpipe_tx(
         frame_duration = params->seg_duration_ts / params->seg_duration_fr;
     int extra_pts = 5 * frame_duration; /* decode extra frames to allow for reordering */
 
-    decoder_context->input_start_pts = -1;
+    decoder_context->video_input_start_pts = -1;
+    decoder_context->audio_input_start_pts = -1;
 
+    int64_t last_dts;
     while ((rc = av_read_frame(decoder_context->format_context, input_packet)) >= 0) {
 
-        if (decoder_context->input_start_pts == -1)
-            decoder_context->input_start_pts = input_packet->pts;
+        // Only for video - PENDING(SSS) we must adjust for audio as well
+        if (input_packet->stream_index == decoder_context->video_stream_index) {
 
-        int input_packet_rel_pts = input_packet->pts - decoder_context->input_start_pts;
-        // Stop when we reached the desired duration (duration -1 means 'entire input stream')
-        if (params->duration_ts != -1 &&
-            input_packet_rel_pts >= params->start_time_ts + params->duration_ts) {
-            elv_dbg("DURATION OVER param start_time=%"PRId64" duration=%"PRId64" pkt pts=%"PRId64"\n",
-                params->start_time_ts, params->duration_ts, input_packet->pts);
-            /* Allow up to 5 reoredered packets */
-            if (input_packet_rel_pts >= params->start_time_ts + params->duration_ts + extra_pts) {
-                elv_dbg("DURATION BREAK param start_time=%"PRId64" duration=%"PRId64" pkt pts=%"PRId64"\n",
+            if (decoder_context->video_input_start_pts == -1)
+                decoder_context->video_input_start_pts = input_packet->pts;
+
+            int input_packet_rel_pts = input_packet->pts - decoder_context->video_input_start_pts;
+
+            // Stop when we reached the desired duration (duration -1 means 'entire input stream')
+            if (params->duration_ts != -1 &&
+                input_packet_rel_pts >= params->start_time_ts + params->duration_ts) {
+                elv_dbg("DURATION OVER param start_time=%"PRId64" duration=%"PRId64" pkt pts=%"PRId64"\n",
                     params->start_time_ts, params->duration_ts, input_packet->pts);
-                break;
+                /* Allow up to 5 reoredered packets */
+                if (input_packet_rel_pts >= params->start_time_ts + params->duration_ts + extra_pts) {
+                    elv_dbg("DURATION BREAK param start_time=%"PRId64" duration=%"PRId64" pkt pts=%"PRId64"\n",
+                        params->start_time_ts, params->duration_ts, input_packet->pts);
+                    break;
+                }
             }
-        }
 
-        encoder_context->input_last_pts_read = input_packet->pts;
+            encoder_context->input_last_pts_read = input_packet->pts;
+
+#ifdef MPEGTS
+            if (!strcmp(params->format, "fmp4-segment")) {
+
+                // Offset packets so they start at pts 0
+                elv_log("ADJUST pts=%d dts=%d ispts=%d", input_packet->pts, input_packet->dts, decoder_context->video_input_start_pts);
+                if (input_packet->pts >= decoder_context->video_input_start_pts)
+                    input_packet->pts -= decoder_context->video_input_start_pts;
+                else
+                    continue;
+
+                if (input_packet->dts >= decoder_context->video_input_start_pts)
+                    input_packet->dts -= decoder_context->video_input_start_pts;
+                else
+                    continue;
+
+                if (decoder_context->video_input_start_pts > 0 && (input_packet->pts == 0 || input_packet->dts == 0)) {
+                    elv_log("ADJUST - drop frame becuae pts or dts are 0");
+                    continue;
+                }
+            }
+#endif
+        }
 
         if (input_packet->stream_index == decoder_context->video_stream_index) {
             if (params->tx_type & tx_video) {
                 // Video packet
                 if (debug_frame_level)
                     dump_packet("IN ", input_packet);
+
+                if (last_dts + input_packet->duration + 1 < input_packet->dts && last_dts != 0) {
+                    elv_log("Expected dts == last_dts + duration - last_dts=%" PRId64 " duration=%" PRId64 " dts=%" PRId64,
+                        last_dts, input_packet->duration, input_packet->dts);
+                }
+                last_dts = input_packet->dts;
 
                 elv_get_time(&tv);
                 response = transcode_packet(
@@ -1136,12 +1191,26 @@ avpipe_tx(
                     break;
                 }
 
-                dump_coders(decoder_context, encoder_context);
+                // dump_coders(decoder_context, encoder_context);
             } else {
                 elv_dbg("Skip transcoding video packet");
             }
         } else if (input_packet->stream_index == decoder_context->audio_stream_index) {
             if (params->tx_type & tx_audio) {
+
+                if (decoder_context->audio_input_start_pts == -1)
+                    decoder_context->audio_input_start_pts = input_packet->pts;
+
+                int input_packet_rel_pts = input_packet->pts - decoder_context->audio_input_start_pts;
+
+                // Stop when we reached the desired duration (duration -1 means 'entire input stream')
+                if (params->duration_ts != -1 &&
+                    input_packet_rel_pts >= params->start_time_ts + params->duration_ts) {
+                    elv_dbg("DURATION OVER param start_time=%"PRId64" duration=%"PRId64" pkt pts=%"PRId64"\n",
+                        params->start_time_ts, params->duration_ts, input_packet->pts);
+                    break;
+                }
+
                 // Audio packet: just copying audio stream
                 av_packet_rescale_ts(input_packet,
                     decoder_context->stream[input_packet->stream_index]->time_base,
@@ -1160,6 +1229,7 @@ avpipe_tx(
                 input_packet->stream_index = 0;
 
                 if (av_interleaved_write_frame(encoder_context->format_context, input_packet) < 0) {
+
                     elv_err("Failure in copying audio stream, index=%d, decoder_index=%d",
                         input_packet->stream_index, decoder_context->audio_stream_index);
                     return -1;
@@ -1198,7 +1268,7 @@ avpipe_tx(
     av_write_trailer(encoder_context->format_context);
 
     elv_log("avpipe_tx done last pts=%d input_start_pts=%d dts=%d pts_read=%d pts_sent_encode=%d pts_encoded=%d",
-        encoder_context->pts, encoder_context->input_start_pts,
+        encoder_context->pts, encoder_context->video_input_start_pts,
         encoder_context->last_dts,
         encoder_context->input_last_pts_read,
         encoder_context->input_last_pts_sent_encode,
@@ -1278,7 +1348,6 @@ static const struct channel_name_t channel_names[] = {
     [34] = { "SDR",       "surround direct right" },
     [35] = { "LFE2",      "low frequency 2"       },
 };
-
 
 static const channel_layout_info_t*
 get_channel_layout_info(

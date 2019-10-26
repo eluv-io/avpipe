@@ -17,6 +17,8 @@ import (
 	elog "github.com/qluvio/content-fabric/log"
 )
 
+var tlog = elog.Get("/eluvio/avpipe/live/test")
+
 var verboseLogging bool = false
 
 // Sky 1080 stream: http://origin1.sedev02_newsdemuxclear.stage-cdhls.skydvn.com/cdsedev04demuxclearnews/13012/cd.m3u8
@@ -27,7 +29,7 @@ var videoParams *avpipe.TxParams = &avpipe.TxParams{
 	Format:          "fmp4",
 	DurationTs:      2700000,
 	StartSegmentStr: "1",
-	VideoBitrate:    3189984, // 8234400
+	VideoBitrate:    5000000, // 1080 probe: 8234400, 720 probe: 3189984
 	SegDurationTs:   180000,
 	SegDurationFr:   50,
 	Ecodec:          "libx264",
@@ -53,7 +55,7 @@ var videoParams *avpipe.TxParams = &avpipe.TxParams{
 //	TxType:          avpipe.TxVideo,
 //}
 
-var outFileName string = "lhr_out"
+var outFileName string = "out"
 
 func TestToolTs(t *testing.T) {
 	setupLogging()
@@ -94,36 +96,33 @@ func TestToolFmp4(t *testing.T) {
 	lhr := NewHLSReader(manifestURL)
 
 	// lhr contains the recording state so use a single instance
-	recordFmp4(t, lhr, outFileName+"_1.mp4")
-	recordFmp4(t, lhr, outFileName+"_2.mp4")
-	recordFmp4(t, lhr, outFileName+"_3.mp4")
+	outFileName = "lhr_out_1"
+	recordFmp4(t, lhr)
+	outFileName = "lhr_out_2"
+	recordFmp4(t, lhr)
+	outFileName = "lhr_out_3"
+	recordFmp4(t, lhr)
 }
 
-func recordFmp4(t *testing.T, lhr *HLSReader, fileName string) {
-	file, err := os.Create(fileName)
-	if err != nil {
-		t.Error("AVL file create", "err", err)
-	}
-	defer file.Close()
-
+func recordFmp4(t *testing.T, lhr *HLSReader) {
 	pr, pw := io.Pipe()
 	readCtx := testCtx{r: pr}
-	writeCtx := testCtx{w: file}
+	writeCtx := testCtx{}
 
 	go func() {
 		lhr.Fill(recordingDuration, pw)
-		log.Info("AVL Fill done")
+		tlog.Info("AVL Fill done")
 		pw.Close()
 	}()
 
 	avpipe.InitIOHandler(&inputOpener{tc: readCtx}, &outputOpener{tc: writeCtx})
 	videoParams.SkipOverPts = lhr.NextSkipOverPts
-	log.Info("AVL Tx start", "videoParams", fmt.Sprintf("%+v", *videoParams))
+	tlog.Info("AVL Tx start", "videoParams", fmt.Sprintf("%+v", *videoParams))
 	errTx := avpipe.Tx(videoParams, "video_out.mp4", false, true, &lhr.NextSkipOverPts)
-	log.Info("AVL Tx done", "err", errTx, "last pts", lhr.NextSkipOverPts)
+	tlog.Info("AVL Tx done", "err", errTx, "last pts", lhr.NextSkipOverPts)
 
 	if errTx != 0 {
-		t.Error("AVL transcode video", "err", err)
+		t.Error("AVL Video transcoding failed", "errTx", errTx)
 	}
 
 	// TODO: Audio - avpipe.Tx(audioParams, ...
@@ -140,7 +139,7 @@ type inputCtx struct {
 }
 
 func (io *inputOpener) Open(fd int64, url string) (avpipe.InputHandler, error) {
-	log.Debug("AVL IN_OPEN", "fd", fd, "url", url)
+	tlog.Debug("AVL IN_OPEN", "fd", fd, "url", url)
 	io.url = url
 	etxInput := &inputCtx{
 		r: io.tc.r,
@@ -150,7 +149,7 @@ func (io *inputOpener) Open(fd int64, url string) (avpipe.InputHandler, error) {
 
 func (i *inputCtx) Read(buf []byte) (int, error) {
 	if verboseLogging {
-		log.Debug("AVL IN_READ", "len", len(buf))
+		tlog.Debug("AVL IN_READ", "len", len(buf))
 	}
 	n, err := i.r.Read(buf)
 	if err == io.EOF {
@@ -158,25 +157,25 @@ func (i *inputCtx) Read(buf []byte) (int, error) {
 	}
 	bytesRead += n
 	if verboseLogging {
-		log.Debug("AVL IN_READ DONE", "len", len(buf), "n", n,
+		tlog.Debug("AVL IN_READ DONE", "len", len(buf), "n", n,
 			"bytesRead", bytesRead, "bytesWritten", bytesWritten, "err", err)
 	}
 	return n, err
 }
 
 func (i *inputCtx) Seek(offset int64, whence int) (int64, error) {
-	log.Debug("AVL IN_SEEK")
+	tlog.Debug("AVL IN_SEEK")
 	return -1, nil
 }
 
 func (i *inputCtx) Close() (err error) {
-	log.Debug("AVL IN_CLOSE")
+	tlog.Debug("AVL IN_CLOSE")
 	err = i.r.(*io.PipeReader).Close()
 	return
 }
 
 func (i *inputCtx) Size() int64 {
-	log.Debug("AVL IN_SIZE")
+	tlog.Debug("AVL IN_SIZE")
 	return -1
 }
 
@@ -185,18 +184,25 @@ type outputOpener struct {
 }
 
 type outputCtx struct {
-	w io.Writer
+	w    io.Writer
+	file *os.File
 }
 
 func (oo *outputOpener) Open(h, fd int64, stream_index, seg_index int, out_type avpipe.AVType) (avpipe.OutputHandler, error) {
-	log.Debug("AVL OUT_OPEN", "fd", fd)
-	oh := &outputCtx{w: oo.tc.w}
+	tlog.Debug("AVL OUT_OPEN", "fd", fd)
+
+	file, err := os.Create(fmt.Sprintf("%s_%d_%03d.mp4", outFileName, stream_index, seg_index))
+	if err != nil {
+		return nil, err
+	}
+
+	oh := &outputCtx{w: file, file: file}
 	return oh, nil
 }
 
 func (o *outputCtx) Write(buf []byte) (int, error) {
 	if verboseLogging {
-		log.Debug("AVL OUT_WRITE", "len", len(buf))
+		tlog.Debug("AVL OUT_WRITE", "len", len(buf))
 	}
 	n, err := o.w.Write(buf)
 	if err != nil {
@@ -204,26 +210,28 @@ func (o *outputCtx) Write(buf []byte) (int, error) {
 	}
 	if bytesWritten == 0 {
 		rwDiffMax = bytesRead - bytesWritten
-		log.Debug("AVL OUT_WRITE FIRST", "bytesRead", bytesRead, "bytesWritten", bytesWritten, "diff", rwDiffMax)
+		tlog.Debug("AVL OUT_WRITE FIRST", "bytesRead", bytesRead, "bytesWritten", bytesWritten, "diff", rwDiffMax)
 	}
 	bytesWritten += n
 	if bytesRead-bytesWritten > rwDiffMax {
 		rwDiffMax = bytesRead - bytesWritten
 	}
 	if verboseLogging {
-		log.Debug("AVL OUT_WRITE DONE", "len", len(buf), "n", n, "err", err,
+		tlog.Debug("AVL OUT_WRITE DONE", "len", len(buf), "n", n, "err", err,
 			"bytesRead", bytesRead, "bytesWritten", bytesWritten, "diff", rwDiffMax)
 	}
 	return n, err
 }
 
 func (o *outputCtx) Seek(offset int64, whence int) (int64, error) {
-	log.Debug("AVL OUT_SEEK")
+	tlog.Debug("AVL OUT_SEEK")
+	//return o.file.Seek(offset, whence)
 	return -1, nil
 }
 
 func (o *outputCtx) Close() error {
-	log.Debug("AVL OUT_CLOSE")
+	tlog.Debug("AVL OUT_CLOSE")
+	o.file.Close()
 	return nil
 }
 
