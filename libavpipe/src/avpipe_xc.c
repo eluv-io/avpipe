@@ -27,11 +27,8 @@
 #define AUDIO_BUF_SIZE  (128*1024)
 #define INPUT_IS_SEEKABLE 0
 
-#ifdef MPEGTS
-#define THREAD_COUNT 16
-#else
-#define THREAD_COUNT 8
-#endif
+#define MPEGTS_THREAD_COUNT     16
+#define DEFAULT_THREAD_COUNT    8
 
 extern int
 init_filters(
@@ -114,6 +111,13 @@ prepare_decoder(
         return -1;
     }
 
+    decoder_context->is_mpegts = 0;
+    if (decoder_context->format_context->iformat &&
+        decoder_context->format_context->iformat->name &&
+        !strcmp(decoder_context->format_context->iformat->name, "mpegts")) {
+        decoder_context->is_mpegts = 1;
+    }
+
     dump_decoder(decoder_context);
 
     for (int i = 0; i < decoder_context->format_context->nb_streams && i < MAX_STREAMS; i++) {
@@ -178,7 +182,10 @@ prepare_decoder(
          * furher thread_count is 1 which forces 1 thread.
          */
         decoder_context->codec_context[i]->active_thread_type = 1;
-        decoder_context->codec_context[i]->thread_count = THREAD_COUNT;
+        if (decoder_context->is_mpegts)
+            decoder_context->codec_context[i]->thread_count = MPEGTS_THREAD_COUNT;
+        else
+            decoder_context->codec_context[i]->thread_count = DEFAULT_THREAD_COUNT;
 
         /* Open the decoder (initialize the decoder codec_context[i] using given codec[i]). */
         if ((rc = avcodec_open2(decoder_context->codec_context[i], decoder_context->codec[i], NULL)) < 0) {
@@ -337,9 +344,8 @@ prepare_video_encoder(
     //av_opt_set(encoder_context->format_context->priv_data, "use_timeline", "0",
     //    AV_OPT_FLAG_ENCODING_PARAM | AV_OPT_SEARCH_CHILDREN);
 
-#ifdef MPEGTS
-    av_opt_set(&encoder_options, "bframes", "0", 0);  // Hopefully not needed
-#endif
+    if (decoder_context->is_mpegts)
+        av_opt_set(&encoder_options, "bframes", "0", 0);  // Hopefully not needed
 
     // Set fragmented MP4 flag if format is fmp4
     if (!strcmp(params->format, "fmp4")) {
@@ -368,9 +374,8 @@ prepare_video_encoder(
         av_opt_set(encoder_context->format_context->priv_data, "segment_time", params->seg_duration, 0);
         av_opt_set(encoder_context->format_context->priv_data, "segment_format_options", "movflags=frag_every_frame", 0);
 
-#ifdef MPEGTS
-        av_opt_set_int(encoder_context->format_context->priv_data, "break_non_keyframes", 1, 0);
-#endif
+        if (decoder_context->is_mpegts)
+            av_opt_set_int(encoder_context->format_context->priv_data, "break_non_keyframes", 1, 0);
     }
 
     /* Set codec context parameters */
@@ -650,14 +655,11 @@ set_key_flag(
     coderctx_t *encoder_context,
     txparams_t *params)
 {
-    /* Don't set any flag if format is "segment" */
     if (!strcmp(params->format, "segment") || !strcmp(params->format, "fmp4-segment")) {
-#ifdef MPEGTS
+        /* Need a new param like -force-key-frame N for this, and then set key frame every N packet (RM) */
         elv_dbg("PACKET SET KEY flag, flag=%d pts=%"PRId64, packet->flags, packet->pts);
         packet->flags |= AV_PKT_FLAG_KEY;
-#else
         return;
-#endif
     }
 
     if (packet->pts >= encoder_context->last_key_frame + params->seg_duration_ts) {
@@ -1130,8 +1132,7 @@ avpipe_tx(
 
             encoder_context->input_last_pts_read = input_packet->pts;
 
-#ifdef MPEGTS
-            if (!strcmp(params->format, "fmp4-segment")) {
+            if (decoder_context->is_mpegts && !strcmp(params->format, "fmp4-segment")) {
 
                 // Offset packets so they start at pts 0
                 elv_log("ADJUST pts=%d dts=%d ispts=%d", input_packet->pts, input_packet->dts, decoder_context->video_input_start_pts);
@@ -1150,7 +1151,6 @@ avpipe_tx(
                     continue;
                 }
             }
-#endif
         }
 
         if (input_packet->stream_index == decoder_context->video_stream_index) {

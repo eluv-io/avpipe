@@ -121,8 +121,10 @@ typedef struct coderctx_t {
     AVFilterGraph *filter_graph;
 
     int64_t pts;              /* Decoder/encoder pts */
-    int64_t video_input_start_pts;  /* In case input stream starts at PTS > 0 */
-    int64_t audio_input_start_pts;  /* In case input stream starts at PTS > 0 */
+    int64_t video_input_start_pts;  /* In case video input stream starts at PTS > 0 */
+    int64_t audio_input_start_pts;  /* In case audio input stream starts at PTS > 0 */
+
+    int is_mpegts;          /* set to 1 if input format name is "mpegts" */
 
 } coderctx_t;
 
