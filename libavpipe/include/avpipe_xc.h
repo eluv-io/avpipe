@@ -43,7 +43,7 @@ typedef struct ioctx_t {
     int bufsz;
 
     /* Size of input, should be set in in_handler-> avpipe_opener_f() */
-    int sz;
+    int64_t sz;
 
     /* Read/write counters, used by input/output handlers */
     int64_t read_bytes;

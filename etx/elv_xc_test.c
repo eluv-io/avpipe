@@ -28,6 +28,7 @@ in_opener(
     int fd = open(url, O_RDONLY);
     if (fd < 0) {
         elv_err("Failed to open input url=%s error=%d", url, errno);
+        inctx->opaque = NULL;
         return -1;
     }
 
@@ -58,6 +59,9 @@ int
 in_closer(
     ioctx_t *inctx)
 {
+    if (!inctx->opaque)
+        return 0;
+
     int fd = *((int *)(inctx->opaque));
     elv_dbg("IN io_close custom writer fd=%d\n", fd);
     free(inctx->opaque);
