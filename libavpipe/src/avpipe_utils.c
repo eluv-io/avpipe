@@ -19,6 +19,7 @@ dump_frame(
     int num,
     AVFrame *frame)
 {
+#if TRACE_FRAME
     elv_dbg("FRAME %s [%d] pts=%d pkt_dts=%d pkt_duration=%d be_time_stamp=%d key=%d "
         "pkt_size=%d "
         "width=%d height=%d linesize=%d "
@@ -29,6 +30,7 @@ dump_frame(
         frame->width, frame->height, frame->linesize[0],
         frame->format, frame->coded_picture_number
     );
+#endif
 }
 
 void
@@ -36,9 +38,11 @@ dump_packet(
     char *msg,
     AVPacket *p)
 {
+#if TRACE_FRAME
     elv_dbg("PACKET %s pts=%d dts=%d duration=%d pos=%d size=%d stream_index=%d\n", msg,
         (int)p->pts, (int)p->dts, (int)p->duration, (int)p->pos, p->size, p->stream_index
     );
+#endif
 }
 
 void
