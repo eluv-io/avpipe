@@ -104,7 +104,10 @@ in_read_packet(
     int r;
     int64_t h;
 
+#if TRACE_IO
     elv_dbg("IN READ buf=%p, size=%d", buf, buf_size);
+#endif
+
 #ifdef CHECK_C_READ
     char *buf2 = (char *) calloc(1, buf_size);
     int fd = *((int *)(c->opaque+1));
@@ -133,7 +136,9 @@ in_read_packet(
     free(buf2);
 #endif
 
+#if TRACE_IO
     elv_dbg("IN READ read=%d pos=%"PRId64" total=%"PRId64, r, c->read_pos, c->read_bytes);
+#endif
     return r > 0 ? r : -1;
 }
 
@@ -231,7 +236,9 @@ out_write_packet(
         outctx->write_pos += bwritten;
     }
 
+#if TRACE_IO
     elv_dbg("OUT WRITE fd=%"PRId64", size=%d written=%d pos=%d total=%d", fd, buf_size, bwritten, outctx->write_pos, outctx->written_bytes);
+#endif
 
     return buf_size;
 }

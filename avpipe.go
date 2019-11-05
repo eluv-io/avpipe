@@ -33,6 +33,8 @@ import (
 
 var log = elog.Get("/eluvio/avpipe")
 
+const traceIo bool = false
+
 // AVType ...
 type AVType int
 
@@ -307,7 +309,9 @@ func AVPipeReadInput(handler C.int64_t, buf *C.uint8_t, sz C.int) C.int {
 	}
 	gMutex.Unlock()
 
-	log.Debug("AVPipeReadInput()", "handler", handler, "buf", buf, "sz", sz)
+	if traceIo {
+		log.Debug("AVPipeReadInput()", "handler", handler, "buf", buf, "sz", sz)
+	}
 
 	//gobuf := C.GoBytes(unsafe.Pointer(buf), sz)
 	gobuf := make([]byte, sz)
@@ -326,7 +330,10 @@ func AVPipeReadInput(handler C.int64_t, buf *C.uint8_t, sz C.int) C.int {
 
 func (h *ioHandler) InReader(buf []byte) (int, error) {
 	n, err := h.input.Read(buf)
-	log.Debug("InReader()", "buf_size", len(buf), "n", n, "error", err)
+
+	if traceIo {
+		log.Debug("InReader()", "buf_size", len(buf), "n", n, "error", err)
+	}
 	return n, err
 }
 
@@ -459,7 +466,9 @@ func AVPipeWriteOutput(handler C.int64_t, fd C.int64_t, buf *C.uint8_t, sz C.int
 		return C.int(-1)
 	}
 	gMutex.Unlock()
-	log.Debug("AVPipeWriteOutput", "fd", fd, "sz", sz)
+	if traceIo {
+		log.Debug("AVPipeWriteOutput", "fd", fd, "sz", sz)
+	}
 
 	if h.getOutTable(int64(fd)) == nil {
 		msg := fmt.Sprintf("OutWriterX outTable entry is NULL, fd=%d", fd)
@@ -478,7 +487,9 @@ func AVPipeWriteOutput(handler C.int64_t, fd C.int64_t, buf *C.uint8_t, sz C.int
 func (h *ioHandler) OutWriter(fd C.int64_t, buf []byte) (int, error) {
 	outHandler := h.getOutTable(int64(fd))
 	n, err := outHandler.Write(buf)
-	log.Debug("OutWriter written", "n", n, "error", err)
+	if traceIo {
+		log.Debug("OutWriter written", "n", n, "error", err)
+	}
 	return n, err
 }
 
