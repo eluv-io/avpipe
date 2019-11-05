@@ -193,7 +193,17 @@ prepare_decoder(
             return -1;
         }
 
-        elv_log("Input stream=%d pixel_format=%d", i, decoder_context->codec_context[i]->pix_fmt);
+        elv_log("Input stream=%d pixel_format=%d, timebase=%d",
+            i, decoder_context->codec_context[i]->pix_fmt, decoder_context->stream[i]->time_base.den);
+
+        if (params &&
+            (params->seg_duration_ts <= 0) &&
+            (!strcmp(params->format, "segment") ||
+            !strcmp(params->format, "fmp4-segment"))) {
+            int seg_duration = atoi(params->seg_duration);
+            params->seg_duration_ts = decoder_context->stream[i]->time_base.den * seg_duration;
+            elv_log("set seg_duration_ts=%d from seg_duration", params->seg_duration_ts);
+        }
 
         /* Video - set context parameters manually */
         /* Setting the frame_rate here causes slight changes to rates - leaving it unset works perfectly
@@ -208,6 +218,45 @@ prepare_decoder(
     }
 
     return 0;
+}
+
+static void
+set_encoder_options(
+    coderctx_t *encoder_context,
+    coderctx_t *decoder_context,
+    txparams_t *params)
+{
+    if (!strcmp(params->format, "fmp4"))
+        av_opt_set(encoder_context->format_context->priv_data, "movflags", "frag_every_frame", 0);
+
+    // Segment duration (in ts) - notice it is set on the format context not codec
+    if (params->seg_duration_ts > 0)
+        av_opt_set_int(encoder_context->format_context->priv_data, "seg_duration_ts", params->seg_duration_ts,
+            AV_OPT_FLAG_ENCODING_PARAM | AV_OPT_SEARCH_CHILDREN);
+    av_opt_set_int(encoder_context->format_context->priv_data, "frame_duration_ts", params->frame_duration_ts,
+        AV_OPT_FLAG_ENCODING_PARAM | AV_OPT_SEARCH_CHILDREN);
+    av_opt_set_int(encoder_context->format_context->priv_data, "start_fragment_index", params->start_fragment_index,
+        AV_OPT_FLAG_ENCODING_PARAM | AV_OPT_SEARCH_CHILDREN);
+    av_opt_set(encoder_context->format_context->priv_data, "start_segment", params->start_segment_str, 0);
+
+    if (!strcmp(params->format, "segment")) {
+        elv_dbg("setting \"segment\" segment_time to %s", params->seg_duration);
+        av_opt_set(encoder_context->format_context->priv_data, "segment_time", params->seg_duration, 0);
+        av_opt_set(encoder_context->format_context->priv_data, "reset_timestamps", "on", 0);
+        // If I set faststart in the flags then ffmpeg generates some zero size files, which I need to dig into it more (RM).
+        // av_opt_set(encoder_context->format_context->priv_data, "segment_format_options", "movflags=faststart", 0);
+        // So lets use flag_every_frame option instead.
+        av_opt_set(encoder_context->format_context->priv_data, "segment_format_options", "movflags=frag_every_frame", 0);
+    }
+
+    if (!strcmp(params->format, "fmp4-segment")) {
+        elv_dbg("setting \"fmp4-segment\" segment_time to %s", params->seg_duration);
+        av_opt_set(encoder_context->format_context->priv_data, "segment_time", params->seg_duration, 0);
+        av_opt_set(encoder_context->format_context->priv_data, "segment_format_options", "movflags=frag_every_frame", 0);
+
+        if (decoder_context->is_mpegts)
+            av_opt_set_int(encoder_context->format_context->priv_data, "break_non_keyframes", 1, 0);
+    }
 }
 
 static int
@@ -257,33 +306,7 @@ prepare_video_encoder(
         out_stream->time_base = in_stream->time_base;
         out_stream->codecpar->codec_tag = 0;
 
-        if (!strcmp(params->format, "fmp4"))
-            av_opt_set(encoder_context->format_context->priv_data, "movflags", "frag_every_frame", 0);
-
-        if (!strcmp(params->format, "segment")) {
-            elv_dbg("setting \"segment\" segment_time to %s", params->seg_duration);
-            av_opt_set(encoder_context->format_context->priv_data, "segment_time", params->seg_duration, 0);
-            av_opt_set(encoder_context->format_context->priv_data, "reset_timestamps", "on", 0);
-            // If I set faststart in the flags then ffmpeg generates some zero size files, which I need to dig into it more (RM).
-            // av_opt_set(encoder_context->format_context->priv_data, "segment_format_options", "movflags=faststart", 0);
-            // So lets use flag_every_frame option instead.
-            av_opt_set(encoder_context->format_context->priv_data, "segment_format_options", "movflags=frag_every_frame", 0);
-        }
-
-        if (!strcmp(params->format, "fmp4-segment")) {
-            elv_dbg("setting \"fmp4-segment\" segment_time to %s", params->seg_duration);
-            av_opt_set(encoder_context->format_context->priv_data, "segment_time", params->seg_duration, 0);
-            av_opt_set(encoder_context->format_context->priv_data, "segment_format_options", "movflags=frag_every_frame", 0);
-        }
-
-        if (params->seg_duration_ts > 0)
-            av_opt_set_int(encoder_context->format_context->priv_data, "seg_duration_ts", params->seg_duration_ts,
-                AV_OPT_FLAG_ENCODING_PARAM | AV_OPT_SEARCH_CHILDREN);
-        av_opt_set_int(encoder_context->format_context->priv_data, "frame_duration_ts", params->frame_duration_ts,
-            AV_OPT_FLAG_ENCODING_PARAM | AV_OPT_SEARCH_CHILDREN);
-        av_opt_set_int(encoder_context->format_context->priv_data, "start_fragment_index", params->start_fragment_index,
-            AV_OPT_FLAG_ENCODING_PARAM | AV_OPT_SEARCH_CHILDREN);
-        av_opt_set(encoder_context->format_context->priv_data, "start_segment", params->start_segment_str, 0);
+        set_encoder_options(encoder_context, decoder_context, params);
         return 0;
     }
 
@@ -327,20 +350,6 @@ prepare_video_encoder(
     if ( params->crf_str && strlen(params->crf_str) > 0 )
         av_opt_set(encoder_codec_context->priv_data, "crf", params->crf_str, AV_OPT_FLAG_ENCODING_PARAM | AV_OPT_SEARCH_CHILDREN);
 
-    // TODO: Get parameters from offering/playout
-    // encoder_codec_context->level = 40;
-    // encoder_codec_context->profile = FF_PROFILE_H264_HIGH;
-
-    // Segment duration (in ts) - notice it is set on the format context not codec
-    if (params->seg_duration_ts > 0)
-        av_opt_set_int(encoder_context->format_context->priv_data, "seg_duration_ts", params->seg_duration_ts,
-            AV_OPT_FLAG_ENCODING_PARAM | AV_OPT_SEARCH_CHILDREN);
-    av_opt_set_int(encoder_context->format_context->priv_data, "frame_duration_ts", params->frame_duration_ts,
-        AV_OPT_FLAG_ENCODING_PARAM | AV_OPT_SEARCH_CHILDREN);
-    av_opt_set_int(encoder_context->format_context->priv_data, "start_fragment_index", params->start_fragment_index,
-        AV_OPT_FLAG_ENCODING_PARAM | AV_OPT_SEARCH_CHILDREN);
-    av_opt_set(encoder_context->format_context->priv_data, "start_segment", params->start_segment_str, 0);
-
     //av_opt_set(encoder_context->format_context->priv_data, "use_timeline", "0",
     //    AV_OPT_FLAG_ENCODING_PARAM | AV_OPT_SEARCH_CHILDREN);
 
@@ -349,34 +358,13 @@ prepare_video_encoder(
 
     // Set fragmented MP4 flag if format is fmp4
     if (!strcmp(params->format, "fmp4")) {
-        av_opt_set(encoder_context->format_context->priv_data, "movflags", "frag_every_frame", 0);
-
         // PENDING(SSS) - must use the same config as mez maker
         av_opt_set_int(&encoder_options, "keyint", params->seg_duration_fr, 0);
         av_opt_set_int(&encoder_options, "min-keyint", params->seg_duration_fr, 0);
         av_opt_set_int(&encoder_options, "no-scenecut", -1, 0);
-        // av_opt_set(&encoder_options, "force_key_frames", "expr:gt(t,n_forced*2-0.01)*lt(t,n_forced*2+0.01)", 0);
-        // av_opt_set(&encoder_options, "bframes", "0", 0);  // Hopefully not needed
     }
 
-    if (!strcmp(params->format, "segment")) {
-        elv_dbg("setting \"segment\" segment_time to %s", params->seg_duration);
-        av_opt_set(encoder_context->format_context->priv_data, "segment_time", params->seg_duration, 0);
-        av_opt_set(encoder_context->format_context->priv_data, "reset_timestamps", "on", 0);
-        // If I set faststart in the flags then ffmpeg generates some zero size files, which I need to dig into it more (RM).
-        // av_opt_set(encoder_context->format_context->priv_data, "segment_format_options", "movflags=faststart", 0);
-        // So lets use flag_every_frame option instead.
-        av_opt_set(encoder_context->format_context->priv_data, "segment_format_options", "movflags=frag_every_frame", 0);
-    }
-
-    if (!strcmp(params->format, "fmp4-segment")) {
-        elv_dbg("setting \"fmp4-segment\" segment_time to %s", params->seg_duration);
-        av_opt_set(encoder_context->format_context->priv_data, "segment_time", params->seg_duration, 0);
-        av_opt_set(encoder_context->format_context->priv_data, "segment_format_options", "movflags=frag_every_frame", 0);
-
-        if (decoder_context->is_mpegts)
-            av_opt_set_int(encoder_context->format_context->priv_data, "break_non_keyframes", 1, 0);
-    }
+    set_encoder_options(encoder_context, decoder_context, params);
 
     /* Set codec context parameters */
     encoder_codec_context->height = params->enc_height != -1 ? params->enc_height : decoder_context->codec_context[index]->height;
@@ -490,19 +478,7 @@ prepare_audio_encoder(
     encoder_context->codec_context[index]->bit_rate = params->audio_bitrate;
     encoder_context->codec_context[index]->channels = av_get_channel_layout_nb_channels(encoder_context->codec_context[index]->channel_layout);
 
-    // Segment duration (in ts) - notice it is set on the format context not codec
-    if (params->seg_duration_ts > 0)
-        av_opt_set_int(encoder_context->format_context->priv_data, "seg_duration_ts", params->seg_duration_ts,
-            AV_OPT_FLAG_ENCODING_PARAM | AV_OPT_SEARCH_CHILDREN);
-    av_opt_set_int(encoder_context->format_context->priv_data, "frame_duration_ts", params->frame_duration_ts,
-        AV_OPT_FLAG_ENCODING_PARAM | AV_OPT_SEARCH_CHILDREN);
-    av_opt_set_int(encoder_context->format_context->priv_data, "start_fragment_index", params->start_fragment_index,
-        AV_OPT_FLAG_ENCODING_PARAM | AV_OPT_SEARCH_CHILDREN);
-    av_opt_set(encoder_context->format_context->priv_data, "start_segment", params->start_segment_str, 0);
-
-    if (!strcmp(params->format, "fmp4")) {
-        av_opt_set(encoder_context->format_context->priv_data, "movflags", "frag_every_frame", 0);
-    }
+    set_encoder_options(encoder_context, decoder_context, params);
 
     /* Open audio encoder codec */
     if (avcodec_open2(encoder_context->codec_context[index], encoder_context->codec[index], NULL) < 0) {
@@ -650,11 +626,36 @@ prepare_encoder(
 }
 
 static void
+set_idr_frame_key_flag(
+    AVFrame *frame,
+    coderctx_t *encoder_context,
+    txparams_t *params)
+{
+    if (!frame)
+        return;
+
+    /* If format is not "fmp4-segment" or "segment" then return */
+    if (strcmp(params->format, "fmp4-segment") && strcmp(params->format, "segment"))
+        return;
+
+    if (frame->pts >= encoder_context->last_key_frame + params->seg_duration_ts) {
+        elv_dbg("FRAME SET KEY flag, flag=%d pts=%"PRId64, frame->pict_type, frame->pts);
+        frame->pict_type = AV_PICTURE_TYPE_I;
+        encoder_context->last_key_frame = frame->pts;
+    }
+}
+
+static void
 set_key_flag(
     AVPacket *packet,
     coderctx_t *encoder_context,
     txparams_t *params)
 {
+    /* If format is "mp4" or "fmp4" return */
+    if (!strcmp(params->format, "fmp4") || !strcmp(params->format, "mp4"))
+        return;
+
+    /* Don't set any flag if format is "segment" */
     if (!strcmp(params->format, "segment") || !strcmp(params->format, "fmp4-segment")) {
         /* Need a new param like -force-key-frame N for this, and then set key frame every N packet (RM) */
         elv_dbg("PACKET SET KEY flag, flag=%d pts=%"PRId64, packet->flags, packet->pts);
@@ -721,6 +722,8 @@ encode_frame(
         elv_dbg("could not allocate memory for output packet");
         return -1;
     }
+
+    set_idr_frame_key_flag(frame, encoder_context, params);
 
     ret = avcodec_send_frame(codec_context, frame);
     if (ret < 0) {
@@ -1255,7 +1258,8 @@ avpipe_tx(
      * Flush all frames, first flush decoder buffers, then encoder buffers by passing NULL frame.
      * TODO: should I do it for the audio stream too?
      */
-    flush_decoder(decoder_context, encoder_context, encoder_context->video_stream_index, params, debug_frame_level);
+    if (params->tx_type & tx_video)
+        flush_decoder(decoder_context, encoder_context, encoder_context->video_stream_index, params, debug_frame_level);
 
     if (!bypass_transcode && (params->tx_type & tx_video))
         encode_frame(decoder_context, encoder_context, NULL, encoder_context->video_stream_index, params, debug_frame_level);
@@ -1547,11 +1551,6 @@ avpipe_init(
         elv_err("Failure in preparing output");
         goto avpipe_init_failed;
     }
-
-    if (params->seg_duration_ts == 0 &&
-        !strcmp(params->format, "segment") &&
-        !strcmp(params->format, "fmp4-segment"))
-        params->seg_duration_ts = 1;
 
     p_txctx->params = params;
     *txctx = p_txctx;
