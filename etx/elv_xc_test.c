@@ -252,10 +252,10 @@ out_write_packet(
             outctx->bufsz = outctx->bufsz*2;
             free(outctx->buf);
             outctx->buf = tmp;
-            elv_log("XXX growing the buffer to %d", outctx->bufsz);
+            elv_dbg("OUT WRITE growing the buffer to %d", outctx->bufsz);
         }
 
-        elv_log("XXX2 MEMORY write sz=%d", buf_size);
+        elv_dbg("OUT WRITE MEMORY write sz=%d", buf_size);
         memcpy(outctx->buf+outctx->written_bytes, buf, buf_size);
         outctx->written_bytes += buf_size;
         outctx->write_pos += buf_size;
@@ -502,6 +502,7 @@ usage(
         "\t                                Using \"segment\" format produces self contained mp4 segments with start pts from 0 for each segment\n"
         "\t                                Using \"fmp4-segment\" format produces self contained mp4 segments with continious pts.\n"
         "\t                                Using \"fmp4-segment\" generates segments that are appropriate for live streaming.\n"
+        "\t-force-keyint :      (optional) force IDR key frame in this interval.\n"
         "\t-sample-rate :       (optional) Default: -1\n"
         "\t-rc-buffer-size :    (optional)\n"
         "\t-rc-max-rate :       (optional)\n"
@@ -572,7 +573,8 @@ main(
         .start_fragment_index = 0,          /* Default is zero */
         .video_bitrate = -1,                /* not used if using CRF */
         .tx_type = tx_all,
-        .seekable = 0
+        .seekable = 0,
+        .force_keyint = 0
     };
 
     i = 1;
@@ -663,7 +665,11 @@ main(
             }
             break;
         case 'f':
-            if (!strcmp(argv[i], "-format")) {
+            if (!strcmp(argv[i], "-force-keyint")) {
+                if (sscanf(argv[i+1], "%d", &p.force_keyint) != 1) {
+                    usage(argv[0], argv[i], EXIT_FAILURE);
+                }
+            } else if (!strcmp(argv[i], "-format")) {
                 if (strcmp(argv[i+1], "dash") == 0) {
                     p.format = "dash";
                 } else if (strcmp(argv[i+1], "hls") == 0) {

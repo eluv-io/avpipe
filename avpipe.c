@@ -316,10 +316,10 @@ tx(
 
     // Note: If log handler functions are set, log levels set through
     //       av_log_set_level and elv_set_log_level are ignored
-    // av_log_set_level(AV_LOG_DEBUG);
+    //av_log_set_level(AV_LOG_DEBUG);
     connect_ffmpeg_log();
     elv_logger_open(NULL, "avpipe", 10, 100*1024*1024, elv_log_file);
-    // elv_set_log_level(elv_log_debug);
+    //elv_set_log_level(elv_log_debug);
 
     in_handlers.avpipe_opener = in_opener;
     in_handlers.avpipe_closer = in_closer;

@@ -154,8 +154,9 @@ func InitTranscode(cmdRoot *cobra.Command) error {
 	cmdTranscode.PersistentFlags().BoolP("bypass", "b", false, "bypass transcoding")
 	cmdTranscode.PersistentFlags().Int32P("threads", "t", 1, "transcoding threads")
 	cmdTranscode.PersistentFlags().StringP("encoder", "e", "libx264", "encoder codec, default is 'libx264', can be: 'libx264', 'h264_nvenc', 'h264_videotoolbox'")
-	cmdTranscode.PersistentFlags().StringP("decoder", "d", "h264", "decoder codec, default is 'h264', can be: 'h264', 'h264_cuvid'")
+	cmdTranscode.PersistentFlags().StringP("decoder", "d", "", "decoder codec, default is 'h264', can be: 'h264', 'h264_cuvid'")
 	cmdTranscode.PersistentFlags().StringP("format", "", "dash", "package format, can be 'dash', 'hls', 'mp4', 'fmp4', 'segment' or 'fmp4-segment'.")
+	cmdTranscode.PersistentFlags().Int32P("force-keyint", "", 0, "force IDR key frame in this interval.")
 	cmdTranscode.PersistentFlags().StringP("tx-type", "", "all", "transcoding type, can be 'all', 'video', or 'audio'.")
 	cmdTranscode.PersistentFlags().Int32P("crf", "", 23, "mutually exclusive with video-bitrate.")
 	cmdTranscode.PersistentFlags().Int64P("start-time-ts", "", 0, "")
@@ -203,9 +204,6 @@ func doTranscode(cmd *cobra.Command, args []string) error {
 	}
 
 	decoder := cmd.Flag("decoder").Value.String()
-	if len(decoder) == 0 {
-		return fmt.Errorf("Decoder is needed after -d")
-	}
 
 	format := cmd.Flag("format").Value.String()
 	if format != "dash" && format != "hls" && format != "mp4" && format != "fmp4" && format != "segment" && format != "fmp4-segment" {
@@ -250,6 +248,12 @@ func doTranscode(cmd *cobra.Command, args []string) error {
 	if err != nil {
 		return fmt.Errorf("start-segment is not valid")
 	}
+
+	forceKeyInterval, err := cmd.Flags().GetInt32("force-keyint")
+	if err != nil {
+		return fmt.Errorf("force-keyint is not valid")
+	}
+	fmt.Printf("force_keyint=%d\n", forceKeyInterval)
 
 	startFragmentIndex, err := cmd.Flags().GetInt32("start-frag-index")
 	if err != nil {
@@ -353,6 +357,7 @@ func doTranscode(cmd *cobra.Command, args []string) error {
 		CryptKeyURL:        cryptKeyURL,
 		CryptScheme:        cryptScheme,
 		TxType:             txType,
+		ForceKeyInt:        forceKeyInterval,
 	}
 
 	avpipe.InitIOHandler(&avcmdInputOpener{url: filename}, &avcmdOutputOpener{dir: dir})

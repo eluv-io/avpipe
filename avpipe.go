@@ -619,6 +619,7 @@ func Tx(params *TxParams, url string, bypassTranscoding bool, debugFrameLevel bo
 		crypt_key_url:        C.CString(params.CryptKeyURL),
 		crypt_scheme:         C.crypt_scheme_t(params.CryptScheme),
 		tx_type:              C.tx_type_t(params.TxType),
+		force_keyint:         C.int(params.ForceKeyInt),
 	}
 
 	var bypass int
