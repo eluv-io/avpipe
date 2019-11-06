@@ -110,6 +110,7 @@ typedef struct coderctx_t {
 
     int64_t last_dts;
     int64_t last_key_frame;     /* pts of last key frame */
+    int64_t forced_keyint_countdown; /* frames until next forced key frame */
     int64_t input_last_pts_read;
     int64_t input_last_pts_sent_encode;
     int64_t input_last_pos_sent_encode;

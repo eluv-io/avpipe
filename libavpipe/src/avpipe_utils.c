@@ -22,12 +22,13 @@ dump_frame(
     AVFrame *frame)
 {
 #if TRACE_FRAME
-    elv_dbg("FRAME %s [%d] pts=%d pkt_dts=%d pkt_duration=%d be_time_stamp=%d key=%d "
+    elv_dbg("FRAME %s [%d] pts=%d pkt_dts=%d pkt_duration=%d be_time_stamp=%d key=%d pict_type=%d "
         "pkt_size=%d "
         "width=%d height=%d linesize=%d "
         "format=%d coded_pic_num=%d flags=%x "
         "\n", msg, num,
-        (int)frame->pts, (int)frame->pkt_dts, (int)frame->pkt_duration, (int)frame->best_effort_timestamp, frame->key_frame,
+        (int)frame->pts, (int)frame->pkt_dts, (int)frame->pkt_duration, (int)frame->best_effort_timestamp,
+        frame->key_frame, frame->pict_type,
         frame->pkt_size,
         frame->width, frame->height, frame->linesize[0],
         frame->format, frame->coded_picture_number,

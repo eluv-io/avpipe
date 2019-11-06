@@ -30,6 +30,8 @@
 #define MPEGTS_THREAD_COUNT     16
 #define DEFAULT_THREAD_COUNT    8
 
+#define TRACE_FRAME 0
+
 extern int
 init_filters(
     const char *filters_descr,
@@ -324,12 +326,10 @@ prepare_video_encoder(
     }
 
     if (!strcmp(params->format, "fmp4-segment")) {
-        encoder_codec_context->has_b_frames = 0;
         encoder_codec_context->max_b_frames = 0;
     }
 
     if (params->force_keyint > 0) {
-        encoder_codec_context->keyint_min = params->force_keyint;
         encoder_codec_context->gop_size = params->force_keyint;
     }
 
@@ -610,10 +610,20 @@ set_idr_frame_key_flag(
         return;
 
     if (frame->pts >= encoder_context->last_key_frame + params->seg_duration_ts) {
-        elv_dbg("FRAME SET KEY flag, flag=%d pts=%"PRId64, frame->pict_type, frame->pts);
+        elv_dbg("FRAME SET KEY flag, seg_duration_ts=%d pts=%"PRId64, params->seg_duration_ts, frame->pts);
         frame->pict_type = AV_PICTURE_TYPE_I;
         encoder_context->last_key_frame = frame->pts;
     }
+
+    if (params->force_keyint > 0) {
+        if (encoder_context->forced_keyint_countdown == 0) {
+            elv_dbg("FRAME SET KEY flag, forced_keyint=%d pts=%"PRId64, params->force_keyint, frame->pts);
+            frame->pict_type = AV_PICTURE_TYPE_I;
+            encoder_context->forced_keyint_countdown = params->force_keyint;
+        }
+        encoder_context->forced_keyint_countdown --;
+    }
+
 }
 
 #if 0
@@ -696,7 +706,10 @@ encode_frame(
         return -1;
     }
 
-    set_idr_frame_key_flag(frame, encoder_context, params);
+    if (frame) {
+        frame->pict_type = AV_PICTURE_TYPE_NONE; // Clear before encoding (see doc/examples/transcoding.c)
+        set_idr_frame_key_flag(frame, encoder_context, params);
+    }
 
     ret = avcodec_send_frame(codec_context, frame);
     if (ret < 0) {
@@ -789,7 +802,10 @@ transcode_packet(
     u_int64_t since;
     AVCodecContext *codec_context = decoder_context->codec_context[stream_index];
     int response;
+
+#if TRACE_FRAME
     elv_dbg("DECODE stream_index=%d send_packet pts=%"PRId64" dts=%"PRId64" duration=%d", stream_index, packet->pts, packet->dts, packet->duration);
+#endif
 
     if (bypass_transcode) {
         /*
@@ -880,7 +896,7 @@ transcode_packet(
                     }
 
                     if (ret < 0) {
-                        assert(0);
+                        elv_err("Failed to execute frame filter ret=%d", ret);
                         return -1;
                     }
 
@@ -897,7 +913,6 @@ transcode_packet(
 
                     if (debug_frame_level)
                         dump_frame("FILT ", codec_context->frame_number, filt_frame);
-
 
                     AVFrame *frame_to_encode = filt_frame;
                     int skip = should_skip_encoding(decoder_context, p, filt_frame);
@@ -942,7 +957,7 @@ flush_decoder(
         response = avcodec_receive_frame(codec_context, frame);
         if (response == AVERROR(EAGAIN)) {
             break;
-	    }
+        }
 
         if (response == AVERROR_EOF) {
             elv_log("1 GOT EOF");
@@ -950,12 +965,6 @@ flush_decoder(
         }
 
         if (codec_context->codec_type == AVMEDIA_TYPE_VIDEO) {
-
-            /* Force an I frame at beginning of each segment */
-            if (frame->pts % p->seg_duration_ts == 0) {
-                frame->pict_type = AV_PICTURE_TYPE_I;
-                elv_dbg("FRAME SET num=%d pts=%"PRId64, frame->coded_picture_number, frame->pts);
-            }
 
             /* push the decoded frame into the filtergraph */
             if (av_buffersrc_add_frame_flags(decoder_context->buffersrc_ctx, frame, AV_BUFFERSRC_FLAG_KEEP_REF) < 0) {
