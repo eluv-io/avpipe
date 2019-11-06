@@ -160,8 +160,8 @@ typedef struct txparams_t {
     int64_t seg_duration_ts;        // In ts units. It is used for transcoding and producing dash mp4 files
     char *seg_duration;             // In sec units. It is used for transcoding and producing mp4 segments
     int seg_duration_fr;
-    int frame_duration_ts;          // Check: seg_duration_ts / frame_duration_ts = seg_duration_fr
     int start_fragment_index;
+    int force_keyint;               // Force a key (IDR) frame at this interval
     char *ecodec;                   // Video/audio encoder
     char *dcodec;                   // Video/audio decoder
     int enc_height;

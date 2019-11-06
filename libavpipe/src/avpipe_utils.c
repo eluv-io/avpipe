@@ -13,6 +13,8 @@
 
 #include <sys/time.h>
 
+#define TRACE_FRAME 0
+
 void
 dump_frame(
     char *msg,
@@ -23,12 +25,13 @@ dump_frame(
     elv_dbg("FRAME %s [%d] pts=%d pkt_dts=%d pkt_duration=%d be_time_stamp=%d key=%d "
         "pkt_size=%d "
         "width=%d height=%d linesize=%d "
-        "format=%d coded_pic_num=%d "
+        "format=%d coded_pic_num=%d flags=%x "
         "\n", msg, num,
         (int)frame->pts, (int)frame->pkt_dts, (int)frame->pkt_duration, (int)frame->best_effort_timestamp, frame->key_frame,
         frame->pkt_size,
         frame->width, frame->height, frame->linesize[0],
-        frame->format, frame->coded_picture_number
+        frame->format, frame->coded_picture_number,
+        frame->flags
     );
 #endif
 }
@@ -39,8 +42,9 @@ dump_packet(
     AVPacket *p)
 {
 #if TRACE_FRAME
-    elv_dbg("PACKET %s pts=%d dts=%d duration=%d pos=%d size=%d stream_index=%d\n", msg,
-        (int)p->pts, (int)p->dts, (int)p->duration, (int)p->pos, p->size, p->stream_index
+    elv_dbg("PACKET %s pts=%d dts=%d duration=%d pos=%d size=%d stream_index=%d flags=%x\n", msg,
+        (int)p->pts, (int)p->dts, (int)p->duration, (int)p->pos, p->size, p->stream_index,
+        p->flags
     );
 #endif
 }

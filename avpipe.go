@@ -111,8 +111,8 @@ type TxParams struct {
 	SegDurationTs      int64       `json:"seg_duration_ts,omitempty"`
 	SegDuration        string      `json:"seg_duration,omitempty"`
 	SegDurationFr      int32       `json:"seg_duration_fr,omitempty"`
-	FrameDurationTs    int32       `json:"frame_duration_ts,omitempty"`
 	StartFragmentIndex int32       `json:"start_fragment_index,omitempty"`
+	ForceKeyInt        int32       `json:"force_keyint"`
 	Ecodec             string      `json:"ecodec,omitempty"` // Video encoder
 	Dcodec             string      `json:"dcodec,omitempty"` // Video decoder
 	EncHeight          int32       `json:"enc_height,omitempty"`
@@ -608,7 +608,6 @@ func Tx(params *TxParams, url string, bypassTranscoding bool, debugFrameLevel bo
 		seg_duration_ts:      C.int64_t(params.SegDurationTs),
 		seg_duration:         C.CString(params.SegDuration),
 		seg_duration_fr:      C.int(params.SegDurationFr),
-		frame_duration_ts:    C.int(params.FrameDurationTs),
 		start_fragment_index: C.int(params.StartFragmentIndex),
 		ecodec:               C.CString(params.Ecodec),
 		dcodec:               C.CString(params.Dcodec),

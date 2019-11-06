@@ -233,8 +233,6 @@ set_encoder_options(
     if (params->seg_duration_ts > 0)
         av_opt_set_int(encoder_context->format_context->priv_data, "seg_duration_ts", params->seg_duration_ts,
             AV_OPT_FLAG_ENCODING_PARAM | AV_OPT_SEARCH_CHILDREN);
-    av_opt_set_int(encoder_context->format_context->priv_data, "frame_duration_ts", params->frame_duration_ts,
-        AV_OPT_FLAG_ENCODING_PARAM | AV_OPT_SEARCH_CHILDREN);
     av_opt_set_int(encoder_context->format_context->priv_data, "start_fragment_index", params->start_fragment_index,
         AV_OPT_FLAG_ENCODING_PARAM | AV_OPT_SEARCH_CHILDREN);
     av_opt_set(encoder_context->format_context->priv_data, "start_segment", params->start_segment_str, 0);
@@ -243,19 +241,16 @@ set_encoder_options(
         elv_dbg("setting \"segment\" segment_time to %s", params->seg_duration);
         av_opt_set(encoder_context->format_context->priv_data, "segment_time", params->seg_duration, 0);
         av_opt_set(encoder_context->format_context->priv_data, "reset_timestamps", "on", 0);
-        // If I set faststart in the flags then ffmpeg generates some zero size files, which I need to dig into it more (RM).
-        // av_opt_set(encoder_context->format_context->priv_data, "segment_format_options", "movflags=faststart", 0);
-        // So lets use flag_every_frame option instead.
-        av_opt_set(encoder_context->format_context->priv_data, "segment_format_options", "movflags=frag_every_frame", 0);
     }
 
     if (!strcmp(params->format, "fmp4-segment")) {
         elv_dbg("setting \"fmp4-segment\" segment_time to %s", params->seg_duration);
         av_opt_set(encoder_context->format_context->priv_data, "segment_time", params->seg_duration, 0);
+        av_opt_set(encoder_context->format_context->priv_data, "reset_timestamps", "on", 0);
+        // If I set faststart in the flags then ffmpeg generates some zero size files, which I need to dig into it more (RM).
+        // av_opt_set(encoder_context->format_context->priv_data, "segment_format_options", "movflags=faststart", 0);
+        // So lets use flag_every_frame option instead.
         av_opt_set(encoder_context->format_context->priv_data, "segment_format_options", "movflags=frag_every_frame", 0);
-
-        if (decoder_context->is_mpegts)
-            av_opt_set_int(encoder_context->format_context->priv_data, "break_non_keyframes", 1, 0);
     }
 }
 
@@ -320,48 +315,22 @@ prepare_video_encoder(
 
     /* Set encoder parameters */
     AVDictionary *encoder_options = NULL;
-#if 0
-    /* These are not necessary - keeping as an example */
-    // TODO: how will this be freed?
-    av_opt_set(&encoder_options, "keyint", "60", 0);
-    av_opt_set(&encoder_options, "min-keyint", "60", 0);
-    av_opt_set(&encoder_options, "no-scenecut", "-1", 0);
-
-    /*
-     * These are not necessary in order to force keyframes for the segments
-     *
-    av_opt_set(encoder_codec_context->priv_data, "keyint", "60", AV_OPT_FLAG_ENCODING_PARAM);
-    av_opt_set(encoder_codec_context->priv_data, "min-keyint", "60", AV_OPT_FLAG_ENCODING_PARAM);
-    av_opt_set(encoder_codec_context->priv_data, "no-scenecut", "-1", AV_OPT_FLAG_ENCODING_PARAM);
-
-    av_opt_set(encoder_codec_context->priv_data, "gop_size", "60", AV_OPT_FLAG_ENCODING_PARAM | AV_OPT_SEARCH_CHILDREN);
-    av_opt_set(encoder_codec_context->priv_data, "forced_idr", "1", AV_OPT_FLAG_ENCODING_PARAM | AV_OPT_SEARCH_CHILDREN);
-
-    // SSTEST set these on the format context as well
-    av_opt_set(encoder_context->format_context->priv_data, "keyint", "60", AV_OPT_FLAG_ENCODING_PARAM);
-    av_opt_set(encoder_context->format_context->priv_data, "min-keyint", "60", AV_OPT_FLAG_ENCODING_PARAM);
-    av_opt_set(encoder_context->format_context->priv_data, "no-scenecut", "-1", AV_OPT_FLAG_ENCODING_PARAM);
-    av_opt_set(encoder_context->format_context->priv_data, "gop_size", "60", AV_OPT_FLAG_ENCODING_PARAM | AV_OPT_SEARCH_CHILDREN);
-    av_opt_set(encoder_context->format_context->priv_data, "forced_idr", "1", AV_OPT_FLAG_ENCODING_PARAM | AV_OPT_SEARCH_CHILDREN);
-    */
-#endif
 
     /* Added to fix/improve encoding quality of the first frame - PENDING(SSS) research */
-    if ( params->crf_str && strlen(params->crf_str) > 0 )
+    if ( params->crf_str && strlen(params->crf_str) > 0 ) {
+        /* The 'crf' option may be overriden by rate control options - 'crf_max' is used as a safety net */
         av_opt_set(encoder_codec_context->priv_data, "crf", params->crf_str, AV_OPT_FLAG_ENCODING_PARAM | AV_OPT_SEARCH_CHILDREN);
+        // av_opt_set(encoder_codec_context->priv_data, "crf_max", params->crf_str, AV_OPT_FLAG_ENCODING_PARAM | AV_OPT_SEARCH_CHILDREN);
+    }
 
-    //av_opt_set(encoder_context->format_context->priv_data, "use_timeline", "0",
-    //    AV_OPT_FLAG_ENCODING_PARAM | AV_OPT_SEARCH_CHILDREN);
+    if (!strcmp(params->format, "fmp4-segment")) {
+        encoder_codec_context->has_b_frames = 0;
+        encoder_codec_context->max_b_frames = 0;
+    }
 
-    if (decoder_context->is_mpegts)
-        av_opt_set(&encoder_options, "bframes", "0", 0);  // Hopefully not needed
-
-    // Set fragmented MP4 flag if format is fmp4
-    if (!strcmp(params->format, "fmp4")) {
-        // PENDING(SSS) - must use the same config as mez maker
-        av_opt_set_int(&encoder_options, "keyint", params->seg_duration_fr, 0);
-        av_opt_set_int(&encoder_options, "min-keyint", params->seg_duration_fr, 0);
-        av_opt_set_int(&encoder_options, "no-scenecut", -1, 0);
+    if (params->force_keyint > 0) {
+        encoder_codec_context->keyint_min = params->force_keyint;
+        encoder_codec_context->gop_size = params->force_keyint;
     }
 
     set_encoder_options(encoder_context, decoder_context, params);
@@ -403,6 +372,8 @@ prepare_video_encoder(
         encoder_context->codec_context[index]->pix_fmt = decoder_context->codec_context[index]->pix_fmt;
     else if (!strcmp(params->ecodec, "h264_nvenc"))
         /* If the codec is nvenc, set pixel format to AV_PIX_FMT_YUV420P */
+        encoder_context->codec_context[index]->pix_fmt = AV_PIX_FMT_YUV420P;
+    else if (!strcmp(params->format, "fmp4-segment"))
         encoder_context->codec_context[index]->pix_fmt = AV_PIX_FMT_YUV420P;
     else
         encoder_context->codec_context[index]->pix_fmt = AV_PIX_FMT_YUV422P;
@@ -645,6 +616,7 @@ set_idr_frame_key_flag(
     }
 }
 
+#if 0
 static void
 set_key_flag(
     AVPacket *packet,
@@ -669,6 +641,7 @@ set_key_flag(
         encoder_context->last_key_frame = packet->pts;
     }
 }
+#endif
 
 static int
 should_skip_encoding(
@@ -780,8 +753,6 @@ encode_frame(
             encoder_context->stream[stream_index]->time_base
         );
 
-        set_key_flag(output_packet, encoder_context, params);
-
         output_packet->pts += params->start_pts;  // PENDING(SSS) Don't we have to compensate for 'relative pts'?
         output_packet->dts += params->start_pts;
 
@@ -845,8 +816,6 @@ transcode_packet(
          *  - packet->duration
          *
          */
-
-        set_key_flag(packet, encoder_context, p); // SS BUG - can't just set key flag in bypass
 
         packet->pts += p->start_pts;
         packet->dts += p->start_pts;
