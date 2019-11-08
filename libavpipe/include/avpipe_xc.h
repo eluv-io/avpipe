@@ -10,6 +10,8 @@
 #include <libavformat/avformat.h>
 #include <libavfilter/buffersink.h>
 #include <libavfilter/buffersrc.h>
+#include <libswresample/swresample.h>
+#include <libavutil/audio_fifo.h>
 #include <libavutil/opt.h>
 
 #define MAX_STREAMS	16
@@ -105,8 +107,12 @@ typedef struct coderctx_t {
     AVStream *stream[MAX_STREAMS];
     AVCodecParameters *codec_parameters[MAX_STREAMS];
     AVCodecContext *codec_context[MAX_STREAMS];
+    SwrContext *resample_context[MAX_STREAMS];  /* resample context for audio */
+    AVAudioFifo *fifo;                          /* audio sampling fifio */
+    
     int video_stream_index;
     int audio_stream_index;
+    int data_stream_index;
 
     int64_t last_dts;
     int64_t last_key_frame;     /* pts of last key frame */
@@ -175,6 +181,7 @@ typedef struct txparams_t {
     tx_type_t tx_type;              // Default: 0 means transcode 'everything'
     int seekable;                   // Default: 0 means not seekable. A non seekable stream with moov box in
                                     //          the end causes a lot of reads up to moov atom.
+    int audio_index;                // Audio index(s) for mez making, may need to become an array of indexes 
 } txparams_t;
 
 #define MAX_CODEC_NAME  256

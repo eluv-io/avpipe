@@ -485,6 +485,7 @@ usage(
         "Invalid parameter: %s\n\n"
         "Usage: %s <params>\n"
         "\t-audio-bitrate :     (optional) Default: -1\n"
+        "\t-audio-index :       (optional) Default: the index of last audio stream\n"
         "\t-bypass :            (optional) bypass transcoding. Default is 0, must be 0 or 1\n"
         "\t-seekable :          (optional) seekable stream. Default is 0, must be 0 or 1\n"
         "\t-crf :               (optional) mutually exclusive with video-bitrate. Default: 23\n"
@@ -550,6 +551,7 @@ main(
     /* Parameters */
     txparams_t p = {
         .audio_bitrate = -1,                /* TODO - default? uses source bitrate? */
+        .audio_index = -1,                  /* Source audio index */
         .crf_str = "23",                    /* 1 best -> 23 standard middle -> 52 poor */
         .crypt_iv = NULL,
         .crypt_key = NULL,
@@ -584,7 +586,11 @@ main(
         }
         switch ((int) argv[i][1]) {
         case 'a':
-            if (!strcmp(argv[i], "-audio-bitrate")) {
+            if (!strcmp(argv[i], "-audio-index")) {
+                if (sscanf(argv[i+1], "%d", &p.audio_index) != 1) {
+                    usage(argv[0], argv[i], EXIT_FAILURE);
+                }
+            } else if (!strcmp(argv[i], "-audio-bitrate")) {
                 if (sscanf(argv[i+1], "%d", &p.audio_bitrate) != 1) {
                     usage(argv[0], argv[i], EXIT_FAILURE);
                 }
@@ -759,6 +765,8 @@ main(
                     usage(argv[0], argv[i], EXIT_FAILURE);
                 }
                 p.tx_type = tx_type_from_string(argv[i+1]);
+                if (!strcmp(argv[i+1], "audio"))
+                    p.ecodec = "aac";
             } else if (sscanf(argv[i+1], "%d", &n_threads) != 1) {
                 usage(argv[0], argv[i], EXIT_FAILURE);
             }
