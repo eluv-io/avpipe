@@ -153,6 +153,7 @@ func InitTranscode(cmdRoot *cobra.Command) error {
 	cmdTranscode.PersistentFlags().StringP("filename", "f", "", "(mandatory) filename to be transcoded")
 	cmdTranscode.PersistentFlags().BoolP("bypass", "b", false, "bypass transcoding")
 	cmdTranscode.PersistentFlags().Int32P("threads", "t", 1, "transcoding threads")
+	cmdTranscode.PersistentFlags().Int32P("audio-index", "", -1, "audio stream index (only for --tx-type audio)")
 	cmdTranscode.PersistentFlags().StringP("encoder", "e", "libx264", "encoder codec, default is 'libx264', can be: 'libx264', 'h264_nvenc', 'h264_videotoolbox'")
 	cmdTranscode.PersistentFlags().StringP("decoder", "d", "", "decoder codec, default is 'h264', can be: 'h264', 'h264_cuvid'")
 	cmdTranscode.PersistentFlags().StringP("format", "", "dash", "package format, can be 'dash', 'hls', 'mp4', 'fmp4', 'segment' or 'fmp4-segment'.")
@@ -166,6 +167,7 @@ func InitTranscode(cmdRoot *cobra.Command) error {
 	cmdTranscode.PersistentFlags().Int32P("start-frag-index", "", 1, "start fragment index >= 1.")
 	cmdTranscode.PersistentFlags().Int32P("video-bitrate", "", -1, "mutually exclusive with crf.")
 	cmdTranscode.PersistentFlags().Int32P("audio-bitrate", "", -1, "Default: -1")
+	cmdTranscode.PersistentFlags().Int32P("rc-max-rate", "", -1, "mandatory, positive integer")
 	cmdTranscode.PersistentFlags().Int32P("enc-height", "", -1, "default -1 means use source height")
 	cmdTranscode.PersistentFlags().Int32P("enc-width", "", -1, "default -1 means use source width")
 	cmdTranscode.PersistentFlags().Int64P("duration-ts", "", -1, "default -1 means entire stream")
@@ -198,6 +200,11 @@ func doTranscode(cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("Invalid threads flag")
 	}
 
+	audioIndex, err := cmd.Flags().GetInt32("audio-index")
+	if err != nil {
+		return fmt.Errorf("Invalid audio index flag")
+	}
+
 	encoder := cmd.Flag("encoder").Value.String()
 	if len(encoder) == 0 {
 		return fmt.Errorf("Encoder is needed after -e")
@@ -222,6 +229,7 @@ func doTranscode(cmd *cobra.Command, args []string) error {
 		txType = avpipe.TxVideo
 	case "audio":
 		txType = avpipe.TxAudio
+		encoder = "aac"
 	}
 
 	crf, err := cmd.Flags().GetInt32("crf")
@@ -268,6 +276,11 @@ func doTranscode(cmd *cobra.Command, args []string) error {
 	audioBitrate, err := cmd.Flags().GetInt32("audio-bitrate")
 	if err != nil {
 		return fmt.Errorf("audio-bitrate is not valid")
+	}
+
+	rcMaxRate, err := cmd.Flags().GetInt32("rc-max-rate")
+	if err != nil  || rcMaxRate <= 0 {
+		return fmt.Errorf("rc-max-rate is not valid")
 	}
 
 	encHeight, err := cmd.Flags().GetInt32("enc-height")
@@ -358,6 +371,9 @@ func doTranscode(cmd *cobra.Command, args []string) error {
 		CryptScheme:        cryptScheme,
 		TxType:             txType,
 		ForceKeyInt:        forceKeyInterval,
+		RcMaxRate:          rcMaxRate,
+		RcBufferSize:       4500000,
+		AudioIndex:         audioIndex,
 	}
 
 	avpipe.InitIOHandler(&avcmdInputOpener{url: filename}, &avcmdOutputOpener{dir: dir})

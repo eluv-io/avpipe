@@ -107,6 +107,8 @@ type TxParams struct {
 	VideoBitrate       int32       `json:"video_bitrate,omitempty"`
 	AudioBitrate       int32       `json:"audio_bitrate,omitempty"`
 	SampleRate         int32       `json:"sample_rate,omitempty"` // Audio sampling rate
+	RcMaxRate          int32       `json:"rc_max_rate,omitempty"`
+	RcBufferSize       int32       `json:"rc_buffer_size,omitempty"`
 	CrfStr             string      `json:"crf_str,omitempty"`
 	SegDurationTs      int64       `json:"seg_duration_ts,omitempty"`
 	SegDuration        string      `json:"seg_duration,omitempty"`
@@ -124,6 +126,7 @@ type TxParams struct {
 	CryptScheme        CryptScheme `json:"crypt_scheme,omitempty"`
 	TxType             TxType      `json:"tx_type,omitempty"`
 	Seekable           bool        `json:"seekable"`
+	AudioIndex         int32       `json:"audio_index"`
 }
 
 type AVMediaType int
@@ -620,6 +623,9 @@ func Tx(params *TxParams, url string, bypassTranscoding bool, debugFrameLevel bo
 		crypt_scheme:         C.crypt_scheme_t(params.CryptScheme),
 		tx_type:              C.tx_type_t(params.TxType),
 		force_keyint:         C.int(params.ForceKeyInt),
+		rc_max_rate:          C.int(params.RcMaxRate),
+		rc_buffer_size:       C.int(params.RcBufferSize),
+		audio_index:          C.int(params.AudioIndex),
 	}
 
 	var bypass int

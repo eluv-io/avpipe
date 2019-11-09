@@ -192,6 +192,7 @@ func TestSingleTranscode(t *testing.T) {
 		Ecodec:          "libx264",
 		EncHeight:       720,
 		EncWidth:        1280,
+		TxType:          avpipe.TxVideo,
 	}
 
 	// Create output directory if it doesn't exist
@@ -206,6 +207,16 @@ func TestSingleTranscode(t *testing.T) {
 	if err != 0 {
 		t.Fail()
 	}
+
+	params.TxType = avpipe.TxAudio
+	params.Ecodec = "aac"
+	params.AudioIndex = -1
+	lastInputPts = 0
+	err = avpipe.Tx(params, filename, false, false, &lastInputPts)
+	if err != 0 {
+		t.Fail()
+	}
+
 }
 
 func doTranscode(t *testing.T, p *avpipe.TxParams, nThreads int, filename string, reportFailure string) {
@@ -253,6 +264,7 @@ func TestNvidiaTranscode(t *testing.T) {
 		Ecodec:          "h264_nvenc",
 		EncHeight:       720,
 		EncWidth:        1280,
+		TxType:          avpipe.TxVideo,
 	}
 
 	doTranscode(t, params, nThreads, filename, "H264_NVIDIA encoder might not be enabled or hardware might not be available")
@@ -276,6 +288,7 @@ func TestConcurrentTranscode(t *testing.T) {
 		Ecodec:          "libx264",
 		EncHeight:       720,
 		EncWidth:        1280,
+		TxType:          avpipe.TxVideo,
 	}
 
 	doTranscode(t, params, nThreads, filename, "")

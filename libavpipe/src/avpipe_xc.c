@@ -209,8 +209,10 @@ prepare_decoder(
             return -1;
         }
 
-        elv_log("Input stream=%d pixel_format=%d, timebase=%d",
-            i, decoder_context->codec_context[i]->pix_fmt, decoder_context->stream[i]->time_base.den);
+        elv_log("Input stream=%d pixel_format=%d, timebase=%d, sample_fmt=%d",
+            i, decoder_context->codec_context[i]->pix_fmt,
+            decoder_context->stream[i]->time_base.den,
+            decoder_context->codec_context[i]->sample_fmt);
 
         if (params &&
             (params->seg_duration_ts <= 0) &&
@@ -875,12 +877,10 @@ encode_frame(
         encoder_context->input_last_pts_encoded = output_packet->pts;
 
         /* Rescale using the stream time_base (not the codec context) */
-        elv_dbg("XXX1 pts=%d", output_packet->pts);
         av_packet_rescale_ts(output_packet,
             decoder_context->stream[stream_index]->time_base,
             encoder_context->stream[stream_index]->time_base
         );
-        elv_dbg("XXX2 pts=%d", output_packet->pts);
 
         output_packet->pts += params->start_pts;  // PENDING(SSS) Don't we have to compensate for 'relative pts'?
         output_packet->dts += params->start_pts;
