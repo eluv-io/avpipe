@@ -10,12 +10,14 @@ void
 dump_frame(
     char *msg,
     int num,
-    AVFrame *frame);
+    AVFrame *frame,
+    int debug_frame_level);
 
 void
 dump_packet(
     char *msg,
-    AVPacket *p);
+    AVPacket *p,
+    int debug_frame_level);
 
 void
 dump_decoder(

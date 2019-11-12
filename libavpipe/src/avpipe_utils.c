@@ -13,15 +13,16 @@
 
 #include <sys/time.h>
 
-#define TRACE_FRAME 0
-
 void
 dump_frame(
     char *msg,
     int num,
-    AVFrame *frame)
+    AVFrame *frame,
+    int debug_frame_level)
 {
-#if TRACE_FRAME
+    if (!debug_frame_level)
+        return;
+
     elv_dbg("FRAME %s [%d] pts=%d pkt_dts=%d pkt_duration=%d be_time_stamp=%d key=%d pict_type=%d "
         "pkt_size=%d "
         "width=%d height=%d linesize=%d "
@@ -34,20 +35,21 @@ dump_frame(
         frame->format, frame->coded_picture_number,
         frame->flags
     );
-#endif
 }
 
 void
 dump_packet(
     char *msg,
-    AVPacket *p)
+    AVPacket *p,
+    int debug_frame_level)
 {
-#if TRACE_FRAME
+    if (!debug_frame_level)
+        return;
+
     elv_dbg("PACKET %s pts=%d dts=%d duration=%d pos=%d size=%d stream_index=%d flags=%x\n", msg,
         (int)p->pts, (int)p->dts, (int)p->duration, (int)p->pos, p->size, p->stream_index,
         p->flags
     );
-#endif
 }
 
 void

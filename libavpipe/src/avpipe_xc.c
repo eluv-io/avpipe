@@ -30,8 +30,6 @@
 #define MPEGTS_THREAD_COUNT     16
 #define DEFAULT_THREAD_COUNT    8
 
-#define TRACE_FRAME 0
-
 extern int
 init_filters(
     const char *filters_descr,
@@ -885,8 +883,7 @@ encode_frame(
         output_packet->pts += params->start_pts;  // PENDING(SSS) Don't we have to compensate for 'relative pts'?
         output_packet->dts += params->start_pts;
 
-        if (debug_frame_level)
-            dump_packet("OUT", output_packet);
+        dump_packet("OUT", output_packet, debug_frame_level);
 
         /* mux encoded frame */
         ret = av_interleaved_write_frame(format_context, output_packet);
@@ -916,9 +913,8 @@ transcode_audio(
     AVCodecContext *codec_context = decoder_context->codec_context[stream_index];
     int response;
 
-#if TRACE_FRAME
-    elv_dbg("DECODE stream_index=%d send_packet pts=%"PRId64" dts=%"PRId64" duration=%d", stream_index, packet->pts, packet->dts, packet->duration);
-#endif
+    if (debug_frame_level)
+        elv_dbg("DECODE stream_index=%d send_packet pts=%"PRId64" dts=%"PRId64" duration=%d", stream_index, packet->pts, packet->dts, packet->duration);
 
     if (bypass_transcode) {
         av_packet_rescale_ts(packet,
@@ -928,8 +924,8 @@ transcode_audio(
         packet->pts += p->start_pts;
         packet->dts += p->start_pts;
 
-        if (debug_frame_level)
-            dump_packet("BYPASS ", packet);
+        dump_packet("AUDIO BYPASS ", packet, debug_frame_level);
+
         if (av_interleaved_write_frame(encoder_context->format_context, packet) < 0) {
             elv_err("Failure in copying audio stream");
             return -1;
@@ -953,8 +949,7 @@ transcode_audio(
             return response;
         }
 
-        if (debug_frame_level)
-            dump_frame("IN ", codec_context->frame_number, frame);
+        dump_frame("IN ", codec_context->frame_number, frame, debug_frame_level);
 
         if (response >= 0) {
             decoder_context->pts = packet->pts;
@@ -978,8 +973,7 @@ transcode_audio(
                     return -1;
                 }
 
-                if (debug_frame_level)
-                    dump_frame("FILT ", codec_context->frame_number, filt_frame);
+                dump_frame("FILT ", codec_context->frame_number, filt_frame, debug_frame_level);
 
                 AVFrame *frame_to_encode = filt_frame;
                 int skip = should_skip_encoding(decoder_context, p, filt_frame);
@@ -1015,9 +1009,8 @@ transcode_video(
     AVCodecContext *codec_context = decoder_context->codec_context[stream_index];
     int response;
 
-#if TRACE_FRAME
-    elv_dbg("DECODE stream_index=%d send_packet pts=%"PRId64" dts=%"PRId64" duration=%d", stream_index, packet->pts, packet->dts, packet->duration);
-#endif
+    if (debug_frame_level)
+        elv_dbg("DECODE stream_index=%d send_packet pts=%"PRId64" dts=%"PRId64" duration=%d", stream_index, packet->pts, packet->dts, packet->duration);
 
     if (bypass_transcode) {
         /*
@@ -1048,8 +1041,8 @@ transcode_video(
         packet->pts += p->start_pts;
         packet->dts += p->start_pts;
 
-        if (debug_frame_level)
-            dump_packet("BYPASS ", packet);
+        dump_packet("VIDEO BYPASS ", packet, debug_frame_level);
+
         if (av_interleaved_write_frame(encoder_context->format_context, packet) < 0) {
             elv_err("Failure in copying audio stream");
             return -1;
@@ -1074,8 +1067,7 @@ transcode_video(
             return response;
         }
 
-        if (debug_frame_level)
-            dump_frame("IN ", codec_context->frame_number, frame);
+        dump_frame("IN ", codec_context->frame_number, frame, debug_frame_level);
 
         if (do_instrument) {
             elv_since(&tv, &since);
@@ -1121,8 +1113,7 @@ transcode_video(
                 "frame-filt", codec_context->frame_number);
 #endif
 
-                if (debug_frame_level)
-                    dump_frame("FILT ", codec_context->frame_number, filt_frame);
+                dump_frame("FILT ", codec_context->frame_number, filt_frame, debug_frame_level);
 
                 AVFrame *frame_to_encode = filt_frame;
                 int skip = should_skip_encoding(decoder_context, p, filt_frame);
@@ -1189,8 +1180,7 @@ flush_decoder(
                     break;
                 }
 
-                if (debug_frame_level)
-                    dump_frame("FILT ", codec_context->frame_number, filt_frame);
+                dump_frame("FILT ", codec_context->frame_number, filt_frame, debug_frame_level);
 
                 AVFrame *frame_to_encode = filt_frame;
                 int skip = should_skip_encoding(decoder_context, p, filt_frame);
@@ -1350,8 +1340,7 @@ avpipe_tx(
         if (input_packet->stream_index == decoder_context->video_stream_index) {
             if (params->tx_type & tx_video) {
                 // Video packet
-                if (debug_frame_level)
-                    dump_packet("IN ", input_packet);
+                dump_packet("VIDEO IN ", input_packet, debug_frame_level);
 
                 if (last_dts + input_packet->duration + 1 < input_packet->dts && last_dts != 0) {
                     elv_log("Expected dts == last_dts + duration - last_dts=%" PRId64 " duration=%" PRId64 " dts=%" PRId64,
@@ -1407,8 +1396,7 @@ avpipe_tx(
 
                 encoder_context->last_dts = input_packet->dts;
 
-                //if (debug_frame_level)
-                    dump_packet("AUDIO IN", input_packet);
+                dump_packet("AUDIO IN", input_packet, debug_frame_level);
 
                 // Set stream_index to 0 since we only can transcode either video or audio at a time.
                 // TODO: make this working when there are 2 or more streams (RM)
