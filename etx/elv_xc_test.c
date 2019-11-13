@@ -484,7 +484,7 @@ usage(
     printf(
         "Invalid parameter: %s\n\n"
         "Usage: %s <params>\n"
-        "\t-audio-bitrate :     (optional) Default: -1\n"
+        "\t-audio-bitrate :     (optional) Default: 128000\n"
         "\t-audio-index :       (optional) Default: the index of last audio stream\n"
         "\t-bypass :            (optional) bypass transcoding. Default is 0, must be 0 or 1\n"
         "\t-seekable :          (optional) seekable stream. Default is 0, must be 0 or 1\n"
@@ -550,7 +550,7 @@ main(
 
     /* Parameters */
     txparams_t p = {
-        .audio_bitrate = -1,                /* TODO - default? uses source bitrate? */
+        .audio_bitrate = 128000,            /* Default bitrate */
         .audio_index = -1,                  /* Source audio index */
         .crf_str = "23",                    /* 1 best -> 23 standard middle -> 52 poor */
         .crypt_iv = NULL,

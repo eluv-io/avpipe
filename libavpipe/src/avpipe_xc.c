@@ -842,7 +842,8 @@ encode_frame(
         ret = avcodec_receive_packet(codec_context, output_packet);
 
         if (ret == AVERROR(EAGAIN) || ret == AVERROR_EOF) {
-            elv_dbg("encode_frame() EAGAIN in receiving packet");
+            if (debug_frame_level)
+                elv_dbg("encode_frame() EAGAIN in receiving packet");
             break;
         } else if (ret < 0) {
             elv_err("Failure while receiving a packet from the encoder: %s", av_err2str(ret));
@@ -1161,7 +1162,8 @@ flush_decoder(
             continue; // PENDING(SSS) why continue and not break?
         }
 
-        if (codec_context->codec_type == AVMEDIA_TYPE_VIDEO) {
+        if (codec_context->codec_type == AVMEDIA_TYPE_VIDEO ||
+            codec_context->codec_type == AVMEDIA_TYPE_AUDIO) {
 
             /* push the decoded frame into the filtergraph */
             if (av_buffersrc_add_frame_flags(decoder_context->buffersrc_ctx, frame, AV_BUFFERSRC_FLAG_KEEP_REF) < 0) {
@@ -1337,88 +1339,80 @@ avpipe_tx(
             }
         }
 
-        if (input_packet->stream_index == decoder_context->video_stream_index) {
-            if (params->tx_type & tx_video) {
-                // Video packet
-                dump_packet("VIDEO IN ", input_packet, debug_frame_level);
+        if (input_packet->stream_index == decoder_context->video_stream_index &&
+            (params->tx_type & tx_video)) {
+            // Video packet
+            dump_packet("VIDEO IN ", input_packet, debug_frame_level);
 
-                if (last_dts + input_packet->duration + 1 < input_packet->dts && last_dts != 0) {
-                    elv_log("Expected dts == last_dts + duration - last_dts=%" PRId64 " duration=%" PRId64 " dts=%" PRId64,
-                        last_dts, input_packet->duration, input_packet->dts);
-                }
-                last_dts = input_packet->dts;
-
-                elv_get_time(&tv);
-                response = transcode_video(
-                    decoder_context,
-                    encoder_context,
-                    input_packet,
-                    input_frame,
-                    filt_frame,
-                    input_packet->stream_index,
-                    params,
-                    do_instrument,
-                    bypass_transcode,
-                    debug_frame_level
-                );
-
-                if (do_instrument) {
-                    elv_since(&tv, &since);
-                    elv_log("INSTRMNT transcode_video time=%"PRId64, since);
-                }
-
-                av_packet_unref(input_packet);
-
-                if (response < 0) {
-                    elv_dbg("Stop transcoding, rc=%d", response);
-                    break;
-                }
-
-                // dump_coders(decoder_context, encoder_context);
-            } else {
-                elv_dbg("Skip transcoding video packet");
+            if (last_dts + input_packet->duration + 1 < input_packet->dts && last_dts != 0) {
+                elv_log("Expected dts == last_dts + duration - last_dts=%" PRId64 " duration=%" PRId64 " dts=%" PRId64,
+                last_dts, input_packet->duration, input_packet->dts);
             }
-        } else if (input_packet->stream_index == decoder_context->audio_stream_index) {
-            if (params->tx_type & tx_audio) {
+            last_dts = input_packet->dts;
 
-                if (decoder_context->audio_input_start_pts == -1)
-                    decoder_context->audio_input_start_pts = input_packet->pts;
+            elv_get_time(&tv);
+            response = transcode_video(
+                decoder_context,
+                encoder_context,
+                input_packet,
+                input_frame,
+                filt_frame,
+                input_packet->stream_index,
+                params,
+                do_instrument,
+                bypass_transcode,
+                debug_frame_level
+            );
 
-                int input_packet_rel_pts = input_packet->pts - decoder_context->audio_input_start_pts;
-
-                // Stop when we reached the desired duration (duration -1 means 'entire input stream')
-                if (params->duration_ts != -1 &&
-                    input_packet_rel_pts >= params->start_time_ts + params->duration_ts) {
-                    elv_dbg("DURATION OVER param start_time=%"PRId64" duration=%"PRId64" pkt pts=%"PRId64"\n",
-                        params->start_time_ts, params->duration_ts, input_packet->pts);
-                    break;
-                }
-
-                encoder_context->last_dts = input_packet->dts;
-
-                dump_packet("AUDIO IN", input_packet, debug_frame_level);
-
-                // Set stream_index to 0 since we only can transcode either video or audio at a time.
-                // TODO: make this working when there are 2 or more streams (RM)
-                //input_packet->stream_index = 0;
-
-                response = transcode_audio(
-                    decoder_context,
-                    encoder_context,
-                    input_packet,
-                    input_frame,
-                    filt_frame,
-                    decoder_context->audio_stream_index,
-                    params,
-                    bypass_transcode,
-                    debug_frame_level
-                );
-
-            } else {
-                elv_dbg("Skip copying audio packet");
+            if (do_instrument) {
+                elv_since(&tv, &since);
+                elv_log("INSTRMNT transcode_video time=%"PRId64, since);
             }
-        } else {
-            elv_dbg("Skip stream - not video or audio[%d]", decoder_context->audio_stream_index);
+
+        } else if (input_packet->stream_index == decoder_context->audio_stream_index &&
+            (params->tx_type & tx_audio)) {
+
+            if (decoder_context->audio_input_start_pts == -1)
+                decoder_context->audio_input_start_pts = input_packet->pts;
+
+            int input_packet_rel_pts = input_packet->pts - decoder_context->audio_input_start_pts;
+
+            // Stop when we reached the desired duration (duration -1 means 'entire input stream')
+            if (params->duration_ts != -1 &&
+                input_packet_rel_pts >= params->start_time_ts + params->duration_ts) {
+                elv_dbg("DURATION OVER param start_time=%"PRId64" duration=%"PRId64" pkt pts=%"PRId64"\n",
+                    params->start_time_ts, params->duration_ts, input_packet->pts);
+                break;
+            }
+
+            encoder_context->last_dts = input_packet->dts;
+
+            dump_packet("AUDIO IN", input_packet, debug_frame_level);
+
+            // Set stream_index to 0 since we only can transcode either video or audio at a time.
+            // TODO: make this working when there are 2 or more streams (RM)
+            //input_packet->stream_index = 0;
+
+            response = transcode_audio(
+                decoder_context,
+                encoder_context,
+                input_packet,
+                input_frame,
+                filt_frame,
+                decoder_context->audio_stream_index,
+                params,
+                bypass_transcode,
+                debug_frame_level
+            );
+        } else if (debug_frame_level) {
+            elv_dbg("Skip stream - packet index=%d, pts=%"PRId64, input_packet->stream_index, input_packet->pts);
+        }
+
+        av_packet_unref(input_packet);
+
+        if (response < 0) {
+            elv_dbg("Stop transcoding, rc=%d", response);
+            break;
         }
     }
 
