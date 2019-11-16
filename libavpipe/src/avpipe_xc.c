@@ -717,16 +717,19 @@ set_idr_frame_key_flag(
     if (!frame)
         return;
 
-    frame->pict_type = AV_PICTURE_TYPE_NONE; // Clear before encoding (see doc/examples/transcoding.c)
+    /*
+     * If format is "dash" or "hls" then don't clear the flag, because dash/hls uses pict_type to determine end of segment.
+     * The reset of the formats would be good to clear before encoding (see doc/examples/transcoding.c).
+     */
+    if (strcmp(params->format, "dash") && strcmp(params->format, "hls"))
+        frame->pict_type = AV_PICTURE_TYPE_NONE;
 
-    /* If format is not "fmp4-segment" or "segment" then return */
-    if (strcmp(params->format, "fmp4-segment") && strcmp(params->format, "segment"))
-        return;
-
-    if (frame->pts >= encoder_context->last_key_frame + params->seg_duration_ts) {
-        elv_dbg("FRAME SET KEY flag, seg_duration_ts=%d pts=%"PRId64, params->seg_duration_ts, frame->pts);
-        frame->pict_type = AV_PICTURE_TYPE_I;
-        encoder_context->last_key_frame = frame->pts;
+    if (!strcmp(params->format, "fmp4-segment") || !strcmp(params->format, "segment")) {
+        if (frame->pts >= encoder_context->last_key_frame + params->seg_duration_ts) {
+            elv_dbg("FRAME SET KEY flag, seg_duration_ts=%d pts=%"PRId64, params->seg_duration_ts, frame->pts);
+            frame->pict_type = AV_PICTURE_TYPE_I;
+            encoder_context->last_key_frame = frame->pts;
+        }
     }
 
     if (params->force_keyint > 0) {
