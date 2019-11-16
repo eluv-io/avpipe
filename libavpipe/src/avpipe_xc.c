@@ -345,7 +345,7 @@ prepare_video_encoder(
         // av_opt_set(encoder_codec_context->priv_data, "crf_max", params->crf_str, AV_OPT_FLAG_ENCODING_PARAM | AV_OPT_SEARCH_CHILDREN);
     }
 
-    if (!strcmp(params->format, "fmp4-segment")) {
+    if (!strcmp(params->format, "fmp4-segment") || !strcmp(params->format, "fmp4")) {
         encoder_codec_context->max_b_frames = 0;
     }
 
@@ -1321,7 +1321,7 @@ avpipe_tx(
 
             encoder_context->input_last_pts_read = input_packet->pts;
 
-            if (decoder_context->is_mpegts && !strcmp(params->format, "fmp4-segment")) {
+            if (decoder_context->is_mpegts && (!strcmp(params->format, "fmp4-segment") || !strcmp(params->format, "fmp4"))) {
 
                 // Offset packets so they start at pts 0
                 elv_log("ADJUST pts=%d dts=%d ispts=%d", input_packet->pts, input_packet->dts, decoder_context->video_input_start_pts);

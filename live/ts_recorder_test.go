@@ -15,8 +15,9 @@ var videoParamsTs = &avpipe.TxParams{
 	DurationTs:      -1,
 	StartSegmentStr: "1",
 	VideoBitrate:    20000000, // fox stream bitrate
-	SegDurationTs:   180000,
-	SegDurationFr:   120,
+	SegDurationTs:   -1,
+	SegDurationFr:   -1,
+	ForceKeyInt:     120,
 	SegDuration:     "30.03",             // seconds
 	Ecodec:          "h264_videotoolbox", // libx264 software / h264_videotoolbox mac hardware
 	EncHeight:       720,                 // 1080

@@ -30,8 +30,9 @@ var videoParams *avpipe.TxParams = &avpipe.TxParams{
 	DurationTs:      2700000,
 	StartSegmentStr: "1",
 	VideoBitrate:    5000000, // 1080 probe: 8234400, 720 probe: 3189984
-	SegDurationTs:   180000,
-	SegDurationFr:   50,
+	SegDurationTs:   -1,      //180000,
+	SegDurationFr:   -1,      // 50,
+	ForceKeyInt:     50,
 	Ecodec:          "libx264",
 	EncHeight:       720,  // 1080
 	EncWidth:        1280, // 1920
