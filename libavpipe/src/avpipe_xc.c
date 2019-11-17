@@ -1165,6 +1165,8 @@ flush_decoder(
             continue; // PENDING(SSS) why continue and not break?
         }
 
+        dump_frame("IN FLUSH", codec_context->frame_number, frame, debug_frame_level);
+
         if (codec_context->codec_type == AVMEDIA_TYPE_VIDEO ||
             codec_context->codec_type == AVMEDIA_TYPE_AUDIO) {
 
@@ -1287,19 +1289,21 @@ avpipe_tx(
             params->seg_duration_ts, params->seg_duration_fr);
         return -1;
     }
-    int frame_duration = 0;
-    if (params->seg_duration_fr > 0)
-        frame_duration = params->seg_duration_ts / params->seg_duration_fr;
-    int extra_pts = 5 * frame_duration; /* decode extra frames to allow for reordering */
 
     decoder_context->video_input_start_pts = -1;
     decoder_context->audio_input_start_pts = -1;
 
     int64_t last_dts;
+    int frames_read = 0;
+    int frames_read_past_duration = 0;
+    const int frames_allowed_past_duration = 5;
+
     while ((rc = av_read_frame(decoder_context->format_context, input_packet)) >= 0) {
 
         // Only for video - PENDING(SSS) we must adjust for audio as well
         if (input_packet->stream_index == decoder_context->video_stream_index) {
+
+            frames_read ++;
 
             if (decoder_context->video_input_start_pts == -1)
                 decoder_context->video_input_start_pts = input_packet->pts;
@@ -1309,19 +1313,20 @@ avpipe_tx(
             // Stop when we reached the desired duration (duration -1 means 'entire input stream')
             if (params->duration_ts != -1 &&
                 input_packet_rel_pts >= params->start_time_ts + params->duration_ts) {
-                elv_dbg("DURATION OVER param start_time=%"PRId64" duration=%"PRId64" pkt pts=%"PRId64"\n",
-                    params->start_time_ts, params->duration_ts, input_packet->pts);
-                /* Allow up to 5 reoredered packets */
-                if (input_packet_rel_pts >= params->start_time_ts + params->duration_ts + extra_pts) {
-                    elv_dbg("DURATION BREAK param start_time=%"PRId64" duration=%"PRId64" pkt pts=%"PRId64"\n",
-                        params->start_time_ts, params->duration_ts, input_packet->pts);
+                frames_read_past_duration ++;
+                elv_dbg("DURATION OVER param start_time=%"PRId64" duration=%"PRId64" pkt pts=%"PRId64" rel_pts=%"PRId64" "
+                    "frames_read=%d past_duration=%d",
+                    params->start_time_ts, params->duration_ts, input_packet->pts, input_packet_rel_pts,
+                    frames_read, frames_read_past_duration);
+                /* Allow decoding past specified duration to accommodate reordered packets */
+                if (frames_read_past_duration > frames_allowed_past_duration) {
                     break;
                 }
             }
 
             encoder_context->input_last_pts_read = input_packet->pts;
 
-            if (decoder_context->is_mpegts && (!strcmp(params->format, "fmp4-segment") || !strcmp(params->format, "fmp4"))) {
+            if (decoder_context->is_mpegts && (!strcmp(params->format, "fmp4-segment"))) {
 
                 // Offset packets so they start at pts 0
                 elv_log("ADJUST pts=%d dts=%d ispts=%d", input_packet->pts, input_packet->dts, decoder_context->video_input_start_pts);
