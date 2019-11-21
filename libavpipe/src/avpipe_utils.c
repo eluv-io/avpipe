@@ -23,7 +23,7 @@ dump_frame(
     if (!debug_frame_level)
         return;
 
-    elv_dbg("FRAME %s [%d] pts=%d pkt_dts=%d pkt_duration=%d be_time_stamp=%d key=%d pict_type=%d "
+    elv_dbg("FRAME %s [%d] pts=%"PRId64" pkt_dts=%"PRId64" pkt_duration=%d be_time_stamp=%d key=%d pict_type=%d "
         "pkt_size=%d "
         "width=%d height=%d linesize=%d "
         "format=%d coded_pic_num=%d flags=%x "
@@ -46,7 +46,7 @@ dump_packet(
     if (!debug_frame_level)
         return;
 
-    elv_dbg("PACKET %s pts=%d dts=%d duration=%d pos=%d size=%d stream_index=%d flags=%x\n", msg,
+    elv_dbg("PACKET %s pts=%"PRId64" dts=%"PRId64" duration=%d pos=%d size=%d stream_index=%d flags=%x\n", msg,
         (int)p->pts, (int)p->dts, (int)p->duration, (int)p->pos, p->size, p->stream_index,
         p->flags
     );
@@ -192,7 +192,7 @@ dump_coders(
     avioctx = (AVIOContext *) decoder_context->format_context->pb;
     inctx = (ioctx_t *) avioctx->opaque;
 
-    elv_dbg("CODERS t=%02d.%03d read_pos=%"PRId64" read_pts=%d seg_index=%d seg_pos=%d seg_pts=%d\n",
+    elv_dbg("CODERS t=%02d.%03d read_pos=%"PRId64" read_pts=%"PRId64" seg_index=%d seg_pos=%d seg_pts=%"PRId64"\n",
         (int)(ti - t0) / 1000, (int)(ti - t0) % 1000, inctx->read_pos, decoder_context->pts / 1001,
         out_tracker->seg_index, out_tracker->last_outctx ? out_tracker->last_outctx->written_bytes:0, encoder_context->pts / 1001);
 }

@@ -1323,19 +1323,20 @@ avpipe_tx(
             if (decoder_context->is_mpegts && (!strcmp(params->format, "fmp4-segment"))) {
 
                 // Offset packets so they start at pts 0
-                elv_log("ADJUST pts=%d dts=%d ispts=%d", input_packet->pts, input_packet->dts, decoder_context->video_input_start_pts);
                 if (input_packet->pts >= decoder_context->video_input_start_pts)
                     input_packet->pts -= decoder_context->video_input_start_pts;
                 else
                     continue;
+                elv_log("ADJUST PTS pts=%"PRId64" dts=%"PRId64" ispts=%"PRId64, input_packet->pts, input_packet->dts, decoder_context->video_input_start_pts);
 
                 if (input_packet->dts >= decoder_context->video_input_start_pts)
                     input_packet->dts -= decoder_context->video_input_start_pts;
                 else
                     continue;
+                elv_log("ADJUST DTS pts=%"PRId64" dts=%"PRId64" ispts=%"PRId64, input_packet->pts, input_packet->dts, decoder_context->video_input_start_pts);
 
                 if (decoder_context->video_input_start_pts > 0 && (input_packet->pts == 0 || input_packet->dts == 0)) {
-                    elv_log("ADJUST - drop frame becuae pts or dts are 0");
+                    elv_log("ADJUST - drop frame because pts or dts are 0");
                     continue;
                 }
             }
@@ -1441,7 +1442,7 @@ avpipe_tx(
 
     av_write_trailer(encoder_context->format_context);
 
-    elv_log("avpipe_tx done last pts=%d input_start_pts=%d dts=%d pts_read=%d pts_sent_encode=%d pts_encoded=%d",
+    elv_log("avpipe_tx done last pts=%"PRId64" input_start_pts=%"PRId64" dts=%"PRId64" pts_read=%"PRId64" pts_sent_encode=%"PRId64" pts_encoded=%"PRId64,
         encoder_context->pts, encoder_context->video_input_start_pts,
         encoder_context->last_dts,
         encoder_context->input_last_pts_read,

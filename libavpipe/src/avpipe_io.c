@@ -130,7 +130,7 @@ elv_io_open(
             }
         }
  
-        elv_dbg("OUT url=%s, type=%d, seg-index=%d", url, outctx->type, outctx->seg_index);
+        elv_dbg("OUT url=%s, type=%d, seg_index=%d", url, outctx->type, outctx->seg_index);
         /* Manifest or init segments */
         if (out_handlers->avpipe_opener(url, outctx) < 0) {
             free(outctx);
