@@ -54,7 +54,7 @@ func TestUdpToMp4(t *testing.T) {
 	avpipe.InitIOHandler(&inputOpener{tc: readCtx}, &outputOpener{tc: writeCtx})
 	var lastPts int64
 	tlog.Info("Tx start", "videoParams", fmt.Sprintf("%+v", *videoParamsTs))
-	errTx := avpipe.Tx(videoParamsTs, "video_out.mp4", false, true, &lastPts)
+	errTx := avpipe.Tx(videoParamsTs, "video_out.mp4", true, &lastPts)
 	if errTx != 0 {
 		t.Error("Tx failed", "err", errTx)
 	}

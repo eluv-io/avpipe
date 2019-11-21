@@ -216,7 +216,7 @@ prepare_decoder(
             (params->seg_duration_ts <= 0) &&
             (!strcmp(params->format, "segment") ||
             !strcmp(params->format, "fmp4-segment"))) {
-            int seg_duration = atoi(params->seg_duration);
+            float seg_duration = atof(params->seg_duration);
             params->seg_duration_ts = decoder_context->stream[i]->time_base.den * seg_duration;
             elv_log("set seg_duration_ts=%d from seg_duration", params->seg_duration_ts);
         }

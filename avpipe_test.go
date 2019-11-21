@@ -179,20 +179,21 @@ func TestSingleTranscode(t *testing.T) {
 	filename := "./media/ErsteChristmas.mp4"
 
 	params := &avpipe.TxParams{
-		Format:          "hls",
-		StartTimeTs:     0,
-		DurationTs:      -1,
-		StartSegmentStr: "1",
-		VideoBitrate:    2560000,
-		AudioBitrate:    64000,
-		SampleRate:      44100,
-		CrfStr:          "23",
-		SegDurationTs:   1001 * 60,
-		SegDurationFr:   60,
-		Ecodec:          "libx264",
-		EncHeight:       720,
-		EncWidth:        1280,
-		TxType:          avpipe.TxVideo,
+		BypassTranscoding: false,
+		Format:            "hls",
+		StartTimeTs:       0,
+		DurationTs:        -1,
+		StartSegmentStr:   "1",
+		VideoBitrate:      2560000,
+		AudioBitrate:      64000,
+		SampleRate:        44100,
+		CrfStr:            "23",
+		SegDurationTs:     1001 * 60,
+		SegDurationFr:     60,
+		Ecodec:            "libx264",
+		EncHeight:         720,
+		EncWidth:          1280,
+		TxType:            avpipe.TxVideo,
 	}
 
 	// Create output directory if it doesn't exist
@@ -203,7 +204,7 @@ func TestSingleTranscode(t *testing.T) {
 	avpipe.InitIOHandler(&fileInputOpener{url: filename}, &fileOutputOpener{dir: "O"})
 
 	var lastInputPts int64
-	err := avpipe.Tx(params, filename, false, false, &lastInputPts)
+	err := avpipe.Tx(params, filename, false, &lastInputPts)
 	if err != 0 {
 		t.Fail()
 	}
@@ -212,7 +213,7 @@ func TestSingleTranscode(t *testing.T) {
 	params.Ecodec = "aac"
 	params.AudioIndex = -1
 	lastInputPts = 0
-	err = avpipe.Tx(params, filename, false, false, &lastInputPts)
+	err = avpipe.Tx(params, filename, false, &lastInputPts)
 	if err != 0 {
 		t.Fail()
 	}
@@ -231,7 +232,7 @@ func doTranscode(t *testing.T, p *avpipe.TxParams, nThreads int, filename string
 	for i := 0; i < nThreads; i++ {
 		go func(params *avpipe.TxParams, filename string) {
 			var lastInputPts int64
-			err := avpipe.Tx(params, filename, false, false, &lastInputPts)
+			err := avpipe.Tx(params, filename, false, &lastInputPts)
 			done <- struct{}{} // Signal the main goroutine
 			if err != 0 && reportFailure == "" {
 				t.Fail()
