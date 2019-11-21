@@ -43,13 +43,13 @@ func doProbe(cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("Probing failed. file=%s", filename)
 	}
 
-	for i, info := range probe.StreamInfo {
+	for _, info := range probe.StreamInfo {
 		channelLayoutName := "-"
 		if info.CodecType == "audio" {
 			channelLayoutName = avpipe.ChannelLayoutName(info.Channels, info.ChannelLayout)
 		}
 
-		fmt.Printf("Stream[%d]\n", i)
+		fmt.Printf("Stream[%d]\n", info.StreamIndex)
 		fmt.Printf("\tcodec_type: %s\n", info.CodecType)
 		fmt.Printf("\tcodec_id: %d\n", info.CodecID)
 		fmt.Printf("\tcodec_name: %s\n", info.CodecName)

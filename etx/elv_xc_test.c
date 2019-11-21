@@ -436,7 +436,7 @@ do_probe(
                 "\tfield_order: %d\n"
                 "\tsample_aspect_ratio: %d:%d\n"
                 "\tdisplay_aspect_ratio: %d:%d\n",
-                i,
+                probe->stream_info[i].stream_index,
                 av_get_media_type_string(probe->stream_info[i].codec_type),
                 probe->stream_info[i].codec_id,
                 probe->stream_info[i].codec_name,

@@ -171,6 +171,7 @@ var AVFieldOrderNames = map[AVFieldOrder]string{
 }
 
 type StreamInfo struct {
+	StreamIndex        int      `json:"stream_index"`
 	CodecType          string   `json:"codec_type"`
 	CodecID            int      `json:"codec_id,omitempty"`
 	CodecName          string   `json:"codec_name,omitempty"`
@@ -686,6 +687,7 @@ func Probe(url string, seekable bool) (*ProbeInfo, error) {
 	probeInfo.StreamInfo = make([]StreamInfo, int(rc))
 	probeArray := (*[1 << 10]C.stream_info_t)(unsafe.Pointer(cprobe.stream_info))
 	for i := 0; i < int(rc); i++ {
+		probeInfo.StreamInfo[i].StreamIndex = int(probeArray[i].stream_index)
 		probeInfo.StreamInfo[i].CodecType = AVMediaTypeNames[AVMediaType(probeArray[i].codec_type)]
 		probeInfo.StreamInfo[i].CodecID = int(probeArray[i].codec_id)
 		probeInfo.StreamInfo[i].CodecName = C.GoString((*C.char)(unsafe.Pointer(&probeArray[i].codec_name)))

@@ -188,6 +188,7 @@ typedef struct txparams_t {
 #define MAX_CODEC_NAME  256
 
 typedef struct stream_info_t {
+    int stream_index;           // Stream index
     int codec_type;             // Audio or Video
     int codec_id;
     char codec_name[MAX_CODEC_NAME+1];
