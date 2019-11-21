@@ -280,8 +280,7 @@ static int
 prepare_video_encoder(
     coderctx_t *encoder_context,
     coderctx_t *decoder_context,
-    txparams_t *params,
-    int bypass_transcode)
+    txparams_t *params)
 {
     int rc = 0;
     int i;
@@ -308,7 +307,7 @@ prepare_video_encoder(
     }
     elv_log("Found encoder %s", params->ecodec);
 
-    if (bypass_transcode) {
+    if (params->bypass_transcoding) {
         AVStream *in_stream = decoder_context->stream[index];
         AVStream *out_stream = encoder_context->stream[index];
         AVCodecParameters *in_codecpar = in_stream->codecpar;
@@ -429,8 +428,7 @@ static int
 prepare_audio_encoder(
     coderctx_t *encoder_context,
     coderctx_t *decoder_context,
-    txparams_t *params,
-    int bypass_transcode)
+    txparams_t *params)
 {
     int index = decoder_context->audio_stream_index;
 
@@ -448,7 +446,7 @@ prepare_audio_encoder(
     encoder_context->last_dts = AV_NOPTS_VALUE;
     encoder_context->stream[index] = avformat_new_stream(encoder_context->format_context, NULL);
     elv_log("XXX ENCODER index=%d, codec_id=%d", index, decoder_context->codec_context[index]->codec_id);
-    if (bypass_transcode)
+    if (params->bypass_transcoding)
         encoder_context->codec[index] = avcodec_find_encoder(decoder_context->codec_context[index]->codec_id);
     else
         encoder_context->codec[index] = avcodec_find_encoder_by_name(params->ecodec);
@@ -469,7 +467,7 @@ prepare_audio_encoder(
     encoder_context->codec_context[index]->time_base = decoder_context->codec_context[index]->time_base;
     encoder_context->stream[index]->time_base = encoder_context->codec_context[index]->time_base;
 
-    if (decoder_context->codec[index]->sample_fmts && bypass_transcode)
+    if (decoder_context->codec[index]->sample_fmts && params->bypass_transcoding)
         encoder_context->codec_context[index]->sample_fmt = decoder_context->codec[index]->sample_fmts[0];
     else
         encoder_context->codec_context[index]->sample_fmt = AV_SAMPLE_FMT_FLTP;
@@ -478,7 +476,7 @@ prepare_audio_encoder(
         index, encoder_context->codec_context[index]->sample_fmt, encoder_context->codec_context[index]->time_base.den);
 
     /* Override encoding parameters if specified */
-    if (bypass_transcode) {
+    if (params->bypass_transcoding) {
         encoder_context->codec_context[index]->channels = av_get_channel_layout_nb_channels(encoder_context->codec_context[index]->channel_layout);
         encoder_context->codec_context[index]->channel_layout = decoder_context->codec_context[index]->channel_layout;
     } else {
@@ -524,8 +522,7 @@ prepare_encoder(
     coderctx_t *decoder_context,
     avpipe_io_handler_t *out_handlers,
     ioctx_t *inctx,
-    txparams_t *params,
-    int bypass_transcode)
+    txparams_t *params)
 {
     out_tracker_t *out_tracker;
     char *filename = "";
@@ -612,14 +609,14 @@ prepare_encoder(
     }
 
     if (params->tx_type & tx_video) {
-        if (prepare_video_encoder(encoder_context, decoder_context, params, bypass_transcode)) {
+        if (prepare_video_encoder(encoder_context, decoder_context, params)) {
             elv_err("Failure in preparing video encoder");
             return -1;
         }
     }
 
     if (params->tx_type & tx_audio) {
-        if (prepare_audio_encoder(encoder_context, decoder_context, params, bypass_transcode)) {
+        if (prepare_audio_encoder(encoder_context, decoder_context, params)) {
             elv_err("Failure in preparing audio copy");
             return -1;
         }
@@ -910,7 +907,6 @@ transcode_audio(
     AVFrame *filt_frame,
     int stream_index,
     txparams_t *p,
-    int bypass_transcode,
     int debug_frame_level)
 {
     int ret;
@@ -920,7 +916,7 @@ transcode_audio(
     if (debug_frame_level)
         elv_dbg("DECODE stream_index=%d send_packet pts=%"PRId64" dts=%"PRId64" duration=%d", stream_index, packet->pts, packet->dts, packet->duration);
 
-    if (bypass_transcode) {
+    if (p->bypass_transcoding) {
         av_packet_rescale_ts(packet,
             decoder_context->stream[packet->stream_index]->time_base,
             encoder_context->stream[packet->stream_index]->time_base);
@@ -1004,7 +1000,6 @@ transcode_video(
     int stream_index,
     txparams_t *p,
     int do_instrument,
-    int bypass_transcode,
     int debug_frame_level)
 {
     int ret;
@@ -1016,7 +1011,7 @@ transcode_video(
     if (debug_frame_level)
         elv_dbg("DECODE stream_index=%d send_packet pts=%"PRId64" dts=%"PRId64" duration=%d", stream_index, packet->pts, packet->dts, packet->duration);
 
-    if (bypass_transcode) {
+    if (p->bypass_transcoding) {
         /*
          * The following code does an estimation of next pts and dts, but it is not accurate and
          * causes player to hang when avpipe bypasses transcoding:
@@ -1208,7 +1203,6 @@ int
 avpipe_tx(
     txctx_t *txctx,
     int do_instrument,
-    int bypass_transcode,
     int debug_frame_level,
     int64_t *last_input_pts)
 {
@@ -1220,21 +1214,21 @@ avpipe_tx(
     coderctx_t *encoder_context = &txctx->encoder_ctx;
     txparams_t *params = txctx->params;
 
-    if (!bypass_transcode && (params->tx_type & tx_video)) {
+    if (!params->bypass_transcoding && (params->tx_type & tx_video)) {
         sprintf(filter_str, "scale=%d:%d",
             encoder_context->codec_context[encoder_context->video_stream_index]->width,
             encoder_context->codec_context[encoder_context->video_stream_index]->height);
         elv_dbg("FILTER scale=%s", filter_str);
     }
 
-    if (!bypass_transcode &&
+    if (!params->bypass_transcoding &&
         (params->tx_type & tx_video) &&
         init_filters(filter_str, decoder_context, encoder_context, txctx->params) < 0) {
         elv_err("Failed to initialize video filter");
         return -1;
     }
 
-    if (!bypass_transcode &&
+    if (!params->bypass_transcoding &&
         (params->tx_type & tx_audio) &&
         init_audio_filters(filter_str, decoder_context, encoder_context, txctx->params) < 0) {
         elv_err("Failed to initialize audio filter");
@@ -1368,7 +1362,6 @@ avpipe_tx(
                 input_packet->stream_index,
                 params,
                 do_instrument,
-                bypass_transcode,
                 debug_frame_level
             );
 
@@ -1409,7 +1402,6 @@ avpipe_tx(
                 filt_frame,
                 decoder_context->audio_stream_index,
                 params,
-                bypass_transcode,
                 debug_frame_level
             );
         } else if (debug_frame_level) {
@@ -1439,7 +1431,7 @@ avpipe_tx(
     if (params->tx_type & tx_video)
         flush_decoder(decoder_context, encoder_context, encoder_context->video_stream_index, params, debug_frame_level);
 
-    if (!bypass_transcode && (params->tx_type & tx_video))
+    if (!params->bypass_transcoding && (params->tx_type & tx_video))
         encode_frame(decoder_context, encoder_context, NULL, encoder_context->video_stream_index, params, debug_frame_level);
 
     dump_coders(decoder_context, encoder_context);
@@ -1576,6 +1568,24 @@ avpipe_channel_name(
     return "";
 }
 
+static const char*
+get_tx_type_name(
+    tx_type_t tx_type)
+{
+    switch (tx_type) {
+    case tx_video:
+        return "tx_video";
+    case tx_audio:
+        return "tx_audio";
+    case tx_all:
+        return "tx_all";
+    default:
+        return "none";
+    }
+
+    return "none";
+}
+
 int
 avpipe_probe(
     avpipe_io_handler_t *in_handlers,
@@ -1678,8 +1688,7 @@ avpipe_init(
     avpipe_io_handler_t *in_handlers,
     ioctx_t *inctx,
     avpipe_io_handler_t *out_handlers,
-    txparams_t *params,
-    int bypass_transcode)
+    txparams_t *params)
 {
     txctx_t *p_txctx = (txctx_t *) calloc(1, sizeof(txctx_t));
 
@@ -1725,7 +1734,7 @@ avpipe_init(
         goto avpipe_init_failed;
     }
 
-    if (prepare_encoder(&p_txctx->encoder_ctx, &p_txctx->decoder_ctx, out_handlers, inctx, params, bypass_transcode)) {
+    if (prepare_encoder(&p_txctx->encoder_ctx, &p_txctx->decoder_ctx, out_handlers, inctx, params)) {
         elv_err("Failure in preparing output");
         goto avpipe_init_failed;
     }
@@ -1735,6 +1744,8 @@ avpipe_init(
 
     char buf[1024];
     sprintf(buf,
+        "bypass=%d "
+        "tx_type=%s "
         "format=%s "
         "start_time_ts=%"PRId64" "
         "start_pts=%"PRId64" "
@@ -1758,6 +1769,7 @@ avpipe_init(
         "crypt_kid=%s "
         "crypt_key_url=%s "
         "crypt_scheme=%d ",
+        params->bypass_transcoding, get_tx_type_name(params->tx_type),
         params->format, params->start_time_ts, params->start_pts, params->duration_ts, params->start_segment_str,
         params->video_bitrate, params->audio_bitrate, params->sample_rate, params->crf_str,
         params->rc_max_rate, params->rc_buffer_size,

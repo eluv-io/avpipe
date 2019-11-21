@@ -98,6 +98,7 @@ const (
 
 // TxParams should match with txparams_t in avpipe_xc.h
 type TxParams struct {
+	BypassTranscoding  bool        `json:"bypass,omitempty"`
 	Format             string      `json:"format,omitempty"`
 	StartTimeTs        int64       `json:"start_time_ts,omitempty"`
 	SkipOverPts        int64       `json:"skip_over_pts,omitempty"`
@@ -589,7 +590,7 @@ func Version() int {
 
 // params: transcoding parameters
 // url: input filename that has to be transcoded
-func Tx(params *TxParams, url string, bypassTranscoding bool, debugFrameLevel bool, lastInputPts *int64) int {
+func Tx(params *TxParams, url string, debugFrameLevel bool, lastInputPts *int64) int {
 
 	// Convert TxParams to C.txparams_t
 	if params == nil {
@@ -628,11 +629,10 @@ func Tx(params *TxParams, url string, bypassTranscoding bool, debugFrameLevel bo
 		audio_index:          C.int(params.AudioIndex),
 	}
 
-	var bypass int
-	if bypassTranscoding {
-		bypass = 1
+	if params.BypassTranscoding {
+		cparams.bypass_transcoding = 1
 	} else {
-		bypass = 0
+		cparams.bypass_transcoding = 0
 	}
 
 	if params.Seekable {
@@ -649,7 +649,7 @@ func Tx(params *TxParams, url string, bypassTranscoding bool, debugFrameLevel bo
 	}
 
 	var lastInputPtsC C.int64_t
-	rc := C.tx((*C.txparams_t)(unsafe.Pointer(cparams)), C.CString(url), C.int(bypass), C.int(debugFrameLevelInt), (*C.int64_t)(unsafe.Pointer(&lastInputPtsC)))
+	rc := C.tx((*C.txparams_t)(unsafe.Pointer(cparams)), C.CString(url), C.int(debugFrameLevelInt), (*C.int64_t)(unsafe.Pointer(&lastInputPtsC)))
 	if lastInputPts != nil {
 		*lastInputPts = int64(lastInputPtsC)
 	}

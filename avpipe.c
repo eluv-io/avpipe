@@ -302,7 +302,6 @@ int
 tx(
     txparams_t *params,
     char *filename,
-    int bypass_transcoding,
     int debug_frame_level,
     int64_t *last_input_pts)
 {
@@ -340,12 +339,12 @@ tx(
         goto end_tx;
     }
 
-    if (avpipe_init(&txctx, &in_handlers, inctx, &out_handlers, params, bypass_transcoding) < 0) {
+    if (avpipe_init(&txctx, &in_handlers, inctx, &out_handlers, params) < 0) {
         rc = -1;
         goto end_tx;
     }
 
-    if (avpipe_tx(txctx, 0, bypass_transcoding, debug_frame_level, last_input_pts) < 0) {
+    if (avpipe_tx(txctx, 0, debug_frame_level, last_input_pts) < 0) {
         elv_err("Error in transcoding");
         rc = -1;
         goto end_tx;

@@ -317,7 +317,6 @@ typedef struct tx_thread_params_t {
     int thread_number;
     char *filename;
     int repeats;
-    int bypass_transcoding;
     txparams_t *txparams;
     avpipe_io_handler_t *in_handlers;
     avpipe_io_handler_t *out_handlers;
@@ -341,13 +340,13 @@ tx_thread_func(
             continue;
         }
 
-        if (avpipe_init(&txctx, params->in_handlers, inctx, params->out_handlers, params->txparams, params->bypass_transcoding) < 0) {
+        if (avpipe_init(&txctx, params->in_handlers, inctx, params->out_handlers, params->txparams) < 0) {
             elv_err("THREAD %d, iteration %d, failed to initialize avpipe", params->thread_number, i+1);
             continue;
         }
 
         int64_t last_input_pts;
-        if (avpipe_tx(txctx, 0, params->bypass_transcoding, 1, &last_input_pts) < 0) {
+        if (avpipe_tx(txctx, 0, 1, &last_input_pts) < 0) {
             elv_err("THREAD %d, iteration %d error in transcoding", params->thread_number, i+1);
             continue;
         }
@@ -605,6 +604,8 @@ main(
                 }
                 if (bypass_transcoding != 0 && bypass_transcoding != 1) {
                     usage(argv[0], argv[i], EXIT_FAILURE);
+                } else {
+                    p.bypass_transcoding = bypass_transcoding;
                 }
             } else {
                 usage(argv[0], argv[i], EXIT_FAILURE);
@@ -867,7 +868,6 @@ main(
     thread_params.txparams = &p;
     thread_params.in_handlers = &in_handlers;
     thread_params.out_handlers = &out_handlers;
-    thread_params.bypass_transcoding = bypass_transcoding;
 
     tids = (pthread_t *) calloc(1, n_threads*sizeof(pthread_t));
 

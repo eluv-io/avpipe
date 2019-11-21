@@ -347,6 +347,7 @@ func doTranscode(cmd *cobra.Command, args []string) error {
 	}
 
 	params := &avpipe.TxParams{
+		BypassTranscoding:  bypass,
 		Format:             format,
 		StartTimeTs:        startTimeTs,
 		StartPts:           startPts,
@@ -381,16 +382,16 @@ func doTranscode(cmd *cobra.Command, args []string) error {
 	done := make(chan interface{})
 
 	for i := 0; i < int(nThreads); i++ {
-		go func(params *avpipe.TxParams, filename string, bypass bool) {
+		go func(params *avpipe.TxParams, filename string) {
 
 			var lastInputPts int64
-			rc := avpipe.Tx(params, filename, bypass, true, &lastInputPts)
+			rc := avpipe.Tx(params, filename, true, &lastInputPts)
 			if rc != 0 {
 				done <- fmt.Errorf("Failed transcoding %s", filename)
 			} else {
 				done <- nil
 			}
-		}(params, filename, bypass)
+		}(params, filename)
 	}
 
 	var lastError error
