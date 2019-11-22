@@ -23,12 +23,12 @@ dump_frame(
     if (!debug_frame_level)
         return;
 
-    elv_dbg("FRAME %s [%d] pts=%"PRId64" pkt_dts=%"PRId64" pkt_duration=%d be_time_stamp=%d key=%d pict_type=%d "
+    elv_dbg("FRAME %s [%d] pts=%"PRId64" pkt_dts=%"PRId64" pkt_duration=%"PRId64" be_time_stamp=%"PRId64" key=%d pict_type=%d "
         "pkt_size=%d "
         "width=%d height=%d linesize=%d "
         "format=%d coded_pic_num=%d flags=%x "
         "\n", msg, num,
-        (int)frame->pts, (int)frame->pkt_dts, (int)frame->pkt_duration, (int)frame->best_effort_timestamp,
+        frame->pts, frame->pkt_dts, frame->pkt_duration, frame->best_effort_timestamp,
         frame->key_frame, frame->pict_type,
         frame->pkt_size,
         frame->width, frame->height, frame->linesize[0],
@@ -46,8 +46,8 @@ dump_packet(
     if (!debug_frame_level)
         return;
 
-    elv_dbg("PACKET %s pts=%"PRId64" dts=%"PRId64" duration=%d pos=%d size=%d stream_index=%d flags=%x\n", msg,
-        (int)p->pts, (int)p->dts, (int)p->duration, (int)p->pos, p->size, p->stream_index,
+    elv_dbg("PACKET %s pts=%"PRId64" dts=%"PRId64" duration=%"PRId64" pos=%"PRId64" size=%d stream_index=%d flags=%x\n", msg,
+        p->pts, p->dts, p->duration, p->pos, p->size, p->stream_index,
         p->flags
     );
 }

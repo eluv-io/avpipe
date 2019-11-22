@@ -109,7 +109,7 @@ typedef struct coderctx_t {
     AVCodecContext *codec_context[MAX_STREAMS];
     SwrContext *resample_context[MAX_STREAMS];  /* resample context for audio */
     AVAudioFifo *fifo;                          /* audio sampling fifio */
-    
+
     int video_stream_index;
     int audio_stream_index;
     int data_stream_index;
@@ -130,6 +130,7 @@ typedef struct coderctx_t {
     int64_t pts;              /* Decoder/encoder pts */
     int64_t video_input_start_pts;  /* In case video input stream starts at PTS > 0 */
     int64_t audio_input_start_pts;  /* In case audio input stream starts at PTS > 0 */
+    int64_t first_encoding_frame_pts; /* PTS of first frame sent to the encoder */
 
     int is_mpegts;          /* set to 1 if input format name is "mpegts" */
 
@@ -155,7 +156,7 @@ typedef struct txparams_t {
     int bypass_transcoding;         // if 0 means do transcoding, otherwise bypass transcoding (only copy)
     char *format;                   // Output format [Required, Values: dash, hls, mp4, fmp4]
     int64_t start_time_ts;          // Transcode the source starting from this time
-    int64_t skip_over_pts;              // Like start_time_ts but expressed in input pts
+    int64_t skip_over_pts;          // Like start_time_ts but expressed in input pts
     int64_t start_pts;              // Starting PTS for output
     int64_t duration_ts;            // Transcode time period [-1 for entire source length from start_time_ts]
     char *start_segment_str;        // Specify index of the first segment  TODO: change type to int

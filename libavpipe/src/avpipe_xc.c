@@ -820,8 +820,31 @@ encode_frame(
         return -1;
     }
 
-    if (params->tx_type == tx_video) {
-        set_idr_frame_key_flag(frame, encoder_context, params);
+    // Prepare packet before encoding - adjust PTS and IDR frame signaling
+    if (frame) {
+
+        // Adjust PTS if input stream starts at an arbitrary value (MPEG-TS)
+        if (decoder_context->is_mpegts && (!strcmp(params->format, "fmp4-segment"))) {
+            if (encoder_context->first_encoding_frame_pts == -1) {
+                /* Remember the first DTS/PTS to use as an offset later */
+                encoder_context->first_encoding_frame_pts = frame->pts;
+            }
+
+            // Adjust frame pts such that first frame sent to the encoder has PTS 0
+            if (frame->pts != AV_NOPTS_VALUE)
+                frame->pts -= encoder_context->first_encoding_frame_pts;
+            if (frame->pkt_dts != AV_NOPTS_VALUE)
+                frame->pkt_dts -= encoder_context->first_encoding_frame_pts;
+            if (frame->best_effort_timestamp != AV_NOPTS_VALUE)
+                frame->best_effort_timestamp -= encoder_context->first_encoding_frame_pts;;
+        }
+
+        // Signal if we need IDR frames
+        if (params->tx_type == tx_video) {
+            set_idr_frame_key_flag(frame, encoder_context, params);
+        }
+
+        dump_frame("TOENC", codec_context->frame_number, frame, debug_frame_level);
     }
 
     ret = avcodec_send_frame(codec_context, frame);
@@ -872,17 +895,17 @@ encode_frame(
             output_packet->duration = output_packet->dts - encoder_context->last_dts;
         }
         encoder_context->last_dts = output_packet->dts;
-        encoder_context->pts = output_packet->pts; // WHy was this dts?
+        encoder_context->pts = output_packet->pts;
         encoder_context->input_last_pts_encoded = output_packet->pts;
+
+        output_packet->pts += params->start_pts;
+        output_packet->dts += params->start_pts;
 
         /* Rescale using the stream time_base (not the codec context) */
         av_packet_rescale_ts(output_packet,
             decoder_context->stream[stream_index]->time_base,
             encoder_context->stream[stream_index]->time_base
         );
-
-        output_packet->pts += params->start_pts;  // PENDING(SSS) Don't we have to compensate for 'relative pts'?
-        output_packet->dts += params->start_pts;
 
         dump_packet("OUT", output_packet, debug_frame_level);
 
@@ -1050,6 +1073,7 @@ transcode_video(
         return 0;
     }
 
+    /* send packet to decoder */
     response = avcodec_send_packet(codec_context, packet);
     if (response < 0) {
         elv_err("Failure while sending a packet to the decoder: %s", av_err2str(response));
@@ -1058,6 +1082,8 @@ transcode_video(
 
     while (response >= 0) {
         elv_get_time(&tv);
+
+        /* read decoded frame from decoder */
         response = avcodec_receive_frame(codec_context, frame);
         if (response == AVERROR(EAGAIN) || response == AVERROR_EOF) {
             break;
@@ -1073,7 +1099,7 @@ transcode_video(
             elv_log("INSTRMNT avcodec_receive_frame time=%"PRId64, since);
         }
 
-        if (response >= 0) {
+        if (response >= 0) { // PENDING(SSS) this is always true as we return for response < 0 above
             decoder_context->pts = packet->pts;
 
             /* push the decoded frame into the filtergraph */
@@ -1286,6 +1312,7 @@ avpipe_tx(
 
     decoder_context->video_input_start_pts = -1;
     decoder_context->audio_input_start_pts = -1;
+    encoder_context->first_encoding_frame_pts = -1;
 
     int64_t last_dts;
     int frames_read = 0;
@@ -1305,6 +1332,8 @@ avpipe_tx(
             int input_packet_rel_pts = input_packet->pts - decoder_context->video_input_start_pts;
 
             // Stop when we reached the desired duration (duration -1 means 'entire input stream')
+            // PENDING(SSS) - this logic can be done after decoding where we know concretely that we decoded all frames
+            // we need to encode.
             if (params->duration_ts != -1 &&
                 input_packet_rel_pts >= params->start_time_ts + params->duration_ts) {
                 frames_read_past_duration ++;
@@ -1319,27 +1348,6 @@ avpipe_tx(
             }
 
             encoder_context->input_last_pts_read = input_packet->pts;
-
-            if (decoder_context->is_mpegts && (!strcmp(params->format, "fmp4-segment"))) {
-
-                // Offset packets so they start at pts 0
-                if (input_packet->pts >= decoder_context->video_input_start_pts)
-                    input_packet->pts -= decoder_context->video_input_start_pts;
-                else
-                    continue;
-                elv_log("ADJUST PTS pts=%"PRId64" dts=%"PRId64" ispts=%"PRId64, input_packet->pts, input_packet->dts, decoder_context->video_input_start_pts);
-
-                if (input_packet->dts >= decoder_context->video_input_start_pts)
-                    input_packet->dts -= decoder_context->video_input_start_pts;
-                else
-                    continue;
-                elv_log("ADJUST DTS pts=%"PRId64" dts=%"PRId64" ispts=%"PRId64, input_packet->pts, input_packet->dts, decoder_context->video_input_start_pts);
-
-                if (decoder_context->video_input_start_pts > 0 && (input_packet->pts == 0 || input_packet->dts == 0)) {
-                    elv_log("ADJUST - drop frame because pts or dts are 0");
-                    continue;
-                }
-            }
         }
 
         if (input_packet->stream_index == decoder_context->video_stream_index &&
@@ -1347,7 +1355,9 @@ avpipe_tx(
             // Video packet
             dump_packet("VIDEO IN ", input_packet, debug_frame_level);
 
-            if (last_dts + input_packet->duration + 1 < input_packet->dts && last_dts != 0) {
+            // Assert DTS is growing as expected (accommodate non integer frame duration)
+            if (last_dts + input_packet->duration + 1 < input_packet->dts &&
+                last_dts != 0 && input_packet->duration > 0) {
                 elv_log("Expected dts == last_dts + duration - last_dts=%" PRId64 " duration=%" PRId64 " dts=%" PRId64,
                 last_dts, input_packet->duration, input_packet->dts);
             }
