@@ -19,11 +19,29 @@ type RWBuffer struct {
 	inReadIndex int     // Index of partially read data from a packet
 	m           *sync.Mutex
 	cond        *sync.Cond
-	closed      bool
+	closed      RWBufferCloseState
 }
+
+type RWBufferCloseState int
+
+const (
+	RWBufferOpen RWBufferCloseState = iota
+	RWBufferReadClosed
+	RWBufferWriteClosed
+	RWBufferClosed
+)
+
 
 var blog = elog.Get("/eluvio/avpipe/live/rwb")
 
+/*
+ * Creates a RWBuffer which is open for reading/writing.
+ * The writer can write to the buffer until Close(RWBufferWriteClosed) is called.
+ * The reader can read from the buffer until Close(RWBufferReadClosed) is called or
+ * EOF is issued.
+ * An EOF is issued for reader when the writer closed the buffer and there is no data
+ * in the buffer.
+ */
 func NewRWBuffer(capacity int) io.ReadWriter {
 	rwb := &RWBuffer{
 		ch:       make([][]byte, capacity),
@@ -32,7 +50,7 @@ func NewRWBuffer(capacity int) io.ReadWriter {
 		front:    0,
 		rear:     -1,
 		capacity: capacity,
-		closed:   false,
+		closed:   0,
 	}
 
 	rwb.m = &sync.Mutex{}
@@ -51,7 +69,8 @@ func (rwb *RWBuffer) Write(buf []byte) (n int, err error) {
 	rwb.m.Lock()
 	defer rwb.m.Unlock()
 
-	if rwb.closed {
+	if rwb.closed & RWBufferWriteClosed != 0 {
+		blog.Debug("Write RWBuffer WRITE closed")
 		return 0, fmt.Errorf("RWBuffer is closed")
 	}
 
@@ -84,7 +103,7 @@ func (rwb *RWBuffer) Read(buf []byte) (n int, err error) {
 	rwb.m.Lock()
 	defer rwb.m.Unlock()
 
-	if rwb.closed {
+	if rwb.closed & RWBufferReadClosed != 0 {
 		return 0, fmt.Errorf("RWBuffer is closed")
 	}
 
@@ -110,7 +129,13 @@ func (rwb *RWBuffer) Read(buf []byte) (n int, err error) {
 	}
 
 	for {
-		if rwb.closed {
+		if rwb.closed & RWBufferReadClosed != 0 {
+			blog.Debug("Read reading from RWBuffer closed")
+			break
+		}
+
+		if rwb.closed & RWBufferWriteClosed != 0 && rwb.count <= 0 {
+			blog.Debug("Read writing to RWBuffer closed and no data")
 			break
 		}
 
@@ -143,6 +168,11 @@ func (rwb *RWBuffer) Read(buf []byte) (n int, err error) {
 	}
 	rwb.cond.Broadcast()
 
+	if rwb.closed & RWBufferWriteClosed != 0  && rwb.count <= 0 && nCopied == 0 {
+		blog.Debug("Read RWBuffer EOF")
+		return 0, io.EOF
+	}
+
 	return nCopied, nil
 }
 
@@ -158,11 +188,12 @@ func (rwb *RWBuffer) Len() int {
 	return rwb.count
 }
 
-func (rwb *RWBuffer) Close() error {
+func (rwb *RWBuffer) Close(state RWBufferCloseState) error {
 	rwb.m.Lock()
 	defer rwb.m.Unlock()
 
-	rwb.closed = true
+	rwb.closed |= state
+	blog.Debug("Close RWBuffer", "state", state)
 	rwb.cond.Broadcast()
 	return nil
 }

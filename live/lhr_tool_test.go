@@ -106,14 +106,14 @@ func TestToolFmp4(t *testing.T) {
 }
 
 func recordFmp4(t *testing.T, lhr *HLSReader) {
-	rwb := NewRWBuffer(10000)
-	readCtx := testCtx{r: rwb}
+	pr, pw := io.Pipe()
+	readCtx := testCtx{r: pr}
 	writeCtx := testCtx{}
 
 	go func() {
-		lhr.Fill(recordingDuration, rwb)
+		lhr.Fill(recordingDuration, pw)
 		tlog.Info("AVL Fill done")
-		rwb.(*RWBuffer).Close()
+		pw.Close()
 	}()
 
 	avpipe.InitIOHandler(&inputOpener{tc: readCtx}, &outputOpener{tc: writeCtx})
@@ -161,7 +161,6 @@ func (i *inputCtx) Read(buf []byte) (int, error) {
 		tlog.Debug("AVL IN_READ DONE", "len", len(buf), "n", n,
 			"bytesRead", bytesRead, "bytesWritten", bytesWritten, "err", err)
 	}
-	//fmt.Printf("Read n=%d, len(buf)=%d\n", n, len(buf))
 	return n, err
 }
 
@@ -172,7 +171,11 @@ func (i *inputCtx) Seek(offset int64, whence int) (int64, error) {
 
 func (i *inputCtx) Close() (err error) {
 	tlog.Debug("AVL IN_CLOSE")
-	err = i.r.(*RWBuffer).Close()
+	if _, ok := i.r.(*RWBuffer); ok {
+		err = i.r.(*RWBuffer).Close(RWBufferReadClosed)
+	} else {
+		err = i.r.(*io.PipeReader).Close()
+	}
 	return
 }
 
@@ -294,7 +297,7 @@ func padPKCS5(src []byte, blockSize int) []byte {
 
 func setupLogging() {
 	elog.SetDefault(&elog.Config{
-		Level:   "info",
+		Level:   "debug",
 		Handler: "text",
 		File: &elog.LumberjackConfig{
 			Filename:  "lhr.log",
