@@ -9,6 +9,7 @@
  */
 
 #include <libavutil/log.h>
+#include "libavutil/audio_fifo.h"
 
 #include "avpipe_xc.h"
 #include "avpipe_utils.h"
@@ -479,7 +480,7 @@ prepare_audio_encoder(
         encoder_context->codec_context[index]->sample_fmt = encoder_context->codec[index]->sample_fmts[0];
     else
         encoder_context->codec_context[index]->sample_fmt = AV_SAMPLE_FMT_FLTP;
-    
+
     /* If the input stream is stereo the decoder_context->codec_context[index]->channel_layout is AV_CH_LAYOUT_STEREO */
     encoder_context->codec_context[index]->channel_layout = decoder_context->codec_context[index]->channel_layout;
     encoder_context->codec_context[index]->channels = av_get_channel_layout_nb_channels(encoder_context->codec_context[index]->channel_layout);
@@ -516,6 +517,13 @@ prepare_audio_encoder(
         elv_err("Failed to copy encoder parameters to output stream");
         return -1;
 
+    }
+
+    /* Create the FIFO buffer based on the specified output sample format. */
+    if (!(decoder_context->fifo = av_audio_fifo_alloc(encoder_context->codec_context[index]->sample_fmt,
+                encoder_context->codec_context[index]->channels, 5000))) {
+        elv_err("Failed to allocate audio FIFO");
+        return -1;
     }
 
     return 0;
@@ -852,11 +860,15 @@ encode_frame(
         output_packet->pts += params->start_pts;
         output_packet->dts += params->start_pts;
 
-        /* Rescale using the stream time_base (not the codec context) */
-        av_packet_rescale_ts(output_packet,
-            decoder_context->stream[stream_index]->time_base,
-            encoder_context->stream[stream_index]->time_base
-        );
+        /* Rescale using the stream time_base (not the codec context).
+         * Don't rescale if using audio FIFO - PTS is alread set in output time base.
+         */
+        if (decoder_context->audio_output_pts == 0) {
+            av_packet_rescale_ts(output_packet,
+                decoder_context->stream[stream_index]->time_base,
+                encoder_context->stream[stream_index]->time_base
+            );
+        }
 
         dump_packet("OUT", output_packet, debug_frame_level);
 
@@ -869,6 +881,40 @@ encode_frame(
     }
     av_packet_unref(output_packet);
     av_packet_free(&output_packet);
+    return 0;
+}
+
+static int init_output_frame(AVFrame **frame,
+                             AVCodecContext *output_codec_context,
+                             int frame_size)
+{
+    int error;
+
+    /* Create a new frame to store the audio samples. */
+    if (!(*frame = av_frame_alloc())) {
+        elv_err("Failed to allocate output frame");
+        return AVERROR_EXIT;
+    }
+
+    /* Set the frame's parameters, especially its size and format.
+     * av_frame_get_buffer needs this to allocate memory for the
+     * audio samples of the frame.
+     * Default channel layouts based on the number of channels
+     * are assumed for simplicity. */
+    (*frame)->nb_samples     = frame_size;
+    (*frame)->channel_layout = output_codec_context->channel_layout;
+    (*frame)->format         = output_codec_context->sample_fmt;
+    (*frame)->sample_rate    = output_codec_context->sample_rate;
+
+    /* Allocate the samples of the created frame. This call will make
+     * sure that the audio frame can hold as many samples as specified. */
+    if ((error = av_frame_get_buffer(*frame, 0)) < 0) {
+        elv_err("Failed to allocate output frame samples (error '%s')",
+                av_err2str(error));
+        av_frame_free(frame);
+        return error;
+    }
+
     return 0;
 }
 
@@ -947,6 +993,108 @@ transcode_audio(
                     elv_err("Failed to execute audio frame filter ret=%d", ret);
                     return -1;
                 }
+
+                dump_frame("FILT ", codec_context->frame_number, filt_frame, debug_frame_level);
+
+                AVFrame *frame_to_encode = filt_frame;
+                int skip = should_skip_encoding(decoder_context, p, filt_frame);
+
+                if (!skip) {
+                    encode_frame(decoder_context, encoder_context, frame_to_encode, stream_index, p, debug_frame_level);
+                }
+                av_frame_unref(filt_frame);
+            }
+
+            av_frame_unref(frame);
+        }
+    }
+    return 0;
+}
+
+static int
+transcode_audio_aac(
+    coderctx_t *decoder_context,
+    coderctx_t *encoder_context,
+    AVPacket *packet,
+    AVFrame *frame,
+    AVFrame *filt_frame,
+    int stream_index,
+    txparams_t *p,
+    int debug_frame_level)
+{
+    AVCodecContext *codec_context = decoder_context->codec_context[stream_index];
+    int response;
+
+    if (debug_frame_level)
+        elv_dbg("DECODE stream_index=%d send_packet pts=%"PRId64" dts=%"PRId64" duration=%d, input frame_size=%d, output frame_size=%d",
+            stream_index, packet->pts, packet->dts, packet->duration, codec_context->frame_size, encoder_context->codec_context[stream_index]->frame_size);
+
+    if (p->bypass_transcoding) {
+        av_packet_rescale_ts(packet,
+            decoder_context->stream[packet->stream_index]->time_base,
+            encoder_context->stream[packet->stream_index]->time_base);
+
+        packet->pts += p->start_pts;
+        packet->dts += p->start_pts;
+
+        dump_packet("AUDIO BYPASS ", packet, debug_frame_level);
+
+        if (av_interleaved_write_frame(encoder_context->format_context, packet) < 0) {
+            elv_err("Failure in copying audio stream");
+            return -1;
+        }
+
+        return 0;
+    }
+
+    response = avcodec_send_packet(codec_context, packet);
+    if (response < 0) {
+        elv_err("Failure while sending a packet to the decoder: %s", av_err2str(response));
+        return response;
+    }
+
+    while (response >= 0) {
+        response = avcodec_receive_frame(codec_context, frame);
+        if (response == AVERROR(EAGAIN) || response == AVERROR_EOF) {
+            break;
+        } else if (response < 0) {
+            elv_err("Failure while receiving a frame from the decoder: %s", av_err2str(response));
+            return response;
+        }
+
+        dump_frame("IN ", codec_context->frame_number, frame, debug_frame_level);
+
+        if (response >= 0) {
+            decoder_context->pts = packet->pts;
+
+            /* Store the new samples in the FIFO buffer. */
+            int input_frame_size = codec_context->frame_size;
+            if (av_audio_fifo_write(decoder_context->fifo, (void **)frame->extended_data,
+                    input_frame_size) < input_frame_size) {
+                elv_err("Failed to write input frame to fifo frame_size=%d", input_frame_size);
+                return AVERROR_EXIT;
+            }
+
+            int output_frame_size = encoder_context->codec_context[stream_index]->frame_size;
+
+            /* pull filtered frames from the filtergraph */
+            while (av_audio_fifo_size(decoder_context->fifo) >= output_frame_size) {
+
+                /* PENDING(SSS) - reuse filt_frame instead of allocating each time here. Not freed */
+                init_output_frame(&filt_frame, encoder_context->codec_context[stream_index], output_frame_size);
+
+                /* Read as many samples from the FIFO buffer as required to fill the frame.
+                 * The samples are stored in the frame temporarily. */
+                if (av_audio_fifo_read(decoder_context->fifo, (void **)filt_frame->data, output_frame_size)
+                    < output_frame_size) {
+                    elv_err("Failed to read input samples from fifo frame_size=%d", output_frame_size);
+                    av_frame_unref(filt_frame);
+                    return AVERROR_EXIT;
+                }
+
+                /* When using FIFO frames no longer have PTS */
+                filt_frame->pts = decoder_context->audio_output_pts;
+                decoder_context->audio_output_pts += filt_frame->nb_samples;
 
                 dump_frame("FILT ", codec_context->frame_number, filt_frame, debug_frame_level);
 
@@ -1272,6 +1420,7 @@ avpipe_tx(
 
     AVFrame *input_frame = av_frame_alloc();
     AVFrame *filt_frame = av_frame_alloc();
+
     if (!input_frame || !filt_frame) {
         elv_err("Failed to allocated memory for AVFrame");
         return -1;
@@ -1375,7 +1524,7 @@ avpipe_tx(
             // TODO: make this working when there are 2 or more streams (RM)
             //input_packet->stream_index = 0;
 
-            response = transcode_audio(
+            response = transcode_audio_aac(
                 decoder_context,
                 encoder_context,
                 input_packet,

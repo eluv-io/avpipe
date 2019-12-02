@@ -108,7 +108,7 @@ typedef struct coderctx_t {
     AVCodecParameters *codec_parameters[MAX_STREAMS];
     AVCodecContext *codec_context[MAX_STREAMS];
     SwrContext *resample_context[MAX_STREAMS];  /* resample context for audio */
-    AVAudioFifo *fifo;                          /* audio sampling fifio */
+    AVAudioFifo *fifo;                          /* audio sampling fifo */
 
     int video_stream_index;
     int audio_stream_index;
@@ -121,6 +121,8 @@ typedef struct coderctx_t {
     int64_t input_last_pts_sent_encode;
     int64_t input_last_pos_sent_encode;
     int64_t input_last_pts_encoded;
+
+    int64_t audio_output_pts; /* Used to set PTS directly when using audio FIFO */
 
     /* Filter graph, valid for decoder */
     AVFilterContext *buffersink_ctx;
