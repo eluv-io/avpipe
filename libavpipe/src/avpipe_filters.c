@@ -137,10 +137,10 @@ init_audio_filters(
     if (!dec_codec_ctx->channel_layout)
         dec_codec_ctx->channel_layout = av_get_default_channel_layout(dec_codec_ctx->channels);
 
-
     snprintf(args, sizeof(args),
         "time_base=%d/%d:sample_rate=%d:sample_fmt=%s:channel_layout=0x%"PRIx64,
-        dec_codec_ctx->time_base.num, dec_codec_ctx->time_base.den, dec_codec_ctx->sample_rate,
+        //dec_codec_ctx->time_base.num, dec_codec_ctx->time_base.den, dec_codec_ctx->sample_rate,
+        1, dec_codec_ctx->sample_rate, dec_codec_ctx->sample_rate,
         av_get_sample_fmt_name(dec_codec_ctx->sample_fmt),
         dec_codec_ctx->channel_layout);
     elv_log("Audio index=%d-%d, filter=%s", decoder_context->audio_stream_index, encoder_context->audio_stream_index, args);

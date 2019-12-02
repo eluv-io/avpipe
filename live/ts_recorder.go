@@ -16,6 +16,7 @@ type TsReader struct {
 	NextSkipOverPts int64 // Bogus field for compat with HLS
 }
 
+// Deprecated
 func NewTsReader(addr string, w io.Writer) *TsReader {
 
 	tsr := &TsReader{
@@ -36,11 +37,36 @@ func NewTsReader(addr string, w io.Writer) *TsReader {
 	return tsr
 }
 
+// NewTsReaderV2  creates a UDP MPEG-TS reader and returns an io.Reader
+// Starts the necessary goroutines - when the returned reader is closed, it stops
+// all goroutines and cleans up.
+func NewTsReaderV2(addr string) io.ReadWriter {
+
+	rwb := NewRWBuffer(10000)
+
+	tsr := &TsReader{
+		addr: addr,
+		w:    rwb,
+	}
+
+	var err error
+	if strings.HasPrefix(addr, "/") || strings.HasPrefix(addr, "./") {
+		err = tsr.serveFromFile(rwb)
+	} else {
+		err = tsr.serveOneConnection(rwb)
+	}
+	if err != nil {
+		log.Error("TsReader failed", "err", err)
+	}
+
+	return rwb
+}
+
 func readUdp(pc net.PacketConn, w io.Writer) error {
 
 	// Assume that Close() is implemented, and that writer is not used after
 	// this call
-	defer closeCloser(w.(io.Closer))
+	defer w.(*RWBuffer).Close(RWBufferWriteClosed)
 
 	// Stop recording if nothing was read for timeout
 	timeout := 5 * time.Second
@@ -75,7 +101,7 @@ func readUdp(pc net.PacketConn, w io.Writer) error {
 			log.Error("Failed to write UDP packet", "err", err, "bw", bw, "n", n, "sender", sender)
 			return err
 		}
-		if time.Since(t) > time.Millisecond * 10 || bw > 1500 {
+		if time.Since(t) > time.Millisecond*10 || bw > 1500 {
 			log.Warn("Writing UDP to avpipe took longer than expected", "timeSpent", time.Since(t), "written", bw)
 		}
 	}
@@ -84,15 +110,21 @@ func readUdp(pc net.PacketConn, w io.Writer) error {
 
 func (tsr *TsReader) serveOneConnection(w io.Writer) (err error) {
 
-	pc, err := net.ListenPacket("udp", tsr.addr)
+	sAddr, err := net.ResolveUDPAddr("udp", tsr.addr)
 	if err != nil {
 		return
 	}
+	conn, err := net.ListenUDP("udp", sAddr)
+	if err != nil {
+		return
+	}
+	// TODO: Make if a config param (RM)
+	conn.SetReadBuffer(16 * 1024 * 1024)
 
 	log.Info("ts_recorder: server: accepted")
 
 	go func() {
-		if err := readUdp(pc, w); err != nil {
+		if err := readUdp(conn, w); err != nil {
 			log.Error("Failed reading UDP stream", "err", err)
 			// TODO: Error does not bubble up
 		}

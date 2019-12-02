@@ -17,10 +17,10 @@ var videoParamsTs = &avpipe.TxParams{
 	SegDurationTs:   -1,
 	SegDurationFr:   -1,
 	ForceKeyInt:     120,
-	SegDuration:     "30.03",             // seconds
+	SegDuration:     "30.03",   // seconds
 	Ecodec:          "libx264", // libx264 software / h264_videotoolbox mac hardware
-	EncHeight:       720,                 // 1080
-	EncWidth:        1280,                // 1920
+	EncHeight:       720,       // 1080
+	EncWidth:        1280,      // 1920
 	TxType:          avpipe.TxVideo,
 }
 
@@ -43,19 +43,19 @@ func TestUdpToMp4(t *testing.T) {
 	if err != nil {
 		t.Error(err)
 	}
-	conn.SetReadBuffer(4*1024*1024)
+	conn.SetReadBuffer(4 * 1024 * 1024)
 
-	rwb := NewRWBuffer(10000)
-	readCtx := testCtx{r: rwb}
+	rwVideoBuf := NewRWBuffer(10000)
+	readCtx := testCtx{r: rwVideoBuf}
 	writeCtx := testCtx{}
 
 	go func() {
 		tlog.Info("UDP start")
-		if err := readUdp(conn, rwb); err != nil {
+		if err := readUdp(conn, rwVideoBuf); err != nil {
 			t.Error(err)
 		}
 		tlog.Info("UDP done", "err", err)
-		if err := rwb.(*RWBuffer).Close(RWBufferWriteClosed); err != nil {
+		if err := rwVideoBuf.(*RWBuffer).Close(RWBufferWriteClosed); err != nil {
 			t.Error(err)
 		}
 	}()
@@ -68,4 +68,31 @@ func TestUdpToMp4(t *testing.T) {
 		t.Error("Tx failed", "err", errTx)
 	}
 	tlog.Info("Tx done", "err", errTx, "last pts", lastPts)
+}
+
+/*
+ * To run this test, run ffmpeg in separate console to produce UDP packets with a ts file:
+ *
+ * ffmpeg -re -i media/FS1-19-10-15.ts -c copy -f mpegts udp://127.0.0.1:21001?pkt_size=1316
+ *
+ */
+func TestUdpToMp4V2(t *testing.T) {
+
+	setupLogging()
+	outFileName = "ts_out"
+
+	r := NewTsReaderV2(":21001")
+
+	readCtx := testCtx{r: r}
+	writeCtx := testCtx{}
+
+	avpipe.InitIOHandler(&inputOpener{tc: readCtx}, &outputOpener{tc: writeCtx})
+
+	tlog.Info("Tx start", "videoParams", fmt.Sprintf("%+v", *videoParamsTs))
+	errTx := avpipe.Tx(videoParamsTs, "video_out.mp4", true, nil)
+	tlog.Info("Tx done", "err", errTx, "last pts", nil)
+
+	if errTx != 0 {
+		t.Error("Tx failed", "err", errTx)
+	}
 }

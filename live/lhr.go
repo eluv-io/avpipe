@@ -46,6 +46,7 @@ type segInfo struct {
 }
 
 // NewHLSReader ...
+// Deprecated
 func NewHLSReader(masterURL *url.URL) *HLSReader {
 	lhr := &HLSReader{
 		client:          http.Client{},
@@ -54,6 +55,30 @@ func NewHLSReader(masterURL *url.URL) *HLSReader {
 		nextSeqNo:       -1,
 	}
 	return lhr
+}
+
+// NewHLSReader creates an HLS reader and returns an io.Reader
+// Starts the necessary goroutines - when the returned reader is closed, it stops
+// all goroutines and cleans up.
+// PENDING(SSS) - it has a max duration of 24h
+func NewHLSReaderV2(masterURL *url.URL) io.ReadWriter {
+
+	rwb := NewRWBuffer(10000)
+
+	lhr := &HLSReader{
+		client:          http.Client{},
+		masterURL:       masterURL,
+		playlistPollSec: 1,
+		nextSeqNo:       -1,
+	}
+
+	go func() {
+		err := lhr.fill(rwb)
+		rwb.(*RWBuffer).Close(RWBufferWriteClosed)
+		log.Info("AVLR Fill done", "err", err)
+	}()
+
+	return rwb
 }
 
 // durationReadSec is the sum of all the ingest segment duration used to create
@@ -70,7 +95,7 @@ func (lhr *HLSReader) durationReadSec() (total float64) {
 func (lhr *HLSReader) prepareNext() {
 	indexOfSegmentsToKeep := len(lhr.segments)
 	var durationOverlap float64
-	for i := len(lhr.segments)-1; i >=0; i-- {
+	for i := len(lhr.segments) - 1; i >= 0; i-- {
 		segment := lhr.segments[i]
 		durationOverlap += segment.duration
 		// TODO: We're assuming transcoding keeps up. Check if controlling
@@ -226,32 +251,6 @@ func readSegment(
 	return
 }
 
-func readMasterPlaylist(client http.Client, u *url.URL) ([]*m3u8.Variant, error) {
-	if len(TESTSaveToDir) > 0 {
-		err := saveManifestToFile(client, u, TESTSaveToDir)
-		if err != nil {
-			log.Error("AVLR readMasterPlaylist saveManifestToFile", "err", err)
-		}
-	}
-
-	log.Debug("AVLR readMasterPlaylist", "url", u)
-	content, err := openURL(client, u)
-	if err != nil {
-		return nil, err
-	}
-	defer closeCloser(content)
-
-	playlist, listType, err := m3u8.DecodeFrom(content, true)
-	if err != nil {
-		return nil, err
-	} else if listType != m3u8.MASTER {
-		return nil, errors.E("AVLR expected master playlist", "ListType", listType)
-	}
-	masterPlaylist := playlist.(*m3u8.MasterPlaylist)
-
-	return masterPlaylist.Variants, nil
-}
-
 // readPlaylist HTTP GET the HLS media playlist and record segments up to
 // durationSec. Starts reading at sequence number lhr.nextSeqNo.
 func (lhr *HLSReader) readPlaylist(u *url.URL, durationSec float64, w io.Writer) (
@@ -371,8 +370,88 @@ func (lhr *HLSReader) readPlaylist(u *url.URL, durationSec float64, w io.Writer)
 	return
 }
 
+func readMasterPlaylist(client http.Client, u *url.URL) ([]*m3u8.Variant, error) {
+	if len(TESTSaveToDir) > 0 {
+		err := saveManifestToFile(client, u, TESTSaveToDir)
+		if err != nil {
+			log.Error("AVLR readMasterPlaylist saveManifestToFile", "err", err)
+		}
+	}
+
+	log.Debug("AVLR readMasterPlaylist", "url", u)
+	content, err := openURL(client, u)
+	if err != nil {
+		return nil, err
+	}
+	defer closeCloser(content)
+
+	playlist, listType, err := m3u8.DecodeFrom(content, true)
+	if err != nil {
+		return nil, err
+	} else if listType != m3u8.MASTER {
+		return nil, errors.E("AVLR expected master playlist", "ListType", listType)
+	}
+	masterPlaylist := playlist.(*m3u8.MasterPlaylist)
+
+	return masterPlaylist.Variants, nil
+}
+
+// fill records the HLS stream and writes it to the io.Writer passed in as parameter.
+// It exits when the io.Writer is closed
+func (lhr *HLSReader) fill(w io.Writer) (err error) {
+
+	log.Debug("AVLR Fill start")
+
+	// TODO: Move playlist handling to another function
+	if lhr.playlistURL == nil {
+		// Read the master playlist only once. Some servers will return a new
+		// session token with each HTTP request for the master. We save the variant
+		// URL to use the same session. Otherwise video may not continue where
+		// left off.
+		var variants []*m3u8.Variant
+		if variants, err = readMasterPlaylist(lhr.client, lhr.masterURL); err != nil {
+			return
+		}
+		// Choose the variant with the highest bandwidth
+		var variant *m3u8.Variant
+		for _, v := range variants {
+			if variant == nil || v.Bandwidth > variant.Bandwidth {
+				if v.FrameRate <= 30 { // PENDING(SSS) Temporary to avoid Fox stream frames with fractional ts duration
+					variant = v
+				}
+			}
+		}
+		if variant == nil {
+			return errors.E("AVLR variant not found in master playlist")
+		}
+
+		if lhr.playlistURL, err = resolve(variant.URI, lhr.masterURL); err != nil {
+			return errors.E("AVLR failed to resolve variant URL", "err", err, "variant.URI", variant.URI, "URL", lhr.masterURL)
+		}
+		log.Debug("AVLR media playlist found", "URL", lhr.playlistURL, "bandwidth", variant.Bandwidth, "resolution", variant.Resolution, "average_bandwidth", variant.AverageBandwidth, "Audio", variant.Audio, "Video", variant.Video)
+	}
+
+	durationSec := 86400.00 // PENDING(SSS) eliminate need for durationSec
+
+	for {
+		var complete bool
+		if complete, err = lhr.readPlaylist(lhr.playlistURL, durationSec, w); complete || err != nil {
+			// The reader was closed - exit
+			if complete || err == io.ErrClosedPipe {
+				err = nil
+			}
+			break
+		}
+		time.Sleep(time.Duration(lhr.playlistPollSec * float64(time.Second)))
+	}
+
+	log.Debug("AVLR Fill done", "err", err)
+	return
+}
+
 // Fill records the specified duration from the HLS stream to the io.Writer.
 // If lhr.nextSeqNo is -1, near the live edge.
+// Deprecated
 func (lhr *HLSReader) Fill(durationSecRat *big.Rat, w io.Writer) (err error) {
 	durationSec, _ := durationSecRat.Float64()
 

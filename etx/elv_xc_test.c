@@ -494,8 +494,10 @@ usage(
         "\t-crypt-scheme :      (optional) encryption scheme. Default is \"none\", can be: \"aes-128\", \"cenc\", \"cbc1\", \"cens\", \"cbcs\"\n"
         "\t-crypt-url :         (optional) specify a key URL in the HLS manifest\n"
         "\t-d :                 (optional) decoder name. Default is \"h264\", can be: \"h264\", \"h264_cuvid\"\n"
+        "\t                                For audio default is \"aac\", but for ts files should be set to \"ac3\"\n"
         "\t-duration-ts :       (optional) Default: -1 (entire stream)\n"
         "\t-e :                 (optional) encoder name. Default is \"libx264\", can be: \"libx264\", \"h264_nvenc\", \"h264_videotoolbox\"\n"
+        "\t                                For audio default is \"aac\", but for ts files should be set to \"ac3\"\n"
         "\t-enc-height :        (optional) Default: -1 (use source height)\n"
         "\t-enc-width :         (optional) Default: -1 (use source width)\n"
         "\t-format :            (optional) package format. Default is \"dash\", can be: \"dash\", \"hls\", \"mp4\", \"fmp4\", \"segment\", or \"fmp4-segment\"\n"
@@ -766,8 +768,11 @@ main(
                     usage(argv[0], argv[i], EXIT_FAILURE);
                 }
                 p.tx_type = tx_type_from_string(argv[i+1]);
-                if (!strcmp(argv[i+1], "audio"))
-                    p.ecodec = "aac";
+                if (!strcmp(argv[i+1], "audio")) {
+                    // If audio encoder is not "a3c" then set the default to "aac"
+                    if (strcmp(p.ecodec, "ac3"))
+                        p.ecodec = "aac";
+                }
             } else if (sscanf(argv[i+1], "%d", &n_threads) != 1) {
                 usage(argv[0], argv[i], EXIT_FAILURE);
             }

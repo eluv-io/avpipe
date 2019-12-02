@@ -136,6 +136,8 @@ prepare_decoder(
             decoder_context->stream[i] = decoder_context->format_context->streams[i];
             decoder_context->video_stream_index = i;
             elv_dbg("STREAM %d Video, codec_id=%s", i, avcodec_get_name(decoder_context->codec_parameters[i]->codec_id));
+            if (params && ((params->tx_type & tx_video) == 0))
+                continue;
             break;
 
         case AVMEDIA_TYPE_AUDIO:
@@ -153,6 +155,8 @@ prepare_decoder(
                 if (avioctx->buffer_size > AUDIO_BUF_SIZE)
                     avioctx->buffer_size = AUDIO_BUF_SIZE;
             }
+            if (params && ((params->tx_type & tx_audio) == 0))
+                continue;
             break;
 
         case AVMEDIA_TYPE_DATA:
@@ -175,7 +179,7 @@ prepare_decoder(
             decoder_context->codec[i] = avcodec_find_decoder(decoder_context->codec_parameters[i]->codec_id);
         }
         if (!decoder_context->codec[i]) {
-            elv_err("Unsupported codec");
+            elv_err("Unsupported decoder codec param=%s, codec_id=%d", params->dcodec, decoder_context->codec_parameters[i]->codec_id);
             return -1;
         }
 
@@ -203,14 +207,16 @@ prepare_decoder(
 
         /* Open the decoder (initialize the decoder codec_context[i] using given codec[i]). */
         if ((rc = avcodec_open2(decoder_context->codec_context[i], decoder_context->codec[i], NULL)) < 0) {
-            elv_err("Failed to open codec through avcodec_open2, err=%d, codec_id=%s", rc, avcodec_get_name(decoder_context->codec_parameters[i]->codec_id));
+            elv_err("Failed to open codec through avcodec_open2, err=%d, param=%s, codec_id=%s",
+                rc, params->dcodec, avcodec_get_name(decoder_context->codec_parameters[i]->codec_id));
             return -1;
         }
 
-        elv_log("Input stream=%d pixel_format=%d, timebase=%d, sample_fmt=%d",
+        elv_log("Input stream=%d pixel_format=%d, timebase=%d, sample_fmt=%d, frame_size=%d",
             i, decoder_context->codec_context[i]->pix_fmt,
             decoder_context->stream[i]->time_base.den,
-            decoder_context->codec_context[i]->sample_fmt);
+            decoder_context->codec_context[i]->sample_fmt,
+            decoder_context->codec_context[i]->frame_size);
 
         if (params &&
             (params->seg_duration_ts <= 0) &&
@@ -445,7 +451,6 @@ prepare_audio_encoder(
     encoder_context->audio_stream_index = index;
     encoder_context->last_dts = AV_NOPTS_VALUE;
     encoder_context->stream[index] = avformat_new_stream(encoder_context->format_context, NULL);
-    elv_log("XXX ENCODER index=%d, codec_id=%d", index, decoder_context->codec_context[index]->codec_id);
     if (params->bypass_transcoding)
         encoder_context->codec[index] = avcodec_find_encoder(decoder_context->codec_context[index]->codec_id);
     else
@@ -464,26 +469,22 @@ prepare_audio_encoder(
     /* By default use decoder parameters */
     encoder_context->codec_context[index]->sample_rate = decoder_context->codec_context[index]->sample_rate;
 
-    encoder_context->codec_context[index]->time_base = decoder_context->codec_context[index]->time_base;
+    /* Set the default time_base based on input sample_rate */
+    encoder_context->codec_context[index]->time_base = (AVRational){1, encoder_context->codec_context[index]->sample_rate};
     encoder_context->stream[index]->time_base = encoder_context->codec_context[index]->time_base;
 
     if (decoder_context->codec[index]->sample_fmts && params->bypass_transcoding)
         encoder_context->codec_context[index]->sample_fmt = decoder_context->codec[index]->sample_fmts[0];
+    else if (encoder_context->codec[index]->sample_fmts[0])
+        encoder_context->codec_context[index]->sample_fmt = encoder_context->codec[index]->sample_fmts[0];
     else
         encoder_context->codec_context[index]->sample_fmt = AV_SAMPLE_FMT_FLTP;
     
-    elv_dbg("encoder stream index=%d, sample_fmts=%d, timebase=%d",
-        index, encoder_context->codec_context[index]->sample_fmt, encoder_context->codec_context[index]->time_base.den);
+    /* If the input stream is stereo the decoder_context->codec_context[index]->channel_layout is AV_CH_LAYOUT_STEREO */
+    encoder_context->codec_context[index]->channel_layout = decoder_context->codec_context[index]->channel_layout;
+    encoder_context->codec_context[index]->channels = av_get_channel_layout_nb_channels(encoder_context->codec_context[index]->channel_layout);
 
-    /* Override encoding parameters if specified */
-    if (params->bypass_transcoding) {
-        encoder_context->codec_context[index]->channels = av_get_channel_layout_nb_channels(encoder_context->codec_context[index]->channel_layout);
-        encoder_context->codec_context[index]->channel_layout = decoder_context->codec_context[index]->channel_layout;
-    } else {
-        encoder_context->codec_context[index]->channels = av_get_channel_layout_nb_channels(AV_CH_LAYOUT_STEREO);
-        encoder_context->codec_context[index]->channel_layout = AV_CH_LAYOUT_STEREO;    // AV_CH_LAYOUT_STEREO is av_get_default_channel_layout(encoder_context->codec_context[index]->channels)
-    }
-
+    elv_log("ENCODER channels=%d, channel_layout=%d", encoder_context->codec_context[index]->channels, encoder_context->codec_context[index]->channel_layout);
     if (params->sample_rate > 0) {
         encoder_context->codec_context[index]->sample_rate = params->sample_rate;
 
@@ -504,6 +505,10 @@ prepare_audio_encoder(
         elv_dbg("Could not open encoder for audio");
         return -1;
     }
+
+    elv_dbg("encoder stream index=%d, sample_fmts=%d, timebase=%d, output frame_size=%d",
+        index, encoder_context->codec_context[index]->sample_fmt,
+        encoder_context->codec_context[index]->time_base.den, encoder_context->codec_context[index]->frame_size);
 
     if (avcodec_parameters_from_context(
             encoder_context->stream[index]->codecpar,
@@ -643,68 +648,6 @@ prepare_encoder(
     return 0;
 }
 
-#if 0
-static int
-prepare_resampler(
-    coderctx_t *encoder_context,
-    coderctx_t *decoder_context,
-    int stream_index)
-{
-    AVCodecContext *input_codec_context = decoder_context->codec_context[stream_index];
-    AVCodecContext *output_codec_context = encoder_context->codec_context[stream_index];
-    SwrContext *resample_context;
-    AVAudioFifo *fifo = NULL;
-    int error;
-
-    /* Create the FIFO buffer based on the specified output sample format. */
-    if (!(fifo = av_audio_fifo_alloc(output_codec_context->sample_fmt,
-                                      output_codec_context->channels, 1))) {
-        elv_err("Could not allocate FIFO");
-        return ENOMEM;
-    }
-
-    /*
-     * Create a resampler context for the conversion.
-     * Set the conversion parameters.
-     * Default channel layouts based on the number of channels
-     * are assumed for simplicity (they are sometimes not detected
-     * properly by the demuxer and/or decoder).
-     */
-    resample_context = swr_alloc_set_opts(NULL,
-        av_get_default_channel_layout(output_codec_context->channels),
-        output_codec_context->sample_fmt,
-        output_codec_context->sample_rate,
-        av_get_default_channel_layout(input_codec_context->channels),
-        input_codec_context->sample_fmt,
-        input_codec_context->sample_rate,
-        0, NULL);
-    if (!resample_context) {
-        elv_err("Could not allocate resample context\n");
-        return ENOMEM;
-    }
-
-    /*
-     * Perform a sanity check so that the number of converted samples is
-     * not greater than the number of samples to be converted.
-     * If the sample rates differ, this case has to be handled differently
-     */
-    assert(output_codec_context->sample_rate == input_codec_context->sample_rate);
-
-    /* Open the resampler with the specified parameters. */
-    if ((error = swr_init(resample_context)) < 0) {
-        elv_err("Could not open resample context\n");
-        swr_free(&resample_context);
-        return error;
-    }
-
-    encoder_context->resample_context[stream_index] = resample_context;
-    encoder_context->fifo = fifo;
-
-    return 0;
-}
-#endif
-
-
 static void
 set_idr_frame_key_flag(
     AVFrame *frame,
@@ -712,6 +655,10 @@ set_idr_frame_key_flag(
     txparams_t *params)
 {
     if (!frame)
+        return;
+
+    /* No need to set IDR key frame if the tx_type is not tx_video. */
+    if ((params->tx_type & tx_video) == 0)
         return;
 
     /*
@@ -774,6 +721,10 @@ should_skip_encoding(
     AVFrame *frame)
 {
     const int frame_in_pts_offset = frame->pts - decoder_context->video_input_start_pts; // Only called for the video stream
+
+    /* If there is no video transcoding return 0 */
+    if ((p->tx_type & tx_video) == 0)
+        return 0;
 
     /* Drop frames before the desired 'start_time' */
     if (p->start_time_ts > 0 && frame_in_pts_offset < p->start_time_ts) {
@@ -937,7 +888,8 @@ transcode_audio(
     int response;
 
     if (debug_frame_level)
-        elv_dbg("DECODE stream_index=%d send_packet pts=%"PRId64" dts=%"PRId64" duration=%d", stream_index, packet->pts, packet->dts, packet->duration);
+        elv_dbg("DECODE stream_index=%d send_packet pts=%"PRId64" dts=%"PRId64" duration=%d, input frame_size=%d, output frame_size=%d",
+            stream_index, packet->pts, packet->dts, packet->duration, codec_context->frame_size, encoder_context->codec_context[stream_index]->frame_size);
 
     if (p->bypass_transcoding) {
         av_packet_rescale_ts(packet,
@@ -1226,6 +1178,58 @@ flush_decoder(
 }
 
 int
+should_stop_decoding(
+    AVPacket *input_packet,
+    coderctx_t *decoder_context,
+    coderctx_t *encoder_context,
+    txparams_t *params,
+    int *frames_read,
+    int *frames_read_past_duration,
+    int frames_allowed_past_duration)
+{
+    int input_packet_rel_pts = 0;
+
+    (*frames_read) ++;
+
+    if (input_packet->stream_index != decoder_context->video_stream_index &&
+        input_packet->stream_index != decoder_context->audio_stream_index)
+        return 0;
+
+    if (input_packet->stream_index == decoder_context->video_stream_index &&
+        (params->tx_type & tx_video)) {
+        if (decoder_context->video_input_start_pts == -1)
+                decoder_context->video_input_start_pts = input_packet->pts;
+
+        input_packet_rel_pts = input_packet->pts - decoder_context->video_input_start_pts;
+    } else if (input_packet->stream_index == decoder_context->audio_stream_index &&
+        (params->tx_type & tx_audio)) {
+        if (decoder_context->audio_input_start_pts == -1)
+                decoder_context->audio_input_start_pts = input_packet->pts;
+
+        input_packet_rel_pts = input_packet->pts - decoder_context->audio_input_start_pts;
+    }
+
+    if (params->duration_ts != -1 &&
+        input_packet_rel_pts >= params->start_time_ts + params->duration_ts) {
+
+        (*frames_read_past_duration) ++;
+        elv_dbg("DURATION OVER param start_time=%"PRId64" duration=%"PRId64" pkt pts=%"PRId64" rel_pts=%"PRId64" "
+                "frames_read=%d past_duration=%d",
+                params->start_time_ts, params->duration_ts, input_packet->pts, input_packet_rel_pts,
+                frames_read, frames_read_past_duration);
+        /* Allow decoding past specified duration to accommodate reordered packets */
+        if (*frames_read_past_duration > frames_allowed_past_duration) {
+            elv_dbg("frames_read_past_duration=%d, frames_allowed_past_duration=%d",
+                        frames_read_past_duration, frames_allowed_past_duration);
+            return 1;
+        }
+    }
+
+    encoder_context->input_last_pts_read = input_packet->pts;
+    return 0;
+}
+
+int
 avpipe_tx(
     txctx_t *txctx,
     int do_instrument,
@@ -1321,34 +1325,13 @@ avpipe_tx(
 
     while ((rc = av_read_frame(decoder_context->format_context, input_packet)) >= 0) {
 
-        // Only for video - PENDING(SSS) we must adjust for audio as well
-        if (input_packet->stream_index == decoder_context->video_stream_index) {
+        if (should_stop_decoding(input_packet, decoder_context, encoder_context,
+                params, &frames_read, &frames_read_past_duration, frames_allowed_past_duration))
+            break;
 
-            frames_read ++;
-
-            if (decoder_context->video_input_start_pts == -1)
-                decoder_context->video_input_start_pts = input_packet->pts;
-
-            int input_packet_rel_pts = input_packet->pts - decoder_context->video_input_start_pts;
-
-            // Stop when we reached the desired duration (duration -1 means 'entire input stream')
-            // PENDING(SSS) - this logic can be done after decoding where we know concretely that we decoded all frames
-            // we need to encode.
-            if (params->duration_ts != -1 &&
-                input_packet_rel_pts >= params->start_time_ts + params->duration_ts) {
-                frames_read_past_duration ++;
-                elv_dbg("DURATION OVER param start_time=%"PRId64" duration=%"PRId64" pkt pts=%"PRId64" rel_pts=%"PRId64" "
-                    "frames_read=%d past_duration=%d",
-                    params->start_time_ts, params->duration_ts, input_packet->pts, input_packet_rel_pts,
-                    frames_read, frames_read_past_duration);
-                /* Allow decoding past specified duration to accommodate reordered packets */
-                if (frames_read_past_duration > frames_allowed_past_duration) {
-                    break;
-                }
-            }
-
-            encoder_context->input_last_pts_read = input_packet->pts;
-        }
+        // Stop when we reached the desired duration (duration -1 means 'entire input stream')
+        // PENDING(SSS) - this logic can be done after decoding where we know concretely that we decoded all frames
+        // we need to encode.
 
         if (input_packet->stream_index == decoder_context->video_stream_index &&
             (params->tx_type & tx_video)) {
@@ -1383,19 +1366,6 @@ avpipe_tx(
 
         } else if (input_packet->stream_index == decoder_context->audio_stream_index &&
             (params->tx_type & tx_audio)) {
-
-            if (decoder_context->audio_input_start_pts == -1)
-                decoder_context->audio_input_start_pts = input_packet->pts;
-
-            int input_packet_rel_pts = input_packet->pts - decoder_context->audio_input_start_pts;
-
-            // Stop when we reached the desired duration (duration -1 means 'entire input stream')
-            if (params->duration_ts != -1 &&
-                input_packet_rel_pts >= params->start_time_ts + params->duration_ts) {
-                elv_dbg("DURATION OVER param start_time=%"PRId64" duration=%"PRId64" pkt pts=%"PRId64"\n",
-                    params->start_time_ts, params->duration_ts, input_packet->pts);
-                break;
-            }
 
             encoder_context->last_dts = input_packet->dts;
 

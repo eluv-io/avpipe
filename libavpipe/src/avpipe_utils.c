@@ -24,13 +24,13 @@ dump_frame(
         return;
 
     elv_dbg("FRAME %s [%d] pts=%"PRId64" pkt_dts=%"PRId64" pkt_duration=%"PRId64" be_time_stamp=%"PRId64" key=%d pict_type=%d "
-        "pkt_size=%d "
+        "pkt_size=%d nb_samples=%d "
         "width=%d height=%d linesize=%d "
         "format=%d coded_pic_num=%d flags=%x "
         "\n", msg, num,
         frame->pts, frame->pkt_dts, frame->pkt_duration, frame->best_effort_timestamp,
         frame->key_frame, frame->pict_type,
-        frame->pkt_size,
+        frame->pkt_size, frame->nb_samples,
         frame->width, frame->height, frame->linesize[0],
         frame->format, frame->coded_picture_number,
         frame->flags
