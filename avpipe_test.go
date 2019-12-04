@@ -4,11 +4,13 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"math/big"
 	"os"
 	"testing"
 
 	"github.com/qluvio/avpipe"
 	"github.com/stretchr/testify/assert"
+	log "github.com/qluvio/content-fabric/log"
 )
 
 //Implement AVPipeInputOpener
@@ -88,6 +90,10 @@ func (oo *fileOutputOpener) Open(h, fd int64, stream_index, seg_index int, out_t
 		filename = fmt.Sprintf("./%s/media_%d.m3u8", oo.dir, stream_index)
 	case avpipe.AES128Key:
 		filename = fmt.Sprintf("./%s/key.bin", oo.dir)
+	case avpipe.MP4Segment:
+		fallthrough
+	case avpipe.FMP4Segment:
+		filename = fmt.Sprintf("./%s/segment-%d.mp4", oo.dir, seg_index)
 	}
 
 	f, err := os.OpenFile(filename, os.O_RDWR|os.O_CREATE|os.O_TRUNC, 0644)
@@ -204,7 +210,7 @@ func TestSingleTranscode(t *testing.T) {
 	avpipe.InitIOHandler(&fileInputOpener{url: filename}, &fileOutputOpener{dir: "O"})
 
 	var lastInputPts int64
-	err := avpipe.Tx(params, filename, false, &lastInputPts)
+	err := avpipe.Tx(params, filename, true, &lastInputPts)
 	if err != 0 {
 		t.Fail()
 	}
@@ -296,6 +302,104 @@ func TestConcurrentTranscode(t *testing.T) {
 
 }
 
+func TestAACTranscode(t *testing.T) {
+	filename := "./media/bond-seg1.aac"
+
+	setupLogging()
+
+	params := &avpipe.TxParams{
+		BypassTranscoding: false,
+		Format:            "fmp4-segment",
+		StartTimeTs:       0,
+		DurationTs:        -1,
+		StartSegmentStr:   "1",
+		SegDuration:       "30",
+		Ecodec:            "aac",
+		Dcodec:            "aac",
+		AudioBitrate:      128000,
+		SampleRate:        48000,
+		EncHeight:         -1,
+		EncWidth:          -1,
+		TxType:            avpipe.TxAudio,
+	}
+
+	// Create output directory if it doesn't exist
+	if _, err := os.Stat("./O"); os.IsNotExist(err) {
+		os.Mkdir("./O", 0755)
+	}
+
+	avpipe.InitIOHandler(&fileInputOpener{url: filename}, &fileOutputOpener{dir: "O"})
+
+	lastInputPts := int64(0)
+	avpipe.Tx(params, filename, false, &lastInputPts)
+
+	// Now probe the generated files
+	probeInfo, err := avpipe.Probe("O/segment-1.mp4", true)
+	if err != nil {
+		t.Error(err)
+	}
+
+	timebase := *probeInfo.StreamInfo[0].TimeBase.Denom()
+	if timebase.Cmp(big.NewInt(48000)) != 0 {
+		t.Error("Unexpected TimeBase", probeInfo.StreamInfo[0].TimeBase)
+	}
+
+	sampleRate := probeInfo.StreamInfo[0].SampleRate
+	if sampleRate != 48000 {
+		t.Error("Unexpected TimeBase", probeInfo.StreamInfo[0].TimeBase)
+	}
+}
+
+func TestAC3TsTranscode(t *testing.T) {
+	filename := "./media/FS1-19-10-14.ts"
+
+	setupLogging()
+
+	params := &avpipe.TxParams{
+		BypassTranscoding: false,
+		Format:            "fmp4-segment",
+		StartTimeTs:       0,
+		DurationTs:        -1,
+		StartSegmentStr:   "1",
+		SegDuration:       "30",
+		Ecodec:            "ac3",
+		Dcodec:            "ac3",
+		AudioBitrate:      128000,
+		SampleRate:        48000,
+		EncHeight:         -1,
+		EncWidth:          -1,
+		TxType:            avpipe.TxAudio,
+		AudioIndex:        1,
+	}
+
+	// Create output directory if it doesn't exist
+	if _, err := os.Stat("./O"); os.IsNotExist(err) {
+		os.Mkdir("./O", 0755)
+	}
+
+	avpipe.InitIOHandler(&fileInputOpener{url: filename}, &fileOutputOpener{dir: "O"})
+
+	lastInputPts := int64(0)
+	avpipe.Tx(params, filename, false, &lastInputPts)
+
+	// Now probe the generated files
+	probeInfo, err := avpipe.Probe("O/segment-1.mp4", true)
+	if err != nil {
+		t.Error(err)
+	}
+
+	timebase := *probeInfo.StreamInfo[0].TimeBase.Denom()
+	if timebase.Cmp(big.NewInt(48000)) != 0 {
+		t.Error("Unexpected TimeBase", probeInfo.StreamInfo[0].TimeBase)
+	}
+
+	sampleRate := probeInfo.StreamInfo[0].SampleRate
+	if sampleRate != 48000 {
+		t.Error("Unexpected TimeBase", probeInfo.StreamInfo[0].TimeBase)
+	}
+}
+
+
 func TestMarshalParams(t *testing.T) {
 	params := &avpipe.TxParams{
 		VideoBitrate:  8000000,
@@ -351,4 +455,16 @@ func TestProbe(t *testing.T) {
 	assert.Equal(t, 0, probe.StreamInfo[1].Width)
 	assert.Equal(t, 0, probe.StreamInfo[1].Height)
 	assert.Equal(t, int64(44100), probe.StreamInfo[1].TimeBase.Denom().Int64())
+}
+
+func setupLogging() {
+	log.SetDefault(&log.Config{
+		Level:   "debug",
+		Handler: "text",
+		File: &log.LumberjackConfig{
+			Filename:  "avpipe-test.log",
+			LocalTime: true,
+		},
+	})
+	avpipe.SetCLoggers()
 }

@@ -43,11 +43,13 @@ func TestUdpToMp4(t *testing.T) {
 	if err != nil {
 		t.Error(err)
 	}
-	conn.SetReadBuffer(4 * 1024 * 1024)
+	conn.SetReadBuffer(8 * 1024 * 1024)
 
-	rwVideoBuf := NewRWBuffer(10000)
-	readCtx := testCtx{r: rwVideoBuf}
-	writeCtx := testCtx{}
+	rwVideoBuf := NewRWBuffer(100000)
+
+	url := "video_udp"
+	reqCtx := &testCtx{url: url, r: rwVideoBuf}
+	putReqCtxByURL(url, reqCtx)
 
 	go func() {
 		tlog.Info("UDP start")
@@ -60,10 +62,10 @@ func TestUdpToMp4(t *testing.T) {
 		}
 	}()
 
-	avpipe.InitIOHandler(&inputOpener{tc: readCtx}, &outputOpener{tc: writeCtx})
+	avpipe.InitIOHandler(&inputOpener{}, &outputOpener{})
 	var lastPts int64
 	tlog.Info("Tx start", "videoParams", fmt.Sprintf("%+v", *videoParamsTs))
-	errTx := avpipe.Tx(videoParamsTs, "video_out.mp4", true, &lastPts)
+	errTx := avpipe.Tx(videoParamsTs, url, true, &lastPts)
 	if errTx != 0 {
 		t.Error("Tx failed", "err", errTx)
 	}
@@ -82,14 +84,14 @@ func TestUdpToMp4V2(t *testing.T) {
 	outFileName = "ts_out"
 
 	r := NewTsReaderV2(":21001")
+	url := "video_udp2"
+	reqCtx := &testCtx{url: url, r: r}
+	putReqCtxByURL(url, reqCtx)
 
-	readCtx := testCtx{r: r}
-	writeCtx := testCtx{}
-
-	avpipe.InitIOHandler(&inputOpener{tc: readCtx}, &outputOpener{tc: writeCtx})
+	avpipe.InitIOHandler(&inputOpener{}, &outputOpener{})
 
 	tlog.Info("Tx start", "videoParams", fmt.Sprintf("%+v", *videoParamsTs))
-	errTx := avpipe.Tx(videoParamsTs, "video_out.mp4", true, nil)
+	errTx := avpipe.Tx(videoParamsTs, url, true, nil)
 	tlog.Info("Tx done", "err", errTx, "last pts", nil)
 
 	if errTx != 0 {

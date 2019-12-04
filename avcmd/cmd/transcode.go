@@ -229,7 +229,9 @@ func doTranscode(cmd *cobra.Command, args []string) error {
 		txType = avpipe.TxVideo
 	case "audio":
 		txType = avpipe.TxAudio
-		encoder = "aac"
+		if len(encoder) == 0 {
+			encoder = "aac"
+		}
 	}
 
 	crf, err := cmd.Flags().GetInt32("crf")

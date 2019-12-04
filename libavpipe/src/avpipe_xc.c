@@ -240,7 +240,7 @@ prepare_decoder(
         dump_codec_context(decoder_context->codec_context[i]);
     }
 
-    if (params && params->audio_index >= 0 && params->audio_index < decoder_context->format_context->nb_streams)
+    if (params && (params->audio_index >= 0) && (params->audio_index < decoder_context->format_context->nb_streams))
         decoder_context->audio_stream_index = params->audio_index;
     elv_dbg("prepare_decoder() audio_stream_index=%d, nb_streams=%d",
         decoder_context->audio_stream_index,
@@ -445,7 +445,7 @@ prepare_audio_encoder(
     }
 
     if (!decoder_context->codec_context[index]) {
-        elv_err("Decoder codec context is NULL!\n");
+        elv_err("Decoder codec context is NULL! index=%d", index);
         return -1;
     }
 
@@ -1524,16 +1524,27 @@ avpipe_tx(
             // TODO: make this working when there are 2 or more streams (RM)
             //input_packet->stream_index = 0;
 
-            response = transcode_audio_aac(
-                decoder_context,
-                encoder_context,
-                input_packet,
-                input_frame,
-                filt_frame,
-                decoder_context->audio_stream_index,
-                params,
-                debug_frame_level
-            );
+            if (!strcmp(params->ecodec, "aac")) {
+                response = transcode_audio_aac(
+                    decoder_context,
+                    encoder_context,
+                    input_packet,
+                    input_frame,
+                    filt_frame,
+                    decoder_context->audio_stream_index,
+                    params,
+                    debug_frame_level);
+            } else {
+                response = transcode_audio(
+                    decoder_context,
+                    encoder_context,
+                    input_packet,
+                    input_frame,
+                    filt_frame,
+                    decoder_context->audio_stream_index,
+                    params,
+                    debug_frame_level);
+            }
         } else if (debug_frame_level) {
             elv_dbg("Skip stream - packet index=%d, pts=%"PRId64, input_packet->stream_index, input_packet->pts);
         }

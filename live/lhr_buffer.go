@@ -41,6 +41,10 @@ var blog = elog.Get("/eluvio/avpipe/live/rwb")
  * in the buffer.
  */
 func NewRWBuffer(capacity int) io.ReadWriter {
+	if capacity < 0 {
+		return nil
+	}
+
 	rwb := &RWBuffer{
 		ch:       make([][]byte, capacity),
 		sz:       0,

@@ -42,7 +42,7 @@ func NewTsReader(addr string, w io.Writer) *TsReader {
 // all goroutines and cleans up.
 func NewTsReaderV2(addr string) io.ReadWriter {
 
-	rwb := NewRWBuffer(10000)
+	rwb := NewRWBuffer(100000)
 
 	tsr := &TsReader{
 		addr: addr,
