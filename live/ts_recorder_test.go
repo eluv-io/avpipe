@@ -57,7 +57,7 @@ func TestUdpToMp4(t *testing.T) {
 			t.Error(err)
 		}
 		tlog.Info("UDP done", "err", err)
-		if err := rwVideoBuf.(*RWBuffer).Close(RWBufferWriteClosed); err != nil {
+		if err := rwVideoBuf.(*RWBuffer).CloseSide(RWBufferWriteClosed); err != nil {
 			t.Error(err)
 		}
 	}()

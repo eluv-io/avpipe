@@ -115,7 +115,7 @@ type TxParams struct {
 	SegDuration        string      `json:"seg_duration,omitempty"`
 	SegDurationFr      int32       `json:"seg_duration_fr,omitempty"`
 	StartFragmentIndex int32       `json:"start_fragment_index,omitempty"`
-	ForceKeyInt        int32       `json:"force_keyint"`
+	ForceKeyInt        int32       `json:"force_keyint,omitempty"`
 	Ecodec             string      `json:"ecodec,omitempty"` // Video encoder
 	Dcodec             string      `json:"dcodec,omitempty"` // Video decoder
 	EncHeight          int32       `json:"enc_height,omitempty"`
@@ -126,8 +126,8 @@ type TxParams struct {
 	CryptKeyURL        string      `json:"crypt_key_url,omitempty"`
 	CryptScheme        CryptScheme `json:"crypt_scheme,omitempty"`
 	TxType             TxType      `json:"tx_type,omitempty"`
-	Seekable           bool        `json:"seekable"`
-	AudioIndex         int32       `json:"audio_index"`
+	Seekable           bool        `json:"seekable,omitempty"`
+	AudioIndex         int32       `json:"audio_index,omitempty"`
 }
 
 type AVMediaType int
@@ -599,7 +599,9 @@ func Tx(params *TxParams, url string, debugFrameLevel bool, lastInputPts *int64)
 		return -1
 	}
 
+	// same field order as avpipe_xc.h
 	cparams := &C.txparams_t{
+		// bypass_transcoding handled below
 		format:               C.CString(params.Format),
 		start_time_ts:        C.int64_t(params.StartTimeTs),
 		skip_over_pts:        C.int64_t(params.SkipOverPts),
@@ -610,10 +612,13 @@ func Tx(params *TxParams, url string, debugFrameLevel bool, lastInputPts *int64)
 		audio_bitrate:        C.int(params.AudioBitrate),
 		sample_rate:          C.int(params.SampleRate),
 		crf_str:              C.CString(params.CrfStr),
+		rc_max_rate:          C.int(params.RcMaxRate),
+		rc_buffer_size:       C.int(params.RcBufferSize),
 		seg_duration_ts:      C.int64_t(params.SegDurationTs),
 		seg_duration:         C.CString(params.SegDuration),
 		seg_duration_fr:      C.int(params.SegDurationFr),
 		start_fragment_index: C.int(params.StartFragmentIndex),
+		force_keyint:         C.int(params.ForceKeyInt),
 		ecodec:               C.CString(params.Ecodec),
 		dcodec:               C.CString(params.Dcodec),
 		enc_height:           C.int(params.EncHeight),
@@ -624,18 +629,14 @@ func Tx(params *TxParams, url string, debugFrameLevel bool, lastInputPts *int64)
 		crypt_key_url:        C.CString(params.CryptKeyURL),
 		crypt_scheme:         C.crypt_scheme_t(params.CryptScheme),
 		tx_type:              C.tx_type_t(params.TxType),
-		force_keyint:         C.int(params.ForceKeyInt),
-		rc_max_rate:          C.int(params.RcMaxRate),
-		rc_buffer_size:       C.int(params.RcBufferSize),
+		// seekable handled below
 		audio_index:          C.int(params.AudioIndex),
 	}
-
 	if params.BypassTranscoding {
 		cparams.bypass_transcoding = 1
 	} else {
 		cparams.bypass_transcoding = 0
 	}
-
 	if params.Seekable {
 		cparams.seekable = C.int(1)
 	} else {

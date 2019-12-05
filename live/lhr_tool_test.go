@@ -148,7 +148,7 @@ func TestVideoHlsLive(t *testing.T) {
 		SegDuration:     "30",
 		SegDurationFr:   -1, // 50,
 		ForceKeyInt:     50,
-		Ecodec:          "libx264",
+		Ecodec:          "libx264", // MacOS h264_videotoolbox
 		EncHeight:       720,  // 1080
 		EncWidth:        1280, // 1920
 		TxType:          avpipe.TxVideo,
@@ -173,7 +173,7 @@ func TestVideoHlsLive(t *testing.T) {
 	go func() {
 		lhr.Fill(recordingDuration, rwb)
 		tlog.Info("AVL Fill done")
-		rwb.(*RWBuffer).Close(RWBufferWriteClosed)
+		rwb.(*RWBuffer).CloseSide(RWBufferWriteClosed)
 	}()
 
 	url := "video_hls"
@@ -240,14 +240,13 @@ func TestVideoHlsLiveV2(t *testing.T) {
 func TestAudioHlsLive(t *testing.T) {
 	params := &avpipe.TxParams{
 		Format:          "fmp4-segment",
-		DurationTs:      3 * 2700000,
+		DurationTs:      3 * 2700000, // TODO 3 * 1443840 should work but Sky stream's 1/90000 time base seems to be used to measure duration
 		StartSegmentStr: "1",
-		AudioBitrate:    128000, // 78187,
+		AudioBitrate:    128000,
 		SampleRate:      48000,
-		SegDurationTs:   -1, //180000,
-		SegDuration:     "30",
-		SegDurationFr:   -1, // 50,
-		ForceKeyInt:     50,
+		SegDurationTs:   -1, // 1443840
+		SegDuration:     "30", // 30.08
+		SegDurationFr:   -1,
 		Ecodec:          "aac", // "ac3", "aac"
 		Dcodec:          "aac", // "aac", "h264"
 		AudioIndex:      11,
@@ -426,7 +425,7 @@ func recordFmp4(t *testing.T, lhr *HLSReader, url string) {
 	go func() {
 		err := lhr.Fill(recordingDurationHlsV1, rwb)
 		tlog.Info("AVL Fill done", "err", err)
-		rwb.(*RWBuffer).Close(RWBufferWriteClosed)
+		rwb.(*RWBuffer).CloseSide(RWBufferWriteClosed)
 	}()
 
 	avpipe.InitIOHandler(&inputOpener{}, &outputOpener{})
@@ -482,7 +481,7 @@ func (i *inputCtx) Seek(offset int64, whence int) (int64, error) {
 func (i *inputCtx) Close() (err error) {
 	tlog.Debug("AVL IN_CLOSE", "url", i.tc.url)
 	if _, ok := i.r.(*RWBuffer); ok {
-		err = i.r.(*RWBuffer).Close(RWBufferReadClosed)
+		err = i.r.(*RWBuffer).CloseSide(RWBufferReadClosed)
 	} else if _, ok := i.r.(*io.PipeReader); ok {
 		err = i.r.(*io.PipeReader).Close()
 	}

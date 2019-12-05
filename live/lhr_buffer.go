@@ -40,7 +40,7 @@ var blog = elog.Get("/eluvio/avpipe/live/rwb")
  * An EOF is issued for reader when the writer closed the buffer and there is no data
  * in the buffer.
  */
-func NewRWBuffer(capacity int) io.ReadWriter {
+func NewRWBuffer(capacity int) io.ReadWriteCloser {
 	if capacity < 0 {
 		return nil
 	}
@@ -195,7 +195,12 @@ func (rwb *RWBuffer) Len() int {
 	return rwb.count
 }
 
-func (rwb *RWBuffer) Close(state RWBufferCloseState) error {
+// io.Closer
+func (rwb *RWBuffer) Close() error {
+	return rwb.CloseSide(RWBufferWriteClosed)
+}
+
+func (rwb *RWBuffer) CloseSide(state RWBufferCloseState) error {
 	rwb.m.Lock()
 	defer rwb.m.Unlock()
 

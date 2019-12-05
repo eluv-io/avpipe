@@ -61,7 +61,7 @@ func NewHLSReader(masterURL *url.URL) *HLSReader {
 // Starts the necessary goroutines - when the returned reader is closed, it stops
 // all goroutines and cleans up.
 // PENDING(SSS) - it has a max duration of 24h
-func NewHLSReaderV2(masterURL *url.URL) io.ReadWriter {
+func NewHLSReaderV2(masterURL *url.URL) io.ReadWriteCloser {
 
 	rwb := NewRWBuffer(10000)
 
@@ -74,7 +74,7 @@ func NewHLSReaderV2(masterURL *url.URL) io.ReadWriter {
 
 	go func() {
 		err := lhr.fill(rwb)
-		rwb.(*RWBuffer).Close(RWBufferWriteClosed)
+		rwb.(*RWBuffer).CloseSide(RWBufferWriteClosed)
 		log.Info("AVLR Fill done", "err", err)
 	}()
 

@@ -116,3 +116,7 @@ func TestConcurrentRWBuffer(t *testing.T) {
 		wg.Wait()
 	}
 }
+
+func TestClose(t *testing.T) {
+	// TODO
+}
