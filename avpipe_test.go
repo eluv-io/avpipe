@@ -9,8 +9,8 @@ import (
 	"testing"
 
 	"github.com/qluvio/avpipe"
-	"github.com/stretchr/testify/assert"
 	log "github.com/qluvio/content-fabric/log"
+	"github.com/stretchr/testify/assert"
 )
 
 //Implement AVPipeInputOpener
@@ -195,7 +195,6 @@ func TestSingleTranscode(t *testing.T) {
 		SampleRate:        44100,
 		CrfStr:            "23",
 		SegDurationTs:     1001 * 60,
-		SegDurationFr:     60,
 		Ecodec:            "libx264",
 		EncHeight:         720,
 		EncWidth:          1280,
@@ -267,7 +266,6 @@ func TestNvidiaTranscode(t *testing.T) {
 		SampleRate:      44100,
 		CrfStr:          "23",
 		SegDurationTs:   1001 * 60,
-		SegDurationFr:   60,
 		Ecodec:          "h264_nvenc",
 		EncHeight:       720,
 		EncWidth:        1280,
@@ -291,7 +289,6 @@ func TestConcurrentTranscode(t *testing.T) {
 		SampleRate:      44100,
 		CrfStr:          "23",
 		SegDurationTs:   1001 * 60,
-		SegDurationFr:   60,
 		Ecodec:          "libx264",
 		EncHeight:       720,
 		EncWidth:        1280,
@@ -302,7 +299,7 @@ func TestConcurrentTranscode(t *testing.T) {
 
 }
 
-func TestAACTranscode(t *testing.T) {
+func TestAACMezMaker(t *testing.T) {
 	filename := "./media/bond-seg1.aac"
 
 	setupLogging()
@@ -350,7 +347,7 @@ func TestAACTranscode(t *testing.T) {
 	}
 }
 
-func TestAC3TsTranscode(t *testing.T) {
+func TestAC3TsMezMaker(t *testing.T) {
 	filename := "./media/FS1-19-10-14.ts"
 
 	setupLogging()
@@ -399,12 +396,10 @@ func TestAC3TsTranscode(t *testing.T) {
 	}
 }
 
-
 func TestMarshalParams(t *testing.T) {
 	params := &avpipe.TxParams{
 		VideoBitrate:  8000000,
 		SegDurationTs: 180000,
-		SegDurationFr: 50,
 		EncHeight:     720,
 		EncWidth:      1280,
 		TxType:        avpipe.TxVideo,

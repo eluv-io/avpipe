@@ -93,16 +93,16 @@ func TestConcurrentRWBuffer(t *testing.T) {
 	wg := &sync.WaitGroup{}
 
 	go func(rwb io.Writer) {
-		for i:=0; i<nRepeats; i++ {
+		for i := 0; i < nRepeats; i++ {
 			b := make([]byte, 100)
 			wg.Add(1)
 			rwb.Write(b)
 		}
-	} (rwb)
+	}(rwb)
 
 	go func(rwb io.Reader) {
 		b := make([]byte, 100)
-		for i:=0; i<nRepeats; i++ {
+		for i := 0; i < nRepeats; i++ {
 			rwb.Read(b)
 			nRead++
 			wg.Done()

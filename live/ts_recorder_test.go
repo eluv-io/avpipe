@@ -15,7 +15,6 @@ var videoParamsTs = &avpipe.TxParams{
 	StartSegmentStr: "1",
 	VideoBitrate:    20000000, // fox stream bitrate
 	SegDurationTs:   -1,
-	SegDurationFr:   -1,
 	ForceKeyInt:     120,
 	SegDuration:     "30.03",   // seconds
 	Ecodec:          "libx264", // libx264 software / h264_videotoolbox mac hardware
@@ -33,7 +32,6 @@ var videoParamsTs = &avpipe.TxParams{
 func TestUdpToMp4(t *testing.T) {
 
 	setupLogging()
-	outFileName = "ts_out"
 
 	sAddr, err := net.ResolveUDPAddr("udp", ":21001")
 	if err != nil {
@@ -81,7 +79,6 @@ func TestUdpToMp4(t *testing.T) {
 func TestUdpToMp4V2(t *testing.T) {
 
 	setupLogging()
-	outFileName = "ts_out"
 
 	r := NewTsReaderV2(":21001")
 	url := "video_udp2"

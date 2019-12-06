@@ -281,7 +281,7 @@ func doTranscode(cmd *cobra.Command, args []string) error {
 	}
 
 	rcMaxRate, err := cmd.Flags().GetInt32("rc-max-rate")
-	if err != nil  || rcMaxRate <= 0 {
+	if err != nil || rcMaxRate <= 0 {
 		return fmt.Errorf("rc-max-rate is not valid")
 	}
 
@@ -308,11 +308,6 @@ func doTranscode(cmd *cobra.Command, args []string) error {
 	segDuration := cmd.Flag("seg-duration").Value.String()
 	if format == "segment" && len(segDuration) == 0 {
 		return fmt.Errorf("Seg duration ts is not valid")
-	}
-
-	segDurationFr, err := cmd.Flags().GetInt32("seg-duration-fr")
-	if err != nil || (format != "segment" && format != "fmp4-segment" && segDurationFr == 0) {
-		return fmt.Errorf("Seg duration fr is not valid")
 	}
 
 	crfStr := strconv.Itoa(int(crf))
@@ -362,7 +357,6 @@ func doTranscode(cmd *cobra.Command, args []string) error {
 		CrfStr:             crfStr,
 		SegDurationTs:      segDurationTs,
 		SegDuration:        segDuration,
-		SegDurationFr:      segDurationFr,
 		Ecodec:             encoder,
 		Dcodec:             decoder,
 		EncHeight:          encHeight, // -1 means use source height, other values 2160, 720

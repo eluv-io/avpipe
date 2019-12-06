@@ -9,9 +9,9 @@
 package cmd
 
 import (
-	elog "github.com/qluvio/content-fabric/log"
 	"encoding/json"
 	"fmt"
+	elog "github.com/qluvio/content-fabric/log"
 	"io/ioutil"
 	"math/rand"
 	"net/http"

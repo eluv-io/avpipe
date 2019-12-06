@@ -1455,14 +1455,6 @@ avpipe_tx(
     if (params->duration_ts != -1)
         encoder_context->format_context->duration = params->duration_ts;
 
-    if (strcmp(params->format, "segment") &&
-        strcmp(params->format, "fmp4-segment") &&
-        params->seg_duration_ts % params->seg_duration_fr != 0) {
-        elv_err("Frame duration is not an integer, seg_duration_ts=%d, seg_duration_fr=%d",
-            params->seg_duration_ts, params->seg_duration_fr);
-        return -1;
-    }
-
     decoder_context->video_input_start_pts = -1;
     decoder_context->audio_input_start_pts = -1;
     encoder_context->first_encoding_frame_pts = -1;
@@ -1904,7 +1896,6 @@ avpipe_init(
         "rc_buffer_size=%d "
         "seg_duration_ts=%"PRId64" "
         "seg_duration=%s "
-        "seg_duration_fr=%d "
         "ecodec=%s "
         "dcodec=%s "
         "enc_height=%d "
@@ -1918,7 +1909,7 @@ avpipe_init(
         params->format, params->start_time_ts, params->start_pts, params->duration_ts, params->start_segment_str,
         params->video_bitrate, params->audio_bitrate, params->sample_rate, params->crf_str,
         params->rc_max_rate, params->rc_buffer_size,
-        params->seg_duration_ts, params->seg_duration, params->seg_duration_fr, params->ecodec, params->dcodec, params->enc_height, params->enc_width,
+        params->seg_duration_ts, params->seg_duration, params->ecodec, params->dcodec, params->enc_height, params->enc_width,
         params->crypt_iv, params->crypt_key, params->crypt_kid, params->crypt_key_url, params->crypt_scheme);
     elv_log("AVPIPE TXPARAMS %s", buf);
 

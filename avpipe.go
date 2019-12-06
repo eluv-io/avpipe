@@ -113,7 +113,6 @@ type TxParams struct {
 	CrfStr             string      `json:"crf_str,omitempty"`
 	SegDurationTs      int64       `json:"seg_duration_ts,omitempty"`
 	SegDuration        string      `json:"seg_duration,omitempty"`
-	SegDurationFr      int32       `json:"seg_duration_fr,omitempty"`
 	StartFragmentIndex int32       `json:"start_fragment_index,omitempty"`
 	ForceKeyInt        int32       `json:"force_keyint,omitempty"`
 	Ecodec             string      `json:"ecodec,omitempty"` // Video encoder
@@ -616,7 +615,6 @@ func Tx(params *TxParams, url string, debugFrameLevel bool, lastInputPts *int64)
 		rc_buffer_size:       C.int(params.RcBufferSize),
 		seg_duration_ts:      C.int64_t(params.SegDurationTs),
 		seg_duration:         C.CString(params.SegDuration),
-		seg_duration_fr:      C.int(params.SegDurationFr),
 		start_fragment_index: C.int(params.StartFragmentIndex),
 		force_keyint:         C.int(params.ForceKeyInt),
 		ecodec:               C.CString(params.Ecodec),
@@ -630,7 +628,7 @@ func Tx(params *TxParams, url string, debugFrameLevel bool, lastInputPts *int64)
 		crypt_scheme:         C.crypt_scheme_t(params.CryptScheme),
 		tx_type:              C.tx_type_t(params.TxType),
 		// seekable handled below
-		audio_index:          C.int(params.AudioIndex),
+		audio_index: C.int(params.AudioIndex),
 	}
 	if params.BypassTranscoding {
 		cparams.bypass_transcoding = 1

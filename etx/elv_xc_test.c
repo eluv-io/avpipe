@@ -207,7 +207,7 @@ out_opener(
 
     outctx->bufsz = 1 * 1024 * 1024;
     outctx->buf = (unsigned char *)malloc(outctx->bufsz); /* Must be malloc'd - will be realloc'd by avformat */
-    elv_dbg("OUT OPEN outctx=%p, path=%s, type=%d, fd=%d\n", outctx, segname, outctx->type, fd);
+    elv_dbg("OUT OPEN outctx=%p, path=%s, type=%d, fd=%d, seg_index=%d\n", outctx, segname, outctx->type, fd, outctx->seg_index);
     return 0;
 }
 
@@ -568,7 +568,6 @@ main(
         .rc_buffer_size = 4500000,          /* TODO - default? */
         .rc_max_rate = 6700000,             /* TODO - default? */
         .sample_rate = -1,                  /* Audio sampling rate 44100 */
-        .seg_duration_fr = -1,              /* input argument, in frames-per-secoond units */
         .seg_duration_ts = -1,              /* input argument, same units as input stream PTS */
         .start_pts = 0,
         .start_segment_str = "1",           /* 1-based */
@@ -730,10 +729,6 @@ main(
                 if (sscanf(argv[i+1], "%d", &p.sample_rate) != 1) {
                     usage(argv[0], argv[i], EXIT_FAILURE);
                 }
-            } else if (!strcmp(argv[i], "-seg-duration-fr")) {
-                if (sscanf(argv[i+1], "%d", &p.seg_duration_fr) != 1) {
-                    usage(argv[0], argv[i], EXIT_FAILURE);
-                }
             } else if (!strcmp(argv[i], "-seg-duration-ts")) {
                 if (sscanf(argv[i+1], "%"PRId64, &p.seg_duration_ts) != 1) {
                     usage(argv[0], argv[i], EXIT_FAILURE);
@@ -813,8 +808,8 @@ main(
     }
     if (strcmp(p.format, "segment") &&
         strcmp(p.format, "fmp4-segment") &&
-        (p.seg_duration_ts <= 0 || p.seg_duration_fr <= 0 || start_segment < 1)) {
-        usage(argv[0], "seg_duration_ts, seg_duration_fr, start_segment", EXIT_FAILURE);
+        (p.seg_duration_ts <= 0 || start_segment < 1)) {
+        usage(argv[0], "seg_duration_ts, start_segment", EXIT_FAILURE);
     }
     if (!strcmp(p.format, "segment") &&
         !strcmp(p.format, "fmp4-segment") &&
@@ -843,7 +838,6 @@ main(
             "  rc_buffer_size=%d\n"
             "  rc_max_rate=%d\n"
             "  sample_rate=%d\n"
-            "  seg_duration_fr=%d\n"
             "  seg_duration_ts=%"PRId64"\n"
             "  seg_duration=%"PRId64"\n"
             "  start_pts=%d\n"
@@ -853,7 +847,7 @@ main(
         p.audio_bitrate, p.crf_str, p.crypt_iv, p.crypt_key, p.crypt_key_url,
         p.crypt_kid, p.crypt_scheme, p.dcodec, p.duration_ts, p.ecodec,
         p.enc_height, p.enc_width, p.format, p.rc_buffer_size, p.rc_max_rate,
-        p.sample_rate, p.seg_duration_fr, p.seg_duration_ts, p.seg_duration, p.start_pts,
+        p.sample_rate, p.seg_duration_ts, p.seg_duration, p.start_pts,
         p.start_segment_str, p.start_time_ts, p.video_bitrate);
 
     in_handlers.avpipe_opener = in_opener;
