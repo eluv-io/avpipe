@@ -281,7 +281,7 @@ func doTranscode(cmd *cobra.Command, args []string) error {
 	}
 
 	rcMaxRate, err := cmd.Flags().GetInt32("rc-max-rate")
-	if err != nil || rcMaxRate <= 0 {
+	if err != nil {
 		return fmt.Errorf("rc-max-rate is not valid")
 	}
 

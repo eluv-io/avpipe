@@ -8,10 +8,11 @@ import (
 )
 
 type TsReader struct {
-	addr     string // For example ":21001" (for localhost port 21001)
-	pktLimit int
-	w        io.Writer
-	done     chan bool
+	addr       string // For example ":21001" (for localhost port 21001)
+	pktLimit   int
+	w          io.Writer
+	done       chan bool
+	errChannel chan error
 
 	NextSkipOverPts int64 // Bogus field for compat with HLS
 }
@@ -20,8 +21,9 @@ type TsReader struct {
 func NewTsReader(addr string, w io.Writer) *TsReader {
 
 	tsr := &TsReader{
-		addr: addr,
-		w:    w,
+		addr:       addr,
+		w:          w,
+		errChannel: make(chan error, 10),
 	}
 
 	var err error
@@ -45,8 +47,9 @@ func NewTsReaderV2(addr string) io.ReadWriteCloser {
 	rwb := NewRWBuffer(100000)
 
 	tsr := &TsReader{
-		addr: addr,
-		w:    rwb,
+		addr:       addr,
+		w:          rwb,
+		errChannel: make(chan error, 10),
 	}
 
 	var err error
@@ -66,7 +69,7 @@ func readUdp(pc net.PacketConn, w io.Writer) error {
 
 	// Assume that Close() is implemented, and that writer is not used after
 	// this call
-	defer w.(*RWBuffer).CloseSide(RWBufferWriteClosed)
+	defer w.(io.WriteCloser).Close()
 
 	// Stop recording if nothing was read for timeout
 	timeout := 5 * time.Second
@@ -88,12 +91,11 @@ func readUdp(pc net.PacketConn, w io.Writer) error {
 				}
 				log.Info("Stopped receiving UDP packets",
 					"timeout", timeout, "bytesRead", bytesRead)
-				break
+				return err
 			}
 			log.Error("UDP read failed", "err", err, "sender", sender)
 			return err
 		}
-		// log.Debug("te_recorder: packet received", "bytes", n, "from", sender.String(), "b0", buf[0], "b1", buf[1], "b2", buf[2])
 
 		t := time.Now()
 		bw, err := w.Write(buf[:n])
@@ -123,12 +125,12 @@ func (tsr *TsReader) serveOneConnection(w io.Writer) (err error) {
 
 	log.Info("ts_recorder: server: accepted")
 
-	go func() {
+	go func(tsr *TsReader) {
 		if err := readUdp(conn, w); err != nil {
 			log.Error("Failed reading UDP stream", "err", err)
-			// TODO: Error does not bubble up
+			tsr.errChannel <- err
 		}
-	}()
+	}(tsr)
 
 	return
 }

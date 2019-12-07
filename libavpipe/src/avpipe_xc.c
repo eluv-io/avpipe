@@ -368,7 +368,8 @@ prepare_video_encoder(
     encoder_codec_context->sample_aspect_ratio = decoder_context->codec_context[index]->sample_aspect_ratio;
     encoder_codec_context->bit_rate = params->video_bitrate;
     encoder_codec_context->rc_buffer_size = params->rc_buffer_size;
-    encoder_codec_context->rc_max_rate = params->rc_max_rate;
+    if (params->rc_max_rate > 0)
+        encoder_codec_context->rc_max_rate = params->rc_max_rate;
 
     if (encoder_context->codec[index]->pix_fmts) {
         encoder_codec_context->pix_fmt = encoder_context->codec[index]->pix_fmts[0];
@@ -957,7 +958,9 @@ transcode_audio(
 
     response = avcodec_send_packet(codec_context, packet);
     if (response < 0) {
-        elv_err("Failure while sending a packet to the decoder: %s", av_err2str(response));
+        elv_err("Failure while sending a packet to the decoder: err=%d, %s", response, av_err2str(response));
+        // Ignore the error and continue
+        response = 0;
         return response;
     }
 
@@ -1049,7 +1052,9 @@ transcode_audio_aac(
 
     response = avcodec_send_packet(codec_context, packet);
     if (response < 0) {
-        elv_err("Failure while sending a packet to the decoder: %s", av_err2str(response));
+        elv_err("Failure while sending a packet to the decoder: err=%d, %s", response, av_err2str(response));
+        // Ignore the error and continue
+        response = 0;
         return response;
     }
 

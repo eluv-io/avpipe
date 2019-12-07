@@ -22,7 +22,7 @@ import (
 
 var tlog = elog.Get("/eluvio/avpipe/live/test")
 
-var verboseLogging bool = true
+var verboseLogging bool = false
 var requestURLTable map[string]*testCtx = map[string]*testCtx{}
 var urlMutex *sync.RWMutex = &sync.RWMutex{}
 var requestFDTable map[int64]*testCtx = map[int64]*testCtx{}
@@ -34,7 +34,7 @@ type testCtx struct {
 	bytesRead    int
 	bytesWritten int
 	rwDiffMax    int
-	w            io.Writer
+	wc           io.WriteCloser
 	r            io.Reader
 }
 
@@ -239,8 +239,8 @@ func TestAudioHlsLive(t *testing.T) {
 		StartSegmentStr: "1",
 		AudioBitrate:    128000,
 		SampleRate:      48000,
-		SegDurationTs:   -1,   // 1443840
-		SegDuration:     "30", // 30.08
+		SegDurationTs:   -1,    // 1443840
+		SegDuration:     "30",  // 30.08
 		Ecodec:          "aac", // "ac3", "aac"
 		Dcodec:          "aac", // "aac", "h264"
 		AudioIndex:      11,
@@ -528,7 +528,8 @@ func (i *inputCtx) Read(buf []byte) (int, error) {
 	}
 	n, err := i.r.Read(buf)
 	if err == io.EOF {
-		return 0, nil
+		tlog.Info("AVL IN_READ got EOF", "url", i.tc.url)
+		return 0, err
 	}
 	i.tc.bytesRead += n
 	if verboseLogging {
@@ -539,16 +540,23 @@ func (i *inputCtx) Read(buf []byte) (int, error) {
 }
 
 func (i *inputCtx) Seek(offset int64, whence int) (int64, error) {
-	tlog.Debug("AVL IN_SEEK", "url", i.tc.url)
+	tlog.Error("AVL IN_SEEK", "url", i.tc.url)
 	return 0, fmt.Errorf("AVL IN_SEEK url=%s", i.tc.url)
 }
 
 func (i *inputCtx) Close() (err error) {
 	tlog.Debug("AVL IN_CLOSE", "url", i.tc.url)
+
+	if i.tc.wc != nil {
+		tlog.Debug("AVL IN_CLOSE closing write side", "url", i.tc.url)
+		err = i.tc.wc.Close()
+	}
+
 	if _, ok := i.r.(*os.File); ok {
 		err = i.r.(*os.File).Close()
 	} else if _, ok := i.r.(*RWBuffer); ok {
-		err = i.r.(*RWBuffer).CloseSide(RWBufferReadClosed)
+		tlog.Debug("AVL IN_CLOSE closing RWBuffer", "url", i.tc.url)
+		err = i.r.(*RWBuffer).Close()
 	} else if _, ok := i.r.(*io.PipeReader); ok {
 		err = i.r.(*io.PipeReader).Close()
 	}
@@ -566,7 +574,7 @@ func (oo *outputOpener) Open(h, fd int64, stream_index, seg_index int, out_type 
 		return nil, err
 	}
 
-		url := tc.url
+	url := tc.url
 	if strings.Compare(url[len(url)-3:], "mp4") == 0 {
 		url = url[:len(url)-4]
 	}
