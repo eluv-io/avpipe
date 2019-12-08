@@ -486,6 +486,13 @@ prepare_audio_encoder(
     encoder_context->codec_context[index]->channel_layout = decoder_context->codec_context[index]->channel_layout;
     encoder_context->codec_context[index]->channels = av_get_channel_layout_nb_channels(encoder_context->codec_context[index]->channel_layout);
 
+    /* If decoder channel layout is DOWNMIX then set the channel layout to STEREO */
+    if ( decoder_context->codec_context[index]->channel_layout == AV_CH_LAYOUT_STEREO_DOWNMIX ) {
+        elv_dbg("Set channel layout from DOWNMIX to STEREO");
+        encoder_context->codec_context[index]->channels = av_get_channel_layout_nb_channels(AV_CH_LAYOUT_STEREO);
+        encoder_context->codec_context[index]->channel_layout = AV_CH_LAYOUT_STEREO;    // AV_CH_LAYOUT_STEREO is av_get_default_channel_layout(encoder_context->codec_context[index]->channels)
+    }
+
     elv_log("ENCODER channels=%d, channel_layout=%d", encoder_context->codec_context[index]->channels, encoder_context->codec_context[index]->channel_layout);
     if (params->sample_rate > 0) {
         encoder_context->codec_context[index]->sample_rate = params->sample_rate;
@@ -1073,7 +1080,7 @@ transcode_audio_aac(
             decoder_context->pts = packet->pts;
 
             /* Store the new samples in the FIFO buffer. */
-            int input_frame_size = codec_context->frame_size;
+            int input_frame_size = codec_context->frame_size > 0 ? codec_context->frame_size : frame->nb_samples;
             if (av_audio_fifo_write(decoder_context->fifo, (void **)frame->extended_data,
                     input_frame_size) < input_frame_size) {
                 elv_err("Failed to write input frame to fifo frame_size=%d", input_frame_size);
@@ -1521,7 +1528,12 @@ avpipe_tx(
             // TODO: make this working when there are 2 or more streams (RM)
             //input_packet->stream_index = 0;
 
-            if (!strcmp(params->ecodec, "aac")) {
+            /*
+             * If decoder frame_size is not set (or it is zero), then using fifo for transcoding would not work,
+             * so fallback to use audio filtering for transcoding.
+             * Optimal solution would be to make filtering working for both aac and other cases (RM).
+             */ 
+            if (!strcmp(params->ecodec, "aac") && (decoder_context->codec_context[input_packet->stream_index]->frame_size > 0)) {
                 response = transcode_audio_aac(
                     decoder_context,
                     encoder_context,
