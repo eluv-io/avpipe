@@ -6,12 +6,46 @@ import (
 	"io"
 	"math/big"
 	"os"
+	"path/filepath"
 	"testing"
 
 	"github.com/qluvio/avpipe"
 	log "github.com/qluvio/content-fabric/log"
 	"github.com/stretchr/testify/assert"
 )
+
+func removeDirContents(dir string) error {
+	d, err := os.Open(dir)
+	if err != nil {
+		return err
+	}
+	defer d.Close()
+	names, err := d.Readdirnames(-1)
+	if err != nil {
+		return err
+	}
+	for _, name := range names {
+		err = os.RemoveAll(filepath.Join(dir, name))
+		if err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func setupOutDir(dir string) error {
+	_, err := os.Stat(dir)
+	if os.IsNotExist(err) {
+		os.Mkdir(dir, 0755)
+	} else {
+		err = removeDirContents(dir)
+		if err != nil {
+			return err
+		}
+	}
+
+	return nil
+}
 
 //Implement AVPipeInputOpener
 type fileInputOpener struct {
@@ -181,8 +215,9 @@ func (o *fileOutput) Close() error {
 	return err
 }
 
-func TestSingleTranscode(t *testing.T) {
+func TestSingleABRTranscode(t *testing.T) {
 	filename := "./media/ErsteChristmas.mp4"
+	outputDir := "O"
 
 	params := &avpipe.TxParams{
 		BypassTranscoding: false,
@@ -202,15 +237,16 @@ func TestSingleTranscode(t *testing.T) {
 	}
 
 	// Create output directory if it doesn't exist
-	if _, err := os.Stat("./O"); os.IsNotExist(err) {
-		os.Mkdir("./O", 0755)
+	err := setupOutDir(outputDir)
+	if err != nil {
+		t.Fail()
 	}
 
-	avpipe.InitIOHandler(&fileInputOpener{url: filename}, &fileOutputOpener{dir: "O"})
+	avpipe.InitIOHandler(&fileInputOpener{url: filename}, &fileOutputOpener{dir: outputDir})
 
 	var lastInputPts int64
-	err := avpipe.Tx(params, filename, true, &lastInputPts)
-	if err != 0 {
+	rc := avpipe.Tx(params, filename, true, &lastInputPts)
+	if rc != 0 {
 		t.Fail()
 	}
 
@@ -218,20 +254,22 @@ func TestSingleTranscode(t *testing.T) {
 	params.Ecodec = "aac"
 	params.AudioIndex = -1
 	lastInputPts = 0
-	err = avpipe.Tx(params, filename, false, &lastInputPts)
-	if err != 0 {
+	rc = avpipe.Tx(params, filename, false, &lastInputPts)
+	if rc != 0 {
 		t.Fail()
 	}
 
 }
 
 func doTranscode(t *testing.T, p *avpipe.TxParams, nThreads int, filename string, reportFailure string) {
+	outputDir := "O"
 	// Create output directory if it doesn't exist
-	if _, err := os.Stat("./O"); os.IsNotExist(err) {
-		os.Mkdir("./O", 0755)
+	err := setupOutDir(outputDir)
+	if err != nil {
+		t.Fail()
 	}
 
-	avpipe.InitIOHandler(&fileInputOpener{url: filename}, &concurrentOutputOpener{dir: "O"})
+	avpipe.InitIOHandler(&fileInputOpener{url: filename}, &concurrentOutputOpener{dir: outputDir})
 
 	done := make(chan struct{})
 	for i := 0; i < nThreads; i++ {
@@ -252,7 +290,7 @@ func doTranscode(t *testing.T, p *avpipe.TxParams, nThreads int, filename string
 	}
 }
 
-func TestNvidiaTranscode(t *testing.T) {
+func TestNvidiaABRTranscode(t *testing.T) {
 	nThreads := 10
 	filename := "./media/rocky.mp4"
 
@@ -275,7 +313,7 @@ func TestNvidiaTranscode(t *testing.T) {
 	doTranscode(t, params, nThreads, filename, "H264_NVIDIA encoder might not be enabled or hardware might not be available")
 }
 
-func TestConcurrentTranscode(t *testing.T) {
+func TestConcurrentABRTranscode(t *testing.T) {
 	nThreads := 10
 	filename := "./media/rocky.mp4"
 
@@ -296,11 +334,11 @@ func TestConcurrentTranscode(t *testing.T) {
 	}
 
 	doTranscode(t, params, nThreads, filename, "")
-
 }
 
-func TestAACMezMaker(t *testing.T) {
+func TestAAC2AACMezMaker(t *testing.T) {
 	filename := "./media/bond-seg1.aac"
+	outputDir := "AAC2AAC"
 
 	setupLogging()
 
@@ -321,17 +359,19 @@ func TestAACMezMaker(t *testing.T) {
 	}
 
 	// Create output directory if it doesn't exist
-	if _, err := os.Stat("./O"); os.IsNotExist(err) {
-		os.Mkdir("./O", 0755)
+	err := setupOutDir(outputDir)
+	if err != nil {
+		t.Fail()
 	}
 
-	avpipe.InitIOHandler(&fileInputOpener{url: filename}, &fileOutputOpener{dir: "O"})
+	avpipe.InitIOHandler(&fileInputOpener{url: filename}, &fileOutputOpener{dir: outputDir})
 
 	lastInputPts := int64(0)
 	avpipe.Tx(params, filename, false, &lastInputPts)
 
+	mezFile := fmt.Sprintf("%s/segment-1.mp4", outputDir)
 	// Now probe the generated files
-	probeInfo, err := avpipe.Probe("O/segment-1.mp4", true)
+	probeInfo, err := avpipe.Probe(mezFile, true)
 	if err != nil {
 		t.Error(err)
 	}
@@ -347,8 +387,9 @@ func TestAACMezMaker(t *testing.T) {
 	}
 }
 
-func TestAC3TsMezMaker(t *testing.T) {
-	filename := "./media/FS1-19-10-14.ts"
+func TestAC3TsAC3MezMaker(t *testing.T) {
+	filename := "./media/FS1-19-10-15-2-min.ts"
+	outputDir := "AC3TsAC3Mez"
 
 	setupLogging()
 
@@ -366,21 +407,192 @@ func TestAC3TsMezMaker(t *testing.T) {
 		EncHeight:         -1,
 		EncWidth:          -1,
 		TxType:            avpipe.TxAudio,
+		AudioIndex:        0,
+	}
+
+	// Create output directory if it doesn't exist
+	err := setupOutDir(outputDir)
+	if err != nil {
+		t.Fail()
+	}
+
+	avpipe.InitIOHandler(&fileInputOpener{url: filename}, &fileOutputOpener{dir: outputDir})
+
+	lastInputPts := int64(0)
+	rc := avpipe.Tx(params, filename, false, &lastInputPts)
+	if rc != 0 {
+		t.Fail()
+	}
+
+	mezFile := fmt.Sprintf("%s/segment-1.mp4", outputDir)
+	// Now probe the generated files
+	probeInfo, err := avpipe.Probe(mezFile, true)
+	if err != nil {
+		t.Error(err)
+	}
+
+	timebase := *probeInfo.StreamInfo[0].TimeBase.Denom()
+	if timebase.Cmp(big.NewInt(48000)) != 0 {
+		t.Error("Unexpected TimeBase", probeInfo.StreamInfo[0].TimeBase)
+	}
+
+	sampleRate := probeInfo.StreamInfo[0].SampleRate
+	if sampleRate != 48000 {
+		t.Error("Unexpected TimeBase", probeInfo.StreamInfo[0].TimeBase)
+	}
+}
+
+func TestAC3TsAACMezMaker(t *testing.T) {
+	filename := "./media/FS1-19-10-15-2-min.ts"
+	outputDir := "AC3TsACCMez"
+
+	setupLogging()
+
+	params := &avpipe.TxParams{
+		BypassTranscoding: false,
+		Format:            "fmp4-segment",
+		StartTimeTs:       0,
+		DurationTs:        -1,
+		StartSegmentStr:   "1",
+		SegDuration:       "30",
+		Ecodec:            "aac",
+		Dcodec:            "ac3",
+		AudioBitrate:      128000,
+		SampleRate:        48000,
+		EncHeight:         -1,
+		EncWidth:          -1,
+		TxType:            avpipe.TxAudio,
+		AudioIndex:        0,
+	}
+
+	// Create output directory if it doesn't exist
+	err := setupOutDir(outputDir)
+	if err != nil {
+		t.Fail()
+	}
+
+	avpipe.InitIOHandler(&fileInputOpener{url: filename}, &fileOutputOpener{dir: outputDir})
+
+	lastInputPts := int64(0)
+	rc := avpipe.Tx(params, filename, false, &lastInputPts)
+	if rc != 0 {
+		t.Fail()
+	}
+
+	mezFile := fmt.Sprintf("%s/segment-1.mp4", outputDir)
+	// Now probe the generated files
+	probeInfo, err := avpipe.Probe(mezFile, true)
+	if err != nil {
+		t.Error(err)
+	}
+
+	timebase := *probeInfo.StreamInfo[0].TimeBase.Denom()
+	if timebase.Cmp(big.NewInt(48000)) != 0 {
+		t.Error("Unexpected TimeBase", probeInfo.StreamInfo[0].TimeBase)
+	}
+
+	sampleRate := probeInfo.StreamInfo[0].SampleRate
+	if sampleRate != 48000 {
+		t.Error("Unexpected TimeBase", probeInfo.StreamInfo[0].TimeBase)
+	}
+}
+
+func TestMP2TsAACMezMaker(t *testing.T) {
+	filename := "./media/FS1-19-10-15-2-min.ts"
+	//filename := "./media/FS1-15-MP2.mp2"
+	outputDir := "MP2TsACCMez"
+
+	setupLogging()
+
+	params := &avpipe.TxParams{
+		BypassTranscoding: false,
+		Format:            "fmp4-segment",
+		StartTimeTs:       0,
+		DurationTs:        -1,
+		StartSegmentStr:   "1",
+		SegDuration:       "30",
+		Ecodec:            "mp2",
+		Dcodec:            "mp2",
+		AudioBitrate:      128000,
+		SampleRate:        48000,
+		EncHeight:         -1,
+		EncWidth:          -1,
+		TxType:            avpipe.TxAudio,
 		AudioIndex:        1,
 	}
 
 	// Create output directory if it doesn't exist
-	if _, err := os.Stat("./O"); os.IsNotExist(err) {
-		os.Mkdir("./O", 0755)
+	err := setupOutDir(outputDir)
+	if err != nil {
+		t.Fail()
 	}
 
-	avpipe.InitIOHandler(&fileInputOpener{url: filename}, &fileOutputOpener{dir: "O"})
+	avpipe.InitIOHandler(&fileInputOpener{url: filename}, &fileOutputOpener{dir: outputDir})
 
 	lastInputPts := int64(0)
-	avpipe.Tx(params, filename, false, &lastInputPts)
+	rc := avpipe.Tx(params, filename, false, &lastInputPts)
+	if rc != 0 {
+		t.Fail()
+	}
 
+	mezFile := fmt.Sprintf("%s/segment-1.mp4", outputDir)
 	// Now probe the generated files
-	probeInfo, err := avpipe.Probe("O/segment-1.mp4", true)
+	probeInfo, err := avpipe.Probe(mezFile, true)
+	if err != nil {
+		t.Error(err)
+	}
+
+	timebase := *probeInfo.StreamInfo[0].TimeBase.Denom()
+	if timebase.Cmp(big.NewInt(48000)) != 0 {
+		t.Error("Unexpected TimeBase", probeInfo.StreamInfo[0].TimeBase)
+	}
+
+	sampleRate := probeInfo.StreamInfo[0].SampleRate
+	if sampleRate != 48000 {
+		t.Error("Unexpected TimeBase", probeInfo.StreamInfo[0].TimeBase)
+	}
+}
+
+func TestDownmix2AACMezMaker(t *testing.T) {
+	filename := "./media/BOND23-CLIP-downmix-2min.mov"
+	outputDir := "Downmix2ACCMez"
+
+	setupLogging()
+
+	params := &avpipe.TxParams{
+		BypassTranscoding: false,
+		Format:            "fmp4-segment",
+		StartTimeTs:       0,
+		DurationTs:        -1,
+		StartSegmentStr:   "1",
+		SegDuration:       "30",
+		Ecodec:            "aac",
+		Dcodec:            "pcm_s24le",
+		AudioBitrate:      128000,
+		SampleRate:        48000,
+		EncHeight:         -1,
+		EncWidth:          -1,
+		TxType:            avpipe.TxAudio,
+		AudioIndex:        6,
+	}
+
+	// Create output directory if it doesn't exist
+	err := setupOutDir(outputDir)
+	if err != nil {
+		t.Fail()
+	}
+
+	avpipe.InitIOHandler(&fileInputOpener{url: filename}, &fileOutputOpener{dir: outputDir})
+
+	lastInputPts := int64(0)
+	rc := avpipe.Tx(params, filename, false, &lastInputPts)
+	if rc != 0 {
+		t.Fail()
+	}
+
+	mezFile := fmt.Sprintf("%s/segment-1.mp4", outputDir)
+	// Now probe the generated files
+	probeInfo, err := avpipe.Probe(mezFile, true)
 	if err != nil {
 		t.Error(err)
 	}

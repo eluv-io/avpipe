@@ -58,6 +58,135 @@ elv_io_close(
     struct AVFormatContext *s,
     AVIOContext *pb);
 
+/**
+ * Initialize the audio resampler based on the input and output codec settings.
+ * If the input and output sample formats differ, a conversion is required
+ * libswresample takes care of this, but requires initialization.
+ * @param      input_codec_context  Codec context of the input file
+ * @param      output_codec_context Codec context of the output file
+ * @param[out] resample_context     Resample context for the required conversion
+ * @return Error code (0 if successful)
+ */
+static
+int init_resampler(
+    AVCodecContext *input_codec_context,
+    AVCodecContext *output_codec_context,
+    SwrContext **resample_context)
+{
+        int error;
+
+        /*
+         * Create a resampler context for the conversion.
+         * Set the conversion parameters.
+         * Default channel layouts based on the number of channels
+         * are assumed for simplicity (they are sometimes not detected
+         * properly by the demuxer and/or decoder).
+         */
+        *resample_context = swr_alloc_set_opts(NULL,
+                                              av_get_default_channel_layout(output_codec_context->channels),
+                                              output_codec_context->sample_fmt,
+                                              output_codec_context->sample_rate,
+                                              av_get_default_channel_layout(input_codec_context->channels),
+                                              input_codec_context->sample_fmt,
+                                              input_codec_context->sample_rate,
+                                              0, NULL);
+        if (!*resample_context) {
+            elv_err("Could not allocate resample context");
+            return AVERROR(ENOMEM);
+        }
+        /*
+        * Perform a sanity check so that the number of converted samples is
+        * not greater than the number of samples to be converted.
+        * If the sample rates differ, this case has to be handled differently
+        */
+        assert(output_codec_context->sample_rate == input_codec_context->sample_rate);
+
+        /* Open the resampler with the specified parameters. */
+        if ((error = swr_init(*resample_context)) < 0) {
+            elv_err("Could not open resample context, error=%d", error);
+            swr_free(resample_context);
+            return error;
+        }
+    return 0;
+}
+
+/**
+ * Initialize a temporary storage for the specified number of audio samples.
+ * The conversion requires temporary storage due to the different format.
+ * The number of audio samples to be allocated is specified in frame_size.
+ * @param[out] converted_input_samples Array of converted samples. The
+ *                                     dimensions are reference, channel
+ *                                     (for multi-channel audio), sample.
+ * @param      output_codec_context    Codec context of the output file
+ * @param      frame_size              Number of samples to be converted in
+ *                                     each round
+ * @return Error code (0 if successful)
+ */
+static
+int init_converted_samples(
+    uint8_t ***converted_input_samples,
+    AVCodecContext *output_codec_context,
+    int frame_size)
+{
+    int error;
+
+    /* Allocate as many pointers as there are audio channels.
+     * Each pointer will later point to the audio samples of the corresponding
+     * channels (although it may be NULL for interleaved formats).
+     */
+    if (!(*converted_input_samples = calloc(output_codec_context->channels,
+                                            sizeof(**converted_input_samples)))) {
+        elv_err("Could not allocate converted input sample pointers");
+        return AVERROR(ENOMEM);
+    }
+
+    /* Allocate memory for the samples of all channels in one consecutive
+     * block for convenience. */
+    if ((error = av_samples_alloc(*converted_input_samples, NULL,
+                                  output_codec_context->channels,
+                                  frame_size,
+                                  output_codec_context->sample_fmt, 0)) < 0) {
+        elv_err("Could not allocate converted input samples, error='%s'", av_err2str(error));
+        av_freep(&(*converted_input_samples)[0]);
+        free(*converted_input_samples);
+        return error;
+    }
+    return 0;
+}
+
+/**
+ * Convert the input audio samples into the output sample format.
+ * The conversion happens on a per-frame basis, the size of which is
+ * specified by frame_size.
+ * @param      input_data       Samples to be decoded. The dimensions are
+ *                              channel (for multi-channel audio), sample.
+ * @param[out] converted_data   Converted samples. The dimensions are channel
+ *                              (for multi-channel audio), sample.
+ * @param      frame_size       Number of samples to be converted
+ * @param      resample_context Resample context for the conversion
+ * @return Error code (0 if successful)
+ */
+static
+int convert_samples(
+    const uint8_t **input_data,
+    uint8_t **converted_data,
+    const int frame_size,
+    SwrContext *resample_context)
+{
+    int error;
+
+    /* Convert the samples using the resampler. */
+    if ((error = swr_convert(resample_context,
+                             converted_data, frame_size,
+                             input_data    , frame_size)) < 0) {
+        elv_err("Could not convert input samples, error='%s'", av_err2str(error));
+        return error;
+    }
+
+    return 0;
+}
+
+
 static int
 prepare_input(
     avpipe_io_handler_t *in_handlers,
@@ -173,8 +302,13 @@ prepare_decoder(
             continue;
         }
 
-        /* Initialize codec and codec context */
-        if (params != NULL && params->dcodec != NULL && params->dcodec[0] != '\0') {
+        /*
+         * Initialize codec and codec context.
+         * Pick params->decodec if this stream index is the same as params->audio_index.
+         */
+        if (params != NULL && params->dcodec != NULL && params->dcodec[0] != '\0' && (params->tx_type & tx_video)) {
+            decoder_context->codec[i] = avcodec_find_decoder_by_name(params->dcodec);
+        } else if (params != NULL && params->audio_index == i && params->dcodec != NULL && params->dcodec[0] != '\0' && (params->tx_type & tx_audio)) {
             decoder_context->codec[i] = avcodec_find_decoder_by_name(params->dcodec);
         } else {
             decoder_context->codec[i] = avcodec_find_decoder(decoder_context->codec_parameters[i]->codec_id);
@@ -233,6 +367,11 @@ prepare_decoder(
           decoder_context->codec_context[i]->framerate = av_guess_frame_rate(
             decoder_context->format_context, decoder_context->format_context->streams[i], NULL);
         */
+
+        /*
+         * NOTE: Don't change the input stream or input codec_context timebase to 1/sample_rate.
+         * This will break transcoding audio if the input timebase doesn't match with output timebase. (-RM)
+         */
         decoder_context->codec_context[i]->time_base = decoder_context->stream[i]->time_base;
 
         dump_stream(decoder_context->stream[i]);
@@ -466,7 +605,6 @@ prepare_audio_encoder(
     encoder_context->format_context->io_close = elv_io_close;
 
     encoder_context->codec_context[index] = avcodec_alloc_context3(encoder_context->codec[index]);
-    //encoder_context->codec_context[index] = encoder_context->stream[index]->codec;  // Deprecated!
 
     /* By default use decoder parameters */
     encoder_context->codec_context[index]->sample_rate = decoder_context->codec_context[index]->sample_rate;
@@ -486,9 +624,9 @@ prepare_audio_encoder(
     encoder_context->codec_context[index]->channel_layout = decoder_context->codec_context[index]->channel_layout;
     encoder_context->codec_context[index]->channels = av_get_channel_layout_nb_channels(encoder_context->codec_context[index]->channel_layout);
 
-    /* If decoder channel layout is DOWNMIX then set the channel layout to STEREO */
-    if ( decoder_context->codec_context[index]->channel_layout == AV_CH_LAYOUT_STEREO_DOWNMIX ) {
-        elv_dbg("Set channel layout from DOWNMIX to STEREO");
+    /* If decoder channel layout is DOWNMIX, or params->ecodec == "aac" then set the channel layout to STEREO */
+    if ( decoder_context->codec_context[index]->channel_layout == AV_CH_LAYOUT_STEREO_DOWNMIX || !strcmp(params->ecodec, "aac")) {
+        /* This encoder is prepared specifically for AAC, therefore set the channel layout to AV_CH_LAYOUT_STEREO */
         encoder_context->codec_context[index]->channels = av_get_channel_layout_nb_channels(AV_CH_LAYOUT_STEREO);
         encoder_context->codec_context[index]->channel_layout = AV_CH_LAYOUT_STEREO;    // AV_CH_LAYOUT_STEREO is av_get_default_channel_layout(encoder_context->codec_context[index]->channels)
     }
@@ -509,14 +647,20 @@ prepare_audio_encoder(
 
     set_encoder_options(encoder_context, decoder_context, params);
 
+    AVCodecContext *encoder_codec_context = encoder_context->codec_context[index];
+    /* Some container formats (like MP4) require global headers to be present.
+     * Mark the encoder so that it behaves accordingly. */
+    if (encoder_context->format_context->oformat->flags & AVFMT_GLOBALHEADER)
+        encoder_codec_context->flags |= AV_CODEC_FLAG_GLOBAL_HEADER;
+
     /* Open audio encoder codec */
     if (avcodec_open2(encoder_context->codec_context[index], encoder_context->codec[index], NULL) < 0) {
         elv_dbg("Could not open encoder for audio");
         return -1;
     }
 
-    elv_dbg("encoder stream index=%d, sample_fmts=%d, timebase=%d, output frame_size=%d",
-        index, encoder_context->codec_context[index]->sample_fmt,
+    elv_dbg("encoder audio stream index=%d, bitrate=%d, sample_fmts=%d, timebase=%d, output frame_size=%d",
+        index, encoder_context->codec_context[index]->bit_rate, encoder_context->codec_context[index]->sample_fmt,
         encoder_context->codec_context[index]->time_base.den, encoder_context->codec_context[index]->frame_size);
 
     if (avcodec_parameters_from_context(
@@ -527,9 +671,12 @@ prepare_audio_encoder(
 
     }
 
+    init_resampler(decoder_context->codec_context[index], encoder_context->codec_context[index],
+                       &decoder_context->resampler_context);
+
     /* Create the FIFO buffer based on the specified output sample format. */
     if (!(decoder_context->fifo = av_audio_fifo_alloc(encoder_context->codec_context[index]->sample_fmt,
-                encoder_context->codec_context[index]->channels, 5000))) {
+                encoder_context->codec_context[index]->channels, 1))) {
         elv_err("Failed to allocate audio FIFO");
         return -1;
     }
@@ -803,7 +950,7 @@ encode_frame(
             if (frame->pkt_dts != AV_NOPTS_VALUE)
                 frame->pkt_dts -= encoder_context->first_encoding_frame_pts;
             if (frame->best_effort_timestamp != AV_NOPTS_VALUE)
-                frame->best_effort_timestamp -= encoder_context->first_encoding_frame_pts;;
+                frame->best_effort_timestamp -= encoder_context->first_encoding_frame_pts;
         }
 
         // Signal if we need IDR frames
@@ -1033,6 +1180,8 @@ transcode_audio_aac(
     int debug_frame_level)
 {
     AVCodecContext *codec_context = decoder_context->codec_context[stream_index];
+    AVCodecContext *output_codec_context = encoder_context->codec_context[stream_index];
+    SwrContext *resampler_context = decoder_context->resampler_context;
     int response;
 
     if (debug_frame_level)
@@ -1078,10 +1227,23 @@ transcode_audio_aac(
 
         if (response >= 0) {
             decoder_context->pts = packet->pts;
+            /* Temporary storage for the converted input samples. */
+            uint8_t **converted_input_samples = NULL;
+            int input_frame_size = codec_context->frame_size > 0 ? codec_context->frame_size : frame->nb_samples;
+
+            if (init_converted_samples(&converted_input_samples, output_codec_context, input_frame_size)) {
+                elv_err("Failed to allocate audio samples");
+                return AVERROR_EXIT;
+            }
+
+            if (convert_samples((const uint8_t**)frame->extended_data, converted_input_samples,
+                            input_frame_size, resampler_context)) {
+                elv_err("Failed to convert audio samples");
+                return AVERROR_EXIT;
+            }
 
             /* Store the new samples in the FIFO buffer. */
-            int input_frame_size = codec_context->frame_size > 0 ? codec_context->frame_size : frame->nb_samples;
-            if (av_audio_fifo_write(decoder_context->fifo, (void **)frame->extended_data,
+            if (av_audio_fifo_write(decoder_context->fifo, (void **)converted_input_samples,
                     input_frame_size) < input_frame_size) {
                 elv_err("Failed to write input frame to fifo frame_size=%d", input_frame_size);
                 return AVERROR_EXIT;
@@ -1089,7 +1251,6 @@ transcode_audio_aac(
 
             int output_frame_size = encoder_context->codec_context[stream_index]->frame_size;
 
-            /* pull filtered frames from the filtergraph */
             while (av_audio_fifo_size(decoder_context->fifo) >= output_frame_size) {
 
                 /* PENDING(SSS) - reuse filt_frame instead of allocating each time here. Not freed */
@@ -1110,11 +1271,9 @@ transcode_audio_aac(
 
                 dump_frame("FILT ", codec_context->frame_number, filt_frame, debug_frame_level);
 
-                AVFrame *frame_to_encode = filt_frame;
                 int skip = should_skip_encoding(decoder_context, p, filt_frame);
-
                 if (!skip) {
-                    encode_frame(decoder_context, encoder_context, frame_to_encode, stream_index, p, debug_frame_level);
+                    encode_frame(decoder_context, encoder_context, filt_frame, stream_index, p, debug_frame_level);
                 }
                 av_frame_unref(filt_frame);
             }
@@ -1533,7 +1692,7 @@ avpipe_tx(
              * so fallback to use audio filtering for transcoding.
              * Optimal solution would be to make filtering working for both aac and other cases (RM).
              */ 
-            if (!strcmp(params->ecodec, "aac") && (decoder_context->codec_context[input_packet->stream_index]->frame_size > 0)) {
+            if (!strcmp(params->ecodec, "aac")) {
                 response = transcode_audio_aac(
                     decoder_context,
                     encoder_context,

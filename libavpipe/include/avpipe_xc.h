@@ -107,7 +107,7 @@ typedef struct coderctx_t {
     AVStream *stream[MAX_STREAMS];
     AVCodecParameters *codec_parameters[MAX_STREAMS];
     AVCodecContext *codec_context[MAX_STREAMS];
-    SwrContext *resample_context[MAX_STREAMS];  /* resample context for audio */
+    SwrContext *resampler_context;              /* resample context for audio */
     AVAudioFifo *fifo;                          /* audio sampling fifo */
 
     int video_stream_index;
