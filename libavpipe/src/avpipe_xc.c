@@ -906,7 +906,7 @@ should_skip_encoding(
         }
     }
 
-    const int frame_in_pts_offset = frame->pts - decoder_context->video_input_start_pts; // Only called for the video stream
+    const int64_t frame_in_pts_offset = frame->pts - decoder_context->video_input_start_pts; // Only called for the video stream
 
     /* If there is no video transcoding return 0 */
     if ((p->tx_type & tx_video) == 0)
@@ -928,7 +928,7 @@ should_skip_encoding(
 
     /* To allow for packet reordering frames can come with pts past the desired duration */
     if (p->duration_ts > 0) {
-        const int max_valid_ts = p->start_time_ts + p->duration_ts;
+        const int64_t max_valid_ts = p->start_time_ts + p->duration_ts;
         if (frame_in_pts_offset >= max_valid_ts) {
             elv_dbg("ENCODE skip frame late pts=%" PRId64 ", frame_in_pts_offset=%" PRId64 ", max_valid_ts=%" PRId64,
                 frame->pts, frame_in_pts_offset, max_valid_ts);
