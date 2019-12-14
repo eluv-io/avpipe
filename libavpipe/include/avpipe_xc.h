@@ -133,6 +133,7 @@ typedef struct coderctx_t {
     int64_t video_input_start_pts;  /* In case video input stream starts at PTS > 0 */
     int64_t audio_input_start_pts;  /* In case audio input stream starts at PTS > 0 */
     int64_t first_encoding_frame_pts; /* PTS of first frame sent to the encoder */
+    int64_t first_read_frame_pts; /* PTS of first frame read - which might not be decodable */
 
     int is_mpegts;          /* set to 1 if input format name is "mpegts" */
 

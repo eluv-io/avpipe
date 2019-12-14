@@ -880,9 +880,32 @@ set_key_flag(
 static int
 should_skip_encoding(
     coderctx_t *decoder_context,
+    coderctx_t *encoder_context,
+    int stream_index,
     txparams_t *p,
     AVFrame *frame)
 {
+
+    /* For MPEG-TS - skip a fixed duration at the beginning to sync audio and vide
+     * Audio starts encoding right away but video will drop frames up until the first i-frame.
+     * Skipping an equal amount of both audio and video ensures they start encoding at approximately
+     * the same time (generally less that one frame duration apart).
+     */
+    const int64_t mpegts_skip_offset = 2; /* seoncds */
+    if (mpegts_skip_offset > 0 && decoder_context->is_mpegts && (!strcmp(p->format, "fmp4-segment"))) {
+        int64_t time_base = decoder_context->stream[stream_index]->time_base.den;
+        int64_t pts_offset = encoder_context->first_read_frame_pts;
+        if (!strcmp(p->ecodec, "aac")) {
+            time_base = encoder_context->stream[stream_index]->time_base.den;
+            pts_offset = 0; /* AAC aloways starts at PTS 0 */
+        }
+        if (frame->pts - pts_offset < mpegts_skip_offset * time_base) {
+            elv_log("ENCODE skip frame early mpegts stream=%d pts=%" PRId64" first=%" PRId64 " time_base=%" PRId64,
+                stream_index, frame->pts, pts_offset, time_base);
+            return 1;
+        }
+    }
+
     const int frame_in_pts_offset = frame->pts - decoder_context->video_input_start_pts; // Only called for the video stream
 
     /* If there is no video transcoding return 0 */
@@ -942,6 +965,8 @@ encode_frame(
             if (encoder_context->first_encoding_frame_pts == -1) {
                 /* Remember the first DTS/PTS to use as an offset later */
                 encoder_context->first_encoding_frame_pts = frame->pts;
+                elv_log("PTS first_encoding_frame_pts=%"PRId64" stream_index=%d",
+                    encoder_context->first_encoding_frame_pts, stream_index);
             }
 
             // Adjust frame pts such that first frame sent to the encoder has PTS 0
@@ -1154,7 +1179,7 @@ transcode_audio(
                 dump_frame("FILT ", codec_context->frame_number, filt_frame, debug_frame_level);
 
                 AVFrame *frame_to_encode = filt_frame;
-                int skip = should_skip_encoding(decoder_context, p, filt_frame);
+                int skip = should_skip_encoding(decoder_context, encoder_context, stream_index, p, filt_frame);
 
                 if (!skip) {
                     encode_frame(decoder_context, encoder_context, frame_to_encode, stream_index, p, debug_frame_level);
@@ -1271,7 +1296,7 @@ transcode_audio_aac(
 
                 dump_frame("FILT ", codec_context->frame_number, filt_frame, debug_frame_level);
 
-                int skip = should_skip_encoding(decoder_context, p, filt_frame);
+                int skip = should_skip_encoding(decoder_context, encoder_context, stream_index, p, filt_frame);
                 if (!skip) {
                     encode_frame(decoder_context, encoder_context, filt_frame, stream_index, p, debug_frame_level);
                 }
@@ -1412,7 +1437,7 @@ transcode_video(
                 dump_frame("FILT ", codec_context->frame_number, filt_frame, debug_frame_level);
 
                 AVFrame *frame_to_encode = filt_frame;
-                int skip = should_skip_encoding(decoder_context, p, filt_frame);
+                int skip = should_skip_encoding(decoder_context, encoder_context, stream_index, p, filt_frame);
 
                 if (!skip) {
                     elv_get_time(&tv);
@@ -1482,7 +1507,7 @@ flush_decoder(
                 dump_frame("FILT ", codec_context->frame_number, filt_frame, debug_frame_level);
 
                 AVFrame *frame_to_encode = filt_frame;
-                int skip = should_skip_encoding(decoder_context, p, filt_frame);
+                int skip = should_skip_encoding(decoder_context, encoder_context, stream_index, p, filt_frame);
 
                 if (!skip) {
                     encode_frame(decoder_context, encoder_context, frame_to_encode, stream_index, p, debug_frame_level);
@@ -1629,6 +1654,7 @@ avpipe_tx(
     decoder_context->video_input_start_pts = -1;
     decoder_context->audio_input_start_pts = -1;
     encoder_context->first_encoding_frame_pts = -1;
+    encoder_context->first_read_frame_pts = -1;
 
     int64_t last_dts;
     int frames_read = 0;
@@ -1637,13 +1663,25 @@ avpipe_tx(
 
     while ((rc = av_read_frame(decoder_context->format_context, input_packet)) >= 0) {
 
+        // Stop when we reached the desired duration (duration -1 means 'entire input stream')
+        // PENDING(SSS) - this logic can be done after decoding where we know concretely that we decoded all frames
+        // we need to encode.
         if (should_stop_decoding(input_packet, decoder_context, encoder_context,
                 params, &frames_read, &frames_read_past_duration, frames_allowed_past_duration))
             break;
 
-        // Stop when we reached the desired duration (duration -1 means 'entire input stream')
-        // PENDING(SSS) - this logic can be done after decoding where we know concretely that we decoded all frames
-        // we need to encode.
+        if ((input_packet->stream_index == decoder_context->video_stream_index && (params->tx_type & tx_video)) ||
+            (input_packet->stream_index == decoder_context->audio_stream_index && (params->tx_type & tx_audio))) {
+
+            if (encoder_context->first_read_frame_pts == -1 && input_packet->pts != AV_NOPTS_VALUE) {
+                encoder_context->first_read_frame_pts = input_packet->pts;
+                elv_log("PTS first_read_frame=%"PRId64, encoder_context->first_read_frame_pts);
+            } else if (input_packet->pts != AV_NOPTS_VALUE && input_packet->pts < encoder_context->first_read_frame_pts) {
+                /* Due to b-frame reordering */
+                encoder_context->first_read_frame_pts = input_packet->pts;
+                elv_log("PTS first_read_frame reorder new=%"PRId64, encoder_context->first_read_frame_pts);
+            }
+        }
 
         if (input_packet->stream_index == decoder_context->video_stream_index &&
             (params->tx_type & tx_video)) {
@@ -1691,7 +1729,7 @@ avpipe_tx(
              * If decoder frame_size is not set (or it is zero), then using fifo for transcoding would not work,
              * so fallback to use audio filtering for transcoding.
              * Optimal solution would be to make filtering working for both aac and other cases (RM).
-             */ 
+             */
             if (!strcmp(params->ecodec, "aac")) {
                 response = transcode_audio_aac(
                     decoder_context,
