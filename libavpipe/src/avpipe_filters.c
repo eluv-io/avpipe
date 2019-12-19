@@ -127,6 +127,12 @@ init_audio_filters(
     AVFilterInOut *inputs  = avfilter_inout_alloc();
     AVFilterInOut *outputs = avfilter_inout_alloc();
 
+    if (!dec_codec_ctx) {
+        elv_err("Audio decoder was not initialized!");
+        ret = AVERROR_UNKNOWN;
+        goto end;
+    }
+
     decoder_context->filter_graph = avfilter_graph_alloc();
     if (!buffersrc || !buffersink || !decoder_context->filter_graph || !outputs || !inputs) {
         elv_err("Audio filtering source or sink element not found");

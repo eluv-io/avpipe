@@ -885,6 +885,8 @@ should_skip_encoding(
     txparams_t *p,
     AVFrame *frame)
 {
+    if (!frame)
+        return 1;
 
     /* For MPEG-TS - skip a fixed duration at the beginning to sync audio and vide
      * Audio starts encoding right away but video will drop frames up until the first i-frame.
@@ -951,6 +953,11 @@ encode_frame(
     int ret;
     AVFormatContext *format_context = encoder_context->format_context;
     AVCodecContext *codec_context = encoder_context->codec_context[stream_index];
+
+    int skip = should_skip_encoding(decoder_context, encoder_context, stream_index, params, frame);
+    if (skip)
+        return 0;
+
     AVPacket *output_packet = av_packet_alloc();
     if (!output_packet) {
         elv_dbg("could not allocate memory for output packet");
@@ -1154,41 +1161,33 @@ transcode_audio(
 
         dump_frame("IN ", codec_context->frame_number, frame, debug_frame_level);
 
-        if (response >= 0) {
-            decoder_context->pts = packet->pts;
+        decoder_context->pts = packet->pts;
 
-            /* push the decoded frame into the filtergraph */
-            if (av_buffersrc_add_frame_flags(decoder_context->buffersrc_ctx, frame, AV_BUFFERSRC_FLAG_KEEP_REF) < 0) {
-                elv_err("Failure in feeding into audio filtergraph");
+        /* push the decoded frame into the filtergraph */
+        if (av_buffersrc_add_frame_flags(decoder_context->buffersrc_ctx, frame, AV_BUFFERSRC_FLAG_KEEP_REF) < 0) {
+            elv_err("Failure in feeding into audio filtergraph");
+            break;
+        }
+
+        /* pull filtered frames from the filtergraph */
+        while (1) {
+            ret = av_buffersink_get_frame(decoder_context->buffersink_ctx, filt_frame);
+            if (ret == AVERROR(EAGAIN) || ret == AVERROR_EOF) {
+                //elv_dbg("av_buffersink_get_frame() ret=EAGAIN");
                 break;
             }
 
-            /* pull filtered frames from the filtergraph */
-            while (1) {
-                ret = av_buffersink_get_frame(decoder_context->buffersink_ctx, filt_frame);
-                if (ret == AVERROR(EAGAIN) || ret == AVERROR_EOF) {
-                    //elv_dbg("av_buffersink_get_frame() ret=EAGAIN");
-                    break;
-                }
-
-                if (ret < 0) {
-                    elv_err("Failed to execute audio frame filter ret=%d", ret);
-                    return -1;
-                }
-
-                dump_frame("FILT ", codec_context->frame_number, filt_frame, debug_frame_level);
-
-                AVFrame *frame_to_encode = filt_frame;
-                int skip = should_skip_encoding(decoder_context, encoder_context, stream_index, p, filt_frame);
-
-                if (!skip) {
-                    encode_frame(decoder_context, encoder_context, frame_to_encode, stream_index, p, debug_frame_level);
-                }
-                av_frame_unref(filt_frame);
+            if (ret < 0) {
+                elv_err("Failed to execute audio frame filter ret=%d", ret);
+                return -1;
             }
 
-            av_frame_unref(frame);
+            dump_frame("FILT ", codec_context->frame_number, filt_frame, debug_frame_level);
+            encode_frame(decoder_context, encoder_context, filt_frame, stream_index, p, debug_frame_level);
+            av_frame_unref(filt_frame);
         }
+
+        av_frame_unref(frame);
     }
     return 0;
 }
@@ -1250,61 +1249,55 @@ transcode_audio_aac(
 
         dump_frame("IN ", codec_context->frame_number, frame, debug_frame_level);
 
-        if (response >= 0) {
-            decoder_context->pts = packet->pts;
-            /* Temporary storage for the converted input samples. */
-            uint8_t **converted_input_samples = NULL;
-            int input_frame_size = codec_context->frame_size > 0 ? codec_context->frame_size : frame->nb_samples;
+        decoder_context->pts = packet->pts;
+        /* Temporary storage for the converted input samples. */
+        uint8_t **converted_input_samples = NULL;
+        int input_frame_size = codec_context->frame_size > 0 ? codec_context->frame_size : frame->nb_samples;
 
-            if (init_converted_samples(&converted_input_samples, output_codec_context, input_frame_size)) {
-                elv_err("Failed to allocate audio samples");
-                return AVERROR_EXIT;
-            }
-
-            if (convert_samples((const uint8_t**)frame->extended_data, converted_input_samples,
-                            input_frame_size, resampler_context)) {
-                elv_err("Failed to convert audio samples");
-                return AVERROR_EXIT;
-            }
-
-            /* Store the new samples in the FIFO buffer. */
-            if (av_audio_fifo_write(decoder_context->fifo, (void **)converted_input_samples,
-                    input_frame_size) < input_frame_size) {
-                elv_err("Failed to write input frame to fifo frame_size=%d", input_frame_size);
-                return AVERROR_EXIT;
-            }
-
-            int output_frame_size = encoder_context->codec_context[stream_index]->frame_size;
-
-            while (av_audio_fifo_size(decoder_context->fifo) >= output_frame_size) {
-
-                /* PENDING(SSS) - reuse filt_frame instead of allocating each time here. Not freed */
-                init_output_frame(&filt_frame, encoder_context->codec_context[stream_index], output_frame_size);
-
-                /* Read as many samples from the FIFO buffer as required to fill the frame.
-                 * The samples are stored in the frame temporarily. */
-                if (av_audio_fifo_read(decoder_context->fifo, (void **)filt_frame->data, output_frame_size)
-                    < output_frame_size) {
-                    elv_err("Failed to read input samples from fifo frame_size=%d", output_frame_size);
-                    av_frame_unref(filt_frame);
-                    return AVERROR_EXIT;
-                }
-
-                /* When using FIFO frames no longer have PTS */
-                filt_frame->pts = decoder_context->audio_output_pts;
-                decoder_context->audio_output_pts += filt_frame->nb_samples;
-
-                dump_frame("FILT ", codec_context->frame_number, filt_frame, debug_frame_level);
-
-                int skip = should_skip_encoding(decoder_context, encoder_context, stream_index, p, filt_frame);
-                if (!skip) {
-                    encode_frame(decoder_context, encoder_context, filt_frame, stream_index, p, debug_frame_level);
-                }
-                av_frame_unref(filt_frame);
-            }
-
-            av_frame_unref(frame);
+        if (init_converted_samples(&converted_input_samples, output_codec_context, input_frame_size)) {
+            elv_err("Failed to allocate audio samples");
+            return AVERROR_EXIT;
         }
+
+        if (convert_samples((const uint8_t**)frame->extended_data, converted_input_samples,
+                            input_frame_size, resampler_context)) {
+            elv_err("Failed to convert audio samples");
+            return AVERROR_EXIT;
+        }
+
+        /* Store the new samples in the FIFO buffer. */
+        if (av_audio_fifo_write(decoder_context->fifo, (void **)converted_input_samples,
+                input_frame_size) < input_frame_size) {
+            elv_err("Failed to write input frame to fifo frame_size=%d", input_frame_size);
+            return AVERROR_EXIT;
+        }
+
+        int output_frame_size = encoder_context->codec_context[stream_index]->frame_size;
+
+        while (av_audio_fifo_size(decoder_context->fifo) >= output_frame_size) {
+
+            /* PENDING(SSS) - reuse filt_frame instead of allocating each time here. Not freed */
+            init_output_frame(&filt_frame, encoder_context->codec_context[stream_index], output_frame_size);
+
+            /* Read as many samples from the FIFO buffer as required to fill the frame.
+             * The samples are stored in the frame temporarily. */
+            if (av_audio_fifo_read(decoder_context->fifo, (void **)filt_frame->data, output_frame_size)
+                    < output_frame_size) {
+                elv_err("Failed to read input samples from fifo frame_size=%d", output_frame_size);
+                av_frame_unref(filt_frame);
+                return AVERROR_EXIT;
+            }
+
+            /* When using FIFO frames no longer have PTS */
+            filt_frame->pts = decoder_context->audio_output_pts;
+            decoder_context->audio_output_pts += filt_frame->nb_samples;
+
+            dump_frame("FILT ", codec_context->frame_number, filt_frame, debug_frame_level);
+            encode_frame(decoder_context, encoder_context, filt_frame, stream_index, p, debug_frame_level);
+            av_frame_unref(filt_frame);
+        }
+
+        av_frame_unref(frame);
     }
     return 0;
 }
@@ -1395,63 +1388,56 @@ transcode_video(
             elv_log("INSTRMNT avcodec_receive_frame time=%"PRId64, since);
         }
 
-        if (response >= 0) { // PENDING(SSS) this is always true as we return for response < 0 above
-            decoder_context->pts = packet->pts;
+        decoder_context->pts = packet->pts;
 
-            /* push the decoded frame into the filtergraph */
+        /* push the decoded frame into the filtergraph */
+        elv_get_time(&tv);
+        if (av_buffersrc_add_frame_flags(decoder_context->buffersrc_ctx, frame, AV_BUFFERSRC_FLAG_KEEP_REF) < 0) {
+            elv_err("Failure in feeding the filtergraph");
+            break;
+        }
+        if (do_instrument) {
+            elv_since(&tv, &since);
+            elv_log("INSTRMNT av_buffersrc_add_frame_flags time=%"PRId64, since);
+        }
+
+        /* pull filtered frames from the filtergraph */
+        while (1) {
             elv_get_time(&tv);
-            if (av_buffersrc_add_frame_flags(decoder_context->buffersrc_ctx, frame, AV_BUFFERSRC_FLAG_KEEP_REF) < 0) {
-                elv_err("Failure in feeding the filtergraph");
+            ret = av_buffersink_get_frame(decoder_context->buffersink_ctx, filt_frame);
+            if (ret == AVERROR(EAGAIN) || ret == AVERROR_EOF) {
+                //elv_dbg("av_buffersink_get_frame() ret=EAGAIN");
                 break;
             }
+
+            if (ret < 0) {
+                elv_err("Failed to execute frame filter ret=%d", ret);
+                return -1;
+            }
+
             if (do_instrument) {
                 elv_since(&tv, &since);
-                elv_log("INSTRMNT av_buffersrc_add_frame_flags time=%"PRId64, since);
+                elv_log("INSTRMNT av_buffersink_get_frame time=%"PRId64, since);
             }
-
-            /* pull filtered frames from the filtergraph */
-            while (1) {
-                elv_get_time(&tv);
-                ret = av_buffersink_get_frame(decoder_context->buffersink_ctx, filt_frame);
-                if (ret == AVERROR(EAGAIN) || ret == AVERROR_EOF) {
-                    //elv_dbg("av_buffersink_get_frame() ret=EAGAIN");
-                    break;
-                }
-
-                if (ret < 0) {
-                    elv_err("Failed to execute frame filter ret=%d", ret);
-                    return -1;
-                }
-
-                if (do_instrument) {
-                    elv_since(&tv, &since);
-                    elv_log("INSTRMNT av_buffersink_get_frame time=%"PRId64, since);
-                }
 
 #if 0
-                // TEST ONLY - save gray scale frame
-                save_gray_frame(filt_frame->data[0], filt_frame->linesize[0], filt_frame->width, filt_frame->height,
-                "frame-filt", codec_context->frame_number);
+            // TEST ONLY - save gray scale frame
+            save_gray_frame(filt_frame->data[0], filt_frame->linesize[0], filt_frame->width, filt_frame->height,
+            "frame-filt", codec_context->frame_number);
 #endif
 
-                dump_frame("FILT ", codec_context->frame_number, filt_frame, debug_frame_level);
+            dump_frame("FILT ", codec_context->frame_number, filt_frame, debug_frame_level);
 
-                AVFrame *frame_to_encode = filt_frame;
-                int skip = should_skip_encoding(decoder_context, encoder_context, stream_index, p, filt_frame);
-
-                if (!skip) {
-                    elv_get_time(&tv);
-                    encode_frame(decoder_context, encoder_context, frame_to_encode, stream_index, p, debug_frame_level);
-                    if (do_instrument) {
-                        elv_since(&tv, &since);
-                        elv_log("INSTRMNT encode_frame time=%"PRId64, since);
-                    }
-                }
-
-                av_frame_unref(filt_frame);
+            elv_get_time(&tv);
+            encode_frame(decoder_context, encoder_context, filt_frame, stream_index, p, debug_frame_level);
+            if (do_instrument) {
+                elv_since(&tv, &since);
+                elv_log("INSTRMNT encode_frame time=%"PRId64, since);
             }
-            av_frame_unref(frame);
+
+            av_frame_unref(filt_frame);
         }
+        av_frame_unref(frame);
     }
     return 0;
 }
@@ -1505,13 +1491,7 @@ flush_decoder(
                 }
 
                 dump_frame("FILT ", codec_context->frame_number, filt_frame, debug_frame_level);
-
-                AVFrame *frame_to_encode = filt_frame;
-                int skip = should_skip_encoding(decoder_context, encoder_context, stream_index, p, filt_frame);
-
-                if (!skip) {
-                    encode_frame(decoder_context, encoder_context, frame_to_encode, stream_index, p, debug_frame_level);
-                }
+                encode_frame(decoder_context, encoder_context, filt_frame, stream_index, p, debug_frame_level);
             }
         }
         av_frame_unref(filt_frame);

@@ -519,7 +519,6 @@ usage(
         "\t-tx-type :           (optional) transcoding type. Default is \"all\", can be \"video\", \"audio\", or \"all\" \n"
         "\t-seg-duration-ts :   (mandatory if format is not \"segment\") segment duration time base (positive integer).\n"
         "\t-seg-duration :      (mandatory if format is \"segment\") segment duration secs (positive integer). It is used for making mp4 segments.\n"
-        "\t-seg-duration-fr :   (mandatory if format is not \"segment\") segment duration frame (positive integer).\n"
         "\t-f :                 (mandatory) input filename for transcoding. Output goes to directory ./O\n",
         bad_flag, progname);
     exit(status);

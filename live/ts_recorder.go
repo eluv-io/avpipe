@@ -123,7 +123,7 @@ func (tsr *TsReader) serveOneConnection(w io.Writer) (err error) {
 	// TODO: Make if a config param (RM)
 	conn.SetReadBuffer(16 * 1024 * 1024)
 
-	log.Info("ts_recorder: server: accepted")
+	log.Info("ts_recorder server accepted", "addr", tsr.addr)
 
 	go func(tsr *TsReader) {
 		if err := readUdp(conn, w); err != nil {
