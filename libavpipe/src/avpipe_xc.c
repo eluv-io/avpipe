@@ -886,7 +886,7 @@ should_skip_encoding(
     AVFrame *frame)
 {
     if (!frame)
-        return 1;
+        return 0;
 
     /* For MPEG-TS - skip a fixed duration at the beginning to sync audio and vide
      * Audio starts encoding right away but video will drop frames up until the first i-frame.
