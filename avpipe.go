@@ -132,6 +132,7 @@ type TxParams struct {
 type AVMediaType int
 
 const (
+	AVMEDIA_TYPE_UNKNOWN    = -1
 	AVMEDIA_TYPE_VIDEO      = 0
 	AVMEDIA_TYPE_AUDIO      = 1
 	AVMEDIA_TYPE_DATA       = 2 ///< Opaque data information usually continuous
@@ -141,6 +142,7 @@ const (
 )
 
 var AVMediaTypeNames = map[AVMediaType]string{
+	AVMEDIA_TYPE_UNKNOWN:    "unknown",
 	AVMEDIA_TYPE_VIDEO:      "video",
 	AVMEDIA_TYPE_AUDIO:      "audio",
 	AVMEDIA_TYPE_DATA:       "data",
@@ -737,4 +739,24 @@ func Probe(url string, seekable bool) (*ProbeInfo, error) {
 	C.free(unsafe.Pointer(cprobe))
 
 	return probeInfo, nil
+}
+
+// StreamInfoAsArray builds an array where each stream is at its corresponsing index
+// by filling in non-existing index positions with codec type "unknown"
+func StreamInfoAsArray(s []StreamInfo) []StreamInfo {
+	maxIdx := 0
+	for _, v := range s {
+		if v.StreamIndex > maxIdx {
+			maxIdx = v.StreamIndex
+		}
+	}
+	a := make([]StreamInfo, maxIdx+1)
+	for i, _ := range a {
+		a[i].StreamIndex = i
+		a[i].CodecType = AVMediaTypeNames[AVMediaType(AVMEDIA_TYPE_UNKNOWN)]
+	}
+	for _, v := range s {
+		a[v.StreamIndex] = v
+	}
+	return a
 }

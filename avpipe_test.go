@@ -662,6 +662,11 @@ func TestProbe(t *testing.T) {
 	assert.Equal(t, 0, probe.StreamInfo[1].Width)
 	assert.Equal(t, 0, probe.StreamInfo[1].Height)
 	assert.Equal(t, int64(44100), probe.StreamInfo[1].TimeBase.Denom().Int64())
+
+	// Test StreamInfoAsArray
+	a := avpipe.StreamInfoAsArray(probe.StreamInfo)
+	assert.Equal(t, "h264", a[0].CodecName)
+	assert.Equal(t, "aac", a[1].CodecName)
 }
 
 func setupLogging() {
