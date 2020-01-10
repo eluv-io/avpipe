@@ -63,13 +63,12 @@ func TestUdpToMp4(t *testing.T) {
 	}()
 
 	avpipe.InitIOHandler(&inputOpener{}, &outputOpener{})
-	var lastPts int64
 	tlog.Info("Tx start", "videoParams", fmt.Sprintf("%+v", *videoParamsTs))
-	errTx := avpipe.Tx(videoParamsTs, url, true, &lastPts)
+	errTx := avpipe.Tx(videoParamsTs, url, true)
 	if errTx != 0 {
 		t.Error("Tx failed", "err", errTx)
 	}
-	tlog.Info("Tx done", "err", errTx, "last pts", lastPts)
+	tlog.Info("Tx done", "err", errTx)
 }
 
 /*
@@ -116,7 +115,7 @@ func TestUdpToMp4V2(t *testing.T) {
 		avpipe.InitIOHandler(&inputOpener{}, &outputOpener{})
 
 		tlog.Info("Tx UDP Audio stream start", "params", fmt.Sprintf("%+v", *audioParamsTs))
-		errTx := avpipe.Tx(audioParamsTs, url, true, nil)
+		errTx := avpipe.Tx(audioParamsTs, url, true)
 		tlog.Info("Tx UDP Audio stream done", "err", errTx, "last pts", nil)
 
 		if errTx != 0 {
@@ -149,7 +148,7 @@ func TestUdpToMp4V2(t *testing.T) {
 		avpipe.InitIOHandler(&inputOpener{}, &outputOpener{})
 
 		tlog.Info("Tx UDP Video stream start", "params", fmt.Sprintf("%+v", *videoParamsTs))
-		errTx := avpipe.Tx(videoParamsTs, url, true, nil)
+		errTx := avpipe.Tx(videoParamsTs, url, true)
 		tlog.Info("Tx UDP Video stream done", "err", errTx, "last pts", nil)
 
 		if errTx != 0 {
@@ -168,15 +167,14 @@ func TestUdpToMp4V2(t *testing.T) {
 
 	// Now create audio dash segments out of audio mezzanines
 	go func() {
-		var NextSkipOverPts int64
 
 		for i, url := range audioMezFiles {
 			tlog.Info("AVL Audio Dash Tx start", "audioParams", fmt.Sprintf("%+v", *audioParamsTs), "url", url)
 			reqCtx := &testCtx{url: url}
 			putReqCtxByURL(url, reqCtx)
 			audioParamsTs.StartSegmentStr = fmt.Sprintf("%d", i*15+1)
-			errTx := avpipe.Tx(audioParamsTs, url, true, &NextSkipOverPts)
-			tlog.Info("AVL Audio Dash Tx done", "err", errTx, "last pts", NextSkipOverPts)
+			errTx := avpipe.Tx(audioParamsTs, url, true)
+			tlog.Info("AVL Audio Dash Tx done", "err", errTx)
 
 			if errTx != 0 {
 				t.Error("AVL Audio Dash transcoding failed", "errTx", errTx, "url", url)
@@ -195,15 +193,14 @@ func TestUdpToMp4V2(t *testing.T) {
 
 	// Now create audio dash segments out of audio mezzanines
 	go func() {
-		var NextSkipOverPts int64
 
 		for i, url := range videoMezFiles {
 			tlog.Info("AVL Video Dash Tx start", "videoParams", fmt.Sprintf("%+v", *videoParamsTs), "url", url)
 			reqCtx := &testCtx{url: url}
 			putReqCtxByURL(url, reqCtx)
 			audioParamsTs.StartSegmentStr = fmt.Sprintf("%d", i*15+1)
-			errTx := avpipe.Tx(videoParamsTs, url, true, &NextSkipOverPts)
-			tlog.Info("AVL Video Dash Tx done", "err", errTx, "last pts", NextSkipOverPts)
+			errTx := avpipe.Tx(videoParamsTs, url, true)
+			tlog.Info("AVL Video Dash Tx done", "err", errTx)
 
 			if errTx != 0 {
 				t.Error("AVL Video Dash transcoding failed", "errTx", errTx, "url", url)

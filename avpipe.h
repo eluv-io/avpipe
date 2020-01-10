@@ -2,11 +2,31 @@
 
 #include "avpipe_xc.h"
 
-int
-tx(txparams_t *params, char *filename, int debug_frame_level, int64_t *last_input_pts);
+int32_t
+tx_init(
+    txparams_t *params,
+    char *filename,
+    int debug_frame_level);
 
 int
-probe(char *filename, int seekable, txprobe_t **txprobe);
+tx_run(
+    int32_t handle);
+
+int
+tx_cancel(
+    int32_t handle);
+
+int
+tx(
+    txparams_t *params,
+    char *filename,
+    int debug_frame_level);
+
+int
+probe(
+    char *filename,
+    int seekable,
+    txprobe_t **txprobe);
 
 void
 set_loggers();

@@ -3,15 +3,15 @@ package avpipe_test
 import (
 	"encoding/json"
 	"fmt"
+	"github.com/qluvio/avpipe"
+	log "github.com/qluvio/content-fabric/log"
+	"github.com/stretchr/testify/assert"
 	"io"
 	"math/big"
 	"os"
 	"path/filepath"
 	"testing"
-
-	"github.com/qluvio/avpipe"
-	log "github.com/qluvio/content-fabric/log"
-	"github.com/stretchr/testify/assert"
+	"time"
 )
 
 func removeDirContents(dir string) error {
@@ -95,6 +95,15 @@ func (i *fileInput) Size() int64 {
 		return -1
 	}
 	return fi.Size()
+}
+
+func (i *fileInput) Stat(statType avpipe.AVStatType, statArgs interface{}) error {
+	switch statType {
+	case avpipe.AV_IN_STAT_BYTES_READ:
+		readOffset := statArgs.(*uint64)
+		log.Info("AVP TEST", "STAT read offset", *readOffset)
+	}
+	return nil
 }
 
 //Implement AVPipeOutputOpener
@@ -215,9 +224,29 @@ func (o *fileOutput) Close() error {
 	return err
 }
 
+func (o fileOutput) Stat(statType avpipe.AVStatType, statArgs interface{}) error {
+	switch statType {
+	case avpipe.AV_OUT_STAT_BYTES_WRITTEN:
+		writeOffset := statArgs.(*uint64)
+		log.Info("AVP TEST", "STAT, write offset", *writeOffset)
+	case avpipe.AV_OUT_STAT_DECODING_START_PTS:
+		startPTS := statArgs.(*uint64)
+		log.Info("AVP TEST", "STAT, startPTS", *startPTS)
+	case avpipe.AV_OUT_STAT_ENCODING_END_PTS:
+		endPTS := statArgs.(*uint64)
+		log.Info("AVP TEST", "STAT, endPTS", *endPTS)
+
+	}
+
+	return nil
+}
+
 func TestSingleABRTranscode(t *testing.T) {
 	filename := "./media/ErsteChristmas.mp4"
 	outputDir := "O"
+
+	setupLogging()
+	log.Info("STARTING TestSingleABRTranscode")
 
 	params := &avpipe.TxParams{
 		BypassTranscoding: false,
@@ -244,8 +273,7 @@ func TestSingleABRTranscode(t *testing.T) {
 
 	avpipe.InitIOHandler(&fileInputOpener{url: filename}, &fileOutputOpener{dir: outputDir})
 
-	var lastInputPts int64
-	rc := avpipe.Tx(params, filename, true, &lastInputPts)
+	rc := avpipe.Tx(params, filename, true)
 	if rc != 0 {
 		t.Fail()
 	}
@@ -253,12 +281,120 @@ func TestSingleABRTranscode(t *testing.T) {
 	params.TxType = avpipe.TxAudio
 	params.Ecodec = "aac"
 	params.AudioIndex = -1
-	lastInputPts = 0
-	rc = avpipe.Tx(params, filename, false, &lastInputPts)
+	rc = avpipe.Tx(params, filename, false)
 	if rc != 0 {
 		t.Fail()
 	}
 
+}
+
+// This test uses the following new APIs
+// - to obtain a handle of running session:
+//   - TxInit()
+// - to run the tx session
+//   - TxRun()
+func TestV2SingleABRTranscode(t *testing.T) {
+	filename := "./media/ErsteChristmas.mp4"
+	outputDir := "O"
+
+	setupLogging()
+	log.Info("STARTING TestV2SingleABRTranscode")
+
+	params := &avpipe.TxParams{
+		BypassTranscoding: false,
+		Format:            "hls",
+		StartTimeTs:       0,
+		DurationTs:        -1,
+		StartSegmentStr:   "1",
+		VideoBitrate:      2560000,
+		AudioBitrate:      64000,
+		SampleRate:        44100,
+		CrfStr:            "23",
+		SegDurationTs:     1001 * 60,
+		Ecodec:            "libx264",
+		EncHeight:         720,
+		EncWidth:          1280,
+		TxType:            avpipe.TxVideo,
+	}
+
+	// Create output directory if it doesn't exist
+	err := setupOutDir(outputDir)
+	if err != nil {
+		t.Fail()
+	}
+
+	avpipe.InitIOHandler(&fileInputOpener{url: filename}, &fileOutputOpener{dir: outputDir})
+
+	handle, err := avpipe.TxInit(params, filename, true)
+	assert.NoError(t, err)
+	assert.Equal(t, true, handle > 0)
+	err = avpipe.TxRun(handle)
+	assert.NoError(t, err)
+
+	params.TxType = avpipe.TxAudio
+	params.Ecodec = "aac"
+	params.AudioIndex = 1
+	handle, err = avpipe.TxInit(params, filename, true)
+	assert.NoError(t, err)
+	assert.Equal(t, true, handle > 0)
+	err = avpipe.TxRun(handle)
+	assert.NoError(t, err)
+}
+
+func TestV2CancellingSingleABRTranscode(t *testing.T) {
+	filename := "./media/ErsteChristmas.mp4"
+	outputDir := "O"
+
+	setupLogging()
+	log.Info("STARTING TestV2CancellingSingleABRTranscode")
+
+	params := &avpipe.TxParams{
+		BypassTranscoding: false,
+		Format:            "hls",
+		StartTimeTs:       0,
+		DurationTs:        -1,
+		StartSegmentStr:   "1",
+		VideoBitrate:      2560000,
+		AudioBitrate:      64000,
+		SampleRate:        44100,
+		CrfStr:            "23",
+		SegDurationTs:     1001 * 60,
+		Ecodec:            "libx264",
+		EncHeight:         720,
+		EncWidth:          1280,
+		TxType:            avpipe.TxVideo,
+	}
+
+	// Create output directory if it doesn't exist
+	err := setupOutDir(outputDir)
+	if err != nil {
+		t.Fail()
+	}
+
+	avpipe.InitIOHandler(&fileInputOpener{url: filename}, &fileOutputOpener{dir: outputDir})
+
+	handle, err := avpipe.TxInit(params, filename, true)
+	assert.NoError(t, err)
+	assert.Equal(t, true, handle > 0)
+	go func(handle int32) {
+		// Wait for 3 sec the transcoding starts, then cancel it.
+		time.Sleep(3 * time.Second)
+		err := avpipe.TxCancel(handle)
+		assert.NoError(t, err)
+	}(handle)
+	err = avpipe.TxRun(handle)
+	assert.Error(t, err)
+
+	params.TxType = avpipe.TxAudio
+	params.Ecodec = "aac"
+	params.AudioIndex = 1
+	handle, err = avpipe.TxInit(params, filename, true)
+	assert.NoError(t, err)
+	assert.Equal(t, true, handle > 0)
+	err = avpipe.TxCancel(handle)
+	assert.NoError(t, err)
+	err = avpipe.TxRun(handle)
+	assert.Error(t, err)
 }
 
 func doTranscode(t *testing.T, p *avpipe.TxParams, nThreads int, filename string, reportFailure string) {
@@ -274,8 +410,7 @@ func doTranscode(t *testing.T, p *avpipe.TxParams, nThreads int, filename string
 	done := make(chan struct{})
 	for i := 0; i < nThreads; i++ {
 		go func(params *avpipe.TxParams, filename string) {
-			var lastInputPts int64
-			err := avpipe.Tx(params, filename, false, &lastInputPts)
+			err := avpipe.Tx(params, filename, false)
 			done <- struct{}{} // Signal the main goroutine
 			if err != 0 && reportFailure == "" {
 				t.Fail()
@@ -293,6 +428,9 @@ func doTranscode(t *testing.T, p *avpipe.TxParams, nThreads int, filename string
 func TestNvidiaABRTranscode(t *testing.T) {
 	nThreads := 10
 	filename := "./media/rocky.mp4"
+
+	setupLogging()
+	log.Info("STARTING TestNvidiaABRTranscode")
 
 	params := &avpipe.TxParams{
 		Format:          "hls",
@@ -316,6 +454,9 @@ func TestNvidiaABRTranscode(t *testing.T) {
 func TestConcurrentABRTranscode(t *testing.T) {
 	nThreads := 10
 	filename := "./media/rocky.mp4"
+
+	setupLogging()
+	log.Info("STARTING TestConcurrentABRTranscode")
 
 	params := &avpipe.TxParams{
 		Format:          "hls",
@@ -341,6 +482,7 @@ func TestAAC2AACMezMaker(t *testing.T) {
 	outputDir := "AAC2AAC"
 
 	setupLogging()
+	log.Info("STARTING TestAAC2AACMezMaker")
 
 	params := &avpipe.TxParams{
 		BypassTranscoding: false,
@@ -366,8 +508,7 @@ func TestAAC2AACMezMaker(t *testing.T) {
 
 	avpipe.InitIOHandler(&fileInputOpener{url: filename}, &fileOutputOpener{dir: outputDir})
 
-	lastInputPts := int64(0)
-	avpipe.Tx(params, filename, false, &lastInputPts)
+	avpipe.Tx(params, filename, false)
 
 	mezFile := fmt.Sprintf("%s/segment-1.mp4", outputDir)
 	// Now probe the generated files
@@ -392,6 +533,7 @@ func TestAC3TsAC3MezMaker(t *testing.T) {
 	outputDir := "AC3TsAC3Mez"
 
 	setupLogging()
+	log.Info("STARTING TestAC3TsAC3MezMaker")
 
 	params := &avpipe.TxParams{
 		BypassTranscoding: false,
@@ -418,28 +560,19 @@ func TestAC3TsAC3MezMaker(t *testing.T) {
 
 	avpipe.InitIOHandler(&fileInputOpener{url: filename}, &fileOutputOpener{dir: outputDir})
 
-	lastInputPts := int64(0)
-	rc := avpipe.Tx(params, filename, false, &lastInputPts)
-	if rc != 0 {
-		t.Fail()
-	}
+	rc := avpipe.Tx(params, filename, false)
+	assert.Equal(t, 0, rc)
 
 	mezFile := fmt.Sprintf("%s/segment-1.mp4", outputDir)
 	// Now probe the generated files
 	probeInfo, err := avpipe.Probe(mezFile, true)
-	if err != nil {
-		t.Error(err)
-	}
+	assert.NoError(t, err)
 
 	timebase := *probeInfo.StreamInfo[0].TimeBase.Denom()
-	if timebase.Cmp(big.NewInt(48000)) != 0 {
-		t.Error("Unexpected TimeBase", probeInfo.StreamInfo[0].TimeBase)
-	}
+	assert.Equal(t, true, timebase.Cmp(big.NewInt(48000)) == 0)
 
 	sampleRate := probeInfo.StreamInfo[0].SampleRate
-	if sampleRate != 48000 {
-		t.Error("Unexpected TimeBase", probeInfo.StreamInfo[0].TimeBase)
-	}
+	assert.Equal(t, 48000, sampleRate)
 }
 
 func TestAC3TsAACMezMaker(t *testing.T) {
@@ -447,6 +580,7 @@ func TestAC3TsAACMezMaker(t *testing.T) {
 	outputDir := "AC3TsACCMez"
 
 	setupLogging()
+	log.Info("STARTING TestAC3TsAACMezMaker")
 
 	params := &avpipe.TxParams{
 		BypassTranscoding: false,
@@ -473,8 +607,7 @@ func TestAC3TsAACMezMaker(t *testing.T) {
 
 	avpipe.InitIOHandler(&fileInputOpener{url: filename}, &fileOutputOpener{dir: outputDir})
 
-	lastInputPts := int64(0)
-	rc := avpipe.Tx(params, filename, false, &lastInputPts)
+	rc := avpipe.Tx(params, filename, false)
 	if rc != 0 {
 		t.Fail()
 	}
@@ -503,6 +636,7 @@ func TestMP2TsAACMezMaker(t *testing.T) {
 	outputDir := "MP2TsACCMez"
 
 	setupLogging()
+	log.Info("STARTING TestMP2TsAACMezMaker")
 
 	params := &avpipe.TxParams{
 		BypassTranscoding: false,
@@ -529,8 +663,7 @@ func TestMP2TsAACMezMaker(t *testing.T) {
 
 	avpipe.InitIOHandler(&fileInputOpener{url: filename}, &fileOutputOpener{dir: outputDir})
 
-	lastInputPts := int64(0)
-	rc := avpipe.Tx(params, filename, false, &lastInputPts)
+	rc := avpipe.Tx(params, filename, false)
 	if rc != 0 {
 		t.Fail()
 	}
@@ -558,6 +691,7 @@ func TestDownmix2AACMezMaker(t *testing.T) {
 	outputDir := "Downmix2ACCMez"
 
 	setupLogging()
+	log.Info("STARTING TestDownmix2AACMezMaker")
 
 	params := &avpipe.TxParams{
 		BypassTranscoding: false,
@@ -584,8 +718,7 @@ func TestDownmix2AACMezMaker(t *testing.T) {
 
 	avpipe.InitIOHandler(&fileInputOpener{url: filename}, &fileOutputOpener{dir: outputDir})
 
-	lastInputPts := int64(0)
-	rc := avpipe.Tx(params, filename, false, &lastInputPts)
+	rc := avpipe.Tx(params, filename, false)
 	if rc != 0 {
 		t.Fail()
 	}
@@ -639,6 +772,8 @@ func TestUnmarshalParams(t *testing.T) {
 
 func TestProbe(t *testing.T) {
 	filename := "./media/ErsteChristmas.mp4"
+
+	setupLogging()
 
 	avpipe.InitIOHandler(&fileInputOpener{url: filename}, &concurrentOutputOpener{dir: "O"})
 	probe, err := avpipe.Probe(filename, true)

@@ -24,6 +24,7 @@
 #include <sys/uio.h>
 #include <unistd.h>
 #include <stdlib.h>
+#include <pthread.h>
 
 #define AUDIO_BUF_SIZE  (128*1024)
 #define INPUT_IS_SEEKABLE 0
@@ -615,7 +616,7 @@ prepare_audio_encoder(
 
     if (decoder_context->codec[index]->sample_fmts && params->bypass_transcoding)
         encoder_context->codec_context[index]->sample_fmt = decoder_context->codec[index]->sample_fmts[0];
-    else if (encoder_context->codec[index]->sample_fmts[0])
+    else if (encoder_context->codec[index]->sample_fmts && encoder_context->codec[index]->sample_fmts[0])
         encoder_context->codec_context[index]->sample_fmt = encoder_context->codec[index]->sample_fmts[0];
     else
         encoder_context->codec_context[index]->sample_fmt = AV_SAMPLE_FMT_FLTP;
@@ -800,6 +801,7 @@ prepare_encoder(
     out_tracker[0].video_stream_index = out_tracker[1].video_stream_index = decoder_context->video_stream_index;
     out_tracker[0].audio_stream_index = out_tracker[1].audio_stream_index = decoder_context->audio_stream_index;
     out_tracker[0].seg_index = out_tracker[1].seg_index = atoi(params->start_segment_str);
+    out_tracker[0].encoder_ctx = out_tracker[1].encoder_ctx = encoder_context;
     encoder_context->format_context->avpipe_opaque = out_tracker;
 
     dump_encoder(encoder_context);
@@ -1513,6 +1515,9 @@ should_stop_decoding(
 {
     int input_packet_rel_pts = 0;
 
+    if (decoder_context->cancelled)
+        return 1;
+
     (*frames_read) ++;
 
     if (input_packet->stream_index != decoder_context->video_stream_index &&
@@ -1521,18 +1526,35 @@ should_stop_decoding(
 
     if (input_packet->stream_index == decoder_context->video_stream_index &&
         (params->tx_type & tx_video)) {
-        if (decoder_context->video_input_start_pts == -1)
-                decoder_context->video_input_start_pts = input_packet->pts;
+        if (decoder_context->video_input_start_pts == -1) {
+            out_tracker_t *out_tracker = (out_tracker_t *) encoder_context->format_context->avpipe_opaque;
+            avpipe_io_handler_t *out_handlers = out_tracker->out_handlers;
+            ioctx_t *outctx = out_tracker->last_outctx;
+            decoder_context->video_input_start_pts = input_packet->pts;
+            if (outctx) {
+                outctx->decoding_start_pts = input_packet->pts;
+                out_handlers->avpipe_stater(outctx, out_stat_decoding_start_pts);
+            }
+        }
 
         input_packet_rel_pts = input_packet->pts - decoder_context->video_input_start_pts;
     } else if (input_packet->stream_index == decoder_context->audio_stream_index &&
         (params->tx_type & tx_audio)) {
-        if (decoder_context->audio_input_start_pts == -1)
-                decoder_context->audio_input_start_pts = input_packet->pts;
+        if (decoder_context->audio_input_start_pts == -1) {
+            out_tracker_t *out_tracker = (out_tracker_t *) encoder_context->format_context->avpipe_opaque;
+            avpipe_io_handler_t *out_handlers = out_tracker->out_handlers;
+            ioctx_t *outctx = out_tracker->last_outctx;
+            decoder_context->audio_input_start_pts = input_packet->pts;
+            if (outctx) {
+                outctx->decoding_start_pts = input_packet->pts;
+                out_handlers->avpipe_stater(outctx, out_stat_decoding_start_pts);
+            }
+        }
 
         input_packet_rel_pts = input_packet->pts - decoder_context->audio_input_start_pts;
     }
 
+    /* TODO: the following code path is not functional, double check and test (-RM) */
     if (params->duration_ts != -1 &&
         input_packet_rel_pts >= params->start_time_ts + params->duration_ts) {
 
@@ -1540,11 +1562,11 @@ should_stop_decoding(
         elv_dbg("DURATION OVER param start_time=%"PRId64" duration=%"PRId64" pkt pts=%"PRId64" rel_pts=%"PRId64" "
                 "frames_read=%d past_duration=%d",
                 params->start_time_ts, params->duration_ts, input_packet->pts, input_packet_rel_pts,
-                frames_read, frames_read_past_duration);
+                *frames_read, *frames_read_past_duration);
         /* Allow decoding past specified duration to accommodate reordered packets */
         if (*frames_read_past_duration > frames_allowed_past_duration) {
             elv_dbg("frames_read_past_duration=%d, frames_allowed_past_duration=%d",
-                        frames_read_past_duration, frames_allowed_past_duration);
+                        *frames_read_past_duration, frames_allowed_past_duration);
             return 1;
         }
     }
@@ -1557,8 +1579,7 @@ int
 avpipe_tx(
     txctx_t *txctx,
     int do_instrument,
-    int debug_frame_level,
-    int64_t *last_input_pts)
+    int debug_frame_level)
 {
     /* Set scale filter */
     char filter_str[128];
@@ -1775,7 +1796,13 @@ avpipe_tx(
         encoder_context->input_last_pts_sent_encode,
         encoder_context->input_last_pts_encoded);
 
-    *last_input_pts = encoder_context->input_last_pts_sent_encode;
+    decoder_context->stopped = 1;
+    encoder_context->stopped = 1;
+
+    if (decoder_context->cancelled) {
+        elv_err("transcoding session cancelled, handle=%d", txctx->handle);
+        return -1;
+    }
 
     return 0;
 }
@@ -2019,19 +2046,23 @@ avpipe_init(
     avpipe_io_handler_t *in_handlers,
     ioctx_t *inctx,
     avpipe_io_handler_t *out_handlers,
-    txparams_t *params)
+    txparams_t *p)
 {
     txctx_t *p_txctx = (txctx_t *) calloc(1, sizeof(txctx_t));
+    txparams_t *params;
 
     if (!txctx) {
         elv_err("Trancoding context is NULL");
         goto avpipe_init_failed;
     }
 
-    if (!params) {
+    if (!p) {
         elv_err("Parameters are not set");
         goto avpipe_init_failed;
     }
+
+    params = (txparams_t *) calloc(1, sizeof(txparams_t));
+    *params = *p;
 
     if (!params->format ||
         (strcmp(params->format, "dash") &&
@@ -2112,6 +2143,8 @@ avpipe_init(
 avpipe_init_failed:
     if (txctx)
         *txctx = NULL;
+    if (p_txctx)
+        free(p_txctx->params);
     free(p_txctx);
     return -1;
 }
@@ -2165,6 +2198,8 @@ avpipe_fini(
         }
     }
 
+    free((*txctx)->inctx);
+    free((*txctx)->params);
     free(*txctx);
     *txctx = NULL;
 

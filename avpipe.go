@@ -171,6 +171,15 @@ var AVFieldOrderNames = map[AVFieldOrder]string{
 	AV_FIELD_BT:          "bt",
 }
 
+type AVStatType int
+
+const (
+	AV_IN_STAT_BYTES_READ          = 1
+	AV_OUT_STAT_BYTES_WRITTEN      = 2
+	AV_OUT_STAT_DECODING_START_PTS = 3
+	AV_OUT_STAT_ENCODING_END_PTS   = 4
+)
+
 type StreamInfo struct {
 	StreamIndex        int      `json:"stream_index"`
 	CodecType          string   `json:"codec_type"`
@@ -212,9 +221,11 @@ type IOHandler interface {
 	InReader(buf []byte) (int, error)
 	InSeeker(offset C.int64_t, whence C.int) error
 	InCloser() error
+	InStat(avp_stat C.avp_stat_t, stat_args *C.void) error
 	OutWriter(fd C.int, buf []byte) (int, error)
 	OutSeeker(fd C.int, offset C.int64_t, whence C.int) (int64, error)
 	OutCloser(fd C.int) error
+	OutStat(avp_stat C.avp_stat_t, stat_args *C.void) error
 }
 
 type InputOpener interface {
@@ -236,6 +247,9 @@ type InputHandler interface {
 
 	// Returns the size of input, if the size is not known returns 0 or -1.
 	Size() int64
+
+	// Reports some stats
+	Stat(statType AVStatType, statArgs interface{}) error
 }
 
 type OutputOpener interface {
@@ -253,6 +267,9 @@ type OutputHandler interface {
 
 	// Closes the output.
 	Close() error
+
+	// Reports some stats
+	Stat(statType AVStatType, statArgs interface{}) error
 }
 
 // Implement IOHandler
@@ -264,24 +281,56 @@ type ioHandler struct {
 
 // Global table of handlers
 var gHandlers map[int64]*ioHandler = make(map[int64]*ioHandler)
+var gURLInputOpeners map[string]InputOpener = make(map[string]InputOpener)    // Keeps InputOpener for specific URL
+var gURLOutputOpeners map[string]OutputOpener = make(map[string]OutputOpener) // Keeps OutputOpener for specific URL
 var gHandleNum int64
 var gFd int64
 var gMutex sync.Mutex
 var gInputOpener InputOpener
 var gOutputOpener OutputOpener
 
+// This is used to set global input/output opener for avpipe
+// If there is no specific input/output opener for a URL, the global
+// input/output opener will be used.
 func InitIOHandler(inputOpener InputOpener, outputOpener OutputOpener) {
 	gInputOpener = inputOpener
 	gOutputOpener = outputOpener
 }
 
+// This is used to set input/output opener specific to a URL.
+// The input/output opener set by this function, is only valid for the URL and will be unset after
+// Tx() or Probe() is complete.
+func InitUrlIOHandler(url string, inputOpener InputOpener, outputOpener OutputOpener) {
+	if inputOpener != nil {
+		gMutex.Lock()
+		gURLInputOpeners[url] = inputOpener
+		gMutex.Unlock()
+	}
+
+	if outputOpener != nil {
+		gMutex.Lock()
+		gURLOutputOpeners[url] = outputOpener
+		gMutex.Unlock()
+	}
+}
+
 //export NewIOHandler
 func NewIOHandler(url *C.char, size *C.int64_t) C.int64_t {
-	if gInputOpener == nil || gOutputOpener == nil {
+	filename := C.GoString((*C.char)(unsafe.Pointer(url)))
+	urlInputOpener, ok := gURLInputOpeners[filename]
+	if !ok {
+		urlInputOpener = gInputOpener
+	}
+
+	urlOutputOpener, ok := gURLOutputOpeners[filename]
+	if !ok {
+		urlOutputOpener = gOutputOpener
+	}
+
+	if urlInputOpener == nil || urlOutputOpener == nil {
 		log.Error("Input or output opener(s) are not set")
 		return C.int64_t(-1)
 	}
-	filename := C.GoString((*C.char)(unsafe.Pointer(url)))
 	log.Debug("NewIOHandler()", "url", filename)
 
 	gMutex.Lock()
@@ -289,7 +338,7 @@ func NewIOHandler(url *C.char, size *C.int64_t) C.int64_t {
 	fd := gHandleNum
 	gMutex.Unlock()
 
-	input, err := gInputOpener.Open(fd, filename)
+	input, err := urlInputOpener.Open(fd, filename)
 	if err != nil {
 		return C.int64_t(-1)
 	}
@@ -306,9 +355,9 @@ func NewIOHandler(url *C.char, size *C.int64_t) C.int64_t {
 }
 
 //export AVPipeReadInput
-func AVPipeReadInput(handler C.int64_t, buf *C.uint8_t, sz C.int) C.int {
+func AVPipeReadInput(fd C.int64_t, buf *C.uint8_t, sz C.int) C.int {
 	gMutex.Lock()
-	h := gHandlers[int64(handler)]
+	h := gHandlers[int64(fd)]
 	if h == nil {
 		gMutex.Unlock()
 		return C.int(-1)
@@ -316,7 +365,7 @@ func AVPipeReadInput(handler C.int64_t, buf *C.uint8_t, sz C.int) C.int {
 	gMutex.Unlock()
 
 	if traceIo {
-		log.Debug("AVPipeReadInput()", "handler", handler, "buf", buf, "sz", sz)
+		log.Debug("AVPipeReadInput()", "fd", fd, "buf", buf, "sz", sz)
 	}
 
 	//gobuf := C.GoBytes(unsafe.Pointer(buf), sz)
@@ -344,9 +393,9 @@ func (h *ioHandler) InReader(buf []byte) (int, error) {
 }
 
 //export AVPipeSeekInput
-func AVPipeSeekInput(handler C.int64_t, offset C.int64_t, whence C.int) C.int64_t {
+func AVPipeSeekInput(fd C.int64_t, offset C.int64_t, whence C.int) C.int64_t {
 	gMutex.Lock()
-	h := gHandlers[int64(handler)]
+	h := gHandlers[int64(fd)]
 	if h == nil {
 		gMutex.Unlock()
 		return C.int64_t(-1)
@@ -356,7 +405,7 @@ func AVPipeSeekInput(handler C.int64_t, offset C.int64_t, whence C.int) C.int64_
 
 	n, err := h.InSeeker(offset, whence)
 	if err != nil {
-		return -1
+		return C.int64_t(-1)
 	}
 	return C.int64_t(n)
 }
@@ -368,16 +417,17 @@ func (h *ioHandler) InSeeker(offset C.int64_t, whence C.int) (int64, error) {
 }
 
 //export AVPipeCloseInput
-func AVPipeCloseInput(handler C.int64_t) C.int {
+func AVPipeCloseInput(fd C.int64_t) C.int {
 	gMutex.Lock()
-	h := gHandlers[int64(handler)]
+	h := gHandlers[int64(fd)]
 	if h == nil {
+		gMutex.Unlock()
 		return C.int(-1)
 	}
 	err := h.InCloser()
 
 	// Remove the handler from global table
-	gHandlers[int64(handler)] = nil
+	gHandlers[int64(fd)] = nil
 	gMutex.Unlock()
 	if err != nil {
 		return C.int(-1)
@@ -389,6 +439,36 @@ func AVPipeCloseInput(handler C.int64_t) C.int {
 func (h *ioHandler) InCloser() error {
 	err := h.input.Close()
 	log.Debug("InCloser()", "error", err)
+	return err
+}
+
+//export AVPipeStatInput
+func AVPipeStatInput(fd C.int64_t, avp_stat C.avp_stat_t, stat_args unsafe.Pointer) C.int {
+	gMutex.Lock()
+	h := gHandlers[int64(fd)]
+	if h == nil {
+		gMutex.Unlock()
+		return C.int(-1)
+	}
+	gMutex.Unlock()
+
+	err := h.InStat(avp_stat, stat_args)
+	if err != nil {
+		return C.int(-1)
+	}
+
+	return C.int(0)
+}
+
+func (h *ioHandler) InStat(avp_stat C.avp_stat_t, stat_args unsafe.Pointer) error {
+	var err error
+
+	switch avp_stat {
+	case C.in_stat_bytes_read:
+		statArgs := *(*uint64)(stat_args)
+		err = h.input.Stat(AV_IN_STAT_BYTES_READ, &statArgs)
+	}
+
 	return err
 }
 
@@ -546,6 +626,46 @@ func (h *ioHandler) OutCloser(fd C.int64_t) error {
 	return err
 }
 
+//export AVPipeStatOutput
+func AVPipeStatOutput(handler C.int64_t, fd C.int64_t, avp_stat C.avp_stat_t, stat_args unsafe.Pointer) C.int {
+	gMutex.Lock()
+	h := gHandlers[int64(handler)]
+	if h == nil {
+		gMutex.Unlock()
+		return C.int(-1)
+	}
+	gMutex.Unlock()
+
+	err := h.OutStat(fd, avp_stat, stat_args)
+	if err != nil {
+		return C.int(-1)
+	}
+
+	return C.int(0)
+}
+
+func (h *ioHandler) OutStat(fd C.int64_t, avp_stat C.avp_stat_t, stat_args unsafe.Pointer) error {
+	var err error
+	outHandler := h.getOutTable(int64(fd))
+	if outHandler == nil {
+		return fmt.Errorf("OutStat nil handler, fd=%d", int64(fd))
+	}
+
+	switch avp_stat {
+	case C.out_stat_bytes_written:
+		statArgs := *(*uint64)(stat_args)
+		err = outHandler.Stat(AV_OUT_STAT_BYTES_WRITTEN, &statArgs)
+	case C.out_stat_decoding_start_pts:
+		statArgs := *(*uint64)(stat_args)
+		err = outHandler.Stat(AV_OUT_STAT_DECODING_START_PTS, &statArgs)
+	case C.out_stat_encoding_end_pts:
+		statArgs := *(*uint64)(stat_args)
+		err = outHandler.Stat(AV_OUT_STAT_ENCODING_END_PTS, &statArgs)
+	}
+
+	return err
+}
+
 //export CLog
 func CLog(msg *C.char) C.int {
 	m := C.GoString((*C.char)(unsafe.Pointer(msg)))
@@ -592,7 +712,7 @@ func Version() int {
 
 // params: transcoding parameters
 // url: input filename that has to be transcoded
-func Tx(params *TxParams, url string, debugFrameLevel bool, lastInputPts *int64) int {
+func Tx(params *TxParams, url string, debugFrameLevel bool) int {
 
 	// Convert TxParams to C.txparams_t
 	if params == nil {
@@ -650,11 +770,10 @@ func Tx(params *TxParams, url string, debugFrameLevel bool, lastInputPts *int64)
 		debugFrameLevelInt = 0
 	}
 
-	var lastInputPtsC C.int64_t
-	rc := C.tx((*C.txparams_t)(unsafe.Pointer(cparams)), C.CString(url), C.int(debugFrameLevelInt), (*C.int64_t)(unsafe.Pointer(&lastInputPtsC)))
-	if lastInputPts != nil {
-		*lastInputPts = int64(lastInputPtsC)
-	}
+	rc := C.tx((*C.txparams_t)(unsafe.Pointer(cparams)), C.CString(url), C.int(debugFrameLevelInt))
+
+	delete(gURLInputOpeners, url)
+	delete(gURLOutputOpeners, url)
 
 	return int(rc)
 }
@@ -738,7 +857,96 @@ func Probe(url string, seekable bool) (*ProbeInfo, error) {
 	C.free(unsafe.Pointer(cprobe.stream_info))
 	C.free(unsafe.Pointer(cprobe))
 
+	delete(gURLInputOpeners, url)
+	delete(gURLOutputOpeners, url)
+
 	return probeInfo, nil
+}
+
+// Returns a handle and error (if there is any error)
+// In case of error the handle would be zero
+func TxInit(params *TxParams, url string, debugFrameLevel bool) (int32, error) {
+	// Convert TxParams to C.txparams_t
+	if params == nil {
+		log.Error("Failed transcoding, params is not set.")
+		return -1, fmt.Errorf("TxParams is nil")
+	}
+
+	// same field order as avpipe_xc.h
+	cparams := &C.txparams_t{
+		// bypass_transcoding handled below
+		format:               C.CString(params.Format),
+		start_time_ts:        C.int64_t(params.StartTimeTs),
+		skip_over_pts:        C.int64_t(params.SkipOverPts),
+		start_pts:            C.int64_t(params.StartPts),
+		duration_ts:          C.int64_t(params.DurationTs),
+		start_segment_str:    C.CString(params.StartSegmentStr),
+		video_bitrate:        C.int(params.VideoBitrate),
+		audio_bitrate:        C.int(params.AudioBitrate),
+		sample_rate:          C.int(params.SampleRate),
+		crf_str:              C.CString(params.CrfStr),
+		rc_max_rate:          C.int(params.RcMaxRate),
+		rc_buffer_size:       C.int(params.RcBufferSize),
+		seg_duration_ts:      C.int64_t(params.SegDurationTs),
+		seg_duration:         C.CString(params.SegDuration),
+		start_fragment_index: C.int(params.StartFragmentIndex),
+		force_keyint:         C.int(params.ForceKeyInt),
+		ecodec:               C.CString(params.Ecodec),
+		dcodec:               C.CString(params.Dcodec),
+		enc_height:           C.int(params.EncHeight),
+		enc_width:            C.int(params.EncWidth),
+		crypt_iv:             C.CString(params.CryptIV),
+		crypt_key:            C.CString(params.CryptKey),
+		crypt_kid:            C.CString(params.CryptKID),
+		crypt_key_url:        C.CString(params.CryptKeyURL),
+		crypt_scheme:         C.crypt_scheme_t(params.CryptScheme),
+		tx_type:              C.tx_type_t(params.TxType),
+		// seekable handled below
+		audio_index: C.int(params.AudioIndex),
+	}
+
+	if params.BypassTranscoding {
+		cparams.bypass_transcoding = 1
+	} else {
+		cparams.bypass_transcoding = 0
+	}
+	if params.Seekable {
+		cparams.seekable = C.int(1)
+	} else {
+		cparams.seekable = C.int(0)
+	}
+
+	var debugFrameLevelInt int
+	if debugFrameLevel {
+		debugFrameLevelInt = 1
+	} else {
+		debugFrameLevelInt = 0
+	}
+
+	handle := C.tx_init((*C.txparams_t)(unsafe.Pointer(cparams)), C.CString(url), C.int(debugFrameLevelInt))
+	if handle < C.int32_t(0) {
+		return -1, fmt.Errorf("Tx initialization failed")
+	}
+
+	return int32(handle), nil
+}
+
+func TxRun(handle int32) error {
+	rc := C.tx_run(C.int32_t(handle))
+	if rc == 0 {
+		return nil
+	}
+
+	return fmt.Errorf("TxRun failed with the handle=%d", handle)
+}
+
+func TxCancel(handle int32) error {
+	rc := C.tx_cancel(C.int32_t(handle))
+	if rc == 0 {
+		return nil
+	}
+
+	return fmt.Errorf("TxCancel failed with the handle=%d", handle)
 }
 
 // StreamInfoAsArray builds an array where each stream is at its corresponsing index

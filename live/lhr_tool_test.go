@@ -12,6 +12,7 @@ import (
 	"math/big"
 	"net/url"
 	"os"
+	"path/filepath"
 	"strings"
 	"sync"
 	"testing"
@@ -22,7 +23,7 @@ import (
 
 var tlog = elog.Get("/eluvio/avpipe/live/test")
 
-var verboseLogging bool = false
+var verboseLogging bool = true
 var requestURLTable map[string]*testCtx = map[string]*testCtx{}
 var urlMutex *sync.RWMutex = &sync.RWMutex{}
 var requestFDTable map[int64]*testCtx = map[int64]*testCtx{}
@@ -152,6 +153,7 @@ func TestVideoHlsLive(t *testing.T) {
 	}
 
 	setupLogging()
+	setupOutDir("./O")
 
 	// Save stream files instead of transcoding if specified
 	//   Make sure go test timeout is big enough:
@@ -178,10 +180,9 @@ func TestVideoHlsLive(t *testing.T) {
 	putReqCtxByURL(url, reqCtx)
 
 	avpipe.InitIOHandler(&inputOpener{}, &outputOpener{})
-	var NextSkipOverPts int64
 	tlog.Info("AVL Tx start", "videoParams", fmt.Sprintf("%+v", *params))
-	errTx := avpipe.Tx(params, url, true, &NextSkipOverPts)
-	tlog.Info("AVL Tx done", "err", errTx, "last pts", NextSkipOverPts)
+	errTx := avpipe.Tx(params, url, true)
+	tlog.Info("AVL Tx done", "err", errTx)
 
 	if errTx != 0 {
 		t.Error("AVL Video transcoding failed", "errTx", errTx)
@@ -204,6 +205,7 @@ func TestVideoHlsLiveV2(t *testing.T) {
 	}
 
 	setupLogging()
+	setupOutDir("./O")
 
 	// Save stream files instead of transcoding if specified
 	//   Make sure go test timeout is big enough:
@@ -224,7 +226,7 @@ func TestVideoHlsLiveV2(t *testing.T) {
 	avpipe.InitIOHandler(&inputOpener{}, &outputOpener{})
 
 	tlog.Info("AVL Tx start", "videoParams", fmt.Sprintf("%+v", *params))
-	errTx := avpipe.Tx(params, url, true, nil)
+	errTx := avpipe.Tx(params, url, true)
 	tlog.Info("AVL Tx done", "err", errTx)
 
 	if errTx != 0 {
@@ -249,6 +251,7 @@ func TestAudioHlsLive(t *testing.T) {
 	}
 
 	setupLogging()
+	setupOutDir("./O")
 
 	// Save stream files instead of transcoding if specified
 	//   Make sure go test timeout is big enough:
@@ -268,10 +271,9 @@ func TestAudioHlsLive(t *testing.T) {
 	reqCtx := &testCtx{url: url, r: lhr}
 	putReqCtxByURL(url, reqCtx)
 
-	var NextSkipOverPts int64
 	tlog.Info("AVL Tx start", "audioHlsParams", fmt.Sprintf("%+v", *params))
-	errTx := avpipe.Tx(params, url, true, &NextSkipOverPts)
-	tlog.Info("AVL Tx done", "err", errTx, "last pts", NextSkipOverPts)
+	errTx := avpipe.Tx(params, url, true)
+	tlog.Info("AVL Tx done", "err", errTx)
 
 	if errTx != 0 {
 		t.Error("AVL Audio transcoding failed", "errTx", errTx)
@@ -284,6 +286,7 @@ func TestAudioHlsLive(t *testing.T) {
 func TestAudioVideoHlsLive(t *testing.T) {
 
 	setupLogging()
+	setupOutDir("./O")
 
 	// Create output directory if it doesn't exist
 	if _, err := os.Stat("./O"); os.IsNotExist(err) {
@@ -326,14 +329,13 @@ func TestAudioVideoHlsLive(t *testing.T) {
 
 	// Transcode audio mez files in background
 	go func(reader io.Reader) {
-		var NextSkipOverPts int64
 
 		tlog.Info("AVL Audio Mez Tx start", "audioHlsParams", fmt.Sprintf("%+v", *audioHlsParams))
 		url := "audio_mez_hls"
 		reqCtx := &testCtx{url: url, r: reader}
 		putReqCtxByURL(url, reqCtx)
-		errTx := avpipe.Tx(audioHlsParams, url, true, &NextSkipOverPts)
-		tlog.Info("AVL Audio Mez Tx done", "err", errTx, "last pts", NextSkipOverPts)
+		errTx := avpipe.Tx(audioHlsParams, url, true)
+		tlog.Info("AVL Audio Mez Tx done", "err", errTx)
 
 		if errTx != 0 {
 			t.Error("AVL Audio Mez transcoding failed", "errTx", errTx)
@@ -358,13 +360,12 @@ func TestAudioVideoHlsLive(t *testing.T) {
 
 	// Transcode video mez files in background
 	go func(reader io.Reader) {
-		var NextSkipOverPts int64
 		tlog.Info("AVL Video Mez Tx start", "videoHlsParams", fmt.Sprintf("%+v", *videoHlsParams))
 		url := "video_mez_hls"
 		reqCtx := &testCtx{url: url, r: reader}
 		putReqCtxByURL(url, reqCtx)
-		errTx := avpipe.Tx(videoHlsParams, url, true, &NextSkipOverPts)
-		tlog.Info("AVL Video Mez Tx done", "err", errTx, "last pts", NextSkipOverPts)
+		errTx := avpipe.Tx(videoHlsParams, url, true)
+		tlog.Info("AVL Video Mez Tx done", "err", errTx)
 
 		if errTx != 0 {
 			t.Error("AVL Video Mez transcoding failed", "errTx", errTx)
@@ -382,15 +383,14 @@ func TestAudioVideoHlsLive(t *testing.T) {
 
 	// Now create audio dash segments out of audio mezzanines
 	go func() {
-		var NextSkipOverPts int64
 
 		for i, url := range audioMezFiles {
 			tlog.Info("AVL Audio Dash Tx start", "audioHlsParams", fmt.Sprintf("%+v", *audioHlsParams), "url", url)
 			reqCtx := &testCtx{url: url}
 			putReqCtxByURL(url, reqCtx)
 			audioHlsParams.StartSegmentStr = fmt.Sprintf("%d", i*15+1)
-			errTx := avpipe.Tx(audioHlsParams, url, true, &NextSkipOverPts)
-			tlog.Info("AVL Audio Dash Tx done", "err", errTx, "last pts", NextSkipOverPts)
+			errTx := avpipe.Tx(audioHlsParams, url, true)
+			tlog.Info("AVL Audio Dash Tx done", "err", errTx)
 
 			if errTx != 0 {
 				t.Error("AVL Audio Dash transcoding failed", "errTx", errTx, "url", url)
@@ -409,15 +409,14 @@ func TestAudioVideoHlsLive(t *testing.T) {
 
 	// Now create video dash segments out of video mezzanines
 	go func() {
-		var NextSkipOverPts int64
 
 		for i, url := range videoMezFiles {
 			tlog.Info("AVL Video Dash Tx start", "videoHlsParams", fmt.Sprintf("%+v", *videoHlsParams), "url", url)
 			reqCtx := &testCtx{url: url}
 			putReqCtxByURL(url, reqCtx)
 			videoHlsParams.StartSegmentStr = fmt.Sprintf("%d", i*15+1)
-			errTx := avpipe.Tx(videoHlsParams, url, true, &NextSkipOverPts)
-			tlog.Info("AVL Video Dash Tx done", "err", errTx, "last pts", NextSkipOverPts)
+			errTx := avpipe.Tx(videoHlsParams, url, true)
+			tlog.Info("AVL Video Dash Tx done", "err", errTx)
 
 			if errTx != 0 {
 				t.Error("AVL Video Dash transcoding failed", "errTx", errTx, "url", url)
@@ -478,10 +477,9 @@ func recordFmp4(t *testing.T, lhr *HLSReader, url string) {
 	}()
 
 	avpipe.InitIOHandler(&inputOpener{}, &outputOpener{})
-	var NextSkipOverPts int64
 	tlog.Info("AVL Tx start", "videoParams", fmt.Sprintf("%+v", *params))
-	errTx := avpipe.Tx(params, url, true, &NextSkipOverPts)
-	tlog.Info("AVL Tx done", "err", errTx, "last pts", NextSkipOverPts)
+	errTx := avpipe.Tx(params, url, true)
+	tlog.Info("AVL Tx done", "err", errTx)
 
 	if errTx != 0 {
 		t.Error("AVL Video transcoding failed", "errTx", errTx)
@@ -568,6 +566,15 @@ func (i *inputCtx) Size() int64 {
 	return -1
 }
 
+func (i *inputCtx) Stat(statType avpipe.AVStatType, statArgs interface{}) error {
+	switch statType {
+	case avpipe.AV_IN_STAT_BYTES_READ:
+		readOffset := statArgs.(*uint64)
+		log.Info("AVP TEST", "STAT read offset", *readOffset)
+	}
+	return nil
+}
+
 func (oo *outputOpener) Open(h, fd int64, stream_index, seg_index int, out_type avpipe.AVType) (avpipe.OutputHandler, error) {
 	tc, err := getReqCtxByFD(h)
 	if err != nil {
@@ -652,6 +659,23 @@ func (o *outputCtx) Close() error {
 	return nil
 }
 
+func (i *outputCtx) Stat(statType avpipe.AVStatType, statArgs interface{}) error {
+	switch statType {
+	case avpipe.AV_OUT_STAT_BYTES_WRITTEN:
+		writeOffset := statArgs.(*uint64)
+		log.Info("AVP TEST", "STAT, write offset", *writeOffset)
+	case avpipe.AV_OUT_STAT_DECODING_START_PTS:
+		startPTS := statArgs.(*uint64)
+		log.Info("AVP TEST", "STAT, startPTS", *startPTS)
+	case avpipe.AV_OUT_STAT_ENCODING_END_PTS:
+		endPTS := statArgs.(*uint64)
+		log.Info("AVP TEST", "STAT, endPTS", *endPTS)
+
+	}
+
+	return nil
+}
+
 func TestDecrypt(t *testing.T) {
 	encDec(t, []byte(""))
 	encDec(t, []byte("1"))
@@ -705,6 +729,39 @@ func padPKCS5(src []byte, blockSize int) []byte {
 	padlen := (blockSize - (srclen % blockSize))
 	padding := bytes.Repeat([]byte{byte(padlen)}, padlen)
 	return append(src, padding...)
+}
+
+func removeDirContents(dir string) error {
+	d, err := os.Open(dir)
+	if err != nil {
+		return err
+	}
+	defer d.Close()
+	names, err := d.Readdirnames(-1)
+	if err != nil {
+		return err
+	}
+	for _, name := range names {
+		err = os.RemoveAll(filepath.Join(dir, name))
+		if err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func setupOutDir(dir string) error {
+	_, err := os.Stat(dir)
+	if os.IsNotExist(err) {
+		os.Mkdir(dir, 0755)
+	} else {
+		err = removeDirContents(dir)
+		if err != nil {
+			return err
+		}
+	}
+
+	return nil
 }
 
 func setupLogging() {

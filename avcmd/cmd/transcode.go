@@ -60,6 +60,16 @@ func (i *avcmdInput) Size() int64 {
 	return fi.Size()
 }
 
+func (i *avcmdInput) Stat(statType avpipe.AVStatType, statArgs interface{}) error {
+	switch statType {
+	case avpipe.AV_IN_STAT_BYTES_READ:
+		readOffset := statArgs.(*uint64)
+		log.Info("AVCMD", "stat read offset", *readOffset)
+	}
+
+	return nil
+}
+
 //Implement AVPipeOutputOpener
 type avcmdOutputOpener struct {
 	dir string
@@ -137,6 +147,23 @@ func (o *avcmdOutput) Seek(offset int64, whence int) (int64, error) {
 func (o *avcmdOutput) Close() error {
 	err := o.file.Close()
 	return err
+}
+
+func (o *avcmdOutput) Stat(statType avpipe.AVStatType, statArgs interface{}) error {
+	switch statType {
+	case avpipe.AV_OUT_STAT_BYTES_WRITTEN:
+		writeOffset := statArgs.(*uint64)
+		log.Info("AVCMD", "STAT, write offset", *writeOffset)
+	case avpipe.AV_OUT_STAT_DECODING_START_PTS:
+		startPTS := statArgs.(*uint64)
+		log.Info("AVCMD", "STAT, startPTS", *startPTS)
+	case avpipe.AV_OUT_STAT_ENCODING_END_PTS:
+		endPTS := statArgs.(*uint64)
+		log.Info("AVCMD", "STAT, endPTS", *endPTS)
+
+	}
+
+	return nil
 }
 
 func InitTranscode(cmdRoot *cobra.Command) error {
@@ -380,8 +407,7 @@ func doTranscode(cmd *cobra.Command, args []string) error {
 	for i := 0; i < int(nThreads); i++ {
 		go func(params *avpipe.TxParams, filename string) {
 
-			var lastInputPts int64
-			rc := avpipe.Tx(params, filename, true, &lastInputPts)
+			rc := avpipe.Tx(params, filename, true)
 			if rc != 0 {
 				done <- fmt.Errorf("Failed transcoding %s", filename)
 			} else {

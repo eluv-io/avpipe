@@ -14,6 +14,8 @@
 #include <libavutil/audio_fifo.h>
 #include <libavutil/opt.h>
 
+#include <pthread.h>
+
 #define MAX_STREAMS	16
 
 typedef enum avpipe_buftype_t {
@@ -33,9 +35,21 @@ typedef enum avpipe_buftype_t {
     avpipe_fmp4_segment = 13            // segmented fmp4 stream
 } avpipe_buftype_t;
 
+#define BYTES_READ_REPORT   (1024*1024)
+
+typedef enum avp_stat_t {
+    in_stat_bytes_read = 1,
+    out_stat_bytes_written = 2,
+    out_stat_decoding_start_pts = 4,
+    out_stat_encoding_end_pts = 8
+} avp_stat_t;
+
+struct coderctx_t;
+
 typedef struct ioctx_t {
     /* Application specific IO context */
-    void *opaque;
+    void                *opaque;
+    struct coderctx_t   *encoder_ctx;   /* Needed to get access for stats */
 
     /* Input filename or url */
     char *url;
@@ -50,8 +64,13 @@ typedef struct ioctx_t {
     /* Read/write counters, used by input/output handlers */
     int64_t read_bytes;
     int64_t read_pos;
+    int64_t read_reported;
     int64_t written_bytes;
     int64_t write_pos;
+    int64_t write_reported;
+
+    /* Audio/video decoding start pts for stat reporting */
+    int64_t decoding_start_pts;
 
     /* Output handlers specific data */
     int stream_index;       // usually video=0 and audio=1
@@ -91,12 +110,18 @@ typedef int64_t
     int64_t offset,
     int whence);
 
+typedef int
+(*avpipe_stater_f)(
+    void *opaque,
+    avp_stat_t stat_type);
+
 typedef struct avpipe_io_handler_t {
     avpipe_opener_f avpipe_opener;
     avpipe_closer_f avpipe_closer;
     avpipe_reader_f avpipe_reader;
     avpipe_writer_f avpipe_writer;
     avpipe_seeker_f avpipe_seeker;
+    avpipe_stater_f avpipe_stater;
 } avpipe_io_handler_t;
 
 /* Decoder/encoder context, keeps both video and audio stream ffmpeg contexts */
@@ -137,6 +162,8 @@ typedef struct coderctx_t {
 
     int is_mpegts;          /* set to 1 if input format name is "mpegts" */
 
+    int             cancelled;
+    int             stopped;
 } coderctx_t;
 
 typedef enum crypt_scheme_t {
@@ -226,16 +253,23 @@ typedef struct txprobe_t {
 } txprobe_t;
 
 typedef struct txctx_t {
-    coderctx_t decoder_ctx;
-    coderctx_t encoder_ctx;
-    txparams_t *params;
+    coderctx_t          decoder_ctx;
+    coderctx_t          encoder_ctx;
+    txparams_t          *params;
+    int32_t             index;  // index in tx table
+    int32_t             handle; // handle for V2 API
+    ioctx_t             *inctx;
+    avpipe_io_handler_t *in_handlers;
+    avpipe_io_handler_t *out_handlers;
+    int                 debug_frame_level;
 } txctx_t;
 
 typedef struct out_tracker_t {
-    struct avpipe_io_handler_t *out_handlers;
-    ioctx_t *last_outctx;
-    int seg_index;
-    ioctx_t *inctx;     // Points to input context
+    struct avpipe_io_handler_t  *out_handlers;
+    coderctx_t                  *encoder_ctx;   /* Needed to get access for stats */
+    ioctx_t                     *last_outctx;
+    int                         seg_index;
+    ioctx_t                     *inctx;         /* Points to input context */
 
     /** Needed to detect type of encoding frame */
     int video_stream_index;
@@ -317,6 +351,5 @@ int
 avpipe_tx(
     txctx_t *txctx,
     int do_instrument,
-    int debug_frame_level,
-    int64_t *last_input_pts);
+    int debug_frame_level);
 #endif

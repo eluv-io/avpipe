@@ -125,6 +125,19 @@ in_seek(
 }
 
 int
+in_stat(
+    void *opaque,
+    avp_stat_t stat_type)
+{
+    int64_t fd;
+    ioctx_t *c = (ioctx_t *)opaque;
+
+    fd = *((int64_t *)(c->opaque));
+    elv_log("IN STAT fd=%d, read offset=%"PRId64, fd, c->read_bytes);
+    return 0;
+}
+
+int
 out_opener(
     const char *url,
     ioctx_t *outctx)
@@ -229,7 +242,7 @@ out_read_packet(
         outctx->read_pos += bread;
     }
 
-    elv_dbg("OUT READ read=%d pos=%d total=%d", bread, outctx->read_pos, outctx->read_bytes);
+    elv_dbg("OUT READ read=%d pos=%d total=%"PRId64, bread, outctx->read_pos, outctx->read_bytes);
 
     return bread;
 }
@@ -269,7 +282,7 @@ out_write_packet(
         }
     }
 
-    elv_dbg("OUT WRITE fd=%d size=%d written=%d pos=%d total=%d", fd, buf_size, bwritten, outctx->write_pos, outctx->written_bytes);
+    elv_dbg("OUT WRITE fd=%d size=%d written=%d pos=%"PRId64" total=%"PRId64, fd, buf_size, bwritten, outctx->write_pos, outctx->written_bytes);
     return bwritten;
 }
 
@@ -297,7 +310,7 @@ out_seek(
         elv_err("OUT SEEK - weird seek\n");
     }
 
-    elv_dbg("OUT SEEK offset=%d whence=%d rc=%d", offset, whence, rc);
+    elv_dbg("OUT SEEK offset=%"PRId64" whence=%d rc=%d", offset, whence, rc);
     return rc;
 }
 
@@ -310,6 +323,38 @@ out_closer(
     close(fd);
     free(outctx->opaque);
     free(outctx->buf);
+    return 0;
+}
+
+int
+out_stat(
+    void *opaque,
+    avp_stat_t stat_type)
+{
+    ioctx_t *outctx = (ioctx_t *)opaque;
+    int64_t fd = *(int64_t *)outctx->opaque;
+
+    if (outctx->type != avpipe_video_segment &&
+        outctx->type != avpipe_audio_segment &&
+        outctx->type != avpipe_mp4_stream &&
+        outctx->type != avpipe_fmp4_stream &&
+        outctx->type != avpipe_mp4_segment &&
+        outctx->type != avpipe_fmp4_segment)
+        return 0;
+
+    switch (stat_type) {
+    case out_stat_bytes_written:
+        elv_log("OUT STAT fd=%d, write offset=%"PRId64, fd, outctx->written_bytes);
+        break;
+    case out_stat_decoding_start_pts:
+        elv_log("OUT STAT fd=%d, start PTS=%"PRId64, fd, outctx->decoding_start_pts);
+        break;
+    case out_stat_encoding_end_pts:
+        elv_log("OUT STAT fd=%d, end PTS=%"PRId64, fd, outctx->encoder_ctx->input_last_pts_sent_encode);
+        break;
+    default:
+        break;
+    }
     return 0;
 }
 
@@ -345,8 +390,7 @@ tx_thread_func(
             continue;
         }
 
-        int64_t last_input_pts;
-        if (avpipe_tx(txctx, 0, 1, &last_input_pts) < 0) {
+        if (avpipe_tx(txctx, 0, 1) < 0) {
             elv_err("THREAD %d, iteration %d error in transcoding", params->thread_number, i+1);
             continue;
         }
@@ -854,12 +898,14 @@ main(
     in_handlers.avpipe_reader = in_read_packet;
     in_handlers.avpipe_writer = in_write_packet;
     in_handlers.avpipe_seeker = in_seek;
+    in_handlers.avpipe_stater = in_stat;
 
     out_handlers.avpipe_opener = out_opener;
     out_handlers.avpipe_closer = out_closer;
     out_handlers.avpipe_reader = out_read_packet;
     out_handlers.avpipe_writer = out_write_packet;
     out_handlers.avpipe_seeker = out_seek;
+    out_handlers.avpipe_stater = out_stat;
 
     thread_params.filename = strdup(filename);
     thread_params.repeats = repeats;

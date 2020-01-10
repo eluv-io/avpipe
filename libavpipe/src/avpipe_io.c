@@ -48,6 +48,7 @@ elv_io_open(
         AVDictionaryEntry *stream_opt = av_dict_get(*options, "stream_index", 0, 0);
         ioctx_t *outctx = (ioctx_t *) calloc(1, sizeof(ioctx_t));
 
+        outctx->encoder_ctx = out_tracker->encoder_ctx;
         outctx->stream_index = (int) strtol(stream_opt->value, &endptr, 10);
         assert(outctx->stream_index == 0 || outctx->stream_index == 1);
         if (outctx->stream_index == out_tracker[outctx->stream_index].video_stream_index)
@@ -77,6 +78,7 @@ elv_io_open(
         ioctx_t *outctx = (ioctx_t *) calloc(1, sizeof(ioctx_t));
         outctx->stream_index = 0;
 
+        outctx->encoder_ctx = out_tracker->encoder_ctx;
         outctx->inctx = out_tracker[0].inctx;
         outctx->seg_index = 0;      // init segment has stream_index and seg_index = 0
         if (!url || url[0] == '\0') {
@@ -130,6 +132,10 @@ elv_io_open(
             }
         }
  
+        if (outctx->type == avpipe_mp4_segment ||
+            outctx->type == avpipe_fmp4_stream ||
+            outctx->type == avpipe_mp4_stream)
+            out_tracker[outctx->stream_index].last_outctx = outctx;
         elv_dbg("OUT url=%s, type=%d, seg_index=%d", url, outctx->type, outctx->seg_index);
         /* Manifest or init segments */
         if (out_handlers->avpipe_opener(url, outctx) < 0) {
@@ -163,12 +169,18 @@ elv_io_close(
     AVIOContext *pb)
 {
     out_tracker_t *out_tracker = (out_tracker_t *) format_ctx->avpipe_opaque;
-    avpipe_io_handler_t *out_handlers = out_tracker->out_handlers;
     ioctx_t *outctx = (ioctx_t *)pb->opaque;
+    avpipe_io_handler_t *out_handlers = NULL;
+
+    if (out_tracker != NULL)
+        out_handlers = out_tracker->out_handlers;
 
     elv_dbg("OUT elv_io_close avioctx=%p, avioctx->opaque=%p outtracker[0]->last_outctx=%p, outtracker[1]->last_outctx=%p",
-        pb, pb->opaque, out_tracker[0].last_outctx, out_tracker[1].last_outctx);
-    out_handlers->avpipe_closer(outctx);
+        pb, pb->opaque, out_tracker != NULL ? out_tracker[0].last_outctx : 0, out_tracker != NULL ? out_tracker[1].last_outctx : 0);
+    if (out_handlers) {
+        out_handlers->avpipe_stater(outctx, out_stat_encoding_end_pts);
+        out_handlers->avpipe_closer(outctx);
+    }
     free(outctx);
     return;
 }
