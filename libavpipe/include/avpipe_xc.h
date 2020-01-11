@@ -35,7 +35,7 @@ typedef enum avpipe_buftype_t {
     avpipe_fmp4_segment = 13            // segmented fmp4 stream
 } avpipe_buftype_t;
 
-#define BYTES_READ_REPORT   (1024*1024)
+#define BYTES_READ_REPORT   (20*1024*1024)
 
 typedef enum avp_stat_t {
     in_stat_bytes_read = 1,
