@@ -206,6 +206,7 @@ func InitTranscode(cmdRoot *cobra.Command) error {
 	cmdTranscode.PersistentFlags().String("crypt-kid", "", "16-byte key ID, as 32 char hex")
 	cmdTranscode.PersistentFlags().String("crypt-key-url", "", "specify a key URL in the manifest")
 	cmdTranscode.PersistentFlags().String("crypt-scheme", "none", "encryption scheme, default is 'none', can be: 'aes-128', 'cbc1', 'cbcs', 'cenc', 'cens'")
+	cmdTranscode.PersistentFlags().String("watermark", "", "adds an additional filterchain to the existing filtergraph used by the pipe")
 
 	return nil
 }
@@ -243,6 +244,8 @@ func doTranscode(cmd *cobra.Command, args []string) error {
 	if format != "dash" && format != "hls" && format != "mp4" && format != "fmp4" && format != "segment" && format != "fmp4-segment" {
 		return fmt.Errorf("Pakage format is not valid, can be 'dash', 'hls', 'mp4', 'fmp4', 'segment', or 'fmp4-segment'")
 	}
+
+	watermark := cmd.Flag("watermark").Value.String()
 
 	txTypeStr := cmd.Flag("tx-type").Value.String()
 	if txTypeStr != "all" && txTypeStr != "video" && txTypeStr != "audio" {
@@ -394,6 +397,7 @@ func doTranscode(cmd *cobra.Command, args []string) error {
 		CryptKeyURL:        cryptKeyURL,
 		CryptScheme:        cryptScheme,
 		TxType:             txType,
+		Watermark:          watermark,
 		ForceKeyInt:        forceKeyInterval,
 		RcMaxRate:          rcMaxRate,
 		RcBufferSize:       4500000,

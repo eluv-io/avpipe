@@ -31,6 +31,7 @@
 
 #define MPEGTS_THREAD_COUNT     16
 #define DEFAULT_THREAD_COUNT    8
+#define FILTER_STRING_SZ        1024
 
 extern int
 init_filters(
@@ -1582,25 +1583,39 @@ avpipe_tx(
     int debug_frame_level)
 {
     /* Set scale filter */
-    char filter_str[128];
+    char filter_str[FILTER_STRING_SZ];
     struct timeval tv;
     u_int64_t since;
     coderctx_t *decoder_context = &txctx->decoder_ctx;
     coderctx_t *encoder_context = &txctx->encoder_ctx;
     txparams_t *params = txctx->params;
 
-    if (!params->bypass_transcoding && (params->tx_type & tx_video)) {
-        sprintf(filter_str, "scale=%d:%d",
-            encoder_context->codec_context[encoder_context->video_stream_index]->width,
-            encoder_context->codec_context[encoder_context->video_stream_index]->height);
-        elv_dbg("FILTER scale=%s", filter_str);
-    }
-
     if (!params->bypass_transcoding &&
-        (params->tx_type & tx_video) &&
-        init_filters(filter_str, decoder_context, encoder_context, txctx->params) < 0) {
-        elv_err("Failed to initialize video filter");
-        return -1;
+        (params->tx_type & tx_video)) {
+            if (txctx->params->watermark){
+                int ret = snprintf(filter_str, FILTER_STRING_SZ, "scale=%d:%d, %s",
+                    encoder_context->codec_context[encoder_context->video_stream_index]->width,
+                    encoder_context->codec_context[encoder_context->video_stream_index]->height,
+                    txctx->params->watermark);
+                if (ret < 0){
+                    elv_dbg("snprintf encoding error=%s", txctx->params->watermark);
+                    return -1;
+                }else {
+                    if (ret >= FILTER_STRING_SZ){
+                        elv_dbg("Not enough string space for %s", txctx->params->watermark);
+                        return -1;
+                    }
+                }
+            }else{
+                sprintf(filter_str, "scale=%d:%d",
+                    encoder_context->codec_context[encoder_context->video_stream_index]->width,
+                    encoder_context->codec_context[encoder_context->video_stream_index]->height);
+                elv_dbg("FILTER scale=%s", filter_str);
+            }
+            if (init_filters(filter_str, decoder_context, encoder_context, txctx->params) < 0){
+                elv_err("Failed to initialize video filter");
+                return -1;
+            }
     }
 
     if (!params->bypass_transcoding &&
@@ -2082,6 +2097,11 @@ avpipe_init(
 
     if (params->start_pts < 0) {
         elv_err("Start PTS can not be negative");
+        goto avpipe_init_failed;
+    }
+
+    if (params->watermark != NULL && (strlen(params->watermark) > (FILTER_STRING_SZ-1))){
+        elv_err("Watermark too large");
         goto avpipe_init_failed;
     }
 

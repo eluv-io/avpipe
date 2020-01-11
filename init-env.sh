@@ -1,3 +1,4 @@
+#!/bin/bash
 #
 # Initialize Go and CGO build environment
 #
@@ -16,13 +17,17 @@ elvdev_dir=$1/..
 avpipe_dir=$script_dir
 
 if [[ -z "${ELV_TOOLCHAIN_DIST_PLATFORM}" ]]; then
-    if [ "$(uname)" == "Darwin" ]; then
+    OS="`uname`"
+    case $OS in
+    'Darwin')
         DARWIN=`ls $elvdev_dir/elv-toolchain/dist | grep darwin`
         export ELV_TOOLCHAIN_DIST_PLATFORM=$elvdev_dir/elv-toolchain/dist/${DARWIN}
-    else
+        ;;
+    'Linux')
         LINUX=`ls $elvdev_dir/elv-toolchain/dist | grep linux`
         export ELV_TOOLCHAIN_DIST_PLATFORM=$elvdev_dir/elv-toolchain/dist/${LINUX}
-    fi
+        ;;
+    esac
 fi
 
 export PKG_CONFIG_PATH="${ELV_TOOLCHAIN_DIST_PLATFORM}/lib/pkgconfig:$PKG_CONFIG_PATH"

@@ -16,6 +16,7 @@ ifeq ($(OSNAME), Darwin)
 		-lavcodec \
 		-lavdevice \
 		-lswresample \
+		-lavresample \
 		-lswscale \
 		-lavutil \
 		-lpostproc \
@@ -53,6 +54,7 @@ ifeq ($(OSNAME), Linux)
 		-lavcodec \
 		-lavdevice \
 		-lswresample \
+		-lavresample \
 		-lswscale \
 		-lavutil \
 		-lpostproc \

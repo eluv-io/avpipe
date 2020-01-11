@@ -115,6 +115,9 @@ init_audio_filters(
     coderctx_t *encoder_context,
     txparams_t *params)
 {
+    if (decoder_context->audio_stream_index < 0){
+        return -1;  //REVIEW want some unique val to say no audio present
+    }
     AVCodecContext *dec_codec_ctx = decoder_context->codec_context[decoder_context->audio_stream_index];
     AVCodecContext *enc_codec_ctx = encoder_context->codec_context[encoder_context->audio_stream_index];
     const char *filter_spec = "anull"; /* passthrough (dummy) filter for audio */

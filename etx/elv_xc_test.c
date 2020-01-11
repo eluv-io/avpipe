@@ -825,6 +825,11 @@ main(
                 usage(argv[0], argv[i], EXIT_FAILURE);
             }
             break;
+        case 'w':
+            if (!strcmp(argv[i], "-watermark")) {
+                p.watermark = argv[i+1];
+            }
+            break;
         default:
             usage(argv[0], argv[i], EXIT_FAILURE);
         }
