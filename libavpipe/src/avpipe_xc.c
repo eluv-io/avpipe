@@ -1592,7 +1592,7 @@ avpipe_tx(
 
     if (!params->bypass_transcoding &&
         (params->tx_type & tx_video)) {
-            if (txctx->params->watermark){
+            if (txctx->params->watermark != 0 && *(txctx->params->watermark) != 0){
                 int ret = snprintf(filter_str, FILTER_STRING_SZ, "scale=%d:%d, %s",
                     encoder_context->codec_context[encoder_context->video_stream_index]->width,
                     encoder_context->codec_context[encoder_context->video_stream_index]->height,
