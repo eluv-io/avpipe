@@ -126,7 +126,11 @@ type TxParams struct {
 	CryptScheme        CryptScheme `json:"crypt_scheme,omitempty"`
 	TxType             TxType      `json:"tx_type,omitempty"`
 	Seekable           bool        `json:"seekable,omitempty"`
-	Watermark          string      `json:"watermark,omitempty"`
+	WatermarkText      string      `json:"watermark_text,omitempty"`
+	WatermarkXLoc      string      `json:"watermark_xloc,omitempty"`
+	WatermarkYLoc      string      `json:"watermark_yloc,omitempty"`
+	WatermarkFontSz    string      `json:"watermark_font_sz,omitempty"`
+	WatermarkFontClr   string      `json:"watermark_font_color,omitempty"`
 	AudioIndex         int32       `json:"audio_index,omitempty"`
 }
 
@@ -750,7 +754,12 @@ func Tx(params *TxParams, url string, debugFrameLevel bool) int {
 		crypt_key_url:        C.CString(params.CryptKeyURL),
 		crypt_scheme:         C.crypt_scheme_t(params.CryptScheme),
 		tx_type:              C.tx_type_t(params.TxType),
-		watermark:            C.CString(params.Watermark),
+		watermark_text:       C.CString(params.WatermarkText),
+		watermark_xloc:       C.CString(params.WatermarkXLoc),
+		watermark_yloc:       C.CString(params.WatermarkYLoc),
+		watermark_font_sz:    C.CString(params.WatermarkFontSz),
+		watermark_font_color: C.CString(params.WatermarkFontClr),
+
 		// seekable handled below
 		audio_index: C.int(params.AudioIndex),
 	}

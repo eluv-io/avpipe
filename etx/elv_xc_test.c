@@ -739,7 +739,7 @@ main(
             } else if (strlen(argv[i]) > 2) {
                 usage(argv[0], argv[i], EXIT_FAILURE);
             } else {
-                filename = argv[i+1];   
+                filename = argv[i+1];
             }
             break;
         case 'r':
@@ -826,8 +826,20 @@ main(
             }
             break;
         case 'w':
-            if (!strcmp(argv[i], "-watermark")) {
-                p.watermark = argv[i+1];
+            if (!strcmp(argv[i], "-watermark-text")) {
+                p.watermark_text = argv[i+1];
+            }
+            if (!strcmp(argv[i], "-watermark-xloc")) {
+                p.watermark_xloc = argv[i+1];
+            }
+            if (!strcmp(argv[i], "-watermark-yloc")) {
+                p.watermark_yloc = argv[i+1];
+            }
+            if (!strcmp(argv[i], "-watermark-font-color")) {
+                p.watermark_font_color = argv[i+1];
+            }
+            if (!strcmp(argv[i], "-watermark-font-sz")) {
+                p.watermark_font_sz = argv[i+1];
             }
             break;
         default:

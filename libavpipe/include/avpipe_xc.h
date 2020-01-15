@@ -212,8 +212,12 @@ typedef struct txparams_t {
     crypt_scheme_t crypt_scheme;    // Content protection / DRM / encryption [Optional, Default: crypt_none]
     tx_type_t tx_type;              // Default: 0 means transcode 'everything'
     int seekable;                   // Default: 0 means not seekable. A non seekable stream with moov box in
-    char *watermark;                // Default: no watermark
                                     //          the end causes a lot of reads up to moov atom.
+    char *watermark_text;           // Default: no watermark
+    char *watermark_xloc;           // Default 0
+    char *watermark_yloc;           // Default 0
+    char *watermark_font_sz;      // Default 0 nofont
+    char *watermark_font_color;     // black        
     int audio_index;                // Audio index(s) for mez making, may need to become an array of indexes 
 } txparams_t;
 

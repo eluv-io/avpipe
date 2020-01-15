@@ -10,6 +10,6 @@ else
     outfile=$3
     set --  # unset args before we source
     source "$( dirname "${BASH_SOURCE[0]}" )/../init-env.sh" $fabric_dir
-    ./bin/etx -seg-duration-ts 8631360 -tx-type video -seg-duration 720 -f ${BASE_TEST_ASSETS}/media/bbb-trailer/orig/trailer_video_0.mp4 -watermark drawtext=text='michelle@eluv.io':fontcolor=black:fontsize=96:x=W/2:y=H*0.9:shadowx=5:shadowy=5:shadowcolor=white:alpha=0.5
+    ./bin/etx -seg-duration-ts 8631360 -tx-type video -seg-duration 720 -f ${BASE_TEST_ASSETS}/media/bbb-trailer/orig/trailer_video_0.mp4 -watermark-text michelle@eluv.io -watermark-font-color black -watermark-font-sz 24 -watermark-xloc W/2 -watermark-yloc H*0.9
     cat ./O/O1/init-stream0.m4s ./O/O1/chunk-stream0-00001.mp4 > ./O/O1/$outfile
 fi

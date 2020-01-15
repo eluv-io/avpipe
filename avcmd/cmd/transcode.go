@@ -206,7 +206,12 @@ func InitTranscode(cmdRoot *cobra.Command) error {
 	cmdTranscode.PersistentFlags().String("crypt-kid", "", "16-byte key ID, as 32 char hex")
 	cmdTranscode.PersistentFlags().String("crypt-key-url", "", "specify a key URL in the manifest")
 	cmdTranscode.PersistentFlags().String("crypt-scheme", "none", "encryption scheme, default is 'none', can be: 'aes-128', 'cbc1', 'cbcs', 'cenc', 'cens'")
-	cmdTranscode.PersistentFlags().String("watermark", "", "adds an additional filterchain to the existing filtergraph used by the pipe")
+	cmdTranscode.PersistentFlags().String("watermark-text", "", "add text to the watermark display")
+	cmdTranscode.PersistentFlags().String("watermark-xloc", "", "the xLoc of the watermark as specified by a fraction of width")
+	cmdTranscode.PersistentFlags().String("watermark-yloc", "", "the yLoc of the watermark as specified by a fraction of height")
+	cmdTranscode.PersistentFlags().String("watermark-font-sz", "", "font size as specified in pt size")
+	cmdTranscode.PersistentFlags().String("watermark-font-color", "", "a string marking the color of text to use")
+
 
 	return nil
 }
@@ -245,7 +250,7 @@ func doTranscode(cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("Pakage format is not valid, can be 'dash', 'hls', 'mp4', 'fmp4', 'segment', or 'fmp4-segment'")
 	}
 
-	watermark := cmd.Flag("watermark").Value.String()
+	watermarkText := cmd.Flag("watermark-text").Value.String()
 
 	txTypeStr := cmd.Flag("tx-type").Value.String()
 	if txTypeStr != "all" && txTypeStr != "video" && txTypeStr != "audio" {
@@ -397,7 +402,7 @@ func doTranscode(cmd *cobra.Command, args []string) error {
 		CryptKeyURL:        cryptKeyURL,
 		CryptScheme:        cryptScheme,
 		TxType:             txType,
-		Watermark:          watermark,
+		WatermarkText:      watermarkText,
 		ForceKeyInt:        forceKeyInterval,
 		RcMaxRate:          rcMaxRate,
 		RcBufferSize:       4500000,

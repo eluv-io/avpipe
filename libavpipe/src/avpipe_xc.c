@@ -31,7 +31,8 @@
 
 #define MPEGTS_THREAD_COUNT     16
 #define DEFAULT_THREAD_COUNT    8
-#define FILTER_STRING_SZ        1024
+#define WATERMARK_STRING_SZ     1024
+#define FILTER_STRING_SZ        1024 + WATERMARK_STRING_SZ
 
 extern int
 init_filters(
@@ -1576,6 +1577,10 @@ should_stop_decoding(
     return 0;
 }
 
+const char* GetFieldOrDefault(const char* field, const char* defaultVal){
+    return (field != 0 && *(field) != 0) ? field : defaultVal;
+}
+
 int
 avpipe_tx(
     txctx_t *txctx,
@@ -1584,25 +1589,44 @@ avpipe_tx(
 {
     /* Set scale filter */
     char filter_str[FILTER_STRING_SZ];
+    char watermark_str[WATERMARK_STRING_SZ];
     struct timeval tv;
     u_int64_t since;
     coderctx_t *decoder_context = &txctx->decoder_ctx;
     coderctx_t *encoder_context = &txctx->encoder_ctx;
     txparams_t *params = txctx->params;
+    const char* filterTemplate = "drawtext=text='%s':fontcolor=%s:fontsize=%s:x=%s:y=%s:shadowx=1:shadowy=1:shadowcolor=white:alpha=0.65";
 
     if (!params->bypass_transcoding &&
         (params->tx_type & tx_video)) {
-            if (txctx->params->watermark != 0 && *(txctx->params->watermark) != 0){
-                int ret = snprintf(filter_str, FILTER_STRING_SZ, "scale=%d:%d, %s",
-                    encoder_context->codec_context[encoder_context->video_stream_index]->width,
-                    encoder_context->codec_context[encoder_context->video_stream_index]->height,
-                    txctx->params->watermark);
+            const char* wm_text = GetFieldOrDefault(txctx->params->watermark_text, "");
+            if (*(wm_text) != 0){
+                const char* wm_font_color = GetFieldOrDefault(txctx->params->watermark_font_color, "black");
+                const char* wm_font_sz = GetFieldOrDefault(txctx->params->watermark_font_sz, "24");
+                const char* wm_xloc = GetFieldOrDefault(txctx->params->watermark_xloc, "W*0.85");
+                const char* wm_yloc = GetFieldOrDefault(txctx->params->watermark_yloc, "H*0.90");
+                int ret = snprintf(watermark_str, WATERMARK_STRING_SZ, filterTemplate, wm_text, wm_font_color, wm_font_sz, wm_xloc, wm_yloc);
+
                 if (ret < 0){
-                    elv_dbg("snprintf encoding error=%s", txctx->params->watermark);
+                    elv_dbg("snprintf encoding text=%s fontcolor=%s, fontsize=%s, locx = %s, locy = %s", wm_text, wm_font_color, wm_font_sz, wm_xloc, wm_yloc);
                     return -1;
                 }else {
                     if (ret >= FILTER_STRING_SZ){
-                        elv_dbg("Not enough string space for %s", txctx->params->watermark);
+                        elv_dbg("Not enough string space for %s",  wm_text);
+                        return -1;
+                    }
+                }
+
+                ret = snprintf(filter_str, FILTER_STRING_SZ*2, "scale=%d:%d, %s",
+                    encoder_context->codec_context[encoder_context->video_stream_index]->width,
+                    encoder_context->codec_context[encoder_context->video_stream_index]->height,
+                    watermark_str);
+                if (ret < 0){
+                    elv_dbg("snprintf encoding error=%s", watermark_str);
+                    return -1;
+                }else {
+                    if (ret >= FILTER_STRING_SZ){
+                        elv_dbg("Not enough string space for %s", watermark_str);
                         return -1;
                     }
                 }
@@ -2100,7 +2124,7 @@ avpipe_init(
         goto avpipe_init_failed;
     }
 
-    if (params->watermark != NULL && (strlen(params->watermark) > (FILTER_STRING_SZ-1))){
+    if (params->watermark_text != NULL && (strlen(params->watermark_text) > (WATERMARK_STRING_SZ-1))){
         elv_err("Watermark too large");
         goto avpipe_init_failed;
     }
