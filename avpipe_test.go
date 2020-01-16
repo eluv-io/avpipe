@@ -288,6 +288,49 @@ func TestSingleABRTranscode(t *testing.T) {
 
 }
 
+func TestSingleABRTranscodeWithWatermark(t *testing.T) {
+	filename := "./media/ErsteChristmas.mp4"
+	outputDir := "O"
+
+	setupLogging()
+	log.Info("STARTING TestSingleABRTranscode")
+
+	params := &avpipe.TxParams{
+		BypassTranscoding: false,
+		Format:            "hls",
+		StartTimeTs:       0,
+		DurationTs:        -1,
+		StartSegmentStr:   "1",
+		VideoBitrate:      2560000,
+		AudioBitrate:      64000,
+		SampleRate:        44100,
+		CrfStr:            "23",
+		SegDurationTs:     1001 * 60,
+		Ecodec:            "libx264",
+		EncHeight:         720,
+		EncWidth:          1280,
+		TxType:            avpipe.TxVideo,
+		WatermarkText:     "This is avpipe watermarking",
+		WatermarkYLoc:     "H*0.5",
+		WatermarkXLoc:     "W/2",
+		WatermarkFontSz:   "36",
+		WatermarkFontClr:  "black",
+	}
+
+	// Create output directory if it doesn't exist
+	err := setupOutDir(outputDir)
+	if err != nil {
+		t.Fail()
+	}
+
+	avpipe.InitIOHandler(&fileInputOpener{url: filename}, &fileOutputOpener{dir: outputDir})
+
+	rc := avpipe.Tx(params, filename, true)
+	if rc != 0 {
+		t.Fail()
+	}
+}
+
 // This test uses the following new APIs
 // - to obtain a handle of running session:
 //   - TxInit()

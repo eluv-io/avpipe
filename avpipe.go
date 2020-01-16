@@ -14,7 +14,7 @@ Package avpipe has four main interfaces that has to be implemented by the client
 */
 package avpipe
 
-// #cgo pkg-config: libavcodec libavfilter libavformat libavutil libswresample
+// #cgo pkg-config: libavcodec libavfilter libavformat libavutil libswresample libavresample
 // #cgo CFLAGS: -I./include
 // #include <string.h>
 // #include <stdlib.h>

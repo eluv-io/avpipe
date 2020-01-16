@@ -544,6 +544,7 @@ usage(
         "\t                                For audio default is \"aac\", but for ts files should be set to \"ac3\"\n"
         "\t-enc-height :        (optional) Default: -1 (use source height)\n"
         "\t-enc-width :         (optional) Default: -1 (use source width)\n"
+        "\t-f :                 (mandatory) input filename for transcoding. Output goes to directory ./O\n"
         "\t-format :            (optional) package format. Default is \"dash\", can be: \"dash\", \"hls\", \"mp4\", \"fmp4\", \"segment\", or \"fmp4-segment\"\n"
         "\t                                Using \"segment\" format produces self contained mp4 segments with start pts from 0 for each segment\n"
         "\t                                Using \"fmp4-segment\" format produces self contained mp4 segments with continious pts.\n"
@@ -560,10 +561,14 @@ usage(
         "\t-r :                 (optional) number of repeats. Default is 1 repeat, must be bigger than 1\n"
         "\t-t :                 (optional) transcoding threads. Default is 1 thread, must be bigger than 1\n"
         "\t-command :           (optional) directing command of etx, can be \"transcode\" or \"probe\" (default is transcode).\n"
-        "\t-tx-type :           (optional) transcoding type. Default is \"all\", can be \"video\", \"audio\", or \"all\" \n"
         "\t-seg-duration-ts :   (mandatory if format is not \"segment\") segment duration time base (positive integer).\n"
         "\t-seg-duration :      (mandatory if format is \"segment\") segment duration secs (positive integer). It is used for making mp4 segments.\n"
-        "\t-f :                 (mandatory) input filename for transcoding. Output goes to directory ./O\n",
+        "\t-tx-type :           (optional) transcoding type. Default is \"all\", can be \"video\", \"audio\", or \"all\" \n"
+        "\t-watermark-text :    (optional) watermark text that will be presented in every video frame if it exist\n"
+        "\t-watermark-xloc :    (optional) watermark X location\n"
+        "\t-watermark-yloc :    (optional) watermark Y location\n"
+        "\t-watermark-color :   (optional) watermark font color\n"
+        "\t-watermark-size :    (optional) watermark font size\n",
         bad_flag, progname);
     exit(status);
 }
@@ -835,10 +840,10 @@ main(
             if (!strcmp(argv[i], "-watermark-yloc")) {
                 p.watermark_yloc = argv[i+1];
             }
-            if (!strcmp(argv[i], "-watermark-font-color")) {
+            if (!strcmp(argv[i], "-watermark-color")) {
                 p.watermark_font_color = argv[i+1];
             }
-            if (!strcmp(argv[i], "-watermark-font-sz")) {
+            if (!strcmp(argv[i], "-watermark-size")) {
                 p.watermark_font_sz = argv[i+1];
             }
             break;

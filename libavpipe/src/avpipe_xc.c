@@ -1577,10 +1577,6 @@ should_stop_decoding(
     return 0;
 }
 
-const char* GetFieldOrDefault(const char* field, const char* defaultVal){
-    return (field != 0 && *(field) != 0) ? field : defaultVal;
-}
-
 int
 avpipe_tx(
     txctx_t *txctx,
@@ -1599,20 +1595,29 @@ avpipe_tx(
 
     if (!params->bypass_transcoding &&
         (params->tx_type & tx_video)) {
-            const char* wm_text = GetFieldOrDefault(txctx->params->watermark_text, "");
-            if (*(wm_text) != 0){
-                const char* wm_font_color = GetFieldOrDefault(txctx->params->watermark_font_color, "black");
-                const char* wm_font_sz = GetFieldOrDefault(txctx->params->watermark_font_sz, "24");
-                const char* wm_xloc = GetFieldOrDefault(txctx->params->watermark_xloc, "W*0.85");
-                const char* wm_yloc = GetFieldOrDefault(txctx->params->watermark_yloc, "H*0.90");
-                int ret = snprintf(watermark_str, WATERMARK_STRING_SZ, filterTemplate, wm_text, wm_font_color, wm_font_sz, wm_xloc, wm_yloc);
-
-                if (ret < 0){
-                    elv_dbg("snprintf encoding text=%s fontcolor=%s, fontsize=%s, locx = %s, locy = %s", wm_text, wm_font_color, wm_font_sz, wm_xloc, wm_yloc);
+            if (params->watermark_text && *params->watermark_text != '\0') {
+                /* Return an error if one of the watermark params is not set properly */
+                if ((!params->watermark_font_color || *params->watermark_font_color == '\0') ||
+                    (!params->watermark_font_sz || *params->watermark_font_sz == '\0') ||
+                    (!params->watermark_xloc || *params->watermark_xloc == '\0') ||
+                    (!params->watermark_yloc || *params->watermark_yloc == '\0')) {
+                    elv_err("Watermark param is not set. color=\"%s\", \"size=%s\", \"xloc=%s\", \"yloc=%s\"",
+                        params->watermark_font_color != NULL ? params->watermark_font_color : "",
+                        params->watermark_font_sz != NULL ? params->watermark_font_sz : "",
+                        params->watermark_xloc != NULL ? params->watermark_xloc : "",
+                        params->watermark_yloc != NULL ? params->watermark_yloc : "");
                     return -1;
-                }else {
-                    if (ret >= FILTER_STRING_SZ){
-                        elv_dbg("Not enough string space for %s",  wm_text);
+                }
+                int ret = snprintf(watermark_str, WATERMARK_STRING_SZ, filterTemplate,
+                        params->watermark_text, params->watermark_font_color, params->watermark_font_sz, params->watermark_xloc, params->watermark_yloc);
+
+                elv_dbg("watermark=%s, x=%s, y=%s, font-size=%s, ret=%d",
+                        watermark_str, params->watermark_xloc, params->watermark_yloc, params->watermark_font_sz, ret);
+                if (ret < 0) {
+                    return -1;
+                } else {
+                    if (ret >= FILTER_STRING_SZ) {
+                        elv_dbg("Not enough memory for watermark filter");
                         return -1;
                     }
                 }
@@ -1621,22 +1626,22 @@ avpipe_tx(
                     encoder_context->codec_context[encoder_context->video_stream_index]->width,
                     encoder_context->codec_context[encoder_context->video_stream_index]->height,
                     watermark_str);
-                if (ret < 0){
+                if (ret < 0) {
                     elv_dbg("snprintf encoding error=%s", watermark_str);
                     return -1;
-                }else {
+                } else {
                     if (ret >= FILTER_STRING_SZ){
                         elv_dbg("Not enough string space for %s", watermark_str);
                         return -1;
                     }
                 }
-            }else{
+            } else {
                 sprintf(filter_str, "scale=%d:%d",
                     encoder_context->codec_context[encoder_context->video_stream_index]->width,
                     encoder_context->codec_context[encoder_context->video_stream_index]->height);
                 elv_dbg("FILTER scale=%s", filter_str);
             }
-            if (init_filters(filter_str, decoder_context, encoder_context, txctx->params) < 0){
+            if (init_filters(filter_str, decoder_context, encoder_context, txctx->params) < 0) {
                 elv_err("Failed to initialize video filter");
                 return -1;
             }

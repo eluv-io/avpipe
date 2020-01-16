@@ -209,9 +209,8 @@ func InitTranscode(cmdRoot *cobra.Command) error {
 	cmdTranscode.PersistentFlags().String("watermark-text", "", "add text to the watermark display")
 	cmdTranscode.PersistentFlags().String("watermark-xloc", "", "the xLoc of the watermark as specified by a fraction of width")
 	cmdTranscode.PersistentFlags().String("watermark-yloc", "", "the yLoc of the watermark as specified by a fraction of height")
-	cmdTranscode.PersistentFlags().String("watermark-font-sz", "", "font size as specified in pt size")
-	cmdTranscode.PersistentFlags().String("watermark-font-color", "", "a string marking the color of text to use")
-
+	cmdTranscode.PersistentFlags().String("watermark-size", "", "font size as specified in pt size")
+	cmdTranscode.PersistentFlags().String("watermark-color", "", "a string marking the color of text to use")
 
 	return nil
 }
@@ -251,6 +250,10 @@ func doTranscode(cmd *cobra.Command, args []string) error {
 	}
 
 	watermarkText := cmd.Flag("watermark-text").Value.String()
+	watermarkXloc := cmd.Flag("watermark-xloc").Value.String()
+	watermarkYloc := cmd.Flag("watermark-yloc").Value.String()
+	watermarkColor := cmd.Flag("watermark-color").Value.String()
+	watermarkSize := cmd.Flag("watermark-size").Value.String()
 
 	txTypeStr := cmd.Flag("tx-type").Value.String()
 	if txTypeStr != "all" && txTypeStr != "video" && txTypeStr != "audio" {
@@ -403,6 +406,10 @@ func doTranscode(cmd *cobra.Command, args []string) error {
 		CryptScheme:        cryptScheme,
 		TxType:             txType,
 		WatermarkText:      watermarkText,
+		WatermarkXLoc:      watermarkXloc,
+		WatermarkYLoc:      watermarkYloc,
+		WatermarkFontSz:    watermarkSize,
+		WatermarkFontClr:   watermarkColor,
 		ForceKeyInt:        forceKeyInterval,
 		RcMaxRate:          rcMaxRate,
 		RcBufferSize:       4500000,
