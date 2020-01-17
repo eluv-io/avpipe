@@ -98,40 +98,42 @@ const (
 
 // TxParams should match with txparams_t in avpipe_xc.h
 type TxParams struct {
-	BypassTranscoding  bool        `json:"bypass,omitempty"`
-	Format             string      `json:"format,omitempty"`
-	StartTimeTs        int64       `json:"start_time_ts,omitempty"`
-	SkipOverPts        int64       `json:"skip_over_pts,omitempty"`
-	StartPts           int64       `json:"start_pts,omitempty"` // Start PTS for output
-	DurationTs         int64       `json:"duration_ts,omitempty"`
-	StartSegmentStr    string      `json:"start_segment_str,omitempty"`
-	VideoBitrate       int32       `json:"video_bitrate,omitempty"`
-	AudioBitrate       int32       `json:"audio_bitrate,omitempty"`
-	SampleRate         int32       `json:"sample_rate,omitempty"` // Audio sampling rate
-	RcMaxRate          int32       `json:"rc_max_rate,omitempty"`
-	RcBufferSize       int32       `json:"rc_buffer_size,omitempty"`
-	CrfStr             string      `json:"crf_str,omitempty"`
-	SegDurationTs      int64       `json:"seg_duration_ts,omitempty"`
-	SegDuration        string      `json:"seg_duration,omitempty"`
-	StartFragmentIndex int32       `json:"start_fragment_index,omitempty"`
-	ForceKeyInt        int32       `json:"force_keyint,omitempty"`
-	Ecodec             string      `json:"ecodec,omitempty"` // Video encoder
-	Dcodec             string      `json:"dcodec,omitempty"` // Video decoder
-	EncHeight          int32       `json:"enc_height,omitempty"`
-	EncWidth           int32       `json:"enc_width,omitempty"`
-	CryptIV            string      `json:"crypt_iv,omitempty"`
-	CryptKey           string      `json:"crypt_key,omitempty"`
-	CryptKID           string      `json:"crypt_kid,omitempty"`
-	CryptKeyURL        string      `json:"crypt_key_url,omitempty"`
-	CryptScheme        CryptScheme `json:"crypt_scheme,omitempty"`
-	TxType             TxType      `json:"tx_type,omitempty"`
-	Seekable           bool        `json:"seekable,omitempty"`
-	WatermarkText      string      `json:"watermark_text,omitempty"`
-	WatermarkXLoc      string      `json:"watermark_xloc,omitempty"`
-	WatermarkYLoc      string      `json:"watermark_yloc,omitempty"`
-	WatermarkFontSz    string      `json:"watermark_font_sz,omitempty"`
-	WatermarkFontClr   string      `json:"watermark_font_color,omitempty"`
-	AudioIndex         int32       `json:"audio_index,omitempty"`
+	BypassTranscoding     bool        `json:"bypass,omitempty"`
+	Format                string      `json:"format,omitempty"`
+	StartTimeTs           int64       `json:"start_time_ts,omitempty"`
+	SkipOverPts           int64       `json:"skip_over_pts,omitempty"`
+	StartPts              int64       `json:"start_pts,omitempty"` // Start PTS for output
+	DurationTs            int64       `json:"duration_ts,omitempty"`
+	StartSegmentStr       string      `json:"start_segment_str,omitempty"`
+	VideoBitrate          int32       `json:"video_bitrate,omitempty"`
+	AudioBitrate          int32       `json:"audio_bitrate,omitempty"`
+	SampleRate            int32       `json:"sample_rate,omitempty"` // Audio sampling rate
+	RcMaxRate             int32       `json:"rc_max_rate,omitempty"`
+	RcBufferSize          int32       `json:"rc_buffer_size,omitempty"`
+	CrfStr                string      `json:"crf_str,omitempty"`
+	SegDurationTs         int64       `json:"seg_duration_ts,omitempty"`
+	SegDuration           string      `json:"seg_duration,omitempty"`
+	StartFragmentIndex    int32       `json:"start_fragment_index,omitempty"`
+	ForceKeyInt           int32       `json:"force_keyint,omitempty"`
+	Ecodec                string      `json:"ecodec,omitempty"` // Video encoder
+	Dcodec                string      `json:"dcodec,omitempty"` // Video decoder
+	EncHeight             int32       `json:"enc_height,omitempty"`
+	EncWidth              int32       `json:"enc_width,omitempty"`
+	CryptIV               string      `json:"crypt_iv,omitempty"`
+	CryptKey              string      `json:"crypt_key,omitempty"`
+	CryptKID              string      `json:"crypt_kid,omitempty"`
+	CryptKeyURL           string      `json:"crypt_key_url,omitempty"`
+	CryptScheme           CryptScheme `json:"crypt_scheme,omitempty"`
+	TxType                TxType      `json:"tx_type,omitempty"`
+	Seekable              bool        `json:"seekable,omitempty"`
+	WatermarkText         string      `json:"watermark_text,omitempty"`
+	WatermarkXLoc         string      `json:"watermark_xloc,omitempty"`
+	WatermarkYLoc         string      `json:"watermark_yloc,omitempty"`
+	WatermarkRelativeSize float32     `json:"watermark_relative_size,omitempty"`
+	WatermarkFontColor    string      `json:"watermark_font_color,omitempty"`
+	WatermarkShadow       bool        `json:"watermark_shadow,omitempty"`
+	WatermarkShadowColor  string      `json:"watermark_shadow_color,omitempty"`
+	AudioIndex            int32       `json:"audio_index,omitempty"`
 }
 
 type AVMediaType int
@@ -728,50 +730,55 @@ func Tx(params *TxParams, url string, debugFrameLevel bool) int {
 	// same field order as avpipe_xc.h
 	cparams := &C.txparams_t{
 		// bypass_transcoding handled below
-		format:               C.CString(params.Format),
-		start_time_ts:        C.int64_t(params.StartTimeTs),
-		skip_over_pts:        C.int64_t(params.SkipOverPts),
-		start_pts:            C.int64_t(params.StartPts),
-		duration_ts:          C.int64_t(params.DurationTs),
-		start_segment_str:    C.CString(params.StartSegmentStr),
-		video_bitrate:        C.int(params.VideoBitrate),
-		audio_bitrate:        C.int(params.AudioBitrate),
-		sample_rate:          C.int(params.SampleRate),
-		crf_str:              C.CString(params.CrfStr),
-		rc_max_rate:          C.int(params.RcMaxRate),
-		rc_buffer_size:       C.int(params.RcBufferSize),
-		seg_duration_ts:      C.int64_t(params.SegDurationTs),
-		seg_duration:         C.CString(params.SegDuration),
-		start_fragment_index: C.int(params.StartFragmentIndex),
-		force_keyint:         C.int(params.ForceKeyInt),
-		ecodec:               C.CString(params.Ecodec),
-		dcodec:               C.CString(params.Dcodec),
-		enc_height:           C.int(params.EncHeight),
-		enc_width:            C.int(params.EncWidth),
-		crypt_iv:             C.CString(params.CryptIV),
-		crypt_key:            C.CString(params.CryptKey),
-		crypt_kid:            C.CString(params.CryptKID),
-		crypt_key_url:        C.CString(params.CryptKeyURL),
-		crypt_scheme:         C.crypt_scheme_t(params.CryptScheme),
-		tx_type:              C.tx_type_t(params.TxType),
-		watermark_text:       C.CString(params.WatermarkText),
-		watermark_xloc:       C.CString(params.WatermarkXLoc),
-		watermark_yloc:       C.CString(params.WatermarkYLoc),
-		watermark_font_sz:    C.CString(params.WatermarkFontSz),
-		watermark_font_color: C.CString(params.WatermarkFontClr),
+		format:                 C.CString(params.Format),
+		start_time_ts:          C.int64_t(params.StartTimeTs),
+		skip_over_pts:          C.int64_t(params.SkipOverPts),
+		start_pts:              C.int64_t(params.StartPts),
+		duration_ts:            C.int64_t(params.DurationTs),
+		start_segment_str:      C.CString(params.StartSegmentStr),
+		video_bitrate:          C.int(params.VideoBitrate),
+		audio_bitrate:          C.int(params.AudioBitrate),
+		sample_rate:            C.int(params.SampleRate),
+		crf_str:                C.CString(params.CrfStr),
+		rc_max_rate:            C.int(params.RcMaxRate),
+		rc_buffer_size:         C.int(params.RcBufferSize),
+		seg_duration_ts:        C.int64_t(params.SegDurationTs),
+		seg_duration:           C.CString(params.SegDuration),
+		start_fragment_index:   C.int(params.StartFragmentIndex),
+		force_keyint:           C.int(params.ForceKeyInt),
+		ecodec:                 C.CString(params.Ecodec),
+		dcodec:                 C.CString(params.Dcodec),
+		enc_height:             C.int(params.EncHeight),
+		enc_width:              C.int(params.EncWidth),
+		crypt_iv:               C.CString(params.CryptIV),
+		crypt_key:              C.CString(params.CryptKey),
+		crypt_kid:              C.CString(params.CryptKID),
+		crypt_key_url:          C.CString(params.CryptKeyURL),
+		crypt_scheme:           C.crypt_scheme_t(params.CryptScheme),
+		tx_type:                C.tx_type_t(params.TxType),
+		watermark_text:         C.CString(params.WatermarkText),
+		watermark_xloc:         C.CString(params.WatermarkXLoc),
+		watermark_yloc:         C.CString(params.WatermarkYLoc),
+		watermark_relative_sz:  C.float(params.WatermarkRelativeSize),
+		watermark_font_color:   C.CString(params.WatermarkFontColor),
+		watermark_shadow:       C.int(0),
+		watermark_shadow_color: C.CString(params.WatermarkShadowColor),
+		audio_index:            C.int(params.AudioIndex),
+		bypass_transcoding:     C.int(0),
+		seekable:               C.int(0),
+		// seekable, bypass, and shadow handled below
+	}
 
-		// seekable handled below
-		audio_index: C.int(params.AudioIndex),
-	}
 	if params.BypassTranscoding {
-		cparams.bypass_transcoding = 1
-	} else {
-		cparams.bypass_transcoding = 0
+		cparams.bypass_transcoding = C.int(1)
 	}
+
 	if params.Seekable {
 		cparams.seekable = C.int(1)
-	} else {
-		cparams.seekable = C.int(0)
+	}
+
+	if params.WatermarkShadow {
+		cparams.watermark_shadow = C.int(1)
 	}
 
 	var debugFrameLevelInt int
@@ -886,45 +893,56 @@ func TxInit(params *TxParams, url string, debugFrameLevel bool) (int32, error) {
 	// same field order as avpipe_xc.h
 	cparams := &C.txparams_t{
 		// bypass_transcoding handled below
-		format:               C.CString(params.Format),
-		start_time_ts:        C.int64_t(params.StartTimeTs),
-		skip_over_pts:        C.int64_t(params.SkipOverPts),
-		start_pts:            C.int64_t(params.StartPts),
-		duration_ts:          C.int64_t(params.DurationTs),
-		start_segment_str:    C.CString(params.StartSegmentStr),
-		video_bitrate:        C.int(params.VideoBitrate),
-		audio_bitrate:        C.int(params.AudioBitrate),
-		sample_rate:          C.int(params.SampleRate),
-		crf_str:              C.CString(params.CrfStr),
-		rc_max_rate:          C.int(params.RcMaxRate),
-		rc_buffer_size:       C.int(params.RcBufferSize),
-		seg_duration_ts:      C.int64_t(params.SegDurationTs),
-		seg_duration:         C.CString(params.SegDuration),
-		start_fragment_index: C.int(params.StartFragmentIndex),
-		force_keyint:         C.int(params.ForceKeyInt),
-		ecodec:               C.CString(params.Ecodec),
-		dcodec:               C.CString(params.Dcodec),
-		enc_height:           C.int(params.EncHeight),
-		enc_width:            C.int(params.EncWidth),
-		crypt_iv:             C.CString(params.CryptIV),
-		crypt_key:            C.CString(params.CryptKey),
-		crypt_kid:            C.CString(params.CryptKID),
-		crypt_key_url:        C.CString(params.CryptKeyURL),
-		crypt_scheme:         C.crypt_scheme_t(params.CryptScheme),
-		tx_type:              C.tx_type_t(params.TxType),
-		// seekable handled below
+		format:                 C.CString(params.Format),
+		start_time_ts:          C.int64_t(params.StartTimeTs),
+		skip_over_pts:          C.int64_t(params.SkipOverPts),
+		start_pts:              C.int64_t(params.StartPts),
+		duration_ts:            C.int64_t(params.DurationTs),
+		start_segment_str:      C.CString(params.StartSegmentStr),
+		video_bitrate:          C.int(params.VideoBitrate),
+		audio_bitrate:          C.int(params.AudioBitrate),
+		sample_rate:            C.int(params.SampleRate),
+		crf_str:                C.CString(params.CrfStr),
+		rc_max_rate:            C.int(params.RcMaxRate),
+		rc_buffer_size:         C.int(params.RcBufferSize),
+		seg_duration_ts:        C.int64_t(params.SegDurationTs),
+		seg_duration:           C.CString(params.SegDuration),
+		start_fragment_index:   C.int(params.StartFragmentIndex),
+		force_keyint:           C.int(params.ForceKeyInt),
+		ecodec:                 C.CString(params.Ecodec),
+		dcodec:                 C.CString(params.Dcodec),
+		enc_height:             C.int(params.EncHeight),
+		enc_width:              C.int(params.EncWidth),
+		crypt_iv:               C.CString(params.CryptIV),
+		crypt_key:              C.CString(params.CryptKey),
+		crypt_kid:              C.CString(params.CryptKID),
+		crypt_key_url:          C.CString(params.CryptKeyURL),
+		crypt_scheme:           C.crypt_scheme_t(params.CryptScheme),
+		tx_type:                C.tx_type_t(params.TxType),
+		watermark_text:         C.CString(params.WatermarkText),
+		watermark_xloc:         C.CString(params.WatermarkXLoc),
+		watermark_yloc:         C.CString(params.WatermarkYLoc),
+		watermark_relative_sz:  C.float(params.WatermarkRelativeSize),
+		watermark_font_color:   C.CString(params.WatermarkFontColor),
+		watermark_shadow:       C.int(0),
+		watermark_shadow_color: C.CString(params.WatermarkShadowColor),
+		bypass_transcoding:     C.int(0),
+		seekable:               C.int(0),
+
 		audio_index: C.int(params.AudioIndex),
+		// seekable, bypass, and shadow handled below
 	}
 
 	if params.BypassTranscoding {
-		cparams.bypass_transcoding = 1
-	} else {
-		cparams.bypass_transcoding = 0
+		cparams.bypass_transcoding = C.int(1)
 	}
+
 	if params.Seekable {
 		cparams.seekable = C.int(1)
-	} else {
-		cparams.seekable = C.int(0)
+	}
+
+	if params.WatermarkShadow {
+		cparams.watermark_shadow = C.int(1)
 	}
 
 	var debugFrameLevelInt int

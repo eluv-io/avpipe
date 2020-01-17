@@ -564,11 +564,13 @@ usage(
         "\t-seg-duration-ts :   (mandatory if format is not \"segment\") segment duration time base (positive integer).\n"
         "\t-seg-duration :      (mandatory if format is \"segment\") segment duration secs (positive integer). It is used for making mp4 segments.\n"
         "\t-tx-type :           (optional) transcoding type. Default is \"all\", can be \"video\", \"audio\", or \"all\" \n"
-        "\t-watermark-text :    (optional) watermark text that will be presented in every video frame if it exist\n"
-        "\t-watermark-xloc :    (optional) watermark X location\n"
-        "\t-watermark-yloc :    (optional) watermark Y location\n"
-        "\t-watermark-color :   (optional) watermark font color\n"
-        "\t-watermark-size :    (optional) watermark font size\n",
+        "\t-wm-text :           (optional) watermark text that will be presented in every video frame if it exist\n"
+        "\t-wm-xloc :           (optional) watermark X location\n"
+        "\t-wm-yloc :           (optional) watermark Y location\n"
+        "\t-wm-color :          (optional) watermark font color\n"
+        "\t-wm-relative-size :  (optional) watermark relative font/shadow size\n"
+        "\t-wm-shadow :         (optional) watermarking with shadow. Default is 1, means with shadow.\n"
+        "\t-wm-shadow-color :   (optional) watermark shadow color. Default is white.\n",
         bad_flag, progname);
     exit(status);
 }
@@ -596,6 +598,7 @@ main(
     int start_segment = -1;
     char *command = "transcode";
     int i;
+    int wm_shadow = 0;
 
     /* Parameters */
     txparams_t p = {
@@ -624,7 +627,9 @@ main(
         .video_bitrate = -1,                /* not used if using CRF */
         .tx_type = tx_all,
         .seekable = 0,
-        .force_keyint = 0
+        .force_keyint = 0,
+        .watermark_text = NULL,
+        .watermark_shadow = 0
     };
 
     i = 1;
@@ -831,20 +836,33 @@ main(
             }
             break;
         case 'w':
-            if (!strcmp(argv[i], "-watermark-text")) {
+            if (!strcmp(argv[i], "-wm-text")) {
                 p.watermark_text = argv[i+1];
-            }
-            if (!strcmp(argv[i], "-watermark-xloc")) {
+                p.watermark_shadow = 1;
+                p.watermark_shadow_color = "white"; /* Default shadow color */
+            } else if (!strcmp(argv[i], "-wm-xloc")) {
                 p.watermark_xloc = argv[i+1];
-            }
-            if (!strcmp(argv[i], "-watermark-yloc")) {
+            } else if (!strcmp(argv[i], "-wm-yloc")) {
                 p.watermark_yloc = argv[i+1];
-            }
-            if (!strcmp(argv[i], "-watermark-color")) {
+            } else if (!strcmp(argv[i], "-wm-color")) {
                 p.watermark_font_color = argv[i+1];
-            }
-            if (!strcmp(argv[i], "-watermark-size")) {
-                p.watermark_font_sz = argv[i+1];
+            } else if (!strcmp(argv[i], "-wm-relative-size")) {
+                if (sscanf(argv[i+1], "%f", &p.watermark_relative_sz) != 1) {
+                    usage(argv[0], argv[i], EXIT_FAILURE);
+                }
+            } else if (!strcmp(argv[i], "-wm-shadow")) {
+                if (sscanf(argv[i+1], "%d", &wm_shadow) != 1) {
+                    usage(argv[0], argv[i], EXIT_FAILURE);
+                }
+                if (wm_shadow != 0 && wm_shadow != 1) {
+                    usage(argv[0], argv[i], EXIT_FAILURE);
+                } else {
+                    p.watermark_shadow = wm_shadow;
+                }
+            } else if (!strcmp(argv[i], "-wm-shadow-color")) {
+                p.watermark_shadow_color = argv[i+1];
+            } else {
+                usage(argv[0], argv[i], EXIT_FAILURE);
             }
             break;
         default:

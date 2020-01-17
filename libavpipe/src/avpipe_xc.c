@@ -32,7 +32,7 @@
 #define MPEGTS_THREAD_COUNT     16
 #define DEFAULT_THREAD_COUNT    8
 #define WATERMARK_STRING_SZ     1024
-#define FILTER_STRING_SZ        1024 + WATERMARK_STRING_SZ
+#define FILTER_STRING_SZ        (1024 + WATERMARK_STRING_SZ)
 
 extern int
 init_filters(
@@ -43,7 +43,6 @@ init_filters(
 
 extern int
 init_audio_filters(
-    const char *filters_descr,
     coderctx_t *decoder_context,
     coderctx_t *encoder_context,
     txparams_t *params);
@@ -1585,55 +1584,53 @@ avpipe_tx(
 {
     /* Set scale filter */
     char filter_str[FILTER_STRING_SZ];
-    char watermark_str[WATERMARK_STRING_SZ];
     struct timeval tv;
     u_int64_t since;
     coderctx_t *decoder_context = &txctx->decoder_ctx;
     coderctx_t *encoder_context = &txctx->encoder_ctx;
     txparams_t *params = txctx->params;
-    const char* filterTemplate = "drawtext=text='%s':fontcolor=%s:fontsize=%s:x=%s:y=%s:shadowx=1:shadowy=1:shadowcolor=white:alpha=0.65";
+    int shadow_x = 0;
+    int shadow_y = 0;
+    int font_size = 0;
+    const char* filterTemplate = "scale=%d:%d, drawtext=text='%s':fontcolor=%s:fontsize=%d:x=%s:y=%s:shadowx=%d:shadowy=%d:shadowcolor=%s:alpha=0.65";
 
     if (!params->bypass_transcoding &&
         (params->tx_type & tx_video)) {
             if (params->watermark_text && *params->watermark_text != '\0') {
                 /* Return an error if one of the watermark params is not set properly */
                 if ((!params->watermark_font_color || *params->watermark_font_color == '\0') ||
-                    (!params->watermark_font_sz || *params->watermark_font_sz == '\0') ||
                     (!params->watermark_xloc || *params->watermark_xloc == '\0') ||
-                    (!params->watermark_yloc || *params->watermark_yloc == '\0')) {
-                    elv_err("Watermark param is not set. color=\"%s\", \"size=%s\", \"xloc=%s\", \"yloc=%s\"",
+                    (params->watermark_relative_sz > 1 || params->watermark_relative_sz < 0) ||
+                    (!params->watermark_yloc || *params->watermark_yloc == '\0') ||
+                    (params->watermark_shadow && (!params->watermark_shadow_color || *params->watermark_shadow_color == '\0'))) {
+                    elv_err("Watermark param is not set correctly. color=\"%s\", relative_size=\"%f\", xloc=\"%s\", yloc=\"%s\", shadow=%d, shadow_color=\"%s\"",
                         params->watermark_font_color != NULL ? params->watermark_font_color : "",
-                        params->watermark_font_sz != NULL ? params->watermark_font_sz : "",
+                        params->watermark_relative_sz,
                         params->watermark_xloc != NULL ? params->watermark_xloc : "",
-                        params->watermark_yloc != NULL ? params->watermark_yloc : "");
+                        params->watermark_yloc != NULL ? params->watermark_yloc : "",
+                        params->watermark_shadow,
+                        params->watermark_shadow_color != NULL ? params->watermark_shadow_color : "");
                     return -1;
                 }
-                int ret = snprintf(watermark_str, WATERMARK_STRING_SZ, filterTemplate,
-                        params->watermark_text, params->watermark_font_color, params->watermark_font_sz, params->watermark_xloc, params->watermark_yloc);
-
-                elv_dbg("watermark=%s, x=%s, y=%s, font-size=%s, ret=%d",
-                        watermark_str, params->watermark_xloc, params->watermark_yloc, params->watermark_font_sz, ret);
-                if (ret < 0) {
-                    return -1;
-                } else {
-                    if (ret >= FILTER_STRING_SZ) {
-                        elv_dbg("Not enough memory for watermark filter");
-                        return -1;
-                    }
+                font_size = (int) (params->watermark_relative_sz * encoder_context->codec_context[encoder_context->video_stream_index]->height);
+                if (params->watermark_shadow) {
+                    /* Calculate shadow x and y */
+                    shadow_x = shadow_y = font_size*DRAW_TEXT_SHADOW_OFFSET;
                 }
+                int ret = snprintf(filter_str, FILTER_STRING_SZ, filterTemplate,
+                        encoder_context->codec_context[encoder_context->video_stream_index]->width,
+                        encoder_context->codec_context[encoder_context->video_stream_index]->height,
+                        params->watermark_text, params->watermark_font_color, font_size,
+                        params->watermark_xloc, params->watermark_yloc,
+                        shadow_x, shadow_y, params->watermark_shadow_color);
 
-                ret = snprintf(filter_str, FILTER_STRING_SZ*2, "scale=%d:%d, %s",
-                    encoder_context->codec_context[encoder_context->video_stream_index]->width,
-                    encoder_context->codec_context[encoder_context->video_stream_index]->height,
-                    watermark_str);
+                elv_dbg("filterstr=%s, x=%s, y=%s, relative-size=%f, ret=%d",
+                        filter_str, params->watermark_xloc, params->watermark_yloc, params->watermark_relative_sz, ret);
                 if (ret < 0) {
-                    elv_dbg("snprintf encoding error=%s", watermark_str);
                     return -1;
-                } else {
-                    if (ret >= FILTER_STRING_SZ){
-                        elv_dbg("Not enough string space for %s", watermark_str);
-                        return -1;
-                    }
+                } else if (ret >= FILTER_STRING_SZ) {
+                    elv_dbg("Not enough memory for watermark filter");
+                    return -1;
                 }
             } else {
                 sprintf(filter_str, "scale=%d:%d",
@@ -1649,7 +1646,7 @@ avpipe_tx(
 
     if (!params->bypass_transcoding &&
         (params->tx_type & tx_audio) &&
-        init_audio_filters(filter_str, decoder_context, encoder_context, txctx->params) < 0) {
+        init_audio_filters(decoder_context, encoder_context, txctx->params) < 0) {
         elv_err("Failed to initialize audio filter");
         return -1;
     }
@@ -2178,13 +2175,14 @@ avpipe_init(
         "crypt_key=%s "
         "crypt_kid=%s "
         "crypt_key_url=%s "
-        "crypt_scheme=%d ",
+        "crypt_scheme=%d "
+        "audio_index=%d ",
         params->bypass_transcoding, get_tx_type_name(params->tx_type),
         params->format, params->start_time_ts, params->start_pts, params->duration_ts, params->start_segment_str,
         params->video_bitrate, params->audio_bitrate, params->sample_rate, params->crf_str,
         params->rc_max_rate, params->rc_buffer_size,
         params->seg_duration_ts, params->seg_duration, params->ecodec, params->dcodec, params->enc_height, params->enc_width,
-        params->crypt_iv, params->crypt_key, params->crypt_kid, params->crypt_key_url, params->crypt_scheme);
+        params->crypt_iv, params->crypt_key, params->crypt_kid, params->crypt_key_url, params->crypt_scheme, params->audio_index);
     elv_log("AVPIPE TXPARAMS %s", buf);
 
     return 0;

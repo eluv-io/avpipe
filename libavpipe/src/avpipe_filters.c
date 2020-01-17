@@ -110,7 +110,6 @@ end:
 
 int
 init_audio_filters(
-    const char *filters_descr,
     coderctx_t *decoder_context,
     coderctx_t *encoder_context,
     txparams_t *params)

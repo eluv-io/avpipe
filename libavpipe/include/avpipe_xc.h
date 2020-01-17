@@ -182,6 +182,8 @@ typedef enum tx_type_t {
     tx_all
 } tx_type_t;
 
+#define DRAW_TEXT_SHADOW_OFFSET     0.075
+
 typedef struct txparams_t {
     int bypass_transcoding;         // if 0 means do transcoding, otherwise bypass transcoding (only copy)
     char *format;                   // Output format [Required, Values: dash, hls, mp4, fmp4]
@@ -213,11 +215,14 @@ typedef struct txparams_t {
     tx_type_t tx_type;              // Default: 0 means transcode 'everything'
     int seekable;                   // Default: 0 means not seekable. A non seekable stream with moov box in
                                     //          the end causes a lot of reads up to moov atom.
-    char *watermark_text;           // Default: no watermark
-    char *watermark_xloc;           // Default 0
-    char *watermark_yloc;           // Default 0
-    char *watermark_font_sz;      // Default 0 nofont
-    char *watermark_font_color;     // black        
+    char  *watermark_text;          // Default: NULL or empty text means no watermark
+    char  *watermark_xloc;          // Default 0
+    char  *watermark_yloc;          // Default 0
+    float watermark_relative_sz;    // Default 0
+    char  *watermark_font_color;    // black
+    int   watermark_shadow;         // Default 1, means shadow exist 
+    char  *watermark_shadow_color;  // Watermark shadow color
+
     int audio_index;                // Audio index(s) for mez making, may need to become an array of indexes 
 } txparams_t;
 

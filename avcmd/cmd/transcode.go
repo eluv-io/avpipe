@@ -206,11 +206,13 @@ func InitTranscode(cmdRoot *cobra.Command) error {
 	cmdTranscode.PersistentFlags().String("crypt-kid", "", "16-byte key ID, as 32 char hex")
 	cmdTranscode.PersistentFlags().String("crypt-key-url", "", "specify a key URL in the manifest")
 	cmdTranscode.PersistentFlags().String("crypt-scheme", "none", "encryption scheme, default is 'none', can be: 'aes-128', 'cbc1', 'cbcs', 'cenc', 'cens'")
-	cmdTranscode.PersistentFlags().String("watermark-text", "", "add text to the watermark display")
-	cmdTranscode.PersistentFlags().String("watermark-xloc", "", "the xLoc of the watermark as specified by a fraction of width")
-	cmdTranscode.PersistentFlags().String("watermark-yloc", "", "the yLoc of the watermark as specified by a fraction of height")
-	cmdTranscode.PersistentFlags().String("watermark-size", "", "font size as specified in pt size")
-	cmdTranscode.PersistentFlags().String("watermark-color", "", "a string marking the color of text to use")
+	cmdTranscode.PersistentFlags().String("wm-text", "", "add text to the watermark display")
+	cmdTranscode.PersistentFlags().String("wm-xloc", "", "the xLoc of the watermark as specified by a fraction of width")
+	cmdTranscode.PersistentFlags().String("wm-yloc", "", "the yLoc of the watermark as specified by a fraction of height")
+	cmdTranscode.PersistentFlags().Float32("wm-relative-size", 0.05, "font/shadow relative size based on frame height")
+	cmdTranscode.PersistentFlags().String("wm-color", "black", "watermark font color")
+	cmdTranscode.PersistentFlags().BoolP("wm-shadow", "", true, "watermarking with shadow")
+	cmdTranscode.PersistentFlags().String("wm-shadow-color", "white", "watermark shadow color")
 
 	return nil
 }
@@ -249,11 +251,13 @@ func doTranscode(cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("Pakage format is not valid, can be 'dash', 'hls', 'mp4', 'fmp4', 'segment', or 'fmp4-segment'")
 	}
 
-	watermarkText := cmd.Flag("watermark-text").Value.String()
-	watermarkXloc := cmd.Flag("watermark-xloc").Value.String()
-	watermarkYloc := cmd.Flag("watermark-yloc").Value.String()
-	watermarkColor := cmd.Flag("watermark-color").Value.String()
-	watermarkSize := cmd.Flag("watermark-size").Value.String()
+	watermarkText := cmd.Flag("wm-text").Value.String()
+	watermarkXloc := cmd.Flag("wm-xloc").Value.String()
+	watermarkYloc := cmd.Flag("wm-yloc").Value.String()
+	watermarkFontColor := cmd.Flag("wm-color").Value.String()
+	watermarkRelativeSize, _ := cmd.Flags().GetFloat32("wm-relative-size")
+	watermarkShadow, _ := cmd.Flags().GetBool("watermark-shadow")
+	watermarkShadowColor := cmd.Flag("wm-shadow-color").Value.String()
 
 	txTypeStr := cmd.Flag("tx-type").Value.String()
 	if txTypeStr != "all" && txTypeStr != "video" && txTypeStr != "audio" {
@@ -382,38 +386,40 @@ func doTranscode(cmd *cobra.Command, args []string) error {
 	}
 
 	params := &avpipe.TxParams{
-		BypassTranscoding:  bypass,
-		Format:             format,
-		StartTimeTs:        startTimeTs,
-		StartPts:           startPts,
-		DurationTs:         durationTs,
-		StartSegmentStr:    startSegmentStr,
-		StartFragmentIndex: startFragmentIndex,
-		VideoBitrate:       videoBitrate,
-		AudioBitrate:       audioBitrate,
-		SampleRate:         sampleRate,
-		CrfStr:             crfStr,
-		SegDurationTs:      segDurationTs,
-		SegDuration:        segDuration,
-		Ecodec:             encoder,
-		Dcodec:             decoder,
-		EncHeight:          encHeight, // -1 means use source height, other values 2160, 720
-		EncWidth:           encWidth,  // -1 means use source width, other values 3840, 1280
-		CryptIV:            cryptIV,
-		CryptKey:           cryptKey,
-		CryptKID:           cryptKID,
-		CryptKeyURL:        cryptKeyURL,
-		CryptScheme:        cryptScheme,
-		TxType:             txType,
-		WatermarkText:      watermarkText,
-		WatermarkXLoc:      watermarkXloc,
-		WatermarkYLoc:      watermarkYloc,
-		WatermarkFontSz:    watermarkSize,
-		WatermarkFontClr:   watermarkColor,
-		ForceKeyInt:        forceKeyInterval,
-		RcMaxRate:          rcMaxRate,
-		RcBufferSize:       4500000,
-		AudioIndex:         audioIndex,
+		BypassTranscoding:     bypass,
+		Format:                format,
+		StartTimeTs:           startTimeTs,
+		StartPts:              startPts,
+		DurationTs:            durationTs,
+		StartSegmentStr:       startSegmentStr,
+		StartFragmentIndex:    startFragmentIndex,
+		VideoBitrate:          videoBitrate,
+		AudioBitrate:          audioBitrate,
+		SampleRate:            sampleRate,
+		CrfStr:                crfStr,
+		SegDurationTs:         segDurationTs,
+		SegDuration:           segDuration,
+		Ecodec:                encoder,
+		Dcodec:                decoder,
+		EncHeight:             encHeight, // -1 means use source height, other values 2160, 720
+		EncWidth:              encWidth,  // -1 means use source width, other values 3840, 1280
+		CryptIV:               cryptIV,
+		CryptKey:              cryptKey,
+		CryptKID:              cryptKID,
+		CryptKeyURL:           cryptKeyURL,
+		CryptScheme:           cryptScheme,
+		TxType:                txType,
+		WatermarkText:         watermarkText,
+		WatermarkXLoc:         watermarkXloc,
+		WatermarkYLoc:         watermarkYloc,
+		WatermarkRelativeSize: watermarkRelativeSize,
+		WatermarkFontColor:    watermarkFontColor,
+		WatermarkShadow:       watermarkShadow,
+		WatermarkShadowColor:  watermarkShadowColor,
+		ForceKeyInt:           forceKeyInterval,
+		RcMaxRate:             rcMaxRate,
+		RcBufferSize:          4500000,
+		AudioIndex:            audioIndex,
 	}
 
 	avpipe.InitIOHandler(&avcmdInputOpener{url: filename}, &avcmdOutputOpener{dir: dir})
