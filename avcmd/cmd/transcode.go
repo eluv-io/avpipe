@@ -189,7 +189,7 @@ func InitTranscode(cmdRoot *cobra.Command) error {
 	cmdTranscode.PersistentFlags().Int32P("crf", "", 23, "mutually exclusive with video-bitrate.")
 	cmdTranscode.PersistentFlags().Int64P("start-time-ts", "", 0, "")
 	cmdTranscode.PersistentFlags().Int64P("start-pts", "", 0, "starting PTS for output")
-	cmdTranscode.PersistentFlags().Int32P("sample-rate", "", -1, "")
+	cmdTranscode.PersistentFlags().Int32P("sample-rate", "", -1, "For aac output sample rate is set to input sample rate and this parameter is ignored.")
 	cmdTranscode.PersistentFlags().Int32P("start-segment", "", 1, "start segment number >= 1.")
 	cmdTranscode.PersistentFlags().Int32P("start-frag-index", "", 1, "start fragment index >= 1.")
 	cmdTranscode.PersistentFlags().Int32P("video-bitrate", "", -1, "output video bitrate, mutually exclusive with crf.")

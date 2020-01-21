@@ -75,40 +75,45 @@ int init_resampler(
     AVCodecContext *output_codec_context,
     SwrContext **resample_context)
 {
-        int error;
+    int error;
 
-        /*
-         * Create a resampler context for the conversion.
-         * Set the conversion parameters.
-         * Default channel layouts based on the number of channels
-         * are assumed for simplicity (they are sometimes not detected
-         * properly by the demuxer and/or decoder).
-         */
-        *resample_context = swr_alloc_set_opts(NULL,
-                                              av_get_default_channel_layout(output_codec_context->channels),
-                                              output_codec_context->sample_fmt,
-                                              output_codec_context->sample_rate,
-                                              av_get_default_channel_layout(input_codec_context->channels),
-                                              input_codec_context->sample_fmt,
-                                              input_codec_context->sample_rate,
-                                              0, NULL);
-        if (!*resample_context) {
-            elv_err("Could not allocate resample context");
-            return AVERROR(ENOMEM);
-        }
-        /*
-        * Perform a sanity check so that the number of converted samples is
-        * not greater than the number of samples to be converted.
-        * If the sample rates differ, this case has to be handled differently
-        */
-        assert(output_codec_context->sample_rate == input_codec_context->sample_rate);
+    /*
+     * Create a resampler context for the conversion.
+     * Set the conversion parameters.
+     * Default channel layouts based on the number of channels
+     * are assumed for simplicity (they are sometimes not detected
+     * properly by the demuxer and/or decoder).
+     */
+     *resample_context = swr_alloc_set_opts(NULL,
+                            av_get_default_channel_layout(output_codec_context->channels),
+                            output_codec_context->sample_fmt,
+                            output_codec_context->sample_rate,
+                            av_get_default_channel_layout(input_codec_context->channels),
+                            input_codec_context->sample_fmt,
+                            input_codec_context->sample_rate,
+                            0, NULL);
+    if (!*resample_context) {
+        elv_err("Could not allocate resample context");
+        return AVERROR(ENOMEM);
+    }
+    /*
+     * Perform a sanity check so that the number of converted samples is
+     * not greater than the number of samples to be converted.
+     * If the sample rates differ, this case has to be handled differently
+     */
+    if (output_codec_context->sample_rate != input_codec_context->sample_rate) {
+        elv_err("Output sample_rate (%d) doesn't match input sample_rate (%d)",
+            output_codec_context->sample_rate, input_codec_context->sample_rate);
+            return AVERROR(EINVAL);
+    }
 
-        /* Open the resampler with the specified parameters. */
-        if ((error = swr_init(*resample_context)) < 0) {
-            elv_err("Could not open resample context, error=%d", error);
-            swr_free(resample_context);
-            return error;
-        }
+    /* Open the resampler with the specified parameters. */
+    if ((error = swr_init(*resample_context)) < 0) {
+        elv_err("Could not open resample context, error=%d", error);
+        swr_free(resample_context);
+        return error;
+    }
+
     return 0;
 }
 
@@ -634,7 +639,12 @@ prepare_audio_encoder(
     }
 
     elv_log("ENCODER channels=%d, channel_layout=%d", encoder_context->codec_context[index]->channels, encoder_context->codec_context[index]->channel_layout);
-    if (params->sample_rate > 0) {
+    if (params->sample_rate > 0 && strcmp(params->ecodec, "aac")) {
+        /*
+         * Audio resampling, which is active for aac encoder, needs more work to adjust sampling properly
+         * when input sample rate is different from output sample rate.
+         * Therefore, set the sample rate to params->sample_rate if the encoder is not aac (-RM).
+         */
         encoder_context->codec_context[index]->sample_rate = params->sample_rate;
 
         /* Update timebase for the new sample rate */
@@ -661,9 +671,10 @@ prepare_audio_encoder(
         return -1;
     }
 
-    elv_dbg("encoder audio stream index=%d, bitrate=%d, sample_fmts=%d, timebase=%d, output frame_size=%d",
+    elv_dbg("encoder audio stream index=%d, bitrate=%d, sample_fmts=%d, timebase=%d, output frame_size=%d, sample_rate=%d",
         index, encoder_context->codec_context[index]->bit_rate, encoder_context->codec_context[index]->sample_fmt,
-        encoder_context->codec_context[index]->time_base.den, encoder_context->codec_context[index]->frame_size);
+        encoder_context->codec_context[index]->time_base.den, encoder_context->codec_context[index]->frame_size,
+        encoder_context->codec_context[index]->sample_rate);
 
     if (avcodec_parameters_from_context(
             encoder_context->stream[index]->codecpar,
@@ -2116,41 +2127,8 @@ avpipe_init(
         goto avpipe_init_failed;
     }
 
-    // By default transcode 'everything'
-    if (params->tx_type == tx_none) {
-        params->tx_type = tx_all;
-    }
-
-    if (params->start_pts < 0) {
-        elv_err("Start PTS can not be negative");
-        goto avpipe_init_failed;
-    }
-
-    if (params->watermark_text != NULL && (strlen(params->watermark_text) > (WATERMARK_STRING_SZ-1))){
-        elv_err("Watermark too large");
-        goto avpipe_init_failed;
-    }
-
-    /* Infer rc parameters */
-    if (params->video_bitrate > 0) {
-        params->rc_max_rate = params->video_bitrate * 1;
-        params->rc_buffer_size = params->video_bitrate;
-    }
-
-    if (prepare_decoder(&p_txctx->decoder_ctx, in_handlers, inctx, params, params->seekable)) {
-        elv_err("Failure in preparing decoder");
-        goto avpipe_init_failed;
-    }
-
-    if (prepare_encoder(&p_txctx->encoder_ctx, &p_txctx->decoder_ctx, out_handlers, inctx, params)) {
-        elv_err("Failure in preparing output");
-        goto avpipe_init_failed;
-    }
-
-    p_txctx->params = params;
-    *txctx = p_txctx;
-
     char buf[1024];
+
     sprintf(buf,
         "bypass=%d "
         "tx_type=%s "
@@ -2184,6 +2162,40 @@ avpipe_init(
         params->seg_duration_ts, params->seg_duration, params->ecodec, params->dcodec, params->enc_height, params->enc_width,
         params->crypt_iv, params->crypt_key, params->crypt_kid, params->crypt_key_url, params->crypt_scheme, params->audio_index);
     elv_log("AVPIPE TXPARAMS %s", buf);
+
+    // By default transcode 'everything'
+    if (params->tx_type == tx_none) {
+        params->tx_type = tx_all;
+    }
+
+    if (params->start_pts < 0) {
+        elv_err("Start PTS can not be negative");
+        goto avpipe_init_failed;
+    }
+
+    if (params->watermark_text != NULL && (strlen(params->watermark_text) > (WATERMARK_STRING_SZ-1))){
+        elv_err("Watermark too large");
+        goto avpipe_init_failed;
+    }
+
+    /* Infer rc parameters */
+    if (params->video_bitrate > 0) {
+        params->rc_max_rate = params->video_bitrate * 1;
+        params->rc_buffer_size = params->video_bitrate;
+    }
+
+    if (prepare_decoder(&p_txctx->decoder_ctx, in_handlers, inctx, params, params->seekable)) {
+        elv_err("Failure in preparing decoder");
+        goto avpipe_init_failed;
+    }
+
+    if (prepare_encoder(&p_txctx->encoder_ctx, &p_txctx->decoder_ctx, out_handlers, inctx, params)) {
+        elv_err("Failure in preparing output");
+        goto avpipe_init_failed;
+    }
+
+    p_txctx->params = params;
+    *txctx = p_txctx;
 
     return 0;
 
