@@ -408,7 +408,9 @@ func AVPipeSeekInput(fd C.int64_t, offset C.int64_t, whence C.int) C.int64_t {
 		return C.int64_t(-1)
 	}
 	gMutex.Unlock()
-	log.Debug("AVPipeSeekInput()", "h", h)
+	if traceIo {
+		log.Debug("AVPipeSeekInput()", "h", h)
+	}
 
 	n, err := h.InSeeker(offset, whence)
 	if err != nil {
