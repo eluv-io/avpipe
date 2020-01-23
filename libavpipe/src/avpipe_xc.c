@@ -1379,7 +1379,13 @@ transcode_video(
     /* send packet to decoder */
     response = avcodec_send_packet(codec_context, packet);
     if (response < 0) {
-        elv_err("Failure while sending a packet to the decoder: %s", av_err2str(response));
+        elv_err("Failure while sending a packet to the decoder: %s (%d)", av_err2str(response), response);
+        if (response == AVERROR_INVALIDDATA)
+            /*
+             * AVERROR_INVALIDDATA means the frame is invalid (mostly because of bad header).
+             * To avoid premature termination jump over the bad frame and continue decoding.
+             */
+            response = 0;
         return response;
     }
 
