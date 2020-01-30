@@ -60,6 +60,10 @@ elv_io_close(
     struct AVFormatContext *s,
     AVIOContext *pb);
 
+extern const char *
+av_get_pix_fmt_name(
+    enum AVPixelFormat pix_fmt);
+
 /**
  * Initialize the audio resampler based on the input and output codec settings.
  * If the input and output sample formats differ, a conversion is required
@@ -354,8 +358,9 @@ prepare_decoder(
             return -1;
         }
 
-        elv_log("Input stream=%d pixel_format=%d, timebase=%d, sample_fmt=%d, frame_size=%d",
-            i, decoder_context->codec_context[i]->pix_fmt,
+        elv_log("Input stream=%d pixel_format=%s, timebase=%d, sample_fmt=%d, frame_size=%d",
+            i,
+            av_get_pix_fmt_name(decoder_context->codec_context[i]->pix_fmt),
             decoder_context->stream[i]->time_base.den,
             decoder_context->codec_context[i]->sample_fmt,
             decoder_context->codec_context[i]->frame_size);
@@ -429,16 +434,59 @@ set_encoder_options(
     }
 }
 
+/* 
+ * Set H264 specific params profile, and level based on encoding height.
+ */
+static void
+set_h264_params(
+    coderctx_t *encoder_context,
+    coderctx_t *decoder_context,
+    txparams_t *params)
+{
+    int index = decoder_context->video_stream_index;
+    AVCodecContext *encoder_codec_context = encoder_context->codec_context[index];
+
+    /* Codec level and profile must be set correctly per H264 spec */
+    if (encoder_codec_context->height <= 480)
+        /*
+         * FF_PROFILE_H264_BASELINE is primarily for lower-cost applications with limited computing resources,
+         * this profile is used widely in videoconferencing and mobile applications.
+         */
+        encoder_codec_context->profile = FF_PROFILE_H264_BASELINE;
+    else
+        /*
+         * FF_PROFILE_H264_HIGH is the primary profile for broadcast and disc storage applications,
+         * particularly for high-definition television applications.
+         */
+        encoder_codec_context->profile = FF_PROFILE_H264_HIGH;
+
+    /* 
+     * These are set according to
+     * https://en.wikipedia.org/wiki/Advanced_Video_Coding#Levels
+     * https://developer.apple.com/documentation/http_live_streaming/hls_authoring_specification_for_apple_devices
+     */
+    if (encoder_codec_context->height <= 480)
+        encoder_codec_context->level = 30;
+    else if (encoder_codec_context->height <= 720)
+        encoder_codec_context->level = 31;
+    else if (encoder_codec_context->height <= 1080)
+        encoder_codec_context->level = 42;
+    else if (encoder_codec_context->height <= 1920)
+        encoder_codec_context->level = 50;
+    else
+        encoder_codec_context->level = 51;
+}
+
 static int
 prepare_video_encoder(
     coderctx_t *encoder_context,
     coderctx_t *decoder_context,
     txparams_t *params)
 {
-    int rc = 0;
     int i;
-    int found_pix_fmt = 0;
+    int rc = 0;
     int index = decoder_context->video_stream_index;
+    int found_pix_fmt = 0;
 
     if (index < 0) {
         elv_dbg("No video stream detected by decoder.");
@@ -517,12 +565,6 @@ prepare_video_encoder(
     if (params->rc_max_rate > 0)
         encoder_codec_context->rc_max_rate = params->rc_max_rate;
 
-    if (encoder_context->codec[index]->pix_fmts) {
-        encoder_codec_context->pix_fmt = encoder_context->codec[index]->pix_fmts[0];
-    } else {
-        encoder_codec_context->pix_fmt = decoder_context->codec_context[index]->pix_fmt;
-    }
-
     // This needs to be set before open (ffmpeg samples have it wrong)
     if (encoder_context->format_context->oformat->flags & AVFMT_GLOBALHEADER) {
         encoder_codec_context->flags |= AV_CODEC_FLAG_GLOBAL_HEADER;
@@ -540,20 +582,23 @@ prepare_video_encoder(
         }
     }
 
-    /* If encoder supports the input pixel format then keep it,
-     * otherwise set encoder pixel format to AV_PIX_FMT_YUV420P/AV_PIX_FMT_YUV422P.
-     */
-    if (!strcmp(params->format, "fmp4-segment"))
-        encoder_context->codec_context[index]->pix_fmt = AV_PIX_FMT_YUV420P;
+    /* If the codec is nvenc, or format is fmp4-segment set pixel format to AV_PIX_FMT_YUV420P. */
+    if (!strcmp(params->format, "fmp4-segment") || !strcmp(params->ecodec, "h264_nvenc"))
+        encoder_codec_context->pix_fmt = AV_PIX_FMT_YUV420P;
     else if (found_pix_fmt)
-        encoder_context->codec_context[index]->pix_fmt = decoder_context->codec_context[index]->pix_fmt;
-    else if (!strcmp(params->ecodec, "h264_nvenc"))
-        /* If the codec is nvenc, set pixel format to AV_PIX_FMT_YUV420P */
-        encoder_context->codec_context[index]->pix_fmt = AV_PIX_FMT_YUV420P;
+        /* If encoder supports the input pixel format then keep it */
+        encoder_codec_context->pix_fmt = decoder_context->codec_context[index]->pix_fmt;
     else
-        encoder_context->codec_context[index]->pix_fmt = AV_PIX_FMT_YUV422P;
+        /* otherwise set encoder pixel format to AV_PIX_FMT_YUV420P. */
+        encoder_codec_context->pix_fmt = AV_PIX_FMT_YUV420P;
 
-    elv_log("Output pixel_format=%d", encoder_context->codec_context[index]->pix_fmt);
+    /* Set H264 specific params, pix_fmt, profile, and level */
+    set_h264_params(encoder_context, decoder_context, params);
+
+    elv_log("Output pixel_format=%s, profile=%d, level=%d",
+        av_get_pix_fmt_name(encoder_codec_context->pix_fmt),
+        encoder_codec_context->profile,
+        encoder_codec_context->level);
 
     /* Open video encoder (initialize the encoder codec_context[i] using given codec[i]). */
     if ((rc = avcodec_open2(encoder_context->codec_context[index], encoder_context->codec[index], &encoder_options)) < 0) {
