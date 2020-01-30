@@ -210,6 +210,8 @@ type StreamInfo struct {
 	SampleAspectRatio  *big.Rat `json:"sample_aspect_ratio,omitempty"`
 	DisplayAspectRatio *big.Rat `json:"display_aspect_ratio,omitempty"`
 	FieldOrder         string   `json:"field_order,omitempty"`
+	Profile            int      `json:"profile,omitempty"`
+	Level              int      `json:"level,omitempty"`
 }
 
 type ContainerInfo struct {
@@ -808,6 +810,26 @@ func ChannelLayoutName(nbChannels, channelLayout int) string {
 	return ""
 }
 
+func GetPixelFormatName(pixFmt int) string {
+	pName := C.get_pix_fmt_name(C.int(pixFmt))
+	if unsafe.Pointer(pName) != C.NULL {
+		pixelFormatName := C.GoString((*C.char)(unsafe.Pointer(pName)))
+		return pixelFormatName
+	}
+
+	return ""
+}
+
+func GetProfileName(codecId int, profile int) string {
+	pName := C.get_profile_name(C.int(codecId), C.int(profile))
+	if unsafe.Pointer(pName) != C.NULL {
+		profileName := C.GoString((*C.char)(unsafe.Pointer(pName)))
+		return profileName
+	}
+
+	return ""
+}
+
 func Probe(url string, seekable bool) (*ProbeInfo, error) {
 	var cprobe *C.txprobe_t
 	var cseekable C.int
@@ -869,6 +891,8 @@ func Probe(url string, seekable bool) (*ProbeInfo, error) {
 			probeInfo.StreamInfo[i].DisplayAspectRatio = big.NewRat(int64(probeArray[i].display_aspect_ratio.num), int64(1))
 		}
 		probeInfo.StreamInfo[i].FieldOrder = AVFieldOrderNames[AVFieldOrder(probeArray[i].field_order)]
+		probeInfo.StreamInfo[i].Profile = int(probeArray[i].profile)
+		probeInfo.StreamInfo[i].Level = int(probeArray[i].level)
 	}
 
 	probeInfo.ContainerInfo.FormatName = C.GoString((*C.char)(unsafe.Pointer(cprobe.container_info.format_name)))

@@ -827,6 +827,8 @@ func TestProbe(t *testing.T) {
 
 	assert.Equal(t, 27, probe.StreamInfo[0].CodecID)
 	assert.Equal(t, "h264", probe.StreamInfo[0].CodecName)
+	assert.Equal(t, 77, probe.StreamInfo[0].Profile) // 77 = FF_PROFILE_H264_MAIN
+	assert.Equal(t, 31, probe.StreamInfo[0].Level)
 	assert.Equal(t, int64(2428), probe.StreamInfo[0].NBFrames)
 	assert.Equal(t, int64(0), probe.StreamInfo[0].StartTime)
 	assert.Equal(t, int64(506151), probe.StreamInfo[0].BitRate)
@@ -836,6 +838,8 @@ func TestProbe(t *testing.T) {
 
 	assert.Equal(t, 86018, probe.StreamInfo[1].CodecID)
 	assert.Equal(t, "aac", probe.StreamInfo[1].CodecName)
+	assert.Equal(t, 1, probe.StreamInfo[1].Profile) // 1 = FF_PROFILE_AAC_LOW
+	assert.Equal(t, -99, probe.StreamInfo[1].Level)
 	assert.Equal(t, int64(4183), probe.StreamInfo[1].NBFrames)
 	assert.Equal(t, int64(0), probe.StreamInfo[1].StartTime)
 	assert.Equal(t, int64(127999), probe.StreamInfo[1].BitRate)

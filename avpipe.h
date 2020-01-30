@@ -22,6 +22,15 @@ tx(
     char *filename,
     int debug_frame_level);
 
+const char *
+get_pix_fmt_name(
+    int pix_fmt);
+
+const char *
+get_profile_name(
+    int codec_id,
+    int profile);
+
 int
 probe(
     char *filename,

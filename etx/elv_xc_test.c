@@ -458,10 +458,14 @@ do_probe(
         if (probe->stream_info[i].codec_type != AVMEDIA_TYPE_AUDIO)
             channel_name = NULL;
 
+        const char *profile_name = avcodec_profile_name(probe->stream_info[i].codec_id, probe->stream_info[i].profile);
+
         printf("Stream[%d]\n"
                 "\tcodec_type: %s\n"
                 "\tcodec_id: %d\n"
                 "\tcodec_name: %s\n"
+                "\tprofile: %s\n"
+                "\tlevel: %d\n"
                 "\tduration_ts: %"PRId64"\n"
                 "\ttime_base: %d/%d\n"
                 "\tnb_frames: %"PRId64"\n"
@@ -484,6 +488,8 @@ do_probe(
                 av_get_media_type_string(probe->stream_info[i].codec_type),
                 probe->stream_info[i].codec_id,
                 probe->stream_info[i].codec_name,
+                profile_name != NULL ? profile_name : "-",
+                probe->stream_info[i].level,
                 probe->stream_info[i].duration_ts,
                 probe->stream_info[i].time_base.num,probe->stream_info[i].time_base.den,
                 probe->stream_info[i].nb_frames,
@@ -559,11 +565,11 @@ usage(
         "\t-start-frag-index :  (optional) start fragment index of first segment. Default is 0\n"
         "\t-start-segment :     (optional) start segment number >= 1, Default is 1\n"
         "\t-start-time-ts :     (optional) Default: 0\n"
-        "\t-video-bitrate :     (optional) mutually exclusive with crf. Default: -1 (unused)\n"
         "\t-seg-duration-ts :   (mandatory if format is not \"segment\") segment duration time base (positive integer).\n"
         "\t-seg-duration :      (mandatory if format is \"segment\") segment duration secs (positive integer). It is used for making mp4 segments.\n"
         "\t-t :                 (optional) transcoding threads. Default is 1 thread, must be bigger than 1\n"
         "\t-tx-type :           (optional) transcoding type. Default is \"all\", can be \"video\", \"audio\", or \"all\" \n"
+        "\t-video-bitrate :     (optional) mutually exclusive with crf. Default: -1 (unused)\n"
         "\t-wm-text :           (optional) watermark text that will be presented in every video frame if it exist\n"
         "\t-wm-xloc :           (optional) watermark X location\n"
         "\t-wm-yloc :           (optional) watermark Y location\n"

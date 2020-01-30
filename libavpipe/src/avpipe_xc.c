@@ -2128,6 +2128,8 @@ avpipe_probe(
         stream_probes_ptr->height = codec_context->height;
         stream_probes_ptr->pix_fmt = codec_context->pix_fmt;
         stream_probes_ptr->field_order = codec_context->field_order;
+        stream_probes_ptr->profile = codec_context->profile;
+        stream_probes_ptr->level = codec_context->level;
 
         if (probe->container_info.duration < ((float)stream_probes_ptr->duration_ts)/stream_probes_ptr->time_base.den)
             probe->container_info.duration = ((float)stream_probes_ptr->duration_ts)/stream_probes_ptr->time_base.den;

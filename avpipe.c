@@ -652,6 +652,21 @@ end_tx:
     return rc;
 }
 
+const char *
+get_pix_fmt_name(
+    int pix_fmt)
+{
+    return av_get_pix_fmt_name((enum AVPixelFormat) pix_fmt);
+}
+
+const char *
+get_profile_name(
+    int codec_id,
+    int profile)
+{
+    return avcodec_profile_name((enum AVCodecID) codec_id, profile);
+}
+
 int
 probe(
     char *filename,

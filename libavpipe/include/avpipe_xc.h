@@ -54,9 +54,9 @@ typedef struct ioctx_t {
     /* Input filename or url */
     char *url;
 
-    avpipe_buftype_t type;
-    unsigned char* buf;
-    int bufsz;
+    avpipe_buftype_t    type;
+    unsigned char*      buf;
+    int                 bufsz;
 
     /* Size of input, should be set in in_handler-> avpipe_opener_f() */
     int64_t sz;
@@ -126,14 +126,14 @@ typedef struct avpipe_io_handler_t {
 
 /* Decoder/encoder context, keeps both video and audio stream ffmpeg contexts */
 typedef struct coderctx_t {
-    AVFormatContext *format_context;
+    AVFormatContext     *format_context;
 
-    AVCodec *codec[MAX_STREAMS];
-    AVStream *stream[MAX_STREAMS];
-    AVCodecParameters *codec_parameters[MAX_STREAMS];
-    AVCodecContext *codec_context[MAX_STREAMS];
-    SwrContext *resampler_context;              /* resample context for audio */
-    AVAudioFifo *fifo;                          /* audio sampling fifo */
+    AVCodec             *codec[MAX_STREAMS];
+    AVStream            *stream[MAX_STREAMS];
+    AVCodecParameters   *codec_parameters[MAX_STREAMS];
+    AVCodecContext      *codec_context[MAX_STREAMS];
+    SwrContext          *resampler_context;              /* resample context for audio */
+    AVAudioFifo         *fifo;                           /* audio sampling fifo */
 
     int video_stream_index;
     int audio_stream_index;
@@ -152,7 +152,7 @@ typedef struct coderctx_t {
     /* Filter graph, valid for decoder */
     AVFilterContext *buffersink_ctx;
     AVFilterContext *buffersrc_ctx;
-    AVFilterGraph *filter_graph;
+    AVFilterGraph   *filter_graph;
 
     int64_t pts;              /* Decoder/encoder pts */
     int64_t video_input_start_pts;  /* In case video input stream starts at PTS > 0 */
@@ -185,71 +185,77 @@ typedef enum tx_type_t {
 #define DRAW_TEXT_SHADOW_OFFSET     0.075
 
 typedef struct txparams_t {
-    int bypass_transcoding;         // if 0 means do transcoding, otherwise bypass transcoding (only copy)
-    char *format;                   // Output format [Required, Values: dash, hls, mp4, fmp4]
+    int     bypass_transcoding;     // if 0 means do transcoding, otherwise bypass transcoding (only copy)
+    char    *format;                // Output format [Required, Values: dash, hls, mp4, fmp4]
     int64_t start_time_ts;          // Transcode the source starting from this time
     int64_t skip_over_pts;          // Like start_time_ts but expressed in input pts
     int64_t start_pts;              // Starting PTS for output
     int64_t duration_ts;            // Transcode time period [-1 for entire source length from start_time_ts]
-    char *start_segment_str;        // Specify index of the first segment  TODO: change type to int
-    int video_bitrate;
-    int audio_bitrate;
-    int sample_rate;                // Audio sampling rate
-    char *crf_str;
-    int rc_max_rate;                // Rate control - max rate
-    int rc_buffer_size;             // Rate control - buffer size
+    char    *start_segment_str;     // Specify index of the first segment  TODO: change type to int
+    int     video_bitrate;
+    int     audio_bitrate;
+    int     sample_rate;            // Audio sampling rate
+    char    *crf_str;
+    int     rc_max_rate;            // Rate control - max rate
+    int     rc_buffer_size;         // Rate control - buffer size
     int64_t seg_duration_ts;        // In ts units. It is used for transcoding and producing dash mp4 files
-    char *seg_duration;             // In sec units. It is used for transcoding and producing mp4 segments
-    int seg_duration_fr;
-    int start_fragment_index;
-    int force_keyint;               // Force a key (IDR) frame at this interval
-    char *ecodec;                   // Video/audio encoder
-    char *dcodec;                   // Video/audio decoder
-    int enc_height;
-    int enc_width;
-    char *crypt_iv;                 // 16-byte AES IV in hex [Optional, Default: Generated]
-    char *crypt_key;                // 16-byte AES key in hex [Optional, Default: Generated]
-    char *crypt_kid;                // 16-byte UUID in hex [Optional, required for CENC]
-    char *crypt_key_url;            // Specify a key URL in the manifest [Optional, Default: key.bin]
-    crypt_scheme_t crypt_scheme;    // Content protection / DRM / encryption [Optional, Default: crypt_none]
-    tx_type_t tx_type;              // Default: 0 means transcode 'everything'
-    int seekable;                   // Default: 0 means not seekable. A non seekable stream with moov box in
-                                    //          the end causes a lot of reads up to moov atom.
-    char  *watermark_text;          // Default: NULL or empty text means no watermark
-    char  *watermark_xloc;          // Default 0
-    char  *watermark_yloc;          // Default 0
-    float watermark_relative_sz;    // Default 0
-    char  *watermark_font_color;    // black
-    int   watermark_shadow;         // Default 1, means shadow exist 
-    char  *watermark_shadow_color;  // Watermark shadow color
+    char    *seg_duration;          // In sec units. It is used for transcoding and producing mp4 segments
+    int     seg_duration_fr;
+    int     start_fragment_index;
+    int     force_keyint;           // Force a key (IDR) frame at this interval
+    char    *ecodec;                // Video/audio encoder
+    char    *dcodec;                // Video/audio decoder
+    int     enc_height;
+    int     enc_width;
+    char    *crypt_iv;              // 16-byte AES IV in hex [Optional, Default: Generated]
+    char    *crypt_key;             // 16-byte AES key in hex [Optional, Default: Generated]
+    char    *crypt_kid;             // 16-byte UUID in hex [Optional, required for CENC]
+    char    *crypt_key_url;         // Specify a key URL in the manifest [Optional, Default: key.bin]
 
-    int audio_index;                // Audio index(s) for mez making, may need to become an array of indexes 
+    crypt_scheme_t  crypt_scheme;   // Content protection / DRM / encryption [Optional, Default: crypt_none]
+    tx_type_t       tx_type;        // Default: 0 means transcode 'everything'
+
+    int     seekable;               // Default: 0 means not seekable. A non seekable stream with moov box in
+                                    //          the end causes a lot of reads up to moov atom.
+    char    *watermark_text;        // Default: NULL or empty text means no watermark
+    char    *watermark_xloc;        // Default 0
+    char    *watermark_yloc;        // Default 0
+    float   watermark_relative_sz;  // Default 0
+    char    *watermark_font_color;  // black
+    int     watermark_shadow;       // Default 1, means shadow exist 
+    char    *watermark_shadow_color;// Watermark shadow color
+
+    int     audio_index;            // Audio index(s) for mez making, may need to become an array of indexes 
 } txparams_t;
 
 #define MAX_CODEC_NAME  256
 
 typedef struct stream_info_t {
-    int stream_index;           // Stream index
-    int codec_type;             // Audio or Video
-    int codec_id;
-    char codec_name[MAX_CODEC_NAME+1];
-    int64_t duration_ts;
-    AVRational time_base;
-    int64_t nb_frames;
-    int64_t start_time;
-    AVRational avg_frame_rate;
-    AVRational frame_rate;      // Same as r_frame_rate
-    int sample_rate;            // Audio only, samples per second
-    int channels;               // Audio only, number of audio channels
-    int channel_layout;         // Audio channel layout
-    int ticks_per_frame;
-    int64_t bit_rate;
-    int has_b_frames;
-    int width, height;              // Video only
-    enum AVPixelFormat pix_fmt;     // Video only
-    AVRational sample_aspect_ratio;
-    AVRational display_aspect_ratio;
-    enum AVFieldOrder field_order;
+    int         stream_index;       // Stream index
+    int         codec_type;         // Audio or Video
+    int         codec_id;
+    char        codec_name[MAX_CODEC_NAME+1];
+    int64_t     duration_ts;
+    AVRational  time_base;
+    int64_t     nb_frames;
+    int64_t     start_time;
+    AVRational  avg_frame_rate;
+    AVRational  frame_rate;         // Same as r_frame_rate
+    int         sample_rate;        // Audio only, samples per second
+    int         channels;           // Audio only, number of audio channels
+    int         channel_layout;     // Audio channel layout
+    int         ticks_per_frame;
+    int64_t     bit_rate;
+    int         has_b_frames;
+    int         width, height;       // Video only
+
+    enum AVPixelFormat  pix_fmt;     // Video only
+
+    AVRational          sample_aspect_ratio;
+    AVRational          display_aspect_ratio;
+    enum AVFieldOrder   field_order;
+    int                 profile;
+    int                 level;
 } stream_info_t;
 
 typedef struct container_info_t {
@@ -257,6 +263,7 @@ typedef struct container_info_t {
     char *format_name;
 } container_info_t;
 
+/* The data structure that is filled by avpipe_probe */
 typedef struct txprobe_t {
     container_info_t container_info;
     stream_info_t *stream_info;    // An array of stream_info_t (usually 2)
