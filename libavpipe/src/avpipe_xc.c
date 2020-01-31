@@ -483,10 +483,8 @@ prepare_video_encoder(
     coderctx_t *decoder_context,
     txparams_t *params)
 {
-    int i;
     int rc = 0;
     int index = decoder_context->video_stream_index;
-    int found_pix_fmt = 0;
 
     if (index < 0) {
         elv_dbg("No video stream detected by decoder.");
@@ -574,6 +572,13 @@ prepare_video_encoder(
     if (!strcmp(params->format, "hls"))
         av_opt_set(encoder_context->format_context->priv_data, "hls_playlist", "1", 0);
 
+#if 0
+    /*
+     * This part is disabled to prevent having YUV422 as output if we have some videos with pixel format YUV422.
+     * YUV422 pixel format has problem in playing on mac.
+     */
+    int found_pix_fmt = 0;
+    int i;
     /* Search for input pixel format in list of encoder pixel formats. */
     if ( encoder_context->codec[index]->pix_fmts ) {
         for (i=0; encoder_context->codec[index]->pix_fmts[i] >= 0; i++) {
@@ -591,6 +596,8 @@ prepare_video_encoder(
     else
         /* otherwise set encoder pixel format to AV_PIX_FMT_YUV420P. */
         encoder_codec_context->pix_fmt = AV_PIX_FMT_YUV420P;
+#endif
+    encoder_codec_context->pix_fmt = AV_PIX_FMT_YUV420P;
 
     /* Set H264 specific params, pix_fmt, profile, and level */
     set_h264_params(encoder_context, decoder_context, params);
