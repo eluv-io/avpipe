@@ -18,6 +18,15 @@
 #include "elv_channel.h"
 #include "avpipe.h"
 
+extern const char *
+av_get_pix_fmt_name(
+    enum AVPixelFormat pix_fmt);
+
+extern const char *
+avcodec_profile_name(
+    enum AVCodecID codec_id,
+    int profile);
+
 int64_t NewIOHandler(char*, int64_t *);
 int AVPipeReadInput(int64_t, uint8_t *, int);
 int64_t AVPipeSeekInput(int64_t, int64_t offset, int whence);
