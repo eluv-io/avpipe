@@ -191,7 +191,7 @@ func TestUdpToMp4V2(t *testing.T) {
 	videoParamsTs.SegDurationTs = 180000 // almost 2 * 90000
 	videoMezFiles := [3]string{"video_mez_udp2-segment-1.mp4", "video_mez_udp2-segment-2.mp4", "video_mez_udp2-segment-3.mp4"}
 
-	// Now create audio dash segments out of audio mezzanines
+	// Now create video dash segments out of audio mezzanines
 	go func() {
 
 		for i, url := range videoMezFiles {

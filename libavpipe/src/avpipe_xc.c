@@ -1884,13 +1884,16 @@ avpipe_tx(
 
     /*
      * Flush all frames, first flush decoder buffers, then encoder buffers by passing NULL frame.
-     * TODO: should I do it for the audio stream too?
      */
     if (params->tx_type & tx_video)
         flush_decoder(decoder_context, encoder_context, encoder_context->video_stream_index, params, debug_frame_level);
+    if (params->tx_type & tx_audio)
+        flush_decoder(decoder_context, encoder_context, encoder_context->audio_stream_index, params, debug_frame_level);
 
     if (!params->bypass_transcoding && (params->tx_type & tx_video))
         encode_frame(decoder_context, encoder_context, NULL, encoder_context->video_stream_index, params, debug_frame_level);
+    if (!params->bypass_transcoding && (params->tx_type & tx_audio))
+        encode_frame(decoder_context, encoder_context, NULL, encoder_context->audio_stream_index, params, debug_frame_level);
 
     dump_coders(decoder_context, encoder_context);
 
