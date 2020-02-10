@@ -55,6 +55,9 @@ $(BINDIR)/%.o: %.c
 lclean:
 	@rm -rf lib bin include
 
+clean-test:
+	@rm -rf  AAC2AAC AC3TsAC3Mez AC3TsACCMez Downmix2ACCMez MP2TsACCMez
+
 check-env:
 ifndef ELV_TOOLCHAIN_DIST_PLATFORM
   $(error ELV_TOOLCHAIN_DIST_PLATFORM is undefined)
