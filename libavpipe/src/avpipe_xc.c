@@ -954,6 +954,11 @@ should_skip_encoding(
     if (!frame)
         return 0;
 
+    if (decoder_context->duration >= frame->pts) {
+        elv_log("SKIP frame pts=%"PRId64", duration=%"PRId64", format=%s, tx_type=%d", frame->pts, decoder_context->duration, p->format, p->tx_type);
+        return 1;
+    }
+
     /* For MPEG-TS - skip a fixed duration at the beginning to sync audio and vide
      * Audio starts encoding right away but video will drop frames up until the first i-frame.
      * Skipping an equal amount of both audio and video ensures they start encoding at approximately
@@ -1032,6 +1037,8 @@ encode_frame(
 
     // Prepare packet before encoding - adjust PTS and IDR frame signaling
     if (frame) {
+
+        decoder_context->duration = frame->pts;
 
         // Adjust PTS if input stream starts at an arbitrary value (MPEG-TS)
         if (decoder_context->is_mpegts && (!strcmp(params->format, "fmp4-segment"))) {
@@ -1123,7 +1130,7 @@ encode_frame(
             );
         }
 
-        dump_packet("OUT", output_packet, debug_frame_level);
+        dump_packet("OUT ", output_packet, debug_frame_level);
 
         /* mux encoded frame */
         ret = av_interleaved_write_frame(format_context, output_packet);
@@ -1210,7 +1217,7 @@ transcode_audio(
 
     response = avcodec_send_packet(codec_context, packet);
     if (response < 0) {
-        elv_err("Failure while sending a packet to the decoder: err=%d, %s", response, av_err2str(response));
+        elv_err("Failure while sending an audio packet to the decoder: err=%d, %s", response, av_err2str(response));
         // Ignore the error and continue
         response = 0;
         return response;
@@ -1248,7 +1255,7 @@ transcode_audio(
                 return -1;
             }
 
-            dump_frame("FILT ", codec_context->frame_number, filt_frame, debug_frame_level);
+            dump_frame("AUDIO FILT ", codec_context->frame_number, filt_frame, debug_frame_level);
             encode_frame(decoder_context, encoder_context, filt_frame, stream_index, p, debug_frame_level);
             av_frame_unref(filt_frame);
         }
@@ -1298,7 +1305,7 @@ transcode_audio_aac(
 
     response = avcodec_send_packet(codec_context, packet);
     if (response < 0) {
-        elv_err("Failure while sending a packet to the decoder: err=%d, %s", response, av_err2str(response));
+        elv_err("Failure while sending an audio packet to the decoder: err=%d, %s", response, av_err2str(response));
         // Ignore the error and continue
         response = 0;
         return response;
@@ -1314,6 +1321,9 @@ transcode_audio_aac(
         }
 
         dump_frame("IN ", codec_context->frame_number, frame, debug_frame_level);
+
+        if (decoder_context->audio_input_prev_pts < 0)
+            decoder_context->audio_input_prev_pts = frame->pts;
 
         decoder_context->pts = packet->pts;
         /* Temporary storage for the converted input samples. */
@@ -1356,10 +1366,38 @@ transcode_audio_aac(
 
             /* When using FIFO frames no longer have PTS */
             filt_frame->pts = decoder_context->audio_output_pts;
-            decoder_context->audio_output_pts += filt_frame->nb_samples;
+            filt_frame->pkt_dts = filt_frame->pts;
 
-            dump_frame("FILT ", codec_context->frame_number, filt_frame, debug_frame_level);
+            if (frame->pts - decoder_context->audio_input_prev_pts > frame->pkt_duration) {
+                /*
+                 * float pkt_ratio = ((float)(encoder_context->codec_context[stream_index]->sample_rate * frame->pkt_duration)) /
+                 *                    (((float) decoder_context->stream[stream_index]->time_base.den) * filt_frame->nb_samples);
+                 * pkt_ratio shows the transcoding ratio of output frames (packets) to input frames (packets).
+                 * For example, if input timebase is 90000 with pkt_duration = 2880,
+                 * and output sample rate is 48000 with frame duration = 1024 then pkt_ratio = 3/2 that means
+                 * for every 2 input audio frames, there would be 3 output audio frame.
+                 * Now to calculate output packet pts from input packet pts:
+                 * output_pkt_pts = ((float) (frame->pts - decoder_context->audio_input_start_pts) / frame->pkt_duration) * pkt_ratio * filt_frame->nb_samples
+                 * After simplification we will have d as follows:
+                 */
+                int64_t d = (frame->pts - decoder_context->audio_input_start_pts) * (encoder_context->codec_context[stream_index]->sample_rate) /
+                            (decoder_context->stream[stream_index]->time_base.den);
+
+                elv_dbg("AUDIO JUMP from=%"PRId64", to=%"PRId64", frame->pts=%"PRId64", audio_input_prev_pts=%"PRId64,
+                    decoder_context->audio_output_pts,
+                    d,
+                    frame->pts,
+                    decoder_context->audio_input_prev_pts);
+                decoder_context->audio_output_pts = d;
+            } else {
+                decoder_context->audio_output_pts += filt_frame->nb_samples;
+            }
+            decoder_context->audio_input_prev_pts = frame->pts;
+
+            dump_frame("AUDIO FILT ", codec_context->frame_number, filt_frame, debug_frame_level);
+
             encode_frame(decoder_context, encoder_context, filt_frame, stream_index, p, debug_frame_level);
+
             av_frame_unref(filt_frame);
         }
 
@@ -1431,7 +1469,7 @@ transcode_video(
     /* send packet to decoder */
     response = avcodec_send_packet(codec_context, packet);
     if (response < 0) {
-        elv_err("Failure while sending a packet to the decoder: %s (%d)", av_err2str(response), response);
+        elv_err("Failure while sending a video packet to the decoder: %s (%d)", av_err2str(response), response);
         if (response == AVERROR_INVALIDDATA)
             /*
              * AVERROR_INVALIDDATA means the frame is invalid (mostly because of bad header).
@@ -1498,7 +1536,8 @@ transcode_video(
             "frame-filt", codec_context->frame_number);
 #endif
 
-            dump_frame("FILT ", codec_context->frame_number, filt_frame, debug_frame_level);
+            dump_frame("VIDEO FILT ", codec_context->frame_number, filt_frame, debug_frame_level);
+            filt_frame->pkt_dts = filt_frame->pts;
 
             elv_get_time(&tv);
             encode_frame(decoder_context, encoder_context, filt_frame, stream_index, p, debug_frame_level);
@@ -1764,6 +1803,9 @@ avpipe_tx(
 
     decoder_context->video_input_start_pts = -1;
     decoder_context->audio_input_start_pts = -1;
+    decoder_context->duration = -1;
+    encoder_context->duration = -1;
+    decoder_context->audio_input_prev_pts = -1;
     encoder_context->first_encoding_frame_pts = -1;
     encoder_context->first_read_frame_pts = -1;
 

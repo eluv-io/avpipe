@@ -154,13 +154,15 @@ typedef struct coderctx_t {
     AVFilterContext *buffersrc_ctx;
     AVFilterGraph   *filter_graph;
 
-    int64_t pts;              /* Decoder/encoder pts */
-    int64_t video_input_start_pts;  /* In case video input stream starts at PTS > 0 */
-    int64_t audio_input_start_pts;  /* In case audio input stream starts at PTS > 0 */
-    int64_t first_encoding_frame_pts; /* PTS of first frame sent to the encoder */
-    int64_t first_read_frame_pts; /* PTS of first frame read - which might not be decodable */
+    int64_t pts;                        /* Decoder/encoder pts */
+    int64_t video_input_start_pts;      /* In case video input stream starts at PTS > 0 */
+    int64_t audio_input_start_pts;      /* In case audio input stream starts at PTS > 0 */
+    int64_t first_encoding_frame_pts;   /* PTS of first frame sent to the encoder */
+    int64_t first_read_frame_pts;       /* PTS of first frame read - which might not be decodable */
+    int64_t audio_input_prev_pts;       /* Previous pts for audio input */
+    int64_t duration;                   /* Duration/pts of original frame */
 
-    int is_mpegts;          /* set to 1 if input format name is "mpegts" */
+    int     is_mpegts;                  /* set to 1 if input format name is "mpegts" */
 
     int             cancelled;
     int             stopped;
