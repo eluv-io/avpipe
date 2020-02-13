@@ -954,11 +954,6 @@ should_skip_encoding(
     if (!frame)
         return 0;
 
-    if (decoder_context->duration >= frame->pts) {
-        elv_log("SKIP frame pts=%"PRId64", duration=%"PRId64", format=%s, tx_type=%d", frame->pts, decoder_context->duration, p->format, p->tx_type);
-        return 1;
-    }
-
     /* For MPEG-TS - skip a fixed duration at the beginning to sync audio and vide
      * Audio starts encoding right away but video will drop frames up until the first i-frame.
      * Skipping an equal amount of both audio and video ensures they start encoding at approximately
@@ -1037,8 +1032,6 @@ encode_frame(
 
     // Prepare packet before encoding - adjust PTS and IDR frame signaling
     if (frame) {
-
-        decoder_context->duration = frame->pts;
 
         // Adjust PTS if input stream starts at an arbitrary value (MPEG-TS)
         if (decoder_context->is_mpegts && (!strcmp(params->format, "fmp4-segment"))) {
@@ -1377,18 +1370,19 @@ transcode_audio_aac(
                  * and output sample rate is 48000 with frame duration = 1024 then pkt_ratio = 3/2 that means
                  * for every 2 input audio frames, there would be 3 output audio frame.
                  * Now to calculate output packet pts from input packet pts:
-                 * output_pkt_pts = ((float) (frame->pts - decoder_context->audio_input_start_pts) / frame->pkt_duration) * pkt_ratio * filt_frame->nb_samples
+                 * output_pkt_pts = decoder_context->audio_output_pts + d 
+                 * where d = ((float) (frame->pts - decoder_context->audio_input_prev_pts) / frame->pkt_duration) * pkt_ratio * filt_frame->nb_samples
                  * After simplification we will have d as follows:
                  */
-                int64_t d = (frame->pts - decoder_context->audio_input_start_pts) * (encoder_context->codec_context[stream_index]->sample_rate) /
+                int64_t d = (frame->pts - decoder_context->audio_input_prev_pts) * (encoder_context->codec_context[stream_index]->sample_rate) /
                             (decoder_context->stream[stream_index]->time_base.den);
 
                 elv_dbg("AUDIO JUMP from=%"PRId64", to=%"PRId64", frame->pts=%"PRId64", audio_input_prev_pts=%"PRId64,
                     decoder_context->audio_output_pts,
-                    d,
+                    decoder_context->audio_output_pts + d,
                     frame->pts,
                     decoder_context->audio_input_prev_pts);
-                decoder_context->audio_output_pts = d;
+                decoder_context->audio_output_pts += d;
             } else {
                 decoder_context->audio_output_pts += filt_frame->nb_samples;
             }
@@ -1396,7 +1390,12 @@ transcode_audio_aac(
 
             dump_frame("AUDIO FILT ", codec_context->frame_number, filt_frame, debug_frame_level);
 
-            encode_frame(decoder_context, encoder_context, filt_frame, stream_index, p, debug_frame_level);
+            if (decoder_context->duration < filt_frame->pts) {
+                decoder_context->duration = filt_frame->pts;
+                encode_frame(decoder_context, encoder_context, filt_frame, stream_index, p, debug_frame_level);
+            } else {
+                elv_log("SKIP audio frame pts=%"PRId64", duration=%"PRId64, filt_frame->pts, decoder_context->duration);
+            }
 
             av_frame_unref(filt_frame);
         }
@@ -1540,7 +1539,12 @@ transcode_video(
             filt_frame->pkt_dts = filt_frame->pts;
 
             elv_get_time(&tv);
-            encode_frame(decoder_context, encoder_context, filt_frame, stream_index, p, debug_frame_level);
+            if (decoder_context->duration < filt_frame->pts) {
+                decoder_context->duration = filt_frame->pts;
+                encode_frame(decoder_context, encoder_context, filt_frame, stream_index, p, debug_frame_level);
+            } else {
+                elv_log("SKIP video frame pts=%"PRId64", duration=%"PRId64, filt_frame->pts, decoder_context->duration);
+            }
             if (do_instrument) {
                 elv_since(&tv, &since);
                 elv_log("INSTRMNT encode_frame time=%"PRId64, since);
