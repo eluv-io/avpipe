@@ -182,5 +182,6 @@ elv_io_close(
         out_handlers->avpipe_closer(outctx);
     }
     free(outctx);
+    free(pb);
     return;
 }

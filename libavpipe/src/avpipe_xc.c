@@ -736,14 +736,16 @@ prepare_audio_encoder(
 
     }
 
-    init_resampler(decoder_context->codec_context[index], encoder_context->codec_context[index],
+    if (!strcmp(params->ecodec, "aac")) {
+        init_resampler(decoder_context->codec_context[index], encoder_context->codec_context[index],
                        &decoder_context->resampler_context);
 
-    /* Create the FIFO buffer based on the specified output sample format. */
-    if (!(decoder_context->fifo = av_audio_fifo_alloc(encoder_context->codec_context[index]->sample_fmt,
+        /* Create the FIFO buffer based on the specified output sample format. */
+        if (!(decoder_context->fifo = av_audio_fifo_alloc(encoder_context->codec_context[index]->sample_fmt,
                 encoder_context->codec_context[index]->channels, 1))) {
-        elv_err("Failed to allocate audio FIFO");
-        return -1;
+            elv_err("Failed to allocate audio FIFO");
+            return -1;
+        }
     }
 
     return 0;
@@ -1341,6 +1343,11 @@ transcode_audio_aac(
             return AVERROR_EXIT;
         }
 
+        if (converted_input_samples) {
+            av_freep(&converted_input_samples[0]);
+            free(converted_input_samples);
+        }
+
         int output_frame_size = encoder_context->codec_context[stream_index]->frame_size;
 
         while (av_audio_fifo_size(decoder_context->fifo) >= output_frame_size) {
@@ -1398,6 +1405,7 @@ transcode_audio_aac(
             }
 
             av_frame_unref(filt_frame);
+            av_frame_free(&filt_frame);
         }
 
         av_frame_unref(frame);
@@ -1570,9 +1578,9 @@ flush_decoder(
     AVCodecContext *codec_context = decoder_context->codec_context[stream_index];
     int response = avcodec_send_packet(codec_context, NULL);	/* Passing NULL means flush the decoder buffers */
 
+    frame = av_frame_alloc();
+    filt_frame = av_frame_alloc();
     while (response >=0) {
-        frame = av_frame_alloc();
-        filt_frame = av_frame_alloc();
         response = avcodec_receive_frame(codec_context, frame);
         if (response == AVERROR(EAGAIN)) {
             break;
@@ -1609,10 +1617,12 @@ flush_decoder(
                 encode_frame(decoder_context, encoder_context, filt_frame, stream_index, p, debug_frame_level);
             }
         }
-        av_frame_unref(filt_frame);
-        av_frame_unref(frame);
     }
 
+    av_frame_unref(filt_frame);
+    av_frame_free(&filt_frame);
+    av_frame_unref(frame);
+    av_frame_free(&frame);
     return 0;
 }
 
@@ -2353,17 +2363,22 @@ avpipe_fini(
         avformat_free_context(encoder_context->format_context);
 
     for (int i=0; i<MAX_STREAMS; i++) {
-        if (decoder_context && decoder_context->codec_context[i]) {
+        if (decoder_context->codec_context[i]) {
             /* Corresponds to avcodec_open2() */
             avcodec_close(decoder_context->codec_context[i]);
             avcodec_free_context(&decoder_context->codec_context[i]);
         }
 
-        if (encoder_context && encoder_context->codec_context[i]) {
+        if (encoder_context->codec_context[i]) {
             /* Corresponds to avcodec_open2() */
             avcodec_close(encoder_context->codec_context[i]);
             avcodec_free_context(&encoder_context->codec_context[i]);
         }
+    }
+
+    if (!strcmp((*txctx)->params->ecodec, "aac")) {
+        av_audio_fifo_free(decoder_context->fifo);
+        swr_free(&decoder_context->resampler_context);
     }
 
     free((*txctx)->inctx);
