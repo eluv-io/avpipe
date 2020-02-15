@@ -415,10 +415,9 @@ func (lhr *HLSReader) fill(w io.Writer) (err error) {
 		// Choose the variant with the highest bandwidth
 		var variant *m3u8.Variant
 		for _, v := range variants {
+			log.Debug("AVLR variant check", "variant", variant)
 			if variant == nil || v.Bandwidth > variant.Bandwidth {
-				if v.FrameRate <= 30 { // PENDING(SSS) Temporary to avoid Fox stream frames with fractional ts duration
-					variant = v
-				}
+				variant = v
 			}
 		}
 		if variant == nil {
