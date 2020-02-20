@@ -16,6 +16,12 @@ elv_channel_send(
     elv_channel_t *channel,
     void *msg);
 
+int
+elv_channel_timed_receive(
+    elv_channel_t *channel,
+    u_int64_t usec, 
+    void **rcvdmsg);
+
 void *
 elv_channel_receive(
     elv_channel_t *channel);

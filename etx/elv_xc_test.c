@@ -4,6 +4,7 @@
  */
 
 #include <sys/types.h>
+#include <sys/socket.h>
 #include <sys/stat.h>
 #include <unistd.h>
 #include <fcntl.h>
@@ -15,9 +16,45 @@
 #include "avpipe_xc.h"
 #include "avpipe_utils.h"
 #include "elv_log.h"
+#include "url_parser.h"
+#include "elv_sock.h"
 
 static int opened_inputs = 0;
 static pthread_mutex_t lock = PTHREAD_MUTEX_INITIALIZER;
+
+typedef struct udp_thread_params_t {
+    int             fd;             /* Socket fd to read UDP datagrams */
+    elv_channel_t   *udp_channel;   /* udp channel to keep incomming UDP packets */
+    socklen_t       salen;
+} udp_thread_params_t;
+
+void *
+udp_thread_func(
+    void *thread_params)
+{
+    udp_thread_params_t *params = (udp_thread_params_t *) thread_params;
+    struct sockaddr     ca;
+    socklen_t len;
+    udp_packet_t *udp_packet;
+
+    int pkt_num = 0;
+    for ( ; ; ) {
+        if (readable_timeout(params->fd, UDP_PIPE_TIMEOUT) <= 0) {
+            elv_log("UDP recv timeout");
+            break;
+        }
+
+        len = params->salen;
+        udp_packet = (udp_packet_t *) calloc(1, sizeof(udp_packet_t));
+        
+        udp_packet->len = recvfrom(params->fd, udp_packet->buf, MAX_UDP_PKT_LEN, 0, &ca, &len);
+        pkt_num++;
+        elv_channel_send(params->udp_channel, udp_packet);
+        elv_log("Received UDP packet=%d, len=%d", pkt_num, udp_packet->len);
+    }
+
+    return NULL;
+}
 
 int
 in_opener(
@@ -25,7 +62,81 @@ in_opener(
     ioctx_t *inctx)
 {
     struct stat stb;
-    int fd = open(url, O_RDONLY);
+    int rc;
+    int fd;
+    url_parser_t url_parser;
+
+    rc = parse_url((char *) url, &url_parser);
+    if (rc) {
+        elv_err("Failed to parse input url=%s", url);
+        inctx->opaque = NULL;
+        return -1;
+    }
+
+    /* If input url is a UDP */
+    if (!strcmp(url_parser.protocol, "udp")) {
+        const int           on = 1;
+        socklen_t           salen;
+        struct sockaddr     *sa;
+        udp_thread_params_t *params;
+
+        fd = udp_socket(url_parser.host, url_parser.port, &sa, &salen);
+        if (fd < 0) {
+            elv_err("Failed to open input udp url=%s error=%d", url, errno);
+            inctx->opaque = NULL;
+            return -1;
+        }
+
+        setsockopt(fd, SOL_SOCKET, SO_REUSEADDR, &on, sizeof(on));
+        if ((rc = bind(fd, sa, salen)) < 0) {
+            /* Can not bind, fail and exit */
+            elv_err("Failed to bind UDP socket, rc=%d", rc);
+            return -1;
+        }
+
+        struct timeval tv;
+        tv.tv_sec = UDP_PIPE_TIMEOUT;
+        tv.tv_usec = 0;
+        if ((rc = setsockopt(fd, SOL_SOCKET, SO_RCVTIMEO, &tv, sizeof(tv))) < 0) {
+            elv_err("Failed to set UDP socket timeout, rc=%d", rc);
+            return -1;
+        }
+
+        size_t bufsz = UDP_PIPE_BUFSIZE;
+        if (setsockopt(fd, SOL_SOCKET, SO_RCVBUF, (const void *)&bufsz, (socklen_t)sizeof(bufsz)) == -1) {
+            elv_err("Failed to set UDP socket buf size to=%"PRId64, bufsz);
+            return -1;
+        }
+
+        elv_channel_init(&inctx->udp_channel, MAX_UDP_CHANNEL);
+        inctx->opaque = (int *) calloc(1, 2*sizeof(int));
+        *((int *)(inctx->opaque)) = fd;
+
+        pthread_mutex_lock(&lock);
+        opened_inputs++;
+        *((int *)(inctx->opaque)+1) = opened_inputs;
+        pthread_mutex_unlock(&lock);
+
+        /* Start a thread to read into UDP channel */
+        params = (udp_thread_params_t *) calloc(1, sizeof(udp_thread_params_t));
+        params->fd = fd;
+        params->salen = salen;
+        params->udp_channel = inctx->udp_channel;
+
+        pthread_create(&inctx->utid, NULL, udp_thread_func, params);
+
+        elv_dbg("IN OPEN UDP fd=%d url=%s", fd, url);
+        return 0;
+    }
+
+    /* If input is not file */
+    if (strcmp(url_parser.protocol, "file")) {
+        elv_err("Invalid input url=%s, can be only udp or file", url);
+        inctx->opaque = NULL;
+        return -1;
+    }
+    
+    fd = open(url, O_RDONLY);
     if (fd < 0) {
         elv_err("Failed to open input url=%s error=%d", url, errno);
         inctx->opaque = NULL;
@@ -76,15 +187,56 @@ in_read_packet(
     int buf_size)
 {
     ioctx_t *c = (ioctx_t *)opaque;
-    int fd = *((int *)(c->opaque));
-    elv_dbg("IN READ buf=%p buf_size=%d fd=%d", buf, buf_size, fd);
+    int r = 0;
 
-    int r = read(fd, buf, buf_size);
-    if (r >= 0) {
+    if (c->udp_channel) {
+        udp_packet_t *udp_packet;
+        int rc;
+
+        if (c->cur_packet) {
+            r = buf_size > (c->cur_packet->len - c->cur_pread) ? (c->cur_packet->len - c->cur_pread) : buf_size;
+            memcpy(buf, &c->cur_packet->buf[c->cur_pread], r);
+            c->cur_pread += r;
+            if (c->cur_pread == c->cur_packet->len) {
+                free(c->cur_packet);
+                c->cur_packet = NULL;
+                c->cur_pread = 0;
+            }
+            c->read_bytes += r;
+            c->read_pos += r;
+            elv_dbg("IN READ UDP partial read=%d pos=%"PRId64" total=%"PRId64, r, c->read_pos, c->read_bytes);
+            return r;        
+        }
+
+        rc = elv_channel_timed_receive(c->udp_channel, UDP_PIPE_TIMEOUT*1000000, (void **)&udp_packet);
+        if (rc == ETIMEDOUT) {
+            elv_dbg("TIMEDOUT in UDP rcv channel");
+            return -1;
+        }
+
+        r = buf_size > udp_packet->len ? udp_packet->len : buf_size;
         c->read_bytes += r;
         c->read_pos += r;
+        memcpy(buf, udp_packet->buf, r);
+        if (r < udp_packet->len) {
+            c->cur_packet = udp_packet;
+            c->cur_pread = r;
+        } else {
+            free(udp_packet);
+        }
+        elv_dbg("IN READ UDP read=%d pos=%"PRId64" total=%"PRId64, r, c->read_pos, c->read_bytes);
+        return r;
+    } else {
+        int fd = *((int *)(c->opaque));
+        elv_dbg("IN READ buf=%p buf_size=%d fd=%d", buf, buf_size, fd);
+
+        r = read(fd, buf, buf_size);
+        if (r >= 0) {
+            c->read_bytes += r;
+            c->read_pos += r;
+        }
+        elv_dbg("IN READ read=%d pos=%"PRId64" total=%"PRId64, r, c->read_pos, c->read_bytes);
     }
-    elv_dbg("IN READ read=%d pos=%"PRId64" total=%"PRId64, r, c->read_pos, c->read_bytes);
 
     return r > 0 ? r : -1;
 }
@@ -395,6 +547,11 @@ tx_thread_func(
             continue;
         }
 
+        /* If url is UDP, then wait for UDP thread to be finished */
+        if (inctx->utid) {
+            pthread_join(inctx->utid, NULL);
+        }
+
         /* Close input handler resources */
         params->in_handlers->avpipe_closer(inctx);
 
@@ -440,6 +597,8 @@ do_probe(
     in_handlers.avpipe_reader = in_read_packet;
     in_handlers.avpipe_writer = in_write_packet;
     in_handlers.avpipe_seeker = in_seek;
+
+    memset(&inctx, 0, sizeof(ioctx_t));
 
     if (in_handlers.avpipe_opener(filename, &inctx) < 0) {
         rc = -1;
@@ -550,7 +709,8 @@ usage(
         "\t                                For audio default is \"aac\", but for ts files should be set to \"ac3\"\n"
         "\t-enc-height :        (optional) Default: -1 (use source height)\n"
         "\t-enc-width :         (optional) Default: -1 (use source width)\n"
-        "\t-f :                 (mandatory) input filename for transcoding. Output goes to directory ./O\n"
+        "\t-f :                 (mandatory) input filename for transcoding. Valid formats are: a filename that points to a valid file, or udp://127.0.0.1:<port>.\n"
+        "\t                                 Output goes to directory ./O\n"
         "\t-format :            (optional) package format. Default is \"dash\", can be: \"dash\", \"hls\", \"mp4\", \"fmp4\", \"segment\", or \"fmp4-segment\"\n"
         "\t                                Using \"segment\" format produces self contained mp4 segments with start pts from 0 for each segment\n"
         "\t                                Using \"fmp4-segment\" format produces self contained mp4 segments with continious pts.\n"
@@ -605,6 +765,7 @@ main(
     char *command = "transcode";
     int i;
     int wm_shadow = 0;
+    url_parser_t url_parser;
 
     /* Parameters */
     txparams_t p = {
@@ -959,7 +1120,22 @@ main(
     thread_params.in_handlers = &in_handlers;
     thread_params.out_handlers = &out_handlers;
 
+    if (parse_url(filename, &url_parser) != 0) {
+        usage(argv[0], "-f", EXIT_FAILURE);
+    }
+
     tids = (pthread_t *) calloc(1, n_threads*sizeof(pthread_t));
+
+    /* If it is UDP, only run one thread */
+    if (!strcmp(url_parser.protocol, "udp")) {
+        tx_thread_params_t *tp = (tx_thread_params_t *) malloc(sizeof(tx_thread_params_t));
+        thread_params.repeats = 1;
+        *tp = thread_params;
+        tp->thread_number = 1;
+        pthread_create(&tids[0], NULL, tx_thread_func, tp);
+        pthread_join(tids[0], NULL);
+        return 0;
+    }
 
     for (i=0; i<n_threads; i++) {
         tx_thread_params_t *tp = (tx_thread_params_t *) malloc(sizeof(tx_thread_params_t));

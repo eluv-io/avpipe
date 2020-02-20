@@ -4,6 +4,8 @@
 
 #pragma once
 
+#include <stdio.h>
+
 typedef enum elv_log_level_t {
     elv_log_debug = 0,
     elv_log_log,

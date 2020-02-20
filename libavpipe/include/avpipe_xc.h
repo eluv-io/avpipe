@@ -15,6 +15,7 @@
 #include <libavutil/opt.h>
 
 #include <pthread.h>
+#include "elv_channel.h"
 
 #define MAX_STREAMS	16
 
@@ -46,10 +47,24 @@ typedef enum avp_stat_t {
 
 struct coderctx_t;
 
+#define MAX_UDP_PKT_LEN     2048            /* Max UDP length */
+#define UDP_PIPE_TIMEOUT    60              /* sec */
+#define UDP_PIPE_BUFSIZE    (10*1024*1024)  /* 10MB recv buf size */
+#define MAX_UDP_CHANNEL     10000           /* Max # of entries in UDP channel */
+
+typedef struct udp_packet_t {
+    char buf[MAX_UDP_PKT_LEN];
+    int len;
+} udp_packet_t;
+
 typedef struct ioctx_t {
     /* Application specific IO context */
     void                *opaque;
     struct coderctx_t   *encoder_ctx;   /* Needed to get access for stats */
+    elv_channel_t       *udp_channel;   /* This is set if input is a UDP url */
+    udp_packet_t        *cur_packet;    /* Current UDP packet not consumed fully */
+    int                 cur_pread;      /* Current packet read */
+    pthread_t           utid;           /* UDP thread id */
 
     /* Input filename or url */
     char *url;

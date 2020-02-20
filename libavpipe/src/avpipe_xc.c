@@ -2160,7 +2160,7 @@ avpipe_probe(
         stream_probes_ptr->codec_id = codec->id;
         strncpy(stream_probes_ptr->codec_name, codec->name, MAX_CODEC_NAME);
         stream_probes_ptr->codec_name[MAX_CODEC_NAME] = '\0';
-        stream_probes_ptr->duration_ts = (int)s->duration;
+        stream_probes_ptr->duration_ts = s->duration;
         stream_probes_ptr->time_base = s->time_base;
         stream_probes_ptr->nb_frames = s->nb_frames;
         stream_probes_ptr->start_time = s->start_time;

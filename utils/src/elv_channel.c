@@ -4,6 +4,8 @@
 
 #include <pthread.h>
 #include <stdlib.h>
+#include <errno.h>
+#include <sys/time.h>
 
 #include "elv_channel.h"
 
@@ -50,8 +52,9 @@ elv_channel_send(
         return -1;
 
     pthread_mutex_lock(&channel->_mutex);
-    while (channel->_count >= channel->_capacity)
+    while (channel->_count >= channel->_capacity) {
         pthread_cond_wait(&channel->_cond_recv, &channel->_mutex);
+    }
 
     channel->_count++;
     channel->_rear = (channel->_rear+1) % channel->_capacity;
@@ -71,7 +74,7 @@ elv_channel_receive(
         return NULL;
 
     pthread_mutex_lock(&channel->_mutex);
-    if (channel->_count <= 0)
+    while (channel->_count <= 0)
         pthread_cond_wait(&channel->_cond_send, &channel->_mutex);
 
     channel->_count--;
@@ -82,6 +85,45 @@ elv_channel_receive(
 
     return msg;
 }
+
+int
+elv_channel_timed_receive(
+    elv_channel_t *channel,
+    u_int64_t usec,
+    void **rcvdmsg)
+{
+    struct timeval tv;
+    struct timespec ts;
+    void *msg;
+    int rc;
+
+    if (!channel)
+        return EINVAL;
+
+    gettimeofday(&tv, NULL);
+
+    ts.tv_sec  = (long) (usec / 1000000) + tv.tv_sec;
+    ts.tv_nsec = (int) ((usec % 1000000) + tv.tv_usec) * 1000;
+
+    pthread_mutex_lock(&channel->_mutex);
+    while (channel->_count <= 0) {
+        rc = pthread_cond_timedwait(&channel->_cond_send, &channel->_mutex, &ts);
+        if (rc == ETIMEDOUT) {
+            pthread_mutex_unlock(&channel->_mutex);
+            return rc;
+        }
+    }
+
+    channel->_count--;
+    msg = channel->_items[channel->_front];
+    channel->_front = (channel->_front+1) % channel->_capacity;
+    pthread_cond_signal(&channel->_cond_recv);
+    pthread_mutex_unlock(&channel->_mutex);
+
+    *rcvdmsg = msg;
+    return 0;
+}
+
 
 int64_t
 elv_channel_size(
