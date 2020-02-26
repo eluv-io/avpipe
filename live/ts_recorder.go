@@ -13,8 +13,6 @@ type TsReader struct {
 	w          io.Writer
 	done       chan bool
 	errChannel chan error
-
-	NextSkipOverPts int64 // Bogus field for compat with HLS
 }
 
 // Deprecated

@@ -60,6 +60,9 @@ type outputCtx struct {
 	file *os.File
 }
 
+// FFmpeg test HLS live stream: ffmpeg -re -f lavfi -i sine=b=2 -f lavfi -i testsrc -vf scale=1920:1080 -c:v libx264 -profile:v main -pix_fmt yuv420p -map 0:a -map 1:v -f hls -hls_time 6 -g 50 -hls_segment_filename "%v/%d.ts" -var_stream_map "v:0,name:video,agroup:audio a:0,name:audio,agroup:audio" -master_pl_name master.m3u8 "%v/playlist.m3u8"
+// (use local HTTP server, e.g. http-server . -p 80 --cors)
+
 // Sky 1080 stream: http://origin1.sedev02_newsdemuxclear.stage-cdhls.skydvn.com/cdsedev04demuxclearnews/13012/cd.m3u8
 // Sky 720 stream: http://origin1.skynews.mobile.skydvn.com/skynews/1404/latest.m3u8
 var manifestURLStr string = "http://origin1.skynews.mobile.skydvn.com/skynews/1404/latest.m3u8"
@@ -120,82 +123,13 @@ func putReqCtxByFD(fd int64, reqCtx *testCtx) {
 	requestFDTable[fd] = reqCtx
 }
 
-func TestToolTs(t *testing.T) {
-	setupLogging()
-
-	manifestURL, err := url.Parse(manifestURLStr)
-	if err != nil {
-		t.Fail()
-	}
-
-	f, err := os.Create("out.ts")
-	defer f.Close()
-
-	lhr := NewHLSReader(manifestURL)
-	if err = lhr.Fill(recordingDuration, f); err != nil {
-		t.Error(err)
-	}
-}
-
-func TestVideoHlsLive(t *testing.T) {
+func TestHLSVideoOnly(t *testing.T) {
 	params := &avpipe.TxParams{
 		Format:          "fmp4-segment",
 		DurationTs:      3 * 2700000,
 		StartSegmentStr: "1",
-		VideoBitrate:    5000000, // 1080 probe: 8234400, 720 probe: 3189984
-		SegDurationTs:   -1,      //180000,
-		SegDuration:     "30",
-		ForceKeyInt:     50,
-		Ecodec:          "libx264", // MacOS h264_videotoolbox
-		EncHeight:       720,       // 1080
-		EncWidth:        1280,      // 1920
-		TxType:          avpipe.TxVideo,
-	}
-
-	setupLogging()
-	setupOutDir("./O")
-
-	// Save stream files instead of transcoding if specified
-	//   Make sure go test timeout is big enough:
-	//     go test -timeout 24h --run TestToolFmp4
-	//TESTSaveToDir = "/temp/fox"
-
-	manifestURL, err := url.Parse(manifestURLStr)
-	if err != nil {
-		t.Error(err)
-	}
-
-	// lhr contains the recording state so use a single instance
-	lhr := NewHLSReader(manifestURL)
-	rwb := NewRWBuffer(10000)
-
-	go func() {
-		lhr.Fill(recordingDuration, rwb)
-		tlog.Info("AVL Fill done")
-		rwb.(*RWBuffer).CloseSide(RWBufferWriteClosed)
-	}()
-
-	url := "video_hls"
-	reqCtx := &testCtx{url: url, r: rwb}
-	putReqCtxByURL(url, reqCtx)
-
-	avpipe.InitIOHandler(&inputOpener{}, &outputOpener{})
-	tlog.Info("AVL Tx start", "videoParams", fmt.Sprintf("%+v", *params))
-	errTx := avpipe.Tx(params, url, true)
-	tlog.Info("AVL Tx done", "err", errTx)
-
-	if errTx != 0 {
-		t.Error("AVL Video transcoding failed", "errTx", errTx)
-	}
-}
-
-func TestVideoHlsLiveV2(t *testing.T) {
-	params := &avpipe.TxParams{
-		Format:          "fmp4-segment",
-		DurationTs:      3 * 2700000,
-		StartSegmentStr: "1",
-		VideoBitrate:    5000000, // 1080 probe: 8234400, 720 probe: 3189984
-		SegDurationTs:   -1,      //180000,
+		VideoBitrate:    5000000,
+		SegDurationTs:   -1,
 		SegDuration:     "30",
 		ForceKeyInt:     50,
 		Ecodec:          "libx264",
@@ -217,16 +151,19 @@ func TestVideoHlsLiveV2(t *testing.T) {
 		t.Error(err)
 	}
 
-	lhr := NewHLSReaderV2(manifestURL)
+	readers, err := NewHLSReaders(manifestURL, STVideoOnly)
+	if err != nil {
+		t.Error(err)
+	}
 
 	url := "video_hls"
-	reqCtx := &testCtx{url: url, r: lhr}
+	reqCtx := &testCtx{url: url, r: readers[0].Pipe}
 	putReqCtxByURL(url, reqCtx)
 
 	avpipe.InitIOHandler(&inputOpener{}, &outputOpener{})
 
 	tlog.Info("AVL Tx start", "videoParams", fmt.Sprintf("%+v", *params))
-	errTx := avpipe.Tx(params, url, true)
+	errTx := avpipe.Tx(params, url, verboseLogging)
 	tlog.Info("AVL Tx done", "err", errTx)
 
 	if errTx != 0 {
@@ -234,18 +171,18 @@ func TestVideoHlsLiveV2(t *testing.T) {
 	}
 }
 
-func TestAudioHlsLive(t *testing.T) {
+func TestHLSAudioOnly(t *testing.T) {
 	params := &avpipe.TxParams{
 		Format:          "fmp4-segment",
-		DurationTs:      3 * 2700000, // TODO 3 * 1443840 should work but Sky stream's 1/90000 time base seems to be used to measure duration
+		DurationTs:      3 * 2700000,
 		StartSegmentStr: "1",
 		AudioBitrate:    128000,
 		SampleRate:      48000,
-		SegDurationTs:   -1,    // 1443840
-		SegDuration:     "30",  // 30.08
+		SegDurationTs:   -1,
+		SegDuration:     "30",
 		Ecodec:          "aac", // "ac3", "aac"
-		Dcodec:          "aac", // "aac", "h264"
-		AudioIndex:      11,
+		Dcodec:          "aac",
+		AudioIndex:      0,
 		TxType:          avpipe.TxAudio,
 		//BypassTranscoding: true,
 	}
@@ -263,16 +200,19 @@ func TestAudioHlsLive(t *testing.T) {
 		t.Error(err)
 	}
 
-	lhr := NewHLSReaderV2(manifestURL)
+	readers, err := NewHLSReaders(manifestURL, STAudioOnly)
+	if err != nil {
+		t.Error(err)
+	}
 
 	avpipe.InitIOHandler(&inputOpener{}, &outputOpener{})
 
 	url := "audio_hls"
-	reqCtx := &testCtx{url: url, r: lhr}
+	reqCtx := &testCtx{url: url, r: readers[0].Pipe}
 	putReqCtxByURL(url, reqCtx)
 
 	tlog.Info("AVL Tx start", "audioHlsParams", fmt.Sprintf("%+v", *params))
-	errTx := avpipe.Tx(params, url, true)
+	errTx := avpipe.Tx(params, url, verboseLogging)
 	tlog.Info("AVL Tx done", "err", errTx)
 
 	if errTx != 0 {
@@ -302,9 +242,14 @@ func TestAudioVideoHlsLive(t *testing.T) {
 	if err != nil {
 		t.Error(err)
 	}
-	rwb := NewHLSReaderV2(manifestURL)
+
+	readers, err := NewHLSReaders(manifestURL, STUnknown)
+	if err != nil {
+		t.Error(err)
+	}
+
 	audioReader := NewRWBuffer(10000)
-	videoReader := io.TeeReader(rwb, audioReader)
+	videoReader := io.TeeReader(readers[0].Pipe, audioReader)
 
 	done := make(chan bool, 1)
 
@@ -315,13 +260,12 @@ func TestAudioVideoHlsLive(t *testing.T) {
 		Format:          "fmp4-segment",
 		DurationTs:      3 * 2700000,
 		StartSegmentStr: "1",
-		AudioBitrate:    128000, // 78187,
+		AudioBitrate:    128000,
 		SampleRate:      48000,
-		SegDurationTs:   -1, //180000,
+		SegDurationTs:   -1,
 		SegDuration:     "30.080",
-		ForceKeyInt:     50,
 		Ecodec:          "aac", // "ac3", "aac"
-		Dcodec:          "aac", // "aac", "h264"
+		Dcodec:          "aac", // "aac"
 		AudioIndex:      11,
 		TxType:          avpipe.TxAudio,
 		//BypassTranscoding: true,
@@ -347,13 +291,13 @@ func TestAudioVideoHlsLive(t *testing.T) {
 		Format:          "fmp4-segment",
 		DurationTs:      3 * 2700000,
 		StartSegmentStr: "1",
-		VideoBitrate:    5000000, // 1080 probe: 8234400, 720 probe: 3189984
-		SegDurationTs:   -1,      //180000,
+		VideoBitrate:    5000000,
+		SegDurationTs:   -1,
 		SegDuration:     "30",
 		ForceKeyInt:     50,
-		Ecodec:          "libx264", // "ac3", "aac"
-		EncHeight:       720,       // 1080
-		EncWidth:        1280,      // 1920
+		Ecodec:          "libx264",
+		EncHeight:       720,
+		EncWidth:        1280,
 		TxType:          avpipe.TxVideo,
 		//BypassTranscoding: true,
 	}
@@ -427,62 +371,6 @@ func TestAudioVideoHlsLive(t *testing.T) {
 
 	for _ = range videoMezFiles {
 		<-done
-	}
-}
-
-// TestToolFmp4 records HLS mezzanines using one one avpipe.Tx invocation per mez
-// and the returnled 'last PTS' to skip during the following avpipe.Tx invocation
-func TestVideoFmp4(t *testing.T) {
-	setupLogging()
-
-	// Save stream files instead of transcoding if specified
-	//   Make sure go test timeout is big enough:
-	//     go test -timeout 24h --run TestToolFmp4
-	//TESTSaveToDir = "/temp/fox"
-
-	manifestURL, err := url.Parse(manifestURLStr)
-	if err != nil {
-		t.Error(err)
-	}
-
-	lhr := NewHLSReader(manifestURL)
-
-	recordFmp4(t, lhr, "video_fmp4_1")
-	recordFmp4(t, lhr, "video_fmp4_2")
-	recordFmp4(t, lhr, "video_fmp4_3")
-}
-
-func recordFmp4(t *testing.T, lhr *HLSReader, url string) {
-	params := &avpipe.TxParams{
-		Format:          "fmp4",
-		DurationTs:      2700000,
-		StartSegmentStr: "1",
-		VideoBitrate:    5000000, // 1080 probe: 8234400, 720 probe: 3189984
-		SegDurationTs:   -1,      //180000,
-		ForceKeyInt:     50,
-		Ecodec:          "libx264",
-		EncHeight:       720,  // 1080
-		EncWidth:        1280, // 1920
-		TxType:          avpipe.TxVideo,
-	}
-
-	rwb := NewRWBuffer(10000)
-	reqCtx := &testCtx{url: url, r: rwb}
-	putReqCtxByURL(url, reqCtx)
-
-	go func() {
-		err := lhr.Fill(recordingDurationHlsV1, rwb)
-		tlog.Info("AVL Fill done", "err", err)
-		rwb.(*RWBuffer).CloseSide(RWBufferWriteClosed)
-	}()
-
-	avpipe.InitIOHandler(&inputOpener{}, &outputOpener{})
-	tlog.Info("AVL Tx start", "videoParams", fmt.Sprintf("%+v", *params))
-	errTx := avpipe.Tx(params, url, true)
-	tlog.Info("AVL Tx done", "err", errTx)
-
-	if errTx != 0 {
-		t.Error("AVL Video transcoding failed", "errTx", errTx)
 	}
 }
 
