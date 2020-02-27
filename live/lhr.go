@@ -54,13 +54,24 @@ var TESTSaveToDir string
 
 type compareVariant = func(a *m3u8.Variant, b *m3u8.Variant) *m3u8.Variant
 
+func audioAlternative(video *m3u8.Variant) (alt *m3u8.Alternative) {
+	for _, a := range video.Alternatives {
+		if strings.ToLower(a.Type) == "audio" &&
+			strings.ToLower(a.GroupId) == strings.ToLower(video.Audio) &&
+			(a.Default || alt == nil) {
+			alt = a
+		}
+	}
+	return
+}
+
 // assumption: a and b are not muxed
 func compareAudioVariant(a *m3u8.Variant, b *m3u8.Variant) *m3u8.Variant {
-	if !hasVideo(a) && hasVideo(b) {
+	if isAudioOnly(a) && !isAudioOnly(b) {
 		return a
-	} else if !hasVideo(b) && hasVideo(a) {
+	} else if isAudioOnly(b) && !isAudioOnly(a) {
 		return b
-	} else if hasVideo(a) && hasVideo(b) {
+	} else if !isAudioOnly(a) && !isAudioOnly(b) {
 		return nil
 	}
 	if a.Bandwidth > b.Bandwidth {
@@ -87,11 +98,11 @@ func compareMuxedVariant(a *m3u8.Variant, b *m3u8.Variant) *m3u8.Variant {
 
 // assumption: a and b are not muxed
 func compareVideoVariant(a *m3u8.Variant, b *m3u8.Variant) *m3u8.Variant {
-	if hasVideo(a) && !hasVideo(b) {
+	if isVideoOnly(a) && !isVideoOnly(b) {
 		return a
-	} else if hasVideo(b) && !hasVideo(a) {
+	} else if isVideoOnly(b) && !isVideoOnly(a) {
 		return b
-	} else if !hasVideo(a) && !hasVideo(b) {
+	} else if !isVideoOnly(a) && !isVideoOnly(b) {
 		return nil
 	}
 	if a.Bandwidth > b.Bandwidth {
@@ -105,11 +116,7 @@ func findTopVariant(variants []*m3u8.Variant, compare compareVariant) (
 	top *m3u8.Variant) {
 
 	for _, v := range variants {
-		if top == nil {
-			top = v
-		} else {
-			top = compare(top, v)
-		}
+		top = compare(top, v)
 	}
 	return
 }
@@ -118,8 +125,16 @@ func hasVideo(v *m3u8.Variant) bool {
 	return v != nil && len(v.Resolution) > 0
 }
 
+func isAudioOnly(v *m3u8.Variant) bool {
+	return v != nil && !hasVideo(v) && !v.Iframe
+}
+
 func isMuxed(v *m3u8.Variant) bool {
-	return v != nil && hasVideo(v) && len(v.Audio) == 0
+	return v != nil && hasVideo(v) && len(v.Audio) == 0 && !v.Iframe
+}
+
+func isVideoOnly(v *m3u8.Variant) bool {
+	return v != nil && hasVideo(v) && !v.Iframe
 }
 
 // Determines readers based on the desired stream type and the playlistURL,
@@ -129,6 +144,8 @@ func isMuxed(v *m3u8.Variant) bool {
 // to reload *media* playlists. Also, some servers will return a new
 // session token with each HTTP request for the master, but the same token
 // must be used to maintain playback state.
+//
+// TODO Probably should change approach to selecting a variant first, then finding the audio/video streams. Also test against different playlists.
 func NewHLSReaders(playlistURL *url.URL, desired StreamType) (
 	readers []*HLSReader, err error) {
 
@@ -144,52 +161,81 @@ func NewHLSReaders(playlistURL *url.URL, desired StreamType) (
 
 	var content io.ReadCloser
 	if content, err = openURL(http.DefaultClient, playlistURL); err != nil {
-		return
+		return nil, et(err)
 	}
 	defer closeCloser(content)
 
 	playlist, listType, err := m3u8.DecodeFrom(content, true)
 	if err != nil {
-		err = et(err)
-		return
+		return nil, et(err)
 	}
 
 	var lhr *HLSReader
 	if listType == m3u8.MEDIA {
 		if lhr = NewHLSReader(playlistURL, desired); err == nil {
 			readers = append(readers, lhr)
+		} else {
+			err = et(err)
 		}
 		return
 	}
 
 	// From the master playlist, choose the variant with the highest bandwidth
-	var v *m3u8.Variant
 	master := playlist.(*m3u8.MasterPlaylist)
 
-	if v = findTopVariant(master.Variants, compareMuxedVariant); v != nil {
+	if v := findTopVariant(master.Variants, compareMuxedVariant); v != nil {
 		if lhr, err = NewHLSReaderV(v, playlistURL, STMuxed); err == nil {
 			readers = append(readers, lhr)
+		} else {
+			err = et(err)
 		}
 		return
 	}
 
-	if desired != STVideoOnly {
-		if v = findTopVariant(master.Variants, compareAudioVariant); v != nil {
-			if lhr, err = NewHLSReaderV(v, playlistURL, STAudioOnly); err != nil {
-				return
+	var topVideo *m3u8.Variant
+	if desired != STAudioOnly {
+		if topVideo = findTopVariant(master.Variants, compareVideoVariant); topVideo != nil {
+			if lhr, err = NewHLSReaderV(topVideo, playlistURL, STVideoOnly); err != nil {
+				return nil, et(err)
 			}
 			readers = append(readers, lhr)
 		}
 	}
-	if desired != STAudioOnly {
-		if v = findTopVariant(master.Variants, compareVideoVariant); v != nil {
-			if lhr, err = NewHLSReaderV(v, playlistURL, STVideoOnly); err != nil {
-				if len(readers) > 0 {
-					closeCloser(readers[0].Pipe)
-					readers = nil
-				}
-				return
+
+	if desired != STVideoOnly {
+		var lhr *HLSReader
+
+		// Use audio stream associated with the variant
+		if topVideo != nil {
+			if alt := audioAlternative(topVideo); alt != nil {
+				lhr, err = NewHLSReaderA(alt, playlistURL)
 			}
+		}
+
+		if lhr == nil {
+			if v := findTopVariant(master.Variants, compareAudioVariant); v != nil {
+				lhr, err = NewHLSReaderV(v, playlistURL, STAudioOnly)
+			}
+		}
+
+		if lhr == nil {
+			// Hack for grafov bug (not populating VariantParams.Alternatives)
+			for _, v := range master.Variants {
+				if alt := audioAlternative(v); alt != nil {
+					lhr, err = NewHLSReaderA(alt, playlistURL)
+					break
+				}
+			}
+		}
+
+		if err != nil {
+			if len(readers) > 0 {
+				closeCloser(readers[0].Pipe)
+			}
+			return nil, et(err)
+		}
+
+		if lhr != nil {
 			readers = append(readers, lhr)
 		}
 	}
@@ -224,7 +270,7 @@ func NewHLSReaderV(v *m3u8.Variant, masterPlaylistURL *url.URL, t StreamType) (
 		return
 	}
 
-	log.Debug("reading variant playlist", "URL", playlistURL,
+	log.Debug("reading media playlist", "URL", playlistURL,
 		"codecs", v.Codecs,
 		"audio", v.Audio,
 		"resolution", v.Resolution,
@@ -234,6 +280,20 @@ func NewHLSReaderV(v *m3u8.Variant, masterPlaylistURL *url.URL, t StreamType) (
 		"video-range", v.VideoRange)
 
 	lhr = NewHLSReader(playlistURL, t)
+	return
+}
+
+func NewHLSReaderA(a *m3u8.Alternative, masterPlaylistURL *url.URL) (
+	lhr *HLSReader, err error) {
+
+	var playlistURL *url.URL
+	if playlistURL, err = resolve(a.URI, masterPlaylistURL); err != nil {
+		return
+	}
+
+	log.Debug("reading audio playlist", "URL", playlistURL, )
+
+	lhr = NewHLSReader(playlistURL, STAudioOnly)
 	return
 }
 
