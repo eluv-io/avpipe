@@ -176,6 +176,7 @@ typedef struct coderctx_t {
     int64_t first_read_frame_pts;       /* PTS of first frame read - which might not be decodable */
     int64_t audio_input_prev_pts;       /* Previous pts for audio input */
     int64_t duration;                   /* Duration/pts of original frame */
+    int     pts_residue;                /* Residue of pts lost in output */
 
     int     is_mpegts;                  /* set to 1 if input format name is "mpegts" */
 

@@ -410,27 +410,28 @@ set_encoder_options(
         av_opt_set(encoder_context->format_context->priv_data, "movflags", "frag_every_frame", 0);
 
     // Segment duration (in ts) - notice it is set on the format context not codec
-    if (params->seg_duration_ts > 0)
+    if (params->seg_duration_ts > 0 && (!strcmp(params->format, "dash") || !strcmp(params->format, "hls")))
         av_opt_set_int(encoder_context->format_context->priv_data, "seg_duration_ts", params->seg_duration_ts,
             AV_OPT_FLAG_ENCODING_PARAM | AV_OPT_SEARCH_CHILDREN);
     av_opt_set_int(encoder_context->format_context->priv_data, "start_fragment_index", params->start_fragment_index,
         AV_OPT_FLAG_ENCODING_PARAM | AV_OPT_SEARCH_CHILDREN);
     av_opt_set(encoder_context->format_context->priv_data, "start_segment", params->start_segment_str, 0);
 
-    if (!strcmp(params->format, "segment")) {
-        elv_dbg("setting \"segment\" segment_time to %s", params->seg_duration);
-        av_opt_set(encoder_context->format_context->priv_data, "segment_time", params->seg_duration, 0);
-        av_opt_set(encoder_context->format_context->priv_data, "reset_timestamps", "on", 0);
-    }
-
-    if (!strcmp(params->format, "fmp4-segment")) {
-        elv_dbg("setting \"fmp4-segment\" segment_time to %s", params->seg_duration);
-        av_opt_set(encoder_context->format_context->priv_data, "segment_time", params->seg_duration, 0);
+    if (!strcmp(params->format, "fmp4-segment") || !strcmp(params->format, "segment")) {
+        int64_t seg_duration_ts = 0;
+        float seg_duration = atof(params->seg_duration);
+        if (params->tx_type == tx_audio)
+            seg_duration_ts = seg_duration * encoder_context->stream[encoder_context->audio_stream_index]->time_base.den;
+        else
+            seg_duration_ts = seg_duration * decoder_context->stream[decoder_context->video_stream_index]->time_base.den;
+        av_opt_set_int(encoder_context->format_context->priv_data, "segment_duration_ts", seg_duration_ts, 0);
+        elv_dbg("setting \"fmp4-segment\" segment_time to %s, seg_duration_ts=%"PRId64, params->seg_duration, seg_duration_ts);
         av_opt_set(encoder_context->format_context->priv_data, "reset_timestamps", "on", 0);
         // If I set faststart in the flags then ffmpeg generates some zero size files, which I need to dig into it more (RM).
         // av_opt_set(encoder_context->format_context->priv_data, "segment_format_options", "movflags=faststart", 0);
         // So lets use flag_every_frame option instead.
-        av_opt_set(encoder_context->format_context->priv_data, "segment_format_options", "movflags=frag_every_frame", 0);
+        if (!strcmp(params->format, "fmp4-segment"))
+            av_opt_set(encoder_context->format_context->priv_data, "segment_format_options", "movflags=frag_every_frame", 0);
     }
 }
 
@@ -1261,6 +1262,16 @@ transcode_audio(
 }
 
 static int
+calculate_pts_residue(
+    int64_t d,
+    int output_nb_sample)
+{
+    if (output_nb_sample == 0)
+        return 0;
+    return d % output_nb_sample;
+}
+
+static int
 transcode_audio_aac(
     coderctx_t *decoder_context,
     coderctx_t *encoder_context,
@@ -1381,18 +1392,26 @@ transcode_audio_aac(
                  * where d = ((float) (frame->pts - decoder_context->audio_input_prev_pts) / frame->pkt_duration) * pkt_ratio * filt_frame->nb_samples
                  * After simplification we will have d as follows:
                  */
-                int64_t d = (frame->pts - decoder_context->audio_input_prev_pts) * (encoder_context->codec_context[stream_index]->sample_rate) /
+                int64_t d = (frame->pts - decoder_context->audio_input_prev_pts) * (encoder_context->codec_context[stream_index]->time_base.den) /
                             (decoder_context->stream[stream_index]->time_base.den);
+                decoder_context->pts_residue += calculate_pts_residue(d, output_frame_size);
+                d = (d/output_frame_size)*output_frame_size;
+                if (decoder_context->pts_residue >= output_frame_size) {
+                    decoder_context->pts_residue -= output_frame_size;
+                    d += output_frame_size;
+                }
 
-                elv_dbg("AUDIO JUMP from=%"PRId64", to=%"PRId64", frame->pts=%"PRId64", audio_input_prev_pts=%"PRId64,
+                elv_dbg("AUDIO JUMP from=%"PRId64", to=%"PRId64", frame->pts=%"PRId64", audio_input_prev_pts=%"PRId64", pts_residue=%d",
                     decoder_context->audio_output_pts,
                     decoder_context->audio_output_pts + d,
                     frame->pts,
-                    decoder_context->audio_input_prev_pts);
+                    decoder_context->audio_input_prev_pts,
+                    decoder_context->pts_residue);
                 decoder_context->audio_output_pts += d;
             } else {
-                decoder_context->audio_output_pts += filt_frame->nb_samples;
+                decoder_context->audio_output_pts += output_frame_size;
             }
+
             decoder_context->audio_input_prev_pts = frame->pts;
 
             dump_frame("AUDIO FILT ", codec_context->frame_number, filt_frame, debug_frame_level);
