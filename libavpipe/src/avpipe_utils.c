@@ -20,7 +20,7 @@ dump_frame(
     AVFrame *frame,
     int debug_frame_level)
 {
-    if (!debug_frame_level)
+    if (!debug_frame_level || !frame)
         return;
 
     elv_dbg("FRAME %s [%d] pts=%"PRId64" pkt_dts=%"PRId64" pkt_duration=%"PRId64" be_time_stamp=%"PRId64" key=%d pict_type=%d "
@@ -43,7 +43,7 @@ dump_packet(
     AVPacket *p,
     int debug_frame_level)
 {
-    if (!debug_frame_level)
+    if (!debug_frame_level || !p)
         return;
 
     elv_dbg("PACKET %s pts=%"PRId64" dts=%"PRId64" duration=%"PRId64" pos=%"PRId64" size=%d stream_index=%d flags=%x\n", msg,
