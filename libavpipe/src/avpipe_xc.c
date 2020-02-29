@@ -1379,7 +1379,7 @@ transcode_audio_aac(
             filt_frame->pts = decoder_context->audio_output_pts;
             filt_frame->pkt_dts = filt_frame->pts;
 
-            if (frame->pts - decoder_context->audio_input_prev_pts > frame->pkt_duration) {
+            if (decoder_context->is_mpegts && frame->pts - decoder_context->audio_input_prev_pts > frame->pkt_duration) {
                 /*
                  * float pkt_ratio = ((float)(encoder_context->codec_context[stream_index]->sample_rate * frame->pkt_duration)) /
                  *                    (((float) decoder_context->stream[stream_index]->time_base.den) * filt_frame->nb_samples);
