@@ -17,7 +17,7 @@
 #include <pthread.h>
 #include "elv_channel.h"
 
-#define MAX_STREAMS	16
+#define MAX_STREAMS	32
 
 typedef enum avpipe_buftype_t {
     avpipe_input_stream = 0,
