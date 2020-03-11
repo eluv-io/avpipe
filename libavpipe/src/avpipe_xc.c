@@ -552,6 +552,7 @@ prepare_video_encoder(
         encoder_codec_context->gop_size = params->force_keyint;
     }
 
+    encoder_context->stream[encoder_context->video_stream_index]->time_base = decoder_context->codec_context[index]->time_base;
     set_encoder_options(encoder_context, decoder_context, params);
 
     /* Set codec context parameters */
@@ -1795,6 +1796,25 @@ avpipe_tx(
     if (avformat_write_header(encoder_context->format_context, NULL) < 0) {
         elv_err("Failed to open output file");
         return -1;
+    }
+
+    /*
+     * Sometimes avformat_write_header() changes the timebase of stream (for example 24 -> 512).
+     * In this case, reset the segment duration ts with new value to become sure cutting the segments are done properly.
+     * PENDING (RM): it might be needed to do the same thing for audio.
+     */
+    if (params->tx_type & tx_video &&
+        encoder_context->codec_context[encoder_context->video_stream_index]->time_base.den
+            != encoder_context->stream[encoder_context->video_stream_index]->time_base.den) {
+        float seg_duration = atof(params->seg_duration);
+        int64_t seg_duration_ts = seg_duration * encoder_context->stream[encoder_context->video_stream_index]->time_base.den;
+        elv_dbg("Stream orig ts=%"PRId64", new ts=%"PRId64", resetting \"fmp4-segment\" segment_time to %s, seg_duration_ts=%"PRId64,
+            encoder_context->codec_context[encoder_context->video_stream_index]->time_base.den,
+            encoder_context->stream[encoder_context->video_stream_index]->time_base.den,
+            params->seg_duration, seg_duration_ts);
+        encoder_context->codec_context[encoder_context->video_stream_index]->time_base =
+            encoder_context->stream[encoder_context->video_stream_index]->time_base;
+        av_opt_set_int(encoder_context->format_context->priv_data, "segment_duration_ts", seg_duration_ts, 0);
     }
 
     AVFrame *input_frame = av_frame_alloc();
