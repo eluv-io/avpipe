@@ -1804,11 +1804,12 @@ avpipe_tx(
      * PENDING (RM): it might be needed to do the same thing for audio.
      */
     if (params->tx_type & tx_video &&
+        encoder_context->codec_context[encoder_context->video_stream_index] &&
         encoder_context->codec_context[encoder_context->video_stream_index]->time_base.den
             != encoder_context->stream[encoder_context->video_stream_index]->time_base.den) {
         float seg_duration = atof(params->seg_duration);
         int64_t seg_duration_ts = seg_duration * encoder_context->stream[encoder_context->video_stream_index]->time_base.den;
-        elv_dbg("Stream orig ts=%"PRId64", new ts=%"PRId64", resetting \"fmp4-segment\" segment_time to %s, seg_duration_ts=%"PRId64,
+        elv_log("Stream orig ts=%"PRId64", new ts=%"PRId64", resetting \"fmp4-segment\" segment_time to %s, seg_duration_ts=%"PRId64,
             encoder_context->codec_context[encoder_context->video_stream_index]->time_base.den,
             encoder_context->stream[encoder_context->video_stream_index]->time_base.den,
             params->seg_duration, seg_duration_ts);

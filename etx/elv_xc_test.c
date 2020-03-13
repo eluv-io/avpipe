@@ -1061,8 +1061,8 @@ main(
         (p.seg_duration_ts <= 0 || start_segment < 1)) {
         usage(argv[0], "seg_duration_ts, start_segment", EXIT_FAILURE);
     }
-    if (!strcmp(p.format, "segment") &&
-        !strcmp(p.format, "fmp4-segment") &&
+    if ((!strcmp(p.format, "segment") ||
+        !strcmp(p.format, "fmp4-segment")) &&
         (p.seg_duration == NULL || start_segment < 1)) {
         usage(argv[0], "seg_duration, start_segment", EXIT_FAILURE);
     }
