@@ -706,11 +706,3 @@ end_probe:
     free(in_handlers);
     return rc;
 }
-
-// TODO: Something better than manually updating this. Currently useful for
-//       checking if fabric builds with expected version. 
-int
-version()
-{
-    return 1;
-}

@@ -5,17 +5,20 @@ BINDIR=bin
 LIBDIR=lib
 INCDIR=include
 
+GIT_VERSION := "$(shell git describe --abbrev=4 --dirty --always --tags)"
+
 OSNAME := $(shell uname -s)
 
 INCDIRS=-I${ELV_TOOLCHAIN_DIST_PLATFORM}/include -I../utils/include -Iinclude
 
 OBJS=$(SRCS:%.c=$(BINDIR)/%.o)
 
-FLAGS=-O0 -ggdb -Wall -fPIC
+FLAGS=-O0 -ggdb -Wall -fPIC -DVERSION=\"$(GIT_VERSION)\"
 
 all: avpipelib install
 
 install:
+	@echo "VERSION=" $(VERSION)
 	@(if [ ! -d $(TOP_DIR)/../$(LIBDIR) ]; then mkdir $(TOP_DIR)/../$(LIBDIR); fi)
 	@echo Installing avpipelib
 	@cp $(LIBDIR)/* $(TOP_DIR)/../$(LIBDIR)

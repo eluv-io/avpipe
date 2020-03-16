@@ -305,7 +305,6 @@ func doTranscode(cmd *cobra.Command, args []string) error {
 	if err != nil {
 		return fmt.Errorf("force-keyint is not valid")
 	}
-	fmt.Printf("force_keyint=%d\n", forceKeyInterval)
 
 	startFragmentIndex, err := cmd.Flags().GetInt32("start-frag-index")
 	if err != nil {

@@ -717,8 +717,8 @@ func SetCLoggers() {
 }
 
 // GetVersion ...
-func Version() int {
-	return int(C.version())
+func Version() string {
+	return C.GoString((*C.char)(unsafe.Pointer(C.avpipe_version())))
 }
 
 // params: transcoding parameters

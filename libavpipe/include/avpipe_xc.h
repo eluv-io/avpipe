@@ -387,4 +387,11 @@ avpipe_tx(
     txctx_t *txctx,
     int do_instrument,
     int debug_frame_level);
+
+/**
+ * @brief   Returns avpipe GIT version
+ */
+char *
+avpipe_version();
+
 #endif

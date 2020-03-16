@@ -2289,6 +2289,7 @@ avpipe_init(
     char buf[1024];
 
     sprintf(buf,
+        "version=%s "
         "bypass=%d "
         "tx_type=%s "
         "format=%s "
@@ -2314,6 +2315,7 @@ avpipe_init(
         "crypt_key_url=%s "
         "crypt_scheme=%d "
         "audio_index=%d ",
+        avpipe_version(),
         params->bypass_transcoding, get_tx_type_name(params->tx_type),
         params->format, params->start_time_ts, params->start_pts, params->duration_ts, params->start_segment_str,
         params->video_bitrate, params->audio_bitrate, params->sample_rate, params->crf_str,
@@ -2427,4 +2429,10 @@ avpipe_fini(
     *txctx = NULL;
 
     return 0;
+}
+
+char *
+avpipe_version()
+{
+    return VERSION;
 }
