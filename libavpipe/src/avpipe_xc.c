@@ -15,6 +15,7 @@
 #include "avpipe_utils.h"
 #include "elv_log.h"
 #include "elv_time.h"
+#include "avpipe_version.h"
 
 #include <stdio.h>
 #include <fcntl.h>
@@ -2434,5 +2435,12 @@ avpipe_fini(
 char *
 avpipe_version()
 {
-    return VERSION;
+    static char version_str[128];
+
+    if (version_str[0] != '\0')
+        return version_str;
+
+    snprintf(version_str, sizeof(version_str), "%d.%d@%s", AVPIPE_MAJOR_VERSION, AVPIPE_MINOR_VERSION, VERSION);
+    
+    return version_str;
 }

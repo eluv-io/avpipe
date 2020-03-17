@@ -28,7 +28,7 @@ func main() {
 	})
 	avpipe.SetCLoggers()
 
-	log.Info("Starting avcmd")
+	log.Info("Starting avcmd", "version", avpipe.Version())
 
 	err := cmd.InitTranscode(cmdRoot)
 	if err != nil {
