@@ -738,6 +738,7 @@ usage(
         "\t-wm-shadow :         (optional) watermarking with shadow. Default is 1, means with shadow.\n"
         "\t-wm-shadow-color :   (optional) watermark shadow color. Default is white.\n",
         bad_flag, progname);
+    printf("\n%s version=%s\n", progname, avpipe_version());
     exit(status);
 }
 

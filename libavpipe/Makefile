@@ -13,7 +13,13 @@ INCDIRS=-I${ELV_TOOLCHAIN_DIST_PLATFORM}/include -I../utils/include -Iinclude
 
 OBJS=$(SRCS:%.c=$(BINDIR)/%.o)
 
-FLAGS=-O0 -ggdb -Wall -fPIC -DVERSION=\"$(GIT_VERSION)\"
+ifdef AVP_VERSION
+VERSION := $(AVP_VERSION)
+else
+VERSION := $(GIT_VERSION)
+endif
+
+FLAGS=-O0 -ggdb -Wall -fPIC -DVERSION=\"$(VERSION)\"
 
 all: avpipelib install
 
