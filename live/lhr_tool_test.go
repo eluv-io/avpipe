@@ -7,23 +7,35 @@ import (
 	"crypto/rand"
 	"encoding/hex"
 	"fmt"
+	"github.com/qluvio/avpipe"
 	"github.com/qluvio/content-fabric/errors"
+	elog "github.com/qluvio/content-fabric/log"
+	"github.com/qluvio/content-fabric/util/ioutil"
 	"io"
-	"math/big"
 	"net/url"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"sync"
 	"testing"
-
-	"github.com/qluvio/avpipe"
-	elog "github.com/qluvio/content-fabric/log"
 )
 
-var tlog = elog.Get("/eluvio/avpipe/live/test")
+//
+// Test Streams
+// * FFmpeg HLS TS stream (separate a/v): ffmpeg -re -f lavfi -i sine=b=2 -f lavfi -i testsrc -map 0:a -map 1:v -f hls -hls_time 6 -c:a aac -ac 2 -c:v h264_videotoolbox -vf scale=1280:720 -profile:v high -pix_fmt yuv420p -r 25 -g 50 -force_key_frames "expr:gte(t,n_forced*2)" -var_stream_map "a:0,name:audio,agroup:audio v:0,name:video,agroup:audio" -hls_segment_filename "%v/%d.ts" -master_pl_name master.m3u8 "%v/playlist.m3u8"
+//   (use local HTTP server, e.g. http-server . -p 80 --cors)
+// * FFmpeg HLS TS stream (muxed a/v): ffmpeg -re -f lavfi -i sine=b=2 -f lavfi -i testsrc -map 0:a -map 1:v -f hls -hls_time 6 -c:a aac -ac 2 -c:v h264_videotoolbox -vf scale=1280:720 -profile:v high -pix_fmt yuv420p -r 25 -g 50 -force_key_frames "expr:gte(t,n_forced*2)" -var_stream_map "v:0,a:0,name:muxed" -hls_segment_filename "%v/%d.ts" -master_pl_name master.m3u8 "%v/playlist.m3u8"
+// * Sky 1080 stream: http://origin1.sedev02_newsdemuxclear.stage-cdhls.skydvn.com/cdsedev04demuxclearnews/13012/cd.m3u8
+// * Sky 720 stream: http://origin1.skynews.mobile.skydvn.com/skynews/1404/latest.m3u8
+//
+// To save HLS files, add the following to the test:
+//   TESTSaveToDir = "~/temp"
+//
+const manifestURLStr = "http://origin1.skynews.mobile.skydvn.com/skynews/1404/latest.m3u8"
+const verboseLogging = false
 
-var verboseLogging bool = true
+var tlog = elog.Get("/eluvio/avpipe/live/test")
 var requestURLTable map[string]*testCtx = map[string]*testCtx{}
 var urlMutex *sync.RWMutex = &sync.RWMutex{}
 var requestFDTable map[int64]*testCtx = map[int64]*testCtx{}
@@ -59,31 +71,6 @@ type outputCtx struct {
 	w    io.Writer
 	file *os.File
 }
-
-// FFmpeg test HLS live stream: ffmpeg -re -f lavfi -i sine=b=2 -f lavfi -i testsrc -vf scale=1920:1080 -c:v libx264 -profile:v main -pix_fmt yuv420p -map 0:a -map 1:v -f hls -hls_time 6 -g 50 -hls_segment_filename "%v/%d.ts" -var_stream_map "v:0,name:video,agroup:audio a:0,name:audio,agroup:audio" -master_pl_name master.m3u8 "%v/playlist.m3u8"
-// (use local HTTP server, e.g. http-server . -p 80 --cors)
-
-// Sky 1080 stream: http://origin1.sedev02_newsdemuxclear.stage-cdhls.skydvn.com/cdsedev04demuxclearnews/13012/cd.m3u8
-// Sky 720 stream: http://origin1.skynews.mobile.skydvn.com/skynews/1404/latest.m3u8
-var manifestURLStr string = "http://origin1.skynews.mobile.skydvn.com/skynews/1404/latest.m3u8"
-var recordingDuration *big.Rat = big.NewRat(int64(3*2700000), int64(90000))
-var recordingDurationHlsV1 *big.Rat = big.NewRat(int64(2700000), int64(90000))
-
-// Fox stream
-//var manifestURLStr string = "https://content.uplynk.com/channel/089cd376140c40d3a64c7c1dcccb4467.m3u8"
-//var recordingDuration *big.Rat = big.NewRat(int64(2702700), int64(90000))
-//var videoParams *avpipe.TxParams = &avpipe.TxParams{
-//	Format:          "fmp4",
-//	SkipOverPts:     0,
-//	DurationTs:      2702700, //5405400
-//	StartSegmentStr: "1",
-//	VideoBitrate:    1557559,
-//	SegDurationTs:   180180, //360360
-//	Ecodec:          "libx264",
-//	EncHeight:       432,
-//	EncWidth:        768,
-//	TxType:          avpipe.TxVideo,
-//}
 
 func getReqCtxByURL(url string) (*testCtx, error) {
 	urlMutex.RLock()
@@ -132,42 +119,43 @@ func TestHLSVideoOnly(t *testing.T) {
 		SegDurationTs:   -1,
 		SegDuration:     "30",
 		ForceKeyInt:     50,
-		Ecodec:          "libx264",
-		EncHeight:       720,  // 1080
-		EncWidth:        1280, // 1920
+		Ecodec:          defaultVideoEncoder(),
+		EncHeight:       720,
+		EncWidth:        1280,
 		TxType:          avpipe.TxVideo,
 	}
 
 	setupLogging()
 	setupOutDir("./O")
 
-	// Save stream files instead of transcoding if specified
-	//   Make sure go test timeout is big enough:
-	//     go test -timeout 24h --run TestToolFmp4
-	//TESTSaveToDir = "/temp/fox"
-
 	manifestURL, err := url.Parse(manifestURLStr)
 	if err != nil {
 		t.Error(err)
 	}
-
 	readers, err := NewHLSReaders(manifestURL, STVideoOnly)
 	if err != nil {
 		t.Error(err)
 	}
+	reader := readers[0]
+	endChan := make(chan error, 1)
+	reader.Start(endChan)
 
-	url := "video_hls"
-	reqCtx := &testCtx{url: url, r: readers[0].Pipe}
-	putReqCtxByURL(url, reqCtx)
-
+	tlog.Info("Tx start", "params", fmt.Sprintf("%+v", *params))
 	avpipe.InitIOHandler(&inputOpener{}, &outputOpener{})
-
-	tlog.Info("AVL Tx start", "videoParams", fmt.Sprintf("%+v", *params))
+	url := "video_hls"
+	reqCtx := &testCtx{url: url, r: reader.Pipe}
+	putReqCtxByURL(url, reqCtx)
 	errTx := avpipe.Tx(params, url, verboseLogging)
-	tlog.Info("AVL Tx done", "err", errTx)
-
+	tlog.Info("Tx done", "err", errTx)
 	if errTx != 0 {
-		t.Error("AVL Video transcoding failed", "errTx", errTx)
+		t.Error("video transcoding error", "errTx", errTx)
+	}
+
+	ioutil.CloseCloser(reader.Pipe, tlog)
+	err = <-endChan
+	tlog.Info("HLSReader done", "err", err)
+	if err != nil {
+		t.Error("HLSReader error", "err", err)
 	}
 }
 
@@ -190,33 +178,34 @@ func TestHLSAudioOnly(t *testing.T) {
 	setupLogging()
 	setupOutDir("./O")
 
-	// Save stream files instead of transcoding if specified
-	//   Make sure go test timeout is big enough:
-	//     go test -timeout 24h --run TestToolFmp4
-	//TESTSaveToDir = "/temp/fox"
-
 	manifestURL, err := url.Parse(manifestURLStr)
 	if err != nil {
 		t.Error(err)
 	}
-
 	readers, err := NewHLSReaders(manifestURL, STAudioOnly)
 	if err != nil {
 		t.Error(err)
 	}
+	reader := readers[0]
+	endChan := make(chan error, 1)
+	reader.Start(endChan)
 
+	tlog.Info("Tx start", "params", fmt.Sprintf("%+v", *params))
 	avpipe.InitIOHandler(&inputOpener{}, &outputOpener{})
-
 	url := "audio_hls"
-	reqCtx := &testCtx{url: url, r: readers[0].Pipe}
+	reqCtx := &testCtx{url: url, r: reader.Pipe}
 	putReqCtxByURL(url, reqCtx)
-
-	tlog.Info("AVL Tx start", "audioHlsParams", fmt.Sprintf("%+v", *params))
 	errTx := avpipe.Tx(params, url, verboseLogging)
-	tlog.Info("AVL Tx done", "err", errTx)
-
+	tlog.Info("Tx done", "err", errTx)
 	if errTx != 0 {
-		t.Error("AVL Audio transcoding failed", "errTx", errTx)
+		t.Error("video transcoding error", "errTx", errTx)
+	}
+
+	ioutil.CloseCloser(reader.Pipe, tlog)
+	err = <-endChan
+	tlog.Info("HLSReader done", "err", err)
+	if err != nil {
+		t.Error("HLSReader error", "err", err)
 	}
 }
 
@@ -224,70 +213,54 @@ func TestHLSAudioOnly(t *testing.T) {
 // Then creates DASH abr-segments for each generated audio/video mez file.
 // All the output files will be saved in "./O".
 func TestAudioVideoHlsLive(t *testing.T) {
-
 	setupLogging()
 	setupOutDir("./O")
-
-	// Create output directory if it doesn't exist
-	if _, err := os.Stat("./O"); os.IsNotExist(err) {
-		os.Mkdir("./O", 0755)
-	}
-
-	// Save stream files instead of transcoding if specified
-	//   Make sure go test timeout is big enough:
-	//     go test -timeout 24h --run TestToolFmp4
-	//TESTSaveToDir = "/temp/fox"
 
 	manifestURL, err := url.Parse(manifestURLStr)
 	if err != nil {
 		t.Error(err)
 	}
-
 	readers, err := NewHLSReaders(manifestURL, STUnknown)
 	if err != nil {
 		t.Error(err)
 	}
-
+	reader := readers[0]
+	endChan := make(chan error, 1)
+	reader.Start(endChan)
 	audioReader := NewRWBuffer(10000)
-	videoReader := io.TeeReader(readers[0].Pipe, audioReader)
+	videoReader := io.TeeReader(reader.Pipe, audioReader)
 
-	done := make(chan bool, 1)
-
-	// lhr contains the recording state so use a single instance
+	done := make(chan bool, 2)
 	avpipe.InitIOHandler(&inputOpener{}, &outputOpener{})
 
-	audioHlsParams := &avpipe.TxParams{
+	audioParams := &avpipe.TxParams{
 		Format:          "fmp4-segment",
 		DurationTs:      3 * 2700000,
 		StartSegmentStr: "1",
 		AudioBitrate:    128000,
 		SampleRate:      48000,
 		SegDurationTs:   -1,
-		SegDuration:     "30.080",
+		SegDuration:     "30",
 		Ecodec:          "aac", // "ac3", "aac"
-		Dcodec:          "aac", // "aac"
-		AudioIndex:      11,
+		Dcodec:          "aac",
+		AudioIndex:      1,
 		TxType:          avpipe.TxAudio,
 		//BypassTranscoding: true,
 	}
-
-	// Transcode audio mez files in background
 	go func(reader io.Reader) {
-
-		tlog.Info("AVL Audio Mez Tx start", "audioHlsParams", fmt.Sprintf("%+v", *audioHlsParams))
+		tlog.Info("audio mez Tx start", "params", fmt.Sprintf("%+v", *audioParams))
 		url := "audio_mez_hls"
 		reqCtx := &testCtx{url: url, r: reader}
 		putReqCtxByURL(url, reqCtx)
-		errTx := avpipe.Tx(audioHlsParams, url, true)
-		tlog.Info("AVL Audio Mez Tx done", "err", errTx)
-
+		errTx := avpipe.Tx(audioParams, url, verboseLogging)
+		tlog.Info("audio mez Tx done", "err", errTx)
 		if errTx != 0 {
-			t.Error("AVL Audio Mez transcoding failed", "errTx", errTx)
+			t.Error("audio mez transcoding error", "errTx", errTx)
 		}
 		done <- true
 	}(audioReader)
 
-	videoHlsParams := &avpipe.TxParams{
+	videoParams := &avpipe.TxParams{
 		Format:          "fmp4-segment",
 		DurationTs:      3 * 2700000,
 		StartSegmentStr: "1",
@@ -295,24 +268,21 @@ func TestAudioVideoHlsLive(t *testing.T) {
 		SegDurationTs:   -1,
 		SegDuration:     "30",
 		ForceKeyInt:     50,
-		Ecodec:          "libx264",
+		Ecodec:          defaultVideoEncoder(),
 		EncHeight:       720,
 		EncWidth:        1280,
 		TxType:          avpipe.TxVideo,
 		//BypassTranscoding: true,
 	}
-
-	// Transcode video mez files in background
 	go func(reader io.Reader) {
-		tlog.Info("AVL Video Mez Tx start", "videoHlsParams", fmt.Sprintf("%+v", *videoHlsParams))
+		tlog.Info("video mez Tx start", "params", fmt.Sprintf("%+v", *videoParams))
 		url := "video_mez_hls"
 		reqCtx := &testCtx{url: url, r: reader}
 		putReqCtxByURL(url, reqCtx)
-		errTx := avpipe.Tx(videoHlsParams, url, true)
-		tlog.Info("AVL Video Mez Tx done", "err", errTx)
-
+		errTx := avpipe.Tx(videoParams, url, verboseLogging)
+		tlog.Info("video mez Tx done", "err", errTx)
 		if errTx != 0 {
-			t.Error("AVL Video Mez transcoding failed", "errTx", errTx)
+			t.Error("video mez transcoding error", "errTx", errTx)
 		}
 		done <- true
 	}(videoReader)
@@ -320,62 +290,60 @@ func TestAudioVideoHlsLive(t *testing.T) {
 	// Wait for audio/video mez making to be finished
 	<-done
 	<-done
+	ioutil.CloseCloser(reader.Pipe, tlog)
+	err = <-endChan
+	tlog.Info("HLSReader done", "err", err)
+	if err != nil {
+		t.Error("HLSReader error", "err", err)
+	}
 
-	audioHlsParams.Format = "dash"
-	audioHlsParams.SegDurationTs = 2 * 48000
+	// Create audio dash segments out of audio mezzanines
+	audioParams.Format = "dash"
+	audioParams.SegDurationTs = 2 * 48000
 	audioMezFiles := [3]string{"audio_mez_hls-segment-1.mp4", "audio_mez_hls-segment-2.mp4", "audio_mez_hls-segment-3.mp4"}
-
-	// Now create audio dash segments out of audio mezzanines
 	go func() {
-
 		for i, url := range audioMezFiles {
-			tlog.Info("AVL Audio Dash Tx start", "audioHlsParams", fmt.Sprintf("%+v", *audioHlsParams), "url", url)
+			tlog.Info("audio dash Tx start", "params", fmt.Sprintf("%+v", *audioParams), "url", url)
 			reqCtx := &testCtx{url: url}
 			putReqCtxByURL(url, reqCtx)
-			audioHlsParams.StartSegmentStr = fmt.Sprintf("%d", i*15+1)
-			errTx := avpipe.Tx(audioHlsParams, url, true)
-			tlog.Info("AVL Audio Dash Tx done", "err", errTx)
-
+			audioParams.StartSegmentStr = fmt.Sprintf("%d", i*15+1)
+			errTx := avpipe.Tx(audioParams, url, true)
+			tlog.Info("audio dash Tx done", "err", errTx)
 			if errTx != 0 {
-				t.Error("AVL Audio Dash transcoding failed", "errTx", errTx, "url", url)
+				t.Error("audio dash transcoding error", "errTx", errTx, "url", url)
 			}
 			done <- true
 		}
 	}()
-
 	for _ = range audioMezFiles {
 		<-done
 	}
 
-	videoHlsParams.Format = "dash"
-	videoHlsParams.SegDurationTs = 2 * 90000
+	// Create video dash segments out of video mezzanines
+	videoParams.Format = "dash"
+	videoParams.SegDurationTs = 2 * 90000
 	videoMezFiles := [3]string{"video_mez_hls-segment-1.mp4", "video_mez_hls-segment-2.mp4", "video_mez_hls-segment-3.mp4"}
-
-	// Now create video dash segments out of video mezzanines
 	go func() {
-
 		for i, url := range videoMezFiles {
-			tlog.Info("AVL Video Dash Tx start", "videoHlsParams", fmt.Sprintf("%+v", *videoHlsParams), "url", url)
+			tlog.Info("video dash Tx start", "videoParams", fmt.Sprintf("%+v", *videoParams), "url", url)
 			reqCtx := &testCtx{url: url}
 			putReqCtxByURL(url, reqCtx)
-			videoHlsParams.StartSegmentStr = fmt.Sprintf("%d", i*15+1)
-			errTx := avpipe.Tx(videoHlsParams, url, true)
-			tlog.Info("AVL Video Dash Tx done", "err", errTx)
-
+			videoParams.StartSegmentStr = fmt.Sprintf("%d", i*15+1)
+			errTx := avpipe.Tx(videoParams, url, true)
+			tlog.Info("video dash Tx done", "err", errTx)
 			if errTx != 0 {
-				t.Error("AVL Video Dash transcoding failed", "errTx", errTx, "url", url)
+				t.Error("video dash transcoding error", "errTx", errTx, "url", url)
 			}
 			done <- true
 		}
 	}()
-
 	for _ = range videoMezFiles {
 		<-done
 	}
 }
 
 func (io *inputOpener) Open(fd int64, url string) (avpipe.InputHandler, error) {
-	tlog.Debug("AVL IN_OPEN", "fd", fd, "url", url)
+	tlog.Debug("IN_OPEN", "fd", fd, "url", url)
 	io.url = url
 	tc, err := getReqCtxByURL(url)
 	if err != nil {
@@ -410,38 +378,38 @@ func (io *inputOpener) Open(fd int64, url string) (avpipe.InputHandler, error) {
 
 func (i *inputCtx) Read(buf []byte) (int, error) {
 	if verboseLogging {
-		tlog.Debug("AVL IN_READ", "url", i.tc.url, "len", len(buf))
+		tlog.Debug("IN_READ", "url", i.tc.url, "len", len(buf))
 	}
 	n, err := i.r.Read(buf)
 	if err == io.EOF {
-		tlog.Info("AVL IN_READ got EOF", "url", i.tc.url)
+		tlog.Info("IN_READ got EOF", "url", i.tc.url)
 		return 0, err
 	}
 	i.tc.bytesRead += n
 	if verboseLogging {
-		tlog.Debug("AVL IN_READ DONE", "url", i.tc.url, "len", len(buf), "n", n,
+		tlog.Debug("IN_READ DONE", "url", i.tc.url, "len", len(buf), "n", n,
 			"bytesRead", i.tc.bytesRead, "bytesWritten", i.tc.bytesWritten, "err", err)
 	}
 	return n, err
 }
 
 func (i *inputCtx) Seek(offset int64, whence int) (int64, error) {
-	tlog.Error("AVL IN_SEEK", "url", i.tc.url)
-	return 0, fmt.Errorf("AVL IN_SEEK url=%s", i.tc.url)
+	tlog.Error("IN_SEEK", "url", i.tc.url)
+	return 0, fmt.Errorf("IN_SEEK url=%s", i.tc.url)
 }
 
 func (i *inputCtx) Close() (err error) {
-	tlog.Debug("AVL IN_CLOSE", "url", i.tc.url)
+	tlog.Debug("IN_CLOSE", "url", i.tc.url)
 
 	if i.tc.wc != nil {
-		tlog.Debug("AVL IN_CLOSE closing write side", "url", i.tc.url)
+		tlog.Debug("IN_CLOSE closing write side", "url", i.tc.url)
 		err = i.tc.wc.Close()
 	}
 
 	if _, ok := i.r.(*os.File); ok {
 		err = i.r.(*os.File).Close()
 	} else if _, ok := i.r.(*RWBuffer); ok {
-		tlog.Debug("AVL IN_CLOSE closing RWBuffer", "url", i.tc.url)
+		tlog.Debug("IN_CLOSE closing RWBuffer", "url", i.tc.url)
 		err = i.r.(*RWBuffer).Close()
 	} else if _, ok := i.r.(*io.PipeReader); ok {
 		err = i.r.(*io.PipeReader).Close()
@@ -450,7 +418,7 @@ func (i *inputCtx) Close() (err error) {
 }
 
 func (i *inputCtx) Size() int64 {
-	tlog.Debug("AVL IN_SIZE")
+	tlog.Debug("IN_SIZE")
 	return -1
 }
 
@@ -458,7 +426,7 @@ func (i *inputCtx) Stat(statType avpipe.AVStatType, statArgs interface{}) error 
 	switch statType {
 	case avpipe.AV_IN_STAT_BYTES_READ:
 		readOffset := statArgs.(*uint64)
-		log.Info("AVP TEST", "STAT read offset", *readOffset)
+		log.Info("STAT read offset", *readOffset)
 	}
 	return nil
 }
@@ -501,7 +469,7 @@ func (oo *outputOpener) Open(h, fd int64, stream_index, seg_index int, out_type 
 		filename = fmt.Sprintf("./O/%s-segment-%d.mp4", url, seg_index)
 	}
 
-	tlog.Debug("AVL OUT_OPEN", "url", tc.url, "h", h, "stream_index", stream_index, "seg_index", seg_index, "filename", filename)
+	tlog.Debug("OUT_OPEN", "url", tc.url, "h", h, "stream_index", stream_index, "seg_index", seg_index, "filename", filename)
 
 	file, err := os.Create(filename)
 	if err != nil {
@@ -514,7 +482,7 @@ func (oo *outputOpener) Open(h, fd int64, stream_index, seg_index int, out_type 
 
 func (o *outputCtx) Write(buf []byte) (int, error) {
 	if verboseLogging {
-		tlog.Debug("AVL OUT_WRITE", "url", o.tc.url, "len", len(buf))
+		tlog.Debug("OUT_WRITE", "url", o.tc.url, "len", len(buf))
 	}
 	n, err := o.w.Write(buf)
 	if err != nil {
@@ -522,27 +490,27 @@ func (o *outputCtx) Write(buf []byte) (int, error) {
 	}
 	if o.tc.bytesWritten == 0 {
 		o.tc.rwDiffMax = o.tc.bytesRead - o.tc.bytesWritten
-		tlog.Debug("AVL OUT_WRITE FIRST", "url", o.tc.url, "bytesRead", o.tc.bytesRead, "bytesWritten", o.tc.bytesWritten, "diff", o.tc.rwDiffMax)
+		tlog.Debug("OUT_WRITE FIRST", "url", o.tc.url, "bytesRead", o.tc.bytesRead, "bytesWritten", o.tc.bytesWritten, "diff", o.tc.rwDiffMax)
 	}
 	o.tc.bytesWritten += n
 	if o.tc.bytesRead-o.tc.bytesWritten > o.tc.rwDiffMax {
 		o.tc.rwDiffMax = o.tc.bytesRead - o.tc.bytesWritten
 	}
 	if verboseLogging {
-		tlog.Debug("AVL OUT_WRITE DONE", "url", o.tc.url, "len", len(buf), "n", n, "err", err,
+		tlog.Debug("OUT_WRITE DONE", "url", o.tc.url, "len", len(buf), "n", n, "err", err,
 			"bytesRead", o.tc.bytesRead, "bytesWritten", o.tc.bytesWritten, "diff", o.tc.rwDiffMax)
 	}
 	return n, err
 }
 
 func (o *outputCtx) Seek(offset int64, whence int) (int64, error) {
-	tlog.Debug("AVL OUT_SEEK", "url", o.tc.url)
+	tlog.Debug("OUT_SEEK", "url", o.tc.url)
 	//return o.file.Seek(offset, whence)
-	return -1, fmt.Errorf("AVL OUT_SEEK url=%s", o.tc.url)
+	return -1, fmt.Errorf("OUT_SEEK url=%s", o.tc.url)
 }
 
 func (o *outputCtx) Close() error {
-	tlog.Debug("AVL OUT_CLOSE")
+	tlog.Debug("OUT_CLOSE")
 	o.file.Close()
 	return nil
 }
@@ -551,13 +519,13 @@ func (i *outputCtx) Stat(statType avpipe.AVStatType, statArgs interface{}) error
 	switch statType {
 	case avpipe.AV_OUT_STAT_BYTES_WRITTEN:
 		writeOffset := statArgs.(*uint64)
-		log.Info("AVP TEST", "STAT, write offset", *writeOffset)
+		log.Info("STAT, write offset", *writeOffset)
 	case avpipe.AV_OUT_STAT_DECODING_START_PTS:
 		startPTS := statArgs.(*uint64)
-		log.Info("AVP TEST", "STAT, startPTS", *startPTS)
+		log.Info("STAT, startPTS", *startPTS)
 	case avpipe.AV_OUT_STAT_ENCODING_END_PTS:
 		endPTS := statArgs.(*uint64)
-		log.Info("AVP TEST", "STAT, endPTS", *endPTS)
+		log.Info("STAT, endPTS", *endPTS)
 
 	}
 
@@ -614,9 +582,18 @@ func encDec(t *testing.T, plaintext []byte) {
 
 func padPKCS5(src []byte, blockSize int) []byte {
 	srclen := len(src)
-	padlen := (blockSize - (srclen % blockSize))
+	padlen := blockSize - (srclen % blockSize)
 	padding := bytes.Repeat([]byte{byte(padlen)}, padlen)
 	return append(src, padding...)
+}
+
+func defaultVideoEncoder() string {
+	ecodec := "libx264"
+	if runtime.GOOS == "darwin" {
+		// h264_videotoolbox on Mac for speed
+		ecodec = "h264_videotoolbox"
+	}
+	return ecodec
 }
 
 func removeDirContents(dir string) error {

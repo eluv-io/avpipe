@@ -19,6 +19,7 @@ import (
 
 	"github.com/qluvio/content-fabric/errors"
 	elog "github.com/qluvio/content-fabric/log"
+	eioutil "github.com/qluvio/content-fabric/util/ioutil"
 )
 
 var log = elog.Get("/eluvio/avpipe/live")
@@ -163,7 +164,7 @@ func NewHLSReaders(playlistURL *url.URL, desired StreamType) (
 	if content, err = openURL(http.DefaultClient, playlistURL); err != nil {
 		return nil, et(err)
 	}
-	defer closeCloser(content)
+	defer eioutil.CloseCloser(content, log)
 
 	playlist, listType, err := m3u8.DecodeFrom(content, true)
 	if err != nil {
@@ -220,6 +221,7 @@ func NewHLSReaders(playlistURL *url.URL, desired StreamType) (
 
 		if lhr == nil {
 			// Hack for grafov bug (not populating VariantParams.Alternatives)
+			// TODO: Revisit if/when grafov fixes it
 			for _, v := range master.Variants {
 				if alt := audioAlternative(v); alt != nil {
 					lhr, err = NewHLSReaderA(alt, playlistURL)
@@ -230,7 +232,7 @@ func NewHLSReaders(playlistURL *url.URL, desired StreamType) (
 
 		if err != nil {
 			if len(readers) > 0 {
-				closeCloser(readers[0].Pipe)
+				eioutil.CloseCloser(readers[0].Pipe, log)
 			}
 			return nil, et(err)
 		}
@@ -250,16 +252,15 @@ func NewHLSReaders(playlistURL *url.URL, desired StreamType) (
 
 // NewHLSReader creates and returns a media playlist reader, and starts
 // goroutines to download the segments. Close the Reader to clean up.
-func NewHLSReader(playlistURL *url.URL, t StreamType) (lhr *HLSReader) {
-	lhr = &HLSReader{
+func NewHLSReader(playlistURL *url.URL, t StreamType) *HLSReader {
+	return &HLSReader{
 		client:          &http.Client{},
 		nextSeqNo:       -1,
-		playlistPollSec: 6,
+		playlistPollSec: 5,
 		playlistURL:     playlistURL,
+		Pipe:            NewRWBuffer(10000),
 		Type:            t,
 	}
-	lhr.readMediaSegments()
-	return
 }
 
 func NewHLSReaderV(v *m3u8.Variant, masterPlaylistURL *url.URL, t StreamType) (
@@ -271,13 +272,12 @@ func NewHLSReaderV(v *m3u8.Variant, masterPlaylistURL *url.URL, t StreamType) (
 	}
 
 	log.Debug("reading media playlist", "URL", playlistURL,
-		"codecs", v.Codecs,
-		"audio", v.Audio,
-		"resolution", v.Resolution,
-		"bandwidth", v.Bandwidth,
-		"average-bandwidth", v.AverageBandwidth,
-		"frame-rate", v.FrameRate,
-		"video-range", v.VideoRange)
+		"CODECS", v.Codecs,
+		"AUDIO", v.Audio,
+		"RESOLUTION", v.Resolution,
+		"BANDWIDTH", v.Bandwidth,
+		"AVERAGE-BANDWIDTH", v.AverageBandwidth,
+		"FRAME-RATE", v.FrameRate)
 
 	lhr = NewHLSReader(playlistURL, t)
 	return
@@ -291,7 +291,10 @@ func NewHLSReaderA(a *m3u8.Alternative, masterPlaylistURL *url.URL) (
 		return
 	}
 
-	log.Debug("reading audio playlist", "URL", playlistURL, )
+	log.Debug("reading audio playlist", "URL", playlistURL,
+		"GROUP-ID", a.GroupId,
+		"LANGUAGE", a.Language,
+		"NAME", a.Name)
 
 	lhr = NewHLSReader(playlistURL, STAudioOnly)
 	return
@@ -313,12 +316,11 @@ func openURL(client *http.Client, u *url.URL) (io.ReadCloser, error) {
 	return resp.Body, nil
 }
 
-func (lhr *HLSReader) readMediaSegments() {
-	lhr.Pipe = NewRWBuffer(10000)
+func (lhr *HLSReader) Start(endChan chan<- error) {
 	go func() {
 		err := lhr.fill()
 		lhr.Pipe.(*RWBuffer).CloseSide(RWBufferWriteClosed)
-		log.Info("fill done", "err", err)
+		endChan <- err
 	}()
 }
 
@@ -339,13 +341,13 @@ func saveToFile(client *http.Client, u *url.URL, savePath string) (err error) {
 	if file, err = os.Create(savePath); err != nil {
 		return
 	}
-	defer closeCloser(file)
+	defer eioutil.CloseCloser(file, log)
 
 	var content io.ReadCloser
 	if content, err = openURL(client, u); err != nil {
 		return
 	}
-	defer closeCloser(content)
+	defer eioutil.CloseCloser(content, log)
 
 	written, err := io.Copy(file, content)
 	if err != nil {
@@ -385,7 +387,7 @@ func saveSegment(
 	if file, err = os.Create(savePath); err != nil {
 		return
 	}
-	defer closeCloser(file)
+	defer eioutil.CloseCloser(file, log)
 	return readSegment(client, u, s, file)
 }
 
@@ -431,7 +433,7 @@ func readSegment(
 	if content, err = openURL(client, msURL); err != nil {
 		return
 	}
-	defer closeCloser(content)
+	defer eioutil.CloseCloser(content, log)
 
 	if s.Key != nil {
 		if written, err = io.Copy(dw, content); err != nil {
@@ -448,7 +450,8 @@ func readSegment(
 }
 
 // readPlaylist retrieves the media playlist and reads the available segments.
-// Starts reading at sequence number lhr.nextSeqNo.
+// Starts reading at sequence number lhr.nextSeqNo. Returns complete or error
+// when the stream is done or failed irrecoverably
 func (lhr *HLSReader) readPlaylist() (
 	complete bool, err error) {
 
@@ -464,22 +467,37 @@ func (lhr *HLSReader) readPlaylist() (
 		}
 	}
 
-	var content io.ReadCloser
-	if content, err = openURL(lhr.client, lhr.playlistURL); err != nil {
-		return
+	// HTTP GET playlist
+	content, err := openURL(lhr.client, lhr.playlistURL)
+	defer eioutil.CloseCloser(content, log)
+	if err != nil {
+		log.Debug("failed to get playlist", "err", err, "c", logContext)
+		return // url.Error
 	}
-	defer closeCloser(content)
 
+	// Decode/Unmarshal
 	playlist, listType, err := m3u8.DecodeFrom(content, true)
 	if err != nil {
-		return false, e(err)
+		err = e(err)
+		return
 	} else if listType != m3u8.MEDIA {
 		err = errors.E("parse playlist", errors.K.Invalid, e(err),
 			"reason", "expected media playlist", "ListType", listType)
 		return
 	}
 	mediaPlaylist := playlist.(*m3u8.MediaPlaylist)
-	lhr.playlistPollSec = mediaPlaylist.TargetDuration / 2
+
+	// 4.3.3.4. EXT-X-ENDLIST indicates that no more Media Segments will be added
+	complete = mediaPlaylist.Closed
+	if complete {
+		log.Info("HLS stream ended", "c", logContext)
+	}
+	// 6.3.4. When a Playlist file has changed, the client MUST wait for at
+	// least the target duration before reload. If it has not changed, wait for
+	// one-half the target duration
+	if mediaPlaylist.TargetDuration >= 2 {
+		lhr.playlistPollSec = mediaPlaylist.TargetDuration / 2
+	}
 
 	// Look for the index of the segment to start reading from
 	startIndex := -1
@@ -495,7 +513,7 @@ func (lhr *HLSReader) readPlaylist() (
 				}
 				lhr.nextSeqNo = edgeSeqNo - 1
 				startIndex = i - 2
-				log.Info("initializing recording at live edge", "c", logContext)
+				log.Info("initializing recording at live edge", "nextSeqNo", lhr.nextSeqNo, "c", logContext)
 			} else if startIndex == -1 { // Segment not found in the playlist
 				if lhr.nextSeqNo < edgeSeqNo {
 					lhr.nextSeqNo = edgeSeqNo
@@ -554,7 +572,7 @@ func (lhr *HLSReader) readPlaylist() (
 					"err", e(err), "durationReadSec", lhr.durationReadSec)
 				return
 			} else {
-				log.Debug("finished reading media playlist",
+				log.Debug("done reading media playlist (transcoding stopped)",
 					"written", written, "c", logContext)
 				return true, nil
 			}
@@ -569,33 +587,48 @@ func (lhr *HLSReader) readPlaylist() (
 
 // fill periodically retrieves the media playlist and reads segments
 func (lhr *HLSReader) fill() (err error) {
-	log.Debug("fill start")
+	logContext := fmt.Sprintf("url=%s type=%d",
+		lhr.playlistURL.String(), lhr.Type)
+	log.Debug("fill start", "c", logContext)
 
+	lastSeqNo := -1
+	lastPlaylistChangeTime := time.Now()
 	for {
 		var complete bool
-		if complete, err = lhr.readPlaylist(); complete || err != nil {
-			// The reader was closed - exit
-			if complete || err == io.ErrClosedPipe {
+		complete, err = lhr.readPlaylist()
+		pollingPeriod := time.Duration(lhr.playlistPollSec * float64(time.Second))
+		if complete {
+			break
+		} else if err != nil {
+			if _, ok := err.(*url.Error); ok {
+				// don't break - retry for HTTP error
+			} else if err == io.ErrClosedPipe {
+				// the pipe reader was closed
 				err = nil
+				break
+			} else {
+				break
 			}
+		}
+		if lastSeqNo != -1 && lastSeqNo == lhr.nextSeqNo &&
+			time.Since(lastPlaylistChangeTime) > pollingPeriod*6 {
+			// Wait 3x target duration
+			log.Info("recording stopped - server stopped publishing",
+				"timeout", lhr.playlistPollSec*6, "c", logContext)
 			break
 		}
-		time.Sleep(time.Duration(lhr.playlistPollSec * float64(time.Second)))
+		if lastSeqNo != lhr.nextSeqNo {
+			lastPlaylistChangeTime = time.Now()
+			lastSeqNo = lhr.nextSeqNo
+		}
+		time.Sleep(pollingPeriod)
 	}
 
-	log.Debug("fill done", "err", err)
+	log.Debug("fill done", "err", err, "c", logContext)
 	return
 }
 
 // TODO: Move code below to common/utils
-
-// closeCloser lets us catch close errors when deferred
-func closeCloser(c io.Closer) {
-	err := c.Close()
-	if err != nil {
-		log.Error("Close error", "err", err)
-	}
-}
 
 func unpadPKCS5(src []byte) []byte {
 	srclen := len(src)
@@ -668,6 +701,6 @@ func httpGetBytes(base *url.URL, uri string) (body []byte, err error) {
 	if err != nil {
 		return
 	}
-	defer closeCloser(resp.Body)
+	defer eioutil.CloseCloser(resp.Body, log)
 	return ioutil.ReadAll(resp.Body)
 }
