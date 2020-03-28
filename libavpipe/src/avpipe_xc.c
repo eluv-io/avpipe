@@ -436,6 +436,26 @@ set_encoder_options(
     }
 }
 
+static int
+find_level(
+    int height)
+{
+    int level;
+
+    if (height <= 480)
+        level = 30;
+    else if (height <= 720)
+        level = 31;
+    else if (height <= 1080)
+        level = 42;
+    else if (height <= 1920)
+        level = 50;
+    else
+        level = 51;
+
+    return level;
+}
+
 /* 
  * Set H264 specific params profile, and level based on encoding height.
  */
@@ -467,16 +487,76 @@ set_h264_params(
      * https://en.wikipedia.org/wiki/Advanced_Video_Coding#Levels
      * https://developer.apple.com/documentation/http_live_streaming/hls_authoring_specification_for_apple_devices
      */
+    encoder_codec_context->level = find_level(encoder_codec_context->height);
+}
+
+/* Borrowed from libavcodec/nvenc.h since it is not exposed */
+enum {
+    NV_ENC_H264_PROFILE_BASELINE,
+    NV_ENC_H264_PROFILE_MAIN,
+    NV_ENC_H264_PROFILE_HIGH,
+    NV_ENC_H264_PROFILE_HIGH_444P,
+};
+
+enum {
+    PRESET_DEFAULT = 0,
+    PRESET_SLOW,
+    PRESET_MEDIUM,
+    PRESET_FAST,
+    PRESET_HP,
+    PRESET_HQ,
+    PRESET_BD ,
+    PRESET_LOW_LATENCY_DEFAULT ,
+    PRESET_LOW_LATENCY_HQ ,
+    PRESET_LOW_LATENCY_HP,
+    PRESET_LOSSLESS_DEFAULT, // lossless presets must be the last ones
+    PRESET_LOSSLESS_HP,
+};
+
+static void
+set_nvidia_params(
+    coderctx_t *encoder_context,
+    coderctx_t *decoder_context,
+    txparams_t *params)
+{
+    int index = decoder_context->video_stream_index;
+    AVCodecContext *encoder_codec_context = encoder_context->codec_context[index];
+
+    av_opt_set(encoder_codec_context->priv_data, "forced-idr", "on", 0);
+
     if (encoder_codec_context->height <= 480)
-        encoder_codec_context->level = 30;
-    else if (encoder_codec_context->height <= 720)
-        encoder_codec_context->level = 31;
-    else if (encoder_codec_context->height <= 1080)
-        encoder_codec_context->level = 42;
-    else if (encoder_codec_context->height <= 1920)
-        encoder_codec_context->level = 50;
+        av_opt_set_int(encoder_codec_context->priv_data, "profile", NV_ENC_H264_PROFILE_BASELINE, 0);
     else
-        encoder_codec_context->level = 51;
+        av_opt_set_int(encoder_codec_context->priv_data, "profile", NV_ENC_H264_PROFILE_HIGH, 0);
+
+    av_opt_set_int(encoder_codec_context->priv_data, "level", find_level(encoder_codec_context->height), 0);
+
+    /*
+     * According to https://superuser.com/questions/1296374/best-settings-for-ffmpeg-with-nvenc
+     * the best setting can be PRESET_LOW_LATENCY_HQ or PRESET_LOW_LATENCY_HP.
+     * (in my experiment PRESET_LOW_LATENCY_HQ is better than PRESET_LOW_LATENCY_HP)
+     */
+    av_opt_set_int(encoder_codec_context->priv_data, "preset", PRESET_LOW_LATENCY_HQ, 0);
+
+    /*
+     * We might want to set one of the following options in future:
+     *
+     * av_opt_set(encoder_codec_context->priv_data, "bluray-compat", "on", 0);
+     * av_opt_set(encoder_codec_context->priv_data, "strict_gop", "on", 0);
+     * av_opt_set(encoder_codec_context->priv_data, "b_adapt", "off", 0);
+     * av_opt_set(encoder_codec_context->priv_data, "nonref_p", "on", 0);
+     * av_opt_set(encoder_codec_context->priv_data, "2pass", "on", 0);
+     * 
+     * Constant quantization parameter rate control method
+     * av_opt_set_int(encoder_codec_context->priv_data, "qp", 15, 0);
+     * av_opt_set_int(encoder_codec_context->priv_data, "init_qpB", 20, 0);
+     * av_opt_set_int(encoder_codec_context->priv_data, "init_qpP", 20, 0);
+     * av_opt_set_int(encoder_codec_context->priv_data, "init_qpI", 20, 0);
+
+     * char level[10];
+     * sprintf(level, "%d.", 15);
+     * av_opt_set(encoder_codec_context->priv_data, "cq", level, 0);
+     */
 }
 
 static int
@@ -602,8 +682,12 @@ prepare_video_encoder(
 #endif
     encoder_codec_context->pix_fmt = AV_PIX_FMT_YUV420P;
 
-    /* Set H264 specific params, pix_fmt, profile, and level */
-    set_h264_params(encoder_context, decoder_context, params);
+    if (!strcmp(params->ecodec, "h264_nvenc"))
+        /* Set NVIDIA specific params if the encoder is NVIDIA */
+        set_nvidia_params(encoder_context, decoder_context, params);
+    else
+        /* Set H264 specific params (profile and level) */
+        set_h264_params(encoder_context, decoder_context, params);
 
     elv_log("Output pixel_format=%s, profile=%d, level=%d",
         av_get_pix_fmt_name(encoder_codec_context->pix_fmt),
@@ -902,7 +986,11 @@ set_idr_frame_key_flag(
     if (strcmp(params->format, "dash") && strcmp(params->format, "hls"))
         frame->pict_type = AV_PICTURE_TYPE_NONE;
 
-    if (!strcmp(params->format, "fmp4-segment") || !strcmp(params->format, "segment")) {
+    /* 
+     * Set key frame in the beginning of every segment (doesn't matter it is mez segment or abr segment).
+     */
+    if (!strcmp(params->format, "fmp4-segment") || !strcmp(params->format, "segment") ||
+        !strcmp(params->format, "dash") || !strcmp(params->format, "hls")) {
         if (frame->pts >= encoder_context->last_key_frame + params->seg_duration_ts) {
             elv_dbg("FRAME SET KEY flag, seg_duration_ts=%d pts=%"PRId64, params->seg_duration_ts, frame->pts);
             frame->pict_type = AV_PICTURE_TYPE_I;
@@ -918,35 +1006,7 @@ set_idr_frame_key_flag(
         }
         encoder_context->forced_keyint_countdown --;
     }
-
 }
-
-#if 0
-static void
-set_key_flag(
-    AVPacket *packet,
-    coderctx_t *encoder_context,
-    txparams_t *params)
-{
-    /* If format is "mp4" or "fmp4" return */
-    if (!strcmp(params->format, "fmp4") || !strcmp(params->format, "mp4"))
-        return;
-
-    /* Don't set any flag if format is "segment" */
-    if (!strcmp(params->format, "segment") || !strcmp(params->format, "fmp4-segment")) {
-        /* Need a new param like -force-key-frame N for this, and then set key frame every N packet (RM) */
-        elv_dbg("PACKET SET KEY flag, flag=%d pts=%"PRId64, packet->flags, packet->pts);
-        packet->flags |= AV_PKT_FLAG_KEY;
-        return;
-    }
-
-    if (packet->pts >= encoder_context->last_key_frame + params->seg_duration_ts) {
-        elv_dbg("PACKET SET KEY flag, flag=%d pts=%"PRId64, packet->flags, packet->pts);
-        packet->flags |= AV_PKT_FLAG_KEY;
-        encoder_context->last_key_frame = packet->pts;
-    }
-}
-#endif
 
 static int
 should_skip_encoding(
@@ -1119,7 +1179,7 @@ encode_frame(
         output_packet->dts += params->start_pts;
 
         /* Rescale using the stream time_base (not the codec context).
-         * Don't rescale if using audio FIFO - PTS is alread set in output time base.
+         * Don't rescale if using audio FIFO - PTS is already set in output time base.
          */
         if (decoder_context->audio_output_pts == 0) {
             av_packet_rescale_ts(output_packet,
