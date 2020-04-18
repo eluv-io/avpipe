@@ -6,6 +6,8 @@ SUBDIRS=utils libavpipe etx avcmd goetx
 SRCS=avpipe_handler.c
 OBJS=$(SRCS:%.c=$(BINDIR)/%.o)
 
+.DEFAULT_GOAL := dynamic
+
 all install: copy_libs check-env
 	@for dir in $(SUBDIRS); do \
 	echo "Making $@ in $$dir..."; \
