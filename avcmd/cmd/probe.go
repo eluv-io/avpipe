@@ -55,7 +55,9 @@ func doProbe(cmd *cobra.Command, args []string) error {
 		fmt.Printf("\tcodec_name: %s\n", info.CodecName)
 		fmt.Printf("\tprofile: %s\n", avpipe.GetProfileName(info.CodecID, info.Profile))
 		fmt.Printf("\tlevel: %d\n", info.Level)
-		fmt.Printf("\tduration_ts: %d\n", info.DurationTs)
+		if uint64(info.DurationTs) != avpipe.AvNoPtsValue {
+			fmt.Printf("\tduration_ts: %d\n", info.DurationTs)
+		}
 		fmt.Printf("\ttime_base: %d/%d\n", info.TimeBase.Num(), info.TimeBase.Denom())
 		fmt.Printf("\tnb_frames: %d\n", info.NBFrames)
 		fmt.Printf("\tstart_time: %d\n", info.StartTime)

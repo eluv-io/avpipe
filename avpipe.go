@@ -69,6 +69,9 @@ const (
 	FMP4Segment
 )
 
+// This is corresponding to AV_NOPTS_VALUE
+const AvNoPtsValue = uint64(C.uint64_t(0x8000000000000000))
+
 type TxType int
 
 const (
