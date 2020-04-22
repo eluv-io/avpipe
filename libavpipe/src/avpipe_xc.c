@@ -456,7 +456,7 @@ find_level(
     return level;
 }
 
-/* 
+/*
  * Set H264 specific params profile, and level based on encoding height.
  */
 static void
@@ -482,7 +482,7 @@ set_h264_params(
          */
         encoder_codec_context->profile = FF_PROFILE_H264_HIGH;
 
-    /* 
+    /*
      * These are set according to
      * https://en.wikipedia.org/wiki/Advanced_Video_Coding#Levels
      * https://developer.apple.com/documentation/http_live_streaming/hls_authoring_specification_for_apple_devices
@@ -546,7 +546,7 @@ set_nvidia_params(
      * av_opt_set(encoder_codec_context->priv_data, "b_adapt", "off", 0);
      * av_opt_set(encoder_codec_context->priv_data, "nonref_p", "on", 0);
      * av_opt_set(encoder_codec_context->priv_data, "2pass", "on", 0);
-     * 
+     *
      * Constant quantization parameter rate control method
      * av_opt_set_int(encoder_codec_context->priv_data, "qp", 15, 0);
      * av_opt_set_int(encoder_codec_context->priv_data, "init_qpB", 20, 0);
@@ -986,7 +986,7 @@ set_idr_frame_key_flag(
     if (strcmp(params->format, "dash") && strcmp(params->format, "hls"))
         frame->pict_type = AV_PICTURE_TYPE_NONE;
 
-    /* 
+    /*
      * Set key frame in the beginning of every segment (doesn't matter it is mez segment or abr segment).
      */
     if (!strcmp(params->format, "fmp4-segment") || !strcmp(params->format, "segment") ||
@@ -1450,7 +1450,7 @@ transcode_audio_aac(
                  * and output sample rate is 48000 with frame duration = 1024 then pkt_ratio = 3/2 that means
                  * for every 2 input audio frames, there would be 3 output audio frame.
                  * Now to calculate output packet pts from input packet pts:
-                 * output_pkt_pts = decoder_context->audio_output_pts + d 
+                 * output_pkt_pts = decoder_context->audio_output_pts + d
                  * where d = ((float) (frame->pts - decoder_context->audio_input_prev_pts) / frame->pkt_duration) * pkt_ratio * filt_frame->nb_samples
                  * After simplification we will have d as follows:
                  */
@@ -2501,6 +2501,55 @@ avpipe_version()
         return version_str;
 
     snprintf(version_str, sizeof(version_str), "%d.%d@%s", AVPIPE_MAJOR_VERSION, AVPIPE_MINOR_VERSION, VERSION);
-    
+
     return version_str;
+}
+
+int
+get_overlay_filter_string(char *filt_buf, int filt_buf_size, char *img_buf, int img_buf_size, int img_type){
+    const char* data_template = "data\\:%s;base64,%s";
+    char* encoded_data = NULL;
+    int encoded_data_length = Base64encode_len(img_buf_size);
+    int ret = 0;
+    if (filt_buf_size < encoded_data_length + strlen(data_template) + 11){ // 11 is len of format
+        elv_err("get_overlay_filter_string passed out buffer too small, need %lu", encoded_data_length + strlen(data_template) + 11);
+        ret = -1;
+        goto cleanup;
+    }
+    encoded_data = malloc(encoded_data_length + 1);
+    Base64encode(encoded_data, img_buf, img_buf_size);
+    int n = 0;
+    switch(img_type){
+        case png:{
+            n = snprintf(filt_buf, filt_buf_size, data_template, "image/png", encoded_data);
+            if (n < 0 || n >= filt_buf_size){
+                elv_err(NULL, AV_LOG_ERROR, "snprintf overflow for png, need %u", n);
+                ret = -1;
+            }
+            goto cleanup;
+        }
+        case jpeg:{
+            n = snprintf(filt_buf, filt_buf_size, data_template, "image/jpg", encoded_data);
+            if (n < 0 || n >= filt_buf_size){
+                elv_err(NULL, AV_LOG_ERROR, "snprintf overflow for jpg, need %u", n);
+                ret = -1;
+            }
+            goto cleanup;
+        }
+        case gif:{
+            snprintf(filt_buf, filt_buf_size, data_template, "image/gif", encoded_data);
+            if (n < 0 || n >= filt_buf_size){
+                elv_err("snprintf overflow for gif, need %u", n);
+                ret = -1;
+            }
+            goto cleanup;
+        }
+        default:
+            av_log(NULL, AV_LOG_ERROR, "get_overlay_filter_string passed invalid type %d", img_type);
+            ret = -1;
+            goto cleanup;
+    }
+cleanup:
+    free(encoded_data);
+    return ret;
 }

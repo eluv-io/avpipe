@@ -1,5 +1,5 @@
 TOP_DIR ?= $(shell pwd)
-SRCS=elv_log.c elv_time.c elv_channel.c url_parser.c elv_sock.c
+SRCS=elv_log.c elv_time.c elv_channel.c url_parser.c elv_sock.c base64.c
 
 BINDIR=bin
 LIBDIR=lib

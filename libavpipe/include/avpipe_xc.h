@@ -240,10 +240,10 @@ typedef struct txparams_t {
     char    *watermark_yloc;        // Default 0
     float   watermark_relative_sz;  // Default 0
     char    *watermark_font_color;  // black
-    int     watermark_shadow;       // Default 1, means shadow exist 
+    int     watermark_shadow;       // Default 1, means shadow exist
     char    *watermark_shadow_color;// Watermark shadow color
 
-    int     audio_index;            // Audio index(s) for mez making, may need to become an array of indexes 
+    int     audio_index;            // Audio index(s) for mez making, may need to become an array of indexes
 } txparams_t;
 
 #define MAX_CODEC_NAME  256
@@ -393,5 +393,26 @@ avpipe_tx(
  */
 char *
 avpipe_version();
+
+/* handled image types in get_overlay_filter_string*/
+typedef enum e_image_type{
+    jpeg,
+    png,
+    gif
+}image_type;
+
+/**
+ * @brief   formats a base64 encoded data url.
+ *
+ * @param   filt_buf            buffer large enough to receive the base64 encoded data url
+ * @param   filt_buf_size       size of output buffer
+ * @param   img_buf             input buffer containing binary image data
+ * @param   img_buf_size        size of input buffer
+ * @param   img_type            value from enum image_type
+ *
+ * @return  Returns 0 if transcoding is successful, otherwise -1.
+ */
+int get_overlay_filter_string(char *filt_buf, int filt_buf_size, char *img_buf, int img_buf_size, int img_type);
+
 
 #endif
