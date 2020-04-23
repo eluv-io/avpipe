@@ -39,7 +39,7 @@ dump_frame(
 
 void
 dump_packet(
-    char *msg,
+    const char *msg,
     AVPacket *p,
     int debug_frame_level)
 {

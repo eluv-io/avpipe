@@ -16,6 +16,7 @@
 #include "elv_log.h"
 #include "elv_time.h"
 #include "avpipe_version.h"
+#include "base64.h"
 
 #include <stdio.h>
 #include <fcntl.h>
@@ -1237,6 +1238,39 @@ static int init_output_frame(AVFrame **frame,
 }
 
 static int
+do_bypass(
+    coderctx_t *decoder_context,
+    coderctx_t *encoder_context,
+    AVPacket *packet,
+    txparams_t *p,
+    int debug_frame_level,
+    const char *tx_type)
+{
+    if (p->start_time_ts > 0 && packet->pts < p->start_time_ts) {
+        if (debug_frame_level)
+            elv_dbg("ENCODE %s skip, packet pts=%" PRId64 ", start_time_ts=%" PRId64,
+                tx_type, packet->pts, p->start_time_ts);
+        return 0;
+    }
+
+    av_packet_rescale_ts(packet,
+        decoder_context->stream[packet->stream_index]->time_base,
+        encoder_context->stream[packet->stream_index]->time_base);
+
+    packet->pts += p->start_pts;
+    packet->dts += p->start_pts;
+
+    dump_packet(tx_type, packet, debug_frame_level);
+
+    if (av_interleaved_write_frame(encoder_context->format_context, packet) < 0) {
+        elv_err("Failure in copying %s", tx_type);
+        return -1;
+    }
+
+    return 0;
+}
+
+static int
 transcode_audio(
     coderctx_t *decoder_context,
     coderctx_t *encoder_context,
@@ -1256,21 +1290,7 @@ transcode_audio(
             stream_index, packet->pts, packet->dts, packet->duration, codec_context->frame_size, encoder_context->codec_context[stream_index]->frame_size);
 
     if (p->bypass_transcoding) {
-        av_packet_rescale_ts(packet,
-            decoder_context->stream[packet->stream_index]->time_base,
-            encoder_context->stream[packet->stream_index]->time_base);
-
-        packet->pts += p->start_pts;
-        packet->dts += p->start_pts;
-
-        dump_packet("AUDIO BYPASS ", packet, debug_frame_level);
-
-        if (av_interleaved_write_frame(encoder_context->format_context, packet) < 0) {
-            elv_err("Failure in copying audio stream");
-            return -1;
-        }
-
-        return 0;
+        return do_bypass(decoder_context, encoder_context, packet, p, debug_frame_level, "AUDIO BYPASS ");
     }
 
     response = avcodec_send_packet(codec_context, packet);
@@ -1354,21 +1374,7 @@ transcode_audio_aac(
             stream_index, packet->pts, packet->dts, packet->duration, codec_context->frame_size, encoder_context->codec_context[stream_index]->frame_size);
 
     if (p->bypass_transcoding) {
-        av_packet_rescale_ts(packet,
-            decoder_context->stream[packet->stream_index]->time_base,
-            encoder_context->stream[packet->stream_index]->time_base);
-
-        packet->pts += p->start_pts;
-        packet->dts += p->start_pts;
-
-        dump_packet("AUDIO BYPASS ", packet, debug_frame_level);
-
-        if (av_interleaved_write_frame(encoder_context->format_context, packet) < 0) {
-            elv_err("Failure in copying audio stream");
-            return -1;
-        }
-
-        return 0;
+        return do_bypass(decoder_context, encoder_context, packet, p, debug_frame_level, "AUDIO BYPASS ");
     }
 
     response = avcodec_send_packet(codec_context, packet);
@@ -1541,17 +1547,7 @@ transcode_video(
          *
          */
 
-        packet->pts += p->start_pts;
-        packet->dts += p->start_pts;
-
-        dump_packet("VIDEO BYPASS ", packet, debug_frame_level);
-
-        if (av_interleaved_write_frame(encoder_context->format_context, packet) < 0) {
-            elv_err("Failure in copying audio stream");
-            return -1;
-        }
-
-        return 0;
+        return do_bypass(decoder_context, encoder_context, packet, p, debug_frame_level, "VIDEO BYPASS ");
     }
 
     /* send packet to decoder */
@@ -1767,6 +1763,11 @@ should_stop_decoding(
                 "frames_read=%d past_duration=%d",
                 params->start_time_ts, params->duration_ts, input_packet->pts, input_packet_rel_pts,
                 *frames_read, *frames_read_past_duration);
+
+        /* If it is a bypass simply return since there is no decoding/encoding involved */
+        if (params->bypass_transcoding)
+            return 1;
+
         /* Allow decoding past specified duration to accommodate reordered packets */
         if (*frames_read_past_duration > frames_allowed_past_duration) {
             elv_dbg("frames_read_past_duration=%d, frames_allowed_past_duration=%d",
@@ -2509,7 +2510,7 @@ int
 get_overlay_filter_string(char *filt_buf, int filt_buf_size, char *img_buf, int img_buf_size, int img_type){
     const char* data_template = "data\\:%s;base64,%s";
     char* encoded_data = NULL;
-    int encoded_data_length = Base64encode_len(img_buf_size);
+    int encoded_data_length = base64encode_len(img_buf_size);
     int ret = 0;
     if (filt_buf_size < encoded_data_length + strlen(data_template) + 11){ // 11 is len of format
         elv_err("get_overlay_filter_string passed out buffer too small, need %lu", encoded_data_length + strlen(data_template) + 11);
@@ -2517,7 +2518,7 @@ get_overlay_filter_string(char *filt_buf, int filt_buf_size, char *img_buf, int 
         goto cleanup;
     }
     encoded_data = malloc(encoded_data_length + 1);
-    Base64encode(encoded_data, img_buf, img_buf_size);
+    base64encode(encoded_data, img_buf, img_buf_size);
     int n = 0;
     switch(img_type){
         case png:{
