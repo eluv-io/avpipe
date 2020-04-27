@@ -1048,7 +1048,7 @@ should_skip_encoding(
 
     /* Drop frames before the desired 'start_time' */
     if (p->start_time_ts > 0 && frame_in_pts_offset < p->start_time_ts) {
-        elv_dbg("ENCODE skip frame early pts=%" PRId64 ", frame_in_pts_offset=%" PRId64 ", start_time_ts=%" PRId64,
+        elv_warn("ENCODE skip frame early pts=%" PRId64 ", frame_in_pts_offset=%" PRId64 ", start_time_ts=%" PRId64,
             frame->pts, frame_in_pts_offset, p->start_time_ts);
         return 1;
     }
@@ -1246,13 +1246,6 @@ do_bypass(
     int debug_frame_level,
     const char *tx_type)
 {
-    if (p->start_time_ts > 0 && packet->pts < p->start_time_ts) {
-        if (debug_frame_level)
-            elv_dbg("ENCODE %s skip, packet pts=%" PRId64 ", start_time_ts=%" PRId64,
-                tx_type, packet->pts, p->start_time_ts);
-        return 0;
-    }
-
     av_packet_rescale_ts(packet,
         decoder_context->stream[packet->stream_index]->time_base,
         encoder_context->stream[packet->stream_index]->time_base);
@@ -1938,6 +1931,20 @@ avpipe_tx(
         if (should_stop_decoding(input_packet, decoder_context, encoder_context,
                 params, &frames_read, &frames_read_past_duration, frames_allowed_past_duration))
             break;
+
+        /*
+         * Skip the input packet if the packet timestamp is smaller than start_time_ts.
+         * The fact that avpipe mezzanine generated files don't have B-frames let us to skip before decoding.
+         * The assumption here is that the input stream does not have any B-frames, otherwise we can not skip
+         * the input packets without decoding.
+         * PENDING(RM) - add a validation to check input stream doesn't have any B-frames.
+         */
+        if (params->start_time_ts > 0 && input_packet && input_packet->pts < params->start_time_ts) {
+            if (debug_frame_level)
+                elv_dbg("SKIP tx_type=%d, packet pts=%" PRId64 ", start_time_ts=%" PRId64,
+                    params->tx_type, input_packet->pts, params->start_time_ts);
+            continue;
+        }
 
         if ((input_packet->stream_index == decoder_context->video_stream_index && (params->tx_type & tx_video)) ||
             (input_packet->stream_index == decoder_context->audio_stream_index && (params->tx_type & tx_audio))) {
