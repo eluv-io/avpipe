@@ -439,10 +439,14 @@ set_encoder_options(
 
 static int
 find_level(
+    int width,
     int height)
 {
     int level;
 
+    /*
+     * Reference: https://en.wikipedia.org/wiki/Advanced_Video_Coding
+     */
     if (height <= 480)
         level = 30;
     else if (height <= 720)
@@ -453,6 +457,15 @@ find_level(
         level = 50;
     else
         level = 51;
+
+    if (level < 31 && width >= 720)
+        level = 31;
+
+    if (level < 42 && width >= 1280 && height >= 720)
+        level = 42;
+
+    if (level < 50 && width >= 1920 && height >= 1080)
+        level = 50;
 
     return level;
 }
@@ -488,7 +501,7 @@ set_h264_params(
      * https://en.wikipedia.org/wiki/Advanced_Video_Coding#Levels
      * https://developer.apple.com/documentation/http_live_streaming/hls_authoring_specification_for_apple_devices
      */
-    encoder_codec_context->level = find_level(encoder_codec_context->height);
+    encoder_codec_context->level = find_level(encoder_codec_context->width, encoder_codec_context->height);
 }
 
 /* Borrowed from libavcodec/nvenc.h since it is not exposed */
@@ -525,12 +538,20 @@ set_nvidia_params(
 
     av_opt_set(encoder_codec_context->priv_data, "forced-idr", "on", 0);
 
-    if (encoder_codec_context->height <= 480)
+    /*
+     * The encoder_codec_context->profile is set just for proper log message, otherwise it has no impact
+     * when the encoder is nvidia.
+     */
+    if (encoder_codec_context->height <= 480) {
         av_opt_set_int(encoder_codec_context->priv_data, "profile", NV_ENC_H264_PROFILE_BASELINE, 0);
-    else
+        encoder_codec_context->profile = FF_PROFILE_H264_BASELINE;
+    } else {
         av_opt_set_int(encoder_codec_context->priv_data, "profile", NV_ENC_H264_PROFILE_HIGH, 0);
+        encoder_codec_context->profile = FF_PROFILE_H264_HIGH;
+    }
 
-    av_opt_set_int(encoder_codec_context->priv_data, "level", find_level(encoder_codec_context->height), 0);
+    encoder_codec_context->level = find_level(encoder_codec_context->width, encoder_codec_context->height);
+    av_opt_set_int(encoder_codec_context->priv_data, "level", encoder_codec_context->level, 0);
 
     /*
      * According to https://superuser.com/questions/1296374/best-settings-for-ffmpeg-with-nvenc
