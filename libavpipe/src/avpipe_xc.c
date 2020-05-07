@@ -918,20 +918,33 @@ prepare_encoder(
                        "hls_enc_key_url", params->crypt_key_url, 0);
         break;
     case crypt_cenc:
+        /* PENDING (RM) after debugging cbcs we can remove old encryption scheme names. */
         av_opt_set(encoder_context->format_context->priv_data,
                    "encryption_scheme", "cenc", 0);
+        av_opt_set(encoder_context->format_context->priv_data,
+                   "encryption_scheme", "cenc-aes-ctr", 0);
         break;
     case crypt_cbc1:
         av_opt_set(encoder_context->format_context->priv_data,
                    "encryption_scheme", "cbc1", 0);
+        av_opt_set(encoder_context->format_context->priv_data,
+                   "encryption_scheme", "cenc-aes-cbc", 0);
         break;
     case crypt_cens:
         av_opt_set(encoder_context->format_context->priv_data,
                    "encryption_scheme", "cens", 0);
+        av_opt_set(encoder_context->format_context->priv_data,
+                   "encryption_scheme", "cenc-aes-ctr-pattern", 0);
         break;
     case crypt_cbcs:
         av_opt_set(encoder_context->format_context->priv_data,
                    "encryption_scheme", "cbcs", 0);
+        av_opt_set(encoder_context->format_context->priv_data,
+                   "encryption_scheme", "cenc-aes-cbc-pattern", 0);
+        av_opt_set(encoder_context->format_context->priv_data, "encryption_iv",
+            params->crypt_iv, 0);
+        av_opt_set(encoder_context->format_context->priv_data, "hls_enc_iv",        /* To remove */
+            params->crypt_iv, 0);
         break;
     case crypt_none:
         break;
@@ -1883,8 +1896,15 @@ avpipe_tx(
         encoder_context->codec_context[encoder_context->video_stream_index] &&
         encoder_context->codec_context[encoder_context->video_stream_index]->time_base.den
             != encoder_context->stream[encoder_context->video_stream_index]->time_base.den) {
-        float seg_duration = atof(params->seg_duration);
-        int64_t seg_duration_ts = seg_duration * encoder_context->stream[encoder_context->video_stream_index]->time_base.den;
+        int64_t seg_duration_ts;
+        if (params->seg_duration && params->seg_duration > 0) {
+            float seg_duration = atof(params->seg_duration);
+            seg_duration_ts = seg_duration * encoder_context->stream[encoder_context->video_stream_index]->time_base.den;
+        } else {
+            seg_duration_ts = params->seg_duration_ts *
+                encoder_context->stream[encoder_context->video_stream_index]->time_base.den /
+                encoder_context->codec_context[encoder_context->video_stream_index]->time_base.den;
+        }
         elv_log("Stream orig ts=%"PRId64", new ts=%"PRId64", resetting \"fmp4-segment\" segment_time to %s, seg_duration_ts=%"PRId64,
             encoder_context->codec_context[encoder_context->video_stream_index]->time_base.den,
             encoder_context->stream[encoder_context->video_stream_index]->time_base.den,
