@@ -3,15 +3,16 @@ package avpipe_test
 import (
 	"encoding/json"
 	"fmt"
-	"github.com/qluvio/avpipe"
-	log "github.com/qluvio/content-fabric/log"
-	"github.com/stretchr/testify/assert"
 	"io"
 	"math/big"
 	"os"
 	"path/filepath"
 	"testing"
 	"time"
+
+	"github.com/qluvio/avpipe"
+	log "github.com/qluvio/content-fabric/log"
+	"github.com/stretchr/testify/assert"
 )
 
 func removeDirContents(dir string) error {
@@ -671,7 +672,7 @@ func TestAC3TsAACMezMaker(t *testing.T) {
 
 	sampleRate := probeInfo.StreamInfo[0].SampleRate
 	if sampleRate != 48000 {
-		t.Error("Unexpected TimeBase", probeInfo.StreamInfo[0].TimeBase)
+		t.Error("Unexpected SampleRate", probeInfo.StreamInfo[0].SampleRate)
 	}
 }
 
@@ -727,7 +728,7 @@ func TestMP2TsAACMezMaker(t *testing.T) {
 
 	sampleRate := probeInfo.StreamInfo[0].SampleRate
 	if sampleRate != 48000 {
-		t.Error("Unexpected TimeBase", probeInfo.StreamInfo[0].TimeBase)
+		t.Error("Unexpected SampleRate", probeInfo.StreamInfo[0].SampleRate)
 	}
 }
 
@@ -782,8 +783,150 @@ func TestDownmix2AACMezMaker(t *testing.T) {
 
 	sampleRate := probeInfo.StreamInfo[0].SampleRate
 	if sampleRate != 48000 {
+		t.Error("Unexpected sample rate", probeInfo.StreamInfo[0].SampleRate)
+	}
+}
+
+func TestAVPipeMXF_H265MezMaker(t *testing.T) {
+	filename := "./media/across_the_universe_4k_clip_60sec.mxf"
+	outputDir := "H265MXF"
+
+	setupLogging()
+	log.Info("STARTING TestAVPipeMXF_H265MezMaker")
+
+	params := &avpipe.TxParams{
+		BypassTranscoding: false,
+		Format:            "fmp4-segment",
+		StartTimeTs:       0,
+		DurationTs:        -1,
+		StartSegmentStr:   "1",
+		SegDuration:       "30.03",
+		Ecodec:            "libx265",
+		Dcodec:            "jpeg2000",
+		EncHeight:         -1,
+		EncWidth:          -1,
+		TxType:            avpipe.TxVideo,
+	}
+
+	// Create output directory if it doesn't exist
+	err := setupOutDir(outputDir)
+	if err != nil {
+		t.Fail()
+	}
+
+	avpipe.InitIOHandler(&fileInputOpener{url: filename}, &fileOutputOpener{dir: outputDir})
+
+	rc := avpipe.Tx(params, filename, false)
+	if rc != 0 {
+		t.Fail()
+	}
+
+	mezFile := fmt.Sprintf("%s/segment-1.mp4", outputDir)
+	// Now probe the generated files
+	probeInfo, err := avpipe.Probe(mezFile, true)
+	if err != nil {
+		t.Error(err)
+	}
+
+	timebase := *probeInfo.StreamInfo[0].TimeBase.Denom()
+	if timebase.Cmp(big.NewInt(24000)) != 0 {
 		t.Error("Unexpected TimeBase", probeInfo.StreamInfo[0].TimeBase)
 	}
+
+	pixelFormat := probeInfo.StreamInfo[0].SampleRate
+	// 0 means AV_PIX_FMT_YUV420P
+	if pixelFormat != 0 {
+		t.Error("Unexpected PixelFormat", probeInfo.StreamInfo[0].PixFmt)
+	}
+}
+
+func TestAVPipeHEVC_H264MezMaker(t *testing.T) {
+	filename := "./media/across_the_universe_4k_clip_30sec.mp4"
+	outputDir := "HEVC_H264"
+
+	setupLogging()
+	log.Info("STARTING TestAVPipeHEVC_H264MezMaker")
+
+	params := &avpipe.TxParams{
+		BypassTranscoding: false,
+		Format:            "fmp4-segment",
+		StartTimeTs:       0,
+		DurationTs:        -1,
+		StartSegmentStr:   "1",
+		SegDuration:       "15.03",
+		Ecodec:            "libx264",
+		Dcodec:            "hevc",
+		EncHeight:         -1,
+		EncWidth:          -1,
+		TxType:            avpipe.TxVideo,
+	}
+
+	// Create output directory if it doesn't exist
+	err := setupOutDir(outputDir)
+	if err != nil {
+		t.Fail()
+	}
+
+	avpipe.InitIOHandler(&fileInputOpener{url: filename}, &fileOutputOpener{dir: outputDir})
+
+	rc := avpipe.Tx(params, filename, false)
+	if rc != 0 {
+		t.Fail()
+	}
+
+	mezFile := fmt.Sprintf("%s/segment-1.mp4", outputDir)
+	// Now probe the generated files
+	probeInfo, err := avpipe.Probe(mezFile, true)
+	if err != nil {
+		t.Error(err)
+	}
+
+	timebase := *probeInfo.StreamInfo[0].TimeBase.Denom()
+	if timebase.Cmp(big.NewInt(24000)) != 0 {
+		t.Error("Unexpected TimeBase", probeInfo.StreamInfo[0].TimeBase)
+	}
+
+	pixelFormat := probeInfo.StreamInfo[0].SampleRate
+	// 0 means AV_PIX_FMT_YUV420P
+	if pixelFormat != 0 {
+		t.Error("Unexpected PixelFormat", probeInfo.StreamInfo[0].PixFmt)
+	}
+}
+
+func TestAVPipeHEVC_H265ABRTranscode(t *testing.T) {
+	filename := "./media/across_the_universe_4k_clip_30sec.mp4"
+	outputDir := "HEVC_H265ABR"
+
+	setupLogging()
+	log.Info("STARTING TestAVPipeHEVC_H265ABRTranscode")
+
+	params := &avpipe.TxParams{
+		BypassTranscoding: false,
+		Format:            "dash",
+		StartTimeTs:       0,
+		DurationTs:        -1,
+		StartSegmentStr:   "1",
+		SegDuration:       "15.03",
+		Ecodec:            "libx265",
+		Dcodec:            "hevc",
+		EncHeight:         -1,
+		EncWidth:          -1,
+		TxType:            avpipe.TxVideo,
+	}
+
+	// Create output directory if it doesn't exist
+	err := setupOutDir(outputDir)
+	if err != nil {
+		t.Fail()
+	}
+
+	avpipe.InitIOHandler(&fileInputOpener{url: filename}, &fileOutputOpener{dir: outputDir})
+
+	rc := avpipe.Tx(params, filename, false)
+	if rc != 0 {
+		t.Fail()
+	}
+
 }
 
 func TestMarshalParams(t *testing.T) {

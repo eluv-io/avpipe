@@ -455,8 +455,10 @@ find_level(
         level = 42;
     else if (height <= 1920)
         level = 50;
-    else
+    else if (height <= 2048)
         level = 51;
+    else
+        level = 52;
 
     if (level < 31 && width >= 720)
         level = 31;
@@ -466,6 +468,12 @@ find_level(
 
     if (level < 50 && width >= 1920 && height >= 1080)
         level = 50;
+
+    if (level < 52 && width >= 2560 && height >= 1920)
+        level = 52;
+
+    if (level < 60 && width >= 3840 && height >= 2160)
+        level = 60;
 
     return level;
 }
@@ -500,6 +508,29 @@ set_h264_params(
      * These are set according to
      * https://en.wikipedia.org/wiki/Advanced_Video_Coding#Levels
      * https://developer.apple.com/documentation/http_live_streaming/hls_authoring_specification_for_apple_devices
+     */
+    encoder_codec_context->level = find_level(encoder_codec_context->width, encoder_codec_context->height);
+}
+
+static void
+set_h265_params(
+    coderctx_t *encoder_context,
+    coderctx_t *decoder_context,
+    txparams_t *params)
+{
+    int index = decoder_context->video_stream_index;
+    AVCodecContext *encoder_codec_context = encoder_context->codec_context[index];
+
+    /*
+     * The Main profile allows for a bit depth of 8-bits per sample with 4:2:0 chroma sampling,
+     * which is the most common type of video used with consumer devices
+     * PENDING(RM) do we need profiles higher that MAIN for HEVC?
+     */
+    encoder_codec_context->profile = FF_PROFILE_HEVC_MAIN;
+
+    /*
+     * These are set according to
+     * https://en.wikipedia.org/wiki/High_Efficiency_Video_Coding
      */
     encoder_codec_context->level = find_level(encoder_codec_context->width, encoder_codec_context->height);
 }
@@ -663,7 +694,8 @@ prepare_video_encoder(
     encoder_codec_context->width = params->enc_width != -1 ? params->enc_width : decoder_context->codec_context[index]->width;
     encoder_codec_context->time_base = decoder_context->codec_context[index]->time_base;
     encoder_codec_context->sample_aspect_ratio = decoder_context->codec_context[index]->sample_aspect_ratio;
-    encoder_codec_context->bit_rate = params->video_bitrate;
+    if (params->video_bitrate > 0)
+        encoder_codec_context->bit_rate = params->video_bitrate;
     encoder_codec_context->rc_buffer_size = params->rc_buffer_size;
     if (params->rc_max_rate > 0)
         encoder_codec_context->rc_max_rate = params->rc_max_rate;
@@ -707,6 +739,9 @@ prepare_video_encoder(
     if (!strcmp(params->ecodec, "h264_nvenc"))
         /* Set NVIDIA specific params if the encoder is NVIDIA */
         set_nvidia_params(encoder_context, decoder_context, params);
+    else if (!strcmp(params->ecodec, "libx265"))
+        /* Set H265 specific params (profile and level) */
+        set_h265_params(encoder_context, decoder_context, params);
     else
         /* Set H264 specific params (profile and level) */
         set_h264_params(encoder_context, decoder_context, params);

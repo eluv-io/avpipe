@@ -58,7 +58,7 @@ lclean:
 	@rm -rf lib bin include
 
 clean-test:
-	@rm -rf  AAC2AAC AC3TsAC3Mez AC3TsACCMez Downmix2ACCMez MP2TsACCMez
+	@rm -rf  AAC2AAC AC3TsAC3Mez AC3TsACCMez Downmix2ACCMez MP2TsACCMez HEVCH264 H265MXF HEVC_H265ABR
 
 check-env:
 ifndef ELV_TOOLCHAIN_DIST_PLATFORM

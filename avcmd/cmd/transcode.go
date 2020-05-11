@@ -87,13 +87,13 @@ func (oo *avcmdOutputOpener) Open(h, fd int64, stream_index, seg_index int, out_
 	case avpipe.DASHVideoInit:
 		fallthrough
 	case avpipe.DASHAudioInit:
-		filename = fmt.Sprintf("./%s/init-stream%d.mp4", dir, stream_index)
+		filename = fmt.Sprintf("./%s/init-stream%d.m4s", dir, stream_index)
 	case avpipe.DASHManifest:
 		filename = fmt.Sprintf("./%s/dash.mpd", dir)
 	case avpipe.DASHVideoSegment:
 		fallthrough
 	case avpipe.DASHAudioSegment:
-		filename = fmt.Sprintf("./%s/chunk-stream%d-%05d.mp4", dir, stream_index, seg_index)
+		filename = fmt.Sprintf("./%s/chunk-stream%d-%05d.m4s", dir, stream_index, seg_index)
 	case avpipe.HLSMasterM3U:
 		filename = fmt.Sprintf("./%s/master.m3u8", dir)
 	case avpipe.HLSVideoM3U:
@@ -181,8 +181,8 @@ func InitTranscode(cmdRoot *cobra.Command) error {
 	cmdTranscode.PersistentFlags().BoolP("bypass", "b", false, "bypass transcoding")
 	cmdTranscode.PersistentFlags().Int32P("threads", "t", 1, "transcoding threads")
 	cmdTranscode.PersistentFlags().Int32P("audio-index", "", -1, "audio stream index (only for --tx-type audio)")
-	cmdTranscode.PersistentFlags().StringP("encoder", "e", "libx264", "encoder codec, default is 'libx264', can be: 'libx264', 'h264_nvenc', 'h264_videotoolbox'")
-	cmdTranscode.PersistentFlags().StringP("decoder", "d", "", "decoder codec, default is 'h264', can be: 'h264', 'h264_cuvid'")
+	cmdTranscode.PersistentFlags().StringP("encoder", "e", "libx264", "encoder codec, default is 'libx264', can be: 'libx264', 'libx265', 'h264_nvenc', 'h264_videotoolbox'")
+	cmdTranscode.PersistentFlags().StringP("decoder", "d", "", "decoder codec, default is 'h264', can be: 'h264', 'h264_cuvid', 'jpeg2000', 'hevc'")
 	cmdTranscode.PersistentFlags().StringP("format", "", "dash", "package format, can be 'dash', 'hls', 'mp4', 'fmp4', 'segment' or 'fmp4-segment'.")
 	cmdTranscode.PersistentFlags().Int32P("force-keyint", "", 0, "force IDR key frame in this interval.")
 	cmdTranscode.PersistentFlags().StringP("tx-type", "", "all", "transcoding type, can be 'all', 'video', or 'audio'.")

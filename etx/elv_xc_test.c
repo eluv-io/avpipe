@@ -334,7 +334,7 @@ out_opener(
         {
             const char *segbase = "chunk-stream";
 
-            sprintf(segname, "./%s/%s%d-%05d.mp4",
+            sprintf(segname, "./%s/%s%d-%05d.m4s",
                 dir, segbase, outctx->stream_index, outctx->seg_index);
         }
         break;
@@ -702,10 +702,10 @@ usage(
         "\t-crypt-kid :         (optional) 16-byte key ID, as hex\n"
         "\t-crypt-scheme :      (optional) encryption scheme. Default is \"none\", can be: \"aes-128\", \"cenc\", \"cbc1\", \"cens\", \"cbcs\"\n"
         "\t-crypt-url :         (optional) specify a key URL in the HLS manifest\n"
-        "\t-d :                 (optional) decoder name. Default is \"h264\", can be: \"h264\", \"h264_cuvid\"\n"
+        "\t-d :                 (optional) decoder name. For video default is \"h264\", can be: \"h264\", \"h264_cuvid\", \"jpeg2000\", \"hevc\"\n"
         "\t                                For audio default is \"aac\", but for ts files should be set to \"ac3\"\n"
         "\t-duration-ts :       (optional) Default: -1 (entire stream)\n"
-        "\t-e :                 (optional) encoder name. Default is \"libx264\", can be: \"libx264\", \"h264_nvenc\", \"h264_videotoolbox\"\n"
+        "\t-e :                 (optional) encoder name. Default is \"libx264\", can be: \"libx264\", \"libx265\", \"h264_nvenc\", \"h264_videotoolbox\"\n"
         "\t                                For audio default is \"aac\", but for ts files should be set to \"ac3\"\n"
         "\t-enc-height :        (optional) Default: -1 (use source height)\n"
         "\t-enc-width :         (optional) Default: -1 (use source width)\n"
