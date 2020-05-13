@@ -682,6 +682,53 @@ end_probe:
     return rc;
 }
 
+static int
+read_image(
+    char *overlay_filename,
+    txparams_t *params
+)
+{
+    struct stat st;
+    char *buf;
+    int fd = open(overlay_filename, O_RDONLY);
+    if (fd < 0)
+        return -1;
+
+    if (fstat(fd, &st) != 0) {
+        close(fd);
+        return -1;
+    }
+
+    buf = (char *) malloc(st.st_size);
+    int nread = read(fd, buf, st.st_size);
+    if (nread != st.st_size) {
+        close(fd);
+        free(buf);
+        return -1;
+    }
+
+    close(fd);
+    params->watermark_overlay = buf;
+    params->watermark_overlay_len = nread;
+    return nread;
+}
+
+static image_type
+get_image_type(
+    char * image_type_str)
+{
+    if (strncmp(image_type_str, "png", 3) == 0 || strncmp(image_type_str, "PNG", 3) == 0)
+        return png_image;
+
+    if (strncmp(image_type_str, "jpg", 3) == 0 || strncmp(image_type_str, "JPG", 3) == 0)
+        return jpg_image;
+    
+    if (strncmp(image_type_str, "gif", 3) == 0 || strncmp(image_type_str, "GIF", 3) == 0)
+        return gif_image;
+
+    return unknown_image;
+}
+
 static void
 usage(
     char *progname,
@@ -730,10 +777,12 @@ usage(
         "\t-t :                 (optional) transcoding threads. Default is 1 thread, must be bigger than 1\n"
         "\t-tx-type :           (optional) transcoding type. Default is \"all\", can be \"video\", \"audio\", or \"all\" \n"
         "\t-video-bitrate :     (optional) mutually exclusive with crf. Default: -1 (unused)\n"
-        "\t-wm-text :           (optional) watermark text that will be presented in every video frame if it exist\n"
+        "\t-wm-text :           (optional) watermark text that will be presented in every video frame if it exist. It has higher priority than overlay watermark.\n"
         "\t-wm-xloc :           (optional) watermark X location\n"
         "\t-wm-yloc :           (optional) watermark Y location\n"
         "\t-wm-color :          (optional) watermark font color\n"
+        "\t-wm-overlay :        (optional) watermark overlay image file. It has less priority than text watermark.\n"
+        "\t-wm-overlay-type :   (optional) watermark overlay image file type, can be \"png\", \"gif\", \"jpg\". Default is png.\n"
         "\t-wm-relative-size :  (optional) watermark relative font/shadow size\n"
         "\t-wm-shadow :         (optional) watermarking with shadow. Default is 1, means with shadow.\n"
         "\t-wm-shadow-color :   (optional) watermark shadow color. Default is white.\n",
@@ -797,7 +846,11 @@ main(
         .seekable = 0,
         .force_keyint = 0,
         .watermark_text = NULL,
-        .watermark_shadow = 0
+        .watermark_shadow = 0,
+        .overlay_filename = NULL,
+        .watermark_overlay = NULL,
+        .watermark_overlay_len = 0,
+        .watermark_overlay_type = png_image
     };
 
     i = 1;
@@ -1014,6 +1067,13 @@ main(
                 p.watermark_yloc = argv[i+1];
             } else if (!strcmp(argv[i], "-wm-color")) {
                 p.watermark_font_color = argv[i+1];
+            } else if (!strcmp(argv[i], "-wm-overlay")) {
+                p.overlay_filename = argv[i+1];
+            } else if (!strcmp(argv[i], "-wm-overlay-type")) {
+                p.watermark_overlay_type = get_image_type(argv[i+1]);
+                if (p.watermark_overlay_type == unknown_image) {
+                    usage(argv[0], argv[i], EXIT_FAILURE);
+                }
             } else if (!strcmp(argv[i], "-wm-relative-size")) {
                 if (sscanf(argv[i+1], "%f", &p.watermark_relative_sz) != 1) {
                     usage(argv[0], argv[i], EXIT_FAILURE);
@@ -1066,6 +1126,12 @@ main(
         !strcmp(p.format, "fmp4-segment")) &&
         (p.seg_duration == NULL || start_segment < 1)) {
         usage(argv[0], "seg_duration, start_segment", EXIT_FAILURE);
+    }
+
+    if (p.overlay_filename) {
+        read_image(p.overlay_filename, &p);
+        if (!p.watermark_overlay_len)
+            usage(argv[0], "wm-overlay", EXIT_FAILURE);
     }
 
     /* Create O dir if doesn't exist */

@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"io/ioutil"
 	"math/big"
 	"os"
 	"path/filepath"
@@ -322,6 +323,54 @@ func TestSingleABRTranscodeWithWatermark(t *testing.T) {
 
 	// Create output directory if it doesn't exist
 	err := setupOutDir(outputDir)
+	if err != nil {
+		t.Fail()
+	}
+
+	avpipe.InitIOHandler(&fileInputOpener{url: filename}, &fileOutputOpener{dir: outputDir})
+
+	rc := avpipe.Tx(params, filename, true)
+	if rc != 0 {
+		t.Fail()
+	}
+}
+
+func TestSingleABRTranscodeWithOverlayWatermark(t *testing.T) {
+	filename := "./media/ErsteChristmas.mp4"
+	outputDir := "O"
+
+	setupLogging()
+	log.Info("STARTING TestSingleABRTranscode")
+
+	overlayImage, err := ioutil.ReadFile("./media/fox_watermark.png")
+	if err != nil {
+		t.Fail()
+	}
+
+	params := &avpipe.TxParams{
+		BypassTranscoding:    false,
+		Format:               "hls",
+		StartTimeTs:          0,
+		DurationTs:           -1,
+		StartSegmentStr:      "1",
+		VideoBitrate:         2560000,
+		AudioBitrate:         64000,
+		SampleRate:           44100,
+		CrfStr:               "23",
+		SegDurationTs:        1001 * 60,
+		Ecodec:               "libx264",
+		EncHeight:            720,
+		EncWidth:             1280,
+		TxType:               avpipe.TxVideo,
+		WatermarkYLoc:        "main_h*0.7",
+		WatermarkXLoc:        "main_w/2-overlay_w/2",
+		WatermarkOverlay:     string(overlayImage),
+		WatermarkOverlayLen:  len(overlayImage),
+		WatermarkOverlayType: avpipe.PngImage,
+	}
+
+	// Create output directory if it doesn't exist
+	err = setupOutDir(outputDir)
 	if err != nil {
 		t.Fail()
 	}

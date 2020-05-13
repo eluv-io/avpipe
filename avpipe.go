@@ -81,6 +81,15 @@ const (
 	TxAll
 )
 
+type ImageType int
+
+const (
+	UnknownImage = iota
+	PngImage
+	JpgImage
+	GifImage
+)
+
 // CryptScheme is the content encryption scheme
 type CryptScheme int
 
@@ -136,6 +145,9 @@ type TxParams struct {
 	WatermarkFontColor    string      `json:"watermark_font_color,omitempty"`
 	WatermarkShadow       bool        `json:"watermark_shadow,omitempty"`
 	WatermarkShadowColor  string      `json:"watermark_shadow_color,omitempty"`
+	WatermarkOverlay      string      `json:"watermark_overlay,omitempty"`      // Buffer containing overlay image
+	WatermarkOverlayLen   int         `json:"watermark_overlay_len,omitempty"`  // Length of overlay image
+	WatermarkOverlayType  ImageType   `json:"watermark_overlay_type,omitempty"` // Type of overlay image (i.e PngImage, ...)
 	AudioIndex            int32       `json:"audio_index,omitempty"`
 }
 
@@ -770,6 +782,9 @@ func Tx(params *TxParams, url string, debugFrameLevel bool) int {
 		watermark_font_color:   C.CString(params.WatermarkFontColor),
 		watermark_shadow:       C.int(0),
 		watermark_shadow_color: C.CString(params.WatermarkShadowColor),
+		watermark_overlay:      C.CString(params.WatermarkOverlay),
+		watermark_overlay_len:  C.int(params.WatermarkOverlayLen),
+		watermark_overlay_type: C.image_type(params.WatermarkOverlayType),
 		audio_index:            C.int(params.AudioIndex),
 		bypass_transcoding:     C.int(0),
 		seekable:               C.int(0),
@@ -955,6 +970,9 @@ func TxInit(params *TxParams, url string, debugFrameLevel bool) (int32, error) {
 		watermark_font_color:   C.CString(params.WatermarkFontColor),
 		watermark_shadow:       C.int(0),
 		watermark_shadow_color: C.CString(params.WatermarkShadowColor),
+		watermark_overlay:      C.CString(params.WatermarkOverlay),
+		watermark_overlay_len:  C.int(params.WatermarkOverlayLen),
+		watermark_overlay_type: C.image_type(params.WatermarkOverlayType),
 		bypass_transcoding:     C.int(0),
 		seekable:               C.int(0),
 

@@ -10,6 +10,8 @@
 
 #include <libavutil/log.h>
 #include "libavutil/audio_fifo.h"
+#include <libswscale/swscale.h>
+#include <libavutil/imgutils.h>
 
 #include "avpipe_xc.h"
 #include "avpipe_utils.h"
@@ -33,12 +35,19 @@
 
 #define MPEGTS_THREAD_COUNT     16
 #define DEFAULT_THREAD_COUNT    8
-#define WATERMARK_STRING_SZ     1024
+#define WATERMARK_STRING_SZ     1024    /* Max length of watermark text */
 #define FILTER_STRING_SZ        (1024 + WATERMARK_STRING_SZ)
 
 extern int
 init_filters(
     const char *filters_descr,
+    coderctx_t *decoder_context,
+    coderctx_t *encoder_context,
+    txparams_t *params);
+
+extern int
+init_overlay_filters(
+    const char *filter_spec,
     coderctx_t *decoder_context,
     coderctx_t *encoder_context,
     txparams_t *params);
@@ -1648,10 +1657,12 @@ transcode_video(
 
         /* push the decoded frame into the filtergraph */
         elv_get_time(&tv);
-        if (av_buffersrc_add_frame_flags(decoder_context->buffersrc_ctx, frame, AV_BUFFERSRC_FLAG_KEEP_REF) < 0) {
+        //if (av_buffersrc_add_frame_flags(decoder_context->buffersrc_ctx, frame, AV_BUFFERSRC_FLAG_KEEP_REF | AV_BUFFERSRC_FLAG_PUSH) < 0)
+        if (av_buffersrc_add_frame_flags(decoder_context->buffersrc_ctx, frame, 0) < 0) {
             elv_err("Failure in feeding the filtergraph");
             break;
         }
+
         if (do_instrument) {
             elv_since(&tv, &since);
             elv_log("INSTRMNT av_buffersrc_add_frame_flags time=%"PRId64, since);
@@ -1740,6 +1751,7 @@ flush_decoder(
                 elv_err("Failure in feeding the filtergraph");
                 break;
             }
+
             /* pull filtered frames from the filtergraph */
             while (1) {
                 ret = av_buffersink_get_frame(decoder_context->buffersink_ctx, filt_frame);
@@ -1842,6 +1854,176 @@ should_stop_decoding(
     return 0;
 }
 
+/**
+ * @brief   formats a base64 encoded data url.
+ *
+ * @param   filt_buf            buffer to receive the base64 encoded data url, caller has to free the buffer
+ * @param   filt_buf_size       size of output buffer
+ * @param   img_buf             input buffer containing binary image data
+ * @param   img_buf_size        size of input buffer
+ * @param   img_type            value from enum image_type
+ *
+ * @return  Returns length of filt_buf if transcoding is successful, otherwise -1.
+ */
+static int
+get_overlay_filter_string(
+    char **filt_buf,
+    char *img_buf,
+    int img_buf_size,
+    int img_type)
+{
+    const char* data_template = "data\\:%s;base64,%s";
+    char* encoded_data = NULL;
+    int encoded_data_length = base64encode_len(img_buf_size);
+    int ret = 0;
+    int n = 0;
+    int filt_buf_size;
+
+    encoded_data = malloc(encoded_data_length + 1);
+    base64encode(encoded_data, img_buf, img_buf_size);
+
+    ret = filt_buf_size = encoded_data_length + 128;
+    *filt_buf = (char *) calloc(filt_buf_size, 1);
+    switch(img_type){
+        case png_image:
+        {
+            n = snprintf(*filt_buf, filt_buf_size, data_template, "image/png", encoded_data);
+            if (n < 0 || n >= filt_buf_size){
+                elv_err("snprintf overflow for png, need %u", n);
+                ret = -1;
+            }
+            goto cleanup;
+        }
+        case jpg_image:
+        {
+            n = snprintf(*filt_buf, filt_buf_size, data_template, "image/jpg", encoded_data);
+            if (n < 0 || n >= filt_buf_size){
+                elv_err("snprintf overflow for jpg, need %u", n);
+                ret = -1;
+            }
+            goto cleanup;
+        }
+        case gif_image:
+        {
+            snprintf(*filt_buf, filt_buf_size, data_template, "image/gif", encoded_data);
+            if (n < 0 || n >= filt_buf_size){
+                elv_err("snprintf overflow for gif, need %u", n);
+                ret = -1;
+            }
+            goto cleanup;
+        }
+        default:
+            elv_log("get_overlay_filter_string passed invalid type %d", img_type);
+            ret = -1;
+            goto cleanup;
+    }
+cleanup:
+    free(encoded_data);
+    return ret;
+}
+
+static int
+get_filter_str(
+    char **filter_str,
+    coderctx_t *encoder_context,
+    txparams_t *params)
+{
+    *filter_str = NULL;
+    if (params->watermark_text && *params->watermark_text != '\0') {
+        char local_filter_str[FILTER_STRING_SZ];
+        int shadow_x = 0;
+        int shadow_y = 0;
+        int font_size = 0;
+        const char* filterTemplate = "scale=%d:%d, drawtext=text='%s':fontcolor=%s:fontsize=%d:x=%s:y=%s:shadowx=%d:shadowy=%d:shadowcolor=%s:alpha=0.65";
+
+        /* Return an error if one of the watermark params is not set properly */
+        if ((!params->watermark_font_color || *params->watermark_font_color == '\0') ||
+            (!params->watermark_xloc || *params->watermark_xloc == '\0') ||
+            (params->watermark_relative_sz > 1 || params->watermark_relative_sz < 0) ||
+            (!params->watermark_yloc || *params->watermark_yloc == '\0') ||
+            (params->watermark_shadow && (!params->watermark_shadow_color || *params->watermark_shadow_color == '\0'))) {
+            elv_err("Watermark params are not set correctly. color=\"%s\", relative_size=\"%f\", xloc=\"%s\", yloc=\"%s\", shadow=%d, shadow_color=\"%s\"",
+                params->watermark_font_color != NULL ? params->watermark_font_color : "",
+                params->watermark_relative_sz,
+                params->watermark_xloc != NULL ? params->watermark_xloc : "",
+                params->watermark_yloc != NULL ? params->watermark_yloc : "",
+                params->watermark_shadow,
+                params->watermark_shadow_color != NULL ? params->watermark_shadow_color : "");
+            return -1;
+        }
+
+        font_size = (int) (params->watermark_relative_sz * encoder_context->codec_context[encoder_context->video_stream_index]->height);
+        if (params->watermark_shadow) {
+            /* Calculate shadow x and y */
+            shadow_x = shadow_y = font_size*DRAW_TEXT_SHADOW_OFFSET;
+        }
+
+        int ret = snprintf(local_filter_str, FILTER_STRING_SZ, filterTemplate,
+                encoder_context->codec_context[encoder_context->video_stream_index]->width,
+                encoder_context->codec_context[encoder_context->video_stream_index]->height,
+                params->watermark_text, params->watermark_font_color, font_size,
+                params->watermark_xloc, params->watermark_yloc,
+                shadow_x, shadow_y, params->watermark_shadow_color);
+
+        elv_dbg("filterstr=%s, len=%d, x=%s, y=%s, relative-size=%f, ret=%d",
+            local_filter_str, strlen(local_filter_str), params->watermark_xloc, params->watermark_yloc, params->watermark_relative_sz, ret);
+        if (ret < 0) {
+            return -1;
+        } else if (ret >= FILTER_STRING_SZ) {
+            elv_dbg("Not enough memory for watermark filter");
+            return -1;
+        }
+        *filter_str = (char *) calloc(strlen(local_filter_str)+1, 1);
+        strcpy(*filter_str, local_filter_str);
+    } else if (params->watermark_overlay && params->watermark_overlay[0] != '\0') {
+        char *filt_buf = NULL;
+        int filt_buf_size;
+        int filt_str_len;
+        const char* filt_template = "[in] scale=%d:%d [in-1]; movie='%s', setpts=PTS-STARTPTS [over]; [in-1] setpts=PTS-STARTPTS [in-1a]; [in-1a][over]  overlay='%s:%s:alpha=0.1' [out]";
+
+        /* Return an error if one of the watermark params is not set properly */
+        if ((!params->watermark_xloc || *params->watermark_xloc == '\0') ||
+            (params->watermark_overlay_type == unknown_image) ||
+            (!params->watermark_yloc || *params->watermark_yloc == '\0')) {
+            elv_err("Watermark overlay params are not set correctly. overlay_type=\"%d\", xloc=\"%s\", yloc=\"%s\"",
+                params->watermark_overlay_type,
+                params->watermark_xloc != NULL ? params->watermark_xloc : "",
+                params->watermark_yloc != NULL ? params->watermark_yloc : "");
+            return -1;
+        }
+
+        filt_buf_size = get_overlay_filter_string(&filt_buf, params->watermark_overlay, params->watermark_overlay_len, params->watermark_overlay_type);
+        if (filt_buf_size < 0)
+            return -1;
+
+        filt_str_len = filt_buf_size+FILTER_STRING_SZ;
+        *filter_str = (char *) calloc(filt_str_len, 1);
+        int ret = snprintf(*filter_str, filt_str_len, filt_template,
+                        encoder_context->codec_context[encoder_context->video_stream_index]->width,
+                        encoder_context->codec_context[encoder_context->video_stream_index]->height,
+                        filt_buf,
+                        params->watermark_xloc, params->watermark_yloc);
+        free(filt_buf);
+        if (ret < 0) {
+            free(*filter_str);
+            return -1;
+        } else if (ret >= filt_str_len) {
+            free(*filter_str);
+            elv_dbg("Not enough memory for overlay watermark filter");
+            return -1;
+        }
+    } else {
+        *filter_str = (char *) calloc(FILTER_STRING_SZ, 1);
+        sprintf(*filter_str, "scale=%d:%d",
+            encoder_context->codec_context[encoder_context->video_stream_index]->width,
+            encoder_context->codec_context[encoder_context->video_stream_index]->height);
+            elv_dbg("FILTER scale=%s", filter_str);
+    }
+
+    return 0;
+}
+
+
 int
 avpipe_tx(
     txctx_t *txctx,
@@ -1849,65 +2031,24 @@ avpipe_tx(
     int debug_frame_level)
 {
     /* Set scale filter */
-    char filter_str[FILTER_STRING_SZ];
+    char *filter_str = NULL;
     struct timeval tv;
     u_int64_t since;
     coderctx_t *decoder_context = &txctx->decoder_ctx;
     coderctx_t *encoder_context = &txctx->encoder_ctx;
     txparams_t *params = txctx->params;
-    int shadow_x = 0;
-    int shadow_y = 0;
-    int font_size = 0;
-    const char* filterTemplate = "scale=%d:%d, drawtext=text='%s':fontcolor=%s:fontsize=%d:x=%s:y=%s:shadowx=%d:shadowy=%d:shadowcolor=%s:alpha=0.65";
 
     if (!params->bypass_transcoding &&
         (params->tx_type & tx_video)) {
-            if (params->watermark_text && *params->watermark_text != '\0') {
-                /* Return an error if one of the watermark params is not set properly */
-                if ((!params->watermark_font_color || *params->watermark_font_color == '\0') ||
-                    (!params->watermark_xloc || *params->watermark_xloc == '\0') ||
-                    (params->watermark_relative_sz > 1 || params->watermark_relative_sz < 0) ||
-                    (!params->watermark_yloc || *params->watermark_yloc == '\0') ||
-                    (params->watermark_shadow && (!params->watermark_shadow_color || *params->watermark_shadow_color == '\0'))) {
-                    elv_err("Watermark param is not set correctly. color=\"%s\", relative_size=\"%f\", xloc=\"%s\", yloc=\"%s\", shadow=%d, shadow_color=\"%s\"",
-                        params->watermark_font_color != NULL ? params->watermark_font_color : "",
-                        params->watermark_relative_sz,
-                        params->watermark_xloc != NULL ? params->watermark_xloc : "",
-                        params->watermark_yloc != NULL ? params->watermark_yloc : "",
-                        params->watermark_shadow,
-                        params->watermark_shadow_color != NULL ? params->watermark_shadow_color : "");
-                    return -1;
-                }
-                font_size = (int) (params->watermark_relative_sz * encoder_context->codec_context[encoder_context->video_stream_index]->height);
-                if (params->watermark_shadow) {
-                    /* Calculate shadow x and y */
-                    shadow_x = shadow_y = font_size*DRAW_TEXT_SHADOW_OFFSET;
-                }
-                int ret = snprintf(filter_str, FILTER_STRING_SZ, filterTemplate,
-                        encoder_context->codec_context[encoder_context->video_stream_index]->width,
-                        encoder_context->codec_context[encoder_context->video_stream_index]->height,
-                        params->watermark_text, params->watermark_font_color, font_size,
-                        params->watermark_xloc, params->watermark_yloc,
-                        shadow_x, shadow_y, params->watermark_shadow_color);
+        if (get_filter_str(&filter_str, encoder_context, params) < 0)
+            return -1;
 
-                elv_dbg("filterstr=%s, x=%s, y=%s, relative-size=%f, ret=%d",
-                        filter_str, params->watermark_xloc, params->watermark_yloc, params->watermark_relative_sz, ret);
-                if (ret < 0) {
-                    return -1;
-                } else if (ret >= FILTER_STRING_SZ) {
-                    elv_dbg("Not enough memory for watermark filter");
-                    return -1;
-                }
-            } else {
-                sprintf(filter_str, "scale=%d:%d",
-                    encoder_context->codec_context[encoder_context->video_stream_index]->width,
-                    encoder_context->codec_context[encoder_context->video_stream_index]->height);
-                elv_dbg("FILTER scale=%s", filter_str);
-            }
-            if (init_filters(filter_str, decoder_context, encoder_context, txctx->params) < 0) {
-                elv_err("Failed to initialize video filter");
-                return -1;
-            }
+        if (init_filters(filter_str, decoder_context, encoder_context, txctx->params) < 0) {
+            free(filter_str);
+            elv_err("Failed to initialize video filter");
+            return -1;
+        }
+        free(filter_str);
     }
 
     if (!params->bypass_transcoding &&
@@ -2459,14 +2600,17 @@ avpipe_init(
         "crypt_kid=%s "
         "crypt_key_url=%s "
         "crypt_scheme=%d "
-        "audio_index=%d ",
+        "audio_index=%d "
+        "wm_overlay_type=%d "
+        "wm_overlay_len=%d",
         avpipe_version(),
         params->bypass_transcoding, get_tx_type_name(params->tx_type),
         params->format, params->start_time_ts, params->start_pts, params->duration_ts, params->start_segment_str,
         params->video_bitrate, params->audio_bitrate, params->sample_rate, params->crf_str,
         params->rc_max_rate, params->rc_buffer_size,
         params->seg_duration_ts, params->seg_duration, params->ecodec, params->dcodec, params->enc_height, params->enc_width,
-        params->crypt_iv, params->crypt_key, params->crypt_kid, params->crypt_key_url, params->crypt_scheme, params->audio_index);
+        params->crypt_iv, params->crypt_key, params->crypt_kid, params->crypt_key_url, params->crypt_scheme, params->audio_index,
+        params->watermark_overlay_type, params->watermark_overlay_len);
     elv_log("AVPIPE TXPARAMS %s", buf);
 
     // By default transcode 'everything'
@@ -2569,6 +2713,7 @@ avpipe_fini(
     }
 
     free((*txctx)->inctx);
+    free((*txctx)->params->watermark_overlay);
     free((*txctx)->params);
     free(*txctx);
     *txctx = NULL;
@@ -2589,51 +2734,3 @@ avpipe_version()
     return version_str;
 }
 
-int
-get_overlay_filter_string(char *filt_buf, int filt_buf_size, char *img_buf, int img_buf_size, int img_type){
-    const char* data_template = "data\\:%s;base64,%s";
-    char* encoded_data = NULL;
-    int encoded_data_length = base64encode_len(img_buf_size);
-    int ret = 0;
-    if (filt_buf_size < encoded_data_length + strlen(data_template) + 11){ // 11 is len of format
-        elv_err("get_overlay_filter_string passed out buffer too small, need %lu", encoded_data_length + strlen(data_template) + 11);
-        ret = -1;
-        goto cleanup;
-    }
-    encoded_data = malloc(encoded_data_length + 1);
-    base64encode(encoded_data, img_buf, img_buf_size);
-    int n = 0;
-    switch(img_type){
-        case png:{
-            n = snprintf(filt_buf, filt_buf_size, data_template, "image/png", encoded_data);
-            if (n < 0 || n >= filt_buf_size){
-                elv_err(NULL, AV_LOG_ERROR, "snprintf overflow for png, need %u", n);
-                ret = -1;
-            }
-            goto cleanup;
-        }
-        case jpeg:{
-            n = snprintf(filt_buf, filt_buf_size, data_template, "image/jpg", encoded_data);
-            if (n < 0 || n >= filt_buf_size){
-                elv_err(NULL, AV_LOG_ERROR, "snprintf overflow for jpg, need %u", n);
-                ret = -1;
-            }
-            goto cleanup;
-        }
-        case gif:{
-            snprintf(filt_buf, filt_buf_size, data_template, "image/gif", encoded_data);
-            if (n < 0 || n >= filt_buf_size){
-                elv_err("snprintf overflow for gif, need %u", n);
-                ret = -1;
-            }
-            goto cleanup;
-        }
-        default:
-            av_log(NULL, AV_LOG_ERROR, "get_overlay_filter_string passed invalid type %d", img_type);
-            ret = -1;
-            goto cleanup;
-    }
-cleanup:
-    free(encoded_data);
-    return ret;
-}

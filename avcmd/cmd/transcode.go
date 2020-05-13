@@ -3,6 +3,7 @@ package cmd
 import (
 	"fmt"
 	"io"
+	"io/ioutil"
 	"os"
 	"strconv"
 
@@ -213,6 +214,8 @@ func InitTranscode(cmdRoot *cobra.Command) error {
 	cmdTranscode.PersistentFlags().String("wm-color", "black", "watermark font color")
 	cmdTranscode.PersistentFlags().BoolP("wm-shadow", "", true, "watermarking with shadow")
 	cmdTranscode.PersistentFlags().String("wm-shadow-color", "white", "watermark shadow color")
+	cmdTranscode.PersistentFlags().String("wm-overlay", "", "watermark overlay image file")
+	cmdTranscode.PersistentFlags().String("wm-overlay-type", "png", "watermark overlay image file type, can be 'png', 'jpg', 'gif'")
 
 	return nil
 }
@@ -258,6 +261,37 @@ func doTranscode(cmd *cobra.Command, args []string) error {
 	watermarkRelativeSize, _ := cmd.Flags().GetFloat32("wm-relative-size")
 	watermarkShadow, _ := cmd.Flags().GetBool("watermark-shadow")
 	watermarkShadowColor := cmd.Flag("wm-shadow-color").Value.String()
+	watermarkOverlay := cmd.Flag("wm-overlay").Value.String()
+
+	var watermarkOverlayType avpipe.ImageType
+	watermarkOverlayTypeStr := cmd.Flag("wm-overlay-type").Value.String()
+	switch watermarkOverlayTypeStr {
+	case "png":
+		fallthrough
+	case "PNG":
+		watermarkOverlayType = avpipe.PngImage
+	case "jpg":
+		fallthrough
+	case "JPG":
+		watermarkOverlayType = avpipe.JpgImage
+	case "gif":
+		fallthrough
+	case "GIF":
+		watermarkOverlayType = avpipe.GifImage
+	default:
+		watermarkOverlayType = avpipe.UnknownImage
+	}
+	if len(watermarkOverlay) > 0 && watermarkOverlayType == avpipe.UnknownImage {
+		return fmt.Errorf("Watermark overlay type is not valid, can be 'png', 'jpg', 'gif'")
+	}
+
+	var overlayImage []byte
+	if len(watermarkOverlay) > 0 {
+		overlayImage, err = ioutil.ReadFile(watermarkOverlay)
+		if err != nil {
+			return err
+		}
+	}
 
 	txTypeStr := cmd.Flag("tx-type").Value.String()
 	if txTypeStr != "all" && txTypeStr != "video" && txTypeStr != "audio" {
@@ -415,11 +449,15 @@ func doTranscode(cmd *cobra.Command, args []string) error {
 		WatermarkFontColor:    watermarkFontColor,
 		WatermarkShadow:       watermarkShadow,
 		WatermarkShadowColor:  watermarkShadowColor,
+		WatermarkOverlay:      string(overlayImage),
+		WatermarkOverlayType:  watermarkOverlayType,
 		ForceKeyInt:           forceKeyInterval,
 		RcMaxRate:             rcMaxRate,
 		RcBufferSize:          4500000,
 		AudioIndex:            audioIndex,
 	}
+
+	params.WatermarkOverlayLen = len(params.WatermarkOverlay)
 
 	avpipe.InitIOHandler(&avcmdInputOpener{url: filename}, &avcmdOutputOpener{dir: dir})
 

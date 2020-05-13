@@ -147,8 +147,8 @@ typedef struct coderctx_t {
     AVStream            *stream[MAX_STREAMS];
     AVCodecParameters   *codec_parameters[MAX_STREAMS];
     AVCodecContext      *codec_context[MAX_STREAMS];
-    SwrContext          *resampler_context;              /* resample context for audio */
-    AVAudioFifo         *fifo;                           /* audio sampling fifo */
+    SwrContext          *resampler_context;             /* resample context for audio */
+    AVAudioFifo         *fifo;                          /* audio sampling fifo */
 
     int video_stream_index;
     int audio_stream_index;
@@ -200,6 +200,14 @@ typedef enum tx_type_t {
     tx_all
 } tx_type_t;
 
+/* handled image types in get_overlay_filter_string*/
+typedef enum image_type {
+    unknown_image,
+    png_image,
+    jpg_image,
+    gif_image
+} image_type;
+
 #define DRAW_TEXT_SHADOW_OFFSET     0.075
 
 typedef struct txparams_t {
@@ -235,13 +243,17 @@ typedef struct txparams_t {
 
     int     seekable;               // Default: 0 means not seekable. A non seekable stream with moov box in
                                     //          the end causes a lot of reads up to moov atom.
-    char    *watermark_text;        // Default: NULL or empty text means no watermark
-    char    *watermark_xloc;        // Default 0
-    char    *watermark_yloc;        // Default 0
-    float   watermark_relative_sz;  // Default 0
-    char    *watermark_font_color;  // black
-    int     watermark_shadow;       // Default 1, means shadow exist
-    char    *watermark_shadow_color;// Watermark shadow color
+    char        *watermark_text;        // Default: NULL or empty text means no watermark
+    char        *watermark_xloc;        // Default 0
+    char        *watermark_yloc;        // Default 0
+    float       watermark_relative_sz;  // Default 0
+    char        *watermark_font_color;  // black
+    int         watermark_shadow;       // Default 1, means shadow exist 
+    char        *overlay_filename;      // Overlay file name
+    char        *watermark_overlay;     // Overlay image buffer, default is NULL
+    image_type  watermark_overlay_type; // Overlay image type, default is png
+    int         watermark_overlay_len;  // Length of watermark_overlay if there is any
+    char        *watermark_shadow_color;// Watermark shadow color
 
     int     audio_index;            // Audio index(s) for mez making, may need to become an array of indexes
 } txparams_t;
@@ -393,26 +405,5 @@ avpipe_tx(
  */
 char *
 avpipe_version();
-
-/* handled image types in get_overlay_filter_string*/
-typedef enum e_image_type{
-    jpeg,
-    png,
-    gif
-}image_type;
-
-/**
- * @brief   formats a base64 encoded data url.
- *
- * @param   filt_buf            buffer large enough to receive the base64 encoded data url
- * @param   filt_buf_size       size of output buffer
- * @param   img_buf             input buffer containing binary image data
- * @param   img_buf_size        size of input buffer
- * @param   img_type            value from enum image_type
- *
- * @return  Returns 0 if transcoding is successful, otherwise -1.
- */
-int get_overlay_filter_string(char *filt_buf, int filt_buf_size, char *img_buf, int img_buf_size, int img_type);
-
 
 #endif
