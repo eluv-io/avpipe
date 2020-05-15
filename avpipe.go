@@ -748,7 +748,6 @@ func Tx(params *TxParams, url string, debugFrameLevel bool) int {
 
 	// same field order as avpipe_xc.h
 	cparams := &C.txparams_t{
-		// bypass_transcoding handled below
 		format:                 C.CString(params.Format),
 		start_time_ts:          C.int64_t(params.StartTimeTs),
 		skip_over_pts:          C.int64_t(params.SkipOverPts),
@@ -788,7 +787,7 @@ func Tx(params *TxParams, url string, debugFrameLevel bool) int {
 		audio_index:            C.int(params.AudioIndex),
 		bypass_transcoding:     C.int(0),
 		seekable:               C.int(0),
-		// seekable, bypass, and shadow handled below
+		// seekable, bypass_transcoding, and shadow handled below
 	}
 
 	if params.BypassTranscoding {
@@ -936,7 +935,6 @@ func TxInit(params *TxParams, url string, debugFrameLevel bool) (int32, error) {
 
 	// same field order as avpipe_xc.h
 	cparams := &C.txparams_t{
-		// bypass_transcoding handled below
 		format:                 C.CString(params.Format),
 		start_time_ts:          C.int64_t(params.StartTimeTs),
 		skip_over_pts:          C.int64_t(params.SkipOverPts),
@@ -977,7 +975,7 @@ func TxInit(params *TxParams, url string, debugFrameLevel bool) (int32, error) {
 		seekable:               C.int(0),
 
 		audio_index: C.int(params.AudioIndex),
-		// seekable, bypass, and shadow handled below
+		// seekable, bypass_transcoding, and shadow handled below
 	}
 
 	if params.BypassTranscoding {

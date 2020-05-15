@@ -526,9 +526,8 @@ tx_init(
     init_tx_module();
 
     connect_ffmpeg_log();
-    elv_logger_open(NULL, "avpipe", 10, 100*1024*1024, elv_log_file);
-
     set_handlers(&in_handlers, &out_handlers);
+
     ioctx_t *inctx = (ioctx_t *)calloc(1, sizeof(ioctx_t));
 
     if (in_handlers->avpipe_opener(filename, inctx) < 0) {
@@ -623,7 +622,6 @@ tx(
     //       av_log_set_level and elv_set_log_level are ignored
     //av_log_set_level(AV_LOG_DEBUG);
     connect_ffmpeg_log();
-    elv_logger_open(NULL, "avpipe", 10, 100*1024*1024, elv_log_file);
     //elv_set_log_level(elv_log_debug);
 
     set_handlers(&in_handlers, &out_handlers);
