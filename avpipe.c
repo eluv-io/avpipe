@@ -534,7 +534,7 @@ tx_init(
         goto end_tx_init;
     }
 
-    if (avpipe_init(&txctx, in_handlers, inctx, out_handlers, params) < 0) {
+    if (avpipe_init(&txctx, in_handlers, inctx, out_handlers, params, filename) < 0) {
         goto end_tx_init;
     }
 
@@ -632,7 +632,7 @@ tx(
         goto end_tx;
     }
 
-    if (avpipe_init(&txctx, in_handlers, inctx, out_handlers, params) < 0) {
+    if (avpipe_init(&txctx, in_handlers, inctx, out_handlers, params, filename) < 0) {
         rc = -1;
         goto end_tx;
     }

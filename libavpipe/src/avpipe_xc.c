@@ -2543,7 +2543,8 @@ avpipe_init(
     avpipe_io_handler_t *in_handlers,
     ioctx_t *inctx,
     avpipe_io_handler_t *out_handlers,
-    txparams_t *p)
+    txparams_t *p,
+    char *url)
 {
     txctx_t *p_txctx = (txctx_t *) calloc(1, sizeof(txctx_t));
     txparams_t *params;
@@ -2575,6 +2576,7 @@ avpipe_init(
     char buf[1024];
 
     sprintf(buf,
+        "url=%s "
         "version=%s "
         "bypass=%d "
         "tx_type=%s "
@@ -2603,6 +2605,7 @@ avpipe_init(
         "audio_index=%d "
         "wm_overlay_type=%d "
         "wm_overlay_len=%d",
+        url,
         avpipe_version(),
         params->bypass_transcoding, get_tx_type_name(params->tx_type),
         params->format, params->start_time_ts, params->start_pts, params->duration_ts, params->start_segment_str,

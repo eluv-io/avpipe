@@ -333,6 +333,7 @@ typedef struct out_tracker_t {
  *                          by the application before calling this function.
  * @param   out_handlers    A pointer to output handlers. Must be properly set up by the application.
  * @param   params          A pointer to the parameters for transcoding.
+ * @param   url             Points to input url or filename.
  *
  * @return  Returns 0 if the initialization of an avpipe txctx_t is successful, otherwise returns -1 on error.
  */
@@ -342,7 +343,8 @@ avpipe_init(
     avpipe_io_handler_t *in_handlers,
     ioctx_t *inctx,
     avpipe_io_handler_t *out_handlers,
-    txparams_t *params);
+    txparams_t *params,
+    char *url);
 
 /**
  * @brief   Frees the memory and other resources allocated by ffmpeg.
