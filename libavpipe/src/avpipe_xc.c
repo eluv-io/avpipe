@@ -1103,7 +1103,7 @@ should_skip_encoding(
      * Skipping an equal amount of both audio and video ensures they start encoding at approximately
      * the same time (generally less that one frame duration apart).
      */
-    const int64_t mpegts_skip_offset = 2; /* seoncds */
+    const int64_t mpegts_skip_offset = 10; /* seoncds */
     if (mpegts_skip_offset > 0 && decoder_context->is_mpegts && (!strcmp(p->format, "fmp4-segment"))) {
         int64_t time_base = decoder_context->stream[stream_index]->time_base.den;
         int64_t pts_offset = encoder_context->first_read_frame_pts;
@@ -1518,7 +1518,11 @@ transcode_audio_aac(
             filt_frame->pts = decoder_context->audio_output_pts;
             filt_frame->pkt_dts = filt_frame->pts;
 
-            if (decoder_context->is_mpegts && frame->pts - decoder_context->audio_input_prev_pts > frame->pkt_duration) {
+            // TODO this handles packet loss but not irregular PTS deltas that are not equal to pkt_duration
+            // If audio frames have irregular PTS the code will produce incorrect results - disabled by default
+            int fix_audio_gaps = 0;
+            if (fix_audio_gaps &&
+                (decoder_context->is_mpegts && frame->pts - decoder_context->audio_input_prev_pts > frame->pkt_duration)) {
                 /*
                  * float pkt_ratio = ((float)(encoder_context->codec_context[stream_index]->sample_rate * frame->pkt_duration)) /
                  *                    (((float) decoder_context->stream[stream_index]->time_base.den) * filt_frame->nb_samples);
@@ -1532,7 +1536,7 @@ transcode_audio_aac(
                  * After simplification we will have d as follows:
                  */
                 int64_t d = (frame->pts - decoder_context->audio_input_prev_pts) * (encoder_context->codec_context[stream_index]->time_base.den) /
-                            (decoder_context->stream[stream_index]->time_base.den);
+                    (decoder_context->stream[stream_index]->time_base.den);
                 decoder_context->pts_residue += calculate_pts_residue(d, output_frame_size);
                 d = (d/output_frame_size)*output_frame_size;
                 if (decoder_context->pts_residue >= output_frame_size) {
@@ -2181,8 +2185,8 @@ avpipe_tx(
             // Video packet
             dump_packet("VIDEO IN ", input_packet, debug_frame_level);
 
-            // Assert DTS is growing as expected (accommodate non integer frame duration)
-            if (last_dts + input_packet->duration + 1 < input_packet->dts &&
+            // Assert DTS is growing as expected (accommodate non integer and irregular frame duration)
+            if (last_dts + input_packet->duration * 1.5 < input_packet->dts &&
                 last_dts != 0 && input_packet->duration > 0) {
                 elv_log("Expected dts == last_dts + duration - last_dts=%" PRId64 " duration=%" PRId64 " dts=%" PRId64,
                 last_dts, input_packet->duration, input_packet->dts);
