@@ -2021,7 +2021,7 @@ get_filter_str(
         sprintf(*filter_str, "scale=%d:%d",
             encoder_context->codec_context[encoder_context->video_stream_index]->width,
             encoder_context->codec_context[encoder_context->video_stream_index]->height);
-            elv_dbg("FILTER scale=%s", filter_str);
+            elv_dbg("FILTER scale=%s", *filter_str);
     }
 
     return 0;
