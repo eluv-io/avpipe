@@ -893,13 +893,13 @@ main(
                     usage(argv[0], argv[i], EXIT_FAILURE);
                 }
             } else if (!strcmp(argv[i], "-crf")) {
-                p.crf_str = argv[i+1];
+                p.crf_str = strdup(argv[i+1]);
             } else if (strcmp(argv[i], "-crypt-iv") == 0) {
-                p.crypt_iv = argv[i+1];
+                p.crypt_iv = strdup(argv[i+1]);
             } else if (strcmp(argv[i], "-crypt-key") == 0) {
-                p.crypt_key = argv[i+1];
+                p.crypt_key = strdup(argv[i+1]);
             } else if (strcmp(argv[i], "-crypt-kid") == 0) {
-                p.crypt_kid = argv[i+1];
+                p.crypt_kid = strdup(argv[i+1]);
             } else if (strcmp(argv[i], "-crypt-scheme") == 0) {
                 if (strcmp(argv[i+1], "aes-128") == 0) {
                     p.crypt_scheme = crypt_aes128;
@@ -915,7 +915,7 @@ main(
                     usage(argv[0], argv[i], EXIT_FAILURE);
                 }
             } else if (strcmp(argv[i], "-crypt-url") == 0) {
-                p.crypt_key_url = argv[i+1];
+                p.crypt_key_url = strdup(argv[i+1]);
             } else {
                 usage(argv[0], argv[i], EXIT_FAILURE);
             }
@@ -928,7 +928,7 @@ main(
             } else if (strlen(argv[i]) > 2) {
                 usage(argv[0], argv[i], EXIT_FAILURE);
             } else {
-                p.dcodec = argv[i+1];
+                p.dcodec = strdup(argv[i+1]);
             }
             break;
         case 'e':
@@ -943,7 +943,7 @@ main(
             } else if (strlen(argv[i]) > 2) {
                 usage(argv[0], argv[i], EXIT_FAILURE);
             } else {
-                p.ecodec = argv[i+1];
+                p.ecodec = strdup(argv[i+1]);
             }
             break;
         case 'f':
@@ -953,17 +953,17 @@ main(
                 }
             } else if (!strcmp(argv[i], "-format")) {
                 if (strcmp(argv[i+1], "dash") == 0) {
-                    p.format = "dash";
+                    p.format = strdup("dash");
                 } else if (strcmp(argv[i+1], "hls") == 0) {
-                    p.format = "hls";
+                    p.format = strdup("hls");
                 } else if (strcmp(argv[i+1], "mp4") == 0) {
-                    p.format = "mp4";
+                    p.format = strdup("mp4");
                 } else if (strcmp(argv[i+1], "fmp4") == 0) {
-                    p.format = "fmp4";
+                    p.format = strdup("fmp4");
                 } else if (strcmp(argv[i+1], "segment") == 0) {
-                    p.format = "segment";
+                    p.format = strdup("segment");
                 } else if (strcmp(argv[i+1], "fmp4-segment") == 0) {
-                    p.format = "fmp4-segment";
+                    p.format = strdup("fmp4-segment");
                 } else {
                     usage(argv[0], argv[i], EXIT_FAILURE);
                 }
@@ -1012,13 +1012,13 @@ main(
                 if (sscanf(argv[i+1], "%"PRId64, &seg_duration) != 1) {
                     usage(argv[0], argv[i], EXIT_FAILURE);
                 }
-                p.seg_duration = argv[i+1];
+                p.seg_duration = strdup(argv[i+1]);
             } else if (!strcmp(argv[i], "-start-pts")) {
                 if (sscanf(argv[i+1], "%"PRId64, &p.start_pts) != 1) {
                     usage(argv[0], argv[i], EXIT_FAILURE);
                 }
             } else if (!strcmp(argv[i], "-start-segment")) {
-                p.start_segment_str = argv[i+1];
+                p.start_segment_str = strdup(argv[i+1]);
             } else if (!strcmp(argv[i], "-start-frag-index")) {
                 if (sscanf(argv[i+1], "%d", &p.start_fragment_index) != 1) {
                     usage(argv[0], argv[i], EXIT_FAILURE);
@@ -1040,7 +1040,7 @@ main(
                 if (!strcmp(argv[i+1], "audio")) {
                     // If audio encoder is not "a3c" then set the default to "aac"
                     if (strcmp(p.ecodec, "ac3"))
-                        p.ecodec = "aac";
+                        p.ecodec = strdup("aac");
                 }
             } else if (sscanf(argv[i+1], "%d", &n_threads) != 1) {
                 usage(argv[0], argv[i], EXIT_FAILURE);
@@ -1058,17 +1058,17 @@ main(
             break;
         case 'w':
             if (!strcmp(argv[i], "-wm-text")) {
-                p.watermark_text = argv[i+1];
+                p.watermark_text = strdup(argv[i+1]);
                 p.watermark_shadow = 1;
-                p.watermark_shadow_color = "white"; /* Default shadow color */
+                p.watermark_shadow_color = strdup("white"); /* Default shadow color */
             } else if (!strcmp(argv[i], "-wm-xloc")) {
-                p.watermark_xloc = argv[i+1];
+                p.watermark_xloc = strdup(argv[i+1]);
             } else if (!strcmp(argv[i], "-wm-yloc")) {
-                p.watermark_yloc = argv[i+1];
+                p.watermark_yloc = strdup(argv[i+1]);
             } else if (!strcmp(argv[i], "-wm-color")) {
-                p.watermark_font_color = argv[i+1];
+                p.watermark_font_color = strdup(argv[i+1]);
             } else if (!strcmp(argv[i], "-wm-overlay")) {
-                p.overlay_filename = argv[i+1];
+                p.overlay_filename = strdup(argv[i+1]);
             } else if (!strcmp(argv[i], "-wm-overlay-type")) {
                 p.watermark_overlay_type = get_image_type(argv[i+1]);
                 if (p.watermark_overlay_type == unknown_image) {
@@ -1088,7 +1088,7 @@ main(
                     p.watermark_shadow = wm_shadow;
                 }
             } else if (!strcmp(argv[i], "-wm-shadow-color")) {
-                p.watermark_shadow_color = argv[i+1];
+                p.watermark_shadow_color = strdup(argv[i+1]);
             } else {
                 usage(argv[0], argv[i], EXIT_FAILURE);
             }

@@ -2665,6 +2665,32 @@ avpipe_init_failed:
     return -1;
 }
 
+static void
+avpipe_free_params(
+    txctx_t *txctx)
+{
+    txparams_t *params = txctx->params;
+
+    free(params->format);
+    free(params->start_segment_str);
+    free(params->crf_str);
+    free(params->seg_duration);
+    free(params->ecodec);
+    free(params->dcodec);
+    free(params->crypt_iv);
+    free(params->crypt_key);
+    free(params->crypt_kid);
+    free(params->crypt_key_url);
+    free(params->watermark_text);
+    free(params->watermark_xloc);
+    free(params->watermark_yloc);
+    free(params->watermark_font_color);
+    free(params->watermark_shadow_color);
+    free(params->watermark_overlay);
+    free(params);
+    txctx->params = NULL;
+}
+
 int
 avpipe_fini(
     txctx_t **txctx)
@@ -2720,8 +2746,7 @@ avpipe_fini(
     }
 
     free((*txctx)->inctx);
-    free((*txctx)->params->watermark_overlay);
-    free((*txctx)->params);
+    avpipe_free_params(*txctx);
     free(*txctx);
     *txctx = NULL;
 
