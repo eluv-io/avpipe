@@ -178,44 +178,47 @@ func InitTranscode(cmdRoot *cobra.Command) error {
 
 	cmdRoot.AddCommand(cmdTranscode)
 
-	cmdTranscode.PersistentFlags().StringP("filename", "f", "", "(mandatory) filename to be transcoded")
-	cmdTranscode.PersistentFlags().BoolP("bypass", "b", false, "bypass transcoding")
-	cmdTranscode.PersistentFlags().Int32P("threads", "t", 1, "transcoding threads")
-	cmdTranscode.PersistentFlags().Int32P("audio-index", "", -1, "audio stream index (only for --tx-type audio)")
-	cmdTranscode.PersistentFlags().StringP("encoder", "e", "libx264", "encoder codec, default is 'libx264', can be: 'libx264', 'libx265', 'h264_nvenc', 'h264_videotoolbox'")
-	cmdTranscode.PersistentFlags().StringP("decoder", "d", "", "decoder codec, default is 'h264', can be: 'h264', 'h264_cuvid', 'jpeg2000', 'hevc'")
+	cmdTranscode.PersistentFlags().StringP("filename", "f", "", "(mandatory) filename to be transcoded.")
+	cmdTranscode.PersistentFlags().BoolP("bypass", "b", false, "bypass transcoding.")
+	cmdTranscode.PersistentFlags().Int32P("threads", "t", 1, "transcoding threads.")
+	cmdTranscode.PersistentFlags().Int32P("audio-index", "", -1, "audio stream index (only for --tx-type audio).")
+	cmdTranscode.PersistentFlags().StringP("encoder", "e", "libx264", "encoder codec, default is 'libx264', can be: 'libx264', 'libx265', 'h264_nvenc', 'h264_videotoolbox'.")
+	cmdTranscode.PersistentFlags().StringP("decoder", "d", "", "decoder codec, default is 'h264', can be: 'h264', 'h264_cuvid', 'jpeg2000', 'hevc'.")
 	cmdTranscode.PersistentFlags().StringP("format", "", "dash", "package format, can be 'dash', 'hls', 'mp4', 'fmp4', 'segment' or 'fmp4-segment'.")
 	cmdTranscode.PersistentFlags().Int32P("force-keyint", "", 0, "force IDR key frame in this interval.")
 	cmdTranscode.PersistentFlags().StringP("tx-type", "", "all", "transcoding type, can be 'all', 'video', or 'audio'.")
 	cmdTranscode.PersistentFlags().Int32P("crf", "", 23, "mutually exclusive with video-bitrate.")
 	cmdTranscode.PersistentFlags().Int64P("start-time-ts", "", 0, "")
-	cmdTranscode.PersistentFlags().Int64P("start-pts", "", 0, "starting PTS for output")
+	cmdTranscode.PersistentFlags().Int64P("start-pts", "", 0, "starting PTS for output.")
 	cmdTranscode.PersistentFlags().Int32P("sample-rate", "", -1, "For aac output sample rate is set to input sample rate and this parameter is ignored.")
 	cmdTranscode.PersistentFlags().Int32P("start-segment", "", 1, "start segment number >= 1.")
 	cmdTranscode.PersistentFlags().Int32P("start-frag-index", "", 1, "start fragment index >= 1.")
 	cmdTranscode.PersistentFlags().Int32P("video-bitrate", "", -1, "output video bitrate, mutually exclusive with crf.")
-	cmdTranscode.PersistentFlags().Int32P("audio-bitrate", "", 128000, "output audio bitrate")
-	cmdTranscode.PersistentFlags().Int32P("rc-max-rate", "", -1, "mandatory, positive integer")
-	cmdTranscode.PersistentFlags().Int32P("enc-height", "", -1, "default -1 means use source height")
-	cmdTranscode.PersistentFlags().Int32P("enc-width", "", -1, "default -1 means use source width")
-	cmdTranscode.PersistentFlags().Int64P("duration-ts", "", -1, "default -1 means entire stream")
-	cmdTranscode.PersistentFlags().Int64P("seg-duration-ts", "", 0, "(mandatory if format is not 'segment') segment duration time base (positive integer)")
-	cmdTranscode.PersistentFlags().StringP("seg-duration", "", "30", "(mandatory if format is 'segment') segment duration seconds (positive integer), default is 30")
-	cmdTranscode.PersistentFlags().Int32P("seg-duration-fr", "", 0, "(mandatory if format is not 'segment') segment duration frame (positive integer)")
-	cmdTranscode.PersistentFlags().String("crypt-iv", "", "128-bit AES IV, as 32 char hex")
-	cmdTranscode.PersistentFlags().String("crypt-key", "", "128-bit AES key, as 32 char hex")
-	cmdTranscode.PersistentFlags().String("crypt-kid", "", "16-byte key ID, as 32 char hex")
-	cmdTranscode.PersistentFlags().String("crypt-key-url", "", "specify a key URL in the manifest")
-	cmdTranscode.PersistentFlags().String("crypt-scheme", "none", "encryption scheme, default is 'none', can be: 'aes-128', 'cbc1', 'cbcs', 'cenc', 'cens'")
-	cmdTranscode.PersistentFlags().String("wm-text", "", "add text to the watermark display")
-	cmdTranscode.PersistentFlags().String("wm-xloc", "", "the xLoc of the watermark as specified by a fraction of width")
-	cmdTranscode.PersistentFlags().String("wm-yloc", "", "the yLoc of the watermark as specified by a fraction of height")
-	cmdTranscode.PersistentFlags().Float32("wm-relative-size", 0.05, "font/shadow relative size based on frame height")
-	cmdTranscode.PersistentFlags().String("wm-color", "black", "watermark font color")
-	cmdTranscode.PersistentFlags().BoolP("wm-shadow", "", true, "watermarking with shadow")
-	cmdTranscode.PersistentFlags().String("wm-shadow-color", "white", "watermark shadow color")
-	cmdTranscode.PersistentFlags().String("wm-overlay", "", "watermark overlay image file")
-	cmdTranscode.PersistentFlags().String("wm-overlay-type", "png", "watermark overlay image file type, can be 'png', 'jpg', 'gif'")
+	cmdTranscode.PersistentFlags().Int32P("audio-bitrate", "", 128000, "output audio bitrate.")
+	cmdTranscode.PersistentFlags().Int32P("rc-max-rate", "", -1, "mandatory, positive integer.")
+	cmdTranscode.PersistentFlags().Int32P("enc-height", "", -1, "default -1 means use source height.")
+	cmdTranscode.PersistentFlags().Int32P("enc-width", "", -1, "default -1 means use source width.")
+	cmdTranscode.PersistentFlags().Int64P("duration-ts", "", -1, "default -1 means entire stream.")
+	cmdTranscode.PersistentFlags().Int64P("seg-duration-ts", "", 0, "(mandatory if format is not 'segment') segment duration time base (positive integer).")
+	cmdTranscode.PersistentFlags().StringP("seg-duration", "", "30", "(mandatory if format is 'segment') segment duration seconds (positive integer), default is 30.")
+	cmdTranscode.PersistentFlags().Int32P("seg-duration-fr", "", 0, "(mandatory if format is not 'segment') segment duration frame (positive integer).")
+	cmdTranscode.PersistentFlags().String("crypt-iv", "", "128-bit AES IV, as 32 char hex.")
+	cmdTranscode.PersistentFlags().String("crypt-key", "", "128-bit AES key, as 32 char hex.")
+	cmdTranscode.PersistentFlags().String("crypt-kid", "", "16-byte key ID, as 32 char hex.")
+	cmdTranscode.PersistentFlags().String("crypt-key-url", "", "specify a key URL in the manifest.")
+	cmdTranscode.PersistentFlags().String("crypt-scheme", "none", "encryption scheme, default is 'none', can be: 'aes-128', 'cbc1', 'cbcs', 'cenc', 'cens'.")
+	cmdTranscode.PersistentFlags().String("wm-text", "", "add text to the watermark display.")
+	cmdTranscode.PersistentFlags().String("wm-xloc", "", "the xLoc of the watermark as specified by a fraction of width.")
+	cmdTranscode.PersistentFlags().String("wm-yloc", "", "the yLoc of the watermark as specified by a fraction of height.")
+	cmdTranscode.PersistentFlags().Float32("wm-relative-size", 0.05, "font/shadow relative size based on frame height.")
+	cmdTranscode.PersistentFlags().String("wm-color", "black", "watermark font color.")
+	cmdTranscode.PersistentFlags().BoolP("wm-shadow", "", true, "watermarking with shadow.")
+	cmdTranscode.PersistentFlags().String("wm-shadow-color", "white", "watermark shadow color.")
+	cmdTranscode.PersistentFlags().String("wm-overlay", "", "watermark overlay image file.")
+	cmdTranscode.PersistentFlags().String("wm-overlay-type", "png", "watermark overlay image file type, can be 'png', 'jpg', 'gif'.")
+	cmdTranscode.PersistentFlags().String("max-cll", "", "Maximum Content Light Level and Maximum Frame Average Light Level, only valid if encoder is libx265.")
+	cmdTranscode.PersistentFlags().String("master-display", "", "Master display, only valid if encoder is libx265.")
+	cmdTranscode.PersistentFlags().Int32("bitdepth", 8, "Refers to number of colors each pixel can have, can be 8, 10, 12.")
 
 	return nil
 }
@@ -308,6 +311,13 @@ func doTranscode(cmd *cobra.Command, args []string) error {
 		if len(encoder) == 0 {
 			encoder = "aac"
 		}
+	}
+
+	maxCLL := cmd.Flag("max-cll").Value.String()
+	masterDisplay := cmd.Flag("master-display").Value.String()
+	bitDepth, err := cmd.Flags().GetInt32("bitdepth")
+	if err != nil {
+		return fmt.Errorf("bitdepth is not valid, should be 8, 10, or 12")
 	}
 
 	crf, err := cmd.Flags().GetInt32("crf")
@@ -455,6 +465,9 @@ func doTranscode(cmd *cobra.Command, args []string) error {
 		RcMaxRate:             rcMaxRate,
 		RcBufferSize:          4500000,
 		AudioIndex:            audioIndex,
+		MaxCLL:                maxCLL,
+		MasterDisplay:         masterDisplay,
+		BitDepth:              bitDepth,
 	}
 
 	params.WatermarkOverlayLen = len(params.WatermarkOverlay)

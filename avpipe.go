@@ -149,6 +149,9 @@ type TxParams struct {
 	WatermarkOverlayLen   int         `json:"watermark_overlay_len,omitempty"`  // Length of overlay image
 	WatermarkOverlayType  ImageType   `json:"watermark_overlay_type,omitempty"` // Type of overlay image (i.e PngImage, ...)
 	AudioIndex            int32       `json:"audio_index,omitempty"`
+	MaxCLL                string      `json:"max_cll,omitempty"`
+	MasterDisplay         string      `json:"master_display,omitempty"`
+	BitDepth              int32       `json:"bitdepth,omitempty"`
 }
 
 type AVMediaType int
@@ -787,6 +790,9 @@ func Tx(params *TxParams, url string, debugFrameLevel bool) int {
 		audio_index:            C.int(params.AudioIndex),
 		bypass_transcoding:     C.int(0),
 		seekable:               C.int(0),
+		max_cll:                C.CString(params.MaxCLL),
+		master_display:         C.CString(params.MasterDisplay),
+		bitdepth:               C.int(params.BitDepth),
 		// seekable, bypass_transcoding, and shadow handled below
 	}
 
@@ -973,8 +979,10 @@ func TxInit(params *TxParams, url string, debugFrameLevel bool) (int32, error) {
 		watermark_overlay_type: C.image_type(params.WatermarkOverlayType),
 		bypass_transcoding:     C.int(0),
 		seekable:               C.int(0),
-
-		audio_index: C.int(params.AudioIndex),
+		audio_index:            C.int(params.AudioIndex),
+		max_cll:                C.CString(params.MaxCLL),
+		master_display:         C.CString(params.MasterDisplay),
+		bitdepth:               C.int(params.BitDepth),
 		// seekable, bypass_transcoding, and shadow handled below
 	}
 

@@ -441,8 +441,9 @@ set_encoder_options(
         // If I set faststart in the flags then ffmpeg generates some zero size files, which I need to dig into it more (RM).
         // av_opt_set(encoder_context->format_context->priv_data, "segment_format_options", "movflags=faststart", 0);
         // So lets use flag_every_frame option instead.
-        if (!strcmp(params->format, "fmp4-segment"))
+        if (!strcmp(params->format, "fmp4-segment")) {
             av_opt_set(encoder_context->format_context->priv_data, "segment_format_options", "movflags=frag_every_frame", 0);
+        }
     }
 }
 
@@ -537,6 +538,15 @@ set_h265_params(
      */
     encoder_codec_context->profile = FF_PROFILE_HEVC_MAIN;
 
+    /* Set max_cll and master_display meta data for HDR content */
+    if (params->max_cll && params->max_cll[0] != '\0')
+        av_opt_set(encoder_codec_context->priv_data, "max-cll", params->max_cll, 0);
+    if (params->master_display && params->master_display[0] != '\0')
+        av_opt_set(encoder_codec_context->priv_data, "master-display", params->master_display, 0);
+
+    /* Set the number of bframes to 0 and avoid having bframes */
+    av_opt_set_int(encoder_codec_context->priv_data, "bframes", 0, 0);
+
     /*
      * These are set according to
      * https://en.wikipedia.org/wiki/High_Efficiency_Video_Coding
@@ -619,6 +629,30 @@ set_nvidia_params(
      * sprintf(level, "%d.", 15);
      * av_opt_set(encoder_codec_context->priv_data, "cq", level, 0);
      */
+}
+
+static int
+set_pixel_fmt(
+    AVCodecContext *encoder_codec_context,
+    txparams_t *params)
+{
+    /* Set pix_fmt to AV_PIX_FMT_YUV422P if encoder is h265 */
+    switch (params->bitdepth) {
+    case 8:
+        encoder_codec_context->pix_fmt = AV_PIX_FMT_YUV420P;
+        break;
+    case 10:
+        encoder_codec_context->pix_fmt = AV_PIX_FMT_YUV422P;
+        break;
+    case 12:
+        encoder_codec_context->pix_fmt = AV_PIX_FMT_YUV444P;
+        break;
+    default:
+        elv_log("Invalid bitdepth=%d", params->bitdepth);
+        return -1;
+    }
+
+    return 0;
 }
 
 static int
@@ -743,7 +777,8 @@ prepare_video_encoder(
         /* otherwise set encoder pixel format to AV_PIX_FMT_YUV420P. */
         encoder_codec_context->pix_fmt = AV_PIX_FMT_YUV420P;
 #endif
-    encoder_codec_context->pix_fmt = AV_PIX_FMT_YUV420P;
+    if (set_pixel_fmt(encoder_codec_context, params) < 0)
+        return -1;
 
     if (!strcmp(params->ecodec, "h264_nvenc"))
         /* Set NVIDIA specific params if the encoder is NVIDIA */

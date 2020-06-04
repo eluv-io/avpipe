@@ -255,7 +255,10 @@ typedef struct txparams_t {
     int         watermark_overlay_len;  // Length of watermark_overlay if there is any
     char        *watermark_shadow_color;// Watermark shadow color
 
-    int     audio_index;            // Audio index(s) for mez making, may need to become an array of indexes
+    int         audio_index;            // Audio index(s) for mez making, may need to become an array of indexes
+    int         bitdepth;               // Can be 8, 10, 12
+    char        *max_cll;               // Maximum Content Light Level (HDR only)
+    char        *master_display;        // Master display (HDR only)
 } txparams_t;
 
 #define MAX_CODEC_NAME  256

@@ -741,6 +741,7 @@ usage(
         "Usage: %s <params>\n"
         "\t-audio-bitrate :     (optional) Default: 128000\n"
         "\t-audio-index :       (optional) Default: the index of last audio stream\n"
+        "\t-bitdepth :          (optional) bitdepth of color space. Default is 8, can be 8, 10, or 12.\n"
         "\t-bypass :            (optional) bypass transcoding. Default is 0, must be 0 or 1\n"
         "\t-command :           (optional) directing command of etx, can be \"transcode\" or \"probe\" (default is transcode).\n"
         "\t-crf :               (optional) mutually exclusive with video-bitrate. Default: 23\n"
@@ -763,6 +764,9 @@ usage(
         "\t                                Using \"fmp4-segment\" format produces self contained mp4 segments with continious pts.\n"
         "\t                                Using \"fmp4-segment\" generates segments that are appropriate for live streaming.\n"
         "\t-force-keyint :      (optional) force IDR key frame in this interval.\n"
+        "\t-master-display :    (optional) Master display, only valid if encoder is libx265.\n"
+        "\t-max-cll :           (optional) Maximum Content Light Level and Maximum Frame Average Light Level, only valid if encoder is libx265.\n"
+        "\t                                This parameter is a comma separated of max-cll and max-fall (i.e \"1514,172\").\n"
         "\t-r :                 (optional) number of repeats. Default is 1 repeat, must be bigger than 1\n"
         "\t-rc-buffer-size :    (optional)\n"
         "\t-rc-max-rate :       (optional)\n"
@@ -821,24 +825,24 @@ main(
     txparams_t p = {
         .audio_bitrate = 128000,            /* Default bitrate */
         .audio_index = -1,                  /* Source audio index */
-        .crf_str = "23",                    /* 1 best -> 23 standard middle -> 52 poor */
+        .crf_str = strdup("23"),            /* 1 best -> 23 standard middle -> 52 poor */
         .crypt_iv = NULL,
         .crypt_key = NULL,
         .crypt_key_url = NULL,
         .crypt_kid = NULL,
         .crypt_scheme = crypt_none,
-        .dcodec = "",
+        .dcodec = strdup(""),
         .duration_ts = -1,                  /* -1 means entire input stream, same units as input stream */
-        .ecodec = "libx264",
+        .ecodec = strdup("libx264"),
         .enc_height = -1,                   /* -1 means use source height, other values 2160, 1080, 720 */
         .enc_width = -1,                    /* -1 means use source width, other values 3840, 1920, 1280 */
-        .format = "dash",
+        .format = strdup("dash"),
         .rc_buffer_size = 4500000,          /* TODO - default? */
         .rc_max_rate = 6700000,             /* TODO - default? */
         .sample_rate = -1,                  /* Audio sampling rate 44100 */
         .seg_duration_ts = -1,              /* input argument, same units as input stream PTS */
         .start_pts = 0,
-        .start_segment_str = "1",           /* 1-based */
+        .start_segment_str = strdup("1"),   /* 1-based */
         .start_time_ts = 0,                 /* same units as input stream PTS */
         .start_fragment_index = 0,          /* Default is zero */
         .video_bitrate = -1,                /* not used if using CRF */
@@ -850,7 +854,10 @@ main(
         .overlay_filename = NULL,
         .watermark_overlay = NULL,
         .watermark_overlay_len = 0,
-        .watermark_overlay_type = png_image
+        .watermark_overlay_type = png_image,
+        .max_cll = NULL,
+        .master_display = NULL,
+        .bitdepth = 8
     };
 
     i = 1;
@@ -881,6 +888,10 @@ main(
                     usage(argv[0], argv[i], EXIT_FAILURE);
                 } else {
                     p.bypass_transcoding = bypass_transcoding;
+                }
+            } else if (!strcmp(argv[i], "-bitdepth")) { 
+                if (sscanf(argv[i+1], "%d", &p.bitdepth) != 1) {
+                    usage(argv[0], argv[i], EXIT_FAILURE);
                 }
             } else {
                 usage(argv[0], argv[i], EXIT_FAILURE);
@@ -971,6 +982,15 @@ main(
                 usage(argv[0], argv[i], EXIT_FAILURE);
             } else {
                 filename = argv[i+1];
+            }
+            break;
+        case 'm':
+            if (!strcmp(argv[i], "-master-display")) {
+                p.master_display = strdup(argv[i+1]);
+            } else if (!strcmp(argv[i], "-max-cll")) {
+                p.max_cll = strdup(argv[i+1]);
+            } else {
+                usage(argv[0], argv[i], EXIT_FAILURE);
             }
             break;
         case 'r':
