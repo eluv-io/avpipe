@@ -642,7 +642,7 @@ set_pixel_fmt(
         encoder_codec_context->pix_fmt = AV_PIX_FMT_YUV420P;
         break;
     case 10:
-        encoder_codec_context->pix_fmt = AV_PIX_FMT_YUV422P;
+        encoder_codec_context->pix_fmt = AV_PIX_FMT_YUV422P10LE;
         break;
     case 12:
         encoder_codec_context->pix_fmt = AV_PIX_FMT_YUV444P;
