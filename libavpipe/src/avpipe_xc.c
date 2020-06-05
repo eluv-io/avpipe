@@ -636,16 +636,17 @@ set_pixel_fmt(
     AVCodecContext *encoder_codec_context,
     txparams_t *params)
 {
-    /* Set pix_fmt to AV_PIX_FMT_YUV422P if encoder is h265 */
     switch (params->bitdepth) {
     case 8:
         encoder_codec_context->pix_fmt = AV_PIX_FMT_YUV420P;
         break;
     case 10:
+        /* AV_PIX_FMT_YUV422P10LE: 20bpp, (1 Cr & Cb sample per 2x1 Y samples), little-endian */
         encoder_codec_context->pix_fmt = AV_PIX_FMT_YUV422P10LE;
         break;
     case 12:
-        encoder_codec_context->pix_fmt = AV_PIX_FMT_YUV444P;
+        /* AV_PIX_FMT_YUV422P12LE: 24bpp, (1 Cr & Cb sample per 2x1 Y samples), little-endian */
+        encoder_codec_context->pix_fmt = AV_PIX_FMT_YUV422P12LE;
         break;
     default:
         elv_err("Invalid bitdepth=%d", params->bitdepth);
@@ -2575,6 +2576,39 @@ avpipe_probe_end:
     return rc;
 }
 
+static int
+check_params(
+    txparams_t *params)
+{
+    // By default transcode 'everything'
+    if (params->tx_type == tx_none) {
+        params->tx_type = tx_all;
+    }
+
+    if (params->start_pts < 0) {
+        elv_err("Start PTS can not be negative");
+        return -1;
+    }
+
+    if (params->watermark_text != NULL && (strlen(params->watermark_text) > (WATERMARK_STRING_SZ-1))){
+        elv_err("Watermark too large");
+        return -1;
+    }
+
+    /* Infer rc parameters */
+    if (params->video_bitrate > 0) {
+        params->rc_max_rate = params->video_bitrate * 1;
+        params->rc_buffer_size = params->video_bitrate;
+    }
+
+    if (params->bitdepth == 0) {
+        params->bitdepth = 8;
+        elv_log("Set bitdepth=%d", params->bitdepth);
+    }
+
+    return 0;
+}
+
 // TODO: properly validate all params
 int
 avpipe_init(
@@ -2659,26 +2693,8 @@ avpipe_init(
         params->max_cll ? params->max_cll : "", params->master_display ? params->master_display : "");
     elv_log("AVPIPE TXPARAMS %s", buf);
 
-    // By default transcode 'everything'
-    if (params->tx_type == tx_none) {
-        params->tx_type = tx_all;
-    }
-
-    if (params->start_pts < 0) {
-        elv_err("Start PTS can not be negative");
+    if (check_params(params) < 0)
         goto avpipe_init_failed;
-    }
-
-    if (params->watermark_text != NULL && (strlen(params->watermark_text) > (WATERMARK_STRING_SZ-1))){
-        elv_err("Watermark too large");
-        goto avpipe_init_failed;
-    }
-
-    /* Infer rc parameters */
-    if (params->video_bitrate > 0) {
-        params->rc_max_rate = params->video_bitrate * 1;
-        params->rc_buffer_size = params->video_bitrate;
-    }
 
     if (prepare_decoder(&p_txctx->decoder_ctx, in_handlers, inctx, params, params->seekable)) {
         elv_err("Failure in preparing decoder");
