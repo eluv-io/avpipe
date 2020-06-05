@@ -648,7 +648,7 @@ set_pixel_fmt(
         encoder_codec_context->pix_fmt = AV_PIX_FMT_YUV444P;
         break;
     default:
-        elv_log("Invalid bitdepth=%d", params->bitdepth);
+        elv_err("Invalid bitdepth=%d", params->bitdepth);
         return -1;
     }
 
@@ -2643,7 +2643,10 @@ avpipe_init(
         "crypt_scheme=%d "
         "audio_index=%d "
         "wm_overlay_type=%d "
-        "wm_overlay_len=%d",
+        "wm_overlay_len=%d "
+        "bitdepth=%d "
+        "max_cll=\"%s\" "
+        "master_display=\"%s\"",
         url,
         avpipe_version(),
         params->bypass_transcoding, get_tx_type_name(params->tx_type),
@@ -2652,7 +2655,8 @@ avpipe_init(
         params->rc_max_rate, params->rc_buffer_size,
         params->seg_duration_ts, params->seg_duration, params->ecodec, params->dcodec, params->enc_height, params->enc_width,
         params->crypt_iv, params->crypt_key, params->crypt_kid, params->crypt_key_url, params->crypt_scheme, params->audio_index,
-        params->watermark_overlay_type, params->watermark_overlay_len);
+        params->watermark_overlay_type, params->watermark_overlay_len, params->bitdepth,
+        params->max_cll ? params->max_cll : "", params->master_display ? params->master_display : "");
     elv_log("AVPIPE TXPARAMS %s", buf);
 
     // By default transcode 'everything'
