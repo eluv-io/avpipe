@@ -720,6 +720,11 @@ prepare_video_encoder(
         /* The 'crf' option may be overriden by rate control options - 'crf_max' is used as a safety net */
         av_opt_set(encoder_codec_context->priv_data, "crf", params->crf_str, AV_OPT_FLAG_ENCODING_PARAM | AV_OPT_SEARCH_CHILDREN);
         // av_opt_set(encoder_codec_context->priv_data, "crf_max", params->crf_str, AV_OPT_FLAG_ENCODING_PARAM | AV_OPT_SEARCH_CHILDREN);
+        if (params->preset && strlen(params->preset) > 0 &&
+            (!strcmp(params->format, "fmp4-segment") || !strcmp(params->format, "fmp4"))) {
+            av_opt_set(encoder_codec_context->priv_data, "preset", params->preset, AV_OPT_FLAG_ENCODING_PARAM | AV_OPT_SEARCH_CHILDREN);
+            
+        }
     }
 
     if (!strcmp(params->format, "fmp4-segment") || !strcmp(params->format, "fmp4")) {
@@ -2662,6 +2667,7 @@ avpipe_init(
         "audio_bitrate=%d "
         "sample_rate=%d "
         "crf_str=%s "
+        "preset=%s "
         "rc_max_rate=%d "
         "rc_buffer_size=%d "
         "seg_duration_ts=%"PRId64" "
@@ -2685,7 +2691,7 @@ avpipe_init(
         avpipe_version(),
         params->bypass_transcoding, get_tx_type_name(params->tx_type),
         params->format, params->start_time_ts, params->start_pts, params->duration_ts, params->start_segment_str,
-        params->video_bitrate, params->audio_bitrate, params->sample_rate, params->crf_str,
+        params->video_bitrate, params->audio_bitrate, params->sample_rate, params->crf_str, params->preset,
         params->rc_max_rate, params->rc_buffer_size,
         params->seg_duration_ts, params->seg_duration, params->ecodec, params->dcodec, params->enc_height, params->enc_width,
         params->crypt_iv, params->crypt_key, params->crypt_kid, params->crypt_key_url, params->crypt_scheme, params->audio_index,
@@ -2729,6 +2735,7 @@ avpipe_free_params(
     free(params->format);
     free(params->start_segment_str);
     free(params->crf_str);
+    free(params->preset);
     free(params->seg_duration);
     free(params->ecodec);
     free(params->dcodec);

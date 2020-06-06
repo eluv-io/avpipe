@@ -222,6 +222,7 @@ typedef struct txparams_t {
     int     audio_bitrate;
     int     sample_rate;            // Audio sampling rate
     char    *crf_str;
+    char    *preset;                // Sets encoding speed to compression ratio
     int     rc_max_rate;            // Rate control - max rate
     int     rc_buffer_size;         // Rate control - buffer size
     int64_t seg_duration_ts;        // In ts units. It is used for transcoding and producing dash mp4 files

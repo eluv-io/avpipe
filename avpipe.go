@@ -123,6 +123,7 @@ type TxParams struct {
 	RcMaxRate             int32       `json:"rc_max_rate,omitempty"`
 	RcBufferSize          int32       `json:"rc_buffer_size,omitempty"`
 	CrfStr                string      `json:"crf_str,omitempty"`
+	Preset                string      `json:"preset,omitempty"`
 	SegDurationTs         int64       `json:"seg_duration_ts,omitempty"`
 	SegDuration           string      `json:"seg_duration,omitempty"`
 	StartFragmentIndex    int32       `json:"start_fragment_index,omitempty"`
@@ -761,6 +762,7 @@ func Tx(params *TxParams, url string, debugFrameLevel bool) int {
 		audio_bitrate:          C.int(params.AudioBitrate),
 		sample_rate:            C.int(params.SampleRate),
 		crf_str:                C.CString(params.CrfStr),
+		preset:                 C.CString(params.Preset),
 		rc_max_rate:            C.int(params.RcMaxRate),
 		rc_buffer_size:         C.int(params.RcBufferSize),
 		seg_duration_ts:        C.int64_t(params.SegDurationTs),

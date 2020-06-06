@@ -188,6 +188,7 @@ func InitTranscode(cmdRoot *cobra.Command) error {
 	cmdTranscode.PersistentFlags().Int32P("force-keyint", "", 0, "force IDR key frame in this interval.")
 	cmdTranscode.PersistentFlags().StringP("tx-type", "", "all", "transcoding type, can be 'all', 'video', or 'audio'.")
 	cmdTranscode.PersistentFlags().Int32P("crf", "", 23, "mutually exclusive with video-bitrate.")
+	cmdTranscode.PersistentFlags().StringP("preset", "", "medium", "Preset string to determine compression speed, can be: 'ultrafast', 'superfast', 'veryfast', 'faster', 'fast', 'medium', 'slow', 'slower', 'veryslow'")
 	cmdTranscode.PersistentFlags().Int64P("start-time-ts", "", 0, "")
 	cmdTranscode.PersistentFlags().Int64P("start-pts", "", 0, "starting PTS for output.")
 	cmdTranscode.PersistentFlags().Int32P("sample-rate", "", -1, "For aac output sample rate is set to input sample rate and this parameter is ignored.")
@@ -325,6 +326,12 @@ func doTranscode(cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("crf is not valid, should be in 0..51")
 	}
 
+	preset := cmd.Flag("preset").Value.String()
+	if preset != "ultrafast" && preset != "superfast" && preset != "veryfast" && preset != "faster" &&
+		preset != "fast" && preset != "medium" && preset != "slow" && preset != "slower" && preset != "veryslow" {
+		return fmt.Errorf("preset is not valid, should be one of: 'ultrafast', 'superfast', 'veryfast', 'faster', 'fast', 'medium', 'slow', 'slower', 'veryslow'")
+	}
+
 	startTimeTs, err := cmd.Flags().GetInt64("start-time-ts")
 	if err != nil {
 		return fmt.Errorf("start-time-ts is not valid")
@@ -440,6 +447,7 @@ func doTranscode(cmd *cobra.Command, args []string) error {
 		AudioBitrate:          audioBitrate,
 		SampleRate:            sampleRate,
 		CrfStr:                crfStr,
+		Preset:                preset,
 		SegDurationTs:         segDurationTs,
 		SegDuration:           segDuration,
 		Ecodec:                encoder,

@@ -767,6 +767,8 @@ usage(
         "\t-master-display :    (optional) Master display, only valid if encoder is libx265.\n"
         "\t-max-cll :           (optional) Maximum Content Light Level and Maximum Frame Average Light Level, only valid if encoder is libx265.\n"
         "\t                                This parameter is a comma separated of max-cll and max-fall (i.e \"1514,172\").\n"
+        "\t-preset :            (optional) Preset string to determine compression speed. Default is \"medium\". Valid values are: \"ultrafast\", \"superfast\",\n"
+        "\t                                \"veryfast\", \"faster\", \"fast\", \"medium\", \"slow\", \"slower\", \"veryslow\".\n"
         "\t-r :                 (optional) number of repeats. Default is 1 repeat, must be bigger than 1\n"
         "\t-rc-buffer-size :    (optional)\n"
         "\t-rc-max-rate :       (optional)\n"
@@ -826,6 +828,7 @@ main(
         .audio_bitrate = 128000,            /* Default bitrate */
         .audio_index = -1,                  /* Source audio index */
         .crf_str = strdup("23"),            /* 1 best -> 23 standard middle -> 52 poor */
+        .preset = strdup("medium"),
         .crypt_iv = NULL,
         .crypt_key = NULL,
         .crypt_key_url = NULL,
@@ -989,6 +992,13 @@ main(
                 p.master_display = strdup(argv[i+1]);
             } else if (!strcmp(argv[i], "-max-cll")) {
                 p.max_cll = strdup(argv[i+1]);
+            } else {
+                usage(argv[0], argv[i], EXIT_FAILURE);
+            }
+            break;
+        case 'p':
+            if (!strcmp(argv[i], "-preset")) {
+                p.preset = strdup(argv[i+1]);
             } else {
                 usage(argv[0], argv[i], EXIT_FAILURE);
             }
