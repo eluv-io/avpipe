@@ -538,8 +538,10 @@ set_h265_params(
      */
     if (params->bitdepth == 8)
         av_opt_set(encoder_codec_context->priv_data, "profile", "main", 0);
-    else
+    else {
         av_opt_set(encoder_codec_context->priv_data, "profile", "main10", 0);
+        av_opt_set(encoder_codec_context->priv_data, "x265-params", "hdr-opt=1:repeat-headers=1:colorprim=bt2020:transfer=smpte2084:colormatrix=bt2020nc", 0);
+    }
 
     /* Set max_cll and master_display meta data for HDR content */
     if (params->max_cll && params->max_cll[0] != '\0')
