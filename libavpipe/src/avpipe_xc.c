@@ -534,9 +534,12 @@ set_h265_params(
     /*
      * The Main profile allows for a bit depth of 8-bits per sample with 4:2:0 chroma sampling,
      * which is the most common type of video used with consumer devices
-     * PENDING(RM) do we need profiles higher that MAIN for HEVC?
+     * For HDR10 we need MAIN 10 that supports 10 bit profile.
      */
-    encoder_codec_context->profile = FF_PROFILE_HEVC_MAIN;
+    if (params->bitdepth == 8)
+        av_opt_set(encoder_codec_context->priv_data, "profile", "main", 0);
+    else
+        av_opt_set(encoder_codec_context->priv_data, "profile", "main10", 0);
 
     /* Set max_cll and master_display meta data for HDR content */
     if (params->max_cll && params->max_cll[0] != '\0')
@@ -636,13 +639,16 @@ set_pixel_fmt(
     AVCodecContext *encoder_codec_context,
     txparams_t *params)
 {
+    /* Using the spec in https://en.wikipedia.org/wiki/High_Efficiency_Video_Coding */
     switch (params->bitdepth) {
     case 8:
         encoder_codec_context->pix_fmt = AV_PIX_FMT_YUV420P;
         break;
     case 10:
-        /* AV_PIX_FMT_YUV422P10LE: 20bpp, (1 Cr & Cb sample per 2x1 Y samples), little-endian */
-        encoder_codec_context->pix_fmt = AV_PIX_FMT_YUV422P10LE;
+        /* AV_PIX_FMT_YUV420P10LE: 15bpp, (1 Cr & Cb sample per 2x2 Y samples), little-endian.
+         * If encoder is h265 then AV_PIX_FMT_YUV420P10LE matches with MAIN10 profile (V1).
+         */
+        encoder_codec_context->pix_fmt = AV_PIX_FMT_YUV420P10LE;
         break;
     case 12:
         /* AV_PIX_FMT_YUV422P12LE: 24bpp, (1 Cr & Cb sample per 2x1 Y samples), little-endian */
@@ -720,11 +726,11 @@ prepare_video_encoder(
         /* The 'crf' option may be overriden by rate control options - 'crf_max' is used as a safety net */
         av_opt_set(encoder_codec_context->priv_data, "crf", params->crf_str, AV_OPT_FLAG_ENCODING_PARAM | AV_OPT_SEARCH_CHILDREN);
         // av_opt_set(encoder_codec_context->priv_data, "crf_max", params->crf_str, AV_OPT_FLAG_ENCODING_PARAM | AV_OPT_SEARCH_CHILDREN);
-        if (params->preset && strlen(params->preset) > 0 &&
-            (!strcmp(params->format, "fmp4-segment") || !strcmp(params->format, "fmp4"))) {
-            av_opt_set(encoder_codec_context->priv_data, "preset", params->preset, AV_OPT_FLAG_ENCODING_PARAM | AV_OPT_SEARCH_CHILDREN);
-            
-        }
+    }
+
+    if (params->preset && strlen(params->preset) > 0 &&
+        (!strcmp(params->format, "fmp4-segment") || !strcmp(params->format, "fmp4"))) {
+        av_opt_set(encoder_codec_context->priv_data, "preset", params->preset, AV_OPT_FLAG_ENCODING_PARAM | AV_OPT_SEARCH_CHILDREN);
     }
 
     if (!strcmp(params->format, "fmp4-segment") || !strcmp(params->format, "fmp4")) {
