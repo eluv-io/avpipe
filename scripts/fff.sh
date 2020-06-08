@@ -50,50 +50,50 @@ case $arg in
     ;;
 
     --dump-headers)
-    check_filename $2
-    $FFMPEG_BIN/ffmpeg -i $2 -c copy -bsf:v trace_headers -f null -
+    check_filename "$2"
+    $FFMPEG_BIN/ffmpeg -i "$2" -c copy -bsf:v trace_headers -f null -
     shift
     shift
     ;;
 
     --dump-streams)
-    check_filename $2
-    $FFMPEG_BIN/ffprobe -i $2 -show_streams
+    check_filename "$2"
+    $FFMPEG_BIN/ffprobe -i "$2" -show_streams
     shift
     shift
     ;;
 
     --dump-streams-json)
-    check_filename $2
-    $FFMPEG_BIN/ffprobe -v quiet -print_format json -show_format -show_streams $2
+    check_filename "$2"
+    $FFMPEG_BIN/ffprobe -v quiet -print_format json -show_format -show_streams "$2"
     shift
     shift
     ;;
 
     --dump-frames)
-    check_stream_filename $2 $3
-    $FFMPEG_BIN/ffprobe -hide_banner -show_frames -select_streams $2 -print_format json $3
+    check_stream_filename "$2" "$3"
+    $FFMPEG_BIN/ffprobe -hide_banner -show_frames -select_streams "$2" -print_format json "$3"
     shift
     shift
     ;;
 
     --dump-box)
-    check_filename $2
-    mp4dump $2
+    check_filename "$2"
+    mp4dump "$2"
     shift
     shift
     ;;
 
     --dump-tracks)
-    check_filename $2
-    mp4info $2
+    check_filename "$2"
+    mp4info "$2"
     shift
     shift
     ;;
 
     --dump-media)
-    check_filename $2
-    mediainfo $2
+    check_filename "$2"
+    mediainfo "$2"
     shift
     shift
     ;;
