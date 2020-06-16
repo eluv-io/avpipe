@@ -11,13 +11,15 @@ dump_frame(
     char *msg,
     int num,
     AVFrame *frame,
-    int debug_frame_level);
+    int debug_frame_level,
+    int tx_type);
 
 void
 dump_packet(
     const char *msg,
     AVPacket *p,
-    int debug_frame_level);
+    int debug_frame_level,
+    int tx_type);
 
 void
 dump_decoder(
@@ -25,7 +27,8 @@ dump_decoder(
 
 void
 dump_encoder(
-    coderctx_t *d);
+    coderctx_t *d,
+    txparams_t *params);
 
 void
 dump_codec_context(

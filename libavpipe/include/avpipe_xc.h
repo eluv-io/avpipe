@@ -172,16 +172,20 @@ typedef struct coderctx_t {
     int64_t pts;                        /* Decoder/encoder pts */
     int64_t video_input_start_pts;      /* In case video input stream starts at PTS > 0 */
     int64_t audio_input_start_pts;      /* In case audio input stream starts at PTS > 0 */
+    int64_t first_decoding_frame_pts;   /* PTS of first frame read from the decoder */
     int64_t first_encoding_frame_pts;   /* PTS of first frame sent to the encoder */
     int64_t first_read_frame_pts;       /* PTS of first frame read - which might not be decodable */
     int64_t audio_input_prev_pts;       /* Previous pts for audio input */
     int64_t duration;                   /* Duration/pts of original frame */
+    int64_t first_key_frame_pts;        /* First video key frame pts, used to synchronize audio and video in UDP live streams */
     int     pts_residue;                /* Residue of pts lost in output */
 
-    int     is_mpegts;                  /* set to 1 if input format name is "mpegts" */
+    int     is_mpegts;                  /* Set to 1 if input format name is "mpegts" */
+    int     mpegts_synced;              /* will be set to 1 if audio and video are synced */
+    int     frame_duration;             /* Will be > 0 if parameter set_equal_fduration is set and doing mez making */
 
-    int             cancelled;
-    int             stopped;
+    int     cancelled;
+    int     stopped;
 } coderctx_t;
 
 typedef enum crypt_scheme_t {
@@ -230,6 +234,7 @@ typedef struct txparams_t {
     int     seg_duration_fr;
     int     start_fragment_index;
     int     force_keyint;           // Force a key (IDR) frame at this interval
+    int     force_equal_fduration;  // Force all frames to have equal frame duration 
     char    *ecodec;                // Video/audio encoder
     char    *dcodec;                // Video/audio decoder
     int     enc_height;
@@ -257,6 +262,8 @@ typedef struct txparams_t {
     char        *watermark_shadow_color;// Watermark shadow color
 
     int         audio_index;            // Audio index(s) for mez making, may need to become an array of indexes
+    int         audio_fill_gap;         // Audio only, fills the gap if there is a jump in PTS
+    int         sync_audio_to_iframe;   // mpegts only, default is 0
     int         bitdepth;               // Can be 8, 10, 12
     char        *max_cll;               // Maximum Content Light Level (HDR only)
     char        *master_display;        // Master display (HDR only)

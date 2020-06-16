@@ -182,10 +182,13 @@ func InitTranscode(cmdRoot *cobra.Command) error {
 	cmdTranscode.PersistentFlags().BoolP("bypass", "b", false, "bypass transcoding.")
 	cmdTranscode.PersistentFlags().Int32P("threads", "t", 1, "transcoding threads.")
 	cmdTranscode.PersistentFlags().Int32P("audio-index", "", -1, "audio stream index (only for --tx-type audio).")
+	cmdTranscode.PersistentFlags().BoolP("audio-fill-gap", "", false, "fill audio gap when encoder is aac and decoder is mpegts")
+	cmdTranscode.PersistentFlags().BoolP("sync-audio-to-iframe", "", false, "sync audio to first video iframe when input stream is mpegts")
 	cmdTranscode.PersistentFlags().StringP("encoder", "e", "libx264", "encoder codec, default is 'libx264', can be: 'libx264', 'libx265', 'h264_nvenc', 'h264_videotoolbox'.")
 	cmdTranscode.PersistentFlags().StringP("decoder", "d", "", "decoder codec, default is 'h264', can be: 'h264', 'h264_cuvid', 'jpeg2000', 'hevc'.")
 	cmdTranscode.PersistentFlags().StringP("format", "", "dash", "package format, can be 'dash', 'hls', 'mp4', 'fmp4', 'segment' or 'fmp4-segment'.")
 	cmdTranscode.PersistentFlags().Int32P("force-keyint", "", 0, "force IDR key frame in this interval.")
+	cmdTranscode.PersistentFlags().BoolP("equal-fduration", "", false, "force equal frame duration. Must be 0 or 1 and only valid for 'fmp4-segment' format.")
 	cmdTranscode.PersistentFlags().StringP("tx-type", "", "all", "transcoding type, can be 'all', 'video', or 'audio'.")
 	cmdTranscode.PersistentFlags().Int32P("crf", "", 23, "mutually exclusive with video-bitrate.")
 	cmdTranscode.PersistentFlags().StringP("preset", "", "medium", "Preset string to determine compression speed, can be: 'ultrafast', 'superfast', 'veryfast', 'faster', 'fast', 'medium', 'slow', 'slower', 'veryslow'")
@@ -236,6 +239,11 @@ func doTranscode(cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("Invalid bypass flag")
 	}
 
+	forceEqualFrameDuration, err := cmd.Flags().GetBool("equal-fduration")
+	if err != nil {
+		return fmt.Errorf("Invalid equal-fduration flag")
+	}
+
 	nThreads, err := cmd.Flags().GetInt32("threads")
 	if err != nil {
 		return fmt.Errorf("Invalid threads flag")
@@ -244,6 +252,16 @@ func doTranscode(cmd *cobra.Command, args []string) error {
 	audioIndex, err := cmd.Flags().GetInt32("audio-index")
 	if err != nil {
 		return fmt.Errorf("Invalid audio index flag")
+	}
+
+	audioFillGap, err := cmd.Flags().GetBool("audio-fill-gap")
+	if err != nil {
+		return fmt.Errorf("Invalid audio-fill-gap flag")
+	}
+
+	syncAudioToIFrame, err := cmd.Flags().GetBool("sync-audio-to-iframe")
+	if err != nil {
+		return fmt.Errorf("Invalid sync-audio-to-iframe flag")
 	}
 
 	encoder := cmd.Flag("encoder").Value.String()
@@ -476,6 +494,9 @@ func doTranscode(cmd *cobra.Command, args []string) error {
 		MaxCLL:                maxCLL,
 		MasterDisplay:         masterDisplay,
 		BitDepth:              bitDepth,
+		ForceEqualFDuration:   forceEqualFrameDuration,
+		AudioFillGap:          audioFillGap,
+		SyncAudioToIFrame:     syncAudioToIFrame,
 	}
 
 	params.WatermarkOverlayLen = len(params.WatermarkOverlay)

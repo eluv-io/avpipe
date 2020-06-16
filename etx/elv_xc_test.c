@@ -739,59 +739,62 @@ usage(
     printf(
         "Invalid parameter: %s\n\n"
         "Usage: %s <params>\n"
-        "\t-audio-bitrate :     (optional) Default: 128000\n"
-        "\t-audio-index :       (optional) Default: the index of last audio stream\n"
-        "\t-bitdepth :          (optional) bitdepth of color space. Default is 8, can be 8, 10, or 12.\n"
-        "\t-bypass :            (optional) bypass transcoding. Default is 0, must be 0 or 1\n"
-        "\t-command :           (optional) directing command of etx, can be \"transcode\" or \"probe\" (default is transcode).\n"
-        "\t-crf :               (optional) mutually exclusive with video-bitrate. Default: 23\n"
-        "\t-crypt-iv :          (optional) 128-bit AES IV, as hex\n"
-        "\t-crypt-key :         (optional) 128-bit AES key, as hex\n"
-        "\t-crypt-kid :         (optional) 16-byte key ID, as hex\n"
-        "\t-crypt-scheme :      (optional) encryption scheme. Default is \"none\", can be: \"aes-128\", \"cenc\", \"cbc1\", \"cens\", \"cbcs\"\n"
-        "\t-crypt-url :         (optional) specify a key URL in the HLS manifest\n"
-        "\t-d :                 (optional) decoder name. For video default is \"h264\", can be: \"h264\", \"h264_cuvid\", \"jpeg2000\", \"hevc\"\n"
-        "\t                                For audio default is \"aac\", but for ts files should be set to \"ac3\"\n"
-        "\t-duration-ts :       (optional) Default: -1 (entire stream)\n"
-        "\t-e :                 (optional) encoder name. Default is \"libx264\", can be: \"libx264\", \"libx265\", \"h264_nvenc\", \"h264_videotoolbox\"\n"
-        "\t                                For audio default is \"aac\", but for ts files should be set to \"ac3\"\n"
-        "\t-enc-height :        (optional) Default: -1 (use source height)\n"
-        "\t-enc-width :         (optional) Default: -1 (use source width)\n"
-        "\t-f :                 (mandatory) input filename for transcoding. Valid formats are: a filename that points to a valid file, or udp://127.0.0.1:<port>.\n"
-        "\t                                 Output goes to directory ./O\n"
-        "\t-format :            (optional) package format. Default is \"dash\", can be: \"dash\", \"hls\", \"mp4\", \"fmp4\", \"segment\", or \"fmp4-segment\"\n"
-        "\t                                Using \"segment\" format produces self contained mp4 segments with start pts from 0 for each segment\n"
-        "\t                                Using \"fmp4-segment\" format produces self contained mp4 segments with continious pts.\n"
-        "\t                                Using \"fmp4-segment\" generates segments that are appropriate for live streaming.\n"
-        "\t-force-keyint :      (optional) force IDR key frame in this interval.\n"
-        "\t-master-display :    (optional) Master display, only valid if encoder is libx265.\n"
-        "\t-max-cll :           (optional) Maximum Content Light Level and Maximum Frame Average Light Level, only valid if encoder is libx265.\n"
-        "\t                                This parameter is a comma separated of max-cll and max-fall (i.e \"1514,172\").\n"
-        "\t-preset :            (optional) Preset string to determine compression speed. Default is \"medium\". Valid values are: \"ultrafast\", \"superfast\",\n"
-        "\t                                \"veryfast\", \"faster\", \"fast\", \"medium\", \"slow\", \"slower\", \"veryslow\".\n"
-        "\t-r :                 (optional) number of repeats. Default is 1 repeat, must be bigger than 1\n"
-        "\t-rc-buffer-size :    (optional)\n"
-        "\t-rc-max-rate :       (optional)\n"
-        "\t-sample-rate :       (optional) Default: -1. For aac output sample rate is set to input sample rate and this parameter is ignored.\n"
-        "\t-seekable :          (optional) seekable stream. Default is 0, must be 0 or 1\n"
-        "\t-start-pts :         (optional) starting PTS for output. Default is 0\n"
-        "\t-start-frag-index :  (optional) start fragment index of first segment. Default is 0\n"
-        "\t-start-segment :     (optional) start segment number >= 1, Default is 1\n"
-        "\t-start-time-ts :     (optional) Default: 0\n"
-        "\t-seg-duration-ts :   (mandatory if format is not \"segment\") segment duration time base (positive integer).\n"
-        "\t-seg-duration :      (mandatory if format is \"segment\") segment duration secs (positive integer). It is used for making mp4 segments.\n"
-        "\t-t :                 (optional) transcoding threads. Default is 1 thread, must be bigger than 1\n"
-        "\t-tx-type :           (optional) transcoding type. Default is \"all\", can be \"video\", \"audio\", or \"all\" \n"
-        "\t-video-bitrate :     (optional) mutually exclusive with crf. Default: -1 (unused)\n"
-        "\t-wm-text :           (optional) watermark text that will be presented in every video frame if it exist. It has higher priority than overlay watermark.\n"
-        "\t-wm-xloc :           (optional) watermark X location\n"
-        "\t-wm-yloc :           (optional) watermark Y location\n"
-        "\t-wm-color :          (optional) watermark font color\n"
-        "\t-wm-overlay :        (optional) watermark overlay image file. It has less priority than text watermark.\n"
-        "\t-wm-overlay-type :   (optional) watermark overlay image file type, can be \"png\", \"gif\", \"jpg\". Default is png.\n"
-        "\t-wm-relative-size :  (optional) watermark relative font/shadow size\n"
-        "\t-wm-shadow :         (optional) watermarking with shadow. Default is 1, means with shadow.\n"
-        "\t-wm-shadow-color :   (optional) watermark shadow color. Default is white.\n",
+        "\t-audio-bitrate :         (optional) Default: 128000\n"
+        "\t-audio-fill-gap :        (optional) Default: 0, must be 0 or 1. It only effects if encoder is aac.\n"
+        "\t-audio-index :           (optional) Default: the index of last audio stream\n"
+        "\t-bitdepth :              (optional) bitdepth of color space. Default is 8, can be 8, 10, or 12.\n"
+        "\t-bypass :                (optional) bypass transcoding. Default is 0, must be 0 or 1\n"
+        "\t-command :               (optional) directing command of etx, can be \"transcode\" or \"probe\" (default is transcode).\n"
+        "\t-crf :                   (optional) mutually exclusive with video-bitrate. Default: 23\n"
+        "\t-crypt-iv :              (optional) 128-bit AES IV, as hex\n"
+        "\t-crypt-key :             (optional) 128-bit AES key, as hex\n"
+        "\t-crypt-kid :             (optional) 16-byte key ID, as hex\n"
+        "\t-crypt-scheme :          (optional) encryption scheme. Default is \"none\", can be: \"aes-128\", \"cenc\", \"cbc1\", \"cens\", \"cbcs\"\n"
+        "\t-crypt-url :             (optional) specify a key URL in the HLS manifest\n"
+        "\t-d :                     (optional) decoder name. For video default is \"h264\", can be: \"h264\", \"h264_cuvid\", \"jpeg2000\", \"hevc\"\n"
+        "\t                                    For audio default is \"aac\", but for ts files should be set to \"ac3\"\n"
+        "\t-duration-ts :           (optional) Default: -1 (entire stream)\n"
+        "\t-e :                     (optional) encoder name. Default is \"libx264\", can be: \"libx264\", \"libx265\", \"h264_nvenc\", \"h264_videotoolbox\"\n"
+        "\t                                    For audio default is \"aac\", but for ts files should be set to \"ac3\"\n"
+        "\t-enc-height :            (optional) Default: -1 (use source height)\n"
+        "\t-enc-width :             (optional) Default: -1 (use source width)\n"
+        "\t-equal-fduration :       (optional) force equal frame duration. Must be 0 or 1 and only valid for \"fmp4-segment\" format\n"
+        "\t-f :                     (mandatory) input filename for transcoding. Valid formats are: a filename that points to a valid file, or udp://127.0.0.1:<port>.\n"
+        "\t                                     Output goes to directory ./O\n"
+        "\t-format :                (optional) package format. Default is \"dash\", can be: \"dash\", \"hls\", \"mp4\", \"fmp4\", \"segment\", or \"fmp4-segment\"\n"
+        "\t                                    Using \"segment\" format produces self contained mp4 segments with start pts from 0 for each segment\n"
+        "\t                                    Using \"fmp4-segment\" format produces self contained mp4 segments with continious pts.\n"
+        "\t                                    Using \"fmp4-segment\" generates segments that are appropriate for live streaming.\n"
+        "\t-force-keyint :          (optional) force IDR key frame in this interval.\n"
+        "\t-master-display :        (optional) Master display, only valid if encoder is libx265.\n"
+        "\t-max-cll :               (optional) Maximum Content Light Level and Maximum Frame Average Light Level, only valid if encoder is libx265.\n"
+        "\t                                    This parameter is a comma separated of max-cll and max-fall (i.e \"1514,172\").\n"
+        "\t-preset :                (optional) Preset string to determine compression speed. Default is \"medium\". Valid values are: \"ultrafast\", \"superfast\",\n"
+        "\t                                    \"veryfast\", \"faster\", \"fast\", \"medium\", \"slow\", \"slower\", \"veryslow\".\n"
+        "\t-r :                     (optional) number of repeats. Default is 1 repeat, must be bigger than 1\n"
+        "\t-rc-buffer-size :        (optional)\n"
+        "\t-rc-max-rate :           (optional)\n"
+        "\t-sample-rate :           (optional) Default: -1. For aac output sample rate is set to input sample rate and this parameter is ignored.\n"
+        "\t-seekable :              (optional) seekable stream. Default is 0, must be 0 or 1\n"
+        "\t-start-pts :             (optional) starting PTS for output. Default is 0\n"
+        "\t-start-frag-index :      (optional) start fragment index of first segment. Default is 0\n"
+        "\t-start-segment :         (optional) start segment number >= 1, Default is 1\n"
+        "\t-start-time-ts :         (optional) Default: 0\n"
+        "\t-seg-duration-ts :       (mandatory if format is not \"segment\") segment duration time base (positive integer).\n"
+        "\t-seg-duration :          (mandatory if format is \"segment\") segment duration secs (positive integer). It is used for making mp4 segments.\n"
+        "\t-sync-audio-to-iframe:   (optional) Default 0, must be 0 or 1. Sync audio to first video iframe when input stream is mpegts.\n"
+        "\t-t :                     (optional) transcoding threads. Default is 1 thread, must be bigger than 1\n"
+        "\t-tx-type :               (optional) transcoding type. Default is \"all\", can be \"video\", \"audio\", or \"all\" \n"
+        "\t-video-bitrate :         (optional) mutually exclusive with crf. Default: -1 (unused)\n"
+        "\t-wm-text :               (optional) watermark text that will be presented in every video frame if it exist. It has higher priority than overlay watermark.\n"
+        "\t-wm-xloc :               (optional) watermark X location\n"
+        "\t-wm-yloc :               (optional) watermark Y location\n"
+        "\t-wm-color :              (optional) watermark font color\n"
+        "\t-wm-overlay :            (optional) watermark overlay image file. It has less priority than text watermark.\n"
+        "\t-wm-overlay-type :       (optional) watermark overlay image file type, can be \"png\", \"gif\", \"jpg\". Default is png.\n"
+        "\t-wm-relative-size :      (optional) watermark relative font/shadow size\n"
+        "\t-wm-shadow :             (optional) watermarking with shadow. Default is 1, means with shadow.\n"
+        "\t-wm-shadow-color :       (optional) watermark shadow color. Default is white.\n",
         bad_flag, progname);
     printf("\n%s version=%s\n", progname, avpipe_version());
     exit(status);
@@ -827,8 +830,9 @@ main(
     txparams_t p = {
         .audio_bitrate = 128000,            /* Default bitrate */
         .audio_index = -1,                  /* Source audio index */
+        .audio_fill_gap = 0,                /* Don't fill gap if there is JUMP */
+        .bitdepth = 8,
         .crf_str = strdup("23"),            /* 1 best -> 23 standard middle -> 52 poor */
-        .preset = strdup("medium"),
         .crypt_iv = NULL,
         .crypt_key = NULL,
         .crypt_key_url = NULL,
@@ -839,28 +843,30 @@ main(
         .ecodec = strdup("libx264"),
         .enc_height = -1,                   /* -1 means use source height, other values 2160, 1080, 720 */
         .enc_width = -1,                    /* -1 means use source width, other values 3840, 1920, 1280 */
+        .force_equal_fduration = 0,
+        .force_keyint = 0,
         .format = strdup("dash"),
+        .max_cll = NULL,
+        .master_display = NULL,
+        .preset = strdup("medium"),
         .rc_buffer_size = 4500000,          /* TODO - default? */
         .rc_max_rate = 6700000,             /* TODO - default? */
         .sample_rate = -1,                  /* Audio sampling rate 44100 */
+        .seekable = 0,
         .seg_duration_ts = -1,              /* input argument, same units as input stream PTS */
         .start_pts = 0,
         .start_segment_str = strdup("1"),   /* 1-based */
         .start_time_ts = 0,                 /* same units as input stream PTS */
         .start_fragment_index = 0,          /* Default is zero */
-        .video_bitrate = -1,                /* not used if using CRF */
+        .sync_audio_to_iframe = 0,
         .tx_type = tx_all,
-        .seekable = 0,
-        .force_keyint = 0,
+        .video_bitrate = -1,                /* not used if using CRF */
         .watermark_text = NULL,
         .watermark_shadow = 0,
         .overlay_filename = NULL,
         .watermark_overlay = NULL,
         .watermark_overlay_len = 0,
         .watermark_overlay_type = png_image,
-        .max_cll = NULL,
-        .master_display = NULL,
-        .bitdepth = 8
     };
 
     i = 1;
@@ -872,6 +878,13 @@ main(
         case 'a':
             if (!strcmp(argv[i], "-audio-index")) {
                 if (sscanf(argv[i+1], "%d", &p.audio_index) != 1) {
+                    usage(argv[0], argv[i], EXIT_FAILURE);
+                }
+            } else if (!strcmp(argv[i], "-audio-fill-gap")) {
+                if (sscanf(argv[i+1], "%d", &p.audio_fill_gap) != 1) {
+                    usage(argv[0], argv[i], EXIT_FAILURE);
+                }
+                if (p.audio_fill_gap != 0 && p.audio_fill_gap != 1) {
                     usage(argv[0], argv[i], EXIT_FAILURE);
                 }
             } else if (!strcmp(argv[i], "-audio-bitrate")) {
@@ -952,6 +965,13 @@ main(
                 }
             } else if (!strcmp(argv[i], "-enc-width")) {
                 if (sscanf(argv[i+1], "%d", &p.enc_width) != 1) {
+                    usage(argv[0], argv[i], EXIT_FAILURE);
+                }
+            } else if (!strcmp(argv[i], "-equal-fduration")) {
+                if (sscanf(argv[i+1], "%d", &p.force_equal_fduration) != 1) {
+                    usage(argv[0], argv[i], EXIT_FAILURE);
+                }
+                if (p.force_equal_fduration != 0 && p.force_equal_fduration != 1) {
                     usage(argv[0], argv[i], EXIT_FAILURE);
                 }
             } else if (strlen(argv[i]) > 2) {
@@ -1055,6 +1075,13 @@ main(
                 }
             } else if (!strcmp(argv[i], "-start-time-ts")) {
                 if (sscanf(argv[i+1], "%"PRId64, &p.start_time_ts) != 1) {
+                    usage(argv[0], argv[i], EXIT_FAILURE);
+                }
+            } else if (!strcmp(argv[i], "-sync-audio-to-iframe")) {
+                if (sscanf(argv[i+1], "%d", &p.sync_audio_to_iframe) != 1) {
+                    usage(argv[0], argv[i], EXIT_FAILURE);
+                }
+                if (p.sync_audio_to_iframe != 0 && p.sync_audio_to_iframe != 1) {
                     usage(argv[0], argv[i], EXIT_FAILURE);
                 }
             } else {

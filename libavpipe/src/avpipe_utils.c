@@ -13,21 +13,35 @@
 
 #include <sys/time.h>
 
+static const char*
+tx_type_str(
+    int tx_type)
+{
+    switch (tx_type) {
+    case tx_video:
+        return "VIDEO";
+    case tx_audio:
+        return "AUDIO";
+    }
+    return "AUDIO_VIDEO";
+}
+
 void
 dump_frame(
     char *msg,
     int num,
     AVFrame *frame,
-    int debug_frame_level)
+    int debug_frame_level,
+    int tx_type)
 {
     if (!debug_frame_level || !frame)
         return;
 
-    elv_dbg("FRAME %s [%d] pts=%"PRId64" pkt_dts=%"PRId64" pkt_duration=%"PRId64" be_time_stamp=%"PRId64" key=%d pict_type=%d "
+    elv_dbg("%s FRAME %s [%d] pts=%"PRId64" pkt_dts=%"PRId64" pkt_duration=%"PRId64" be_time_stamp=%"PRId64" key=%d pict_type=%d "
         "pkt_size=%d nb_samples=%d "
         "width=%d height=%d linesize=%d "
         "format=%d coded_pic_num=%d flags=%x "
-        "\n", msg, num,
+        "\n", tx_type_str(tx_type), msg, num,
         frame->pts, frame->pkt_dts, frame->pkt_duration, frame->best_effort_timestamp,
         frame->key_frame, frame->pict_type,
         frame->pkt_size, frame->nb_samples,
@@ -41,12 +55,14 @@ void
 dump_packet(
     const char *msg,
     AVPacket *p,
-    int debug_frame_level)
+    int debug_frame_level,
+    int tx_type)
 {
     if (!debug_frame_level || !p)
         return;
 
-    elv_dbg("PACKET %s pts=%"PRId64" dts=%"PRId64" duration=%"PRId64" pos=%"PRId64" size=%d stream_index=%d flags=%x\n", msg,
+    elv_dbg("%s PACKET %s pts=%"PRId64" dts=%"PRId64" duration=%"PRId64" pos=%"PRId64" size=%d stream_index=%d flags=%x\n",
+        tx_type_str(tx_type), msg,
         p->pts, p->dts, p->duration, p->pos, p->size, p->stream_index,
         p->flags
     );
@@ -73,14 +89,17 @@ dump_decoder(
 
 void
 dump_encoder(
-    coderctx_t *d)
+    coderctx_t *d,
+    txparams_t *params)
 {
-    elv_dbg("ENCODER nb_streams=%d\n",
+    elv_dbg("ENCODER tx_type=%d, nb_streams=%d\n",
+        params->tx_type,
         d->format_context->nb_streams
     );
     for (int i = 0; i < d->format_context->nb_streams; i++) {
         AVStream *s = d->format_context->streams[i];
-        elv_dbg("ENCODER[%d] codec_type=%d start_time=%d duration=%d time_base=%d/%d frame_rate=%d/%d\n", i,
+        elv_dbg("ENCODER[%d] tx_type=%d, codec_type=%d start_time=%d duration=%d time_base=%d/%d frame_rate=%d/%d\n", i,
+            params->tx_type,
             s->codecpar->codec_type,
             (int)s->start_time, (int)s->duration,
             s->time_base.num, s->time_base.den,

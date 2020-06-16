@@ -153,6 +153,9 @@ type TxParams struct {
 	MaxCLL                string      `json:"max_cll,omitempty"`
 	MasterDisplay         string      `json:"master_display,omitempty"`
 	BitDepth              int32       `json:"bitdepth,omitempty"`
+	AudioFillGap          bool        `json:"audio_fill_gap,omitempty"`
+	SyncAudioToIFrame     bool        `json:"sync_audio_to_iframe,omitempty"`
+	ForceEqualFDuration   bool        `json:"force_equal_frame_duration,omitempty"`
 }
 
 type AVMediaType int
@@ -740,16 +743,7 @@ func Version() string {
 	return C.GoString((*C.char)(unsafe.Pointer(C.avpipe_version())))
 }
 
-// params: transcoding parameters
-// url: input filename that has to be transcoded
-func Tx(params *TxParams, url string, debugFrameLevel bool) int {
-
-	// Convert TxParams to C.txparams_t
-	if params == nil {
-		log.Error("Failed transcoding, params is not set.")
-		return -1
-	}
-
+func getCParams(params *TxParams) *C.txparams_t {
 	// same field order as avpipe_xc.h
 	cparams := &C.txparams_t{
 		format:                 C.CString(params.Format),
@@ -795,7 +789,7 @@ func Tx(params *TxParams, url string, debugFrameLevel bool) int {
 		max_cll:                C.CString(params.MaxCLL),
 		master_display:         C.CString(params.MasterDisplay),
 		bitdepth:               C.int(params.BitDepth),
-		// seekable, bypass_transcoding, and shadow handled below
+		// seekable, bypass_transcoding, shadow, audio_fill_gap, sync_audio_video and force_equal_fduration handled below
 	}
 
 	if params.BypassTranscoding {
@@ -809,6 +803,33 @@ func Tx(params *TxParams, url string, debugFrameLevel bool) int {
 	if params.WatermarkShadow {
 		cparams.watermark_shadow = C.int(1)
 	}
+
+	if params.ForceEqualFDuration {
+		cparams.force_equal_fduration = C.int(1)
+	}
+
+	if params.AudioFillGap {
+		cparams.audio_fill_gap = C.int(1)
+	}
+
+	if params.SyncAudioToIFrame {
+		cparams.sync_audio_to_iframe = C.int(1)
+	}
+
+	return cparams
+}
+
+// params: transcoding parameters
+// url: input filename that has to be transcoded
+func Tx(params *TxParams, url string, debugFrameLevel bool) int {
+
+	// Convert TxParams to C.txparams_t
+	if params == nil {
+		log.Error("Failed transcoding, params is not set.")
+		return -1
+	}
+
+	cparams := getCParams(params)
 
 	var debugFrameLevelInt int
 	if debugFrameLevel {
@@ -941,64 +962,7 @@ func TxInit(params *TxParams, url string, debugFrameLevel bool) (int32, error) {
 		return -1, fmt.Errorf("TxParams is nil")
 	}
 
-	// same field order as avpipe_xc.h
-	cparams := &C.txparams_t{
-		format:                 C.CString(params.Format),
-		start_time_ts:          C.int64_t(params.StartTimeTs),
-		skip_over_pts:          C.int64_t(params.SkipOverPts),
-		start_pts:              C.int64_t(params.StartPts),
-		duration_ts:            C.int64_t(params.DurationTs),
-		start_segment_str:      C.CString(params.StartSegmentStr),
-		video_bitrate:          C.int(params.VideoBitrate),
-		audio_bitrate:          C.int(params.AudioBitrate),
-		sample_rate:            C.int(params.SampleRate),
-		crf_str:                C.CString(params.CrfStr),
-		rc_max_rate:            C.int(params.RcMaxRate),
-		rc_buffer_size:         C.int(params.RcBufferSize),
-		seg_duration_ts:        C.int64_t(params.SegDurationTs),
-		seg_duration:           C.CString(params.SegDuration),
-		start_fragment_index:   C.int(params.StartFragmentIndex),
-		force_keyint:           C.int(params.ForceKeyInt),
-		ecodec:                 C.CString(params.Ecodec),
-		dcodec:                 C.CString(params.Dcodec),
-		enc_height:             C.int(params.EncHeight),
-		enc_width:              C.int(params.EncWidth),
-		crypt_iv:               C.CString(params.CryptIV),
-		crypt_key:              C.CString(params.CryptKey),
-		crypt_kid:              C.CString(params.CryptKID),
-		crypt_key_url:          C.CString(params.CryptKeyURL),
-		crypt_scheme:           C.crypt_scheme_t(params.CryptScheme),
-		tx_type:                C.tx_type_t(params.TxType),
-		watermark_text:         C.CString(params.WatermarkText),
-		watermark_xloc:         C.CString(params.WatermarkXLoc),
-		watermark_yloc:         C.CString(params.WatermarkYLoc),
-		watermark_relative_sz:  C.float(params.WatermarkRelativeSize),
-		watermark_font_color:   C.CString(params.WatermarkFontColor),
-		watermark_shadow:       C.int(0),
-		watermark_shadow_color: C.CString(params.WatermarkShadowColor),
-		watermark_overlay:      C.CString(params.WatermarkOverlay),
-		watermark_overlay_len:  C.int(params.WatermarkOverlayLen),
-		watermark_overlay_type: C.image_type(params.WatermarkOverlayType),
-		bypass_transcoding:     C.int(0),
-		seekable:               C.int(0),
-		audio_index:            C.int(params.AudioIndex),
-		max_cll:                C.CString(params.MaxCLL),
-		master_display:         C.CString(params.MasterDisplay),
-		bitdepth:               C.int(params.BitDepth),
-		// seekable, bypass_transcoding, and shadow handled below
-	}
-
-	if params.BypassTranscoding {
-		cparams.bypass_transcoding = C.int(1)
-	}
-
-	if params.Seekable {
-		cparams.seekable = C.int(1)
-	}
-
-	if params.WatermarkShadow {
-		cparams.watermark_shadow = C.int(1)
-	}
+	cparams := getCParams(params)
 
 	var debugFrameLevelInt int
 	if debugFrameLevel {
