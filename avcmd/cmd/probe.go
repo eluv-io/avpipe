@@ -50,6 +50,7 @@ func doProbe(cmd *cobra.Command, args []string) error {
 		}
 
 		fmt.Printf("Stream[%d]\n", info.StreamIndex)
+		fmt.Printf("\tstream_id: %d\n", info.StreamId)
 		fmt.Printf("\tcodec_type: %s\n", info.CodecType)
 		fmt.Printf("\tcodec_id: %d\n", info.CodecID)
 		fmt.Printf("\tcodec_name: %s\n", info.CodecName)

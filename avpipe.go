@@ -149,6 +149,7 @@ type TxParams struct {
 	WatermarkOverlay      string      `json:"watermark_overlay,omitempty"`      // Buffer containing overlay image
 	WatermarkOverlayLen   int         `json:"watermark_overlay_len,omitempty"`  // Length of overlay image
 	WatermarkOverlayType  ImageType   `json:"watermark_overlay_type,omitempty"` // Type of overlay image (i.e PngImage, ...)
+	StreamId              int32       `json:"stream_id"`                        // Specify stream by ID (instead of index)
 	AudioIndex            int32       `json:"audio_index,omitempty"`
 	MaxCLL                string      `json:"max_cll,omitempty"`
 	MasterDisplay         string      `json:"master_display,omitempty"`
@@ -211,6 +212,7 @@ const (
 
 type StreamInfo struct {
 	StreamIndex        int      `json:"stream_index"`
+	StreamId           int32    `json:"stream_id"`
 	CodecType          string   `json:"codec_type"`
 	CodecID            int      `json:"codec_id,omitempty"`
 	CodecName          string   `json:"codec_name,omitempty"`
@@ -784,6 +786,7 @@ func getCParams(params *TxParams) *C.txparams_t {
 		watermark_overlay_len:  C.int(params.WatermarkOverlayLen),
 		watermark_overlay_type: C.image_type(params.WatermarkOverlayType),
 		audio_index:            C.int(params.AudioIndex),
+		stream_id:              C.int(params.StreamId),
 		bypass_transcoding:     C.int(0),
 		seekable:               C.int(0),
 		max_cll:                C.CString(params.MaxCLL),
@@ -896,6 +899,7 @@ func Probe(url string, seekable bool) (*ProbeInfo, error) {
 	probeArray := (*[1 << 10]C.stream_info_t)(unsafe.Pointer(cprobe.stream_info))
 	for i := 0; i < int(rc); i++ {
 		probeInfo.StreamInfo[i].StreamIndex = int(probeArray[i].stream_index)
+		probeInfo.StreamInfo[i].StreamId = int32(probeArray[i].stream_id)
 		probeInfo.StreamInfo[i].CodecType = AVMediaTypeNames[AVMediaType(probeArray[i].codec_type)]
 		probeInfo.StreamInfo[i].CodecID = int(probeArray[i].codec_id)
 		probeInfo.StreamInfo[i].CodecName = C.GoString((*C.char)(unsafe.Pointer(&probeArray[i].codec_name)))

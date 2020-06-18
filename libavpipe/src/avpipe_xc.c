@@ -244,6 +244,7 @@ prepare_decoder(
 {
     int rc;
     decoder_context->last_dts = AV_NOPTS_VALUE;
+    int stream_id_index = -1;
 
     decoder_context->video_stream_index = -1;
     decoder_context->audio_stream_index = -1;
@@ -287,17 +288,18 @@ prepare_decoder(
             decoder_context->codec_parameters[i] = decoder_context->format_context->streams[i]->codecpar;
             decoder_context->stream[i] = decoder_context->format_context->streams[i];
             decoder_context->video_stream_index = i;
-            elv_dbg("STREAM %d Video, codec_id=%s", i, avcodec_get_name(decoder_context->codec_parameters[i]->codec_id));
-            if (params && ((params->tx_type & tx_video) == 0))
-                continue;
+            elv_dbg("VIDEO STREAM %d, codec_id=%s, stream_id=%d",
+                i, avcodec_get_name(decoder_context->codec_parameters[i]->codec_id), decoder_context->stream[i]->id);
             break;
 
         case AVMEDIA_TYPE_AUDIO:
             /* Audio, copy codec params from stream format context */
             decoder_context->codec_parameters[i] = decoder_context->format_context->streams[i]->codecpar;
             decoder_context->stream[i] = decoder_context->format_context->streams[i];
-            decoder_context->audio_stream_index = i;
-            elv_dbg("STREAM %d Audio, codec_id=%s", i, avcodec_get_name(decoder_context->codec_parameters[i]->codec_id));
+            if (params && params->stream_id < 0)
+                decoder_context->audio_stream_index = i;
+            elv_dbg("AUDIO STREAM %d, codec_id=%s, stream_id=%d",
+                i, avcodec_get_name(decoder_context->codec_parameters[i]->codec_id), decoder_context->stream[i]->id);
 
             /* If the buffer size is too big, ffmpeg might assert in aviobuf.c:581
              * To avoid this assertion, reset the buffer size to something smaller.
@@ -307,21 +309,24 @@ prepare_decoder(
                 if (avioctx->buffer_size > AUDIO_BUF_SIZE)
                     avioctx->buffer_size = AUDIO_BUF_SIZE;
             }
-            if (params && ((params->tx_type & tx_audio) == 0))
-                continue;
             break;
 
         case AVMEDIA_TYPE_DATA:
             decoder_context->codec_parameters[i] = decoder_context->format_context->streams[i]->codecpar;
             decoder_context->stream[i] = decoder_context->format_context->streams[i];
             decoder_context->data_stream_index = i;
-            elv_dbg("STREAM %d Data, codec_id=%s", i, avcodec_get_name(decoder_context->codec_parameters[i]->codec_id));
-            continue;
+            elv_dbg("DATA STREAM %d, codec_id=%s, stream_id=%d",
+                i, avcodec_get_name(decoder_context->codec_parameters[i]->codec_id), decoder_context->stream[i]->id);
+            break;
 
         default:
             decoder_context->codec[i] = NULL;
-            elv_dbg("STREAM UNKNOWN type=%d", decoder_context->format_context->streams[i]->codecpar->codec_type);
+            elv_dbg("UNKNOWN STREAM type=%d", decoder_context->format_context->streams[i]->codecpar->codec_type);
             continue;
+        }
+
+        if (params && decoder_context->stream[i]->id == params->stream_id) {
+            stream_id_index = i;
         }
 
         /*
@@ -335,8 +340,9 @@ prepare_decoder(
         } else {
             decoder_context->codec[i] = avcodec_find_decoder(decoder_context->codec_parameters[i]->codec_id);
         }
-        if (!decoder_context->codec[i]) {
-            elv_err("Unsupported decoder codec param=%s, codec_id=%d", params->dcodec, decoder_context->codec_parameters[i]->codec_id);
+        if (decoder_context->codec_parameters[i]->codec_type != AVMEDIA_TYPE_DATA && !decoder_context->codec[i]) {
+            elv_err("Unsupported decoder codec param=%s, codec_id=%d",
+                params ? params->dcodec : "", decoder_context->codec_parameters[i]->codec_id);
             return -1;
         }
 
@@ -363,7 +369,8 @@ prepare_decoder(
             decoder_context->codec_context[i]->thread_count = DEFAULT_THREAD_COUNT;
 
         /* Open the decoder (initialize the decoder codec_context[i] using given codec[i]). */
-        if ((rc = avcodec_open2(decoder_context->codec_context[i], decoder_context->codec[i], NULL)) < 0) {
+        if (decoder_context->codec_parameters[i]->codec_type != AVMEDIA_TYPE_DATA &&
+             (rc = avcodec_open2(decoder_context->codec_context[i], decoder_context->codec[i], NULL)) < 0) {
             elv_err("Failed to open codec through avcodec_open2, err=%d, param=%s, codec_id=%s",
                 rc, params->dcodec, avcodec_get_name(decoder_context->codec_parameters[i]->codec_id));
             return -1;
@@ -402,8 +409,24 @@ prepare_decoder(
         dump_codec_context(decoder_context->codec_context[i]);
     }
 
-    if (params && (params->audio_index >= 0) && (params->audio_index < decoder_context->format_context->nb_streams))
+    /* If it couldn't find identified stream with params->stream_id, then return an error */
+    if (params && params->stream_id >= 0 && stream_id_index < 0) {
+        elv_err("Invalid stream_id=%d", params->stream_id);
+        return -1;
+    }
+
+    if (stream_id_index >= 0) {
+        if (decoder_context->format_context->streams[stream_id_index]->codecpar->codec_type == AVMEDIA_TYPE_VIDEO) {
+            decoder_context->video_stream_index = stream_id_index;
+            params->tx_type = tx_video;
+        } else if (decoder_context->format_context->streams[stream_id_index]->codecpar->codec_type == AVMEDIA_TYPE_AUDIO) {
+            decoder_context->audio_stream_index = stream_id_index;
+            params->tx_type = tx_audio;
+        }
+    } else if (params && (params->audio_index >= 0) &&
+            (params->audio_index < decoder_context->format_context->nb_streams)) {
         decoder_context->audio_stream_index = params->audio_index;
+    }
     elv_dbg("prepare_decoder() tx_type=%d, audio_stream_index=%d, nb_streams=%d",
         params ? params->tx_type : 0,
         decoder_context->audio_stream_index,
@@ -2641,15 +2664,21 @@ avpipe_probe(
         AVCodec *codec = decoder_ctx.codec[i];
         AVRational sar, dar;
 
-        if (!codec || !codec_context || (codec->type != AVMEDIA_TYPE_VIDEO && codec->type != AVMEDIA_TYPE_AUDIO)) {
+        //if (!codec || !codec_context || (codec->type != AVMEDIA_TYPE_VIDEO && codec->type != AVMEDIA_TYPE_AUDIO)) {
+        if (!codec_context) {
             nb_skipped_streams++;
             continue;
         }
         stream_probes_ptr = &stream_probes[i-nb_skipped_streams];
         stream_probes_ptr->stream_index = i;
-        stream_probes_ptr->codec_type = codec->type;
-        stream_probes_ptr->codec_id = codec->id;
-        strncpy(stream_probes_ptr->codec_name, codec->name, MAX_CODEC_NAME);
+        stream_probes_ptr->stream_id = s->id;
+        if (codec) {
+            stream_probes_ptr->codec_type = codec->type;
+            stream_probes_ptr->codec_id = codec->id;
+            strncpy(stream_probes_ptr->codec_name, codec->name, MAX_CODEC_NAME);
+        } else {
+            stream_probes_ptr->codec_type = decoder_ctx.format_context->streams[i]->codecpar->codec_type;
+        }
         stream_probes_ptr->codec_name[MAX_CODEC_NAME] = '\0';
         stream_probes_ptr->duration_ts = s->duration;
         stream_probes_ptr->time_base = s->time_base;
@@ -2677,7 +2706,7 @@ avpipe_probe(
         stream_probes_ptr->has_b_frames = codec_context->has_b_frames;
         stream_probes_ptr->sample_rate = codec_context->sample_rate;
         stream_probes_ptr->channels = codec_context->channels;
-        if (codec->type == AVMEDIA_TYPE_AUDIO)
+        if (codec && codec->type == AVMEDIA_TYPE_AUDIO)
             stream_probes_ptr->channel_layout = codec_context->channel_layout;
         else
             stream_probes_ptr->channel_layout = -1;
@@ -2705,8 +2734,14 @@ static int
 check_params(
     txparams_t *params)
 {
-    // By default transcode 'everything'
-    if (params->tx_type == tx_none) {
+    if (params->stream_id >= 0 && (params->tx_type != tx_none || params->audio_index >= 0)) {
+        elv_err("Incompatible params, stream_id=%d, tx_type=%d, audio_index=%d",
+            params->stream_id, params->tx_type, params->audio_index);
+        return -1;
+    }
+    
+    // By default transcode 'everything' if streamId < 0
+    if (params->tx_type == tx_none && params->stream_id < 0) {
         params->tx_type = tx_all;
     }
 

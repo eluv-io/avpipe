@@ -17,7 +17,7 @@
 #include <pthread.h>
 #include "elv_channel.h"
 
-#define MAX_STREAMS	32
+#define MAX_STREAMS	64
 
 typedef enum avpipe_buftype_t {
     avpipe_input_stream = 0,
@@ -49,8 +49,8 @@ struct coderctx_t;
 
 #define MAX_UDP_PKT_LEN     2048            /* Max UDP length */
 #define UDP_PIPE_TIMEOUT    60              /* sec */
-#define UDP_PIPE_BUFSIZE    (10*1024*1024)  /* 10MB recv buf size */
-#define MAX_UDP_CHANNEL     10000           /* Max # of entries in UDP channel */
+#define UDP_PIPE_BUFSIZE    (128*1024*1024) /* 128MB recv buf size */
+#define MAX_UDP_CHANNEL     100000          /* Max # of entries in UDP channel */
 
 typedef struct udp_packet_t {
     char buf[MAX_UDP_PKT_LEN];
@@ -267,12 +267,14 @@ typedef struct txparams_t {
     int         bitdepth;               // Can be 8, 10, 12
     char        *max_cll;               // Maximum Content Light Level (HDR only)
     char        *master_display;        // Master display (HDR only)
+    int         stream_id;              // Stream id to trasncode, should be >= 0
 } txparams_t;
 
 #define MAX_CODEC_NAME  256
 
 typedef struct stream_info_t {
-    int         stream_index;       // Stream index
+    int         stream_index;       // Stream index in AVFormatContext
+    int         stream_id;          // Format-specific stream ID, set by libavformat during decoding
     int         codec_type;         // Audio or Video
     int         codec_id;
     char        codec_name[MAX_CODEC_NAME+1];

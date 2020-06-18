@@ -620,6 +620,7 @@ do_probe(
         const char *profile_name = avcodec_profile_name(probe->stream_info[i].codec_id, probe->stream_info[i].profile);
 
         printf("Stream[%d]\n"
+                "\tstream_id: %d\n"
                 "\tcodec_type: %s\n"
                 "\tcodec_id: %d\n"
                 "\tcodec_name: %s\n"
@@ -644,15 +645,16 @@ do_probe(
                 "\tsample_aspect_ratio: %d:%d\n"
                 "\tdisplay_aspect_ratio: %d:%d\n",
                 probe->stream_info[i].stream_index,
+                probe->stream_info[i].stream_id,
                 av_get_media_type_string(probe->stream_info[i].codec_type),
                 probe->stream_info[i].codec_id,
                 probe->stream_info[i].codec_name,
                 profile_name != NULL ? profile_name : "-",
                 probe->stream_info[i].level,
-                probe->stream_info[i].duration_ts,
+                probe->stream_info[i].duration_ts != AV_NOPTS_VALUE ? probe->stream_info[i].duration_ts : 0,
                 probe->stream_info[i].time_base.num,probe->stream_info[i].time_base.den,
                 probe->stream_info[i].nb_frames,
-                probe->stream_info[i].start_time,
+                probe->stream_info[i].start_time != AV_NOPTS_VALUE ? probe->stream_info[i].start_time : 0,
                 probe->stream_info[i].avg_frame_rate.num, probe->stream_info[i].avg_frame_rate.den,
                 probe->stream_info[i].frame_rate.num, probe->stream_info[i].frame_rate.den,
                 probe->stream_info[i].sample_rate,
@@ -776,12 +778,13 @@ usage(
         "\t-rc-max-rate :           (optional)\n"
         "\t-sample-rate :           (optional) Default: -1. For aac output sample rate is set to input sample rate and this parameter is ignored.\n"
         "\t-seekable :              (optional) seekable stream. Default is 0, must be 0 or 1\n"
+        "\t-seg-duration-ts :       (mandatory if format is not \"segment\") segment duration time base (positive integer).\n"
+        "\t-seg-duration :          (mandatory if format is \"segment\") segment duration secs (positive integer). It is used for making mp4 segments.\n"
         "\t-start-pts :             (optional) starting PTS for output. Default is 0\n"
         "\t-start-frag-index :      (optional) start fragment index of first segment. Default is 0\n"
         "\t-start-segment :         (optional) start segment number >= 1, Default is 1\n"
         "\t-start-time-ts :         (optional) Default: 0\n"
-        "\t-seg-duration-ts :       (mandatory if format is not \"segment\") segment duration time base (positive integer).\n"
-        "\t-seg-duration :          (mandatory if format is \"segment\") segment duration secs (positive integer). It is used for making mp4 segments.\n"
+        "\t-stream-id :             (optional) Default: -1, if it is valid it will be used to transcode elementary stream with that stream-id.\n"
         "\t-sync-audio-to-iframe:   (optional) Default 0, must be 0 or 1. Sync audio to first video iframe when input stream is mpegts.\n"
         "\t-t :                     (optional) transcoding threads. Default is 1 thread, must be bigger than 1\n"
         "\t-tx-type :               (optional) transcoding type. Default is \"all\", can be \"video\", \"audio\", or \"all\" \n"
@@ -828,6 +831,7 @@ main(
 
     /* Parameters */
     txparams_t p = {
+        .stream_id = -1,
         .audio_bitrate = 128000,            /* Default bitrate */
         .audio_index = -1,                  /* Source audio index */
         .audio_fill_gap = 0,                /* Don't fill gap if there is JUMP */
@@ -859,7 +863,7 @@ main(
         .start_time_ts = 0,                 /* same units as input stream PTS */
         .start_fragment_index = 0,          /* Default is zero */
         .sync_audio_to_iframe = 0,
-        .tx_type = tx_all,
+        .tx_type = tx_none,
         .video_bitrate = -1,                /* not used if using CRF */
         .watermark_text = NULL,
         .watermark_shadow = 0,
@@ -1042,7 +1046,14 @@ main(
             }
             break;
         case 's':
-            if (!strcmp(argv[i], "-seekable")) {
+            if (!strcmp(argv[i], "-stream-id")) {
+                if (sscanf(argv[i+1], "%d", &p.stream_id) != 1) {
+                    usage(argv[0], argv[i], EXIT_FAILURE);
+                }
+                if (p.stream_id < 0) {
+                    usage(argv[0], argv[i], EXIT_FAILURE);
+                }
+            } else if (!strcmp(argv[i], "-seekable")) {
                 if (sscanf(argv[i+1], "%d", &seekable) != 1) {
                     usage(argv[0], argv[i], EXIT_FAILURE);
                 }

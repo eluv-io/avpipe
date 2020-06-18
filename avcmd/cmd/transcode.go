@@ -189,10 +189,11 @@ func InitTranscode(cmdRoot *cobra.Command) error {
 	cmdTranscode.PersistentFlags().StringP("format", "", "dash", "package format, can be 'dash', 'hls', 'mp4', 'fmp4', 'segment' or 'fmp4-segment'.")
 	cmdTranscode.PersistentFlags().Int32P("force-keyint", "", 0, "force IDR key frame in this interval.")
 	cmdTranscode.PersistentFlags().BoolP("equal-fduration", "", false, "force equal frame duration. Must be 0 or 1 and only valid for 'fmp4-segment' format.")
-	cmdTranscode.PersistentFlags().StringP("tx-type", "", "all", "transcoding type, can be 'all', 'video', or 'audio'.")
+	cmdTranscode.PersistentFlags().StringP("tx-type", "", "", "transcoding type, can be 'all', 'video', or 'audio'.")
 	cmdTranscode.PersistentFlags().Int32P("crf", "", 23, "mutually exclusive with video-bitrate.")
 	cmdTranscode.PersistentFlags().StringP("preset", "", "medium", "Preset string to determine compression speed, can be: 'ultrafast', 'superfast', 'veryfast', 'faster', 'fast', 'medium', 'slow', 'slower', 'veryslow'")
-	cmdTranscode.PersistentFlags().Int64P("start-time-ts", "", 0, "")
+	cmdTranscode.PersistentFlags().Int64P("start-time-ts", "", 0, "offset to start transcoding")
+	cmdTranscode.PersistentFlags().Int32P("stream-id", "", -1, "if it is valid it will be used to transcode elementary stream with that stream-id")
 	cmdTranscode.PersistentFlags().Int64P("start-pts", "", 0, "starting PTS for output.")
 	cmdTranscode.PersistentFlags().Int32P("sample-rate", "", -1, "For aac output sample rate is set to input sample rate and this parameter is ignored.")
 	cmdTranscode.PersistentFlags().Int32P("start-segment", "", 1, "start segment number >= 1.")
@@ -315,9 +316,14 @@ func doTranscode(cmd *cobra.Command, args []string) error {
 		}
 	}
 
+	streamId, err := cmd.Flags().GetInt32("stream-id")
+	if err != nil {
+		return fmt.Errorf("stream-id is not valid, must be >= 0")
+	}
+
 	txTypeStr := cmd.Flag("tx-type").Value.String()
-	if txTypeStr != "all" && txTypeStr != "video" && txTypeStr != "audio" {
-		return fmt.Errorf("Transcoding type is not valid, can be 'all', 'video', or 'audio'")
+	if streamId < 0 && txTypeStr != "all" && txTypeStr != "video" && txTypeStr != "audio" {
+		return fmt.Errorf("Transcoding type is not valid, with no stream-id can be 'all', 'video', or 'audio'")
 	}
 	var txType avpipe.TxType
 	switch txTypeStr {
@@ -330,6 +336,8 @@ func doTranscode(cmd *cobra.Command, args []string) error {
 		if len(encoder) == 0 {
 			encoder = "aac"
 		}
+	case "":
+		txType = avpipe.TxNone
 	}
 
 	maxCLL := cmd.Flag("max-cll").Value.String()
@@ -497,6 +505,7 @@ func doTranscode(cmd *cobra.Command, args []string) error {
 		ForceEqualFDuration:   forceEqualFrameDuration,
 		AudioFillGap:          audioFillGap,
 		SyncAudioToIFrame:     syncAudioToIFrame,
+		StreamId:              streamId,
 	}
 
 	params.WatermarkOverlayLen = len(params.WatermarkOverlay)

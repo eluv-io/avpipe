@@ -245,7 +245,7 @@ func (o fileOutput) Stat(statType avpipe.AVStatType, statArgs interface{}) error
 
 func TestSingleABRTranscode(t *testing.T) {
 	filename := "./media/ErsteChristmas.mp4"
-	outputDir := "O"
+	outputDir := "SingleABRTranscode"
 
 	setupLogging()
 	log.Info("STARTING TestSingleABRTranscode")
@@ -265,6 +265,7 @@ func TestSingleABRTranscode(t *testing.T) {
 		EncHeight:         720,
 		EncWidth:          1280,
 		TxType:            avpipe.TxVideo,
+		StreamId:          -1,
 	}
 
 	// Create output directory if it doesn't exist
@@ -290,9 +291,56 @@ func TestSingleABRTranscode(t *testing.T) {
 
 }
 
+func TestSingleABRTranscodeByStreamId(t *testing.T) {
+	filename := "./media/ErsteChristmas.mp4"
+	outputDir := "SingleABRTranscodeByStreamId"
+
+	setupLogging()
+	log.Info("STARTING TestSingleABRTranscodeByStreamId")
+
+	params := &avpipe.TxParams{
+		BypassTranscoding: false,
+		Format:            "hls",
+		StartTimeTs:       0,
+		DurationTs:        -1,
+		StartSegmentStr:   "1",
+		VideoBitrate:      2560000,
+		AudioBitrate:      64000,
+		SampleRate:        44100,
+		CrfStr:            "23",
+		SegDurationTs:     1001 * 60,
+		Ecodec:            "libx264",
+		EncHeight:         720,
+		EncWidth:          1280,
+		StreamId:          1,
+		AudioIndex:        -1,
+	}
+
+	// Create output directory if it doesn't exist
+	err := setupOutDir(outputDir)
+	if err != nil {
+		t.Fail()
+	}
+
+	avpipe.InitIOHandler(&fileInputOpener{url: filename}, &fileOutputOpener{dir: outputDir})
+
+	rc := avpipe.Tx(params, filename, true)
+	if rc != 0 {
+		t.Fail()
+	}
+
+	params.StreamId = 2
+	params.Ecodec = "aac"
+	rc = avpipe.Tx(params, filename, false)
+	if rc != 0 {
+		t.Fail()
+	}
+
+}
+
 func TestSingleABRTranscodeWithWatermark(t *testing.T) {
 	filename := "./media/ErsteChristmas.mp4"
-	outputDir := "O"
+	outputDir := "SingleABRTranscodeWithWatermark"
 
 	setupLogging()
 	log.Info("STARTING TestSingleABRTranscode")
@@ -319,6 +367,7 @@ func TestSingleABRTranscodeWithWatermark(t *testing.T) {
 		WatermarkFontColor:    "black",
 		WatermarkShadow:       true,
 		WatermarkShadowColor:  "white",
+		StreamId:              -1,
 	}
 
 	// Create output directory if it doesn't exist
@@ -337,7 +386,7 @@ func TestSingleABRTranscodeWithWatermark(t *testing.T) {
 
 func TestSingleABRTranscodeWithOverlayWatermark(t *testing.T) {
 	filename := "./media/ErsteChristmas.mp4"
-	outputDir := "O"
+	outputDir := "SingleABRTranscodeWithOverlayWatermark"
 
 	setupLogging()
 	log.Info("STARTING TestSingleABRTranscode")
@@ -367,6 +416,7 @@ func TestSingleABRTranscodeWithOverlayWatermark(t *testing.T) {
 		WatermarkOverlay:     string(overlayImage),
 		WatermarkOverlayLen:  len(overlayImage),
 		WatermarkOverlayType: avpipe.PngImage,
+		StreamId:             -1,
 	}
 
 	// Create output directory if it doesn't exist
@@ -390,7 +440,7 @@ func TestSingleABRTranscodeWithOverlayWatermark(t *testing.T) {
 //   - TxRun()
 func TestV2SingleABRTranscode(t *testing.T) {
 	filename := "./media/ErsteChristmas.mp4"
-	outputDir := "O"
+	outputDir := "V2SingleABRTranscode"
 
 	setupLogging()
 	log.Info("STARTING TestV2SingleABRTranscode")
@@ -410,6 +460,7 @@ func TestV2SingleABRTranscode(t *testing.T) {
 		EncHeight:         720,
 		EncWidth:          1280,
 		TxType:            avpipe.TxVideo,
+		StreamId:          -1,
 	}
 
 	// Create output directory if it doesn't exist
@@ -436,12 +487,12 @@ func TestV2SingleABRTranscode(t *testing.T) {
 	assert.NoError(t, err)
 }
 
-func TestV2CancellingSingleABRTranscode(t *testing.T) {
+func TestV2SingleABRTranscodeCancelling(t *testing.T) {
 	filename := "./media/ErsteChristmas.mp4"
-	outputDir := "O"
+	outputDir := "V2SingleABRTranscodeCancelling"
 
 	setupLogging()
-	log.Info("STARTING TestV2CancellingSingleABRTranscode")
+	log.Info("STARTING TestV2SingleABRTranscodeCancelling")
 
 	params := &avpipe.TxParams{
 		BypassTranscoding: false,
@@ -458,6 +509,7 @@ func TestV2CancellingSingleABRTranscode(t *testing.T) {
 		EncHeight:         720,
 		EncWidth:          1280,
 		TxType:            avpipe.TxVideo,
+		StreamId:          -1,
 	}
 
 	// Create output directory if it doesn't exist
@@ -541,6 +593,7 @@ func TestNvidiaABRTranscode(t *testing.T) {
 		EncHeight:       720,
 		EncWidth:        1280,
 		TxType:          avpipe.TxVideo,
+		StreamId:        -1,
 	}
 
 	doTranscode(t, params, nThreads, filename, "H264_NVIDIA encoder might not be enabled or hardware might not be available")
@@ -567,6 +620,7 @@ func TestConcurrentABRTranscode(t *testing.T) {
 		EncHeight:       720,
 		EncWidth:        1280,
 		TxType:          avpipe.TxVideo,
+		StreamId:        -1,
 	}
 
 	doTranscode(t, params, nThreads, filename, "")
@@ -593,6 +647,7 @@ func TestAAC2AACMezMaker(t *testing.T) {
 		EncHeight:         -1,
 		EncWidth:          -1,
 		TxType:            avpipe.TxAudio,
+		StreamId:          -1,
 	}
 
 	// Create output directory if it doesn't exist
@@ -645,6 +700,7 @@ func TestAC3TsAC3MezMaker(t *testing.T) {
 		EncWidth:          -1,
 		TxType:            avpipe.TxAudio,
 		AudioIndex:        0,
+		StreamId:          -1,
 	}
 
 	// Create output directory if it doesn't exist
@@ -692,6 +748,7 @@ func TestAC3TsAACMezMaker(t *testing.T) {
 		EncWidth:          -1,
 		TxType:            avpipe.TxAudio,
 		AudioIndex:        0,
+		StreamId:          -1,
 	}
 
 	// Create output directory if it doesn't exist
@@ -748,6 +805,7 @@ func TestMP2TsAACMezMaker(t *testing.T) {
 		EncWidth:          -1,
 		TxType:            avpipe.TxAudio,
 		AudioIndex:        1,
+		StreamId:          -1,
 	}
 
 	// Create output directory if it doesn't exist
@@ -803,6 +861,7 @@ func TestDownmix2AACMezMaker(t *testing.T) {
 		EncWidth:          -1,
 		TxType:            avpipe.TxAudio,
 		AudioIndex:        6,
+		StreamId:          -1,
 	}
 
 	// Create output directory if it doesn't exist
@@ -855,6 +914,7 @@ func TestAVPipeMXF_H265MezMaker(t *testing.T) {
 		EncHeight:         -1,
 		EncWidth:          -1,
 		TxType:            avpipe.TxVideo,
+		StreamId:          -1,
 	}
 
 	// Create output directory if it doesn't exist
@@ -908,6 +968,7 @@ func TestAVPipeHEVC_H264MezMaker(t *testing.T) {
 		EncHeight:         -1,
 		EncWidth:          -1,
 		TxType:            avpipe.TxVideo,
+		StreamId:          -1,
 	}
 
 	// Create output directory if it doesn't exist
@@ -961,6 +1022,7 @@ func TestAVPipeHEVC_H265ABRTranscode(t *testing.T) {
 		EncHeight:         -1,
 		EncWidth:          -1,
 		TxType:            avpipe.TxVideo,
+		StreamId:          -1,
 	}
 
 	// Create output directory if it doesn't exist
