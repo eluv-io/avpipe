@@ -296,8 +296,7 @@ prepare_decoder(
             /* Audio, copy codec params from stream format context */
             decoder_context->codec_parameters[i] = decoder_context->format_context->streams[i]->codecpar;
             decoder_context->stream[i] = decoder_context->format_context->streams[i];
-            if (params && params->stream_id < 0)
-                decoder_context->audio_stream_index = i;
+            decoder_context->audio_stream_index = i;
             elv_dbg("AUDIO STREAM %d, codec_id=%s, stream_id=%d",
                 i, avcodec_get_name(decoder_context->codec_parameters[i]->codec_id), decoder_context->stream[i]->id);
 
@@ -2809,6 +2808,7 @@ avpipe_init(
     char buf[1024];
 
     sprintf(buf,
+        "stream_id=%d "
         "url=%s "
         "version=%s "
         "bypass=%d "
@@ -2846,7 +2846,7 @@ avpipe_init(
         "bitdepth=%d "
         "max_cll=\"%s\" "
         "master_display=\"%s\"",
-        url,
+        params->stream_id, url,
         avpipe_version(),
         params->bypass_transcoding, get_tx_type_name(params->tx_type),
         params->format, params->start_time_ts, params->start_pts, params->duration_ts, params->start_segment_str,
