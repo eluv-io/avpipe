@@ -487,6 +487,57 @@ func TestV2SingleABRTranscode(t *testing.T) {
 	assert.NoError(t, err)
 }
 
+func TestV2SingleABRTranscodeIOHandler(t *testing.T) {
+	filename := "./media/ErsteChristmas.mp4"
+	outputDir := "V2SingleABRTranscodeIOHandler"
+
+	setupLogging()
+	log.Info("STARTING TestV2SingleABRTranscode")
+
+	params := &avpipe.TxParams{
+		BypassTranscoding: false,
+		Format:            "hls",
+		StartTimeTs:       0,
+		DurationTs:        -1,
+		StartSegmentStr:   "1",
+		VideoBitrate:      2560000,
+		AudioBitrate:      64000,
+		SampleRate:        44100,
+		CrfStr:            "23",
+		SegDurationTs:     1001 * 60,
+		Ecodec:            "libx264",
+		EncHeight:         720,
+		EncWidth:          1280,
+		TxType:            avpipe.TxVideo,
+		StreamId:          -1,
+	}
+
+	// Create output directory if it doesn't exist
+	err := setupOutDir(outputDir)
+	if err != nil {
+		t.Fail()
+	}
+
+	avpipe.InitUrlIOHandler(filename, &fileInputOpener{url: filename}, &fileOutputOpener{dir: outputDir})
+
+	handle, err := avpipe.TxInit(params, filename, true)
+	assert.NoError(t, err)
+	assert.Equal(t, true, handle > 0)
+	err = avpipe.TxRun(handle)
+	assert.NoError(t, err)
+
+	avpipe.InitUrlIOHandler(filename, &fileInputOpener{url: filename}, &fileOutputOpener{dir: outputDir})
+
+	params.TxType = avpipe.TxAudio
+	params.Ecodec = "aac"
+	params.AudioIndex = 1
+	handle, err = avpipe.TxInit(params, filename, true)
+	assert.NoError(t, err)
+	assert.Equal(t, true, handle > 0)
+	err = avpipe.TxRun(handle)
+	assert.NoError(t, err)
+}
+
 func TestV2SingleABRTranscodeCancelling(t *testing.T) {
 	filename := "./media/ErsteChristmas.mp4"
 	outputDir := "V2SingleABRTranscodeCancelling"

@@ -314,8 +314,9 @@ type ioHandler struct {
 
 // Global table of handlers
 var gHandlers map[int64]*ioHandler = make(map[int64]*ioHandler)
-var gURLInputOpeners map[string]InputOpener = make(map[string]InputOpener)    // Keeps InputOpener for specific URL
-var gURLOutputOpeners map[string]OutputOpener = make(map[string]OutputOpener) // Keeps OutputOpener for specific URL
+var gURLInputOpeners map[string]InputOpener = make(map[string]InputOpener)           // Keeps InputOpener for specific URL
+var gURLOutputOpeners map[string]OutputOpener = make(map[string]OutputOpener)        // Keeps OutputOpener for specific URL
+var gURLOutputOpenersByHandler map[int64]OutputOpener = make(map[int64]OutputOpener) // Keeps OutputOpener for specific URL
 var gHandleNum int64
 var gFd int64
 var gMutex sync.Mutex
@@ -347,18 +348,37 @@ func InitUrlIOHandler(url string, inputOpener InputOpener, outputOpener OutputOp
 	}
 }
 
+func getInputOpener(url string) InputOpener {
+	if inputOpener, ok := gURLInputOpeners[url]; ok {
+		return inputOpener
+	}
+
+	return gInputOpener
+}
+
+func getOutputOpener(url string) OutputOpener {
+	if outputOpener, ok := gURLOutputOpeners[url]; ok {
+		return outputOpener
+	}
+
+	return gOutputOpener
+}
+
+func getOutputOpenerByHandler(h int64) OutputOpener {
+	gMutex.Lock()
+	defer gMutex.Unlock()
+	if outputOpener, ok := gURLOutputOpenersByHandler[h]; ok {
+		return outputOpener
+	}
+
+	return gOutputOpener
+}
+
 //export NewIOHandler
 func NewIOHandler(url *C.char, size *C.int64_t) C.int64_t {
 	filename := C.GoString((*C.char)(unsafe.Pointer(url)))
-	urlInputOpener, ok := gURLInputOpeners[filename]
-	if !ok {
-		urlInputOpener = gInputOpener
-	}
-
-	urlOutputOpener, ok := gURLOutputOpeners[filename]
-	if !ok {
-		urlOutputOpener = gOutputOpener
-	}
+	urlInputOpener := getInputOpener(filename)
+	urlOutputOpener := getOutputOpener(filename)
 
 	if urlInputOpener == nil || urlOutputOpener == nil {
 		log.Error("Input or output opener(s) are not set")
@@ -369,6 +389,7 @@ func NewIOHandler(url *C.char, size *C.int64_t) C.int64_t {
 	gMutex.Lock()
 	gHandleNum++
 	fd := gHandleNum
+	gURLOutputOpenersByHandler[fd] = urlOutputOpener
 	gMutex.Unlock()
 
 	input, err := urlInputOpener.Open(fd, filename)
@@ -463,6 +484,7 @@ func AVPipeCloseInput(fd C.int64_t) C.int {
 
 	// Remove the handler from global table
 	gHandlers[int64(fd)] = nil
+	gURLOutputOpenersByHandler[int64(fd)] = nil
 	gMutex.Unlock()
 	if err != nil {
 		return C.int(-1)
@@ -566,7 +588,12 @@ func AVPipeOpenOutput(handler C.int64_t, stream_index, seg_index, stream_type C.
 		return C.int64_t(-1)
 	}
 
-	outHandler, err := gOutputOpener.Open(int64(handler), fd, int(stream_index), int(seg_index), out_type)
+	outputOpener := getOutputOpenerByHandler(int64(handler))
+	if outputOpener == nil {
+		log.Error("AVPipeOpenOutput() nil outputOpener", "handler", handler)
+		return C.int64_t(-1)
+	}
+	outHandler, err := outputOpener.Open(int64(handler), fd, int(stream_index), int(seg_index), out_type)
 	if err != nil {
 		log.Error("AVPipeOpenOutput()", "out_type", out_type, "error", err)
 		return C.int64_t(-1)
