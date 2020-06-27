@@ -40,7 +40,7 @@ func NewTsReader(addr string, w io.Writer) *TsReader {
 // NewTsReaderV2  creates a UDP MPEG-TS reader and returns an io.Reader
 // Starts the necessary goroutines - when the returned reader is closed, it stops
 // all goroutines and cleans up.
-func NewTsReaderV2(addr string) io.ReadWriteCloser {
+func NewTsReaderV2(addr string) (io.ReadWriteCloser, error) {
 
 	rwb := NewRWBuffer(100000)
 
@@ -60,7 +60,7 @@ func NewTsReaderV2(addr string) io.ReadWriteCloser {
 		log.Error("TsReader failed", "err", err)
 	}
 
-	return rwb
+	return rwb, err
 }
 
 func readUdp(pc net.PacketConn, w io.Writer) error {

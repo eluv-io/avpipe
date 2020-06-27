@@ -86,7 +86,11 @@ func TestUdpToMp4V2(t *testing.T) {
 		os.Mkdir("./O", 0755)
 	}
 
-	rwb := NewTsReaderV2(":21001")
+	rwb, err := NewTsReaderV2(":21001")
+	if err != nil {
+		t.Error("TsReader failed", "err", err)
+	}
+
 	audioReader := NewRWBuffer(10000)
 	videoReader := io.TeeReader(rwb, audioReader)
 
