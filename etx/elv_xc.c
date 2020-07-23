@@ -22,6 +22,12 @@
 static int opened_inputs = 0;
 static pthread_mutex_t lock = PTHREAD_MUTEX_INITIALIZER;
 
+extern int
+do_mux(
+    txparams_t *params,
+    char *out_filename
+);
+
 typedef struct udp_thread_params_t {
     int             fd;             /* Socket fd to read UDP datagrams */
     elv_channel_t   *udp_channel;   /* udp channel to keep incomming UDP packets */
@@ -456,7 +462,7 @@ out_seek(
         outctx->read_pos += offset; break;
     case SEEK_END:
         outctx->read_pos = -1;
-        elv_dbg("IN SEEK - SEEK_END not yet implemented\n");
+        elv_dbg("OUT SEEK - SEEK_END not yet implemented\n");
         break;
     default:
         elv_err("OUT SEEK - weird seek\n");
@@ -685,14 +691,15 @@ end_probe:
 }
 
 static int
-read_image(
-    char *overlay_filename,
-    txparams_t *params
+read_file(
+    char *filename,
+    char **buf
 )
 {
+    char *lbuf;
     struct stat st;
-    char *buf;
-    int fd = open(overlay_filename, O_RDONLY);
+
+    int fd = open(filename, O_RDONLY);
     if (fd < 0)
         return -1;
 
@@ -701,15 +708,46 @@ read_image(
         return -1;
     }
 
-    buf = (char *) malloc(st.st_size);
-    int nread = read(fd, buf, st.st_size);
+    lbuf = (char *) malloc(st.st_size+1);
+    int nread = read(fd, lbuf, st.st_size);
     if (nread != st.st_size) {
         close(fd);
-        free(buf);
+        free(lbuf);
         return -1;
     }
 
     close(fd);
+    lbuf[nread] = '\0';
+    *buf = lbuf;
+    return nread;
+}
+
+static int
+read_muxing_spec(
+    char *spec_filename,
+    txparams_t *params
+)
+{
+    char *buf;
+    int nread = read_file(spec_filename, &buf);
+    if (nread < 0)
+        return -1;
+
+    params->mux_spec = buf;
+    return nread;
+}
+
+static int
+read_image(
+    char *overlay_filename,
+    txparams_t *params
+)
+{
+    char *buf;
+    int nread = read_file(overlay_filename, &buf);
+    if (nread < 0)
+        return -1;
+
     params->watermark_overlay = buf;
     params->watermark_overlay_len = nread;
     return nread;
@@ -744,60 +782,61 @@ usage(
         "\t-audio-bitrate :         (optional) Default: 128000\n"
         "\t-audio-fill-gap :        (optional) Default: 0, must be 0 or 1. It only effects if encoder is aac.\n"
         "\t-audio-index :           (optional) Default: the index of last audio stream\n"
-        "\t-bitdepth :              (optional) bitdepth of color space. Default is 8, can be 8, 10, or 12.\n"
-        "\t-bypass :                (optional) bypass transcoding. Default is 0, must be 0 or 1\n"
-        "\t-command :               (optional) directing command of etx, can be \"transcode\" or \"probe\" (default is transcode).\n"
-        "\t-crf :                   (optional) mutually exclusive with video-bitrate. Default: 23\n"
+        "\t-bitdepth :              (optional) Bitdepth of color space. Default is 8, can be 8, 10, or 12.\n"
+        "\t-bypass :                (optional) Bypass transcoding. Default is 0, must be 0 or 1\n"
+        "\t-command :               (optional) Directing command of etx, can be \"transcode\", \"probe\" or \"mux\" (default is transcode).\n"
+        "\t-crf :                   (optional) Mutually exclusive with video-bitrate. Default: 23\n"
         "\t-crypt-iv :              (optional) 128-bit AES IV, as hex\n"
         "\t-crypt-key :             (optional) 128-bit AES key, as hex\n"
         "\t-crypt-kid :             (optional) 16-byte key ID, as hex\n"
-        "\t-crypt-scheme :          (optional) encryption scheme. Default is \"none\", can be: \"aes-128\", \"cenc\", \"cbc1\", \"cens\", \"cbcs\"\n"
-        "\t-crypt-url :             (optional) specify a key URL in the HLS manifest\n"
-        "\t-d :                     (optional) decoder name. For video default is \"h264\", can be: \"h264\", \"h264_cuvid\", \"jpeg2000\", \"hevc\"\n"
+        "\t-crypt-scheme :          (optional) Encryption scheme. Default is \"none\", can be: \"aes-128\", \"cenc\", \"cbc1\", \"cens\", \"cbcs\"\n"
+        "\t-crypt-url :             (optional) Specify a key URL in the HLS manifest\n"
+        "\t-d :                     (optional) Decoder name. For video default is \"h264\", can be: \"h264\", \"h264_cuvid\", \"jpeg2000\", \"hevc\"\n"
         "\t                                    For audio default is \"aac\", but for ts files should be set to \"ac3\"\n"
         "\t-duration-ts :           (optional) Default: -1 (entire stream)\n"
-        "\t-e :                     (optional) encoder name. Default is \"libx264\", can be: \"libx264\", \"libx265\", \"h264_nvenc\", \"h264_videotoolbox\"\n"
+        "\t-e :                     (optional) Encoder name. Default is \"libx264\", can be: \"libx264\", \"libx265\", \"h264_nvenc\", \"h264_videotoolbox\"\n"
         "\t                                    For audio default is \"aac\", but for ts files should be set to \"ac3\"\n"
         "\t-enc-height :            (optional) Default: -1 (use source height)\n"
         "\t-enc-width :             (optional) Default: -1 (use source width)\n"
-        "\t-equal-fduration :       (optional) force equal frame duration. Must be 0 or 1 and only valid for \"fmp4-segment\" format\n"
-        "\t-f :                     (mandatory) input filename for transcoding. Valid formats are: a filename that points to a valid file, or udp://127.0.0.1:<port>.\n"
+        "\t-equal-fduration :       (optional) Force equal frame duration. Must be 0 or 1 and only valid for \"fmp4-segment\" format\n"
+        "\t-f :                     (mandatory) Input filename for transcoding. Valid formats are: a filename that points to a valid file, or udp://127.0.0.1:<port>.\n"
         "\t                                     Output goes to directory ./O\n"
-        "\t-format :                (optional) package format. Default is \"dash\", can be: \"dash\", \"hls\", \"mp4\", \"fmp4\", \"segment\", or \"fmp4-segment\"\n"
+        "\t-format :                (optional) Package format. Default is \"dash\", can be: \"dash\", \"hls\", \"mp4\", \"fmp4\", \"segment\", or \"fmp4-segment\"\n"
         "\t                                    Using \"segment\" format produces self contained mp4 segments with start pts from 0 for each segment\n"
         "\t                                    Using \"fmp4-segment\" format produces self contained mp4 segments with continious pts.\n"
         "\t                                    Using \"fmp4-segment\" generates segments that are appropriate for live streaming.\n"
-        "\t-force-keyint :          (optional) force IDR key frame in this interval.\n"
+        "\t-force-keyint :          (optional) Force IDR key frame in this interval.\n"
         "\t-master-display :        (optional) Master display, only valid if encoder is libx265.\n"
         "\t-max-cll :               (optional) Maximum Content Light Level and Maximum Frame Average Light Level, only valid if encoder is libx265.\n"
         "\t                                    This parameter is a comma separated of max-cll and max-fall (i.e \"1514,172\").\n"
+        "\t-mux-spec :              (optional) Muxing spec file.\n"
         "\t-preset :                (optional) Preset string to determine compression speed. Default is \"medium\". Valid values are: \"ultrafast\", \"superfast\",\n"
         "\t                                    \"veryfast\", \"faster\", \"fast\", \"medium\", \"slow\", \"slower\", \"veryslow\".\n"
         "\t-r :                     (optional) number of repeats. Default is 1 repeat, must be bigger than 1\n"
         "\t-rc-buffer-size :        (optional)\n"
         "\t-rc-max-rate :           (optional)\n"
         "\t-sample-rate :           (optional) Default: -1. For aac output sample rate is set to input sample rate and this parameter is ignored.\n"
-        "\t-seekable :              (optional) seekable stream. Default is 0, must be 0 or 1\n"
-        "\t-seg-duration-ts :       (mandatory if format is not \"segment\") segment duration time base (positive integer).\n"
-        "\t-seg-duration :          (mandatory if format is \"segment\") segment duration secs (positive integer). It is used for making mp4 segments.\n"
-        "\t-start-pts :             (optional) starting PTS for output. Default is 0\n"
-        "\t-start-frag-index :      (optional) start fragment index of first segment. Default is 0\n"
-        "\t-start-segment :         (optional) start segment number >= 1, Default is 1\n"
+        "\t-seekable :              (optional) Seekable stream. Default is 0, must be 0 or 1\n"
+        "\t-seg-duration-ts :       (mandatory If format is not \"segment\") segment duration time base (positive integer).\n"
+        "\t-seg-duration :          (mandatory If format is \"segment\") segment duration secs (positive integer). It is used for making mp4 segments.\n"
+        "\t-start-pts :             (optional) Starting PTS for output. Default is 0\n"
+        "\t-start-frag-index :      (optional) Start fragment index of first segment. Default is 0\n"
+        "\t-start-segment :         (optional) Start segment number >= 1, Default is 1\n"
         "\t-start-time-ts :         (optional) Default: 0\n"
         "\t-stream-id :             (optional) Default: -1, if it is valid it will be used to transcode elementary stream with that stream-id.\n"
         "\t-sync-audio-to-iframe:   (optional) Default 0, must be 0 or 1. Sync audio to first video iframe when input stream is mpegts.\n"
-        "\t-t :                     (optional) transcoding threads. Default is 1 thread, must be bigger than 1\n"
-        "\t-tx-type :               (optional) transcoding type. Default is \"all\", can be \"video\", \"audio\", or \"all\" \n"
-        "\t-video-bitrate :         (optional) mutually exclusive with crf. Default: -1 (unused)\n"
-        "\t-wm-text :               (optional) watermark text that will be presented in every video frame if it exist. It has higher priority than overlay watermark.\n"
-        "\t-wm-xloc :               (optional) watermark X location\n"
-        "\t-wm-yloc :               (optional) watermark Y location\n"
-        "\t-wm-color :              (optional) watermark font color\n"
-        "\t-wm-overlay :            (optional) watermark overlay image file. It has less priority than text watermark.\n"
-        "\t-wm-overlay-type :       (optional) watermark overlay image file type, can be \"png\", \"gif\", \"jpg\". Default is png.\n"
-        "\t-wm-relative-size :      (optional) watermark relative font/shadow size\n"
-        "\t-wm-shadow :             (optional) watermarking with shadow. Default is 1, means with shadow.\n"
-        "\t-wm-shadow-color :       (optional) watermark shadow color. Default is white.\n",
+        "\t-t :                     (optional) Transcoding threads. Default is 1 thread, must be bigger than 1\n"
+        "\t-tx-type :               (optional) Transcoding type. Default is \"all\", can be \"video\", \"audio\", or \"all\" \n"
+        "\t-video-bitrate :         (optional) Mutually exclusive with crf. Default: -1 (unused)\n"
+        "\t-wm-text :               (optional) Watermark text that will be presented in every video frame if it exist. It has higher priority than overlay watermark.\n"
+        "\t-wm-xloc :               (optional) Watermark X location\n"
+        "\t-wm-yloc :               (optional) Watermark Y location\n"
+        "\t-wm-color :              (optional) Watermark font color\n"
+        "\t-wm-overlay :            (optional) Watermark overlay image file. It has less priority than text watermark.\n"
+        "\t-wm-overlay-type :       (optional) Watermark overlay image file type, can be \"png\", \"gif\", \"jpg\". Default is png.\n"
+        "\t-wm-relative-size :      (optional) Watermark relative font/shadow size\n"
+        "\t-wm-shadow :             (optional) Watermarking with shadow. Default is 1, means with shadow.\n"
+        "\t-wm-shadow-color :       (optional) Watermark shadow color. Default is white.\n",
         bad_flag, progname);
     printf("\n%s version=%s\n", progname, avpipe_version());
     exit(status);
@@ -920,7 +959,7 @@ main(
         case 'c':
             if (!strcmp(argv[i], "-command")) {
                 command = argv[i+1];
-                if (!strcmp(command, "transcode") && !strcmp(command, "probe")) {
+                if (strcmp(command, "transcode") && strcmp(command, "probe") && strcmp(command, "mux")) {
                     usage(argv[0], argv[i], EXIT_FAILURE);
                 }
             } else if (!strcmp(argv[i], "-crf")) {
@@ -1012,7 +1051,11 @@ main(
             }
             break;
         case 'm':
-            if (!strcmp(argv[i], "-master-display")) {
+            if (!strcmp(argv[i], "-mux-spec")) {
+                if (read_muxing_spec(argv[i+1], &p) < 0) {
+                    usage(argv[0], argv[i], EXIT_FAILURE);
+                }
+            } else if (!strcmp(argv[i], "-master-display")) {
                 p.master_display = strdup(argv[i+1]);
             } else if (!strcmp(argv[i], "-max-cll")) {
                 p.max_cll = strdup(argv[i+1]);
@@ -1180,6 +1223,8 @@ main(
 
     if (!strcmp(command, "probe")) {
         return do_probe(filename, seekable);
+    } else if (!strcmp(command, "mux")) {
+        return do_mux(&p, filename);
     }
 
     if (sscanf(p.start_segment_str, "%d", &start_segment) != 1) {

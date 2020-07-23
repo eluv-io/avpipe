@@ -1,7 +1,7 @@
 include ../rules.make
 TOP_DIR ?= $(shell pwd)
 
-SRCS=elv_xc_test.c
+SRCS=elv_xc.c elv_mux.c
 LIBDIRS=-L$(TOP_DIR)/../lib
 INCDIRS=-I$(TOP_DIR)/../include
 FLAGS=-O0 -ggdb -Wall -fPIC

@@ -3,6 +3,7 @@ package avpipe_test
 import (
 	"encoding/json"
 	"fmt"
+	"github.com/qluvio/avpipe/avcmd/cmd"
 	"io"
 	"io/ioutil"
 	"math/big"
@@ -1089,6 +1090,152 @@ func TestAVPipeHEVC_H265ABRTranscode(t *testing.T) {
 		t.Fail()
 	}
 
+}
+
+// This unit test is almost a complete test for mez, abr, muxing and probing. It does:
+// 1) Creates audio and video mez files
+// 2) Creates ABR segments using audio and video mez files in step 1
+// 3) Mux the ABR audio and video segments from step 2
+// 4) Probes the initial mez file from step 1 and mux output from step 3. The duration has to be equal.
+func TestABRMuxing(t *testing.T) {
+	filename := "./media/creed_1_min.mov"
+	log.Info("STARTING TestABRMuxing")
+	setupLogging()
+
+	videoMezDir := "VideoMez4Muxing"
+	audioMezDir := "AudioMez4Muxing"
+	videoABRDir := "VideoABR4Muxing"
+	audioABRDir := "AudioABR4Muxing"
+	muxOutDir := "MuxingOutput"
+
+	// Create video mez files
+	err := setupOutDir(videoMezDir)
+	if err != nil {
+		t.Fail()
+	}
+
+	params := &avpipe.TxParams{
+		BypassTranscoding: false,
+		Format:            "fmp4-segment",
+		StartTimeTs:       0,
+		DurationTs:        -1,
+		StartSegmentStr:   "1",
+		VideoBitrate:      2560000,
+		AudioBitrate:      128000,
+		SampleRate:        44100,
+		CrfStr:            "23",
+		SegDuration:       "30.03",
+		Ecodec:            "libx264",
+		EncHeight:         720,
+		EncWidth:          1280,
+		TxType:            avpipe.TxVideo,
+		StreamId:          -1,
+	}
+
+	avpipe.InitUrlIOHandler(filename, &fileInputOpener{url: filename}, &fileOutputOpener{dir: videoMezDir})
+	rc := avpipe.Tx(params, filename, true)
+	if rc != 0 {
+		t.Fail()
+	}
+
+	// Create audio mez files
+	err = setupOutDir(audioMezDir)
+	if err != nil {
+		t.Fail()
+	}
+
+	params.TxType = avpipe.TxAudio
+	params.Ecodec = "aac"
+	params.AudioIndex = -1
+
+	avpipe.InitUrlIOHandler(filename, &fileInputOpener{url: filename}, &fileOutputOpener{dir: audioMezDir})
+	rc = avpipe.Tx(params, filename, false)
+	if rc != 0 {
+		t.Fail()
+	}
+
+	// Create video ABR files
+	err = setupOutDir(videoABRDir)
+	if err != nil {
+		t.Fail()
+	}
+
+	filename = videoMezDir + "/segment-1.mp4"
+	params.TxType = avpipe.TxVideo
+	params.Format = "dash"
+	params.Ecodec = "libx264"
+	params.SegDurationTs = 48000
+	params.AudioIndex = -1
+
+	avpipe.InitUrlIOHandler(filename, &fileInputOpener{url: filename}, &fileOutputOpener{dir: videoABRDir})
+	rc = avpipe.Tx(params, filename, true)
+	if rc != 0 {
+		t.Fail()
+	}
+
+	// Create audio ABR files
+	err = setupOutDir(audioABRDir)
+	if err != nil {
+		t.Fail()
+	}
+
+	filename = audioMezDir + "/segment-1.mp4"
+	params.TxType = avpipe.TxAudio
+	params.Format = "dash"
+	params.Ecodec = "aac"
+	params.SegDurationTs = 96000
+	params.AudioIndex = -1
+
+	avpipe.InitUrlIOHandler(filename, &fileInputOpener{url: filename}, &fileOutputOpener{dir: audioABRDir})
+	rc = avpipe.Tx(params, filename, true)
+	if rc != 0 {
+		t.Fail()
+	}
+
+	// Create playable file by muxing audio/video segments
+	err = setupOutDir(muxOutDir)
+	if err != nil {
+		t.Fail()
+	}
+
+	muxSpec := "abr-mux\n"
+	muxSpec += "audio,1," + audioABRDir + "/init-stream0.mp4\n"
+	for i := 1; i <= 15; i++ {
+		muxSpec += fmt.Sprintf("%s%s%s%02d%s\n", "audio,1,", audioABRDir, "/chunk-stream0-000", i, ".mp4")
+	}
+	muxSpec += "video,1,VideoABR4Muxing/init-stream0.mp4\n"
+	for i := 1; i <= 15; i++ {
+		muxSpec += fmt.Sprintf("%s%s%s%02d%s\n", "video,1,", videoABRDir, "/chunk-stream0-000", i, ".mp4")
+	}
+	filename = muxOutDir + "/segment-1.mp4"
+	params.MuxingSpec = muxSpec
+	log.Debug("TestABRMuxing", "muxSpec", string(muxSpec))
+
+	avpipe.InitUrlMuxIOHandler(filename, &cmd.AVCmdMuxInputOpener{URL: filename}, &cmd.AVCmdMuxOutputOpener{})
+
+	rc = avpipe.Mux(params, filename, true)
+	if rc != 0 {
+		t.Fail()
+	}
+
+	// Now probe mez video and output file and become sure both have the same duration
+	videoMezFile := fmt.Sprintf("%s/segment-1.mp4", videoMezDir)
+	avpipe.InitIOHandler(&fileInputOpener{url: videoMezFile}, &fileOutputOpener{dir: videoMezDir})
+	// Now probe the generated files
+	videoMezProbeInfo, err := avpipe.Probe(videoMezFile, true)
+	if err != nil {
+		t.Error(err)
+	}
+
+	muxOutFile := fmt.Sprintf("%s/segment-1.mp4", muxOutDir)
+	avpipe.InitIOHandler(&fileInputOpener{url: muxOutFile}, &fileOutputOpener{dir: muxOutDir})
+	muxOutProbeInfo, err := avpipe.Probe(muxOutFile, true)
+	if err != nil {
+		t.Error(err)
+	}
+
+	log.Debug("TestABRMuxing", "mezDuration", videoMezProbeInfo.ContainerInfo.Duration, "muxOutDuration", muxOutProbeInfo.ContainerInfo.Duration)
+	assert.Equal(t, true, int(videoMezProbeInfo.ContainerInfo.Duration) == int(muxOutProbeInfo.ContainerInfo.Duration))
 }
 
 func TestMarshalParams(t *testing.T) {

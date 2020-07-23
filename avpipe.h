@@ -22,6 +22,12 @@ tx(
     char *filename,
     int debug_frame_level);
 
+int
+mux(
+    txparams_t *params,
+    char *filename,
+    int debug_frame_level);
+
 const char *
 get_pix_fmt_name(
     int pix_fmt);

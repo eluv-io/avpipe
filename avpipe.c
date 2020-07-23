@@ -27,21 +27,27 @@ avcodec_profile_name(
     enum AVCodecID codec_id,
     int profile);
 
-int64_t NewIOHandler(char*, int64_t *);
-int AVPipeReadInput(int64_t, uint8_t *, int);
-int64_t AVPipeSeekInput(int64_t, int64_t offset, int whence);
-int AVPipeCloseInput(int64_t);
-int AVPipeStatInput(int64_t, avp_stat_t, void *);
+int64_t AVPipeOpenInput(char *, int64_t *);
+int64_t AVPipeOpenMuxInput(char *, char *, int64_t *);
+int     AVPipeReadInput(int64_t, uint8_t *, int);
+int64_t AVPipeSeekInput(int64_t, int64_t, int);
+int     AVPipeCloseInput(int64_t);
+int     AVPipeStatInput(int64_t, avp_stat_t, void *);
 int64_t AVPipeOpenOutput(int64_t, int, int, int);
-int AVPipeWriteOutput(int64_t, int64_t, uint8_t *, int);
-int AVPipeSeekOutput(int64_t, int64_t, int64_t offset, int whence);
-int AVPipeCloseOutput(int64_t, int64_t);
-int AVPipeStatOutput(int64_t, int64_t, avp_stat_t, void *);
-int CLog(char *);
-int CDebug(char *);
-int CInfo(char *);
-int CWarn(char *);
-int CError(char *);
+int64_t AVPipeOpenMuxOutput(char *, int);
+int     AVPipeWriteOutput(int64_t, int64_t, uint8_t *, int);
+int     AVPipeWriteMuxOutput(int64_t, uint8_t *, int);
+int     AVPipeSeekOutput(int64_t, int64_t, int64_t, int);
+int     AVPipeSeekMuxOutput(int64_t, int64_t, int);
+int     AVPipeCloseOutput(int64_t, int64_t);
+int     AVPipeCloseMuxOutput(int64_t);
+int     AVPipeStatOutput(int64_t, int64_t, avp_stat_t, void *);
+int     AVPipeStatMuxOutput(int64_t, avp_stat_t, void *);
+int     CLog(char *);
+int     CDebug(char *);
+int     CInfo(char *);
+int     CWarn(char *);
+int     CError(char *);
 
 #define MIN_VALID_FD      (-4)
 
@@ -56,12 +62,12 @@ typedef struct txctx_entry_t {
 txctx_entry_t          *tx_table[MAX_TX];
 static pthread_mutex_t tx_mutex = PTHREAD_MUTEX_INITIALIZER;
 
-int
+static int
 in_stat(
     void *opaque,
     avp_stat_t stat_type);
 
-int
+static int
 in_opener(
     const char *url,
     ioctx_t *inctx)
@@ -93,19 +99,21 @@ in_opener(
         /* Default file input would be assumed to be mp4 */
         inctx->url = "bogus.mp4";
 
-    int64_t h = NewIOHandler((char *) url, &size);
-    if (h <= 0 )
+    int64_t fd = AVPipeOpenInput((char *) url, &size);
+    if (fd <= 0 )
         return -1;
 
     if (size > 0)
         inctx->sz = size;
-    elv_dbg("IN OPEN h=%"PRId64", size=%"PRId64, h, size);
+#if TRACE_IO
+    elv_dbg("IN OPEN fd=%"PRId64", size=%"PRId64, fd, size);
+#endif
 
-    *((int64_t *)(inctx->opaque)) = h;
+    *((int64_t *)(inctx->opaque)) = fd;
     return 0;
 }
 
-int
+static int
 in_closer(
     ioctx_t *inctx)
 {
@@ -117,12 +125,14 @@ in_closer(
 #endif
 
     int64_t h = *((int64_t *)(inctx->opaque));
-    elv_dbg("IN io_close custom reader h=%d", h);
+#if TRACE_IO
+    elv_dbg("IN CLOSER h=%d", h);
+#endif
     AVPipeCloseInput(h);
     return 0;
 }
 
-int
+static int
 in_read_packet(
     void *opaque,
     uint8_t *buf,
@@ -175,7 +185,7 @@ in_read_packet(
     return r > 0 ? r : -1;
 }
 
-int
+static int
 in_write_packet(
     void *opaque,
     uint8_t *buf,
@@ -185,7 +195,7 @@ in_write_packet(
     return 0;
 }
 
-int64_t
+static int64_t
 in_seek(
     void *opaque,
     int64_t offset,
@@ -212,12 +222,14 @@ in_seek(
         elv_dbg("IN SEEK - weird seek\n");
     }
 
+#if TRACE_IO
     elv_dbg("IN SEEK offset=%"PRId64", whence=%d, rc=%"PRId64, offset, whence, rc);
+#endif
 
     return rc;
 }
 
-int
+static int
 in_stat(
     void *opaque,
     avp_stat_t stat_type)
@@ -231,7 +243,7 @@ in_stat(
     return rc;
 }
 
-int
+static int
 out_opener(
     const char *url,
     ioctx_t *outctx)
@@ -247,9 +259,11 @@ out_opener(
     outctx->buf = (unsigned char *)malloc(outctx->bufsz); /* Must be malloc'd - will be realloc'd by avformat */
 
     fd = AVPipeOpenOutput(h, outctx->stream_index, outctx->seg_index, outctx->type);
+#if TRACE_IO
     elv_dbg("OUT out_opener outctx=%p, fd=%"PRId64, outctx, fd);
+#endif
     if (fd < 0) {
-	elv_err("AVPIPE OUT OPEN failed stream_index=%d, seg_index=%d, type=%d",
+        elv_err("AVPIPE OUT OPEN failed stream_index=%d, seg_index=%d, type=%d",
             outctx->stream_index, outctx->seg_index, outctx->type);
         return -1;
     }
@@ -260,7 +274,7 @@ out_opener(
     return 0;
 }
 
-int
+static int
 out_read_packet(
     void *opaque,
     uint8_t *buf,
@@ -270,7 +284,7 @@ out_read_packet(
     return 0;
 }
 
-int
+static int
 out_write_packet(
     void *opaque,
     uint8_t *buf,
@@ -293,7 +307,7 @@ out_write_packet(
     return buf_size;
 }
 
-int64_t
+static int64_t
 out_seek(
     void *opaque,
     int64_t offset,
@@ -321,7 +335,7 @@ out_seek(
     return rc;
 }
 
-int
+static int
 out_closer(
     ioctx_t *outctx)
 {
@@ -334,7 +348,7 @@ out_closer(
     return rc;
 }
 
-int
+static int
 out_stat(
     void *opaque,
     avp_stat_t stat_type)
@@ -642,7 +656,7 @@ tx(
     txctx->inctx = inctx;
 
     if (avpipe_tx(txctx, 0, debug_frame_level) < 0) {
-        elv_err("Error in transcoding");
+        elv_err("Transcoding failed");
         rc = -1;
         goto end_tx;
     }
@@ -655,6 +669,317 @@ end_tx:
     avpipe_fini(&txctx);
     free(in_handlers);
     free(out_handlers);
+
+    return rc;
+}
+
+static int
+in_mux_opener(
+    const char *url,
+    ioctx_t *inctx)
+{
+    int64_t size;
+    char *out_filename = inctx->in_mux_ctx->out_filename;
+
+    inctx->opaque = (void *) calloc(1, sizeof(int64_t));
+    if (url != NULL)
+        inctx->url = strdup(url);
+    else
+        /* Default file input would be assumed to be mp4 */
+        inctx->url = "bogus.mp4";
+
+    int64_t fd = AVPipeOpenMuxInput((char *) out_filename, (char *) url, &size);
+    if (fd <= 0 )
+        return -1;
+
+    if (size > 0)
+        inctx->sz = size;
+    elv_dbg("IN MUX OPEN fd=%"PRId64", size=%"PRId64, fd, size);
+
+    *((int64_t *)(inctx->opaque)) = fd;
+    return 0;
+}
+
+
+static int
+in_mux_read_packet(
+    void *opaque,
+    uint8_t *buf,
+    int buf_size)
+{
+    ioctx_t *c = (ioctx_t *)opaque;
+    int r;
+    int64_t fd;
+
+read_next_input:
+    /* This means the input file is not opened yet, so open the input file */
+    if (!c->opaque) {
+        io_mux_ctx_t *in_mux_ctx = c->in_mux_ctx;
+        int index = c->in_mux_index;
+        char *filepath;
+
+        /* index 0 means video */
+        if (index == 0) {
+            /* Reached end of videos */
+            if (in_mux_ctx->video.index >= in_mux_ctx->video.n_parts)
+                return -1;
+            filepath = in_mux_ctx->video.parts[in_mux_ctx->video.index];
+            in_mux_ctx->video.index++;
+        } else if (index <= in_mux_ctx->last_audio_index) {
+            if (in_mux_ctx->audios[index-1].index >= in_mux_ctx->audios[index-1].n_parts)
+                return -1;
+            filepath = in_mux_ctx->audios[index-1].parts[in_mux_ctx->audios[index-1].index];
+            in_mux_ctx->audios[index-1].index++;
+        } else if (index <= in_mux_ctx->last_audio_index+in_mux_ctx->last_caption_index) {
+            if (in_mux_ctx->captions[index - in_mux_ctx->last_audio_index - 1].index >=
+                in_mux_ctx->captions[index - in_mux_ctx->last_audio_index - 1].n_parts)
+                return -1;
+            filepath = in_mux_ctx->captions[index - in_mux_ctx->last_audio_index - 1].parts[in_mux_ctx->captions[index - in_mux_ctx->last_audio_index - 1].index];
+            in_mux_ctx->captions[index - in_mux_ctx->last_audio_index - 1].index++;
+        } else {
+            elv_err("in_mux_read_packet invalid index=%d", index);
+            return -1;
+        }
+
+        c->opaque = (int *) calloc(1, sizeof(int));
+        if (in_mux_opener(filepath, c) < 0) {
+            elv_err("in_mux_read_packet failed to open file=%s", filepath);
+            return -1;
+        }
+        fd = *((int64_t *)(c->opaque));
+
+#if 0
+        /* PENDING(RM) complete this for multiple mez inputs */ 
+        if (new_video)
+            in_mux_ctx->video.header_size = read_header(fd, in_mux_ctx->mux_type);
+        else if (new_audio)
+            in_mux_ctx->audios[index-1].header_size = read_header(fd, in_mux_ctx->mux_type);
+#endif
+
+#if TRACE_IO
+        elv_dbg("IN MUX READ opened new file filepath=%s, fd=%d", filepath, fd);
+#endif
+    }
+
+    fd = *((int64_t *)(c->opaque));
+    r = AVPipeReadInput(fd, buf, buf_size);
+#if TRACE_IO
+    elv_dbg("IN MUX READ index=%d, buf=%p buf_size=%d fd=%d, r=%d",
+        c->in_mux_index, buf, buf_size, fd, r);
+#endif
+
+    /* If it is EOF, read the next input file */
+    if (r == 0) {
+#if TRACE_IO
+        elv_dbg("IN MUX READ closing file fd=%d", fd);
+#endif
+        in_closer(c);
+        free(c->opaque);
+        c->opaque = NULL;
+        goto read_next_input;
+    }
+
+    if (r > 0) {
+        c->read_bytes += r;
+        c->read_pos += r;
+    }
+
+    if (c->read_bytes - c->read_reported > BYTES_READ_REPORT) {
+        in_stat(opaque, in_stat_bytes_read);
+        c->read_reported = c->read_bytes;
+    }
+
+#if TRACE_IO
+    elv_dbg("IN MUX READ read=%d pos=%"PRId64" total=%"PRId64, r, c->read_pos, c->read_bytes);
+#endif
+    return r > 0 ? r : -1;
+}
+
+static int64_t
+in_mux_seek(
+    void *opaque,
+    int64_t offset,
+    int whence)
+{
+    ioctx_t *c = (ioctx_t *)opaque;
+#if TRACE_IO
+    elv_dbg("IN MUX SEEK index=%d, offset=%"PRId64" whence=%d", c->in_mux_index, offset, whence);
+#endif
+    return -1;
+}
+
+static int
+out_mux_opener(
+    const char *url,
+    ioctx_t *outctx)
+{
+    int64_t fd;
+
+    /* Allocate the buffers. The data will be copied to the buffers */
+    outctx->bufsz = 1 * 1024 * 1024;
+    outctx->buf = (unsigned char *)malloc(outctx->bufsz); /* Must be malloc'd - will be realloc'd by avformat */
+
+    fd = AVPipeOpenMuxOutput((char *) url, outctx->type);
+#if TRACE_IO
+    elv_dbg("OUT out_mux_opener outctx=%p, fd=%"PRId64, outctx, fd);
+#endif
+    if (fd < 0) {
+        elv_err("AVPIPE OUT MUX OPEN failed, type=%d", outctx->type);
+        return -1;
+    }
+
+    outctx->opaque = (int *) malloc(sizeof(int64_t));
+    *((int64_t *)(outctx->opaque)) = fd;
+
+    return 0;
+}
+
+static int
+out_mux_closer(
+    ioctx_t *outctx)
+{
+    int64_t fd = *(int64_t *)outctx->opaque;
+    int rc = AVPipeCloseMuxOutput(fd);
+    free(outctx->opaque);
+    free(outctx->buf);
+    return rc;
+}
+
+
+static int
+out_mux_write_packet(
+    void *opaque,
+    uint8_t *buf,
+    int buf_size)
+{
+    ioctx_t *outctx = (ioctx_t *)opaque;
+    int64_t fd = *(int64_t *)outctx->opaque;
+    int bwritten = AVPipeWriteMuxOutput(fd, buf, buf_size);
+    if (bwritten >= 0) {
+        outctx->written_bytes += bwritten;
+        outctx->write_pos += bwritten;
+    }
+
+#if TRACE_IO
+    elv_dbg("OUT MUX WRITE fd=%"PRId64", size=%d written=%d pos=%d total=%d", fd, buf_size, bwritten, outctx->write_pos, outctx->written_bytes);
+#endif
+
+    return bwritten;
+}
+
+static int64_t
+out_mux_seek(
+    void *opaque,
+    int64_t offset,
+    int whence)
+{
+    ioctx_t *outctx = (ioctx_t *)opaque;
+    int64_t fd = *(int64_t *)outctx->opaque;
+    int rc = AVPipeSeekMuxOutput(fd, offset, whence);
+#if TRACE_IO
+    elv_dbg("OUT MUX SEEK fd=%"PRId64" offset=%d whence=%d", fd, offset, whence);
+#endif
+    return rc;
+}
+
+static int
+out_mux_stat(
+    void *opaque,
+    avp_stat_t stat_type)
+{
+    ioctx_t *outctx = (ioctx_t *)opaque;
+    int64_t fd = *(int64_t *)outctx->opaque;
+    int64_t rc = 0;
+
+    switch (stat_type) {
+    case out_stat_bytes_written:
+        rc = AVPipeStatMuxOutput(fd, stat_type, &outctx->written_bytes);
+        break;
+    case out_stat_decoding_start_pts:
+        rc = AVPipeStatMuxOutput(fd, stat_type, &outctx->decoding_start_pts);
+        break;
+    case out_stat_encoding_end_pts:
+        rc = AVPipeStatMuxOutput(fd, stat_type, &outctx->encoder_ctx->input_last_pts_sent_encode);
+        break;
+    default:
+        break;
+    }
+    return rc;
+}
+
+
+static void
+set_mux_handlers(
+    avpipe_io_handler_t **p_in_handlers,
+    avpipe_io_handler_t **p_out_handlers)
+{
+    if (p_in_handlers) {
+        avpipe_io_handler_t *in_handlers = (avpipe_io_handler_t *)calloc(1, sizeof(avpipe_io_handler_t));
+        in_handlers->avpipe_opener = in_opener;
+        in_handlers->avpipe_closer = in_closer;
+        in_handlers->avpipe_reader = in_mux_read_packet;
+        in_handlers->avpipe_writer = in_write_packet;
+        in_handlers->avpipe_seeker = in_mux_seek;
+        in_handlers->avpipe_stater = in_stat;
+        *p_in_handlers = in_handlers;
+    }
+
+    if (p_out_handlers) {
+        avpipe_io_handler_t *out_handlers = (avpipe_io_handler_t *)calloc(1, sizeof(avpipe_io_handler_t));
+        out_handlers->avpipe_opener = out_mux_opener;
+        out_handlers->avpipe_closer = out_mux_closer;
+        out_handlers->avpipe_reader = out_read_packet;
+        out_handlers->avpipe_writer = out_mux_write_packet;
+        out_handlers->avpipe_seeker = out_mux_seek;
+        out_handlers->avpipe_stater = out_mux_stat;
+        *p_out_handlers = out_handlers;
+    }
+}
+
+/*
+ * filename is the output url/filename that uniquely identifies the result of muxer.
+ */
+int
+mux(
+    txparams_t *params,
+    char *filename,
+    int debug_frame_level)
+{
+    io_mux_ctx_t *in_mux_ctx = NULL;
+    txctx_t *txctx = NULL;
+    int rc = 0;
+    avpipe_io_handler_t *in_handlers;
+    avpipe_io_handler_t *out_handlers;
+
+    if (!filename || filename[0] == '\0' )
+        return -1;
+
+    connect_ffmpeg_log();
+
+    set_mux_handlers(&in_handlers, &out_handlers);
+    in_mux_ctx = (io_mux_ctx_t *)calloc(1, sizeof(io_mux_ctx_t));
+
+    if (avpipe_init_muxer(&txctx, in_handlers, in_mux_ctx, out_handlers, params, filename) < 0) {
+        elv_err("Initializing muxer failed");
+        rc = -1;
+        goto end_mux;
+    }
+
+    txctx->in_handlers = in_handlers;
+    txctx->out_handlers = out_handlers;
+
+    if (avpipe_mux(txctx) < 0) {
+        elv_err("Muxing failed");
+        rc = -1;
+        goto end_mux;
+    }
+
+end_mux:
+    elv_dbg("Releasing all the muxing resources");
+    avpipe_mux_fini(&txctx);
+    free(in_handlers);
+    free(out_handlers);
+    free(in_mux_ctx);
 
     return rc;
 }

@@ -62,6 +62,7 @@ clean-test:
             AC3TsACCMez Downmix2ACCMez \
             MP2TsACCMez HEVC_H264 H265MXF \
             HEVC_H265ABR V2SingleABRTranscode* \
+            Audio*Muxing Video*Muxing MuxingOutput \
             SingleABRTranscode* avpipe-test.log
 
 check-env:

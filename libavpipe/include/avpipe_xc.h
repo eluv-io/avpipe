@@ -17,7 +17,10 @@
 #include <pthread.h>
 #include "elv_channel.h"
 
-#define MAX_STREAMS	64
+#define MAX_STREAMS	        64
+#define MAX_MUX_IN_STREAM   4096
+#define MAX_AUDIO_MUX       8
+#define MAX_CAPTION_MUX     8
 
 typedef enum avpipe_buftype_t {
     avpipe_input_stream = 0,
@@ -47,15 +50,34 @@ typedef enum avp_stat_t {
 
 struct coderctx_t;
 
-#define MAX_UDP_PKT_LEN     2048            /* Max UDP length */
-#define UDP_PIPE_TIMEOUT    60              /* sec */
-#define UDP_PIPE_BUFSIZE    (128*1024*1024) /* 128MB recv buf size */
-#define MAX_UDP_CHANNEL     100000          /* Max # of entries in UDP channel */
+#define MAX_UDP_PKT_LEN         2048            /* Max UDP length */
+#define UDP_PIPE_TIMEOUT        60              /* sec */
+#define UDP_PIPE_BUFSIZE        (128*1024*1024) /* 128MB recv buf size */
+#define MAX_UDP_CHANNEL         100000          /* Max # of entries in UDP channel */
 
 typedef struct udp_packet_t {
     char buf[MAX_UDP_PKT_LEN];
     int len;
 } udp_packet_t;
+
+typedef struct mux_input_ctx_t {
+    int     n_parts;                    /* Number of input parts */
+    int     index;                      /* Index of current input part that should be processed */
+    char    *parts[MAX_MUX_IN_STREAM];  /* All the input parts */
+    int     header_size;
+} mux_input_ctx_t;
+
+typedef struct io_mux_ctx_t {
+    char            *out_filename;              /* Output filename/url for this muxing */
+    char            *mux_type;                  /* "mux-mez" or "mux-abr" */
+    mux_input_ctx_t video;
+    int64_t         last_video_pts;
+    int             last_audio_index;
+    mux_input_ctx_t audios[MAX_AUDIO_MUX];
+    int64_t         last_audio_pts;
+    int             last_caption_index;
+    mux_input_ctx_t captions[MAX_CAPTION_MUX];
+} io_mux_ctx_t;
 
 typedef struct ioctx_t {
     /* Application specific IO context */
@@ -67,7 +89,7 @@ typedef struct ioctx_t {
     pthread_t           utid;           /* UDP thread id */
 
     /* Input filename or url */
-    char *url;
+    char                *url;
 
     avpipe_buftype_t    type;
     unsigned char*      buf;
@@ -88,8 +110,11 @@ typedef struct ioctx_t {
     int64_t decoding_start_pts;
 
     /* Output handlers specific data */
-    int stream_index;       // usually video=0 and audio=1
-    int seg_index;          // segment index if this ioctx is a segment
+    int stream_index;       /* usually (but not always) video=0 and audio=1 */
+    int seg_index;          /* segment index if this ioctx is a segment */
+
+    io_mux_ctx_t    *in_mux_ctx;   /* Input muxer context */
+    int             in_mux_index;
 
     /* Pointer to input context of a transcoding session.
      * A transcoding session has one input (i.e one mp4 file) and
@@ -247,8 +272,8 @@ typedef struct txparams_t {
     crypt_scheme_t  crypt_scheme;   // Content protection / DRM / encryption [Optional, Default: crypt_none]
     tx_type_t       tx_type;        // Default: 0 means transcode 'everything'
 
-    int     seekable;               // Default: 0 means not seekable. A non seekable stream with moov box in
-                                    //          the end causes a lot of reads up to moov atom.
+    int         seekable;               // Default: 0 means not seekable. A non seekable stream with moov box in
+                                        //          the end causes a lot of reads up to moov atom.
     char        *watermark_text;        // Default: NULL or empty text means no watermark
     char        *watermark_xloc;        // Default 0
     char        *watermark_yloc;        // Default 0
@@ -268,6 +293,8 @@ typedef struct txparams_t {
     char        *max_cll;               // Maximum Content Light Level (HDR only)
     char        *master_display;        // Master display (HDR only)
     int         stream_id;              // Stream id to trasncode, should be >= 0
+
+    char        *mux_spec;
 } txparams_t;
 
 #define MAX_CODEC_NAME  256
@@ -322,6 +349,19 @@ typedef struct txctx_t {
     avpipe_io_handler_t *in_handlers;
     avpipe_io_handler_t *out_handlers;
     int                 debug_frame_level;
+
+    /*
+     * Data structures that are needed for muxing multiple inputs to generate one output.
+     * Each video/audio/caption input stream can have multiple input files/parts.
+     * Each video/audio/caption input stream has its own coderctx_t and ioctx_t.
+     */
+    io_mux_ctx_t        *in_mux_ctx;                                        // Input muxer context
+    coderctx_t          in_muxer_ctx[MAX_AUDIO_MUX+MAX_CAPTION_MUX+1];      // Video, audio, captions coder input muxer context (one video, multiple audio/caption)
+    ioctx_t             *inctx_muxer[MAX_AUDIO_MUX+MAX_CAPTION_MUX+1];      // Video, audio, captions io muxer context (one video, multiple audio/caption)
+    coderctx_t          out_muxer_ctx;                                      // Output muxer
+
+    AVPacket            pkt_array[MAX_AUDIO_MUX+MAX_CAPTION_MUX+1];
+    int                 is_pkt_valid[MAX_AUDIO_MUX+MAX_CAPTION_MUX+1];
 } txctx_t;
 
 typedef struct out_tracker_t {
@@ -414,6 +454,45 @@ avpipe_tx(
     txctx_t *txctx,
     int do_instrument,
     int debug_frame_level);
+
+/**
+ * @brief   Initializes the avpipe muxer.
+ *
+ * @param   txctx           A pointer to a transcoding context.
+ * @param   in_handlers     A pointer to input handlers. Must be properly set up by the application.
+ * @param   out_handlers    A pointer to output handlers. Must be properly set up by the application.
+ * @param   params          A pointer to the parameters for transcoding/muxing.
+ * @param   url             Output url name (filename)
+ * @return  Returns 0 if initializing the muxer is successful, otherwise -1.
+ */
+int
+avpipe_init_muxer(
+    txctx_t **txctx,
+    avpipe_io_handler_t *in_handlers,
+    io_mux_ctx_t *in_mux_ctx,
+    avpipe_io_handler_t *out_handlers,
+    txparams_t *params,
+    char *url);
+
+/**
+ * @brief   Frees the memory and other resources allocated by avpipe muxer/ffmpeg.
+ *
+ * @param   txctx       A pointer to the trascoding context that would be destructed.
+ * @return  Returns 0.
+ */
+int
+avpipe_mux_fini(
+    txctx_t **txctx);
+
+/**
+ * @brief   Starts avpipe muxer.
+ *
+ * @param   txctx           A pointer to a transcoding context.
+ * @return  Returns 0 if muxing is successful, otherwise -1.
+ */
+int
+avpipe_mux(
+    txctx_t *txctx);
 
 /**
  * @brief   Returns avpipe GIT version

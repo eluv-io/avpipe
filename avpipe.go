@@ -157,6 +157,7 @@ type TxParams struct {
 	AudioFillGap          bool        `json:"audio_fill_gap,omitempty"`
 	SyncAudioToIFrame     bool        `json:"sync_audio_to_iframe,omitempty"`
 	ForceEqualFDuration   bool        `json:"force_equal_frame_duration,omitempty"`
+	MuxingSpec            string      `json:"muxing_spec,omitempty"`
 }
 
 type AVMediaType int
@@ -291,6 +292,11 @@ type OutputOpener interface {
 	Open(h, fd int64, stream_index, seg_index int, out_type AVType) (OutputHandler, error)
 }
 
+type MuxOutputOpener interface {
+	// url and fd determines uniquely opening output.
+	Open(url string, fd int64, out_type AVType) (OutputHandler, error)
+}
+
 type OutputHandler interface {
 	// Writes encoded stream to the output.
 	Write(buf []byte) (int, error)
@@ -314,14 +320,17 @@ type ioHandler struct {
 
 // Global table of handlers
 var gHandlers map[int64]*ioHandler = make(map[int64]*ioHandler)
-var gURLInputOpeners map[string]InputOpener = make(map[string]InputOpener)           // Keeps InputOpener for specific URL
-var gURLOutputOpeners map[string]OutputOpener = make(map[string]OutputOpener)        // Keeps OutputOpener for specific URL
-var gURLOutputOpenersByHandler map[int64]OutputOpener = make(map[int64]OutputOpener) // Keeps OutputOpener for specific URL
+var gMuxHandlers map[int64]OutputHandler = make(map[int64]OutputHandler)
+var gURLInputOpeners map[string]InputOpener = make(map[string]InputOpener)             // Keeps InputOpener for specific URL
+var gURLOutputOpeners map[string]OutputOpener = make(map[string]OutputOpener)          // Keeps OutputOpener for specific URL
+var gURLMuxOutputOpeners map[string]MuxOutputOpener = make(map[string]MuxOutputOpener) // Keeps MuxOutputOpener for specific URL
+var gURLOutputOpenersByHandler map[int64]OutputOpener = make(map[int64]OutputOpener)   // Keeps OutputOpener for specific URL
 var gHandleNum int64
 var gFd int64
 var gMutex sync.Mutex
 var gInputOpener InputOpener
 var gOutputOpener OutputOpener
+var gMuxOutputOpener MuxOutputOpener
 
 // This is used to set global input/output opener for avpipe
 // If there is no specific input/output opener for a URL, the global
@@ -329,6 +338,12 @@ var gOutputOpener OutputOpener
 func InitIOHandler(inputOpener InputOpener, outputOpener OutputOpener) {
 	gInputOpener = inputOpener
 	gOutputOpener = outputOpener
+}
+
+// Sets the global handlers for muxing (similar to InitIOHandler for transcoding)
+func InitMuxIOHandler(inputOpener InputOpener, muxOutputOpener MuxOutputOpener) {
+	gInputOpener = inputOpener
+	gMuxOutputOpener = muxOutputOpener
 }
 
 // This is used to set input/output opener specific to a URL.
@@ -348,6 +363,22 @@ func InitUrlIOHandler(url string, inputOpener InputOpener, outputOpener OutputOp
 	}
 }
 
+// Sets specific IO handler for muxing a url/file (similar to InitUrlIOHandler)
+func InitUrlMuxIOHandler(url string, inputOpener InputOpener, muxOutputOpener MuxOutputOpener) {
+	if inputOpener != nil {
+		gMutex.Lock()
+		gURLInputOpeners[url] = inputOpener
+		gMutex.Unlock()
+	}
+
+	if muxOutputOpener != nil {
+		gMutex.Lock()
+		gURLMuxOutputOpeners[url] = muxOutputOpener
+		gMutex.Unlock()
+	}
+	log.Debug("InitUrlMuxIOHandler", "url", url, "urlInputOpener", inputOpener == nil, "urlOutputOpener", muxOutputOpener == nil)
+}
+
 func getInputOpener(url string) InputOpener {
 	if inputOpener, ok := gURLInputOpeners[url]; ok {
 		return inputOpener
@@ -364,6 +395,21 @@ func getOutputOpener(url string) OutputOpener {
 	return gOutputOpener
 }
 
+func getMuxOutputOpener(url string) MuxOutputOpener {
+	log.Debug("getMuxOutputOpener", "url", url)
+	if muxOutputOpener, ok := gURLMuxOutputOpeners[url]; ok {
+		return muxOutputOpener
+	}
+
+	return gMuxOutputOpener
+}
+
+func putMuxOutputOpener(fd int64, muxOutputHandler OutputHandler) {
+	gMutex.Lock()
+	gMuxHandlers[fd] = muxOutputHandler
+	gMutex.Unlock()
+}
+
 func getOutputOpenerByHandler(h int64) OutputOpener {
 	gMutex.Lock()
 	defer gMutex.Unlock()
@@ -374,17 +420,17 @@ func getOutputOpenerByHandler(h int64) OutputOpener {
 	return gOutputOpener
 }
 
-//export NewIOHandler
-func NewIOHandler(url *C.char, size *C.int64_t) C.int64_t {
+//export AVPipeOpenInput
+func AVPipeOpenInput(url *C.char, size *C.int64_t) C.int64_t {
 	filename := C.GoString((*C.char)(unsafe.Pointer(url)))
 	urlInputOpener := getInputOpener(filename)
 	urlOutputOpener := getOutputOpener(filename)
 
 	if urlInputOpener == nil || urlOutputOpener == nil {
-		log.Error("Input or output opener(s) are not set")
+		log.Error("Input or output opener(s) are not set", "urlInputOpener", urlInputOpener, "urlOutputOpener", urlOutputOpener)
 		return C.int64_t(-1)
 	}
-	log.Debug("NewIOHandler()", "url", filename)
+	log.Debug("AVPipeOpenInput()", "url", filename)
 
 	gMutex.Lock()
 	gHandleNum++
@@ -400,7 +446,42 @@ func NewIOHandler(url *C.char, size *C.int64_t) C.int64_t {
 	*size = C.int64_t(input.Size())
 
 	h := &ioHandler{input: input, outTable: make(map[int64]OutputHandler), mutex: &sync.Mutex{}}
-	log.Debug("NewIOHandler()", "url", filename, "size", *size)
+	log.Debug("AVPipeOpenInput()", "url", filename, "size", *size)
+
+	gMutex.Lock()
+	defer gMutex.Unlock()
+	gHandlers[fd] = h
+	return C.int64_t(fd)
+}
+
+//export AVPipeOpenMuxInput
+func AVPipeOpenMuxInput(out_url, url *C.char, size *C.int64_t) C.int64_t {
+	filename := C.GoString((*C.char)(unsafe.Pointer(url)))
+	out_filename := C.GoString((*C.char)(unsafe.Pointer(out_url)))
+	urlInputOpener := getInputOpener(out_filename)
+	urlOutputOpener := getMuxOutputOpener(out_filename)
+
+	log.Debug("AVPipeOpenMuxInput()", "url", filename, "out_filename", out_filename)
+
+	if urlInputOpener == nil || urlOutputOpener == nil {
+		log.Error("Input or output opener(s) are not set", "urlInputOpener", urlInputOpener, "urlOutputOpener", urlOutputOpener)
+		return C.int64_t(-1)
+	}
+
+	gMutex.Lock()
+	gHandleNum++
+	fd := gHandleNum
+	gMutex.Unlock()
+
+	input, err := urlInputOpener.Open(fd, filename)
+	if err != nil {
+		return C.int64_t(-1)
+	}
+
+	*size = C.int64_t(input.Size())
+
+	h := &ioHandler{input: input, outTable: make(map[int64]OutputHandler), mutex: &sync.Mutex{}}
+	log.Debug("AVPipeOpenMuxInput()", "url", filename, "size", *size)
 
 	gMutex.Lock()
 	defer gMutex.Unlock()
@@ -434,7 +515,7 @@ func AVPipeReadInput(fd C.int64_t, buf *C.uint8_t, sz C.int) C.int {
 		return C.int(-1)
 	}
 
-	return C.int(n) // PENDING err
+	return C.int(n)
 }
 
 func (h *ioHandler) InReader(buf []byte) (int, error) {
@@ -605,6 +686,42 @@ func AVPipeOpenOutput(handler C.int64_t, stream_index, seg_index, stream_type C.
 	return C.int64_t(fd)
 }
 
+//export AVPipeOpenMuxOutput
+func AVPipeOpenMuxOutput(url *C.char, stream_type C.int) C.int64_t {
+	var out_type AVType
+
+	gMutex.Lock()
+	gFd++
+	fd := gFd
+	gMutex.Unlock()
+	switch stream_type {
+	case C.avpipe_mp4_segment:
+		out_type = MP4Segment
+	case C.avpipe_fmp4_segment:
+		out_type = FMP4Segment
+	default:
+		log.Error("AVPipeOpenOutput()", "invalid stream type", stream_type)
+		return C.int64_t(-1)
+	}
+
+	filename := C.GoString((*C.char)(unsafe.Pointer(url)))
+	muxOutputOpener := getMuxOutputOpener(filename)
+	if muxOutputOpener == nil {
+		log.Error("AVPipeOpenMuxOutput() nil muxOutputOpener", "url", filename)
+		return C.int64_t(-1)
+	}
+	outHandler, err := muxOutputOpener.Open(filename, fd, out_type)
+	if err != nil {
+		log.Error("AVPipeOpenOutput()", "out_type", out_type, "error", err)
+		return C.int64_t(-1)
+	}
+
+	log.Debug("AVPipeOpenOutput()", "fd", fd, "out_type", out_type)
+	putMuxOutputOpener(fd, outHandler)
+
+	return C.int64_t(fd)
+}
+
 //export AVPipeWriteOutput
 func AVPipeWriteOutput(handler C.int64_t, fd C.int64_t, buf *C.uint8_t, sz C.int) C.int {
 	gMutex.Lock()
@@ -625,6 +742,29 @@ func AVPipeWriteOutput(handler C.int64_t, fd C.int64_t, buf *C.uint8_t, sz C.int
 
 	gobuf := C.GoBytes(unsafe.Pointer(buf), sz)
 	n, err := h.OutWriter(fd, gobuf)
+	if err != nil {
+		return C.int(-1)
+	}
+
+	return C.int(n)
+}
+
+//export AVPipeWriteMuxOutput
+func AVPipeWriteMuxOutput(fd C.int64_t, buf *C.uint8_t, sz C.int) C.int {
+	if traceIo {
+		log.Debug("AVPipeWriteMuxOutput", "fd", fd, "sz", sz)
+	}
+
+	gMutex.Lock()
+	outHandler := gMuxHandlers[int64(fd)]
+	if outHandler == nil {
+		gMutex.Unlock()
+		return C.int(-1)
+	}
+	gMutex.Unlock()
+
+	gobuf := C.GoBytes(unsafe.Pointer(buf), sz)
+	n, err := outHandler.Write(gobuf)
 	if err != nil {
 		return C.int(-1)
 	}
@@ -657,6 +797,23 @@ func AVPipeSeekOutput(handler C.int64_t, fd C.int64_t, offset C.int64_t, whence 
 	return C.int(n)
 }
 
+//export AVPipeSeekMuxOutput
+func AVPipeSeekMuxOutput(fd C.int64_t, offset C.int64_t, whence C.int) C.int {
+	gMutex.Lock()
+	outHandler := gMuxHandlers[int64(fd)]
+	if outHandler == nil {
+		gMutex.Unlock()
+		return C.int(-1)
+	}
+	gMutex.Unlock()
+
+	n, err := outHandler.Seek(int64(offset), int(whence))
+	if err != nil {
+		return C.int(-1)
+	}
+	return C.int(n)
+}
+
 func (h *ioHandler) OutSeeker(fd C.int64_t, offset C.int64_t, whence C.int) (int64, error) {
 	outHandler := h.getOutTable(int64(fd))
 	n, err := outHandler.Seek(int64(offset), int(whence))
@@ -674,6 +831,24 @@ func AVPipeCloseOutput(handler C.int64_t, fd C.int64_t) C.int {
 	}
 	gMutex.Unlock()
 	err := h.OutCloser(fd)
+	if err != nil {
+		return C.int(-1)
+	}
+
+	return C.int(0)
+}
+
+//export AVPipeCloseMuxOutput
+func AVPipeCloseMuxOutput(fd C.int64_t) C.int {
+	gMutex.Lock()
+	outHandler := gMuxHandlers[int64(fd)]
+	if outHandler == nil {
+		gMutex.Unlock()
+		return C.int(-1)
+	}
+	gMutex.Unlock()
+
+	err := outHandler.Close()
 	if err != nil {
 		return C.int(-1)
 	}
@@ -699,6 +874,36 @@ func AVPipeStatOutput(handler C.int64_t, fd C.int64_t, avp_stat C.avp_stat_t, st
 	gMutex.Unlock()
 
 	err := h.OutStat(fd, avp_stat, stat_args)
+	if err != nil {
+		return C.int(-1)
+	}
+
+	return C.int(0)
+}
+
+//export AVPipeStatMuxOutput
+func AVPipeStatMuxOutput(fd C.int64_t, avp_stat C.avp_stat_t, stat_args unsafe.Pointer) C.int {
+	gMutex.Lock()
+	outHandler := gMuxHandlers[int64(fd)]
+	if outHandler == nil {
+		gMutex.Unlock()
+		return C.int(-1)
+	}
+	gMutex.Unlock()
+
+	var err error
+	switch avp_stat {
+	case C.out_stat_bytes_written:
+		statArgs := *(*uint64)(stat_args)
+		err = outHandler.Stat(AV_OUT_STAT_BYTES_WRITTEN, &statArgs)
+	case C.out_stat_decoding_start_pts:
+		statArgs := *(*uint64)(stat_args)
+		err = outHandler.Stat(AV_OUT_STAT_DECODING_START_PTS, &statArgs)
+	case C.out_stat_encoding_end_pts:
+		statArgs := *(*uint64)(stat_args)
+		err = outHandler.Stat(AV_OUT_STAT_ENCODING_END_PTS, &statArgs)
+	}
+
 	if err != nil {
 		return C.int(-1)
 	}
@@ -819,6 +1024,7 @@ func getCParams(params *TxParams) *C.txparams_t {
 		max_cll:                C.CString(params.MaxCLL),
 		master_display:         C.CString(params.MasterDisplay),
 		bitdepth:               C.int(params.BitDepth),
+		mux_spec:               C.CString(params.MuxingSpec),
 		// seekable, bypass_transcoding, shadow, audio_fill_gap, sync_audio_video and force_equal_fduration handled below
 	}
 
@@ -874,6 +1080,30 @@ func Tx(params *TxParams, url string, debugFrameLevel bool) int {
 	delete(gURLOutputOpeners, url)
 
 	return int(rc)
+}
+
+func Mux(params *TxParams, url string, debugFrameLevel bool) int {
+	if params == nil {
+		log.Error("Failed muxing, params is not set.")
+		return -1
+	}
+
+	cparams := getCParams(params)
+
+	var debugFrameLevelInt int
+	if debugFrameLevel {
+		debugFrameLevelInt = 1
+	} else {
+		debugFrameLevelInt = 0
+	}
+
+	rc := C.mux((*C.txparams_t)(unsafe.Pointer(cparams)), C.CString(url), C.int(debugFrameLevelInt))
+
+	delete(gURLInputOpeners, url)
+	delete(gURLOutputOpeners, url)
+
+	return int(rc)
+
 }
 
 func ChannelLayoutName(nbChannels, channelLayout int) string {

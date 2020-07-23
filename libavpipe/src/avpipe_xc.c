@@ -209,7 +209,7 @@ int convert_samples(
 }
 
 
-static int
+int
 prepare_input(
     avpipe_io_handler_t *in_handlers,
     ioctx_t *inctx,
@@ -2768,7 +2768,6 @@ check_params(
     return 0;
 }
 
-// TODO: properly validate all params
 int
 avpipe_init(
     txctx_t **txctx,
@@ -2909,6 +2908,7 @@ avpipe_free_params(
     free(params->watermark_font_color);
     free(params->watermark_shadow_color);
     free(params->watermark_overlay);
+    free(params->mux_spec);
     free(params);
     txctx->params = NULL;
 }
