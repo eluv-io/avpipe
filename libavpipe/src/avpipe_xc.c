@@ -2336,13 +2336,14 @@ avpipe_tx(
             break;
 
         /*
-         * Skip the input packet if the packet timestamp is smaller than start_time_ts.
+         * Skip the input packet in bypass mode if the packet timestamp is smaller than start_time_ts.
          * The fact that avpipe mezzanine generated files don't have B-frames let us to skip before decoding.
          * The assumption here is that the input stream does not have any B-frames, otherwise we can not skip
          * the input packets without decoding.
          * PENDING(RM) - add a validation to check input stream doesn't have any B-frames.
          */
-        if (params->start_time_ts > 0 && input_packet && input_packet->pts < params->start_time_ts) {
+        if (params->start_time_ts > 0 && params->bypass_transcoding &&
+            input_packet && input_packet->pts < params->start_time_ts) {
             if (debug_frame_level)
                 elv_dbg("SKIP tx_type=%d, packet pts=%" PRId64 ", start_time_ts=%" PRId64,
                     params->tx_type, input_packet->pts, params->start_time_ts);

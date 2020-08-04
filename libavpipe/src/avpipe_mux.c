@@ -258,6 +258,7 @@ avpipe_init_muxer(
 
     /* The output format has to be fragmented to avoid doing seeks */
     av_opt_set(out_muxer_ctx->format_context->priv_data, "movflags", "frag_every_frame", 0);
+    //av_opt_set(out_muxer_ctx->format_context->priv_data, "segment_format_options", "movflags=faststart", 0);
 
     out_muxer_ctx->format_context->avpipe_opaque = out_handlers;
 
@@ -282,6 +283,8 @@ avpipe_init_muxer(
             return -1;
         }
         out_muxer_ctx->stream[i]->time_base = in_stream->time_base;
+        out_muxer_ctx->stream[i]->avg_frame_rate = in_stream->avg_frame_rate;
+        out_muxer_ctx->stream[i]->r_frame_rate = in_stream->r_frame_rate;
 
 #if 0
         /* Find codec and then initialize codec_context with the codec */
