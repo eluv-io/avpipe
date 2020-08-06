@@ -1218,7 +1218,7 @@ should_skip_encoding(
                 pts_offset = 0; /* AAC aloways starts at PTS 0 */
             }
             if (frame->pts - pts_offset < mpegts_skip_offset * time_base) {
-                elv_log("ENCODE skip frame early mpegts stream=%d pts=%" PRId64" first=%" PRId64 " time_base=%" PRId64,
+                elv_dbg("ENCODE skip frame early mpegts stream=%d pts=%" PRId64" first=%" PRId64 " time_base=%" PRId64,
                     stream_index, frame->pts, pts_offset, time_base);
                 return 1;
             }
@@ -1233,7 +1233,7 @@ should_skip_encoding(
 
     /* Drop frames before the desired 'start_time' */
     if (p->start_time_ts > 0 && frame_in_pts_offset < p->start_time_ts) {
-        elv_warn("ENCODE skip frame early pts=%" PRId64 ", frame_in_pts_offset=%" PRId64 ", start_time_ts=%" PRId64,
+        elv_dbg("ENCODE skip frame early pts=%" PRId64 ", frame_in_pts_offset=%" PRId64 ", start_time_ts=%" PRId64,
             frame->pts, frame_in_pts_offset, p->start_time_ts);
         return 1;
     }
@@ -1653,7 +1653,18 @@ transcode_audio_aac(
 
                 if (decoder_context->duration < filt_frame->pts) {
                     decoder_context->duration = filt_frame->pts;
-                    encode_frame(decoder_context, encoder_context, filt_frame, stream_index, p, debug_frame_level);
+
+                    int should_skip = 0;
+                    int64_t frame_in_pts_offset = frame->pts - decoder_context->audio_input_start_pts;
+                    /* If frame PTS < start_time_ts then don't encode audio frame */
+                    if (p->start_time_ts > 0 && frame_in_pts_offset < p->start_time_ts) {
+                         elv_dbg("ENCODE skip audio frame early pts=%" PRId64 ", frame_in_pts_offset=%" PRId64 ", start_time_ts=%" PRId64,
+                            filt_frame->pts, frame_in_pts_offset, p->start_time_ts);
+                        should_skip = 1;
+                    }
+
+                    if (!should_skip)
+                        encode_frame(decoder_context, encoder_context, filt_frame, stream_index, p, debug_frame_level);
                 }
                 else {
                     elv_log("SKIP audio frame pts=%"PRId64", duration=%"PRId64, filt_frame->pts, decoder_context->duration);
