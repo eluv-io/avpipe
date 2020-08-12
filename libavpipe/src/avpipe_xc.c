@@ -218,18 +218,16 @@ prepare_input(
 {
     unsigned char *bufin;
     AVIOContext *avioctx;
-    int bufin_sz = 64 * 1024;
+    int bufin_sz = 1024 * 1024;
 
-    int avioctxBufSize = 1024 * 1024;
-
-    bufin = (unsigned char *) av_malloc(64*1024); /* Must be malloc'd - will be realloc'd by avformat */
+    bufin = (unsigned char *) av_malloc(bufin_sz);  /* Must be malloc'd - will be realloc'd by avformat */
     avioctx = avio_alloc_context(bufin, bufin_sz, 0, (void *)inctx,
         in_handlers->avpipe_reader, in_handlers->avpipe_writer, in_handlers->avpipe_seeker);
 
     avioctx->written = inctx->sz; /* Fake avio_size() to avoid calling seek to find size */
     avioctx->seekable = seekable;
     avioctx->direct = 0;
-    avioctx->buffer_size = inctx->sz < avioctxBufSize ? inctx->sz : avioctxBufSize; // avoid seeks - avio_seek() seeks internal buffer */
+    avioctx->buffer_size = inctx->sz < bufin_sz ? inctx->sz : bufin_sz; // avoid seeks - avio_seek() seeks internal buffer */
     format_ctx->pb = avioctx;
     return 0;
 }
