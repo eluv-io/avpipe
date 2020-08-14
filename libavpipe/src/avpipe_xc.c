@@ -1835,6 +1835,7 @@ transcode_video(
             } else {
                 elv_log("SKIP video frame pts=%"PRId64", duration=%"PRId64, filt_frame->pts, decoder_context->duration);
             }
+
             if (do_instrument) {
                 elv_since(&tv, &since);
                 elv_log("INSTRMNT encode_frame time=%"PRId64, since);
@@ -2351,12 +2352,16 @@ avpipe_tx(
          * the input packets without decoding.
          * PENDING(RM) - add a validation to check input stream doesn't have any B-frames.
          */
-        if (params->start_time_ts > 0 && params->bypass_transcoding &&
-            input_packet && input_packet->pts < params->start_time_ts) {
-            if (debug_frame_level)
-                elv_dbg("SKIP tx_type=%d, packet pts=%" PRId64 ", start_time_ts=%" PRId64,
-                    params->tx_type, input_packet->pts, params->start_time_ts);
-            continue;
+        if (input_packet && params->start_time_ts > 0 && params->bypass_transcoding) {
+            const int64_t input_start_pts = params->tx_type & tx_video ?
+                decoder_context->video_input_start_pts : decoder_context->audio_input_start_pts;
+            const int64_t packet_in_pts_offset = input_packet->pts - input_start_pts;
+            if (packet_in_pts_offset < params->start_time_ts) {
+                if (debug_frame_level)
+                    elv_dbg("SKIP tx_type=%d, packet pts=%" PRId64 ", start_time_ts=%" PRId64,
+                        params->tx_type, input_packet->pts, params->start_time_ts);
+                continue;
+            }
         }
 
         if (!params->sync_audio_to_iframe &&
