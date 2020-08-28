@@ -183,7 +183,7 @@ func InitTranscode(cmdRoot *cobra.Command) error {
 	cmdTranscode.PersistentFlags().Int32P("threads", "t", 1, "transcoding threads.")
 	cmdTranscode.PersistentFlags().Int32P("audio-index", "", -1, "audio stream index (only for --tx-type audio).")
 	cmdTranscode.PersistentFlags().BoolP("audio-fill-gap", "", false, "fill audio gap when encoder is aac and decoder is mpegts")
-	cmdTranscode.PersistentFlags().BoolP("sync-audio-to-iframe", "", false, "sync audio to first video iframe when input stream is mpegts")
+	cmdTranscode.PersistentFlags().Int32P("sync-audio-to-stream-id", "", -1, "sync audio to video iframe of specific stream-id when input stream is mpegts")
 	cmdTranscode.PersistentFlags().StringP("encoder", "e", "libx264", "encoder codec, default is 'libx264', can be: 'libx264', 'libx265', 'h264_nvenc', 'h264_videotoolbox'.")
 	cmdTranscode.PersistentFlags().StringP("decoder", "d", "", "decoder codec, default is 'h264', can be: 'h264', 'h264_cuvid', 'jpeg2000', 'hevc'.")
 	cmdTranscode.PersistentFlags().StringP("format", "", "dash", "package format, can be 'dash', 'hls', 'mp4', 'fmp4', 'segment' or 'fmp4-segment'.")
@@ -260,9 +260,9 @@ func doTranscode(cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("Invalid audio-fill-gap flag")
 	}
 
-	syncAudioToIFrame, err := cmd.Flags().GetBool("sync-audio-to-iframe")
+	syncAudioToStreamId, err := cmd.Flags().GetInt32("sync-audio-to-stream-id")
 	if err != nil {
-		return fmt.Errorf("Invalid sync-audio-to-iframe flag")
+		return fmt.Errorf("Invalid sync-audio-to-stream-id flag")
 	}
 
 	encoder := cmd.Flag("encoder").Value.String()
@@ -504,7 +504,7 @@ func doTranscode(cmd *cobra.Command, args []string) error {
 		BitDepth:              bitDepth,
 		ForceEqualFDuration:   forceEqualFrameDuration,
 		AudioFillGap:          audioFillGap,
-		SyncAudioToIFrame:     syncAudioToIFrame,
+		SyncAudioToStreamId:   int(syncAudioToStreamId),
 		StreamId:              streamId,
 	}
 

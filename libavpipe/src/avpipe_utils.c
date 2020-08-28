@@ -26,6 +26,17 @@ tx_type_str(
     return "AUDIO_VIDEO";
 }
 
+const char *stream_type_str(
+    coderctx_t *c,
+    int idx)
+{
+    if (idx == c->video_stream_index)
+        return "v";
+    if (idx == c->audio_stream_index)
+        return "a";
+    return "u";
+}
+
 void
 dump_frame(
     char *msg,

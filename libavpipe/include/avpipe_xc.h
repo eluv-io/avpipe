@@ -288,7 +288,7 @@ typedef struct txparams_t {
 
     int         audio_index;            // Audio index(s) for mez making, may need to become an array of indexes
     int         audio_fill_gap;         // Audio only, fills the gap if there is a jump in PTS
-    int         sync_audio_to_iframe;   // mpegts only, default is 0
+    int         sync_audio_to_stream_id;// mpegts only, default is 0
     int         bitdepth;               // Can be 8, 10, 12
     char        *max_cll;               // Maximum Content Light Level (HDR only)
     char        *master_display;        // Master display (HDR only)

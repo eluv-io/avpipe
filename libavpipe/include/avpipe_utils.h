@@ -58,3 +58,8 @@ dump_coders(
 
 void
 connect_ffmpeg_log();
+
+const char *stream_type_str(
+    coderctx_t *c,
+    int idx);
+

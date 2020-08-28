@@ -243,6 +243,7 @@ prepare_decoder(
     int rc;
     decoder_context->last_dts = AV_NOPTS_VALUE;
     int stream_id_index = -1;
+    int sync_id_index = -1;     // Index of the video stream used for audio sync
 
     decoder_context->video_stream_index = -1;
     decoder_context->audio_stream_index = -1;
@@ -285,18 +286,26 @@ prepare_decoder(
             /* Video, copy codec params from stream format context */
             decoder_context->codec_parameters[i] = decoder_context->format_context->streams[i]->codecpar;
             decoder_context->stream[i] = decoder_context->format_context->streams[i];
-            decoder_context->video_stream_index = i;
-            elv_dbg("VIDEO STREAM %d, codec_id=%s, stream_id=%d",
-                i, avcodec_get_name(decoder_context->codec_parameters[i]->codec_id), decoder_context->stream[i]->id);
+
+            /* If no stream ID specified - choose the first video stream encountered */
+            if (params && params->stream_id < 0 && decoder_context->video_stream_index < 0)
+                decoder_context->video_stream_index = i;
+            elv_dbg("VIDEO STREAM %d, codec_id=%s, stream_id=%d, tx_type=%d",
+                i, avcodec_get_name(decoder_context->codec_parameters[i]->codec_id), decoder_context->stream[i]->id,
+                params ? params->tx_type : tx_none);
             break;
 
         case AVMEDIA_TYPE_AUDIO:
             /* Audio, copy codec params from stream format context */
             decoder_context->codec_parameters[i] = decoder_context->format_context->streams[i]->codecpar;
             decoder_context->stream[i] = decoder_context->format_context->streams[i];
-            decoder_context->audio_stream_index = i;
-            elv_dbg("AUDIO STREAM %d, codec_id=%s, stream_id=%d",
-                i, avcodec_get_name(decoder_context->codec_parameters[i]->codec_id), decoder_context->stream[i]->id);
+
+            /* If no stream ID specified - choose the first audio stream encountered */
+            if (params && params->stream_id < 0 && decoder_context->audio_stream_index < 0)
+                decoder_context->audio_stream_index = i;
+            elv_dbg("AUDIO STREAM %d, codec_id=%s, stream_id=%d, tx_type=%d",
+                i, avcodec_get_name(decoder_context->codec_parameters[i]->codec_id), decoder_context->stream[i]->id,
+                params ? params->tx_type : tx_none);
 
             /* If the buffer size is too big, ffmpeg might assert in aviobuf.c:581
              * To avoid this assertion, reset the buffer size to something smaller.
@@ -322,17 +331,35 @@ prepare_decoder(
             continue;
         }
 
+        /* Is this the stream selected for transcoding? */
+        int selected_stream = 0;
         if (params && decoder_context->stream[i]->id == params->stream_id) {
+            elv_log("STREAM MATCH stream_id=%d stream_index=%d tx_type=%d", params->stream_id, i, params->tx_type);
             stream_id_index = i;
+            selected_stream = 1;
+        }
+
+        if (params && decoder_context->stream[i]->id == params->sync_audio_to_stream_id) {
+            if (decoder_context->stream[i]->codecpar->codec_type != AVMEDIA_TYPE_VIDEO) {
+                elv_err("Syncing to non-video stream is not possible, sync_audio_to_stream_id=%d", params->sync_audio_to_stream_id);
+                return -1;
+            }
+            elv_log("STREAM MATCH sync_stream_id=%d stream_index=%d", params->sync_audio_to_stream_id, i);
+            sync_id_index = i;
+        }
+
+        /* If stream ID is not set - match audio_index */
+        if (params && params->stream_id < 0 && params->tx_type == tx_audio && params->audio_index == i) {
+            selected_stream = 1;
         }
 
         /*
          * Initialize codec and codec context.
-         * Pick params->decodec if this stream index is the same as params->audio_index.
+         * Pick params->decodec if this is the selected stream (stream_id or audio_index)
          */
-        if (params != NULL && params->dcodec != NULL && params->dcodec[0] != '\0' && (params->tx_type & tx_video)) {
-            decoder_context->codec[i] = avcodec_find_decoder_by_name(params->dcodec);
-        } else if (params != NULL && params->audio_index == i && params->dcodec != NULL && params->dcodec[0] != '\0' && (params->tx_type & tx_audio)) {
+        if (params != NULL && params->dcodec != NULL && params->dcodec[0] != '\0' && selected_stream) {
+            elv_log("STREAM SELECTED id=%d idx=%d tx_type=%d dcodec=%s", decoder_context->stream[i]->id,
+                    i, params->tx_type, params->dcodec);
             decoder_context->codec[i] = avcodec_find_decoder_by_name(params->dcodec);
         } else {
             decoder_context->codec[i] = avcodec_find_decoder(decoder_context->codec_parameters[i]->codec_id);
@@ -419,13 +446,17 @@ prepare_decoder(
         } else if (decoder_context->format_context->streams[stream_id_index]->codecpar->codec_type == AVMEDIA_TYPE_AUDIO) {
             decoder_context->audio_stream_index = stream_id_index;
             params->tx_type = tx_audio;
+
+            if (sync_id_index >= 0)
+                decoder_context->video_stream_index = sync_id_index;
         }
     } else if (params && (params->audio_index >= 0) &&
             (params->audio_index < decoder_context->format_context->nb_streams)) {
         decoder_context->audio_stream_index = params->audio_index;
     }
-    elv_dbg("prepare_decoder() tx_type=%d, audio_stream_index=%d, nb_streams=%d",
+    elv_dbg("prepare_decoder tx_type=%d, video_stream_index=%d audio_stream_index=%d, nb_streams=%d",
         params ? params->tx_type : 0,
+        decoder_context->video_stream_index,
         decoder_context->audio_stream_index,
         decoder_context->format_context->nb_streams);
 
@@ -975,7 +1006,7 @@ prepare_audio_encoder(
 
     /* Open audio encoder codec */
     if (avcodec_open2(encoder_context->codec_context[index], encoder_context->codec[index], NULL) < 0) {
-        elv_dbg("Could not open encoder for audio");
+        elv_dbg("Could not open encoder for audio, index=%d", index);
         return -1;
     }
 
@@ -1206,14 +1237,14 @@ should_skip_encoding(
      * Skipping an equal amount of both audio and video ensures they start encoding at approximately
      * the same time (generally less that one frame duration apart).
      */
-    if (!p->sync_audio_to_iframe) {
+    if (p->sync_audio_to_stream_id < 0) {
         const int64_t mpegts_skip_offset = 10; /* seoncds */
         if (mpegts_skip_offset > 0 && decoder_context->is_mpegts && (!strcmp(p->format, "fmp4-segment"))) {
             int64_t time_base = decoder_context->stream[stream_index]->time_base.den;
             int64_t pts_offset = encoder_context->first_read_frame_pts;
             if (!strcmp(p->ecodec, "aac")) {
                 time_base = encoder_context->stream[stream_index]->time_base.den;
-                pts_offset = 0; /* AAC aloways starts at PTS 0 */
+                pts_offset = 0; /* AAC always starts at PTS 0 */
             }
             if (frame->pts - pts_offset < mpegts_skip_offset * time_base) {
                 elv_dbg("ENCODE skip frame early mpegts stream=%d pts=%" PRId64" first=%" PRId64 " time_base=%" PRId64,
@@ -1282,13 +1313,17 @@ encode_frame(
     // Prepare packet before encoding - adjust PTS and IDR frame signaling
     if (frame) {
 
+        const char *st = stream_type_str(encoder_context, stream_index);
+
         // Adjust PTS if input stream starts at an arbitrary value (MPEG-TS)
         if (decoder_context->is_mpegts && (!strcmp(params->format, "fmp4-segment"))) {
             if (encoder_context->first_encoding_frame_pts == -1) {
-                /* Remember the first DTS/PTS to use as an offset later */
+                /* Remember the first PTS to use as an offset later */
                 encoder_context->first_encoding_frame_pts = frame->pts;
-                elv_log("PTS first_encoding_frame_pts=%"PRId64" stream_index=%d",
-                    encoder_context->first_encoding_frame_pts, stream_index);
+                elv_log("PTS first_encoding_frame_pts=%"PRId64" dec=%"PRId64" read=%"PRId64" stream=%d:%s",
+                    encoder_context->first_encoding_frame_pts,
+                    decoder_context->first_decoding_frame_pts,
+                    encoder_context->first_read_frame_pts, params->tx_type, st);
             }
 
             // Adjust frame pts such that first frame sent to the encoder has PTS 0
@@ -1995,7 +2030,7 @@ skip_for_sync(
     AVPacket *input_packet,
     txparams_t *params)
 {
-    if (!params->sync_audio_to_iframe)
+    if (params->sync_audio_to_stream_id < 0)
         return 0;
 
     /* No need to sync if:
@@ -2008,36 +2043,43 @@ skip_for_sync(
         strcmp(params->format, "fmp4-segment"))
         return 0;
 
-    /* first_key_frame_pts points to first video key frame. */
-    if (decoder_context->first_key_frame_pts < 0 &&
-        input_packet->stream_index == decoder_context->video_stream_index &&
-        input_packet->flags == AV_PKT_FLAG_KEY) {
-        decoder_context->first_key_frame_pts = input_packet->pts;
-
-        dump_packet("SYNC ", input_packet, 1, params->tx_type);
-        /* If transcoding audio then continue to next packet since this one is not audio */
-        if (params->tx_type & tx_audio) {
-            return 1;
-        } else {
+    /* If tx_video just skip until the first key frame */
+    if (params->tx_type & tx_video) {
+        if (input_packet->flags == AV_PKT_FLAG_KEY) {
             decoder_context->mpegts_synced = 1;
             return 0;
         }
-    }
-
-    if (decoder_context->first_key_frame_pts < 0) { 
-        dump_packet("SYNC SKIP ", input_packet, 1, params->tx_type);
         return 1;
     }
 
-    /* For audio get close to video key frame pts as much as possible */
-    if (params->tx_type & tx_audio &&
-        (input_packet->pts < decoder_context->first_key_frame_pts ||
-        input_packet->stream_index == decoder_context->video_stream_index)) {
+    /* We are tx_audio but processing both video and audio input streams */
+    if (input_packet->stream_index == decoder_context->video_stream_index) {
+        /* first_key_frame_pts points to first video key frame. */
+        if (decoder_context->first_key_frame_pts < 0 &&
+            input_packet->flags == AV_PKT_FLAG_KEY) {
+            decoder_context->first_key_frame_pts = input_packet->pts;
+            elv_log("PTS first_key_frame_pts=%"PRId64" sidx=%d",
+                decoder_context->first_key_frame_pts, input_packet->stream_index);
+
+            dump_packet("SYNC ", input_packet, 1, params->tx_type);
+        }
+        return 1;
+    }
+
+    /* We are tx_audio and processing the audio stream.
+     * Skip until the audio PTS has reached the first video key frame PTS
+     * PENDING(SSS) - this is incorrect if audio PTS is muxed ahead of video
+     */
+    if (decoder_context->first_key_frame_pts < 0 ||
+        input_packet->pts < decoder_context->first_key_frame_pts) {
+        elv_log("PTS sync skip audio_pts=%"PRId64" first_key_frame_pts=%"PRId64,
+            input_packet->pts, decoder_context->first_key_frame_pts);
         dump_packet("SYNC SKIP ", input_packet, 1, params->tx_type);
         return 1;
     }
 
     decoder_context->mpegts_synced = 1;
+    elv_log("PTS first_audio_frame_pts=%"PRId64, input_packet->pts);
     return 0;
 }
 
@@ -2326,45 +2368,72 @@ avpipe_tx(
     decoder_context->first_key_frame_pts = -1;
     decoder_context->mpegts_synced = 0;
 
-    int64_t last_dts;
+    int64_t last_dts = 0;
     int frames_read = 0;
     int frames_read_past_duration = 0;
     const int frames_allowed_past_duration = 5;
 
     while ((rc = av_read_frame(decoder_context->format_context, input_packet)) >= 0) {
 
-        if (skip_for_sync(decoder_context, input_packet, params)) {
-            av_packet_unref(input_packet);
-            continue;
+        const char *st = stream_type_str(encoder_context, input_packet->stream_index);
+
+        // Record PTS of first frame read - excute only for the desired stream
+        if ((input_packet->stream_index == decoder_context->video_stream_index && (params->tx_type & tx_video)) ||
+            (input_packet->stream_index == decoder_context->audio_stream_index && (params->tx_type & tx_audio))) {
+
+            if (encoder_context->first_read_frame_pts == -1 && input_packet->pts != AV_NOPTS_VALUE) {
+                encoder_context->first_read_frame_pts = input_packet->pts;
+                elv_log("PTS first_read_frame=%"PRId64" stream=%d:%d:%s sidx=%d",
+                    encoder_context->first_read_frame_pts, params->tx_type, params->stream_id,
+                    st, input_packet->stream_index);
+            } else if (input_packet->pts != AV_NOPTS_VALUE && input_packet->pts < encoder_context->first_read_frame_pts) {
+                /* Due to b-frame reordering */
+                encoder_context->first_read_frame_pts = input_packet->pts;
+                elv_log("PTS first_read_frame reorder new=%"PRId64" stream=%d:%d:%s",
+                    encoder_context->first_read_frame_pts, params->tx_type, params->stream_id, st);
+            }
         }
 
-        // Stop when we reached the desired duration (duration -1 means 'entire input stream')
-        // PENDING(SSS) - this logic can be done after decoding where we know concretely that we decoded all frames
-        // we need to encode.
-        if (should_stop_decoding(input_packet, decoder_context, encoder_context,
-                params, &frames_read, &frames_read_past_duration, frames_allowed_past_duration))
-            break;
-
-        /*
-         * Skip the input packet in bypass mode if the packet timestamp is smaller than start_time_ts.
-         * The fact that avpipe mezzanine generated files don't have B-frames let us to skip before decoding.
-         * The assumption here is that the input stream does not have any B-frames, otherwise we can not skip
-         * the input packets without decoding.
-         * PENDING(RM) - add a validation to check input stream doesn't have any B-frames.
-         */
-        if (input_packet && params->start_time_ts > 0 && params->bypass_transcoding) {
-            const int64_t input_start_pts = params->tx_type & tx_video ?
-                decoder_context->video_input_start_pts : decoder_context->audio_input_start_pts;
-            const int64_t packet_in_pts_offset = input_packet->pts - input_start_pts;
-            if (packet_in_pts_offset < params->start_time_ts) {
-                if (debug_frame_level)
-                    elv_dbg("SKIP tx_type=%d, packet pts=%" PRId64 ", start_time_ts=%" PRId64,
-                        params->tx_type, input_packet->pts, params->start_time_ts);
+        // Execute for both audio and video streams (used for syncing audio to first video key frame)
+        if (input_packet->stream_index == decoder_context->video_stream_index ||
+            input_packet->stream_index == decoder_context->audio_stream_index ) {
+            if (skip_for_sync(decoder_context, input_packet, params)) {
+                av_packet_unref(input_packet);
                 continue;
             }
         }
 
-        if (!params->sync_audio_to_iframe &&
+        // Excute only for the desired stream
+        if ((input_packet->stream_index == decoder_context->video_stream_index && (params->tx_type & tx_video)) ||
+            (input_packet->stream_index == decoder_context->audio_stream_index && (params->tx_type & tx_audio))) {
+            // Stop when we reached the desired duration (duration -1 means 'entire input stream')
+            // PENDING(SSS) - this logic can be done after decoding where we know concretely that we decoded all frames
+            // we need to encode.
+            if (should_stop_decoding(input_packet, decoder_context, encoder_context,
+                params, &frames_read, &frames_read_past_duration, frames_allowed_past_duration))
+                break;
+
+            /*
+             * Skip the input packet in bypass mode if the packet timestamp is smaller than start_time_ts.
+             * The fact that avpipe mezzanine generated files don't have B-frames let us to skip before decoding.
+             * The assumption here is that the input stream does not have any B-frames, otherwise we can not skip
+             * the input packets without decoding.
+             * PENDING(RM) - add a validation to check input stream doesn't have any B-frames.
+             */
+            if (input_packet && params->start_time_ts > 0 && params->bypass_transcoding) {
+                const int64_t input_start_pts = params->tx_type & tx_video ?
+                    decoder_context->video_input_start_pts : decoder_context->audio_input_start_pts;
+                const int64_t packet_in_pts_offset = input_packet->pts - input_start_pts;
+                if (packet_in_pts_offset < params->start_time_ts) {
+                    if (debug_frame_level)
+                        elv_dbg("SKIP tx_type=%d, packet pts=%" PRId64 ", start_time_ts=%" PRId64,
+                            params->tx_type, input_packet->pts, params->start_time_ts);
+                    continue;
+                }
+            }
+        }
+
+        if (params->sync_audio_to_stream_id < 0 &&
             ((input_packet->stream_index == decoder_context->video_stream_index && (params->tx_type & tx_video)) ||
             (input_packet->stream_index == decoder_context->audio_stream_index && (params->tx_type & tx_audio)))) {
 
@@ -2853,7 +2922,7 @@ avpipe_init(
         "crypt_key_url=%s "
         "crypt_scheme=%d "
         "audio_index=%d "
-        "sync_audio_to_iframe=%d "
+        "sync_audio_to_stream_id=%d "
         "audio_fill_gap=%d "
         "wm_overlay_type=%d "
         "wm_overlay_len=%d "
@@ -2868,7 +2937,7 @@ avpipe_init(
         params->rc_max_rate, params->rc_buffer_size, params->seg_duration_ts, params->seg_duration, params->force_keyint,
         params->force_equal_fduration, params->ecodec, params->dcodec, params->enc_height, params->enc_width,
         params->crypt_iv, params->crypt_key, params->crypt_kid, params->crypt_key_url, params->crypt_scheme,
-        params->audio_index, params->sync_audio_to_iframe, params->audio_fill_gap,
+        params->audio_index, params->sync_audio_to_stream_id, params->audio_fill_gap,
         params->watermark_overlay_type, params->watermark_overlay_len, params->bitdepth,
         params->max_cll ? params->max_cll : "", params->master_display ? params->master_display : "");
     elv_log("AVPIPE TXPARAMS %s", buf);

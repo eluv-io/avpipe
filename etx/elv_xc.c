@@ -824,7 +824,7 @@ usage(
         "\t-start-segment :         (optional) Start segment number >= 1, Default is 1\n"
         "\t-start-time-ts :         (optional) Default: 0\n"
         "\t-stream-id :             (optional) Default: -1, if it is valid it will be used to transcode elementary stream with that stream-id.\n"
-        "\t-sync-audio-to-iframe:   (optional) Default 0, must be 0 or 1. Sync audio to first video iframe when input stream is mpegts.\n"
+        "\t-sync-audio-to-stream-id:(optional) Default: -1, sync audio to video iframe of specific stream-id when input stream is mpegts.\n"
         "\t-t :                     (optional) Transcoding threads. Default is 1 thread, must be bigger than 1\n"
         "\t-tx-type :               (optional) Transcoding type. Default is \"all\", can be \"video\", \"audio\", or \"all\" \n"
         "\t-video-bitrate :         (optional) Mutually exclusive with crf. Default: -1 (unused)\n"
@@ -901,7 +901,7 @@ main(
         .start_segment_str = strdup("1"),   /* 1-based */
         .start_time_ts = 0,                 /* same units as input stream PTS */
         .start_fragment_index = 0,          /* Default is zero */
-        .sync_audio_to_iframe = 0,
+        .sync_audio_to_stream_id = -1,
         .tx_type = tx_none,
         .video_bitrate = -1,                /* not used if using CRF */
         .watermark_text = NULL,
@@ -1131,11 +1131,11 @@ main(
                 if (sscanf(argv[i+1], "%"PRId64, &p.start_time_ts) != 1) {
                     usage(argv[0], argv[i], EXIT_FAILURE);
                 }
-            } else if (!strcmp(argv[i], "-sync-audio-to-iframe")) {
-                if (sscanf(argv[i+1], "%d", &p.sync_audio_to_iframe) != 1) {
+            } else if (!strcmp(argv[i], "-sync-audio-to-stream-id")) {
+                if (sscanf(argv[i+1], "%d", &p.sync_audio_to_stream_id) != 1) {
                     usage(argv[0], argv[i], EXIT_FAILURE);
                 }
-                if (p.sync_audio_to_iframe != 0 && p.sync_audio_to_iframe != 1) {
+                if (p.sync_audio_to_stream_id <= -1) {
                     usage(argv[0], argv[i], EXIT_FAILURE);
                 }
             } else {
