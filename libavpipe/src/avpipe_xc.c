@@ -2433,20 +2433,6 @@ avpipe_tx(
             }
         }
 
-        if (params->sync_audio_to_stream_id < 0 &&
-            ((input_packet->stream_index == decoder_context->video_stream_index && (params->tx_type & tx_video)) ||
-            (input_packet->stream_index == decoder_context->audio_stream_index && (params->tx_type & tx_audio)))) {
-
-            if (encoder_context->first_read_frame_pts == -1 && input_packet->pts != AV_NOPTS_VALUE) {
-                encoder_context->first_read_frame_pts = input_packet->pts;
-                elv_log("PTS first_read_frame=%"PRId64, encoder_context->first_read_frame_pts);
-            } else if (input_packet->pts != AV_NOPTS_VALUE && input_packet->pts < encoder_context->first_read_frame_pts) {
-                /* Due to b-frame reordering */
-                encoder_context->first_read_frame_pts = input_packet->pts;
-                elv_log("PTS first_read_frame reorder new=%"PRId64, encoder_context->first_read_frame_pts);
-            }
-        }
-
         if (input_packet->stream_index == decoder_context->video_stream_index &&
             (params->tx_type & tx_video)) {
             // Video packet
