@@ -1955,7 +1955,7 @@ should_stop_decoding(
     int *frames_read_past_duration,
     int frames_allowed_past_duration)
 {
-    int input_packet_rel_pts = 0;
+    int64_t input_packet_rel_pts = 0;
 
     if (decoder_context->cancelled)
         return 1;
@@ -1998,8 +1998,8 @@ should_stop_decoding(
         input_packet_rel_pts = input_packet->pts - decoder_context->audio_input_start_pts;
     }
 
-    /* TODO: the following code path is not functional, double check and test (-RM) */
     if (params->duration_ts != -1 &&
+        input_packet->pts != AV_NOPTS_VALUE &&
         input_packet_rel_pts >= params->start_time_ts + params->duration_ts) {
 
         (*frames_read_past_duration) ++;
@@ -2020,7 +2020,8 @@ should_stop_decoding(
         }
     }
 
-    encoder_context->input_last_pts_read = input_packet->pts;
+    if (input_packet->pts != AV_NOPTS_VALUE)
+        encoder_context->input_last_pts_read = input_packet->pts;
     return 0;
 }
 
