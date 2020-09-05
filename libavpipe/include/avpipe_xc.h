@@ -262,6 +262,7 @@ typedef struct txparams_t {
     int     force_equal_fduration;  // Force all frames to have equal frame duration 
     char    *ecodec;                // Video/audio encoder
     char    *dcodec;                // Video/audio decoder
+    int     gpu_index;              // GPU index for transcoding
     int     enc_height;
     int     enc_width;
     char    *crypt_iv;              // 16-byte AES IV in hex [Optional, Default: Generated]

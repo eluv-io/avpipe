@@ -806,6 +806,7 @@ usage(
         "\t                                    Using \"fmp4-segment\" format produces self contained mp4 segments with continious pts.\n"
         "\t                                    Using \"fmp4-segment\" generates segments that are appropriate for live streaming.\n"
         "\t-force-keyint :          (optional) Force IDR key frame in this interval.\n"
+        "\t-gpu-index :             (optional) Use the GPU with specified index for transcoding (export CUDA_DEVICE_ORDER=PCI_BUS_ID would use smi index).\n"
         "\t-master-display :        (optional) Master display, only valid if encoder is libx265.\n"
         "\t-max-cll :               (optional) Maximum Content Light Level and Maximum Frame Average Light Level, only valid if encoder is libx265.\n"
         "\t                                    This parameter is a comma separated of max-cll and max-fall (i.e \"1514,172\").\n"
@@ -910,6 +911,7 @@ main(
         .watermark_overlay = NULL,
         .watermark_overlay_len = 0,
         .watermark_overlay_type = png_image,
+        .gpu_index = -1,
     };
 
     i = 1;
@@ -1048,6 +1050,15 @@ main(
                 usage(argv[0], argv[i], EXIT_FAILURE);
             } else {
                 filename = argv[i+1];
+            }
+            break;
+        case 'g':
+            if (!strcmp(argv[i], "-gpu-index")) {
+                if (sscanf(argv[i+1], "%d", &p.gpu_index) != 1) {
+                    usage(argv[0], argv[i], EXIT_FAILURE);
+                }
+            } else {
+                usage(argv[0], argv[i], EXIT_FAILURE);
             }
             break;
         case 'm':

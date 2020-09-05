@@ -678,6 +678,9 @@ set_nvidia_params(
 
     av_opt_set(encoder_codec_context->priv_data, "forced-idr", "on", 0);
 
+    if (params->gpu_index >= 0)
+        av_opt_set_int(encoder_codec_context->priv_data, "gpu", params->gpu_index, 0);
+
     /*
      * The encoder_codec_context->profile is set just for proper log message, otherwise it has no impact
      * when the encoder is nvidia.
@@ -2901,6 +2904,7 @@ avpipe_init(
         "force_equal_fduration=%d "
         "ecodec=%s "
         "dcodec=%s "
+        "gpu_index=%d "
         "enc_height=%d "
         "enc_width=%d "
         "crypt_iv=%s "
@@ -2922,12 +2926,12 @@ avpipe_init(
         params->format, params->start_time_ts, params->start_pts, params->duration_ts, params->start_segment_str,
         params->video_bitrate, params->audio_bitrate, params->sample_rate, params->crf_str, params->preset,
         params->rc_max_rate, params->rc_buffer_size, params->seg_duration_ts, params->seg_duration, params->force_keyint,
-        params->force_equal_fduration, params->ecodec, params->dcodec, params->enc_height, params->enc_width,
+        params->force_equal_fduration, params->ecodec, params->dcodec, params->gpu_index, params->enc_height, params->enc_width,
         params->crypt_iv, params->crypt_key, params->crypt_kid, params->crypt_key_url, params->crypt_scheme,
         params->audio_index, params->sync_audio_to_stream_id, params->audio_fill_gap,
         params->watermark_overlay_type, params->watermark_overlay_len, params->bitdepth,
         params->max_cll ? params->max_cll : "", params->master_display ? params->master_display : "");
-    elv_log("AVPIPE TXPARAMS %s", buf);
+    elv_log("AVPIPE XCPARAMS %s", buf);
 
     if (check_params(params) < 0)
         goto avpipe_init_failed;

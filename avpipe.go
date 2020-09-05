@@ -130,6 +130,7 @@ type TxParams struct {
 	ForceKeyInt           int32       `json:"force_keyint,omitempty"`
 	Ecodec                string      `json:"ecodec,omitempty"` // Video encoder
 	Dcodec                string      `json:"dcodec,omitempty"` // Video decoder
+	GPUIndex              int32       `json:"gpu_index,omitempty"` // GPU index if encoder/decoder is GPU (nvidia)
 	EncHeight             int32       `json:"enc_height,omitempty"`
 	EncWidth              int32       `json:"enc_width,omitempty"`
 	CryptIV               string      `json:"crypt_iv,omitempty"`
