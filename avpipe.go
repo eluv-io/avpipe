@@ -128,8 +128,8 @@ type TxParams struct {
 	SegDuration           string      `json:"seg_duration,omitempty"`
 	StartFragmentIndex    int32       `json:"start_fragment_index,omitempty"`
 	ForceKeyInt           int32       `json:"force_keyint,omitempty"`
-	Ecodec                string      `json:"ecodec,omitempty"` // Video encoder
-	Dcodec                string      `json:"dcodec,omitempty"` // Video decoder
+	Ecodec                string      `json:"ecodec,omitempty"`    // Video encoder
+	Dcodec                string      `json:"dcodec,omitempty"`    // Video decoder
 	GPUIndex              int32       `json:"gpu_index,omitempty"` // GPU index if encoder/decoder is GPU (nvidia)
 	EncHeight             int32       `json:"enc_height,omitempty"`
 	EncWidth              int32       `json:"enc_width,omitempty"`
@@ -1027,6 +1027,7 @@ func getCParams(params *TxParams) *C.txparams_t {
 		bitdepth:                C.int(params.BitDepth),
 		mux_spec:                C.CString(params.MuxingSpec),
 		sync_audio_to_stream_id: C.int(params.SyncAudioToStreamId),
+		gpu_index:               C.int(params.GPUIndex),
 		// seekable, bypass_transcoding, shadow, audio_fill_gap, sync_audio_video and force_equal_fduration handled below
 	}
 
