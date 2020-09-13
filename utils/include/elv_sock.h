@@ -16,3 +16,8 @@ udp_socket(
     struct sockaddr **saptr,
     socklen_t *lenp);
 
+int
+tcp_connect(
+    const char *host,
+    const char *port);
+

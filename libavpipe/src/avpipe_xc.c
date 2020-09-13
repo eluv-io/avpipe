@@ -220,6 +220,10 @@ prepare_input(
     AVIOContext *avioctx;
     int bufin_sz = 1024 * 1024;
 
+    /* For RTMP protocol don't create input callbacks */
+    if (!strncmp(inctx->url, "rtmp", 4))
+        return 0;
+
     bufin = (unsigned char *) av_malloc(bufin_sz);  /* Must be malloc'd - will be realloc'd by avformat */
     avioctx = avio_alloc_context(bufin, bufin_sz, 0, (void *)inctx,
         in_handlers->avpipe_reader, in_handlers->avpipe_writer, in_handlers->avpipe_seeker);
@@ -3003,10 +3007,12 @@ avpipe_fini(
 
     /* note: the internal buffer could have changed, and be != avio_ctx_buffer */
     if (decoder_context && decoder_context->format_context) {
-        AVIOContext *avioctx = (AVIOContext *) decoder_context->format_context->pb;
-        if (avioctx) {
-            av_freep(&avioctx->buffer);
-            av_freep(&avioctx);
+        if ((*txctx)->inctx && strncmp((*txctx)->inctx->url, "rtmp", 4)) {
+            AVIOContext *avioctx = (AVIOContext *) decoder_context->format_context->pb;
+            if (avioctx) {
+                av_freep(&avioctx->buffer);
+                av_freep(&avioctx);
+            }
         }
     }
 

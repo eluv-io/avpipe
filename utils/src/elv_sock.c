@@ -1,6 +1,9 @@
+#include <stdlib.h>
 #include <sys/types.h>
 #include <sys/socket.h>
 #include <sys/select.h>
+#include <netinet/in.h>
+#include <arpa/inet.h>
 #include <netdb.h>
 #include <stdlib.h>
 #include <string.h>
@@ -64,6 +67,27 @@ udp_socket(
     freeaddrinfo(ressave);
 
     return(sockfd);
+}
+
+int
+tcp_connect(
+    const char *host,
+    const char *port)
+{
+    int sockfd, n;
+    struct addrinfo hints, *res;
+
+    sockfd = socket(AF_INET, SOCK_STREAM, 0);
+    if (sockfd == -1)
+        return -1;
+
+    if ( (n = getaddrinfo(host, port, &hints, &res)) != 0)
+        return -1;
+
+    if (connect(sockfd, res->ai_addr, res->ai_addrlen) != 0)
+        return -1;
+
+    return sockfd;
 }
 
 #if 0

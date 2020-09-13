@@ -135,6 +135,18 @@ in_opener(
         return 0;
     }
 
+    if (!strcmp(url_parser.protocol, "rtmp")) {
+        inctx->opaque = (int *) calloc(2, sizeof(int));
+        inctx->url = strdup(url);
+        pthread_mutex_lock(&lock);
+        opened_inputs++;
+        *((int *)(inctx->opaque)+1) = opened_inputs;
+        pthread_mutex_unlock(&lock);
+
+        elv_dbg("IN OPEN RTMP url=%s", url);
+        return 0;
+    }
+
     /* If input is not file */
     if (strcmp(url_parser.protocol, "file")) {
         elv_err("Invalid input url=%s, can be only udp or file", url);

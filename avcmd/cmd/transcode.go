@@ -17,6 +17,10 @@ type avcmdInputOpener struct {
 }
 
 func (io *avcmdInputOpener) Open(fd int64, url string) (avpipe.InputHandler, error) {
+	if url[0:4] == "rtmp" {
+		return &avcmdInput{url: url}, nil
+	}
+
 	f, err := os.OpenFile(url, os.O_RDONLY, 0755)
 	if err != nil {
 		return nil, err
@@ -25,6 +29,7 @@ func (io *avcmdInputOpener) Open(fd int64, url string) (avpipe.InputHandler, err
 	io.url = url
 	etxInput := &avcmdInput{
 		file: f,
+		url:  url,
 	}
 
 	return etxInput, nil
@@ -32,10 +37,14 @@ func (io *avcmdInputOpener) Open(fd int64, url string) (avpipe.InputHandler, err
 
 // Implement InputHandler
 type avcmdInput struct {
+	url  string
 	file *os.File // Input file
 }
 
 func (i *avcmdInput) Read(buf []byte) (int, error) {
+	if i.url[0:4] == "rtmp" {
+		return 0, nil
+	}
 	n, err := i.file.Read(buf)
 	if err == io.EOF {
 		return 0, nil
@@ -44,11 +53,19 @@ func (i *avcmdInput) Read(buf []byte) (int, error) {
 }
 
 func (i *avcmdInput) Seek(offset int64, whence int) (int64, error) {
+	if i.url[0:4] == "rtmp" {
+		return 0, nil
+	}
+
 	n, err := i.file.Seek(int64(offset), int(whence))
 	return n, err
 }
 
 func (i *avcmdInput) Close() error {
+	if i.url[0:4] == "rtmp" {
+		return nil
+	}
+
 	err := i.file.Close()
 	return err
 }
