@@ -119,13 +119,14 @@ init_audio_filters(
     }
     AVCodecContext *dec_codec_ctx = decoder_context->codec_context[decoder_context->audio_stream_index];
     AVCodecContext *enc_codec_ctx = encoder_context->codec_context[encoder_context->audio_stream_index];
-    const char *filter_spec = "anull"; /* passthrough (dummy) filter for audio */
     char args[512];
     int ret = 0;
     AVFilterContext *buffersrc_ctx = NULL;
     AVFilterContext *buffersink_ctx = NULL;
+    AVFilterContext *format_ctx = NULL;
     const AVFilter *buffersrc = avfilter_get_by_name("abuffer");
     const AVFilter *buffersink = avfilter_get_by_name("abuffersink");
+    const AVFilter *aformat = avfilter_get_by_name("aformat");
     AVFilterInOut *inputs  = avfilter_inout_alloc();
     AVFilterInOut *outputs = avfilter_inout_alloc();
 
@@ -147,7 +148,6 @@ init_audio_filters(
 
     snprintf(args, sizeof(args),
         "time_base=%d/%d:sample_rate=%d:sample_fmt=%s:channel_layout=0x%"PRIx64,
-        //dec_codec_ctx->time_base.num, dec_codec_ctx->time_base.den, dec_codec_ctx->sample_rate,
         1, dec_codec_ctx->sample_rate, dec_codec_ctx->sample_rate,
         av_get_sample_fmt_name(dec_codec_ctx->sample_fmt),
         dec_codec_ctx->channel_layout);
@@ -173,14 +173,6 @@ init_audio_filters(
         goto end;
     }
 
-    ret = av_opt_set_bin(buffersink_ctx, "channel_layouts",
-        (uint8_t*)&enc_codec_ctx->channel_layout,
-        sizeof(enc_codec_ctx->channel_layout), AV_OPT_SEARCH_CHILDREN);
-    if (ret < 0) {
-        elv_err("Cannot set output channel layout");
-        goto end;
-    }
-
     ret = av_opt_set_bin(buffersink_ctx, "sample_rates",
         (uint8_t*)&enc_codec_ctx->sample_rate, sizeof(enc_codec_ctx->sample_rate),
         AV_OPT_SEARCH_CHILDREN);
@@ -189,19 +181,38 @@ init_audio_filters(
         goto end;
     }
 
-    /* Endpoints for the filter graph. */
-    outputs->name       = av_strdup("in");
-    outputs->filter_ctx = buffersrc_ctx;
-    outputs->pad_idx    = 0;
-    outputs->next       = NULL;
-
-    inputs->name       = av_strdup("out");
-    inputs->filter_ctx = buffersink_ctx;
-    inputs->pad_idx    = 0;
-    inputs->next       = NULL;
-
-    if ((ret = avfilter_graph_parse_ptr(decoder_context->filter_graph, filter_spec, &inputs, &outputs, NULL)) < 0)
+    ret = av_opt_set_bin(buffersink_ctx, "channel_layouts",
+        (uint8_t*)&enc_codec_ctx->channel_layout,
+        sizeof(enc_codec_ctx->channel_layout), AV_OPT_SEARCH_CHILDREN);
+    if (ret < 0) {
+        elv_err("Cannot set output channel layout");
         goto end;
+    }
+
+    snprintf(args, sizeof(args),
+             "sample_fmts=%s:sample_rates=%d:channel_layouts=0x%"PRIx64,
+             av_get_sample_fmt_name(enc_codec_ctx->sample_fmt), enc_codec_ctx->sample_rate,
+             (uint64_t)enc_codec_ctx->channel_layout);
+    elv_log("Audio index=%d-%d, format_filter=%s", decoder_context->audio_stream_index, encoder_context->audio_stream_index, args);
+
+    ret = avfilter_graph_create_filter(&format_ctx, aformat, "format_out_0_0", args, NULL, decoder_context->filter_graph);
+    if (ret < 0) {
+        elv_err("Cannot create audio format filter");
+        goto end;
+    }
+
+    if ((ret = avfilter_link(buffersrc_ctx, 0, format_ctx, 0)) < 0) {
+        elv_err("Failed to link audio src to format, ret=%d", ret);
+        return ret;
+    }
+
+    if ((ret = avfilter_link(format_ctx, 0, buffersink_ctx, 0)) < 0) {
+        elv_err("Failed to link audio format to sink, ret=%d", ret);
+        return ret;
+    }
+
+    av_buffersink_set_frame_size(buffersink_ctx,
+        encoder_context->codec_context[decoder_context->audio_stream_index]->frame_size);
 
     if ((ret = avfilter_graph_config(decoder_context->filter_graph, NULL)) < 0)
         goto end;

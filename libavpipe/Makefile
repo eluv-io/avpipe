@@ -1,5 +1,9 @@
 TOP_DIR ?= $(shell pwd)
-SRCS=avpipe_xc.c avpipe_utils.c avpipe_filters.c avpipe_io.c avpipe_mux.c
+SRCS=avpipe_xc.c \
+    avpipe_utils.c \
+    avpipe_filters.c \
+    avpipe_io.c \
+    avpipe_mux.c
 
 BINDIR=bin
 LIBDIR=lib
