@@ -368,7 +368,8 @@ out_stat(
         rc = AVPipeStatOutput(h, fd, stat_type, &outctx->decoding_start_pts);
         break;
     case out_stat_encoding_end_pts:
-        rc = AVPipeStatOutput(h, fd, stat_type, &outctx->encoder_ctx->input_last_pts_sent_encode);
+        /* PENDING (RM) Add stats for audio too */
+        rc = AVPipeStatOutput(h, fd, stat_type, &outctx->encoder_ctx->video_last_pts_sent_encode);
         break;
     default:
         break;
@@ -899,7 +900,7 @@ out_mux_stat(
         rc = AVPipeStatMuxOutput(fd, stat_type, &outctx->decoding_start_pts);
         break;
     case out_stat_encoding_end_pts:
-        rc = AVPipeStatMuxOutput(fd, stat_type, &outctx->encoder_ctx->input_last_pts_sent_encode);
+        rc = AVPipeStatMuxOutput(fd, stat_type, &outctx->encoder_ctx->video_last_pts_sent_encode);
         break;
     default:
         break;

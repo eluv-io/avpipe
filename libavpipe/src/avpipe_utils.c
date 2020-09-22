@@ -13,19 +13,6 @@
 
 #include <sys/time.h>
 
-static const char*
-tx_type_str(
-    int tx_type)
-{
-    switch (tx_type) {
-    case tx_video:
-        return "VIDEO";
-    case tx_audio:
-        return "AUDIO";
-    }
-    return "AUDIO_VIDEO";
-}
-
 const char *stream_type_str(
     coderctx_t *c,
     int idx)
@@ -39,11 +26,11 @@ const char *stream_type_str(
 
 void
 dump_frame(
+    int is_audio,
     char *msg,
     int num,
     AVFrame *frame,
-    int debug_frame_level,
-    int tx_type)
+    int debug_frame_level)
 {
     if (!debug_frame_level || !frame)
         return;
@@ -52,7 +39,7 @@ dump_frame(
         "pkt_size=%d nb_samples=%d "
         "width=%d height=%d linesize=%d "
         "format=%d coded_pic_num=%d flags=%x "
-        "\n", tx_type_str(tx_type), msg, num,
+        "\n", is_audio ? "AUDIO" : "VIDEO", msg, num,
         frame->pts, frame->pkt_dts, frame->pkt_duration, frame->best_effort_timestamp,
         frame->key_frame, frame->pict_type,
         frame->pkt_size, frame->nb_samples,
@@ -64,16 +51,16 @@ dump_frame(
 
 void
 dump_packet(
+    int is_audio,
     const char *msg,
     AVPacket *p,
-    int debug_frame_level,
-    int tx_type)
+    int debug_frame_level)
 {
     if (!debug_frame_level || !p)
         return;
 
     elv_dbg("%s PACKET %s pts=%"PRId64" dts=%"PRId64" duration=%"PRId64" pos=%"PRId64" size=%d stream_index=%d flags=%x\n",
-        tx_type_str(tx_type), msg,
+        is_audio ? "AUDIO" : "VIDEO", msg,
         p->pts, p->dts, p->duration, p->pos, p->size, p->stream_index,
         p->flags
     );
@@ -203,28 +190,34 @@ save_gray_frame(
 }
 
 void
-dump_coders(
-    coderctx_t *decoder_context,
-    coderctx_t *encoder_context)
+dump_trackers(
+    AVFormatContext *encoder_format_context,
+    AVFormatContext *decoder_format_context)
 {
+    if (!encoder_format_context || !decoder_format_context)
+        return;
+
     static long t0 = 0;
     struct timeval t;
     long ti;
     AVIOContext *avioctx;
     ioctx_t *inctx;
-    out_tracker_t *out_tracker = (out_tracker_t *) encoder_context->format_context->avpipe_opaque;
+    out_tracker_t *out_tracker = (out_tracker_t *) encoder_format_context->avpipe_opaque;
 
     gettimeofday(&t, NULL);
     ti = t.tv_sec * 1000 + t.tv_usec / 1000;
     if (t0 == 0)
         t0 = ti;
 
-    avioctx = (AVIOContext *) decoder_context->format_context->pb;
+    avioctx = (AVIOContext *) decoder_format_context->pb;
+    if (!avioctx)
+        /* prepare_decoder can fail and pb becomes NULL */
+        return;
     inctx = (ioctx_t *) avioctx->opaque;
 
-    elv_dbg("CODERS t=%02d.%03d read_pos=%"PRId64" read_pts=%"PRId64" seg_index=%d seg_pos=%d seg_pts=%"PRId64"\n",
-        (int)(ti - t0) / 1000, (int)(ti - t0) % 1000, inctx->read_pos, decoder_context->pts / 1001,
-        out_tracker->seg_index, out_tracker->last_outctx ? out_tracker->last_outctx->written_bytes:0, encoder_context->pts / 1001);
+    elv_dbg("CODERS t=%02d.%03d read_pos=%"PRId64" seg_index=%d seg_pos=%d\n",
+        (int)(ti - t0) / 1000, (int)(ti - t0) % 1000, inctx->read_pos,
+        out_tracker->seg_index, out_tracker->last_outctx ? out_tracker->last_outctx->written_bytes:0);
 }
 
 static void

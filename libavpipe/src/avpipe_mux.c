@@ -15,7 +15,7 @@ elv_mux_open(
     ioctx_t *outctx = (ioctx_t *) calloc(1, sizeof(ioctx_t));
 
     /* Set mux output format to avpipe_fmp4_segment */
-    outctx->type = avpipe_fmp4_segment;
+    outctx->type = avpipe_mp4_segment;
     outctx->url = (char *) url;
     elv_dbg("OUT elv_mux_open url=%s", url);
     if (out_handlers->avpipe_opener(url, outctx) < 0) {
@@ -379,10 +379,7 @@ get_next_packet(
     pkt->stream_index = index;
     txctx->is_pkt_valid[index] = 0;
 
-    if (pkt->stream_index == 0)
-        dump_packet("MUX IN ", pkt, txctx->debug_frame_level, tx_video);
-    else
-        dump_packet("MUX IN ", pkt, txctx->debug_frame_level, tx_audio);
+    dump_packet(pkt->stream_index, "MUX IN ", pkt, txctx->debug_frame_level);
 
 read_frame_again:
     ret = av_read_frame(txctx->in_muxer_ctx[index].format_context, &pkts[index]);
@@ -446,10 +443,7 @@ avpipe_mux(
         if (ret <= 0)
             break;
 
-        if (pkt.stream_index == 0)
-            dump_packet("MUX OUT ", &pkt, 1, tx_video);
-        else
-            dump_packet("MUX OUT ", &pkt, 1, tx_audio);
+        dump_packet(pkt.stream_index, "MUX OUT ", &pkt, 1);
 
         if (av_interleaved_write_frame(txctx->out_muxer_ctx.format_context, &pkt) < 0) {
             elv_err("Failure in copying mux packet");

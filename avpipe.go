@@ -65,8 +65,10 @@ const (
 	FMP4Stream
 	// MP4Segment 12
 	MP4Segment
-	// FMP4Segment 13
-	FMP4Segment
+	// FMP4VideoSegment 13
+	FMP4VideoSegment
+	// FMP4AudioSegment 14
+	FMP4AudioSegment
 )
 
 // This is corresponding to AV_NOPTS_VALUE
@@ -79,7 +81,26 @@ const (
 	TxVideo
 	TxAudio
 	TxAll
+	TxMux
 )
+
+func TxTypeFromString(txTypeStr string) TxType {
+	var txType TxType
+	switch txTypeStr {
+	case "all":
+		txType = TxAll
+	case "video":
+		txType = TxVideo
+	case "audio":
+		txType = TxAudio
+	case "mux":
+		txType = TxMux
+	default:
+		txType = TxNone
+	}
+
+	return txType
+}
 
 type ImageType int
 
@@ -124,12 +145,15 @@ type TxParams struct {
 	RcBufferSize          int32       `json:"rc_buffer_size,omitempty"`
 	CrfStr                string      `json:"crf_str,omitempty"`
 	Preset                string      `json:"preset,omitempty"`
-	SegDurationTs         int64       `json:"seg_duration_ts,omitempty"`
+	AudioSegDurationTs    int64       `json:"audio_seg_duration_ts,omitempty"`
+	VideoSegDurationTs    int64       `json:"video_seg_duration_ts,omitempty"`
 	SegDuration           string      `json:"seg_duration,omitempty"`
 	StartFragmentIndex    int32       `json:"start_fragment_index,omitempty"`
 	ForceKeyInt           int32       `json:"force_keyint,omitempty"`
 	Ecodec                string      `json:"ecodec,omitempty"`    // Video encoder
+	Ecodec2               string      `json:"ecodec2,omitempty"`   // Audio encoder
 	Dcodec                string      `json:"dcodec,omitempty"`    // Video decoder
+	Dcodec2               string      `json:"dcodec2,omitempty"`   // Audio decoder
 	GPUIndex              int32       `json:"gpu_index,omitempty"` // GPU index if encoder/decoder is GPU (nvidia)
 	EncHeight             int32       `json:"enc_height,omitempty"`
 	EncWidth              int32       `json:"enc_width,omitempty"`
@@ -663,8 +687,10 @@ func AVPipeOpenOutput(handler C.int64_t, stream_index, seg_index, stream_type C.
 		out_type = FMP4Stream
 	case C.avpipe_mp4_segment:
 		out_type = MP4Segment
-	case C.avpipe_fmp4_segment:
-		out_type = FMP4Segment
+	case C.avpipe_video_fmp4_segment:
+		out_type = FMP4VideoSegment
+	case C.avpipe_audio_fmp4_segment:
+		out_type = FMP4AudioSegment
 	default:
 		log.Error("AVPipeOpenOutput()", "invalid stream type", stream_type)
 		return C.int64_t(-1)
@@ -698,8 +724,10 @@ func AVPipeOpenMuxOutput(url *C.char, stream_type C.int) C.int64_t {
 	switch stream_type {
 	case C.avpipe_mp4_segment:
 		out_type = MP4Segment
-	case C.avpipe_fmp4_segment:
-		out_type = FMP4Segment
+	case C.avpipe_video_fmp4_segment:
+		out_type = FMP4VideoSegment
+	case C.avpipe_audio_fmp4_segment:
+		out_type = FMP4AudioSegment
 	default:
 		log.Error("AVPipeOpenOutput()", "invalid stream type", stream_type)
 		return C.int64_t(-1)
@@ -994,12 +1022,15 @@ func getCParams(params *TxParams) *C.txparams_t {
 		preset:                  C.CString(params.Preset),
 		rc_max_rate:             C.int(params.RcMaxRate),
 		rc_buffer_size:          C.int(params.RcBufferSize),
-		seg_duration_ts:         C.int64_t(params.SegDurationTs),
+		audio_seg_duration_ts:   C.int64_t(params.AudioSegDurationTs),
+		video_seg_duration_ts:   C.int64_t(params.VideoSegDurationTs),
 		seg_duration:            C.CString(params.SegDuration),
 		start_fragment_index:    C.int(params.StartFragmentIndex),
 		force_keyint:            C.int(params.ForceKeyInt),
 		ecodec:                  C.CString(params.Ecodec),
+		ecodec2:                 C.CString(params.Ecodec2),
 		dcodec:                  C.CString(params.Dcodec),
+		dcodec2:                 C.CString(params.Dcodec2),
 		enc_height:              C.int(params.EncHeight),
 		enc_width:               C.int(params.EncWidth),
 		crypt_iv:                C.CString(params.CryptIV),

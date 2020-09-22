@@ -337,20 +337,36 @@ out_opener(
         break;
 
     case avpipe_video_init_stream:
-    case avpipe_audio_init_stream:
     case avpipe_video_m3u:
+        /* Init segments, m3u8 file */
+        sprintf(segname, "%s/v%s", dir, url);
+        break;
+
+    case avpipe_audio_init_stream:
     case avpipe_audio_m3u:
+        /* Init segments, m3u8 file */
+        sprintf(segname, "%s/a%s", dir, url);
+        break;
+
     case avpipe_aes_128_key:
     case avpipe_mp4_stream:
     case avpipe_fmp4_stream:
-        /* Init segments, or m3u files */
+        /* m3u files */
         sprintf(segname, "%s/%s", dir, url);
         break;
 
     case avpipe_video_segment:
+        {
+            const char *segbase = "vchunk-stream";
+
+            sprintf(segname, "./%s/%s%d-%05d.m4s",
+                dir, segbase, outctx->stream_index, outctx->seg_index);
+        }
+        break;
+
     case avpipe_audio_segment:
         {
-            const char *segbase = "chunk-stream";
+            const char *segbase = "achunk-stream";
 
             sprintf(segname, "./%s/%s%d-%05d.m4s",
                 dir, segbase, outctx->stream_index, outctx->seg_index);
@@ -366,9 +382,18 @@ out_opener(
         }
         break;
 
-    case avpipe_fmp4_segment:
+    case avpipe_video_fmp4_segment:
         {
-            const char *segbase = "fsegment";
+            const char *segbase = "vfsegment";
+
+            sprintf(segname, "./%s/%s%d-%05d.mp4",
+                dir, segbase, outctx->stream_index, outctx->seg_index);
+        }
+        break;
+
+    case avpipe_audio_fmp4_segment:
+        {
+            const char *segbase = "afsegment";
 
             sprintf(segname, "./%s/%s%d-%05d.mp4",
                 dir, segbase, outctx->stream_index, outctx->seg_index);
@@ -509,7 +534,8 @@ out_stat(
         outctx->type != avpipe_mp4_stream &&
         outctx->type != avpipe_fmp4_stream &&
         outctx->type != avpipe_mp4_segment &&
-        outctx->type != avpipe_fmp4_segment)
+        outctx->type != avpipe_video_fmp4_segment &&
+        outctx->type != avpipe_audio_fmp4_segment)
         return 0;
 
     switch (stat_type) {
@@ -520,7 +546,8 @@ out_stat(
         elv_log("OUT STAT fd=%d, start PTS=%"PRId64, fd, outctx->decoding_start_pts);
         break;
     case out_stat_encoding_end_pts:
-        elv_log("OUT STAT fd=%d, end PTS=%"PRId64, fd, outctx->encoder_ctx->input_last_pts_sent_encode);
+        elv_log("OUT STAT fd=%d, video end PTS=%"PRId64", audio end PTS=%"PRId64,
+            fd, outctx->encoder_ctx->video_last_pts_sent_encode, outctx->encoder_ctx->audio_last_pts_sent_encode);
         break;
     default:
         break;
@@ -792,8 +819,11 @@ usage(
         "Invalid parameter: %s\n\n"
         "Usage: %s <params>\n"
         "\t-audio-bitrate :         (optional) Default: 128000\n"
+        "\t-audio-decoder :         (optional) Audio decoder name. For audio default is \"aac\", but for ts files should be set to \"ac3\"\n"
+        "\t-audio-encoder :         (optional) Audio encoder name. Default is \"aac\", can be \"ac3\", \"mp2\" or \"mp3\"\n"
         "\t-audio-fill-gap :        (optional) Default: 0, must be 0 or 1. It only effects if encoder is aac.\n"
         "\t-audio-index :           (optional) Default: the index of last audio stream\n"
+        "\t-audio-seg-duration-ts : (mandatory If format is not \"segment\" and transcoding audio) audio segment duration time base (positive integer).\n"
         "\t-bitdepth :              (optional) Bitdepth of color space. Default is 8, can be 8, 10, or 12.\n"
         "\t-bypass :                (optional) Bypass transcoding. Default is 0, must be 0 or 1\n"
         "\t-command :               (optional) Directing command of etx, can be \"transcode\", \"probe\" or \"mux\" (default is transcode).\n"
@@ -806,8 +836,7 @@ usage(
         "\t-d :                     (optional) Decoder name. For video default is \"h264\", can be: \"h264\", \"h264_cuvid\", \"jpeg2000\", \"hevc\"\n"
         "\t                                    For audio default is \"aac\", but for ts files should be set to \"ac3\"\n"
         "\t-duration-ts :           (optional) Default: -1 (entire stream)\n"
-        "\t-e :                     (optional) Encoder name. Default is \"libx264\", can be: \"libx264\", \"libx265\", \"h264_nvenc\", \"h264_videotoolbox\"\n"
-        "\t                                    For audio default is \"aac\", but for ts files should be set to \"ac3\"\n"
+        "\t-e :                     (optional) Video encoder name. Default is \"libx264\", can be: \"libx264\", \"libx265\", \"h264_nvenc\", \"h264_videotoolbox\"\n"
         "\t-enc-height :            (optional) Default: -1 (use source height)\n"
         "\t-enc-width :             (optional) Default: -1 (use source width)\n"
         "\t-equal-fduration :       (optional) Force equal frame duration. Must be 0 or 1 and only valid for \"fmp4-segment\" format\n"
@@ -830,7 +859,6 @@ usage(
         "\t-rc-max-rate :           (optional)\n"
         "\t-sample-rate :           (optional) Default: -1. For aac output sample rate is set to input sample rate and this parameter is ignored.\n"
         "\t-seekable :              (optional) Seekable stream. Default is 0, must be 0 or 1\n"
-        "\t-seg-duration-ts :       (mandatory If format is not \"segment\") segment duration time base (positive integer).\n"
         "\t-seg-duration :          (mandatory If format is \"segment\") segment duration secs (positive integer). It is used for making mp4 segments.\n"
         "\t-start-pts :             (optional) Starting PTS for output. Default is 0\n"
         "\t-start-frag-index :      (optional) Start fragment index of first segment. Default is 0\n"
@@ -841,6 +869,7 @@ usage(
         "\t-t :                     (optional) Transcoding threads. Default is 1 thread, must be bigger than 1\n"
         "\t-tx-type :               (optional) Transcoding type. Default is \"all\", can be \"video\", \"audio\", or \"all\" \n"
         "\t-video-bitrate :         (optional) Mutually exclusive with crf. Default: -1 (unused)\n"
+        "\t-video-seg-duration-ts : (mandatory If format is not \"segment\" and transcoding video) video segment duration time base (positive integer).\n"
         "\t-wm-text :               (optional) Watermark text that will be presented in every video frame if it exist. It has higher priority than overlay watermark.\n"
         "\t-wm-xloc :               (optional) Watermark X location\n"
         "\t-wm-yloc :               (optional) Watermark Y location\n"
@@ -895,8 +924,10 @@ main(
         .crypt_kid = NULL,
         .crypt_scheme = crypt_none,
         .dcodec = strdup(""),
+        .dcodec2 = strdup(""),
         .duration_ts = -1,                  /* -1 means entire input stream, same units as input stream */
         .ecodec = strdup("libx264"),
+        .ecodec2 = strdup("aac"),
         .enc_height = -1,                   /* -1 means use source height, other values 2160, 1080, 720 */
         .enc_width = -1,                    /* -1 means use source width, other values 3840, 1920, 1280 */
         .force_equal_fduration = 0,
@@ -909,7 +940,8 @@ main(
         .rc_max_rate = 6700000,             /* TODO - default? */
         .sample_rate = -1,                  /* Audio sampling rate 44100 */
         .seekable = 0,
-        .seg_duration_ts = -1,              /* input argument, same units as input stream PTS */
+        .video_seg_duration_ts = -1,        /* input argument, same units as input stream PTS */
+        .audio_seg_duration_ts = -1,        /* input argument, same units as input stream PTS */
         .start_pts = 0,
         .start_segment_str = strdup("1"),   /* 1-based */
         .start_time_ts = 0,                 /* same units as input stream PTS */
@@ -937,6 +969,10 @@ main(
                 if (sscanf(argv[i+1], "%d", &p.audio_index) != 1) {
                     usage(argv[0], argv[i], EXIT_FAILURE);
                 }
+            } else if (!strcmp(argv[i], "-audio-decoder")) {
+                p.dcodec2 = strdup(argv[i+1]);
+            } else if (!strcmp(argv[i], "-audio-encoder")) {
+                p.ecodec2 = strdup(argv[i+1]);
             } else if (!strcmp(argv[i], "-audio-fill-gap")) {
                 if (sscanf(argv[i+1], "%d", &p.audio_fill_gap) != 1) {
                     usage(argv[0], argv[i], EXIT_FAILURE);
@@ -946,6 +982,10 @@ main(
                 }
             } else if (!strcmp(argv[i], "-audio-bitrate")) {
                 if (sscanf(argv[i+1], "%d", &p.audio_bitrate) != 1) {
+                    usage(argv[0], argv[i], EXIT_FAILURE);
+                }
+            } else if (!strcmp(argv[i], "-audio-seg-duration-ts")) {
+                if (sscanf(argv[i+1], "%"PRId64, &p.audio_seg_duration_ts) != 1) {
                     usage(argv[0], argv[i], EXIT_FAILURE);
                 }
             } else {
@@ -1130,10 +1170,6 @@ main(
                 if (sscanf(argv[i+1], "%d", &p.sample_rate) != 1) {
                     usage(argv[0], argv[i], EXIT_FAILURE);
                 }
-            } else if (!strcmp(argv[i], "-seg-duration-ts")) {
-                if (sscanf(argv[i+1], "%"PRId64, &p.seg_duration_ts) != 1) {
-                    usage(argv[0], argv[i], EXIT_FAILURE);
-                }
             } else if (!strcmp(argv[i], "-seg-duration")) {
                 int64_t seg_duration;
                 if (sscanf(argv[i+1], "%"PRId64, &seg_duration) != 1) {
@@ -1171,11 +1207,6 @@ main(
                     usage(argv[0], argv[i], EXIT_FAILURE);
                 }
                 p.tx_type = tx_type_from_string(argv[i+1]);
-                if (!strcmp(argv[i+1], "audio")) {
-                    // If audio encoder is not "a3c" then set the default to "aac"
-                    if (strcmp(p.ecodec, "ac3"))
-                        p.ecodec = strdup("aac");
-                }
             } else if (sscanf(argv[i+1], "%d", &n_threads) != 1) {
                 usage(argv[0], argv[i], EXIT_FAILURE);
             }
@@ -1184,6 +1215,10 @@ main(
         case 'v':
             if (!strcmp(argv[i], "-video-bitrate")) {
                 if (sscanf(argv[i+1], "%d", &p.video_bitrate) != 1) {
+                    usage(argv[0], argv[i], EXIT_FAILURE);
+                }
+            } else if (!strcmp(argv[i], "-video-seg-duration-ts")) {
+                if (sscanf(argv[i+1], "%"PRId64, &p.video_seg_duration_ts) != 1) {
                     usage(argv[0], argv[i], EXIT_FAILURE);
                 }
             } else {
@@ -1251,17 +1286,19 @@ main(
     }
 
     if (sscanf(p.start_segment_str, "%d", &start_segment) != 1) {
-        usage(argv[0], "-start_segment", EXIT_FAILURE);
+        usage(argv[0], "-start-segment", EXIT_FAILURE);
     }
     if (strcmp(p.format, "segment") &&
         strcmp(p.format, "fmp4-segment") &&
-        (p.seg_duration_ts <= 0 || start_segment < 1)) {
-        usage(argv[0], "seg_duration_ts, start_segment", EXIT_FAILURE);
+        p.seg_duration == NULL &&
+        p.audio_seg_duration_ts <= 0 && p.tx_type & tx_audio) {
+        usage(argv[0], "audio_seg_duration_ts or seg_duration", EXIT_FAILURE);
     }
-    if ((!strcmp(p.format, "segment") ||
-        !strcmp(p.format, "fmp4-segment")) &&
-        (p.seg_duration == NULL || start_segment < 1)) {
-        usage(argv[0], "seg_duration, start_segment", EXIT_FAILURE);
+    if (strcmp(p.format, "segment") &&
+        strcmp(p.format, "fmp4-segment") &&
+        p.seg_duration == NULL &&
+        p.video_seg_duration_ts <= 0 && p.tx_type & tx_video) {
+        usage(argv[0], "video-seg-duration-ts or seg-duration", EXIT_FAILURE);
     }
 
     if (p.overlay_filename) {
@@ -1273,35 +1310,6 @@ main(
     /* Create O dir if doesn't exist */
     if (stat("./O", &st) == -1)
         mkdir("./O", 0700);
-
-    elv_log("txparams:\n"
-            "  audio_bitrate=%d\n"
-            "  crf_str=%s\n"
-            "  crypt_iv=%s\n"
-            "  crypt_key=%s\n"
-            "  crypt_key_url=%s\n"
-            "  crypt_kid=%s\n"
-            "  crypt_scheme=%d\n"
-            "  dcodec=%s\n"
-            "  duration_ts=%d\n"
-            "  ecodec=%s\n"
-            "  enc_height=%d\n"
-            "  enc_width=%d\n"
-            "  format=%s\n"
-            "  rc_buffer_size=%d\n"
-            "  rc_max_rate=%d\n"
-            "  sample_rate=%d\n"
-            "  seg_duration_ts=%"PRId64"\n"
-            "  seg_duration=%"PRId64"\n"
-            "  start_pts=%d\n"
-            "  start_segment_str=%s\n"
-            "  start_time_ts=%d\n"
-            "  video_bitrate=%d",
-        p.audio_bitrate, p.crf_str, p.crypt_iv, p.crypt_key, p.crypt_key_url,
-        p.crypt_kid, p.crypt_scheme, p.dcodec, p.duration_ts, p.ecodec,
-        p.enc_height, p.enc_width, p.format, p.rc_buffer_size, p.rc_max_rate,
-        p.sample_rate, p.seg_duration_ts, p.seg_duration, p.start_pts,
-        p.start_segment_str, p.start_time_ts, p.video_bitrate);
 
     in_handlers.avpipe_opener = in_opener;
     in_handlers.avpipe_closer = in_closer;

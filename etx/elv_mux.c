@@ -305,7 +305,8 @@ out_mux_stat(
         outctx->type != avpipe_mp4_stream &&
         outctx->type != avpipe_fmp4_stream &&
         outctx->type != avpipe_mp4_segment &&
-        outctx->type != avpipe_fmp4_segment)
+        outctx->type != avpipe_video_fmp4_segment &&
+        outctx->type != avpipe_audio_fmp4_segment)
         return 0;
 
     switch (stat_type) {

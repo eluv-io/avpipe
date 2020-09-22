@@ -29,8 +29,8 @@ init_filters(
 
     time_base = decoder_context->format_context->streams[decoder_context->video_stream_index]->time_base;
 
-    decoder_context->filter_graph = avfilter_graph_alloc();
-    if (!outputs || !inputs || !decoder_context->filter_graph) {
+    decoder_context->video_filter_graph = avfilter_graph_alloc();
+    if (!outputs || !inputs || !decoder_context->video_filter_graph) {
         ret = AVERROR(ENOMEM);
         goto end;
     }
@@ -45,22 +45,22 @@ init_filters(
     /* video_stream_index should be the same in both encoder and decoder context */
     pix_fmts[0] = encoder_context->codec_context[decoder_context->video_stream_index]->pix_fmt;
 
-    ret = avfilter_graph_create_filter(&decoder_context->buffersrc_ctx, buffersrc, "in",
-                                       args, NULL, decoder_context->filter_graph);
+    ret = avfilter_graph_create_filter(&decoder_context->video_buffersrc_ctx, buffersrc, "in",
+                                       args, NULL, decoder_context->video_filter_graph);
     if (ret < 0) {
         av_log(NULL, AV_LOG_ERROR, "Cannot create buffer source\n");
         goto end;
     }
 
     /* buffer video sink: to terminate the filter chain. */
-    ret = avfilter_graph_create_filter(&decoder_context->buffersink_ctx, buffersink, "out",
-                                       NULL, NULL, decoder_context->filter_graph);
+    ret = avfilter_graph_create_filter(&decoder_context->video_buffersink_ctx, buffersink, "out",
+                                       NULL, NULL, decoder_context->video_filter_graph);
     if (ret < 0) {
         av_log(NULL, AV_LOG_ERROR, "Cannot create buffer sink\n");
         goto end;
     }
 
-    ret = av_opt_set_int_list(decoder_context->buffersink_ctx, "pix_fmts", pix_fmts,
+    ret = av_opt_set_int_list(decoder_context->video_buffersink_ctx, "pix_fmts", pix_fmts,
                               AV_PIX_FMT_NONE, AV_OPT_SEARCH_CHILDREN);
     if (ret < 0) {
         av_log(NULL, AV_LOG_ERROR, "Cannot set output pixel format\n");
@@ -79,7 +79,7 @@ init_filters(
      * default.
      */
     outputs->name       = av_strdup("in");
-    outputs->filter_ctx = decoder_context->buffersrc_ctx;
+    outputs->filter_ctx = decoder_context->video_buffersrc_ctx;
     outputs->pad_idx    = 0;
     outputs->next       = NULL;
 
@@ -90,15 +90,15 @@ init_filters(
      * default.
      */
     inputs->name       = av_strdup("out");
-    inputs->filter_ctx = decoder_context->buffersink_ctx;
+    inputs->filter_ctx = decoder_context->video_buffersink_ctx;
     inputs->pad_idx    = 0;
     inputs->next       = NULL;
 
-    if ((ret = avfilter_graph_parse_ptr(decoder_context->filter_graph, filters_descr,
+    if ((ret = avfilter_graph_parse_ptr(decoder_context->video_filter_graph, filters_descr,
                                     &inputs, &outputs, NULL)) < 0)
         goto end;
 
-    if ((ret = avfilter_graph_config(decoder_context->filter_graph, NULL)) < 0)
+    if ((ret = avfilter_graph_config(decoder_context->video_filter_graph, NULL)) < 0)
         goto end;
 
 end:
@@ -127,8 +127,7 @@ init_audio_filters(
     const AVFilter *buffersrc = avfilter_get_by_name("abuffer");
     const AVFilter *buffersink = avfilter_get_by_name("abuffersink");
     const AVFilter *aformat = avfilter_get_by_name("aformat");
-    AVFilterInOut *inputs  = avfilter_inout_alloc();
-    AVFilterInOut *outputs = avfilter_inout_alloc();
+    AVFilterGraph *filter_graph;
 
     if (!dec_codec_ctx) {
         elv_err("Audio decoder was not initialized!");
@@ -136,8 +135,8 @@ init_audio_filters(
         goto end;
     }
 
-    decoder_context->filter_graph = avfilter_graph_alloc();
-    if (!buffersrc || !buffersink || !decoder_context->filter_graph || !outputs || !inputs) {
+    filter_graph = avfilter_graph_alloc();
+    if (!buffersrc || !buffersink || !filter_graph) {
         elv_err("Audio filtering source or sink element not found");
         ret = AVERROR_UNKNOWN;
         goto end;
@@ -153,13 +152,13 @@ init_audio_filters(
         dec_codec_ctx->channel_layout);
     elv_log("Audio index=%d-%d, filter=%s", decoder_context->audio_stream_index, encoder_context->audio_stream_index, args);
 
-    ret = avfilter_graph_create_filter(&buffersrc_ctx, buffersrc, "in", args, NULL, decoder_context->filter_graph);
+    ret = avfilter_graph_create_filter(&buffersrc_ctx, buffersrc, "in", args, NULL, filter_graph);
     if (ret < 0) {
         elv_err("Cannot create audio buffer source");
         goto end;
     }
 
-    ret = avfilter_graph_create_filter(&buffersink_ctx, buffersink, "out", NULL, NULL, decoder_context->filter_graph);
+    ret = avfilter_graph_create_filter(&buffersink_ctx, buffersink, "out", NULL, NULL, filter_graph);
     if (ret < 0) {
         elv_err("Cannot create audio buffer sink");
         goto end;
@@ -195,7 +194,7 @@ init_audio_filters(
              (uint64_t)enc_codec_ctx->channel_layout);
     elv_log("Audio index=%d-%d, format_filter=%s", decoder_context->audio_stream_index, encoder_context->audio_stream_index, args);
 
-    ret = avfilter_graph_create_filter(&format_ctx, aformat, "format_out_0_0", args, NULL, decoder_context->filter_graph);
+    ret = avfilter_graph_create_filter(&format_ctx, aformat, "format_out_0_0", args, NULL, filter_graph);
     if (ret < 0) {
         elv_err("Cannot create audio format filter");
         goto end;
@@ -214,16 +213,15 @@ init_audio_filters(
     av_buffersink_set_frame_size(buffersink_ctx,
         encoder_context->codec_context[decoder_context->audio_stream_index]->frame_size);
 
-    if ((ret = avfilter_graph_config(decoder_context->filter_graph, NULL)) < 0)
+    if ((ret = avfilter_graph_config(filter_graph, NULL)) < 0)
         goto end;
 
     /* Fill FilteringContext */
-    decoder_context->buffersrc_ctx = buffersrc_ctx;
-    decoder_context->buffersink_ctx = buffersink_ctx;
+    decoder_context->audio_filter_graph = filter_graph;
+    decoder_context->audio_buffersrc_ctx = buffersrc_ctx;
+    decoder_context->audio_buffersink_ctx = buffersink_ctx;
 
 end:
-    avfilter_inout_free(&inputs);
-    avfilter_inout_free(&outputs);
 
     return ret;
 

@@ -126,8 +126,10 @@ func (oo *avcmdOutputOpener) Open(h, fd int64, stream_index, seg_index int, out_
 		filename = fmt.Sprintf("%s/fmp4-stream.mp4", dir)
 	case avpipe.MP4Segment:
 		filename = fmt.Sprintf("%s/segment%d-%05d.mp4", dir, stream_index, seg_index)
-	case avpipe.FMP4Segment:
-		filename = fmt.Sprintf("%s/fmp4-segment%d-%05d.mp4", dir, stream_index, seg_index)
+	case avpipe.FMP4VideoSegment:
+		filename = fmt.Sprintf("%s/fmp4-vsegment%d-%05d.mp4", dir, stream_index, seg_index)
+	case avpipe.FMP4AudioSegment:
+		filename = fmt.Sprintf("%s/fmp4-asegment%d-%05d.mp4", dir, stream_index, seg_index)
 	}
 
 	f, err := os.OpenFile(filename, os.O_RDWR|os.O_CREATE|os.O_TRUNC, 0644)
@@ -203,7 +205,9 @@ func InitTranscode(cmdRoot *cobra.Command) error {
 	cmdTranscode.PersistentFlags().BoolP("audio-fill-gap", "", false, "fill audio gap when encoder is aac and decoder is mpegts")
 	cmdTranscode.PersistentFlags().Int32P("sync-audio-to-stream-id", "", -1, "sync audio to video iframe of specific stream-id when input stream is mpegts")
 	cmdTranscode.PersistentFlags().StringP("encoder", "e", "libx264", "encoder codec, default is 'libx264', can be: 'libx264', 'libx265', 'h264_nvenc', 'h264_videotoolbox'.")
-	cmdTranscode.PersistentFlags().StringP("decoder", "d", "", "decoder codec, default is 'h264', can be: 'h264', 'h264_cuvid', 'jpeg2000', 'hevc'.")
+	cmdTranscode.PersistentFlags().StringP("audio-encoder", "", "aac", "audio encoder, default is 'aac', can be: 'aac', 'ac3', 'mp2', 'mp3'.")
+	cmdTranscode.PersistentFlags().StringP("decoder", "d", "", "video decoder, default is 'h264', can be: 'h264', 'h264_cuvid', 'jpeg2000', 'hevc'.")
+	cmdTranscode.PersistentFlags().StringP("audio-decoder", "", "", "audio decoder, default is '' and will be automatically chosen.")
 	cmdTranscode.PersistentFlags().StringP("format", "", "dash", "package format, can be 'dash', 'hls', 'mp4', 'fmp4', 'segment' or 'fmp4-segment'.")
 	cmdTranscode.PersistentFlags().Int32P("force-keyint", "", 0, "force IDR key frame in this interval.")
 	cmdTranscode.PersistentFlags().BoolP("equal-fduration", "", false, "force equal frame duration. Must be 0 or 1 and only valid for 'fmp4-segment' format.")
@@ -222,7 +226,8 @@ func InitTranscode(cmdRoot *cobra.Command) error {
 	cmdTranscode.PersistentFlags().Int32P("enc-height", "", -1, "default -1 means use source height.")
 	cmdTranscode.PersistentFlags().Int32P("enc-width", "", -1, "default -1 means use source width.")
 	cmdTranscode.PersistentFlags().Int64P("duration-ts", "", -1, "default -1 means entire stream.")
-	cmdTranscode.PersistentFlags().Int64P("seg-duration-ts", "", 0, "(mandatory if format is not 'segment') segment duration time base (positive integer).")
+	cmdTranscode.PersistentFlags().Int64P("audio-seg-duration-ts", "", 0, "(mandatory if format is not 'segment' and transcoding audio) audio segment duration time base (positive integer).")
+	cmdTranscode.PersistentFlags().Int64P("video-seg-duration-ts", "", 0, "(mandatory if format is not 'segment' and transcoding video) video segment duration time base (positive integer).")
 	cmdTranscode.PersistentFlags().StringP("seg-duration", "", "30", "(mandatory if format is 'segment') segment duration seconds (positive integer), default is 30.")
 	cmdTranscode.PersistentFlags().Int32P("seg-duration-fr", "", 0, "(mandatory if format is not 'segment') segment duration frame (positive integer).")
 	cmdTranscode.PersistentFlags().String("crypt-iv", "", "128-bit AES IV, as 32 char hex.")
@@ -293,7 +298,13 @@ func doTranscode(cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("Encoder is needed after -e")
 	}
 
+	audioEncoder := cmd.Flag("audio-encoder").Value.String()
+	if len(audioEncoder) == 0 {
+		return fmt.Errorf("Audio encoder is missing")
+	}
+
 	decoder := cmd.Flag("decoder").Value.String()
+	audioDecoder := cmd.Flag("audio-decoder").Value.String()
 
 	format := cmd.Flag("format").Value.String()
 	if format != "dash" && format != "hls" && format != "mp4" && format != "fmp4" && format != "segment" && format != "fmp4-segment" {
@@ -348,19 +359,9 @@ func doTranscode(cmd *cobra.Command, args []string) error {
 	if streamId < 0 && txTypeStr != "all" && txTypeStr != "video" && txTypeStr != "audio" {
 		return fmt.Errorf("Transcoding type is not valid, with no stream-id can be 'all', 'video', or 'audio'")
 	}
-	var txType avpipe.TxType
-	switch txTypeStr {
-	case "all":
-		txType = avpipe.TxAll
-	case "video":
-		txType = avpipe.TxVideo
-	case "audio":
-		txType = avpipe.TxAudio
-		if len(encoder) == 0 {
-			encoder = "aac"
-		}
-	case "":
-		txType = avpipe.TxNone
+	txType := avpipe.TxTypeFromString(txTypeStr)
+	if txType == avpipe.TxAudio && len(encoder) == 0 {
+		encoder = "aac"
 	}
 
 	maxCLL := cmd.Flag("max-cll").Value.String()
@@ -441,9 +442,17 @@ func doTranscode(cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("Duration ts is not valid")
 	}
 
-	segDurationTs, err := cmd.Flags().GetInt64("seg-duration-ts")
-	if err != nil || (format != "segment" && format != "fmp4-segment" && segDurationTs == 0) {
-		return fmt.Errorf("Seg duration ts is not valid")
+	audioSegDurationTs, err := cmd.Flags().GetInt64("audio-seg-duration-ts")
+	if err != nil ||
+		(format != "segment" && format != "fmp4-segment" &&
+			audioSegDurationTs == 0 && (txType == avpipe.TxAll || txType == avpipe.TxAudio)) {
+		return fmt.Errorf("Audio seg duration ts is not valid")
+	}
+
+	videoSegDurationTs, err := cmd.Flags().GetInt64("video-seg-duration-ts")
+	if err != nil || (format != "segment" && format != "fmp4-segment" &&
+		videoSegDurationTs == 0 && (txType == avpipe.TxAll || txType == avpipe.TxVideo)) {
+		return fmt.Errorf("Video seg duration ts is not valid")
 	}
 
 	segDuration := cmd.Flag("seg-duration").Value.String()
@@ -497,10 +506,13 @@ func doTranscode(cmd *cobra.Command, args []string) error {
 		SampleRate:            sampleRate,
 		CrfStr:                crfStr,
 		Preset:                preset,
-		SegDurationTs:         segDurationTs,
+		AudioSegDurationTs:    audioSegDurationTs,
+		VideoSegDurationTs:    videoSegDurationTs,
 		SegDuration:           segDuration,
 		Ecodec:                encoder,
+		Ecodec2:               audioEncoder,
 		Dcodec:                decoder,
+		Dcodec2:               audioDecoder,
 		EncHeight:             encHeight, // -1 means use source height, other values 2160, 720
 		EncWidth:              encWidth,  // -1 means use source width, other values 3840, 1280
 		CryptIV:               cryptIV,

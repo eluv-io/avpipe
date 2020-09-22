@@ -27,8 +27,8 @@ typedef enum avpipe_buftype_t {
     avpipe_manifest = 1,                // dash.mpd
     avpipe_video_init_stream = 2,       // video init_stream
     avpipe_audio_init_stream = 3,       // audio init_stream
-    avpipe_video_segment = 4,           // video chunk-stream
-    avpipe_audio_segment = 5,           // audio chunk-stream
+    avpipe_video_segment = 4,           // video ABR segment
+    avpipe_audio_segment = 5,           // audio ABR segment
     avpipe_master_m3u = 6,              // hls master m3u
     avpipe_video_m3u = 7,               // video m3u
     avpipe_audio_m3u = 8,               // audio m3u
@@ -36,7 +36,8 @@ typedef enum avpipe_buftype_t {
     avpipe_mp4_stream = 10,             // mp4 stream
     avpipe_fmp4_stream = 11,            // fragmented mp4 stream
     avpipe_mp4_segment = 12,            // segmented mp4 stream
-    avpipe_fmp4_segment = 13            // segmented fmp4 stream
+    avpipe_video_fmp4_segment = 13,     // segmented fmp4 video stream
+    avpipe_audio_fmp4_segment = 14      // segmented fmp4 audio stream
 } avpipe_buftype_t;
 
 #define BYTES_READ_REPORT   (20*1024*1024)
@@ -166,7 +167,8 @@ typedef struct avpipe_io_handler_t {
 
 /* Decoder/encoder context, keeps both video and audio stream ffmpeg contexts */
 typedef struct coderctx_t {
-    AVFormatContext     *format_context;
+    AVFormatContext     *format_context;        /* Input format context or video output format context */
+    AVFormatContext     *format_context2;       /* Audio output format context */
 
     AVCodec             *codec[MAX_STREAMS];
     AVStream            *stream[MAX_STREAMS];
@@ -179,29 +181,39 @@ typedef struct coderctx_t {
     int audio_stream_index;
     int data_stream_index;
 
-    int64_t last_dts;
-    int64_t last_key_frame;     /* pts of last key frame */
-    int64_t forced_keyint_countdown; /* frames until next forced key frame */
-    int64_t input_last_pts_read;
-    int64_t input_last_pts_sent_encode;
-    int64_t input_last_pos_sent_encode;
-    int64_t input_last_pts_encoded;
+    int64_t video_last_dts;
+    int64_t audio_last_dts;
+    int64_t last_key_frame;                 /* pts of last key frame */
+    int64_t forced_keyint_countdown;        /* frames until next forced key frame */
+    int64_t video_last_pts_read;            /* Video input last pts read */
+    int64_t audio_last_pts_read;            /* Audio input last pts reas */
+    int64_t video_last_pts_sent_encode;     /* Video last pts to encode if tx_type & tx_video */
+    int64_t audio_last_pts_sent_encode;     /* Audio last pts to encode if tx_type & tx_audio */
+    int64_t video_last_pts_encoded;         /* Video last input pts encoded if tx_type & tx_video */
+    int64_t audio_last_pts_encoded;         /* Audio last input pts encoded if tx_type & tx_audio */
 
     int64_t audio_output_pts; /* Used to set PTS directly when using audio FIFO */
 
-    /* Filter graph, valid for decoder */
-    AVFilterContext *buffersink_ctx;
-    AVFilterContext *buffersrc_ctx;
-    AVFilterGraph   *filter_graph;
+    /* Video filter */
+    AVFilterContext *video_buffersink_ctx;
+    AVFilterContext *video_buffersrc_ctx;
+    AVFilterGraph   *video_filter_graph;
 
-    int64_t pts;                        /* Decoder/encoder pts */
+    /* Audio filter */
+    AVFilterContext *audio_buffersink_ctx;
+    AVFilterContext *audio_buffersrc_ctx;
+    AVFilterGraph   *audio_filter_graph;
+
+    int64_t video_pts;                  /* Video decoder/encoder pts */
+    int64_t audio_pts;                  /* Audio decoder/encoder pts */
     int64_t video_input_start_pts;      /* In case video input stream starts at PTS > 0 */
     int64_t audio_input_start_pts;      /* In case audio input stream starts at PTS > 0 */
     int64_t first_decoding_frame_pts;   /* PTS of first frame read from the decoder */
     int64_t first_encoding_frame_pts;   /* PTS of first frame sent to the encoder */
     int64_t first_read_frame_pts;       /* PTS of first frame read - which might not be decodable */
     int64_t audio_input_prev_pts;       /* Previous pts for audio input */
-    int64_t duration;                   /* Duration/pts of original frame */
+    int64_t video_duration;             /* Duration/pts of original frame */
+    int64_t audio_duration;             /* Audio duration/pts of original frame when tx_type == tx_all */
     int64_t first_key_frame_pts;        /* First video key frame pts, used to synchronize audio and video in UDP live streams */
     int     pts_residue;                /* Residue of pts lost in output */
 
@@ -254,14 +266,17 @@ typedef struct txparams_t {
     char    *preset;                // Sets encoding speed to compression ratio
     int     rc_max_rate;            // Rate control - max rate
     int     rc_buffer_size;         // Rate control - buffer size
-    int64_t seg_duration_ts;        // In ts units. It is used for transcoding and producing dash mp4 files
+    int64_t audio_seg_duration_ts;  // In ts units. It is used for transcoding and producing audio ABR/mez segments
+    int64_t video_seg_duration_ts;  // In ts units. It is used for transcoding and producing video ABR/mez segments 
     char    *seg_duration;          // In sec units. It is used for transcoding and producing mp4 segments
     int     seg_duration_fr;
     int     start_fragment_index;
     int     force_keyint;           // Force a key (IDR) frame at this interval
     int     force_equal_fduration;  // Force all frames to have equal frame duration 
-    char    *ecodec;                // Video/audio encoder
-    char    *dcodec;                // Video/audio decoder
+    char    *ecodec;                // Video encoder
+    char    *ecodec2;               // Audio encoder when tx_type & tx_audio
+    char    *dcodec;                // Video decoder
+    char    *dcodec2;               // Audio decoder when tx_type & tx_audio
     int     gpu_index;              // GPU index for transcoding, must be >= 0
     int     enc_height;
     int     enc_width;

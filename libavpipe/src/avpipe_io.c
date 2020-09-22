@@ -118,7 +118,15 @@ elv_io_open(
             else if (!strncmp(url, "mp4", 3)) {
                 outctx->type = avpipe_mp4_stream;
             } else if (strstr(url, "fsegment")) {
-                outctx->type = avpipe_fmp4_segment;
+                if (strstr(url, "fsegment-video"))
+                    outctx->type = avpipe_video_fmp4_segment;
+                else if (strstr(url, "fsegment-audio"))
+                    outctx->type = avpipe_audio_fmp4_segment;
+                else {
+                    elv_dbg("Invalid out url=%s", url);
+                    free(outctx);
+                    return -1;
+                }
                 outctx->seg_index = out_tracker[outctx->stream_index].seg_index;
                 out_tracker[outctx->stream_index].seg_index++;
                 outctx->inctx = out_tracker[outctx->stream_index].inctx;
@@ -153,7 +161,9 @@ elv_io_open(
             avioctx->seekable = 0;
 
         /* If the stream is fragmented mp4, to avoid seek, direct flag must be zero */
-        if (outctx->type == avpipe_fmp4_stream || outctx->type == avpipe_fmp4_segment)
+        if (outctx->type == avpipe_fmp4_stream ||
+            outctx->type == avpipe_video_fmp4_segment ||
+            outctx->type == avpipe_audio_fmp4_segment)
             avioctx->direct = 0;
         else
             avioctx->direct = 1;

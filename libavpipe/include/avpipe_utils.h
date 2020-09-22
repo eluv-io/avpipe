@@ -8,18 +8,18 @@
 
 void
 dump_frame(
+    int is_audio,
     char *msg,
     int num,
     AVFrame *frame,
-    int debug_frame_level,
-    int tx_type);
+    int debug_frame_level);
 
 void
 dump_packet(
+    int is_audio,
     const char *msg,
     AVPacket *p,
-    int debug_frame_level,
-    int tx_type);
+    int debug_frame_level);
 
 void
 dump_decoder(
@@ -52,9 +52,9 @@ save_gray_frame(
     int number);
 
 void
-dump_coders(
-    coderctx_t *decoder_context,
-    coderctx_t *encoder_context);
+dump_trackers(
+    AVFormatContext *encoder_format_context,
+    AVFormatContext *decoder_format_context);
 
 void
 connect_ffmpeg_log();

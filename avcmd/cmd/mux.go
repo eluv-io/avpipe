@@ -116,7 +116,9 @@ type AVCmdMuxOutputOpener struct {
 
 func (outputOpener *AVCmdMuxOutputOpener) Open(filename string, fd int64, outType avpipe.AVType) (avpipe.OutputHandler, error) {
 
-	if outType != avpipe.MP4Segment && outType != avpipe.FMP4Segment {
+	if outType != avpipe.MP4Segment &&
+		outType != avpipe.FMP4AudioSegment &&
+		outType != avpipe.FMP4VideoSegment {
 		return nil, fmt.Errorf("Invalid outType=%d", outType)
 	}
 
