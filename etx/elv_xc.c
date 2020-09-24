@@ -117,6 +117,7 @@ in_opener(
         elv_channel_init(&inctx->udp_channel, MAX_UDP_CHANNEL);
         inctx->opaque = (int *) calloc(1, 2*sizeof(int));
         *((int *)(inctx->opaque)) = fd;
+        inctx->url = strdup(url);
 
         pthread_mutex_lock(&lock);
         opened_inputs++;
