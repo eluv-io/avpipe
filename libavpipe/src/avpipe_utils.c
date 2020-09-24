@@ -87,21 +87,28 @@ dump_decoder(
 
 void
 dump_encoder(
-    coderctx_t *d,
+    AVFormatContext *format_context,
     txparams_t *params)
 {
+    if (!format_context)
+        return;
+
     elv_dbg("ENCODER tx_type=%d, nb_streams=%d\n",
         params->tx_type,
-        d->format_context->nb_streams
-    );
-    for (int i = 0; i < d->format_context->nb_streams; i++) {
-        AVStream *s = d->format_context->streams[i];
-        elv_dbg("ENCODER[%d] tx_type=%d, codec_type=%d start_time=%d duration=%d time_base=%d/%d frame_rate=%d/%d\n", i,
-            params->tx_type,
+        format_context->nb_streams);
+
+    for (int i = 0; i < format_context->nb_streams; i++) {
+        AVStream *s = format_context->streams[i];
+        AVRational codec_time_base = av_stream_get_codec_timebase(s);
+        elv_dbg("ENCODER[%d] stream_index=%d, id=%d, codec_type=%d start_time=%d duration=%d nb_frames=%d "
+                "time_base=%d/%d codec_time_base=%d/%d frame_rate=%d/%d avg_frame_rate=%d/%d\n", i,
+            s->index, s->id,
             s->codecpar->codec_type,
-            (int)s->start_time, (int)s->duration,
+            (int)s->start_time, (int)s->duration, (int)s->nb_frames,
             s->time_base.num, s->time_base.den,
-            s->r_frame_rate.num, s->r_frame_rate.den
+            codec_time_base.num, codec_time_base.den,
+            s->r_frame_rate.num, s->r_frame_rate.den,
+            s->avg_frame_rate.num, s->avg_frame_rate.den
         );
     }
 

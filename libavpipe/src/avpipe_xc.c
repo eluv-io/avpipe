@@ -260,7 +260,7 @@ prepare_input(
     int bufin_sz = 1024 * 1024;
 
     /* For RTMP protocol don't create input callbacks */
-    if (!strncmp(inctx->url, "rtmp", 4))
+    if (inctx->url && !strncmp(inctx->url, "rtmp", 4))
         return 0;
 
     bufin = (unsigned char *) av_malloc(bufin_sz);  /* Must be malloc'd - will be realloc'd by avformat */
@@ -1367,14 +1367,10 @@ prepare_encoder(
         encoder_context->format_context2->avpipe_opaque = out_tracker;
     }
 
-    /* PENDING (RM) dump both format contexts */
-    if (encoder_context->format_context) {
-        dump_encoder(encoder_context, params);
-        dump_stream(encoder_context->stream[encoder_context->video_stream_index]);
-        dump_codec_context(encoder_context->codec_context[encoder_context->video_stream_index]);
-        dump_stream(encoder_context->stream[encoder_context->audio_stream_index]);
-        dump_codec_context(encoder_context->codec_context[encoder_context->audio_stream_index]);
-    }
+    dump_encoder(encoder_context->format_context, params);
+    dump_codec_context(encoder_context->codec_context[encoder_context->video_stream_index]);
+    dump_encoder(encoder_context->format_context2, params);
+    dump_codec_context(encoder_context->codec_context[encoder_context->audio_stream_index]);
 
     return 0;
 }
@@ -1442,7 +1438,7 @@ should_skip_encoding(
         if (mpegts_skip_offset > 0 && decoder_context->is_mpegts && (!strcmp(p->format, "fmp4-segment"))) {
             int64_t time_base = decoder_context->stream[stream_index]->time_base.den;
             int64_t pts_offset = encoder_context->first_read_frame_pts;
-            if (!strcmp(p->ecodec, "aac")) {
+            if (!strcmp(p->ecodec2, "aac")) {
                 time_base = encoder_context->stream[stream_index]->time_base.den;
 #ifdef USE_RESAMPLE_AAC
                 pts_offset = 0; /* AAC always starts at PTS 0 */
@@ -2540,12 +2536,14 @@ avpipe_tx(
      * In this case, reset the segment duration ts with new value to become sure cutting the segments are done properly.
      * PENDING (RM): it might be needed to do the same thing for audio.
      */
+#if 0
+    /* Will be removed after some more testing */
     if (params->tx_type & tx_video &&
         encoder_context->codec_context[encoder_context->video_stream_index] &&
         encoder_context->codec_context[encoder_context->video_stream_index]->time_base.den
             != encoder_context->stream[encoder_context->video_stream_index]->time_base.den) {
         int64_t seg_duration_ts;
-        if (params->seg_duration && params->seg_duration > 0) {
+        if (params->seg_duration && strlen(params->seg_duration) > 0) {
             float seg_duration = atof(params->seg_duration);
             seg_duration_ts = seg_duration * encoder_context->stream[encoder_context->video_stream_index]->time_base.den;
         } else {
@@ -2561,6 +2559,7 @@ avpipe_tx(
             encoder_context->stream[encoder_context->video_stream_index]->time_base;
         av_opt_set_int(encoder_context->format_context->priv_data, "segment_duration_ts", seg_duration_ts, 0);
     }
+#endif
 
     AVFrame *input_frame = av_frame_alloc();
     AVFrame *filt_frame = av_frame_alloc();

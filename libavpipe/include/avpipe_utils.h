@@ -27,7 +27,7 @@ dump_decoder(
 
 void
 dump_encoder(
-    coderctx_t *d,
+    AVFormatContext *format_context,
     txparams_t *params);
 
 void
