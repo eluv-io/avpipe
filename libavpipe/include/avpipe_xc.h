@@ -290,6 +290,7 @@ typedef struct txparams_t {
 
     int         seekable;               // Default: 0 means not seekable. A non seekable stream with moov box in
                                         //          the end causes a lot of reads up to moov atom.
+    int         listen;                 // Default is 1, listen mode for RTMP
     char        *watermark_text;        // Default: NULL or empty text means no watermark
     char        *watermark_xloc;        // Default 0
     char        *watermark_yloc;        // Default 0

@@ -849,6 +849,7 @@ usage(
         "\t                                    Using \"fmp4-segment\" generates segments that are appropriate for live streaming.\n"
         "\t-force-keyint :          (optional) Force IDR key frame in this interval.\n"
         "\t-gpu-index :             (optional) Use the GPU with specified index for transcoding (export CUDA_DEVICE_ORDER=PCI_BUS_ID would use smi index).\n"
+        "\t-listen:                 (optional) Listen mode for RTMP. Must be 0 or 1, by default is on (value 1)"
         "\t-master-display :        (optional) Master display, only valid if encoder is libx265.\n"
         "\t-max-cll :               (optional) Maximum Content Light Level and Maximum Frame Average Light Level, only valid if encoder is libx265.\n"
         "\t                                    This parameter is a comma separated of max-cll and max-fall (i.e \"1514,172\").\n"
@@ -934,6 +935,7 @@ main(
         .force_equal_fduration = 0,
         .force_keyint = 0,
         .format = strdup("dash"),
+        .listen = 1,
         .max_cll = NULL,
         .master_display = NULL,
         .preset = strdup("medium"),
@@ -1112,6 +1114,16 @@ main(
                 }
             } else {
                 usage(argv[0], argv[i], EXIT_FAILURE);
+            }
+            break;
+        case 'l':
+            if (!strcmp(argv[i], "-listen")) {
+                if (sscanf(argv[i+1], "%d", &p.listen) != 1) {
+                    usage(argv[0], argv[i], EXIT_FAILURE);
+                }
+                if (p.listen != 0 && p.listen != 1) {
+                    usage(argv[0], argv[i], EXIT_FAILURE);
+                }
             }
             break;
         case 'm':

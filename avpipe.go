@@ -183,6 +183,7 @@ type TxParams struct {
 	SyncAudioToStreamId   int         `json:"sync_audio_to_stream_id,omitempty"`
 	ForceEqualFDuration   bool        `json:"force_equal_frame_duration,omitempty"`
 	MuxingSpec            string      `json:"muxing_spec,omitempty"`
+	Listen                bool        `json:"listen"`
 }
 
 type AVMediaType int
@@ -1059,7 +1060,8 @@ func getCParams(params *TxParams) *C.txparams_t {
 		mux_spec:                C.CString(params.MuxingSpec),
 		sync_audio_to_stream_id: C.int(params.SyncAudioToStreamId),
 		gpu_index:               C.int(params.GPUIndex),
-		// seekable, bypass_transcoding, shadow, audio_fill_gap, sync_audio_video and force_equal_fduration handled below
+		listen:                  C.int(0),
+		// seekable, bypass_transcoding, shadow, audio_fill_gap, sync_audio_video, listen and force_equal_fduration handled below
 	}
 
 	if params.BypassTranscoding {
@@ -1080,6 +1082,10 @@ func getCParams(params *TxParams) *C.txparams_t {
 
 	if params.AudioFillGap {
 		cparams.audio_fill_gap = C.int(1)
+	}
+
+	if params.Listen {
+		cparams.listen = C.int(1)
 	}
 
 	return cparams

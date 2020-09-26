@@ -199,6 +199,7 @@ func InitTranscode(cmdRoot *cobra.Command) error {
 
 	cmdTranscode.PersistentFlags().StringP("filename", "f", "", "(mandatory) filename to be transcoded.")
 	cmdTranscode.PersistentFlags().BoolP("bypass", "b", false, "bypass transcoding.")
+	cmdTranscode.PersistentFlags().BoolP("listen", "", true, "listen mode for RTMP.")
 	cmdTranscode.PersistentFlags().Int32P("threads", "t", 1, "transcoding threads.")
 	cmdTranscode.PersistentFlags().Int32P("audio-index", "", -1, "audio stream index (only for --tx-type audio).")
 	cmdTranscode.PersistentFlags().Int32P("gpu-index", "", -1, "Use the GPU with specified index for transcoding (export CUDA_DEVICE_ORDER=PCI_BUS_ID would use smi index).")
@@ -261,6 +262,11 @@ func doTranscode(cmd *cobra.Command, args []string) error {
 	bypass, err := cmd.Flags().GetBool("bypass")
 	if err != nil {
 		return fmt.Errorf("Invalid bypass flag")
+	}
+
+	listen, err := cmd.Flags().GetBool("listen")
+	if err != nil {
+		return fmt.Errorf("Invalid listen flag")
 	}
 
 	forceEqualFrameDuration, err := cmd.Flags().GetBool("equal-fduration")
@@ -542,6 +548,7 @@ func doTranscode(cmd *cobra.Command, args []string) error {
 		AudioFillGap:          audioFillGap,
 		SyncAudioToStreamId:   int(syncAudioToStreamId),
 		StreamId:              streamId,
+		Listen:                listen,
 	}
 
 	params.WatermarkOverlayLen = len(params.WatermarkOverlay)
