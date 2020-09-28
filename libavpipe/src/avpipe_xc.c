@@ -317,7 +317,7 @@ prepare_decoder(
     prepare_input(in_handlers, inctx, decoder_context->format_context, seekable);
 
     AVDictionary *opts = NULL;
-    if (params->listen)
+    if (params && params->listen)
         av_dict_set(&opts, "listen", "1" , 0);
     /* Allocate AVFormatContext in format_context and find input file format */
     rc = avformat_open_input(&decoder_context->format_context, inctx->url, NULL, &opts);
