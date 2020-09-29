@@ -6,6 +6,7 @@
 #include <libavformat/avformat.h>
 #include <libavutil/opt.h>
 #include <libavutil/log.h>
+#include <libavutil/pixdesc.h>
 
 #include "avpipe_utils.h"
 #include "avpipe_xc.h"
@@ -68,18 +69,33 @@ dump_packet(
 
 void
 dump_decoder(
+    char *url,
     coderctx_t *d)
 {
-    elv_dbg("DECODER nb_streams=%d\n",
+    elv_dbg("DECODER url=%s, nb_streams=%d\n",
+        url ? url : "",
         d->format_context->nb_streams
     );
     for (int i = 0; i < d->format_context->nb_streams; i++) {
         AVStream *s = d->format_context->streams[i];
-        elv_dbg("DECODER[%d] codec_type=%d start_time=%d duration=%d time_base=%d/%d frame_rate=%d/%d\n", i,
-            s->codecpar->codec_type,
+        AVCodecContext *codec_context = d->codec_context[i];
+
+        const char *channel_name = avpipe_channel_name(codec_context->channels, codec_context->channel_layout);
+
+        elv_dbg("DECODER[%d] url=%s codec_type=%d profile=%d level=%d start_time=%d duration=%d nb_frames=%d"
+            " time_base=%d/%d frame_rate=%d/%d avg_frame_rate=%d/%d, sample_aspect_ratio=%d/%d"
+            " bit_rate=%d width=%d height=%d pix_fmt=%s channels=%d channel_layout=%s\n",
+            i, url ? url : "",
+            s->codecpar->codec_type, codec_context->profile, codec_context->level,
             (int)s->start_time, (int)s->duration,
+            (int)s->nb_frames,
             s->time_base.num, s->time_base.den,
-            s->r_frame_rate.num, s->r_frame_rate.den
+            s->r_frame_rate.num, s->r_frame_rate.den,
+            s->avg_frame_rate.num, s->avg_frame_rate.den,
+            codec_context ? codec_context->sample_aspect_ratio.num : 0, codec_context ? codec_context->sample_aspect_ratio.den : 0,
+            codec_context->bit_rate, codec_context->width, codec_context->height,
+            av_get_pix_fmt_name(codec_context->pix_fmt) != NULL ? av_get_pix_fmt_name(codec_context->pix_fmt) : "-",
+            codec_context->channels, channel_name && channel_name[0] != '\0' ? channel_name : "-"
         );
     }
 
@@ -87,22 +103,23 @@ dump_decoder(
 
 void
 dump_encoder(
+    char *url,
     AVFormatContext *format_context,
     txparams_t *params)
 {
     if (!format_context)
         return;
 
-    elv_dbg("ENCODER tx_type=%d, nb_streams=%d\n",
-        params->tx_type,
+    elv_dbg("ENCODER url=%s, tx_type=%d, nb_streams=%d\n",
+        url, params->tx_type,
         format_context->nb_streams);
 
     for (int i = 0; i < format_context->nb_streams; i++) {
         AVStream *s = format_context->streams[i];
         AVRational codec_time_base = av_stream_get_codec_timebase(s);
-        elv_dbg("ENCODER[%d] stream_index=%d, id=%d, codec_type=%d start_time=%d duration=%d nb_frames=%d "
+        elv_dbg("ENCODER[%d] stream_index=%d url=%s, id=%d, codec_type=%d start_time=%d duration=%d nb_frames=%d "
                 "time_base=%d/%d codec_time_base=%d/%d frame_rate=%d/%d avg_frame_rate=%d/%d\n", i,
-            s->index, s->id,
+            s->index, s->id, url,
             s->codecpar->codec_type,
             (int)s->start_time, (int)s->duration, (int)s->nb_frames,
             s->time_base.num, s->time_base.den,

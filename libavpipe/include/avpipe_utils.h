@@ -23,10 +23,12 @@ dump_packet(
 
 void
 dump_decoder(
+    char *url,
     coderctx_t *d);
 
 void
 dump_encoder(
+    char *url,
     AVFormatContext *format_context,
     txparams_t *params);
 

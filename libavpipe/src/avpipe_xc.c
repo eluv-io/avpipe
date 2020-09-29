@@ -339,8 +339,6 @@ prepare_decoder(
         decoder_context->is_mpegts = 1;
     }
 
-    dump_decoder(decoder_context);
-
     for (int i = 0; i < decoder_context->format_context->nb_streams && i < MAX_STREAMS; i++) {
 
         switch (decoder_context->format_context->streams[i]->codecpar->codec_type) {
@@ -532,6 +530,8 @@ prepare_decoder(
             elv_log("set video_seg_duration_ts=%d from seg_duration", params->video_seg_duration_ts);
         }
     }
+
+    dump_decoder(inctx->url, decoder_context);
 
     /*
      * If params->force_equal_fduration is set, then initialize decoder_context->frame_duration.
@@ -1100,7 +1100,7 @@ prepare_audio_encoder(
         encoder_context->codec_context[index]->channel_layout = AV_CH_LAYOUT_STEREO;    // AV_CH_LAYOUT_STEREO is av_get_default_channel_layout(encoder_context->codec_context[index]->channels)
     }
 
-    elv_log("ENCODER channels=%d, channel_layout=%d", encoder_context->codec_context[index]->channels, encoder_context->codec_context[index]->channel_layout);
+    elv_dbg("ENCODER channels=%d, channel_layout=%d", encoder_context->codec_context[index]->channels, encoder_context->codec_context[index]->channel_layout);
     if (params->sample_rate > 0 && strcmp(ecodec, "aac")) {
         /*
          * Audio resampling, which is active for aac encoder, needs more work to adjust sampling properly
@@ -1387,9 +1387,9 @@ prepare_encoder(
         encoder_context->format_context2->avpipe_opaque = out_tracker;
     }
 
-    dump_encoder(encoder_context->format_context, params);
+    dump_encoder(inctx->url, encoder_context->format_context, params);
     dump_codec_context(encoder_context->codec_context[encoder_context->video_stream_index]);
-    dump_encoder(encoder_context->format_context2, params);
+    dump_encoder(inctx->url, encoder_context->format_context2, params);
     dump_codec_context(encoder_context->codec_context[encoder_context->audio_stream_index]);
 
     return 0;
