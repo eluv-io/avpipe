@@ -961,6 +961,180 @@ func TestDownmix2AACMezMaker(t *testing.T) {
 	}
 }
 
+// Timebase of BOB923HL_clip_timebase_1001_60000.MXF is 1001/60000
+func TestIrregularTsMezMaker_1001_60000(t *testing.T) {
+	filename := "./media/BOB923HL_clip_timebase_1001_60000.MXF"
+	outputDir := "IrregularTsMezMaker_1001_60000"
+
+	setupLogging()
+	log.Info("STARTING TestIrregularTsMezMaker_1001_60000")
+
+	params := &avpipe.TxParams{
+		BypassTranscoding:   false,
+		Format:              "fmp4-segment",
+		StartTimeTs:         0,
+		DurationTs:          -1,
+		StartSegmentStr:     "1",
+		SegDuration:         "30.03",
+		Ecodec:              "libx264",
+		Dcodec:              "",
+		EncHeight:           720,
+		EncWidth:            1280,
+		TxType:              avpipe.TxVideo,
+		StreamId:            -1,
+		SyncAudioToStreamId: -1,
+		ForceKeyInt:         120,
+	}
+
+	// Create output directory if it doesn't exist
+	err := setupOutDir(outputDir)
+	if err != nil {
+		t.Fail()
+	}
+
+	avpipe.InitIOHandler(&fileInputOpener{url: filename}, &fileOutputOpener{dir: outputDir})
+
+	rc := avpipe.Tx(params, filename, false)
+	if rc != 0 {
+		t.Fail()
+	}
+
+	for i := 1; i <= 4; i++ {
+		mezFile := fmt.Sprintf("%s/vsegment-%d.mp4", outputDir, i)
+		// Now probe the generated files
+		probeInfo, err := avpipe.Probe(mezFile, true)
+		if err != nil {
+			t.Error(err)
+		}
+
+		timebase := *probeInfo.StreamInfo[0].TimeBase.Denom()
+		if timebase.Cmp(big.NewInt(60000)) != 0 {
+			t.Error("Unexpected TimeBase", probeInfo.StreamInfo[0].TimeBase)
+		}
+
+		if avpipe.GetPixelFormatName(probeInfo.StreamInfo[0].PixFmt) != "yuv420p" {
+			t.Error("Unexpected pixel format", probeInfo.StreamInfo[0].PixFmt)
+		}
+	}
+
+}
+
+// Timebase of Rigify-2min is 1/24
+func TestIrregularTsMezMaker_1_24(t *testing.T) {
+	filename := "./media/Rigify-2min.mp4"
+	outputDir := "IrregularTsMezMaker_1_24"
+
+	setupLogging()
+	log.Info("STARTING TestIrregularTsMezMaker_1_24")
+
+	params := &avpipe.TxParams{
+		BypassTranscoding:   false,
+		Format:              "fmp4-segment",
+		StartTimeTs:         0,
+		DurationTs:          -1,
+		StartSegmentStr:     "1",
+		SegDuration:         "30",
+		Ecodec:              "libx264",
+		Dcodec:              "",
+		EncHeight:           720,
+		EncWidth:            1280,
+		TxType:              avpipe.TxVideo,
+		StreamId:            -1,
+		SyncAudioToStreamId: -1,
+		ForceKeyInt:         48,
+	}
+
+	// Create output directory if it doesn't exist
+	err := setupOutDir(outputDir)
+	if err != nil {
+		t.Fail()
+	}
+
+	avpipe.InitIOHandler(&fileInputOpener{url: filename}, &fileOutputOpener{dir: outputDir})
+
+	rc := avpipe.Tx(params, filename, false)
+	if rc != 0 {
+		t.Fail()
+	}
+
+	for i := 1; i <= 4; i++ {
+		mezFile := fmt.Sprintf("%s/vsegment-%d.mp4", outputDir, i)
+		// Now probe the generated files
+		probeInfo, err := avpipe.Probe(mezFile, true)
+		if err != nil {
+			t.Error(err)
+		}
+
+		timebase := *probeInfo.StreamInfo[0].TimeBase.Denom()
+		if timebase.Cmp(big.NewInt(12288)) != 0 {
+			t.Error("Unexpected TimeBase", probeInfo.StreamInfo[0].TimeBase)
+		}
+
+		if avpipe.GetPixelFormatName(probeInfo.StreamInfo[0].PixFmt) != "yuv420p" {
+			t.Error("Unexpected pixel format", probeInfo.StreamInfo[0].PixFmt)
+		}
+	}
+
+}
+
+// Timebase of Rigify-2min is 1/10000
+func TestIrregularTsMezMaker_1_10000(t *testing.T) {
+	filename := "./media/Rigify-2min-10000ts.mp4"
+	outputDir := "IrregularTsMezMaker_1_10000"
+
+	setupLogging()
+	log.Info("STARTING TestIrregularTsMezMaker_1_10000")
+
+	params := &avpipe.TxParams{
+		BypassTranscoding:   false,
+		Format:              "fmp4-segment",
+		StartTimeTs:         0,
+		DurationTs:          -1,
+		StartSegmentStr:     "1",
+		SegDuration:         "30",
+		Ecodec:              "libx264",
+		Dcodec:              "",
+		EncHeight:           720,
+		EncWidth:            1280,
+		TxType:              avpipe.TxVideo,
+		StreamId:            -1,
+		SyncAudioToStreamId: -1,
+		ForceKeyInt:         48,
+	}
+
+	// Create output directory if it doesn't exist
+	err := setupOutDir(outputDir)
+	if err != nil {
+		t.Fail()
+	}
+
+	avpipe.InitIOHandler(&fileInputOpener{url: filename}, &fileOutputOpener{dir: outputDir})
+
+	rc := avpipe.Tx(params, filename, false)
+	if rc != 0 {
+		t.Fail()
+	}
+
+	for i := 1; i <= 4; i++ {
+		mezFile := fmt.Sprintf("%s/vsegment-%d.mp4", outputDir, i)
+		// Now probe the generated files
+		probeInfo, err := avpipe.Probe(mezFile, true)
+		if err != nil {
+			t.Error(err)
+		}
+
+		timebase := *probeInfo.StreamInfo[0].TimeBase.Denom()
+		if timebase.Cmp(big.NewInt(10000)) != 0 {
+			t.Error("Unexpected TimeBase", probeInfo.StreamInfo[0].TimeBase)
+		}
+
+		if avpipe.GetPixelFormatName(probeInfo.StreamInfo[0].PixFmt) != "yuv420p" {
+			t.Error("Unexpected pixel format", probeInfo.StreamInfo[0].PixFmt)
+		}
+	}
+
+}
+
 func TestAVPipeMXF_H265MezMaker(t *testing.T) {
 	filename := "./media/across_the_universe_4k_clip_60sec.mxf"
 	outputDir := "H265MXF"

@@ -281,9 +281,6 @@ static int
 calc_timebase(
     int timebase)
 {
-    if (timebase >= TIMEBASE_THRESHOLD)
-        return timebase;
-
     while (timebase < TIMEBASE_THRESHOLD)
         timebase *= 2;
 
@@ -527,7 +524,10 @@ prepare_decoder(
         if ((params->tx_type & tx_video) && params->video_seg_duration_ts <= 0) {
             float seg_duration = atof(params->seg_duration);
             params->video_seg_duration_ts = calc_timebase(decoder_context->stream[decoder_context->video_stream_index]->time_base.den) * seg_duration;
-            elv_log("set video_seg_duration_ts=%d from seg_duration", params->video_seg_duration_ts);
+            elv_log("set video_seg_duration_ts=%d from seg_duration, decoder timebase=%d/%d",
+                params->video_seg_duration_ts,
+                decoder_context->stream[decoder_context->video_stream_index]->time_base.num,
+                decoder_context->stream[decoder_context->video_stream_index]->time_base.den);
         }
     }
 
@@ -1646,8 +1646,10 @@ encode_frame(
          * Don't rescale if using audio FIFO - PTS is already set in output time base.
          */
         if (stream_index == decoder_context->video_stream_index &&
-            decoder_context->stream[stream_index]->time_base.den !=
-            encoder_context->stream[stream_index]->time_base.den) {
+            (decoder_context->stream[stream_index]->time_base.den !=
+            encoder_context->stream[stream_index]->time_base.den ||
+            decoder_context->stream[stream_index]->time_base.num !=
+            encoder_context->stream[stream_index]->time_base.num)) {
             av_packet_rescale_ts(output_packet,
                 decoder_context->stream[stream_index]->time_base,
                 encoder_context->stream[stream_index]->time_base
