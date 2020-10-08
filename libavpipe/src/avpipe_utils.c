@@ -80,6 +80,10 @@ dump_decoder(
         AVStream *s = d->format_context->streams[i];
         AVCodecContext *codec_context = d->codec_context[i];
 
+        /* DATA doesn't have codec_context/decoder and not important to dump */
+        if (!codec_context)
+            continue;
+
         const char *channel_name = avpipe_channel_name(codec_context->channels, codec_context->channel_layout);
 
         elv_dbg("DECODER[%d] url=%s codec_type=%d profile=%d level=%d start_time=%d duration=%d nb_frames=%d"
