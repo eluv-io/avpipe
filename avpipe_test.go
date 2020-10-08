@@ -1493,6 +1493,67 @@ func TestProbe(t *testing.T) {
 	assert.Equal(t, "aac", a[1].CodecName)
 }
 
+func TestProbeWithData(t *testing.T) {
+	filename := "./media/ActOfLove-30sec.mov"
+
+	setupLogging()
+
+	avpipe.InitIOHandler(&fileInputOpener{url: filename}, &concurrentOutputOpener{dir: "O"})
+	probe, err := avpipe.Probe(filename, true)
+	assert.NoError(t, err)
+	assert.Equal(t, 4, len(probe.StreamInfo))
+
+	assert.Equal(t, 147, probe.StreamInfo[0].CodecID)
+	assert.Equal(t, "prores", probe.StreamInfo[0].CodecName)
+	assert.Equal(t, 3, probe.StreamInfo[0].Profile) // 3 = FF_PROFILE_MPEG4_MAIN
+	assert.Equal(t, -99, probe.StreamInfo[0].Level)
+	assert.Equal(t, int64(900), probe.StreamInfo[0].NBFrames)
+	assert.Equal(t, int64(0), probe.StreamInfo[0].StartTime)
+	assert.Equal(t, int64(59664772), probe.StreamInfo[0].BitRate)
+	assert.Equal(t, 720, probe.StreamInfo[0].Width)
+	assert.Equal(t, 486, probe.StreamInfo[0].Height)
+	assert.Equal(t, int64(11988), probe.StreamInfo[0].TimeBase.Denom().Int64())
+
+	assert.Equal(t, 65548, probe.StreamInfo[1].CodecID)
+	assert.Equal(t, "pcm_s24le", probe.StreamInfo[1].CodecName)
+	assert.Equal(t, -99, probe.StreamInfo[1].Profile)
+	assert.Equal(t, -99, probe.StreamInfo[1].Level)
+	assert.Equal(t, int64(1441552), probe.StreamInfo[1].NBFrames)
+	assert.Equal(t, int64(0), probe.StreamInfo[1].StartTime)
+	assert.Equal(t, int64(2304000), probe.StreamInfo[1].BitRate)
+	assert.Equal(t, 0, probe.StreamInfo[1].Width)
+	assert.Equal(t, 0, probe.StreamInfo[1].Height)
+	assert.Equal(t, int64(48000), probe.StreamInfo[1].TimeBase.Denom().Int64())
+
+	assert.Equal(t, 65548, probe.StreamInfo[2].CodecID)
+	assert.Equal(t, "pcm_s24le", probe.StreamInfo[2].CodecName)
+	assert.Equal(t, -99, probe.StreamInfo[2].Profile)
+	assert.Equal(t, -99, probe.StreamInfo[2].Level)
+	assert.Equal(t, int64(1441552), probe.StreamInfo[2].NBFrames)
+	assert.Equal(t, int64(0), probe.StreamInfo[2].StartTime)
+	assert.Equal(t, int64(2304000), probe.StreamInfo[2].BitRate)
+	assert.Equal(t, 0, probe.StreamInfo[2].Width)
+	assert.Equal(t, 0, probe.StreamInfo[2].Height)
+	assert.Equal(t, int64(48000), probe.StreamInfo[2].TimeBase.Denom().Int64())
+
+	assert.Equal(t, 0, probe.StreamInfo[3].CodecID)
+	assert.Equal(t, "", probe.StreamInfo[3].CodecName)
+	assert.Equal(t, -99, probe.StreamInfo[3].Profile)
+	assert.Equal(t, -99, probe.StreamInfo[3].Level)
+	assert.Equal(t, int64(1), probe.StreamInfo[3].NBFrames)
+	assert.Equal(t, int64(0), probe.StreamInfo[3].StartTime)
+	assert.Equal(t, int64(1), probe.StreamInfo[3].BitRate)
+	assert.Equal(t, 0, probe.StreamInfo[3].Width)
+	assert.Equal(t, 0, probe.StreamInfo[3].Height)
+	assert.Equal(t, int64(30), probe.StreamInfo[3].TimeBase.Denom().Int64())
+
+	// Test StreamInfoAsArray
+	a := avpipe.StreamInfoAsArray(probe.StreamInfo)
+	assert.Equal(t, "prores", a[0].CodecName)
+	assert.Equal(t, "", a[1].CodecName)
+	assert.Equal(t, "pcm_s24le", a[2].CodecName)
+}
+
 func setupLogging() {
 	log.SetDefault(&log.Config{
 		Level:   "debug",

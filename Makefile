@@ -63,6 +63,7 @@ clean-test:
             MP2TsACCMez HEVC_H264 H265MXF \
             HEVC_H265ABR V2SingleABRTranscode* \
             Audio*Muxing Video*Muxing MuxingOutput \
+            IrregularTsMezMaker* \
             SingleABRTranscode* avpipe-test.log
 
 check-env:
