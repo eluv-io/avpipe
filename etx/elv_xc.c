@@ -873,6 +873,8 @@ usage(
         "\t-video-bitrate :         (optional) Mutually exclusive with crf. Default: -1 (unused)\n"
         "\t-video-seg-duration-ts : (mandatory If format is not \"segment\" and transcoding video) video segment duration time base (positive integer).\n"
         "\t-wm-text :               (optional) Watermark text that will be presented in every video frame if it exist. It has higher priority than overlay watermark.\n"
+        "\t-wm-timecode :           (optional) Watermark timecode string (i.e 00\\:00\\:00\\:00). It has higher priority than text watermark.\n"
+        "\t-wm-timecode-rate :      (optional) Watermark timecode frame rate. Only applies if watermark timecode is enabled.\n"
         "\t-wm-xloc :               (optional) Watermark X location\n"
         "\t-wm-yloc :               (optional) Watermark Y location\n"
         "\t-wm-color :              (optional) Watermark font color\n"
@@ -953,11 +955,14 @@ main(
         .tx_type = tx_none,
         .video_bitrate = -1,                /* not used if using CRF */
         .watermark_text = NULL,
+        .watermark_timecode = NULL,
+        .watermark_timecode_rate = -1,
         .watermark_shadow = 0,
         .overlay_filename = NULL,
         .watermark_overlay = NULL,
         .watermark_overlay_len = 0,
         .watermark_overlay_type = png_image,
+        .watermark_shadow_color = strdup("white"),  /* Default shadow color */
         .gpu_index = -1,
     };
 
@@ -1242,7 +1247,12 @@ main(
             if (!strcmp(argv[i], "-wm-text")) {
                 p.watermark_text = strdup(argv[i+1]);
                 p.watermark_shadow = 1;
-                p.watermark_shadow_color = strdup("white"); /* Default shadow color */
+            } else if (!strcmp(argv[i], "-wm-timecode")) {
+                p.watermark_timecode = strdup(argv[i+1]);
+            } else if (!strcmp(argv[i], "-wm-timecode-rate")) {
+                if (sscanf(argv[i+1], "%f", &p.watermark_timecode_rate) != 1) {
+                    usage(argv[0], argv[i], EXIT_FAILURE);
+                }
             } else if (!strcmp(argv[i], "-wm-xloc")) {
                 p.watermark_xloc = strdup(argv[i+1]);
             } else if (!strcmp(argv[i], "-wm-yloc")) {

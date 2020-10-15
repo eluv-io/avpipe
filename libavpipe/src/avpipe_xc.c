@@ -2412,12 +2412,14 @@ get_filter_str(
     txparams_t *params)
 {
     *filter_str = NULL;
-    if (params->watermark_text && *params->watermark_text != '\0') {
+
+    if ((params->watermark_text && *params->watermark_text != '\0') || (params->watermark_timecode && *params->watermark_timecode != '\0')) {
         char local_filter_str[FILTER_STRING_SZ];
         int shadow_x = 0;
         int shadow_y = 0;
         int font_size = 0;
         const char* filterTemplate = "scale=%d:%d, drawtext=text='%s':fontcolor=%s:fontsize=%d:x=%s:y=%s:shadowx=%d:shadowy=%d:shadowcolor=%s:alpha=0.65";
+        int ret = 0;
 
         /* Return an error if one of the watermark params is not set properly */
         if ((!params->watermark_font_color || *params->watermark_font_color == '\0') ||
@@ -2435,18 +2437,36 @@ get_filter_str(
             return -1;
         }
 
+        if (params->watermark_timecode) {
+            filterTemplate = "scale=%d:%d, drawtext=timecode='%s':rate=%f:fontcolor=%s:fontsize=%d:x=%s:y=%s:shadowx=%d:shadowy=%d:shadowcolor=%s:alpha=0.65";
+
+            if (params->watermark_timecode_rate <= 0) {
+                elv_err("Watermark timecode params are not set correctly. rate=%f", params->watermark_timecode_rate);
+                return -1;
+            }
+        }
+
         font_size = (int) (params->watermark_relative_sz * encoder_context->codec_context[encoder_context->video_stream_index]->height);
         if (params->watermark_shadow) {
             /* Calculate shadow x and y */
             shadow_x = shadow_y = font_size*DRAW_TEXT_SHADOW_OFFSET;
         }
 
-        int ret = snprintf(local_filter_str, FILTER_STRING_SZ, filterTemplate,
+        if (params->watermark_timecode) {
+            ret = snprintf(local_filter_str, FILTER_STRING_SZ, filterTemplate,
+                encoder_context->codec_context[encoder_context->video_stream_index]->width,
+                encoder_context->codec_context[encoder_context->video_stream_index]->height,
+                params->watermark_timecode, params->watermark_timecode_rate, params->watermark_font_color, font_size,
+                params->watermark_xloc, params->watermark_yloc,
+                shadow_x, shadow_y, params->watermark_shadow_color);
+        } else {
+            ret = snprintf(local_filter_str, FILTER_STRING_SZ, filterTemplate,
                 encoder_context->codec_context[encoder_context->video_stream_index]->width,
                 encoder_context->codec_context[encoder_context->video_stream_index]->height,
                 params->watermark_text, params->watermark_font_color, font_size,
                 params->watermark_xloc, params->watermark_yloc,
                 shadow_x, shadow_y, params->watermark_shadow_color);
+        }
 
         elv_dbg("filterstr=%s, len=%d, x=%s, y=%s, relative-size=%f, ret=%d",
             local_filter_str, strlen(local_filter_str), params->watermark_xloc, params->watermark_yloc, params->watermark_relative_sz, ret);

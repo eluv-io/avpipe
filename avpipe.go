@@ -165,6 +165,8 @@ type TxParams struct {
 	TxType                TxType      `json:"tx_type,omitempty"`
 	Seekable              bool        `json:"seekable,omitempty"`
 	WatermarkText         string      `json:"watermark_text,omitempty"`
+	WatermarkTimecode     string      `json:"watermark_timecode,omitempty"`
+	WatermarkTimecodeRate float32     `json:"watermark_timecode_rate,omitempty"`
 	WatermarkXLoc         string      `json:"watermark_xloc,omitempty"`
 	WatermarkYLoc         string      `json:"watermark_yloc,omitempty"`
 	WatermarkRelativeSize float32     `json:"watermark_relative_size,omitempty"`
@@ -1041,6 +1043,8 @@ func getCParams(params *TxParams) *C.txparams_t {
 		crypt_scheme:            C.crypt_scheme_t(params.CryptScheme),
 		tx_type:                 C.tx_type_t(params.TxType),
 		watermark_text:          C.CString(params.WatermarkText),
+		watermark_timecode:      C.CString(params.WatermarkTimecode),
+		watermark_timecode_rate: C.float(params.WatermarkTimecodeRate),
 		watermark_xloc:          C.CString(params.WatermarkXLoc),
 		watermark_yloc:          C.CString(params.WatermarkYLoc),
 		watermark_relative_sz:   C.float(params.WatermarkRelativeSize),

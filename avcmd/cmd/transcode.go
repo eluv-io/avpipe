@@ -237,6 +237,8 @@ func InitTranscode(cmdRoot *cobra.Command) error {
 	cmdTranscode.PersistentFlags().String("crypt-key-url", "", "specify a key URL in the manifest.")
 	cmdTranscode.PersistentFlags().String("crypt-scheme", "none", "encryption scheme, default is 'none', can be: 'aes-128', 'cbc1', 'cbcs', 'cenc', 'cens'.")
 	cmdTranscode.PersistentFlags().String("wm-text", "", "add text to the watermark display.")
+	cmdTranscode.PersistentFlags().String("wm-timecode", "", "add timecode watermark to each frame.")
+	cmdTranscode.PersistentFlags().Float32("wm-timecode-rate", -1, "Watermark timecode frame rate.")
 	cmdTranscode.PersistentFlags().String("wm-xloc", "", "the xLoc of the watermark as specified by a fraction of width.")
 	cmdTranscode.PersistentFlags().String("wm-yloc", "", "the yLoc of the watermark as specified by a fraction of height.")
 	cmdTranscode.PersistentFlags().Float32("wm-relative-size", 0.05, "font/shadow relative size based on frame height.")
@@ -317,6 +319,11 @@ func doTranscode(cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("Pakage format is not valid, can be 'dash', 'hls', 'mp4', 'fmp4', 'segment', or 'fmp4-segment'")
 	}
 
+	watermarkTimecode := cmd.Flag("wm-timecode").Value.String()
+	watermarkTimecodeRate, _ := cmd.Flags().GetFloat32("wm-timecode-rate")
+	if len(watermarkTimecode) > 0 && watermarkTimecodeRate <= 0 {
+		return fmt.Errorf("Watermark timecode rate is needed")
+	}
 	watermarkText := cmd.Flag("wm-text").Value.String()
 	watermarkXloc := cmd.Flag("wm-xloc").Value.String()
 	watermarkYloc := cmd.Flag("wm-yloc").Value.String()
@@ -527,6 +534,8 @@ func doTranscode(cmd *cobra.Command, args []string) error {
 		CryptKeyURL:           cryptKeyURL,
 		CryptScheme:           cryptScheme,
 		TxType:                txType,
+		WatermarkTimecode:     watermarkTimecode,
+		WatermarkTimecodeRate: watermarkTimecodeRate,
 		WatermarkText:         watermarkText,
 		WatermarkXLoc:         watermarkXloc,
 		WatermarkYLoc:         watermarkYloc,
@@ -551,6 +560,7 @@ func doTranscode(cmd *cobra.Command, args []string) error {
 		Listen:                listen,
 	}
 
+	log.Debug("XXX rate", "rate", params.WatermarkTimecodeRate)
 	params.WatermarkOverlayLen = len(params.WatermarkOverlay)
 
 	avpipe.InitIOHandler(&avcmdInputOpener{url: filename}, &avcmdOutputOpener{dir: dir})

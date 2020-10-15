@@ -302,6 +302,8 @@ typedef struct txparams_t {
     image_type  watermark_overlay_type; // Overlay image type, default is png
     int         watermark_overlay_len;  // Length of watermark_overlay if there is any
     char        *watermark_shadow_color;// Watermark shadow color
+    char        *watermark_timecode;    // Watermark timecode string (i.e 00\:00\:00\:00)
+    float       watermark_timecode_rate;// Watermark timecode frame rate
 
     int         audio_index;            // Audio index(s) for mez making, may need to become an array of indexes
     int         audio_fill_gap;         // Audio only, fills the gap if there is a jump in PTS
