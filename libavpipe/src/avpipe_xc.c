@@ -2437,7 +2437,7 @@ get_filter_str(
             return -1;
         }
 
-        if (params->watermark_timecode) {
+        if (params->watermark_timecode && *params->watermark_timecode != '\0') {
             filterTemplate = "scale=%d:%d, drawtext=timecode='%s':rate=%f:fontcolor=%s:fontsize=%d:x=%s:y=%s:shadowx=%d:shadowy=%d:shadowcolor=%s:alpha=0.65";
 
             if (params->watermark_timecode_rate <= 0) {
