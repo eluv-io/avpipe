@@ -2437,6 +2437,13 @@ get_filter_str(
             return -1;
         }
 
+        font_size = (int) (params->watermark_relative_sz * encoder_context->codec_context[encoder_context->video_stream_index]->height);
+        if (params->watermark_shadow) {
+            /* Calculate shadow x and y */
+            shadow_x = shadow_y = font_size*DRAW_TEXT_SHADOW_OFFSET;
+        }
+
+        /* If timecode params are set then apply them, otherwise apply text watermark params */
         if (params->watermark_timecode && *params->watermark_timecode != '\0') {
             filterTemplate = "scale=%d:%d, drawtext=timecode='%s':rate=%f:fontcolor=%s:fontsize=%d:x=%s:y=%s:shadowx=%d:shadowy=%d:shadowcolor=%s:alpha=0.65";
 
@@ -2444,15 +2451,7 @@ get_filter_str(
                 elv_err("Watermark timecode params are not set correctly. rate=%f", params->watermark_timecode_rate);
                 return -1;
             }
-        }
 
-        font_size = (int) (params->watermark_relative_sz * encoder_context->codec_context[encoder_context->video_stream_index]->height);
-        if (params->watermark_shadow) {
-            /* Calculate shadow x and y */
-            shadow_x = shadow_y = font_size*DRAW_TEXT_SHADOW_OFFSET;
-        }
-
-        if (params->watermark_timecode) {
             ret = snprintf(local_filter_str, FILTER_STRING_SZ, filterTemplate,
                 encoder_context->codec_context[encoder_context->video_stream_index]->width,
                 encoder_context->codec_context[encoder_context->video_stream_index]->height,
