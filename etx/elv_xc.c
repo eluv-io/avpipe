@@ -589,6 +589,7 @@ tx_thread_func(
         }
 
         if (avpipe_tx(txctx, 0, 1) < 0) {
+            avpipe_fini(&txctx);
             elv_err("THREAD %d, iteration %d error in transcoding", params->thread_number, i+1);
             continue;
         }

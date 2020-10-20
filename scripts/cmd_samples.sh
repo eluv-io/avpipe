@@ -1,5 +1,6 @@
 # Text watermarking
 ./bin/etx -seg-duration 30 -tx-type video -f media/creed_1_min.mov -wm-text "TEST WATERMARK" -wm-color black -wm-relative-size 0.05 -wm-xloc W/2 -wm-yloc H*0.9 -format fmp4-segment
+./bin/etx -seg-duration 30 -tx-type video -f media/creed_1_min.mov -wm-text "%{pts\\:gmtime\\:1602968400\\:%d-%m-%Y %T}" -wm-color black -wm-relative-size 0.05 -wm-xloc W/2 -wm-yloc H*0.9 -format fmp4-segment
 
 # Timecode watermarking
 ./bin/avcmd transcode --seg-duration 30 --tx-type video -f media/creed_1_min.mov --wm-timecode-rate 24 --wm-color black --wm-relative-size 0.05 --wm-xloc W/2 --wm-yloc H*0.9 --format fmp4-segment --wm-timecode "00\:00\:00\:00"

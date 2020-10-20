@@ -2180,13 +2180,13 @@ flush_decoder(
                     "FILT ", codec_context->frame_number, filt_frame, debug_frame_level);
 
                 encode_frame(decoder_context, encoder_context, filt_frame, stream_index, p, debug_frame_level);
+                av_frame_unref(filt_frame);
             }
         }
+        av_frame_unref(frame);
     }
 
-    av_frame_unref(filt_frame);
     av_frame_free(&filt_frame);
-    av_frame_unref(frame);
     av_frame_free(&frame);
     return 0;
 }
@@ -2852,6 +2852,7 @@ avpipe_tx(
 
     av_packet_free(&input_packet);
     av_frame_free(&input_frame);
+    av_frame_free(&filt_frame);
 
     if (params->tx_type & tx_video)
         av_write_trailer(encoder_context->format_context);
@@ -3290,6 +3291,7 @@ avpipe_init(
     }
 
     p_txctx->params = params;
+    p_txctx->inctx = inctx;
     *txctx = p_txctx;
 
     return 0;
@@ -3297,9 +3299,7 @@ avpipe_init(
 avpipe_init_failed:
     if (txctx)
         *txctx = NULL;
-    if (p_txctx)
-        free(p_txctx->params);
-    free(p_txctx);
+    avpipe_fini(&p_txctx);
     return -1;
 }
 
@@ -3369,10 +3369,14 @@ avpipe_fini(
         avfilter_graph_free(&decoder_context->audio_filter_graph);
 
     //avformat_close_input(&encoder_context->format_context);
-    if (encoder_context && encoder_context->format_context)
+    if (encoder_context && encoder_context->format_context) {
+        free(encoder_context->format_context->avpipe_opaque);
         avformat_free_context(encoder_context->format_context);
-    if (encoder_context && encoder_context->format_context2)
+    }
+    if (encoder_context && encoder_context->format_context2) {
+        free(encoder_context->format_context2->avpipe_opaque);
         avformat_free_context(encoder_context->format_context2);
+    }
 
     for (int i=0; i<MAX_STREAMS; i++) {
         if (decoder_context->codec_context[i]) {
@@ -3388,7 +3392,7 @@ avpipe_fini(
         }
     }
 
-    if (!strcmp((*txctx)->params->ecodec, "aac")) {
+    if (!strcmp((*txctx)->params->ecodec2, "aac")) {
         av_audio_fifo_free(decoder_context->fifo);
         swr_free(&decoder_context->resampler_context);
     }

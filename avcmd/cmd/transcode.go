@@ -17,7 +17,7 @@ type avcmdInputOpener struct {
 }
 
 func (io *avcmdInputOpener) Open(fd int64, url string) (avpipe.InputHandler, error) {
-	if url[0:4] == "rtmp" {
+	if len(url) >=4 && url[0:4] == "rtmp" {
 		return &avcmdInput{url: url}, nil
 	}
 
