@@ -48,7 +48,7 @@ init_filters(
     ret = avfilter_graph_create_filter(&decoder_context->video_buffersrc_ctx, buffersrc, "in",
                                        args, NULL, decoder_context->video_filter_graph);
     if (ret < 0) {
-        av_log(NULL, AV_LOG_ERROR, "Cannot create buffer source\n");
+        av_log(NULL, AV_LOG_ERROR, "Cannot create buffer source err=%d\n", ret);
         goto end;
     }
 

@@ -310,6 +310,10 @@ prepare_decoder(
         return -1;
     }
 
+    /* Set global decoding options */
+    /* Disable timestamp wrapping */
+    decoder_context->format_context->correct_ts_overflow = 0;
+
     /* Set our custom reader */
     prepare_input(in_handlers, inctx, decoder_context->format_context, seekable);
 
@@ -427,6 +431,7 @@ prepare_decoder(
         } else {
             decoder_context->codec[i] = avcodec_find_decoder(decoder_context->codec_parameters[i]->codec_id);
         }
+
         if (decoder_context->codec_parameters[i]->codec_type != AVMEDIA_TYPE_DATA && !decoder_context->codec[i]) {
             elv_err("Unsupported decoder codec param=%s, codec_id=%d",
                 params ? params->dcodec : "", decoder_context->codec_parameters[i]->codec_id);
@@ -2664,6 +2669,7 @@ avpipe_tx(
     encoder_context->audio_duration = -1;
     decoder_context->audio_input_prev_pts = -1;
     decoder_context->first_decoding_frame_pts = -1;
+    decoder_context->first_read_frame_pts = -1;
     encoder_context->first_encoding_frame_pts = -1;
     encoder_context->first_read_frame_pts = -1;
     decoder_context->first_key_frame_pts = -1;
@@ -3416,4 +3422,3 @@ avpipe_version()
 
     return version_str;
 }
-

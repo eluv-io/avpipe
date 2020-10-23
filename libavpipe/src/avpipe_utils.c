@@ -72,9 +72,9 @@ dump_decoder(
     char *url,
     coderctx_t *d)
 {
-    elv_dbg("DECODER url=%s, nb_streams=%d\n",
+    elv_dbg("DECODER url=%s, nb_streams=%d, ts_ovr=%d\n",
         url ? url : "",
-        d->format_context->nb_streams
+        d->format_context->nb_streams, d->format_context->correct_ts_overflow
     );
     for (int i = 0; i < d->format_context->nb_streams; i++) {
         AVStream *s = d->format_context->streams[i];
@@ -183,12 +183,13 @@ dump_stream(
     elv_dbg("STREAM idx=%d id=%d "
         "time_base=%d/%d start_time=%d duration=%d nb_frames=%d "
         "codec_time_base=%d/%d "
-        "r_frame_rate=%d/%d avg_frame_rate=%d/%d "
+        "r_frame_rate=%d/%d avg_frame_rate=%d/%d pts_wrap=%d"
         "\n",
         s->index, s->id,
         s->time_base.num, s->time_base.den, (int)s->start_time, (int)s->duration, (int)s->nb_frames,
         codec_time_base.num, codec_time_base.den,
-        s->r_frame_rate.num, s->r_frame_rate.den, s->avg_frame_rate.num, s->avg_frame_rate.den
+        s->r_frame_rate.num, s->r_frame_rate.den, s->avg_frame_rate.num, s->avg_frame_rate.den,
+        s->pts_wrap_behavior
     );
 }
 

@@ -31,6 +31,10 @@ hls)
   cmd="ffmpeg"
   FPS="60000/1001"
   ;;
+dazn)
+  cmd="ffmpeg"
+  FPS="50"
+  ;;
 esac
 
 # --------------------------------------------------------------
@@ -78,6 +82,9 @@ ffmpeg)
   ;;
 hls)
   args+=(-map 0:v -map 0:a -b:v 10M -g 120 -force_key_frames "expr:gte(t,n_forced*2.002)" -c:a libfdk_aac -b:a 256K -f hls -hls_time 2 -hls_segment_type fmp4 -var_stream_map "a:0,name:audio,agroup:audio v:0,name:video,agroup:audio" -hls_segment_filename "%v/%d.fmp4" -master_pl_name master.m3u8 "%v/playlist.m3u8")
+  ;;
+dazn)
+  args+=(-map 0:v -map 0:a -b:v 10M -g 100 -force_key_frames "expr:gte(t,n_forced*2)" -c:a libfdk_aac -b:a 256K -f hls -hls_time 2 -hls_segment_type fmp4 -var_stream_map "a:0,name:audio,agroup:audio v:0,name:video,agroup:audio" -hls_segment_filename "%v/%d.fmp4" -master_pl_name master.m3u8 "%v/playlist.m3u8")
   ;;
 esac
 

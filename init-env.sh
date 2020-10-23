@@ -30,6 +30,8 @@ if [[ -z "${ELV_TOOLCHAIN_DIST_PLATFORM}" ]]; then
     esac
 fi
 
+export GOPRIVATE="github.com/qluvio/*"
+
 export PKG_CONFIG_PATH="${ELV_TOOLCHAIN_DIST_PLATFORM}/lib/pkgconfig:$PKG_CONFIG_PATH"
 export CGO_CFLAGS="$CGO_CFLAGS -I${ELV_TOOLCHAIN_DIST_PLATFORM}/include -I$avpipe_dir/include"
 export CGO_LDFLAGS="$CGO_LDFLAGS -L${ELV_TOOLCHAIN_DIST_PLATFORM}/lib -L$avpipe_dir/lib \

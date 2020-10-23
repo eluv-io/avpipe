@@ -1,0 +1,509 @@
+[
+  {
+    "pts": 8554888184,
+    "tier": 4095,
+    "splice_command_type": 6,
+    "splice_descriptors": [
+      {
+        "splice_descriptor_tag": 2,
+        "segmentation_event_id": 156591750,
+        "segmentation_event_cancel_indicator": false,
+        "segmentation_type_id": 1,
+        "segment_num": 0,
+        "segments_expected": 0,
+        "sub_segment_num": 0,
+        "sub_segments_expected": 0,
+        "delivery_restrictions": {
+          "web_delivery_allowed_flag": true,
+          "no_regional_blackout_flag": true,
+          "archive_allowed_flag": true,
+          "device_restrictions": 3
+        },
+        "segmentation_upids": [
+          {
+            "segmentation_upid_type": 1,
+            "upid": "RVAwMzQxMTUwNjAwOTk="
+          }
+        ]
+      }
+    ]
+  },
+  {
+    "pts": 8559388284,
+    "tier": 4095,
+    "splice_command_type": 6,
+    "splice_descriptors": [
+      {
+        "splice_descriptor_tag": 2,
+        "segmentation_event_id": 156591750,
+        "segmentation_event_cancel_indicator": false,
+        "segmentation_type_id": 1,
+        "segment_num": 0,
+        "segments_expected": 0,
+        "sub_segment_num": 0,
+        "sub_segments_expected": 0,
+        "delivery_restrictions": {
+          "web_delivery_allowed_flag": true,
+          "no_regional_blackout_flag": true,
+          "archive_allowed_flag": true,
+          "device_restrictions": 3
+        },
+        "segmentation_upids": [
+          {
+            "segmentation_upid_type": 1,
+            "upid": "RVAwMzQxMTUwNjAwOTk="
+          }
+        ]
+      }
+    ]
+  },
+  {
+    "pts": 8563888223,
+    "tier": 4095,
+    "splice_command_type": 6,
+    "splice_descriptors": [
+      {
+        "splice_descriptor_tag": 2,
+        "segmentation_event_id": 156591750,
+        "segmentation_event_cancel_indicator": false,
+        "segmentation_type_id": 1,
+        "segment_num": 0,
+        "segments_expected": 0,
+        "sub_segment_num": 0,
+        "sub_segments_expected": 0,
+        "delivery_restrictions": {
+          "web_delivery_allowed_flag": true,
+          "no_regional_blackout_flag": true,
+          "archive_allowed_flag": true,
+          "device_restrictions": 3
+        },
+        "segmentation_upids": [
+          {
+            "segmentation_upid_type": 1,
+            "upid": "RVAwMzQxMTUwNjAwOTk="
+          }
+        ]
+      }
+    ]
+  },
+  {
+    "pts": 8568388326,
+    "tier": 4095,
+    "splice_command_type": 6,
+    "splice_descriptors": [
+      {
+        "splice_descriptor_tag": 2,
+        "segmentation_event_id": 156591750,
+        "segmentation_event_cancel_indicator": false,
+        "segmentation_type_id": 1,
+        "segment_num": 0,
+        "segments_expected": 0,
+        "sub_segment_num": 0,
+        "sub_segments_expected": 0,
+        "delivery_restrictions": {
+          "web_delivery_allowed_flag": true,
+          "no_regional_blackout_flag": true,
+          "archive_allowed_flag": true,
+          "device_restrictions": 3
+        },
+        "segmentation_upids": [
+          {
+            "segmentation_upid_type": 1,
+            "upid": "RVAwMzQxMTUwNjAwOTk="
+          }
+        ]
+      }
+    ]
+  },
+  {
+    "pts": 8571278764,
+    "tier": 4095,
+    "splice_command_type": 6,
+    "splice_descriptors": [
+      {
+        "splice_descriptor_tag": 2,
+        "segmentation_event_id": 158662685,
+        "segmentation_event_cancel_indicator": false,
+        "segmentation_type_id": 33,
+        "segment_num": 5,
+        "segments_expected": 1,
+        "sub_segment_num": 0,
+        "sub_segments_expected": 0,
+        "delivery_restrictions": {
+          "web_delivery_allowed_flag": true,
+          "no_regional_blackout_flag": true,
+          "archive_allowed_flag": true,
+          "device_restrictions": 3
+        },
+        "segmentation_upids": [
+          {
+            "segmentation_upid_type": 1,
+            "upid": "RVAwMzQxMTUwNjAwOTk="
+          }
+        ]
+      },
+      {
+        "splice_descriptor_tag": 2,
+        "segmentation_event_id": 158989451,
+        "segmentation_event_cancel_indicator": false,
+        "segmentation_duration": 11340000,
+        "segmentation_type_id": 52,
+        "segment_num": 0,
+        "segments_expected": 1,
+        "sub_segment_num": 0,
+        "sub_segments_expected": 0,
+        "delivery_restrictions": {
+          "web_delivery_allowed_flag": true,
+          "no_regional_blackout_flag": true,
+          "archive_allowed_flag": true,
+          "device_restrictions": 3
+        },
+        "segmentation_upids": [
+          {
+            "segmentation_upid_type": 0
+          }
+        ]
+      }
+    ]
+  },
+  {
+    "pts": 8574101509,
+    "tier": 4095,
+    "splice_command_type": 6,
+    "splice_descriptors": [
+      {
+        "splice_descriptor_tag": 2,
+        "segmentation_event_id": 0,
+        "segmentation_event_cancel_indicator": false,
+        "segmentation_duration": 8190000,
+        "segmentation_type_id": 54,
+        "segment_num": 0,
+        "segments_expected": 0,
+        "sub_segment_num": 0,
+        "sub_segments_expected": 0,
+        "segmentation_upids": [
+          {
+            "segmentation_upid_type": 0
+          }
+        ]
+      }
+    ]
+  },
+  {
+    "pts": 8574511852,
+    "tier": 4095,
+    "splice_command_type": 6,
+    "splice_descriptors": [
+      {
+        "splice_descriptor_tag": 2,
+        "segmentation_event_id": 159035361,
+        "segmentation_event_cancel_indicator": false,
+        "segmentation_duration": 5405405,
+        "segmentation_type_id": 48,
+        "segment_num": 1,
+        "segments_expected": 1,
+        "sub_segment_num": 0,
+        "sub_segments_expected": 0,
+        "delivery_restrictions": {
+          "web_delivery_allowed_flag": true,
+          "no_regional_blackout_flag": true,
+          "archive_allowed_flag": true,
+          "device_restrictions": 3
+        },
+        "segmentation_upids": [
+          {
+            "segmentation_upid_type": 3
+          }
+        ]
+      }
+    ]
+  },
+  {
+    "pts": 8579917252,
+    "tier": 4095,
+    "splice_command_type": 6,
+    "splice_descriptors": [
+      {
+        "splice_descriptor_tag": 2,
+        "segmentation_event_id": 159035361,
+        "segmentation_event_cancel_indicator": false,
+        "segmentation_type_id": 49,
+        "segment_num": 1,
+        "segments_expected": 1,
+        "sub_segment_num": 0,
+        "sub_segments_expected": 0,
+        "delivery_restrictions": {
+          "web_delivery_allowed_flag": true,
+          "no_regional_blackout_flag": true,
+          "archive_allowed_flag": true,
+          "device_restrictions": 3
+        },
+        "segmentation_upids": [
+          {
+            "segmentation_upid_type": 3
+          }
+        ]
+      },
+      {
+        "splice_descriptor_tag": 2,
+        "segmentation_event_id": 159085743,
+        "segmentation_event_cancel_indicator": false,
+        "segmentation_duration": 2699700,
+        "segmentation_type_id": 48,
+        "segment_num": 1,
+        "segments_expected": 1,
+        "sub_segment_num": 0,
+        "sub_segments_expected": 0,
+        "delivery_restrictions": {
+          "web_delivery_allowed_flag": true,
+          "no_regional_blackout_flag": true,
+          "archive_allowed_flag": true,
+          "device_restrictions": 3
+        },
+        "segmentation_upids": [
+          {
+            "segmentation_upid_type": 3
+          }
+        ]
+      }
+    ]
+  },
+  {
+    "pts": 8582289863,
+    "tier": 4095,
+    "splice_command_type": 6,
+    "splice_descriptors": [
+      {
+        "splice_descriptor_tag": 2,
+        "segmentation_event_id": 0,
+        "segmentation_event_cancel_indicator": false,
+        "segmentation_type_id": 55,
+        "segment_num": 0,
+        "segments_expected": 0,
+        "sub_segment_num": 0,
+        "sub_segments_expected": 0,
+        "segmentation_upids": [
+          {
+            "segmentation_upid_type": 0
+          }
+        ]
+      }
+    ]
+  },
+  {
+    "pts": 8582618160,
+    "tier": 4095,
+    "splice_command_type": 6,
+    "splice_descriptors": [
+      {
+        "splice_descriptor_tag": 2,
+        "segmentation_event_id": 159085743,
+        "segmentation_event_cancel_indicator": false,
+        "segmentation_type_id": 49,
+        "segment_num": 1,
+        "segments_expected": 1,
+        "sub_segment_num": 0,
+        "sub_segments_expected": 0,
+        "delivery_restrictions": {
+          "web_delivery_allowed_flag": true,
+          "no_regional_blackout_flag": true,
+          "archive_allowed_flag": true,
+          "device_restrictions": 3
+        },
+        "segmentation_upids": [
+          {
+            "segmentation_upid_type": 3
+          }
+        ]
+      },
+      {
+        "splice_descriptor_tag": 2,
+        "segmentation_event_id": 158989451,
+        "segmentation_event_cancel_indicator": false,
+        "segmentation_type_id": 53,
+        "segment_num": 0,
+        "segments_expected": 1,
+        "sub_segment_num": 0,
+        "sub_segments_expected": 0,
+        "delivery_restrictions": {
+          "web_delivery_allowed_flag": true,
+          "no_regional_blackout_flag": true,
+          "archive_allowed_flag": true,
+          "device_restrictions": 3
+        },
+        "segmentation_upids": [
+          {
+            "segmentation_upid_type": 0
+          }
+        ]
+      },
+      {
+        "splice_descriptor_tag": 2,
+        "segmentation_event_id": 159115395,
+        "segmentation_event_cancel_indicator": false,
+        "segmentation_type_id": 32,
+        "segment_num": 6,
+        "segments_expected": 1,
+        "sub_segment_num": 0,
+        "sub_segments_expected": 0,
+        "delivery_restrictions": {
+          "web_delivery_allowed_flag": true,
+          "no_regional_blackout_flag": true,
+          "archive_allowed_flag": true,
+          "device_restrictions": 3
+        },
+        "segmentation_upids": [
+          {
+            "segmentation_upid_type": 1,
+            "upid": "RVAwMzQxMTUwNjAwOTk="
+          }
+        ]
+      }
+    ]
+  },
+  {
+    "pts": 8586631690,
+    "tier": 4095,
+    "splice_command_type": 6,
+    "splice_descriptors": [
+      {
+        "splice_descriptor_tag": 2,
+        "segmentation_event_id": 156591750,
+        "segmentation_event_cancel_indicator": false,
+        "segmentation_type_id": 1,
+        "segment_num": 0,
+        "segments_expected": 0,
+        "sub_segment_num": 0,
+        "sub_segments_expected": 0,
+        "delivery_restrictions": {
+          "web_delivery_allowed_flag": true,
+          "no_regional_blackout_flag": true,
+          "archive_allowed_flag": true,
+          "device_restrictions": 3
+        },
+        "segmentation_upids": [
+          {
+            "segmentation_upid_type": 1,
+            "upid": "RVAwMzQxMTUwNjAwOTk="
+          }
+        ]
+      }
+    ]
+  },
+  {
+    "pts": 1197122,
+    "tier": 4095,
+    "splice_command_type": 6,
+    "splice_descriptors": [
+      {
+        "splice_descriptor_tag": 2,
+        "segmentation_event_id": 156591750,
+        "segmentation_event_cancel_indicator": false,
+        "segmentation_type_id": 1,
+        "segment_num": 0,
+        "segments_expected": 0,
+        "sub_segment_num": 0,
+        "sub_segments_expected": 0,
+        "delivery_restrictions": {
+          "web_delivery_allowed_flag": true,
+          "no_regional_blackout_flag": true,
+          "archive_allowed_flag": true,
+          "device_restrictions": 3
+        },
+        "segmentation_upids": [
+          {
+            "segmentation_upid_type": 1,
+            "upid": "RVAwMzQxMTUwNjAwOTk="
+          }
+        ]
+      }
+    ]
+  },
+  {
+    "pts": 5697223,
+    "tier": 4095,
+    "splice_command_type": 6,
+    "splice_descriptors": [
+      {
+        "splice_descriptor_tag": 2,
+        "segmentation_event_id": 156591750,
+        "segmentation_event_cancel_indicator": false,
+        "segmentation_type_id": 1,
+        "segment_num": 0,
+        "segments_expected": 0,
+        "sub_segment_num": 0,
+        "sub_segments_expected": 0,
+        "delivery_restrictions": {
+          "web_delivery_allowed_flag": true,
+          "no_regional_blackout_flag": true,
+          "archive_allowed_flag": true,
+          "device_restrictions": 3
+        },
+        "segmentation_upids": [
+          {
+            "segmentation_upid_type": 1,
+            "upid": "RVAwMzQxMTUwNjAwOTk="
+          }
+        ]
+      }
+    ]
+  },
+  {
+    "pts": 10197057,
+    "tier": 4095,
+    "splice_command_type": 6,
+    "splice_descriptors": [
+      {
+        "splice_descriptor_tag": 2,
+        "segmentation_event_id": 156591750,
+        "segmentation_event_cancel_indicator": false,
+        "segmentation_type_id": 1,
+        "segment_num": 0,
+        "segments_expected": 0,
+        "sub_segment_num": 0,
+        "sub_segments_expected": 0,
+        "delivery_restrictions": {
+          "web_delivery_allowed_flag": true,
+          "no_regional_blackout_flag": true,
+          "archive_allowed_flag": true,
+          "device_restrictions": 3
+        },
+        "segmentation_upids": [
+          {
+            "segmentation_upid_type": 1,
+            "upid": "RVAwMzQxMTUwNjAwOTk="
+          }
+        ]
+      }
+    ]
+  },
+  {
+    "pts": 14697109,
+    "tier": 4095,
+    "splice_command_type": 6,
+    "splice_descriptors": [
+      {
+        "splice_descriptor_tag": 2,
+        "segmentation_event_id": 156591750,
+        "segmentation_event_cancel_indicator": false,
+        "segmentation_type_id": 1,
+        "segment_num": 0,
+        "segments_expected": 0,
+        "sub_segment_num": 0,
+        "sub_segments_expected": 0,
+        "delivery_restrictions": {
+          "web_delivery_allowed_flag": true,
+          "no_regional_blackout_flag": true,
+          "archive_allowed_flag": true,
+          "device_restrictions": 3
+        },
+        "segmentation_upids": [
+          {
+            "segmentation_upid_type": 1,
+            "upid": "RVAwMzQxMTUwNjAwOTk="
+          }
+        ]
+      }
+    ]
+  }
+]

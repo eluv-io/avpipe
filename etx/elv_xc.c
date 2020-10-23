@@ -952,7 +952,7 @@ main(
         .start_segment_str = strdup("1"),   /* 1-based */
         .start_time_ts = 0,                 /* same units as input stream PTS */
         .start_fragment_index = 0,          /* Default is zero */
-        .sync_audio_to_stream_id = -1,
+        .sync_audio_to_stream_id = -1,      /* Default -1 (no sync to a video stream) */
         .tx_type = tx_none,
         .video_bitrate = -1,                /* not used if using CRF */
         .watermark_text = NULL,

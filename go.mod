@@ -1,10 +1,12 @@
 module github.com/qluvio/avpipe
 
 require (
+	github.com/Comcast/gots v0.0.0-20200213175321-9799558ed3e2
 	github.com/grafov/m3u8 v0.11.1
-	github.com/qluvio/content-fabric v0.0.0-20200317211333-a1edc2ec7cc7
+	github.com/qluvio/content-fabric v0.0.0-20200724202309-718d41a86732
+	github.com/qluvio/legacy_imf_dash_extract v0.0.0-20200820234411-06ebf24ad826
 	github.com/spf13/cobra v0.0.5
-	github.com/stretchr/testify v1.4.0
+	github.com/stretchr/testify v1.6.1
 )
 
 replace (
