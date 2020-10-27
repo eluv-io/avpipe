@@ -45,6 +45,7 @@ unsigned long flip(unsigned long val) {
    return new;
 }
 
+#if 0
 static int
 read_header(
     int fd,
@@ -74,6 +75,7 @@ read_header(
     lseek(fd, flipped_len+offset-4, SEEK_SET);
     return flipped_len+offset-4;
 }
+#endif
 
 static int
 in_mux_read_packet(

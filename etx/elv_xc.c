@@ -313,7 +313,7 @@ out_opener(
     const char *url,
     ioctx_t *outctx)
 {
-    char segname[128];
+    char segname[512];
     char dir[256];
     int fd;
     ioctx_t *inctx = outctx->inctx;
