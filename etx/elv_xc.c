@@ -625,6 +625,12 @@ tx_type_from_string(
     if (!strcmp(tx_type_str, "audio"))
         return tx_audio;
 
+    if (!strcmp(tx_type_str, "audio-merge"))
+        return tx_audio_merge;
+
+    if (!strcmp(tx_type_str, "audio-join"))
+        return tx_audio_join;
+
     return tx_none;
 }
 
@@ -810,6 +816,34 @@ get_image_type(
     return unknown_image;
 }
 
+static int
+get_audio_index(
+    char *s,
+    txparams_t *params)
+{
+    char *ptr;
+    int n_index = 0;
+    char *index_str;
+
+    index_str = strtok_r(s, ",", &ptr);
+    if (!index_str) {
+        params->n_audio = 0;
+        return 0;
+    }
+
+    while (1) {
+        params->audio_index[n_index] = atoi(index_str);
+        n_index++;
+
+        index_str = strtok_r(NULL, ",", &ptr);
+        if (!index_str)
+            break;
+    }
+
+    params->n_audio = n_index;
+    return n_index;
+}
+
 static void
 usage(
     char *progname,
@@ -824,7 +858,7 @@ usage(
         "\t-audio-decoder :         (optional) Audio decoder name. For audio default is \"aac\", but for ts files should be set to \"ac3\"\n"
         "\t-audio-encoder :         (optional) Audio encoder name. Default is \"aac\", can be \"ac3\", \"mp2\" or \"mp3\"\n"
         "\t-audio-fill-gap :        (optional) Default: 0, must be 0 or 1. It only effects if encoder is aac.\n"
-        "\t-audio-index :           (optional) Default: the index of last audio stream\n"
+        "\t-audio-index :           (optional) Default: the indexes of audio stream (comma separated)\n"
         "\t-audio-seg-duration-ts : (mandatory If format is not \"segment\" and transcoding audio) audio segment duration time base (positive integer).\n"
         "\t-bitdepth :              (optional) Bitdepth of color space. Default is 8, can be 8, 10, or 12.\n"
         "\t-bypass :                (optional) Bypass transcoding. Default is 0, must be 0 or 1\n"
@@ -870,7 +904,7 @@ usage(
         "\t-stream-id :             (optional) Default: -1, if it is valid it will be used to transcode elementary stream with that stream-id.\n"
         "\t-sync-audio-to-stream-id:(optional) Default: -1, sync audio to video iframe of specific stream-id when input stream is mpegts.\n"
         "\t-t :                     (optional) Transcoding threads. Default is 1 thread, must be bigger than 1\n"
-        "\t-tx-type :               (optional) Transcoding type. Default is \"all\", can be \"video\", \"audio\", or \"all\" \n"
+        "\t-tx-type :               (optional) Transcoding type. Default is \"all\", can be \"video\", \"audio\", \"audio-merge\", \"audio-join\" or \"all\" \n"
         "\t-video-bitrate :         (optional) Mutually exclusive with crf. Default: -1 (unused)\n"
         "\t-video-seg-duration-ts : (mandatory If format is not \"segment\" and transcoding video) video segment duration time base (positive integer).\n"
         "\t-wm-text :               (optional) Watermark text that will be presented in every video frame if it exist. It has higher priority than overlay watermark.\n"
@@ -919,7 +953,7 @@ main(
     txparams_t p = {
         .stream_id = -1,
         .audio_bitrate = 128000,            /* Default bitrate */
-        .audio_index = -1,                  /* Source audio index */
+        .n_audio = 0,                       /* # of audio index */
         .audio_fill_gap = 0,                /* Don't fill gap if there is JUMP */
         .bitdepth = 8,
         .crf_str = strdup("23"),            /* 1 best -> 23 standard middle -> 52 poor */
@@ -975,7 +1009,7 @@ main(
         switch ((int) argv[i][1]) {
         case 'a':
             if (!strcmp(argv[i], "-audio-index")) {
-                if (sscanf(argv[i+1], "%d", &p.audio_index) != 1) {
+                if (get_audio_index(argv[i+1], &p) <= 0) {
                     usage(argv[0], argv[i], EXIT_FAILURE);
                 }
             } else if (!strcmp(argv[i], "-audio-decoder")) {
@@ -1222,7 +1256,11 @@ main(
             break;
         case 't':
             if (!strcmp(argv[i], "-tx-type")) {
-                if (strcmp(argv[i+1], "all") && strcmp(argv[i+1], "video") && strcmp(argv[i+1], "audio")) {
+                if (strcmp(argv[i+1], "all") &&
+                    strcmp(argv[i+1], "video") &&
+                    strcmp(argv[i+1], "audio") &&
+                    strcmp(argv[i+1], "audio-join") &&
+                    strcmp(argv[i+1], "audio-merge")) {
                     usage(argv[0], argv[i], EXIT_FAILURE);
                 }
                 p.tx_type = tx_type_from_string(argv[i+1]);

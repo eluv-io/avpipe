@@ -20,8 +20,9 @@ const char *stream_type_str(
 {
     if (idx == c->video_stream_index)
         return "v";
-    if (idx == c->audio_stream_index)
-        return "a";
+    for (int i=0; i<c->n_audio; i++)
+        if (idx == c->audio_stream_index[i])
+            return "a";
     return "u";
 }
 

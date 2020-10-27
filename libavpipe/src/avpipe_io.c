@@ -51,7 +51,7 @@ elv_io_open(
         outctx->encoder_ctx = out_tracker->encoder_ctx;
         outctx->stream_index = (int) strtol(stream_opt->value, &endptr, 10);
         assert(outctx->stream_index == 0 || outctx->stream_index == 1);
-        if (outctx->stream_index == out_tracker[outctx->stream_index].video_stream_index)
+        if (out_tracker[outctx->stream_index].tx_type == tx_video)
             outctx->type = avpipe_video_segment;
         else
             outctx->type = avpipe_audio_segment;
@@ -99,14 +99,14 @@ elv_io_open(
                 outctx->seg_index = -1;     // Special index for manifest
             }
             else if (!strncmp(url, "media", 5)) {
-                if (outctx->stream_index == out_tracker[outctx->stream_index].video_stream_index)
+                if (out_tracker[outctx->stream_index].tx_type == tx_video)
                     outctx->type = avpipe_video_m3u;
                 else
                     outctx->type = avpipe_audio_m3u;
                 outctx->seg_index = -1;     // Special index for manifest
             }
             else if (!strncmp(url, "init", 4)) {
-                if (outctx->stream_index == out_tracker[outctx->stream_index].video_stream_index)
+                if (out_tracker[outctx->stream_index].tx_type == tx_video)
                     outctx->type = avpipe_video_init_stream;
                 else
                     outctx->type = avpipe_audio_init_stream;

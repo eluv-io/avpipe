@@ -178,8 +178,11 @@ typedef struct coderctx_t {
     AVAudioFifo         *fifo;                          /* audio sampling fifo */
 
     int video_stream_index;
-    int audio_stream_index;
+    int audio_stream_index[MAX_AUDIO_MUX];              /* Audio input stream indexes */
+    int n_audio;                                        /* Number of audio streams that will be decoded */
+
     int data_stream_index;
+    int audio_enc_stream_index;                         /* Audio output stream index */
 
     int64_t video_last_dts;
     int64_t audio_last_dts;
@@ -201,16 +204,17 @@ typedef struct coderctx_t {
 
     /* Audio filter */
     AVFilterContext *audio_buffersink_ctx;
-    AVFilterContext *audio_buffersrc_ctx;
+    AVFilterContext **audio_buffersrc_ctx;
     AVFilterGraph   *audio_filter_graph;
 
-    int64_t video_pts;                  /* Video decoder/encoder pts */
-    int64_t audio_pts;                  /* Audio decoder/encoder pts */
-    int64_t video_input_start_pts;      /* In case video input stream starts at PTS > 0 */
-    int64_t audio_input_start_pts;      /* In case audio input stream starts at PTS > 0 */
-    int64_t first_decoding_frame_pts;   /* PTS of first frame read from the decoder */
-    int64_t first_encoding_frame_pts;   /* PTS of first frame sent to the encoder */
-    int64_t first_read_frame_pts;       /* PTS of first frame read - which might not be decodable */
+    int64_t video_pts;                                  /* Video decoder/encoder pts */
+    int64_t audio_pts;                                  /* Audio decoder/encoder pts */
+    int64_t video_input_start_pts;                      /* In case video input stream starts at PTS > 0 */
+    int64_t audio_input_start_pts;                      /* In case audio input stream starts at PTS > 0 */
+    int64_t first_decoding_frame_pts;                   /* PTS of first frame read from the decoder */
+    int64_t first_encoding_frame_pts;                   /* PTS of first frame sent to the encoder */
+    int64_t first_read_frame_pts[MAX_STREAMS];          /* PTS of first frame read - which might not be decodable */
+
     int64_t audio_input_prev_pts;       /* Previous pts for audio input */
     int64_t video_duration;             /* Duration/pts of original frame */
     int64_t audio_duration;             /* Audio duration/pts of original frame when tx_type == tx_all */
@@ -235,10 +239,13 @@ typedef enum crypt_scheme_t {
 } crypt_scheme_t;
 
 typedef enum tx_type_t {
-    tx_none,
-    tx_video,
-    tx_audio,
-    tx_all
+    tx_none         = 0,
+    tx_video        = 1,
+    tx_audio        = 2,
+    tx_all          = 3,    // tx_video | tx_audio
+    tx_audio_merge  = 6,    // 0x04 | tx_audio
+    tx_audio_join   = 10,   // 0x08 | tx_audio
+    tx_mux          = 32
 } tx_type_t;
 
 /* handled image types in get_overlay_filter_string*/
@@ -288,30 +295,31 @@ typedef struct txparams_t {
     crypt_scheme_t  crypt_scheme;   // Content protection / DRM / encryption [Optional, Default: crypt_none]
     tx_type_t       tx_type;        // Default: 0 means transcode 'everything'
 
-    int         seekable;               // Default: 0 means not seekable. A non seekable stream with moov box in
-                                        //          the end causes a lot of reads up to moov atom.
-    int         listen;                 // Default is 1, listen mode for RTMP
-    char        *watermark_text;        // Default: NULL or empty text means no watermark
-    char        *watermark_xloc;        // Default 0
-    char        *watermark_yloc;        // Default 0
-    float       watermark_relative_sz;  // Default 0
-    char        *watermark_font_color;  // black
-    int         watermark_shadow;       // Default 1, means shadow exist 
-    char        *overlay_filename;      // Overlay file name
-    char        *watermark_overlay;     // Overlay image buffer, default is NULL
-    image_type  watermark_overlay_type; // Overlay image type, default is png
-    int         watermark_overlay_len;  // Length of watermark_overlay if there is any
-    char        *watermark_shadow_color;// Watermark shadow color
-    char        *watermark_timecode;    // Watermark timecode string (i.e 00\:00\:00\:00)
-    float       watermark_timecode_rate;// Watermark timecode frame rate
+    int         seekable;                   // Default: 0 means not seekable. A non seekable stream with moov box in
+                                            //          the end causes a lot of reads up to moov atom.
+    int         listen;                     // Default is 1, listen mode for RTMP
+    char        *watermark_text;            // Default: NULL or empty text means no watermark
+    char        *watermark_xloc;            // Default 0
+    char        *watermark_yloc;            // Default 0
+    float       watermark_relative_sz;      // Default 0
+    char        *watermark_font_color;      // black
+    int         watermark_shadow;           // Default 1, means shadow exist 
+    char        *overlay_filename;          // Overlay file name
+    char        *watermark_overlay;         // Overlay image buffer, default is NULL
+    image_type  watermark_overlay_type;     // Overlay image type, default is png
+    int         watermark_overlay_len;      // Length of watermark_overlay if there is any
+    char        *watermark_shadow_color;    // Watermark shadow color
+    char        *watermark_timecode;        // Watermark timecode string (i.e 00\:00\:00\:00)
+    float       watermark_timecode_rate;    // Watermark timecode frame rate
 
-    int         audio_index;            // Audio index(s) for mez making, may need to become an array of indexes
-    int         audio_fill_gap;         // Audio only, fills the gap if there is a jump in PTS
-    int         sync_audio_to_stream_id;// mpegts only, set to the video stream id to sync to (default is -1)
-    int         bitdepth;               // Can be 8, 10, 12
-    char        *max_cll;               // Maximum Content Light Level (HDR only)
-    char        *master_display;        // Master display (HDR only)
-    int         stream_id;              // Stream id to trasncode, should be >= 0
+    int         audio_index[MAX_AUDIO_MUX]; // Audio index(s) for mez making, may need to become an array of indexes
+    int         n_audio;                    // Number of entries in audio_index
+    int         audio_fill_gap;             // Audio only, fills the gap if there is a jump in PTS
+    int         sync_audio_to_stream_id;    // mpegts only, default is 0
+    int         bitdepth;                   // Can be 8, 10, 12
+    char        *max_cll;                   // Maximum Content Light Level (HDR only)
+    char        *master_display;            // Master display (HDR only)
+    int         stream_id;                  // Stream id to trasncode, should be >= 0
 
     char        *mux_spec;
 } txparams_t;
@@ -389,6 +397,7 @@ typedef struct out_tracker_t {
     ioctx_t                     *last_outctx;
     int                         seg_index;
     ioctx_t                     *inctx;         /* Points to input context */
+    tx_type_t                   tx_type;
 
     /** Needed to detect type of encoding frame */
     int video_stream_index;

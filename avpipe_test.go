@@ -288,7 +288,7 @@ func TestSingleABRTranscode(t *testing.T) {
 
 	params.TxType = avpipe.TxAudio
 	params.Ecodec2 = "aac"
-	params.AudioIndex = -1
+	params.NumAudio = -1
 	rc = avpipe.Tx(params, filename, false)
 	if rc != 0 {
 		t.Fail()
@@ -319,7 +319,7 @@ func TestSingleABRTranscodeByStreamId(t *testing.T) {
 		EncHeight:          720,
 		EncWidth:           1280,
 		StreamId:           1,
-		AudioIndex:         -1,
+		NumAudio:           -1,
 	}
 
 	// Create output directory if it doesn't exist
@@ -486,7 +486,8 @@ func TestV2SingleABRTranscode(t *testing.T) {
 
 	params.TxType = avpipe.TxAudio
 	params.Ecodec2 = "aac"
-	params.AudioIndex = 1
+	params.NumAudio = 1
+	params.AudioIndex[0] = 1
 	handle, err = avpipe.TxInit(params, filename, true)
 	assert.NoError(t, err)
 	assert.Equal(t, true, handle > 0)
@@ -538,7 +539,8 @@ func TestV2SingleABRTranscodeIOHandler(t *testing.T) {
 
 	params.TxType = avpipe.TxAudio
 	params.Ecodec2 = "aac"
-	params.AudioIndex = 1
+	params.NumAudio = 1
+	params.AudioIndex[0] = 1
 	handle, err = avpipe.TxInit(params, filename, true)
 	assert.NoError(t, err)
 	assert.Equal(t, true, handle > 0)
@@ -594,7 +596,8 @@ func TestV2SingleABRTranscodeCancelling(t *testing.T) {
 
 	params.TxType = avpipe.TxAudio
 	params.Ecodec2 = "aac"
-	params.AudioIndex = 1
+	params.NumAudio = 1
+	params.AudioIndex[0] = 1
 	handle, err = avpipe.TxInit(params, filename, true)
 	assert.NoError(t, err)
 	assert.Equal(t, true, handle > 0)
@@ -761,10 +764,12 @@ func TestAC3TsAC3MezMaker(t *testing.T) {
 		EncHeight:           -1,
 		EncWidth:            -1,
 		TxType:              avpipe.TxAudio,
-		AudioIndex:          0,
+		NumAudio:            1,
 		StreamId:            -1,
 		SyncAudioToStreamId: -1,
 	}
+
+	params.AudioIndex[0] = 0
 
 	// Create output directory if it doesn't exist
 	err := setupOutDir(outputDir)
@@ -810,10 +815,12 @@ func TestAC3TsAACMezMaker(t *testing.T) {
 		EncHeight:           -1,
 		EncWidth:            -1,
 		TxType:              avpipe.TxAudio,
-		AudioIndex:          0,
+		NumAudio:            1,
 		StreamId:            -1,
 		SyncAudioToStreamId: -1,
 	}
+
+	params.AudioIndex[0] = 0
 
 	// Create output directory if it doesn't exist
 	err := setupOutDir(outputDir)
@@ -868,10 +875,12 @@ func TestMP2TsAACMezMaker(t *testing.T) {
 		EncHeight:           -1,
 		EncWidth:            -1,
 		TxType:              avpipe.TxAudio,
-		AudioIndex:          1,
+		NumAudio:            1,
 		StreamId:            -1,
 		SyncAudioToStreamId: -1,
 	}
+
+	params.AudioIndex[0] = 1
 
 	// Create output directory if it doesn't exist
 	err := setupOutDir(outputDir)
@@ -925,10 +934,12 @@ func TestDownmix2AACMezMaker(t *testing.T) {
 		EncHeight:           -1,
 		EncWidth:            -1,
 		TxType:              avpipe.TxAudio,
-		AudioIndex:          6,
+		NumAudio:            1,
 		StreamId:            -1,
 		SyncAudioToStreamId: -1,
 	}
+
+	params.AudioIndex[0] = 6
 
 	// Create output directory if it doesn't exist
 	err := setupOutDir(outputDir)
@@ -959,6 +970,65 @@ func TestDownmix2AACMezMaker(t *testing.T) {
 	if sampleRate != 48000 {
 		t.Error("Unexpected sample rate", probeInfo.StreamInfo[0].SampleRate)
 	}
+}
+
+func Test2Mono1Stereo(t *testing.T) {
+	filename := "./media/AGAIG-clip-2mono.mp4"
+	outputDir := "2Mono1Stereo"
+
+	setupLogging()
+	log.Info("STARTING Test2Mono1Stereo")
+
+	params := &avpipe.TxParams{
+		BypassTranscoding:   false,
+		Format:              "fmp4-segment",
+		StartTimeTs:         0,
+		DurationTs:          -1,
+		StartSegmentStr:     "1",
+		SegDuration:         "30",
+		Ecodec2:             "aac",
+		Dcodec:              "",
+		TxType:              avpipe.TxAudioJoin,
+		NumAudio:            2,
+		StreamId:            -1,
+		SyncAudioToStreamId: -1,
+	}
+
+	params.AudioIndex[0] = 1
+	params.AudioIndex[1] = 2
+
+	// Create output directory if it doesn't exist
+	err := setupOutDir(outputDir)
+	if err != nil {
+		t.Fail()
+	}
+
+	avpipe.InitIOHandler(&fileInputOpener{url: filename}, &fileOutputOpener{dir: outputDir})
+
+	rc := avpipe.Tx(params, filename, true)
+	if rc != 0 {
+		t.Fail()
+	}
+
+	for i := 1; i <= 2; i++ {
+		mezFile := fmt.Sprintf("%s/asegment-%d.mp4", outputDir, i)
+		// Now probe the generated files
+		probeInfo, err := avpipe.Probe(mezFile, true)
+		if err != nil {
+			t.Error(err)
+		}
+
+		timebase := *probeInfo.StreamInfo[0].TimeBase.Denom()
+		if timebase.Cmp(big.NewInt(48000)) != 0 {
+			t.Error("Unexpected TimeBase", probeInfo.StreamInfo[0].TimeBase)
+		}
+
+		if avpipe.ChannelLayoutName(probeInfo.StreamInfo[0].Channels,
+			probeInfo.StreamInfo[0].ChannelLayout) != "stereo" {
+			t.Error("Unexpected channel layout", probeInfo.StreamInfo[0].ChannelLayout)
+		}
+	}
+
 }
 
 // Timebase of BOB923HL_clip_timebase_1001_60000.MXF is 1001/60000
@@ -1318,6 +1388,7 @@ func TestABRMuxing(t *testing.T) {
 		EncWidth:          1280,
 		TxType:            avpipe.TxVideo,
 		StreamId:          -1,
+		NumAudio:          -1,
 	}
 
 	avpipe.InitUrlIOHandler(filename, &fileInputOpener{url: filename}, &fileOutputOpener{dir: videoMezDir})
@@ -1334,7 +1405,6 @@ func TestABRMuxing(t *testing.T) {
 
 	params.TxType = avpipe.TxAudio
 	params.Ecodec2 = "aac"
-	params.AudioIndex = -1
 
 	avpipe.InitUrlIOHandler(filename, &fileInputOpener{url: filename}, &fileOutputOpener{dir: audioMezDir})
 	rc = avpipe.Tx(params, filename, false)
@@ -1353,7 +1423,6 @@ func TestABRMuxing(t *testing.T) {
 	params.Format = "dash"
 	params.Ecodec = "libx264"
 	params.VideoSegDurationTs = 48000
-	params.AudioIndex = -1
 
 	avpipe.InitUrlIOHandler(filename, &fileInputOpener{url: filename}, &fileOutputOpener{dir: videoABRDir})
 	rc = avpipe.Tx(params, filename, true)
@@ -1372,7 +1441,6 @@ func TestABRMuxing(t *testing.T) {
 	params.Format = "dash"
 	params.Ecodec2 = "aac"
 	params.AudioSegDurationTs = 96000
-	params.AudioIndex = -1
 
 	avpipe.InitUrlIOHandler(filename, &fileInputOpener{url: filename}, &fileOutputOpener{dir: audioABRDir})
 	rc = avpipe.Tx(params, filename, true)

@@ -17,3 +17,6 @@
 
 # Listen in RTMP mode and make mezzanines
 ./bin/etx -f rtmp://localhost:5000/test001 -tx-type all -format fmp4-segment -video-seg-duration 480480 -audio-seg-duration-ts 1441440 -force-keyint 4 -listen 1
+
+# Audio join
+./bin/avcmd transcode -f ./media/AGAIG-clip-2mono.mp4 --tx-type audio-join --audio-index 1,2 --format fmp4-segment --seg-duration 30

@@ -6,6 +6,7 @@ import (
 	"io/ioutil"
 	"os"
 	"strconv"
+	"strings"
 
 	"github.com/qluvio/avpipe"
 	"github.com/spf13/cobra"
@@ -186,6 +187,25 @@ func (o *avcmdOutput) Stat(statType avpipe.AVStatType, statArgs interface{}) err
 	return nil
 }
 
+func getAudioIndexes(params *avpipe.TxParams, audioIndexes string) (err error) {
+	params.NumAudio = 0
+	if len(audioIndexes) == 0 {
+		return
+	}
+
+	indexes := strings.Split(audioIndexes, ",")
+	for _, indexStr := range indexes {
+		index, err := strconv.Atoi(indexStr)
+		if err != nil {
+			return fmt.Errorf("Invalid audio indexes")
+		}
+		params.AudioIndex[params.NumAudio] = int32(index)
+		params.NumAudio++
+	}
+
+	return nil
+}
+
 func InitTranscode(cmdRoot *cobra.Command) error {
 	cmdTranscode := &cobra.Command{
 		Use:   "transcode",
@@ -201,7 +221,7 @@ func InitTranscode(cmdRoot *cobra.Command) error {
 	cmdTranscode.PersistentFlags().BoolP("bypass", "b", false, "bypass transcoding.")
 	cmdTranscode.PersistentFlags().BoolP("listen", "", true, "listen mode for RTMP.")
 	cmdTranscode.PersistentFlags().Int32P("threads", "t", 1, "transcoding threads.")
-	cmdTranscode.PersistentFlags().Int32P("audio-index", "", -1, "audio stream index (only for --tx-type audio).")
+	cmdTranscode.PersistentFlags().StringP("audio-index", "", "", "the indexes of audio stream (comma separated).")
 	cmdTranscode.PersistentFlags().Int32P("gpu-index", "", -1, "Use the GPU with specified index for transcoding (export CUDA_DEVICE_ORDER=PCI_BUS_ID would use smi index).")
 	cmdTranscode.PersistentFlags().BoolP("audio-fill-gap", "", false, "fill audio gap when encoder is aac and decoder is mpegts")
 	cmdTranscode.PersistentFlags().Int32P("sync-audio-to-stream-id", "", -1, "sync audio to video iframe of specific stream-id when input stream is mpegts")
@@ -212,7 +232,7 @@ func InitTranscode(cmdRoot *cobra.Command) error {
 	cmdTranscode.PersistentFlags().StringP("format", "", "dash", "package format, can be 'dash', 'hls', 'mp4', 'fmp4', 'segment' or 'fmp4-segment'.")
 	cmdTranscode.PersistentFlags().Int32P("force-keyint", "", 0, "force IDR key frame in this interval.")
 	cmdTranscode.PersistentFlags().BoolP("equal-fduration", "", false, "force equal frame duration. Must be 0 or 1 and only valid for 'fmp4-segment' format.")
-	cmdTranscode.PersistentFlags().StringP("tx-type", "", "", "transcoding type, can be 'all', 'video', or 'audio'.")
+	cmdTranscode.PersistentFlags().StringP("tx-type", "", "", "transcoding type, can be 'all', 'video', 'audio', 'audio-join', or 'audio-merge'.")
 	cmdTranscode.PersistentFlags().Int32P("crf", "", 23, "mutually exclusive with video-bitrate.")
 	cmdTranscode.PersistentFlags().StringP("preset", "", "medium", "Preset string to determine compression speed, can be: 'ultrafast', 'superfast', 'veryfast', 'faster', 'fast', 'medium', 'slow', 'slower', 'veryslow'")
 	cmdTranscode.PersistentFlags().Int64P("start-time-ts", "", 0, "offset to start transcoding")
@@ -281,10 +301,7 @@ func doTranscode(cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("Invalid threads flag")
 	}
 
-	audioIndex, err := cmd.Flags().GetInt32("audio-index")
-	if err != nil {
-		return fmt.Errorf("Invalid audio index flag")
-	}
+	audioIndex := cmd.Flag("audio-index").Value.String()
 
 	gpuIndex, err := cmd.Flags().GetInt32("gpu-index")
 	if err != nil {
@@ -369,8 +386,12 @@ func doTranscode(cmd *cobra.Command, args []string) error {
 	}
 
 	txTypeStr := cmd.Flag("tx-type").Value.String()
-	if streamId < 0 && txTypeStr != "all" && txTypeStr != "video" && txTypeStr != "audio" {
-		return fmt.Errorf("Transcoding type is not valid, with no stream-id can be 'all', 'video', or 'audio'")
+	if streamId < 0 && txTypeStr != "all" &&
+		txTypeStr != "video" &&
+		txTypeStr != "audio" &&
+		txTypeStr != "audio-join" &&
+		txTypeStr != "audio-merge" {
+		return fmt.Errorf("Transcoding type is not valid, with no stream-id can be 'all', 'video', 'audio', 'audio-join', or 'audio-merge'")
 	}
 	txType := avpipe.TxTypeFromString(txTypeStr)
 	if txType == avpipe.TxAudio && len(encoder) == 0 {
@@ -458,7 +479,9 @@ func doTranscode(cmd *cobra.Command, args []string) error {
 	audioSegDurationTs, err := cmd.Flags().GetInt64("audio-seg-duration-ts")
 	if err != nil ||
 		(format != "segment" && format != "fmp4-segment" &&
-			audioSegDurationTs == 0 && (txType == avpipe.TxAll || txType == avpipe.TxAudio)) {
+			audioSegDurationTs == 0 &&
+			(txType == avpipe.TxAll || txType == avpipe.TxAudio ||
+				txType == avpipe.TxAudioJoin || txType == avpipe.TxAudioMerge)) {
 		return fmt.Errorf("Audio seg duration ts is not valid")
 	}
 
@@ -548,7 +571,6 @@ func doTranscode(cmd *cobra.Command, args []string) error {
 		ForceKeyInt:           forceKeyInterval,
 		RcMaxRate:             rcMaxRate,
 		RcBufferSize:          4500000,
-		AudioIndex:            audioIndex,
 		GPUIndex:              gpuIndex,
 		MaxCLL:                maxCLL,
 		MasterDisplay:         masterDisplay,
@@ -560,7 +582,11 @@ func doTranscode(cmd *cobra.Command, args []string) error {
 		Listen:                listen,
 	}
 
-	log.Debug("XXX rate", "rate", params.WatermarkTimecodeRate)
+	err = getAudioIndexes(params, audioIndex)
+	if err != nil {
+		return err
+	}
+
 	params.WatermarkOverlayLen = len(params.WatermarkOverlay)
 
 	avpipe.InitIOHandler(&avcmdInputOpener{url: filename}, &avcmdOutputOpener{dir: dir})
