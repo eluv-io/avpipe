@@ -622,7 +622,7 @@ prepare_decoder(
     return 0;
 }
 
-static void
+static int
 set_encoder_options(
     coderctx_t *encoder_context,
     coderctx_t *decoder_context,
@@ -651,12 +651,20 @@ set_encoder_options(
     }
 
     if (selected_decoded_audio(decoder_context, stream_index) >= 0) {
+        if (!(params->tx_type & tx_audio)) {
+            elv_err("Failed to set encoder options, stream_index=%d, tx_type=%d", stream_index, params->tx_type);
+            return -1;
+        }
         av_opt_set_int(encoder_context->format_context2->priv_data, "start_fragment_index", params->start_fragment_index,
             AV_OPT_FLAG_ENCODING_PARAM | AV_OPT_SEARCH_CHILDREN);
         av_opt_set(encoder_context->format_context2->priv_data, "start_segment", params->start_segment_str, 0);
     }
 
     if (stream_index == decoder_context->video_stream_index) {
+        if (!(params->tx_type & tx_video)) {
+            elv_err("Failed to set encoder options, stream_index=%d, tx_type=%d", stream_index, params->tx_type);
+            return -1;
+        }
         av_opt_set_int(encoder_context->format_context->priv_data, "start_fragment_index", params->start_fragment_index,
             AV_OPT_FLAG_ENCODING_PARAM | AV_OPT_SEARCH_CHILDREN);
         av_opt_set(encoder_context->format_context->priv_data, "start_segment", params->start_segment_str, 0);
@@ -695,6 +703,8 @@ set_encoder_options(
                 av_opt_set(encoder_context->format_context->priv_data, "segment_format_options", "movflags=frag_every_frame", 0);
         }
     }
+
+    return 0;
 }
 
 static int
@@ -961,8 +971,12 @@ prepare_video_encoder(
         out_stream->time_base = in_stream->time_base;
         out_stream->codecpar->codec_tag = 0;
 
-        set_encoder_options(encoder_context, decoder_context, params, decoder_context->video_stream_index,
+        rc = set_encoder_options(encoder_context, decoder_context, params, decoder_context->video_stream_index,
             decoder_context->stream[decoder_context->video_stream_index]->time_base.den);
+        if (rc < 0) {
+            elv_err("Failed to set video encoder options with bypass");
+            return -1;
+        }
         return 0;
     }
 
@@ -998,8 +1012,12 @@ prepare_video_encoder(
     }
 
     encoder_context->stream[encoder_context->video_stream_index]->time_base = decoder_context->codec_context[index]->time_base;
-    set_encoder_options(encoder_context, decoder_context, params, decoder_context->video_stream_index,
+    rc = set_encoder_options(encoder_context, decoder_context, params, decoder_context->video_stream_index,
         decoder_context->stream[decoder_context->video_stream_index]->time_base.den);
+    if (rc < 0) {
+        elv_err("Failed to set video encoder options");
+        return -1;
+    }
 
     /* Set codec context parameters */
     encoder_codec_context->height = params->enc_height != -1 ? params->enc_height : decoder_context->codec_context[index]->height;
@@ -1096,6 +1114,7 @@ prepare_audio_encoder(
     int index = decoder_context->audio_stream_index[0];
     char *ecodec;
     AVFormatContext *format_context;
+    int rc;
 
     if (index < 0) {
         elv_dbg("No audio stream detected by decoder.");
@@ -1179,8 +1198,12 @@ prepare_audio_encoder(
     /* Allow the use of the experimental AAC encoder. */
     encoder_context->codec_context[index]->strict_std_compliance = FF_COMPLIANCE_EXPERIMENTAL;
 
-    set_encoder_options(encoder_context, decoder_context, params, encoder_context->audio_stream_index[0],
+    rc = set_encoder_options(encoder_context, decoder_context, params, encoder_context->audio_stream_index[0],
         encoder_context->stream[encoder_context->audio_stream_index[0]]->time_base.den);
+    if (rc < 0) {
+        elv_err("Failed to set audio encoder options");
+        return -1;
+    }
 
     AVCodecContext *encoder_codec_context = encoder_context->codec_context[index];
     /* Some container formats (like MP4) require global headers to be present.
@@ -3344,6 +3367,7 @@ avpipe_init(
         "bypass=%d "
         "tx_type=%s "
         "format=%s "
+        "seekable=%d "
         "start_time_ts=%"PRId64" "
         "start_pts=%"PRId64" "
         "duration_ts=%"PRId64" "
@@ -3383,8 +3407,8 @@ avpipe_init(
         "master_display=\"%s\"",
         params->stream_id, url,
         avpipe_version(),
-        params->bypass_transcoding, get_tx_type_name(params->tx_type),
-        params->format, params->start_time_ts, params->start_pts, params->duration_ts, params->start_segment_str,
+        params->bypass_transcoding, get_tx_type_name(params->tx_type), params->format,
+        params->seekable, params->start_time_ts, params->start_pts, params->duration_ts, params->start_segment_str,
         params->video_bitrate, params->audio_bitrate, params->sample_rate, params->crf_str, params->preset,
         params->rc_max_rate, params->rc_buffer_size, params->video_seg_duration_ts, params->audio_seg_duration_ts,
         params->seg_duration, params->force_keyint, params->force_equal_fduration, params->ecodec,
@@ -3425,6 +3449,9 @@ avpipe_free_params(
     txctx_t *txctx)
 {
     txparams_t *params = txctx->params;
+
+    if (!params)
+        return;
 
     free(params->format);
     free(params->start_segment_str);
@@ -3509,7 +3536,7 @@ avpipe_fini(
         }
     }
 
-    if (!strcmp((*txctx)->params->ecodec2, "aac")) {
+    if ((*txctx)->params && !strcmp((*txctx)->params->ecodec2, "aac")) {
         av_audio_fifo_free(decoder_context->fifo);
         swr_free(&decoder_context->resampler_context);
     }

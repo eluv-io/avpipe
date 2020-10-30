@@ -119,7 +119,10 @@ func (tsr *TsReader) serveOneConnection(w io.Writer) (err error) {
 		return
 	}
 	// TODO: Make if a config param (RM)
-	conn.SetReadBuffer(16 * 1024 * 1024)
+	err = conn.SetReadBuffer(16 * 1024 * 1024)
+	if err != nil {
+		log.Error("Failed to set UDP buffer size, continue ...", err)
+	}
 
 	log.Info("ts_recorder server accepted", "addr", tsr.addr)
 
