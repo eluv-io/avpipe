@@ -219,7 +219,7 @@ func InitTranscode(cmdRoot *cobra.Command) error {
 
 	cmdTranscode.PersistentFlags().StringP("filename", "f", "", "(mandatory) filename to be transcoded.")
 	cmdTranscode.PersistentFlags().BoolP("bypass", "b", false, "bypass transcoding.")
-	cmdTranscode.PersistentFlags().BoolP("listen", "", true, "listen mode for RTMP.")
+	cmdTranscode.PersistentFlags().BoolP("listen", "", false, "listen mode for RTMP.")
 	cmdTranscode.PersistentFlags().Int32P("threads", "t", 1, "transcoding threads.")
 	cmdTranscode.PersistentFlags().StringP("audio-index", "", "", "the indexes of audio stream (comma separated).")
 	cmdTranscode.PersistentFlags().Int32P("gpu-index", "", -1, "Use the GPU with specified index for transcoding (export CUDA_DEVICE_ORDER=PCI_BUS_ID would use smi index).")

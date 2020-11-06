@@ -81,7 +81,7 @@ extern const char *
 av_get_pix_fmt_name(
     enum AVPixelFormat pix_fmt);
 
-//#define USE_RESAMPLE_AAC
+#define USE_RESAMPLE_AAC
 /* This will be removed after more testing with new audio transcoding using filters */
 #ifdef USE_RESAMPLE_AAC
 
@@ -258,7 +258,7 @@ int
 prepare_input(
     avpipe_io_handler_t *in_handlers,
     ioctx_t *inctx,
-    AVFormatContext *format_ctx,
+    coderctx_t *decoder_context,
     int seekable)
 {
     unsigned char *bufin;
@@ -266,8 +266,11 @@ prepare_input(
     int bufin_sz = 1024 * 1024;
 
     /* For RTMP protocol don't create input callbacks */
-    if (inctx->url && !strncmp(inctx->url, "rtmp", 4))
+    decoder_context->is_rtmp = 0;
+    if (inctx->url && !strncmp(inctx->url, "rtmp", 4)) {
+        decoder_context->is_rtmp = 1;
         return 0;
+    }
 
     bufin = (unsigned char *) av_malloc(bufin_sz);  /* Must be malloc'd - will be realloc'd by avformat */
     avioctx = avio_alloc_context(bufin, bufin_sz, 0, (void *)inctx,
@@ -277,7 +280,7 @@ prepare_input(
     avioctx->seekable = seekable;
     avioctx->direct = 0;
     avioctx->buffer_size = inctx->sz < bufin_sz ? inctx->sz : bufin_sz; // avoid seeks - avio_seek() seeks internal buffer */
-    format_ctx->pb = avioctx;
+    decoder_context->format_context->pb = avioctx;
     return 0;
 }
 
@@ -287,6 +290,11 @@ static int
 calc_timebase(
     int timebase)
 {
+    if (timebase <= 0) {
+        elv_err("calc_timebase invalid timebase=%d", timebase);
+        return timebase;
+    }
+
     while (timebase < TIMEBASE_THRESHOLD)
         timebase *= 2;
 
@@ -354,7 +362,7 @@ prepare_decoder(
     decoder_context->format_context->correct_ts_overflow = 0;
 
     /* Set our custom reader */
-    prepare_input(in_handlers, inctx, decoder_context->format_context, seekable);
+    prepare_input(in_handlers, inctx, decoder_context, seekable);
 
     AVDictionary *opts = NULL;
     if (params && params->listen)
@@ -567,23 +575,6 @@ prepare_decoder(
         decoder_context->n_audio,
         decoder_context->format_context->nb_streams);
 
-    if (params && (!strcmp(params->format, "segment") || !strcmp(params->format, "fmp4-segment"))) {
-        if (params->tx_type & tx_audio && params->audio_seg_duration_ts <= 0) {
-            float seg_duration = atof(params->seg_duration);
-            /* It is assumed all the audio elementary streams have the same timebase */
-            params->audio_seg_duration_ts = av_stream_get_codec_timebase(decoder_context->stream[decoder_context->audio_stream_index[0]]).den * seg_duration;
-            elv_log("set audio_seg_duration_ts=%d from seg_duration", params->audio_seg_duration_ts);
-        }
-        if ((params->tx_type & tx_video) && params->video_seg_duration_ts <= 0) {
-            float seg_duration = atof(params->seg_duration);
-            params->video_seg_duration_ts = calc_timebase(decoder_context->stream[decoder_context->video_stream_index]->time_base.den) * seg_duration;
-            elv_log("set video_seg_duration_ts=%d from seg_duration, decoder timebase=%d/%d",
-                params->video_seg_duration_ts,
-                decoder_context->stream[decoder_context->video_stream_index]->time_base.num,
-                decoder_context->stream[decoder_context->video_stream_index]->time_base.den);
-        }
-    }
-
     dump_decoder(inctx->url, decoder_context);
 
     /*
@@ -630,6 +621,11 @@ set_encoder_options(
     int stream_index,
     int timebase)
 {
+    if (timebase <= 0) {
+        elv_err("Setting encoder options failed, invalid timebase=%d (check encoding params)", timebase);
+        return -1;
+    }
+
     if (!strcmp(params->format, "fmp4")) {
         if (stream_index == decoder_context->video_stream_index)
             av_opt_set(encoder_context->format_context->priv_data, "movflags", "frag_every_frame", 0);
@@ -690,7 +686,7 @@ set_encoder_options(
             if (params->video_seg_duration_ts > 0)
                 seg_duration_ts = params->video_seg_duration_ts;
             av_opt_set_int(encoder_context->format_context->priv_data, "segment_duration_ts", seg_duration_ts, 0);
-            elv_dbg("setting \"fmp4-segment\" segment_time to %s, seg_duration_ts=%"PRId64, params->seg_duration, seg_duration_ts);
+            elv_dbg("setting \"fmp4-segment\" video segment_time to %s, seg_duration_ts=%"PRId64, params->seg_duration, seg_duration_ts);
             av_opt_set(encoder_context->format_context->priv_data, "reset_timestamps", "on", 0);
         }
         // If I set faststart in the flags then ffmpeg generates some zero size files, which I need to dig into it more (RM).
@@ -1532,7 +1528,7 @@ should_skip_encoding(
     txparams_t *p,
     AVFrame *frame)
 {
-    if (!frame)
+    if (!frame || p->tx_type == tx_audio_join)
         return 0;
 
     /* For MPEG-TS - skip a fixed duration at the beginning to sync audio and vide
@@ -1628,24 +1624,47 @@ encode_frame(
 
         const char *st = stream_type_str(encoder_context, stream_index);
 
-        // Adjust PTS if input stream starts at an arbitrary value (MPEG-TS)
-        if (decoder_context->is_mpegts && (!strcmp(params->format, "fmp4-segment"))) {
-            if (encoder_context->first_encoding_frame_pts == -1) {
-                /* Remember the first PTS to use as an offset later */
-                encoder_context->first_encoding_frame_pts = frame->pts;
-                elv_log("PTS first_encoding_frame_pts=%"PRId64" dec=%"PRId64" read=%"PRId64" stream=%d:%s",
-                    encoder_context->first_encoding_frame_pts,
-                    decoder_context->first_decoding_frame_pts,
-                    encoder_context->first_read_frame_pts[stream_index], params->tx_type, st);
-            }
+        // Adjust PTS if input stream starts at an arbitrary value (MPEG-TS/RTMP)
+        if ((decoder_context->is_mpegts || decoder_context->is_rtmp)
+            && (!strcmp(params->format, "fmp4-segment"))) {
+            if (stream_index == decoder_context->video_stream_index) {
+                if (encoder_context->first_encoding_video_pts == -1) {
+                    /* Remember the first video PTS to use as an offset later */
+                    encoder_context->first_encoding_video_pts = frame->pts;
+                    elv_log("PTS first_encoding_video_pts=%"PRId64" dec=%"PRId64" read=%"PRId64" stream=%d:%s",
+                        encoder_context->first_encoding_video_pts,
+                        decoder_context->first_decoding_video_pts,
+                        encoder_context->first_read_frame_pts[stream_index], params->tx_type, st);
+                }
 
-            // Adjust frame pts such that first frame sent to the encoder has PTS 0
-            if (frame->pts != AV_NOPTS_VALUE)
-                frame->pts -= encoder_context->first_encoding_frame_pts;
-            if (frame->pkt_dts != AV_NOPTS_VALUE)
-                frame->pkt_dts -= encoder_context->first_encoding_frame_pts;
-            if (frame->best_effort_timestamp != AV_NOPTS_VALUE)
-                frame->best_effort_timestamp -= encoder_context->first_encoding_frame_pts;
+                // Adjust video frame pts such that first frame sent to the encoder has PTS 0
+                if (frame->pts != AV_NOPTS_VALUE)
+                    frame->pts -= encoder_context->first_encoding_video_pts;
+                if (frame->pkt_dts != AV_NOPTS_VALUE)
+                    frame->pkt_dts -= encoder_context->first_encoding_video_pts;
+                if (frame->best_effort_timestamp != AV_NOPTS_VALUE)
+                    frame->best_effort_timestamp -= encoder_context->first_encoding_video_pts;
+            }
+#ifndef USE_RESAMPLE_AAC
+            else if (selected_decoded_audio(decoder_context, stream_index) >= 0) {
+                if (encoder_context->first_encoding_audio_pts == -1) {
+                    /* Remember the first video PTS to use as an offset later */
+                    encoder_context->first_encoding_audio_pts = frame->pts;
+                    elv_log("PTS first_encoding_audio_pts=%"PRId64" dec=%"PRId64" read=%"PRId64" stream=%d:%s",
+                        encoder_context->first_encoding_audio_pts,
+                        decoder_context->first_decoding_audio_pts,
+                        encoder_context->first_read_frame_pts[stream_index], params->tx_type, st);
+                }
+
+                // Adjust audio frame pts such that first frame sent to the encoder has PTS 0
+                if (frame->pts != AV_NOPTS_VALUE)
+                    frame->pts -= encoder_context->first_encoding_audio_pts;
+                if (frame->pkt_dts != AV_NOPTS_VALUE)
+                    frame->pkt_dts -= encoder_context->first_encoding_audio_pts;
+                if (frame->best_effort_timestamp != AV_NOPTS_VALUE)
+                    frame->best_effort_timestamp -= encoder_context->first_encoding_audio_pts;
+            }
+#endif
         }
 
         // Signal if we need IDR frames
@@ -1729,10 +1748,13 @@ encode_frame(
         output_packet->pts += params->start_pts;
         output_packet->dts += params->start_pts;
 
-        /* Rescale using the stream time_base (not the codec context).
-         * Don't rescale if using audio FIFO - PTS is already set in output time base.
-         */
+        /* Rescale using the stream time_base (not the codec context). */
+#ifdef USE_RESAMPLE_AAC
+        /* Don't rescale if using audio FIFO - PTS is already set in output time base. */
         if (stream_index == decoder_context->video_stream_index &&
+#else
+        if (
+#endif
             (decoder_context->stream[stream_index]->time_base.den !=
             encoder_context->stream[stream_index]->time_base.den ||
             decoder_context->stream[stream_index]->time_base.num !=
@@ -1833,8 +1855,8 @@ transcode_audio(
             return response;
         }
 
-        if (decoder_context->first_decoding_frame_pts < 0)
-            decoder_context->first_decoding_frame_pts = frame->pts;
+        if (decoder_context->first_decoding_audio_pts < 0)
+            decoder_context->first_decoding_audio_pts = frame->pts;
 
         dump_frame(1, "IN ", codec_context->frame_number, frame, debug_frame_level);
 
@@ -1916,8 +1938,8 @@ transcode_audio_aac(
             return response;
         }
 
-        if (decoder_context->first_decoding_frame_pts < 0)
-            decoder_context->first_decoding_frame_pts = frame->pts;
+        if (decoder_context->first_decoding_audio_pts < 0)
+            decoder_context->first_decoding_audio_pts = frame->pts;
 
         dump_frame(1, "IN ", codec_context->frame_number, frame, debug_frame_level);
 
@@ -2121,19 +2143,19 @@ transcode_video(
             return response;
         }
 
-        if (decoder_context->first_decoding_frame_pts < 0)
-            decoder_context->first_decoding_frame_pts = frame->pts;
+        if (decoder_context->first_decoding_video_pts < 0)
+            decoder_context->first_decoding_video_pts = frame->pts;
 
         /* If force_equal_fduration is set then frame_duration > 0 is true */
         if (decoder_context->frame_duration > 0) {
             elv_dbg("SET VIDEO PTS frame_num=%d, old_pts=%"PRId64", new_pts=%"PRId64", diff=%"PRId64", dts=%"PRId64,
                 codec_context->frame_number,
                 frame->pts,
-                decoder_context->first_decoding_frame_pts + decoder_context->frame_duration * (codec_context->frame_number - 1),
-                decoder_context->first_decoding_frame_pts + decoder_context->frame_duration * (codec_context->frame_number - 1) - frame->pts,
+                decoder_context->first_decoding_video_pts + decoder_context->frame_duration * (codec_context->frame_number - 1),
+                decoder_context->first_decoding_video_pts + decoder_context->frame_duration * (codec_context->frame_number - 1) - frame->pts,
                 frame->pkt_dts);
             /* Set the PTS and DTS of the frame to equalize frame durations */
-            frame->pts = decoder_context->first_decoding_frame_pts +
+            frame->pts = decoder_context->first_decoding_video_pts +
                 decoder_context->frame_duration * (codec_context->frame_number - 1);
             frame->pkt_dts = frame->pts;
         }
@@ -2608,6 +2630,10 @@ get_filter_str(
             return -1;
         }
     } else {
+        if (!encoder_context->codec_context[encoder_context->video_stream_index]) {
+            elv_err("Failed to make filter string, invalid codec context (check params)");
+            return -1;
+        }
         *filter_str = (char *) calloc(FILTER_STRING_SZ, 1);
         sprintf(*filter_str, "scale=%d:%d",
             encoder_context->codec_context[encoder_context->video_stream_index]->width,
@@ -2765,8 +2791,10 @@ avpipe_tx(
     decoder_context->video_duration = -1;
     encoder_context->audio_duration = -1;
     decoder_context->audio_input_prev_pts = -1;
-    decoder_context->first_decoding_frame_pts = -1;
-    encoder_context->first_encoding_frame_pts = -1;
+    decoder_context->first_decoding_video_pts = -1;
+    decoder_context->first_decoding_audio_pts = -1;
+    encoder_context->first_encoding_video_pts = -1;
+    encoder_context->first_encoding_audio_pts = -1;
     for (int j=0; j<MAX_STREAMS; j++)
         encoder_context->first_read_frame_pts[j] = -1;
     decoder_context->first_key_frame_pts = -1;
@@ -2886,7 +2914,8 @@ avpipe_tx(
              * so fallback to use audio filtering for transcoding.
              * Optimal solution would be to make filtering working for both aac and other cases (RM).
              */
-            if (!strcmp(params->ecodec2, "aac")) {
+            if (!strcmp(params->ecodec2, "aac") &&
+                params->tx_type != tx_audio_join) {
                 response = transcode_audio_aac(
                     decoder_context,
                     encoder_context,
@@ -3403,6 +3432,7 @@ avpipe_init(
         "wm_overlay_type=%d "
         "wm_overlay_len=%d "
         "bitdepth=%d "
+        "listen=%d "
         "max_cll=\"%s\" "
         "master_display=\"%s\"",
         params->stream_id, url,
@@ -3415,7 +3445,7 @@ avpipe_init(
         params->ecodec2, params->dcodec, params->dcodec2, params->gpu_index, params->enc_height, params->enc_width,
         params->crypt_iv, params->crypt_key, params->crypt_kid, params->crypt_key_url, params->crypt_scheme,
         params->n_audio, audio_index_str, params->sync_audio_to_stream_id, params->audio_fill_gap,
-        params->watermark_overlay_type, params->watermark_overlay_len, params->bitdepth,
+        params->watermark_overlay_type, params->watermark_overlay_len, params->bitdepth, params->listen,
         params->max_cll ? params->max_cll : "", params->master_display ? params->master_display : "");
     elv_log("AVPIPE XCPARAMS %s", buf);
 

@@ -211,8 +211,10 @@ typedef struct coderctx_t {
     int64_t audio_pts;                                  /* Audio decoder/encoder pts */
     int64_t video_input_start_pts;                      /* In case video input stream starts at PTS > 0 */
     int64_t audio_input_start_pts;                      /* In case audio input stream starts at PTS > 0 */
-    int64_t first_decoding_frame_pts;                   /* PTS of first frame read from the decoder */
-    int64_t first_encoding_frame_pts;                   /* PTS of first frame sent to the encoder */
+    int64_t first_decoding_video_pts;                   /* PTS of first video frame read from the decoder */
+    int64_t first_decoding_audio_pts;                   /* PTS of first audio frame read from the decoder */
+    int64_t first_encoding_video_pts;                   /* PTS of first video frame sent to the encoder */
+    int64_t first_encoding_audio_pts;                   /* PTS of first audio frame sent to the encoder */
     int64_t first_read_frame_pts[MAX_STREAMS];          /* PTS of first frame read - which might not be decodable */
 
     int64_t audio_input_prev_pts;       /* Previous pts for audio input */
@@ -221,6 +223,7 @@ typedef struct coderctx_t {
     int64_t first_key_frame_pts;        /* First video key frame pts, used to synchronize audio and video in UDP live streams */
     int     pts_residue;                /* Residue of pts lost in output */
 
+    int     is_rtmp;
     int     is_mpegts;                  /* Set to 1 if input format name is "mpegts" */
     int     mpegts_synced;              /* will be set to 1 if audio and video are synced */
     int     frame_duration;             /* Will be > 0 if parameter set_equal_fduration is set and doing mez making */

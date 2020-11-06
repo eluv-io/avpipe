@@ -55,7 +55,7 @@ extern int
 prepare_input(
     avpipe_io_handler_t *in_handlers,
     ioctx_t *inctx,
-    AVFormatContext *format_ctx,
+    coderctx_t *decoder_context,
     int seekable);
 
 
@@ -88,7 +88,7 @@ prepare_input_muxer(
     }
 
     /* set our custom reader */
-    prepare_input(in_handlers, inctx, muxer_ctx->format_context, params->seekable);
+    prepare_input(in_handlers, inctx, muxer_ctx, params->seekable);
 
     rc = avformat_open_input(&muxer_ctx->format_context, inctx->url, NULL, NULL);
     if (rc != 0) {

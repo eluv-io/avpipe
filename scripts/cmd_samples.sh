@@ -15,8 +15,11 @@
 
 ./bin/etx -seg-duration 30.03 -f across_the_universe_2160p_h265_veryslow_segmented_60_sec.mp4 -e libx265 -tx-type video -format fmp4-segment -bitdepth 10
 
+# Muxing audio/video
+./bin/etx -command mux -mux-spec scripts/sample_mux_spec_abr.txt -f muxed.mp4
+
 # Listen in RTMP mode and make mezzanines
-./bin/etx -f rtmp://localhost:5000/test001 -tx-type all -format fmp4-segment -video-seg-duration 480480 -audio-seg-duration-ts 1441440 -force-keyint 4 -listen 1
+./bin/etx -f rtmp://localhost:5000/test001 -tx-type all -format fmp4-segment -video-seg-duration-ts 480480 -audio-seg-duration-ts 1441440 -force-keyint 4 -listen 1
 
 # Audio join
 ./bin/avcmd transcode -f ./media/AGAIG-clip-2mono.mp4 --tx-type audio-join --audio-index 1,2 --format fmp4-segment --seg-duration 30
