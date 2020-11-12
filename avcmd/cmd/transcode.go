@@ -18,7 +18,7 @@ type avcmdInputOpener struct {
 }
 
 func (io *avcmdInputOpener) Open(fd int64, url string) (avpipe.InputHandler, error) {
-	if len(url) >=4 && url[0:4] == "rtmp" {
+	if len(url) >= 4 && url[0:4] == "rtmp" {
 		return &avcmdInput{url: url}, nil
 	}
 
@@ -230,6 +230,7 @@ func InitTranscode(cmdRoot *cobra.Command) error {
 	cmdTranscode.PersistentFlags().StringP("decoder", "d", "", "video decoder, default is 'h264', can be: 'h264', 'h264_cuvid', 'jpeg2000', 'hevc'.")
 	cmdTranscode.PersistentFlags().StringP("audio-decoder", "", "", "audio decoder, default is '' and will be automatically chosen.")
 	cmdTranscode.PersistentFlags().StringP("format", "", "dash", "package format, can be 'dash', 'hls', 'mp4', 'fmp4', 'segment' or 'fmp4-segment'.")
+	cmdTranscode.PersistentFlags().StringP("filter-descriptor", "", "", " Audio filter descriptor the same as ffmpeg format")
 	cmdTranscode.PersistentFlags().Int32P("force-keyint", "", 0, "force IDR key frame in this interval.")
 	cmdTranscode.PersistentFlags().BoolP("equal-fduration", "", false, "force equal frame duration. Must be 0 or 1 and only valid for 'fmp4-segment' format.")
 	cmdTranscode.PersistentFlags().StringP("tx-type", "", "", "transcoding type, can be 'all', 'video', 'audio', 'audio-join', or 'audio-merge'.")
@@ -336,6 +337,8 @@ func doTranscode(cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("Pakage format is not valid, can be 'dash', 'hls', 'mp4', 'fmp4', 'segment', or 'fmp4-segment'")
 	}
 
+	filterDescriptor := cmd.Flag("filter-descriptor").Value.String()
+
 	watermarkTimecode := cmd.Flag("wm-timecode").Value.String()
 	watermarkTimecodeRate, _ := cmd.Flags().GetFloat32("wm-timecode-rate")
 	if len(watermarkTimecode) > 0 && watermarkTimecodeRate <= 0 {
@@ -390,8 +393,8 @@ func doTranscode(cmd *cobra.Command, args []string) error {
 		txTypeStr != "video" &&
 		txTypeStr != "audio" &&
 		txTypeStr != "audio-join" &&
-		txTypeStr != "audio-merge" {
-		return fmt.Errorf("Transcoding type is not valid, with no stream-id can be 'all', 'video', 'audio', 'audio-join', or 'audio-merge'")
+		txTypeStr != "audio-pan" {
+		return fmt.Errorf("Transcoding type is not valid, with no stream-id can be 'all', 'video', 'audio', 'audio-join', or 'audio-pan'")
 	}
 	txType := avpipe.TxTypeFromString(txTypeStr)
 	if txType == avpipe.TxAudio && len(encoder) == 0 {
@@ -580,6 +583,7 @@ func doTranscode(cmd *cobra.Command, args []string) error {
 		SyncAudioToStreamId:   int(syncAudioToStreamId),
 		StreamId:              streamId,
 		Listen:                listen,
+		FilterDescriptor:      filterDescriptor,
 	}
 
 	err = getAudioIndexes(params, audioIndex)

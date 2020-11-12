@@ -186,16 +186,16 @@ typedef struct coderctx_t {
 
     int64_t video_last_dts;
     int64_t audio_last_dts;
-    int64_t last_key_frame;                 /* pts of last key frame */
-    int64_t forced_keyint_countdown;        /* frames until next forced key frame */
-    int64_t video_last_pts_read;            /* Video input last pts read */
-    int64_t audio_last_pts_read;            /* Audio input last pts reas */
-    int64_t video_last_pts_sent_encode;     /* Video last pts to encode if tx_type & tx_video */
-    int64_t audio_last_pts_sent_encode;     /* Audio last pts to encode if tx_type & tx_audio */
-    int64_t video_last_pts_encoded;         /* Video last input pts encoded if tx_type & tx_video */
-    int64_t audio_last_pts_encoded;         /* Audio last input pts encoded if tx_type & tx_audio */
+    int64_t last_key_frame;                             /* pts of last key frame */
+    int64_t forced_keyint_countdown;                    /* frames until next forced key frame */
+    int64_t video_last_pts_read;                        /* Video input last pts read */
+    int64_t audio_last_pts_read;                        /* Audio input last pts reas */
+    int64_t video_last_pts_sent_encode;                 /* Video last pts to encode if tx_type & tx_video */
+    int64_t audio_last_pts_sent_encode;                 /* Audio last pts to encode if tx_type & tx_audio */
+    int64_t video_last_pts_encoded;                     /* Video last input pts encoded if tx_type & tx_video */
+    int64_t audio_last_pts_encoded;                     /* Audio last input pts encoded if tx_type & tx_audio */
 
-    int64_t audio_output_pts; /* Used to set PTS directly when using audio FIFO */
+    int64_t audio_output_pts;                           /* Used to set PTS directly when using audio FIFO */
 
     /* Video filter */
     AVFilterContext *video_buffersink_ctx;
@@ -204,7 +204,7 @@ typedef struct coderctx_t {
 
     /* Audio filter */
     AVFilterContext *audio_buffersink_ctx;
-    AVFilterContext **audio_buffersrc_ctx;
+    AVFilterContext *audio_buffersrc_ctx[MAX_AUDIO_MUX];
     AVFilterGraph   *audio_filter_graph;
 
     int64_t video_pts;                                  /* Video decoder/encoder pts */
@@ -248,6 +248,7 @@ typedef enum tx_type_t {
     tx_all          = 3,    // tx_video | tx_audio
     tx_audio_merge  = 6,    // 0x04 | tx_audio
     tx_audio_join   = 10,   // 0x08 | tx_audio
+    tx_audio_pan    = 18,   // 0x10 | tx_audio
     tx_mux          = 32
 } tx_type_t;
 
@@ -323,6 +324,7 @@ typedef struct txparams_t {
     char        *max_cll;                   // Maximum Content Light Level (HDR only)
     char        *master_display;            // Master display (HDR only)
     int         stream_id;                  // Stream id to trasncode, should be >= 0
+    char        *filter_descriptor;         // Filter descriptor if tx-type == audio-merge
 
     char        *mux_spec;
 } txparams_t;

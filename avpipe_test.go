@@ -1031,6 +1031,64 @@ func Test2Mono1Stereo(t *testing.T) {
 
 }
 
+func Test2Channel1Stereo(t *testing.T) {
+	filename := "./media/multichannel_audio_clip.mov"
+	outputDir := "2Channel1Stereo"
+
+	setupLogging()
+	log.Info("STARTING Test2Channel1Stereo")
+
+	params := &avpipe.TxParams{
+		BypassTranscoding:   false,
+		Format:              "fmp4-segment",
+		StartTimeTs:         0,
+		DurationTs:          -1,
+		StartSegmentStr:     "1",
+		SegDuration:         "30",
+		Ecodec2:             "aac",
+		Dcodec:              "",
+		TxType:              avpipe.TxAudioPan,
+		NumAudio:            1,
+		StreamId:            -1,
+		SyncAudioToStreamId: -1,
+		FilterDescriptor:    "[0:1]pan=stereo|c0<c1+0.707*c2|c1<c2+0.707*c1[aout]",
+	}
+
+	params.AudioIndex[0] = 1
+
+	// Create output directory if it doesn't exist
+	err := setupOutDir(outputDir)
+	if err != nil {
+		t.Fail()
+	}
+
+	avpipe.InitIOHandler(&fileInputOpener{url: filename}, &fileOutputOpener{dir: outputDir})
+
+	rc := avpipe.Tx(params, filename, true)
+	if rc != 0 {
+		t.Fail()
+	}
+
+	for i := 1; i <= 2; i++ {
+		mezFile := fmt.Sprintf("%s/asegment-%d.mp4", outputDir, i)
+		// Now probe the generated files
+		probeInfo, err := avpipe.Probe(mezFile, true)
+		if err != nil {
+			t.Error(err)
+		}
+
+		timebase := *probeInfo.StreamInfo[0].TimeBase.Denom()
+		if timebase.Cmp(big.NewInt(48000)) != 0 {
+			t.Error("Unexpected TimeBase", probeInfo.StreamInfo[0].TimeBase)
+		}
+
+		if avpipe.ChannelLayoutName(probeInfo.StreamInfo[0].Channels,
+			probeInfo.StreamInfo[0].ChannelLayout) != "stereo" {
+			t.Error("Unexpected channel layout", probeInfo.StreamInfo[0].ChannelLayout)
+		}
+	}
+}
+
 // Timebase of BOB923HL_clip_timebase_1001_60000.MXF is 1001/60000
 func TestIrregularTsMezMaker_1001_60000(t *testing.T) {
 	filename := "./media/BOB923HL_clip_timebase_1001_60000.MXF"

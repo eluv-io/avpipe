@@ -80,9 +80,10 @@ const (
 	TxNone       TxType = iota
 	TxVideo             = 1
 	TxAudio             = 2
-	TxAll               = 3		// TxAudio | TxVideo
-	TxAudioMerge        = 6		// TxAudio | 0x04
-	TxAudioJoin         = 10	// TxAudio | 0x08
+	TxAll               = 3  // TxAudio | TxVideo
+	TxAudioMerge        = 6  // TxAudio | 0x04
+	TxAudioJoin         = 10 // TxAudio | 0x08
+	TxAudioPan          = 18 // TxAudio | 0x10
 	TxMux               = 32
 )
 
@@ -99,6 +100,8 @@ func TxTypeFromString(txTypeStr string) TxType {
 		txType = TxAudioJoin
 	case "audio-merge":
 		txType = TxAudioMerge
+	case "audio-pan":
+		txType = TxAudioPan
 	case "mux":
 		txType = TxMux
 	default:
@@ -195,6 +198,7 @@ type TxParams struct {
 	ForceEqualFDuration   bool               `json:"force_equal_frame_duration,omitempty"`
 	MuxingSpec            string             `json:"muxing_spec,omitempty"`
 	Listen                bool               `json:"listen"`
+	FilterDescriptor      string             `json:filter_descriptor`
 }
 
 type AVMediaType int
@@ -1074,6 +1078,7 @@ func getCParams(params *TxParams) (*C.txparams_t, error) {
 		sync_audio_to_stream_id: C.int(params.SyncAudioToStreamId),
 		gpu_index:               C.int(params.GPUIndex),
 		listen:                  C.int(0),
+		filter_descriptor:       C.CString(params.FilterDescriptor),
 		// seekable, bypass_transcoding, shadow, audio_fill_gap, sync_audio_video, listen and force_equal_fduration handled below
 	}
 

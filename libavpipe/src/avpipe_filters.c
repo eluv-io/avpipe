@@ -114,7 +114,7 @@ init_audio_filters(
     coderctx_t *encoder_context,
     txparams_t *params)
 {
-    if (decoder_context->n_audio < 0){
+    if (decoder_context->n_audio < 0) {
         return -1;  //REVIEW want some unique val to say no audio present
     }
     AVCodecContext *dec_codec_ctx = decoder_context->codec_context[decoder_context->audio_stream_index[0]];
@@ -155,12 +155,7 @@ init_audio_filters(
     elv_log("Audio srcfilter args=%s", args);
 
     /* decoder_context->n_audio is 1 */
-    abuffersrc_ctx = (AVFilterContext **) calloc(1, sizeof(AVFilterContext *));
-    if (!abuffersrc_ctx) {
-        elv_err("Failed to allocate memory for audio buffersrc filter");
-        ret = AVERROR(ENOMEM);
-        goto end;
-    }
+    abuffersrc_ctx = decoder_context->audio_buffersrc_ctx;
 
     ret = avfilter_graph_create_filter(&abuffersrc_ctx[0], buffersrc, "in", args, NULL, filter_graph);
     if (ret < 0) {
@@ -228,10 +223,160 @@ init_audio_filters(
 
     /* Fill FilteringContext */
     decoder_context->audio_filter_graph = filter_graph;
-    decoder_context->audio_buffersrc_ctx = abuffersrc_ctx;
     decoder_context->audio_buffersink_ctx = buffersink_ctx;
 
 end:
+
+    return ret;
+
+}
+
+/*
+ * This filter pans multiple channels in one input stream to one output stereo stream.
+ * A sample equvalent ffmpeg command is something like this:
+ *
+ *   ffmpeg -i input.mov -vn  -filter_complex "[0:1]pan=stereo|c0<c1+0.707*c2|c1<c2+0.707*c1[aout]" -map [aout] -acodec aac -b:a 128k out.mp4
+ * 
+ * This function creates a filter graph with the following structure:
+ *
+ *   asrc_abuffer --> af_pan --> asink_abuffer
+ * 
+ */
+int
+init_audio_pan_filters(
+    const char *filters_descr,
+    coderctx_t *decoder_context,
+    coderctx_t *encoder_context)
+{
+    /* Only one innput stream is accepted for this filter */
+    if (decoder_context->n_audio != 1) {
+        elv_err("init_audio_pan_filters invalid number of audio streams, n_audio=%d", decoder_context->n_audio);
+        return -1;
+    }
+    AVCodecContext *dec_codec_ctx = decoder_context->codec_context[decoder_context->audio_stream_index[0]];
+    AVCodecContext *enc_codec_ctx = encoder_context->codec_context[encoder_context->audio_stream_index[0]];
+    char args[512];
+    int ret = 0;
+    AVFilterContext **abuffersrc_ctx = NULL;
+    AVFilterContext *buffersink_ctx = NULL;
+    const AVFilter *buffersrc = avfilter_get_by_name("abuffer");
+    const AVFilter *buffersink = avfilter_get_by_name("abuffersink");
+    AVFilterInOut *outputs = avfilter_inout_alloc();
+    AVFilterInOut *inputs  = avfilter_inout_alloc();
+    AVFilterGraph *filter_graph;
+    AVStream *s = decoder_context->format_context->streams[decoder_context->audio_stream_index[0]];
+
+    if (!dec_codec_ctx) {
+        elv_err("Audio decoder was not initialized!");
+        ret = AVERROR_UNKNOWN;
+        goto end;
+    }
+
+    filter_graph = avfilter_graph_alloc();
+    if (!buffersrc || !buffersink || !filter_graph) {
+        elv_err("Audio filtering source or sink element not found");
+        ret = AVERROR_UNKNOWN;
+        goto end;
+    }
+
+    if (!dec_codec_ctx->channel_layout)
+        dec_codec_ctx->channel_layout = av_get_default_channel_layout(dec_codec_ctx->channels);
+
+    snprintf(args, sizeof(args),
+        "time_base=%d/%d:sample_rate=%d:sample_fmt=%s:channel_layout=0x%"PRIx64,
+        s->time_base.num, s->time_base.den,
+        dec_codec_ctx->sample_rate,
+        av_get_sample_fmt_name(dec_codec_ctx->sample_fmt),
+        dec_codec_ctx->channel_layout);
+    elv_log("Audio srcfilter args=%s", args);
+
+    /* decoder_context->n_audio is 1 */
+    abuffersrc_ctx = decoder_context->audio_buffersrc_ctx;
+
+    ret = avfilter_graph_create_filter(&abuffersrc_ctx[0], buffersrc, "in", args, NULL, filter_graph);
+    if (ret < 0) {
+        elv_err("Cannot create audio buffer source");
+        goto end;
+    }
+
+    ret = avfilter_graph_create_filter(&buffersink_ctx, buffersink, "out", NULL, NULL, filter_graph);
+    if (ret < 0) {
+        elv_err("Cannot create audio buffer sink");
+        goto end;
+    }
+
+    ret = av_opt_set_bin(buffersink_ctx, "sample_fmts",
+        (uint8_t*)&enc_codec_ctx->sample_fmt, sizeof(enc_codec_ctx->sample_fmt),
+        AV_OPT_SEARCH_CHILDREN);
+    if (ret < 0) {
+        elv_err("Cannot set output sample format");
+        goto end;
+    }
+
+    ret = av_opt_set_bin(buffersink_ctx, "sample_rates",
+        (uint8_t*)&enc_codec_ctx->sample_rate, sizeof(enc_codec_ctx->sample_rate),
+        AV_OPT_SEARCH_CHILDREN);
+    if (ret < 0) {
+        elv_err("Cannot set output sample rate");
+        goto end;
+    }
+
+    ret = av_opt_set_bin(buffersink_ctx, "channel_layouts",
+        (uint8_t*)&enc_codec_ctx->channel_layout,
+        sizeof(enc_codec_ctx->channel_layout), AV_OPT_SEARCH_CHILDREN);
+    if (ret < 0) {
+        elv_err("Cannot set output channel layout");
+        goto end;
+    }
+
+    /*
+     * The buffer source output must be connected to the input pad of
+     * the first filter described by filters_descr; since the first
+     * filter input label is not specified, it is set to "in" by
+     * default.
+     */
+    outputs->name       = av_strdup("in");
+    outputs->filter_ctx = abuffersrc_ctx[0];
+    outputs->pad_idx    = 0;
+    outputs->next       = NULL;
+
+    /*
+     * The buffer sink input must be connected to the output pad of
+     * the last filter described by filters_descr; since the last
+     * filter output label is not specified, it is set to "out" by
+     * default.
+     */
+    inputs->name       = av_strdup("out");
+    inputs->filter_ctx = buffersink_ctx;
+    inputs->pad_idx    = 0;
+    inputs->next       = NULL;
+
+    if ((ret = avfilter_graph_parse_ptr(filter_graph, filters_descr,
+                                        &inputs, &outputs, NULL)) < 0)
+        goto end;
+
+    /* Link audio source output to audio pan input */
+    if ((ret = avfilter_link(abuffersrc_ctx[0], 0, filter_graph->filters[2], 0)) < 0) {
+        elv_err("Failed to link audio src to pan, ret=%d", ret);
+        return ret;
+    }
+
+    /* Link audio pan output to audio sink input */
+    if ((ret = avfilter_link(filter_graph->filters[2], 0, filter_graph->filters[1], 0)) < 0) {
+        elv_err("Failed to link audio pan to sink, ret=%d", ret);
+        return ret;
+    }
+
+    if ((ret = avfilter_graph_config(filter_graph, NULL)) < 0)
+        goto end;
+
+    /* Fill FilteringContext */
+    decoder_context->audio_filter_graph = filter_graph;
+    decoder_context->audio_buffersink_ctx = buffersink_ctx;
+
+end:
+    avfilter_inout_free(&inputs);
+    avfilter_inout_free(&outputs);
 
     return ret;
 
@@ -243,7 +388,8 @@ init_audio_join_filters(
     coderctx_t *encoder_context,
     txparams_t *params)
 {
-    if (decoder_context->audio_stream_index < 0){
+    if (decoder_context->n_audio < 0 ||
+        decoder_context->n_audio > MAX_AUDIO_MUX) {
         return -1;  //REVIEW want some unique val to say no audio present
     }
     AVCodecContext *enc_codec_ctx = encoder_context->codec_context[encoder_context->audio_stream_index[0]];
@@ -266,12 +412,7 @@ init_audio_join_filters(
         goto end;
     }
 
-    abuffersrc_ctx = (AVFilterContext **) calloc(decoder_context->n_audio, sizeof(AVFilterContext *));
-    if (!abuffersrc_ctx) {
-        elv_err("Failed to allocate memory for audio join buffersrc filter");
-        ret = AVERROR(ENOMEM);
-        goto end;
-    }
+    abuffersrc_ctx = decoder_context->audio_buffersrc_ctx;
 
     /* Create join filter with n inputs */
     sprintf(args, "inputs=%d", decoder_context->n_audio);
@@ -379,7 +520,6 @@ init_audio_join_filters(
         goto end;
 
     /* Save FilteringContext */
-    decoder_context->audio_buffersrc_ctx = abuffersrc_ctx;
     decoder_context->audio_buffersink_ctx = buffersink_ctx;
 
 end:

@@ -21,5 +21,21 @@
 # Listen in RTMP mode and make mezzanines
 ./bin/etx -f rtmp://localhost:5000/test001 -tx-type all -format fmp4-segment -video-seg-duration-ts 480480 -audio-seg-duration-ts 1441440 -force-keyint 4 -listen 1
 
+
 # Audio join
 ./bin/avcmd transcode -f ./media/AGAIG-clip-2mono.mp4 --tx-type audio-join --audio-index 1,2 --format fmp4-segment --seg-duration 30
+
+ffmpeg-4.2.2-amd64-static/ffmpeg -y -i ./media/AGAIG-clip-2mono.mp4 -vn -filter_complex "[0:1][0:2]join=inputs=2:channel_layout=stereo[aout]" -map [aout] -acodec aac -b:a 128k 'out-audio.mp4'
+
+
+# Audio pan
+./bin/etx -f ../media/MGM/multichannel_audio_clip.mov -tx-type audio-merge -filter-descriptor "[0:1]pan=stereo|c0<c1+0.707*c2|c1<c2+0.707*c1[aout]" -format fmp4-segment -seg-duration 30
+
+ffmpeg -i ../media/MGM/multichannel_audio_clip.mov -vn  -filter_complex "[0:1]pan=stereo|c0<c1+0.707*c2|c1<c2+0.707*c1[aout]" -map [aout]  -acodec aac -b:a 128k bb.mp4
+
+
+# Audio merge (not functional yet)
+./bin/etx -f ../media/MGM/BOB923HL_clip_timebase_1001_60000.MXF -tx-type audio-merge -filter-descriptor "[0:1][0:2][0:3][0:5][0:6]amerge=inputs=5,pan=stereo|c0<c0+c3+0.707*c2|c1<c1+c4+0.707*c2[out]" -format fmp4-segment -seg-duration 30 -audio-index 1,2,3,5,6
+
+ffmpeg-4.2.2-amd64-static/ffmpeg -y -i ../media/MGM/BOB923HL_clip_timebase_1001_60000.MXF -vn -filter_complex "[0:1][0:2][0:3][0:5][0:6]amerge=inputs=5,pan=stereo|c0<c0+c3+0.707*c2|c1<c1+c4+0.707*c2[aout]" -map [aout] -acodec aac -b:a 128k 'BOB1003HL.MXF.audio.mp4'
+

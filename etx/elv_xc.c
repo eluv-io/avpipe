@@ -631,6 +631,9 @@ tx_type_from_string(
     if (!strcmp(tx_type_str, "audio-join"))
         return tx_audio_join;
 
+    if (!strcmp(tx_type_str, "audio-pan"))
+        return tx_audio_pan;
+
     return tx_none;
 }
 
@@ -875,9 +878,11 @@ usage(
         "\t-e :                     (optional) Video encoder name. Default is \"libx264\", can be: \"libx264\", \"libx265\", \"h264_nvenc\", \"h264_videotoolbox\"\n"
         "\t-enc-height :            (optional) Default: -1 (use source height)\n"
         "\t-enc-width :             (optional) Default: -1 (use source width)\n"
-        "\t-equal-fduration :       (optional) Force equal frame duration. Must be 0 or 1 and only valid for \"fmp4-segment\" format\n"
+        "\t-equal-fduration :       (optional) Force equal frame duration. Must be 0 or 1 and only valid for \"fmp4-segment\" format.\n"
         "\t-f :                     (mandatory) Input filename for transcoding. Valid formats are: a filename that points to a valid file, or udp://127.0.0.1:<port>.\n"
-        "\t                                     Output goes to directory ./O\n"
+        "\t                                    Output goes to directory ./O\n"
+        "\t-filter-descriptor :     (mandatory if tx-type is audio-pan). Audio filter descriptor the same as ffmpeg format.\n"
+        "\t                                    For example: -filter-descriptor [0:1]pan=stereo|c0<c1+0.707*c2|c1<c2+0.707*c1[aout]\n"
         "\t-format :                (optional) Package format. Default is \"dash\", can be: \"dash\", \"hls\", \"mp4\", \"fmp4\", \"segment\", or \"fmp4-segment\"\n"
         "\t                                    Using \"segment\" format produces self contained mp4 segments with start pts from 0 for each segment\n"
         "\t                                    Using \"fmp4-segment\" format produces self contained mp4 segments with continious pts.\n"
@@ -896,7 +901,7 @@ usage(
         "\t-rc-max-rate :           (optional)\n"
         "\t-sample-rate :           (optional) Default: -1. For aac output sample rate is set to input sample rate and this parameter is ignored.\n"
         "\t-seekable :              (optional) Seekable stream. Default is 0, must be 0 or 1\n"
-        "\t-seg-duration :          (mandatory If format is \"segment\") segment duration secs (positive integer). It is used for making mp4 segments.\n"
+        "\t-seg-duration :          (mandatory if format is \"segment\") segment duration secs (positive integer). It is used for making mp4 segments.\n"
         "\t-start-pts :             (optional) Starting PTS for output. Default is 0\n"
         "\t-start-frag-index :      (optional) Start fragment index of first segment. Default is 0\n"
         "\t-start-segment :         (optional) Start segment number >= 1, Default is 1\n"
@@ -904,7 +909,8 @@ usage(
         "\t-stream-id :             (optional) Default: -1, if it is valid it will be used to transcode elementary stream with that stream-id.\n"
         "\t-sync-audio-to-stream-id:(optional) Default: -1, sync audio to video iframe of specific stream-id when input stream is mpegts.\n"
         "\t-t :                     (optional) Transcoding threads. Default is 1 thread, must be bigger than 1\n"
-        "\t-tx-type :               (optional) Transcoding type. Default is \"all\", can be \"video\", \"audio\", \"audio-merge\", \"audio-join\" or \"all\" \n"
+        "\t-tx-type :               (optional) Transcoding type. Default is \"all\", can be \"video\", \"audio\", \"audio-merge\", \"audio-join\", \"audio-pan\" or \"all\" \n"
+        "\t                                    \"all\" means transcoding video and audio together.\n"
         "\t-video-bitrate :         (optional) Mutually exclusive with crf. Default: -1 (unused)\n"
         "\t-video-seg-duration-ts : (mandatory If format is not \"segment\" and transcoding video) video segment duration time base (positive integer).\n"
         "\t-wm-text :               (optional) Watermark text that will be presented in every video frame if it exist. It has higher priority than overlay watermark.\n"
@@ -969,6 +975,7 @@ main(
         .ecodec2 = strdup("aac"),
         .enc_height = -1,                   /* -1 means use source height, other values 2160, 1080, 720 */
         .enc_width = -1,                    /* -1 means use source width, other values 3840, 1920, 1280 */
+        .filter_descriptor = strdup(""),
         .force_equal_fduration = 0,
         .force_keyint = 0,
         .format = strdup("dash"),
@@ -1141,6 +1148,8 @@ main(
                 } else {
                     usage(argv[0], argv[i], EXIT_FAILURE);
                 }
+            } else if (!strcmp(argv[i], "-filter-descriptor")) {
+                p.filter_descriptor = strdup(argv[i+1]);
             } else if (strlen(argv[i]) > 2) {
                 usage(argv[0], argv[i], EXIT_FAILURE);
             } else {
@@ -1260,6 +1269,7 @@ main(
                     strcmp(argv[i+1], "video") &&
                     strcmp(argv[i+1], "audio") &&
                     strcmp(argv[i+1], "audio-join") &&
+                    strcmp(argv[i+1], "audio-pan") &&
                     strcmp(argv[i+1], "audio-merge")) {
                     usage(argv[0], argv[i], EXIT_FAILURE);
                 }

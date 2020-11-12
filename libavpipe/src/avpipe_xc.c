@@ -58,6 +58,12 @@ init_audio_filters(
     coderctx_t *encoder_context,
     txparams_t *params);
 
+int
+init_audio_pan_filters(
+    const char *filters_descr,
+    coderctx_t *decoder_context,
+    coderctx_t *encoder_context);
+
 extern int
 init_audio_join_filters(
     coderctx_t *decoder_context,
@@ -1528,7 +1534,9 @@ should_skip_encoding(
     txparams_t *p,
     AVFrame *frame)
 {
-    if (!frame || p->tx_type == tx_audio_join)
+    if (!frame ||
+        p->tx_type == tx_audio_join ||
+        p->tx_type == tx_audio_merge)
         return 0;
 
     /* For MPEG-TS - skip a fixed duration at the beginning to sync audio and vide
@@ -1831,8 +1839,10 @@ transcode_audio(
 
 
     if (debug_frame_level)
-        elv_dbg("DECODE stream_index=%d send_packet pts=%"PRId64" dts=%"PRId64" duration=%d, input frame_size=%d, output frame_size=%d",
-            stream_index, packet->pts, packet->dts, packet->duration, codec_context->frame_size, encoder_context->codec_context[audio_enc_stream_index]->frame_size);
+        elv_dbg("DECODE stream_index=%d send_packet pts=%"PRId64" dts=%"PRId64
+            " duration=%d, input frame_size=%d, output frame_size=%d, audio_output_pts=%"PRId64,
+            stream_index, packet->pts, packet->dts, packet->duration, codec_context->frame_size,
+            encoder_context->codec_context[audio_enc_stream_index]->frame_size, decoder_context->audio_output_pts);
 
     if (p->bypass_transcoding) {
         return do_bypass(1, decoder_context, encoder_context, packet, p, debug_frame_level);
@@ -2675,6 +2685,7 @@ avpipe_tx(
     if (!params->bypass_transcoding &&
         (params->tx_type & tx_audio) &&
         params->tx_type != tx_audio_join &&
+        params->tx_type != tx_audio_pan &&
         params->tx_type != tx_audio_merge &&
         init_audio_filters(decoder_context, encoder_context, txctx->params) < 0) {
         elv_err("Failed to initialize audio filter");
@@ -2682,7 +2693,14 @@ avpipe_tx(
     }
 
     if (!params->bypass_transcoding &&
-        (params->tx_type == tx_audio_join) &&
+        params->tx_type == tx_audio_pan &&
+        init_audio_pan_filters(txctx->params->filter_descriptor, decoder_context, encoder_context) < 0) {
+        elv_err("Failed to initialize audio pan filter");
+        return -1;
+    }
+        
+    if (!params->bypass_transcoding &&
+        params->tx_type == tx_audio_join &&
         init_audio_join_filters(decoder_context, encoder_context, txctx->params) < 0) {
         elv_err("Failed to initialize audio join filter");
         return -1;
@@ -2915,7 +2933,8 @@ avpipe_tx(
              * Optimal solution would be to make filtering working for both aac and other cases (RM).
              */
             if (!strcmp(params->ecodec2, "aac") &&
-                params->tx_type != tx_audio_join) {
+                params->tx_type != tx_audio_join &&
+                params->tx_type != tx_audio_merge) {
                 response = transcode_audio_aac(
                     decoder_context,
                     encoder_context,
@@ -3325,6 +3344,16 @@ check_params(
         return -1;
     }
 
+    if (params->tx_type == tx_audio_merge) {
+        elv_err("Audio merge is not supported yet.");
+        return -1;
+    }
+
+    if (params->tx_type == tx_audio_pan && params->n_audio > 1) {
+        elv_err("Invalid number of audio streams, n_audio=%d", params->n_audio);
+        return -1;
+    }
+
     /* Set n_audio to zero if n_audio < 0 or tx_type == tx_video */
     if (params->n_audio < 0 ||
         params->tx_type == tx_video)
@@ -3503,6 +3532,7 @@ avpipe_free_params(
     free(params->watermark_shadow_color);
     free(params->watermark_overlay);
     free(params->mux_spec);
+    free(params->filter_descriptor);
     free(params);
     txctx->params = NULL;
 }
