@@ -64,6 +64,7 @@ clean-test:
             HEVC_H265ABR V2SingleABRTranscode* \
             Audio*Muxing Video*Muxing MuxingOutput \
             IrregularTsMezMaker* \
+            2Mono1Stereo 2Channel1Stereo \
             SingleABRTranscode* avpipe-test.log
 
 check-env:

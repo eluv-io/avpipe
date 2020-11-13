@@ -3349,7 +3349,7 @@ check_params(
         return -1;
     }
 
-    if (params->tx_type == tx_audio_pan && params->n_audio > 1) {
+    if (params->tx_type != tx_audio_join && params->n_audio > 1) {
         elv_err("Invalid number of audio streams, n_audio=%d", params->n_audio);
         return -1;
     }
