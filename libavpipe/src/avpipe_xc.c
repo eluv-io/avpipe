@@ -675,6 +675,7 @@ set_encoder_options(
     if (!strcmp(params->format, "fmp4-segment") || !strcmp(params->format, "segment")) {
         int64_t seg_duration_ts = 0;
         float seg_duration = 0;
+        /* Precalculate seg_duration_ts based on seg_duration if seg_duration is set */
         if (params->seg_duration) {
             seg_duration = atof(params->seg_duration);
             if (stream_index == decoder_context->video_stream_index)
@@ -685,6 +686,9 @@ set_encoder_options(
             if (params->audio_seg_duration_ts > 0)
                 seg_duration_ts = params->audio_seg_duration_ts;
             av_opt_set_int(encoder_context->format_context2->priv_data, "segment_duration_ts", seg_duration_ts, 0);
+            /* If audio_seg_duration_ts is not set, set it now */
+            if (params->audio_seg_duration_ts <= 0)
+                params->audio_seg_duration_ts = seg_duration_ts;
             elv_dbg("setting \"fmp4-segment\" audio segment_time to %s, seg_duration_ts=%"PRId64, params->seg_duration, seg_duration_ts);
             av_opt_set(encoder_context->format_context2->priv_data, "reset_timestamps", "on", 0);
         } 
@@ -692,6 +696,9 @@ set_encoder_options(
             if (params->video_seg_duration_ts > 0)
                 seg_duration_ts = params->video_seg_duration_ts;
             av_opt_set_int(encoder_context->format_context->priv_data, "segment_duration_ts", seg_duration_ts, 0);
+            /* If video_seg_duration_ts is not set, set it now */
+            if (params->video_seg_duration_ts <= 0)
+                params->video_seg_duration_ts = seg_duration_ts;
             elv_dbg("setting \"fmp4-segment\" video segment_time to %s, seg_duration_ts=%"PRId64, params->seg_duration, seg_duration_ts);
             av_opt_set(encoder_context->format_context->priv_data, "reset_timestamps", "on", 0);
         }
