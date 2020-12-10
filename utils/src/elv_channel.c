@@ -11,14 +11,15 @@
 
 struct elv_channel_t
 {
-    void **_items;
-    int64_t _count;
-    int64_t _front;
-    int64_t _rear;
-    u_int64_t _capacity;
+    void **         _items;
+    int64_t         _count;
+    int64_t         _front;
+    int64_t         _rear;
+    u_int64_t       _capacity;
+    int             _closed;
     pthread_mutex_t _mutex;
-    pthread_cond_t _cond_send;  /* Signaled when an item has been sent */
-    pthread_cond_t _cond_recv;  /* Signaled when an item has been received */
+    pthread_cond_t  _cond_send;  /* Signaled when an item has been sent */
+    pthread_cond_t  _cond_recv;  /* Signaled when an item has been received */
 };
 
 int
@@ -74,8 +75,14 @@ elv_channel_receive(
         return NULL;
 
     pthread_mutex_lock(&channel->_mutex);
-    while (channel->_count <= 0)
+    while (channel->_count <= 0 && !channel->_closed)
         pthread_cond_wait(&channel->_cond_send, &channel->_mutex);
+
+    if (channel->_closed && channel->_count == 0) {
+        pthread_cond_signal(&channel->_cond_recv);
+        pthread_mutex_unlock(&channel->_mutex);
+        return NULL;
+    }
 
     channel->_count--;
     msg = channel->_items[channel->_front];
@@ -100,15 +107,24 @@ elv_channel_timed_receive(
     if (!channel)
         return EINVAL;
 
+    *rcvdmsg = NULL;
     gettimeofday(&tv, NULL);
 
-    ts.tv_sec  = (long) (usec / 1000000) + tv.tv_sec;
-    ts.tv_nsec = (int) ((usec % 1000000) + tv.tv_usec) * 1000;
+    tv.tv_sec += usec / MICRO_IN_SEC;
+    tv.tv_usec += usec % MICRO_IN_SEC;
+    if (tv.tv_usec >= MICRO_IN_SEC) {
+        tv.tv_sec += (tv.tv_usec / MICRO_IN_SEC);
+        tv.tv_usec %= MICRO_IN_SEC;
+    }
+
+    ts.tv_sec  = tv.tv_sec;
+    ts.tv_nsec = tv.tv_usec * 1000;
 
     pthread_mutex_lock(&channel->_mutex);
     while (channel->_count <= 0) {
         rc = pthread_cond_timedwait(&channel->_cond_send, &channel->_mutex, &ts);
-        if (rc == ETIMEDOUT) {
+        /* ETIMEDOUT is not a real error */
+        if (rc != 0) {
             pthread_mutex_unlock(&channel->_mutex);
             return rc;
         }
@@ -145,6 +161,11 @@ int
 elv_channel_close(
     elv_channel_t *channel)
 {
+    channel->_closed = 1;
+    pthread_mutex_lock(&channel->_mutex);
+    pthread_cond_signal(&channel->_cond_recv);
+    pthread_cond_signal(&channel->_cond_send);
+    pthread_mutex_unlock(&channel->_mutex);
     return 0;
 }
 

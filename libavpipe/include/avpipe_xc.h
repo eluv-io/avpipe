@@ -218,6 +218,7 @@ typedef struct coderctx_t {
     int64_t first_read_frame_pts[MAX_STREAMS];          /* PTS of first frame read - which might not be decodable */
 
     int64_t audio_input_prev_pts;       /* Previous pts for audio input */
+    int64_t video_encoder_prev_pts;     /* Previous pts for video output (encoder) */
     int64_t video_duration;             /* Duration/pts of original frame */
     int64_t audio_duration;             /* Audio duration/pts of original frame when tx_type == tx_all */
     int64_t first_key_frame_pts;        /* First video key frame pts, used to synchronize audio and video in UDP live streams */
@@ -227,6 +228,7 @@ typedef struct coderctx_t {
     int     is_mpegts;                  /* Set to 1 if input format name is "mpegts" */
     int     mpegts_synced;              /* will be set to 1 if audio and video are synced */
     int     frame_duration;             /* Will be > 0 if parameter set_equal_fduration is set and doing mez making */
+    int     calculated_frame_duration;  /* Approximate/real frame duration of video stream, will be used to fill video frames */
 
     int     cancelled;
     int     stopped;
@@ -381,6 +383,7 @@ typedef struct txctx_t {
     avpipe_io_handler_t *in_handlers;
     avpipe_io_handler_t *out_handlers;
     int                 debug_frame_level;
+    int                 do_instrument;
 
     /*
      * Data structures that are needed for muxing multiple inputs to generate one output.
@@ -394,7 +397,21 @@ typedef struct txctx_t {
 
     AVPacket            pkt_array[MAX_AUDIO_MUX+MAX_CAPTION_MUX+1];
     int                 is_pkt_valid[MAX_AUDIO_MUX+MAX_CAPTION_MUX+1];
+
+    elv_channel_t       *vc;        // Video frame channel
+    elv_channel_t       *ac;        // Audio frame channel
+    pthread_t           vthread_id;
+    pthread_t           athread_id;
+    int                 stop;
 } txctx_t;
+
+/* Params that are needed to decode/encode a frame in a thread */
+typedef struct xc_frame_t {
+    AVPacket    *packet;
+    AVFrame     *frame;
+    AVFrame     *filt_frame;
+    int         stream_index;
+} xc_frame_t;
 
 typedef struct out_tracker_t {
     struct avpipe_io_handler_t  *out_handlers;

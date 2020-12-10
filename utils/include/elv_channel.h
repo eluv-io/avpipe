@@ -6,6 +6,8 @@
 
 typedef struct elv_channel_t elv_channel_t;
 
+#define MICRO_IN_SEC    1000000
+
 int
 elv_channel_init(
     elv_channel_t **channel,

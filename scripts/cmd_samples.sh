@@ -39,3 +39,4 @@ ffmpeg -i ../media/MGM/multichannel_audio_clip.mov -vn  -filter_complex "[0:1]pa
 
 ffmpeg-4.2.2-amd64-static/ffmpeg -y -i ../media/MGM/BOB923HL_clip_timebase_1001_60000.MXF -vn -filter_complex "[0:1][0:2][0:3][0:5][0:6]amerge=inputs=5,pan=stereo|c0<c0+c3+0.707*c2|c1<c1+c4+0.707*c2[aout]" -map [aout] -acodec aac -b:a 128k 'BOB1003HL.MXF.audio.mp4'
 
+$FFMPEG_BIN/ffmpeg -listen 1 -i rtmp://192.168.90.202:1935/rtmp/XQjNir3S -c copy -flags +global_header -f segment -segment_time 60 -segment_format_options movflags=+faststart -reset_timestamps 1 test%d.mp4
