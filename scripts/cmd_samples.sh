@@ -29,7 +29,7 @@ ffmpeg-4.2.2-amd64-static/ffmpeg -y -i ./media/AGAIG-clip-2mono.mp4 -vn -filter_
 
 
 # Audio pan
-./bin/etx -f ../media/MGM/multichannel_audio_clip.mov -tx-type audio-merge -filter-descriptor "[0:1]pan=stereo|c0<c1+0.707*c2|c1<c2+0.707*c1[aout]" -format fmp4-segment -seg-duration 30
+./bin/etx -f ../media/MGM/multichannel_audio_clip.mov -tx-type audio-pan -filter-descriptor "[0:1]pan=stereo|c0<c1+0.707*c2|c1<c2+0.707*c1[aout]" -format fmp4-segment -seg-duration 30
 
 ffmpeg -i ../media/MGM/multichannel_audio_clip.mov -vn  -filter_complex "[0:1]pan=stereo|c0<c1+0.707*c2|c1<c2+0.707*c1[aout]" -map [aout]  -acodec aac -b:a 128k bb.mp4
 

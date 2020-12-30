@@ -2869,7 +2869,7 @@ get_filter_str(
 
 
 int
-avpipe_tx(
+avpipe_xc(
     txctx_t *txctx,
     int do_instrument,
     int debug_frame_level)
@@ -2879,16 +2879,23 @@ avpipe_tx(
     coderctx_t *decoder_context = &txctx->decoder_ctx;
     coderctx_t *encoder_context = &txctx->encoder_ctx;
     txparams_t *params = txctx->params;
+    int rc = 0;
+    AVPacket *input_packet = NULL;
+    AVFrame *input_frame = NULL;
+    AVFrame *filt_frame = NULL;
 
     if (!params->bypass_transcoding &&
         (params->tx_type & tx_video)) {
-        if (get_filter_str(&filter_str, encoder_context, params) < 0)
-            return -1;
+        if (get_filter_str(&filter_str, encoder_context, params) < 0) {
+            rc = -1;
+            goto xc_done;
+        }
 
         if (init_filters(filter_str, decoder_context, encoder_context, txctx->params) < 0) {
             free(filter_str);
             elv_err("Failed to initialize video filter");
-            return -1;
+            rc = -1;
+            goto xc_done;
         }
         free(filter_str);
     }
@@ -2900,33 +2907,38 @@ avpipe_tx(
         params->tx_type != tx_audio_merge &&
         init_audio_filters(decoder_context, encoder_context, txctx->params) < 0) {
         elv_err("Failed to initialize audio filter");
-        return -1;
+        rc = -1;
+        goto xc_done;
     }
 
     if (!params->bypass_transcoding &&
         params->tx_type == tx_audio_pan &&
         init_audio_pan_filters(txctx->params->filter_descriptor, decoder_context, encoder_context) < 0) {
         elv_err("Failed to initialize audio pan filter");
-        return -1;
+        rc = -1;
+        goto xc_done;
     }
         
     if (!params->bypass_transcoding &&
         params->tx_type == tx_audio_join &&
         init_audio_join_filters(decoder_context, encoder_context, txctx->params) < 0) {
         elv_err("Failed to initialize audio join filter");
-        return -1;
+        rc = -1;
+        goto xc_done;
     }
 
     if ((params->tx_type & tx_video) &&
         avformat_write_header(encoder_context->format_context, NULL) < 0) {
         elv_err("Failed to open video output file");
-        return -1;
+        rc = -1;
+        goto xc_done;
     }
 
     if (params->tx_type & tx_audio &&
         avformat_write_header(encoder_context->format_context2, NULL) < 0) {
         elv_err("Failed to open audio output file");
-        return -1;
+        rc = -1;
+        goto xc_done;
     }
 
     if (params->tx_type & tx_video &&
@@ -2936,7 +2948,8 @@ avpipe_tx(
         elv_err("Internal error in calculating timebase, calc_timebase=%d, stream_timebase=%d",
             calc_timebase(encoder_context->codec_context[encoder_context->video_stream_index]->time_base.den),
             encoder_context->stream[encoder_context->video_stream_index]->time_base.den);
-        return -1;
+        rc = -1;
+        goto xc_done;
     }
 
     /*
@@ -2980,18 +2993,17 @@ avpipe_tx(
     }
 
 
-    AVFrame *input_frame = av_frame_alloc();
-    AVFrame *filt_frame = av_frame_alloc();
+    input_frame = av_frame_alloc();
+    filt_frame = av_frame_alloc();
 
     if (!input_frame || !filt_frame) {
         elv_err("Failed to allocated memory for AVFrame");
-        return -1;
+        rc = -1;
+        goto xc_done;
     }
 
     txctx->do_instrument = do_instrument;
     txctx->debug_frame_level = debug_frame_level;
-
-    int rc = 0;
 
     elv_dbg("START TIME %d SKIP_PTS %d, START PTS %d (output), DURATION %d",
         params->start_time_ts, params->skip_over_pts,
@@ -3003,7 +3015,8 @@ avpipe_tx(
         if (av_seek_frame(decoder_context->format_context,
                 decoder_context->video_stream_index, params->start_time_ts, SEEK_SET) < 0) {
             elv_err("Failed seeking to desired start frame");
-            return -1;
+            rc = -1;
+            goto xc_done;
         }
     }
 #endif
@@ -3041,7 +3054,6 @@ avpipe_tx(
     int frames_read = 0;
     int frames_read_past_duration = 0;
     const int frames_allowed_past_duration = 5;
-    AVPacket *input_packet = NULL;
 
     while (1) {
         input_packet = av_packet_alloc();
@@ -3149,6 +3161,7 @@ avpipe_tx(
         }
     }
 
+xc_done:
     elv_dbg("av_read_frame() rc=%d", rc);
 
     txctx->stop = 1;
@@ -3185,7 +3198,7 @@ avpipe_tx(
     if (params->tx_type & tx_audio)
         av_write_trailer(encoder_context->format_context2);
 
-    elv_log("avpipe_tx done last video_pts=%"PRId64" audio_pts=%"PRId64
+    elv_log("avpipe_xc done last video_pts=%"PRId64" audio_pts=%"PRId64
         " video_input_start_pts=%"PRId64" audio_input_start_pts=%"PRId64
         " video_last_dts=%"PRId64" audio_last_dts="PRId64
         " last_pts_read=%"PRId64" last_pts_read2=%"PRId64
@@ -3343,6 +3356,8 @@ get_tx_type_name(
         return "tx_all";
     case tx_audio_join:
         return "tx_audio_join";
+    case tx_audio_pan:
+        return "tx_audio_pan";
     case tx_audio_merge:
         return "tx_audio_merge";
     default:
@@ -3520,7 +3535,9 @@ check_params(
         return -1;
     }
 
-    if (params->tx_type != tx_audio_join && params->n_audio > 1) {
+    if (params->tx_type != tx_audio_join &&
+        params->tx_type != tx_audio_pan
+        && params->n_audio > 1) {
         elv_err("Invalid number of audio streams, n_audio=%d", params->n_audio);
         return -1;
     }
@@ -3634,7 +3651,8 @@ avpipe_init(
         "bitdepth=%d "
         "listen=%d "
         "max_cll=\"%s\" "
-        "master_display=\"%s\"",
+        "master_display=\"%s\" "
+        "filter_descriptor=\"%s\"",
         params->stream_id, url,
         avpipe_version(),
         params->bypass_transcoding, get_tx_type_name(params->tx_type), params->format,
@@ -3646,7 +3664,8 @@ avpipe_init(
         params->crypt_iv, params->crypt_key, params->crypt_kid, params->crypt_key_url, params->crypt_scheme,
         params->n_audio, audio_index_str, params->sync_audio_to_stream_id, params->audio_fill_gap,
         params->watermark_overlay_type, params->watermark_overlay_len, params->bitdepth, params->listen,
-        params->max_cll ? params->max_cll : "", params->master_display ? params->master_display : "");
+        params->max_cll ? params->max_cll : "", params->master_display ? params->master_display : "",
+        params->filter_descriptor);
     elv_log("AVPIPE XCPARAMS %s", buf);
 
     if (check_params(params) < 0)
@@ -3779,8 +3798,8 @@ avpipe_fini(
     }
 
     free((*txctx)->inctx);
-    elv_channel_fini(&(*txctx)->vc);
-    elv_channel_fini(&(*txctx)->ac);
+    elv_channel_fini(&((*txctx)->vc));
+    elv_channel_fini(&((*txctx)->ac));
     avpipe_free_params(*txctx);
     free(*txctx);
     *txctx = NULL;

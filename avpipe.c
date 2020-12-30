@@ -590,7 +590,7 @@ tx_run(
     }
 
     txctx_t *txctx = txe->txctx;
-    if (avpipe_tx(txctx, 0, txctx->debug_frame_level) < 0) {
+    if (avpipe_xc(txctx, 0, txctx->debug_frame_level) < 0) {
         elv_err("Error in transcoding");
         rc = -1;
         goto end_tx;
@@ -656,7 +656,7 @@ tx(
     txctx->out_handlers = out_handlers;
     txctx->inctx = inctx;
 
-    if (avpipe_tx(txctx, 0, debug_frame_level) < 0) {
+    if (avpipe_xc(txctx, 0, debug_frame_level) < 0) {
         elv_err("Transcoding failed");
         rc = -1;
         goto end_tx;

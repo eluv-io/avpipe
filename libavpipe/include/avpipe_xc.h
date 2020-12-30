@@ -500,7 +500,7 @@ avpipe_probe(
  * @return  Returns 0 if transcoding is successful, otherwise -1.
  */
 int
-avpipe_tx(
+avpipe_xc(
     txctx_t *txctx,
     int do_instrument,
     int debug_frame_level);
