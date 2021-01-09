@@ -3063,8 +3063,10 @@ avpipe_xc(
         }
 
         rc = av_read_frame(decoder_context->format_context, input_packet);
-        if (rc < 0)
+        if (rc < 0) {
+            av_packet_free(&input_packet);
             break;
+        }
 
         const char *st = stream_type_str(encoder_context, input_packet->stream_index);
         int stream_index = input_packet->stream_index;
@@ -3158,6 +3160,7 @@ avpipe_xc(
 
         } else if (debug_frame_level) {
             elv_dbg("Skip stream - packet index=%d, pts=%"PRId64, input_packet->stream_index, input_packet->pts);
+            av_packet_free(&input_packet);
         }
     }
 
