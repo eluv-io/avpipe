@@ -3107,8 +3107,10 @@ avpipe_xc(
             // PENDING(SSS) - this logic can be done after decoding where we know concretely that we decoded all frames
             // we need to encode.
             if (should_stop_decoding(input_packet, decoder_context, encoder_context,
-                params, &frames_read, &frames_read_past_duration, frames_allowed_past_duration))
+                params, &frames_read, &frames_read_past_duration, frames_allowed_past_duration)) {
+                av_packet_free(&input_packet);
                 break;
+            }
 
             /*
              * Skip the input packet if the packet timestamp is smaller than start_time_ts.
@@ -3158,8 +3160,9 @@ avpipe_xc(
             xc_frame->stream_index = input_packet->stream_index;
             elv_channel_send(txctx->ac, xc_frame);
 
-        } else if (debug_frame_level) {
-            elv_dbg("Skip stream - packet index=%d, pts=%"PRId64, input_packet->stream_index, input_packet->pts);
+        } else {
+            if (debug_frame_level)
+                elv_dbg("Skip stream - packet index=%d, pts=%"PRId64, input_packet->stream_index, input_packet->pts);
             av_packet_free(&input_packet);
         }
     }
