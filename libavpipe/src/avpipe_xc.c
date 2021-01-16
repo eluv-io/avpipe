@@ -3,7 +3,7 @@
  *
  * Build:
  *
- * ELV_TOOLCHAIN_DIST_PLATFORM=...
+ * . init-env.sh <PATH_TO_CONTENT_FABRIC>
  * make
  *
  */
@@ -360,7 +360,7 @@ prepare_decoder(
     decoder_context->format_context = avformat_alloc_context();
     if (!decoder_context->format_context) {
         elv_err("Could not allocate memory for Format Context");
-        return -1;
+        return eav_mem_alloc;
     }
 
     /* Set global decoding options */
@@ -377,13 +377,13 @@ prepare_decoder(
     rc = avformat_open_input(&decoder_context->format_context, inctx->url, NULL, &opts);
     if (rc != 0) {
         elv_err("Could not open input file, err=%d", rc);
-        return -1;
+        return eav_open_input;
     }
 
     /* Retrieve stream information */
     if (avformat_find_stream_info(decoder_context->format_context,  NULL) < 0) {
         elv_err("Could not get input stream info");
-        return -1;
+        return eav_stream_info;
     }
 
     decoder_context->is_mpegts = 0;
@@ -459,7 +459,7 @@ prepare_decoder(
         if (params && decoder_context->stream[i]->id == params->sync_audio_to_stream_id) {
             if (decoder_context->stream[i]->codecpar->codec_type != AVMEDIA_TYPE_VIDEO) {
                 elv_err("Syncing to non-video stream is not possible, sync_audio_to_stream_id=%d", params->sync_audio_to_stream_id);
-                return -1;
+                return eav_stream_index;
             }
             elv_log("STREAM MATCH sync_stream_id=%d stream_index=%d", params->sync_audio_to_stream_id, i);
             sync_id_index = i;
@@ -493,18 +493,18 @@ prepare_decoder(
         if (decoder_context->codec_parameters[i]->codec_type != AVMEDIA_TYPE_DATA && !decoder_context->codec[i]) {
             elv_err("Unsupported decoder codec param=%s, codec_id=%d",
                 params ? params->dcodec : "", decoder_context->codec_parameters[i]->codec_id);
-            return -1;
+            return eav_codec_param;
         }
 
         decoder_context->codec_context[i] = avcodec_alloc_context3(decoder_context->codec[i]);
         if (!decoder_context->codec_context[i]) {
             elv_err("Failed to allocated memory for AVCodecContext");
-            return -1;
+            return eav_mem_alloc;
         }
 
         if (avcodec_parameters_to_context(decoder_context->codec_context[i], decoder_context->codec_parameters[i]) < 0) {
             elv_err("Failed to copy codec params to codec context");
-            return -1;
+            return eav_codec_param;
         }
 
         /* Enable multi-threading - if thread_count is 0 the library will determine number of threads as a
@@ -523,7 +523,7 @@ prepare_decoder(
              (rc = avcodec_open2(decoder_context->codec_context[i], decoder_context->codec[i], NULL)) < 0) {
             elv_err("Failed to open codec through avcodec_open2, err=%d, param=%s, codec_id=%s",
                 rc, params->dcodec, avcodec_get_name(decoder_context->codec_parameters[i]->codec_id));
-            return -1;
+            return eav_open_codec;
         }
 
         elv_log("Input stream=%d pixel_format=%s, timebase=%d, sample_fmt=%d, frame_size=%d",
@@ -553,7 +553,7 @@ prepare_decoder(
     /* If it couldn't find identified stream with params->stream_id, then return an error */
     if (params && params->stream_id >= 0 && stream_id_index < 0) {
         elv_err("Invalid stream_id=%d", params->stream_id);
-        return -1;
+        return eav_param;
     }
 
     if (stream_id_index >= 0) {
@@ -602,7 +602,7 @@ prepare_decoder(
                     decoder_context->stream[decoder_context->video_stream_index]->time_base.den,
                     decoder_context->format_context->streams[decoder_context->video_stream_index]->r_frame_rate.den,
                     decoder_context->format_context->streams[decoder_context->video_stream_index]->r_frame_rate.num);
-                return -1;
+                return eav_timebase;
             }
             decoder_context->frame_duration = decoder_context->stream[decoder_context->video_stream_index]->time_base.den *
                 decoder_context->format_context->streams[decoder_context->video_stream_index]->r_frame_rate.den /
@@ -629,7 +629,7 @@ set_encoder_options(
 {
     if (timebase <= 0) {
         elv_err("Setting encoder options failed, invalid timebase=%d (check encoding params)", timebase);
-        return -1;
+        return eav_timebase;
     }
 
     if (!strcmp(params->format, "fmp4")) {
@@ -655,7 +655,7 @@ set_encoder_options(
     if (selected_decoded_audio(decoder_context, stream_index) >= 0) {
         if (!(params->tx_type & tx_audio)) {
             elv_err("Failed to set encoder options, stream_index=%d, tx_type=%d", stream_index, params->tx_type);
-            return -1;
+            return eav_param;
         }
         av_opt_set_int(encoder_context->format_context2->priv_data, "start_fragment_index", params->start_fragment_index,
             AV_OPT_FLAG_ENCODING_PARAM | AV_OPT_SEARCH_CHILDREN);
@@ -665,7 +665,7 @@ set_encoder_options(
     if (stream_index == decoder_context->video_stream_index) {
         if (!(params->tx_type & tx_video)) {
             elv_err("Failed to set encoder options, stream_index=%d, tx_type=%d", stream_index, params->tx_type);
-            return -1;
+            return eav_param;
         }
         av_opt_set_int(encoder_context->format_context->priv_data, "start_fragment_index", params->start_fragment_index,
             AV_OPT_FLAG_ENCODING_PARAM | AV_OPT_SEARCH_CHILDREN);
@@ -930,7 +930,7 @@ set_pixel_fmt(
         break;
     default:
         elv_err("Invalid bitdepth=%d", params->bitdepth);
-        return -1;
+        return eav_param;
     }
 
     return 0;
@@ -947,7 +947,7 @@ prepare_video_encoder(
 
     if (index < 0) {
         elv_dbg("No video stream detected by decoder.");
-        return 0;
+        return eav_stream_index;
     }
 
     encoder_context->video_stream_index = index;
@@ -961,7 +961,7 @@ prepare_video_encoder(
 
     if (!encoder_context->codec[index]) {
         elv_dbg("could not find the proper codec");
-        return -1;
+        return eav_codec_context;
     }
     elv_log("Found encoder index=%d, %s", index, params->ecodec);
 
@@ -973,7 +973,7 @@ prepare_video_encoder(
         rc = avcodec_parameters_copy(out_stream->codecpar, in_codecpar);
         if (rc < 0) {
             elv_err("BYPASS failed to copy codec parameters\n");
-            return -1;
+            return eav_codec_param;
         }
 
         /* Set output stream timebase when bypass encoding */
@@ -984,7 +984,7 @@ prepare_video_encoder(
             decoder_context->stream[decoder_context->video_stream_index]->time_base.den);
         if (rc < 0) {
             elv_err("Failed to set video encoder options with bypass");
-            return -1;
+            return rc;
         }
         return 0;
     }
@@ -992,7 +992,7 @@ prepare_video_encoder(
     encoder_context->codec_context[index] = avcodec_alloc_context3(encoder_context->codec[index]);
     if (!encoder_context->codec_context[index]) {
         elv_dbg("could not allocated memory for codec context");
-        return -1;
+        return eav_codec_context;
     }
 
     AVCodecContext *encoder_codec_context = encoder_context->codec_context[index];
@@ -1025,7 +1025,7 @@ prepare_video_encoder(
         decoder_context->stream[decoder_context->video_stream_index]->time_base.den);
     if (rc < 0) {
         elv_err("Failed to set video encoder options");
-        return -1;
+        return rc;
     }
 
     /* Set codec context parameters */
@@ -1073,8 +1073,8 @@ prepare_video_encoder(
         /* otherwise set encoder pixel format to AV_PIX_FMT_YUV420P. */
         encoder_codec_context->pix_fmt = AV_PIX_FMT_YUV420P;
 #endif
-    if (set_pixel_fmt(encoder_codec_context, params) < 0)
-        return -1;
+    if ((rc = set_pixel_fmt(encoder_codec_context, params)) != eav_success)
+        return rc;
 
     if (!strcmp(params->ecodec, "h264_nvenc"))
         /* Set NVIDIA specific params if the encoder is NVIDIA */
@@ -1094,7 +1094,7 @@ prepare_video_encoder(
     /* Open video encoder (initialize the encoder codec_context[i] using given codec[i]). */
     if ((rc = avcodec_open2(encoder_context->codec_context[index], encoder_context->codec[index], &encoder_options)) < 0) {
         elv_dbg("Could not open encoder for video, err=%d", rc);
-        return -1;
+        return eav_open_codec;
     }
 
     /* This needs to happen after avcodec_open2() */
@@ -1102,7 +1102,7 @@ prepare_video_encoder(
             encoder_context->stream[index]->codecpar,
             encoder_context->codec_context[index]) < 0) {
         elv_dbg("could not copy encoder parameters to output stream");
-        return -1;
+        return eav_codec_param;
     }
 
     /* Set stream parameters - after avcodec_open2 and parameters from context.
@@ -1127,18 +1127,18 @@ prepare_audio_encoder(
 
     if (index < 0) {
         elv_dbg("No audio stream detected by decoder.");
-        return 0;
+        return eav_stream_index;
     }
 
     if (!decoder_context->codec_context[index]) {
         elv_err("Decoder codec context is NULL! index=%d", index);
-        return -1;
+        return eav_codec_context;
     }
 
     /* If there are more than 1 audio stream do encode, we can't do bypass */
     if (params && params->bypass_transcoding && decoder_context->n_audio > 1) {
         elv_err("Can not bypass multiple audio streams, n_audio=%d", decoder_context->n_audio);
-        return -1;
+        return eav_num_streams;
     }
 
     format_context = encoder_context->format_context2;
@@ -1155,7 +1155,7 @@ prepare_audio_encoder(
         encoder_context->codec[index] = avcodec_find_encoder_by_name(ecodec);
     if (!encoder_context->codec[index]) {
         elv_err("Codec not found, codec_id=%s\n", avcodec_get_name(decoder_context->codec_context[index]->codec_id));
-        return -1;
+        return eav_codec_context;
     }
 
     format_context->io_open = elv_io_open;
@@ -1211,7 +1211,7 @@ prepare_audio_encoder(
         encoder_context->stream[encoder_context->audio_stream_index[0]]->time_base.den);
     if (rc < 0) {
         elv_err("Failed to set audio encoder options");
-        return -1;
+        return rc;
     }
 
     AVCodecContext *encoder_codec_context = encoder_context->codec_context[index];
@@ -1223,7 +1223,7 @@ prepare_audio_encoder(
     /* Open audio encoder codec */
     if (avcodec_open2(encoder_context->codec_context[index], encoder_context->codec[index], NULL) < 0) {
         elv_dbg("Could not open encoder for audio, index=%d", index);
-        return -1;
+        return eav_open_codec;
     }
 
     elv_dbg("encoder audio stream index=%d, bitrate=%d, sample_fmts=%d, timebase=%d, output frame_size=%d, sample_rate=%d",
@@ -1235,7 +1235,7 @@ prepare_audio_encoder(
             encoder_context->stream[index]->codecpar,
             encoder_context->codec_context[index]) < 0) {
         elv_err("Failed to copy encoder parameters to output stream");
-        return -1;
+        return eav_codec_param;
 
     }
 
@@ -1248,7 +1248,7 @@ prepare_audio_encoder(
         if (!(decoder_context->fifo = av_audio_fifo_alloc(encoder_context->codec_context[index]->sample_fmt,
                 encoder_context->codec_context[index]->channels, 1))) {
             elv_err("Failed to allocate audio FIFO");
-            return -1;
+            return eav_mem_alloc;
         }
     }
 #endif
@@ -1269,6 +1269,7 @@ prepare_encoder(
     char *filename = "";
     char *filename2 = "";
     char *format = params->format;
+    int rc = 0;
 
     /*
      * TODO: passing "hls" format needs some development in FF to produce stream index for audio/video.
@@ -1308,14 +1309,14 @@ prepare_encoder(
         avformat_alloc_output_context2(&encoder_context->format_context, NULL, format, filename);
         if (!encoder_context->format_context) {
             elv_dbg("could not allocate memory for output format");
-            return -1;
+            return eav_codec_context;
         }
     }
     if (params->tx_type & tx_audio) {
         avformat_alloc_output_context2(&encoder_context->format_context2, NULL, format, filename2);
         if (!encoder_context->format_context2) {
             elv_dbg("could not allocate memory for audio output format");
-            return -1;
+            return eav_codec_context;
         }
     }
 
@@ -1441,17 +1442,17 @@ prepare_encoder(
     }
 
     if (params->tx_type & tx_video) {
-        if (prepare_video_encoder(encoder_context, decoder_context, params)) {
+        if ((rc = prepare_video_encoder(encoder_context, decoder_context, params)) != eav_success) {
             elv_err("Failure in preparing video encoder");
-            return -1;
+            return rc;
         }
     }
 
     if (params->tx_type & tx_audio) {
         encoder_context->audio_enc_stream_index = -1;
-        if (prepare_audio_encoder(encoder_context, decoder_context, params)) {
+        if ((rc = prepare_audio_encoder(encoder_context, decoder_context, params)) != eav_success) {
             elv_err("Failure in preparing audio copy");
-            return -1;
+            return rc;
         }
     }
 
@@ -1632,12 +1633,12 @@ encode_frame(
 
     int skip = should_skip_encoding(decoder_context, encoder_context, stream_index, params, frame);
     if (skip)
-        return 0;
+        return eav_success;
 
     AVPacket *output_packet = av_packet_alloc();
     if (!output_packet) {
         elv_dbg("could not allocate memory for output packet");
-        return -1;
+        return eav_mem_alloc;
     }
 
     // Prepare packet before encoding - adjust PTS and IDR frame signaling
@@ -1724,7 +1725,7 @@ encode_frame(
             break;
         } else if (ret < 0) {
             elv_err("Failure while receiving a packet from the encoder: %s", av_err2str(ret));
-            return -1;
+            return eav_receive_packet;
         }
 
         /*
@@ -1737,7 +1738,7 @@ encode_frame(
         } else if (output_packet->stream_index >= format_context->nb_streams) {
             elv_err("Output packet stream_index=%d is more than the number of streams=%d in output format",
                 output_packet->stream_index, format_context->nb_streams);
-            return -1;
+            return eav_stream_index;
         }
 
         /*
@@ -1812,7 +1813,7 @@ encode_frame(
     }
     av_packet_unref(output_packet);
     av_packet_free(&output_packet);
-    return 0;
+    return eav_success;
 }
 
 static int
@@ -1842,10 +1843,10 @@ do_bypass(
 
     if (av_interleaved_write_frame(format_context, packet) < 0) {
         elv_err("Failure in copying bypass packet tx_type=%d", p->tx_type);
-        return -1;
+        return eav_write_frame;
     }
 
-    return 0;
+    return eav_success;
 }
 
 static int
@@ -1879,8 +1880,7 @@ transcode_audio(
     if (response < 0) {
         elv_err("Failure while sending an audio packet to the decoder: err=%d, %s", response, av_err2str(response));
         // Ignore the error and continue
-        response = 0;
-        return response;
+        return eav_success;
     }
 
     while (response >= 0) {
@@ -1889,7 +1889,7 @@ transcode_audio(
             break;
         } else if (response < 0) {
             elv_err("Failure while receiving a frame from the decoder: %s", av_err2str(response));
-            return response;
+            return eav_receive_frame;
         }
 
         if (decoder_context->first_decoding_audio_pts < 0)
@@ -1920,7 +1920,7 @@ transcode_audio(
 
             if (ret < 0) {
                 elv_err("Failed to execute audio frame filter ret=%d", ret);
-                return -1;
+                return eav_receive_filter_frame;
             }
 
             dump_frame(1, "FILT ", codec_context->frame_number, filt_frame, debug_frame_level);
@@ -1930,7 +1930,7 @@ transcode_audio(
 
         av_frame_unref(frame);
     }
-    return 0;
+    return eav_success;
 }
 
 #ifdef USE_RESAMPLE_AAC
@@ -1962,8 +1962,7 @@ transcode_audio_aac(
     if (response < 0) {
         elv_err("Failure while sending an audio packet to the decoder: err=%d, %s", response, av_err2str(response));
         // Ignore the error and continue
-        response = 0;
-        return response;
+        return eav_success;
     }
 
     while (response >= 0) {
@@ -1972,7 +1971,7 @@ transcode_audio_aac(
             break;
         } else if (response < 0) {
             elv_err("Failure while receiving a frame from the decoder: %s", av_err2str(response));
-            return response;
+            return eav_receive_frame;
         }
 
         if (decoder_context->first_decoding_audio_pts < 0)
@@ -1990,20 +1989,20 @@ transcode_audio_aac(
 
         if (init_converted_samples(&converted_input_samples, output_codec_context, input_frame_size)) {
             elv_err("Failed to allocate audio samples");
-            return AVERROR_EXIT;
+            return eav_audio_sample;
         }
 
         if (convert_samples((const uint8_t**)frame->extended_data, converted_input_samples,
                             input_frame_size, resampler_context)) {
             elv_err("Failed to convert audio samples");
-            return AVERROR_EXIT;
+            return eav_audio_sample;
         }
 
         /* Store the new samples in the FIFO buffer. */
         if (av_audio_fifo_write(decoder_context->fifo, (void **)converted_input_samples,
                 input_frame_size) < input_frame_size) {
             elv_err("Failed to write input frame to fifo frame_size=%d", input_frame_size);
-            return AVERROR_EXIT;
+            return eav_write_frame;
         }
 
         if (converted_input_samples) {
@@ -2024,7 +2023,7 @@ transcode_audio_aac(
                     < output_frame_size) {
                 elv_err("Failed to read input samples from fifo frame_size=%d", output_frame_size);
                 av_frame_unref(filt_frame);
-                return AVERROR_EXIT;
+                return eav_receive_frame;
             }
 
             int64_t d;
@@ -2101,7 +2100,7 @@ transcode_audio_aac(
 
         av_frame_unref(frame);
     }
-    return 0;
+    return eav_success;
 }
 #endif
 
@@ -2124,7 +2123,8 @@ transcode_video(
     int response;
 
     if (debug_frame_level)
-        elv_dbg("DECODE stream_index=%d send_packet pts=%"PRId64" dts=%"PRId64" duration=%d", stream_index, packet->pts, packet->dts, packet->duration);
+        elv_dbg("DECODE stream_index=%d send_packet pts=%"PRId64" dts=%"PRId64" duration=%d",
+            stream_index, packet->pts, packet->dts, packet->duration);
 
     if (p->bypass_transcoding) {
         /*
@@ -2164,8 +2164,8 @@ transcode_video(
              * AVERROR_INVALIDDATA means the frame is invalid (mostly because of bad header).
              * To avoid premature termination jump over the bad frame and continue decoding.
              */
-            response = 0;
-        return response;
+            return eav_success;
+        return eav_send_packet;
     }
 
     while (response >= 0) {
@@ -2177,7 +2177,7 @@ transcode_video(
             break;
         } else if (response < 0) {
             elv_err("Failure while receiving a frame from the decoder: %s", av_err2str(response));
-            return response;
+            return eav_receive_frame;
         }
 
         if (decoder_context->first_decoding_video_pts < 0)
@@ -2230,7 +2230,7 @@ transcode_video(
 
             if (ret < 0) {
                 elv_err("Failed to execute frame filter ret=%d", ret);
-                return -1;
+                return eav_receive_filter_frame;
             }
 
             if (do_instrument) {
@@ -2265,7 +2265,7 @@ transcode_video(
         }
         av_frame_unref(frame);
     }
-    return 0;
+    return eav_success;
 }
 
 void *
@@ -2277,7 +2277,7 @@ transcode_video_func(
     coderctx_t *encoder_context = &xctx->encoder_ctx;
     txparams_t *params = xctx->params;
     xc_frame_t *xc_frame;
-    int rc;
+    int err = 0;
 
     AVFrame *frame = av_frame_alloc();
     AVFrame *filt_frame = av_frame_alloc();
@@ -2286,7 +2286,7 @@ transcode_video_func(
 
         xc_frame = elv_channel_receive(xctx->vc);
         if (!xc_frame) {
-            elv_dbg("trancode_video thread, there is no frame rc=%d", rc);
+            elv_dbg("trancode_video thread, there is no frame");
             continue;
         }
 
@@ -2298,7 +2298,7 @@ transcode_video_func(
 
         dump_packet(0, "IN THREAD", packet, xctx->debug_frame_level);
 
-        rc = transcode_video(
+        err = transcode_video(
                 decoder_context,
                 encoder_context,
                 packet,
@@ -2315,16 +2315,18 @@ transcode_video_func(
         av_packet_free(&packet);
         free(xc_frame);
 
-        if (rc < 0) {
-            elv_dbg("Stop video transcoding, rc=%d", rc);
+        if (err != eav_success) {
+            elv_dbg("Stop video transcoding, err=%d", err);
             break;
         }
     }
 
     av_frame_free(&frame);
     av_frame_free(&filt_frame);
+    if (!xctx->err)
+        xctx->err = err;
 
-    elv_dbg("transcode_video_func stop=%d", xctx->stop);
+    elv_dbg("transcode_video_func err=%d, stop=%d", err, xctx->stop);
 
     return NULL;
 }
@@ -2338,7 +2340,7 @@ transcode_audio_func(
     coderctx_t *encoder_context = &xctx->encoder_ctx;
     txparams_t *params = xctx->params;
     xc_frame_t *xc_frame;
-    int rc;
+    int err = 0;
 
     AVFrame *frame = av_frame_alloc();
     AVFrame *filt_frame = av_frame_alloc();
@@ -2368,7 +2370,7 @@ transcode_audio_func(
         if (!strcmp(params->ecodec2, "aac") &&
             params->tx_type != tx_audio_join &&
             params->tx_type != tx_audio_merge) {
-            rc = transcode_audio_aac(
+            err = transcode_audio_aac(
                 decoder_context,
                 encoder_context,
                 packet,
@@ -2378,7 +2380,7 @@ transcode_audio_func(
                 params,
                 xctx->debug_frame_level);
         } else {
-            rc = transcode_audio(
+            err = transcode_audio(
                 decoder_context,
                 encoder_context,
                 packet,
@@ -2389,7 +2391,7 @@ transcode_audio_func(
                 xctx->debug_frame_level);
         }
 #else
-        rc = transcode_audio(
+        err = transcode_audio(
             decoder_context,
             encoder_context,
             packet,
@@ -2405,8 +2407,8 @@ transcode_audio_func(
         av_packet_free(&packet);
         free(xc_frame);
 
-        if (rc < 0) {
-            elv_dbg("Stop audio transcoding, rc=%d", rc);
+        if (err != eav_success) {
+            elv_dbg("Stop audio transcoding, err=%d", err);
             break;
         }
 
@@ -2414,8 +2416,10 @@ transcode_audio_func(
 
     av_frame_free(&frame);
     av_frame_free(&filt_frame);
-
-    elv_dbg("transcode_audio_func stop=%d", xctx->stop);
+    if (!xctx->err)
+        xctx->err = err;
+    
+    elv_dbg("transcode_audio_func err=%d, stop=%d", err, xctx->stop);
 
     return NULL;
 }
@@ -2492,7 +2496,7 @@ flush_decoder(
 
     av_frame_free(&filt_frame);
     av_frame_free(&frame);
-    return 0;
+    return eav_success;
 }
 
 int
@@ -2751,12 +2755,14 @@ get_filter_str(
 {
     *filter_str = NULL;
 
-    if ((params->watermark_text && *params->watermark_text != '\0') || (params->watermark_timecode && *params->watermark_timecode != '\0')) {
+    if ((params->watermark_text && *params->watermark_text != '\0') ||
+            (params->watermark_timecode && *params->watermark_timecode != '\0')) {
         char local_filter_str[FILTER_STRING_SZ];
         int shadow_x = 0;
         int shadow_y = 0;
         int font_size = 0;
-        const char* filterTemplate = "scale=%d:%d, drawtext=text='%s':fontcolor=%s:fontsize=%d:x=%s:y=%s:shadowx=%d:shadowy=%d:shadowcolor=%s:alpha=0.65";
+        const char* filterTemplate =
+            "scale=%d:%d, drawtext=text='%s':fontcolor=%s:fontsize=%d:x=%s:y=%s:shadowx=%d:shadowy=%d:shadowcolor=%s:alpha=0.65";
         int ret = 0;
 
         /* Return an error if one of the watermark params is not set properly */
@@ -2772,7 +2778,7 @@ get_filter_str(
                 params->watermark_yloc != NULL ? params->watermark_yloc : "",
                 params->watermark_shadow,
                 params->watermark_shadow_color != NULL ? params->watermark_shadow_color : "");
-            return -1;
+            return eav_filter_string_init;
         }
 
         font_size = (int) (params->watermark_relative_sz * encoder_context->codec_context[encoder_context->video_stream_index]->height);
@@ -2787,7 +2793,7 @@ get_filter_str(
 
             if (params->watermark_timecode_rate <= 0) {
                 elv_err("Watermark timecode params are not set correctly. rate=%f", params->watermark_timecode_rate);
-                return -1;
+                return eav_filter_string_init;
             }
 
             ret = snprintf(local_filter_str, FILTER_STRING_SZ, filterTemplate,
@@ -2806,12 +2812,13 @@ get_filter_str(
         }
 
         elv_dbg("filterstr=%s, len=%d, x=%s, y=%s, relative-size=%f, ret=%d",
-            local_filter_str, strlen(local_filter_str), params->watermark_xloc, params->watermark_yloc, params->watermark_relative_sz, ret);
+            local_filter_str, strlen(local_filter_str), params->watermark_xloc,
+            params->watermark_yloc, params->watermark_relative_sz, ret);
         if (ret < 0) {
-            return -1;
+            return eav_filter_string_init;
         } else if (ret >= FILTER_STRING_SZ) {
             elv_dbg("Not enough memory for watermark filter");
-            return -1;
+            return eav_filter_string_init;
         }
         *filter_str = (char *) calloc(strlen(local_filter_str)+1, 1);
         strcpy(*filter_str, local_filter_str);
@@ -2819,7 +2826,8 @@ get_filter_str(
         char *filt_buf = NULL;
         int filt_buf_size;
         int filt_str_len;
-        const char* filt_template = "[in] scale=%d:%d [in-1]; movie='%s', setpts=PTS-STARTPTS [over]; [in-1] setpts=PTS-STARTPTS [in-1a]; [in-1a][over]  overlay='%s:%s:alpha=0.1' [out]";
+        const char* filt_template =
+            "[in] scale=%d:%d [in-1]; movie='%s', setpts=PTS-STARTPTS [over]; [in-1] setpts=PTS-STARTPTS [in-1a]; [in-1a][over]  overlay='%s:%s:alpha=0.1' [out]";
 
         /* Return an error if one of the watermark params is not set properly */
         if ((!params->watermark_xloc || *params->watermark_xloc == '\0') ||
@@ -2829,12 +2837,13 @@ get_filter_str(
                 params->watermark_overlay_type,
                 params->watermark_xloc != NULL ? params->watermark_xloc : "",
                 params->watermark_yloc != NULL ? params->watermark_yloc : "");
-            return -1;
+            return eav_filter_string_init;
         }
 
-        filt_buf_size = get_overlay_filter_string(&filt_buf, params->watermark_overlay, params->watermark_overlay_len, params->watermark_overlay_type);
+        filt_buf_size = get_overlay_filter_string(&filt_buf,
+            params->watermark_overlay, params->watermark_overlay_len, params->watermark_overlay_type);
         if (filt_buf_size < 0)
-            return -1;
+            return eav_filter_string_init;
 
         filt_str_len = filt_buf_size+FILTER_STRING_SZ;
         *filter_str = (char *) calloc(filt_str_len, 1);
@@ -2846,16 +2855,16 @@ get_filter_str(
         free(filt_buf);
         if (ret < 0) {
             free(*filter_str);
-            return -1;
+            return eav_filter_string_init;
         } else if (ret >= filt_str_len) {
             free(*filter_str);
             elv_dbg("Not enough memory for overlay watermark filter");
-            return -1;
+            return eav_filter_string_init;
         }
     } else {
         if (!encoder_context->codec_context[encoder_context->video_stream_index]) {
             elv_err("Failed to make filter string, invalid codec context (check params)");
-            return -1;
+            return eav_filter_string_init;
         }
         *filter_str = (char *) calloc(FILTER_STRING_SZ, 1);
         sprintf(*filter_str, "scale=%d:%d",
@@ -2886,15 +2895,13 @@ avpipe_xc(
 
     if (!params->bypass_transcoding &&
         (params->tx_type & tx_video)) {
-        if (get_filter_str(&filter_str, encoder_context, params) < 0) {
-            rc = -1;
+        if ((rc = get_filter_str(&filter_str, encoder_context, params)) != eav_success) {
             goto xc_done;
         }
 
-        if (init_filters(filter_str, decoder_context, encoder_context, txctx->params) < 0) {
+        if ((rc = init_filters(filter_str, decoder_context, encoder_context, txctx->params)) != eav_success) {
             free(filter_str);
             elv_err("Failed to initialize video filter");
-            rc = -1;
             goto xc_done;
         }
         free(filter_str);
@@ -2905,39 +2912,38 @@ avpipe_xc(
         params->tx_type != tx_audio_join &&
         params->tx_type != tx_audio_pan &&
         params->tx_type != tx_audio_merge &&
-        init_audio_filters(decoder_context, encoder_context, txctx->params) < 0) {
+        (rc = init_audio_filters(decoder_context, encoder_context, txctx->params)) != eav_success) {
         elv_err("Failed to initialize audio filter");
-        rc = -1;
         goto xc_done;
     }
 
     if (!params->bypass_transcoding &&
         params->tx_type == tx_audio_pan &&
-        init_audio_pan_filters(txctx->params->filter_descriptor, decoder_context, encoder_context) < 0) {
+        (rc = init_audio_pan_filters(txctx->params->filter_descriptor, decoder_context, encoder_context)) != eav_success) {
         elv_err("Failed to initialize audio pan filter");
-        rc = -1;
         goto xc_done;
     }
         
     if (!params->bypass_transcoding &&
         params->tx_type == tx_audio_join &&
-        init_audio_join_filters(decoder_context, encoder_context, txctx->params) < 0) {
+        (rc = init_audio_join_filters(decoder_context, encoder_context, txctx->params)) != eav_success) {
         elv_err("Failed to initialize audio join filter");
-        rc = -1;
         goto xc_done;
     }
 
     if ((params->tx_type & tx_video) &&
-        avformat_write_header(encoder_context->format_context, NULL) < 0) {
-        elv_err("Failed to open video output file");
-        rc = -1;
+        avformat_write_header(encoder_context->format_context, NULL) != eav_success) {
+        elv_err("Failed to write video output file header, file=%s",
+            txctx->inctx->url != NULL ? txctx->inctx->url : "NULL");
+        rc = eav_write_header;
         goto xc_done;
     }
 
     if (params->tx_type & tx_audio &&
-        avformat_write_header(encoder_context->format_context2, NULL) < 0) {
-        elv_err("Failed to open audio output file");
-        rc = -1;
+        avformat_write_header(encoder_context->format_context2, NULL) != eav_success) {
+        elv_err("Failed to write audio output file header, file=%s",
+            txctx->inctx->url != NULL ? txctx->inctx->url : "NULL");
+        rc = eav_write_header;
         goto xc_done;
     }
 
@@ -2948,7 +2954,7 @@ avpipe_xc(
         elv_err("Internal error in calculating timebase, calc_timebase=%d, stream_timebase=%d",
             calc_timebase(encoder_context->codec_context[encoder_context->video_stream_index]->time_base.den),
             encoder_context->stream[encoder_context->video_stream_index]->time_base.den);
-        rc = -1;
+        rc = eav_timebase;
         goto xc_done;
     }
 
@@ -2998,7 +3004,7 @@ avpipe_xc(
 
     if (!input_frame || !filt_frame) {
         elv_err("Failed to allocated memory for AVFrame");
-        rc = -1;
+        rc = eav_mem_alloc;
         goto xc_done;
     }
 
@@ -3015,7 +3021,7 @@ avpipe_xc(
         if (av_seek_frame(decoder_context->format_context,
                 decoder_context->video_stream_index, params->start_time_ts, SEEK_SET) < 0) {
             elv_err("Failed seeking to desired start frame");
-            rc = -1;
+            rc = eav_seek;
             goto xc_done;
         }
     }
@@ -3059,12 +3065,18 @@ avpipe_xc(
         input_packet = av_packet_alloc();
         if (!input_packet) {
             elv_err("Failed to allocated memory for AVPacket");
-            return -1;
+            return eav_mem_alloc;
         }
 
         rc = av_read_frame(decoder_context->format_context, input_packet);
         if (rc < 0) {
             av_packet_free(&input_packet);
+            if (rc == AVERROR_EOF || rc == -1)
+                rc = eav_success;
+            else {
+                elv_err("av_read_frame() rc=%d", rc);
+                rc = eav_read_input;
+            }
             break;
         }
 
@@ -3204,12 +3216,14 @@ xc_done:
     if (params->tx_type & tx_audio)
         av_write_trailer(encoder_context->format_context2);
 
-    elv_log("avpipe_xc done last video_pts=%"PRId64" audio_pts=%"PRId64
+    elv_log("avpipe_xc done rc=%d, txctx->err=%d, tx-type=%d, "
+        "last video_pts=%"PRId64" audio_pts=%"PRId64
         " video_input_start_pts=%"PRId64" audio_input_start_pts=%"PRId64
         " video_last_dts=%"PRId64" audio_last_dts="PRId64
         " last_pts_read=%"PRId64" last_pts_read2=%"PRId64
         " video_pts_sent_encode=%"PRId64" audio_pts_sent_encode=%"PRId64
         " last_pts_encoded=%"PRId64" last_pts_encoded2=%"PRId64,
+        rc, txctx->err, params->tx_type,
         encoder_context->video_pts,
         encoder_context->audio_pts,
         encoder_context->video_input_start_pts,
@@ -3228,10 +3242,15 @@ xc_done:
 
     if (decoder_context->cancelled) {
         elv_err("transcoding session cancelled, handle=%d", txctx->handle);
-        return -1;
+        return eav_cancelled;
     }
 
-    return 0;
+    /* If there was an error in reading frames, return that error */
+    if (rc != eav_success)
+        return rc;
+
+    /* Return transcoding error code */
+    return txctx->err;
 }
 
 typedef struct channel_layout_info_t {
@@ -3378,30 +3397,30 @@ avpipe_probe(
     avpipe_io_handler_t *in_handlers,
     ioctx_t *inctx,
     int seekable,
-    txprobe_t **txprobe)
+    txprobe_t **txprobe,
+    int *n_streams)
 {
     coderctx_t decoder_ctx;
     stream_info_t *stream_probes, *stream_probes_ptr;
     txprobe_t *probe;
-    int rc;
+    int rc = 0;
 
     if (!in_handlers) {
         elv_err("avpipe_probe NULL handlers");
-        rc = -1;
+        rc = eav_param;
         goto avpipe_probe_end;
     }
 
     memset(&decoder_ctx, 0, sizeof(coderctx_t));
 
-    if (prepare_decoder(&decoder_ctx, in_handlers, inctx, NULL, seekable)) {
+    if ((rc = prepare_decoder(&decoder_ctx, in_handlers, inctx, NULL, seekable)) != eav_success) {
         elv_err("avpipe_probe failed to prepare decoder");
-        rc = -1;
         goto avpipe_probe_end;
     }
 
     int nb_streams = decoder_ctx.format_context->nb_streams;
     if (nb_streams <= 0) {
-        rc = nb_streams;
+        rc = eav_num_streams;
         goto avpipe_probe_end;
     }
 
@@ -3414,7 +3433,6 @@ avpipe_probe(
         AVCodec *codec = decoder_ctx.codec[i];
         AVRational sar, dar;
 
-        //if (!codec || !codec_context || (codec->type != AVMEDIA_TYPE_VIDEO && codec->type != AVMEDIA_TYPE_AUDIO)) {
         if (!codec_context) {
             nb_skipped_streams++;
             continue;
@@ -3467,14 +3485,16 @@ avpipe_probe(
         stream_probes_ptr->profile = codec_context->profile;
         stream_probes_ptr->level = codec_context->level;
 
-        if (probe->container_info.duration < ((float)stream_probes_ptr->duration_ts)/stream_probes_ptr->time_base.den)
-            probe->container_info.duration = ((float)stream_probes_ptr->duration_ts)/stream_probes_ptr->time_base.den;
+        if (probe->container_info.duration <
+            ((float)stream_probes_ptr->duration_ts)/stream_probes_ptr->time_base.den)
+            probe->container_info.duration =
+                ((float)stream_probes_ptr->duration_ts)/stream_probes_ptr->time_base.den;
     }
 
     probe->stream_info = stream_probes;
     probe->container_info.format_name = strdup(decoder_ctx.format_context->iformat->name);
     *txprobe = probe;
-    rc = nb_streams - nb_skipped_streams;
+    *n_streams = nb_streams - nb_skipped_streams;
 
 avpipe_probe_end:
     return rc;
@@ -3487,7 +3507,7 @@ check_params(
     if (params->stream_id >= 0 && (params->tx_type != tx_none || params->n_audio > 0)) {
         elv_err("Incompatible params, stream_id=%d, tx_type=%d, n_audio=%d",
             params->stream_id, params->tx_type, params->n_audio);
-        return -1;
+        return eav_param;
     }
     
     // By default transcode 'everything' if streamId < 0
@@ -3497,12 +3517,12 @@ check_params(
 
     if (params->start_pts < 0) {
         elv_err("Start PTS can not be negative");
-        return -1;
+        return eav_param;
     }
 
     if (params->watermark_text != NULL && (strlen(params->watermark_text) > (WATERMARK_STRING_SZ-1))){
         elv_err("Watermark too large");
-        return -1;
+        return eav_param;
     }
 
     /* Infer rc parameters */
@@ -3520,32 +3540,32 @@ check_params(
         params->seg_duration <= 0 &&
         params->audio_seg_duration_ts <= 0) {
         elv_err("Segment duration is not set for audio (invalid seg_duration and audio_seg_duration_ts)");
-        return -1;
+        return eav_param;
     }
 
     if (params->tx_type & tx_video &&
         params->seg_duration <= 0 &&
         params->video_seg_duration_ts <= 0) {
         elv_err("Segment duration is not set for video (invalid seg_duration and video_seg_duration_ts)");
-        return -1;
+        return eav_param;
     }
 
     if (params->stream_id >=0 &&
         params->seg_duration <= 0) {
         elv_err("Segment duration is not set for stream id=%d", params->stream_id);
-        return -1;
+        return eav_param;
     }
 
     if (params->tx_type == tx_audio_merge) {
         elv_err("Audio merge is not supported yet.");
-        return -1;
+        return eav_param;
     }
 
     if (params->tx_type != tx_audio_join &&
         params->tx_type != tx_audio_pan
         && params->n_audio > 1) {
         elv_err("Invalid number of audio streams, n_audio=%d", params->n_audio);
-        return -1;
+        return eav_param;
     }
 
     /* Set n_audio to zero if n_audio < 0 or tx_type == tx_video */
@@ -3557,10 +3577,10 @@ check_params(
         params->tx_type == tx_audio_merge) &&
         params->n_audio < 2) {
         elv_err("Insufficient audio indexes, n_audio=%d, tx_type=%d", params->n_audio, params->tx_type);
-        return -1;
+        return eav_param;
     }
 
-    return 0;
+    return eav_success;
 }
 
 int
@@ -3574,14 +3594,17 @@ avpipe_init(
 {
     txctx_t *p_txctx = (txctx_t *) calloc(1, sizeof(txctx_t));
     txparams_t *params;
+    int rc = 0;
 
     if (!txctx) {
         elv_err("Trancoding context is NULL");
+        rc = eav_param;
         goto avpipe_init_failed;
     }
 
     if (!p) {
         elv_err("Parameters are not set");
+        rc = eav_param;
         goto avpipe_init_failed;
     }
 
@@ -3597,6 +3620,7 @@ avpipe_init(
          strcmp(params->format, "segment") &&
          strcmp(params->format, "fmp4-segment"))) {
         elv_err("Output format can be only \"dash\", \"hls\", \"mp4\", \"fmp4\", \"segment\", or \"fmp4-segment\"");
+        rc = eav_param;
         goto avpipe_init_failed;
     }
 
@@ -3661,29 +3685,40 @@ avpipe_init(
         "filter_descriptor=\"%s\"",
         params->stream_id, url,
         avpipe_version(),
-        params->bypass_transcoding, get_tx_type_name(params->tx_type), params->format,
-        params->seekable, params->start_time_ts, params->start_pts, params->duration_ts, params->start_segment_str,
-        params->video_bitrate, params->audio_bitrate, params->sample_rate, params->crf_str, params->preset,
-        params->rc_max_rate, params->rc_buffer_size, params->video_seg_duration_ts, params->audio_seg_duration_ts,
-        params->seg_duration, params->force_keyint, params->force_equal_fduration, params->ecodec,
-        params->ecodec2, params->dcodec, params->dcodec2, params->gpu_index, params->enc_height, params->enc_width,
-        params->crypt_iv, params->crypt_key, params->crypt_kid, params->crypt_key_url, params->crypt_scheme,
-        params->n_audio, audio_index_str, params->sync_audio_to_stream_id, params->audio_fill_gap,
-        params->watermark_overlay_type, params->watermark_overlay_len, params->bitdepth, params->listen,
-        params->max_cll ? params->max_cll : "", params->master_display ? params->master_display : "",
+        params->bypass_transcoding, get_tx_type_name(params->tx_type),
+        params->format, params->seekable, params->start_time_ts,
+        params->start_pts, params->duration_ts, params->start_segment_str,
+        params->video_bitrate, params->audio_bitrate, params->sample_rate,
+        params->crf_str, params->preset, params->rc_max_rate, params->rc_buffer_size,
+        params->video_seg_duration_ts, params->audio_seg_duration_ts,
+        params->seg_duration, params->force_keyint, params->force_equal_fduration,
+        params->ecodec, params->ecodec2, params->dcodec, params->dcodec2,
+        params->gpu_index, params->enc_height, params->enc_width,
+        params->crypt_iv, params->crypt_key, params->crypt_kid, params->crypt_key_url,
+        params->crypt_scheme, params->n_audio, audio_index_str,
+        params->sync_audio_to_stream_id, params->audio_fill_gap,
+        params->watermark_overlay_type, params->watermark_overlay_len,
+        params->bitdepth, params->listen,
+        params->max_cll ? params->max_cll : "",
+        params->master_display ? params->master_display : "",
         params->filter_descriptor);
     elv_log("AVPIPE XCPARAMS %s", buf);
 
-    if (check_params(params) < 0)
-        goto avpipe_init_failed;
-
-    if (prepare_decoder(&p_txctx->decoder_ctx, in_handlers, inctx, params, params->seekable)) {
-        elv_err("Failure in preparing decoder");
+    if ((rc = check_params(params)) != eav_success) {
         goto avpipe_init_failed;
     }
 
-    if (prepare_encoder(&p_txctx->encoder_ctx, &p_txctx->decoder_ctx, out_handlers, inctx, params)) {
-        elv_err("Failure in preparing output");
+    if ((rc = prepare_decoder(&p_txctx->decoder_ctx,
+            in_handlers, inctx, params, params->seekable)) != eav_success) {
+        elv_err("Failure in preparing decoder, file=%s",
+            inctx->url != NULL ? inctx->url : "NULL");
+        goto avpipe_init_failed;
+    }
+
+    if ((rc = prepare_encoder(&p_txctx->encoder_ctx,
+        &p_txctx->decoder_ctx, out_handlers, inctx, params)) != eav_success) {
+        elv_err("Failure in preparing encoder, file=%s",
+            inctx->url != NULL ? inctx->url : "NULL");
         goto avpipe_init_failed;
     }
 
@@ -3696,13 +3731,13 @@ avpipe_init(
     pthread_create(&p_txctx->athread_id, NULL, transcode_audio_func, p_txctx);
     *txctx = p_txctx;
 
-    return 0;
+    return eav_success;
 
 avpipe_init_failed:
     if (txctx)
         *txctx = NULL;
     avpipe_fini(&p_txctx);
-    return -1;
+    return rc;
 }
 
 static void

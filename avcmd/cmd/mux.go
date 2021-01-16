@@ -216,10 +216,5 @@ func doMux(cmd *cobra.Command, args []string) error {
 
 	avpipe.InitUrlMuxIOHandler(filename, &AVCmdMuxInputOpener{URL: filename}, &AVCmdMuxOutputOpener{})
 
-	rc := avpipe.Mux(params, filename, true)
-	if rc != 0 {
-		return fmt.Errorf("Failed to do muxing mux-spec=%s, output filename=%s", muxSpec, filename)
-	}
-
-	return nil
+	return avpipe.Mux(params, filename, true)
 }

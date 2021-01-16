@@ -22,6 +22,37 @@
 #define MAX_AUDIO_MUX       8
 #define MAX_CAPTION_MUX     8
 
+/*
+ * Adding/deleting an error code needs adding/deleting corresponding GO
+ * error in avpipe_errors.go
+ */
+typedef enum avpipe_error_t {
+    eav_success                 = 0,    // No error
+    eav_filter_string_init      = 1,    // Error in initializing filter string
+    eav_mem_alloc               = 2,    // Error in allocating memory or an ffmpeg context
+    eav_filter_init             = 3,    // Error in initializing filter
+    eav_num_streams             = 4,    // Bad number of audio/video inputs
+    eav_write_header            = 5,    // Error in writing headers
+    eav_timebase                = 6,    // Timebase mismatch
+    eav_seek                    = 7,    // Error in seeking input
+    eav_cancelled               = 8,    // The transcoding cancelled
+    eav_open_input              = 9,    // Error in opening input stream
+    eav_stream_info             = 10,   // Error in obtaining stream info
+    eav_codec_context           = 11,   // Error in allocating decoder/encoder context
+    eav_codec_param             = 12,   // Bad codec parameter
+    eav_open_codec              = 13,   // Error in opening decoder/encoder
+    eav_param                   = 14,   // Bad avpipe parameter
+    eav_stream_index            = 15,   // Bad stream index in input/output packet
+    eav_read_input              = 16,   // Error in reading input frames
+    eav_send_packet             = 17,   // Error in sending packet to the decoder
+    eav_receive_frame           = 18,   // Error in receiving frame from decoder or audio fifo
+    eav_receive_filter_frame    = 19,   // Error in receiving frame from filter buffer sink
+    eav_receive_packet          = 20,   // Error in receiving packet from encoder
+    eav_write_frame             = 21,   // Error in writing frame to output stream or audio fifo
+    eav_audio_sample            = 22,   // Error in converting audio samples
+    eav_xc_table                = 23
+} avpipe_error_t;
+
 typedef enum avpipe_buftype_t {
     avpipe_input_stream = 0,
     avpipe_manifest = 1,                // dash.mpd
@@ -403,6 +434,7 @@ typedef struct txctx_t {
     pthread_t           vthread_id;
     pthread_t           athread_id;
     int                 stop;
+    int                 err;        // Return code of transcoding
 } txctx_t;
 
 /* Params that are needed to decode/encode a frame in a thread */
@@ -438,7 +470,7 @@ typedef struct out_tracker_t {
  * @param   params          A pointer to the parameters for transcoding.
  * @param   url             Points to input url or filename.
  *
- * @return  Returns 0 if the initialization of an avpipe txctx_t is successful, otherwise returns -1 on error.
+ * @return  Returns 0 if the initialization of an avpipe txctx_t is successful, otherwise returns corresponding eav error.
  */
 int
 avpipe_init(
@@ -481,14 +513,16 @@ avpipe_channel_name(
  *                          by the application before calling this function.
  * @param   seekable        A flag to specify whether input stream is seakable or no
  * @param   txprob          A pointer to the txprobe_t that could contain probing info.
- * @return  Returns <=0 if probing is failed, otherwise number of streams that are probed.
+ * @param   n_streams       Will contail number of streams that are probed if successful.
+ * @return  Returns 0 if successful, otherwise corresponding eav error.
  */
 int
 avpipe_probe(
     avpipe_io_handler_t *in_handlers,
     ioctx_t *inctx,
     int seekable,
-    txprobe_t **txprobe);
+    txprobe_t **txprobe,
+    int *n_streams);
 
 /**
  * @brief   Starts transcoding.

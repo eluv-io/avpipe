@@ -281,16 +281,16 @@ func TestSingleABRTranscode(t *testing.T) {
 
 	avpipe.InitIOHandler(&fileInputOpener{url: filename}, &fileOutputOpener{dir: outputDir})
 
-	rc := avpipe.Tx(params, filename, true)
-	if rc != 0 {
+	err = avpipe.Tx(params, filename, true)
+	if err != nil {
 		t.Fail()
 	}
 
 	params.TxType = avpipe.TxAudio
 	params.Ecodec2 = "aac"
 	params.NumAudio = -1
-	rc = avpipe.Tx(params, filename, false)
-	if rc != 0 {
+	err = avpipe.Tx(params, filename, false)
+	if err != nil {
 		t.Fail()
 	}
 
@@ -330,15 +330,15 @@ func TestSingleABRTranscodeByStreamId(t *testing.T) {
 
 	avpipe.InitIOHandler(&fileInputOpener{url: filename}, &fileOutputOpener{dir: outputDir})
 
-	rc := avpipe.Tx(params, filename, true)
-	if rc != 0 {
+	err = avpipe.Tx(params, filename, true)
+	if err != nil {
 		t.Fail()
 	}
 
 	params.StreamId = 2
 	params.Ecodec2 = "aac"
-	rc = avpipe.Tx(params, filename, false)
-	if rc != 0 {
+	err = avpipe.Tx(params, filename, false)
+	if err != nil {
 		t.Fail()
 	}
 
@@ -384,8 +384,8 @@ func TestSingleABRTranscodeWithWatermark(t *testing.T) {
 
 	avpipe.InitIOHandler(&fileInputOpener{url: filename}, &fileOutputOpener{dir: outputDir})
 
-	rc := avpipe.Tx(params, filename, true)
-	if rc != 0 {
+	err = avpipe.Tx(params, filename, true)
+	if err != nil {
 		t.Fail()
 	}
 }
@@ -433,8 +433,8 @@ func TestSingleABRTranscodeWithOverlayWatermark(t *testing.T) {
 
 	avpipe.InitIOHandler(&fileInputOpener{url: filename}, &fileOutputOpener{dir: outputDir})
 
-	rc := avpipe.Tx(params, filename, true)
-	if rc != 0 {
+	err = avpipe.Tx(params, filename, true)
+	if err != nil {
 		t.Fail()
 	}
 }
@@ -622,10 +622,11 @@ func doTranscode(t *testing.T, p *avpipe.TxParams, nThreads int, filename string
 		go func(params *avpipe.TxParams, filename string) {
 			err := avpipe.Tx(params, filename, false)
 			done <- struct{}{} // Signal the main goroutine
-			if err != 0 && reportFailure == "" {
+			if err != nil && reportFailure == "" {
 				t.Fail()
-			} else if err != 0 {
+			} else if err != nil {
 				fmt.Printf("%s\n", reportFailure)
+				log.Error("doTranscode failed", err)
 			}
 		}(p, filename)
 	}
@@ -779,8 +780,8 @@ func TestAC3TsAC3MezMaker(t *testing.T) {
 
 	avpipe.InitIOHandler(&fileInputOpener{url: filename}, &fileOutputOpener{dir: outputDir})
 
-	rc := avpipe.Tx(params, filename, false)
-	assert.Equal(t, 0, rc)
+	err = avpipe.Tx(params, filename, false)
+	assert.NoError(t, err)
 
 	mezFile := fmt.Sprintf("%s/asegment-1.mp4", outputDir)
 	// Now probe the generated files
@@ -830,8 +831,8 @@ func TestAC3TsAACMezMaker(t *testing.T) {
 
 	avpipe.InitIOHandler(&fileInputOpener{url: filename}, &fileOutputOpener{dir: outputDir})
 
-	rc := avpipe.Tx(params, filename, false)
-	if rc != 0 {
+	err = avpipe.Tx(params, filename, false)
+	if err != nil {
 		t.Fail()
 	}
 
@@ -890,8 +891,8 @@ func TestMP2TsAACMezMaker(t *testing.T) {
 
 	avpipe.InitIOHandler(&fileInputOpener{url: filename}, &fileOutputOpener{dir: outputDir})
 
-	rc := avpipe.Tx(params, filename, false)
-	if rc != 0 {
+	err = avpipe.Tx(params, filename, false)
+	if err != nil {
 		t.Fail()
 	}
 
@@ -949,8 +950,8 @@ func TestDownmix2AACMezMaker(t *testing.T) {
 
 	avpipe.InitIOHandler(&fileInputOpener{url: filename}, &fileOutputOpener{dir: outputDir})
 
-	rc := avpipe.Tx(params, filename, false)
-	if rc != 0 {
+	err = avpipe.Tx(params, filename, false)
+	if err != nil {
 		t.Fail()
 	}
 
@@ -1005,8 +1006,8 @@ func Test2Mono1Stereo(t *testing.T) {
 
 	avpipe.InitIOHandler(&fileInputOpener{url: filename}, &fileOutputOpener{dir: outputDir})
 
-	rc := avpipe.Tx(params, filename, true)
-	if rc != 0 {
+	err = avpipe.Tx(params, filename, true)
+	if err != nil {
 		t.Fail()
 	}
 
@@ -1064,8 +1065,8 @@ func Test2Channel1Stereo(t *testing.T) {
 
 	avpipe.InitIOHandler(&fileInputOpener{url: filename}, &fileOutputOpener{dir: outputDir})
 
-	rc := avpipe.Tx(params, filename, true)
-	if rc != 0 {
+	err = avpipe.Tx(params, filename, true)
+	if err != nil {
 		t.Fail()
 	}
 
@@ -1122,8 +1123,8 @@ func TestIrregularTsMezMaker_1001_60000(t *testing.T) {
 
 	avpipe.InitIOHandler(&fileInputOpener{url: filename}, &fileOutputOpener{dir: outputDir})
 
-	rc := avpipe.Tx(params, filename, false)
-	if rc != 0 {
+	err = avpipe.Tx(params, filename, false)
+	if err != nil {
 		t.Fail()
 	}
 
@@ -1180,8 +1181,8 @@ func TestIrregularTsMezMaker_1_24(t *testing.T) {
 
 	avpipe.InitIOHandler(&fileInputOpener{url: filename}, &fileOutputOpener{dir: outputDir})
 
-	rc := avpipe.Tx(params, filename, false)
-	if rc != 0 {
+	err = avpipe.Tx(params, filename, false)
+	if err != nil {
 		t.Fail()
 	}
 
@@ -1238,8 +1239,8 @@ func TestIrregularTsMezMaker_1_10000(t *testing.T) {
 
 	avpipe.InitIOHandler(&fileInputOpener{url: filename}, &fileOutputOpener{dir: outputDir})
 
-	rc := avpipe.Tx(params, filename, false)
-	if rc != 0 {
+	err = avpipe.Tx(params, filename, false)
+	if err != nil {
 		t.Fail()
 	}
 
@@ -1293,8 +1294,8 @@ func TestAVPipeMXF_H265MezMaker(t *testing.T) {
 
 	avpipe.InitIOHandler(&fileInputOpener{url: filename}, &fileOutputOpener{dir: outputDir})
 
-	rc := avpipe.Tx(params, filename, false)
-	if rc != 0 {
+	err = avpipe.Tx(params, filename, false)
+	if err != nil {
 		t.Fail()
 	}
 
@@ -1347,8 +1348,8 @@ func TestAVPipeHEVC_H264MezMaker(t *testing.T) {
 
 	avpipe.InitIOHandler(&fileInputOpener{url: filename}, &fileOutputOpener{dir: outputDir})
 
-	rc := avpipe.Tx(params, filename, false)
-	if rc != 0 {
+	err = avpipe.Tx(params, filename, false)
+	if err != nil {
 		t.Fail()
 	}
 
@@ -1401,8 +1402,8 @@ func TestAVPipeHEVC_H265ABRTranscode(t *testing.T) {
 
 	avpipe.InitIOHandler(&fileInputOpener{url: filename}, &fileOutputOpener{dir: outputDir})
 
-	rc := avpipe.Tx(params, filename, false)
-	if rc != 0 {
+	err = avpipe.Tx(params, filename, false)
+	if err != nil {
 		t.Fail()
 	}
 
@@ -1450,8 +1451,8 @@ func TestABRMuxing(t *testing.T) {
 	}
 
 	avpipe.InitUrlIOHandler(filename, &fileInputOpener{url: filename}, &fileOutputOpener{dir: videoMezDir})
-	rc := avpipe.Tx(params, filename, true)
-	if rc != 0 {
+	err = avpipe.Tx(params, filename, true)
+	if err != nil {
 		t.Fail()
 	}
 
@@ -1465,8 +1466,8 @@ func TestABRMuxing(t *testing.T) {
 	params.Ecodec2 = "aac"
 
 	avpipe.InitUrlIOHandler(filename, &fileInputOpener{url: filename}, &fileOutputOpener{dir: audioMezDir})
-	rc = avpipe.Tx(params, filename, false)
-	if rc != 0 {
+	err = avpipe.Tx(params, filename, false)
+	if err != nil {
 		t.Fail()
 	}
 
@@ -1483,8 +1484,8 @@ func TestABRMuxing(t *testing.T) {
 	params.VideoSegDurationTs = 48000
 
 	avpipe.InitUrlIOHandler(filename, &fileInputOpener{url: filename}, &fileOutputOpener{dir: videoABRDir})
-	rc = avpipe.Tx(params, filename, true)
-	if rc != 0 {
+	err = avpipe.Tx(params, filename, true)
+	if err != nil {
 		t.Fail()
 	}
 
@@ -1501,8 +1502,8 @@ func TestABRMuxing(t *testing.T) {
 	params.AudioSegDurationTs = 96000
 
 	avpipe.InitUrlIOHandler(filename, &fileInputOpener{url: filename}, &fileOutputOpener{dir: audioABRDir})
-	rc = avpipe.Tx(params, filename, true)
-	if rc != 0 {
+	err = avpipe.Tx(params, filename, true)
+	if err != nil {
 		t.Fail()
 	}
 
@@ -1527,8 +1528,8 @@ func TestABRMuxing(t *testing.T) {
 
 	avpipe.InitUrlMuxIOHandler(filename, &cmd.AVCmdMuxInputOpener{URL: filename}, &cmd.AVCmdMuxOutputOpener{})
 
-	rc = avpipe.Mux(params, filename, true)
-	if rc != 0 {
+	err = avpipe.Mux(params, filename, true)
+	if err != nil {
 		t.Fail()
 	}
 

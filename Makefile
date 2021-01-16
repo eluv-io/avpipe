@@ -65,7 +65,7 @@ clean-test:
             Audio*Muxing Video*Muxing MuxingOutput \
             IrregularTsMezMaker* \
             2Mono1Stereo 2Channel1Stereo \
-            SingleABRTranscode* avpipe-test.log
+            SingleABRTranscode* avpipe-test*.log
 
 check-env:
 ifndef ELV_TOOLCHAIN_DIST_PLATFORM

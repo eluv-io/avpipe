@@ -78,13 +78,13 @@ prepare_input_muxer(
         inctx->url = in_mux_ctx->captions[in_mux_index-in_mux_ctx->last_audio_index-1].parts[0];
     } else {
         elv_err("prepare_input_muxer() invalid in_mux_index=%d", in_mux_index);
-        return -1;
+        return eav_stream_index;
     }
 
     muxer_ctx->format_context = avformat_alloc_context();
     if (!muxer_ctx->format_context) {
         elv_err("Could not allocate memory for muxer format context");
-        return -1;
+        return eav_mem_alloc;
     }
 
     /* set our custom reader */
@@ -93,13 +93,13 @@ prepare_input_muxer(
     rc = avformat_open_input(&muxer_ctx->format_context, inctx->url, NULL, NULL);
     if (rc != 0) {
         elv_err("Could not open input muxer, err=%d", rc);
-        return -1;
+        return eav_open_input;
     }
 
     /* Retrieve stream information */
     if (avformat_find_stream_info(muxer_ctx->format_context,  NULL) < 0) {
         elv_err("Could not get input muxer stream info");
-        return -1;
+        return eav_stream_info;
     }
 
     muxer_ctx->codec_parameters[0] = muxer_ctx->format_context->streams[0]->codecpar;
@@ -108,21 +108,21 @@ prepare_input_muxer(
     muxer_ctx->codec_context[0] = avcodec_alloc_context3(muxer_ctx->codec[0]);
     if (!muxer_ctx->codec_context[0]) {
         elv_err("Failed to allocated memory for muxer AVCodecContext");
-        return -1;
+        return eav_mem_alloc;
     }
 
     if (avcodec_parameters_to_context(muxer_ctx->codec_context[0], muxer_ctx->codec_parameters[0]) < 0) {
         elv_err("Failed to copy muxer codec params to codec context");
-        return -1;
+        return eav_codec_param;
     }
 
     if (avcodec_open2(muxer_ctx->codec_context[0], muxer_ctx->codec[0], NULL) < 0) {
         elv_err("Failed to open codec muxer through avcodec_open2, err=%d, codec_id=%s",
                 rc, avcodec_get_name(muxer_ctx->codec_parameters[0]->codec_id));
-        return -1;
+        return eav_open_codec;
     }
 
-    return 0;
+    return eav_success;
 }
 
 /**
@@ -131,7 +131,7 @@ prepare_input_muxer(
  * @param   mux_spec        A pointer to memory containing muxing spec.
  * @param   in_mux_ctx      A pointer to io_mux_ctx_t that will be initialized based on mux_spec.
  *
- * @return  Returns 0 if transcoding is successful, otherwise -1.
+ * @return  Returns 0 if mux ctx initialization is successful, otherwise -1.
  */
 static int
 init_mux_ctx(
@@ -144,7 +144,7 @@ init_mux_ctx(
 
     char *mux_type = strtok_r(mux_spec, "\n\r", &ptr);
     if (!mux_type || (strcmp(mux_type, "mez-mux") && strcmp(mux_type, "abr-mux")))
-        return -1;
+        return eav_param;
 
     in_mux_ctx->mux_type = mux_type;
 
@@ -158,18 +158,18 @@ init_mux_ctx(
         char *end;
         int stream_index = (int) strtol(index_str, &end, 10);
         if (*end != '\0' || stream_index <= 0)
-            return -1;
+            return eav_param;
         if (!strcmp(stream_type, "video") && stream_index > 1) {
             elv_err("init_mux_ctx invalid video stream_index=%d", stream_index);
-            return -1;
+            return eav_param;
         }
         if (!strcmp(stream_type, "audio") && (stream_index > MAX_AUDIO_MUX || stream_index > in_mux_ctx->last_audio_index+1)) {
             elv_err("init_mux_ctx invalid audio stream_index=%d", stream_index);
-            return -1;
+            return eav_param;
         }
         if (!strcmp(stream_type, "caption") && (stream_index > MAX_CAPTION_MUX || stream_index > in_mux_ctx->last_caption_index+1)) {
             elv_err("init_mux_ctx invalid caption stream_index=%d", stream_index);
-            return -1;
+            return eav_param;
         }
         char *stream_url = strtok_r(NULL, "\n\r,", &ptr);
         if (!stream_url)
@@ -199,14 +199,14 @@ init_mux_ctx(
     }
 
     if (found_muxing_input <= 0)
-        return -1;
+        return eav_param;
 
     in_mux_ctx->out_filename = strdup(out_filename);
 
     elv_dbg("init_mux_ctx video_stream=%d, audio_streams=%d, captions=%d",
         in_mux_ctx->video.n_parts > 0 ? 1 : 0, in_mux_ctx->last_audio_index, in_mux_ctx->last_caption_index);
 
-    return 0;
+    return eav_success;
 }
 
 
@@ -226,15 +226,15 @@ avpipe_init_muxer(
     char *out_filename = url;
     txctx_t *p_txctx;
 
-    if (init_mux_ctx(p->mux_spec, out_filename, in_mux_ctx) < 0) {
-        elv_err("Initializing mux context failed");
-        return -1;
+    if ((ret = init_mux_ctx(p->mux_spec, out_filename, in_mux_ctx)) != eav_success) {
+        elv_err("Initializing mux context failed, ret=%d", ret);
+        return ret;
     }
 
     p_txctx = (txctx_t *) calloc(1, sizeof(txctx_t));
     if (!txctx) {
         elv_err("Trancoding context is NULL (muxer)");
-        return -1;
+        return eav_mem_alloc;
     }
 
     coderctx_t *out_muxer_ctx = &p_txctx->out_muxer_ctx;
@@ -253,7 +253,7 @@ avpipe_init_muxer(
     avformat_alloc_output_context2(&out_muxer_ctx->format_context, NULL, "mp4", out_filename);
     if (!out_muxer_ctx->format_context) {
         elv_dbg("could not allocate memory for muxer output format");
-        return -1;
+        return eav_codec_context;
     }
 
     /* The output format has to be fragmented to avoid doing seeks */
@@ -272,7 +272,7 @@ avpipe_init_muxer(
 
         if (!p_txctx->in_muxer_ctx[i].format_context) {
             elv_err("Muxer input format context is NULL, i=%d", i);
-            return -1;
+            return eav_codec_context;
         }
 
         /* Copy input stream params to output stream params */
@@ -280,7 +280,7 @@ avpipe_init_muxer(
         ret = avcodec_parameters_copy(out_muxer_ctx->stream[i]->codecpar, in_stream->codecpar);
         if (ret < 0) {
             elv_err("Failed to copy codec parameters of input stream muxer, i=%d", i);
-            return -1;
+            return eav_codec_param;
         }
         out_muxer_ctx->stream[i]->time_base = in_stream->time_base;
         out_muxer_ctx->stream[i]->avg_frame_rate = in_stream->avg_frame_rate;
@@ -332,7 +332,7 @@ avpipe_init_muxer(
     ret = avformat_write_header(out_muxer_ctx->format_context, NULL);
     if (ret < 0) {
         elv_err("Error occurred when opening muxer output file '%s'", out_filename);
-        return -1;
+        return eav_write_header;
     }
 
     txparams_t *params = (txparams_t *) calloc(1, sizeof(txparams_t));
@@ -341,7 +341,7 @@ avpipe_init_muxer(
     p_txctx->params = params;
     *txctx = p_txctx;
 
-    return 0;
+    return eav_success;
 }
 
 static int
@@ -425,7 +425,7 @@ avpipe_mux(
 
     if (!txctx) {
         elv_err("Invalid transcoding context for muxing");
-        return -1;
+        return eav_param;
     }
 
     pkts = txctx->pkt_array;
@@ -447,7 +447,7 @@ avpipe_mux(
 
         if (av_interleaved_write_frame(txctx->out_muxer_ctx.format_context, &pkt) < 0) {
             elv_err("Failure in copying mux packet");
-            ret = -1;
+            ret = eav_write_frame;
             break;
         }
         av_packet_unref(&pkt);

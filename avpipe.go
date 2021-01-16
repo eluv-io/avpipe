@@ -1119,12 +1119,12 @@ func getCParams(params *TxParams) (*C.txparams_t, error) {
 
 // params: transcoding parameters
 // url: input filename that has to be transcoded
-func Tx(params *TxParams, url string, debugFrameLevel bool) int {
+func Tx(params *TxParams, url string, debugFrameLevel bool) error {
 
 	// Convert TxParams to C.txparams_t
 	if params == nil {
 		log.Error("Failed transcoding, params is not set.")
-		return -1
+		return EAV_PARAM
 	}
 
 	cparams, err := getCParams(params)
@@ -1144,13 +1144,13 @@ func Tx(params *TxParams, url string, debugFrameLevel bool) int {
 	delete(gURLInputOpeners, url)
 	delete(gURLOutputOpeners, url)
 
-	return int(rc)
+	return avpipeError(rc)
 }
 
-func Mux(params *TxParams, url string, debugFrameLevel bool) int {
+func Mux(params *TxParams, url string, debugFrameLevel bool) error {
 	if params == nil {
 		log.Error("Failed muxing, params is not set.")
-		return -1
+		return EAV_PARAM
 	}
 
 	cparams, err := getCParams(params)
@@ -1170,7 +1170,7 @@ func Mux(params *TxParams, url string, debugFrameLevel bool) int {
 	delete(gURLInputOpeners, url)
 	delete(gURLOutputOpeners, url)
 
-	return int(rc)
+	return avpipeError(rc)
 
 }
 
@@ -1207,6 +1207,7 @@ func GetProfileName(codecId int, profile int) string {
 func Probe(url string, seekable bool) (*ProbeInfo, error) {
 	var cprobe *C.txprobe_t
 	var cseekable C.int
+	var n_streams C.int
 
 	if seekable {
 		cseekable = C.int(1)
@@ -1214,15 +1215,15 @@ func Probe(url string, seekable bool) (*ProbeInfo, error) {
 		cseekable = C.int(0)
 	}
 
-	rc := C.probe(C.CString(url), cseekable, (**C.txprobe_t)(unsafe.Pointer(&cprobe)))
-	if int(rc) <= 0 {
-		return nil, fmt.Errorf("Probing failed")
+	rc := C.probe(C.CString(url), cseekable, (**C.txprobe_t)(unsafe.Pointer(&cprobe)), (*C.int)(unsafe.Pointer(&n_streams)))
+	if int(rc) != 0 {
+		return nil, avpipeError(rc)
 	}
 
 	probeInfo := &ProbeInfo{}
-	probeInfo.StreamInfo = make([]StreamInfo, int(rc))
+	probeInfo.StreamInfo = make([]StreamInfo, int(n_streams))
 	probeArray := (*[1 << 10]C.stream_info_t)(unsafe.Pointer(cprobe.stream_info))
-	for i := 0; i < int(rc); i++ {
+	for i := 0; i < int(n_streams); i++ {
 		probeInfo.StreamInfo[i].StreamIndex = int(probeArray[i].stream_index)
 		probeInfo.StreamInfo[i].StreamId = int32(probeArray[i].stream_id)
 		probeInfo.StreamInfo[i].CodecType = AVMediaTypeNames[AVMediaType(probeArray[i].codec_type)]
@@ -1303,9 +1304,11 @@ func TxInit(params *TxParams, url string, debugFrameLevel bool) (int32, error) {
 		debugFrameLevelInt = 0
 	}
 
-	handle := C.tx_init((*C.txparams_t)(unsafe.Pointer(cparams)), C.CString(url), C.int(debugFrameLevelInt))
-	if handle < C.int32_t(0) {
-		return -1, fmt.Errorf("Tx initialization failed")
+	var handle C.int32_t
+	rc := C.tx_init((*C.txparams_t)(unsafe.Pointer(cparams)),
+		C.CString(url), C.int(debugFrameLevelInt), (*C.int32_t)(unsafe.Pointer(&handle)))
+	if rc != C.eav_success {
+		return -1, avpipeError(rc)
 	}
 
 	return int32(handle), nil
@@ -1317,7 +1320,7 @@ func TxRun(handle int32) error {
 		return nil
 	}
 
-	return fmt.Errorf("TxRun failed with the handle=%d", handle)
+	return avpipeError(rc)
 }
 
 func TxCancel(handle int32) error {
@@ -1326,7 +1329,7 @@ func TxCancel(handle int32) error {
 		return nil
 	}
 
-	return fmt.Errorf("TxCancel failed with the handle=%d", handle)
+	return EAV_CANCEL_FAILED
 }
 
 // StreamInfoAsArray builds an array where each stream is at its corresponsing index

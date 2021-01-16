@@ -572,6 +572,7 @@ tx_thread_func(
     tx_thread_params_t *params = (tx_thread_params_t *) thread_params;
     txctx_t *txctx;
     int i;
+    int rc;
 
     elv_log("TRANSCODER THREAD %d STARTS", params->thread_number);
 
@@ -583,14 +584,14 @@ tx_thread_func(
             continue;
         }
 
-        if (avpipe_init(&txctx, params->in_handlers, inctx, params->out_handlers, params->txparams, params->filename) < 0) {
-            elv_err("THREAD %d, iteration %d, failed to initialize avpipe", params->thread_number, i+1);
+        if ((rc = avpipe_init(&txctx, params->in_handlers, inctx, params->out_handlers, params->txparams, params->filename)) != eav_success) {
+            elv_err("THREAD %d, iteration %d, failed to initialize avpipe rc=%d", params->thread_number, i+1, rc);
             continue;
         }
 
-        if (avpipe_xc(txctx, 0, 1) < 0) {
+        if ((rc = avpipe_xc(txctx, 0, 1)) != eav_success) {
             avpipe_fini(&txctx);
-            elv_err("THREAD %d, iteration %d error in transcoding", params->thread_number, i+1);
+            elv_err("THREAD %d, iteration %d error in transcoding, err=%d", params->thread_number, i+1, rc);
             continue;
         }
 
@@ -646,6 +647,7 @@ do_probe(
     ioctx_t inctx;
     avpipe_io_handler_t in_handlers;
     txprobe_t *probe;
+    int n_streams;
     int rc;
 
     in_handlers.avpipe_opener = in_opener;
@@ -661,13 +663,13 @@ do_probe(
         goto end_probe;
     }
 
-    rc = avpipe_probe(&in_handlers, &inctx, seekable, &probe);
-    if (rc < 0) {
-        printf("Error: avpipe probe failed on file %s with no valid stream.\n", filename);
+    rc = avpipe_probe(&in_handlers, &inctx, seekable, &probe, &n_streams);
+    if (rc != eav_success) {
+        printf("Error: avpipe probe failed on file %s with no valid stream (err=%d).\n", filename, rc);
         goto end_probe;
     }
 
-    for (int i=0; i<rc; i++) {
+    for (int i=0; i<n_streams; i++) {
         const char *channel_name = avpipe_channel_name(probe->stream_info[i].channels, probe->stream_info[i].channel_layout);
 
         if (probe->stream_info[i].codec_type != AVMEDIA_TYPE_AUDIO)

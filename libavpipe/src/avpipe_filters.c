@@ -5,6 +5,10 @@
 #include "avpipe_xc.h"
 #include "elv_log.h"
 
+/*
+ * @brief   Used to initialize video filter.
+ * @return  Returns 0 if successful, otherwise eav_filter_init if there is an error.
+ */
 int
 init_filters(
     const char *filters_descr,
@@ -105,9 +109,18 @@ end:
     avfilter_inout_free(&inputs);
     avfilter_inout_free(&outputs);
 
+    if (ret < 0)
+        return eav_filter_init;
+
     return ret;
 }
 
+/*
+ * @brief   Used to initialize audio filter.
+ * @return  Returns 0 if successful.
+ *          If number of audio streams are not correct returns eav_num_streams, 
+ *          otherwise eav_filter_init if there is other errors.
+ */
 int
 init_audio_filters(
     coderctx_t *decoder_context,
@@ -115,8 +128,9 @@ init_audio_filters(
     txparams_t *params)
 {
     if (decoder_context->n_audio < 0) {
-        return -1;  //REVIEW want some unique val to say no audio present
+        return eav_num_streams;
     }
+
     AVCodecContext *dec_codec_ctx = decoder_context->codec_context[decoder_context->audio_stream_index[0]];
     AVCodecContext *enc_codec_ctx = encoder_context->codec_context[encoder_context->audio_stream_index[0]];
     char args[512];
@@ -207,12 +221,12 @@ init_audio_filters(
 
     if ((ret = avfilter_link(abuffersrc_ctx[0], 0, format_ctx, 0)) < 0) {
         elv_err("Failed to link audio src to format, ret=%d", ret);
-        return ret;
+        goto end;
     }
 
     if ((ret = avfilter_link(format_ctx, 0, buffersink_ctx, 0)) < 0) {
         elv_err("Failed to link audio format to sink, ret=%d", ret);
-        return ret;
+        goto end;
     }
 
     av_buffersink_set_frame_size(buffersink_ctx,
@@ -226,21 +240,27 @@ init_audio_filters(
     decoder_context->audio_buffersink_ctx = buffersink_ctx;
 
 end:
+    if (ret < 0)
+        return eav_filter_init;
 
     return ret;
 
 }
 
 /*
- * This filter pans multiple channels in one input stream to one output stereo stream.
- * A sample equvalent ffmpeg command is something like this:
+ * @brief   This filter pans multiple channels in one input stream to one output stereo stream.
+ *          A sample equvalent ffmpeg command is something like this:
  *
- *   ffmpeg -i input.mov -vn  -filter_complex "[0:1]pan=stereo|c0<c1+0.707*c2|c1<c2+0.707*c1[aout]" -map [aout] -acodec aac -b:a 128k out.mp4
+ *          ffmpeg -i input.mov -vn  -filter_complex "[0:1]pan=stereo|c0<c1+0.707*c2|c1<c2+0.707*c1[aout]"
+ *              -map [aout] -acodec aac -b:a 128k out.mp4
  * 
- * This function creates a filter graph with the following structure:
+ *          This function creates a filter graph with the following structure:
  *
- *   asrc_abuffer --> af_pan --> asink_abuffer
+ *          asrc_abuffer --> af_pan --> asink_abuffer
  * 
+ * @return  Returns 0 if successful.
+ *          If number of audio streams are not correct returns eav_num_streams, 
+ *          otherwise eav_filter_init if there is other errors.
  */
 int
 init_audio_pan_filters(
@@ -251,7 +271,7 @@ init_audio_pan_filters(
     /* Only one innput stream is accepted for this filter */
     if (decoder_context->n_audio != 1) {
         elv_err("init_audio_pan_filters invalid number of audio streams, n_audio=%d", decoder_context->n_audio);
-        return -1;
+        return eav_num_streams;
     }
     AVCodecContext *dec_codec_ctx = decoder_context->codec_context[decoder_context->audio_stream_index[0]];
     AVCodecContext *enc_codec_ctx = encoder_context->codec_context[encoder_context->audio_stream_index[0]];
@@ -358,13 +378,13 @@ init_audio_pan_filters(
     /* Link audio source output to audio pan input */
     if ((ret = avfilter_link(abuffersrc_ctx[0], 0, filter_graph->filters[2], 0)) < 0) {
         elv_err("Failed to link audio src to pan, ret=%d", ret);
-        return ret;
+        goto end;
     }
 
     /* Link audio pan output to audio sink input */
     if ((ret = avfilter_link(filter_graph->filters[2], 0, filter_graph->filters[1], 0)) < 0) {
         elv_err("Failed to link audio pan to sink, ret=%d", ret);
-        return ret;
+        goto end;
     }
 
     if ((ret = avfilter_graph_config(filter_graph, NULL)) < 0)
@@ -378,10 +398,19 @@ end:
     avfilter_inout_free(&inputs);
     avfilter_inout_free(&outputs);
 
+    if (ret < 0)
+        return eav_filter_init;
+
     return ret;
 
 }
 
+/*
+ * @brief   Used to initialize audio join filter.
+ * @return  Returns 0 if successful.
+ *          If number of audio streams are not correct returns eav_num_streams, 
+ *          otherwise eav_filter_init if there is other errors.
+ */
 int
 init_audio_join_filters(
     coderctx_t *decoder_context,
@@ -390,8 +419,9 @@ init_audio_join_filters(
 {
     if (decoder_context->n_audio < 0 ||
         decoder_context->n_audio > MAX_AUDIO_MUX) {
-        return -1;  //REVIEW want some unique val to say no audio present
+        return eav_num_streams;
     }
+
     AVCodecContext *enc_codec_ctx = encoder_context->codec_context[encoder_context->audio_stream_index[0]];
     char args[512];
     char format_args[512];
@@ -443,7 +473,6 @@ init_audio_join_filters(
             dec_codec_ctx->sample_rate,
             av_get_sample_fmt_name(dec_codec_ctx->sample_fmt),
             dec_codec_ctx->channel_layout);
-            //av_get_channel_layout("BL"));
 
         sprintf(filt_name, "in_%d", i);
         elv_log("Audio srcfilter=%s args=%s", filt_name, args);
@@ -456,7 +485,7 @@ init_audio_join_filters(
 
         if ((ret = avfilter_link(abuffersrc_ctx[i], 0, join_ctx, i)) < 0) {
             elv_err("Failed to link audio src %d to join filter, ret=%d", i, ret);
-            return ret;
+            goto end;
         }
 
     }
@@ -505,7 +534,7 @@ init_audio_join_filters(
 
     if ((ret = avfilter_link(join_ctx, 0, format_ctx, 0)) < 0) {
         elv_err("Failed to link audio join to format, ret=%d", ret);
-        return ret;
+        goto end;
     }
 
     if ((ret = avfilter_link(format_ctx, 0, buffersink_ctx, 0)) < 0) {
@@ -523,6 +552,9 @@ init_audio_join_filters(
     decoder_context->audio_buffersink_ctx = buffersink_ctx;
 
 end:
+    if (ret < 0)
+        return eav_filter_init;
+
     return ret;
 }
 

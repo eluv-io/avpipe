@@ -527,16 +527,17 @@ int32_t
 tx_init(
     txparams_t *params,
     char *filename,
-    int debug_frame_level)
+    int debug_frame_level,
+    int32_t *handle)
 {
     txctx_t *txctx = NULL;
     int64_t rc = 0;
-    uint32_t handle;
+    uint32_t h;
     avpipe_io_handler_t *in_handlers = NULL;
     avpipe_io_handler_t *out_handlers = NULL;
 
     if (!filename || filename[0] == '\0' )
-        return -1;
+        return eav_param;
 
     init_tx_module();
 
@@ -546,15 +547,17 @@ tx_init(
     ioctx_t *inctx = (ioctx_t *)calloc(1, sizeof(ioctx_t));
 
     if (in_handlers->avpipe_opener(filename, inctx) < 0) {
+        rc = eav_open_input;
         goto end_tx_init;
     }
 
-    if (avpipe_init(&txctx, in_handlers, inctx, out_handlers, params, filename) < 0) {
+    if ((rc = avpipe_init(&txctx, in_handlers, inctx, out_handlers, params, filename)) != eav_success) {
         goto end_tx_init;
     }
 
-    if ((handle = tx_table_put(txctx)) < 0) {
+    if ((h = tx_table_put(txctx)) < 0) {
         elv_err("tx_init tx_table is full, cancelling transcoding");
+        rc = eav_xc_table;
         goto end_tx_init;
     }
 
@@ -563,7 +566,8 @@ tx_init(
     txctx->inctx = inctx;
     txctx->debug_frame_level = debug_frame_level;
 
-    return handle;
+    *handle = h;
+    return eav_success;
 
 end_tx_init:
     /* Close input handler resources */
@@ -574,7 +578,7 @@ end_tx_init:
     free(in_handlers);
     free(out_handlers);
 
-    return -1;
+    return rc;
 }
 
 int
@@ -586,13 +590,12 @@ tx_run(
 
     if (!txe) {
         elv_err("tx_run invalid handle=%d", handle);
-        return -1;
+        return eav_param;
     }
 
     txctx_t *txctx = txe->txctx;
-    if (avpipe_xc(txctx, 0, txctx->debug_frame_level) < 0) {
+    if ((rc = avpipe_xc(txctx, 0, txctx->debug_frame_level)) != eav_success) {
         elv_err("Error in transcoding");
-        rc = -1;
         goto end_tx;
     }
 
@@ -643,12 +646,11 @@ tx(
     ioctx_t *inctx = (ioctx_t *)calloc(1, sizeof(ioctx_t));
 
     if (in_handlers->avpipe_opener(filename, inctx) < 0) {
-        rc = -1;
+        rc = eav_open_input;
         goto end_tx;
     }
 
-    if (avpipe_init(&txctx, in_handlers, inctx, out_handlers, params, filename) < 0) {
-        rc = -1;
+    if ((rc = avpipe_init(&txctx, in_handlers, inctx, out_handlers, params, filename)) != eav_success) {
         goto end_tx;
     }
 
@@ -656,9 +658,8 @@ tx(
     txctx->out_handlers = out_handlers;
     txctx->inctx = inctx;
 
-    if (avpipe_xc(txctx, 0, debug_frame_level) < 0) {
-        elv_err("Transcoding failed");
-        rc = -1;
+    if ((rc = avpipe_xc(txctx, 0, debug_frame_level)) != eav_success) {
+        elv_err("Transcoding failed, rc=%d", rc);
         goto end_tx;
     }
 
@@ -717,6 +718,7 @@ read_next_input:
     if (!c->opaque) {
         io_mux_ctx_t *in_mux_ctx = c->in_mux_ctx;
         int index = c->in_mux_index;
+        int i;
         char *filepath;
 
         /* index 0 means video */
@@ -732,11 +734,11 @@ read_next_input:
             filepath = in_mux_ctx->audios[index-1].parts[in_mux_ctx->audios[index-1].index];
             in_mux_ctx->audios[index-1].index++;
         } else if (index <= in_mux_ctx->last_audio_index+in_mux_ctx->last_caption_index) {
-            if (in_mux_ctx->captions[index - in_mux_ctx->last_audio_index - 1].index >=
-                in_mux_ctx->captions[index - in_mux_ctx->last_audio_index - 1].n_parts)
+            i = index - in_mux_ctx->last_audio_index - 1;
+            if (in_mux_ctx->captions[i].index >= in_mux_ctx->captions[i].n_parts)
                 return -1;
-            filepath = in_mux_ctx->captions[index - in_mux_ctx->last_audio_index - 1].parts[in_mux_ctx->captions[index - in_mux_ctx->last_audio_index - 1].index];
-            in_mux_ctx->captions[index - in_mux_ctx->last_audio_index - 1].index++;
+            filepath = in_mux_ctx->captions[i].parts[in_mux_ctx->captions[i].index];
+            in_mux_ctx->captions[i].index++;
         } else {
             elv_err("in_mux_read_packet invalid index=%d", index);
             return -1;
@@ -862,7 +864,8 @@ out_mux_write_packet(
     }
 
 #if TRACE_IO
-    elv_dbg("OUT MUX WRITE fd=%"PRId64", size=%d written=%d pos=%d total=%d", fd, buf_size, bwritten, outctx->write_pos, outctx->written_bytes);
+    elv_dbg("OUT MUX WRITE fd=%"PRId64", size=%d written=%d pos=%d total=%d",
+        fd, buf_size, bwritten, outctx->write_pos, outctx->written_bytes);
 #endif
 
     return bwritten;
@@ -953,25 +956,24 @@ mux(
     avpipe_io_handler_t *out_handlers;
 
     if (!filename || filename[0] == '\0' )
-        return -1;
+        return eav_param;
 
     connect_ffmpeg_log();
 
     set_mux_handlers(&in_handlers, &out_handlers);
     in_mux_ctx = (io_mux_ctx_t *)calloc(1, sizeof(io_mux_ctx_t));
 
-    if (avpipe_init_muxer(&txctx, in_handlers, in_mux_ctx, out_handlers, params, filename) < 0) {
+    if ((rc = avpipe_init_muxer(&txctx,
+        in_handlers, in_mux_ctx, out_handlers, params, filename)) != eav_success) {
         elv_err("Initializing muxer failed");
-        rc = -1;
         goto end_mux;
     }
 
     txctx->in_handlers = in_handlers;
     txctx->out_handlers = out_handlers;
 
-    if (avpipe_mux(txctx) < 0) {
+    if ((rc = avpipe_mux(txctx)) != eav_success) {
         elv_err("Muxing failed");
-        rc = -1;
         goto end_mux;
     }
 
@@ -1004,7 +1006,8 @@ int
 probe(
     char *filename,
     int seekable,
-    txprobe_t **txprobe)
+    txprobe_t **txprobe,
+    int *n_streams)
 {
     ioctx_t inctx;
     avpipe_io_handler_t *in_handlers;
@@ -1013,12 +1016,12 @@ probe(
 
     set_handlers(&in_handlers, NULL);
     if (in_handlers->avpipe_opener(filename, &inctx) < 0) {
-        rc = -1;
+        rc = eav_open_input;
         goto end_probe;
     }
 
-    rc = avpipe_probe(in_handlers, &inctx, seekable, &probes);
-    if (rc < 0)
+    rc = avpipe_probe(in_handlers, &inctx, seekable, &probes, n_streams);
+    if (rc != eav_success)
         goto end_probe;
 
     *txprobe = probes;
