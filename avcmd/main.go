@@ -19,7 +19,7 @@ func main() {
 	}
 
 	log.SetDefault(&log.Config{
-		Level:   "debug",
+		Level:   "info",
 		Handler: "text",
 		File: &log.LumberjackConfig{
 			Filename:  "avcmd.log",

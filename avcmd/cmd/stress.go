@@ -213,7 +213,7 @@ func (tr *TestResource) sendGetRequestAndUpdateStats(session int, iteration int,
 		tr.stats.totalResp += len(body)
 		tr.m.Unlock()
 		msg := fmt.Sprintf("session=%d, i=%d, url=%s, len=%d, elapsed=%+v\n", session, iteration, url, len(body), elapsed)
-		log.Info(msg)
+		log.Debug(msg)
 	}
 }
 
@@ -268,7 +268,7 @@ func doStressOneSession(session int, td *TestDescriptor, done chan struct{}) {
 		tr := &td.TestResources[n]
 		segNum := rand.Intn(tr.EndId - tr.StartId + 1)
 
-		IdStr := strconv.Itoa(segNum)
+		IdStr := strconv.Itoa(segNum + tr.StartId)
 		newID := strings.Replace(tr.URLId, "ID", IdStr, 1)
 		url := tr.URLBase + newID + "?" + tr.URLParam
 
