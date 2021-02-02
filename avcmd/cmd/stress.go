@@ -28,12 +28,24 @@ var log = elog.Get("/eluvio/avcmd")
 
 const MaxIdleConnections = 100
 
+type RequestType int
+
+const (
+	UnknownABRSegment RequestType = iota
+	VideoABRSegment
+	AudioABRSegment
+	HLSPlaylistVideo
+	HLSPlaylistAudio
+)
+
 type TestResource struct {
-	URLBase  string `json:"url_base"`
-	URLId    string `json:"url_id"`
-	StartId  int    `json:"start_id"`
-	EndId    int    `json:"end_id"`
-	URLParam string `json:"url_param"`
+	ReqType     string  `json:"request_type"`
+	SegDuration float32 `json:"duration"`
+	URLBase     string  `json:"url_base"`
+	URLId       string  `json:"url_id"`
+	StartId     int     `json:"start_id"`
+	EndId       int     `json:"end_id"`
+	URLParam    string  `json:"url_param"`
 
 	stats TestStats
 	m     sync.Mutex
@@ -54,6 +66,23 @@ type TestDescriptor struct {
 	TestResources []TestResource `json:"test_resources"`
 	NumSessions   int            `json:"n_sessions"`
 	NumRepeats    int            `json:"n_repeats"`
+	//VideoSegDuration int            `json:"video_seg_duration"` // in sec
+	//AudioSegDuration int            `json:"audio_seg_duration"` // in sec
+}
+
+// createHTTPClient for connection re-use
+func createHTTPClient() *http.Client {
+	client := &http.Client{
+		Transport: &http.Transport{
+			MaxConnsPerHost:     10000,
+			MaxIdleConns:        10000,
+			MaxIdleConnsPerHost: 10000,
+			// other option field
+		},
+		Timeout: time.Duration(10) * time.Second,
+	}
+
+	return client
 }
 
 func WarmupStress(cmdRoot *cobra.Command) error {
@@ -86,6 +115,17 @@ Running this command should be done after initializing persistent cache (init co
 	cmdStress.AddCommand(cmdStressRun)
 	cmdStressRun.PersistentFlags().StringP("config", "c", "", "(mandatory) config file to run stress test")
 
+	cmdLiveRun := &cobra.Command{
+		Use:   "live",
+		Short: "Run live stress test",
+		Long: `Run the live stress test.
+Running this command would create requests every N seconds (default is 2 sec) for ABR segments.`,
+
+		RunE: doLive,
+	}
+	cmdStress.AddCommand(cmdLiveRun)
+	cmdLiveRun.PersistentFlags().StringP("config", "c", "", "(mandatory) config file to run stress test")
+
 	return nil
 }
 
@@ -112,7 +152,7 @@ func newTestDescriptor(cmd *cobra.Command, args []string) (*TestDescriptor, erro
 
 	err = json.Unmarshal(byteValue, &testDescriptor)
 	if err != nil {
-		return nil, fmt.Errorf("Config file %s is invalid or has invalid json format.", filename)
+		return nil, fmt.Errorf("Config file %s is invalid or has invalid json format (err=%v).", filename, err)
 	}
 
 	return &testDescriptor, nil
@@ -173,15 +213,22 @@ func (tr *TestResource) sendGetRequestForAllResources() {
 		newID := strings.Replace(URLId, "ID", IdStr, 1)
 		url := URLBase + newID + "?" + URLParam
 
-		tr.sendGetRequestAndUpdateStats(1, i, url)
+		tr.sendGetRequestAndUpdateStats(nil, 1, i, url)
 	}
 }
 
-func (tr *TestResource) sendGetRequestAndUpdateStats(session int, iteration int, url string) {
+func (tr *TestResource) sendGetRequestAndUpdateStats(client *http.Client, session int, iteration int, url string) {
 	// Send the URL to the server
-	start := time.Now()
-	resp, err := http.Get(url)
 	var body []byte
+	var err error
+	var resp *http.Response
+
+	start := time.Now()
+	if client == nil {
+		resp, err = http.Get(url)
+	} else {
+		resp, err = client.Get(url)
+	}
 	if err == nil {
 		body, err = ioutil.ReadAll(resp.Body)
 	}
@@ -262,21 +309,168 @@ func doStressRun(cmd *cobra.Command, args []string) error {
 func doStressOneSession(session int, td *TestDescriptor, done chan struct{}) {
 	msg := fmt.Sprintf("Starting session %d, iteration=%d", session, td.NumRepeats)
 	log.Info(msg)
+
+	client := createHTTPClient()
+
 	nTestResource := len(td.TestResources)
+	var url string
 	for i := 0; i < td.NumRepeats; i++ {
 		n := rand.Intn(nTestResource)
 		tr := &td.TestResources[n]
-		segNum := rand.Intn(tr.EndId - tr.StartId + 1)
+		if getReqType(tr.ReqType) == AudioABRSegment || getReqType(tr.ReqType) == VideoABRSegment {
+			segNum := rand.Intn(tr.EndId - tr.StartId + 1)
 
-		IdStr := strconv.Itoa(segNum + tr.StartId)
-		newID := strings.Replace(tr.URLId, "ID", IdStr, 1)
-		url := tr.URLBase + newID + "?" + tr.URLParam
+			IdStr := strconv.Itoa(segNum + tr.StartId)
+			newID := strings.Replace(tr.URLId, "ID", IdStr, 1)
+			url = tr.URLBase + newID + "?" + tr.URLParam
+		} else {
+			url = tr.URLBase + "?" + tr.URLParam
+		}
 
-		tr.sendGetRequestAndUpdateStats(session, i, url)
+		tr.sendGetRequestAndUpdateStats(client, session, i, url)
 	}
 	msg = fmt.Sprintf("Finished session %d", session)
 	log.Info(msg)
 	done <- struct{}{}
+}
+
+func doLive(cmd *cobra.Command, args []string) error {
+	td, err := newTestDescriptor(cmd, args)
+	if err != nil {
+		return err
+	}
+
+	http.DefaultTransport.(*http.Transport).MaxIdleConnsPerHost = MaxIdleConnections
+
+	msg := fmt.Sprintf("Got %d test resource, n_sessions=%d, n_repeats=%d\n",
+		len(td.TestResources), td.NumSessions, td.NumRepeats)
+	log.Info(msg)
+
+	for i := 0; i < len(td.TestResources); i++ {
+		msg = fmt.Sprintf("%+v\n", td.TestResources[i])
+		log.Info(msg)
+	}
+
+	done := make(chan struct{})
+
+	videoResource, _ := td.getTestResource(VideoABRSegment)
+	if videoResource != nil {
+		if videoResource.URLBase[len(videoResource.URLBase)-1] != '/' {
+			videoResource.URLBase = videoResource.URLBase + "/"
+		}
+	}
+
+	audioResource, _ := td.getTestResource(AudioABRSegment)
+	if audioResource != nil {
+		if audioResource.URLBase[len(audioResource.URLBase)-1] != '/' {
+			audioResource.URLBase = audioResource.URLBase + "/"
+		}
+	}
+
+	videoManifestResource, _ := td.getTestResource(HLSPlaylistVideo)
+	audioManifestResource, _ := td.getTestResource(HLSPlaylistAudio)
+
+	nGoRoutines := 0
+
+	for session := 1; session <= td.NumSessions; session++ {
+		// Each live session tries to mimic a player when playing live
+		if videoResource != nil {
+			go doStressOneLiveSession(session, videoResource, done)
+			nGoRoutines++
+		}
+
+		if audioResource != nil {
+			go doStressOneLiveSession(session, audioResource, done)
+			nGoRoutines++
+		}
+
+		if videoManifestResource != nil {
+			go doStressOneLiveSession(session, videoManifestResource, done)
+			nGoRoutines++
+		}
+
+		if audioManifestResource != nil {
+			go doStressOneLiveSession(session, audioManifestResource, done)
+			nGoRoutines++
+		}
+	}
+
+	for session := 0; session < nGoRoutines; session++ {
+		<-done // Wait for background goroutines to finish
+	}
+
+	for i := 0; i < len(td.TestResources); i++ {
+		tr := &td.TestResources[i]
+		tr.reportStats()
+	}
+	td.reportStats()
+
+	return nil
+}
+
+func doStressOneLiveSession(session int, tr *TestResource, done chan struct{}) {
+	endId := tr.EndId
+	startId := tr.StartId
+
+	client := createHTTPClient()
+
+	msg := fmt.Sprintf("Starting session %d, iteration=%d, SegDuration=%d",
+		session, tr.EndId-tr.StartId, tr.SegDuration)
+	log.Info(msg)
+
+	for i := startId; i <= endId; i++ {
+		var elapsed time.Duration
+		IdStr := strconv.Itoa(i)
+
+		// Every videoManifestReqPeriod ask for a video manifest
+		if getReqType(tr.ReqType) == HLSPlaylistVideo || getReqType(tr.ReqType) == HLSPlaylistAudio {
+			url := tr.URLBase + "?" + tr.URLParam
+
+			start := time.Now()
+			tr.sendGetRequestAndUpdateStats(client, session, i, url)
+			elapsed = time.Since(start)
+		} else {
+			newID := strings.Replace(tr.URLId, "ID", IdStr, 1)
+			url := tr.URLBase + newID + "?" + tr.URLParam
+
+			start := time.Now()
+			tr.sendGetRequestAndUpdateStats(client, session, i, url)
+			elapsed = time.Since(start)
+		}
+
+		//log.Info("XXX", "elapsed", elapsed, "SegDuration", tr.SegDuration)
+		if int(elapsed) < int(time.Duration(tr.SegDuration)*time.Second) {
+			time.Sleep(time.Duration(tr.SegDuration)*time.Second - elapsed)
+		}
+	}
+	msg = fmt.Sprintf("Finished session %d", session)
+	log.Info(msg)
+	done <- struct{}{}
+}
+
+func (td *TestDescriptor) getTestResource(reqType RequestType) (*TestResource, time.Duration) {
+	for i := 0; i < len(td.TestResources); i++ {
+		if getReqType(td.TestResources[i].ReqType) == reqType {
+			return &td.TestResources[i], time.Duration(td.TestResources[i].SegDuration) * time.Second
+		}
+	}
+
+	return nil, 0
+}
+
+func getReqType(reqType string) RequestType {
+	switch reqType {
+	case "video":
+		return VideoABRSegment
+	case "audio":
+		return AudioABRSegment
+	case "playlist_video":
+		return HLSPlaylistVideo
+	case "playlist_audio":
+		return HLSPlaylistAudio
+	default:
+		return UnknownABRSegment
+	}
 }
 
 func (td *TestDescriptor) reportStats() {

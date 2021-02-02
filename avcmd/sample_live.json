@@ -1,0 +1,40 @@
+{
+  "test_resources":[
+    {
+      "request_type": "video",
+      "duration": 2.002,
+      "url_base": "http://localhost:8008/qlibs/ilib8SLzhEyJWiJ41BPezhswG56MUwL/q/hq__CVXyHMAPQUtXgPGY6ek1oagDGNMVoHyHPTBJhaLTYpKxCSmDHHmrXooNuYxC3iB331iuQwD3jx/rep/playout/default/hls-clear/video/videovideo_1920x1080@9500000/",
+      "url_id": "ID.m4s",
+      "start_id": 1,
+      "end_id": 150,
+      "url_param": "authorization=atxsjc4pj5cmCCd8ta5KSv9tW6MqgzaCNRG4dmbonHXAmtqhkYr8WX1eUjdkCLuJCLiXyFuBiq95qq3wAxinWUNMAEGLhQZ6jCg7MkBKSxvfL8DF3upkPtvBDDZuQQRxMHrrqFDUwmTnUfVJtLrx82AtZXXDqJZuCkK2JofNmQpMJgPXNjxgi1VPxAAJoGnEuW17gNek2yYSrPXoLh57bN4LSGArT1C3u6CnRr8z5fyiRdLxGf8WYfNwJKkthZUW7j4n8wGbYdy12wyTxbpr5ViAaNRvuCVnvsRAuLXdZHX1GzKTmdftd7VWFGCCbeErfULEEsrsS7hASmHxT9hWanmRzHm5BezebF3rGyxGW6EXnZRkQFuprUxEGtmJLERkKAxJqwgFXyqveoHP2rB3nC3Sp5pHAphsQmXDGiNaeseHyRjd7QYqN36mYS6zo4gemawyyNyKtfv2qg9oCdX5efgShfbiHn44kV4G8whBJofvLBmVFhWYj6n18M8tmGmru964zSG5mSCRvqBNjPhH12y6XGXap8ntdTJyd6dBkZVvyL2rnvqHLNfM24W3ULiJMdqijBVcA2ybUmDCS2GWCq6zz4aSAtAj1Y"
+    },
+    {
+      "request_type": "audio",
+      "duration": 2.002,
+      "url_base": "http://localhost:8008/qlibs/ilib8SLzhEyJWiJ41BPezhswG56MUwL/q/hq__CVXyHMAPQUtXgPGY6ek1oagDGNMVoHyHPTBJhaLTYpKxCSmDHHmrXooNuYxC3iB331iuQwD3jx/rep/playout/default/hls-clear/audio/audioaudio@128000/",
+      "url_id": "ID.m4s",
+      "start_id": 1,
+      "end_id": 150,
+      "url_param": "authorization=atxsjc4pj5cmCCd8ta5KSv9tW6MqgzaCNRG4dmbonHXAmtqhkYr8WX1eUjdkCLuJCLiXyFuBiq95qq3wAxinWUNMAEGLhQZ6jCg7MkBKSxvfL8DF3upkPtvBDDZuQQRxMHrrqFDUwmTnUfVJtLrx82AtZXXDqJZuCkK2JofNmQpMJgPXNjxgi1VPxAAJoGnEuW17gNek2yYSrPXoLh57bN4LSGArT1C3u6CnRr8z5fyiRdLxGf8WYfNwJKkthZUW7j4n8wGbYdy12wyTxbpr5ViAaNRvuCVnvsRAuLXdZHX1GzKTmdftd7VWFGCCbeErfULEEsrsS7hASmHxT9hWanmRzHm5BezebF3rGyxGW6EXnZRkQFuprUxEGtmJLERkKAxJqwgFXyqveoHP2rB3nC3Sp5pHAphsQmXDGiNaeseHyRjd7QYqN36mYS6zo4gemawyyNyKtfv2qg9oCdX5efgShfbiHn44kV4G8whBJofvLBmVFhWYj6n18M8tmGmru964zSG5mSCRvqBNjPhH12y6XGXap8ntdTJyd6dBkZVvyL2rnvqHLNfM24W3ULiJMdqijBVcA2ybUmDCS2GWCq6zz4aSAtAj1Y"
+    },
+    {
+      "request_type": "playlist_video",
+      "duration": 10,
+      "url_base": "http://localhost:8008/qlibs/ilib8SLzhEyJWiJ41BPezhswG56MUwL/q/hq__CVXyHMAPQUtXgPGY6ek1oagDGNMVoHyHPTBJhaLTYpKxCSmDHHmrXooNuYxC3iB331iuQwD3jx/rep/playout/default/hls-clear/video/videovideo_640x360@400000/playlist.m3u8",
+      "start_id": 1,
+      "end_id": 15,
+      "url_param": "authorization=atxsjc4pj5cmCCd8ta5KSv9tW6MqgzaCNRG4dmbonHXAmtqhkYr8WX1eUjdkCLuJCLiXyFuBiq95qq3wAxinWUNMAEGLhQZ6jCg7MkBKSxvfL8DF3upkPtvBDDZuQQRxMHrrqFDUwmTnUfVJtLrx82AtZXXDqJZuCkK2JofNmQpMJgPXNjxgi1VPxAAJoGnEuW17gNek2yYSrPXoLh57bN4LSGArT1C3u6CnRr8z5fyiRdLxGf8WYfNwJKkthZUW7j4n8wGbYdy12wyTxbpr5ViAaNRvuCVnvsRAuLXdZHX1GzKTmdftd7VWFGCCbeErfULEEsrsS7hASmHxT9hWanmRzHm5BezebF3rGyxGW6EXnZRkQFuprUxEGtmJLERkKAxJqwgFXyqveoHP2rB3nC3Sp5pHAphsQmXDGiNaeseHyRjd7QYqN36mYS6zo4gemawyyNyKtfv2qg9oCdX5efgShfbiHn44kV4G8whBJofvLBmVFhWYj6n18M8tmGmru964zSG5mSCRvqBNjPhH12y6XGXap8ntdTJyd6dBkZVvyL2rnvqHLNfM24W3ULiJMdqijBVcA2ybUmDCS2GWCq6zz4aSAtAj1Y"
+    },
+    {
+      "request_type": "playlist_audio",
+      "duration": 10,
+      "url_base": "http://localhost:8008/qlibs/ilib8SLzhEyJWiJ41BPezhswG56MUwL/q/hq__CVXyHMAPQUtXgPGY6ek1oagDGNMVoHyHPTBJhaLTYpKxCSmDHHmrXooNuYxC3iB331iuQwD3jx/rep/playout/default/hls-clear/audio/audioaudio@128000/playlist.m3u8",
+      "start_id": 1,
+      "end_id": 15,
+      "url_param": "authorization=atxsjc4pj5cmCCd8ta5KSv9tW6MqgzaCNRG4dmbonHXAmtqhkYr8WX1eUjdkCLuJCLiXyFuBiq95qq3wAxinWUNMAEGLhQZ6jCg7MkBKSxvfL8DF3upkPtvBDDZuQQRxMHrrqFDUwmTnUfVJtLrx82AtZXXDqJZuCkK2JofNmQpMJgPXNjxgi1VPxAAJoGnEuW17gNek2yYSrPXoLh57bN4LSGArT1C3u6CnRr8z5fyiRdLxGf8WYfNwJKkthZUW7j4n8wGbYdy12wyTxbpr5ViAaNRvuCVnvsRAuLXdZHX1GzKTmdftd7VWFGCCbeErfULEEsrsS7hASmHxT9hWanmRzHm5BezebF3rGyxGW6EXnZRkQFuprUxEGtmJLERkKAxJqwgFXyqveoHP2rB3nC3Sp5pHAphsQmXDGiNaeseHyRjd7QYqN36mYS6zo4gemawyyNyKtfv2qg9oCdX5efgShfbiHn44kV4G8whBJofvLBmVFhWYj6n18M8tmGmru964zSG5mSCRvqBNjPhH12y6XGXap8ntdTJyd6dBkZVvyL2rnvqHLNfM24W3ULiJMdqijBVcA2ybUmDCS2GWCq6zz4aSAtAj1Y"
+    }
+  ],
+  "n_sessions": 10,
+  "n_repeats": 1
+}

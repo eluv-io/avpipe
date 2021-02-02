@@ -556,7 +556,7 @@ tx_init(
     }
 
     if ((h = tx_table_put(txctx)) < 0) {
-        elv_err("tx_init tx_table is full, cancelling transcoding");
+        elv_err("tx_init tx_table is full, cancelling transcoding %s", filename);
         rc = eav_xc_table;
         goto end_tx_init;
     }
@@ -573,7 +573,7 @@ end_tx_init:
     /* Close input handler resources */
     in_handlers->avpipe_closer(inctx);
 
-    elv_dbg("Releasing all the resources");
+    elv_dbg("Releasing all the resources, filename=%s", filename);
     avpipe_fini(&txctx);
     free(in_handlers);
     free(out_handlers);
@@ -595,7 +595,7 @@ tx_run(
 
     txctx_t *txctx = txe->txctx;
     if ((rc = avpipe_xc(txctx, 0, txctx->debug_frame_level)) != eav_success) {
-        elv_err("Error in transcoding");
+        elv_err("Error in transcoding, handle=%d", handle);
         goto end_tx;
     }
 
@@ -603,7 +603,7 @@ end_tx:
     /* Close input handler resources */
     txctx->in_handlers->avpipe_closer(txctx->inctx);
 
-    elv_dbg("Releasing all the resources");
+    elv_dbg("Releasing all the resources, handle=%d", handle);
     tx_table_free(handle);
     avpipe_fini(&txctx);
 
@@ -659,7 +659,7 @@ tx(
     txctx->inctx = inctx;
 
     if ((rc = avpipe_xc(txctx, 0, debug_frame_level)) != eav_success) {
-        elv_err("Transcoding failed, rc=%d", rc);
+        elv_err("Transcoding failed filename=%s, rc=%d", filename, rc);
         goto end_tx;
     }
 
@@ -667,7 +667,7 @@ end_tx:
     /* Close input handler resources */
     in_handlers->avpipe_closer(inctx);
 
-    elv_dbg("Releasing all the resources");
+    elv_dbg("Releasing all the resources, filename=%s", filename);
     avpipe_fini(&txctx);
     free(in_handlers);
     free(out_handlers);
@@ -965,7 +965,7 @@ mux(
 
     if ((rc = avpipe_init_muxer(&txctx,
         in_handlers, in_mux_ctx, out_handlers, params, filename)) != eav_success) {
-        elv_err("Initializing muxer failed");
+        elv_err("Initializing muxer failed, filename=%s", filename);
         goto end_mux;
     }
 
@@ -978,7 +978,7 @@ mux(
     }
 
 end_mux:
-    elv_dbg("Releasing all the muxing resources");
+    elv_dbg("Releasing all the muxing resources, filename=%s", filename);
     avpipe_mux_fini(&txctx);
     free(in_handlers);
     free(out_handlers);
@@ -1027,7 +1027,7 @@ probe(
     *txprobe = probes;
 
 end_probe:
-    elv_dbg("Releasing probe resources");
+    elv_dbg("Releasing probe resources, filename=%s", filename != NULL ? filename : "");
     /* Close input handler resources */
     in_handlers->avpipe_closer(&inctx);
     free(in_handlers);

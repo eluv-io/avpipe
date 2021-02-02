@@ -1123,13 +1123,13 @@ func Tx(params *TxParams, url string, debugFrameLevel bool) error {
 
 	// Convert TxParams to C.txparams_t
 	if params == nil {
-		log.Error("Failed transcoding, params is not set.")
+		log.Error("Failed transcoding, params is not set.", "url", url)
 		return EAV_PARAM
 	}
 
 	cparams, err := getCParams(params)
 	if err != nil {
-		log.Error("Transcoding failed", err)
+		log.Error("Transcoding failed", err, "url", url)
 	}
 
 	var debugFrameLevelInt int
@@ -1149,13 +1149,13 @@ func Tx(params *TxParams, url string, debugFrameLevel bool) error {
 
 func Mux(params *TxParams, url string, debugFrameLevel bool) error {
 	if params == nil {
-		log.Error("Failed muxing, params is not set.")
+		log.Error("Failed muxing, params is not set.", "url", url)
 		return EAV_PARAM
 	}
 
 	cparams, err := getCParams(params)
 	if err != nil {
-		log.Error("Muxing failed", err)
+		log.Error("Muxing failed", err, "url", url)
 	}
 
 	var debugFrameLevelInt int
@@ -1288,13 +1288,13 @@ func Probe(url string, seekable bool) (*ProbeInfo, error) {
 func TxInit(params *TxParams, url string, debugFrameLevel bool) (int32, error) {
 	// Convert TxParams to C.txparams_t
 	if params == nil {
-		log.Error("Failed transcoding, params is not set.")
-		return -1, fmt.Errorf("TxParams is nil")
+		log.Error("Failed transcoding, params is not set.", "url", url)
+		return -1, EAV_PARAM
 	}
 
 	cparams, err := getCParams(params)
 	if err != nil {
-		log.Error("Initializing transcoder failed", err)
+		log.Error("Initializing transcoder failed", err, "url", url)
 	}
 
 	var debugFrameLevelInt int
