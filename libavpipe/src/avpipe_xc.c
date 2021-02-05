@@ -1586,10 +1586,16 @@ should_skip_encoding(
      * If the format is dash or hls, we skip the frames in skip_until_start_time_pts()
      * without decoding the frame.
      */
-    if (p->start_time_ts > 0 &&
-        frame_in_pts_offset < p->start_time_ts &&
-        strcmp(p->format, "dash") &&
-        strcmp(p->format, "hls")) {
+    if (p->skip_decoding) {
+        if (p->start_time_ts > 0 &&
+            frame_in_pts_offset < p->start_time_ts &&
+            strcmp(p->format, "dash") &&
+            strcmp(p->format, "hls")) {
+            elv_dbg("ENCODE skip frame early pts=%" PRId64 ", frame_in_pts_offset=%" PRId64 ", start_time_ts=%" PRId64,
+                frame->pts, frame_in_pts_offset, p->start_time_ts);
+            return 1;
+        }
+    } else if (p->start_time_ts > 0 && frame_in_pts_offset < p->start_time_ts) {
         elv_dbg("ENCODE skip frame early pts=%" PRId64 ", frame_in_pts_offset=%" PRId64 ", start_time_ts=%" PRId64,
             frame->pts, frame_in_pts_offset, p->start_time_ts);
         return 1;
@@ -2591,7 +2597,7 @@ skip_until_start_time_pts(
     AVPacket *input_packet,
     txparams_t *params)
 {
-    if (params->start_time_ts <= 0)
+    if (params->start_time_ts <= 0 || !params->skip_decoding)
         return 0;
 
     /* If the format is not dash/hls then return.
@@ -2611,8 +2617,10 @@ skip_until_start_time_pts(
     const int64_t packet_in_pts_offset = input_packet->pts - input_start_pts;
     /* Drop frames before the desired 'start_time' */
     if (packet_in_pts_offset < params->start_time_ts) {
-        elv_dbg("PREDECODE skip frame early pts=%" PRId64 ", start_time_ts=%" PRId64,
-            input_packet->pts, params->start_time_ts);
+        elv_dbg("PREDECODE skip frame early pts=%" PRId64 ", start_time_ts=%" PRId64
+            ", input_start_pts=%" PRId64 ", packet_in_pts_offset=%" PRId64,
+            input_packet->pts, params->start_time_ts,
+            input_start_pts, packet_in_pts_offset);
         return 1;
     }
 
@@ -3641,6 +3649,7 @@ avpipe_init(
         "url=%s "
         "version=%s "
         "bypass=%d "
+        "skip_decoding=%d "
         "tx_type=%s "
         "format=%s "
         "seekable=%d "
@@ -3685,7 +3694,8 @@ avpipe_init(
         "filter_descriptor=\"%s\"",
         params->stream_id, url,
         avpipe_version(),
-        params->bypass_transcoding, get_tx_type_name(params->tx_type),
+        params->bypass_transcoding, params->skip_decoding,
+        get_tx_type_name(params->tx_type),
         params->format, params->seekable, params->start_time_ts,
         params->start_pts, params->duration_ts, params->start_segment_str,
         params->video_bitrate, params->audio_bitrate, params->sample_rate,

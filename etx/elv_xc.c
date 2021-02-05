@@ -904,6 +904,7 @@ usage(
         "\t-sample-rate :           (optional) Default: -1. For aac output sample rate is set to input sample rate and this parameter is ignored.\n"
         "\t-seekable :              (optional) Seekable stream. Default is 0, must be 0 or 1\n"
         "\t-seg-duration :          (mandatory if format is \"segment\") segment duration secs (positive integer). It is used for making mp4 segments.\n"
+        "\t-skip-decoding :         (optional) If start-time-ts is set and skip-decoding enabled, then will skip until start-time-ts without decoding.\n"
         "\t-start-pts :             (optional) Starting PTS for output. Default is 0\n"
         "\t-start-frag-index :      (optional) Start fragment index of first segment. Default is 0\n"
         "\t-start-segment :         (optional) Start segment number >= 1, Default is 1\n"
@@ -991,6 +992,7 @@ main(
         .seekable = 0,
         .video_seg_duration_ts = -1,        /* input argument, same units as input stream PTS */
         .audio_seg_duration_ts = -1,        /* input argument, same units as input stream PTS */
+        .skip_decoding = 0,
         .start_pts = 0,
         .start_segment_str = strdup("1"),   /* 1-based */
         .start_time_ts = 0,                 /* same units as input stream PTS */
@@ -1221,6 +1223,10 @@ main(
                     usage(argv[0], argv[i], EXIT_FAILURE);
                 }
                 if (p.stream_id < 0) {
+                    usage(argv[0], argv[i], EXIT_FAILURE);
+                }
+            } else if (!strcmp(argv[i], "-skip-decoding")) {
+                if (sscanf(argv[i+1], "%d", &p.skip_decoding) != 1) {
                     usage(argv[0], argv[i], EXIT_FAILURE);
                 }
             } else if (!strcmp(argv[i], "-seekable")) {

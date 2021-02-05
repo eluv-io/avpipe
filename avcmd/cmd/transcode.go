@@ -219,6 +219,7 @@ func InitTranscode(cmdRoot *cobra.Command) error {
 
 	cmdTranscode.PersistentFlags().StringP("filename", "f", "", "(mandatory) filename to be transcoded.")
 	cmdTranscode.PersistentFlags().BoolP("bypass", "b", false, "bypass transcoding.")
+	cmdTranscode.PersistentFlags().BoolP("skip-decoding", "", false, "skip decoding when start-time-ts is set.")
 	cmdTranscode.PersistentFlags().BoolP("listen", "", false, "listen mode for RTMP.")
 	cmdTranscode.PersistentFlags().Int32P("threads", "t", 1, "transcoding threads.")
 	cmdTranscode.PersistentFlags().StringP("audio-index", "", "", "the indexes of audio stream (comma separated).")
@@ -285,6 +286,11 @@ func doTranscode(cmd *cobra.Command, args []string) error {
 	bypass, err := cmd.Flags().GetBool("bypass")
 	if err != nil {
 		return fmt.Errorf("Invalid bypass flag")
+	}
+
+	skipDecoding, err := cmd.Flags().GetBool("skip-decoding")
+	if err != nil {
+		return fmt.Errorf("Invalid skip-decoding flag")
 	}
 
 	listen, err := cmd.Flags().GetBool("listen")
@@ -584,6 +590,7 @@ func doTranscode(cmd *cobra.Command, args []string) error {
 		StreamId:              streamId,
 		Listen:                listen,
 		FilterDescriptor:      filterDescriptor,
+		SkipDecoding:          skipDecoding,
 	}
 
 	err = getAudioIndexes(params, audioIndex)
