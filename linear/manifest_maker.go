@@ -3,13 +3,14 @@ package linear
 import (
 	"errors"
 	"fmt"
-	"github.com/qluvio/legacy_imf_dash_extract/abr"
 	"math"
 	"math/big"
 	"net/url"
 	"strconv"
 	"strings"
 	"time"
+
+	"github.com/qluvio/legacy_imf_dash_extract/abr"
 
 	elog "github.com/qluvio/content-fabric/log"
 )
@@ -65,11 +66,16 @@ func (mm *ManifestMaker) MakeMasterPlaylist(offering string) string {
 	mm.Query.Del("audio_only")
 	query := mm.makeQueryParams()
 
+	codecAudio := "mp4a.40.2"
+	codecVideo1080 := "avc1.640032" // profile 'high' level 5
+	codecVideo720 := "avc1.64002A"  // profile 'high' level 4.2
+
 	if audioOnly {
+
 		return `#EXTM3U
 #EXT-X-VERSION:6
 #EXT-X-INDEPENDENT-SEGMENTS
-#EXT-X-STREAM-INF:BANDWIDTH=128000,CODECS="mp4a.40.2"
+#EXT-X-STREAM-INF:BANDWIDTH=128000,CODECS="` + codecAudio + `"
 audio/stereo@128000/` + fileName + query + "\n"
 	}
 
@@ -78,13 +84,13 @@ audio/stereo@128000/` + fileName + query + "\n"
 			return `#EXTM3U
 #EXT-X-VERSION:6
 #EXT-X-INDEPENDENT-SEGMENTS
-#EXT-X-STREAM-INF:BANDWIDTH=9400000,CODECS="avc1.640032",RESOLUTION=1920x1080
+#EXT-X-STREAM-INF:BANDWIDTH=9400000,CODECS="` + codecVideo1080 + `",RESOLUTION=1920x1080
 video/1080@9400000/` + fileName + query + "\n"
 		}
 		return `#EXTM3U
 #EXT-X-VERSION:6
 #EXT-X-INDEPENDENT-SEGMENTS
-#EXT-X-STREAM-INF:BANDWIDTH=9400000,CODECS="avc1.640032,mp4a.40.2",RESOLUTION=1920x1080,AUDIO="audio"
+#EXT-X-STREAM-INF:BANDWIDTH=9400000,CODECS="` + codecVideo1080 + `,` + codecAudio + `",RESOLUTION=1920x1080,AUDIO="audio"
 video/1080@9400000/` + fileName + query +
 			"\n#EXT-X-MEDIA:NAME=\"audio_2ch_eng\",GROUP-ID=\"audio\",TYPE=AUDIO,CHANNELS=\"2\",URI=\"audio/stereo@128000/" + fileName + query + "\"\n"
 	} else {
@@ -92,13 +98,13 @@ video/1080@9400000/` + fileName + query +
 			return `#EXTM3U
 #EXT-X-VERSION:6
 #EXT-X-INDEPENDENT-SEGMENTS
-#EXT-X-STREAM-INF:BANDWIDTH=13900000,CODECS="avc1.640028",RESOLUTION=1280x720
+#EXT-X-STREAM-INF:BANDWIDTH=13900000,CODECS="` + codecVideo720 + `",RESOLUTION=1280x720
 video/720@13900000/` + fileName + query + "\n"
 		}
 		return `#EXTM3U
 #EXT-X-VERSION:6
 #EXT-X-INDEPENDENT-SEGMENTS
-#EXT-X-STREAM-INF:BANDWIDTH=13900000,CODECS="avc1.640028,mp4a.40.2",RESOLUTION=1280x720,AUDIO="audio"
+#EXT-X-STREAM-INF:BANDWIDTH=13900000,CODECS="` + codecVideo720 + `,` + codecAudio + `",RESOLUTION=1280x720,AUDIO="audio"
 video/720@13900000/` + fileName + query +
 			"\n#EXT-X-MEDIA:NAME=\"audio_2ch_eng\",GROUP-ID=\"audio\",TYPE=AUDIO,CHANNELS=\"2\",URI=\"audio/stereo@128000/" + fileName + query + "\"\n"
 	}
@@ -253,7 +259,7 @@ func (mm *ManifestMaker) makeSlicePlaylistForLivePlayable(
 				continue
 			}
 			currentSegTs = t - startPts
-			partial = fmt.Sprintf("-%d-%d", segTs - currentSegTs, segTs)
+			partial = fmt.Sprintf("-%d-%d", segTs-currentSegTs, segTs)
 		} else {
 			t += segTs
 			if t > startPts+duration {
@@ -261,7 +267,7 @@ func (mm *ManifestMaker) makeSlicePlaylistForLivePlayable(
 				partial = fmt.Sprintf("-0-%d", currentSegTs)
 			}
 		}
-		currentSegSec := float32(currentSegTs)/float32(adj.timescale())
+		currentSegSec := float32(currentSegTs) / float32(adj.timescale())
 		sb.WriteString(fmt.Sprintf("#EXTINF:%.6f,\n%s/%05d%s.m4s%s\n",
 			currentSegSec, base, seg, partial, query))
 		if t >= startPts+duration {
