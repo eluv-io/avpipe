@@ -603,7 +603,7 @@ tx_thread_func(
         /* Close input handler resources */
         params->in_handlers->avpipe_closer(inctx);
 
-        elv_dbg("Releasing all the resources");
+        elv_dbg("Releasing all the resources, filename=%s", params->filename);
         avpipe_fini(&txctx);
     }
 

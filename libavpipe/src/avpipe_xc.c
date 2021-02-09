@@ -1496,7 +1496,8 @@ static void
 set_idr_frame_key_flag(
     AVFrame *frame,
     coderctx_t *encoder_context,
-    txparams_t *params)
+    txparams_t *params,
+    int debug_frame_level)
 {
     if (!frame)
         return;
@@ -1518,7 +1519,10 @@ set_idr_frame_key_flag(
     if (!strcmp(params->format, "fmp4-segment") || !strcmp(params->format, "segment") ||
         !strcmp(params->format, "dash") || !strcmp(params->format, "hls")) {
         if (frame->pts >= encoder_context->last_key_frame + params->video_seg_duration_ts) {
-            elv_dbg("FRAME SET KEY flag, seg_duration_ts=%d pts=%"PRId64, params->video_seg_duration_ts, frame->pts);
+            if (debug_frame_level) {
+                elv_dbg("FRAME SET KEY flag, seg_duration_ts=%d pts=%"PRId64,
+                    params->video_seg_duration_ts, frame->pts);
+            }
             frame->pict_type = AV_PICTURE_TYPE_I;
             encoder_context->last_key_frame = frame->pts;
         }
@@ -1526,7 +1530,10 @@ set_idr_frame_key_flag(
 
     if (params->force_keyint > 0) {
         if (encoder_context->forced_keyint_countdown == 0) {
-            elv_dbg("FRAME SET KEY flag, forced_keyint=%d pts=%"PRId64, params->force_keyint, frame->pts);
+            if (debug_frame_level) {
+                elv_dbg("FRAME SET KEY flag, forced_keyint=%d pts=%"PRId64,
+                    params->force_keyint, frame->pts);
+            }
             frame->pict_type = AV_PICTURE_TYPE_I;
             encoder_context->forced_keyint_countdown = params->force_keyint;
         }
@@ -1698,7 +1705,7 @@ encode_frame(
         // Signal if we need IDR frames
         if (params->tx_type & tx_video &&
             stream_index == decoder_context->video_stream_index) {
-            set_idr_frame_key_flag(frame, encoder_context, params);
+            set_idr_frame_key_flag(frame, encoder_context, params, debug_frame_level);
         }
 
         dump_frame(selected_decoded_audio(decoder_context, stream_index) >= 0,
@@ -3505,6 +3512,23 @@ avpipe_probe(
     *n_streams = nb_streams - nb_skipped_streams;
 
 avpipe_probe_end:
+    if (decoder_ctx.format_context) {
+        AVIOContext *avioctx = (AVIOContext *) decoder_ctx.format_context->pb;
+        if (avioctx) {
+            av_freep(&avioctx->buffer);
+            av_freep(&avioctx);
+        }
+        avformat_close_input(&decoder_ctx.format_context);
+    }
+
+    for (int i=0; i<MAX_STREAMS; i++) {
+        if (decoder_ctx.codec_context[i]) {
+            /* Corresponds to avcodec_open2() */
+            avcodec_close(decoder_ctx.codec_context[i]);
+            avcodec_free_context(&decoder_ctx.codec_context[i]);
+        }
+    }
+
     return rc;
 }
 

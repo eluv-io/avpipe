@@ -488,7 +488,7 @@ func AVPipeOpenInput(url *C.char, size *C.int64_t) C.int64_t {
 	*size = C.int64_t(input.Size())
 
 	h := &ioHandler{input: input, outTable: make(map[int64]OutputHandler), mutex: &sync.Mutex{}}
-	log.Debug("AVPipeOpenInput()", "url", filename, "size", *size)
+	log.Debug("AVPipeOpenInput()", "url", filename, "size", *size, "fd", fd)
 
 	gMutex.Lock()
 	defer gMutex.Unlock()
@@ -606,12 +606,14 @@ func AVPipeCloseInput(fd C.int64_t) C.int {
 	err := h.InCloser()
 
 	// Remove the handler from global table
-	gHandlers[int64(fd)] = nil
-	gURLOutputOpenersByHandler[int64(fd)] = nil
+	delete(gHandlers, int64(fd))
+	delete(gURLOutputOpenersByHandler, int64(fd))
 	gMutex.Unlock()
 	if err != nil {
 		return C.int(-1)
 	}
+
+	log.Debug("AVPipeCloseInput()", "fd", fd)
 
 	return C.int(0)
 }
@@ -656,7 +658,11 @@ func (h *ioHandler) putOutTable(fd int64, outHandler OutputHandler) {
 	h.mutex.Lock()
 	defer h.mutex.Unlock()
 
-	h.outTable[fd] = outHandler
+	if outHandler != nil {
+		h.outTable[fd] = outHandler
+	} else {
+		delete(h.outTable, fd)
+	}
 }
 
 func (h *ioHandler) getOutTable(fd int64) OutputHandler {
@@ -876,10 +882,13 @@ func AVPipeCloseOutput(handler C.int64_t, fd C.int64_t) C.int {
 		return C.int(-1)
 	}
 	gMutex.Unlock()
+	defer h.putOutTable(int64(fd), nil)
 	err := h.OutCloser(fd)
 	if err != nil {
 		return C.int(-1)
 	}
+
+	log.Debug("AVPipeCloseOutput()", "fd", fd)
 
 	return C.int(0)
 }
