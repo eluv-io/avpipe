@@ -739,6 +739,8 @@ end_probe:
     elv_dbg("Releasing probe resources");
     /* Close input handler resources */
     in_handlers.avpipe_closer(&inctx);
+    free(probe->stream_info);
+    free(probe);
     return rc;
 }
 

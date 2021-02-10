@@ -1638,6 +1638,7 @@ encode_frame(
     int debug_frame_level)
 {
     int ret;
+    int rc = eav_success;
     AVFormatContext *format_context = encoder_context->format_context;
     AVCodecContext *codec_context = encoder_context->codec_context[stream_index];
 
@@ -1738,7 +1739,8 @@ encode_frame(
             break;
         } else if (ret < 0) {
             elv_err("Failure while receiving a packet from the encoder: %s", av_err2str(ret));
-            return eav_receive_packet;
+            rc = eav_receive_packet;
+            goto end_encode_frame;
         }
 
         /*
@@ -1751,7 +1753,8 @@ encode_frame(
         } else if (output_packet->stream_index >= format_context->nb_streams) {
             elv_err("Output packet stream_index=%d is more than the number of streams=%d in output format",
                 output_packet->stream_index, format_context->nb_streams);
-            return eav_stream_index;
+            rc = eav_stream_index;
+            goto end_encode_frame;
         }
 
         /*
@@ -1824,9 +1827,11 @@ encode_frame(
                 ret, output_packet->stream_index, stream_index, av_err2str(ret));
         }
     }
+
+end_encode_frame:
     av_packet_unref(output_packet);
     av_packet_free(&output_packet);
-    return eav_success;
+    return rc;
 }
 
 static int
@@ -1953,7 +1958,6 @@ transcode_audio_aac(
     coderctx_t *encoder_context,
     AVPacket *packet,
     AVFrame *frame,
-    AVFrame *filt_frame,
     int stream_index,
     txparams_t *p,
     int debug_frame_level)
@@ -1962,6 +1966,7 @@ transcode_audio_aac(
     AVCodecContext *output_codec_context = encoder_context->codec_context[stream_index];
     SwrContext *resampler_context = decoder_context->resampler_context;
     int response;
+    AVFrame *filt_frame;
 
     if (debug_frame_level)
         elv_dbg("DECODE stream_index=%d send_packet pts=%"PRId64" dts=%"PRId64" duration=%d, input frame_size=%d, output frame_size=%d",
@@ -2221,8 +2226,7 @@ transcode_video(
 
         /* push the decoded frame into the filtergraph */
         elv_get_time(&tv);
-        //if (av_buffersrc_add_frame_flags(decoder_context->buffersrc_ctx, frame, AV_BUFFERSRC_FLAG_KEEP_REF | AV_BUFFERSRC_FLAG_PUSH) < 0)
-        if (av_buffersrc_add_frame_flags(decoder_context->video_buffersrc_ctx, frame, 0) < 0) {
+        if (av_buffersrc_add_frame_flags(decoder_context->video_buffersrc_ctx, frame, AV_BUFFERSRC_FLAG_KEEP_REF) < 0) {
             elv_err("Failure in feeding the filtergraph");
             break;
         }
@@ -2306,6 +2310,7 @@ transcode_video_func(
         AVPacket *packet = xc_frame->packet;
         if (!packet) {
             elv_err("transcode_video packet is NULL");
+            free(xc_frame);
             continue;
         }
 
@@ -2325,6 +2330,7 @@ transcode_video_func(
 
         av_frame_unref(frame);
         av_frame_unref(filt_frame);
+        av_packet_unref(packet);
         av_packet_free(&packet);
         free(xc_frame);
 
@@ -2369,6 +2375,7 @@ transcode_audio_func(
         AVPacket *packet = xc_frame->packet;
         if (!packet) {
             elv_err("transcode_video packet is NULL");
+            free(xc_frame);
             continue;
         }
 
@@ -2388,7 +2395,6 @@ transcode_audio_func(
                 encoder_context,
                 packet,
                 frame,
-                filt_frame,
                 packet->stream_index,
                 params,
                 xctx->debug_frame_level);
@@ -2402,6 +2408,7 @@ transcode_audio_func(
                 packet->stream_index,
                 params,
                 xctx->debug_frame_level);
+            av_frame_unref(filt_frame);
         }
 #else
         err = transcode_audio(
@@ -2413,10 +2420,10 @@ transcode_audio_func(
             packet->stream_index,
             params,
             xctx->debug_frame_level);
+        av_frame_unref(filt_frame);
 #endif
 
         av_frame_unref(frame);
-        av_frame_unref(filt_frame);
         av_packet_free(&packet);
         free(xc_frame);
 
@@ -2905,8 +2912,6 @@ avpipe_xc(
     txparams_t *params = txctx->params;
     int rc = 0;
     AVPacket *input_packet = NULL;
-    AVFrame *input_frame = NULL;
-    AVFrame *filt_frame = NULL;
 
     if (!params->bypass_transcoding &&
         (params->tx_type & tx_video)) {
@@ -3011,16 +3016,6 @@ avpipe_xc(
                     (encoder_context->format_context->streams[0]->avg_frame_rate.num * decoder_context->stream[0]->time_base.num);
         }
         elv_log("calculated_frame_duration=%d", encoder_context->calculated_frame_duration);
-    }
-
-
-    input_frame = av_frame_alloc();
-    filt_frame = av_frame_alloc();
-
-    if (!input_frame || !filt_frame) {
-        elv_err("Failed to allocated memory for AVFrame");
-        rc = eav_mem_alloc;
-        goto xc_done;
     }
 
     txctx->do_instrument = do_instrument;
@@ -3223,8 +3218,6 @@ xc_done:
     dump_trackers(decoder_context->format_context, encoder_context->format_context);
 
     av_packet_free(&input_packet);
-    av_frame_free(&input_frame);
-    av_frame_free(&filt_frame);
 
     if (params->tx_type & tx_video)
         av_write_trailer(encoder_context->format_context);
@@ -3835,7 +3828,6 @@ avpipe_fini(
     /* Corresponds to avformat_open_input */
     if (decoder_context && decoder_context->format_context)
         avformat_close_input(&decoder_context->format_context);
-    //avformat_free_context(decoder_context->format_context);
 
     /* Free filter graph resources */
     if (decoder_context && decoder_context->video_filter_graph)
@@ -3843,7 +3835,6 @@ avpipe_fini(
     if (decoder_context && decoder_context->audio_filter_graph)
         avfilter_graph_free(&decoder_context->audio_filter_graph);
 
-    //avformat_close_input(&encoder_context->format_context);
     if (encoder_context && encoder_context->format_context) {
         free(encoder_context->format_context->avpipe_opaque);
         avformat_free_context(encoder_context->format_context);
