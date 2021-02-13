@@ -1170,7 +1170,8 @@ prepare_audio_encoder(
     encoder_context->codec_context[index]->time_base = (AVRational){1, encoder_context->codec_context[index]->sample_rate};
     encoder_context->stream[index]->time_base = encoder_context->codec_context[index]->time_base;
 
-    if (decoder_context->codec[index]->sample_fmts && params->bypass_transcoding)
+    if (decoder_context->codec[index] && 
+        decoder_context->codec[index]->sample_fmts && params->bypass_transcoding)
         encoder_context->codec_context[index]->sample_fmt = decoder_context->codec[index]->sample_fmts[0];
     else if (encoder_context->codec[index]->sample_fmts && encoder_context->codec[index]->sample_fmts[0])
         encoder_context->codec_context[index]->sample_fmt = encoder_context->codec[index]->sample_fmts[0];
@@ -1443,7 +1444,7 @@ prepare_encoder(
 
     if (params->tx_type & tx_video) {
         if ((rc = prepare_video_encoder(encoder_context, decoder_context, params)) != eav_success) {
-            elv_err("Failure in preparing video encoder");
+            elv_err("Failure in preparing video encoder, rc=%d", rc);
             return rc;
         }
     }
@@ -1451,7 +1452,7 @@ prepare_encoder(
     if (params->tx_type & tx_audio) {
         encoder_context->audio_enc_stream_index = -1;
         if ((rc = prepare_audio_encoder(encoder_context, decoder_context, params)) != eav_success) {
-            elv_err("Failure in preparing audio copy");
+            elv_err("Failure in preparing audio copy, rc=%d", rc);
             return rc;
         }
     }
