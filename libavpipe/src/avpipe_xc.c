@@ -1555,30 +1555,6 @@ should_skip_encoding(
         p->tx_type == tx_audio_merge)
         return 0;
 
-    /* For MPEG-TS - skip a fixed duration at the beginning to sync audio and vide
-     * Audio starts encoding right away but video will drop frames up until the first i-frame.
-     * Skipping an equal amount of both audio and video ensures they start encoding at approximately
-     * the same time (generally less that one frame duration apart).
-     */
-    if (p->sync_audio_to_stream_id < 0) {
-        const int64_t mpegts_skip_offset = 10; /* seoncds */
-        if (mpegts_skip_offset > 0 && decoder_context->is_mpegts && (!strcmp(p->format, "fmp4-segment"))) {
-            int64_t time_base = decoder_context->stream[stream_index]->time_base.den;
-            int64_t pts_offset = encoder_context->first_read_frame_pts[stream_index];
-            if (!strcmp(p->ecodec2, "aac")) {
-                time_base = encoder_context->stream[stream_index]->time_base.den;
-#ifdef USE_RESAMPLE_AAC
-                pts_offset = 0; /* AAC always starts at PTS 0 */
-#endif
-            }
-            if (frame->pts - pts_offset < mpegts_skip_offset * time_base) {
-                elv_dbg("ENCODE skip frame early mpegts stream=%d pts=%" PRId64" first=%" PRId64 " time_base=%" PRId64,
-                    stream_index, frame->pts, pts_offset, time_base);
-                return 1;
-            }
-        }
-    }
-
     int64_t frame_in_pts_offset;
 
     if (selected_decoded_audio(decoder_context, stream_index) >= 0)
@@ -2573,6 +2549,7 @@ should_stop_decoding(
         input_packet_rel_pts = input_packet->pts - decoder_context->audio_input_start_pts;
     }
 
+    /* PENDING (RM) for some of the live feeds (like RTMP) we need to scale input_packet_rel_pts */
     if (params->duration_ts != -1 &&
         input_packet->pts != AV_NOPTS_VALUE &&
         input_packet_rel_pts >= params->start_time_ts + params->duration_ts) {
@@ -2661,16 +2638,7 @@ skip_for_sync(
         strcmp(params->format, "fmp4-segment"))
         return 0;
 
-    /* If tx_video just skip until the first key frame */
-    if (params->tx_type & tx_video) {
-        if (input_packet->flags == AV_PKT_FLAG_KEY) {
-            decoder_context->mpegts_synced = 1;
-            return 0;
-        }
-        return 1;
-    }
-
-    /* We are tx_audio but processing both video and audio input streams */
+    /* Check if the packet is video and it is a key frame */
     if (input_packet->stream_index == decoder_context->video_stream_index) {
         /* first_key_frame_pts points to first video key frame. */
         if (decoder_context->first_key_frame_pts < 0 &&
@@ -2680,11 +2648,13 @@ skip_for_sync(
                 decoder_context->first_key_frame_pts, input_packet->stream_index);
 
             dump_packet(0, "SYNC ", input_packet, 1);
+            if (params->tx_type & tx_video)
+                return 0;
         }
         return 1;
     }
 
-    /* We are tx_audio and processing the audio stream.
+    /* We are processing the audio packets now.
      * Skip until the audio PTS has reached the first video key frame PTS
      * PENDING(SSS) - this is incorrect if audio PTS is muxed ahead of video
      */
