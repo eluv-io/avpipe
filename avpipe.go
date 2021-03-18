@@ -69,6 +69,8 @@ const (
 	FMP4VideoSegment
 	// FMP4AudioSegment 14
 	FMP4AudioSegment
+	// FrameImage 15
+	FrameImage
 )
 
 // This is corresponding to AV_NOPTS_VALUE
@@ -77,14 +79,15 @@ const AvNoPtsValue = uint64(C.uint64_t(0x8000000000000000))
 type TxType int
 
 const (
-	TxNone       TxType = iota
-	TxVideo             = 1
-	TxAudio             = 2
-	TxAll               = 3  // TxAudio | TxVideo
-	TxAudioMerge        = 6  // TxAudio | 0x04
-	TxAudioJoin         = 10 // TxAudio | 0x08
-	TxAudioPan          = 18 // TxAudio | 0x10
-	TxMux               = 32
+	TxNone          TxType = iota
+	TxVideo                = 1
+	TxAudio                = 2
+	TxAll                  = 3  // TxAudio | TxVideo
+	TxAudioMerge           = 6  // TxAudio | 0x04
+	TxAudioJoin            = 10 // TxAudio | 0x08
+	TxAudioPan             = 18 // TxAudio | 0x10
+	TxMux                  = 32
+	TxExtractImages        = 65 // TxVideo | 2^6
 )
 
 func TxTypeFromString(txTypeStr string) TxType {
@@ -104,6 +107,8 @@ func TxTypeFromString(txTypeStr string) TxType {
 		txType = TxAudioPan
 	case "mux":
 		txType = TxMux
+	case "extract-images":
+		txType = TxExtractImages
 	default:
 		txType = TxNone
 	}
@@ -142,64 +147,98 @@ const MaxAudioMux = C.MAX_AUDIO_MUX
 
 // TxParams should match with txparams_t in avpipe_xc.h
 type TxParams struct {
-	BypassTranscoding     bool               `json:"bypass,omitempty"`
-	Format                string             `json:"format,omitempty"`
-	StartTimeTs           int64              `json:"start_time_ts,omitempty"`
-	SkipOverPts           int64              `json:"skip_over_pts,omitempty"`
-	StartPts              int64              `json:"start_pts,omitempty"` // Start PTS for output
-	DurationTs            int64              `json:"duration_ts,omitempty"`
-	StartSegmentStr       string             `json:"start_segment_str,omitempty"`
-	VideoBitrate          int32              `json:"video_bitrate,omitempty"`
-	AudioBitrate          int32              `json:"audio_bitrate,omitempty"`
-	SampleRate            int32              `json:"sample_rate,omitempty"` // Audio sampling rate
-	RcMaxRate             int32              `json:"rc_max_rate,omitempty"`
-	RcBufferSize          int32              `json:"rc_buffer_size,omitempty"`
-	CrfStr                string             `json:"crf_str,omitempty"`
-	Preset                string             `json:"preset,omitempty"`
-	AudioSegDurationTs    int64              `json:"audio_seg_duration_ts,omitempty"`
-	VideoSegDurationTs    int64              `json:"video_seg_duration_ts,omitempty"`
-	SegDuration           string             `json:"seg_duration,omitempty"`
-	StartFragmentIndex    int32              `json:"start_fragment_index,omitempty"`
-	ForceKeyInt           int32              `json:"force_keyint,omitempty"`
-	Ecodec                string             `json:"ecodec,omitempty"`    // Video encoder
-	Ecodec2               string             `json:"ecodec2,omitempty"`   // Audio encoder
-	Dcodec                string             `json:"dcodec,omitempty"`    // Video decoder
-	Dcodec2               string             `json:"dcodec2,omitempty"`   // Audio decoder
-	GPUIndex              int32              `json:"gpu_index,omitempty"` // GPU index if encoder/decoder is GPU (nvidia)
-	EncHeight             int32              `json:"enc_height,omitempty"`
-	EncWidth              int32              `json:"enc_width,omitempty"`
-	CryptIV               string             `json:"crypt_iv,omitempty"`
-	CryptKey              string             `json:"crypt_key,omitempty"`
-	CryptKID              string             `json:"crypt_kid,omitempty"`
-	CryptKeyURL           string             `json:"crypt_key_url,omitempty"`
-	CryptScheme           CryptScheme        `json:"crypt_scheme,omitempty"`
-	TxType                TxType             `json:"tx_type,omitempty"`
-	Seekable              bool               `json:"seekable,omitempty"`
-	WatermarkText         string             `json:"watermark_text,omitempty"`
-	WatermarkTimecode     string             `json:"watermark_timecode,omitempty"`
-	WatermarkTimecodeRate float32            `json:"watermark_timecode_rate,omitempty"`
-	WatermarkXLoc         string             `json:"watermark_xloc,omitempty"`
-	WatermarkYLoc         string             `json:"watermark_yloc,omitempty"`
-	WatermarkRelativeSize float32            `json:"watermark_relative_size,omitempty"`
-	WatermarkFontColor    string             `json:"watermark_font_color,omitempty"`
-	WatermarkShadow       bool               `json:"watermark_shadow,omitempty"`
-	WatermarkShadowColor  string             `json:"watermark_shadow_color,omitempty"`
-	WatermarkOverlay      string             `json:"watermark_overlay,omitempty"`      // Buffer containing overlay image
-	WatermarkOverlayLen   int                `json:"watermark_overlay_len,omitempty"`  // Length of overlay image
-	WatermarkOverlayType  ImageType          `json:"watermark_overlay_type,omitempty"` // Type of overlay image (i.e PngImage, ...)
-	StreamId              int32              `json:"stream_id"`                        // Specify stream by ID (instead of index)
-	AudioIndex            [MaxAudioMux]int32 `json:"audio_index,omitempty"`
-	NumAudio              int32              `json:"n_audio"`
-	MaxCLL                string             `json:"max_cll,omitempty"`
-	MasterDisplay         string             `json:"master_display,omitempty"`
-	BitDepth              int32              `json:"bitdepth,omitempty"`
-	AudioFillGap          bool               `json:"audio_fill_gap,omitempty"`
-	SyncAudioToStreamId   int                `json:"sync_audio_to_stream_id,omitempty"`
-	ForceEqualFDuration   bool               `json:"force_equal_frame_duration,omitempty"`
-	MuxingSpec            string             `json:"muxing_spec,omitempty"`
-	Listen                bool               `json:"listen"`
-	FilterDescriptor      string             `json:"filter_descriptor"`
-	SkipDecoding          bool               `json:"skip_decoding"`
+	BypassTranscoding      bool               `json:"bypass,omitempty"`
+	Format                 string             `json:"format,omitempty"`
+	StartTimeTs            int64              `json:"start_time_ts,omitempty"`
+	SkipOverPts            int64              `json:"skip_over_pts,omitempty"`
+	StartPts               int64              `json:"start_pts,omitempty"` // Start PTS for output
+	DurationTs             int64              `json:"duration_ts,omitempty"`
+	StartSegmentStr        string             `json:"start_segment_str,omitempty"`
+	VideoBitrate           int32              `json:"video_bitrate,omitempty"`
+	AudioBitrate           int32              `json:"audio_bitrate,omitempty"`
+	SampleRate             int32              `json:"sample_rate,omitempty"` // Audio sampling rate
+	RcMaxRate              int32              `json:"rc_max_rate,omitempty"`
+	RcBufferSize           int32              `json:"rc_buffer_size,omitempty"`
+	CrfStr                 string             `json:"crf_str,omitempty"`
+	Preset                 string             `json:"preset,omitempty"`
+	AudioSegDurationTs     int64              `json:"audio_seg_duration_ts,omitempty"`
+	VideoSegDurationTs     int64              `json:"video_seg_duration_ts,omitempty"`
+	SegDuration            string             `json:"seg_duration,omitempty"`
+	StartFragmentIndex     int32              `json:"start_fragment_index,omitempty"`
+	ForceKeyInt            int32              `json:"force_keyint,omitempty"`
+	Ecodec                 string             `json:"ecodec,omitempty"`    // Video encoder
+	Ecodec2                string             `json:"ecodec2,omitempty"`   // Audio encoder
+	Dcodec                 string             `json:"dcodec,omitempty"`    // Video decoder
+	Dcodec2                string             `json:"dcodec2,omitempty"`   // Audio decoder
+	GPUIndex               int32              `json:"gpu_index,omitempty"` // GPU index if encoder/decoder is GPU (nvidia)
+	EncHeight              int32              `json:"enc_height,omitempty"`
+	EncWidth               int32              `json:"enc_width,omitempty"`
+	CryptIV                string             `json:"crypt_iv,omitempty"`
+	CryptKey               string             `json:"crypt_key,omitempty"`
+	CryptKID               string             `json:"crypt_kid,omitempty"`
+	CryptKeyURL            string             `json:"crypt_key_url,omitempty"`
+	CryptScheme            CryptScheme        `json:"crypt_scheme,omitempty"`
+	TxType                 TxType             `json:"tx_type,omitempty"`
+	Seekable               bool               `json:"seekable,omitempty"`
+	WatermarkText          string             `json:"watermark_text,omitempty"`
+	WatermarkTimecode      string             `json:"watermark_timecode,omitempty"`
+	WatermarkTimecodeRate  float32            `json:"watermark_timecode_rate,omitempty"`
+	WatermarkXLoc          string             `json:"watermark_xloc,omitempty"`
+	WatermarkYLoc          string             `json:"watermark_yloc,omitempty"`
+	WatermarkRelativeSize  float32            `json:"watermark_relative_size,omitempty"`
+	WatermarkFontColor     string             `json:"watermark_font_color,omitempty"`
+	WatermarkShadow        bool               `json:"watermark_shadow,omitempty"`
+	WatermarkShadowColor   string             `json:"watermark_shadow_color,omitempty"`
+	WatermarkOverlay       string             `json:"watermark_overlay,omitempty"`      // Buffer containing overlay image
+	WatermarkOverlayLen    int                `json:"watermark_overlay_len,omitempty"`  // Length of overlay image
+	WatermarkOverlayType   ImageType          `json:"watermark_overlay_type,omitempty"` // Type of overlay image (i.e PngImage, ...)
+	StreamId               int32              `json:"stream_id"`                        // Specify stream by ID (instead of index)
+	AudioIndex             [MaxAudioMux]int32 `json:"audio_index,omitempty"`
+	NumAudio               int32              `json:"n_audio"`
+	MaxCLL                 string             `json:"max_cll,omitempty"`
+	MasterDisplay          string             `json:"master_display,omitempty"`
+	BitDepth               int32              `json:"bitdepth,omitempty"`
+	AudioFillGap           bool               `json:"audio_fill_gap,omitempty"`
+	SyncAudioToStreamId    int                `json:"sync_audio_to_stream_id,omitempty"`
+	ForceEqualFDuration    bool               `json:"force_equal_frame_duration,omitempty"`
+	MuxingSpec             string             `json:"muxing_spec,omitempty"`
+	Listen                 bool               `json:"listen"`
+	FilterDescriptor       string             `json:"filter_descriptor"`
+	SkipDecoding           bool               `json:"skip_decoding"`
+	ExtractImageIntervalTs int64              `json:"extract_image_interval_ts,omitempty"`
+}
+
+// NewTxParams initializes a TxParams struct with unset/default values
+func NewTxParams() *TxParams {
+	return &TxParams{
+		AudioBitrate:           128000,
+		AudioSegDurationTs:     -1,
+		BitDepth:               8,
+		CrfStr:                 "23",
+		DurationTs:             -1,
+		Ecodec:                 "libx264",
+		Ecodec2:                "aac",
+		EncHeight:              -1,
+		EncWidth:               -1,
+		ExtractImageIntervalTs: -1,
+		GPUIndex:               -1,
+		SampleRate:             -1,
+		SegDuration:            "30",
+		StartFragmentIndex:     1,
+		StartSegmentStr:        "1",
+		StreamId:               -1,
+		SyncAudioToStreamId:    -1,
+		VideoBitrate:           -1,
+		VideoSegDurationTs:     -1,
+		WatermarkFontColor:     "white",
+		WatermarkOverlayType:   JpgImage,
+		WatermarkRelativeSize:  0.05,
+		WatermarkShadow:        false,
+		WatermarkShadowColor:   "black",
+		WatermarkTimecodeRate:  -1,
+		WatermarkXLoc:          "W*0.05",
+		WatermarkYLoc:          "H*0.9",
+	}
 }
 
 type AVMediaType int
@@ -714,6 +753,8 @@ func AVPipeOpenOutput(handler C.int64_t, stream_index, seg_index, stream_type C.
 		out_type = FMP4VideoSegment
 	case C.avpipe_audio_fmp4_segment:
 		out_type = FMP4AudioSegment
+	case C.avpipe_image:
+		out_type = FrameImage
 	default:
 		log.Error("AVPipeOpenOutput()", "invalid stream type", stream_type)
 		return C.int64_t(-1)
@@ -1035,61 +1076,63 @@ func Version() string {
 func getCParams(params *TxParams) (*C.txparams_t, error) {
 	// same field order as avpipe_xc.h
 	cparams := &C.txparams_t{
-		format:                  C.CString(params.Format),
-		start_time_ts:           C.int64_t(params.StartTimeTs),
-		skip_over_pts:           C.int64_t(params.SkipOverPts),
-		start_pts:               C.int64_t(params.StartPts),
-		duration_ts:             C.int64_t(params.DurationTs),
-		start_segment_str:       C.CString(params.StartSegmentStr),
-		video_bitrate:           C.int(params.VideoBitrate),
-		audio_bitrate:           C.int(params.AudioBitrate),
-		sample_rate:             C.int(params.SampleRate),
-		crf_str:                 C.CString(params.CrfStr),
-		preset:                  C.CString(params.Preset),
-		rc_max_rate:             C.int(params.RcMaxRate),
-		rc_buffer_size:          C.int(params.RcBufferSize),
-		audio_seg_duration_ts:   C.int64_t(params.AudioSegDurationTs),
-		video_seg_duration_ts:   C.int64_t(params.VideoSegDurationTs),
-		seg_duration:            C.CString(params.SegDuration),
-		start_fragment_index:    C.int(params.StartFragmentIndex),
-		force_keyint:            C.int(params.ForceKeyInt),
-		ecodec:                  C.CString(params.Ecodec),
-		ecodec2:                 C.CString(params.Ecodec2),
-		dcodec:                  C.CString(params.Dcodec),
-		dcodec2:                 C.CString(params.Dcodec2),
-		enc_height:              C.int(params.EncHeight),
-		enc_width:               C.int(params.EncWidth),
-		crypt_iv:                C.CString(params.CryptIV),
-		crypt_key:               C.CString(params.CryptKey),
-		crypt_kid:               C.CString(params.CryptKID),
-		crypt_key_url:           C.CString(params.CryptKeyURL),
-		crypt_scheme:            C.crypt_scheme_t(params.CryptScheme),
-		tx_type:                 C.tx_type_t(params.TxType),
-		watermark_text:          C.CString(params.WatermarkText),
-		watermark_timecode:      C.CString(params.WatermarkTimecode),
-		watermark_timecode_rate: C.float(params.WatermarkTimecodeRate),
-		watermark_xloc:          C.CString(params.WatermarkXLoc),
-		watermark_yloc:          C.CString(params.WatermarkYLoc),
-		watermark_relative_sz:   C.float(params.WatermarkRelativeSize),
-		watermark_font_color:    C.CString(params.WatermarkFontColor),
-		watermark_shadow:        C.int(0),
-		watermark_shadow_color:  C.CString(params.WatermarkShadowColor),
-		watermark_overlay:       C.CString(params.WatermarkOverlay),
-		watermark_overlay_len:   C.int(params.WatermarkOverlayLen),
-		watermark_overlay_type:  C.image_type(params.WatermarkOverlayType),
-		n_audio:                 C.int(params.NumAudio),
-		stream_id:               C.int(params.StreamId),
-		bypass_transcoding:      C.int(0),
-		seekable:                C.int(0),
-		max_cll:                 C.CString(params.MaxCLL),
-		master_display:          C.CString(params.MasterDisplay),
-		bitdepth:                C.int(params.BitDepth),
-		mux_spec:                C.CString(params.MuxingSpec),
-		sync_audio_to_stream_id: C.int(params.SyncAudioToStreamId),
-		gpu_index:               C.int(params.GPUIndex),
-		listen:                  C.int(0),
-		filter_descriptor:       C.CString(params.FilterDescriptor),
-		skip_decoding:           C.int(0),
+		format:                    C.CString(params.Format),
+		start_time_ts:             C.int64_t(params.StartTimeTs),
+		skip_over_pts:             C.int64_t(params.SkipOverPts),
+		start_pts:                 C.int64_t(params.StartPts),
+		duration_ts:               C.int64_t(params.DurationTs),
+		start_segment_str:         C.CString(params.StartSegmentStr),
+		video_bitrate:             C.int(params.VideoBitrate),
+		audio_bitrate:             C.int(params.AudioBitrate),
+		sample_rate:               C.int(params.SampleRate),
+		crf_str:                   C.CString(params.CrfStr),
+		preset:                    C.CString(params.Preset),
+		rc_max_rate:               C.int(params.RcMaxRate),
+		rc_buffer_size:            C.int(params.RcBufferSize),
+		audio_seg_duration_ts:     C.int64_t(params.AudioSegDurationTs),
+		video_seg_duration_ts:     C.int64_t(params.VideoSegDurationTs),
+		seg_duration:              C.CString(params.SegDuration),
+		start_fragment_index:      C.int(params.StartFragmentIndex),
+		force_keyint:              C.int(params.ForceKeyInt),
+		ecodec:                    C.CString(params.Ecodec),
+		ecodec2:                   C.CString(params.Ecodec2),
+		dcodec:                    C.CString(params.Dcodec),
+		dcodec2:                   C.CString(params.Dcodec2),
+		enc_height:                C.int(params.EncHeight),
+		enc_width:                 C.int(params.EncWidth),
+		crypt_iv:                  C.CString(params.CryptIV),
+		crypt_key:                 C.CString(params.CryptKey),
+		crypt_kid:                 C.CString(params.CryptKID),
+		crypt_key_url:             C.CString(params.CryptKeyURL),
+		crypt_scheme:              C.crypt_scheme_t(params.CryptScheme),
+		tx_type:                   C.tx_type_t(params.TxType),
+		watermark_text:            C.CString(params.WatermarkText),
+		watermark_timecode:        C.CString(params.WatermarkTimecode),
+		watermark_timecode_rate:   C.float(params.WatermarkTimecodeRate),
+		watermark_xloc:            C.CString(params.WatermarkXLoc),
+		watermark_yloc:            C.CString(params.WatermarkYLoc),
+		watermark_relative_sz:     C.float(params.WatermarkRelativeSize),
+		watermark_font_color:      C.CString(params.WatermarkFontColor),
+		watermark_shadow:          C.int(0),
+		watermark_shadow_color:    C.CString(params.WatermarkShadowColor),
+		watermark_overlay:         C.CString(params.WatermarkOverlay),
+		watermark_overlay_len:     C.int(params.WatermarkOverlayLen),
+		watermark_overlay_type:    C.image_type(params.WatermarkOverlayType),
+		n_audio:                   C.int(params.NumAudio),
+		stream_id:                 C.int(params.StreamId),
+		bypass_transcoding:        C.int(0),
+		seekable:                  C.int(0),
+		max_cll:                   C.CString(params.MaxCLL),
+		master_display:            C.CString(params.MasterDisplay),
+		bitdepth:                  C.int(params.BitDepth),
+		mux_spec:                  C.CString(params.MuxingSpec),
+		sync_audio_to_stream_id:   C.int(params.SyncAudioToStreamId),
+		gpu_index:                 C.int(params.GPUIndex),
+		listen:                    C.int(0),
+		filter_descriptor:         C.CString(params.FilterDescriptor),
+		skip_decoding:             C.int(0),
+		extract_image_interval_ts: C.int64_t(params.ExtractImageIntervalTs),
+
 		// All boolean params are handled below
 	}
 

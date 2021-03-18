@@ -68,7 +68,8 @@ typedef enum avpipe_buftype_t {
     avpipe_fmp4_stream = 11,            // fragmented mp4 stream
     avpipe_mp4_segment = 12,            // segmented mp4 stream
     avpipe_video_fmp4_segment = 13,     // segmented fmp4 video stream
-    avpipe_audio_fmp4_segment = 14      // segmented fmp4 audio stream
+    avpipe_audio_fmp4_segment = 14,     // segmented fmp4 audio stream
+    avpipe_image = 15                   // extracted images
 } avpipe_buftype_t;
 
 #define BYTES_READ_REPORT   (20*1024*1024)
@@ -275,14 +276,15 @@ typedef enum crypt_scheme_t {
 } crypt_scheme_t;
 
 typedef enum tx_type_t {
-    tx_none         = 0,
-    tx_video        = 1,
-    tx_audio        = 2,
-    tx_all          = 3,    // tx_video | tx_audio
-    tx_audio_merge  = 6,    // 0x04 | tx_audio
-    tx_audio_join   = 10,   // 0x08 | tx_audio
-    tx_audio_pan    = 18,   // 0x10 | tx_audio
-    tx_mux          = 32
+    tx_none           = 0,
+    tx_video          = 1,
+    tx_audio          = 2,
+    tx_all            = 3,    // tx_video | tx_audio
+    tx_audio_merge    = 6,    // 0x04 | tx_audio
+    tx_audio_join     = 10,   // 0x08 | tx_audio
+    tx_audio_pan      = 18,   // 0x10 | tx_audio
+    tx_mux            = 32,
+    tx_extract_images = 65
 } tx_type_t;
 
 /* handled image types in get_overlay_filter_string*/
@@ -359,8 +361,8 @@ typedef struct txparams_t {
     char        *master_display;            // Master display (HDR only)
     int         stream_id;                  // Stream id to trasncode, should be >= 0
     char        *filter_descriptor;         // Filter descriptor if tx-type == audio-merge
-
     char        *mux_spec;
+    int64_t     extract_image_interval_ts;  // Write frames at this interval. Default: -1 (use source timescale * 10)
 } txparams_t;
 
 #define MAX_CODEC_NAME  256
@@ -450,7 +452,7 @@ typedef struct out_tracker_t {
     struct avpipe_io_handler_t  *out_handlers;
     coderctx_t                  *encoder_ctx;   /* Needed to get access for stats */
     ioctx_t                     *last_outctx;
-    int                         seg_index;
+    int64_t                     seg_index;
     ioctx_t                     *inctx;         /* Points to input context */
     tx_type_t                   tx_type;
 

@@ -9,6 +9,9 @@ import (
 	"math/big"
 	"os"
 	"path/filepath"
+	"runtime"
+	"strconv"
+	"strings"
 	"testing"
 	"time"
 
@@ -17,38 +20,7 @@ import (
 	"github.com/stretchr/testify/assert"
 )
 
-func removeDirContents(dir string) error {
-	d, err := os.Open(dir)
-	if err != nil {
-		return err
-	}
-	defer d.Close()
-	names, err := d.Readdirnames(-1)
-	if err != nil {
-		return err
-	}
-	for _, name := range names {
-		err = os.RemoveAll(filepath.Join(dir, name))
-		if err != nil {
-			return err
-		}
-	}
-	return nil
-}
-
-func setupOutDir(dir string) error {
-	_, err := os.Stat(dir)
-	if os.IsNotExist(err) {
-		os.Mkdir(dir, 0755)
-	} else {
-		err = removeDirContents(dir)
-		if err != nil {
-			return err
-		}
-	}
-
-	return nil
-}
+const baseOutPath = "test_out"
 
 //Implement AVPipeInputOpener
 type fileInputOpener struct {
@@ -112,6 +84,7 @@ func (i *fileInput) Stat(statType avpipe.AVStatType, statArgs interface{}) error
 //Implement AVPipeOutputOpener
 type fileOutputOpener struct {
 	dir string
+	err error
 }
 
 func (oo *fileOutputOpener) Open(h, fd int64, stream_index, seg_index int, out_type avpipe.AVType) (avpipe.OutputHandler, error) {
@@ -142,11 +115,13 @@ func (oo *fileOutputOpener) Open(h, fd int64, stream_index, seg_index int, out_t
 		filename = fmt.Sprintf("./%s/vsegment-%d.mp4", oo.dir, seg_index)
 	case avpipe.FMP4AudioSegment:
 		filename = fmt.Sprintf("./%s/asegment-%d.mp4", oo.dir, seg_index)
-
+	case avpipe.FrameImage:
+		filename = fmt.Sprintf("./%s/%d.jpeg", oo.dir, seg_index)
 	}
 
 	f, err := os.OpenFile(filename, os.O_RDWR|os.O_CREATE|os.O_TRUNC, 0644)
 	if err != nil {
+		oo.err = err
 		return nil, err
 	}
 
@@ -1681,6 +1656,80 @@ func TestProbeWithData(t *testing.T) {
 	assert.Equal(t, "pcm_s24le", a[2].CodecName)
 }
 
+func TestExtractImages(t *testing.T) {
+	videoPath := "media/ErsteChristmas.mp4"
+	outPath := baseOutPath+"/TestExtractImages"
+
+	setupLogging()
+	log.Info("STARTING TestExtractImages")
+
+	p := newTxParams()
+	p.Ecodec = "mjpeg"
+	p.Format = "image2"
+	p.TxType = avpipe.TxExtractImages
+
+	err := setupOutDir(outPath)
+	assert.NoError(t, err)
+
+	oo := &fileOutputOpener{dir: outPath}
+	avpipe.InitIOHandler(&fileInputOpener{url: videoPath}, oo)
+
+	handle, err := avpipe.TxInit(p, videoPath, true)
+	assert.NoError(t, err)
+	assert.Equal(t, true, handle > 0)
+
+	err = avpipe.TxRun(handle)
+	assert.NoError(t, err)
+	assert.NoError(t, oo.err)
+
+	files, err := ioutil.ReadDir(outPath)
+	assert.NoError(t, err)
+	assert.Equal(t, 10, len(files))
+	var sum int
+	for _, f := range files {
+		pts, err2 := strconv.ParseInt(strings.Split(f.Name(), ".")[0], 10, 32)
+		assert.NoError(t, err2)
+		sum += int(pts)
+	}
+	assert.Equal(t, 5760000, sum)
+}
+
+// newTxParams modifies parameters for speed
+func newTxParams() *avpipe.TxParams {
+	p := avpipe.NewTxParams()
+
+	// libx264
+	p.CrfStr = "51"
+	p.Preset = "ultrafast"
+
+	// aac
+	p.AudioBitrate = 64000
+
+	if runtime.GOOS == "darwin" {
+		p.Ecodec = "h264_videotoolbox" // half the time of libx264
+	}
+	return p
+}
+
+func removeDirContents(dir string) error {
+	d, err := os.Open(dir)
+	if err != nil {
+		return err
+	}
+	defer d.Close()
+	names, err := d.Readdirnames(-1)
+	if err != nil {
+		return err
+	}
+	for _, name := range names {
+		err = os.RemoveAll(filepath.Join(dir, name))
+		if err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
 func setupLogging() {
 	log.SetDefault(&log.Config{
 		Level:   "debug",
@@ -1691,4 +1740,15 @@ func setupLogging() {
 		},
 	})
 	avpipe.SetCLoggers()
+}
+
+func setupOutDir(dir string) (err error) {
+	if _, err = os.Stat(dir); err != nil {
+		if os.IsNotExist(err) {
+			err = os.MkdirAll(dir, 0755)
+		}
+	} else {
+		err = removeDirContents(dir)
+	}
+	return
 }

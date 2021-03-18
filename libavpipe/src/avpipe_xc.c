@@ -37,6 +37,7 @@
 #define DEFAULT_THREAD_COUNT    8
 #define WATERMARK_STRING_SZ     1024    /* Max length of watermark text */
 #define FILTER_STRING_SZ        (1024 + WATERMARK_STRING_SZ)
+#define DEFAULT_FRAME_INTERVAL_S 10
 
 extern int
 init_filters(
@@ -913,6 +914,12 @@ set_pixel_fmt(
     AVCodecContext *encoder_codec_context,
     txparams_t *params)
 {
+    if (encoder_codec_context->codec_id == AV_CODEC_ID_MJPEG) {
+        //                               AV_PIX_FMT_YUV420P does not work
+        encoder_codec_context->pix_fmt = AV_PIX_FMT_YUVJ420P;
+        return 0;
+    }
+
     /* Using the spec in https://en.wikipedia.org/wiki/High_Efficiency_Video_Coding */
     switch (params->bitdepth) {
     case 8:
@@ -1299,6 +1306,8 @@ prepare_encoder(
             filename = "fsegment-video-%05d.mp4";
         if (params->tx_type & tx_audio)
             filename2 = "fsegment-audio-%05d.mp4";
+    } else if (!strcmp(params->format, "image2")) {
+        filename = "%d.jpeg";
     }
 
     /*
@@ -1319,6 +1328,11 @@ prepare_encoder(
             elv_dbg("could not allocate memory for audio output format");
             return eav_codec_context;
         }
+    }
+
+    if (params->tx_type == tx_extract_images) {
+        // Tell the image2 muxer to expand the filename with PTS instead of sequential numbering
+        av_opt_set(encoder_context->format_context->priv_data, "frame_pts", "true", 0);
     }
 
     // Encryption applies to both audio and video
@@ -1602,6 +1616,22 @@ should_skip_encoding(
         }
     }
 
+    /* Wait for the specified interval between encoding images/frames */    
+    if (p->tx_type == tx_extract_images) {
+        int64_t interval_ts = p->extract_image_interval_ts;
+        if (interval_ts < 0) {
+            interval_ts = DEFAULT_FRAME_INTERVAL_S * encoder_context->codec_context[
+                encoder_context->video_stream_index]->time_base.den;
+        }
+        const int64_t time_since_last_encode_ts = frame->pts -
+            encoder_context->video_last_pts_sent_encode;
+        if (encoder_context->first_encoding_video_pts != -1 &&
+            time_since_last_encode_ts < interval_ts) {
+            //elv_dbg("ENCODE skip frame pts=%" PRId64, frame->pts);
+            return 1;
+        }
+    }
+
     return 0;
 }
 
@@ -1686,6 +1716,12 @@ encode_frame(
             set_idr_frame_key_flag(frame, encoder_context, params, debug_frame_level);
         }
 
+        // Special case to extract the first frame image
+        if (params->tx_type == tx_extract_images &&
+            encoder_context->first_encoding_video_pts == -1) {
+            encoder_context->first_encoding_video_pts = frame->pts;
+        }
+
         dump_frame(selected_decoded_audio(decoder_context, stream_index) >= 0,
             "TOENC ", codec_context->frame_number, frame, debug_frame_level);
     }
@@ -1768,7 +1804,8 @@ encode_frame(
             encoder_context->calculated_frame_duration > 0 &&
             output_packet->pts != AV_NOPTS_VALUE &&
             output_packet->pts - encoder_context->video_encoder_prev_pts >
-                3*encoder_context->calculated_frame_duration) {
+                3*encoder_context->calculated_frame_duration &&
+            params->tx_type != tx_extract_images) {
             elv_log("GAP detected, packet->pts=%"PRId64", video_encoder_prev_pts=%"PRId64,
                 output_packet->pts, encoder_context->video_encoder_prev_pts);
         }
@@ -2289,7 +2326,16 @@ transcode_video_func(
             elv_err("transcode_video packet is NULL");
             free(xc_frame);
             continue;
-        }
+        } 
+        // Image extraction optimization is possible here: By skipping the
+        // decoder unless the packet, 1) contains a keyframe, and 2) is not
+        // within the specified interval after the last frame was extracted.
+        // However, this flag might not be set reliably for all input video
+        // formats/codecs).
+        //
+        // else if (!(packet->flags & AV_PKT_FLAG_KEY) ...) {
+        //     continue;
+        // }
 
         dump_packet(0, "IN THREAD", packet, xctx->debug_frame_level);
 
@@ -2938,7 +2984,8 @@ avpipe_xc(
         goto xc_done;
     }
 
-    if (params->tx_type & tx_video &&
+    // FIXME: error occurs incorrectly if source timebase is small, e.g. 24 (due calc_timebase's TIMEBASE_THRESHOLD)
+    if (params->tx_type & tx_video && params->tx_type != tx_extract_images &&
         encoder_context->codec_context[encoder_context->video_stream_index] &&
         calc_timebase(encoder_context->codec_context[encoder_context->video_stream_index]->time_base.den)
             != encoder_context->stream[encoder_context->video_stream_index]->time_base.den) {
@@ -3364,6 +3411,8 @@ get_tx_type_name(
         return "tx_audio_pan";
     case tx_audio_merge:
         return "tx_audio_merge";
+    case tx_extract_images:
+        return "tx_extract_images";
     default:
         return "none";
     }
@@ -3539,7 +3588,7 @@ check_params(
         return eav_param;
     }
 
-    if (params->tx_type & tx_video &&
+    if (params->tx_type & tx_video && params->tx_type != tx_extract_images &&
         params->seg_duration <= 0 &&
         params->video_seg_duration_ts <= 0) {
         elv_err("Segment duration is not set for video (invalid seg_duration and video_seg_duration_ts)");
@@ -3611,11 +3660,12 @@ avpipe_init(
     if (!params->format ||
         (strcmp(params->format, "dash") &&
          strcmp(params->format, "hls") &&
+         strcmp(params->format, "image2") &&
          strcmp(params->format, "mp4") &&
          strcmp(params->format, "fmp4") &&
          strcmp(params->format, "segment") &&
          strcmp(params->format, "fmp4-segment"))) {
-        elv_err("Output format can be only \"dash\", \"hls\", \"mp4\", \"fmp4\", \"segment\", or \"fmp4-segment\"");
+        elv_err("Output format can be only \"dash\", \"hls\", \"image2\", \"mp4\", \"fmp4\", \"segment\", or \"fmp4-segment\"");
         rc = eav_param;
         goto avpipe_init_failed;
     }
@@ -3679,7 +3729,8 @@ avpipe_init(
         "listen=%d "
         "max_cll=\"%s\" "
         "master_display=\"%s\" "
-        "filter_descriptor=\"%s\"",
+        "filter_descriptor=\"%s\" "
+        "extract_image_interval_ts=%"PRId64" ",
         params->stream_id, url,
         avpipe_version(),
         params->bypass_transcoding, params->skip_decoding,
@@ -3699,7 +3750,8 @@ avpipe_init(
         params->bitdepth, params->listen,
         params->max_cll ? params->max_cll : "",
         params->master_display ? params->master_display : "",
-        params->filter_descriptor);
+        params->filter_descriptor,
+        params->extract_image_interval_ts);
     elv_log("AVPIPE XCPARAMS %s", buf);
 
     if ((rc = check_params(params)) != eav_success) {

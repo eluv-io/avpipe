@@ -12,12 +12,14 @@ import (
 	"github.com/spf13/cobra"
 )
 
-//Implement AVPipeInputOpener
+// avcmdInputOpener implements avpipe.InputOpener
 type avcmdInputOpener struct {
 	url string
 }
 
 func (io *avcmdInputOpener) Open(fd int64, url string) (avpipe.InputHandler, error) {
+	log.Debug("AVCMD InputOpener.Open", "fd", fd, "url", url)
+
 	if len(url) >= 4 && url[0:4] == "rtmp" {
 		return &avcmdInput{url: url}, nil
 	}
@@ -36,7 +38,7 @@ func (io *avcmdInputOpener) Open(fd int64, url string) (avpipe.InputHandler, err
 	return etxInput, nil
 }
 
-// Implement InputHandler
+// avcmdInput implements avpipe.InputHandler
 type avcmdInput struct {
 	url  string
 	file *os.File // Input file
@@ -83,18 +85,20 @@ func (i *avcmdInput) Stat(statType avpipe.AVStatType, statArgs interface{}) erro
 	switch statType {
 	case avpipe.AV_IN_STAT_BYTES_READ:
 		readOffset := statArgs.(*uint64)
-		log.Info("AVCMD", "stat read offset", *readOffset)
+		log.Info("AVCMD InputHandler.Stat", "read offset", *readOffset)
 	}
 
 	return nil
 }
 
-//Implement AVPipeOutputOpener
+// avcmdOutputOpener implements avpipe.OutputOpener
 type avcmdOutputOpener struct {
 	dir string
 }
 
 func (oo *avcmdOutputOpener) Open(h, fd int64, stream_index, seg_index int, out_type avpipe.AVType) (avpipe.OutputHandler, error) {
+	log.Debug("AVCMD OutputOpener.Open", "h", h, "fd", fd, "stream_index", stream_index, "seg_index", seg_index, "out_type", out_type)
+
 	var filename string
 	dir := fmt.Sprintf("%s/O%d", oo.dir, h)
 
@@ -131,6 +135,8 @@ func (oo *avcmdOutputOpener) Open(h, fd int64, stream_index, seg_index int, out_
 		filename = fmt.Sprintf("%s/fmp4-vsegment%d-%05d.mp4", dir, stream_index, seg_index)
 	case avpipe.FMP4AudioSegment:
 		filename = fmt.Sprintf("%s/fmp4-asegment%d-%05d.mp4", dir, stream_index, seg_index)
+	case avpipe.FrameImage:
+		filename = fmt.Sprintf("%s/%d.jpeg", dir, seg_index)
 	}
 
 	f, err := os.OpenFile(filename, os.O_RDWR|os.O_CREATE|os.O_TRUNC, 0644)
@@ -147,7 +153,7 @@ func (oo *avcmdOutputOpener) Open(h, fd int64, stream_index, seg_index int, out_
 	return oh, nil
 }
 
-// Implement OutputHandler
+// avcmdOutput implement avpipe.OutputHandler
 type avcmdOutput struct {
 	url          string
 	stream_index int
@@ -174,16 +180,14 @@ func (o *avcmdOutput) Stat(statType avpipe.AVStatType, statArgs interface{}) err
 	switch statType {
 	case avpipe.AV_OUT_STAT_BYTES_WRITTEN:
 		writeOffset := statArgs.(*uint64)
-		log.Info("AVCMD", "STAT, write offset", *writeOffset)
+		log.Info("AVCMD OutputHandler.Stat", "write offset", *writeOffset)
 	case avpipe.AV_OUT_STAT_DECODING_START_PTS:
 		startPTS := statArgs.(*uint64)
-		log.Info("AVCMD", "STAT, startPTS", *startPTS)
+		log.Info("AVCMD OutputHandler.Stat", "startPTS", *startPTS)
 	case avpipe.AV_OUT_STAT_ENCODING_END_PTS:
 		endPTS := statArgs.(*uint64)
-		log.Info("AVCMD", "STAT, endPTS", *endPTS)
-
+		log.Info("AVCMD OutputHandler.Stat", "endPTS", *endPTS)
 	}
-
 	return nil
 }
 
@@ -245,7 +249,7 @@ func InitTranscode(cmdRoot *cobra.Command) error {
 	cmdTranscode.PersistentFlags().Int32P("start-frag-index", "", 1, "start fragment index >= 1.")
 	cmdTranscode.PersistentFlags().Int32P("video-bitrate", "", -1, "output video bitrate, mutually exclusive with crf.")
 	cmdTranscode.PersistentFlags().Int32P("audio-bitrate", "", 128000, "output audio bitrate.")
-	cmdTranscode.PersistentFlags().Int32P("rc-max-rate", "", -1, "mandatory, positive integer.")
+	cmdTranscode.PersistentFlags().Int32P("rc-max-rate", "", -1, "mandatory, positive integer.") // e.g. 6700000; Needs some explanation
 	cmdTranscode.PersistentFlags().Int32P("enc-height", "", -1, "default -1 means use source height.")
 	cmdTranscode.PersistentFlags().Int32P("enc-width", "", -1, "default -1 means use source width.")
 	cmdTranscode.PersistentFlags().Int64P("duration-ts", "", -1, "default -1 means entire stream.")
@@ -272,6 +276,7 @@ func InitTranscode(cmdRoot *cobra.Command) error {
 	cmdTranscode.PersistentFlags().String("max-cll", "", "Maximum Content Light Level and Maximum Frame Average Light Level, only valid if encoder is libx265.")
 	cmdTranscode.PersistentFlags().String("master-display", "", "Master display, only valid if encoder is libx265.")
 	cmdTranscode.PersistentFlags().Int32("bitdepth", 8, "Refers to number of colors each pixel can have, can be 8, 10, 12.")
+	cmdTranscode.PersistentFlags().Int64P("extract-image-interval-ts", "", -1, "extract frames at this interval.")
 
 	return nil
 }
@@ -339,8 +344,8 @@ func doTranscode(cmd *cobra.Command, args []string) error {
 	audioDecoder := cmd.Flag("audio-decoder").Value.String()
 
 	format := cmd.Flag("format").Value.String()
-	if format != "dash" && format != "hls" && format != "mp4" && format != "fmp4" && format != "segment" && format != "fmp4-segment" {
-		return fmt.Errorf("Pakage format is not valid, can be 'dash', 'hls', 'mp4', 'fmp4', 'segment', or 'fmp4-segment'")
+	if format != "dash" && format != "hls" && format != "mp4" && format != "fmp4" && format != "segment" && format != "fmp4-segment" && format != "image2" {
+		return fmt.Errorf("Package format is not valid, can be 'dash', 'hls', 'mp4', 'fmp4', 'segment', 'fmp4-segment', or 'image2'")
 	}
 
 	filterDescriptor := cmd.Flag("filter-descriptor").Value.String()
@@ -399,8 +404,9 @@ func doTranscode(cmd *cobra.Command, args []string) error {
 		txTypeStr != "video" &&
 		txTypeStr != "audio" &&
 		txTypeStr != "audio-join" &&
-		txTypeStr != "audio-pan" {
-		return fmt.Errorf("Transcoding type is not valid, with no stream-id can be 'all', 'video', 'audio', 'audio-join', or 'audio-pan'")
+		txTypeStr != "audio-pan" &&
+		txTypeStr != "extract-images" {
+		return fmt.Errorf("Transcoding type is not valid, with no stream-id can be 'all', 'video', 'audio', 'audio-join', 'audio-pan', or 'extract-images'")
 	}
 	txType := avpipe.TxTypeFromString(txTypeStr)
 	if txType == avpipe.TxAudio && len(encoder) == 0 {
@@ -533,64 +539,70 @@ func doTranscode(cmd *cobra.Command, args []string) error {
 	cryptKID := cmd.Flag("crypt-kid").Value.String()
 	cryptKeyURL := cmd.Flag("crypt-key-url").Value.String()
 
+	extractImageIntervalTs, err := cmd.Flags().GetInt64("extract-image-interval-ts")
+	if err != nil {
+		return fmt.Errorf("extract-image-interval-ts is not valid")
+	}
+
 	dir := "O"
 	if _, err := os.Stat(dir); os.IsNotExist(err) {
 		os.Mkdir(dir, 0755)
 	}
 
 	params := &avpipe.TxParams{
-		BypassTranscoding:     bypass,
-		Format:                format,
-		StartTimeTs:           startTimeTs,
-		StartPts:              startPts,
-		DurationTs:            durationTs,
-		StartSegmentStr:       startSegmentStr,
-		StartFragmentIndex:    startFragmentIndex,
-		VideoBitrate:          videoBitrate,
-		AudioBitrate:          audioBitrate,
-		SampleRate:            sampleRate,
-		CrfStr:                crfStr,
-		Preset:                preset,
-		AudioSegDurationTs:    audioSegDurationTs,
-		VideoSegDurationTs:    videoSegDurationTs,
-		SegDuration:           segDuration,
-		Ecodec:                encoder,
-		Ecodec2:               audioEncoder,
-		Dcodec:                decoder,
-		Dcodec2:               audioDecoder,
-		EncHeight:             encHeight, // -1 means use source height, other values 2160, 720
-		EncWidth:              encWidth,  // -1 means use source width, other values 3840, 1280
-		CryptIV:               cryptIV,
-		CryptKey:              cryptKey,
-		CryptKID:              cryptKID,
-		CryptKeyURL:           cryptKeyURL,
-		CryptScheme:           cryptScheme,
-		TxType:                txType,
-		WatermarkTimecode:     watermarkTimecode,
-		WatermarkTimecodeRate: watermarkTimecodeRate,
-		WatermarkText:         watermarkText,
-		WatermarkXLoc:         watermarkXloc,
-		WatermarkYLoc:         watermarkYloc,
-		WatermarkRelativeSize: watermarkRelativeSize,
-		WatermarkFontColor:    watermarkFontColor,
-		WatermarkShadow:       watermarkShadow,
-		WatermarkShadowColor:  watermarkShadowColor,
-		WatermarkOverlay:      string(overlayImage),
-		WatermarkOverlayType:  watermarkOverlayType,
-		ForceKeyInt:           forceKeyInterval,
-		RcMaxRate:             rcMaxRate,
-		RcBufferSize:          4500000,
-		GPUIndex:              gpuIndex,
-		MaxCLL:                maxCLL,
-		MasterDisplay:         masterDisplay,
-		BitDepth:              bitDepth,
-		ForceEqualFDuration:   forceEqualFrameDuration,
-		AudioFillGap:          audioFillGap,
-		SyncAudioToStreamId:   int(syncAudioToStreamId),
-		StreamId:              streamId,
-		Listen:                listen,
-		FilterDescriptor:      filterDescriptor,
-		SkipDecoding:          skipDecoding,
+		BypassTranscoding:      bypass,
+		Format:                 format,
+		StartTimeTs:            startTimeTs,
+		StartPts:               startPts,
+		DurationTs:             durationTs,
+		StartSegmentStr:        startSegmentStr,
+		StartFragmentIndex:     startFragmentIndex,
+		VideoBitrate:           videoBitrate,
+		AudioBitrate:           audioBitrate,
+		SampleRate:             sampleRate,
+		CrfStr:                 crfStr,
+		Preset:                 preset,
+		AudioSegDurationTs:     audioSegDurationTs,
+		VideoSegDurationTs:     videoSegDurationTs,
+		SegDuration:            segDuration,
+		Ecodec:                 encoder,
+		Ecodec2:                audioEncoder,
+		Dcodec:                 decoder,
+		Dcodec2:                audioDecoder,
+		EncHeight:              encHeight, // -1 means use source height, other values 2160, 720
+		EncWidth:               encWidth,  // -1 means use source width, other values 3840, 1280
+		CryptIV:                cryptIV,
+		CryptKey:               cryptKey,
+		CryptKID:               cryptKID,
+		CryptKeyURL:            cryptKeyURL,
+		CryptScheme:            cryptScheme,
+		TxType:                 txType,
+		WatermarkTimecode:      watermarkTimecode,
+		WatermarkTimecodeRate:  watermarkTimecodeRate,
+		WatermarkText:          watermarkText,
+		WatermarkXLoc:          watermarkXloc,
+		WatermarkYLoc:          watermarkYloc,
+		WatermarkRelativeSize:  watermarkRelativeSize,
+		WatermarkFontColor:     watermarkFontColor,
+		WatermarkShadow:        watermarkShadow,
+		WatermarkShadowColor:   watermarkShadowColor,
+		WatermarkOverlay:       string(overlayImage),
+		WatermarkOverlayType:   watermarkOverlayType,
+		ForceKeyInt:            forceKeyInterval,
+		RcMaxRate:              rcMaxRate,
+		RcBufferSize:           4500000,
+		GPUIndex:               gpuIndex,
+		MaxCLL:                 maxCLL,
+		MasterDisplay:          masterDisplay,
+		BitDepth:               bitDepth,
+		ForceEqualFDuration:    forceEqualFrameDuration,
+		AudioFillGap:           audioFillGap,
+		SyncAudioToStreamId:    int(syncAudioToStreamId),
+		StreamId:               streamId,
+		Listen:                 listen,
+		FilterDescriptor:       filterDescriptor,
+		SkipDecoding:           skipDecoding,
+		ExtractImageIntervalTs: extractImageIntervalTs,
 	}
 
 	err = getAudioIndexes(params, audioIndex)

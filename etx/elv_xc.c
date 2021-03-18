@@ -401,6 +401,12 @@ out_opener(
         }
         break;
 
+    case avpipe_image:
+        {
+            sprintf(segname, "%s/%s", dir, url);
+        }
+        break;
+
     default:
         return -1;
     }
@@ -634,6 +640,9 @@ tx_type_from_string(
 
     if (!strcmp(tx_type_str, "audio-pan"))
         return tx_audio_pan;
+
+    if (!strcmp(tx_type_str, "extract-images"))
+        return tx_extract_images;
 
     return tx_none;
 }
@@ -883,6 +892,7 @@ usage(
         "\t-enc-height :            (optional) Default: -1 (use source height)\n"
         "\t-enc-width :             (optional) Default: -1 (use source width)\n"
         "\t-equal-fduration :       (optional) Force equal frame duration. Must be 0 or 1 and only valid for \"fmp4-segment\" format.\n"
+        "\t-extract-image-interval-ts : (optional) Write frames at this interval. Default: -1 (use source timescale * 10)\n"
         "\t-f :                     (mandatory) Input filename for transcoding. Valid formats are: a filename that points to a valid file, or udp://127.0.0.1:<port>.\n"
         "\t                                    Output goes to directory ./O\n"
         "\t-filter-descriptor :     (mandatory if tx-type is audio-pan). Audio filter descriptor the same as ffmpeg format.\n"
@@ -980,6 +990,7 @@ main(
         .ecodec2 = strdup("aac"),
         .enc_height = -1,                   /* -1 means use source height, other values 2160, 1080, 720 */
         .enc_width = -1,                    /* -1 means use source width, other values 3840, 1920, 1280 */
+        .extract_image_interval_ts = -1,
         .filter_descriptor = strdup(""),
         .force_equal_fduration = 0,
         .force_keyint = 0,
@@ -1127,6 +1138,10 @@ main(
                 if (p.force_equal_fduration != 0 && p.force_equal_fduration != 1) {
                     usage(argv[0], argv[i], EXIT_FAILURE);
                 }
+            } else if (!strcmp(argv[i], "-extract-image-interval-ts")) {
+                if (sscanf(argv[i+1], "%"PRId64, &p.extract_image_interval_ts) != 1) {
+                    usage(argv[0], argv[i], EXIT_FAILURE);
+                }
             } else if (strlen(argv[i]) > 2) {
                 usage(argv[0], argv[i], EXIT_FAILURE);
             } else {
@@ -1151,6 +1166,8 @@ main(
                     p.format = strdup("segment");
                 } else if (strcmp(argv[i+1], "fmp4-segment") == 0) {
                     p.format = strdup("fmp4-segment");
+                } else if (strcmp(argv[i+1], "image2") == 0) {
+                    p.format = strdup("image2");
                 } else {
                     usage(argv[0], argv[i], EXIT_FAILURE);
                 }
@@ -1280,7 +1297,8 @@ main(
                     strcmp(argv[i+1], "audio") &&
                     strcmp(argv[i+1], "audio-join") &&
                     strcmp(argv[i+1], "audio-pan") &&
-                    strcmp(argv[i+1], "audio-merge")) {
+                    strcmp(argv[i+1], "audio-merge") &&
+                    strcmp(argv[i+1], "extract-images")) {
                     usage(argv[0], argv[i], EXIT_FAILURE);
                 }
                 p.tx_type = tx_type_from_string(argv[i+1]);
@@ -1379,7 +1397,7 @@ main(
     if (strcmp(p.format, "segment") &&
         strcmp(p.format, "fmp4-segment") &&
         p.seg_duration == NULL &&
-        p.video_seg_duration_ts <= 0 && p.tx_type & tx_video) {
+        p.video_seg_duration_ts <= 0 && p.tx_type & tx_video && p.tx_type != tx_extract_images) {
         usage(argv[0], "video-seg-duration-ts or seg-duration", EXIT_FAILURE);
     }
 

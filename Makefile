@@ -21,6 +21,8 @@ clean: lclean
 	echo "Making $@ in $$dir..."; \
 	(cd $$dir; make $@) || exit 1; \
 	done
+	@rm -rf test_out
+	@rm -rf *.log
 
 copy_libs:
 	@(if [ ! -d $(LIBDIR) ]; then mkdir $(LIBDIR); fi)

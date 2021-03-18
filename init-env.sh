@@ -16,7 +16,7 @@ script_dir="$( cd "$( dirname ${BASH_SOURCE[0]} )" && pwd )"
 command -v realpath && elvdev_dir=$(realpath "$1/..") || elvdev_dir="$1/.."
 avpipe_dir=$script_dir
 
-if [[ -z "${ELV_TOOLCHAIN_DIST_PLATFORM}" ]]; then
+if [[ -z "${ELV_TOOLCHAIN_DIST_PLATFORM:-}" ]]; then
     OS="`uname`"
     case $OS in
     'Darwin')
@@ -32,9 +32,9 @@ fi
 
 export GOPRIVATE="github.com/qluvio/*"
 
-export PKG_CONFIG_PATH="${ELV_TOOLCHAIN_DIST_PLATFORM}/lib/pkgconfig:$PKG_CONFIG_PATH"
-export CGO_CFLAGS="$CGO_CFLAGS -I${ELV_TOOLCHAIN_DIST_PLATFORM}/include -I$avpipe_dir/include"
-export CGO_LDFLAGS="$CGO_LDFLAGS -L${ELV_TOOLCHAIN_DIST_PLATFORM}/lib -L$avpipe_dir/lib \
+export PKG_CONFIG_PATH="${ELV_TOOLCHAIN_DIST_PLATFORM}/lib/pkgconfig:${PKG_CONFIG_PATH:-}"
+export CGO_CFLAGS="${CGO_CFLAGS:-} -I${ELV_TOOLCHAIN_DIST_PLATFORM}/include -I$avpipe_dir/include"
+export CGO_LDFLAGS="${CGO_LDFLAGS:-} -L${ELV_TOOLCHAIN_DIST_PLATFORM}/lib -L$avpipe_dir/lib \
 -lavpipe -lavcodec -lavformat -lavfilter -lavdevice -lswresample -lswscale \
 -lavutil -lpostproc -lutils -lm -ldl -lpthread"
 

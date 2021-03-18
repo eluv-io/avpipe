@@ -88,6 +88,7 @@ elv_io_open(
             while (i < strlen(url) && !isdigit(url[i]))
                 i++;
             if (i < strlen(url)) {
+                // Assumes a filename like segment%d-%05d.mp4
                 outctx->stream_index = url[i] - '0';
             }
             if (!strncmp(url + strlen(url) - 3, "mpd", 3)) {
@@ -137,6 +138,17 @@ elv_io_open(
                 outctx->seg_index = out_tracker[outctx->stream_index].seg_index;
                 out_tracker[outctx->stream_index].seg_index++;
                 outctx->inctx = out_tracker[outctx->stream_index].inctx;
+            } else if (strstr(url, ".jpeg") || strstr(url, ".jpg")) {
+                outctx->type = avpipe_image;
+                outctx->stream_index = 0;
+
+                if (sscanf(url, "%"PRId64".jp%*s", &out_tracker[0].seg_index) != 1) {
+                    elv_dbg("Invalid out url=%s", url);
+                    free(outctx);
+                    return -1;
+                }
+                outctx->seg_index = out_tracker[0].seg_index;
+                outctx->inctx = out_tracker[0].inctx;
             }
         }
  
