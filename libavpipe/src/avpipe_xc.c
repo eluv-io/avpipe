@@ -421,9 +421,10 @@ prepare_decoder(
                 decoder_context->audio_stream_index[decoder_context->n_audio] = i;
                 decoder_context->n_audio++;
             }
-            elv_dbg("AUDIO STREAM %d, codec_id=%s, stream_id=%d, timebase=%d, tx_type=%d",
+            elv_dbg("AUDIO STREAM %d, codec_id=%s, stream_id=%d, timebase=%d, tx_type=%d, channels=%d",
                 i, avcodec_get_name(decoder_context->codec_parameters[i]->codec_id), decoder_context->stream[i]->id,
-                decoder_context->stream[i]->time_base.den, params ? params->tx_type : tx_none);
+                decoder_context->stream[i]->time_base.den, params ? params->tx_type : tx_none,
+                decoder_context->codec_parameters[i]->channels);
 
             /* If the buffer size is too big, ffmpeg might assert in aviobuf.c:581
              * To avoid this assertion, reset the buffer size to something smaller.
@@ -527,11 +528,11 @@ prepare_decoder(
             return eav_open_codec;
         }
 
-        elv_log("Input stream=%d pixel_format=%s, timebase=%d, sample_fmt=%d, frame_size=%d",
+        elv_log("Input stream=%d pixel_format=%s, timebase=%d, sample_fmt=%s, frame_size=%d",
             i,
             av_get_pix_fmt_name(decoder_context->codec_context[i]->pix_fmt),
             decoder_context->stream[i]->time_base.den,
-            decoder_context->codec_context[i]->sample_fmt,
+            av_get_sample_fmt_name(decoder_context->codec_context[i]->sample_fmt),
             decoder_context->codec_context[i]->frame_size);
 
         /* Video - set context parameters manually */
@@ -1189,14 +1190,24 @@ prepare_audio_encoder(
     encoder_context->codec_context[index]->channel_layout = decoder_context->codec_context[index]->channel_layout;
     encoder_context->codec_context[index]->channels = av_get_channel_layout_nb_channels(encoder_context->codec_context[index]->channel_layout);
 
-    /* If decoder channel layout is DOWNMIX, or params->ecodec == "aac" then set the channel layout to STEREO */
-    if ( decoder_context->codec_context[index]->channel_layout == AV_CH_LAYOUT_STEREO_DOWNMIX || !strcmp(ecodec, "aac")) {
+    const char *channel_name = avpipe_channel_name(
+                                av_get_channel_layout_nb_channels(encoder_context->codec_context[index]->channel_layout),
+                                decoder_context->codec_context[index]->channel_layout);
+
+    /* If decoder channel layout is DOWNMIX, or params->ecodec == "aac" then set the channel layout to STEREO.
+     * But preserve the channel layout if input channel layout is 5.1.
+     */
+    if ((decoder_context->codec_context[index]->channel_layout == AV_CH_LAYOUT_STEREO_DOWNMIX || !strcmp(ecodec, "aac")) &&
+        strcmp(channel_name, "5.1")) {
         /* This encoder is prepared specifically for AAC, therefore set the channel layout to AV_CH_LAYOUT_STEREO */
         encoder_context->codec_context[index]->channels = av_get_channel_layout_nb_channels(AV_CH_LAYOUT_STEREO);
         encoder_context->codec_context[index]->channel_layout = AV_CH_LAYOUT_STEREO;    // AV_CH_LAYOUT_STEREO is av_get_default_channel_layout(encoder_context->codec_context[index]->channels)
     }
 
-    elv_dbg("ENCODER channels=%d, channel_layout=%d", encoder_context->codec_context[index]->channels, encoder_context->codec_context[index]->channel_layout);
+    elv_dbg("ENCODER channels=%d, channel_layout=%d, sample_fmt=%s",
+        encoder_context->codec_context[index]->channels,
+        encoder_context->codec_context[index]->channel_layout,
+        av_get_sample_fmt_name(encoder_context->codec_context[index]->sample_fmt));
     if (params->sample_rate > 0 && strcmp(ecodec, "aac")) {
         /*
          * Audio resampling, which is active for aac encoder, needs more work to adjust sampling properly
@@ -1234,8 +1245,9 @@ prepare_audio_encoder(
         return eav_open_codec;
     }
 
-    elv_dbg("encoder audio stream index=%d, bitrate=%d, sample_fmts=%d, timebase=%d, output frame_size=%d, sample_rate=%d",
-        index, encoder_context->codec_context[index]->bit_rate, encoder_context->codec_context[index]->sample_fmt,
+    elv_dbg("encoder audio stream index=%d, bitrate=%d, sample_fmts=%s, timebase=%d, output frame_size=%d, sample_rate=%d",
+        index, encoder_context->codec_context[index]->bit_rate,
+        av_get_sample_fmt_name(encoder_context->codec_context[index]->sample_fmt),
         encoder_context->codec_context[index]->time_base.den, encoder_context->codec_context[index]->frame_size,
         encoder_context->codec_context[index]->sample_rate);
 
