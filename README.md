@@ -31,7 +31,24 @@ go test ./...
 ```
 Binaries are installed under $GODEV/bin
 
-<br>
+
+
+## Full Tests
+
+1. Download media test files
+
+  The test files are stored at: https://console.cloud.google.com/storage/browser/qluvio-test-assets
+
+  ```
+  cd ./media
+  gsutil -m cp 'gs://qluvio-test-assets/*' .
+  ```
+
+2. Run the tests
+
+  ```
+  go test ./...
+  ```
 
 # Design
 
