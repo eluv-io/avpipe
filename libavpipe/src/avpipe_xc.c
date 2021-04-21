@@ -753,8 +753,9 @@ find_level(
     if (level < 52 && width >= 2560 && height >= 1920)
         level = 52;
 
-    if (level < 60 && width >= 3840 && height >= 2160)
-        level = 60;
+    // 60 is currently not supported by all browsers
+    // if (level < 60 && width >= 3840 && height >= 2160)
+    //     level = 60;
 
     return level;
 }
