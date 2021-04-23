@@ -721,22 +721,31 @@ set_encoder_options(
 static int
 find_level(
     int width,
-    int height)
+    int height,
+    coderctx_t *decoder_context)
 {
     int level;
+    float frame_rate = 0;
+
+    if (decoder_context->stream[decoder_context->video_stream_index]->avg_frame_rate.den != 0)
+        frame_rate = ((float)decoder_context->stream[decoder_context->video_stream_index]->avg_frame_rate.num) /
+            decoder_context->stream[decoder_context->video_stream_index]->avg_frame_rate.den;
 
     /*
      * Reference: https://en.wikipedia.org/wiki/Advanced_Video_Coding
      */
-    if (height <= 480)
-        level = 30;
-    else if (height <= 720)
+    if (height <= 480) {
+        if (frame_rate <= 30.0)
+            level = 30;
+        else
+            level = 31;
+    } else if (height <= 720)
         level = 31;
     else if (height <= 1080)
         level = 42;
     else if (height <= 1920)
         level = 50;
-    else if (height <= 2048)
+    else if (height <= 2160)
         level = 51;
     else
         level = 52;
@@ -750,12 +759,17 @@ find_level(
     if (level < 50 && width >= 1920 && height >= 1080)
         level = 50;
 
-    if (level < 52 && width >= 2560 && height >= 1920)
-        level = 52;
+    if (level < 51 && width >= 2560 && height >= 1920) {
+        if (frame_rate < 32.0)
+            level = 51;
+        else if (frame_rate < 67.0)
+            level = 52;
+        else
+            level = 60;
+    }
 
-    // 60 is currently not supported by all browsers
-    // if (level < 60 && width >= 3840 && height >= 2160)
-    //     level = 60;
+    if (level < 60 && width > 3840 && height > 2160)
+        level = 60;
 
     return level;
 }
@@ -791,7 +805,7 @@ set_h264_params(
      * https://en.wikipedia.org/wiki/Advanced_Video_Coding#Levels
      * https://developer.apple.com/documentation/http_live_streaming/hls_authoring_specification_for_apple_devices
      */
-    encoder_codec_context->level = find_level(encoder_codec_context->width, encoder_codec_context->height);
+    encoder_codec_context->level = find_level(encoder_codec_context->width, encoder_codec_context->height, decoder_context);
 }
 
 static void
@@ -812,7 +826,8 @@ set_h265_params(
         av_opt_set(encoder_codec_context->priv_data, "profile", "main", 0);
     else {
         av_opt_set(encoder_codec_context->priv_data, "profile", "main10", 0);
-        av_opt_set(encoder_codec_context->priv_data, "x265-params", "hdr-opt=1:repeat-headers=1:colorprim=bt2020:transfer=smpte2084:colormatrix=bt2020nc", 0);
+        av_opt_set(encoder_codec_context->priv_data, "x265-params",
+            "hdr-opt=1:repeat-headers=1:colorprim=bt2020:transfer=smpte2084:colormatrix=bt2020nc", 0);
     }
 
     /* Set max_cll and master_display meta data for HDR content */
@@ -828,7 +843,8 @@ set_h265_params(
      * These are set according to
      * https://en.wikipedia.org/wiki/High_Efficiency_Video_Coding
      */
-    encoder_codec_context->level = find_level(encoder_codec_context->width, encoder_codec_context->height);
+    encoder_codec_context->level = find_level(encoder_codec_context->width,
+        encoder_codec_context->height, decoder_context);
 }
 
 /* Borrowed from libavcodec/nvenc.h since it is not exposed */
@@ -880,7 +896,8 @@ set_nvidia_params(
         encoder_codec_context->profile = FF_PROFILE_H264_HIGH;
     }
 
-    encoder_codec_context->level = find_level(encoder_codec_context->width, encoder_codec_context->height);
+    encoder_codec_context->level = find_level(encoder_codec_context->width,
+        encoder_codec_context->height, decoder_context);
     av_opt_set_int(encoder_codec_context->priv_data, "level", encoder_codec_context->level, 0);
 
     /*
@@ -3074,12 +3091,6 @@ avpipe_xc(
         if (params->tx_type & tx_audio)
             encoder_context->format_context2->start_time = params->start_time_ts;
         /* PENDING (RM) add new start_time_ts for audio */
-    }
-    if (params->duration_ts != -1) {
-        if (params->tx_type & tx_video)
-            encoder_context->format_context->duration = params->duration_ts;
-        if (params->tx_type & tx_audio)
-            encoder_context->format_context2->duration = params->duration_ts;
     }
 
     decoder_context->video_input_start_pts = -1;
