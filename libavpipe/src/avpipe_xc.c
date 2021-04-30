@@ -3261,9 +3261,9 @@ xc_done:
 
     av_packet_free(&input_packet);
 
-    if (params->tx_type & tx_video)
+    if ((params->tx_type & tx_video) && rc == eav_success)
         av_write_trailer(encoder_context->format_context);
-    if (params->tx_type & tx_audio)
+    if ((params->tx_type & tx_audio) && rc == eav_success)
         av_write_trailer(encoder_context->format_context2);
 
     elv_log("avpipe_xc done rc=%d, txctx->err=%d, tx-type=%d, "
