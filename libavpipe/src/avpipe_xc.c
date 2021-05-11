@@ -2442,7 +2442,8 @@ transcode_audio_func(
          */
         if (!strcmp(params->ecodec2, "aac") &&
             params->tx_type != tx_audio_join &&
-            params->tx_type != tx_audio_merge) {
+            params->tx_type != tx_audio_merge &&
+            params->tx_type != tx_audio_pan) {
             err = transcode_audio_aac(
                 decoder_context,
                 encoder_context,
