@@ -571,6 +571,45 @@ typedef struct tx_thread_params_t {
     avpipe_io_handler_t *out_handlers;
 } tx_thread_params_t;
 
+static char *
+safe_strdup(
+    char *s)
+{
+    if (s)
+        return strdup(s);
+
+    return NULL;
+}
+
+static txparams_t *
+txparam_copy(
+    txparams_t *p)
+{
+    txparams_t *p2 = (txparams_t *) calloc(1, sizeof(txparams_t));
+
+    *p2 = *p;
+    p2->crf_str = safe_strdup(p->crf_str);
+    p2->crypt_iv = safe_strdup(p->crypt_iv);
+    p2->crypt_key = safe_strdup(p->crypt_key);
+    p2->crypt_key_url = safe_strdup(p->crypt_key_url);
+    p2->crypt_kid = safe_strdup(p->crypt_kid);
+    p2->dcodec = safe_strdup(p->dcodec);
+    p2->dcodec2 = safe_strdup(p->dcodec);
+    p2->ecodec = safe_strdup(p->ecodec);
+    p2->ecodec2 = safe_strdup(p->ecodec2);
+    p2->filter_descriptor = safe_strdup(p->filter_descriptor);
+    p2->format = safe_strdup(p->format);
+    p2->max_cll = safe_strdup(p->max_cll);
+    p2->master_display = safe_strdup(p->master_display);
+    p2->preset = safe_strdup(p->preset);
+    p2->start_segment_str = safe_strdup(p->start_segment_str);
+    p2->watermark_text = safe_strdup(p->watermark_text);
+    p2->watermark_timecode = safe_strdup(p->watermark_timecode);
+    p2->overlay_filename = safe_strdup(p->overlay_filename);
+    p2->watermark_overlay = safe_strdup(p->watermark_overlay);
+    p2->watermark_shadow_color = safe_strdup(p->watermark_shadow_color);
+}
+
 void *
 tx_thread_func(
     void *thread_params)
@@ -590,7 +629,12 @@ tx_thread_func(
             continue;
         }
 
-        if ((rc = avpipe_init(&txctx, params->in_handlers, inctx, params->out_handlers, params->txparams, params->filename)) != eav_success) {
+        /*
+         * Pass a copy of params since avpipe_fini() releases all the params memory.
+         * (This is needed when repeating the same command with etx.)
+         */
+        txparams_t *txparams = txparam_copy(params->txparams);
+        if ((rc = avpipe_init(&txctx, params->in_handlers, inctx, params->out_handlers, txparams, params->filename)) != eav_success) {
             elv_err("THREAD %d, iteration %d, failed to initialize avpipe rc=%d", params->thread_number, i+1, rc);
             continue;
         }
@@ -611,6 +655,7 @@ tx_thread_func(
 
         elv_dbg("Releasing all the resources, filename=%s", params->filename);
         avpipe_fini(&txctx);
+        free(txparams);
     }
 
     elv_log("TRANSCODER THREAD %d ENDS", params->thread_number);
