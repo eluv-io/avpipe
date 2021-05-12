@@ -594,7 +594,7 @@ txparam_copy(
     p2->crypt_key_url = safe_strdup(p->crypt_key_url);
     p2->crypt_kid = safe_strdup(p->crypt_kid);
     p2->dcodec = safe_strdup(p->dcodec);
-    p2->dcodec2 = safe_strdup(p->dcodec);
+    p2->dcodec2 = safe_strdup(p->dcodec2);
     p2->ecodec = safe_strdup(p->ecodec);
     p2->ecodec2 = safe_strdup(p->ecodec2);
     p2->filter_descriptor = safe_strdup(p->filter_descriptor);
