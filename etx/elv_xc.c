@@ -608,6 +608,8 @@ txparam_copy(
     p2->overlay_filename = safe_strdup(p->overlay_filename);
     p2->watermark_overlay = safe_strdup(p->watermark_overlay);
     p2->watermark_shadow_color = safe_strdup(p->watermark_shadow_color);
+
+    return p2;
 }
 
 void *
