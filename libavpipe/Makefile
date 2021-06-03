@@ -23,7 +23,7 @@ else
 VERSION := $(GIT_VERSION)
 endif
 
-FLAGS=-O0 -ggdb -Wall -fPIC -DVERSION=\"$(VERSION)\"
+FLAGS=-O0 -ggdb -Wall -fPIC -fstack-check -DVERSION=\"$(VERSION)\"
 
 all: avpipelib install
 

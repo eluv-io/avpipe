@@ -3638,6 +3638,11 @@ check_params(
         return eav_param;
     }
 
+    if (params->n_audio > MAX_AUDIO_MUX) {
+        elv_err("Too many audio indexes, n_audio=%d", params->n_audio);
+        return eav_param;
+    }
+
     /* Set n_audio to zero if n_audio < 0 or tx_type == tx_video */
     if (params->n_audio < 0 ||
         params->tx_type == tx_video)
@@ -3695,19 +3700,20 @@ avpipe_init(
         goto avpipe_init_failed;
     }
 
-    char buf[1024];
+    char buf[4096];
     char audio_index_str[256];
     char index_str[10];
 
     audio_index_str[0] = '\0';
-    for (int i=0; i<params->n_audio; i++) {
+    for (int i=0; i<params->n_audio && i<MAX_AUDIO_MUX; i++) {
         snprintf(index_str, 10, "%d", params->audio_index[i]);
         strcat(audio_index_str, index_str);
         if (i < params->n_audio-1)
             strcat(audio_index_str, ",");
     }
 
-    sprintf(buf,
+    /* Note, when adding new params here, become sure buf is big enough to keep params */
+    snprintf(buf, sizeof(buf),
         "stream_id=%d "
         "url=%s "
         "version=%s "

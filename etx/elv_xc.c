@@ -606,7 +606,10 @@ txparam_copy(
     p2->watermark_text = safe_strdup(p->watermark_text);
     p2->watermark_timecode = safe_strdup(p->watermark_timecode);
     p2->overlay_filename = safe_strdup(p->overlay_filename);
-    p2->watermark_overlay = safe_strdup(p->watermark_overlay);
+    if (p->watermark_overlay_len > 0) {
+        p2->watermark_overlay = (char *) calloc(1, p->watermark_overlay_len);
+        memcpy(p2->watermark_overlay, p->watermark_overlay, p->watermark_overlay_len);
+    }
     p2->watermark_shadow_color = safe_strdup(p->watermark_shadow_color);
 
     return p2;
