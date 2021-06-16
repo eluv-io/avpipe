@@ -197,6 +197,8 @@ typedef struct avpipe_io_handler_t {
     avpipe_stater_f avpipe_stater;
 } avpipe_io_handler_t;
 
+#define MAX_WRAP_PTS    ((int64_t)8589000000)
+
 /* Decoder/encoder context, keeps both video and audio stream ffmpeg contexts */
 typedef struct coderctx_t {
     AVFormatContext     *format_context;        /* Input format context or video output format context */
@@ -216,6 +218,10 @@ typedef struct coderctx_t {
     int data_stream_index;
     int audio_enc_stream_index;                         /* Audio output stream index */
 
+    int64_t video_last_wrapped_pts;                     /* Video last wrapped pts */
+    int64_t video_last_input_pts;                       /* Video last input pts */
+    int64_t audio_last_wrapped_pts;                     /* Audio last wrapped pts */
+    int64_t audio_last_input_pts;                       /* Audio last input pts */
     int64_t video_last_dts;
     int64_t audio_last_dts;
     int64_t last_key_frame;                             /* pts of last key frame */
