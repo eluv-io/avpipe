@@ -6,6 +6,8 @@ SUBDIRS=utils libavpipe etx avcmd
 SRCS=avpipe_handler.c
 OBJS=$(SRCS:%.c=$(BINDIR)/%.o)
 
+.PHONY: all test clean
+
 .DEFAULT_GOAL := dynamic
 
 all install: copy_libs check-env
@@ -73,4 +75,10 @@ check-env:
 ifndef ELV_TOOLCHAIN_DIST_PLATFORM
   $(error ELV_TOOLCHAIN_DIST_PLATFORM is undefined)
 endif
+
+test:
+	@cd ./media
+	@(if ! [ -x "command -v gsutil" ]; then echo "gsutil could not be found, install gsutil"; exit 1; fi) || exit 1
+	@gsutil -m cp 'gs://qluvio-test-assets/*' .
+	@go test --timeout 10000s
 

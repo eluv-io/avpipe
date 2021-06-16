@@ -69,7 +69,9 @@ const (
 	FMP4VideoSegment
 	// FMP4AudioSegment 14
 	FMP4AudioSegment
-	// FrameImage 15
+	// MuxSegment 15
+	MuxSegment
+	// FrameImage 16
 	FrameImage
 )
 
@@ -286,10 +288,14 @@ var AVFieldOrderNames = map[AVFieldOrder]string{
 type AVStatType int
 
 const (
-	AV_IN_STAT_BYTES_READ          = 1
-	AV_OUT_STAT_BYTES_WRITTEN      = 2
-	AV_OUT_STAT_DECODING_START_PTS = 3
-	AV_OUT_STAT_ENCODING_END_PTS   = 4
+	AV_IN_STAT_BYTES_READ               = 1
+	AV_IN_STAT_AUDIO_FRAME_READ         = 2
+	AV_IN_STAT_VIDEO_FRAME_READ         = 4
+	AV_IN_STAT_DECODING_AUDIO_START_PTS = 8
+	AV_IN_STAT_DECODING_VIDEO_START_PTS = 16
+	AV_OUT_STAT_BYTES_WRITTEN           = 32
+	AV_OUT_STAT_FRAME_WRITTEN           = 64
+	AV_OUT_STAT_ENCODING_END_PTS        = 128
 )
 
 type StreamInfo struct {
@@ -389,7 +395,7 @@ type OutputHandler interface {
 	Close() error
 
 	// Reports some stats
-	Stat(statType AVStatType, statArgs interface{}) error
+	Stat(avType AVType, statType AVStatType, statArgs interface{}) error
 }
 
 // Implement IOHandler
@@ -688,6 +694,18 @@ func (h *ioHandler) InStat(avp_stat C.avp_stat_t, stat_args unsafe.Pointer) erro
 	case C.in_stat_bytes_read:
 		statArgs := *(*uint64)(stat_args)
 		err = h.input.Stat(AV_IN_STAT_BYTES_READ, &statArgs)
+	case C.in_stat_decoding_audio_start_pts:
+		statArgs := *(*uint64)(stat_args)
+		err = h.input.Stat(AV_IN_STAT_DECODING_AUDIO_START_PTS, &statArgs)
+	case C.in_stat_decoding_video_start_pts:
+		statArgs := *(*uint64)(stat_args)
+		err = h.input.Stat(AV_IN_STAT_DECODING_VIDEO_START_PTS, &statArgs)
+	case C.in_stat_audio_frame_read:
+		statArgs := *(*uint64)(stat_args)
+		err = h.input.Stat(AV_IN_STAT_AUDIO_FRAME_READ, &statArgs)
+	case C.in_stat_video_frame_read:
+		statArgs := *(*uint64)(stat_args)
+		err = h.input.Stat(AV_IN_STAT_VIDEO_FRAME_READ, &statArgs)
 	}
 
 	return err
@@ -711,9 +729,47 @@ func (h *ioHandler) getOutTable(fd int64) OutputHandler {
 	return h.outTable[fd]
 }
 
+func getAVType(av_type C.int) AVType {
+	switch av_type {
+	case C.avpipe_video_init_stream:
+		return DASHVideoInit
+	case C.avpipe_audio_init_stream:
+		return DASHAudioInit
+	case C.avpipe_manifest:
+		return DASHManifest
+	case C.avpipe_video_segment:
+		return DASHVideoSegment
+	case C.avpipe_audio_segment:
+		return DASHAudioSegment
+	case C.avpipe_master_m3u:
+		return HLSMasterM3U
+	case C.avpipe_video_m3u:
+		return HLSVideoM3U
+	case C.avpipe_audio_m3u:
+		return HLSAudioM3U
+	case C.avpipe_aes_128_key:
+		return AES128Key
+	case C.avpipe_mp4_stream:
+		return MP4Stream
+	case C.avpipe_fmp4_stream:
+		return FMP4Stream
+	case C.avpipe_mp4_segment:
+		return MP4Segment
+	case C.avpipe_video_fmp4_segment:
+		return FMP4VideoSegment
+	case C.avpipe_audio_fmp4_segment:
+		return FMP4AudioSegment
+	case C.avpipe_mux_segment:
+		return MuxSegment
+	case C.avpipe_image:
+		return FrameImage
+	default:
+		return Unknown
+	}
+}
+
 //export AVPipeOpenOutput
 func AVPipeOpenOutput(handler C.int64_t, stream_index, seg_index, stream_type C.int) C.int64_t {
-	var out_type AVType
 
 	gMutex.Lock()
 	h := gHandlers[int64(handler)]
@@ -724,38 +780,8 @@ func AVPipeOpenOutput(handler C.int64_t, stream_index, seg_index, stream_type C.
 	gFd++
 	fd := gFd
 	gMutex.Unlock()
-	switch stream_type {
-	case C.avpipe_video_init_stream:
-		out_type = DASHVideoInit
-	case C.avpipe_audio_init_stream:
-		out_type = DASHAudioInit
-	case C.avpipe_manifest:
-		out_type = DASHManifest
-	case C.avpipe_video_segment:
-		out_type = DASHVideoSegment
-	case C.avpipe_audio_segment:
-		out_type = DASHAudioSegment
-	case C.avpipe_master_m3u:
-		out_type = HLSMasterM3U
-	case C.avpipe_video_m3u:
-		out_type = HLSVideoM3U
-	case C.avpipe_audio_m3u:
-		out_type = HLSAudioM3U
-	case C.avpipe_aes_128_key:
-		out_type = AES128Key
-	case C.avpipe_mp4_stream:
-		out_type = MP4Stream
-	case C.avpipe_fmp4_stream:
-		out_type = FMP4Stream
-	case C.avpipe_mp4_segment:
-		out_type = MP4Segment
-	case C.avpipe_video_fmp4_segment:
-		out_type = FMP4VideoSegment
-	case C.avpipe_audio_fmp4_segment:
-		out_type = FMP4AudioSegment
-	case C.avpipe_image:
-		out_type = FrameImage
-	default:
+	out_type := getAVType(stream_type)
+	if out_type == Unknown {
 		log.Error("AVPipeOpenOutput()", "invalid stream type", stream_type)
 		return C.int64_t(-1)
 	}
@@ -960,7 +986,12 @@ func (h *ioHandler) OutCloser(fd C.int64_t) error {
 }
 
 //export AVPipeStatOutput
-func AVPipeStatOutput(handler C.int64_t, fd C.int64_t, avp_stat C.avp_stat_t, stat_args unsafe.Pointer) C.int {
+func AVPipeStatOutput(handler C.int64_t,
+	fd C.int64_t,
+	buf_type C.avpipe_buftype_t,
+	avp_stat C.avp_stat_t,
+	stat_args unsafe.Pointer) C.int {
+
 	gMutex.Lock()
 	h := gHandlers[int64(handler)]
 	if h == nil {
@@ -969,7 +1000,7 @@ func AVPipeStatOutput(handler C.int64_t, fd C.int64_t, avp_stat C.avp_stat_t, st
 	}
 	gMutex.Unlock()
 
-	err := h.OutStat(fd, avp_stat, stat_args)
+	err := h.OutStat(fd, buf_type, avp_stat, stat_args)
 	if err != nil {
 		return C.int(-1)
 	}
@@ -991,13 +1022,10 @@ func AVPipeStatMuxOutput(fd C.int64_t, avp_stat C.avp_stat_t, stat_args unsafe.P
 	switch avp_stat {
 	case C.out_stat_bytes_written:
 		statArgs := *(*uint64)(stat_args)
-		err = outHandler.Stat(AV_OUT_STAT_BYTES_WRITTEN, &statArgs)
-	case C.out_stat_decoding_start_pts:
-		statArgs := *(*uint64)(stat_args)
-		err = outHandler.Stat(AV_OUT_STAT_DECODING_START_PTS, &statArgs)
+		err = outHandler.Stat(MuxSegment, AV_OUT_STAT_BYTES_WRITTEN, &statArgs)
 	case C.out_stat_encoding_end_pts:
 		statArgs := *(*uint64)(stat_args)
-		err = outHandler.Stat(AV_OUT_STAT_ENCODING_END_PTS, &statArgs)
+		err = outHandler.Stat(MuxSegment, AV_OUT_STAT_ENCODING_END_PTS, &statArgs)
 	}
 
 	if err != nil {
@@ -1007,23 +1035,37 @@ func AVPipeStatMuxOutput(fd C.int64_t, avp_stat C.avp_stat_t, stat_args unsafe.P
 	return C.int(0)
 }
 
-func (h *ioHandler) OutStat(fd C.int64_t, avp_stat C.avp_stat_t, stat_args unsafe.Pointer) error {
+type EncodingFrameStats struct {
+	TotalFramesWritten int64 `json:"total_frames_written"`   // Total number of frames encoded in xc session
+	FramesWritten      int64 `json:"segment_frames_written"` // Number of frames encoded in current segment
+}
+
+func (h *ioHandler) OutStat(fd C.int64_t,
+	av_type C.avpipe_buftype_t,
+	avp_stat C.avp_stat_t,
+	stat_args unsafe.Pointer) error {
+
 	var err error
 	outHandler := h.getOutTable(int64(fd))
 	if outHandler == nil {
 		return fmt.Errorf("OutStat nil handler, fd=%d", int64(fd))
 	}
 
+	avType := getAVType(C.int(av_type))
 	switch avp_stat {
 	case C.out_stat_bytes_written:
 		statArgs := *(*uint64)(stat_args)
-		err = outHandler.Stat(AV_OUT_STAT_BYTES_WRITTEN, &statArgs)
-	case C.out_stat_decoding_start_pts:
-		statArgs := *(*uint64)(stat_args)
-		err = outHandler.Stat(AV_OUT_STAT_DECODING_START_PTS, &statArgs)
+		err = outHandler.Stat(avType, AV_OUT_STAT_BYTES_WRITTEN, &statArgs)
 	case C.out_stat_encoding_end_pts:
 		statArgs := *(*uint64)(stat_args)
-		err = outHandler.Stat(AV_OUT_STAT_ENCODING_END_PTS, &statArgs)
+		err = outHandler.Stat(avType, AV_OUT_STAT_ENCODING_END_PTS, &statArgs)
+	case C.out_stat_frame_written:
+		encodingFramesStats := (*C.encoding_frame_stats_t)(stat_args)
+		statArgs := &EncodingFrameStats{
+			TotalFramesWritten: int64(encodingFramesStats.total_frames_written),
+			FramesWritten:      int64(encodingFramesStats.frames_written),
+		}
+		err = outHandler.Stat(avType, AV_OUT_STAT_FRAME_WRITTEN, statArgs)
 	}
 
 	return err

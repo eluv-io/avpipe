@@ -28,6 +28,16 @@ do_mux(
     char *out_filename
 );
 
+int
+in_stat(
+    void *opaque,
+    avp_stat_t stat_type);
+
+int
+out_stat(
+    void *opaque,
+    avp_stat_t stat_type);
+
 typedef struct udp_thread_params_t {
     int             fd;             /* Socket fd to read UDP datagrams */
     elv_channel_t   *udp_channel;   /* udp channel to keep incomming UDP packets */
@@ -254,7 +264,13 @@ in_read_packet(
             c->read_bytes += r;
             c->read_pos += r;
         }
+
         elv_dbg("IN READ read=%d pos=%"PRId64" total=%"PRId64, r, c->read_pos, c->read_bytes);
+    }
+
+    if (c->read_bytes - c->read_reported > BYTES_READ_REPORT) {
+        in_stat(opaque, in_stat_bytes_read);
+        c->read_reported = c->read_bytes;
     }
 
     return r > 0 ? r : -1;
@@ -304,7 +320,27 @@ in_stat(
     ioctx_t *c = (ioctx_t *)opaque;
 
     fd = *((int64_t *)(c->opaque));
-    elv_log("IN STAT fd=%d, read offset=%"PRId64, fd, c->read_bytes);
+    switch (stat_type) {
+    case in_stat_bytes_read:
+        elv_log("IN STAT fd=%d, read offset=%"PRId64, fd, c->read_bytes);
+        break;
+    case in_stat_decoding_audio_start_pts:
+        elv_log("IN STAT fd=%d, audio start PTS=%"PRId64, fd, c->decoding_start_pts);
+        break;
+    case in_stat_decoding_video_start_pts:
+        elv_log("IN STAT fd=%d, video start PTS=%"PRId64, fd, c->decoding_start_pts);
+        break;
+    case in_stat_audio_frame_read:
+        elv_log("IN STAT fd=%d, audio frame read=%"PRId64, fd, c->audio_frames_read);
+        break;
+    case in_stat_video_frame_read:
+        elv_log("IN STAT fd=%d, video frame read=%"PRId64, fd, c->video_frames_read);
+        break;
+    default:
+        elv_err("IN STATS fd=%d, invalid input stat=%d", stat_type);
+        return 1;
+    }
+
     return 0;
 }
 
@@ -484,7 +520,16 @@ out_write_packet(
         }
     }
 
-    elv_dbg("OUT WRITE fd=%d size=%d written=%d pos=%"PRId64" total=%"PRId64, fd, buf_size, bwritten, outctx->write_pos, outctx->written_bytes);
+    if ((outctx->type == avpipe_video_fmp4_segment && 
+        outctx->written_bytes - outctx->write_reported > VIDEO_BYTES_WRITE_REPORT) ||
+        (outctx->type == avpipe_audio_fmp4_segment &&
+        outctx->written_bytes - outctx->write_reported > AUDIO_BYTES_WRITE_REPORT)) {
+        out_stat(opaque, out_stat_bytes_written);
+        outctx->write_reported = outctx->written_bytes;
+    }
+
+    elv_dbg("OUT WRITE fd=%d type=%d size=%d written=%d pos=%"PRId64" total=%"PRId64,
+        fd, outctx->type, buf_size, bwritten, outctx->write_pos, outctx->written_bytes);
     return bwritten;
 }
 
@@ -547,14 +592,20 @@ out_stat(
 
     switch (stat_type) {
     case out_stat_bytes_written:
-        elv_log("OUT STAT fd=%d, write offset=%"PRId64, fd, outctx->written_bytes);
-        break;
-    case out_stat_decoding_start_pts:
-        elv_log("OUT STAT fd=%d, start PTS=%"PRId64, fd, outctx->decoding_start_pts);
+        elv_log("OUT STAT fd=%d, type=%d, write offset=%"PRId64,
+            fd, outctx->type, outctx->written_bytes);
         break;
     case out_stat_encoding_end_pts:
-        elv_log("OUT STAT fd=%d, video end PTS=%"PRId64", audio end PTS=%"PRId64,
-            fd, outctx->encoder_ctx->video_last_pts_sent_encode, outctx->encoder_ctx->audio_last_pts_sent_encode);
+        elv_log("OUT STAT fd=%d, video encoding end PTS=%"PRId64
+                ", audio encoding end PTS=%"PRId64,
+                fd, outctx->encoder_ctx->video_last_pts_sent_encode,
+                outctx->encoder_ctx->audio_last_pts_sent_encode);
+        break;
+    case out_stat_frame_written:
+        elv_log("OUT STAT fd=%d, type=%d, total_frames_written=%"PRId64
+                ", frames_written=%"PRId64,
+                fd, outctx->type, outctx->total_frames_written,
+                outctx->frames_written);
         break;
     default:
         break;

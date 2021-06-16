@@ -354,6 +354,8 @@ prepare_decoder(
     int stream_id_index = -1;
     int sync_id_index = -1;     // Index of the video stream used for audio sync
 
+    decoder_context->in_handlers = in_handlers;
+    decoder_context->inctx = inctx;
     decoder_context->video_stream_index = -1;
     for (int j=0; j<MAX_AUDIO_MUX; j++)
         decoder_context->audio_stream_index[j] = -1;
@@ -1309,6 +1311,7 @@ prepare_encoder(
     char *format = params->format;
     int rc = 0;
 
+    encoder_context->out_handlers = out_handlers;
     /*
      * TODO: passing "hls" format needs some development in FF to produce stream index for audio/video.
      * I will keep hls as before to go to dashenc.c
@@ -1678,6 +1681,9 @@ encode_frame(
     int rc = eav_success;
     AVFormatContext *format_context = encoder_context->format_context;
     AVCodecContext *codec_context = encoder_context->codec_context[stream_index];
+    out_tracker_t *out_tracker;
+    avpipe_io_handler_t *out_handlers;
+    ioctx_t *outctx;
 
     if (selected_decoded_audio(decoder_context, stream_index) >= 0)
         format_context = encoder_context->format_context2;
@@ -1821,10 +1827,13 @@ encode_frame(
             encoder_context->video_last_pts_encoded = output_packet->pts;
         }
 
-        if (selected_decoded_audio(decoder_context, stream_index) >= 0)
+        if (selected_decoded_audio(decoder_context, stream_index) >= 0) {
             encoder_context->audio_pts = output_packet->pts;
-        else
+            encoder_context->audio_frames_written++;
+        } else {
             encoder_context->video_pts = output_packet->pts;
+            encoder_context->video_frames_written++;
+        }
 
         output_packet->pts += params->start_pts;
         output_packet->dts += params->start_pts;
@@ -1870,6 +1879,20 @@ encode_frame(
             elv_err("Error %d writing output packet index=%d into stream_index=%d: %s",
                 ret, output_packet->stream_index, stream_index, av_err2str(ret));
         }
+
+        out_tracker = (out_tracker_t *) format_context->avpipe_opaque;
+        out_handlers = out_tracker->out_handlers;
+        outctx = out_tracker->last_outctx;
+
+        if (out_handlers->avpipe_stater && outctx) {
+            if (stream_index == decoder_context->video_stream_index)
+                outctx->total_frames_written = encoder_context->video_frames_written;
+            else
+                outctx->total_frames_written = encoder_context->audio_frames_written;
+            outctx->frames_written++;
+            out_handlers->avpipe_stater(outctx, out_stat_frame_written);
+        }
+
     }
 
 end_encode_frame:
@@ -1906,6 +1929,26 @@ do_bypass(
     if (av_interleaved_write_frame(format_context, packet) < 0) {
         elv_err("Failure in copying bypass packet tx_type=%d", p->tx_type);
         return eav_write_frame;
+    }
+
+    out_tracker_t *out_tracker = (out_tracker_t *) format_context->avpipe_opaque;
+    avpipe_io_handler_t *out_handlers = out_tracker->out_handlers;
+    ioctx_t *outctx = out_tracker->last_outctx;
+
+    if (out_handlers->avpipe_stater && outctx) {
+        if (is_audio) {
+            if (outctx->type != avpipe_audio_init_stream)
+                encoder_context->audio_frames_written++;
+            encoder_context->audio_last_pts_sent_encode = packet->pts;
+            outctx->total_frames_written = encoder_context->audio_frames_written;
+        } else {
+            if (outctx->type != avpipe_video_init_stream)
+                encoder_context->video_frames_written++;
+            encoder_context->video_last_pts_sent_encode = packet->pts;
+            outctx->total_frames_written = encoder_context->video_frames_written;
+        }
+        outctx->frames_written++;
+        out_handlers->avpipe_stater(outctx, out_stat_frame_written);
     }
 
     return eav_success;
@@ -2619,7 +2662,8 @@ should_stop_decoding(
     coderctx_t *decoder_context,
     coderctx_t *encoder_context,
     txparams_t *params,
-    int *frames_read,
+    int64_t audio_frames_read,
+    int64_t video_frames_read,
     int *frames_read_past_duration,
     int frames_allowed_past_duration)
 {
@@ -2628,8 +2672,6 @@ should_stop_decoding(
     if (decoder_context->cancelled)
         return 1;
 
-    (*frames_read) ++;
-
     if (input_packet->stream_index != decoder_context->video_stream_index &&
         selected_decoded_audio(decoder_context, input_packet->stream_index) < 0)
         return 0;
@@ -2637,30 +2679,22 @@ should_stop_decoding(
     if (input_packet->stream_index == decoder_context->video_stream_index &&
         (params->tx_type & tx_video)) {
         if (decoder_context->video_input_start_pts == -1) {
-            out_tracker_t *out_tracker = (out_tracker_t *) encoder_context->format_context->avpipe_opaque;
-            avpipe_io_handler_t *out_handlers = out_tracker->out_handlers;
-            ioctx_t *outctx = out_tracker->last_outctx;
+            avpipe_io_handler_t *in_handlers = decoder_context->in_handlers;
             decoder_context->video_input_start_pts = input_packet->pts;
-            elv_log("video_input_start_pts=%"PRId64, decoder_context->video_input_start_pts);
-            if (outctx) {
-                outctx->decoding_start_pts = input_packet->pts;
-                out_handlers->avpipe_stater(outctx, out_stat_decoding_start_pts);
-            }
+            elv_log("video_input_start_pts=%"PRId64,
+                decoder_context->video_input_start_pts);
+            in_handlers->avpipe_stater(decoder_context->inctx, in_stat_decoding_video_start_pts);
         }
 
         input_packet_rel_pts = input_packet->pts - decoder_context->video_input_start_pts;
     } else if (selected_decoded_audio(decoder_context, input_packet->stream_index) >= 0 &&
         params->tx_type & tx_audio) {
         if (decoder_context->audio_input_start_pts == -1) {
-            out_tracker_t *out_tracker = (out_tracker_t *) encoder_context->format_context2->avpipe_opaque;
-            avpipe_io_handler_t *out_handlers = out_tracker->out_handlers;
-            ioctx_t *outctx = out_tracker->last_outctx;
+            avpipe_io_handler_t *in_handlers = decoder_context->in_handlers;
             decoder_context->audio_input_start_pts = input_packet->pts;
-            elv_log("audio_input_start_pts=%"PRId64, decoder_context->audio_input_start_pts);
-            if (outctx) {
-                outctx->decoding_start_pts = input_packet->pts;
-                out_handlers->avpipe_stater(outctx, out_stat_decoding_start_pts);
-            }
+            elv_log("audio_input_start_pts=%"PRId64,
+                decoder_context->audio_input_start_pts);
+                in_handlers->avpipe_stater(decoder_context->inctx, in_stat_decoding_audio_start_pts);
         }
 
         input_packet_rel_pts = input_packet->pts - decoder_context->audio_input_start_pts;
@@ -2673,9 +2707,9 @@ should_stop_decoding(
 
         (*frames_read_past_duration) ++;
         elv_dbg("DURATION OVER param start_time=%"PRId64" duration=%"PRId64" pkt pts=%"PRId64" rel_pts=%"PRId64" "
-                "frames_read=%d past_duration=%d",
+                "audio_frames_read=%"PRId64", video_frames_read=%"PRId64", past_duration=%d",
                 params->start_time_ts, params->duration_ts, input_packet->pts, input_packet_rel_pts,
-                *frames_read, *frames_read_past_duration);
+                audio_frames_read, video_frames_read, *frames_read_past_duration);
 
         /* If it is a bypass simply return since there is no decoding/encoding involved */
         if (params->bypass_transcoding)
@@ -2998,6 +3032,8 @@ avpipe_xc(
     coderctx_t *decoder_context = &txctx->decoder_ctx;
     coderctx_t *encoder_context = &txctx->encoder_ctx;
     txparams_t *params = txctx->params;
+    avpipe_io_handler_t *in_handlers = txctx->in_handlers;
+    ioctx_t *inctx = txctx->inctx;
     int rc = 0;
     AVPacket *input_packet = NULL;
 
@@ -3150,7 +3186,6 @@ avpipe_xc(
     decoder_context->mpegts_synced = 0;
 
     int64_t video_last_dts = 0;
-    int frames_read = 0;
     int frames_read_past_duration = 0;
     const int frames_allowed_past_duration = 5;
 
@@ -3212,7 +3247,8 @@ avpipe_xc(
             // PENDING(SSS) - this logic can be done after decoding where we know concretely that we decoded all frames
             // we need to encode.
             if (should_stop_decoding(input_packet, decoder_context, encoder_context,
-                params, &frames_read, &frames_read_past_duration, frames_allowed_past_duration)) {
+                params, inctx->audio_frames_read, inctx->video_frames_read,
+                &frames_read_past_duration, frames_allowed_past_duration)) {
                 av_packet_free(&input_packet);
                 break;
             }
@@ -3240,6 +3276,9 @@ avpipe_xc(
             // Video packet
             dump_packet(0, "IN ", input_packet, debug_frame_level);
 
+            inctx->video_frames_read++;
+            in_handlers->avpipe_stater(inctx, in_stat_video_frame_read);
+
             // Assert DTS is growing as expected (accommodate non integer and irregular frame duration)
             if (video_last_dts + input_packet->duration * 1.5 < input_packet->dts &&
                 video_last_dts != 0 && input_packet->duration > 0) {
@@ -3259,6 +3298,9 @@ avpipe_xc(
             encoder_context->audio_last_dts = input_packet->dts;
 
             dump_packet(1, "IN ", input_packet, debug_frame_level);
+
+            inctx->audio_frames_read++;
+            in_handlers->avpipe_stater(inctx, in_stat_audio_frame_read);
 
             xc_frame_t *xc_frame = (xc_frame_t *) calloc(1, sizeof(xc_frame_t));
             xc_frame->packet = input_packet;
@@ -3850,6 +3892,8 @@ avpipe_init(
     /* Create threads for decoder and encoder */
     pthread_create(&p_txctx->vthread_id, NULL, transcode_video_func, p_txctx);
     pthread_create(&p_txctx->athread_id, NULL, transcode_audio_func, p_txctx);
+    p_txctx->in_handlers = in_handlers;
+    p_txctx->out_handlers = out_handlers;
     *txctx = p_txctx;
 
     return eav_success;

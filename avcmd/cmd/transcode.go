@@ -86,6 +86,18 @@ func (i *avcmdInput) Stat(statType avpipe.AVStatType, statArgs interface{}) erro
 	case avpipe.AV_IN_STAT_BYTES_READ:
 		readOffset := statArgs.(*uint64)
 		log.Info("AVCMD InputHandler.Stat", "read offset", *readOffset)
+	case avpipe.AV_IN_STAT_AUDIO_FRAME_READ:
+		audioFrameRead := statArgs.(*uint64)
+		log.Info("AVCMD InputHandler.Stat", "audioFrameRead", *audioFrameRead)
+	case avpipe.AV_IN_STAT_VIDEO_FRAME_READ:
+		videoFrameRead := statArgs.(*uint64)
+		log.Info("AVCMD InputHandler.Stat", "videoFrameRead", *videoFrameRead)
+	case avpipe.AV_IN_STAT_DECODING_AUDIO_START_PTS:
+		startPTS := statArgs.(*uint64)
+		log.Info("AVCMD InputHandler.Stat", "audio start PTS", *startPTS)
+	case avpipe.AV_IN_STAT_DECODING_VIDEO_START_PTS:
+		startPTS := statArgs.(*uint64)
+		log.Info("AVCMD InputHandler.Stat", "video start PTS", *startPTS)
 	}
 
 	return nil
@@ -176,17 +188,19 @@ func (o *avcmdOutput) Close() error {
 	return err
 }
 
-func (o *avcmdOutput) Stat(statType avpipe.AVStatType, statArgs interface{}) error {
+func (o *avcmdOutput) Stat(avType avpipe.AVType, statType avpipe.AVStatType, statArgs interface{}) error {
+
 	switch statType {
 	case avpipe.AV_OUT_STAT_BYTES_WRITTEN:
 		writeOffset := statArgs.(*uint64)
 		log.Info("AVCMD OutputHandler.Stat", "write offset", *writeOffset)
-	case avpipe.AV_OUT_STAT_DECODING_START_PTS:
-		startPTS := statArgs.(*uint64)
-		log.Info("AVCMD OutputHandler.Stat", "startPTS", *startPTS)
 	case avpipe.AV_OUT_STAT_ENCODING_END_PTS:
 		endPTS := statArgs.(*uint64)
 		log.Info("AVCMD OutputHandler.Stat", "endPTS", *endPTS)
+	case avpipe.AV_OUT_STAT_FRAME_WRITTEN:
+		encodingStats := statArgs.(*avpipe.EncodingFrameStats)
+		log.Info("AVCMD OutputHandler.Stat", "avType", avType,
+			"encodingStats", encodingStats)
 	}
 	return nil
 }

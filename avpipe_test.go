@@ -27,6 +27,15 @@ type fileInputOpener struct {
 	url string
 }
 
+type testStatsInfo struct {
+	audioFramesRead         uint64
+	videoFramesRead         uint64
+	encodingAudioFrameStats avpipe.EncodingFrameStats
+	encodingVideoFrameStats avpipe.EncodingFrameStats
+}
+
+var statsInfo testStatsInfo
+
 func (io *fileInputOpener) Open(fd int64, url string) (avpipe.InputHandler, error) {
 	f, err := os.Open(url)
 	if err != nil {
@@ -76,7 +85,21 @@ func (i *fileInput) Stat(statType avpipe.AVStatType, statArgs interface{}) error
 	switch statType {
 	case avpipe.AV_IN_STAT_BYTES_READ:
 		readOffset := statArgs.(*uint64)
-		log.Info("AVP TEST", "STAT read offset", *readOffset)
+		log.Info("AVP TEST IN STAT", "STAT read offset", *readOffset)
+	case avpipe.AV_IN_STAT_AUDIO_FRAME_READ:
+		audioFramesRead := statArgs.(*uint64)
+		log.Info("AVP TEST IN STAT", "audioFramesRead", *audioFramesRead)
+		statsInfo.audioFramesRead = *audioFramesRead
+	case avpipe.AV_IN_STAT_VIDEO_FRAME_READ:
+		videoFramesRead := statArgs.(*uint64)
+		log.Info("AVP TEST IN STAT", "videoFramesRead", *videoFramesRead)
+		statsInfo.videoFramesRead = *videoFramesRead
+	case avpipe.AV_IN_STAT_DECODING_AUDIO_START_PTS:
+		startPTS := statArgs.(*uint64)
+		log.Info("AVP TEST IN STAT", "audio start PTS", *startPTS)
+	case avpipe.AV_IN_STAT_DECODING_VIDEO_START_PTS:
+		startPTS := statArgs.(*uint64)
+		log.Info("AVP TEST IN STAT", "video start PTS", *startPTS)
 	}
 	return nil
 }
@@ -205,18 +228,23 @@ func (o *fileOutput) Close() error {
 	return err
 }
 
-func (o fileOutput) Stat(statType avpipe.AVStatType, statArgs interface{}) error {
+func (o fileOutput) Stat(avType avpipe.AVType, statType avpipe.AVStatType, statArgs interface{}) error {
 	switch statType {
 	case avpipe.AV_OUT_STAT_BYTES_WRITTEN:
 		writeOffset := statArgs.(*uint64)
-		log.Info("AVP TEST", "STAT, write offset", *writeOffset)
-	case avpipe.AV_OUT_STAT_DECODING_START_PTS:
-		startPTS := statArgs.(*uint64)
-		log.Info("AVP TEST", "STAT, startPTS", *startPTS)
+		log.Info("AVP TEST OUT STAT", "STAT, write offset", *writeOffset)
 	case avpipe.AV_OUT_STAT_ENCODING_END_PTS:
 		endPTS := statArgs.(*uint64)
-		log.Info("AVP TEST", "STAT, endPTS", *endPTS)
-
+		log.Info("AVP TEST OUT STAT", "STAT, endPTS", *endPTS)
+	case avpipe.AV_OUT_STAT_FRAME_WRITTEN:
+		encodingStats := statArgs.(*avpipe.EncodingFrameStats)
+		log.Info("AVP TEST OUT STAT", "avType", avType,
+			"encodingStats", encodingStats)
+		if avType == avpipe.FMP4AudioSegment {
+			statsInfo.encodingAudioFrameStats = *encodingStats
+		} else {
+			statsInfo.encodingVideoFrameStats = *encodingStats
+		}
 	}
 
 	return nil
@@ -1236,7 +1264,6 @@ func TestIrregularTsMezMaker_1_10000(t *testing.T) {
 			t.Error("Unexpected pixel format", probeInfo.StreamInfo[0].PixFmt)
 		}
 	}
-
 }
 
 func TestAVPipeMXF_H265MezMaker(t *testing.T) {
@@ -1381,7 +1408,71 @@ func TestAVPipeHEVC_H265ABRTranscode(t *testing.T) {
 	if err != nil {
 		t.Fail()
 	}
+}
 
+func TestAVPipeStats(t *testing.T) {
+	filename := "./media/Rigify-2min.mp4"
+	outputDir := "Rigify-2min-stats"
+
+	setupLogging()
+	log.Info("STARTING TestAVPipeStats")
+
+	params := &avpipe.TxParams{
+		BypassTranscoding:   false,
+		Format:              "fmp4-segment",
+		StartTimeTs:         0,
+		DurationTs:          -1,
+		StartSegmentStr:     "1",
+		SegDuration:         "30",
+		Ecodec:              "libx264",
+		Dcodec:              "",
+		Ecodec2:             "aac",
+		EncHeight:           720,
+		EncWidth:            1280,
+		TxType:              avpipe.TxAll,
+		StreamId:            -1,
+		SyncAudioToStreamId: -1,
+		ForceKeyInt:         48,
+	}
+
+	// Create output directory if it doesn't exist
+	err := setupOutDir(outputDir)
+	if err != nil {
+		t.Fail()
+	}
+
+	avpipe.InitIOHandler(&fileInputOpener{url: filename}, &fileOutputOpener{dir: outputDir})
+
+	err = avpipe.Tx(params, filename, false)
+	if err != nil {
+		t.Fail()
+	}
+
+	for i := 1; i <= 4; i++ {
+		mezFile := fmt.Sprintf("%s/vsegment-%d.mp4", outputDir, i)
+		// Now probe the generated files
+		probeInfo, err := avpipe.Probe(mezFile, true)
+		if err != nil {
+			t.Error(err)
+			return
+		}
+
+		timebase := *probeInfo.StreamInfo[0].TimeBase.Denom()
+		if timebase.Cmp(big.NewInt(12288)) != 0 {
+			t.Error("Unexpected TimeBase", probeInfo.StreamInfo[0].TimeBase)
+		}
+
+		if avpipe.GetPixelFormatName(probeInfo.StreamInfo[0].PixFmt) != "yuv420p" {
+			t.Error("Unexpected pixel format", probeInfo.StreamInfo[0].PixFmt)
+		}
+	}
+
+	assert.Equal(t, int64(2880), statsInfo.encodingVideoFrameStats.TotalFramesWritten)
+	assert.Equal(t, int64(720), statsInfo.encodingVideoFrameStats.FramesWritten)
+	assert.Equal(t, int64(5625), statsInfo.encodingAudioFrameStats.TotalFramesWritten)
+	assert.Equal(t, int64(1406), statsInfo.encodingAudioFrameStats.FramesWritten)
+	assert.Equal(t, uint64(5625), statsInfo.audioFramesRead)
+	assert.Equal(t, uint64(2880), statsInfo.videoFramesRead)
 }
 
 // This unit test is almost a complete test for mez, abr, muxing and probing. It does:
@@ -1658,7 +1749,7 @@ func TestProbeWithData(t *testing.T) {
 
 func TestExtractImages(t *testing.T) {
 	videoPath := "media/ErsteChristmas.mp4"
-	outPath := baseOutPath+"/TestExtractImages"
+	outPath := baseOutPath + "/TestExtractImages"
 
 	setupLogging()
 	log.Info("STARTING TestExtractImages")

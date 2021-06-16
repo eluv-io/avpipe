@@ -6,7 +6,6 @@
 
 A workspace containing
  - elv-toolchain
- - elv-crypto
  - content-fabric (for utilities such as eluvio/log and eluvio/errors)
 
 ## Clone avpipe
@@ -141,6 +140,22 @@ WORK LOOP
 
 		  - av_write_frame               --> open() write() close()
 
+## Avpipe stat reports
+- Avpipe library reports some input and output stats via some events.
+- Input stats include the following events:
+  - in_stat_bytes_read: input bytes read (this is true for all inputs but not for RTMP).
+  - in_stat_audio_frame_read: input audio frames read so far.
+  - in_stat_video_frame_read: input video frames read so far.
+  - in_stat_decoding_audio_start_pts: input stream start pts for audio.
+  - in_stat_decoding_video_start_pts: input stream start pts for video.
+- Input stats are reported via input handlers avpipe_stater() callback function.
+- A GO client of avpipe library, must implement InputHandler.Stat() method.
+- Output stats include the following events:
+  - out_stat_bytes_written: bytes written to current segment so far. Audio and video each have their own output segment.
+  - out_stat_frame_written: includes total frames written and frames written to current segment.
+  - out_stat_encoding_end_pts: end pts of generated segment. This event is generated when an output segment is complete and it is closing.
+- Output stats are reported via output handlers avpipe_stater() callback function.
+- A GO client of avpipe library, must implement OutputHandler.Stat() method.
 
 ## Setting up live
 

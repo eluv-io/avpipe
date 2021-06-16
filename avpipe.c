@@ -27,6 +27,11 @@ avcodec_profile_name(
     enum AVCodecID codec_id,
     int profile);
 
+static int
+out_stat(
+    void *opaque,
+    avp_stat_t stat_type);
+
 int64_t AVPipeOpenInput(char *, int64_t *);
 int64_t AVPipeOpenMuxInput(char *, char *, int64_t *);
 int     AVPipeReadInput(int64_t, uint8_t *, int);
@@ -41,7 +46,7 @@ int     AVPipeSeekOutput(int64_t, int64_t, int64_t, int);
 int     AVPipeSeekMuxOutput(int64_t, int64_t, int);
 int     AVPipeCloseOutput(int64_t, int64_t);
 int     AVPipeCloseMuxOutput(int64_t);
-int     AVPipeStatOutput(int64_t, int64_t, avp_stat_t, void *);
+int     AVPipeStatOutput(int64_t, int64_t, avpipe_buftype_t, avp_stat_t, void *);
 int     AVPipeStatMuxOutput(int64_t, avp_stat_t, void *);
 int     CLog(char *);
 int     CDebug(char *);
@@ -239,7 +244,25 @@ in_stat(
     int64_t rc;
 
     fd = *((int64_t *)(c->opaque));
-    rc = AVPipeStatInput(fd, stat_type, &c->read_bytes);
+
+    switch (stat_type) {
+    case in_stat_bytes_read:
+        rc = AVPipeStatInput(fd, stat_type, &c->read_bytes);
+        break;
+
+    case in_stat_decoding_audio_start_pts:
+    case in_stat_decoding_video_start_pts:
+        rc = AVPipeStatInput(fd, stat_type, &c->decoding_start_pts);
+        break;
+
+    case in_stat_audio_frame_read:
+        rc = AVPipeStatInput(fd, stat_type, &c->audio_frames_read);
+        break;
+
+    case in_stat_video_frame_read:
+        rc = AVPipeStatInput(fd, stat_type, &c->video_frames_read);
+        break;
+    }
     return rc;
 }
 
@@ -300,6 +323,14 @@ out_write_packet(
         outctx->write_pos += bwritten;
     }
 
+    if ((outctx->type == avpipe_video_fmp4_segment && 
+        outctx->written_bytes - outctx->write_reported > VIDEO_BYTES_WRITE_REPORT) ||
+        (outctx->type == avpipe_audio_fmp4_segment &&
+        outctx->written_bytes - outctx->write_reported > AUDIO_BYTES_WRITE_REPORT)) {
+        out_stat(opaque, out_stat_bytes_written);
+        outctx->write_reported = outctx->written_bytes;
+    }
+
 #if TRACE_IO
     elv_dbg("OUT WRITE fd=%"PRId64", size=%d written=%d pos=%d total=%d", fd, buf_size, bwritten, outctx->write_pos, outctx->written_bytes);
 #endif
@@ -358,18 +389,28 @@ out_stat(
     int64_t h = *((int64_t *)(inctx->opaque));
     int64_t fd = *(int64_t *)outctx->opaque;
     int64_t rc = 0;
+    avpipe_buftype_t buftype = outctx->type;
 
     fd = *((int64_t *)(outctx->opaque));
     switch (stat_type) {
     case out_stat_bytes_written:
-        rc = AVPipeStatOutput(h, fd, stat_type, &outctx->written_bytes);
-        break;
-    case out_stat_decoding_start_pts:
-        rc = AVPipeStatOutput(h, fd, stat_type, &outctx->decoding_start_pts);
+        rc = AVPipeStatOutput(h, fd, buftype, stat_type, &outctx->written_bytes);
         break;
     case out_stat_encoding_end_pts:
-        /* PENDING (RM) Add stats for audio too */
-        rc = AVPipeStatOutput(h, fd, stat_type, &outctx->encoder_ctx->video_last_pts_sent_encode);
+        if (buftype == avpipe_audio_segment ||
+            buftype == avpipe_audio_fmp4_segment)
+            rc = AVPipeStatOutput(h, fd, buftype, stat_type, &outctx->encoder_ctx->audio_last_pts_sent_encode);
+        else
+            rc = AVPipeStatOutput(h, fd, buftype, stat_type, &outctx->encoder_ctx->video_last_pts_sent_encode);
+        break;
+    case out_stat_frame_written:
+        {
+            encoding_frame_stats_t encoding_frame_stats = {
+                .total_frames_written = outctx->total_frames_written,
+                .frames_written = outctx->frames_written,
+            };
+            rc = AVPipeStatOutput(h, fd, buftype, stat_type, &encoding_frame_stats);
+        }
         break;
     default:
         break;
@@ -894,13 +935,11 @@ out_mux_stat(
     ioctx_t *outctx = (ioctx_t *)opaque;
     int64_t fd = *(int64_t *)outctx->opaque;
     int64_t rc = 0;
+    avpipe_buftype_t buftype = outctx->type;
 
     switch (stat_type) {
     case out_stat_bytes_written:
         rc = AVPipeStatMuxOutput(fd, stat_type, &outctx->written_bytes);
-        break;
-    case out_stat_decoding_start_pts:
-        rc = AVPipeStatMuxOutput(fd, stat_type, &outctx->decoding_start_pts);
         break;
     case out_stat_encoding_end_pts:
         rc = AVPipeStatMuxOutput(fd, stat_type, &outctx->encoder_ctx->video_last_pts_sent_encode);

@@ -1,5 +1,6 @@
 package cmd
 
+import "C"
 import (
 	"fmt"
 	"github.com/qluvio/avpipe"
@@ -105,6 +106,12 @@ func (muxInput *avcmdMuxInput) Stat(statType avpipe.AVStatType, statArgs interfa
 	case avpipe.AV_IN_STAT_BYTES_READ:
 		readOffset := statArgs.(*uint64)
 		log.Info("avcmdMuxInput", "stat read offset", *readOffset)
+	case avpipe.AV_IN_STAT_DECODING_AUDIO_START_PTS:
+		startPTS := statArgs.(*uint64)
+		log.Info("avcmdMuxInput", "audio start PTS", *startPTS)
+	case avpipe.AV_IN_STAT_DECODING_VIDEO_START_PTS:
+		startPTS := statArgs.(*uint64)
+		log.Info("avcmdMuxInput", "video start PTS", *startPTS)
 	}
 
 	return nil
@@ -158,14 +165,11 @@ func (muxOutput *avcmdMuxOutput) Close() error {
 	return err
 }
 
-func (muxOutput *avcmdMuxOutput) Stat(statType avpipe.AVStatType, statArgs interface{}) error {
+func (muxOutput *avcmdMuxOutput) Stat(avType avpipe.AVType, statType avpipe.AVStatType, statArgs interface{}) error {
 	switch statType {
 	case avpipe.AV_OUT_STAT_BYTES_WRITTEN:
 		writeOffset := statArgs.(*uint64)
 		log.Info("avcmdMuxOutput", "STAT, write offset", *writeOffset)
-	case avpipe.AV_OUT_STAT_DECODING_START_PTS:
-		startPTS := statArgs.(*uint64)
-		log.Info("avcmdMuxOutput", "STAT, startPTS", *startPTS)
 	case avpipe.AV_OUT_STAT_ENCODING_END_PTS:
 		endPTS := statArgs.(*uint64)
 		log.Info("avcmdMuxOutput", "STAT, endPTS", *endPTS)

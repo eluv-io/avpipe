@@ -69,16 +69,23 @@ typedef enum avpipe_buftype_t {
     avpipe_mp4_segment = 12,            // segmented mp4 stream
     avpipe_video_fmp4_segment = 13,     // segmented fmp4 video stream
     avpipe_audio_fmp4_segment = 14,     // segmented fmp4 audio stream
-    avpipe_image = 15                   // extracted images
+    avpipe_mux_segment = 15,            // Muxed audio/video segment
+    avpipe_image = 16                   // extracted images
 } avpipe_buftype_t;
 
-#define BYTES_READ_REPORT   (20*1024*1024)
+#define BYTES_READ_REPORT               (10*1024*1024)
+#define VIDEO_BYTES_WRITE_REPORT        (1024*1024)
+#define AUDIO_BYTES_WRITE_REPORT        (64*1024)
 
 typedef enum avp_stat_t {
     in_stat_bytes_read = 1,
-    out_stat_bytes_written = 2,
-    out_stat_decoding_start_pts = 4,
-    out_stat_encoding_end_pts = 8
+    in_stat_audio_frame_read = 2,
+    in_stat_video_frame_read = 4,
+    in_stat_decoding_audio_start_pts = 8,
+    in_stat_decoding_video_start_pts = 16,
+    out_stat_bytes_written = 32,
+    out_stat_frame_written = 64,
+    out_stat_encoding_end_pts = 128
 } avp_stat_t;
 
 struct coderctx_t;
@@ -138,6 +145,10 @@ typedef struct ioctx_t {
     int64_t written_bytes;
     int64_t write_pos;
     int64_t write_reported;
+    int64_t frames_written;         /* Frames written in current segment */
+    int64_t total_frames_written;   /* Total frames written */
+    int64_t audio_frames_read;      /* Total audio frames read from input */
+    int64_t video_frames_read;      /* Total video frames read from input */
 
     /* Audio/video decoding start pts for stat reporting */
     int64_t decoding_start_pts;
@@ -211,6 +222,10 @@ typedef struct coderctx_t {
     SwrContext          *resampler_context;             /* resample context for audio */
     AVAudioFifo         *fifo;                          /* audio sampling fifo */
 
+    avpipe_io_handler_t *in_handlers;
+    avpipe_io_handler_t *out_handlers;
+    ioctx_t             *inctx;                         /* Input context needed for stat callbacks */
+
     int video_stream_index;
     int audio_stream_index[MAX_AUDIO_MUX];              /* Audio input stream indexes */
     int n_audio;                                        /* Number of audio streams that will be decoded */
@@ -245,10 +260,14 @@ typedef struct coderctx_t {
     AVFilterContext *audio_buffersrc_ctx[MAX_AUDIO_MUX];
     AVFilterGraph   *audio_filter_graph;
 
+    int64_t video_frames_written;                       /* Total video frames written so far */
+    int64_t audio_frames_written;                       /* Total audio frames written so far */
     int64_t video_pts;                                  /* Video decoder/encoder pts */
     int64_t audio_pts;                                  /* Audio decoder/encoder pts */
     int64_t video_input_start_pts;                      /* In case video input stream starts at PTS > 0 */
+    int     video_input_start_pts_notified;             /* Will be set as soon as out_stat_decoding_video_start_pts is fired */
     int64_t audio_input_start_pts;                      /* In case audio input stream starts at PTS > 0 */
+    int     audio_input_start_pts_notified;             /* Will be set as soon as out_stat_decoding_audio_start_pts is fired */
     int64_t first_decoding_video_pts;                   /* PTS of first video frame read from the decoder */
     int64_t first_decoding_audio_pts;                   /* PTS of first audio frame read from the decoder */
     int64_t first_encoding_video_pts;                   /* PTS of first video frame sent to the encoder */
@@ -466,6 +485,11 @@ typedef struct out_tracker_t {
     int video_stream_index;
     int audio_stream_index;
 } out_tracker_t;
+
+typedef struct encoding_frame_stats_t {
+    int64_t total_frames_written;   /* Total frames encoded in the xc session */
+    int64_t frames_written;         /* Frames encoded in the current segment */
+} encoding_frame_stats_t;
 
 /**
  * @brief   Allocates and initializes a txctx_t (transcoder context) for piplining the input stream.

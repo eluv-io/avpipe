@@ -48,6 +48,8 @@ elv_io_open(
         AVDictionaryEntry *stream_opt = av_dict_get(*options, "stream_index", 0, 0);
         ioctx_t *outctx = (ioctx_t *) calloc(1, sizeof(ioctx_t));
 
+        /* The outctx is created after writing the first frame, so set frames_written to 1. */
+        //outctx->frames_written = 1;
         outctx->encoder_ctx = out_tracker->encoder_ctx;
         outctx->stream_index = (int) strtol(stream_opt->value, &endptr, 10);
         assert(outctx->stream_index == 0 || outctx->stream_index == 1);
@@ -154,9 +156,12 @@ elv_io_open(
  
         if (outctx->type == avpipe_mp4_segment ||
             outctx->type == avpipe_fmp4_stream ||
-            outctx->type == avpipe_mp4_stream)
+            outctx->type == avpipe_mp4_stream ||
+            outctx->type == avpipe_video_fmp4_segment ||
+            outctx->type == avpipe_audio_fmp4_segment)
             out_tracker[outctx->stream_index].last_outctx = outctx;
-        elv_dbg("OUT url=%s, type=%d, seg_index=%d", url, outctx->type, outctx->seg_index);
+        elv_dbg("OUT url=%s, type=%d, seg_index=%d, last_outctx=%p",
+            url, outctx->type, outctx->seg_index, out_tracker[outctx->stream_index].last_outctx);
         /* Manifest or init segments */
         if (out_handlers->avpipe_opener(url, outctx) < 0) {
             free(outctx);
