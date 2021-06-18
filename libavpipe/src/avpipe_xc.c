@@ -2188,7 +2188,7 @@ transcode_audio_aac(
 
                 /* Round up d to nearest multiple of output frame size */
                 d = ((d+output_frame_size-1)/output_frame_size)*output_frame_size;
-                elv_dbg("AUDIO JUMP from=%"PRId64", to=%"PRId64", frame->pts=%"PRId64", audio_input_prev_pts=%"PRId64", pkt_duration=%d",
+                elv_warn("AUDIO JUMP from=%"PRId64", to=%"PRId64", frame->pts=%"PRId64", audio_input_prev_pts=%"PRId64", pkt_duration=%d",
                     decoder_context->audio_output_pts,
                     decoder_context->audio_output_pts + d,
                     frame->pts,
