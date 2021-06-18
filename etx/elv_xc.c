@@ -19,6 +19,8 @@
 #include "url_parser.h"
 #include "elv_sock.h"
 
+#define MAX_LOG_SIZE    100000  // 100000 MB = 100 GB
+
 static int opened_inputs = 0;
 static pthread_mutex_t lock = PTHREAD_MUTEX_INITIALIZER;
 
@@ -1004,7 +1006,8 @@ usage(
         "\t                                    Using \"fmp4-segment\" generates segments that are appropriate for live streaming.\n"
         "\t-force-keyint :          (optional) Force IDR key frame in this interval.\n"
         "\t-gpu-index :             (optional) Use the GPU with specified index for transcoding (export CUDA_DEVICE_ORDER=PCI_BUS_ID would use smi index).\n"
-        "\t-listen:                 (optional) Listen mode for RTMP. Must be 0 or 1, by default is on (value 1)"
+        "\t-listen:                 (optional) Listen mode for RTMP. Must be 0 or 1, by default is on (value 1)\n"
+        "\t-log-size:               (optional) Log size in MB. Default is 100MB.\n"
         "\t-master-display :        (optional) Master display, only valid if encoder is libx265.\n"
         "\t-max-cll :               (optional) Maximum Content Light Level and Maximum Frame Average Light Level, only valid if encoder is libx265.\n"
         "\t                                    This parameter is a comma separated of max-cll and max-fall (i.e \"1514,172\").\n"
@@ -1070,6 +1073,7 @@ main(
     int i;
     int wm_shadow = 0;
     url_parser_t url_parser;
+    u_int64_t log_size = 100;
 
     /* Parameters */
     txparams_t p = {
@@ -1297,6 +1301,13 @@ main(
                 if (p.listen != 0 && p.listen != 1) {
                     usage(argv[0], argv[i], EXIT_FAILURE);
                 }
+            } else if (!strcmp(argv[i], "-log-size")) {
+                if (sscanf(argv[i+1], "%"PRId64, &log_size) != 1) {
+                    usage(argv[0], argv[i], EXIT_FAILURE);
+                }
+                /* Cap the log size to MAX_LOG_SIZE */
+                if (log_size > MAX_LOG_SIZE)
+                    log_size = MAX_LOG_SIZE;
             }
             break;
         case 'm':
@@ -1477,7 +1488,7 @@ main(
     av_log_set_level(AV_LOG_DEBUG);
     connect_ffmpeg_log();
 
-    elv_logger_open(NULL, "etx", 10, 100*1024*1024, elv_log_file);
+    elv_logger_open(NULL, "etx", 10, log_size*1024*1024, elv_log_file);
     elv_set_log_level(elv_log_debug);
 
     if (!strcmp(command, "probe")) {

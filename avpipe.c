@@ -262,6 +262,8 @@ in_stat(
     case in_stat_video_frame_read:
         rc = AVPipeStatInput(fd, stat_type, &c->video_frames_read);
         break;
+    default:
+        rc = -1;
     }
     return rc;
 }
