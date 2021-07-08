@@ -1604,6 +1604,20 @@ should_skip_encoding(
 
     int64_t frame_in_pts_offset;
 
+    /*
+     * If the input frame's PTS and DTS are not set, don't encode the frame.
+     * This situation seems to happen sometimes with mpeg-ts streams.
+     */
+    if (frame->pts == AV_NOPTS_VALUE && frame->pkt_dts == AV_NOPTS_VALUE) {
+        char *url = "";
+        if (decoder_context->inctx && decoder_context->inctx->url)
+            url = decoder_context->inctx->url;
+        elv_warn("ENCODE SKIP invalid frame, stream_index=%d, url=%s, video_last_pts_read=%"PRId64", audio_last_pts_read=%"PRId64,
+            stream_index, url,
+            encoder_context->video_last_pts_read, encoder_context->audio_last_pts_read);
+        return 1;
+    }
+
     if (selected_decoded_audio(decoder_context, stream_index) >= 0)
         frame_in_pts_offset = frame->pts - decoder_context->audio_input_start_pts;
     else
@@ -1622,19 +1636,19 @@ should_skip_encoding(
             frame_in_pts_offset < p->start_time_ts &&
             strcmp(p->format, "dash") &&
             strcmp(p->format, "hls")) {
-            elv_dbg("ENCODE skip frame early pts=%" PRId64 ", frame_in_pts_offset=%" PRId64 ", start_time_ts=%" PRId64,
+            elv_dbg("ENCODE SKIP frame early pts=%" PRId64 ", frame_in_pts_offset=%" PRId64 ", start_time_ts=%" PRId64,
                 frame->pts, frame_in_pts_offset, p->start_time_ts);
             return 1;
         }
     } else if (p->start_time_ts > 0 && frame_in_pts_offset < p->start_time_ts) {
-        elv_dbg("ENCODE skip frame early pts=%" PRId64 ", frame_in_pts_offset=%" PRId64 ", start_time_ts=%" PRId64,
+        elv_dbg("ENCODE SKIP frame early pts=%" PRId64 ", frame_in_pts_offset=%" PRId64 ", start_time_ts=%" PRId64,
             frame->pts, frame_in_pts_offset, p->start_time_ts);
         return 1;
     }
 
     /* Skip beginning based on input packet pts */
     if (p->skip_over_pts > 0 && frame->pts <= p->skip_over_pts) {
-        elv_dbg("ENCODE skip frame early pts=%" PRId64 ", frame_in_pts_offset=%" PRId64 ", skip_over_pts=%" PRId64,
+        elv_dbg("ENCODE SKIP frame early pts=%" PRId64 ", frame_in_pts_offset=%" PRId64 ", skip_over_pts=%" PRId64,
             frame->pts, frame_in_pts_offset, p->skip_over_pts);
         return 1;
     }
@@ -1643,7 +1657,7 @@ should_skip_encoding(
     if (p->duration_ts > 0) {
         const int64_t max_valid_ts = p->start_time_ts + p->duration_ts;
         if (frame_in_pts_offset >= max_valid_ts) {
-            elv_dbg("ENCODE skip frame late pts=%" PRId64 ", frame_in_pts_offset=%" PRId64 ", max_valid_ts=%" PRId64,
+            elv_dbg("ENCODE SKIP frame late pts=%" PRId64 ", frame_in_pts_offset=%" PRId64 ", max_valid_ts=%" PRId64,
                 frame->pts, frame_in_pts_offset, max_valid_ts);
             return 1;
         }
@@ -1668,6 +1682,13 @@ should_skip_encoding(
     return 0;
 }
 
+/*
+ * encode_frame() encodes the frame and writes it to the output.
+ * If the incoming stream is a mpeg-ts or a rtmp stream, encode_frame() adjusts the
+ * frame pts and dts before sending the frame to the encoder.
+ * It returns eav_success if encoding is successful and returns appropriate error
+ * if error happens.
+ */
 static int
 encode_frame(
     coderctx_t *decoder_context,
@@ -1873,11 +1894,25 @@ encode_frame(
         dump_packet(selected_decoded_audio(decoder_context, stream_index) >= 0,
             "OUT ", output_packet, debug_frame_level);
 
+        if (output_packet->pts == AV_NOPTS_VALUE ||
+            output_packet->dts == AV_NOPTS_VALUE ||
+            output_packet->data == NULL) {
+            char *url = "";
+            if (decoder_context->inctx && decoder_context->inctx->url)
+                url = decoder_context->inctx->url;
+            elv_warn("INVALID %s PACKET url=%s pts=%"PRId64" dts=%"PRId64" duration=%"PRId64" pos=%"PRId64" size=%d stream_index=%d flags=%x data=%p\n",
+                selected_decoded_audio(decoder_context, stream_index) >= 0? "AUDIO" : "VIDEO", url,
+                output_packet->pts, output_packet->dts, output_packet->duration,
+                output_packet->pos, output_packet->size, output_packet->stream_index,
+                output_packet->flags, output_packet->data);
+        }
         /* mux encoded frame */
         ret = av_interleaved_write_frame(format_context, output_packet);
         if (ret != 0) {
             elv_err("Error %d writing output packet index=%d into stream_index=%d: %s",
                 ret, output_packet->stream_index, stream_index, av_err2str(ret));
+            rc = eav_write_frame;
+            break;
         }
 
         out_tracker = (out_tracker_t *) format_context->avpipe_opaque;
@@ -1892,7 +1927,6 @@ encode_frame(
             outctx->frames_written++;
             out_handlers->avpipe_stater(outctx, out_stat_frame_written);
         }
-
     }
 
 end_encode_frame:
@@ -1926,29 +1960,42 @@ do_bypass(
     else
         format_context = encoder_context->format_context;
 
-    if (av_interleaved_write_frame(format_context, packet) < 0) {
-        elv_err("Failure in copying bypass packet tx_type=%d", p->tx_type);
-        return eav_write_frame;
-    }
-
-    out_tracker_t *out_tracker = (out_tracker_t *) format_context->avpipe_opaque;
-    avpipe_io_handler_t *out_handlers = out_tracker->out_handlers;
-    ioctx_t *outctx = out_tracker->last_outctx;
-
-    if (out_handlers->avpipe_stater && outctx) {
-        if (is_audio) {
-            if (outctx->type != avpipe_audio_init_stream)
-                encoder_context->audio_frames_written++;
-            encoder_context->audio_last_pts_sent_encode = packet->pts;
-            outctx->total_frames_written = encoder_context->audio_frames_written;
-        } else {
-            if (outctx->type != avpipe_video_init_stream)
-                encoder_context->video_frames_written++;
-            encoder_context->video_last_pts_sent_encode = packet->pts;
-            outctx->total_frames_written = encoder_context->video_frames_written;
+    if (packet->pts == AV_NOPTS_VALUE ||
+        packet->dts == AV_NOPTS_VALUE ||
+        packet->data == NULL) {
+        char *url = "";
+        if (decoder_context->inctx && decoder_context->inctx->url)
+            url = decoder_context->inctx->url;
+        elv_warn("INVALID %s PACKET (BYPASS) url=%s pts=%"PRId64" dts=%"PRId64" duration=%"PRId64" pos=%"PRId64" size=%d stream_index=%d flags=%x data=%p\n",
+            is_audio ? "AUDIO" : "VIDEO", url,
+            packet->pts, packet->dts, packet->duration,
+            packet->pos, packet->size, packet->stream_index,
+            packet->flags, packet->data);
+    } else {
+        if (av_interleaved_write_frame(format_context, packet) < 0) {
+            elv_err("Failure in copying bypass packet tx_type=%d", p->tx_type);
+            return eav_write_frame;
         }
-        outctx->frames_written++;
-        out_handlers->avpipe_stater(outctx, out_stat_frame_written);
+
+        out_tracker_t *out_tracker = (out_tracker_t *) format_context->avpipe_opaque;
+        avpipe_io_handler_t *out_handlers = out_tracker->out_handlers;
+        ioctx_t *outctx = out_tracker->last_outctx;
+
+        if (out_handlers->avpipe_stater && outctx) {
+            if (is_audio) {
+                if (outctx->type != avpipe_audio_init_stream)
+                    encoder_context->audio_frames_written++;
+                encoder_context->audio_last_pts_sent_encode = packet->pts;
+                outctx->total_frames_written = encoder_context->audio_frames_written;
+            } else {
+                if (outctx->type != avpipe_video_init_stream)
+                    encoder_context->video_frames_written++;
+                encoder_context->video_last_pts_sent_encode = packet->pts;
+                outctx->total_frames_written = encoder_context->video_frames_written;
+            }
+            outctx->frames_written++;
+            out_handlers->avpipe_stater(outctx, out_stat_frame_written);
+        }
     }
 
     return eav_success;
@@ -2059,8 +2106,12 @@ transcode_audio(
             }
 
             dump_frame(1, "FILT ", codec_context->frame_number, filt_frame, debug_frame_level);
-            encode_frame(decoder_context, encoder_context, filt_frame, encoder_context->audio_enc_stream_index, p, debug_frame_level);
+            ret = encode_frame(decoder_context, encoder_context, filt_frame, encoder_context->audio_enc_stream_index, p, debug_frame_level);
             av_frame_unref(filt_frame);
+            if (ret == eav_write_frame) {
+                av_frame_unref(frame);
+                return ret;
+            }
         }
 
         av_frame_unref(frame);
@@ -2084,6 +2135,7 @@ transcode_audio_aac(
     SwrContext *resampler_context = decoder_context->resampler_context;
     int response;
     AVFrame *filt_frame;
+    int ret;
 
     if (debug_frame_level)
         elv_dbg("DECODE stream_index=%d send_packet pts=%"PRId64" dts=%"PRId64" duration=%d, input frame_size=%d, output frame_size=%d",
@@ -2211,17 +2263,23 @@ transcode_audio_aac(
                     int64_t frame_in_pts_offset = frame->pts - decoder_context->audio_input_start_pts;
                     /* If frame PTS < start_time_ts then don't encode audio frame */
                     if (p->start_time_ts > 0 && frame_in_pts_offset < p->start_time_ts) {
-                         elv_dbg("ENCODE skip audio frame early pts=%" PRId64
+                         elv_dbg("ENCODE SKIP audio frame early pts=%" PRId64
                             ", frame_in_pts_offset=%" PRId64 ", start_time_ts=%" PRId64,
                             filt_frame->pts, frame_in_pts_offset, p->start_time_ts);
                         should_skip = 1;
                     }
 
-                    if (!should_skip)
-                        encode_frame(decoder_context, encoder_context, filt_frame, stream_index, p, debug_frame_level);
+                    if (!should_skip) {
+                        ret = encode_frame(decoder_context, encoder_context, filt_frame, stream_index, p, debug_frame_level);
+                        if (ret == eav_write_frame) {
+                            av_frame_unref(filt_frame);
+                            av_frame_free(&filt_frame);
+                            return ret;
+                        }
+                    }
                 }
                 else {
-                    elv_log("SKIP audio frame pts=%"PRId64", duration=%"PRId64,
+                    elv_log("ENCODE SKIP audio frame pts=%"PRId64", duration=%"PRId64,
                         filt_frame->pts, decoder_context->audio_duration);
                 }
 
@@ -2394,9 +2452,14 @@ transcode_video(
             elv_get_time(&tv);
             if (decoder_context->video_duration < filt_frame->pts) {
                 decoder_context->video_duration = filt_frame->pts;
-                encode_frame(decoder_context, encoder_context, filt_frame, stream_index, p, debug_frame_level);
+                ret = encode_frame(decoder_context, encoder_context, filt_frame, stream_index, p, debug_frame_level);
+                if (ret == eav_write_frame) {
+                    av_frame_unref(filt_frame);
+                    av_frame_unref(frame);
+                    return ret;
+                }
             } else {
-                elv_log("SKIP video frame pts=%"PRId64", duration=%"PRId64,
+                elv_log("ENCODE SKIP video frame pts=%"PRId64", duration=%"PRId64,
                     filt_frame->pts, decoder_context->video_duration);
             }
 
@@ -2430,7 +2493,7 @@ transcode_video_func(
 
         xc_frame = elv_channel_receive(xctx->vc);
         if (!xc_frame) {
-            elv_dbg("trancode_video thread, there is no frame");
+            elv_dbg("trancode_video_func thread, there is no frame");
             continue;
         }
 
@@ -2644,8 +2707,10 @@ flush_decoder(
                 dump_frame(selected_decoded_audio(decoder_context, stream_index) >= 0,
                     "FILT ", codec_context->frame_number, filt_frame, debug_frame_level);
 
-                encode_frame(decoder_context, encoder_context, filt_frame, stream_index, p, debug_frame_level);
+                ret = encode_frame(decoder_context, encoder_context, filt_frame, stream_index, p, debug_frame_level);
                 av_frame_unref(filt_frame);
+                if (ret == eav_write_frame)
+                    return ret;
             }
         }
         av_frame_unref(frame);
@@ -2694,7 +2759,7 @@ should_stop_decoding(
             decoder_context->audio_input_start_pts = input_packet->pts;
             elv_log("audio_input_start_pts=%"PRId64,
                 decoder_context->audio_input_start_pts);
-                in_handlers->avpipe_stater(decoder_context->inctx, in_stat_decoding_audio_start_pts);
+            in_handlers->avpipe_stater(decoder_context->inctx, in_stat_decoding_audio_start_pts);
         }
 
         input_packet_rel_pts = input_packet->pts - decoder_context->audio_input_start_pts;
@@ -2760,7 +2825,7 @@ skip_until_start_time_pts(
     const int64_t packet_in_pts_offset = input_packet->pts - input_start_pts;
     /* Drop frames before the desired 'start_time' */
     if (packet_in_pts_offset < params->start_time_ts) {
-        elv_dbg("PREDECODE skip frame early pts=%" PRId64 ", start_time_ts=%" PRId64
+        elv_dbg("PREDECODE SKIP frame early pts=%" PRId64 ", start_time_ts=%" PRId64
             ", input_start_pts=%" PRId64 ", packet_in_pts_offset=%" PRId64,
             input_packet->pts, params->start_time_ts,
             input_start_pts, packet_in_pts_offset);
@@ -2811,7 +2876,7 @@ skip_for_sync(
      */
     if (decoder_context->first_key_frame_pts < 0 ||
         input_packet->pts < decoder_context->first_key_frame_pts) {
-        elv_log("PTS sync skip audio_pts=%"PRId64" first_key_frame_pts=%"PRId64,
+        elv_log("PTS SYNC SKIP audio_pts=%"PRId64" first_key_frame_pts=%"PRId64,
             input_packet->pts, decoder_context->first_key_frame_pts);
         dump_packet(1, "SYNC SKIP ", input_packet, 1);
         return 1;
@@ -3326,18 +3391,18 @@ xc_done:
     /*
      * Flush all frames, first flush decoder buffers, then encoder buffers by passing NULL frame.
      */
-    if (params->tx_type & tx_video)
+    if (params->tx_type & tx_video && txctx->err != eav_write_frame)
         flush_decoder(decoder_context, encoder_context, encoder_context->video_stream_index, params, debug_frame_level);
-    if (params->tx_type & tx_audio)
+    if (params->tx_type & tx_audio && txctx->err != eav_write_frame)
         flush_decoder(decoder_context, encoder_context, encoder_context->audio_stream_index[0], params, debug_frame_level);
     if (params->tx_type & tx_audio_join || params->tx_type & tx_audio_merge) {
         for (int i=0; i<decoder_context->n_audio; i++)
             flush_decoder(decoder_context, encoder_context, decoder_context->audio_stream_index[i], params, debug_frame_level);
     }
 
-    if (!params->bypass_transcoding && (params->tx_type & tx_video))
+    if (!params->bypass_transcoding && (params->tx_type & tx_video) && txctx->err != eav_write_frame)
         encode_frame(decoder_context, encoder_context, NULL, encoder_context->video_stream_index, params, debug_frame_level);
-    if (!params->bypass_transcoding && params->tx_type & tx_audio)
+    if (!params->bypass_transcoding && params->tx_type & tx_audio && txctx->err != eav_write_frame)
         encode_frame(decoder_context, encoder_context, NULL, encoder_context->audio_stream_index[0], params, debug_frame_level);
 
     dump_trackers(decoder_context->format_context, encoder_context->format_context);
@@ -3374,7 +3439,7 @@ xc_done:
     encoder_context->stopped = 1;
 
     if (decoder_context->cancelled) {
-        elv_err("transcoding session cancelled, handle=%d", txctx->handle);
+        elv_warn("transcoding session cancelled, handle=%d", txctx->handle);
         return eav_cancelled;
     }
 

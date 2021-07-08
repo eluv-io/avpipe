@@ -321,6 +321,9 @@ in_stat(
     int64_t fd;
     ioctx_t *c = (ioctx_t *)opaque;
 
+    if (!c || !c->opaque)
+        return 0;
+
     fd = *((int64_t *)(c->opaque));
     switch (stat_type) {
     case in_stat_bytes_read:
@@ -581,8 +584,13 @@ out_stat(
     avp_stat_t stat_type)
 {
     ioctx_t *outctx = (ioctx_t *)opaque;
-    int64_t fd = *(int64_t *)outctx->opaque;
+    int64_t fd;
 
+    /* Some error happened and fd is not set */
+    if (!outctx->opaque)
+        return 0;
+
+    fd = *(int64_t *)outctx->opaque;
     if (outctx->type != avpipe_video_segment &&
         outctx->type != avpipe_audio_segment &&
         outctx->type != avpipe_mp4_stream &&

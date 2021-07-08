@@ -243,6 +243,10 @@ in_stat(
     ioctx_t *c = (ioctx_t *)opaque;
     int64_t rc;
 
+    if (!c || !c->opaque) {
+        return 0;
+    }
+
     fd = *((int64_t *)(c->opaque));
 
     switch (stat_type) {
@@ -388,10 +392,18 @@ out_stat(
 {
     ioctx_t *outctx = (ioctx_t *)opaque;
     ioctx_t *inctx = outctx->inctx;
-    int64_t h = *((int64_t *)(inctx->opaque));
-    int64_t fd = *(int64_t *)outctx->opaque;
+    int64_t h;
+    int64_t fd;
     int64_t rc = 0;
-    avpipe_buftype_t buftype = outctx->type;
+    avpipe_buftype_t buftype;
+
+    /* Some error happened and fd is not set */
+    if (!outctx || !outctx->opaque || !inctx || !inctx->opaque) {
+        return 0;
+    }
+
+    h = *((int64_t *)(inctx->opaque));
+    buftype = outctx->type;
 
     fd = *((int64_t *)(outctx->opaque));
     switch (stat_type) {

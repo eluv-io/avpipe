@@ -61,10 +61,10 @@ dump_packet(
     if (!debug_frame_level || !p)
         return;
 
-    elv_dbg("%s PACKET %s pts=%"PRId64" dts=%"PRId64" duration=%"PRId64" pos=%"PRId64" size=%d stream_index=%d flags=%x\n",
+    elv_dbg("%s PACKET %s pts=%"PRId64" dts=%"PRId64" duration=%"PRId64" pos=%"PRId64" size=%d stream_index=%d flags=%x data=%p\n",
         is_audio ? "AUDIO" : "VIDEO", msg,
         p->pts, p->dts, p->duration, p->pos, p->size, p->stream_index,
-        p->flags
+        p->flags, p->data
     );
 }
 
