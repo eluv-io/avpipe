@@ -205,7 +205,7 @@ out_mux_opener(
     outctx->opaque = (int *) malloc(sizeof(int));
     *((int *)(outctx->opaque)) = fd;
 
-    outctx->bufsz = 1 * 1024 * 1024;
+    outctx->bufsz = AVIO_OUT_BUF_SIZE;
     outctx->buf = (unsigned char *)malloc(outctx->bufsz); /* Must be malloc'd - will be realloc'd by avformat */
     elv_dbg("OUT MUX OPEN outctx=%p, path=%s, type=%d, fd=%d, seg_index=%d\n", outctx, url, outctx->type, fd, outctx->seg_index);
     return 0;

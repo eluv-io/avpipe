@@ -22,6 +22,9 @@
 #define MAX_AUDIO_MUX       8
 #define MAX_CAPTION_MUX     8
 
+#define AVIO_OUT_BUF_SIZE   (1*1024*1024)   // avio output buffer size
+#define AVIO_IN_BUF_SIZE    (1*1024*1024)   // avio input buffer size
+
 /*
  * Adding/deleting an error code needs adding/deleting corresponding GO
  * error in avpipe_errors.go
@@ -133,7 +136,7 @@ typedef struct ioctx_t {
 
     avpipe_buftype_t    type;
     unsigned char*      buf;
-    int                 bufsz;
+    int                 bufsz;		/* Buffer size for IO */
 
     /* Size of input, should be set in in_handler-> avpipe_opener_f() */
     int64_t sz;

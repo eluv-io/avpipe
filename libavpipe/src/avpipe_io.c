@@ -66,7 +66,7 @@ elv_io_open(
             return -1;
         }
 
-        AVIOContext *avioctx = avio_alloc_context(outctx->buf, outctx->sz, AVIO_FLAG_WRITE, (void *)outctx,
+        AVIOContext *avioctx = avio_alloc_context(outctx->buf, outctx->bufsz, AVIO_FLAG_WRITE, (void *)outctx,
             out_handlers->avpipe_reader, out_handlers->avpipe_writer, out_handlers->avpipe_seeker);
 
         avioctx->seekable = 0;
@@ -74,8 +74,8 @@ elv_io_open(
         (*pb) = avioctx;
         out_tracker[outctx->stream_index].last_outctx = outctx;
 
-        elv_dbg("OUT open stream_index=%d, seg_index=%d avioctx=%p, avioctx->opaque=%p, outctx=%p, outtracker[0]->last_outctx=%p, outtracker[1]->last_outctx=%p",
-            outctx->stream_index, outctx->seg_index, avioctx, avioctx->opaque, outctx, out_tracker[0].last_outctx, out_tracker[1].last_outctx);
+        elv_dbg("OUT elv_io_open stream_index=%d, seg_index=%d avioctx=%p, avioctx->opaque=%p, buf=%p, outctx=%p, outtracker[0]->last_outctx=%p, outtracker[1]->last_outctx=%p",
+            outctx->stream_index, outctx->seg_index, avioctx, avioctx->opaque, avioctx->buffer, outctx, out_tracker[0].last_outctx, out_tracker[1].last_outctx);
     } else {
         ioctx_t *outctx = (ioctx_t *) calloc(1, sizeof(ioctx_t));
         outctx->stream_index = 0;
@@ -160,8 +160,6 @@ elv_io_open(
             outctx->type == avpipe_video_fmp4_segment ||
             outctx->type == avpipe_audio_fmp4_segment)
             out_tracker[outctx->stream_index].last_outctx = outctx;
-        elv_dbg("OUT url=%s, type=%d, seg_index=%d, last_outctx=%p",
-            url, outctx->type, outctx->seg_index, out_tracker[outctx->stream_index].last_outctx);
         /* Manifest or init segments */
         if (out_handlers->avpipe_opener(url, outctx) < 0) {
             free(outctx);
@@ -170,6 +168,9 @@ elv_io_open(
 
         AVIOContext *avioctx = avio_alloc_context(outctx->buf, outctx->bufsz, AVIO_FLAG_WRITE, (void *)outctx,
             out_handlers->avpipe_reader, out_handlers->avpipe_writer, out_handlers->avpipe_seeker);
+
+        elv_dbg("OUT elv_io_open url=%s, type=%d, seg_index=%d, last_outctx=%p, buf=%p",
+            url, outctx->type, outctx->seg_index, out_tracker[outctx->stream_index].last_outctx, avioctx->buffer);
 
         /* libavformat expects seekable streams for mp4 */
         if (outctx->type == avpipe_mp4_stream || outctx->type == avpipe_mp4_segment)
@@ -196,19 +197,22 @@ elv_io_close(
     AVIOContext *pb)
 {
     out_tracker_t *out_tracker = (out_tracker_t *) format_ctx->avpipe_opaque;
+    AVIOContext *avioctx = (AVIOContext *) pb;
     ioctx_t *outctx = (ioctx_t *)pb->opaque;
     avpipe_io_handler_t *out_handlers = NULL;
 
     if (out_tracker != NULL)
         out_handlers = out_tracker->out_handlers;
 
-    elv_dbg("OUT elv_io_close avioctx=%p, avioctx->opaque=%p outtracker[0]->last_outctx=%p, outtracker[1]->last_outctx=%p",
-        pb, pb->opaque, out_tracker != NULL ? out_tracker[0].last_outctx : 0, out_tracker != NULL ? out_tracker[1].last_outctx : 0);
+    elv_dbg("OUT elv_io_close stream_index=%d, seg_index=%d avioctx=%p, avioctx->opaque=%p buf=%p outtracker[0]->last_outctx=%p, outtracker[1]->last_outctx=%p",
+        outctx->stream_index, outctx->seg_index, pb, pb->opaque, avioctx->buffer,
+	out_tracker != NULL ? out_tracker[0].last_outctx : 0, out_tracker != NULL ? out_tracker[1].last_outctx : 0);
     if (out_handlers) {
         out_handlers->avpipe_stater(outctx, out_stat_encoding_end_pts);
         out_handlers->avpipe_closer(outctx);
     }
     free(outctx);
-    free(pb);
+    av_freep(&avioctx->buffer);
+    avio_context_free(&avioctx);
     return;
 }

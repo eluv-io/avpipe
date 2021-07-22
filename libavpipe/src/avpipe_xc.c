@@ -270,7 +270,7 @@ prepare_input(
 {
     unsigned char *bufin;
     AVIOContext *avioctx;
-    int bufin_sz = 1024 * 1024;
+    int bufin_sz = AVIO_IN_BUF_SIZE;
 
     /* For RTMP protocol don't create input callbacks */
     decoder_context->is_rtmp = 0;
@@ -1906,15 +1906,11 @@ encode_frame(
                 output_packet->pos, output_packet->size, output_packet->stream_index,
                 output_packet->flags, output_packet->data);
         }
-        /* mux encoded frame */
-        ret = av_interleaved_write_frame(format_context, output_packet);
-        if (ret != 0) {
-            elv_err("Error %d writing output packet index=%d into stream_index=%d: %s",
-                ret, output_packet->stream_index, stream_index, av_err2str(ret));
-            rc = eav_write_frame;
-            break;
-        }
 
+        /*
+         * Update the stats before writing the packet to avoid a crash.
+         * The outctx might be freed in av_interleaved_write_frame()
+         */
         out_tracker = (out_tracker_t *) format_context->avpipe_opaque;
         out_handlers = out_tracker->out_handlers;
         outctx = out_tracker->last_outctx;
@@ -1926,6 +1922,15 @@ encode_frame(
                 outctx->total_frames_written = encoder_context->audio_frames_written;
             outctx->frames_written++;
             out_handlers->avpipe_stater(outctx, out_stat_frame_written);
+        }
+
+        /* mux encoded frame */
+        ret = av_interleaved_write_frame(format_context, output_packet);
+        if (ret != 0) {
+            elv_err("Error %d writing output packet index=%d into stream_index=%d: %s",
+                ret, output_packet->stream_index, stream_index, av_err2str(ret));
+            rc = eav_write_frame;
+            break;
         }
     }
 

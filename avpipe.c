@@ -284,8 +284,8 @@ out_opener(
     h = *((int64_t *)(inctx->opaque));
 
     /* Allocate the buffers. The data will be copied to the buffers */
-    outctx->bufsz = 1 * 1024 * 1024;
-    outctx->buf = (unsigned char *)malloc(outctx->bufsz); /* Must be malloc'd - will be realloc'd by avformat */
+    outctx->bufsz = AVIO_OUT_BUF_SIZE;
+    outctx->buf = (unsigned char *)av_malloc(outctx->bufsz); /* Must be malloc'd - will be realloc'd by avformat */
 
     fd = AVPipeOpenOutput(h, outctx->stream_index, outctx->seg_index, outctx->type);
 #if TRACE_IO
@@ -381,7 +381,6 @@ out_closer(
     int64_t h = *((int64_t *)(inctx->opaque));
     int rc = AVPipeCloseOutput(h, fd);
     free(outctx->opaque);
-    free(outctx->buf);
     return rc;
 }
 
@@ -660,6 +659,8 @@ end_tx:
 
     elv_dbg("Releasing all the resources, handle=%d", handle);
     tx_table_free(handle);
+    free(txctx->in_handlers);
+    free(txctx->out_handlers);
     avpipe_fini(&txctx);
 
     return rc;
@@ -874,8 +875,8 @@ out_mux_opener(
     int64_t fd;
 
     /* Allocate the buffers. The data will be copied to the buffers */
-    outctx->bufsz = 1 * 1024 * 1024;
-    outctx->buf = (unsigned char *)malloc(outctx->bufsz); /* Must be malloc'd - will be realloc'd by avformat */
+    outctx->bufsz = AVIO_OUT_BUF_SIZE;
+    outctx->buf = (unsigned char *)av_malloc(outctx->bufsz); /* Must be malloc'd - will be realloc'd by avformat */
 
     fd = AVPipeOpenMuxOutput((char *) url, outctx->type);
 #if TRACE_IO

@@ -859,7 +859,12 @@ func AVPipeWriteOutput(handler C.int64_t, fd C.int64_t, buf *C.uint8_t, sz C.int
 		panic(msg)
 	}
 
-	gobuf := C.GoBytes(unsafe.Pointer(buf), sz)
+	//gobuf := C.GoBytes(unsafe.Pointer(buf), sz)
+	// This should be the equivalent of using GoBytes() but safer if the
+	// Go implementation uses C pointer to wrap a slice.
+	gobuf := make([]byte, sz)
+	C.memcpy(unsafe.Pointer(&gobuf[0]), unsafe.Pointer(buf), C.size_t(sz))
+
 	n, err := h.OutWriter(fd, gobuf)
 	if err != nil {
 		return C.int(-1)
