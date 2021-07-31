@@ -533,7 +533,7 @@ tx_table_cancel(
                 txctx->decoder_ctx.cancelled = 1;
                 txctx->encoder_ctx.cancelled = 1;
             } else {
-                elv_err("tx_table_cancel index=%d doesn't match with hadnle=%d at %d",
+                elv_err("tx_table_cancel index=%d doesn't match with handle=%d at %d",
                     tx_table[i]->txctx->index, handle, i);
                 rc = -1;
             }

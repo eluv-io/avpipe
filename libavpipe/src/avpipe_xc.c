@@ -478,9 +478,9 @@ prepare_decoder(
 
         /*
          * Find decoder and initialize decoder context.
-         * Pick params->decodec if this is the selected stream (stream_id or audio_index)
+         * Pick params->dcodec if this is the selected stream (stream_id or audio_index)
          */
-        if (params != NULL && params->dcodec != NULL && params->dcodec[0] != '\0' && selected_stream &&
+        if (params != NULL && params->dcodec != NULL && params->dcodec[0] != '\0' && 
             decoder_context->format_context->streams[i]->codecpar->codec_type == AVMEDIA_TYPE_VIDEO) {
             elv_log("STREAM SELECTED id=%d idx=%d tx_type=%d dcodec=%s", decoder_context->stream[i]->id,
                     i, params->tx_type, params->dcodec);
