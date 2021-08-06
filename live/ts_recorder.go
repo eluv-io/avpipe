@@ -63,11 +63,15 @@ func NewTsReaderV2(addr string) (io.ReadWriteCloser, error) {
 	return rwb, err
 }
 
-func readUdp(pc net.PacketConn, w io.Writer) error {
+func readUdp(conn net.PacketConn, w io.Writer) error {
 
 	// Assume that Close() is implemented, and that writer is not used after
 	// this call
-	defer w.(io.WriteCloser).Close()
+	defer func() {
+		w.(io.WriteCloser).Close()
+		err := conn.Close()
+		log.Info("Closing UDP socket", "err", err, "addr", conn.LocalAddr().String())
+	}()
 
 	// Stop recording if nothing was read for timeout
 	timeout := 5 * time.Second
@@ -76,11 +80,11 @@ func readUdp(pc net.PacketConn, w io.Writer) error {
 	buf := make([]byte, 65536)
 
 	for {
-		if err := pc.SetReadDeadline(time.Now().Add(timeout)); err != nil {
+		if err := conn.SetReadDeadline(time.Now().Add(timeout)); err != nil {
 			return err
 		}
 
-		n, sender, err := pc.ReadFrom(buf)
+		n, sender, err := conn.ReadFrom(buf)
 		bytesRead += n
 		if err != nil {
 			if err.(net.Error).Timeout() {
