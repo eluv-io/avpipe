@@ -290,8 +290,8 @@ typedef struct coderctx_t {
     int     frame_duration;             /* Will be > 0 if parameter set_equal_fduration is set and doing mez making */
     int     calculated_frame_duration;  /* Approximate/real frame duration of video stream, will be used to fill video frames */
 
-    int     cancelled;
-    int     stopped;
+    volatile int    cancelled;
+    volatile int    stopped;
 } coderctx_t;
 
 typedef enum crypt_scheme_t {
@@ -464,8 +464,8 @@ typedef struct txctx_t {
     elv_channel_t       *ac;        // Audio frame channel
     pthread_t           vthread_id;
     pthread_t           athread_id;
-    int                 stop;
-    int                 err;        // Return code of transcoding
+    volatile int        stop;
+    volatile int        err;        // Return code of transcoding
 } txctx_t;
 
 /* Params that are needed to decode/encode a frame in a thread */

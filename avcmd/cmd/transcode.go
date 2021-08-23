@@ -515,7 +515,7 @@ func doTranscode(cmd *cobra.Command, args []string) error {
 	}
 
 	videoSegDurationTs, err := cmd.Flags().GetInt64("video-seg-duration-ts")
-	if err != nil || (format != "segment" && format != "fmp4-segment" &&
+	if err != nil || (format != "segment" && format != "fmp4-segment" && format != "mp4" &&
 		videoSegDurationTs == 0 && (txType == avpipe.TxAll || txType == avpipe.TxVideo)) {
 		return fmt.Errorf("Video seg duration ts is not valid")
 	}

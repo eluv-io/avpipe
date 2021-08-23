@@ -376,6 +376,9 @@ static int
 out_closer(
     ioctx_t *outctx)
 {
+    if (!outctx)
+        return -1;
+
     int64_t fd = *(int64_t *)outctx->opaque;
     ioctx_t *inctx = outctx->inctx;
     int64_t h = *((int64_t *)(inctx->opaque));
@@ -510,7 +513,7 @@ tx_table_free(
                 free(tx_table[i]);
                 tx_table[i] = NULL;
             } else
-                elv_err("tx_table_free index=%d doesn't match with hadnle=%d at %d",
+                elv_err("tx_table_free index=%d doesn't match with handle=%d at %d",
                     tx_table[i]->txctx->index, handle, i);
             pthread_mutex_unlock(&tx_mutex);
             return;
@@ -649,7 +652,8 @@ tx_run(
 
     txctx_t *txctx = txe->txctx;
     if ((rc = avpipe_xc(txctx, 0, txctx->debug_frame_level)) != eav_success) {
-        elv_err("Error in transcoding, handle=%d", handle);
+        if (rc != eav_cancelled)
+            elv_err("Error in transcoding, handle=%d, err=%d", handle, rc);
         goto end_tx;
     }
 

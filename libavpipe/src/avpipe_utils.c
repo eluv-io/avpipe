@@ -239,6 +239,9 @@ dump_trackers(
     if (t0 == 0)
         t0 = ti;
 
+    if (!out_tracker)
+        return;
+
     avioctx = (AVIOContext *) decoder_format_context->pb;
     if (!avioctx)
         /* prepare_decoder can fail and pb becomes NULL */

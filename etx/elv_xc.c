@@ -586,7 +586,7 @@ out_stat(
     int64_t fd;
 
     /* Some error happened and fd is not set */
-    if (!outctx->opaque)
+    if (!outctx || !outctx->opaque)
         return 0;
 
     fd = *(int64_t *)outctx->opaque;
@@ -1509,12 +1509,14 @@ main(
     }
     if (strcmp(p.format, "segment") &&
         strcmp(p.format, "fmp4-segment") &&
+        strcmp(p.format, "mp4") &&
         p.seg_duration == NULL &&
         p.audio_seg_duration_ts <= 0 && p.tx_type & tx_audio) {
         usage(argv[0], "audio_seg_duration_ts or seg_duration", EXIT_FAILURE);
     }
     if (strcmp(p.format, "segment") &&
         strcmp(p.format, "fmp4-segment") &&
+        strcmp(p.format, "mp4") &&
         p.seg_duration == NULL &&
         p.video_seg_duration_ts <= 0 && p.tx_type & tx_video && p.tx_type != tx_extract_images) {
         usage(argv[0], "video-seg-duration-ts or seg-duration", EXIT_FAILURE);

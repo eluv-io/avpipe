@@ -2539,7 +2539,7 @@ transcode_video_func(
         free(xc_frame);
 
         if (err != eav_success) {
-            elv_dbg("Stop video transcoding, err=%d", err);
+            elv_err("Stop video transcoding, err=%d", err);
             break;
         }
     }
@@ -2633,7 +2633,7 @@ transcode_audio_func(
         free(xc_frame);
 
         if (err != eav_success) {
-            elv_dbg("Stop audio transcoding, err=%d", err);
+            elv_err("Stop audio transcoding, err=%d", err);
             break;
         }
 
@@ -3259,7 +3259,8 @@ avpipe_xc(
     int frames_read_past_duration = 0;
     const int frames_allowed_past_duration = 5;
 
-    while (1) {
+    /* If there is a transcoding error, break the main loop */
+    while (!txctx->err) {
         input_packet = av_packet_alloc();
         if (!input_packet) {
             elv_err("Failed to allocated memory for AVPacket");
@@ -3760,14 +3761,16 @@ check_params(
 
     if (params->tx_type & tx_audio &&
         params->seg_duration <= 0 &&
-        params->audio_seg_duration_ts <= 0) {
+        params->audio_seg_duration_ts <= 0 &&
+        strcmp(params->format, "mp4")) {
         elv_err("Segment duration is not set for audio (invalid seg_duration and audio_seg_duration_ts)");
         return eav_param;
     }
 
     if (params->tx_type & tx_video && params->tx_type != tx_extract_images &&
         params->seg_duration <= 0 &&
-        params->video_seg_duration_ts <= 0) {
+        params->video_seg_duration_ts <= 0 &&
+        strcmp(params->format, "mp4")) {
         elv_err("Segment duration is not set for video (invalid seg_duration and video_seg_duration_ts)");
         return eav_param;
     }

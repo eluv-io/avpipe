@@ -762,7 +762,7 @@ func TestAC3TsAC3MezMaker(t *testing.T) {
 		StartSegmentStr:     "1",
 		SegDuration:         "30",
 		Ecodec2:             "ac3",
-		Dcodec:              "ac3",
+		Dcodec2:             "ac3",
 		AudioBitrate:        128000,
 		SampleRate:          48000,
 		EncHeight:           -1,

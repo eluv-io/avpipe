@@ -79,12 +79,18 @@ func readUdp(conn net.PacketConn, w io.Writer) error {
 	bytesRead := 0
 	buf := make([]byte, 65536)
 
+	first := true
+
 	for {
 		if err := conn.SetReadDeadline(time.Now().Add(timeout)); err != nil {
 			return err
 		}
 
 		n, sender, err := conn.ReadFrom(buf)
+		if first {
+			log.Info("UDP READ", "n", n, "err", err)
+		}
+
 		bytesRead += n
 		if err != nil {
 			if err.(net.Error).Timeout() {
@@ -101,6 +107,11 @@ func readUdp(conn net.PacketConn, w io.Writer) error {
 
 		t := time.Now()
 		bw, err := w.Write(buf[:n])
+		if first {
+			log.Info("UDP WRITE", "bw", bw, "err", err)
+			first = false
+		}
+
 		if err != nil || bw != n {
 			log.Error("Failed to write UDP packet", "err", err, "bw", bw, "n", n, "sender", sender)
 			return err
@@ -122,6 +133,7 @@ func (tsr *TsReader) serveOneConnection(w io.Writer) (err error) {
 	if err != nil {
 		return
 	}
+
 	// TODO: Make if a config param (RM)
 	err = conn.SetReadBuffer(16 * 1024 * 1024)
 	if err != nil {
@@ -130,8 +142,10 @@ func (tsr *TsReader) serveOneConnection(w io.Writer) (err error) {
 
 	log.Info("ts_recorder server accepted", "addr", tsr.addr)
 
+	var pc net.PacketConn
+	pc = conn
 	go func(tsr *TsReader) {
-		if err := readUdp(conn, w); err != nil {
+		if err := readUdp(pc, w); err != nil {
 			log.Error("Failed reading UDP stream", "err", err)
 			tsr.errChannel <- err
 		}

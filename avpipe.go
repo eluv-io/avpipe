@@ -843,6 +843,10 @@ func AVPipeOpenMuxOutput(url *C.char, stream_type C.int) C.int64_t {
 
 //export AVPipeWriteOutput
 func AVPipeWriteOutput(handler C.int64_t, fd C.int64_t, buf *C.uint8_t, sz C.int) C.int {
+	if sz <= 0 {
+		return C.int(0)
+	}
+
 	gMutex.Lock()
 	h := gHandlers[int64(handler)]
 	if h == nil {

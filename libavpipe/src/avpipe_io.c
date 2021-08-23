@@ -52,6 +52,7 @@ elv_io_open(
         //outctx->frames_written = 1;
         outctx->encoder_ctx = out_tracker->encoder_ctx;
         outctx->stream_index = (int) strtol(stream_opt->value, &endptr, 10);
+        outctx->url = strdup(url);
         assert(outctx->stream_index == 0 || outctx->stream_index == 1);
         if (out_tracker[outctx->stream_index].tx_type == tx_video)
             outctx->type = avpipe_video_segment;
@@ -86,6 +87,7 @@ elv_io_open(
         if (!url || url[0] == '\0') {
             outctx->type = avpipe_manifest;
         } else {
+            outctx->url = strdup(url);
             int i = 0;
             while (i < strlen(url) && !isdigit(url[i]))
                 i++;
@@ -204,13 +206,15 @@ elv_io_close(
     if (out_tracker != NULL)
         out_handlers = out_tracker->out_handlers;
 
-    elv_dbg("OUT elv_io_close stream_index=%d, seg_index=%d avioctx=%p, avioctx->opaque=%p buf=%p outtracker[0]->last_outctx=%p, outtracker[1]->last_outctx=%p",
-        outctx->stream_index, outctx->seg_index, pb, pb->opaque, avioctx->buffer,
-	out_tracker != NULL ? out_tracker[0].last_outctx : 0, out_tracker != NULL ? out_tracker[1].last_outctx : 0);
+    elv_dbg("OUT elv_io_close url=%s, stream_index=%d, seg_index=%d avioctx=%p, avioctx->opaque=%p buf=%p outtracker[0]->last_outctx=%p, outtracker[1]->last_outctx=%p",
+        outctx != NULL ? outctx->url : "", outctx != NULL ? outctx->stream_index : -1, outctx != NULL ? outctx->seg_index : -1, pb, pb->opaque, avioctx->buffer,
+	    out_tracker != NULL ? out_tracker[0].last_outctx : 0, out_tracker != NULL ? out_tracker[1].last_outctx : 0);
     if (out_handlers) {
         out_handlers->avpipe_stater(outctx, out_stat_encoding_end_pts);
         out_handlers->avpipe_closer(outctx);
     }
+    if (outctx)
+        free(outctx->url);
     free(outctx);
     av_freep(&avioctx->buffer);
     avio_context_free(&avioctx);
