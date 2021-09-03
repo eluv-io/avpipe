@@ -100,6 +100,12 @@ var EAV_AUDIO_SAMPLE = errors.New("EAV_AUDIO_SAMPLE")
 // EAV_XC_TABLE is the error returned when avpipe fails to find xc context in the xc_table.
 var EAV_XC_TABLE = errors.New("EAV_XC_TABLE")
 
+// EAV_PTS_WRAPPED is the error returned when PTS is wrapped in the source/input.
+var EAV_PTS_WRAPPED = errors.New("EAV_PTS_WRAPPED")
+
+// EAV_IO_TIMEOUT is the error returned when there is a timeout in network/disk io
+var EAV_IO_TIMEOUT = errors.New("EAV_IO_TIMEOUT")
+
 // EAV_UNKNOWN is the error returned when error code doesn't exist in avpipeErrors table (below).
 var EAV_UNKNOWN = errors.New("EAV_UNKNOWN")
 
@@ -127,6 +133,8 @@ var avpipeErrors = map[int]error{
 	int(C.eav_write_frame):          EAV_WRITE_FRAME,
 	int(C.eav_audio_sample):         EAV_AUDIO_SAMPLE,
 	int(C.eav_xc_table):             EAV_XC_TABLE,
+	int(C.eav_pts_wrapped):          EAV_PTS_WRAPPED,
+	int(C.eav_io_timeout):           EAV_IO_TIMEOUT,
 }
 
 func avpipeError(code C.int) error {

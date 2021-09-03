@@ -2006,29 +2006,29 @@ do_bypass(
     return eav_success;
 }
 
-static void
-avoid_pts_wrap(
+static avpipe_error_t
+check_pts_wrapped(
     int64_t *last_wrapped_pts,
     int64_t *last_input_pts,
     AVFrame *frame,
     int stream_index)
 {
-    /* If the stream was wrapped then, shift the pts and dts of the frame up to the last wrapped pts */
-    if (*last_wrapped_pts &&
-        *last_input_pts - frame->pts > MAX_WRAP_PTS) {
-        frame->pkt_dts = *last_wrapped_pts + frame->pts;
-        frame->pts = *last_wrapped_pts + frame->pts;
+
+    (void) last_wrapped_pts;
+
+    if (!frame || !last_input_pts)
+        return eav_success;
+
+    /* If the stream was wrapped then issue an error */
+    if (*last_input_pts && *last_input_pts - frame->pts > MAX_WRAP_PTS) {
+        elv_warn("PTS WRAPPED stream_index=%d, last_input_pts=%"PRId64, stream_index, *last_input_pts);
+        return eav_pts_wrapped;
     }
 
-    /* Keep track of XXX_last_input_pts and detect wrapping */
     if (frame->pts > *last_input_pts)
         *last_input_pts = frame->pts;
-    else if (*last_input_pts - frame->pts > MAX_WRAP_PTS) {
-        *last_wrapped_pts = *last_input_pts;
-        frame->pkt_dts = *last_wrapped_pts + frame->pts;
-        frame->pts = *last_wrapped_pts + frame->pts;
-        elv_log("stream_index=%d, last_wrapped=%"PRId64, stream_index, *last_wrapped_pts);
-    }
+
+    return eav_success;
 }
 
 static int
@@ -2079,10 +2079,14 @@ transcode_audio(
 
         dump_frame(1, "IN ", codec_context->frame_number, frame, debug_frame_level);
 
-        avoid_pts_wrap(&decoder_context->audio_last_wrapped_pts,
+        ret = check_pts_wrapped(&decoder_context->audio_last_wrapped_pts,
             &decoder_context->audio_last_input_pts,
             frame,
             stream_index);
+        if (ret == eav_pts_wrapped) {
+            av_frame_unref(frame);
+            return ret;
+        }
 
         decoder_context->audio_pts = packet->pts;
 
@@ -2171,10 +2175,14 @@ transcode_audio_aac(
 
         dump_frame(1, "IN ", codec_context->frame_number, frame, debug_frame_level);
 
-        avoid_pts_wrap(&decoder_context->audio_last_wrapped_pts,
+        ret = check_pts_wrapped(&decoder_context->audio_last_wrapped_pts,
             &decoder_context->audio_last_input_pts,
             frame,
             stream_index);
+        if (ret == eav_pts_wrapped) {
+            av_frame_unref(frame);
+            return ret;
+        }
 
         if (decoder_context->audio_input_prev_pts < 0)
             decoder_context->audio_input_prev_pts = frame->pts;
@@ -2402,10 +2410,14 @@ transcode_video(
 
         dump_frame(0, "IN ", codec_context->frame_number, frame, debug_frame_level);
 
-        avoid_pts_wrap(&decoder_context->video_last_wrapped_pts,
+        ret = check_pts_wrapped(&decoder_context->video_last_wrapped_pts,
             &decoder_context->video_last_input_pts,
             frame,
             stream_index);
+        if (ret == eav_pts_wrapped) {
+            av_frame_unref(frame);
+            return ret;
+        }
 
         if (do_instrument) {
             elv_since(&tv, &since);

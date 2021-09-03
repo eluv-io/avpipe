@@ -5,6 +5,8 @@ import (
 	"net"
 	"strings"
 	"time"
+
+	"github.com/qluvio/avpipe"
 )
 
 type TsReader struct {
@@ -12,7 +14,8 @@ type TsReader struct {
 	pktLimit   int
 	w          io.Writer
 	done       chan bool
-	errChannel chan error
+	ErrChannel chan error
+	conn       *net.UDPConn
 }
 
 // Deprecated
@@ -21,7 +24,7 @@ func NewTsReader(addr string, w io.Writer) *TsReader {
 	tsr := &TsReader{
 		addr:       addr,
 		w:          w,
-		errChannel: make(chan error, 10),
+		ErrChannel: make(chan error, 10),
 	}
 
 	var err error
@@ -37,17 +40,17 @@ func NewTsReader(addr string, w io.Writer) *TsReader {
 	return tsr
 }
 
-// NewTsReaderV2  creates a UDP MPEG-TS reader and returns an io.Reader
+// NewTsReaderV2  creates a UDP MPEG-TS reader and returns a TsReader and an io.Reader
 // Starts the necessary goroutines - when the returned reader is closed, it stops
 // all goroutines and cleans up.
-func NewTsReaderV2(addr string) (io.ReadWriteCloser, error) {
+func NewTsReaderV2(addr string) (*TsReader, io.ReadWriteCloser, error) {
 
 	rwb := NewRWBuffer(100000)
 
 	tsr := &TsReader{
 		addr:       addr,
 		w:          rwb,
-		errChannel: make(chan error, 10),
+		ErrChannel: make(chan error, 10),
 	}
 
 	var err error
@@ -60,7 +63,57 @@ func NewTsReaderV2(addr string) (io.ReadWriteCloser, error) {
 		log.Error("TsReader failed", "err", err)
 	}
 
-	return rwb, err
+	return tsr, rwb, err
+}
+
+func (tsr *TsReader) serveOneConnection(w io.Writer) (err error) {
+
+	sAddr, err := net.ResolveUDPAddr("udp", tsr.addr)
+	if err != nil {
+		return
+	}
+	conn, err := net.ListenUDP("udp", sAddr)
+	if err != nil {
+		log.Error("Failed to listen UDP network ...", err)
+		return
+	}
+
+	// TODO: Make it a config param (RM)
+	err = conn.SetReadBuffer(16 * 1024 * 1024)
+	if err != nil {
+		log.Error("Failed to set UDP buffer size, continue ...", err)
+	}
+
+	log.Info("ts_recorder server accepted", "addr", tsr.addr)
+
+	var pc net.PacketConn
+	pc = conn
+	go func(tsr *TsReader) {
+		if err := readUdp(pc, w); err != nil {
+			log.Error("Failed reading UDP stream", "err", err)
+			tsr.ErrChannel <- err
+		}
+	}(tsr)
+
+	tsr.conn = conn
+
+	return
+}
+
+func (tsr *TsReader) Close() {
+	if tsr.conn != nil {
+		err := tsr.conn.Close()
+		if err != nil {
+			log.Warn("failed to close udp socket", err)
+		}
+		tsr.conn = nil
+	}
+	if closer, ok := tsr.w.(io.Closer); ok {
+		err := closer.Close()
+		if err != nil {
+			log.Warn("failed to close writer", err)
+		}
+	}
 }
 
 func readUdp(conn net.PacketConn, w io.Writer) error {
@@ -99,7 +152,7 @@ func readUdp(conn net.PacketConn, w io.Writer) error {
 				}
 				log.Info("Stopped receiving UDP packets",
 					"timeout", timeout, "bytesRead", bytesRead)
-				return err
+				return avpipe.EAV_IO_TIMEOUT
 			}
 			log.Error("UDP read failed", "err", err, "sender", sender)
 			return err
@@ -121,37 +174,6 @@ func readUdp(conn net.PacketConn, w io.Writer) error {
 		}
 	}
 	return nil
-}
-
-func (tsr *TsReader) serveOneConnection(w io.Writer) (err error) {
-
-	sAddr, err := net.ResolveUDPAddr("udp", tsr.addr)
-	if err != nil {
-		return
-	}
-	conn, err := net.ListenUDP("udp", sAddr)
-	if err != nil {
-		return
-	}
-
-	// TODO: Make if a config param (RM)
-	err = conn.SetReadBuffer(16 * 1024 * 1024)
-	if err != nil {
-		log.Error("Failed to set UDP buffer size, continue ...", err)
-	}
-
-	log.Info("ts_recorder server accepted", "addr", tsr.addr)
-
-	var pc net.PacketConn
-	pc = conn
-	go func(tsr *TsReader) {
-		if err := readUdp(pc, w); err != nil {
-			log.Error("Failed reading UDP stream", "err", err)
-			tsr.errChannel <- err
-		}
-	}(tsr)
-
-	return
 }
 
 func (tsr *TsReader) serveFromFile(w io.Writer) (err error) {

@@ -53,7 +53,9 @@ typedef enum avpipe_error_t {
     eav_receive_packet          = 20,   // Error in receiving packet from encoder
     eav_write_frame             = 21,   // Error in writing frame to output stream or audio fifo
     eav_audio_sample            = 22,   // Error in converting audio samples
-    eav_xc_table                = 23
+    eav_xc_table                = 23,   // Error in trancoding table
+    eav_pts_wrapped             = 24,   // PTS wrapped error
+    eav_io_timeout              = 25	// IO timeout
 } avpipe_error_t;
 
 typedef enum avpipe_buftype_t {

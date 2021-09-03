@@ -10,21 +10,6 @@ import (
 	"github.com/qluvio/avpipe"
 )
 
-var videoParamsTs = &avpipe.TxParams{
-	Format:          "fmp4-segment",
-	Seekable:        false,
-	DurationTs:      -1,
-	StartSegmentStr: "1",
-	VideoBitrate:    20000000, // fox stream bitrate
-	SegDurationTs:   -1,
-	ForceKeyInt:     120,
-	SegDuration:     "30.03",   // seconds
-	Ecodec:          "libx264", // libx264 software / h264_videotoolbox mac hardware
-	EncHeight:       720,       // 1080
-	EncWidth:        1280,      // 1920
-	TxType:          avpipe.TxVideo,
-}
-
 /*
  * To run this test, run ffmpeg in separate console to produce UDP packets with a ts file:
  *
@@ -32,6 +17,21 @@ var videoParamsTs = &avpipe.TxParams{
  *
  */
 func TestUdpToMp4(t *testing.T) {
+
+	videoParamsTs := &avpipe.TxParams{
+		Format:          "fmp4-segment",
+		Seekable:        false,
+		DurationTs:      -1,
+		StartSegmentStr: "1",
+		VideoBitrate:    20000000, // fox stream bitrate
+		ForceKeyInt:     120,
+		SegDuration:     "30.03",   // seconds
+		Ecodec:          "libx264", // libx264 software / h264_videotoolbox mac hardware
+		EncHeight:       720,       // 1080
+		EncWidth:        1280,      // 1920
+		TxType:          avpipe.TxVideo,
+		StreamId:        -1,
+	}
 
 	setupLogging()
 
@@ -65,7 +65,7 @@ func TestUdpToMp4(t *testing.T) {
 	avpipe.InitIOHandler(&inputOpener{}, &outputOpener{})
 	tlog.Info("Tx start", "videoParams", fmt.Sprintf("%+v", *videoParamsTs))
 	errTx := avpipe.Tx(videoParamsTs, url, true)
-	if errTx != 0 {
+	if errTx != nil {
 		t.Error("Tx failed", "err", errTx)
 	}
 	tlog.Info("Tx done", "err", errTx)
@@ -86,7 +86,7 @@ func TestUdpToMp4V2(t *testing.T) {
 		os.Mkdir("./O", 0755)
 	}
 
-	rwb, err := NewTsReaderV2(":21001")
+	tsr, rwb, err := NewTsReaderV2(":21001")
 	if err != nil {
 		t.Error("TsReader failed", "err", err)
 	}
@@ -95,19 +95,32 @@ func TestUdpToMp4V2(t *testing.T) {
 	videoReader := io.TeeReader(rwb, audioReader)
 
 	done := make(chan bool, 1)
+	testComplet := make(chan bool, 1)
+
+	go func(tsr *TsReader) {
+		out:
+		for {
+			select {
+			case err = <-tsr.ErrChannel:
+				tlog.Error("Got error on reading UDP", err)
+				break out
+			case <-testComplet:
+				break out
+			}
+		}
+	}(tsr)
 
 	audioParamsTs := &avpipe.TxParams{
 		Format:          "fmp4-segment",
 		Seekable:        false,
 		DurationTs:      -1,
 		StartSegmentStr: "1",
-		AudioBitrate:    384000, // FS1-19-10-14.ts audio bitrate
-		SegDurationTs:   -1,
+		AudioBitrate:    384000,  // FS1-19-10-14.ts audio bitrate
 		SegDuration:     "30.03", // seconds
-		Dcodec:          "ac3",
-		Ecodec:          "ac3", // "aac"
+		Dcodec2:         "ac3",
+		Ecodec2:         "ac3", // "aac"
 		TxType:          avpipe.TxAudio,
-		AudioIndex:      1,
+		StreamId:        -1,
 	}
 
 	// Transcode audio mez files in background
@@ -122,7 +135,7 @@ func TestUdpToMp4V2(t *testing.T) {
 		errTx := avpipe.Tx(audioParamsTs, url, true)
 		tlog.Info("Tx UDP Audio stream done", "err", errTx, "last pts", nil)
 
-		if errTx != 0 {
+		if errTx != nil {
 			t.Error("Tx UDP Audio failed", "err", errTx)
 		}
 
@@ -135,13 +148,13 @@ func TestUdpToMp4V2(t *testing.T) {
 		DurationTs:      -1,
 		StartSegmentStr: "1",
 		VideoBitrate:    20000000, // fox stream bitrate
-		SegDurationTs:   -1,
 		ForceKeyInt:     120,
 		SegDuration:     "30.03",   // seconds
 		Ecodec:          "libx264", // libx264 software / h264_videotoolbox mac hardware
 		EncHeight:       720,       // 1080
 		EncWidth:        1280,      // 1920
 		TxType:          avpipe.TxVideo,
+		StreamId:        -1,
 	}
 
 	go func(reader io.Reader, writer io.WriteCloser) {
@@ -155,7 +168,7 @@ func TestUdpToMp4V2(t *testing.T) {
 		errTx := avpipe.Tx(videoParamsTs, url, true)
 		tlog.Info("Tx UDP Video stream done", "err", errTx, "last pts", nil)
 
-		if errTx != 0 {
+		if errTx != nil {
 			t.Error("Tx UDP Video failed", "err", errTx)
 		}
 
@@ -166,7 +179,7 @@ func TestUdpToMp4V2(t *testing.T) {
 	<-done
 
 	audioParamsTs.Format = "dash"
-	audioParamsTs.SegDurationTs = 96106 // almost 2 * 48000
+	audioParamsTs.AudioSegDurationTs = 96106 // almost 2 * 48000
 	audioMezFiles := [3]string{"audio_mez_udp2-segment-1.mp4", "audio_mez_udp2-segment-2.mp4", "audio_mez_udp2-segment-3.mp4"}
 
 	// Now create audio dash segments out of audio mezzanines
@@ -180,7 +193,7 @@ func TestUdpToMp4V2(t *testing.T) {
 			errTx := avpipe.Tx(audioParamsTs, url, true)
 			tlog.Info("AVL Audio Dash Tx done", "err", errTx)
 
-			if errTx != 0 {
+			if errTx != nil {
 				t.Error("AVL Audio Dash transcoding failed", "errTx", errTx, "url", url)
 			}
 			done <- true
@@ -192,7 +205,7 @@ func TestUdpToMp4V2(t *testing.T) {
 	}
 
 	videoParamsTs.Format = "dash"
-	videoParamsTs.SegDurationTs = 180000 // almost 2 * 90000
+	videoParamsTs.VideoSegDurationTs = 180000 // almost 2 * 90000
 	videoMezFiles := [3]string{"video_mez_udp2-segment-1.mp4", "video_mez_udp2-segment-2.mp4", "video_mez_udp2-segment-3.mp4"}
 
 	// Now create video dash segments out of audio mezzanines
@@ -206,7 +219,7 @@ func TestUdpToMp4V2(t *testing.T) {
 			errTx := avpipe.Tx(videoParamsTs, url, true)
 			tlog.Info("AVL Video Dash Tx done", "err", errTx)
 
-			if errTx != 0 {
+			if errTx != nil {
 				t.Error("AVL Video Dash transcoding failed", "errTx", errTx, "url", url)
 			}
 			done <- true
@@ -216,4 +229,5 @@ func TestUdpToMp4V2(t *testing.T) {
 	for _ = range videoMezFiles {
 		<-done
 	}
+	testComplet <- true
 }
