@@ -38,7 +38,7 @@ int     AVPipeReadInput(int64_t, uint8_t *, int);
 int64_t AVPipeSeekInput(int64_t, int64_t, int);
 int     AVPipeCloseInput(int64_t);
 int     AVPipeStatInput(int64_t, avp_stat_t, void *);
-int64_t AVPipeOpenOutput(int64_t, int, int, int);
+int64_t AVPipeOpenOutput(int64_t, int, int, int64_t, int);
 int64_t AVPipeOpenMuxOutput(char *, int);
 int     AVPipeWriteOutput(int64_t, int64_t, uint8_t *, int);
 int     AVPipeWriteMuxOutput(int64_t, uint8_t *, int);
@@ -287,7 +287,7 @@ out_opener(
     outctx->bufsz = AVIO_OUT_BUF_SIZE;
     outctx->buf = (unsigned char *)av_malloc(outctx->bufsz); /* Must be malloc'd - will be realloc'd by avformat */
 
-    fd = AVPipeOpenOutput(h, outctx->stream_index, outctx->seg_index, outctx->type);
+    fd = AVPipeOpenOutput(h, outctx->stream_index, outctx->seg_index, outctx->pts, outctx->type);
 #if TRACE_IO
     elv_dbg("OUT out_opener outctx=%p, fd=%"PRId64, outctx, fd);
 #endif

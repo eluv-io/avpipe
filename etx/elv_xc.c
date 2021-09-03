@@ -574,6 +574,7 @@ out_closer(
     elv_dbg("OUT CLOSE custom writer fd=%d\n", fd);
     close(fd);
     free(outctx->opaque);
+    outctx->opaque = NULL;
     return 0;
 }
 
@@ -671,6 +672,11 @@ txparam_copy(
         memcpy(p2->watermark_overlay, p->watermark_overlay, p->watermark_overlay_len);
     }
     p2->watermark_shadow_color = safe_strdup(p->watermark_shadow_color);
+    if (p2->extract_images_sz != 0) {
+        p2->extract_images_ts = calloc(p2->extract_images_sz, sizeof(int64_t));
+        int size = p2->extract_images_sz * sizeof(int64_t);
+        memcpy(p2->extract_images_ts, p->extract_images_ts, size);
+    }
 
     return p2;
 }
@@ -765,7 +771,7 @@ do_probe(
 {
     ioctx_t inctx;
     avpipe_io_handler_t in_handlers;
-    txprobe_t *probe;
+    txprobe_t *probe = NULL;
     int n_streams;
     int rc;
 
@@ -970,6 +976,38 @@ get_audio_index(
     return n_index;
 }
 
+// parse command line input
+static int get_extract_images_ts(char *s, txparams_t *params) {
+    int i;
+    char *lasts;
+    char *pts;
+    int sz = 0;
+
+    // assert(params->extract_images_ts == NULL);
+
+    for (i = 0; i < strlen(s); i++) {
+        if (s[i] == ',')
+            sz++;
+    }
+    if (sz == 0) {
+        return 0;
+    }
+    sz++; // number of commas + 1
+    init_extract_images(params, sz);
+
+    i = 0;
+    pts = strtok_r(s, ",", &lasts);
+    while (pts && i < sz) {
+        if (sscanf(pts, "%" PRId64, &params->extract_images_ts[i]) != 1) {
+            return -1;
+        }
+        i++;
+        pts = strtok_r(NULL, ",", &lasts);
+    }
+
+    return i;
+}
+
 static void
 usage(
     char *progname,
@@ -998,16 +1036,17 @@ usage(
         "\t-d :                     (optional) Decoder name. For video default is \"h264\", can be: \"h264\", \"h264_cuvid\", \"jpeg2000\", \"hevc\"\n"
         "\t                                    For audio default is \"aac\", but for ts files should be set to \"ac3\"\n"
         "\t-duration-ts :           (optional) Default: -1 (entire stream)\n"
-        "\t-e :                     (optional) Video encoder name. Default is \"libx264\", can be: \"libx264\", \"libx265\", \"h264_nvenc\", \"h264_videotoolbox\"\n"
+        "\t-e :                     (optional) Video encoder name. Default is \"libx264\", can be: \"libx264\", \"libx265\", \"h264_nvenc\", \"h264_videotoolbox\", or \"mjpeg\"\n"
         "\t-enc-height :            (optional) Default: -1 (use source height)\n"
         "\t-enc-width :             (optional) Default: -1 (use source width)\n"
         "\t-equal-fduration :       (optional) Force equal frame duration. Must be 0 or 1 and only valid for \"fmp4-segment\" format.\n"
-        "\t-extract-image-interval-ts : (optional) Write frames at this interval. Default: -1 (use source timescale * 10)\n"
+        "\t-extract-image-interval-ts : (optional) Write frames at this interval. Default: -1 (10 seconds)\n"
+        "\t-extract-images-ts :     (optional) Write frames at these timestamps (comma separated). Mutually exclusive with extract-image-interval-ts"
         "\t-f :                     (mandatory) Input filename for transcoding. Valid formats are: a filename that points to a valid file, or udp://127.0.0.1:<port>.\n"
         "\t                                    Output goes to directory ./O\n"
         "\t-filter-descriptor :     (mandatory if tx-type is audio-pan). Audio filter descriptor the same as ffmpeg format.\n"
         "\t                                    For example: -filter-descriptor [0:1]pan=stereo|c0<c1+0.707*c2|c1<c2+0.707*c1[aout]\n"
-        "\t-format :                (optional) Package format. Default is \"dash\", can be: \"dash\", \"hls\", \"mp4\", \"fmp4\", \"segment\", or \"fmp4-segment\"\n"
+        "\t-format :                (optional) Package format. Default is \"dash\", can be: \"dash\", \"hls\", \"mp4\", \"fmp4\", \"segment\", \"fmp4-segment\", or \"image2\"\n"
         "\t                                    Using \"segment\" format produces self contained mp4 segments with start pts from 0 for each segment\n"
         "\t                                    Using \"fmp4-segment\" format produces self contained mp4 segments with continious pts.\n"
         "\t                                    Using \"fmp4-segment\" generates segments that are appropriate for live streaming.\n"
@@ -1022,8 +1061,8 @@ usage(
         "\t-preset :                (optional) Preset string to determine compression speed. Default is \"medium\". Valid values are: \"ultrafast\", \"superfast\",\n"
         "\t                                    \"veryfast\", \"faster\", \"fast\", \"medium\", \"slow\", \"slower\", \"veryslow\".\n"
         "\t-r :                     (optional) number of repeats. Default is 1 repeat, must be bigger than 1\n"
-        "\t-rc-buffer-size :        (optional)\n"
-        "\t-rc-max-rate :           (optional)\n"
+        "\t-rc-buffer-size :        (optional) Determines the interval used to limit bit rate\n"
+        "\t-rc-max-rate :           (optional) Maximum encoding bit rate, used in conjuction with rc-buffer-size\n"
         "\t-sample-rate :           (optional) Default: -1. For aac output sample rate is set to input sample rate and this parameter is ignored.\n"
         "\t-seekable :              (optional) Seekable stream. Default is 0, must be 0 or 1\n"
         "\t-seg-duration :          (mandatory if format is \"segment\") segment duration secs (positive integer). It is used for making mp4 segments.\n"
@@ -1035,7 +1074,7 @@ usage(
         "\t-stream-id :             (optional) Default: -1, if it is valid it will be used to transcode elementary stream with that stream-id.\n"
         "\t-sync-audio-to-stream-id:(optional) Default: -1, sync audio to video iframe of specific stream-id when input stream is mpegts.\n"
         "\t-t :                     (optional) Transcoding threads. Default is 1 thread, must be bigger than 1\n"
-        "\t-tx-type :               (optional) Transcoding type. Default is \"all\", can be \"video\", \"audio\", \"audio-merge\", \"audio-join\", \"audio-pan\" or \"all\" \n"
+        "\t-tx-type :               (optional) Transcoding type. Default is \"all\", can be \"video\", \"audio\", \"audio-merge\", \"audio-join\", \"audio-pan\", \"all\", or \"extract-images\"\n"
         "\t                                    \"all\" means transcoding video and audio together.\n"
         "\t-video-bitrate :         (optional) Mutually exclusive with crf. Default: -1 (unused)\n"
         "\t-video-seg-duration-ts : (mandatory If format is not \"segment\" and transcoding video) video segment duration time base (positive integer).\n"
@@ -1103,6 +1142,8 @@ main(
         .enc_height = -1,                   /* -1 means use source height, other values 2160, 1080, 720 */
         .enc_width = -1,                    /* -1 means use source width, other values 3840, 1920, 1280 */
         .extract_image_interval_ts = -1,
+        .extract_images_sz = 0,
+        .extract_images_ts = NULL,
         .filter_descriptor = strdup(""),
         .force_equal_fduration = 0,
         .force_keyint = 0,
@@ -1111,8 +1152,8 @@ main(
         .max_cll = NULL,
         .master_display = NULL,
         .preset = strdup("medium"),
-        .rc_buffer_size = 4500000,          /* TODO - default? */
-        .rc_max_rate = 6700000,             /* TODO - default? */
+        .rc_buffer_size = 0,
+        .rc_max_rate = 0,
         .sample_rate = -1,                  /* Audio sampling rate 44100 */
         .seekable = 0,
         .video_seg_duration_ts = -1,        /* input argument, same units as input stream PTS */
@@ -1252,6 +1293,10 @@ main(
                 }
             } else if (!strcmp(argv[i], "-extract-image-interval-ts")) {
                 if (sscanf(argv[i+1], "%"PRId64, &p.extract_image_interval_ts) != 1) {
+                    usage(argv[0], argv[i], EXIT_FAILURE);
+                }
+            } else if (!strcmp(argv[i], "-extract-images-ts")) {
+                if (get_extract_images_ts(argv[i+1], &p) <= 0) {
                     usage(argv[0], argv[i], EXIT_FAILURE);
                 }
             } else if (strlen(argv[i]) > 2) {

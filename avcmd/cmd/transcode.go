@@ -108,14 +108,19 @@ type avcmdOutputOpener struct {
 	dir string
 }
 
-func (oo *avcmdOutputOpener) Open(h, fd int64, stream_index, seg_index int, out_type avpipe.AVType) (avpipe.OutputHandler, error) {
-	log.Debug("AVCMD OutputOpener.Open", "h", h, "fd", fd, "stream_index", stream_index, "seg_index", seg_index, "out_type", out_type)
+func (oo *avcmdOutputOpener) Open(h, fd int64, stream_index, seg_index int,
+	pts int64, out_type avpipe.AVType) (avpipe.OutputHandler, error) {
+
+	log.Debug("AVCMD OutputOpener.Open", "h", h, "fd", fd,
+		"stream_index", stream_index, "seg_index", seg_index, "pts", pts, "out_type", out_type)
 
 	var filename string
 	dir := fmt.Sprintf("%s/O%d", oo.dir, h)
 
 	if _, err := os.Stat(dir); os.IsNotExist(err) {
-		os.Mkdir(dir, 0755)
+		if err = os.Mkdir(dir, 0755); err != nil {
+			return nil, err
+		}
 	}
 
 	switch out_type {
@@ -148,7 +153,7 @@ func (oo *avcmdOutputOpener) Open(h, fd int64, stream_index, seg_index int, out_
 	case avpipe.FMP4AudioSegment:
 		filename = fmt.Sprintf("%s/fmp4-asegment%d-%05d.mp4", dir, stream_index, seg_index)
 	case avpipe.FrameImage:
-		filename = fmt.Sprintf("%s/%d.jpeg", dir, seg_index)
+		filename = fmt.Sprintf("%s/%d.jpeg", dir, pts)
 	}
 
 	f, err := os.OpenFile(filename, os.O_RDWR|os.O_CREATE|os.O_TRUNC, 0644)
@@ -224,6 +229,24 @@ func getAudioIndexes(params *avpipe.TxParams, audioIndexes string) (err error) {
 	return nil
 }
 
+// parseExtractImagesTs converts the extract-images-ts string parameter, e.g.
+// "0,64000,128000,1152000", to an int64 array in avpipe.TxParams
+func parseExtractImagesTs(params *avpipe.TxParams, s string) (err error) {
+	if len(s) == 0 {
+		return
+	}
+	frames := strings.Split(s, ",")
+	params.ExtractImagesTs = make([]int64, len(frames))
+	for i, frame := range frames {
+		var v int64
+		if v, err = strconv.ParseInt(frame, 10, 64); err != nil {
+			return fmt.Errorf("invalid frame PTS %s", frame)
+		}
+		params.ExtractImagesTs[i] = v
+	}
+	return
+}
+
 func InitTranscode(cmdRoot *cobra.Command) error {
 	cmdTranscode := &cobra.Command{
 		Use:   "transcode",
@@ -244,15 +267,15 @@ func InitTranscode(cmdRoot *cobra.Command) error {
 	cmdTranscode.PersistentFlags().Int32P("gpu-index", "", -1, "Use the GPU with specified index for transcoding (export CUDA_DEVICE_ORDER=PCI_BUS_ID would use smi index).")
 	cmdTranscode.PersistentFlags().BoolP("audio-fill-gap", "", false, "fill audio gap when encoder is aac and decoder is mpegts")
 	cmdTranscode.PersistentFlags().Int32P("sync-audio-to-stream-id", "", -1, "sync audio to video iframe of specific stream-id when input stream is mpegts")
-	cmdTranscode.PersistentFlags().StringP("encoder", "e", "libx264", "encoder codec, default is 'libx264', can be: 'libx264', 'libx265', 'h264_nvenc', 'h264_videotoolbox'.")
+	cmdTranscode.PersistentFlags().StringP("encoder", "e", "libx264", "encoder codec, default is 'libx264', can be: 'libx264', 'libx265', 'h264_nvenc', 'h264_videotoolbox', or 'mjpeg'.")
 	cmdTranscode.PersistentFlags().StringP("audio-encoder", "", "aac", "audio encoder, default is 'aac', can be: 'aac', 'ac3', 'mp2', 'mp3'.")
 	cmdTranscode.PersistentFlags().StringP("decoder", "d", "", "video decoder, default is 'h264', can be: 'h264', 'h264_cuvid', 'jpeg2000', 'hevc'.")
 	cmdTranscode.PersistentFlags().StringP("audio-decoder", "", "", "audio decoder, default is '' and will be automatically chosen.")
-	cmdTranscode.PersistentFlags().StringP("format", "", "dash", "package format, can be 'dash', 'hls', 'mp4', 'fmp4', 'segment' or 'fmp4-segment'.")
+	cmdTranscode.PersistentFlags().StringP("format", "", "dash", "package format, can be 'dash', 'hls', 'mp4', 'fmp4', 'segment', 'fmp4-segment', or 'image2'.")
 	cmdTranscode.PersistentFlags().StringP("filter-descriptor", "", "", " Audio filter descriptor the same as ffmpeg format")
 	cmdTranscode.PersistentFlags().Int32P("force-keyint", "", 0, "force IDR key frame in this interval.")
 	cmdTranscode.PersistentFlags().BoolP("equal-fduration", "", false, "force equal frame duration. Must be 0 or 1 and only valid for 'fmp4-segment' format.")
-	cmdTranscode.PersistentFlags().StringP("tx-type", "", "", "transcoding type, can be 'all', 'video', 'audio', 'audio-join', or 'audio-merge'.")
+	cmdTranscode.PersistentFlags().StringP("tx-type", "", "", "transcoding type, can be 'all', 'video', 'audio', 'audio-join', 'audio-merge', or 'extract-images'.")
 	cmdTranscode.PersistentFlags().Int32P("crf", "", 23, "mutually exclusive with video-bitrate.")
 	cmdTranscode.PersistentFlags().StringP("preset", "", "medium", "Preset string to determine compression speed, can be: 'ultrafast', 'superfast', 'veryfast', 'faster', 'fast', 'medium', 'slow', 'slower', 'veryslow'")
 	cmdTranscode.PersistentFlags().Int64P("start-time-ts", "", 0, "offset to start transcoding")
@@ -263,7 +286,8 @@ func InitTranscode(cmdRoot *cobra.Command) error {
 	cmdTranscode.PersistentFlags().Int32P("start-frag-index", "", 1, "start fragment index >= 1.")
 	cmdTranscode.PersistentFlags().Int32P("video-bitrate", "", -1, "output video bitrate, mutually exclusive with crf.")
 	cmdTranscode.PersistentFlags().Int32P("audio-bitrate", "", 128000, "output audio bitrate.")
-	cmdTranscode.PersistentFlags().Int32P("rc-max-rate", "", -1, "mandatory, positive integer.") // e.g. 6700000; Needs some explanation
+	cmdTranscode.PersistentFlags().Int32P("rc-max-rate", "", 0, "maximum encoding bit rate, used in conjuction with rc-buffer-size.")
+	cmdTranscode.PersistentFlags().Int32P("rc-buffer-size", "", 0, "determines the interval used to limit bit rate.")
 	cmdTranscode.PersistentFlags().Int32P("enc-height", "", -1, "default -1 means use source height.")
 	cmdTranscode.PersistentFlags().Int32P("enc-width", "", -1, "default -1 means use source width.")
 	cmdTranscode.PersistentFlags().Int64P("duration-ts", "", -1, "default -1 means entire stream.")
@@ -291,6 +315,7 @@ func InitTranscode(cmdRoot *cobra.Command) error {
 	cmdTranscode.PersistentFlags().String("master-display", "", "Master display, only valid if encoder is libx265.")
 	cmdTranscode.PersistentFlags().Int32("bitdepth", 8, "Refers to number of colors each pixel can have, can be 8, 10, 12.")
 	cmdTranscode.PersistentFlags().Int64P("extract-image-interval-ts", "", -1, "extract frames at this interval.")
+	cmdTranscode.PersistentFlags().StringP("extract-images-ts", "", "", "the frames to extract (PTS, comma separated).")
 
 	return nil
 }
@@ -490,6 +515,11 @@ func doTranscode(cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("rc-max-rate is not valid")
 	}
 
+	rcBufferSize, err := cmd.Flags().GetInt32("rc-buffer-size")
+	if err != nil {
+		return fmt.Errorf("rc-buffer-size is not valid")
+	}
+
 	encHeight, err := cmd.Flags().GetInt32("enc-height")
 	if err != nil {
 		return fmt.Errorf("enc-height is not valid")
@@ -604,7 +634,7 @@ func doTranscode(cmd *cobra.Command, args []string) error {
 		WatermarkOverlayType:   watermarkOverlayType,
 		ForceKeyInt:            forceKeyInterval,
 		RcMaxRate:              rcMaxRate,
-		RcBufferSize:           4500000,
+		RcBufferSize:           rcBufferSize,
 		GPUIndex:               gpuIndex,
 		MaxCLL:                 maxCLL,
 		MasterDisplay:          masterDisplay,
@@ -625,6 +655,11 @@ func doTranscode(cmd *cobra.Command, args []string) error {
 	}
 
 	params.WatermarkOverlayLen = len(params.WatermarkOverlay)
+
+	extractImages := cmd.Flag("extract-images-ts").Value.String()
+	if err = parseExtractImagesTs(params, extractImages); err != nil {
+		return err
+	}
 
 	avpipe.InitIOHandler(&avcmdInputOpener{url: filename}, &avcmdOutputOpener{dir: dir})
 

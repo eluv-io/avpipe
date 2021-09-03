@@ -80,12 +80,21 @@ elv_io_open(
     } else {
         ioctx_t *outctx = (ioctx_t *) calloc(1, sizeof(ioctx_t));
         outctx->stream_index = 0;
-
         outctx->encoder_ctx = out_tracker->encoder_ctx;
         outctx->inctx = out_tracker[0].inctx;
-        outctx->seg_index = 0;      // init segment has stream_index and seg_index = 0
+        outctx->seg_index = 0; // init segment has stream_index and seg_index = 0
+
         if (!url || url[0] == '\0') {
             outctx->type = avpipe_manifest;
+        } else if (strstr(url, ".jpeg")) {
+            // filename is [pts].jpeg; leave stream_index and seg_index at 0
+            outctx->url = strdup(url);
+            outctx->type = avpipe_image;
+            if (sscanf(url, "%"PRId64".jp%*s", &outctx->pts) != 1) {
+                elv_dbg("Invalid out url=%s", url);
+                free(outctx);
+                return -1;
+            }
         } else {
             outctx->url = strdup(url);
             int i = 0;
@@ -142,17 +151,6 @@ elv_io_open(
                 outctx->seg_index = out_tracker[outctx->stream_index].seg_index;
                 out_tracker[outctx->stream_index].seg_index++;
                 outctx->inctx = out_tracker[outctx->stream_index].inctx;
-            } else if (strstr(url, ".jpeg") || strstr(url, ".jpg")) {
-                outctx->type = avpipe_image;
-                outctx->stream_index = 0;
-
-                if (sscanf(url, "%"PRId64".jp%*s", &out_tracker[0].seg_index) != 1) {
-                    elv_dbg("Invalid out url=%s", url);
-                    free(outctx);
-                    return -1;
-                }
-                outctx->seg_index = out_tracker[0].seg_index;
-                outctx->inctx = out_tracker[0].inctx;
             }
         }
  
@@ -161,6 +159,7 @@ elv_io_open(
             outctx->type == avpipe_mp4_stream ||
             outctx->type == avpipe_video_fmp4_segment ||
             outctx->type == avpipe_audio_fmp4_segment)
+            // not set for outctx->type == avpipe_image because elv_io_close will free outctx for each frame extracted
             out_tracker[outctx->stream_index].last_outctx = outctx;
         /* Manifest or init segments */
         if (out_handlers->avpipe_opener(url, outctx) < 0) {

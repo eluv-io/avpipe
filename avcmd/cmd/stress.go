@@ -414,7 +414,7 @@ func doStressOneLiveSession(session int, tr *TestResource, done chan struct{}) {
 
 	client := createHTTPClient()
 
-	msg := fmt.Sprintf("Starting session %d, iteration=%d, SegDuration=%d",
+	msg := fmt.Sprintf("Starting session %d, iteration=%d, SegDuration=%f",
 		session, tr.EndId-tr.StartId, tr.SegDuration)
 	log.Info(msg)
 

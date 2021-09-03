@@ -23,8 +23,6 @@ clean: lclean
 	echo "Making $@ in $$dir..."; \
 	(cd $$dir; make $@) || exit 1; \
 	done
-	@rm -rf test_out
-	@rm -rf *.log
 
 copy_libs:
 	@(if [ ! -d $(LIBDIR) ]; then mkdir $(LIBDIR); fi)
@@ -61,15 +59,8 @@ $(BINDIR)/%.o: %.c
 lclean:
 	@rm -rf lib bin include
 
-clean-test:
-	@rm -rf AAC2AAC AC3TsAC3Mez \
-            AC3TsACCMez Downmix2ACCMez \
-            MP2TsACCMez HEVC_H264 H265MXF \
-            HEVC_H265ABR V2SingleABRTranscode* \
-            Audio*Muxing Video*Muxing MuxingOutput \
-            IrregularTsMezMaker* \
-            2Mono1Stereo 2Channel1Stereo \
-            SingleABRTranscode* avpipe-test*.log
+clean_test:
+	@rm -rf test_out avpipe-test*.log
 
 check-env:
 ifndef ELV_TOOLCHAIN_DIST_PLATFORM
@@ -81,4 +72,3 @@ test:
 	@(if ! [ -x "command -v gsutil" ]; then echo "gsutil could not be found, install gsutil"; exit 1; fi) || exit 1
 	@gsutil -m cp 'gs://qluvio-test-assets/*' .
 	@go test --timeout 10000s
-

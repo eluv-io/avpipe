@@ -16,7 +16,7 @@ import (
  * ffmpeg -re -i media/FS1-19-10-15.ts -c copy -f mpegts udp://127.0.0.1:21001?pkt_size=1316
  *
  */
-func TestUdpToMp4(t *testing.T) {
+func _TestUdpToMp4(t *testing.T) {
 
 	videoParamsTs := &avpipe.TxParams{
 		Format:          "fmp4-segment",
@@ -64,11 +64,11 @@ func TestUdpToMp4(t *testing.T) {
 
 	avpipe.InitIOHandler(&inputOpener{}, &outputOpener{})
 	tlog.Info("Tx start", "videoParams", fmt.Sprintf("%+v", *videoParamsTs))
-	errTx := avpipe.Tx(videoParamsTs, url, true)
-	if errTx != nil {
-		t.Error("Tx failed", "err", errTx)
+	err = avpipe.Tx(videoParamsTs, url, true)
+	if err != nil {
+		t.Error("Tx failed", "err", err)
 	}
-	tlog.Info("Tx done", "err", errTx)
+	tlog.Info("Tx done", "err", err)
 }
 
 /*
@@ -77,8 +77,7 @@ func TestUdpToMp4(t *testing.T) {
  * ffmpeg -re -i media/FS1-19-10-14.ts -c copy -f mpegts udp://127.0.0.1:21001?pkt_size=1316
  *
  */
-func TestUdpToMp4V2(t *testing.T) {
-
+func _TestUdpToMp4V2(t *testing.T) {
 	setupLogging()
 
 	// Create output directory if it doesn't exist
@@ -132,11 +131,10 @@ func TestUdpToMp4V2(t *testing.T) {
 		avpipe.InitIOHandler(&inputOpener{}, &outputOpener{})
 
 		tlog.Info("Tx UDP Audio stream start", "params", fmt.Sprintf("%+v", *audioParamsTs))
-		errTx := avpipe.Tx(audioParamsTs, url, true)
-		tlog.Info("Tx UDP Audio stream done", "err", errTx, "last pts", nil)
-
-		if errTx != nil {
-			t.Error("Tx UDP Audio failed", "err", errTx)
+		err := avpipe.Tx(audioParamsTs, url, true)
+		tlog.Info("Tx UDP Audio stream done", "err", err, "last pts", nil)
+		if err != nil {
+			t.Error("Tx UDP Audio failed", "err", err)
 		}
 
 		done <- true
@@ -165,11 +163,10 @@ func TestUdpToMp4V2(t *testing.T) {
 		avpipe.InitIOHandler(&inputOpener{}, &outputOpener{})
 
 		tlog.Info("Tx UDP Video stream start", "params", fmt.Sprintf("%+v", *videoParamsTs))
-		errTx := avpipe.Tx(videoParamsTs, url, true)
-		tlog.Info("Tx UDP Video stream done", "err", errTx, "last pts", nil)
-
-		if errTx != nil {
-			t.Error("Tx UDP Video failed", "err", errTx)
+		err := avpipe.Tx(videoParamsTs, url, true)
+		tlog.Info("Tx UDP Video stream done", "err", err, "last pts", nil)
+		if err != nil {
+			t.Error("Tx UDP Video failed", "err", err)
 		}
 
 		done <- true
@@ -184,17 +181,15 @@ func TestUdpToMp4V2(t *testing.T) {
 
 	// Now create audio dash segments out of audio mezzanines
 	go func() {
-
 		for i, url := range audioMezFiles {
 			tlog.Info("AVL Audio Dash Tx start", "audioParams", fmt.Sprintf("%+v", *audioParamsTs), "url", url)
 			reqCtx := &testCtx{url: url}
 			putReqCtxByURL(url, reqCtx)
 			audioParamsTs.StartSegmentStr = fmt.Sprintf("%d", i*15+1)
-			errTx := avpipe.Tx(audioParamsTs, url, true)
-			tlog.Info("AVL Audio Dash Tx done", "err", errTx)
-
-			if errTx != nil {
-				t.Error("AVL Audio Dash transcoding failed", "errTx", errTx, "url", url)
+			err := avpipe.Tx(audioParamsTs, url, true)
+			tlog.Info("AVL Audio Dash Tx done", "err", err)
+			if err != nil {
+				t.Error("AVL Audio Dash transcoding failed", "err", err, "url", url)
 			}
 			done <- true
 		}
@@ -210,17 +205,15 @@ func TestUdpToMp4V2(t *testing.T) {
 
 	// Now create video dash segments out of audio mezzanines
 	go func() {
-
 		for i, url := range videoMezFiles {
 			tlog.Info("AVL Video Dash Tx start", "videoParams", fmt.Sprintf("%+v", *videoParamsTs), "url", url)
 			reqCtx := &testCtx{url: url}
 			putReqCtxByURL(url, reqCtx)
 			audioParamsTs.StartSegmentStr = fmt.Sprintf("%d", i*15+1)
-			errTx := avpipe.Tx(videoParamsTs, url, true)
-			tlog.Info("AVL Video Dash Tx done", "err", errTx)
-
-			if errTx != nil {
-				t.Error("AVL Video Dash transcoding failed", "errTx", errTx, "url", url)
+			err := avpipe.Tx(videoParamsTs, url, true)
+			tlog.Info("AVL Video Dash Tx done", "err", err)
+			if err != nil {
+				t.Error("AVL Video Dash transcoding failed", "err", err, "url", url)
 			}
 			done <- true
 		}

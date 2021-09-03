@@ -1063,7 +1063,8 @@ prepare_video_encoder(
     encoder_codec_context->sample_aspect_ratio = decoder_context->codec_context[index]->sample_aspect_ratio;
     if (params->video_bitrate > 0)
         encoder_codec_context->bit_rate = params->video_bitrate;
-    encoder_codec_context->rc_buffer_size = params->rc_buffer_size;
+    if (params->rc_buffer_size > 0)
+        encoder_codec_context->rc_buffer_size = params->rc_buffer_size;
     if (params->rc_max_rate > 0)
         encoder_codec_context->rc_max_rate = params->rc_max_rate;
 
@@ -1590,6 +1591,67 @@ set_idr_frame_key_flag(
 }
 
 static int
+is_frame_extraction_done(coderctx_t *encoder_context,
+    txparams_t *p)
+{
+    if (p->tx_type != tx_extract_images) {
+        return 1;
+    }
+    if (p->extract_images_sz > 0) {
+        for (int i = 0; i < p->extract_images_sz; i++) {
+            const int64_t wanted = p->extract_images_ts[i];
+            if (wanted > encoder_context->video_last_pts_sent_encode) {
+                return 0;
+            }
+        }
+    } else {
+        // TBD - It's a little harder to check when extracting intervals, and
+        // there is no code that uses this right now
+        return 0;
+    }
+    return 1;
+}
+
+/*
+ * should_extract_frame checks when frames should be encoded when
+ * tx_extract_images is set. Either extracts given a list of of exact pts
+ * extract_images_ts, or at an interval extract_image_interval_ts.
+ */
+static int
+should_extract_frame(
+    coderctx_t *encoder_context,
+    txparams_t *p,
+    AVFrame *frame)
+{
+    if (p->tx_type != tx_extract_images) {
+        return 0;
+    }
+
+    if (p->extract_images_sz > 0) {
+        /* Extract specified frames */
+        for (int i = 0; i < p->extract_images_sz; i++) {
+            const int64_t wanted = p->extract_images_ts[i];
+            // Time is right && We didn't already extract for this time
+            if (frame->pts >= wanted && wanted > encoder_context->video_last_pts_sent_encode) {
+                return 1;
+            }
+        }
+    } else {
+        /* Wait for the specified interval between encoding images/frames */
+        int64_t interval = p->extract_image_interval_ts;
+        if (interval < 0) {
+            interval = DEFAULT_FRAME_INTERVAL_S *
+                encoder_context->codec_context[encoder_context->video_stream_index]->time_base.den;
+        }
+        const int64_t time_past = frame->pts - encoder_context->video_last_pts_sent_encode;
+        if (time_past >= interval || encoder_context->first_encoding_video_pts == -1) {
+            return 1;
+        }
+    }
+    return 0;
+}
+
+static int
 should_skip_encoding(
     coderctx_t *decoder_context,
     coderctx_t *encoder_context,
@@ -1663,21 +1725,9 @@ should_skip_encoding(
         }
     }
 
-    /* Wait for the specified interval between encoding images/frames */    
     if (p->tx_type == tx_extract_images) {
-        int64_t interval_ts = p->extract_image_interval_ts;
-        if (interval_ts < 0) {
-            interval_ts = DEFAULT_FRAME_INTERVAL_S * encoder_context->codec_context[
-                encoder_context->video_stream_index]->time_base.den;
-        }
-        const int64_t time_since_last_encode_ts = frame->pts -
-            encoder_context->video_last_pts_sent_encode;
-        if (encoder_context->first_encoding_video_pts != -1 &&
-            time_since_last_encode_ts < interval_ts) {
-            //elv_dbg("ENCODE skip frame pts=%" PRId64, frame->pts);
-            return 1;
-        }
-    }
+        return !should_extract_frame(encoder_context, p, frame);
+    }    
 
     return 0;
 }
@@ -1775,6 +1825,7 @@ encode_frame(
 
         // Special case to extract the first frame image
         if (params->tx_type == tx_extract_images &&
+            params->extract_images_sz == 0 &&
             encoder_context->first_encoding_video_pts == -1) {
             encoder_context->first_encoding_video_pts = frame->pts;
         }
@@ -2519,7 +2570,8 @@ transcode_video_func(
             elv_err("transcode_video packet is NULL");
             free(xc_frame);
             continue;
-        } 
+        }
+
         // Image extraction optimization is possible here: By skipping the
         // decoder unless the packet, 1) contains a keyframe, and 2) is not
         // within the specified interval after the last frame was extracted.
@@ -2529,6 +2581,14 @@ transcode_video_func(
         // else if (!(packet->flags & AV_PKT_FLAG_KEY) ...) {
         //     continue;
         // }
+        if (params->tx_type == tx_extract_images) {
+            if (is_frame_extraction_done(encoder_context, params)) {
+                elv_dbg("all frames already extracted");
+                av_packet_free(&packet);
+                free(xc_frame);
+                break;
+            }
+        }
 
         dump_packet(0, "IN THREAD", packet, xctx->debug_frame_level);
 
@@ -3266,6 +3326,8 @@ avpipe_xc(
         encoder_context->first_read_frame_pts[j] = -1;
     decoder_context->first_key_frame_pts = -1;
     decoder_context->mpegts_synced = 0;
+    encoder_context->video_last_pts_sent_encode = -1;
+    encoder_context->audio_last_pts_sent_encode = -1;
 
     int64_t video_last_dts = 0;
     int frames_read_past_duration = 0;
@@ -3760,9 +3822,27 @@ check_params(
         return eav_param;
     }
 
-    /* Infer rc parameters */
+    /*
+     * Automatically set encoder rate control parameters: Currently constrains
+     * bit rate over a 1 second interval (bufsize == maxrate) to the average bit
+     * rate (video_bitrate). For CRF/VBV (crf_str instead of video_bitrate),
+     * the RC paramters limit bitrate spikes.
+     *
+     * Increasing the bufsize may improve image quality at the cost of increased
+     * bitrate variation.
+     *
+     * References:
+     *   - https://trac.ffmpeg.org/wiki/Limiting%20the%20output%20bitrate
+     *   - https://trac.ffmpeg.org/wiki/Encode/H.264
+     */
     if (params->video_bitrate > 0) {
-        params->rc_max_rate = params->video_bitrate * 1;
+        if (params->rc_max_rate > 0) {
+            elv_warn("Replacing rc_max_rate %d with video_bitrate %d", params->rc_max_rate, params->video_bitrate);
+        }
+        params->rc_max_rate = params->video_bitrate;
+        if (params->rc_buffer_size > 0) {
+            elv_warn("Replacing rc_buffer_size %d with video_bitrate %d", params->rc_buffer_size, params->video_bitrate);
+        }
         params->rc_buffer_size = params->video_bitrate;
     }
 
@@ -3820,6 +3900,16 @@ check_params(
         params->n_audio < 2) {
         elv_err("Insufficient audio indexes, n_audio=%d, tx_type=%d", params->n_audio, params->tx_type);
         return eav_param;
+    }
+
+    if (params->extract_images_sz > 0) {
+        if (params->extract_image_interval_ts > 0) {
+            elv_err("Extract images either by interval or by frame list");
+            return eav_param;
+        } else if (params->extract_images_ts == NULL) {
+            elv_err("Frame list not set");
+            return eav_param;
+        }
     }
 
     return eav_success;
@@ -3928,7 +4018,8 @@ avpipe_init(
         "max_cll=\"%s\" "
         "master_display=\"%s\" "
         "filter_descriptor=\"%s\" "
-        "extract_image_interval_ts=%"PRId64" ",
+        "extract_image_interval_ts=%"PRId64" "
+        "extract_images_sz=%d ",
         params->stream_id, url,
         avpipe_version(),
         params->bypass_transcoding, params->skip_decoding,
@@ -3949,7 +4040,7 @@ avpipe_init(
         params->max_cll ? params->max_cll : "",
         params->master_display ? params->master_display : "",
         params->filter_descriptor,
-        params->extract_image_interval_ts);
+        params->extract_image_interval_ts, params->extract_images_sz);
     elv_log("AVPIPE XCPARAMS %s", buf);
 
     if ((rc = check_params(params)) != eav_success) {
@@ -4016,10 +4107,15 @@ avpipe_free_params(
     free(params->watermark_xloc);
     free(params->watermark_yloc);
     free(params->watermark_font_color);
-    free(params->watermark_shadow_color);
+    free(params->overlay_filename);
     free(params->watermark_overlay);
-    free(params->mux_spec);
+    free(params->watermark_shadow_color);
+    free(params->watermark_timecode);
+    free(params->max_cll);
+    free(params->master_display);
     free(params->filter_descriptor);
+    free(params->mux_spec);
+    free(params->extract_images_ts);
     free(params);
     txctx->params = NULL;
 }
@@ -4107,4 +4203,19 @@ avpipe_version()
     snprintf(version_str, sizeof(version_str), "%d.%d@%s", AVPIPE_MAJOR_VERSION, AVPIPE_MINOR_VERSION, VERSION);
 
     return version_str;
+}
+
+void
+init_extract_images(txparams_t *params, int size) {
+    params->extract_images_ts = calloc(size, sizeof(int64_t));
+    params->extract_images_sz = size;
+}
+
+void 
+set_extract_images(txparams_t *params, int index, int64_t value) {
+    if (index >= params->extract_images_sz) {
+        elv_err("set_extract_images - index out of bounds: %d", index);
+        return;
+    }
+    params->extract_images_ts[index] = value;
 }

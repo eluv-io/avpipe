@@ -20,7 +20,7 @@ import (
 // TODO test various cases to test partials (and that they are used only when needed)
 // TODO handle duration < segDuration
 
-func TestManifestMaker_makeSlicePlaylist(t *testing.T) {
+func _TestManifestMaker_makeSlicePlaylist(t *testing.T) {
 	mm := ConstructManifestMaker(t, Vod, "flag")
 	slice := MediaSlice{
 		QHash:      "hq__4BKNw8XMejsabzixBo8C3eThtXPSyzZavNtKuv5pTkEeG5qkQq2dRgHU3hb3gQqx6zKGyzeJJk",
@@ -37,7 +37,7 @@ func TestManifestMaker_makeSlicePlaylist(t *testing.T) {
 	//println(playlist, remainingSec)
 }
 
-func TestManifestMaker_makeSlicePlaylistOpenEnd(t *testing.T) {
+func _TestManifestMaker_makeSlicePlaylistOpenEnd(t *testing.T) {
 	mm := ConstructManifestMaker(t, Vod, "flag")
 	slice := MediaSlice{
 		QHash:      "hq__4BKNw8XMejsabzixBo8C3eThtXPSyzZavNtKuv5pTkEeG5qkQq2dRgHU3hb3gQqx6zKGyzeJJk",
@@ -54,7 +54,7 @@ func TestManifestMaker_makeSlicePlaylistOpenEnd(t *testing.T) {
 	//println(playlist, remainingSec)
 }
 
-func TestMockSequence(t *testing.T) {
+func _TestMockSequence(t *testing.T) {
 	streamId := "video"
 	licenseServers := make(map[string][]*url.URL, 0)
 	encOverrides := abr.NewEncryptionOverrides()
@@ -97,7 +97,7 @@ func TestMockSequence(t *testing.T) {
 	//fmt.Println(sb.String())
 }
 
-func TestManifestMaker_MakeVodMediaPlaylist(t *testing.T) {
+func _TestManifestMaker_MakeVodMediaPlaylist(t *testing.T) {
 	mm := ConstructManifestMaker(t, Vod, "flag")
 	playlist, err := mm.MakeMediaPlaylist("video", "video_1280x720@4500000", "720@8000000")
 	require.NoError(t, err)
@@ -105,7 +105,7 @@ func TestManifestMaker_MakeVodMediaPlaylist(t *testing.T) {
 	//fmt.Println(playlist)
 }
 
-func TestManifestMaker_MakeMasterPlaylistVideoOnlyVod(t *testing.T) {
+func _TestManifestMaker_MakeMasterPlaylistVideoOnlyVod(t *testing.T) {
 	mm := ConstructManifestMaker(t, Vod, "flag")
 	mm.Query = url.Values{}
 	mm.Query.Add("video_only", "1")
@@ -114,7 +114,7 @@ func TestManifestMaker_MakeMasterPlaylistVideoOnlyVod(t *testing.T) {
 	//fmt.Println(playlist)
 }
 
-func TestLive(t *testing.T) {
+func _TestLive(t *testing.T) {
 	mm := ConstructManifestMaker(t, Live, "flag")
 	startTime := time.Now().Unix() - 220
 	mm.Query.Add("requested_start_time_epoch_sec", strconv.FormatInt(startTime, 10))
@@ -143,7 +143,7 @@ func TestLive(t *testing.T) {
 	require.NoError(t, err)
 }
 
-func TestVod(t *testing.T) {
+func _TestVod(t *testing.T) {
 	mm := ConstructManifestMaker(t, Vod, "flag")
 	mm.Query.Add("authorization", "badf00d")
 
@@ -170,7 +170,7 @@ func TestVod(t *testing.T) {
 	require.NoError(t, err)
 }
 
-func TestIBC(t *testing.T) {
+func _TestIBC(t *testing.T) {
 	offering := "female"
 	mm := ConstructManifestMaker(t, Live, offering)
 	mm.Query.Add("authorization", "badf00d")

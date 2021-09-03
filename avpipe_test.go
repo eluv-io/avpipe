@@ -3,11 +3,11 @@ package avpipe_test
 import (
 	"encoding/json"
 	"fmt"
-	"github.com/qluvio/avpipe/avcmd/cmd"
 	"io"
 	"io/ioutil"
 	"math/big"
 	"os"
+	"path"
 	"path/filepath"
 	"runtime"
 	"strconv"
@@ -15,17 +15,19 @@ import (
 	"testing"
 	"time"
 
+	"github.com/qluvio/avpipe/avcmd/cmd"
+
 	"github.com/qluvio/avpipe"
 	log "github.com/qluvio/content-fabric/log"
 	"github.com/stretchr/testify/assert"
 )
 
 const baseOutPath = "test_out"
-
-//Implement AVPipeInputOpener
-type fileInputOpener struct {
-	url string
-}
+const debugFrameA = false
+const debugFrameV = false
+const h264Codec = "libx264"
+const videoErstePath = "media/ErsteChristmas.mp4"
+const videoRockyPath = "media/rocky.mp4"
 
 type testStatsInfo struct {
 	audioFramesRead         uint64
@@ -36,22 +38,30 @@ type testStatsInfo struct {
 
 var statsInfo testStatsInfo
 
-func (io *fileInputOpener) Open(fd int64, url string) (avpipe.InputHandler, error) {
-	f, err := os.Open(url)
-	if err != nil {
-		return nil, err
-	}
-
-	io.url = url
-	etxInput := &fileInput{
-		file: f,
-	}
-
-	return etxInput, nil
+// Implements avpipe.InputOpener
+type fileInputOpener struct {
+	t   *testing.T
+	url string
 }
 
-// Implement InputHandler
+func (fio *fileInputOpener) Open(_ int64, url string) (
+	handler avpipe.InputHandler, err error) {
+
+	var f *os.File
+	f, err = os.Open(url)
+	assert.NoError(fio.t, err)
+	if err != nil {
+		return
+	}
+
+	fio.url = url
+	handler = &fileInput{t: fio.t, file: f}
+	return
+}
+
+// Implements avpipe.InputHandler
 type fileInput struct {
+	t    *testing.T
 	file *os.File // Input file
 }
 
@@ -60,21 +70,25 @@ func (i *fileInput) Read(buf []byte) (int, error) {
 	if err == io.EOF {
 		return 0, nil
 	}
+	log.Debug("fileInput.Read error", err)
 	return n, err
 }
 
 func (i *fileInput) Seek(offset int64, whence int) (int64, error) {
-	n, err := i.file.Seek(int64(offset), int(whence))
+	n, err := i.file.Seek(offset, whence)
+	log.Debug("fileInput.Seek error", err)
 	return n, err
 }
 
 func (i *fileInput) Close() error {
 	err := i.file.Close()
+	log.Debug("fileInput.Close error", err)
 	return err
 }
 
 func (i *fileInput) Size() int64 {
 	fi, err := i.file.Stat()
+	assert.NoError(i.t, err)
 	if err != nil {
 		return -1
 	}
@@ -104,127 +118,140 @@ func (i *fileInput) Stat(statType avpipe.AVStatType, statArgs interface{}) error
 	return nil
 }
 
-//Implement AVPipeOutputOpener
+// Implements avpipe.OutputOpener
 type fileOutputOpener struct {
+	t   *testing.T
 	dir string
-	err error
 }
 
-func (oo *fileOutputOpener) Open(h, fd int64, stream_index, seg_index int, out_type avpipe.AVType) (avpipe.OutputHandler, error) {
+func (oo *fileOutputOpener) Open(_, _ int64, streamIndex, segIndex int,
+	pts int64, outType avpipe.AVType) (avpipe.OutputHandler, error) {
+
 	var filename string
 
-	switch out_type {
+	switch outType {
 	case avpipe.DASHVideoInit:
 		fallthrough
 	case avpipe.DASHAudioInit:
-		filename = fmt.Sprintf("./%s/init-stream%d.mp4", oo.dir, stream_index)
+		filename = fmt.Sprintf("./%s/init-stream%d.mp4", oo.dir, streamIndex)
 	case avpipe.DASHManifest:
 		filename = fmt.Sprintf("./%s/dash.mpd", oo.dir)
 	case avpipe.DASHVideoSegment:
 		fallthrough
 	case avpipe.DASHAudioSegment:
-		filename = fmt.Sprintf("./%s/chunk-stream%d-%05d.mp4", oo.dir, stream_index, seg_index)
+		filename = fmt.Sprintf("./%s/chunk-stream%d-%05d.mp4", oo.dir, streamIndex, segIndex)
 	case avpipe.HLSMasterM3U:
 		filename = fmt.Sprintf("./%s/master.m3u8", oo.dir)
 	case avpipe.HLSVideoM3U:
 		fallthrough
 	case avpipe.HLSAudioM3U:
-		filename = fmt.Sprintf("./%s/media_%d.m3u8", oo.dir, stream_index)
+		filename = fmt.Sprintf("./%s/media_%d.m3u8", oo.dir, streamIndex)
 	case avpipe.AES128Key:
 		filename = fmt.Sprintf("./%s/key.bin", oo.dir)
 	case avpipe.MP4Segment:
-		filename = fmt.Sprintf("./%s/segment-%d.mp4", oo.dir, seg_index)
+		filename = fmt.Sprintf("./%s/segment-%d.mp4", oo.dir, segIndex)
 	case avpipe.FMP4VideoSegment:
-		filename = fmt.Sprintf("./%s/vsegment-%d.mp4", oo.dir, seg_index)
+		filename = fmt.Sprintf("./%s/vsegment-%d.mp4", oo.dir, segIndex)
 	case avpipe.FMP4AudioSegment:
-		filename = fmt.Sprintf("./%s/asegment-%d.mp4", oo.dir, seg_index)
+		filename = fmt.Sprintf("./%s/asegment-%d.mp4", oo.dir, segIndex)
 	case avpipe.FrameImage:
-		filename = fmt.Sprintf("./%s/%d.jpeg", oo.dir, seg_index)
+		filename = fmt.Sprintf("./%s/%d.jpeg", oo.dir, pts)
 	}
 
 	f, err := os.OpenFile(filename, os.O_RDWR|os.O_CREATE|os.O_TRUNC, 0644)
+	assert.NoError(oo.t, err)
 	if err != nil {
-		oo.err = err
 		return nil, err
 	}
 
 	oh := &fileOutput{
-		url:          filename,
-		stream_index: stream_index,
-		seg_index:    seg_index,
-		file:         f}
-
+		t:           oo.t,
+		url:         filename,
+		streamIndex: streamIndex,
+		segIndex:    segIndex,
+		file:        f}
 	return oh, nil
 }
 
-//Implement AVPipeOutputOpener
+// Implements avpipe.OutputOpener
 type concurrentOutputOpener struct {
+	t   *testing.T
 	dir string
 }
 
-func (coo *concurrentOutputOpener) Open(h, fd int64, stream_index, seg_index int, out_type avpipe.AVType) (avpipe.OutputHandler, error) {
+func (coo *concurrentOutputOpener) Open(h, _ int64, streamIndex, segIndex int,
+	pts int64, outType avpipe.AVType) (oh avpipe.OutputHandler, err error) {
+
 	var filename string
 	dir := fmt.Sprintf("%s/O%d", coo.dir, h)
 
-	if _, err := os.Stat(dir); os.IsNotExist(err) {
-		os.Mkdir(dir, 0755)
+	if _, err = os.Stat(dir); os.IsNotExist(err) {
+		err = os.Mkdir(dir, 0755)
 	}
+	assert.NoError(coo.t, err)
 
-	switch out_type {
+	switch outType {
 	case avpipe.DASHVideoInit:
 		fallthrough
 	case avpipe.DASHAudioInit:
-		filename = fmt.Sprintf("./%s/init-stream%d.mp4", dir, stream_index)
+		filename = fmt.Sprintf("./%s/init-stream%d.mp4", dir, streamIndex)
 	case avpipe.DASHManifest:
 		filename = fmt.Sprintf("./%s/dash.mpd", dir)
 	case avpipe.DASHVideoSegment:
 		fallthrough
 	case avpipe.DASHAudioSegment:
-		filename = fmt.Sprintf("./%s/chunk-stream%d-%05d.mp4", dir, stream_index, seg_index)
+		filename = fmt.Sprintf("./%s/chunk-stream%d-%05d.mp4", dir, streamIndex, segIndex)
 	case avpipe.HLSMasterM3U:
 		filename = fmt.Sprintf("./%s/master.m3u8", dir)
 	case avpipe.HLSVideoM3U:
 		fallthrough
 	case avpipe.HLSAudioM3U:
-		filename = fmt.Sprintf("./%s/media_%d.m3u8", dir, stream_index)
+		filename = fmt.Sprintf("./%s/media_%d.m3u8", dir, streamIndex)
 	case avpipe.AES128Key:
 		filename = fmt.Sprintf("./%s/key.bin", dir)
+	case avpipe.FrameImage:
+		filename = fmt.Sprintf("./%s/%d.jpeg", dir, pts)
 	}
 
 	f, err := os.OpenFile(filename, os.O_RDWR|os.O_CREATE|os.O_TRUNC, 0644)
+	assert.NoError(coo.t, err)
 	if err != nil {
-		return nil, err
+		return
 	}
 
-	oh := &fileOutput{
-		url:          filename,
-		stream_index: stream_index,
-		seg_index:    seg_index,
-		file:         f}
-
-	return oh, nil
+	oh = &fileOutput{
+		t:           coo.t,
+		url:         filename,
+		streamIndex: streamIndex,
+		segIndex:    segIndex,
+		file:        f}
+	return
 }
 
 // Implement OutputHandler
 type fileOutput struct {
-	url          string
-	stream_index int
-	seg_index    int
-	file         *os.File
+	t           *testing.T
+	url         string
+	streamIndex int
+	segIndex    int
+	file        *os.File
 }
 
 func (o *fileOutput) Write(buf []byte) (int, error) {
 	n, err := o.file.Write(buf)
+	log.Debug("fileOutput.Write error", err)
 	return n, err
 }
 
 func (o *fileOutput) Seek(offset int64, whence int) (int64, error) {
 	n, err := o.file.Seek(offset, whence)
+	log.Debug("fileOutput.Seek error", err)
 	return n, err
 }
 
 func (o *fileOutput) Close() error {
 	err := o.file.Close()
+	log.Debug("fileOutput.Close error", err)
 	return err
 }
 
@@ -250,12 +277,25 @@ func (o fileOutput) Stat(avType avpipe.AVType, statType avpipe.AVStatType, statA
 	return nil
 }
 
-func TestSingleABRTranscode(t *testing.T) {
-	filename := "./media/ErsteChristmas.mp4"
-	outputDir := "SingleABRTranscode"
+func TestSegAudio(t *testing.T) {
+	in := videoErstePath
+	_, p := boilerplate(t, fn(), in)
+	p.Format = "fmp4-segment"
+	p.TxType = avpipe.TxAudio
+	boilerTx(t, p, in)
+}
 
-	setupLogging()
-	log.Info("STARTING TestSingleABRTranscode")
+func TestSegVideo(t *testing.T) {
+	in := videoErstePath
+	_, p := boilerplate(t, fn(), in)
+	p.Format = "fmp4-segment"
+	p.TxType = avpipe.TxVideo
+	boilerTx(t, p, in)
+}
+
+func TestSingleABRTranscode(t *testing.T) {
+	filename := videoErstePath
+	boilerplate(t, fn(), filename)
 
 	params := &avpipe.TxParams{
 		BypassTranscoding:  false,
@@ -266,45 +306,26 @@ func TestSingleABRTranscode(t *testing.T) {
 		VideoBitrate:       2560000,
 		AudioBitrate:       64000,
 		SampleRate:         44100,
-		CrfStr:             "23",
 		VideoSegDurationTs: 1001 * 60,
 		AudioSegDurationTs: 1001 * 60,
-		Ecodec:             "libx264",
+		Ecodec:             h264Codec,
 		EncHeight:          720,
 		EncWidth:           1280,
 		TxType:             avpipe.TxVideo,
 		StreamId:           -1,
 	}
-
-	// Create output directory if it doesn't exist
-	err := setupOutDir(outputDir)
-	if err != nil {
-		t.Fail()
-	}
-
-	avpipe.InitIOHandler(&fileInputOpener{url: filename}, &fileOutputOpener{dir: outputDir})
-
-	err = avpipe.Tx(params, filename, true)
-	if err != nil {
-		t.Fail()
-	}
+	setFastEncodeParams(params, false)
+	boilerTx(t, params, filename)
 
 	params.TxType = avpipe.TxAudio
 	params.Ecodec2 = "aac"
 	params.NumAudio = -1
-	err = avpipe.Tx(params, filename, false)
-	if err != nil {
-		t.Fail()
-	}
-
+	boilerTx(t, params, filename)
 }
 
 func TestSingleABRTranscodeByStreamId(t *testing.T) {
-	filename := "./media/ErsteChristmas.mp4"
-	outputDir := "SingleABRTranscodeByStreamId"
-
-	setupLogging()
-	log.Info("STARTING TestSingleABRTranscodeByStreamId")
+	filename := videoErstePath
+	boilerplate(t, fn(), filename)
 
 	params := &avpipe.TxParams{
 		BypassTranscoding:  false,
@@ -315,44 +336,25 @@ func TestSingleABRTranscodeByStreamId(t *testing.T) {
 		VideoBitrate:       2560000,
 		AudioBitrate:       64000,
 		SampleRate:         44100,
-		CrfStr:             "23",
 		VideoSegDurationTs: 1001 * 60,
 		AudioSegDurationTs: 1001 * 60,
-		Ecodec:             "libx264",
+		Ecodec:             h264Codec,
 		EncHeight:          720,
 		EncWidth:           1280,
 		StreamId:           1,
 		NumAudio:           -1,
 	}
-
-	// Create output directory if it doesn't exist
-	err := setupOutDir(outputDir)
-	if err != nil {
-		t.Fail()
-	}
-
-	avpipe.InitIOHandler(&fileInputOpener{url: filename}, &fileOutputOpener{dir: outputDir})
-
-	err = avpipe.Tx(params, filename, true)
-	if err != nil {
-		t.Fail()
-	}
+	setFastEncodeParams(params, false)
+	boilerTx(t, params, filename)
 
 	params.StreamId = 2
 	params.Ecodec2 = "aac"
-	err = avpipe.Tx(params, filename, false)
-	if err != nil {
-		t.Fail()
-	}
-
+	boilerTx(t, params, filename)
 }
 
 func TestSingleABRTranscodeWithWatermark(t *testing.T) {
-	filename := "./media/ErsteChristmas.mp4"
-	outputDir := "SingleABRTranscodeWithWatermark"
-
-	setupLogging()
-	log.Info("STARTING TestSingleABRTranscode")
+	filename := videoErstePath
+	boilerplate(t, fn(), filename)
 
 	params := &avpipe.TxParams{
 		BypassTranscoding:     false,
@@ -363,9 +365,8 @@ func TestSingleABRTranscodeWithWatermark(t *testing.T) {
 		VideoBitrate:          2560000,
 		AudioBitrate:          64000,
 		SampleRate:            44100,
-		CrfStr:                "23",
 		VideoSegDurationTs:    1001 * 60,
-		Ecodec:                "libx264",
+		Ecodec:                h264Codec,
 		EncHeight:             720,
 		EncWidth:              1280,
 		TxType:                avpipe.TxVideo,
@@ -378,32 +379,16 @@ func TestSingleABRTranscodeWithWatermark(t *testing.T) {
 		WatermarkShadowColor:  "white",
 		StreamId:              -1,
 	}
-
-	// Create output directory if it doesn't exist
-	err := setupOutDir(outputDir)
-	if err != nil {
-		t.Fail()
-	}
-
-	avpipe.InitIOHandler(&fileInputOpener{url: filename}, &fileOutputOpener{dir: outputDir})
-
-	err = avpipe.Tx(params, filename, true)
-	if err != nil {
-		t.Fail()
-	}
+	setFastEncodeParams(params, false)
+	boilerTx(t, params, filename)
 }
 
 func TestSingleABRTranscodeWithOverlayWatermark(t *testing.T) {
-	filename := "./media/ErsteChristmas.mp4"
-	outputDir := "SingleABRTranscodeWithOverlayWatermark"
-
-	setupLogging()
-	log.Info("STARTING TestSingleABRTranscode")
+	filename := videoErstePath
+	boilerplate(t, fn(), filename)
 
 	overlayImage, err := ioutil.ReadFile("./media/fox_watermark.png")
-	if err != nil {
-		t.Fail()
-	}
+	failNowOnError(t, err)
 
 	params := &avpipe.TxParams{
 		BypassTranscoding:    false,
@@ -414,9 +399,8 @@ func TestSingleABRTranscodeWithOverlayWatermark(t *testing.T) {
 		VideoBitrate:         2560000,
 		AudioBitrate:         64000,
 		SampleRate:           44100,
-		CrfStr:               "23",
 		VideoSegDurationTs:   1001 * 60,
-		Ecodec:               "libx264",
+		Ecodec:               h264Codec,
 		EncHeight:            720,
 		EncWidth:             1280,
 		TxType:               avpipe.TxVideo,
@@ -427,32 +411,13 @@ func TestSingleABRTranscodeWithOverlayWatermark(t *testing.T) {
 		WatermarkOverlayType: avpipe.PngImage,
 		StreamId:             -1,
 	}
-
-	// Create output directory if it doesn't exist
-	err = setupOutDir(outputDir)
-	if err != nil {
-		t.Fail()
-	}
-
-	avpipe.InitIOHandler(&fileInputOpener{url: filename}, &fileOutputOpener{dir: outputDir})
-
-	err = avpipe.Tx(params, filename, true)
-	if err != nil {
-		t.Fail()
-	}
+	setFastEncodeParams(params, false)
+	boilerTx(t, params, filename)
 }
 
-// This test uses the following new APIs
-// - to obtain a handle of running session:
-//   - TxInit()
-// - to run the tx session
-//   - TxRun()
 func TestV2SingleABRTranscode(t *testing.T) {
-	filename := "./media/ErsteChristmas.mp4"
-	outputDir := "V2SingleABRTranscode"
-
-	setupLogging()
-	log.Info("STARTING TestV2SingleABRTranscode")
+	filename := videoErstePath
+	boilerplate(t, fn(), filename)
 
 	params := &avpipe.TxParams{
 		BypassTranscoding:  false,
@@ -463,47 +428,27 @@ func TestV2SingleABRTranscode(t *testing.T) {
 		VideoBitrate:       2560000,
 		AudioBitrate:       64000,
 		SampleRate:         44100,
-		CrfStr:             "23",
 		VideoSegDurationTs: 1001 * 60,
 		AudioSegDurationTs: 1001 * 60,
-		Ecodec:             "libx264",
+		Ecodec:             h264Codec,
 		EncHeight:          720,
 		EncWidth:           1280,
 		TxType:             avpipe.TxVideo,
 		StreamId:           -1,
 	}
-
-	// Create output directory if it doesn't exist
-	err := setupOutDir(outputDir)
-	if err != nil {
-		t.Fail()
-	}
-
-	avpipe.InitIOHandler(&fileInputOpener{url: filename}, &fileOutputOpener{dir: outputDir})
-
-	handle, err := avpipe.TxInit(params, filename, true)
-	assert.NoError(t, err)
-	assert.Equal(t, true, handle > 0)
-	err = avpipe.TxRun(handle)
-	assert.NoError(t, err)
+	setFastEncodeParams(params, false)
+	boilerTx2(t, params, filename)
 
 	params.TxType = avpipe.TxAudio
 	params.Ecodec2 = "aac"
 	params.NumAudio = 1
 	params.AudioIndex[0] = 1
-	handle, err = avpipe.TxInit(params, filename, true)
-	assert.NoError(t, err)
-	assert.Equal(t, true, handle > 0)
-	err = avpipe.TxRun(handle)
-	assert.NoError(t, err)
+	boilerTx2(t, params, filename)
 }
 
 func TestV2SingleABRTranscodeIOHandler(t *testing.T) {
-	filename := "./media/ErsteChristmas.mp4"
-	outputDir := "V2SingleABRTranscodeIOHandler"
-
-	setupLogging()
-	log.Info("STARTING TestV2SingleABRTranscode")
+	filename := videoErstePath
+	boilerplate(t, fn(), filename)
 
 	params := &avpipe.TxParams{
 		BypassTranscoding:  false,
@@ -514,49 +459,28 @@ func TestV2SingleABRTranscodeIOHandler(t *testing.T) {
 		VideoBitrate:       2560000,
 		AudioBitrate:       64000,
 		SampleRate:         44100,
-		CrfStr:             "23",
 		VideoSegDurationTs: 1001 * 60,
 		AudioSegDurationTs: 1001 * 60,
-		Ecodec:             "libx264",
+		Ecodec:             h264Codec,
 		EncHeight:          720,
 		EncWidth:           1280,
 		TxType:             avpipe.TxVideo,
 		StreamId:           -1,
 	}
+	setFastEncodeParams(params, false)
 
-	// Create output directory if it doesn't exist
-	err := setupOutDir(outputDir)
-	if err != nil {
-		t.Fail()
-	}
-
-	avpipe.InitUrlIOHandler(filename, &fileInputOpener{url: filename}, &fileOutputOpener{dir: outputDir})
-
-	handle, err := avpipe.TxInit(params, filename, true)
-	assert.NoError(t, err)
-	assert.Equal(t, true, handle > 0)
-	err = avpipe.TxRun(handle)
-	assert.NoError(t, err)
-
-	avpipe.InitUrlIOHandler(filename, &fileInputOpener{url: filename}, &fileOutputOpener{dir: outputDir})
+	boilerTx2(t, params, filename)
 
 	params.TxType = avpipe.TxAudio
 	params.Ecodec2 = "aac"
 	params.NumAudio = 1
 	params.AudioIndex[0] = 1
-	handle, err = avpipe.TxInit(params, filename, true)
-	assert.NoError(t, err)
-	assert.Equal(t, true, handle > 0)
-	err = avpipe.TxRun(handle)
-	assert.NoError(t, err)
+	boilerTx2(t, params, filename)
 }
 
 func TestV2SingleABRTranscodeCancelling(t *testing.T) {
-	filename := "./media/ErsteChristmas.mp4"
-	outputDir := "V2SingleABRTranscodeCancelling"
-
-	setupLogging()
-	log.Info("STARTING TestV2SingleABRTranscodeCancelling")
+	filename := videoErstePath
+	boilerplate(t, fn(), filename)
 
 	params := &avpipe.TxParams{
 		BypassTranscoding:  false,
@@ -567,68 +491,60 @@ func TestV2SingleABRTranscodeCancelling(t *testing.T) {
 		VideoBitrate:       2560000,
 		AudioBitrate:       64000,
 		SampleRate:         44100,
-		CrfStr:             "23",
 		VideoSegDurationTs: 1001 * 60,
 		AudioSegDurationTs: 1001 * 60,
-		Ecodec:             "libx264",
+		Ecodec:             h264Codec,
 		EncHeight:          720,
 		EncWidth:           1280,
 		TxType:             avpipe.TxVideo,
 		StreamId:           -1,
 	}
+	setFastEncodeParams(params, false)
+	params.EncHeight = 360 // slow down a bit to allow for the cancel
+	params.EncWidth = 640
 
-	// Create output directory if it doesn't exist
-	err := setupOutDir(outputDir)
-	if err != nil {
-		t.Fail()
-	}
-
-	avpipe.InitIOHandler(&fileInputOpener{url: filename}, &fileOutputOpener{dir: outputDir})
-
-	handle, err := avpipe.TxInit(params, filename, true)
-	assert.NoError(t, err)
-	assert.Equal(t, true, handle > 0)
+	handle, err := avpipe.TxInit(params, filename, debugFrameV)
+	failNowOnError(t, err)
+	assert.Greater(t, handle, int32(0))
 	go func(handle int32) {
-		// Wait for 3 sec the transcoding starts, then cancel it.
-		time.Sleep(3 * time.Second)
+		// Wait for 2 sec the transcoding starts, then cancel it.
+		time.Sleep(2 * time.Second)
 		err := avpipe.TxCancel(handle)
 		assert.NoError(t, err)
 	}(handle)
 	err = avpipe.TxRun(handle)
 	assert.Error(t, err)
 
+	// FIXME: Note that TxCancel does not seem to actually stop the transcoding job
+
 	params.TxType = avpipe.TxAudio
 	params.Ecodec2 = "aac"
 	params.NumAudio = 1
 	params.AudioIndex[0] = 1
-	handle, err = avpipe.TxInit(params, filename, true)
+	handleA, err := avpipe.TxInit(params, filename, debugFrameA)
 	assert.NoError(t, err)
-	assert.Equal(t, true, handle > 0)
-	err = avpipe.TxCancel(handle)
+	assert.Greater(t, handleA, int32(0))
+	err = avpipe.TxCancel(handleA)
 	assert.NoError(t, err)
-	err = avpipe.TxRun(handle)
+	err = avpipe.TxRun(handleA)
 	assert.Error(t, err)
 }
 
-func doTranscode(t *testing.T, p *avpipe.TxParams, nThreads int, filename string, reportFailure string) {
-	outputDir := "O"
-	// Create output directory if it doesn't exist
-	err := setupOutDir(outputDir)
-	if err != nil {
-		t.Fail()
-	}
+func doTranscode(t *testing.T, p *avpipe.TxParams, nThreads int, outputDir,
+	filename string, reportFailure string) {
 
-	avpipe.InitIOHandler(&fileInputOpener{url: filename}, &concurrentOutputOpener{dir: outputDir})
+	avpipe.InitIOHandler(&fileInputOpener{url: filename},
+		&concurrentOutputOpener{dir: outputDir})
 
 	done := make(chan struct{})
 	for i := 0; i < nThreads; i++ {
 		go func(params *avpipe.TxParams, filename string) {
-			err := avpipe.Tx(params, filename, false)
+			err := avpipe.Tx(params, filename, debugFrameV)
 			done <- struct{}{} // Signal the main goroutine
 			if err != nil && reportFailure == "" {
-				t.Fail()
+				failNowOnError(t, err)
 			} else if err != nil {
-				fmt.Printf("%s\n", reportFailure)
+				fmt.Printf("Ignoring error: %s\n", reportFailure)
 				log.Error("doTranscode failed", err)
 			}
 		}(p, filename)
@@ -640,11 +556,9 @@ func doTranscode(t *testing.T, p *avpipe.TxParams, nThreads int, filename string
 }
 
 func TestNvidiaABRTranscode(t *testing.T) {
+	outputDir, _ := boilerplate(t, fn(), "")
+	filename := videoRockyPath
 	nThreads := 10
-	filename := "./media/rocky.mp4"
-
-	setupLogging()
-	log.Info("STARTING TestNvidiaABRTranscode")
 
 	params := &avpipe.TxParams{
 		Format:             "hls",
@@ -654,7 +568,6 @@ func TestNvidiaABRTranscode(t *testing.T) {
 		VideoBitrate:       2560000,
 		AudioBitrate:       64000,
 		SampleRate:         44100,
-		CrfStr:             "23",
 		VideoSegDurationTs: 1001 * 60,
 		AudioSegDurationTs: 1001 * 60,
 		Ecodec:             "h264_nvenc",
@@ -663,16 +576,14 @@ func TestNvidiaABRTranscode(t *testing.T) {
 		TxType:             avpipe.TxVideo,
 		StreamId:           -1,
 	}
-
-	doTranscode(t, params, nThreads, filename, "H264_NVIDIA encoder might not be enabled or hardware might not be available")
+	setFastEncodeParams(params, false)
+	doTranscode(t, params, nThreads, outputDir, filename, "H264_NVIDIA encoder might not be enabled or hardware might not be available")
 }
 
 func TestConcurrentABRTranscode(t *testing.T) {
+	outputDir, _ := boilerplate(t, fn(), "")
+	filename := videoRockyPath
 	nThreads := 10
-	filename := "./media/rocky.mp4"
-
-	setupLogging()
-	log.Info("STARTING TestConcurrentABRTranscode")
 
 	params := &avpipe.TxParams{
 		Format:             "hls",
@@ -682,24 +593,20 @@ func TestConcurrentABRTranscode(t *testing.T) {
 		VideoBitrate:       2560000,
 		AudioBitrate:       64000,
 		SampleRate:         44100,
-		CrfStr:             "23",
 		VideoSegDurationTs: 1001 * 60,
-		Ecodec:             "libx264",
+		Ecodec:             h264Codec,
 		EncHeight:          720,
 		EncWidth:           1280,
 		TxType:             avpipe.TxVideo,
 		StreamId:           -1,
 	}
-
-	doTranscode(t, params, nThreads, filename, "")
+	setFastEncodeParams(params, false)
+	doTranscode(t, params, nThreads, outputDir, filename, "")
 }
 
 func TestAAC2AACMezMaker(t *testing.T) {
 	filename := "./media/bond-seg1.aac"
-	outputDir := "AAC2AAC"
-
-	setupLogging()
-	log.Info("STARTING TestAAC2AACMezMaker")
+	outputDir, _ := boilerplate(t, fn(), filename)
 
 	params := &avpipe.TxParams{
 		BypassTranscoding:   false,
@@ -718,41 +625,15 @@ func TestAAC2AACMezMaker(t *testing.T) {
 		StreamId:            -1,
 		SyncAudioToStreamId: -1,
 	}
-
-	// Create output directory if it doesn't exist
-	err := setupOutDir(outputDir)
-	if err != nil {
-		t.Fail()
-	}
-
-	avpipe.InitIOHandler(&fileInputOpener{url: filename}, &fileOutputOpener{dir: outputDir})
-
-	avpipe.Tx(params, filename, false)
+	boilerTx(t, params, filename)
 
 	mezFile := fmt.Sprintf("%s/asegment-1.mp4", outputDir)
-	// Now probe the generated files
-	probeInfo, err := avpipe.Probe(mezFile, true)
-	if err != nil {
-		t.Error(err)
-	}
-
-	timebase := *probeInfo.StreamInfo[0].TimeBase.Denom()
-	if timebase.Cmp(big.NewInt(48000)) != 0 {
-		t.Error("Unexpected TimeBase", probeInfo.StreamInfo[0].TimeBase)
-	}
-
-	sampleRate := probeInfo.StreamInfo[0].SampleRate
-	if sampleRate != 48000 {
-		t.Error("Unexpected TimeBase", probeInfo.StreamInfo[0].TimeBase)
-	}
+	boilerProbe(t, mezFile, 48000, 48000, "")
 }
 
 func TestAC3TsAC3MezMaker(t *testing.T) {
 	filename := "./media/FS1-19-10-15-2-min.ts"
-	outputDir := "AC3TsAC3Mez"
-
-	setupLogging()
-	log.Info("STARTING TestAC3TsAC3MezMaker")
+	outputDir, _ := boilerplate(t, fn(), filename)
 
 	params := &avpipe.TxParams{
 		BypassTranscoding:   false,
@@ -772,38 +653,16 @@ func TestAC3TsAC3MezMaker(t *testing.T) {
 		StreamId:            -1,
 		SyncAudioToStreamId: -1,
 	}
-
 	params.AudioIndex[0] = 0
-
-	// Create output directory if it doesn't exist
-	err := setupOutDir(outputDir)
-	if err != nil {
-		t.Fail()
-	}
-
-	avpipe.InitIOHandler(&fileInputOpener{url: filename}, &fileOutputOpener{dir: outputDir})
-
-	err = avpipe.Tx(params, filename, false)
-	assert.NoError(t, err)
+	boilerTx(t, params, filename)
 
 	mezFile := fmt.Sprintf("%s/asegment-1.mp4", outputDir)
-	// Now probe the generated files
-	probeInfo, err := avpipe.Probe(mezFile, true)
-	assert.NoError(t, err)
-
-	timebase := *probeInfo.StreamInfo[0].TimeBase.Denom()
-	assert.Equal(t, true, timebase.Cmp(big.NewInt(48000)) == 0)
-
-	sampleRate := probeInfo.StreamInfo[0].SampleRate
-	assert.Equal(t, 48000, sampleRate)
+	boilerProbe(t, mezFile, 48000, 48000, "")
 }
 
 func TestAC3TsAACMezMaker(t *testing.T) {
 	filename := "./media/FS1-19-10-15-2-min.ts"
-	outputDir := "AC3TsACCMez"
-
-	setupLogging()
-	log.Info("STARTING TestAC3TsAACMezMaker")
+	outputDir, _ := boilerplate(t, fn(), filename)
 
 	params := &avpipe.TxParams{
 		BypassTranscoding:   false,
@@ -813,7 +672,7 @@ func TestAC3TsAACMezMaker(t *testing.T) {
 		StartSegmentStr:     "1",
 		SegDuration:         "30",
 		Ecodec2:             "aac",
-		Dcodec:              "ac3",
+		Dcodec2:             "ac3",
 		AudioBitrate:        128000,
 		SampleRate:          48000,
 		EncHeight:           -1,
@@ -823,47 +682,16 @@ func TestAC3TsAACMezMaker(t *testing.T) {
 		StreamId:            -1,
 		SyncAudioToStreamId: -1,
 	}
-
 	params.AudioIndex[0] = 0
-
-	// Create output directory if it doesn't exist
-	err := setupOutDir(outputDir)
-	if err != nil {
-		t.Fail()
-	}
-
-	avpipe.InitIOHandler(&fileInputOpener{url: filename}, &fileOutputOpener{dir: outputDir})
-
-	err = avpipe.Tx(params, filename, false)
-	if err != nil {
-		t.Fail()
-	}
+	boilerTx(t, params, filename)
 
 	mezFile := fmt.Sprintf("%s/asegment-1.mp4", outputDir)
-	// Now probe the generated files
-	probeInfo, err := avpipe.Probe(mezFile, true)
-	if err != nil {
-		t.Error(err)
-	}
-
-	timebase := *probeInfo.StreamInfo[0].TimeBase.Denom()
-	if timebase.Cmp(big.NewInt(48000)) != 0 {
-		t.Error("Unexpected TimeBase", probeInfo.StreamInfo[0].TimeBase)
-	}
-
-	sampleRate := probeInfo.StreamInfo[0].SampleRate
-	if sampleRate != 48000 {
-		t.Error("Unexpected SampleRate", probeInfo.StreamInfo[0].SampleRate)
-	}
+	boilerProbe(t, mezFile, 48000, 48000, "")
 }
 
 func TestMP2TsAACMezMaker(t *testing.T) {
 	filename := "./media/FS1-19-10-15-2-min.ts"
-	//filename := "./media/FS1-15-MP2.mp2"
-	outputDir := "MP2TsACCMez"
-
-	setupLogging()
-	log.Info("STARTING TestMP2TsAACMezMaker")
+	outputDir, _ := boilerplate(t, fn(), filename)
 
 	params := &avpipe.TxParams{
 		BypassTranscoding:   false,
@@ -873,7 +701,7 @@ func TestMP2TsAACMezMaker(t *testing.T) {
 		StartSegmentStr:     "1",
 		SegDuration:         "30",
 		Ecodec2:             "mp2",
-		Dcodec:              "mp2",
+		Dcodec2:             "mp2",
 		AudioBitrate:        128000,
 		SampleRate:          48000,
 		EncHeight:           -1,
@@ -883,46 +711,16 @@ func TestMP2TsAACMezMaker(t *testing.T) {
 		StreamId:            -1,
 		SyncAudioToStreamId: -1,
 	}
-
 	params.AudioIndex[0] = 1
-
-	// Create output directory if it doesn't exist
-	err := setupOutDir(outputDir)
-	if err != nil {
-		t.Fail()
-	}
-
-	avpipe.InitIOHandler(&fileInputOpener{url: filename}, &fileOutputOpener{dir: outputDir})
-
-	err = avpipe.Tx(params, filename, false)
-	if err != nil {
-		t.Fail()
-	}
+	boilerTx(t, params, filename)
 
 	mezFile := fmt.Sprintf("%s/asegment-1.mp4", outputDir)
-	// Now probe the generated files
-	probeInfo, err := avpipe.Probe(mezFile, true)
-	if err != nil {
-		t.Error(err)
-	}
-
-	timebase := *probeInfo.StreamInfo[0].TimeBase.Denom()
-	if timebase.Cmp(big.NewInt(48000)) != 0 {
-		t.Error("Unexpected TimeBase", probeInfo.StreamInfo[0].TimeBase)
-	}
-
-	sampleRate := probeInfo.StreamInfo[0].SampleRate
-	if sampleRate != 48000 {
-		t.Error("Unexpected SampleRate", probeInfo.StreamInfo[0].SampleRate)
-	}
+	boilerProbe(t, mezFile, 48000, 48000, "")
 }
 
 func TestDownmix2AACMezMaker(t *testing.T) {
 	filename := "./media/BOND23-CLIP-downmix-2min.mov"
-	outputDir := "Downmix2ACCMez"
-
-	setupLogging()
-	log.Info("STARTING TestDownmix2AACMezMaker")
+	outputDir, _ := boilerplate(t, fn(), filename)
 
 	params := &avpipe.TxParams{
 		BypassTranscoding:   false,
@@ -932,7 +730,7 @@ func TestDownmix2AACMezMaker(t *testing.T) {
 		StartSegmentStr:     "1",
 		SegDuration:         "30",
 		Ecodec2:             "aac",
-		Dcodec:              "pcm_s24le",
+		Dcodec2:             "pcm_s24le",
 		AudioBitrate:        128000,
 		SampleRate:          48000,
 		EncHeight:           -1,
@@ -942,46 +740,16 @@ func TestDownmix2AACMezMaker(t *testing.T) {
 		StreamId:            -1,
 		SyncAudioToStreamId: -1,
 	}
-
 	params.AudioIndex[0] = 6
-
-	// Create output directory if it doesn't exist
-	err := setupOutDir(outputDir)
-	if err != nil {
-		t.Fail()
-	}
-
-	avpipe.InitIOHandler(&fileInputOpener{url: filename}, &fileOutputOpener{dir: outputDir})
-
-	err = avpipe.Tx(params, filename, false)
-	if err != nil {
-		t.Fail()
-	}
+	boilerTx(t, params, filename)
 
 	mezFile := fmt.Sprintf("%s/asegment-1.mp4", outputDir)
-	// Now probe the generated files
-	probeInfo, err := avpipe.Probe(mezFile, true)
-	if err != nil {
-		t.Error(err)
-	}
-
-	timebase := *probeInfo.StreamInfo[0].TimeBase.Denom()
-	if timebase.Cmp(big.NewInt(48000)) != 0 {
-		t.Error("Unexpected TimeBase", probeInfo.StreamInfo[0].TimeBase)
-	}
-
-	sampleRate := probeInfo.StreamInfo[0].SampleRate
-	if sampleRate != 48000 {
-		t.Error("Unexpected sample rate", probeInfo.StreamInfo[0].SampleRate)
-	}
+	boilerProbe(t, mezFile, 48000, 48000, "")
 }
 
 func Test2Mono1Stereo(t *testing.T) {
 	filename := "./media/AGAIG-clip-2mono.mp4"
-	outputDir := "2Mono1Stereo"
-
-	setupLogging()
-	log.Info("STARTING Test2Mono1Stereo")
+	outputDir, _ := boilerplate(t, fn(), filename)
 
 	params := &avpipe.TxParams{
 		BypassTranscoding:   false,
@@ -991,56 +759,27 @@ func Test2Mono1Stereo(t *testing.T) {
 		StartSegmentStr:     "1",
 		SegDuration:         "30",
 		Ecodec2:             "aac",
-		Dcodec:              "",
+		Dcodec2:             "",
 		TxType:              avpipe.TxAudioJoin,
 		NumAudio:            2,
 		StreamId:            -1,
 		SyncAudioToStreamId: -1,
 	}
-
 	params.AudioIndex[0] = 1
 	params.AudioIndex[1] = 2
-
-	// Create output directory if it doesn't exist
-	err := setupOutDir(outputDir)
-	if err != nil {
-		t.Fail()
-	}
-
-	avpipe.InitIOHandler(&fileInputOpener{url: filename}, &fileOutputOpener{dir: outputDir})
-
-	err = avpipe.Tx(params, filename, true)
-	if err != nil {
-		t.Fail()
-	}
+	boilerTx(t, params, filename)
 
 	for i := 1; i <= 2; i++ {
 		mezFile := fmt.Sprintf("%s/asegment-%d.mp4", outputDir, i)
-		// Now probe the generated files
-		probeInfo, err := avpipe.Probe(mezFile, true)
-		if err != nil {
-			t.Error(err)
-		}
-
-		timebase := *probeInfo.StreamInfo[0].TimeBase.Denom()
-		if timebase.Cmp(big.NewInt(48000)) != 0 {
-			t.Error("Unexpected TimeBase", probeInfo.StreamInfo[0].TimeBase)
-		}
-
-		if avpipe.ChannelLayoutName(probeInfo.StreamInfo[0].Channels,
-			probeInfo.StreamInfo[0].ChannelLayout) != "stereo" {
-			t.Error("Unexpected channel layout", probeInfo.StreamInfo[0].ChannelLayout)
-		}
+		probeInfo := boilerProbe(t, mezFile, 48000, 48000, "")
+		si := probeInfo.StreamInfo[0]
+		assert.Equal(t, "stereo", avpipe.ChannelLayoutName(si.Channels, si.ChannelLayout))
 	}
-
 }
 
 func Test2Channel1Stereo(t *testing.T) {
 	filename := "./media/multichannel_audio_clip.mov"
-	outputDir := "2Channel1Stereo"
-
-	setupLogging()
-	log.Info("STARTING Test2Channel1Stereo")
+	outputDir, _ := boilerplate(t, fn(), filename)
 
 	params := &avpipe.TxParams{
 		BypassTranscoding:   false,
@@ -1050,56 +789,28 @@ func Test2Channel1Stereo(t *testing.T) {
 		StartSegmentStr:     "1",
 		SegDuration:         "30",
 		Ecodec2:             "aac",
-		Dcodec:              "",
+		Dcodec2:             "",
 		TxType:              avpipe.TxAudioPan,
 		NumAudio:            1,
 		StreamId:            -1,
 		SyncAudioToStreamId: -1,
 		FilterDescriptor:    "[0:1]pan=stereo|c0<c1+0.707*c2|c1<c2+0.707*c1[aout]",
 	}
-
 	params.AudioIndex[0] = 1
-
-	// Create output directory if it doesn't exist
-	err := setupOutDir(outputDir)
-	if err != nil {
-		t.Fail()
-	}
-
-	avpipe.InitIOHandler(&fileInputOpener{url: filename}, &fileOutputOpener{dir: outputDir})
-
-	err = avpipe.Tx(params, filename, true)
-	if err != nil {
-		t.Fail()
-	}
+	boilerTx(t, params, filename)
 
 	for i := 1; i <= 2; i++ {
 		mezFile := fmt.Sprintf("%s/asegment-%d.mp4", outputDir, i)
-		// Now probe the generated files
-		probeInfo, err := avpipe.Probe(mezFile, true)
-		if err != nil {
-			t.Error(err)
-		}
-
-		timebase := *probeInfo.StreamInfo[0].TimeBase.Denom()
-		if timebase.Cmp(big.NewInt(48000)) != 0 {
-			t.Error("Unexpected TimeBase", probeInfo.StreamInfo[0].TimeBase)
-		}
-
-		if avpipe.ChannelLayoutName(probeInfo.StreamInfo[0].Channels,
-			probeInfo.StreamInfo[0].ChannelLayout) != "stereo" {
-			t.Error("Unexpected channel layout", probeInfo.StreamInfo[0].ChannelLayout)
-		}
+		probeInfo := boilerProbe(t, mezFile, 48000, 48000, "")
+		si := probeInfo.StreamInfo[0]
+		assert.Equal(t, "stereo", avpipe.ChannelLayoutName(si.Channels, si.ChannelLayout))
 	}
 }
 
 // Timebase of BOB923HL_clip_timebase_1001_60000.MXF is 1001/60000
 func TestIrregularTsMezMaker_1001_60000(t *testing.T) {
 	filename := "./media/BOB923HL_clip_timebase_1001_60000.MXF"
-	outputDir := "IrregularTsMezMaker_1001_60000"
-
-	setupLogging()
-	log.Info("STARTING TestIrregularTsMezMaker_1001_60000")
+	outputDir, _ := boilerplate(t, fn(), filename)
 
 	params := &avpipe.TxParams{
 		BypassTranscoding:   false,
@@ -1108,7 +819,7 @@ func TestIrregularTsMezMaker_1001_60000(t *testing.T) {
 		DurationTs:          -1,
 		StartSegmentStr:     "1",
 		SegDuration:         "30.03",
-		Ecodec:              "libx264",
+		Ecodec:              h264Codec,
 		Dcodec:              "",
 		EncHeight:           720,
 		EncWidth:            1280,
@@ -1117,47 +828,19 @@ func TestIrregularTsMezMaker_1001_60000(t *testing.T) {
 		SyncAudioToStreamId: -1,
 		ForceKeyInt:         120,
 	}
-
-	// Create output directory if it doesn't exist
-	err := setupOutDir(outputDir)
-	if err != nil {
-		t.Fail()
-	}
-
-	avpipe.InitIOHandler(&fileInputOpener{url: filename}, &fileOutputOpener{dir: outputDir})
-
-	err = avpipe.Tx(params, filename, false)
-	if err != nil {
-		t.Fail()
-	}
+	setFastEncodeParams(params, false)
+	boilerTx(t, params, filename)
 
 	for i := 1; i <= 4; i++ {
 		mezFile := fmt.Sprintf("%s/vsegment-%d.mp4", outputDir, i)
-		// Now probe the generated files
-		probeInfo, err := avpipe.Probe(mezFile, true)
-		if err != nil {
-			t.Error(err)
-		}
-
-		timebase := *probeInfo.StreamInfo[0].TimeBase.Denom()
-		if timebase.Cmp(big.NewInt(60000)) != 0 {
-			t.Error("Unexpected TimeBase", probeInfo.StreamInfo[0].TimeBase)
-		}
-
-		if avpipe.GetPixelFormatName(probeInfo.StreamInfo[0].PixFmt) != "yuv420p" {
-			t.Error("Unexpected pixel format", probeInfo.StreamInfo[0].PixFmt)
-		}
+		boilerProbe(t, mezFile, 60000, 0, "yuv420p")
 	}
-
 }
 
 // Timebase of Rigify-2min is 1/24
 func TestIrregularTsMezMaker_1_24(t *testing.T) {
 	filename := "./media/Rigify-2min.mp4"
-	outputDir := "IrregularTsMezMaker_1_24"
-
-	setupLogging()
-	log.Info("STARTING TestIrregularTsMezMaker_1_24")
+	outputDir, _ := boilerplate(t, fn(), filename)
 
 	params := &avpipe.TxParams{
 		BypassTranscoding:   false,
@@ -1166,7 +849,7 @@ func TestIrregularTsMezMaker_1_24(t *testing.T) {
 		DurationTs:          -1,
 		StartSegmentStr:     "1",
 		SegDuration:         "30",
-		Ecodec:              "libx264",
+		Ecodec:              h264Codec,
 		Dcodec:              "",
 		EncHeight:           720,
 		EncWidth:            1280,
@@ -1175,47 +858,19 @@ func TestIrregularTsMezMaker_1_24(t *testing.T) {
 		SyncAudioToStreamId: -1,
 		ForceKeyInt:         48,
 	}
-
-	// Create output directory if it doesn't exist
-	err := setupOutDir(outputDir)
-	if err != nil {
-		t.Fail()
-	}
-
-	avpipe.InitIOHandler(&fileInputOpener{url: filename}, &fileOutputOpener{dir: outputDir})
-
-	err = avpipe.Tx(params, filename, false)
-	if err != nil {
-		t.Fail()
-	}
+	setFastEncodeParams(params, false)
+	boilerTx(t, params, filename)
 
 	for i := 1; i <= 4; i++ {
 		mezFile := fmt.Sprintf("%s/vsegment-%d.mp4", outputDir, i)
-		// Now probe the generated files
-		probeInfo, err := avpipe.Probe(mezFile, true)
-		if err != nil {
-			t.Error(err)
-		}
-
-		timebase := *probeInfo.StreamInfo[0].TimeBase.Denom()
-		if timebase.Cmp(big.NewInt(12288)) != 0 {
-			t.Error("Unexpected TimeBase", probeInfo.StreamInfo[0].TimeBase)
-		}
-
-		if avpipe.GetPixelFormatName(probeInfo.StreamInfo[0].PixFmt) != "yuv420p" {
-			t.Error("Unexpected pixel format", probeInfo.StreamInfo[0].PixFmt)
-		}
+		boilerProbe(t, mezFile, 12288, 0, "yuv420p")
 	}
-
 }
 
 // Timebase of Rigify-2min is 1/10000
 func TestIrregularTsMezMaker_1_10000(t *testing.T) {
 	filename := "./media/Rigify-2min-10000ts.mp4"
-	outputDir := "IrregularTsMezMaker_1_10000"
-
-	setupLogging()
-	log.Info("STARTING TestIrregularTsMezMaker_1_10000")
+	outputDir, _ := boilerplate(t, fn(), filename)
 
 	params := &avpipe.TxParams{
 		BypassTranscoding:   false,
@@ -1224,7 +879,7 @@ func TestIrregularTsMezMaker_1_10000(t *testing.T) {
 		DurationTs:          -1,
 		StartSegmentStr:     "1",
 		SegDuration:         "30",
-		Ecodec:              "libx264",
+		Ecodec:              h264Codec,
 		Dcodec:              "",
 		EncHeight:           720,
 		EncWidth:            1280,
@@ -1233,45 +888,23 @@ func TestIrregularTsMezMaker_1_10000(t *testing.T) {
 		SyncAudioToStreamId: -1,
 		ForceKeyInt:         48,
 	}
-
-	// Create output directory if it doesn't exist
-	err := setupOutDir(outputDir)
-	if err != nil {
-		t.Fail()
-	}
-
-	avpipe.InitIOHandler(&fileInputOpener{url: filename}, &fileOutputOpener{dir: outputDir})
-
-	err = avpipe.Tx(params, filename, false)
-	if err != nil {
-		t.Fail()
-	}
+	setFastEncodeParams(params, false)
+	boilerTx(t, params, filename)
 
 	for i := 1; i <= 4; i++ {
 		mezFile := fmt.Sprintf("%s/vsegment-%d.mp4", outputDir, i)
-		// Now probe the generated files
-		probeInfo, err := avpipe.Probe(mezFile, true)
-		if err != nil {
-			t.Error(err)
-		}
-
-		timebase := *probeInfo.StreamInfo[0].TimeBase.Denom()
-		if timebase.Cmp(big.NewInt(10000)) != 0 {
-			t.Error("Unexpected TimeBase", probeInfo.StreamInfo[0].TimeBase)
-		}
-
-		if avpipe.GetPixelFormatName(probeInfo.StreamInfo[0].PixFmt) != "yuv420p" {
-			t.Error("Unexpected pixel format", probeInfo.StreamInfo[0].PixFmt)
-		}
+		boilerProbe(t, mezFile, 10000, 0, "yuv420p")
 	}
 }
 
 func TestAVPipeMXF_H265MezMaker(t *testing.T) {
+	f := fn()
+	if testing.Short() {
+		// 558.20s on 2018 MacBook Pro (2.9 GHz 6-Core i9, 32 GB RAM, Radeon Pro 560X 4 GB)
+		t.Skip("SKIPPING " + f)
+	}
 	filename := "./media/across_the_universe_4k_clip_60sec.mxf"
-	outputDir := "H265MXF"
-
-	setupLogging()
-	log.Info("STARTING TestAVPipeMXF_H265MezMaker")
+	outputDir, _ := boilerplate(t, fn(), filename)
 
 	params := &avpipe.TxParams{
 		BypassTranscoding: false,
@@ -1287,45 +920,20 @@ func TestAVPipeMXF_H265MezMaker(t *testing.T) {
 		TxType:            avpipe.TxVideo,
 		StreamId:          -1,
 	}
-
-	// Create output directory if it doesn't exist
-	err := setupOutDir(outputDir)
-	if err != nil {
-		t.Fail()
-	}
-
-	avpipe.InitIOHandler(&fileInputOpener{url: filename}, &fileOutputOpener{dir: outputDir})
-
-	err = avpipe.Tx(params, filename, false)
-	if err != nil {
-		t.Fail()
-	}
+	boilerTx(t, params, filename)
 
 	mezFile := fmt.Sprintf("%s/vsegment-1.mp4", outputDir)
-	// Now probe the generated files
-	probeInfo, err := avpipe.Probe(mezFile, true)
-	if err != nil {
-		t.Error(err)
-	}
-
-	timebase := *probeInfo.StreamInfo[0].TimeBase.Denom()
-	if timebase.Cmp(big.NewInt(24000)) != 0 {
-		t.Error("Unexpected TimeBase", probeInfo.StreamInfo[0].TimeBase)
-	}
-
-	pixelFormat := probeInfo.StreamInfo[0].SampleRate
-	// 0 means AV_PIX_FMT_YUV420P
-	if pixelFormat != 0 {
-		t.Error("Unexpected PixelFormat", probeInfo.StreamInfo[0].PixFmt)
-	}
+	boilerProbe(t, mezFile, 24000, 0, "yuv420p")
+	//pixelFormat := probeInfo.StreamInfo[0].SampleRate
+	//// 0 means AV_PIX_FMT_YUV420P
+	//if pixelFormat != 0 {
+	//	t.Error("Unexpected PixelFormat", probeInfo.StreamInfo[0].PixFmt)
+	//}
 }
 
 func TestAVPipeHEVC_H264MezMaker(t *testing.T) {
 	filename := "./media/across_the_universe_4k_clip_30sec.mp4"
-	outputDir := "HEVC_H264"
-
-	setupLogging()
-	log.Info("STARTING TestAVPipeHEVC_H264MezMaker")
+	outputDir, _ := boilerplate(t, fn(), filename)
 
 	params := &avpipe.TxParams{
 		BypassTranscoding: false,
@@ -1334,52 +942,33 @@ func TestAVPipeHEVC_H264MezMaker(t *testing.T) {
 		DurationTs:        -1,
 		StartSegmentStr:   "1",
 		SegDuration:       "15.03",
-		Ecodec:            "libx264",
+		Ecodec:            h264Codec,
 		Dcodec:            "hevc",
 		EncHeight:         -1,
 		EncWidth:          -1,
 		TxType:            avpipe.TxVideo,
 		StreamId:          -1,
 	}
-
-	// Create output directory if it doesn't exist
-	err := setupOutDir(outputDir)
-	if err != nil {
-		t.Fail()
-	}
-
-	avpipe.InitIOHandler(&fileInputOpener{url: filename}, &fileOutputOpener{dir: outputDir})
-
-	err = avpipe.Tx(params, filename, false)
-	if err != nil {
-		t.Fail()
-	}
+	setFastEncodeParams(params, false)
+	boilerTx(t, params, filename)
 
 	mezFile := fmt.Sprintf("%s/vsegment-1.mp4", outputDir)
-	// Now probe the generated files
-	probeInfo, err := avpipe.Probe(mezFile, true)
-	if err != nil {
-		t.Error(err)
-	}
-
-	timebase := *probeInfo.StreamInfo[0].TimeBase.Denom()
-	if timebase.Cmp(big.NewInt(24000)) != 0 {
-		t.Error("Unexpected TimeBase", probeInfo.StreamInfo[0].TimeBase)
-	}
-
-	pixelFormat := probeInfo.StreamInfo[0].SampleRate
-	// 0 means AV_PIX_FMT_YUV420P
-	if pixelFormat != 0 {
-		t.Error("Unexpected PixelFormat", probeInfo.StreamInfo[0].PixFmt)
-	}
+	boilerProbe(t, mezFile, 24000, 0, "yuv420p")
+	//pixelFormat := probeInfo.StreamInfo[0].SampleRate
+	//// 0 means AV_PIX_FMT_YUV420P
+	//if pixelFormat != 0 {
+	//	t.Error("Unexpected PixelFormat", probeInfo.StreamInfo[0].PixFmt)
+	//}
 }
 
 func TestAVPipeHEVC_H265ABRTranscode(t *testing.T) {
+	f := fn()
+	if testing.Short() {
+		// 403.23s on 2018 MacBook Pro (2.9 GHz 6-Core i9, 32 GB RAM, Radeon Pro 560X 4 GB)
+		t.Skip("SKIPPING " + f)
+	}
 	filename := "./media/across_the_universe_4k_clip_30sec.mp4"
-	outputDir := "HEVC_H265ABR"
-
-	setupLogging()
-	log.Info("STARTING TestAVPipeHEVC_H265ABRTranscode")
+	boilerplate(t, fn(), filename)
 
 	params := &avpipe.TxParams{
 		BypassTranscoding: false,
@@ -1395,27 +984,12 @@ func TestAVPipeHEVC_H265ABRTranscode(t *testing.T) {
 		TxType:            avpipe.TxVideo,
 		StreamId:          -1,
 	}
-
-	// Create output directory if it doesn't exist
-	err := setupOutDir(outputDir)
-	if err != nil {
-		t.Fail()
-	}
-
-	avpipe.InitIOHandler(&fileInputOpener{url: filename}, &fileOutputOpener{dir: outputDir})
-
-	err = avpipe.Tx(params, filename, false)
-	if err != nil {
-		t.Fail()
-	}
+	boilerTx(t, params, filename)
 }
 
 func TestAVPipeStats(t *testing.T) {
 	filename := "./media/Rigify-2min.mp4"
-	outputDir := "Rigify-2min-stats"
-
-	setupLogging()
-	log.Info("STARTING TestAVPipeStats")
+	outputDir, _ := boilerplate(t, fn(), filename)
 
 	params := &avpipe.TxParams{
 		BypassTranscoding:   false,
@@ -1424,7 +998,7 @@ func TestAVPipeStats(t *testing.T) {
 		DurationTs:          -1,
 		StartSegmentStr:     "1",
 		SegDuration:         "30",
-		Ecodec:              "libx264",
+		Ecodec:              h264Codec,
 		Dcodec:              "",
 		Ecodec2:             "aac",
 		EncHeight:           720,
@@ -1434,39 +1008,15 @@ func TestAVPipeStats(t *testing.T) {
 		SyncAudioToStreamId: -1,
 		ForceKeyInt:         48,
 	}
-
-	// Create output directory if it doesn't exist
-	err := setupOutDir(outputDir)
-	if err != nil {
-		t.Fail()
-	}
-
-	avpipe.InitIOHandler(&fileInputOpener{url: filename}, &fileOutputOpener{dir: outputDir})
-
-	err = avpipe.Tx(params, filename, false)
-	if err != nil {
-		t.Fail()
-	}
+	setFastEncodeParams(params, false)
+	boilerTx(t, params, filename)
 
 	for i := 1; i <= 4; i++ {
 		mezFile := fmt.Sprintf("%s/vsegment-%d.mp4", outputDir, i)
-		// Now probe the generated files
-		probeInfo, err := avpipe.Probe(mezFile, true)
-		if err != nil {
-			t.Error(err)
-			return
-		}
-
-		timebase := *probeInfo.StreamInfo[0].TimeBase.Denom()
-		if timebase.Cmp(big.NewInt(12288)) != 0 {
-			t.Error("Unexpected TimeBase", probeInfo.StreamInfo[0].TimeBase)
-		}
-
-		if avpipe.GetPixelFormatName(probeInfo.StreamInfo[0].PixFmt) != "yuv420p" {
-			t.Error("Unexpected pixel format", probeInfo.StreamInfo[0].PixFmt)
-		}
+		boilerProbe(t, mezFile, 12288, 0, "yuv420p")
 	}
 
+	// FIXME
 	assert.Equal(t, int64(2880), statsInfo.encodingVideoFrameStats.TotalFramesWritten)
 	assert.Equal(t, int64(720), statsInfo.encodingVideoFrameStats.FramesWritten)
 	assert.Equal(t, int64(5625), statsInfo.encodingAudioFrameStats.TotalFramesWritten)
@@ -1481,22 +1031,18 @@ func TestAVPipeStats(t *testing.T) {
 // 3) Mux the ABR audio and video segments from step 2
 // 4) Probes the initial mez file from step 1 and mux output from step 3. The duration has to be equal.
 func TestABRMuxing(t *testing.T) {
+	f := fn()
+	log.Info("STARTING " + f)
 	filename := "./media/creed_1_min.mov"
-	log.Info("STARTING TestABRMuxing")
-	setupLogging()
 
-	videoMezDir := "VideoMez4Muxing"
-	audioMezDir := "AudioMez4Muxing"
-	videoABRDir := "VideoABR4Muxing"
-	audioABRDir := "AudioABR4Muxing"
-	muxOutDir := "MuxingOutput"
+	videoMezDir := path.Join(baseOutPath, f, "VideoMez4Muxing")
+	audioMezDir := path.Join(baseOutPath, f, "AudioMez4Muxing")
+	videoABRDir := path.Join(baseOutPath, f, "VideoABR4Muxing")
+	audioABRDir := path.Join(baseOutPath, f, "AudioABR4Muxing")
+	muxOutDir := path.Join(baseOutPath, f, "MuxingOutput")
 
 	// Create video mez files
-	err := setupOutDir(videoMezDir)
-	if err != nil {
-		t.Fail()
-	}
-
+	setupOutDir(t, videoMezDir)
 	params := &avpipe.TxParams{
 		BypassTranscoding: false,
 		Format:            "fmp4-segment",
@@ -1506,116 +1052,73 @@ func TestABRMuxing(t *testing.T) {
 		VideoBitrate:      2560000,
 		AudioBitrate:      128000,
 		SampleRate:        44100,
-		CrfStr:            "23",
 		SegDuration:       "30.03",
-		Ecodec:            "libx264",
+		Ecodec:            h264Codec,
 		EncHeight:         720,
 		EncWidth:          1280,
 		TxType:            avpipe.TxVideo,
 		StreamId:          -1,
 		NumAudio:          -1,
 	}
-
+	setFastEncodeParams(params, false)
 	avpipe.InitUrlIOHandler(filename, &fileInputOpener{url: filename}, &fileOutputOpener{dir: videoMezDir})
-	err = avpipe.Tx(params, filename, true)
-	if err != nil {
-		t.Fail()
-	}
+	boilerTx(t, params, filename)
 
 	// Create audio mez files
-	err = setupOutDir(audioMezDir)
-	if err != nil {
-		t.Fail()
-	}
-
+	setupOutDir(t, audioMezDir)
 	params.TxType = avpipe.TxAudio
 	params.Ecodec2 = "aac"
-
 	avpipe.InitUrlIOHandler(filename, &fileInputOpener{url: filename}, &fileOutputOpener{dir: audioMezDir})
-	err = avpipe.Tx(params, filename, false)
-	if err != nil {
-		t.Fail()
-	}
+	boilerTx(t, params, filename)
 
 	// Create video ABR files
-	err = setupOutDir(videoABRDir)
-	if err != nil {
-		t.Fail()
-	}
-
+	setupOutDir(t, videoABRDir)
 	filename = videoMezDir + "/vsegment-1.mp4"
 	params.TxType = avpipe.TxVideo
 	params.Format = "dash"
-	params.Ecodec = "libx264"
 	params.VideoSegDurationTs = 48000
-
 	avpipe.InitUrlIOHandler(filename, &fileInputOpener{url: filename}, &fileOutputOpener{dir: videoABRDir})
-	err = avpipe.Tx(params, filename, true)
-	if err != nil {
-		t.Fail()
-	}
+	boilerTx(t, params, filename)
 
 	// Create audio ABR files
-	err = setupOutDir(audioABRDir)
-	if err != nil {
-		t.Fail()
-	}
-
+	setupOutDir(t, audioABRDir)
 	filename = audioMezDir + "/asegment-1.mp4"
 	params.TxType = avpipe.TxAudio
 	params.Format = "dash"
 	params.Ecodec2 = "aac"
 	params.AudioSegDurationTs = 96000
-
 	avpipe.InitUrlIOHandler(filename, &fileInputOpener{url: filename}, &fileOutputOpener{dir: audioABRDir})
-	err = avpipe.Tx(params, filename, true)
-	if err != nil {
-		t.Fail()
-	}
+	boilerTx(t, params, filename)
 
 	// Create playable file by muxing audio/video segments
-	err = setupOutDir(muxOutDir)
-	if err != nil {
-		t.Fail()
-	}
-
+	setupOutDir(t, muxOutDir)
 	muxSpec := "abr-mux\n"
 	muxSpec += "audio,1," + audioABRDir + "/init-stream0.mp4\n"
 	for i := 1; i <= 15; i++ {
 		muxSpec += fmt.Sprintf("%s%s%s%02d%s\n", "audio,1,", audioABRDir, "/chunk-stream0-000", i, ".mp4")
 	}
-	muxSpec += "video,1,VideoABR4Muxing/init-stream0.mp4\n"
+	muxSpec += "video,1," + videoABRDir + "/init-stream0.mp4\n"
 	for i := 1; i <= 15; i++ {
 		muxSpec += fmt.Sprintf("%s%s%s%02d%s\n", "video,1,", videoABRDir, "/chunk-stream0-000", i, ".mp4")
 	}
 	filename = muxOutDir + "/segment-1.mp4"
 	params.MuxingSpec = muxSpec
-	log.Debug("TestABRMuxing", "muxSpec", string(muxSpec))
+	log.Debug(f, "muxSpec", string(muxSpec))
 
 	avpipe.InitUrlMuxIOHandler(filename, &cmd.AVCmdMuxInputOpener{URL: filename}, &cmd.AVCmdMuxOutputOpener{})
-
-	err = avpipe.Mux(params, filename, true)
-	if err != nil {
-		t.Fail()
-	}
+	err := avpipe.Mux(params, filename, debugFrameV)
+	failNowOnError(t, err)
 
 	// Now probe mez video and output file and become sure both have the same duration
 	videoMezFile := fmt.Sprintf("%s/vsegment-1.mp4", videoMezDir)
 	avpipe.InitIOHandler(&fileInputOpener{url: videoMezFile}, &fileOutputOpener{dir: videoMezDir})
 	// Now probe the generated files
-	videoMezProbeInfo, err := avpipe.Probe(videoMezFile, true)
-	if err != nil {
-		t.Error(err)
-	}
+	videoMezProbeInfo := boilerProbe(t, videoMezFile, 0, 0, "")
 
 	muxOutFile := fmt.Sprintf("%s/segment-1.mp4", muxOutDir)
 	avpipe.InitIOHandler(&fileInputOpener{url: muxOutFile}, &fileOutputOpener{dir: muxOutDir})
-	muxOutProbeInfo, err := avpipe.Probe(muxOutFile, true)
-	if err != nil {
-		t.Error(err)
-	}
+	muxOutProbeInfo := boilerProbe(t, muxOutFile, 0, 0, "")
 
-	log.Debug("TestABRMuxing", "mezDuration", videoMezProbeInfo.ContainerInfo.Duration, "muxOutDuration", muxOutProbeInfo.ContainerInfo.Duration)
 	assert.Equal(t, true, int(videoMezProbeInfo.ContainerInfo.Duration) == int(muxOutProbeInfo.ContainerInfo.Duration))
 }
 
@@ -1628,9 +1131,7 @@ func TestMarshalParams(t *testing.T) {
 		TxType:             avpipe.TxVideo,
 	}
 	bytes, err := json.Marshal(params)
-	if err != nil {
-		t.Error(err)
-	}
+	assert.NoError(t, err)
 	fmt.Println(string(bytes))
 	// TODO: Add asserts
 }
@@ -1639,23 +1140,17 @@ func TestUnmarshalParams(t *testing.T) {
 	var params avpipe.TxParams
 	bytes := []byte(`{"video_bitrate":8000000,"seg_duration_ts":180000,"seg_duration_fr":50,"enc_height":720,"enc_width":1280,"tx_type":1}`)
 	err := json.Unmarshal(bytes, &params)
-	if err != nil {
-		t.Error(err)
-	}
-	if params.TxType != avpipe.TxVideo {
-		t.Error("Unexpected TxType", params.TxType)
-	}
+	assert.NoError(t, err)
+	assert.Equal(t, avpipe.TxVideo, int(params.TxType))
 	// TODO: More checks
 }
 
 func TestProbe(t *testing.T) {
 	filename := "./media/ErsteChristmas.mp4"
 
-	setupLogging()
-
 	avpipe.InitIOHandler(&fileInputOpener{url: filename}, &concurrentOutputOpener{dir: "O"})
 	probe, err := avpipe.Probe(filename, true)
-	assert.NoError(t, err)
+	failNowOnError(t, err)
 	assert.Equal(t, 2, len(probe.StreamInfo))
 
 	assert.Equal(t, 27, probe.StreamInfo[0].CodecID)
@@ -1689,11 +1184,9 @@ func TestProbe(t *testing.T) {
 func TestProbeWithData(t *testing.T) {
 	filename := "./media/ActOfLove-30sec.mov"
 
-	setupLogging()
-
 	avpipe.InitIOHandler(&fileInputOpener{url: filename}, &concurrentOutputOpener{dir: "O"})
 	probe, err := avpipe.Probe(filename, true)
-	assert.NoError(t, err)
+	failNowOnError(t, err)
 	assert.Equal(t, 4, len(probe.StreamInfo))
 
 	assert.Equal(t, 147, probe.StreamInfo[0].CodecID)
@@ -1747,34 +1240,17 @@ func TestProbeWithData(t *testing.T) {
 	assert.Equal(t, "pcm_s24le", a[2].CodecName)
 }
 
-func TestExtractImages(t *testing.T) {
-	videoPath := "media/ErsteChristmas.mp4"
-	outPath := baseOutPath + "/TestExtractImages"
-
-	setupLogging()
-	log.Info("STARTING TestExtractImages")
-
-	p := newTxParams()
+func TestExtractImagesInterval(t *testing.T) {
+	in := videoErstePath
+	outPath, p := boilerplate(t, fn(), in)
 	p.Ecodec = "mjpeg"
 	p.Format = "image2"
 	p.TxType = avpipe.TxExtractImages
 
-	err := setupOutDir(outPath)
-	assert.NoError(t, err)
-
-	oo := &fileOutputOpener{dir: outPath}
-	avpipe.InitIOHandler(&fileInputOpener{url: videoPath}, oo)
-
-	handle, err := avpipe.TxInit(p, videoPath, true)
-	assert.NoError(t, err)
-	assert.Equal(t, true, handle > 0)
-
-	err = avpipe.TxRun(handle)
-	assert.NoError(t, err)
-	assert.NoError(t, oo.err)
+	boilerTx2(t, p, in)
 
 	files, err := ioutil.ReadDir(outPath)
-	assert.NoError(t, err)
+	failNowOnError(t, err)
 	assert.Equal(t, 10, len(files))
 	var sum int
 	for _, f := range files {
@@ -1785,20 +1261,185 @@ func TestExtractImages(t *testing.T) {
 	assert.Equal(t, 5760000, sum)
 }
 
+func TestExtractImagesList(t *testing.T) {
+	in := videoErstePath
+	outPath, p := boilerplate(t, fn(), in)
+	p.Ecodec = "mjpeg"
+	p.Format = "image2"
+	p.TxType = avpipe.TxExtractImages
+	p.ExtractImagesTs = []int64{0, 512, 12800, 513024, 1242624}
+
+	boilerTx2(t, p, in)
+
+	files, err := ioutil.ReadDir(outPath)
+	failNowOnError(t, err)
+	assert.Equal(t, 5, len(files))
+	var sum int
+	for _, f := range files {
+		pts, err2 := strconv.ParseInt(strings.Split(f.Name(), ".")[0], 10, 32)
+		assert.NoError(t, err2)
+		sum += int(pts)
+	}
+	assert.Equal(t, 512+12800+513024+1242624, sum)
+}
+
+// Should exit after extracting the first frame
+func TestExtractImagesListFast(t *testing.T) {
+	in := videoErstePath
+	outPath, p := boilerplate(t, fn(), in)
+	p.Ecodec = "mjpeg"
+	p.Format = "image2"
+	p.TxType = avpipe.TxExtractImages
+	p.ExtractImagesTs = []int64{0}
+
+	boilerTx2(t, p, in)
+
+	files, err := ioutil.ReadDir(outPath)
+	failNowOnError(t, err)
+	assert.Equal(t, 1, len(files))
+	pts, err := strconv.ParseInt(strings.Split(files[0].Name(), ".")[0], 10, 32)
+	assert.NoError(t, err)
+	assert.Equal(t, int64(0), pts)
+}
+
+func TestMain(m *testing.M) {
+	// call flag.Parse() here if TestMain uses flags
+	setupLogging()
+	os.Exit(m.Run())
+}
+
+func boilerplate(t *testing.T, testName, inURL string) (
+	outPath string, params *avpipe.TxParams) {
+
+	log.Info("STARTING " + testName)
+	outPath = path.Join(baseOutPath, testName)
+	setupOutDir(t, outPath)
+
+	if len(inURL) > 0 {
+		fio := &fileInputOpener{t: t, url: inURL}
+		foo := &fileOutputOpener{t: t, dir: outPath}
+		avpipe.InitIOHandler(fio, foo)
+	}
+
+	params = newTxParams()
+	return
+}
+
+func boilerProbe(t *testing.T, file string,
+	timescale, sampleRate int, pixelFmt string) (i *avpipe.ProbeInfo) {
+
+	i, err := avpipe.Probe(file, true)
+	failNowOnError(t, err)
+
+	si := i.StreamInfo[0]
+	if timescale > 0 {
+		tb := *si.TimeBase.Denom()
+		assert.Equal(t, 0, tb.Cmp(big.NewInt(int64(timescale))), si.TimeBase)
+	}
+	if sampleRate > 0 {
+		assert.Equal(t, sampleRate, si.SampleRate)
+	}
+	if len(pixelFmt) > 0 {
+		assert.Equal(t, pixelFmt, avpipe.GetPixelFormatName(si.PixFmt))
+	}
+	return
+}
+
+func boilerTx(t *testing.T, params *avpipe.TxParams, url string) {
+	err := avpipe.Tx(params, url, debugFrame(params))
+	failNowOnError(t, err)
+}
+
+// This test uses the following new APIs
+// - to obtain a handle of running session:
+//   - TxInit()
+// - to run the tx session
+//   - TxRun()
+func boilerTx2(t *testing.T, params *avpipe.TxParams, url string) {
+	handle, err := avpipe.TxInit(params, url, debugFrame(params))
+	failNowOnError(t, err)
+	assert.Greater(t, handle, int32(0))
+	err = avpipe.TxRun(handle)
+	failNowOnError(t, err)
+}
+
+func debugFrame(params *avpipe.TxParams) (v bool) {
+	v = debugFrameV
+	switch params.TxType {
+	case avpipe.TxAudio:
+		fallthrough
+	case avpipe.TxAudioMerge:
+		fallthrough
+	case avpipe.TxAudioJoin:
+		fallthrough
+	case avpipe.TxAudioPan:
+		v = debugFrameA
+	}
+	return
+}
+
+func setFastEncodeParams(p *avpipe.TxParams, force bool) {
+	if !force && !testing.Short() {
+		return
+	}
+
+	///// TestMezVideo benchmark
+	// 19.4s real  150s user/sys
+
+	// 10s real    62s user/sys
+	p.CrfStr = "51"
+
+	// 4.8 real    30s user/sys
+	p.Preset = "ultrafast"
+
+	// 8.9s real   12.6 user/sys
+	// notes:
+	//   * error when height and width are set
+	//   * slower in real time despite better user/sys time
+	//if runtime.GOOS == "darwin" && p.Ecodec == h264Codec {
+	//	p.Ecodec = "h264_videotoolbox" // half the time of libx264
+	//}
+
+	// 13s real    62s user/sys
+	if p.VideoBitrate > 100000 {
+		p.VideoBitrate = 100000
+	}
+
+	// 4.3s real   19.1s user/sys
+	p.EncHeight = 180
+	p.EncWidth = 320
+
+	///// TestMezAudio benchmark
+	// 2.78s real  4.29s user/sys
+
+	// 2.09s real  3.81s user/sys
+	if p.AudioBitrate > 32000 {
+		p.AudioBitrate = 32000
+	}
+}
+
+func failNowOnError(t *testing.T, err error) {
+	if err != nil {
+		assert.NoError(t, err)
+		t.FailNow()
+	}
+}
+
+// fn returns the caller's function name, e.g. pkg.Foo
+func fn() (fname string) {
+	fname = "unknown"
+	if pc, _, _, ok := runtime.Caller(1); ok {
+		if f := runtime.FuncForPC(pc); f != nil {
+			fname = path.Base(f.Name())
+		}
+	}
+	return
+}
+
 // newTxParams modifies parameters for speed
 func newTxParams() *avpipe.TxParams {
 	p := avpipe.NewTxParams()
-
-	// libx264
-	p.CrfStr = "51"
-	p.Preset = "ultrafast"
-
-	// aac
-	p.AudioBitrate = 64000
-
-	if runtime.GOOS == "darwin" {
-		p.Ecodec = "h264_videotoolbox" // half the time of libx264
-	}
+	setFastEncodeParams(p, true)
 	return p
 }
 
@@ -1807,7 +1448,10 @@ func removeDirContents(dir string) error {
 	if err != nil {
 		return err
 	}
-	defer d.Close()
+	defer func() {
+		e := d.Close()
+		log.Error("error closing dir", e)
+	}()
 	names, err := d.Readdirnames(-1)
 	if err != nil {
 		return err
@@ -1833,7 +1477,8 @@ func setupLogging() {
 	avpipe.SetCLoggers()
 }
 
-func setupOutDir(dir string) (err error) {
+func setupOutDir(t *testing.T, dir string) {
+	var err error
 	if _, err = os.Stat(dir); err != nil {
 		if os.IsNotExist(err) {
 			err = os.MkdirAll(dir, 0755)
@@ -1841,5 +1486,5 @@ func setupOutDir(dir string) (err error) {
 	} else {
 		err = removeDirContents(dir)
 	}
-	return
+	failNowOnError(t, err)
 }

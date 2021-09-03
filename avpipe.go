@@ -208,6 +208,7 @@ type TxParams struct {
 	FilterDescriptor       string             `json:"filter_descriptor"`
 	SkipDecoding           bool               `json:"skip_decoding"`
 	ExtractImageIntervalTs int64              `json:"extract_image_interval_ts,omitempty"`
+	ExtractImagesTs        []int64            `json:"extract_images_ts,omitempty"`
 }
 
 // NewTxParams initializes a TxParams struct with unset/default values
@@ -376,7 +377,7 @@ type InputHandler interface {
 type OutputOpener interface {
 	// h determines uniquely opening input.
 	// fd determines uniquely opening output.
-	Open(h, fd int64, stream_index, seg_index int, out_type AVType) (OutputHandler, error)
+	Open(h, fd int64, stream_index, seg_index int, pts int64, out_type AVType) (OutputHandler, error)
 }
 
 type MuxOutputOpener interface {
@@ -769,7 +770,7 @@ func getAVType(av_type C.int) AVType {
 }
 
 //export AVPipeOpenOutput
-func AVPipeOpenOutput(handler C.int64_t, stream_index, seg_index, stream_type C.int) C.int64_t {
+func AVPipeOpenOutput(handler C.int64_t, stream_index, seg_index C.int, pts C.int64_t, stream_type C.int) C.int64_t {
 
 	gMutex.Lock()
 	h := gHandlers[int64(handler)]
@@ -791,13 +792,13 @@ func AVPipeOpenOutput(handler C.int64_t, stream_index, seg_index, stream_type C.
 		log.Error("AVPipeOpenOutput() nil outputOpener", "handler", handler)
 		return C.int64_t(-1)
 	}
-	outHandler, err := outputOpener.Open(int64(handler), fd, int(stream_index), int(seg_index), out_type)
+	outHandler, err := outputOpener.Open(int64(handler), fd, int(stream_index), int(seg_index), int64(pts), out_type)
 	if err != nil {
 		log.Error("AVPipeOpenOutput()", "out_type", out_type, "error", err)
 		return C.int64_t(-1)
 	}
 
-	log.Debug("AVPipeOpenOutput()", "fd", fd, "stream_index", stream_index, "seg_index", seg_index, "out_type", out_type)
+	log.Debug("AVPipeOpenOutput()", "fd", fd, "stream_index", stream_index, "seg_index", seg_index, "pts", pts, "out_type", out_type)
 	h.putOutTable(fd, outHandler)
 
 	return C.int64_t(fd)
@@ -1125,6 +1126,8 @@ func Version() string {
 }
 
 func getCParams(params *TxParams) (*C.txparams_t, error) {
+	extractImagesSize := len(params.ExtractImagesTs)
+
 	// same field order as avpipe_xc.h
 	cparams := &C.txparams_t{
 		format:                    C.CString(params.Format),
@@ -1183,6 +1186,7 @@ func getCParams(params *TxParams) (*C.txparams_t, error) {
 		filter_descriptor:         C.CString(params.FilterDescriptor),
 		skip_decoding:             C.int(0),
 		extract_image_interval_ts: C.int64_t(params.ExtractImageIntervalTs),
+		extract_images_sz:         C.int(extractImagesSize),
 
 		// All boolean params are handled below
 	}
@@ -1221,6 +1225,15 @@ func getCParams(params *TxParams) (*C.txparams_t, error) {
 
 	for i := 0; i < int(params.NumAudio); i++ {
 		cparams.audio_index[i] = C.int(params.AudioIndex[i])
+	}
+
+	if extractImagesSize > 0 {
+		C.init_extract_images((*C.txparams_t)(unsafe.Pointer(cparams)),
+			C.int(extractImagesSize))
+		for i := 0; i < extractImagesSize; i++ {
+			C.set_extract_images((*C.txparams_t)(unsafe.Pointer(cparams)),
+				C.int(i), C.int64_t(params.ExtractImagesTs[i]))
+		}
 	}
 
 	return cparams, nil

@@ -7,10 +7,6 @@ import (
 	"crypto/rand"
 	"encoding/hex"
 	"fmt"
-	"github.com/qluvio/avpipe"
-	"github.com/qluvio/content-fabric/errors"
-	elog "github.com/qluvio/content-fabric/log"
-	"github.com/qluvio/content-fabric/util/ioutil"
 	"io"
 	"net/url"
 	"os"
@@ -19,6 +15,11 @@ import (
 	"strings"
 	"sync"
 	"testing"
+
+	"github.com/qluvio/avpipe"
+	"github.com/qluvio/content-fabric/errors"
+	elog "github.com/qluvio/content-fabric/log"
+	"github.com/qluvio/content-fabric/util/ioutil"
 )
 
 //
@@ -110,7 +111,7 @@ func putReqCtxByFD(fd int64, reqCtx *testCtx) {
 	requestFDTable[fd] = reqCtx
 }
 
-func TestHLSVideoOnly(t *testing.T) {
+func _TestHLSVideoOnly(t *testing.T) {
 	params := &avpipe.TxParams{
 		Format:          "fmp4-segment",
 		DurationTs:      3 * 2700000,
@@ -131,7 +132,7 @@ func TestHLSVideoOnly(t *testing.T) {
 	if err != nil {
 		t.Error(err)
 	}
-	readers, err := NewHLSReaders(manifestURL, avpipe.TxVideo)
+	readers, err := NewHLSReaders(manifestURL, avpipe.TxVideo) //readers, err := NewHLSReaders(manifestURL, STVideoOnly)
 	if err != nil {
 		t.Error(err)
 	}
@@ -144,10 +145,10 @@ func TestHLSVideoOnly(t *testing.T) {
 	url := "video_hls"
 	reqCtx := &testCtx{url: url, r: reader.Pipe}
 	putReqCtxByURL(url, reqCtx)
-	errTx := avpipe.Tx(params, url, verboseLogging)
-	tlog.Info("Tx done", "err", errTx)
-	if errTx != nil {
-		t.Error("video transcoding error", "errTx", errTx)
+	err = avpipe.Tx(params, url, verboseLogging)
+	tlog.Info("Tx done", "err", err)
+	if err != nil {
+		t.Error("video transcoding error", "errTx", err)
 	}
 
 	ioutil.CloseCloser(reader.Pipe, tlog)
@@ -158,7 +159,7 @@ func TestHLSVideoOnly(t *testing.T) {
 	}
 }
 
-func TestHLSAudioOnly(t *testing.T) {
+func _TestHLSAudioOnly(t *testing.T) {
 	params := &avpipe.TxParams{
 		Format:          "fmp4-segment",
 		DurationTs:      3 * 2700000,
@@ -195,10 +196,10 @@ func TestHLSAudioOnly(t *testing.T) {
 	url := "audio_hls"
 	reqCtx := &testCtx{url: url, r: reader.Pipe}
 	putReqCtxByURL(url, reqCtx)
-	errTx := avpipe.Tx(params, url, verboseLogging)
-	tlog.Info("Tx done", "err", errTx)
-	if errTx != nil {
-		t.Error("video transcoding error", "errTx", errTx)
+	err = avpipe.Tx(params, url, verboseLogging)
+	tlog.Info("Tx done", "err", err)
+	if err != nil {
+		t.Error("video transcoding error", "errTx", err)
 	}
 
 	ioutil.CloseCloser(reader.Pipe, tlog)
@@ -212,7 +213,7 @@ func TestHLSAudioOnly(t *testing.T) {
 // Creates 3 audio and 3 video HLS mez files in "./O" (the source is a live hls stream)
 // Then creates DASH abr-segments for each generated audio/video mez file.
 // All the output files will be saved in "./O".
-func TestAudioVideoHlsLive(t *testing.T) {
+func _TestAudioVideoHlsLive(t *testing.T) {
 	setupLogging()
 	setupOutDir("./O")
 
@@ -254,10 +255,10 @@ func TestAudioVideoHlsLive(t *testing.T) {
 		url := "audio_mez_hls"
 		reqCtx := &testCtx{url: url, r: reader}
 		putReqCtxByURL(url, reqCtx)
-		errTx := avpipe.Tx(audioParams, url, verboseLogging)
-		tlog.Info("audio mez Tx done", "err", errTx)
-		if errTx != nil {
-			t.Error("audio mez transcoding error", "errTx", errTx)
+		err := avpipe.Tx(audioParams, url, verboseLogging)
+		tlog.Info("audio mez Tx done", "err", err)
+		if err != nil {
+			t.Error("audio mez transcoding error", "err", err)
 		}
 		done <- true
 	}(audioReader)
@@ -280,10 +281,10 @@ func TestAudioVideoHlsLive(t *testing.T) {
 		url := "video_mez_hls"
 		reqCtx := &testCtx{url: url, r: reader}
 		putReqCtxByURL(url, reqCtx)
-		errTx := avpipe.Tx(videoParams, url, verboseLogging)
-		tlog.Info("video mez Tx done", "err", errTx)
-		if errTx != nil {
-			t.Error("video mez transcoding error", "errTx", errTx)
+		err := avpipe.Tx(videoParams, url, verboseLogging)
+		tlog.Info("video mez Tx done", "err", err)
+		if err != nil {
+			t.Error("video mez transcoding error", "err", err)
 		}
 		done <- true
 	}(videoReader)
@@ -308,10 +309,10 @@ func TestAudioVideoHlsLive(t *testing.T) {
 			reqCtx := &testCtx{url: url}
 			putReqCtxByURL(url, reqCtx)
 			audioParams.StartSegmentStr = fmt.Sprintf("%d", i*15+1)
-			errTx := avpipe.Tx(audioParams, url, true)
-			tlog.Info("audio dash Tx done", "err", errTx)
-			if errTx != nil {
-				t.Error("audio dash transcoding error", "errTx", errTx, "url", url)
+			err := avpipe.Tx(audioParams, url, true)
+			tlog.Info("audio dash Tx done", "err", err)
+			if err != nil {
+				t.Error("audio dash transcoding error", "err", err, "url", url)
 			}
 			done <- true
 		}
@@ -330,10 +331,10 @@ func TestAudioVideoHlsLive(t *testing.T) {
 			reqCtx := &testCtx{url: url}
 			putReqCtxByURL(url, reqCtx)
 			videoParams.StartSegmentStr = fmt.Sprintf("%d", i*15+1)
-			errTx := avpipe.Tx(videoParams, url, true)
-			tlog.Info("video dash Tx done", "err", errTx)
-			if errTx != nil {
-				t.Error("video dash transcoding error", "errTx", errTx, "url", url)
+			err := avpipe.Tx(videoParams, url, true)
+			tlog.Info("video dash Tx done", "err", err)
+			if err != nil {
+				t.Error("video dash transcoding error", "err", err, "url", url)
 			}
 			done <- true
 		}
@@ -432,7 +433,9 @@ func (i *inputCtx) Stat(statType avpipe.AVStatType, statArgs interface{}) error 
 	return nil
 }
 
-func (oo *outputOpener) Open(h, fd int64, stream_index, seg_index int, out_type avpipe.AVType) (avpipe.OutputHandler, error) {
+func (oo *outputOpener) Open(h, fd int64, stream_index, seg_index int, _ int64,
+	out_type avpipe.AVType) (avpipe.OutputHandler, error) {
+
 	tc, err := getReqCtxByFD(h)
 	if err != nil {
 		return nil, err
@@ -518,7 +521,7 @@ func (o *outputCtx) Close() error {
 	return nil
 }
 
-func (i *outputCtx) Stat(avType avpipe.AVType, statType avpipe.AVStatType, statArgs interface{}) error {
+func (o *outputCtx) Stat(avType avpipe.AVType, statType avpipe.AVStatType, statArgs interface{}) error {
 	switch statType {
 	case avpipe.AV_OUT_STAT_BYTES_WRITTEN:
 		writeOffset := statArgs.(*uint64)
@@ -527,7 +530,6 @@ func (i *outputCtx) Stat(avType avpipe.AVType, statType avpipe.AVStatType, statA
 		endPTS := statArgs.(*uint64)
 		log.Info("STAT, endPTS", *endPTS)
 	}
-
 	return nil
 }
 

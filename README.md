@@ -26,7 +26,7 @@ source init-env.sh <content-fabric-path>
 make
 make install
 go install ./...
-go test ./...
+scripts/test.sh -short -v
 ```
 Binaries are installed under $GODEV/bin
 

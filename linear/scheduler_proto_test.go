@@ -8,7 +8,7 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-func TestMock1(t *testing.T) {
+func _TestMock1(t *testing.T) {
 
 	t.Skip("skipping test temporarily")
 
@@ -23,7 +23,7 @@ func TestMock1(t *testing.T) {
 	}
 }
 
-func TestMockIBC(t *testing.T) {
+func _TestMockIBC(t *testing.T) {
 
 	t.Skip("skipping test temporarily")
 
@@ -38,7 +38,7 @@ func TestMockIBC(t *testing.T) {
 	}
 }
 
-func TestMockFlagDay(t *testing.T) {
+func _TestMockFlagDay(t *testing.T) {
 	fmt.Println("Test Schedule FlagDay")
 
 	s, err := MakeMockScheduleFlagDay(false)
@@ -59,7 +59,7 @@ func TestMockFlagDay(t *testing.T) {
 	fmt.Println(seq)
 }
 
-func TestMockIBCSmall(t *testing.T) {
+func _TestMockIBCSmall(t *testing.T) {
 	//t.Skip("skipping test temporarily")
 	fmt.Println("Test Schedule IBC")
 

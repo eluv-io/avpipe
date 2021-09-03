@@ -159,6 +159,7 @@ typedef struct ioctx_t {
     int64_t decoding_start_pts;
 
     /* Output handlers specific data */
+    int64_t pts;            /* frame pts */
     int stream_index;       /* usually (but not always) video=0 and audio=1 */
     int seg_index;          /* segment index if this ioctx is a segment */
 
@@ -326,7 +327,11 @@ typedef enum image_type {
 } image_type;
 
 #define DRAW_TEXT_SHADOW_OFFSET     0.075
+#define MAX_EXTRACT_IMAGES_SZ       100
 
+// Notes:
+//   * rc_max_rate and rc_buffer_size must be set together or not at all; they correspond to ffmpeg's bufsize and maxrate
+//   * setting video_bitrate clobbers rc_max_rate and rc_buffer_size
 typedef struct txparams_t {
     int     bypass_transcoding;     // if 0 means do transcoding, otherwise bypass transcoding (only copy)
     char    *format;                // Output format [Required, Values: dash, hls, mp4, fmp4]
@@ -340,8 +345,8 @@ typedef struct txparams_t {
     int     sample_rate;            // Audio sampling rate
     char    *crf_str;
     char    *preset;                // Sets encoding speed to compression ratio
-    int     rc_max_rate;            // Rate control - max rate
-    int     rc_buffer_size;         // Rate control - buffer size
+    int     rc_max_rate;            // Maximum encoding bit rate, used in conjuction with rc_buffer_size [Default: 0]
+    int     rc_buffer_size;         // Determines the interval used to limit bit rate [Default: 0]
     int64_t audio_seg_duration_ts;  // In ts units. It is used for transcoding and producing audio ABR/mez segments
     int64_t video_seg_duration_ts;  // In ts units. It is used for transcoding and producing video ABR/mez segments 
     char    *seg_duration;          // In sec units. It is used for transcoding and producing mp4 segments
@@ -392,7 +397,9 @@ typedef struct txparams_t {
     int         stream_id;                  // Stream id to trasncode, should be >= 0
     char        *filter_descriptor;         // Filter descriptor if tx-type == audio-merge
     char        *mux_spec;
-    int64_t     extract_image_interval_ts;  // Write frames at this interval. Default: -1 (use source timescale * 10)
+    int64_t     extract_image_interval_ts;  // Write frames at this interval. Default: -1 (will use DEFAULT_FRAME_INTERVAL_S)
+    int64_t     *extract_images_ts;         // Write frames at these timestamps. Mutually exclusive with extract_image_interval_ts
+    int         extract_images_sz;          // Size of the array extract_images_ts
 } txparams_t;
 
 #define MAX_CODEC_NAME  256
@@ -482,7 +489,7 @@ typedef struct out_tracker_t {
     struct avpipe_io_handler_t  *out_handlers;
     coderctx_t                  *encoder_ctx;   /* Needed to get access for stats */
     ioctx_t                     *last_outctx;
-    int64_t                     seg_index;
+    int                         seg_index;
     ioctx_t                     *inctx;         /* Points to input context */
     tx_type_t                   tx_type;
 
@@ -621,5 +628,25 @@ avpipe_mux(
  */
 char *
 avpipe_version();
+
+/**
+ * @brief   Allocate memory for extract_images_ts
+ * 
+ * @param   params  Transcoding parameters
+ * @param   size    Array size
+ */
+void
+init_extract_images(txparams_t *params, int size);
+
+/**
+ * @brief   Helper function avoid dealing with array pointers in Go to set
+ *          extract_images_ts
+ * 
+ * @param   params  Transcoding parameters
+ * @param   index   Array index to set
+ * @param   value   Array value (frame PTS)
+ */
+void
+set_extract_images(txparams_t *params, int index, int64_t value);
 
 #endif

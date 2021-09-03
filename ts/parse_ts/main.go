@@ -38,7 +38,7 @@ func main() {
 	var reader io.Reader
 	var closer io.Closer
 	if udp {
-		rwc, err := live.NewTsReaderV2(*address)
+		_, rwc, err := live.NewTsReaderV2(*address)
 		if err != nil {
 			fmt.Printf("Error starting UDP reader on #{*address}: #{err}\n")
 			return
