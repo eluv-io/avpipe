@@ -189,3 +189,19 @@ WORK LOOP
 
 ```
 - Expermineting with other input files and some RTMP streams showed the same results.
+
+
+## h.265 Implementation Notes
+- h.265 levels for ingests follow the same behaviour as ffmpeg. Below are examples from our testing
+
+|Source Resolution|Profile|Source h.265 Level|Fabric h.265 Level|
+|-----------------|-------|------------------|------------------|
+|1080p            |Main   |4.0               |4.0               |
+|1080p            |Main 10|4.0               |4.0               |
+|1080p            |Main   |4.1               |4.0               |
+|1080p            |Main 10|4.1               |4.0               |
+|1080p            |Main   |5.0               |4.0               |
+|1080p            |Main 10|5.0               |4.0               |
+|1080p            |Main   |5.1               |4.0               |
+|4k               |Main 10|5.1               |5.0               |
+|4k               |Main 10|5.2               |5.0               |

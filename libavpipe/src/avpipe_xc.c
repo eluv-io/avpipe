@@ -795,12 +795,15 @@ set_h264_params(
          * this profile is used widely in videoconferencing and mobile applications.
          */
         encoder_codec_context->profile = FF_PROFILE_H264_BASELINE;
-    else
+    else if (params->bitdepth == 8)
         /*
          * FF_PROFILE_H264_HIGH is the primary profile for broadcast and disc storage applications,
          * particularly for high-definition television applications.
          */
         encoder_codec_context->profile = FF_PROFILE_H264_HIGH;
+    else /* params->bitdepth == 10 */
+        encoder_codec_context->profile = FF_PROFILE_H264_HIGH_10;
+
 
     /*
      * These are set according to
@@ -824,10 +827,15 @@ set_h265_params(
      * which is the most common type of video used with consumer devices
      * For HDR10 we need MAIN 10 that supports 10 bit profile.
      */
-    if (params->bitdepth == 8)
+    if (params->bitdepth == 8) {
         av_opt_set(encoder_codec_context->priv_data, "profile", "main", 0);
-    else {
+    } else if (params->bitdepth == 10) {
         av_opt_set(encoder_codec_context->priv_data, "profile", "main10", 0);
+        av_opt_set(encoder_codec_context->priv_data, "x265-params",
+            "hdr-opt=1:repeat-headers=1:colorprim=bt2020:transfer=smpte2084:colormatrix=bt2020nc", 0);
+    } else {
+        /* bitdepth == 12 */
+        av_opt_set(encoder_codec_context->priv_data, "profile", "main12", 0);
         av_opt_set(encoder_codec_context->priv_data, "x265-params",
             "hdr-opt=1:repeat-headers=1:colorprim=bt2020:transfer=smpte2084:colormatrix=bt2020nc", 0);
     }
@@ -844,9 +852,9 @@ set_h265_params(
     /*
      * These are set according to
      * https://en.wikipedia.org/wiki/High_Efficiency_Video_Coding
+     * Let X265 encoder picks the level automatically. Setting the level based on
+     * resolution and framerate might pick higher level than what is needed.
      */
-    encoder_codec_context->level = find_level(encoder_codec_context->width,
-        encoder_codec_context->height, decoder_context);
 }
 
 /* Borrowed from libavcodec/nvenc.h since it is not exposed */
@@ -953,9 +961,14 @@ set_pixel_fmt(
         encoder_codec_context->pix_fmt = AV_PIX_FMT_YUV420P10LE;
         break;
     case 12:
-        /* AV_PIX_FMT_YUV422P12LE: 24bpp, (1 Cr & Cb sample per 2x1 Y samples), little-endian */
-        encoder_codec_context->pix_fmt = AV_PIX_FMT_YUV422P12LE;
-        break;
+        if (!strcmp(params->ecodec, "libx265")) {
+            /* AV_PIX_FMT_YUV422P12LE: 24bpp, (1 Cr & Cb sample per 2x1 Y samples), little-endian */
+            //encoder_codec_context->pix_fmt = AV_PIX_FMT_YUV422P12LE;
+            encoder_codec_context->pix_fmt = AV_PIX_FMT_YUV420P12LE;
+            break;
+        }
+
+        /* x264 doesn't support 12 bitdepth pixel format */
     default:
         elv_err("Invalid bitdepth=%d", params->bitdepth);
         return eav_param;
@@ -1067,6 +1080,7 @@ prepare_video_encoder(
         encoder_codec_context->rc_buffer_size = params->rc_buffer_size;
     if (params->rc_max_rate > 0)
         encoder_codec_context->rc_max_rate = params->rc_max_rate;
+    encoder_codec_context->framerate = decoder_context->codec_context[index]->framerate;
 
     // This needs to be set before open (ffmpeg samples have it wrong)
     if (encoder_context->format_context->oformat->flags & AVFMT_GLOBALHEADER) {
@@ -3836,14 +3850,14 @@ check_params(
      *   - https://trac.ffmpeg.org/wiki/Encode/H.264
      */
     if (params->video_bitrate > 0) {
-        if (params->rc_max_rate > 0) {
-            elv_warn("Replacing rc_max_rate %d with video_bitrate %d", params->rc_max_rate, params->video_bitrate);
+        if (params->video_bitrate > params->rc_max_rate) {
+            elv_log("Replacing rc_max_rate %d with video_bitrate %d", params->rc_max_rate, params->video_bitrate);
+            params->rc_max_rate = params->video_bitrate;
         }
-        params->rc_max_rate = params->video_bitrate;
-        if (params->rc_buffer_size > 0) {
-            elv_warn("Replacing rc_buffer_size %d with video_bitrate %d", params->rc_buffer_size, params->video_bitrate);
+        if (params->video_bitrate > params->rc_buffer_size) {
+            elv_log("Replacing rc_buffer_size %d with video_bitrate %d", params->rc_buffer_size, params->video_bitrate);
+            params->rc_buffer_size = params->video_bitrate;
         }
-        params->rc_buffer_size = params->video_bitrate;
     }
 
     if (params->bitdepth == 0) {

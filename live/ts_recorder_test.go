@@ -97,7 +97,7 @@ func _TestUdpToMp4V2(t *testing.T) {
 	testComplet := make(chan bool, 1)
 
 	go func(tsr *TsReader) {
-		out:
+	out:
 		for {
 			select {
 			case err = <-tsr.ErrChannel:

@@ -176,7 +176,7 @@ func printPMT(pn uint16, pmt psi.PMT) {
 
 func sendError(c chan<- ScteSignal, err error) {
 	s := ScteSignal{
-		Err:        err,
+		Err: err,
 	}
 	c <- s
 }

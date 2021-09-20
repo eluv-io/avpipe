@@ -63,7 +63,7 @@ func _TestMockIBCSmall(t *testing.T) {
 	//t.Skip("skipping test temporarily")
 	fmt.Println("Test Schedule IBC")
 
-	offerings := []string{ "female", "female192", "male1", "male2", "default" }
+	offerings := []string{"female", "female192", "male1", "male2", "default"}
 	for _, offering := range offerings {
 		s, err := MakeMockScheduleIBCSmall(offering)
 		require.NoError(t, err)
