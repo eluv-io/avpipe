@@ -3501,8 +3501,6 @@ xc_done:
 
     dump_trackers(decoder_context->format_context, encoder_context->format_context);
 
-    av_packet_free(&input_packet);
-
     if ((params->tx_type & tx_video) && rc == eav_success)
         av_write_trailer(encoder_context->format_context);
     if ((params->tx_type & tx_audio) && rc == eav_success)

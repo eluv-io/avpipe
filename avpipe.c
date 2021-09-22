@@ -163,11 +163,11 @@ in_read_packet(
     if (r > 0) {
         c->read_bytes += r;
         c->read_pos += r;
-    }
 
-    if (c->read_bytes - c->read_reported > BYTES_READ_REPORT) {
-        in_stat(opaque, in_stat_bytes_read);
-        c->read_reported = c->read_bytes;
+        if (c->read_bytes - c->read_reported > BYTES_READ_REPORT) {
+            in_stat(opaque, in_stat_bytes_read);
+            c->read_reported = c->read_bytes;
+        }
     }
 
 #ifdef CHECK_C_READ

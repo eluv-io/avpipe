@@ -10,13 +10,13 @@ import (
 	"github.com/qluvio/avpipe"
 )
 
-/*
- * To run this test, run ffmpeg in separate console to produce UDP packets with a ts file:
- *
- * ffmpeg -re -i media/FS1-19-10-15.ts -c copy -f mpegts udp://127.0.0.1:21001?pkt_size=1316
- *
- */
-func _TestUdpToMp4(t *testing.T) {
+func TestUdpToMp4V1(t *testing.T) {
+	outputDir := "TestUdpToMp4V1"
+
+	// Create output directory if it doesn't exist
+	if _, err := os.Stat(outputDir); os.IsNotExist(err) {
+		os.Mkdir(outputDir, 0755)
+	}
 
 	videoParamsTs := &avpipe.TxParams{
 		Format:          "fmp4-segment",
@@ -35,7 +35,13 @@ func _TestUdpToMp4(t *testing.T) {
 
 	setupLogging()
 
-	sAddr, err := net.ResolveUDPAddr("udp", ":21001")
+	liveSource := NewLiveSource()
+	err := liveSource.Start()
+	if err != nil {
+		t.Error(err)
+	}
+
+	sAddr, err := net.ResolveUDPAddr("udp", fmt.Sprintf(":%d", liveSource.Port))
 	if err != nil {
 		t.Error(err)
 	}
@@ -54,7 +60,7 @@ func _TestUdpToMp4(t *testing.T) {
 	go func() {
 		tlog.Info("UDP start")
 		if err := readUdp(conn, rwVideoBuf); err != nil {
-			t.Error(err)
+			tlog.Info("UDP timeout", err)
 		}
 		tlog.Info("UDP done", "err", err)
 		if err := rwVideoBuf.(*RWBuffer).CloseSide(RWBufferWriteClosed); err != nil {
@@ -62,30 +68,28 @@ func _TestUdpToMp4(t *testing.T) {
 		}
 	}()
 
-	avpipe.InitIOHandler(&inputOpener{}, &outputOpener{})
-	tlog.Info("Tx start", "videoParams", fmt.Sprintf("%+v", *videoParamsTs))
+	avpipe.InitIOHandler(&inputOpener{dir: outputDir}, &outputOpener{dir: outputDir})
+	tlog.Info("Transcoding start", "videoParams", fmt.Sprintf("%+v", *videoParamsTs))
 	err = avpipe.Tx(videoParamsTs, url, true)
 	if err != nil {
-		t.Error("Tx failed", "err", err)
+		t.Error("Transcoding failed", "err", err)
 	}
-	tlog.Info("Tx done", "err", err)
+	tlog.Info("Transcoding done", "err", err)
 }
 
-/*
- * To run this test, run ffmpeg in separate console to produce UDP packets with a ts file:
- *
- * ffmpeg -re -i media/FS1-19-10-14.ts -c copy -f mpegts udp://127.0.0.1:21001?pkt_size=1316
- *
- */
-func _TestUdpToMp4V2(t *testing.T) {
+func TestUdpToMp4V2(t *testing.T) {
 	setupLogging()
+	outputDir := "TestUdpToMp4V2"
 
 	// Create output directory if it doesn't exist
-	if _, err := os.Stat("./O"); os.IsNotExist(err) {
-		os.Mkdir("./O", 0755)
+	if _, err := os.Stat(outputDir); os.IsNotExist(err) {
+		os.Mkdir(outputDir, 0755)
 	}
 
-	tsr, rwb, err := NewTsReaderV2(":21001")
+	liveSource := NewLiveSource()
+	addr := fmt.Sprintf(":%d", liveSource.Port)
+
+	tsr, rwb, err := NewTsReaderV2(addr)
 	if err != nil {
 		t.Error("TsReader failed", "err", err)
 	}
@@ -109,6 +113,11 @@ func _TestUdpToMp4V2(t *testing.T) {
 		}
 	}(tsr)
 
+	err = liveSource.Start()
+	if err != nil {
+		t.Error(err)
+	}
+
 	audioParamsTs := &avpipe.TxParams{
 		Format:          "fmp4-segment",
 		Seekable:        false,
@@ -117,7 +126,7 @@ func _TestUdpToMp4V2(t *testing.T) {
 		AudioBitrate:    384000,  // FS1-19-10-14.ts audio bitrate
 		SegDuration:     "30.03", // seconds
 		Dcodec2:         "ac3",
-		Ecodec2:         "ac3", // "aac"
+		Ecodec2:         "aac", // "aac"
 		TxType:          avpipe.TxAudio,
 		StreamId:        -1,
 	}
@@ -128,13 +137,13 @@ func _TestUdpToMp4V2(t *testing.T) {
 		reqCtx := &testCtx{url: url, r: reader}
 		putReqCtxByURL(url, reqCtx)
 
-		avpipe.InitIOHandler(&inputOpener{}, &outputOpener{})
+		avpipe.InitIOHandler(&inputOpener{dir: outputDir}, &outputOpener{dir: outputDir})
 
-		tlog.Info("Tx UDP Audio stream start", "params", fmt.Sprintf("%+v", *audioParamsTs))
+		tlog.Info("Transcoding UDP Audio stream start", "params", fmt.Sprintf("%+v", *audioParamsTs))
 		err := avpipe.Tx(audioParamsTs, url, true)
-		tlog.Info("Tx UDP Audio stream done", "err", err, "last pts", nil)
+		tlog.Info("Transcoding UDP Audio stream done", "err", err, "last pts", nil)
 		if err != nil {
-			t.Error("Tx UDP Audio failed", "err", err)
+			t.Error("Transcoding UDP Audio failed", "err", err)
 		}
 
 		done <- true
@@ -160,13 +169,13 @@ func _TestUdpToMp4V2(t *testing.T) {
 		reqCtx := &testCtx{url: url, r: reader, wc: writer}
 		putReqCtxByURL(url, reqCtx)
 
-		avpipe.InitIOHandler(&inputOpener{}, &outputOpener{})
+		avpipe.InitIOHandler(&inputOpener{dir: outputDir}, &outputOpener{dir: outputDir})
 
-		tlog.Info("Tx UDP Video stream start", "params", fmt.Sprintf("%+v", *videoParamsTs))
+		tlog.Info("Transcoding UDP Video stream start", "params", fmt.Sprintf("%+v", *videoParamsTs))
 		err := avpipe.Tx(videoParamsTs, url, true)
-		tlog.Info("Tx UDP Video stream done", "err", err, "last pts", nil)
+		tlog.Info("Transcoding UDP Video stream done", "err", err, "last pts", nil)
 		if err != nil {
-			t.Error("Tx UDP Video failed", "err", err)
+			t.Error("Transcoding UDP Video failed", "err", err)
 		}
 
 		done <- true
@@ -182,14 +191,14 @@ func _TestUdpToMp4V2(t *testing.T) {
 	// Now create audio dash segments out of audio mezzanines
 	go func() {
 		for i, url := range audioMezFiles {
-			tlog.Info("AVL Audio Dash Tx start", "audioParams", fmt.Sprintf("%+v", *audioParamsTs), "url", url)
+			tlog.Info("Transcoding Audio Dash start", "audioParams", fmt.Sprintf("%+v", *audioParamsTs), "url", url)
 			reqCtx := &testCtx{url: url}
 			putReqCtxByURL(url, reqCtx)
 			audioParamsTs.StartSegmentStr = fmt.Sprintf("%d", i*15+1)
 			err := avpipe.Tx(audioParamsTs, url, true)
-			tlog.Info("AVL Audio Dash Tx done", "err", err)
+			tlog.Info("Transcoding Audio Dash done", "err", err)
 			if err != nil {
-				t.Error("AVL Audio Dash transcoding failed", "err", err, "url", url)
+				t.Error("Transcoding Audio Dash failed", "err", err, "url", url)
 			}
 			done <- true
 		}
@@ -206,14 +215,14 @@ func _TestUdpToMp4V2(t *testing.T) {
 	// Now create video dash segments out of audio mezzanines
 	go func() {
 		for i, url := range videoMezFiles {
-			tlog.Info("AVL Video Dash Tx start", "videoParams", fmt.Sprintf("%+v", *videoParamsTs), "url", url)
+			tlog.Info("AVL Video Dash transcoding start", "videoParams", fmt.Sprintf("%+v", *videoParamsTs), "url", url)
 			reqCtx := &testCtx{url: url}
 			putReqCtxByURL(url, reqCtx)
 			audioParamsTs.StartSegmentStr = fmt.Sprintf("%d", i*15+1)
 			err := avpipe.Tx(videoParamsTs, url, true)
-			tlog.Info("AVL Video Dash Tx done", "err", err)
+			tlog.Info("Transcoding Video Dash done", "err", err)
 			if err != nil {
-				t.Error("AVL Video Dash transcoding failed", "err", err, "url", url)
+				t.Error("Transcoding Video Dash failed", "err", err, "url", url)
 			}
 			done <- true
 		}
@@ -222,5 +231,6 @@ func _TestUdpToMp4V2(t *testing.T) {
 	for _ = range videoMezFiles {
 		<-done
 	}
+
 	testComplet <- true
 }

@@ -150,7 +150,7 @@ func readUdp(conn net.PacketConn, w io.Writer) error {
 				if bytesRead == 0 {
 					continue // waiting for stream start
 				}
-				log.Info("Stopped receiving UDP packets",
+				log.Error("Stopped receiving UDP packets",
 					"timeout", timeout, "bytesRead", bytesRead)
 				return avpipe.EAV_IO_TIMEOUT
 			}

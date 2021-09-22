@@ -270,7 +270,7 @@ in_read_packet(
         elv_dbg("IN READ read=%d pos=%"PRId64" total=%"PRId64, r, c->read_pos, c->read_bytes);
     }
 
-    if (c->read_bytes - c->read_reported > BYTES_READ_REPORT) {
+    if (r > 0 && c->read_bytes - c->read_reported > BYTES_READ_REPORT) {
         in_stat(opaque, in_stat_bytes_read);
         c->read_reported = c->read_bytes;
     }

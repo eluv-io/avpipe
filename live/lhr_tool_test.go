@@ -54,6 +54,7 @@ type testCtx struct {
 
 //Implement AVPipeInputOpener
 type inputOpener struct {
+	dir string
 	url string
 	tc  testCtx
 }
@@ -65,6 +66,7 @@ type inputCtx struct {
 
 type outputOpener struct {
 	tc *testCtx
+	dir string
 }
 
 type outputCtx struct {
@@ -358,7 +360,7 @@ func (io *inputOpener) Open(fd int64, url string) (avpipe.InputHandler, error) {
 	var file *os.File
 	// A convention for abr segmentation in our tests
 	if strings.Contains(url, "mez") && strings.Contains(url, "mp4") {
-		filepath := fmt.Sprintf("O/%s", url)
+		filepath := fmt.Sprintf("%s/%s", io.dir, url)
 		file, err = os.Open(filepath)
 		if err != nil {
 			tlog.Error("Failed to open", "file", filepath)
@@ -452,27 +454,27 @@ func (oo *outputOpener) Open(h, fd int64, stream_index, seg_index int, _ int64,
 	case avpipe.DASHVideoInit:
 		fallthrough
 	case avpipe.DASHAudioInit:
-		filename = fmt.Sprintf("./O/%s-init-stream%d.mp4", url, stream_index)
+		filename = fmt.Sprintf("./%s/%s-init-stream%d.mp4", oo.dir, url, stream_index)
 	case avpipe.DASHManifest:
-		filename = fmt.Sprintf("./O/%s-dash.mpd", url)
+		filename = fmt.Sprintf("./%s/%s-dash.mpd", oo.dir, url)
 	case avpipe.DASHVideoSegment:
 		fallthrough
 	case avpipe.DASHAudioSegment:
-		filename = fmt.Sprintf("./O/%s-chunk-stream%d-%05d.mp4", url, stream_index, seg_index)
+		filename = fmt.Sprintf("./%s/%s-chunk-stream%d-%05d.mp4", oo.dir, url, stream_index, seg_index)
 	case avpipe.HLSMasterM3U:
-		filename = fmt.Sprintf("./O/%s-master.m3u8", url)
+		filename = fmt.Sprintf("./%s/%s-master.m3u8", oo.dir, url)
 	case avpipe.HLSVideoM3U:
 		fallthrough
 	case avpipe.HLSAudioM3U:
-		filename = fmt.Sprintf("./O/%s-media_%d.m3u8", url, stream_index)
+		filename = fmt.Sprintf("./%s/%s-media_%d.m3u8", oo.dir, url, stream_index)
 	case avpipe.AES128Key:
-		filename = fmt.Sprintf("./O/%s-key.bin", url)
+		filename = fmt.Sprintf("./%s/%s-key.bin", oo.dir, url)
 	case avpipe.MP4Segment:
 		fallthrough
 	case avpipe.FMP4AudioSegment:
 		fallthrough
 	case avpipe.FMP4VideoSegment:
-		filename = fmt.Sprintf("./O/%s-segment-%d.mp4", url, seg_index)
+		filename = fmt.Sprintf("./%s/%s-segment-%d.mp4", oo.dir, url, seg_index)
 	}
 
 	tlog.Debug("OUT_OPEN", "url", tc.url, "h", h, "stream_index", stream_index, "seg_index", seg_index, "filename", filename)
