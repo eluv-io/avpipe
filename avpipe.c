@@ -185,7 +185,7 @@ in_read_packet(
 #endif
 
 #if TRACE_IO
-    elv_dbg("IN READ read=%d pos=%"PRId64" total=%"PRId64, r, c->read_pos, c->read_bytes);
+    elv_dbg("IN READ read=%d pos=%"PRId64" total=%"PRId64", checksum=%u", r, c->read_pos, c->read_bytes, r > 0 ? checksum(buf, r) : 0);
 #endif
     return r > 0 ? r : -1;
 }

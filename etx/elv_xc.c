@@ -193,7 +193,7 @@ in_opener(
     pthread_mutex_unlock(&lock);
 
     inctx->sz = stb.st_size;
-    elv_dbg("IN OPEN fd=%d url=%s", fd, url);
+    elv_dbg("IN OPEN fd=%d url=%s, size=%ld", fd, url, inctx->sz);
     return 0;
 }
 
@@ -267,7 +267,7 @@ in_read_packet(
             c->read_pos += r;
         }
 
-        elv_dbg("IN READ read=%d pos=%"PRId64" total=%"PRId64, r, c->read_pos, c->read_bytes);
+        elv_dbg("IN READ read=%d pos=%"PRId64" total=%"PRId64", checksum=%u", r, c->read_pos, c->read_bytes, r > 0 ? checksum(buf, r) : 0);
     }
 
     if (r > 0 && c->read_bytes - c->read_reported > BYTES_READ_REPORT) {
@@ -1113,7 +1113,6 @@ main(
     int n_threads = 1;
     char *filename = NULL;
     int bypass_transcoding = 0;
-    int seekable = 0;
     int start_segment = -1;
     char *command = "transcode";
     int i;
@@ -1413,10 +1412,10 @@ main(
                     usage(argv[0], argv[i], EXIT_FAILURE);
                 }
             } else if (!strcmp(argv[i], "-seekable")) {
-                if (sscanf(argv[i+1], "%d", &seekable) != 1) {
+                if (sscanf(argv[i+1], "%d", &p.seekable) != 1) {
                     usage(argv[0], argv[i], EXIT_FAILURE);
                 }
-                if (seekable != 0 && seekable != 1) {
+                if (p.seekable != 0 && p.seekable != 1) {
                     usage(argv[0], argv[i], EXIT_FAILURE);
                 }
             } else if (!strcmp(argv[i], "-sample-rate")) {
@@ -1544,7 +1543,7 @@ main(
     elv_set_log_level(elv_log_debug);
 
     if (!strcmp(command, "probe")) {
-        return do_probe(filename, seekable);
+        return do_probe(filename, p.seekable);
     } else if (!strcmp(command, "mux")) {
         return do_mux(&p, filename);
     }

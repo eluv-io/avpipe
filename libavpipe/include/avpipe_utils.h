@@ -65,3 +65,12 @@ const char *
 stream_type_str(
     coderctx_t *c,
     int idx);
+
+typedef unsigned char      byte;    // Byte is a char
+typedef unsigned short int word16;  // 16-bit word is a short int
+
+unsigned int
+checksum(
+    byte *addr,
+    unsigned int count);
+

@@ -284,3 +284,27 @@ void
 connect_ffmpeg_log() {
     av_log_set_callback(ffmpeg_log_handler);
 }
+
+unsigned int
+checksum(byte *addr, unsigned int count)
+{
+    unsigned int sum = 0;
+    word16 *addr2 = (word16 *) addr;
+
+    while(count > 1)
+    {
+        sum = sum + *addr2++;
+        count = count - 2;
+    }
+
+    // Add left-over byte, if any
+    if (count > 0)
+        sum = sum + *((byte *) addr2);
+
+    // Fold 32-bit sum to 16 bits
+    while (sum>>16)
+        sum = (sum & 0xFFFF) + (sum >> 16);
+
+    return sum;
+}
+
