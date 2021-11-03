@@ -69,6 +69,6 @@ endif
 
 test:
 	@cd ./media
-	@(if ! [ -x "command -v gsutil" ]; then echo "gsutil could not be found, install gsutil"; exit 1; fi) || exit 1
-	@gsutil -m cp 'gs://qluvio-test-assets/*' .
+	@(if ! [ -x `command -v gsutil` ]; then echo "gsutil could not be found, install gsutil"; exit 1; fi) || exit 1
+	@gsutil -m cp 'gs://qluvio-test-assets/*' ./media
 	@go test --timeout 10000s

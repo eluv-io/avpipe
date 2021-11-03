@@ -343,6 +343,7 @@ typedef struct txparams_t {
     int     video_bitrate;
     int     audio_bitrate;
     int     sample_rate;            // Audio sampling rate
+    int     channel_layout;         // Audio channel layout for output
     char    *crf_str;
     char    *preset;                // Sets encoding speed to compression ratio
     int     rc_max_rate;            // Maximum encoding bit rate, used in conjuction with rc_buffer_size [Default: 0]

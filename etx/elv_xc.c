@@ -1026,6 +1026,7 @@ usage(
         "\t-audio-seg-duration-ts : (mandatory If format is not \"segment\" and transcoding audio) audio segment duration time base (positive integer).\n"
         "\t-bitdepth :              (optional) Bitdepth of color space. Default is 8, can be 8, 10, or 12.\n"
         "\t-bypass :                (optional) Bypass transcoding. Default is 0, must be 0 or 1\n"
+        "\t-channel-layout :        (optional) Channel layout for audio, can be \"mono\", \"stereo\", \"5.0\" or \"5.1\"....\n"
         "\t-command :               (optional) Directing command of etx, can be \"transcode\", \"probe\" or \"mux\" (default is transcode).\n"
         "\t-crf :                   (optional) Mutually exclusive with video-bitrate. Default: 23\n"
         "\t-crypt-iv :              (optional) 128-bit AES IV, as hex\n"
@@ -1154,6 +1155,7 @@ main(
         .rc_buffer_size = 0,
         .rc_max_rate = 0,
         .sample_rate = -1,                  /* Audio sampling rate 44100 */
+        .channel_layout = 0,                /* Preserve input channel layout */
         .seekable = 0,
         .video_seg_duration_ts = -1,        /* input argument, same units as input stream PTS */
         .audio_seg_duration_ts = -1,        /* input argument, same units as input stream PTS */
@@ -1237,6 +1239,11 @@ main(
                 }
             } else if (!strcmp(argv[i], "-crf")) {
                 p.crf_str = strdup(argv[i+1]);
+            } else if (!strcmp(argv[i], "-channel-layout")) {
+                p.channel_layout = av_get_channel_layout(argv[i+1]);
+                if (p.channel_layout == 0)
+                    usage(argv[0], argv[i], EXIT_FAILURE);
+            } else if (strcmp(argv[i], "-crypt-iv") == 0) {
             } else if (strcmp(argv[i], "-crypt-iv") == 0) {
                 p.crypt_iv = strdup(argv[i+1]);
             } else if (strcmp(argv[i], "-crypt-key") == 0) {

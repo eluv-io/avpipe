@@ -30,17 +30,17 @@
 #include <stdlib.h>
 #include <pthread.h>
 
-#define AUDIO_BUF_SIZE  (128*1024)
-#define INPUT_IS_SEEKABLE 0
+#define AUDIO_BUF_SIZE              (128*1024)
+#define INPUT_IS_SEEKABLE           0
 
-#define MPEGTS_THREAD_COUNT     16
-#define DEFAULT_THREAD_COUNT    8
-#define WATERMARK_STRING_SZ     1024    /* Max length of watermark text */
-#define FILTER_STRING_SZ        (1024 + WATERMARK_STRING_SZ)
-#define DEFAULT_FRAME_INTERVAL_S 10
+#define MPEGTS_THREAD_COUNT         16
+#define DEFAULT_THREAD_COUNT        8
+#define WATERMARK_STRING_SZ         1024    /* Max length of watermark text */
+#define FILTER_STRING_SZ            (1024 + WATERMARK_STRING_SZ)
+#define DEFAULT_FRAME_INTERVAL_S    10
 
 extern int
-init_filters(
+init_video_filters(
     const char *filters_descr,
     coderctx_t *decoder_context,
     coderctx_t *encoder_context,
@@ -61,6 +61,12 @@ init_audio_filters(
 
 int
 init_audio_pan_filters(
+    const char *filters_descr,
+    coderctx_t *decoder_context,
+    coderctx_t *encoder_context);
+
+int
+init_audio_merge_pan_filters(
     const char *filters_descr,
     coderctx_t *decoder_context,
     coderctx_t *encoder_context);
@@ -87,6 +93,18 @@ elv_io_close(
 extern const char *
 av_get_pix_fmt_name(
     enum AVPixelFormat pix_fmt);
+
+static const char*
+get_channel_name(
+    int channel_layout);
+
+static int
+get_channel_layout_for_encoder(
+    int);
+
+const char*
+avpipe_channel_layout_name(
+    int channel_layout);
 
 #define USE_RESAMPLE_AAC
 /* This will be removed after more testing with new audio transcoding using filters */
@@ -1221,27 +1239,33 @@ prepare_audio_encoder(
     else
         encoder_context->codec_context[index]->sample_fmt = AV_SAMPLE_FMT_FLTP;
 
-    /* If the input stream is stereo the decoder_context->codec_context[index]->channel_layout is AV_CH_LAYOUT_STEREO */
-    encoder_context->codec_context[index]->channel_layout = decoder_context->codec_context[index]->channel_layout;
+    if (params->channel_layout > 0)
+        encoder_context->codec_context[index]->channel_layout = params->channel_layout;
+    else
+        /* If the input stream is stereo the decoder_context->codec_context[index]->channel_layout is AV_CH_LAYOUT_STEREO */
+        encoder_context->codec_context[index]->channel_layout =
+            get_channel_layout_for_encoder(decoder_context->codec_context[index]->channel_layout);
     encoder_context->codec_context[index]->channels = av_get_channel_layout_nb_channels(encoder_context->codec_context[index]->channel_layout);
 
     const char *channel_name = avpipe_channel_name(
                                 av_get_channel_layout_nb_channels(encoder_context->codec_context[index]->channel_layout),
                                 decoder_context->codec_context[index]->channel_layout);
 
-    /* If decoder channel layout is DOWNMIX, or params->ecodec == "aac" then set the channel layout to STEREO.
-     * But preserve the channel layout if input channel layout is 5.1.
+    /* If decoder channel layout is DOWNMIX and params->ecodec == "aac" and channel_layout is not set
+     * then set the channel layout to STEREO. Preserve the channel layout otherwise.
      */
-    if ((decoder_context->codec_context[index]->channel_layout == AV_CH_LAYOUT_STEREO_DOWNMIX || !strcmp(ecodec, "aac")) &&
-        strcmp(channel_name, "5.1")) {
+    if (decoder_context->codec_context[index]->channel_layout == AV_CH_LAYOUT_STEREO_DOWNMIX &&
+        !strcmp(ecodec, "aac") &&
+        !params->channel_layout) {
         /* This encoder is prepared specifically for AAC, therefore set the channel layout to AV_CH_LAYOUT_STEREO */
         encoder_context->codec_context[index]->channels = av_get_channel_layout_nb_channels(AV_CH_LAYOUT_STEREO);
         encoder_context->codec_context[index]->channel_layout = AV_CH_LAYOUT_STEREO;    // AV_CH_LAYOUT_STEREO is av_get_default_channel_layout(encoder_context->codec_context[index]->channels)
     }
 
-    elv_dbg("ENCODER channels=%d, channel_layout=%d, sample_fmt=%s",
+    elv_dbg("ENCODER channels=%d, channel_layout=%d (%s), sample_fmt=%s",
         encoder_context->codec_context[index]->channels,
         encoder_context->codec_context[index]->channel_layout,
+        avpipe_channel_layout_name(encoder_context->codec_context[index]->channel_layout),
         av_get_sample_fmt_name(encoder_context->codec_context[index]->sample_fmt));
     if (params->sample_rate > 0 && strcmp(ecodec, "aac")) {
         /*
@@ -1280,11 +1304,12 @@ prepare_audio_encoder(
         return eav_open_codec;
     }
 
-    elv_dbg("encoder audio stream index=%d, bitrate=%d, sample_fmts=%s, timebase=%d, output frame_size=%d, sample_rate=%d",
+    elv_dbg("encoder audio stream index=%d, bitrate=%d, sample_fmts=%s, timebase=%d, output frame_size=%d, sample_rate=%d, channel_layout=%s",
         index, encoder_context->codec_context[index]->bit_rate,
         av_get_sample_fmt_name(encoder_context->codec_context[index]->sample_fmt),
         encoder_context->codec_context[index]->time_base.den, encoder_context->codec_context[index]->frame_size,
-        encoder_context->codec_context[index]->sample_rate);
+        encoder_context->codec_context[index]->sample_rate,
+	channel_name);
 
     if (avcodec_parameters_from_context(
             encoder_context->stream[index]->codecpar,
@@ -1295,7 +1320,7 @@ prepare_audio_encoder(
     }
 
 #ifdef USE_RESAMPLE_AAC
-    if (!strcmp(ecodec, "aac")) {
+    if (!strcmp(ecodec, "aac") && params->tx_type & tx_audio) {
         init_resampler(decoder_context->codec_context[index], encoder_context->codec_context[index],
                        &decoder_context->resampler_context);
 
@@ -1514,7 +1539,7 @@ prepare_encoder(
     if (params->tx_type & tx_audio) {
         encoder_context->audio_enc_stream_index = -1;
         if ((rc = prepare_audio_encoder(encoder_context, decoder_context, params)) != eav_success) {
-            elv_err("Failure in preparing audio copy, rc=%d", rc);
+            elv_err("Failure in preparing audio encoder, rc=%d", rc);
             return rc;
         }
     }
@@ -3199,7 +3224,7 @@ avpipe_xc(
             goto xc_done;
         }
 
-        if ((rc = init_filters(filter_str, decoder_context, encoder_context, txctx->params)) != eav_success) {
+        if ((rc = init_video_filters(filter_str, decoder_context, encoder_context, txctx->params)) != eav_success) {
             free(filter_str);
             elv_err("Failed to initialize video filter");
             goto xc_done;
@@ -3228,6 +3253,13 @@ avpipe_xc(
         params->tx_type == tx_audio_join &&
         (rc = init_audio_join_filters(decoder_context, encoder_context, txctx->params)) != eav_success) {
         elv_err("Failed to initialize audio join filter");
+        goto xc_done;
+    }
+
+    if (!params->bypass_transcoding &&
+        params->tx_type == tx_audio_merge &&
+        (rc = init_audio_merge_pan_filters(txctx->params->filter_descriptor, decoder_context, encoder_context)) != eav_success) {
+        elv_err("Failed to initialize audio merge pan filter");
         goto xc_done;
     }
 
@@ -3632,8 +3664,55 @@ get_channel_name(
     int channel_layout)
 {
     if (channel_layout < 0 || channel_layout >= sizeof(channel_names)/sizeof(channel_names[0]))
-        return NULL;
+        return "";
     return channel_names[channel_layout].name;
+}
+
+const char*
+avpipe_channel_layout_name(
+    int channel_layout)
+{
+    for (int i = 0; i < sizeof(channel_layout_map)/sizeof(channel_layout_map[0]); i++) {
+        if (channel_layout_map[i].layout == channel_layout)
+            return channel_layout_map[i].name;
+    }
+
+    return "";
+}
+
+static int
+get_channel_layout_for_encoder(int channel_layout)
+{
+    switch (channel_layout) {
+    case AV_CH_LAYOUT_2_1:
+        channel_layout = AV_CH_LAYOUT_SURROUND;
+        break;
+    case AV_CH_LAYOUT_2_2:
+        channel_layout = AV_CH_LAYOUT_QUAD;
+        break;
+    case AV_CH_LAYOUT_5POINT0:
+        channel_layout = AV_CH_LAYOUT_5POINT0_BACK;
+        break;
+    case AV_CH_LAYOUT_5POINT1:
+        channel_layout = AV_CH_LAYOUT_5POINT1_BACK;
+        break;
+    case AV_CH_LAYOUT_6POINT0_FRONT:
+        channel_layout = AV_CH_LAYOUT_6POINT0;
+        break;
+    case AV_CH_LAYOUT_6POINT1_BACK:
+    case AV_CH_LAYOUT_6POINT1_FRONT:
+        channel_layout = AV_CH_LAYOUT_6POINT1;
+        break;
+    case AV_CH_LAYOUT_7POINT0_FRONT:
+        channel_layout = AV_CH_LAYOUT_7POINT0;
+        break;
+    case AV_CH_LAYOUT_7POINT1_WIDE_BACK:
+    case AV_CH_LAYOUT_7POINT1_WIDE:
+        channel_layout = AV_CH_LAYOUT_7POINT1;
+        break;
+    }
+
+    return channel_layout;
 }
 
 const char*
@@ -3885,14 +3964,10 @@ check_params(
         return eav_param;
     }
 
-    if (params->tx_type == tx_audio_merge) {
-        elv_err("Audio merge is not supported yet.");
-        return eav_param;
-    }
-
     if (params->tx_type != tx_audio_join &&
-        params->tx_type != tx_audio_pan
-        && params->n_audio > 1) {
+        params->tx_type != tx_audio_pan &&
+        params->tx_type != tx_audio_merge &&
+        params->n_audio > 1) {
         elv_err("Invalid number of audio streams, n_audio=%d", params->n_audio);
         return eav_param;
     }
@@ -4021,6 +4096,7 @@ avpipe_init(
         "crypt_scheme=%d "
         "n_audio=%d "
         "audio_index=%s "
+        "channel_layout=%d (%s) "
         "sync_audio_to_stream_id=%d "
         "audio_fill_gap=%d "
         "wm_overlay_type=%d "
@@ -4046,6 +4122,7 @@ avpipe_init(
         params->gpu_index, params->enc_height, params->enc_width,
         params->crypt_iv, params->crypt_key, params->crypt_kid, params->crypt_key_url,
         params->crypt_scheme, params->n_audio, audio_index_str,
+        params->channel_layout, avpipe_channel_layout_name(params->channel_layout),
         params->sync_audio_to_stream_id, params->audio_fill_gap,
         params->watermark_overlay_type, params->watermark_overlay_len,
         params->bitdepth, params->listen,

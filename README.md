@@ -157,6 +157,24 @@ WORK LOOP
 - Output stats are reported via output handlers avpipe_stater() callback function.
 - A GO client of avpipe library, must implement OutputHandler.Stat() method.
 
+## Transcoding Audio/Video
+Avpipe library has the following transcoding options to transcode audio/video:
+- tx_all: in this mode both audio and video will be decoded and encoded according to transcoding params. Usually there is no need to specify decoder and decoder is detected automatically.
+- tx_video: in this mode video will be decoded and encoded according to transcoding params.
+- tx_audio: in this mode audio will be decoded and encoded according to encoder param (by default it is AAC).
+- tx_audio_pan: in this mode audio pan filter will be used before injecting the audio frames into the encoder.
+- tx_audio_merge: in this mode audio merge filter will be used before injecting the audio frames into the encoder.
+- tx_mux: in this mode avpipe would mux some audio and video ABR segments and produce an MP4 output. In this case, it is needed to provide a mux_spec which points to ABR segments to be muxed.
+- tx_extract_images: in this mode avpipe will extract specific images/frames at specific times from a video.
+
+### Audio specific params
+- channel_layout: In all of the above cases channel_layout parameter can be set to specify the output channel layout. If the channel_layout param is not set then the input channel layout would carry to the output.
+- audio_index: The audio_index param can be used to pick the specified audio (using stream index) for transcoding. 
+- audio_seg_duration_ts: This param determines the duration of the generated audio segment in TS.
+- audio_bitrate: This param sets the audio bitrate in the output.
+- filter_descriptor: The filter_descriptor param must be set when transcoding type is tx_audio_pan/tx_audio_merge.
+
+
 ## Setting up live
 
 - Avpipe can handle HLS, UDP TS, and RTMP live streams. For each case it is needed to set parameters for live stream properly.

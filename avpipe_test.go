@@ -286,7 +286,7 @@ func (o fileOutput) Stat(avType avpipe.AVType, statType avpipe.AVStatType, statA
 	return nil
 }
 
-func TestSegAudio(t *testing.T) {
+func TestAudioSeg(t *testing.T) {
 	in := videoErstePath
 	outputDir := path.Join(baseOutPath, fn())
 	params := &avpipe.TxParams{
@@ -317,7 +317,7 @@ func TestSegAudio(t *testing.T) {
 	xcTest(t, outputDir, in, params, nil)
 }
 
-func TestSegVideo(t *testing.T) {
+func TestVideoSeg(t *testing.T) {
 	in := videoErstePath
 	outputDir := path.Join(baseOutPath, fn())
 	params := &avpipe.TxParams{
@@ -372,7 +372,6 @@ func TestSingleABRTranscode(t *testing.T) {
 	}
 	setFastEncodeParams(params, false)
 	xcTest(t, outputDir, filename, params, nil)
-
 
 	params.TxType = avpipe.TxAudio
 	params.Ecodec2 = "aac"
@@ -663,7 +662,7 @@ func TestConcurrentABRTranscode(t *testing.T) {
 	doTranscode(t, params, nThreads, outputDir, filename, "")
 }
 
-func TestAAC2AACMezMaker(t *testing.T) {
+func TestAudioAAC2AACMezMaker(t *testing.T) {
 	filename := "./media/bond-seg1.aac"
 	outputDir := path.Join(baseOutPath, fn())
 
@@ -693,7 +692,7 @@ func TestAAC2AACMezMaker(t *testing.T) {
 	xcTest(t, outputDir, filename, params, xcTestResult)
 }
 
-func TestAC3TsAC3MezMaker(t *testing.T) {
+func TestAudioAC3Ts2AC3MezMaker(t *testing.T) {
 	filename := "./media/FS1-19-10-15-2-min.ts"
 	outputDir := path.Join(baseOutPath, fn())
 
@@ -725,7 +724,7 @@ func TestAC3TsAC3MezMaker(t *testing.T) {
 	xcTest(t, outputDir, filename, params, xcTestResult)
 }
 
-func TestAC3TsAACMezMaker(t *testing.T) {
+func TestAudioAC3Ts2AACMezMaker(t *testing.T) {
 	filename := "./media/FS1-19-10-15-2-min.ts"
 	outputDir := path.Join(baseOutPath, fn())
 
@@ -758,7 +757,7 @@ func TestAC3TsAACMezMaker(t *testing.T) {
 	xcTest(t, outputDir, filename, params, xcTestResult)
 }
 
-func TestMP2TsAACMezMaker(t *testing.T) {
+func TestAudioMP2Ts2AACMezMaker(t *testing.T) {
 	filename := "./media/FS1-19-10-15-2-min.ts"
 	outputDir := path.Join(baseOutPath, fn())
 
@@ -791,7 +790,7 @@ func TestMP2TsAACMezMaker(t *testing.T) {
 	xcTest(t, outputDir, filename, params, xcTestResult)
 }
 
-func TestDownmix2AACMezMaker(t *testing.T) {
+func TestAudioDownmix2AACMezMaker(t *testing.T) {
 	filename := "./media/BOND23-CLIP-downmix-2min.mov"
 	outputDir := path.Join(baseOutPath, fn())
 
@@ -809,6 +808,7 @@ func TestDownmix2AACMezMaker(t *testing.T) {
 		EncHeight:           -1,
 		EncWidth:            -1,
 		TxType:              avpipe.TxAudio,
+		ChannelLayout:       avpipe.ChannelLayout("stereo"),
 		NumAudio:            1,
 		StreamId:            -1,
 		SyncAudioToStreamId: -1,
@@ -816,15 +816,16 @@ func TestDownmix2AACMezMaker(t *testing.T) {
 	params.AudioIndex[0] = 6
 
 	xcTestResult := &XcTestResult{
-		mezFile:    []string{fmt.Sprintf("%s/asegment-1.mp4", outputDir)},
-		timeScale:  48000,
-		sampleRate: 48000,
+		mezFile:           []string{fmt.Sprintf("%s/asegment-1.mp4", outputDir)},
+		timeScale:         48000,
+		sampleRate:        48000,
+		channelLayoutName: "stereo",
 	}
 
 	xcTest(t, outputDir, filename, params, xcTestResult)
 }
 
-func Test2Mono1Stereo(t *testing.T) {
+func TestAudio2MonoTo1Stereo(t *testing.T) {
 	filename := "./media/AGAIG-clip-2mono.mp4"
 	outputDir := path.Join(baseOutPath, fn())
 
@@ -838,6 +839,7 @@ func Test2Mono1Stereo(t *testing.T) {
 		Ecodec2:             "aac",
 		Dcodec2:             "",
 		TxType:              avpipe.TxAudioJoin,
+		ChannelLayout:       avpipe.ChannelLayout("stereo"),
 		NumAudio:            2,
 		StreamId:            -1,
 		SyncAudioToStreamId: -1,
@@ -857,7 +859,208 @@ func Test2Mono1Stereo(t *testing.T) {
 	xcTest(t, outputDir, filename, params, xcTestResult)
 }
 
-func Test2Channel1Stereo(t *testing.T) {
+func TestAudio5_1To5_1(t *testing.T) {
+	filename := "./media/case_1_video_and_5.1_audio.mp4"
+	outputDir := path.Join(baseOutPath, fn())
+
+	params := &avpipe.TxParams{
+		BypassTranscoding:   false,
+		Format:              "fmp4-segment",
+		StartTimeTs:         0,
+		DurationTs:          -1,
+		StartSegmentStr:     "1",
+		SegDuration:         "30",
+		Ecodec2:             "aac",
+		Dcodec2:             "",
+		TxType:              avpipe.TxAudio,
+		StreamId:            -1,
+		SyncAudioToStreamId: -1,
+	}
+
+	xcTestResult := &XcTestResult{
+		timeScale:         44100,
+		sampleRate:        44100,
+		channelLayoutName: "5.1",
+	}
+	for i := 1; i <= 2; i++ {
+		xcTestResult.mezFile = append(xcTestResult.mezFile, fmt.Sprintf("%s/asegment-%d.mp4", outputDir, i))
+	}
+
+	xcTest(t, outputDir, filename, params, xcTestResult)
+}
+
+func TestAudio5_1ToStereo(t *testing.T) {
+	filename := "./media/case_1_video_and_5.1_audio.mp4"
+	outputDir := path.Join(baseOutPath, fn())
+
+	params := &avpipe.TxParams{
+		BypassTranscoding:   false,
+		Format:              "fmp4-segment",
+		StartTimeTs:         0,
+		DurationTs:          -1,
+		StartSegmentStr:     "1",
+		SegDuration:         "30",
+		Ecodec2:             "aac",
+		Dcodec2:             "",
+		TxType:              avpipe.TxAudioPan,
+		FilterDescriptor:    "[0:1]pan=stereo|c0<c0+c4+0.707*c2|c1<c1+c5+0.707*c2[aout]",
+		ChannelLayout:       avpipe.ChannelLayout("stereo"),
+		StreamId:            -1,
+		SyncAudioToStreamId: -1,
+	}
+
+	xcTestResult := &XcTestResult{
+		timeScale:         44100,
+		sampleRate:        44100,
+		channelLayoutName: "stereo",
+	}
+	for i := 1; i <= 2; i++ {
+		xcTestResult.mezFile = append(xcTestResult.mezFile, fmt.Sprintf("%s/asegment-%d.mp4", outputDir, i))
+	}
+
+	xcTest(t, outputDir, filename, params, xcTestResult)
+}
+
+func TestAudioMonoToMono(t *testing.T) {
+	filename := "./media/case_1_video_and_mono_audio.mp4"
+	outputDir := path.Join(baseOutPath, fn())
+
+	params := &avpipe.TxParams{
+		BypassTranscoding:   false,
+		Format:              "fmp4-segment",
+		StartTimeTs:         0,
+		DurationTs:          -1,
+		StartSegmentStr:     "1",
+		SegDuration:         "30",
+		Ecodec2:             "aac",
+		Dcodec2:             "",
+		TxType:              avpipe.TxAudio,
+		NumAudio:            1,
+		ChannelLayout:       avpipe.ChannelLayout("mono"),
+		StreamId:            -1,
+		SyncAudioToStreamId: -1,
+	}
+	params.AudioIndex[0] = 1
+
+	xcTestResult := &XcTestResult{
+		timeScale:         22050,
+		sampleRate:        22050,
+		channelLayoutName: "mono",
+	}
+	for i := 1; i <= 2; i++ {
+		xcTestResult.mezFile = append(xcTestResult.mezFile, fmt.Sprintf("%s/asegment-%d.mp4", outputDir, i))
+	}
+
+	xcTest(t, outputDir, filename, params, xcTestResult)
+}
+
+func TestAudioQuadToQuad(t *testing.T) {
+	filename := "./media/case_1_video_and_quad_audio.mp4"
+	outputDir := path.Join(baseOutPath, fn())
+
+	params := &avpipe.TxParams{
+		BypassTranscoding:   false,
+		Format:              "fmp4-segment",
+		StartTimeTs:         0,
+		DurationTs:          -1,
+		StartSegmentStr:     "1",
+		SegDuration:         "30",
+		Ecodec2:             "aac",
+		Dcodec2:             "",
+		TxType:              avpipe.TxAudio,
+		NumAudio:            1,
+		ChannelLayout:       avpipe.ChannelLayout("quad"),
+		StreamId:            -1,
+		SyncAudioToStreamId: -1,
+	}
+	params.AudioIndex[0] = 1
+
+	xcTestResult := &XcTestResult{
+		timeScale:         22050,
+		sampleRate:        22050,
+		channelLayoutName: "quad",
+	}
+	for i := 1; i <= 2; i++ {
+		xcTestResult.mezFile = append(xcTestResult.mezFile, fmt.Sprintf("%s/asegment-%d.mp4", outputDir, i))
+	}
+
+	xcTest(t, outputDir, filename, params, xcTestResult)
+}
+
+func TestAudio6MonoTo5_1(t *testing.T) {
+	filename := "./media/case_2_video_and_8_mono_audio.mp4"
+	outputDir := path.Join(baseOutPath, fn())
+
+	params := &avpipe.TxParams{
+		BypassTranscoding:   false,
+		Format:              "fmp4-segment",
+		StartTimeTs:         0,
+		DurationTs:          -1,
+		StartSegmentStr:     "1",
+		SegDuration:         "30",
+		Ecodec2:             "aac",
+		Dcodec2:             "",
+		TxType:              avpipe.TxAudioMerge,
+		NumAudio:            6,
+		ChannelLayout:       avpipe.ChannelLayout("5.1"),
+		FilterDescriptor:    "[0:3][0:4][0:5][0:6][0:7][0:8]amerge=inputs=6,pan=5.1|c0=c0|c1=c1|c2=c2| c3=c3|c4=c4|c5=c5[aout]",
+		StreamId:            -1,
+		SyncAudioToStreamId: -1,
+	}
+	params.AudioIndex[0] = 3
+	params.AudioIndex[1] = 4
+	params.AudioIndex[2] = 5
+	params.AudioIndex[3] = 6
+	params.AudioIndex[4] = 7
+	params.AudioIndex[5] = 8
+
+	xcTestResult := &XcTestResult{
+		timeScale:         44100,
+		sampleRate:        44100,
+		channelLayoutName: "5.1",
+	}
+	for i := 1; i <= 2; i++ {
+		xcTestResult.mezFile = append(xcTestResult.mezFile, fmt.Sprintf("%s/asegment-%d.mp4", outputDir, i))
+	}
+
+	xcTest(t, outputDir, filename, params, xcTestResult)
+}
+
+func TestAudio10Channel_s16To6Channel_5_1(t *testing.T) {
+	filename := "./media/case_3_video_and_10_channel_audio_10sec.mov"
+	outputDir := path.Join(baseOutPath, fn())
+
+	params := &avpipe.TxParams{
+		BypassTranscoding:   false,
+		Format:              "fmp4-segment",
+		StartTimeTs:         0,
+		DurationTs:          -1,
+		StartSegmentStr:     "1",
+		SegDuration:         "30",
+		Ecodec2:             "aac",
+		Dcodec2:             "",
+		TxType:              avpipe.TxAudioPan,
+		NumAudio:            1,
+		ChannelLayout:       avpipe.ChannelLayout("5.1"),
+		FilterDescriptor:    "[0:1]pan=5.1|c0=c3|c1=c4|c2=c5|c3=c6|c4=c7|c5=c8[aout]",
+		StreamId:            -1,
+		SyncAudioToStreamId: -1,
+	}
+	params.AudioIndex[0] = 0
+
+	xcTestResult := &XcTestResult{
+		timeScale:         44100,
+		sampleRate:        44100,
+		channelLayoutName: "5.1",
+	}
+	for i := 1; i <= 1; i++ {
+		xcTestResult.mezFile = append(xcTestResult.mezFile, fmt.Sprintf("%s/asegment-%d.mp4", outputDir, i))
+	}
+
+	xcTest(t, outputDir, filename, params, xcTestResult)
+}
+
+func TestAudio2Channel1Stereo(t *testing.T) {
 	filename := "./media/multichannel_audio_clip.mov"
 	outputDir := path.Join(baseOutPath, fn())
 
@@ -871,6 +1074,7 @@ func Test2Channel1Stereo(t *testing.T) {
 		Ecodec2:             "aac",
 		Dcodec2:             "",
 		TxType:              avpipe.TxAudioPan,
+		ChannelLayout:       avpipe.ChannelLayout("stereo"),
 		NumAudio:            1,
 		StreamId:            -1,
 		SyncAudioToStreamId: -1,
@@ -1003,7 +1207,7 @@ func TestIrregularTsMezMaker_1_10000(t *testing.T) {
 	xcTest(t, outputDir, filename, params, xcTestResult)
 }
 
-func TestAVPipeMXF_H265MezMaker(t *testing.T) {
+func TestMXF_H265MezMaker(t *testing.T) {
 	f := fn()
 	if testing.Short() {
 		// 558.20s on 2018 MacBook Pro (2.9 GHz 6-Core i9, 32 GB RAM, Radeon Pro 560X 4 GB)
@@ -1037,7 +1241,7 @@ func TestAVPipeMXF_H265MezMaker(t *testing.T) {
 	xcTest(t, outputDir, filename, params, xcTestResult)
 }
 
-func TestAVPipeHEVC_H264MezMaker(t *testing.T) {
+func TestHEVC_H264MezMaker(t *testing.T) {
 	filename := "./media/across_the_universe_4k_clip_30sec.mp4"
 	outputDir := path.Join(baseOutPath, fn())
 
@@ -1070,7 +1274,7 @@ func TestAVPipeHEVC_H264MezMaker(t *testing.T) {
 	xcTest(t, outputDir, filename, params, xcTestResult)
 }
 
-func TestAVPipeHEVC_H265ABRTranscode(t *testing.T) {
+func TestHEVC_H265ABRTranscode(t *testing.T) {
 	f := fn()
 	if testing.Short() {
 		// 403.23s on 2018 MacBook Pro (2.9 GHz 6-Core i9, 32 GB RAM, Radeon Pro 560X 4 GB)
@@ -1179,16 +1383,19 @@ func TestABRMuxing(t *testing.T) {
 	avpipe.InitUrlIOHandler(filename, &fileInputOpener{url: filename}, &fileOutputOpener{dir: videoMezDir})
 	boilerTx(t, params, filename)
 
+	log.Debug("STARTING audio mez for muxing", "file", filename)
 	// Create audio mez files
 	setupOutDir(t, audioMezDir)
 	params.TxType = avpipe.TxAudio
 	params.Ecodec2 = "aac"
+	params.ChannelLayout = avpipe.ChannelLayout("stereo")
 	avpipe.InitUrlIOHandler(filename, &fileInputOpener{url: filename}, &fileOutputOpener{dir: audioMezDir})
 	boilerTx(t, params, filename)
 
 	// Create video ABR files
 	setupOutDir(t, videoABRDir)
 	filename = videoMezDir + "/vsegment-1.mp4"
+	log.Debug("STARTING video ABR for muxing", "file", filename)
 	params.TxType = avpipe.TxVideo
 	params.Format = "dash"
 	params.VideoSegDurationTs = 48000
@@ -1198,6 +1405,7 @@ func TestABRMuxing(t *testing.T) {
 	// Create audio ABR files
 	setupOutDir(t, audioABRDir)
 	filename = audioMezDir + "/asegment-1.mp4"
+	log.Debug("STARTING audio ABR for muxing", "file", filename)
 	params.TxType = avpipe.TxAudio
 	params.Format = "dash"
 	params.Ecodec2 = "aac"
@@ -1533,7 +1741,7 @@ func boilerProbe(t *testing.T, result *XcTestResult) (probeInfoArray []*avpipe.P
 		}
 
 		if len(result.channelLayoutName) > 0 {
-			assert.Equal(t, "stereo", avpipe.ChannelLayoutName(si.Channels, si.ChannelLayout))
+			assert.Equal(t, result.channelLayoutName, avpipe.ChannelLayoutName(si.Channels, si.ChannelLayout))
 		}
 		probeInfoArray = append(probeInfoArray, probeInfo)
 	}

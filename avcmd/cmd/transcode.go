@@ -264,6 +264,7 @@ func InitTranscode(cmdRoot *cobra.Command) error {
 	cmdTranscode.PersistentFlags().BoolP("listen", "", false, "listen mode for RTMP.")
 	cmdTranscode.PersistentFlags().Int32P("threads", "t", 1, "transcoding threads.")
 	cmdTranscode.PersistentFlags().StringP("audio-index", "", "", "the indexes of audio stream (comma separated).")
+	cmdTranscode.PersistentFlags().StringP("channel-layout", "", "", "audio channel layout.")
 	cmdTranscode.PersistentFlags().Int32P("gpu-index", "", -1, "Use the GPU with specified index for transcoding (export CUDA_DEVICE_ORDER=PCI_BUS_ID would use smi index).")
 	cmdTranscode.PersistentFlags().BoolP("audio-fill-gap", "", false, "fill audio gap when encoder is aac and decoder is mpegts")
 	cmdTranscode.PersistentFlags().Int32P("sync-audio-to-stream-id", "", -1, "sync audio to video iframe of specific stream-id when input stream is mpegts")
@@ -275,7 +276,7 @@ func InitTranscode(cmdRoot *cobra.Command) error {
 	cmdTranscode.PersistentFlags().StringP("filter-descriptor", "", "", " Audio filter descriptor the same as ffmpeg format")
 	cmdTranscode.PersistentFlags().Int32P("force-keyint", "", 0, "force IDR key frame in this interval.")
 	cmdTranscode.PersistentFlags().BoolP("equal-fduration", "", false, "force equal frame duration. Must be 0 or 1 and only valid for 'fmp4-segment' format.")
-	cmdTranscode.PersistentFlags().StringP("tx-type", "", "", "transcoding type, can be 'all', 'video', 'audio', 'audio-join', 'audio-merge', or 'extract-images'.")
+	cmdTranscode.PersistentFlags().StringP("tx-type", "", "", "transcoding type, can be 'all', 'video', 'audio', 'audio-join', 'audio-pan', 'audio-merge', or 'extract-images'.")
 	cmdTranscode.PersistentFlags().Int32P("crf", "", 23, "mutually exclusive with video-bitrate.")
 	cmdTranscode.PersistentFlags().StringP("preset", "", "medium", "Preset string to determine compression speed, can be: 'ultrafast', 'superfast', 'veryfast', 'faster', 'fast', 'medium', 'slow', 'slower', 'veryslow'")
 	cmdTranscode.PersistentFlags().Int64P("start-time-ts", "", 0, "offset to start transcoding")
@@ -353,6 +354,15 @@ func doTranscode(cmd *cobra.Command, args []string) error {
 	}
 
 	audioIndex := cmd.Flag("audio-index").Value.String()
+
+	channelLayout := 0
+	channelLayoutStr := cmd.Flag("channel-layout").Value.String()
+	if len(channelLayoutStr) > 0 {
+		channelLayout = avpipe.ChannelLayout(channelLayoutStr)
+		if channelLayout == 0 {
+			return fmt.Errorf("Invalid channle layout")
+		}
+	}
 
 	gpuIndex, err := cmd.Flags().GetInt32("gpu-index")
 	if err != nil {
@@ -444,8 +454,9 @@ func doTranscode(cmd *cobra.Command, args []string) error {
 		txTypeStr != "audio" &&
 		txTypeStr != "audio-join" &&
 		txTypeStr != "audio-pan" &&
+		txTypeStr != "audio-merge" &&
 		txTypeStr != "extract-images" {
-		return fmt.Errorf("Transcoding type is not valid, with no stream-id can be 'all', 'video', 'audio', 'audio-join', 'audio-pan', or 'extract-images'")
+		return fmt.Errorf("Transcoding type is not valid, with no stream-id can be 'all', 'video', 'audio', 'audio-join', 'audio-pan', 'audio-merge', or 'extract-images'")
 	}
 	txType := avpipe.TxTypeFromString(txTypeStr)
 	if txType == avpipe.TxAudio && len(encoder) == 0 {
@@ -647,6 +658,7 @@ func doTranscode(cmd *cobra.Command, args []string) error {
 		FilterDescriptor:       filterDescriptor,
 		SkipDecoding:           skipDecoding,
 		ExtractImageIntervalTs: extractImageIntervalTs,
+		ChannelLayout:          channelLayout,
 	}
 
 	err = getAudioIndexes(params, audioIndex)

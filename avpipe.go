@@ -197,6 +197,7 @@ type TxParams struct {
 	StreamId               int32              `json:"stream_id"`                        // Specify stream by ID (instead of index)
 	AudioIndex             [MaxAudioMux]int32 `json:"audio_index,omitempty"`
 	NumAudio               int32              `json:"n_audio"`
+	ChannelLayout          int                `json:"channel_layout"` // Audio channel layout
 	MaxCLL                 string             `json:"max_cll,omitempty"`
 	MasterDisplay          string             `json:"master_display,omitempty"`
 	BitDepth               int32              `json:"bitdepth,omitempty"`
@@ -1173,6 +1174,7 @@ func getCParams(params *TxParams) (*C.txparams_t, error) {
 		watermark_overlay_len:     C.int(params.WatermarkOverlayLen),
 		watermark_overlay_type:    C.image_type(params.WatermarkOverlayType),
 		n_audio:                   C.int(params.NumAudio),
+		channel_layout:            C.int(params.ChannelLayout),
 		stream_id:                 C.int(params.StreamId),
 		bypass_transcoding:        C.int(0),
 		seekable:                  C.int(0),
@@ -1304,6 +1306,11 @@ func ChannelLayoutName(nbChannels, channelLayout int) string {
 	}
 
 	return ""
+}
+
+func ChannelLayout(name string) int {
+	channelLayout := C.av_get_channel_layout(C.CString(name))
+	return int(channelLayout)
 }
 
 func GetPixelFormatName(pixFmt int) string {

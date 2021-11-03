@@ -48,8 +48,8 @@ func (l *LiveSource) Start() (err error) {
 	if ffmpeg == "" {
 		ffmpeg, err = exec.LookPath("ffmpeg")
 		if err != nil {
-			log.Error("Failed to find ffmpeg binary")
-			return e(err, "reason", "failed to find ffmpeg binary")
+			log.Error("Failed to find ffmpeg binary, check ELV_TOOLCHAIN env variable")
+			return e(err, "reason", "failed to find ffmpeg binary, check ELV_TOOLCHAIN env variable")
 		}
 		log.Debug("using system ffmpeg", "command", ffmpeg)
 	}
