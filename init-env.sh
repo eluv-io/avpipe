@@ -20,11 +20,11 @@ if [[ -z "${ELV_TOOLCHAIN_DIST_PLATFORM:-}" ]]; then
     OS="`uname`"
     case $OS in
     'Darwin')
-        DARWIN=`ls $elvdev_dir/elv-toolchain/dist | grep darwin`
+        DARWIN=`ls $elvdev_dir/elv-toolchain/dist | grep darwin | tail -1`
         export ELV_TOOLCHAIN_DIST_PLATFORM=$elvdev_dir/elv-toolchain/dist/${DARWIN}
         ;;
     'Linux')
-        LINUX=`ls $elvdev_dir/elv-toolchain/dist | grep linux`
+        LINUX=`ls $elvdev_dir/elv-toolchain/dist | grep linux | tail -1`
         export ELV_TOOLCHAIN_DIST_PLATFORM=$elvdev_dir/elv-toolchain/dist/${LINUX}
         ;;
     esac
