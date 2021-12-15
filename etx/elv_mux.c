@@ -337,29 +337,31 @@ do_mux(
 )
 {
     io_mux_ctx_t in_mux_ctx;
-    avpipe_io_handler_t in_handlers;
-    avpipe_io_handler_t out_handlers;
+    avpipe_io_handler_t *in_handlers;
+    avpipe_io_handler_t *out_handlers;
     //char *url = "fsegment-%05d.mp4";
     char *url = out_filename;
     txctx_t *txctx;
     int rc = 0;
 
-    in_handlers.avpipe_opener = in_mux_opener;
-    in_handlers.avpipe_closer = in_mux_closer;
-    in_handlers.avpipe_reader = in_mux_read_packet;
-    in_handlers.avpipe_writer = in_mux_write_packet;
-    in_handlers.avpipe_seeker = in_mux_seek;
+    in_handlers = (avpipe_io_handler_t *) calloc(1, sizeof(avpipe_io_handler_t));
+    in_handlers->avpipe_opener = in_mux_opener;
+    in_handlers->avpipe_closer = in_mux_closer;
+    in_handlers->avpipe_reader = in_mux_read_packet;
+    in_handlers->avpipe_writer = in_mux_write_packet;
+    in_handlers->avpipe_seeker = in_mux_seek;
 
-    out_handlers.avpipe_opener = out_mux_opener;
-    out_handlers.avpipe_closer = out_mux_closer;
-    out_handlers.avpipe_reader = out_mux_read_packet;
-    out_handlers.avpipe_writer = out_mux_write_packet;
-    out_handlers.avpipe_seeker = out_mux_seek;
-    out_handlers.avpipe_stater = out_mux_stat;
+    out_handlers = (avpipe_io_handler_t *) calloc(1, sizeof(avpipe_io_handler_t));
+    out_handlers->avpipe_opener = out_mux_opener;
+    out_handlers->avpipe_closer = out_mux_closer;
+    out_handlers->avpipe_reader = out_mux_read_packet;
+    out_handlers->avpipe_writer = out_mux_write_packet;
+    out_handlers->avpipe_seeker = out_mux_seek;
+    out_handlers->avpipe_stater = out_mux_stat;
 
     memset(&in_mux_ctx, 0, sizeof(io_mux_ctx_t));
 
-    rc = avpipe_init_muxer(&txctx, &in_handlers, &in_mux_ctx, &out_handlers, params, url);
+    rc = avpipe_init_muxer(&txctx, in_handlers, &in_mux_ctx, out_handlers, params, url);
     if (rc < 0) {
         printf("Error: avpipe init muxer failed, url=%s.\n", url);
         goto end_muxing;

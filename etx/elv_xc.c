@@ -693,19 +693,12 @@ tx_thread_func(
     elv_log("TRANSCODER THREAD %d STARTS", params->thread_number);
 
     for (i=0; i<params->repeats; i++) {
-        ioctx_t *inctx = (ioctx_t *)calloc(1, sizeof(ioctx_t));
-
-        if (params->in_handlers->avpipe_opener(params->filename, inctx) < 0) {
-            elv_err("THREAD %d, iteration %d failed to open avpipe output", params->thread_number, i+1);
-            continue;
-        }
-
         /*
          * Pass a copy of params since avpipe_fini() releases all the params memory.
          * (This is needed when repeating the same command with etx.)
          */
         txparams_t *txparams = txparam_copy(params->txparams);
-        if ((rc = avpipe_init(&txctx, params->in_handlers, inctx, params->out_handlers, txparams, params->filename)) != eav_success) {
+        if ((rc = avpipe_init(&txctx, params->in_handlers, params->out_handlers, txparams, params->filename)) != eav_success) {
             elv_err("THREAD %d, iteration %d, failed to initialize avpipe rc=%d", params->thread_number, i+1, rc);
             continue;
         }
@@ -717,12 +710,9 @@ tx_thread_func(
         }
 
         /* If url is UDP, then wait for UDP thread to be finished */
-        if (inctx->utid) {
-            pthread_join(inctx->utid, NULL);
+        if (txctx->inctx->utid) {
+            pthread_join(txctx->inctx->utid, NULL);
         }
-
-        /* Close input handler resources */
-        params->in_handlers->avpipe_closer(inctx);
 
         elv_dbg("Releasing all the resources, filename=%s", params->filename);
         avpipe_fini(&txctx);
@@ -769,7 +759,6 @@ do_probe(
     int seekable
 )
 {
-    ioctx_t inctx;
     avpipe_io_handler_t in_handlers;
     txprobe_t *probe = NULL;
     int n_streams;
@@ -781,14 +770,7 @@ do_probe(
     in_handlers.avpipe_writer = in_write_packet;
     in_handlers.avpipe_seeker = in_seek;
 
-    memset(&inctx, 0, sizeof(ioctx_t));
-
-    if (in_handlers.avpipe_opener(filename, &inctx) < 0) {
-        rc = -1;
-        goto end_probe;
-    }
-
-    rc = avpipe_probe(&in_handlers, &inctx, seekable, &probe, &n_streams);
+    rc = avpipe_probe(filename, &in_handlers, seekable, &probe, &n_streams);
     if (rc != eav_success) {
         printf("Error: avpipe probe failed on file %s with no valid stream (err=%d).\n", filename, rc);
         goto end_probe;
@@ -862,8 +844,6 @@ do_probe(
 
 end_probe:
     elv_dbg("Releasing probe resources");
-    /* Close input handler resources */
-    in_handlers.avpipe_closer(&inctx);
     free(probe->stream_info);
     free(probe);
     return rc;
@@ -1107,8 +1087,8 @@ main(
 {
     pthread_t *tids;
     tx_thread_params_t thread_params;
-    avpipe_io_handler_t in_handlers;
-    avpipe_io_handler_t out_handlers;
+    avpipe_io_handler_t *in_handlers;
+    avpipe_io_handler_t *out_handlers;
     struct stat st = {0};
     int repeats = 1;
     int n_threads = 1;
@@ -1583,25 +1563,27 @@ main(
     if (stat("./O", &st) == -1)
         mkdir("./O", 0700);
 
-    in_handlers.avpipe_opener = in_opener;
-    in_handlers.avpipe_closer = in_closer;
-    in_handlers.avpipe_reader = in_read_packet;
-    in_handlers.avpipe_writer = in_write_packet;
-    in_handlers.avpipe_seeker = in_seek;
-    in_handlers.avpipe_stater = in_stat;
+    in_handlers = (avpipe_io_handler_t *) calloc(1, sizeof(avpipe_io_handler_t));
+    in_handlers->avpipe_opener = in_opener;
+    in_handlers->avpipe_closer = in_closer;
+    in_handlers->avpipe_reader = in_read_packet;
+    in_handlers->avpipe_writer = in_write_packet;
+    in_handlers->avpipe_seeker = in_seek;
+    in_handlers->avpipe_stater = in_stat;
 
-    out_handlers.avpipe_opener = out_opener;
-    out_handlers.avpipe_closer = out_closer;
-    out_handlers.avpipe_reader = out_read_packet;
-    out_handlers.avpipe_writer = out_write_packet;
-    out_handlers.avpipe_seeker = out_seek;
-    out_handlers.avpipe_stater = out_stat;
+    out_handlers = (avpipe_io_handler_t *) calloc(1, sizeof(avpipe_io_handler_t));
+    out_handlers->avpipe_opener = out_opener;
+    out_handlers->avpipe_closer = out_closer;
+    out_handlers->avpipe_reader = out_read_packet;
+    out_handlers->avpipe_writer = out_write_packet;
+    out_handlers->avpipe_seeker = out_seek;
+    out_handlers->avpipe_stater = out_stat;
 
     thread_params.filename = strdup(filename);
     thread_params.repeats = repeats;
     thread_params.txparams = &p;
-    thread_params.in_handlers = &in_handlers;
-    thread_params.out_handlers = &out_handlers;
+    thread_params.in_handlers = in_handlers;
+    thread_params.out_handlers = out_handlers;
 
     if (parse_url(filename, &url_parser) != 0) {
         usage(argv[0], "-f", EXIT_FAILURE);

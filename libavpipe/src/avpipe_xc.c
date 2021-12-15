@@ -490,7 +490,8 @@ prepare_decoder(
         /* If stream ID is not set - match audio_index */
         if (params && params->stream_id < 0 &&
             params->tx_type & tx_audio &&
-            selected_audio_index(params, i) >= 0) {
+            (selected_audio_index(params, i) >= 0 ||
+                (decoder_context->n_audio > 0 && decoder_context->audio_stream_index[decoder_context->n_audio-1] == i))) {
             selected_stream = 1;
         }
 
@@ -1351,6 +1352,8 @@ prepare_encoder(
     char *format = params->format;
     int rc = 0;
 
+    encoder_context->is_mpegts = decoder_context->is_mpegts;
+    encoder_context->is_rtmp = decoder_context->is_rtmp;
     encoder_context->out_handlers = out_handlers;
     /*
      * TODO: passing "hls" format needs some development in FF to produce stream index for audio/video.
@@ -1607,12 +1610,18 @@ set_idr_frame_key_flag(
     if (!strcmp(params->format, "fmp4-segment") || !strcmp(params->format, "segment") ||
         !strcmp(params->format, "dash") || !strcmp(params->format, "hls")) {
         if (frame->pts >= encoder_context->last_key_frame + params->video_seg_duration_ts) {
+            int64_t diff = frame->pts - (encoder_context->last_key_frame + params->video_seg_duration_ts);
+            int missing_frames = 0;
+            /* We can have some missing_frames only when transcoding UDP MPEG-TS */
+            if (encoder_context->is_mpegts && encoder_context->calculated_frame_duration > 0)
+                missing_frames = diff / encoder_context->calculated_frame_duration;
             if (debug_frame_level) {
-                elv_dbg("FRAME SET KEY flag, seg_duration_ts=%d pts=%"PRId64,
-                    params->video_seg_duration_ts, frame->pts);
+                elv_dbg("FRAME SET KEY flag, seg_duration_ts=%d pts=%"PRId64", missing_frames=%d",
+                    params->video_seg_duration_ts, frame->pts, missing_frames);
             }
             frame->pict_type = AV_PICTURE_TYPE_I;
-            encoder_context->last_key_frame = frame->pts;
+            encoder_context->last_key_frame = frame->pts - missing_frames * encoder_context->calculated_frame_duration;
+            encoder_context->forced_keyint_countdown = params->force_keyint - missing_frames;
         }
     }
 
@@ -3765,12 +3774,13 @@ get_tx_type_name(
 
 int
 avpipe_probe(
+    char *filename,
     avpipe_io_handler_t *in_handlers,
-    ioctx_t *inctx,
     int seekable,
     txprobe_t **txprobe,
     int *n_streams)
 {
+    ioctx_t inctx;
     coderctx_t decoder_ctx;
     stream_info_t *stream_probes, *stream_probes_ptr;
     txprobe_t *probe;
@@ -3782,9 +3792,16 @@ avpipe_probe(
         goto avpipe_probe_end;
     }
 
+    memset(&inctx, 0, sizeof(ioctx_t));
+
+    if (in_handlers->avpipe_opener(filename, &inctx) < 0) {
+        rc = eav_open_input;
+        goto avpipe_probe_end;
+    }
+
     memset(&decoder_ctx, 0, sizeof(coderctx_t));
 
-    if ((rc = prepare_decoder(&decoder_ctx, in_handlers, inctx, NULL, seekable)) != eav_success) {
+    if ((rc = prepare_decoder(&decoder_ctx, in_handlers, &inctx, NULL, seekable)) != eav_success) {
         elv_err("avpipe_probe failed to prepare decoder");
         goto avpipe_probe_end;
     }
@@ -3885,6 +3902,9 @@ avpipe_probe_end:
         }
     }
 
+    /* Close input handler resources */
+    in_handlers->avpipe_closer(&inctx);
+
     return rc;
 }
 
@@ -3935,6 +3955,18 @@ check_params(
             elv_log("Replacing rc_buffer_size %d with video_bitrate %d", params->rc_buffer_size, params->video_bitrate);
             params->rc_buffer_size = params->video_bitrate;
         }
+    }
+
+    /*
+     * PENDING (RM), this is just a short cut to convert joining the same MONO audio index
+     * into a normal audio transcoding and produce stereo (this will prevent a crash).
+     */
+    if (params->tx_type == tx_audio_join &&
+        params->n_audio == 2 &&
+        params->audio_index[0] == params->audio_index[1]) {
+        params->tx_type = tx_audio;
+        params->channel_layout = AV_CH_LAYOUT_STEREO;
+        params->n_audio = 1;
     }
 
     if (params->bitdepth == 0) {
@@ -4006,14 +4038,21 @@ int
 avpipe_init(
     txctx_t **txctx,
     avpipe_io_handler_t *in_handlers,
-    ioctx_t *inctx,
     avpipe_io_handler_t *out_handlers,
     txparams_t *p,
     char *url)
 {
-    txctx_t *p_txctx = (txctx_t *) calloc(1, sizeof(txctx_t));
+    txctx_t *p_txctx = NULL;
     txparams_t *params;
     int rc = 0;
+    ioctx_t *inctx = (ioctx_t *)calloc(1, sizeof(ioctx_t));
+
+    if (in_handlers->avpipe_opener(url, inctx) < 0) {
+        elv_err("Failed to open avpipe input %s", url);
+        free(inctx);
+        rc = eav_open_input;
+        goto avpipe_init_failed;
+    }
 
     if (!txctx) {
         elv_err("Trancoding context is NULL");
@@ -4027,9 +4066,13 @@ avpipe_init(
         goto avpipe_init_failed;
     }
 
+    p_txctx = (txctx_t *) calloc(1, sizeof(txctx_t));
     params = (txparams_t *) calloc(1, sizeof(txparams_t));
     *params = *p;
     p_txctx->params = params;
+    p_txctx->inctx = inctx;
+    p_txctx->in_handlers = in_handlers;
+    p_txctx->out_handlers = out_handlers;
 
     if (!params->format ||
         (strcmp(params->format, "dash") &&
@@ -4150,15 +4193,12 @@ avpipe_init(
         goto avpipe_init_failed;
     }
 
-    p_txctx->inctx = inctx;
     elv_channel_init(&p_txctx->vc, 10000);
     elv_channel_init(&p_txctx->ac, 10000);
 
     /* Create threads for decoder and encoder */
     pthread_create(&p_txctx->vthread_id, NULL, transcode_video_func, p_txctx);
     pthread_create(&p_txctx->athread_id, NULL, transcode_audio_func, p_txctx);
-    p_txctx->in_handlers = in_handlers;
-    p_txctx->out_handlers = out_handlers;
     *txctx = p_txctx;
 
     return eav_success;
@@ -4166,7 +4206,8 @@ avpipe_init(
 avpipe_init_failed:
     if (txctx)
         *txctx = NULL;
-    avpipe_fini(&p_txctx);
+    if (p_txctx)
+        avpipe_fini(&p_txctx);
     return rc;
 }
 
@@ -4218,6 +4259,12 @@ avpipe_fini(
 
     if (!txctx || !(*txctx))
         return 0;
+
+    /* Close input handler resources if it is not a muxing command */
+    if (!(*txctx)->in_mux_ctx)
+        (*txctx)->in_handlers->avpipe_closer((*txctx)->inctx);
+    free((*txctx)->in_handlers);
+    free((*txctx)->out_handlers);
 
     decoder_context = &(*txctx)->decoder_ctx;
     encoder_context = &(*txctx)->encoder_ctx;

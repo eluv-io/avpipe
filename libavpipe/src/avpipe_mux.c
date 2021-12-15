@@ -339,6 +339,8 @@ avpipe_init_muxer(
     *params = *p;
     p_txctx->in_mux_ctx = in_mux_ctx;
     p_txctx->params = params;
+    p_txctx->in_handlers = in_handlers;
+    p_txctx->out_handlers = out_handlers;
     *txctx = p_txctx;
 
     return eav_success;

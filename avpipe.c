@@ -601,14 +601,7 @@ tx_init(
     connect_ffmpeg_log();
     set_handlers(&in_handlers, &out_handlers);
 
-    ioctx_t *inctx = (ioctx_t *)calloc(1, sizeof(ioctx_t));
-
-    if (in_handlers->avpipe_opener(filename, inctx) < 0) {
-        rc = eav_open_input;
-        goto end_tx_init;
-    }
-
-    if ((rc = avpipe_init(&txctx, in_handlers, inctx, out_handlers, params, filename)) != eav_success) {
+    if ((rc = avpipe_init(&txctx, in_handlers, out_handlers, params, filename)) != eav_success) {
         goto end_tx_init;
     }
 
@@ -620,15 +613,12 @@ tx_init(
 
     txctx->in_handlers = in_handlers;
     txctx->out_handlers = out_handlers;
-    txctx->inctx = inctx;
     txctx->debug_frame_level = debug_frame_level;
 
     *handle = h;
     return eav_success;
 
 end_tx_init:
-    /* Close input handler resources */
-    in_handlers->avpipe_closer(inctx);
 
     elv_dbg("Releasing all the resources, filename=%s", filename);
     avpipe_fini(&txctx);
@@ -658,13 +648,8 @@ tx_run(
     }
 
 end_tx:
-    /* Close input handler resources */
-    txctx->in_handlers->avpipe_closer(txctx->inctx);
-
     elv_dbg("Releasing all the resources, handle=%d", handle);
     tx_table_free(handle);
-    free(txctx->in_handlers);
-    free(txctx->out_handlers);
     avpipe_fini(&txctx);
 
     return rc;
@@ -703,20 +688,10 @@ tx(
     //elv_set_log_level(elv_log_debug);
 
     set_handlers(&in_handlers, &out_handlers);
-    ioctx_t *inctx = (ioctx_t *)calloc(1, sizeof(ioctx_t));
 
-    if (in_handlers->avpipe_opener(filename, inctx) < 0) {
-        rc = eav_open_input;
+    if ((rc = avpipe_init(&txctx, in_handlers, out_handlers, params, filename)) != eav_success) {
         goto end_tx;
     }
-
-    if ((rc = avpipe_init(&txctx, in_handlers, inctx, out_handlers, params, filename)) != eav_success) {
-        goto end_tx;
-    }
-
-    txctx->in_handlers = in_handlers;
-    txctx->out_handlers = out_handlers;
-    txctx->inctx = inctx;
 
     if ((rc = avpipe_xc(txctx, 0, debug_frame_level)) != eav_success) {
         elv_err("Transcoding failed filename=%s, rc=%d", filename, rc);
@@ -724,13 +699,8 @@ tx(
     }
 
 end_tx:
-    /* Close input handler resources */
-    in_handlers->avpipe_closer(inctx);
-
     elv_dbg("Releasing all the resources, filename=%s", filename);
     avpipe_fini(&txctx);
-    free(in_handlers);
-    free(out_handlers);
 
     return rc;
 }
@@ -1027,9 +997,6 @@ mux(
         goto end_mux;
     }
 
-    txctx->in_handlers = in_handlers;
-    txctx->out_handlers = out_handlers;
-
     if ((rc = avpipe_mux(txctx)) != eav_success) {
         elv_err("Muxing failed");
         goto end_mux;
@@ -1038,8 +1005,6 @@ mux(
 end_mux:
     elv_dbg("Releasing all the muxing resources, filename=%s", filename);
     avpipe_mux_fini(&txctx);
-    free(in_handlers);
-    free(out_handlers);
     free(in_mux_ctx);
 
     return rc;
@@ -1067,18 +1032,13 @@ probe(
     txprobe_t **txprobe,
     int *n_streams)
 {
-    ioctx_t inctx;
     avpipe_io_handler_t *in_handlers;
     txprobe_t *probes;
     int rc;
 
     set_handlers(&in_handlers, NULL);
-    if (in_handlers->avpipe_opener(filename, &inctx) < 0) {
-        rc = eav_open_input;
-        goto end_probe;
-    }
 
-    rc = avpipe_probe(in_handlers, &inctx, seekable, &probes, n_streams);
+    rc = avpipe_probe(filename, in_handlers, seekable, &probes, n_streams);
     if (rc != eav_success)
         goto end_probe;
 
@@ -1086,8 +1046,6 @@ probe(
 
 end_probe:
     elv_dbg("Releasing probe resources, filename=%s", filename != NULL ? filename : "");
-    /* Close input handler resources */
-    in_handlers->avpipe_closer(&inctx);
     free(in_handlers);
     return rc;
 }

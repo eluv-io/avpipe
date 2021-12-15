@@ -522,7 +522,6 @@ int
 avpipe_init(
     txctx_t **txctx,
     avpipe_io_handler_t *in_handlers,
-    ioctx_t *inctx,
     avpipe_io_handler_t *out_handlers,
     txparams_t *params,
     char *url);
@@ -554,9 +553,8 @@ avpipe_channel_name(
 /**
  * @brief   Probes object stream specified by input handler.
  *
+ * @param   url             url/filename of the media content to probe
  * @param   in_handlers     A pointer to input handlers that direct the probe
- * @param   inctx           A pointer to ioctx_t for input stream. This has to be allocated and initialized
- *                          by the application before calling this function.
  * @param   seekable        A flag to specify whether input stream is seakable or no
  * @param   txprob          A pointer to the txprobe_t that could contain probing info.
  * @param   n_streams       Will contail number of streams that are probed if successful.
@@ -564,8 +562,8 @@ avpipe_channel_name(
  */
 int
 avpipe_probe(
+    char *url,
     avpipe_io_handler_t *in_handlers,
-    ioctx_t *inctx,
     int seekable,
     txprobe_t **txprobe,
     int *n_streams);
