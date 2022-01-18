@@ -1026,6 +1026,45 @@ func TestAudio6MonoTo5_1(t *testing.T) {
 	xcTest(t, outputDir, filename, params, xcTestResult)
 }
 
+func TestAudio6MonoUnequalChannelLayoutsTo5_1(t *testing.T) {
+	filename := "./media/cmbyn_th-2348159_aud-comp-30sec.mov"
+	outputDir := path.Join(baseOutPath, fn())
+
+	params := &avpipe.TxParams{
+		BypassTranscoding:   false,
+		Format:              "fmp4-segment",
+		StartTimeTs:         0,
+		DurationTs:          -1,
+		StartSegmentStr:     "1",
+		SegDuration:         "30",
+		Ecodec2:             "aac",
+		Dcodec2:             "",
+		TxType:              avpipe.TxAudioMerge,
+		NumAudio:            6,
+		ChannelLayout:       avpipe.ChannelLayout("5.1"),
+		FilterDescriptor:    "[0:0][0:1][0:2][0:3][0:4][0:5]amerge=inputs=6,pan=5.1|c0=c0|c1=c1|c2=c2|c3=c3|c4=c4|c5=c5[aout]",
+		StreamId:            -1,
+		SyncAudioToStreamId: -1,
+	}
+	params.AudioIndex[0] = 0
+	params.AudioIndex[1] = 1
+	params.AudioIndex[2] = 2
+	params.AudioIndex[3] = 3
+	params.AudioIndex[4] = 4
+	params.AudioIndex[5] = 5
+
+	xcTestResult := &XcTestResult{
+		timeScale:         48000,
+		sampleRate:        48000,
+		channelLayoutName: "5.1",
+	}
+	for i := 1; i < 2; i++ {
+		xcTestResult.mezFile = append(xcTestResult.mezFile, fmt.Sprintf("%s/asegment-%d.mp4", outputDir, i))
+	}
+
+	xcTest(t, outputDir, filename, params, xcTestResult)
+}
+
 func TestAudio10Channel_s16To6Channel_5_1(t *testing.T) {
 	filename := "./media/case_3_video_and_10_channel_audio_10sec.mov"
 	outputDir := path.Join(baseOutPath, fn())

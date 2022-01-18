@@ -427,7 +427,6 @@ init_audio_merge_pan_filters(
         elv_err("init_audio_merge_pan_filters, invalid number of audio streams, n_audio=%d", decoder_context->n_audio);
         return eav_num_streams;
     }
-    AVCodecContext *dec_codec_ctx = decoder_context->codec_context[decoder_context->audio_stream_index[0]];
     AVCodecContext *enc_codec_ctx = encoder_context->codec_context[encoder_context->audio_stream_index[0]];
     char args[512];
     int ret = 0;
@@ -439,29 +438,12 @@ init_audio_merge_pan_filters(
     AVStream *s = decoder_context->format_context->streams[decoder_context->audio_stream_index[0]];
     char *source_names[] = {"in_0", "in_1", "in_2", "in_3", "in_4", "in_5", "in_6", "in_7"};
 
-    if (!dec_codec_ctx) {
-        elv_err("init_audio_merge_pan_filters, audio decoder was not initialized!");
-        ret = AVERROR_UNKNOWN;
-        goto end;
-    }
-
     filter_graph = avfilter_graph_alloc();
     if (!buffersrc || !buffersink || !filter_graph) {
         elv_err("init_audio_merge_pan_filters, audio filtering source or sink element not found");
         ret = AVERROR_UNKNOWN;
         goto end;
     }
-
-    if (!dec_codec_ctx->channel_layout)
-        dec_codec_ctx->channel_layout = av_get_default_channel_layout(dec_codec_ctx->channels);
-
-    snprintf(args, sizeof(args),
-        "time_base=%d/%d:sample_rate=%d:sample_fmt=%s:channel_layout=0x%"PRIx64,
-        s->time_base.num, s->time_base.den,
-        dec_codec_ctx->sample_rate,
-        av_get_sample_fmt_name(dec_codec_ctx->sample_fmt),
-        dec_codec_ctx->channel_layout);
-    elv_log("init_audio_merge_pan_filters, audio srcfilter args=%s", args);
 
     ret = avfilter_graph_create_filter(&buffersink_ctx, buffersink, "out", NULL, NULL, filter_graph);
     if (ret < 0) {
@@ -500,6 +482,26 @@ init_audio_merge_pan_filters(
     abuffersrc_ctx = decoder_context->audio_buffersrc_ctx;
 
     for (int i=0; i<decoder_context->n_audio; i++) {
+        AVCodecContext *dec_codec_ctx = decoder_context->codec_context[decoder_context->audio_stream_index[i]];
+
+        if (!dec_codec_ctx) {
+            elv_err("init_audio_merge_pan_filters, audio decoder %d was not initialized!", i);
+            ret = AVERROR_UNKNOWN;
+            goto end;
+        }
+
+        if (!dec_codec_ctx->channel_layout)
+            dec_codec_ctx->channel_layout = av_get_default_channel_layout(dec_codec_ctx->channels);
+
+        /* Set the parameters of each input stream */
+        snprintf(args, sizeof(args),
+            "time_base=%d/%d:sample_rate=%d:sample_fmt=%s:channel_layout=0x%"PRIx64,
+            s->time_base.num, s->time_base.den,
+            dec_codec_ctx->sample_rate,
+            av_get_sample_fmt_name(dec_codec_ctx->sample_fmt),
+            dec_codec_ctx->channel_layout);
+        elv_log("init_audio_merge_pan_filters, audio srcfilter args=%s", args);
+
         ret = avfilter_graph_create_filter(&abuffersrc_ctx[i], buffersrc, source_names[i], args, NULL, filter_graph);
         if (ret < 0) {
             elv_err("init_audio_merge_pan_filters, cannot create audio buffer source");
