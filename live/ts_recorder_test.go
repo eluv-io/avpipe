@@ -2,200 +2,80 @@ package live
 
 import (
 	"fmt"
-	"io"
-	"net"
+	"github.com/stretchr/testify/assert"
 	"os"
 	"testing"
+	"time"
 
 	"github.com/qluvio/avpipe"
 )
 
-func TestUdpToMp4V1(t *testing.T) {
-	outputDir := "TestUdpToMp4V1"
+func TestUdpToMp4(t *testing.T) {
+	setupLogging()
+	outputDir := "TestUdpToMp4"
 
 	// Create output directory if it doesn't exist
 	if _, err := os.Stat(outputDir); os.IsNotExist(err) {
 		os.Mkdir(outputDir, 0755)
 	}
 
-	videoParamsTs := &avpipe.TxParams{
-		Format:          "fmp4-segment",
-		Seekable:        false,
-		DurationTs:      -1,
-		StartSegmentStr: "1",
-		VideoBitrate:    20000000, // fox stream bitrate
-		ForceKeyInt:     120,
-		SegDuration:     "30.03",   // seconds
-		Ecodec:          "libx264", // libx264 software / h264_videotoolbox mac hardware
-		EncHeight:       720,       // 1080
-		EncWidth:        1280,      // 1920
-		TxType:          avpipe.TxVideo,
-		StreamId:        -1,
-	}
-
-	setupLogging()
-
 	liveSource := NewLiveSource()
+	addr := fmt.Sprintf("udp://localhost:%d", liveSource.Port)
+
+	done := make(chan bool, 1)
+	testComplet := make(chan bool, 1)
+
 	err := liveSource.Start()
 	if err != nil {
 		t.Error(err)
 	}
 
-	sAddr, err := net.ResolveUDPAddr("udp", fmt.Sprintf(":%d", liveSource.Port))
-	if err != nil {
-		t.Error(err)
-	}
-	conn, err := net.ListenUDP("udp", sAddr)
-	if err != nil {
-		t.Error(err)
-	}
-	conn.SetReadBuffer(8 * 1024 * 1024)
-
-	rwVideoBuf := NewRWBuffer(100000)
-
-	url := "video_udp"
-	reqCtx := &testCtx{url: url, r: rwVideoBuf}
-	putReqCtxByURL(url, reqCtx)
-
-	go func() {
-		tlog.Info("UDP start")
-		if err := readUdp(conn, rwVideoBuf); err != nil {
-			tlog.Info("UDP timeout", err)
-		}
-		tlog.Info("UDP done", "err", err)
-		if err := rwVideoBuf.(*RWBuffer).CloseSide(RWBufferWriteClosed); err != nil {
-			t.Error(err)
-		}
-	}()
-
-	avpipe.InitIOHandler(&inputOpener{dir: outputDir}, &outputOpener{dir: outputDir})
-	tlog.Info("Transcoding start", "videoParams", fmt.Sprintf("%+v", *videoParamsTs))
-	err = avpipe.Tx(videoParamsTs, url, true)
-	if err != nil {
-		t.Error("Transcoding failed", "err", err)
-	}
-	tlog.Info("Transcoding done", "err", err)
-}
-
-func TestUdpToMp4V2(t *testing.T) {
-	setupLogging()
-	outputDir := "TestUdpToMp4V2"
-
-	// Create output directory if it doesn't exist
-	if _, err := os.Stat(outputDir); os.IsNotExist(err) {
-		os.Mkdir(outputDir, 0755)
-	}
-
-	liveSource := NewLiveSource()
-	addr := fmt.Sprintf(":%d", liveSource.Port)
-
-	tsr, rwb, err := NewTsReaderV2(addr)
-	if err != nil {
-		t.Error("TsReader failed", "err", err)
-	}
-
-	audioReader := NewRWBuffer(10000)
-	videoReader := io.TeeReader(rwb, audioReader)
-
-	done := make(chan bool, 1)
-	testComplet := make(chan bool, 1)
-
-	go func(tsr *TsReader) {
-	out:
-		for {
-			select {
-			case err = <-tsr.ErrChannel:
-				tlog.Error("Got error on reading UDP", err)
-				break out
-			case <-testComplet:
-				break out
-			}
-		}
-	}(tsr)
-
-	err = liveSource.Start()
-	if err != nil {
-		t.Error(err)
-	}
-
-	audioParamsTs := &avpipe.TxParams{
+	XCParams := &avpipe.TxParams{
 		Format:          "fmp4-segment",
 		Seekable:        false,
 		DurationTs:      -1,
 		StartSegmentStr: "1",
-		AudioBitrate:    384000,  // FS1-19-10-14.ts audio bitrate
+		AudioBitrate:    384000,   // FS1-19-10-14.ts audio bitrate
+		VideoBitrate:    20000000, // fox stream bitrate
+		ForceKeyInt:     120,
 		SegDuration:     "30.03", // seconds
 		Dcodec2:         "ac3",
-		Ecodec2:         "aac", // "aac"
-		TxType:          avpipe.TxAudio,
+		Ecodec2:         "aac",     // "aac"
+		Ecodec:          "libx264", // libx264 software / h264_videotoolbox mac hardware
+		EncHeight:       720,       // 1080
+		EncWidth:        1280,      // 1920
+		TxType:          avpipe.TxAll,
 		StreamId:        -1,
 	}
 
 	// Transcode audio mez files in background
-	go func(reader io.Reader) {
-		url := "audio_mez_udp2"
-		reqCtx := &testCtx{url: url, r: reader}
-		putReqCtxByURL(url, reqCtx)
+	url := addr
+	reqCtx := &testCtx{url: url}
+	putReqCtxByURL(url, reqCtx)
 
-		avpipe.InitIOHandler(&inputOpener{dir: outputDir}, &outputOpener{dir: outputDir})
+	avpipe.InitIOHandler(&inputOpener{dir: outputDir}, &outputOpener{dir: outputDir})
 
-		tlog.Info("Transcoding UDP Audio stream start", "params", fmt.Sprintf("%+v", *audioParamsTs))
-		err := avpipe.Tx(audioParamsTs, url, true)
-		tlog.Info("Transcoding UDP Audio stream done", "err", err, "last pts", nil)
-		if err != nil {
-			t.Error("Transcoding UDP Audio failed", "err", err)
-		}
-
-		done <- true
-	}(audioReader)
-
-	videoParamsTs := &avpipe.TxParams{
-		Format:          "fmp4-segment",
-		Seekable:        false,
-		DurationTs:      -1,
-		StartSegmentStr: "1",
-		VideoBitrate:    20000000, // fox stream bitrate
-		ForceKeyInt:     120,
-		SegDuration:     "30.03",   // seconds
-		Ecodec:          "libx264", // libx264 software / h264_videotoolbox mac hardware
-		EncHeight:       720,       // 1080
-		EncWidth:        1280,      // 1920
-		TxType:          avpipe.TxVideo,
-		StreamId:        -1,
+	tlog.Info("Transcoding UDP stream start", "params", fmt.Sprintf("%+v", *XCParams))
+	err = avpipe.Tx(XCParams, url, true)
+	tlog.Info("Transcoding UDP stream done", "err", err, "last pts", nil)
+	if err != nil {
+		t.Error("Transcoding UDP stream failed", "err", err)
 	}
 
-	go func(reader io.Reader, writer io.WriteCloser) {
-		url := "video_mez_udp2"
-		reqCtx := &testCtx{url: url, r: reader, wc: writer}
-		putReqCtxByURL(url, reqCtx)
-
-		avpipe.InitIOHandler(&inputOpener{dir: outputDir}, &outputOpener{dir: outputDir})
-
-		tlog.Info("Transcoding UDP Video stream start", "params", fmt.Sprintf("%+v", *videoParamsTs))
-		err := avpipe.Tx(videoParamsTs, url, true)
-		tlog.Info("Transcoding UDP Video stream done", "err", err, "last pts", nil)
-		if err != nil {
-			t.Error("Transcoding UDP Video failed", "err", err)
-		}
-
-		done <- true
-	}(videoReader, audioReader)
-
-	<-done
-	<-done
-
-	audioParamsTs.Format = "dash"
-	audioParamsTs.AudioSegDurationTs = 96106 // almost 2 * 48000
-	audioMezFiles := [3]string{"audio_mez_udp2-segment-1.mp4", "audio_mez_udp2-segment-2.mp4", "audio_mez_udp2-segment-3.mp4"}
+	XCParams.Format = "dash"
+	XCParams.Dcodec2 = "aac"
+	XCParams.AudioSegDurationTs = 96106 // almost 2 * 48000
+	XCParams.TxType = avpipe.TxAudio
+	audioMezFiles := [3]string{"audio-mez-udp-segment-1.mp4", "audio-mez-udp-segment-2.mp4", "audio-mez-udp-segment-3.mp4"}
 
 	// Now create audio dash segments out of audio mezzanines
 	go func() {
 		for i, url := range audioMezFiles {
-			tlog.Info("Transcoding Audio Dash start", "audioParams", fmt.Sprintf("%+v", *audioParamsTs), "url", url)
+			tlog.Info("Transcoding Audio Dash start", "audioParams", fmt.Sprintf("%+v", *XCParams), "url", url)
 			reqCtx := &testCtx{url: url}
 			putReqCtxByURL(url, reqCtx)
-			audioParamsTs.StartSegmentStr = fmt.Sprintf("%d", i*15+1)
-			err := avpipe.Tx(audioParamsTs, url, true)
+			XCParams.StartSegmentStr = fmt.Sprintf("%d", i*15+1)
+			err := avpipe.Tx(XCParams, url, true)
 			tlog.Info("Transcoding Audio Dash done", "err", err)
 			if err != nil {
 				t.Error("Transcoding Audio Dash failed", "err", err, "url", url)
@@ -208,18 +88,19 @@ func TestUdpToMp4V2(t *testing.T) {
 		<-done
 	}
 
-	videoParamsTs.Format = "dash"
-	videoParamsTs.VideoSegDurationTs = 180000 // almost 2 * 90000
-	videoMezFiles := [3]string{"video_mez_udp2-segment-1.mp4", "video_mez_udp2-segment-2.mp4", "video_mez_udp2-segment-3.mp4"}
+	XCParams.Format = "dash"
+	XCParams.VideoSegDurationTs = 180000 // almost 2 * 90000
+	XCParams.TxType = avpipe.TxVideo
+	videoMezFiles := [3]string{"video-mez-udp-segment-1.mp4", "video-mez-udp-segment-2.mp4", "video-mez-udp-segment-3.mp4"}
 
 	// Now create video dash segments out of audio mezzanines
 	go func() {
 		for i, url := range videoMezFiles {
-			tlog.Info("AVL Video Dash transcoding start", "videoParams", fmt.Sprintf("%+v", *videoParamsTs), "url", url)
+			tlog.Info("AVL Video Dash transcoding start", "videoParams", fmt.Sprintf("%+v", *XCParams), "url", url)
 			reqCtx := &testCtx{url: url}
 			putReqCtxByURL(url, reqCtx)
-			audioParamsTs.StartSegmentStr = fmt.Sprintf("%d", i*15+1)
-			err := avpipe.Tx(videoParamsTs, url, true)
+			XCParams.StartSegmentStr = fmt.Sprintf("%d", i*15+1)
+			err := avpipe.Tx(XCParams, url, true)
 			tlog.Info("Transcoding Video Dash done", "err", err)
 			if err != nil {
 				t.Error("Transcoding Video Dash failed", "err", err, "url", url)
@@ -233,4 +114,279 @@ func TestUdpToMp4V2(t *testing.T) {
 	}
 
 	testComplet <- true
+}
+
+// Cancels the live stream transcoding immediately after initializing the transcoding (after TxInit).
+func TestUdpToMp4WithCancelling1(t *testing.T) {
+	setupLogging()
+	outputDir := "TestUdpToMp4WithCancelling1"
+	log.Info("STARTING " + outputDir)
+
+	// Create output directory if it doesn't exist
+	if _, err := os.Stat(outputDir); os.IsNotExist(err) {
+		os.Mkdir(outputDir, 0755)
+	}
+
+	liveSource := NewLiveSource()
+	url := fmt.Sprintf("udp://localhost:%d", liveSource.Port)
+
+	err := liveSource.Start()
+	if err != nil {
+		t.Error(err)
+	}
+
+	XCParams := &avpipe.TxParams{
+		Format:          "fmp4-segment",
+		Seekable:        false,
+		DurationTs:      -1,
+		StartSegmentStr: "1",
+		AudioBitrate:    384000,   // FS1-19-10-14.ts audio bitrate
+		VideoBitrate:    20000000, // fox stream bitrate
+		ForceKeyInt:     120,
+		SegDuration:     "30.03", // seconds
+		Dcodec2:         "ac3",
+		Ecodec2:         "aac",     // "aac"
+		Ecodec:          "libx264", // libx264 software / h264_videotoolbox mac hardware
+		EncHeight:       720,       // 1080
+		EncWidth:        1280,      // 1920
+		TxType:          avpipe.TxAll,
+		StreamId:        -1,
+	}
+
+	// Transcode audio/video mez files in background
+	reqCtx := &testCtx{url: url}
+	putReqCtxByURL(url, reqCtx)
+
+	avpipe.InitIOHandler(&inputOpener{dir: outputDir}, &outputOpener{dir: outputDir})
+
+	tlog.Info("Transcoding UDP stream start", "params", fmt.Sprintf("%+v", *XCParams))
+	handle, err := avpipe.TxInit(XCParams, url, true)
+	if err != nil {
+		t.Error("TxInitializing UDP stream failed", "err", err)
+	}
+	err = avpipe.TxCancel(handle)
+	assert.NoError(t, err)
+	if err != nil {
+		t.Error("Cancelling UDP stream failed", "err", err, "url", url)
+		t.FailNow()
+	} else {
+		tlog.Info("Cancelling UDP stream completed", "err", err, "url", url)
+	}
+}
+
+// Cancels the live stream transcoding immediately after starting the transcoding (1 sec after TxRun).
+func TestUdpToMp4WithCancelling2(t *testing.T) {
+	setupLogging()
+	outputDir := "TestUdpToMp4WithCancelling2"
+	log.Info("STARTING " + outputDir)
+
+	// Create output directory if it doesn't exist
+	if _, err := os.Stat(outputDir); os.IsNotExist(err) {
+		os.Mkdir(outputDir, 0755)
+	}
+
+	liveSource := NewLiveSource()
+	url := fmt.Sprintf("udp://localhost:%d", liveSource.Port)
+	done := make(chan bool, 1)
+
+	err := liveSource.Start()
+	if err != nil {
+		t.Error(err)
+	}
+
+	XCParams := &avpipe.TxParams{
+		Format:          "fmp4-segment",
+		Seekable:        false,
+		DurationTs:      -1,
+		StartSegmentStr: "1",
+		AudioBitrate:    384000,   // FS1-19-10-14.ts audio bitrate
+		VideoBitrate:    20000000, // fox stream bitrate
+		ForceKeyInt:     120,
+		SegDuration:     "30.03", // seconds
+		Dcodec2:         "ac3",
+		Ecodec2:         "aac",     // "aac"
+		Ecodec:          "libx264", // libx264 software / h264_videotoolbox mac hardware
+		EncHeight:       720,       // 1080
+		EncWidth:        1280,      // 1920
+		TxType:          avpipe.TxAll,
+		StreamId:        -1,
+	}
+
+	// Transcode audio/video mez files in background
+	reqCtx := &testCtx{url: url}
+	putReqCtxByURL(url, reqCtx)
+
+	avpipe.InitIOHandler(&inputOpener{dir: outputDir}, &outputOpener{dir: outputDir})
+
+	tlog.Info("Transcoding UDP stream start", "params", fmt.Sprintf("%+v", *XCParams))
+	handle, err := avpipe.TxInit(XCParams, url, true)
+	if err != nil {
+		t.Error("TxInitializing UDP stream failed", "err", err)
+	}
+	go func() {
+		err := avpipe.TxRun(handle)
+		if err != nil && err != avpipe.EAV_CANCELLED {
+			t.Error("Transcoding UDP stream failed", "err", err)
+		}
+		done <- true
+	}()
+
+	// Wait 1 second for transcoding to start
+	time.Sleep(1 * time.Second)
+
+	err = avpipe.TxCancel(handle)
+	assert.NoError(t, err)
+	if err != nil {
+		t.Error("Cancelling UDP stream failed", "err", err, "url", url)
+		t.FailNow()
+	} else {
+		tlog.Info("Cancelling UDP stream completed", "err", err, "url", url)
+	}
+
+	<-done
+}
+
+// Cancels the live stream transcoding some time after starting the transcoding (20 sec after TxRun).
+func TestUdpToMp4WithCancelling3(t *testing.T) {
+	setupLogging()
+	outputDir := "TestUdpToMp4WithCancelling3"
+	log.Info("STARTING " + outputDir)
+
+	// Create output directory if it doesn't exist
+	if _, err := os.Stat(outputDir); os.IsNotExist(err) {
+		os.Mkdir(outputDir, 0755)
+	}
+
+	liveSource := NewLiveSource()
+	url := fmt.Sprintf("udp://localhost:%d", liveSource.Port)
+	done := make(chan bool, 1)
+
+	err := liveSource.Start()
+	if err != nil {
+		t.Error(err)
+	}
+
+	XCParams := &avpipe.TxParams{
+		Format:          "fmp4-segment",
+		Seekable:        false,
+		DurationTs:      -1,
+		StartSegmentStr: "1",
+		AudioBitrate:    384000,   // FS1-19-10-14.ts audio bitrate
+		VideoBitrate:    20000000, // fox stream bitrate
+		ForceKeyInt:     120,
+		SegDuration:     "30.03", // seconds
+		Dcodec2:         "ac3",
+		Ecodec2:         "aac",     // "aac"
+		Ecodec:          "libx264", // libx264 software / h264_videotoolbox mac hardware
+		EncHeight:       720,       // 1080
+		EncWidth:        1280,      // 1920
+		TxType:          avpipe.TxAll,
+		StreamId:        -1,
+	}
+
+	// Transcode audio/video mez files in background
+	reqCtx := &testCtx{url: url}
+	putReqCtxByURL(url, reqCtx)
+
+	avpipe.InitIOHandler(&inputOpener{dir: outputDir}, &outputOpener{dir: outputDir})
+
+	tlog.Info("Transcoding UDP stream start", "params", fmt.Sprintf("%+v", *XCParams))
+	handle, err := avpipe.TxInit(XCParams, url, true)
+	if err != nil {
+		t.Error("TxInitializing UDP stream failed", "err", err)
+	}
+	go func() {
+		err := avpipe.TxRun(handle)
+		if err != nil && err != avpipe.EAV_CANCELLED {
+			t.Error("Transcoding UDP stream failed", "err", err)
+		}
+		done <- true
+	}()
+
+	// Wait 20 second for transcoding to start
+	time.Sleep(20 * time.Second)
+
+	err = avpipe.TxCancel(handle)
+	assert.NoError(t, err)
+	if err != nil {
+		t.Error("Cancelling UDP stream failed", "err", err, "url", url)
+		t.FailNow()
+	} else {
+		tlog.Info("Cancelling UDP stream completed", "err", err, "url", url)
+	}
+
+	<-done
+}
+
+// Cancels the live stream transcoding immediately 1 sec after starting the transcoding (after TxRun), while there is no source.
+func TestUdpToMp4WithCancelling4(t *testing.T) {
+	setupLogging()
+	outputDir := "TestUdpToMp4WithCancelling4"
+	log.Info("STARTING " + outputDir)
+
+	// Create output directory if it doesn't exist
+	if _, err := os.Stat(outputDir); os.IsNotExist(err) {
+		os.Mkdir(outputDir, 0755)
+	}
+
+	liveSource := NewLiveSource()
+	url := fmt.Sprintf("udp://localhost:%d", liveSource.Port)
+	done := make(chan bool, 1)
+
+	err := liveSource.Start()
+	if err != nil {
+		t.Error(err)
+	}
+
+	XCParams := &avpipe.TxParams{
+		Format:          "fmp4-segment",
+		Seekable:        false,
+		DurationTs:      -1,
+		StartSegmentStr: "1",
+		AudioBitrate:    384000,   // FS1-19-10-14.ts audio bitrate
+		VideoBitrate:    20000000, // fox stream bitrate
+		ForceKeyInt:     120,
+		SegDuration:     "30.03", // seconds
+		Dcodec2:         "ac3",
+		Ecodec2:         "aac",     // "aac"
+		Ecodec:          "libx264", // libx264 software / h264_videotoolbox mac hardware
+		EncHeight:       720,       // 1080
+		EncWidth:        1280,      // 1920
+		TxType:          avpipe.TxAll,
+		StreamId:        -1,
+	}
+
+	// Transcode audio/video mez files in background
+	reqCtx := &testCtx{url: url}
+	putReqCtxByURL(url, reqCtx)
+
+	avpipe.InitIOHandler(&inputOpener{dir: outputDir}, &outputOpener{dir: outputDir})
+	tlog.Info("Transcoding UDP stream start", "params", fmt.Sprintf("%+v", *XCParams))
+
+	handle, err := avpipe.TxInit(XCParams, url, true)
+	if err != nil {
+		t.Error("TxInitializing UDP stream failed", "err", err)
+	}
+
+	go func() {
+		err := avpipe.TxRun(handle)
+		if err != nil && err != avpipe.EAV_CANCELLED {
+			t.Error("Transcoding UDP stream failed", "err", err)
+		}
+		done <- true
+	}()
+
+	time.Sleep(1 * time.Second)
+	//liveSource.Stop()
+
+	err = avpipe.TxCancel(handle)
+	assert.NoError(t, err)
+	if err != nil {
+		t.Error("Cancelling UDP stream failed", "err", err, "url", url)
+		t.FailNow()
+	} else {
+		tlog.Info("Cancelling UDP stream completed", "err", err, "url", url)
+	}
+
+	<-done
 }

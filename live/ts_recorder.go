@@ -40,7 +40,10 @@ func NewTsReader(addr string, w io.Writer) *TsReader {
 	return tsr
 }
 
-// NewTsReaderV2  creates a UDP MPEG-TS reader and returns a TsReader and an io.Reader
+// Deprecated: Reading UDP datagrams are done inside avpipe library and no need
+// to create TsReader anymore (this makes handling different situations like
+// stopping and cancelling a stream extremely difficult).
+// NewTsReaderV2 creates a UDP MPEG-TS reader and returns a TsReader and an io.Reader
 // Starts the necessary goroutines - when the returned reader is closed, it stops
 // all goroutines and cleans up.
 func NewTsReaderV2(addr string) (*TsReader, io.ReadWriteCloser, error) {

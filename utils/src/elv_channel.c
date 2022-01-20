@@ -16,7 +16,8 @@ struct elv_channel_t
     int64_t         _front;
     int64_t         _rear;
     u_int64_t       _capacity;
-    int             _closed;
+    volatile int    _closed;
+    free_elem_f     _free_elem;
     pthread_mutex_t _mutex;
     pthread_cond_t  _cond_send;  /* Signaled when an item has been sent */
     pthread_cond_t  _cond_recv;  /* Signaled when an item has been received */
@@ -25,7 +26,8 @@ struct elv_channel_t
 int
 elv_channel_init(
     elv_channel_t **channel,
-    u_int64_t capacity)
+    u_int64_t capacity,
+    free_elem_f free_elem)
 {
     elv_channel_t *ch;
 
@@ -36,6 +38,7 @@ elv_channel_init(
     ch->_items = (void **) calloc(1, capacity*sizeof(void*));
     ch->_rear = -1;
     ch->_capacity = capacity;
+    ch->_free_elem = free_elem;
     pthread_mutex_init(&ch->_mutex, NULL);
     pthread_cond_init(&ch->_cond_send, NULL);
     pthread_cond_init(&ch->_cond_recv, NULL);
@@ -49,7 +52,7 @@ elv_channel_send(
     elv_channel_t *channel,
     void *msg)
 {
-    if (!channel)
+    if (!channel || channel->_closed)
         return -1;
 
     pthread_mutex_lock(&channel->_mutex);
@@ -121,7 +124,7 @@ elv_channel_timed_receive(
     ts.tv_nsec = tv.tv_usec * 1000;
 
     pthread_mutex_lock(&channel->_mutex);
-    while (channel->_count <= 0) {
+    while (channel->_count <= 0 && !channel->_closed) {
         rc = pthread_cond_timedwait(&channel->_cond_send, &channel->_mutex, &ts);
         /* ETIMEDOUT is not a real error */
         if (rc != 0) {
@@ -129,6 +132,9 @@ elv_channel_timed_receive(
             return rc;
         }
     }
+
+    if (channel->_closed)
+        return EPIPE;
 
     channel->_count--;
     msg = channel->_items[channel->_front];
@@ -159,14 +165,35 @@ elv_channel_size(
 
 int
 elv_channel_close(
-    elv_channel_t *channel)
+    elv_channel_t *channel,
+    int purge_channel)
 {
     channel->_closed = 1;
     pthread_mutex_lock(&channel->_mutex);
     pthread_cond_signal(&channel->_cond_recv);
     pthread_cond_signal(&channel->_cond_send);
+
+    /* Purge the channel if the flag is set */
+    while (purge_channel && channel->_count > 0) {
+        channel->_count--;
+        void *msg = channel->_items[channel->_front];
+        channel->_front = (channel->_front+1) % channel->_capacity;
+        if (channel->_free_elem)
+            channel->_free_elem(msg);
+        else
+            free(msg);
+    }
+
     pthread_mutex_unlock(&channel->_mutex);
+    
     return 0;
+}
+
+int
+elv_channel_is_closed(
+    elv_channel_t *channel)
+{
+    return channel->_closed;
 }
 
 int

@@ -96,7 +96,7 @@ typedef enum avp_stat_t {
 struct coderctx_t;
 
 #define MAX_UDP_PKT_LEN         2048            /* Max UDP length */
-#define UDP_PIPE_TIMEOUT        60              /* sec */
+#define UDP_PIPE_TIMEOUT        5               /* sec */
 #define UDP_PIPE_BUFSIZE        (128*1024*1024) /* 128MB recv buf size */
 #define MAX_UDP_CHANNEL         100000          /* Max # of entries in UDP channel */
 
@@ -159,9 +159,9 @@ typedef struct ioctx_t {
     int64_t decoding_start_pts;
 
     /* Output handlers specific data */
-    int64_t pts;            /* frame pts */
-    int stream_index;       /* usually (but not always) video=0 and audio=1 */
-    int seg_index;          /* segment index if this ioctx is a segment */
+    int64_t pts;                /* frame pts */
+    int     stream_index;       /* usually (but not always) video=0 and audio=1 */
+    int     seg_index;          /* segment index if this ioctx is a segment */
 
     io_mux_ctx_t    *in_mux_ctx;   /* Input muxer context */
     int             in_mux_index;
@@ -170,7 +170,9 @@ typedef struct ioctx_t {
      * A transcoding session has one input (i.e one mp4 file) and
      * multiple output (i.e multiple segment files, dash and init_stream files).
      */
-    struct ioctx_t *inctx;
+    struct ioctx_t  *inctx;
+
+    volatile int    closed; /* If it is set that means inctx is closed */
 } ioctx_t;
 
 typedef int
@@ -635,7 +637,9 @@ avpipe_version();
  * @param   size    Array size
  */
 void
-init_extract_images(txparams_t *params, int size);
+init_extract_images(
+    txparams_t *params,
+    int size);
 
 /**
  * @brief   Helper function avoid dealing with array pointers in Go to set
@@ -646,6 +650,9 @@ init_extract_images(txparams_t *params, int size);
  * @param   value   Array value (frame PTS)
  */
 void
-set_extract_images(txparams_t *params, int index, int64_t value);
+set_extract_images(
+    txparams_t *params,
+    int index,
+    int64_t value);
 
 #endif

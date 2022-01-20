@@ -126,7 +126,7 @@ in_opener(
             return -1;
         }
 
-        elv_channel_init(&inctx->udp_channel, MAX_UDP_CHANNEL);
+        elv_channel_init(&inctx->udp_channel, MAX_UDP_CHANNEL, NULL);
         inctx->opaque = (int *) calloc(1, 2*sizeof(int));
         *((int *)(inctx->opaque)) = fd;
         inctx->url = strdup(url);
@@ -678,6 +678,9 @@ txparam_copy(
         memcpy(p2->extract_images_ts, p->extract_images_ts, size);
     }
 
+    if (p->seg_duration)
+        p2->seg_duration = strdup(p->seg_duration);
+
     return p2;
 }
 
@@ -1157,6 +1160,7 @@ main(
         .watermark_overlay_type = png_image,
         .watermark_shadow_color = strdup("white"),  /* Default shadow color */
         .gpu_index = -1,
+        .seg_duration = NULL,
     };
 
     i = 1;

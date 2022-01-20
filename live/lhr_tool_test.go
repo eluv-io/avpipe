@@ -397,8 +397,15 @@ func (i *inputCtx) Read(buf []byte) (int, error) {
 }
 
 func (i *inputCtx) Seek(offset int64, whence int) (int64, error) {
-	tlog.Error("IN_SEEK", "url", i.tc.url)
-	return 0, fmt.Errorf("IN_SEEK url=%s", i.tc.url)
+
+	if i.tc.url[0:3] == "udp" {
+		tlog.Error("IN_SEEK", "url", i.tc.url)
+		return 0, fmt.Errorf("IN_SEEK url=%s", i.tc.url)
+	}
+
+	n, err := i.r.(*os.File).Seek(offset, whence)
+	tlog.Debug("IN_SEEK", "url", i.tc.url, "fd", i.tc.fd, "n", n, "err", err)
+	return n, err
 }
 
 func (i *inputCtx) Close() (err error) {
@@ -421,8 +428,14 @@ func (i *inputCtx) Close() (err error) {
 }
 
 func (i *inputCtx) Size() int64 {
-	tlog.Debug("IN_SIZE")
-	return -1
+	if i.tc.url[0:3] == "udp" {
+		tlog.Debug("IN_SIZE", "url", i.tc.url)
+		return -1
+	}
+
+	fi, err := i.r.(*os.File).Stat()
+	tlog.Debug("IN_SIZE", "url", i.tc.url, "fd", i.tc.fd, "size", fi.Size(), "err", err)
+	return fi.Size()
 }
 
 func (i *inputCtx) Stat(statType avpipe.AVStatType, statArgs interface{}) error {
@@ -469,11 +482,11 @@ func (oo *outputOpener) Open(h, fd int64, stream_index, seg_index int, _ int64,
 	case avpipe.AES128Key:
 		filename = fmt.Sprintf("./%s/%s-key.bin", oo.dir, url)
 	case avpipe.MP4Segment:
-		fallthrough
+		filename = fmt.Sprintf("./%s/segment-%d.mp4", oo.dir, seg_index)
 	case avpipe.FMP4AudioSegment:
-		fallthrough
+		filename = fmt.Sprintf("./%s/audio-mez-udp-segment-%d.mp4", oo.dir, seg_index)
 	case avpipe.FMP4VideoSegment:
-		filename = fmt.Sprintf("./%s/%s-segment-%d.mp4", oo.dir, url, seg_index)
+		filename = fmt.Sprintf("./%s/video-mez-udp-segment-%d.mp4", oo.dir, seg_index)
 	}
 
 	tlog.Debug("OUT_OPEN", "url", tc.url, "h", h, "stream_index", stream_index, "seg_index", seg_index, "filename", filename)
