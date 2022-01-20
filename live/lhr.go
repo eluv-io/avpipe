@@ -5,7 +5,6 @@ import (
 	"crypto/cipher"
 	"encoding/hex"
 	"fmt"
-	"github.com/qluvio/avpipe"
 	"io"
 	"io/ioutil"
 	"net/http"
@@ -16,11 +15,12 @@ import (
 	"strings"
 	"time"
 
+	"github.com/eluv-io/errors-go"
+	"github.com/qluvio/avpipe"
+
 	"github.com/grafov/m3u8"
 
-	"github.com/qluvio/content-fabric/errors"
-	elog "github.com/qluvio/content-fabric/log"
-	eioutil "github.com/qluvio/content-fabric/util/ioutil"
+	elog "github.com/eluv-io/log-go"
 )
 
 var log = elog.Get("/eluvio/avpipe/live")
@@ -156,7 +156,7 @@ func NewHLSReaders(playlistURL *url.URL, xcType avpipe.TxType) (
 	if content, err = openURL(http.DefaultClient, playlistURL); err != nil {
 		return nil, et(err)
 	}
-	defer eioutil.CloseCloser(content, log)
+	defer log.Call(content.Close, "close hls playlist", log.Error)
 
 	playlist, listType, err := m3u8.DecodeFrom(content, true)
 	if err != nil {
@@ -224,7 +224,7 @@ func NewHLSReaders(playlistURL *url.URL, xcType avpipe.TxType) (
 
 		if err != nil {
 			if len(readers) > 0 {
-				eioutil.CloseCloser(readers[0].Pipe, log)
+				log.Call(readers[0].Pipe.Close, "close hls reader", log.Error)
 			}
 			return nil, et(err)
 		}
@@ -333,13 +333,13 @@ func saveToFile(client *http.Client, u *url.URL, savePath string) (err error) {
 	if file, err = os.Create(savePath); err != nil {
 		return
 	}
-	defer eioutil.CloseCloser(file, log)
+	defer log.Call(file.Close, "close file", log.Error)
 
 	var content io.ReadCloser
 	if content, err = openURL(client, u); err != nil {
 		return
 	}
-	defer eioutil.CloseCloser(content, log)
+	defer log.Call(content.Close, "close url reader", log.Error)
 
 	written, err := io.Copy(file, content)
 	if err != nil {
@@ -379,7 +379,7 @@ func saveSegment(
 	if file, err = os.Create(savePath); err != nil {
 		return
 	}
-	defer eioutil.CloseCloser(file, log)
+	defer log.Call(file.Close, "close file", log.Error)
 	return readSegment(client, u, s, file)
 }
 
@@ -425,7 +425,7 @@ func readSegment(
 	if content, err = openURL(client, msURL); err != nil {
 		return
 	}
-	defer eioutil.CloseCloser(content, log)
+	defer log.Call(content.Close, "close url reader", log.Error)
 
 	if s.Key != nil {
 		if written, err = io.Copy(dw, content); err != nil {
@@ -461,7 +461,7 @@ func (lhr *HLSReader) readPlaylist() (
 
 	// HTTP GET playlist
 	content, err := openURL(lhr.client, lhr.playlistURL)
-	defer eioutil.CloseCloser(content, log)
+	defer log.Call(content.Close, "close url reader", log.Error)
 	if err != nil {
 		log.Debug("failed to get playlist", "err", err, "c", logContext)
 		return // url.Error
@@ -693,6 +693,6 @@ func httpGetBytes(base *url.URL, uri string) (body []byte, err error) {
 	if err != nil {
 		return
 	}
-	defer eioutil.CloseCloser(resp.Body, log)
+	defer log.Call(resp.Body.Close, "close response body", log.Error)
 	return ioutil.ReadAll(resp.Body)
 }

@@ -7,7 +7,7 @@ import (
 	"os/exec"
 	"path/filepath"
 
-	"github.com/qluvio/content-fabric/errors"
+	"github.com/eluv-io/errors-go"
 )
 
 func NewLiveSource() *LiveSource {
@@ -81,7 +81,7 @@ func (l *LiveSource) Start() (err error) {
 	go func() {
 		err := l.cmd.Wait()
 		if err != nil {
-			log.Error("Failed to run command", err,"pid", l.Pid, "cmd", fmt.Sprintf("%s %s", l.cmd.Path, l.cmd.Args))
+			log.Error("Failed to run command", err, "pid", l.Pid, "cmd", fmt.Sprintf("%s %s", l.cmd.Path, l.cmd.Args))
 		}
 	}()
 

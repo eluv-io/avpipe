@@ -2,8 +2,9 @@ package main
 
 import (
 	"fmt"
-	log "github.com/qluvio/content-fabric/log"
 	"os"
+
+	"github.com/eluv-io/log-go"
 
 	"github.com/qluvio/avpipe"
 	"github.com/qluvio/avpipe/avcmd/cmd"

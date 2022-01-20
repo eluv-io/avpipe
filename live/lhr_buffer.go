@@ -4,7 +4,7 @@ import (
 	"io"
 	"sync"
 
-	elog "github.com/qluvio/content-fabric/log"
+	elog "github.com/eluv-io/log-go"
 )
 
 type RWBuffer struct {

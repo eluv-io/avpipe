@@ -11,7 +11,6 @@ package cmd
 import (
 	"encoding/json"
 	"fmt"
-	elog "github.com/qluvio/content-fabric/log"
 	"io/ioutil"
 	"math/rand"
 	"net/http"
@@ -20,6 +19,8 @@ import (
 	"strings"
 	"sync"
 	"time"
+
+	elog "github.com/eluv-io/log-go"
 
 	"github.com/spf13/cobra"
 )

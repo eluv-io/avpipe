@@ -16,10 +16,9 @@ import (
 	"sync"
 	"testing"
 
+	"github.com/eluv-io/errors-go"
+	elog "github.com/eluv-io/log-go"
 	"github.com/qluvio/avpipe"
-	"github.com/qluvio/content-fabric/errors"
-	elog "github.com/qluvio/content-fabric/log"
-	"github.com/qluvio/content-fabric/util/ioutil"
 )
 
 //
@@ -65,7 +64,7 @@ type inputCtx struct {
 }
 
 type outputOpener struct {
-	tc *testCtx
+	tc  *testCtx
 	dir string
 }
 
@@ -153,7 +152,7 @@ func _TestHLSVideoOnly(t *testing.T) {
 		t.Error("video transcoding error", "errTx", err)
 	}
 
-	ioutil.CloseCloser(reader.Pipe, tlog)
+	log.Call(reader.Pipe.Close, "close hls reader", tlog.Error)
 	err = <-endChan
 	tlog.Info("HLSReader done", "err", err)
 	if err != nil {
@@ -204,7 +203,7 @@ func _TestHLSAudioOnly(t *testing.T) {
 		t.Error("video transcoding error", "errTx", err)
 	}
 
-	ioutil.CloseCloser(reader.Pipe, tlog)
+	log.Call(reader.Pipe.Close, "close hls reader", tlog.Error)
 	err = <-endChan
 	tlog.Info("HLSReader done", "err", err)
 	if err != nil {
@@ -294,7 +293,7 @@ func _TestAudioVideoHlsLive(t *testing.T) {
 	// Wait for audio/video mez making to be finished
 	<-done
 	<-done
-	ioutil.CloseCloser(reader.Pipe, tlog)
+	log.Call(reader.Pipe.Close, "close hls reader", tlog.Error)
 	err = <-endChan
 	tlog.Info("HLSReader done", "err", err)
 	if err != nil {

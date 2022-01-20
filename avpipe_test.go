@@ -17,8 +17,8 @@ import (
 
 	"github.com/qluvio/avpipe/avcmd/cmd"
 
+	"github.com/eluv-io/log-go"
 	"github.com/qluvio/avpipe"
-	log "github.com/qluvio/content-fabric/log"
 	"github.com/stretchr/testify/assert"
 )
 

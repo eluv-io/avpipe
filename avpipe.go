@@ -28,7 +28,7 @@ import (
 	"sync"
 	"unsafe"
 
-	elog "github.com/qluvio/content-fabric/log"
+	elog "github.com/eluv-io/log-go"
 )
 
 var log = elog.Get("/eluvio/avpipe")
