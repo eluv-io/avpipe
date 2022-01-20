@@ -12,7 +12,7 @@ import (
 
 	"github.com/qluvio/legacy_imf_dash_extract/abr"
 
-	elog "github.com/qluvio/content-fabric/log"
+	elog "github.com/eluv-io/log-go"
 )
 
 var log = elog.Get("/eluvio/avpipe/linear")

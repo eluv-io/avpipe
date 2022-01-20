@@ -2,12 +2,13 @@ package ts
 
 import (
 	"errors"
+	"io"
+	"os"
+
 	"github.com/Comcast/gots/packet"
 	"github.com/Comcast/gots/psi"
 	"github.com/Comcast/gots/scte35"
-	elog "github.com/qluvio/content-fabric/log"
-	"io"
-	"os"
+	elog "github.com/eluv-io/log-go"
 )
 
 var log = elog.Get("/eluvio/avpipe/ts")

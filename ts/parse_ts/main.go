@@ -6,12 +6,13 @@ import (
 	"errors"
 	"flag"
 	"fmt"
-	"github.com/Comcast/gots/packet"
-	"github.com/qluvio/avpipe/live"
-	"github.com/qluvio/avpipe/ts"
-	"github.com/qluvio/content-fabric/log"
 	"io"
 	"os"
+
+	"github.com/Comcast/gots/packet"
+	"github.com/eluv-io/log-go"
+	"github.com/qluvio/avpipe/live"
+	"github.com/qluvio/avpipe/ts"
 )
 
 func main() {

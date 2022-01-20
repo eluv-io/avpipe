@@ -3,7 +3,6 @@ package avpipe_test
 import (
 	"encoding/json"
 	"fmt"
-	"github.com/qluvio/avpipe/avcmd/cmd"
 	"io"
 	"io/ioutil"
 	"math/big"
@@ -16,8 +15,9 @@ import (
 	"testing"
 	"time"
 
+	"github.com/eluv-io/log-go"
 	"github.com/qluvio/avpipe"
-	log "github.com/qluvio/content-fabric/log"
+	"github.com/qluvio/avpipe/avcmd/cmd"
 	"github.com/stretchr/testify/assert"
 )
 
