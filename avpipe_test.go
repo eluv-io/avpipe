@@ -3,6 +3,7 @@ package avpipe_test
 import (
 	"encoding/json"
 	"fmt"
+	"github.com/qluvio/avpipe/avcmd/cmd"
 	"io"
 	"io/ioutil"
 	"math/big"
@@ -14,8 +15,6 @@ import (
 	"strings"
 	"testing"
 	"time"
-
-	"github.com/qluvio/avpipe/avcmd/cmd"
 
 	"github.com/qluvio/avpipe"
 	log "github.com/qluvio/content-fabric/log"
@@ -79,19 +78,19 @@ func (i *fileInput) Read(buf []byte) (int, error) {
 	if err == io.EOF {
 		return 0, nil
 	}
-	log.Debug("fileInput.Read error", err)
+	log.Debug("fileInput.Read", "err", err)
 	return n, err
 }
 
 func (i *fileInput) Seek(offset int64, whence int) (int64, error) {
 	n, err := i.file.Seek(offset, whence)
-	log.Debug("fileInput.Seek error", err)
+	log.Debug("fileInput.Seek", "err", err)
 	return n, err
 }
 
 func (i *fileInput) Close() error {
 	err := i.file.Close()
-	log.Debug("fileInput.Close error", err)
+	log.Debug("fileInput.Close", "err", err)
 	return err
 }
 
@@ -248,19 +247,19 @@ type fileOutput struct {
 
 func (o *fileOutput) Write(buf []byte) (int, error) {
 	n, err := o.file.Write(buf)
-	log.Debug("fileOutput.Write error", err)
+	log.Debug("fileOutput.Write", "err", err)
 	return n, err
 }
 
 func (o *fileOutput) Seek(offset int64, whence int) (int64, error) {
 	n, err := o.file.Seek(offset, whence)
-	log.Debug("fileOutput.Seek error", err)
+	log.Debug("fileOutput.Seek", "err", err)
 	return n, err
 }
 
 func (o *fileOutput) Close() error {
 	err := o.file.Close()
-	log.Debug("fileOutput.Close error", err)
+	log.Debug("fileOutput.Close", "err", err)
 	return err
 }
 
@@ -568,10 +567,8 @@ func TestV2SingleABRTranscodeCancelling(t *testing.T) {
 		err := avpipe.TxCancel(handle)
 		assert.NoError(t, err)
 	}(handle)
-	err = avpipe.TxRun(handle)
-	assert.Error(t, err)
-
-	// FIXME: Note that TxCancel does not seem to actually stop the transcoding job
+	err2 := avpipe.TxRun(handle)
+	assert.Error(t, err2)
 
 	params.TxType = avpipe.TxAudio
 	params.Ecodec2 = "aac"
@@ -1893,7 +1890,7 @@ func removeDirContents(dir string) error {
 	}
 	defer func() {
 		e := d.Close()
-		log.Error("error closing dir", e)
+		log.Error("error closing dir", e, "dir", dir)
 	}()
 	names, err := d.Readdirnames(-1)
 	if err != nil {

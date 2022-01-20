@@ -17,6 +17,7 @@
 #include "avpipe_utils.h"
 #include "elv_log.h"
 #include "elv_time.h"
+#include "url_parser.h"
 #include "avpipe_version.h"
 #include "base64.h"
 
@@ -2873,7 +2874,8 @@ should_stop_decoding(
             decoder_context->video_input_start_pts = input_packet->pts;
             elv_log("video_input_start_pts=%"PRId64,
                 decoder_context->video_input_start_pts);
-            in_handlers->avpipe_stater(decoder_context->inctx, in_stat_decoding_video_start_pts);
+            if (in_handlers->avpipe_stater)
+                in_handlers->avpipe_stater(decoder_context->inctx, in_stat_decoding_video_start_pts);
         }
 
         input_packet_rel_pts = input_packet->pts - decoder_context->video_input_start_pts;
@@ -2884,7 +2886,8 @@ should_stop_decoding(
             decoder_context->audio_input_start_pts = input_packet->pts;
             elv_log("audio_input_start_pts=%"PRId64,
                 decoder_context->audio_input_start_pts);
-            in_handlers->avpipe_stater(decoder_context->inctx, in_stat_decoding_audio_start_pts);
+            if (in_handlers->avpipe_stater)
+                in_handlers->avpipe_stater(decoder_context->inctx, in_stat_decoding_audio_start_pts);
         }
 
         input_packet_rel_pts = input_packet->pts - decoder_context->audio_input_start_pts;
@@ -3450,6 +3453,8 @@ avpipe_xc(
                 params, inctx->audio_frames_read, inctx->video_frames_read,
                 &frames_read_past_duration, frames_allowed_past_duration)) {
                 av_packet_free(&input_packet);
+                if (decoder_context->cancelled)
+                    rc = eav_cancelled;
                 break;
             }
 
@@ -3477,7 +3482,8 @@ avpipe_xc(
             dump_packet(0, "IN ", input_packet, debug_frame_level);
 
             inctx->video_frames_read++;
-            in_handlers->avpipe_stater(inctx, in_stat_video_frame_read);
+            if (in_handlers->avpipe_stater)
+                in_handlers->avpipe_stater(inctx, in_stat_video_frame_read);
 
             // Assert DTS is growing as expected (accommodate non integer and irregular frame duration)
             if (video_last_dts + input_packet->duration * 1.5 < input_packet->dts &&
@@ -3500,7 +3506,8 @@ avpipe_xc(
             dump_packet(1, "IN ", input_packet, debug_frame_level);
 
             inctx->audio_frames_read++;
-            in_handlers->avpipe_stater(inctx, in_stat_audio_frame_read);
+            if (in_handlers->avpipe_stater)
+                in_handlers->avpipe_stater(inctx, in_stat_audio_frame_read);
 
             xc_frame_t *xc_frame = (xc_frame_t *) calloc(1, sizeof(xc_frame_t));
             xc_frame->packet = input_packet;
@@ -3518,8 +3525,9 @@ xc_done:
     elv_dbg("av_read_frame() rc=%d", rc);
 
     txctx->stop = 1;
-    elv_channel_close(txctx->vc);
-    elv_channel_close(txctx->ac);
+    /* Don't purge the channels, let the receiver to drain it */
+    elv_channel_close(txctx->vc, 0);
+    elv_channel_close(txctx->ac, 0);
     pthread_join(txctx->vthread_id, NULL);
     pthread_join(txctx->athread_id, NULL);
 
@@ -3547,13 +3555,14 @@ xc_done:
     if ((params->tx_type & tx_audio) && rc == eav_success)
         av_write_trailer(encoder_context->format_context2);
 
-    elv_log("avpipe_xc done rc=%d, txctx->err=%d, tx-type=%d, "
+    elv_log("avpipe_xc done url=%s, rc=%d, txctx->err=%d, tx-type=%d, "
         "last video_pts=%"PRId64" audio_pts=%"PRId64
         " video_input_start_pts=%"PRId64" audio_input_start_pts=%"PRId64
         " video_last_dts=%"PRId64" audio_last_dts="PRId64
         " last_pts_read=%"PRId64" last_pts_read2=%"PRId64
         " video_pts_sent_encode=%"PRId64" audio_pts_sent_encode=%"PRId64
         " last_pts_encoded=%"PRId64" last_pts_encoded2=%"PRId64,
+        txctx->inctx->url != NULL ? txctx->inctx->url : "\"\"",
         rc, txctx->err, params->tx_type,
         encoder_context->video_pts,
         encoder_context->audio_pts,
@@ -3774,7 +3783,7 @@ get_tx_type_name(
 
 int
 avpipe_probe(
-    char *filename,
+    char *url,
     avpipe_io_handler_t *in_handlers,
     int seekable,
     txprobe_t **txprobe,
@@ -3794,7 +3803,7 @@ avpipe_probe(
 
     memset(&inctx, 0, sizeof(ioctx_t));
 
-    if (in_handlers->avpipe_opener(filename, &inctx) < 0) {
+    if (in_handlers->avpipe_opener(url, &inctx) < 0) {
         rc = eav_open_input;
         goto avpipe_probe_end;
     }
@@ -3879,6 +3888,7 @@ avpipe_probe(
                 ((float)stream_probes_ptr->duration_ts)/stream_probes_ptr->time_base.den;
     }
 
+    inctx.closed = 1;
     probe->stream_info = stream_probes;
     probe->container_info.format_name = strdup(decoder_ctx.format_context->iformat->name);
     *txprobe = probe;
@@ -4084,6 +4094,9 @@ avpipe_init(
          strcmp(params->format, "fmp4-segment"))) {
         elv_err("Output format can be only \"dash\", \"hls\", \"image2\", \"mp4\", \"fmp4\", \"segment\", or \"fmp4-segment\"");
         rc = eav_param;
+        free(p_txctx);
+        free(params);
+        p_txctx = NULL;
         goto avpipe_init_failed;
     }
 
@@ -4193,8 +4206,8 @@ avpipe_init(
         goto avpipe_init_failed;
     }
 
-    elv_channel_init(&p_txctx->vc, 10000);
-    elv_channel_init(&p_txctx->ac, 10000);
+    elv_channel_init(&p_txctx->vc, 10000, NULL);
+    elv_channel_init(&p_txctx->ac, 10000, NULL);
 
     /* Create threads for decoder and encoder */
     pthread_create(&p_txctx->vthread_id, NULL, transcode_video_func, p_txctx);
@@ -4260,11 +4273,15 @@ avpipe_fini(
     if (!txctx || !(*txctx))
         return 0;
 
+    if ((*txctx)->inctx && (*txctx)->inctx->url)
+        elv_dbg("Releasing all the resources, url=%s", (*txctx)->inctx->url);
+
     /* Close input handler resources if it is not a muxing command */
     if (!(*txctx)->in_mux_ctx)
         (*txctx)->in_handlers->avpipe_closer((*txctx)->inctx);
     free((*txctx)->in_handlers);
     free((*txctx)->out_handlers);
+
 
     decoder_context = &(*txctx)->decoder_ctx;
     encoder_context = &(*txctx)->encoder_ctx;
@@ -4318,9 +4335,12 @@ avpipe_fini(
         swr_free(&decoder_context->resampler_context);
     }
 
+    if ((*txctx)->inctx && (*txctx)->inctx->udp_channel)
+        elv_channel_fini(&((*txctx)->inctx->udp_channel));
     free((*txctx)->inctx);
     elv_channel_fini(&((*txctx)->vc));
     elv_channel_fini(&((*txctx)->ac));
+
     avpipe_free_params(*txctx);
     free(*txctx);
     *txctx = NULL;
