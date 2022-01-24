@@ -4136,6 +4136,7 @@ avpipe_init(
         "video_seg_duration_ts=%"PRId64" "
         "audio_seg_duration_ts=%"PRId64" "
         "seg_duration=%s "
+        "start_fragment_index=%d "
         "force_keyint=%d "
         "force_equal_fduration=%d "
         "ecodec=%s "
@@ -4172,8 +4173,8 @@ avpipe_init(
         params->start_pts, params->duration_ts, params->start_segment_str,
         params->video_bitrate, params->audio_bitrate, params->sample_rate,
         params->crf_str, params->preset, params->rc_max_rate, params->rc_buffer_size,
-        params->video_seg_duration_ts, params->audio_seg_duration_ts,
-        params->seg_duration, params->force_keyint, params->force_equal_fduration,
+        params->video_seg_duration_ts, params->audio_seg_duration_ts, params->seg_duration,
+        params->start_fragment_index, params->force_keyint, params->force_equal_fduration,
         params->ecodec, params->ecodec2, params->dcodec, params->dcodec2,
         params->gpu_index, params->enc_height, params->enc_width,
         params->crypt_iv, params->crypt_key, params->crypt_kid, params->crypt_key_url,
