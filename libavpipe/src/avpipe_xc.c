@@ -48,13 +48,6 @@ init_video_filters(
     txparams_t *params);
 
 extern int
-init_overlay_filters(
-    const char *filter_spec,
-    coderctx_t *decoder_context,
-    coderctx_t *encoder_context,
-    txparams_t *params);
-
-extern int
 init_audio_filters(
     coderctx_t *decoder_context,
     coderctx_t *encoder_context,
@@ -3164,7 +3157,7 @@ get_filter_str(
         int filt_buf_size;
         int filt_str_len;
         const char* filt_template =
-            "[in] scale=%d:%d [in-1]; movie='%s', setpts=PTS-STARTPTS [over]; [in-1] setpts=PTS-STARTPTS [in-1a]; [in-1a][over]  overlay='%s:%s:alpha=0.1' [out]";
+            "[in] scale=%d:%d [in-1]; movie='%s', setpts=PTS [over]; [in-1] setpts=PTS [in-1a]; [in-1a][over]  overlay='%s:%s:alpha=0.1' [out]";
 
         /* Return an error if one of the watermark params is not set properly */
         if ((!params->watermark_xloc || *params->watermark_xloc == '\0') ||

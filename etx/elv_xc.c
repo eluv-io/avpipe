@@ -1228,7 +1228,6 @@ main(
                 if (p.channel_layout == 0)
                     usage(argv[0], argv[i], EXIT_FAILURE);
             } else if (strcmp(argv[i], "-crypt-iv") == 0) {
-            } else if (strcmp(argv[i], "-crypt-iv") == 0) {
                 p.crypt_iv = strdup(argv[i+1]);
             } else if (strcmp(argv[i], "-crypt-key") == 0) {
                 p.crypt_key = strdup(argv[i+1]);

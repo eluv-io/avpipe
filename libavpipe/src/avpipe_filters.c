@@ -45,6 +45,7 @@ init_video_filters(
         dec_codec_ctx->width, dec_codec_ctx->height, dec_codec_ctx->pix_fmt,
         time_base.num, time_base.den,
         dec_codec_ctx->sample_aspect_ratio.num, dec_codec_ctx->sample_aspect_ratio.den);
+    elv_dbg("init_video_filters, video srcfilter args=%s", args);
 
     /* video_stream_index should be the same in both encoder and decoder context */
     pix_fmts[0] = encoder_context->codec_context[decoder_context->video_stream_index]->pix_fmt;
@@ -166,7 +167,7 @@ init_audio_filters(
         dec_codec_ctx->sample_rate,
         av_get_sample_fmt_name(dec_codec_ctx->sample_fmt),
         dec_codec_ctx->channel_layout);
-    elv_log("init_audio_filters, audio srcfilter args=%s", args);
+    elv_dbg("init_audio_filters, audio srcfilter args=%s", args);
 
     /* decoder_context->n_audio is 1 */
     abuffersrc_ctx = decoder_context->audio_buffersrc_ctx;
@@ -211,7 +212,7 @@ init_audio_filters(
              "sample_fmts=%s:sample_rates=%d:channel_layouts=0x%"PRIx64,
              av_get_sample_fmt_name(enc_codec_ctx->sample_fmt), enc_codec_ctx->sample_rate,
              (uint64_t)enc_codec_ctx->channel_layout);
-    elv_log("init_audio_filters, audio format_filter args=%s", args);
+    elv_dbg("init_audio_filters, audio format_filter args=%s", args);
 
     ret = avfilter_graph_create_filter(&format_ctx, aformat, "format_out_0_0", args, NULL, filter_graph);
     if (ret < 0) {
@@ -308,7 +309,7 @@ init_audio_pan_filters(
         dec_codec_ctx->sample_rate,
         av_get_sample_fmt_name(dec_codec_ctx->sample_fmt),
         dec_codec_ctx->channel_layout);
-    elv_log("Audio srcfilter args=%s", args);
+    elv_dbg("Audio srcfilter args=%s", args);
 
     /* decoder_context->n_audio is 1 */
     abuffersrc_ctx = decoder_context->audio_buffersrc_ctx;
@@ -500,7 +501,7 @@ init_audio_merge_pan_filters(
             dec_codec_ctx->sample_rate,
             av_get_sample_fmt_name(dec_codec_ctx->sample_fmt),
             dec_codec_ctx->channel_layout);
-        elv_log("init_audio_merge_pan_filters, audio srcfilter args=%s", args);
+        elv_dbg("init_audio_merge_pan_filters, audio srcfilter args=%s", args);
 
         ret = avfilter_graph_create_filter(&abuffersrc_ctx[i], buffersrc, source_names[i], args, NULL, filter_graph);
         if (ret < 0) {
@@ -609,7 +610,7 @@ init_audio_join_filters(
             dec_codec_ctx->channel_layout);
 
         sprintf(filt_name, "in_%d", i);
-        elv_log("init_audio_join_filters, audio srcfilter=%s args=%s", filt_name, args);
+        elv_dbg("init_audio_join_filters, audio srcfilter=%s args=%s", filt_name, args);
 
         ret = avfilter_graph_create_filter(&abuffersrc_ctx[i], buffersrc, filt_name, args, NULL, decoder_context->audio_filter_graph);
         if (ret < 0) {
@@ -658,7 +659,7 @@ init_audio_join_filters(
              "sample_fmts=%s:sample_rates=%d:channel_layouts=0x%"PRIx64,
              av_get_sample_fmt_name(enc_codec_ctx->sample_fmt), enc_codec_ctx->sample_rate,
              (uint64_t)enc_codec_ctx->channel_layout);
-    elv_log("init_audio_join_filters, audio format_filter args=%s", format_args);
+    elv_dbg("init_audio_join_filters, audio format_filter args=%s", format_args);
 
     ret = avfilter_graph_create_filter(&format_ctx, aformat, "format_out_0_0", format_args, NULL, decoder_context->audio_filter_graph);
     if (ret < 0) {
