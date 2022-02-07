@@ -103,6 +103,7 @@ struct coderctx_t;
 typedef struct udp_packet_t {
     char buf[MAX_UDP_PKT_LEN];
     int len;
+    int pkt_num;
 } udp_packet_t;
 
 typedef struct mux_input_ctx_t {
