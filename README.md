@@ -3,52 +3,39 @@
 # Build
 
 ## Prerequisites
+The following libraries must be installed:
+- libx264
+- libx265
+- cuda-10.2 or cuda-11 (if you want to compile and build to support cuda/nvidia)
 
-A workspace containing
- - elv-toolchain
- - content-fabric (for utilities such as eluvio/log and eluvio/errors)
+## Clone FFmpeg and avpipe
+The following repositories can be checked out in any directory, but for better organization it is recommended to be cloned in the same parent directory like _src_
+(_src_ is the workspace containing FFmpeg and avpipe).
+ - elv-io/FFmpeg:
+   - `git clone  git@github.com:eluv-io/FFmpeg.git`
+ - qluvio/avpipe: (this will be moved to elv-io)
+   - `git clone git@github.com:qluvio/avpipe.git`
+    
+## Build FFmpeg and avpipe
 
-## Clone avpipe
+- Build ffmpeg: in FFmpeg directory (_<ffmpeg-path>_) run
+  - `./build.sh`
+- Set environment variables: in avpipe directory run
+  - `source init-env.sh <ffmpeg-path>`
+- Build avpipe: in avpipe directory run
+  - `make`
+- This installs the binaries under _<avpipe-path>/bin_
 
-1. Make a "Go" top level directory - `$GODEV`
-1. Make directory `$GODEV/src/github.com/qluvio`
-1. `git clone` inside directory `$GODEV/src/github.com/qluvio`
+## Test avpipe
 
-## Set Environment
-
-```bash
-source init-env.sh <content-fabric-path>
-```
-
-## Build and Test
-
-```bash
-make
-make install
-go install ./...
-scripts/test.sh -short -v
-```
-Binaries are installed under $GODEV/bin
-
-
-
-## Full Tests
-
-1. Download media test files
-
-  The test files are stored at: https://console.cloud.google.com/storage/browser/qluvio-test-assets
-
-  ```
-  cd ./media
-  gsutil -m cp 'gs://qluvio-test-assets/*' .
-  ```
-
-2. Run the tests
-
-  ```
-  go test ./...
-  ```
-
+- Download media test files from https://console.cloud.google.com/storage/browser/qluvio-test-assets into _media_ directory inside _<avpipe-path>_
+  - `cd avpipe`
+  - `mkdir ./media`  
+  - `cd ./media`
+  - `gsutil -m cp 'gs://qluvio-test-assets/*' .`
+- Inside _<avpipe-path>_ run
+  - `go test -timeout 2000s`
+  
 # Design
 
 ### Parameters

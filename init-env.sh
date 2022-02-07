@@ -2,11 +2,11 @@
 #
 # Initialize Go and CGO build environment
 #
-# Arguments: <content-fabric-top-dir>
+# Arguments: <ffmpeg-dir>
 #
 
 if test $# -lt 1; then
-    echo "Required arguments: <CONTENT-FABRIC-TOP-DIR>"
+    echo "Required arguments: <FFMPEG-DIR>"
     return
 fi
 
@@ -16,31 +16,18 @@ script_dir="$( cd "$( dirname ${BASH_SOURCE[0]} )" && pwd )"
 command -v realpath && elvdev_dir=$(realpath "$1/..") || elvdev_dir="$1/.."
 avpipe_dir=$script_dir
 
-if [[ -z "${ELV_TOOLCHAIN_DIST_PLATFORM:-}" ]]; then
-    OS="`uname`"
-    case $OS in
-    'Darwin')
-        DARWIN=`ls $elvdev_dir/elv-toolchain/dist | grep darwin | tail -1`
-        export ELV_TOOLCHAIN_DIST_PLATFORM=$elvdev_dir/elv-toolchain/dist/${DARWIN}
-        ;;
-    'Linux')
-        LINUX=`ls $elvdev_dir/elv-toolchain/dist | grep linux | tail -1`
-        export ELV_TOOLCHAIN_DIST_PLATFORM=$elvdev_dir/elv-toolchain/dist/${LINUX}
-        ;;
-    esac
-fi
-
+export FFMPEG_DIST=$elvdev_dir/FFmpeg/dist/
 export GOPRIVATE="github.com/qluvio/*"
 
-export PKG_CONFIG_PATH="${ELV_TOOLCHAIN_DIST_PLATFORM}/lib/pkgconfig:${PKG_CONFIG_PATH:-}"
-export CGO_CFLAGS="${CGO_CFLAGS:-} -I${ELV_TOOLCHAIN_DIST_PLATFORM}/include -I$avpipe_dir/include"
-export CGO_LDFLAGS="${CGO_LDFLAGS:-} -L${ELV_TOOLCHAIN_DIST_PLATFORM}/lib -L$avpipe_dir/lib \
+export PKG_CONFIG_PATH="${FFMPEG_DIST}/lib/pkgconfig:${PKG_CONFIG_PATH:-}"
+export CGO_CFLAGS="${CGO_CFLAGS:-} -I${FFMPEG_DIST}/include -I$avpipe_dir/include"
+export CGO_LDFLAGS="${CGO_LDFLAGS:-} -L${FFMPEG_DIST}/lib -L$avpipe_dir/lib \
 -lavpipe -lavcodec -lavformat -lavfilter -lavdevice -lswresample -lswscale \
 -lavutil -lpostproc -lutils -lm -ldl -lpthread"
 
 echo elvdev_dir=$elvdev_dir
 echo avpipe_dir=$avpipe_dir
-echo ELV_TOOLCHAIN_DIST_PLATFORM=$ELV_TOOLCHAIN_DIST_PLATFORM
+echo FFMPEG_DIST=$FFMPEG_DIST
 echo PKG_CONFIG_PATH=$PKG_CONFIG_PATH
 echo CGO_CFLAGS=$CGO_CFLAGS
 echo CGO_LDFLAGS=$CGO_LDFLAGS

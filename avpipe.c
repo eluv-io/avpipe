@@ -325,8 +325,12 @@ recv_again:
         if (params->inctx->closed)
             break;
         udp_packet->len = recvfrom(params->fd, udp_packet->buf, MAX_UDP_PKT_LEN, 0, &ca, &len);
-        if (udp_packet->len < 0 && errno == EINTR)
-            goto recv_again;
+        if (udp_packet->len < 0) {
+            if (errno == EINTR)
+                goto recv_again;
+            elv_err("UDP recvfrom fd=%d, errno=%d", params->fd, errno);
+            break;
+        }
 
         if (first) {
             first = 0;
@@ -334,11 +338,12 @@ recv_again:
         }
 
         pkt_num++;
+        udp_packet->pkt_num = pkt_num;
         /* If the channel is closed, exit the thread */
         if (elv_channel_send(params->udp_channel, udp_packet) < 0) {
             break;
         }
-        elv_dbg("Received UDP packet=%d, len=%d", pkt_num, udp_packet->len);
+        //elv_dbg("Received UDP packet=%d, len=%d", pkt_num, udp_packet->len);
         timedout = 0;
     }
 
@@ -462,7 +467,7 @@ udp_in_read_packet(
             }
             c->read_bytes += r;
             c->read_pos += r;
-            elv_dbg("IN READ UDP partial read=%d pos=%"PRId64" total=%"PRId64, r, c->read_pos, c->read_bytes);
+            //elv_dbg("IN READ UDP partial read=%d pos=%"PRId64" total=%"PRId64, r, c->read_pos, c->read_bytes);
             return r;        
         }
 
@@ -490,9 +495,10 @@ udp_in_read_packet(
             c->cur_packet = udp_packet;
             c->cur_pread = r;
         } else {
+            //elv_log("UDP FREE %d", udp_packet->pkt_num);
             free(udp_packet);
         }
-        elv_dbg("IN READ UDP read=%d pos=%"PRId64" total=%"PRId64, r, c->read_pos, c->read_bytes);
+        //elv_dbg("IN READ UDP read=%d pos=%"PRId64" total=%"PRId64, r, c->read_pos, c->read_bytes);
     }
 
     return r;

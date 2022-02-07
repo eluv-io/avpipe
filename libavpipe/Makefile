@@ -13,7 +13,7 @@ GIT_VERSION := "$(shell git describe --abbrev=4 --dirty --always --tags)"
 
 OSNAME := $(shell uname -s)
 
-INCDIRS=-I${ELV_TOOLCHAIN_DIST_PLATFORM}/include -I../utils/include -Iinclude
+INCDIRS=-I${FFMPEG_DIST}/include -I../utils/include -Iinclude
 
 OBJS=$(SRCS:%.c=$(BINDIR)/%.o)
 
@@ -54,7 +54,7 @@ tags:
 	ctags -R . ../../elv-toolchain/FFmpeg/FFmpeg ../utils
 
 check-env:
-ifndef ELV_TOOLCHAIN_DIST_PLATFORM
-  $(error ELV_TOOLCHAIN_DIST_PLATFORM is undefined)
+ifndef FFMPEG_DIST
+  $(error FFMPEG_DIST is undefined)
 endif
 

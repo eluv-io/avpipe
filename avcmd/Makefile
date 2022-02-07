@@ -16,7 +16,7 @@ install: avcmd
 	@cp avcmd $(TOP_DIR)/../$(BINDIR)
 	
 check-env:
-ifndef ELV_TOOLCHAIN_DIST_PLATFORM
-  $(error ELV_TOOLCHAIN_DIST_PLATFORM is undefined)
+ifndef FFMPEG_DIST
+  $(error FFMPEG_DIST is undefined)
 endif
 

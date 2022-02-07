@@ -7,11 +7,11 @@ INCDIR=include
 
 OSNAME := $(shell uname -s)
 
-INCDIRS=-I${ELV_TOOLCHAIN_DIST_PLATFORM}/include -Iinclude
+INCDIRS=-I${FFMPEG_DIST}/include -Iinclude
 
 OBJS=$(SRCS:%.c=$(BINDIR)/%.o)
 
-LIBDIRS=-L${ELV_TOOLCHAIN_DIST_PLATFORM}/lib
+LIBDIRS=-L${FFMPEG_DIST}/lib
 FLAGS=-O0 -ggdb -Wall -fPIC
 
 ifeq ($(OSNAME), Darwin)
@@ -56,7 +56,7 @@ tags:
 	ctags -R .
 
 check-env:
-ifndef ELV_TOOLCHAIN_DIST_PLATFORM
-  $(error ELV_TOOLCHAIN_DIST_PLATFORM is undefined)
+ifndef FFMPEG_DIST
+  $(error FFMPEG_DIST is undefined)
 endif
 

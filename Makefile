@@ -27,20 +27,20 @@ clean: lclean
 copy_libs:
 	@(if [ ! -d $(LIBDIR) ]; then mkdir $(LIBDIR); fi)
 	@(if [ ! -d $(INCDIR) ]; then mkdir $(INCDIR); fi)
-	cp ${ELV_TOOLCHAIN_DIST_PLATFORM}/lib/libav*.a ${LIBDIR}
-	cp ${ELV_TOOLCHAIN_DIST_PLATFORM}/lib/libswresample.a ${LIBDIR}
-	cp ${ELV_TOOLCHAIN_DIST_PLATFORM}/lib/libswscale.a ${LIBDIR}
-	cp ${ELV_TOOLCHAIN_DIST_PLATFORM}/lib/libpostproc.a ${LIBDIR}
-	cp -r ${ELV_TOOLCHAIN_DIST_PLATFORM}/include/* ${INCDIR}
+	cp ${FFMPEG_DIST}/lib/libav*.a ${LIBDIR}
+	cp ${FFMPEG_DIST}/lib/libswresample.a ${LIBDIR}
+	cp ${FFMPEG_DIST}/lib/libswscale.a ${LIBDIR}
+	cp ${FFMPEG_DIST}/lib/libpostproc.a ${LIBDIR}
+	cp -r ${FFMPEG_DIST}/include/* ${INCDIR}
 
 copy_libs_all:
 	@(if [ ! -d $(LIBDIR) ]; then mkdir $(LIBDIR); fi)
 	@(if [ ! -d $(INCDIR) ]; then mkdir $(INCDIR); fi)
-	cp ${ELV_TOOLCHAIN_DIST_PLATFORM}/lib/libav* ${LIBDIR}
-	cp ${ELV_TOOLCHAIN_DIST_PLATFORM}/lib/libswresample* ${LIBDIR}
-	cp ${ELV_TOOLCHAIN_DIST_PLATFORM}/lib/libswscale* ${LIBDIR}
-	cp ${ELV_TOOLCHAIN_DIST_PLATFORM}/lib/libpostproc* ${LIBDIR}
-	cp -r ${ELV_TOOLCHAIN_DIST_PLATFORM}/include/* ${INCDIR}
+	cp ${FFMPEG_DIST}/lib/libav* ${LIBDIR}
+	cp ${FFMPEG_DIST}/lib/libswresample* ${LIBDIR}
+	cp ${FFMPEG_DIST}/lib/libswscale* ${LIBDIR}
+	cp ${FFMPEG_DIST}/lib/libpostproc* ${LIBDIR}
+	cp -r ${FFMPEG_DIST}/include/* ${INCDIR}
 
 avpipe:
 	CGO_CFLAGS="-I./include" CGO_LDFLAGS="-L${TOP_DIR}/lib -lavcodec -lavformat -lavfilter -lavpipe -lavdevice -lswresample -libavresample -lswscale -lavutil -lpostproc -lutils -lz -lm -ldl -lvdpau -lva -lX11 -lpthread" go build -v
@@ -63,8 +63,8 @@ clean_test:
 	@rm -rf test_out avpipe-test*.log
 
 check-env:
-ifndef ELV_TOOLCHAIN_DIST_PLATFORM
-  $(error ELV_TOOLCHAIN_DIST_PLATFORM is undefined)
+ifndef FFMPEG_DIST
+  $(error FFMPEG_DIST is undefined)
 endif
 
 test:
