@@ -469,6 +469,8 @@ func InitUrlMuxIOHandler(url string, inputOpener InputOpener, muxOutputOpener Mu
 }
 
 func getInputOpener(url string) InputOpener {
+	gMutex.Lock()
+	defer gMutex.Unlock()
 	if inputOpener, ok := gURLInputOpeners[url]; ok {
 		return inputOpener
 	}
@@ -477,6 +479,8 @@ func getInputOpener(url string) InputOpener {
 }
 
 func getOutputOpener(url string) OutputOpener {
+	gMutex.Lock()
+	defer gMutex.Unlock()
 	if outputOpener, ok := gURLOutputOpeners[url]; ok {
 		return outputOpener
 	}
@@ -486,6 +490,8 @@ func getOutputOpener(url string) OutputOpener {
 
 func getMuxOutputOpener(url string) MuxOutputOpener {
 	log.Debug("getMuxOutputOpener", "url", url)
+	gMutex.Lock()
+	defer gMutex.Unlock()
 	if muxOutputOpener, ok := gURLMuxOutputOpeners[url]; ok {
 		return muxOutputOpener
 	}
@@ -1265,6 +1271,8 @@ func Tx(params *TxParams, url string, debugFrameLevel bool) error {
 
 	rc := C.tx((*C.txparams_t)(unsafe.Pointer(cparams)), C.CString(url), C.int(debugFrameLevelInt))
 
+	gMutex.Lock()
+	defer gMutex.Unlock()
 	delete(gURLInputOpeners, url)
 	delete(gURLOutputOpeners, url)
 
@@ -1291,6 +1299,8 @@ func Mux(params *TxParams, url string, debugFrameLevel bool) error {
 
 	rc := C.mux((*C.txparams_t)(unsafe.Pointer(cparams)), C.CString(url), C.int(debugFrameLevelInt))
 
+	gMutex.Lock()
+	defer gMutex.Unlock()
 	delete(gURLInputOpeners, url)
 	delete(gURLOutputOpeners, url)
 
@@ -1406,6 +1416,8 @@ func Probe(url string, seekable bool) (*ProbeInfo, error) {
 	C.free(unsafe.Pointer(cprobe.stream_info))
 	C.free(unsafe.Pointer(cprobe))
 
+	gMutex.Lock()
+	defer gMutex.Unlock()
 	delete(gURLInputOpeners, url)
 	delete(gURLOutputOpeners, url)
 
