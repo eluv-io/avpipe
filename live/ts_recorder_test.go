@@ -20,7 +20,7 @@ func TestUdpToMp4(t *testing.T) {
 	}
 
 	liveSource := NewLiveSource()
-	addr := fmt.Sprintf("udp://localhost:%d", liveSource.Port)
+	url := fmt.Sprintf("udp://localhost:%d", liveSource.Port)
 
 	done := make(chan bool, 1)
 	testComplet := make(chan bool, 1)
@@ -46,17 +46,18 @@ func TestUdpToMp4(t *testing.T) {
 		EncWidth:        1280,      // 1920
 		TxType:          avpipe.TxAll,
 		StreamId:        -1,
+		Url:             url,
+		DebugFrameLevel: debugFrameLevel,
 	}
 
 	// Transcode audio mez files in background
-	url := addr
 	reqCtx := &testCtx{url: url}
 	putReqCtxByURL(url, reqCtx)
 
 	avpipe.InitIOHandler(&inputOpener{dir: outputDir}, &outputOpener{dir: outputDir})
 
 	tlog.Info("Transcoding UDP stream start", "params", fmt.Sprintf("%+v", *XCParams))
-	err = avpipe.Tx(XCParams, url, true)
+	err = avpipe.Tx(XCParams)
 	tlog.Info("Transcoding UDP stream done", "err", err, "last pts", nil)
 	if err != nil {
 		t.Error("Transcoding UDP stream failed", "err", err)
@@ -73,9 +74,10 @@ func TestUdpToMp4(t *testing.T) {
 		for i, url := range audioMezFiles {
 			tlog.Info("Transcoding Audio Dash start", "audioParams", fmt.Sprintf("%+v", *XCParams), "url", url)
 			reqCtx := &testCtx{url: url}
+			XCParams.Url = url
 			putReqCtxByURL(url, reqCtx)
 			XCParams.StartSegmentStr = fmt.Sprintf("%d", i*15+1)
-			err := avpipe.Tx(XCParams, url, true)
+			err := avpipe.Tx(XCParams)
 			tlog.Info("Transcoding Audio Dash done", "err", err)
 			if err != nil {
 				t.Error("Transcoding Audio Dash failed", "err", err, "url", url)
@@ -98,9 +100,10 @@ func TestUdpToMp4(t *testing.T) {
 		for i, url := range videoMezFiles {
 			tlog.Info("AVL Video Dash transcoding start", "videoParams", fmt.Sprintf("%+v", *XCParams), "url", url)
 			reqCtx := &testCtx{url: url}
+			XCParams.Url = url
 			putReqCtxByURL(url, reqCtx)
 			XCParams.StartSegmentStr = fmt.Sprintf("%d", i*15+1)
-			err := avpipe.Tx(XCParams, url, true)
+			err := avpipe.Tx(XCParams)
 			tlog.Info("Transcoding Video Dash done", "err", err)
 			if err != nil {
 				t.Error("Transcoding Video Dash failed", "err", err, "url", url)
@@ -151,6 +154,8 @@ func TestUdpToMp4WithCancelling1(t *testing.T) {
 		EncWidth:        1280,      // 1920
 		TxType:          avpipe.TxAll,
 		StreamId:        -1,
+		Url:             url,
+		DebugFrameLevel: debugFrameLevel,
 	}
 
 	// Transcode audio/video mez files in background
@@ -160,7 +165,7 @@ func TestUdpToMp4WithCancelling1(t *testing.T) {
 	avpipe.InitIOHandler(&inputOpener{dir: outputDir}, &outputOpener{dir: outputDir})
 
 	tlog.Info("Transcoding UDP stream start", "params", fmt.Sprintf("%+v", *XCParams))
-	handle, err := avpipe.TxInit(XCParams, url, true)
+	handle, err := avpipe.TxInit(XCParams)
 	if err != nil {
 		t.Error("TxInitializing UDP stream failed", "err", err)
 	}
@@ -210,6 +215,8 @@ func TestUdpToMp4WithCancelling2(t *testing.T) {
 		EncWidth:        1280,      // 1920
 		TxType:          avpipe.TxAll,
 		StreamId:        -1,
+		Url:             url,
+		DebugFrameLevel: debugFrameLevel,
 	}
 
 	// Transcode audio/video mez files in background
@@ -219,7 +226,7 @@ func TestUdpToMp4WithCancelling2(t *testing.T) {
 	avpipe.InitIOHandler(&inputOpener{dir: outputDir}, &outputOpener{dir: outputDir})
 
 	tlog.Info("Transcoding UDP stream start", "params", fmt.Sprintf("%+v", *XCParams))
-	handle, err := avpipe.TxInit(XCParams, url, true)
+	handle, err := avpipe.TxInit(XCParams)
 	if err != nil {
 		t.Error("TxInitializing UDP stream failed", "err", err)
 	}
@@ -237,10 +244,10 @@ func TestUdpToMp4WithCancelling2(t *testing.T) {
 	err = avpipe.TxCancel(handle)
 	assert.NoError(t, err)
 	if err != nil {
-		t.Error("Cancelling UDP stream failed", "err", err, "url", url)
+		t.Error("Cancelling UDP stream failed", "err", err)
 		t.FailNow()
 	} else {
-		tlog.Info("Cancelling UDP stream completed", "err", err, "url", url)
+		tlog.Info("Cancelling UDP stream completed", "err", err)
 	}
 
 	<-done
@@ -282,6 +289,8 @@ func TestUdpToMp4WithCancelling3(t *testing.T) {
 		EncWidth:        1280,      // 1920
 		TxType:          avpipe.TxAll,
 		StreamId:        -1,
+		Url:             url,
+		DebugFrameLevel: debugFrameLevel,
 	}
 
 	// Transcode audio/video mez files in background
@@ -291,7 +300,7 @@ func TestUdpToMp4WithCancelling3(t *testing.T) {
 	avpipe.InitIOHandler(&inputOpener{dir: outputDir}, &outputOpener{dir: outputDir})
 
 	tlog.Info("Transcoding UDP stream start", "params", fmt.Sprintf("%+v", *XCParams))
-	handle, err := avpipe.TxInit(XCParams, url, true)
+	handle, err := avpipe.TxInit(XCParams)
 	if err != nil {
 		t.Error("TxInitializing UDP stream failed", "err", err)
 	}
@@ -354,16 +363,17 @@ func TestUdpToMp4WithCancelling4(t *testing.T) {
 		EncWidth:        1280,      // 1920
 		TxType:          avpipe.TxAll,
 		StreamId:        -1,
+		Url:             url,
+		DebugFrameLevel: debugFrameLevel,
 	}
 
-	// Transcode audio/video mez files in background
 	reqCtx := &testCtx{url: url}
 	putReqCtxByURL(url, reqCtx)
 
 	avpipe.InitIOHandler(&inputOpener{dir: outputDir}, &outputOpener{dir: outputDir})
 	tlog.Info("Transcoding UDP stream start", "params", fmt.Sprintf("%+v", *XCParams))
 
-	handle, err := avpipe.TxInit(XCParams, url, true)
+	handle, err := avpipe.TxInit(XCParams)
 	if err != nil {
 		t.Error("TxInitializing UDP stream failed", "err", err)
 	}
@@ -377,7 +387,7 @@ func TestUdpToMp4WithCancelling4(t *testing.T) {
 	}()
 
 	time.Sleep(1 * time.Second)
-	//liveSource.Stop()
+	liveSource.Stop()
 
 	err = avpipe.TxCancel(handle)
 	assert.NoError(t, err)

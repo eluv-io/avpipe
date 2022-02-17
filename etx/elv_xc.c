@@ -122,8 +122,7 @@ in_opener(
 
         size_t bufsz = UDP_PIPE_BUFSIZE;
         if (setsockopt(fd, SOL_SOCKET, SO_RCVBUF, (const void *)&bufsz, (socklen_t)sizeof(bufsz)) == -1) {
-            elv_err("Failed to set UDP socket buf size to=%"PRId64, bufsz);
-            return -1;
+            elv_warn("Failed to set UDP socket buf size to=%"PRId64, bufsz);
         }
 
         elv_channel_init(&inctx->udp_channel, MAX_UDP_CHANNEL, NULL);
@@ -218,6 +217,7 @@ in_read_packet(
     int buf_size)
 {
     ioctx_t *c = (ioctx_t *)opaque;
+    txparams_t *xcparams = c->params;
     int r = 0;
 
     if (c->udp_channel) {
@@ -235,7 +235,8 @@ in_read_packet(
             }
             c->read_bytes += r;
             c->read_pos += r;
-            elv_dbg("IN READ UDP partial read=%d pos=%"PRId64" total=%"PRId64, r, c->read_pos, c->read_bytes);
+            if (xcparams->debug_frame_level)
+                elv_dbg("IN READ UDP partial read=%d pos=%"PRId64" total=%"PRId64, r, c->read_pos, c->read_bytes);
             return r;        
         }
 
@@ -255,11 +256,13 @@ in_read_packet(
         } else {
             free(udp_packet);
         }
-        elv_dbg("IN READ UDP read=%d pos=%"PRId64" total=%"PRId64, r, c->read_pos, c->read_bytes);
+        if (xcparams->debug_frame_level)
+            elv_dbg("IN READ UDP read=%d pos=%"PRId64" total=%"PRId64, r, c->read_pos, c->read_bytes);
         return r;
     } else {
         int fd = *((int *)(c->opaque));
-        elv_dbg("IN READ buf=%p buf_size=%d fd=%d", buf, buf_size, fd);
+        if (xcparams && xcparams->debug_frame_level)
+            elv_dbg("IN READ buf=%p buf_size=%d fd=%d", buf, buf_size, fd);
 
         r = read(fd, buf, buf_size);
         if (r >= 0) {
@@ -267,7 +270,9 @@ in_read_packet(
             c->read_pos += r;
         }
 
-        elv_dbg("IN READ read=%d pos=%"PRId64" total=%"PRId64", checksum=%u", r, c->read_pos, c->read_bytes, r > 0 ? checksum(buf, r) : 0);
+        if (xcparams && xcparams->debug_frame_level)
+            elv_dbg("IN READ read=%d pos=%"PRId64" total=%"PRId64", checksum=%u",
+                r, c->read_pos, c->read_bytes, r > 0 ? checksum(buf, r) : 0);
     }
 
     if (r > 0 && c->read_bytes - c->read_reported > BYTES_READ_REPORT) {
@@ -320,6 +325,8 @@ in_stat(
 {
     int64_t fd;
     ioctx_t *c = (ioctx_t *)opaque;
+    txparams_t *xcparams = c->params;
+    int debug_frame_level = (xcparams != NULL) ? xcparams->debug_frame_level : 0;
 
     if (!c || !c->opaque)
         return 0;
@@ -327,19 +334,24 @@ in_stat(
     fd = *((int64_t *)(c->opaque));
     switch (stat_type) {
     case in_stat_bytes_read:
-        elv_log("IN STAT fd=%d, read offset=%"PRId64, fd, c->read_bytes);
+        if (debug_frame_level)
+            elv_dbg("IN STAT fd=%d, read offset=%"PRId64, fd, c->read_bytes);
         break;
     case in_stat_decoding_audio_start_pts:
-        elv_log("IN STAT fd=%d, audio start PTS=%"PRId64, fd, c->decoding_start_pts);
+        if (debug_frame_level)
+            elv_dbg("IN STAT fd=%d, audio start PTS=%"PRId64, fd, c->decoding_start_pts);
         break;
     case in_stat_decoding_video_start_pts:
-        elv_log("IN STAT fd=%d, video start PTS=%"PRId64, fd, c->decoding_start_pts);
+        if (debug_frame_level)
+            elv_dbg("IN STAT fd=%d, video start PTS=%"PRId64, fd, c->decoding_start_pts);
         break;
     case in_stat_audio_frame_read:
-        elv_log("IN STAT fd=%d, audio frame read=%"PRId64, fd, c->audio_frames_read);
+        if (debug_frame_level)
+            elv_dbg("IN STAT fd=%d, audio frame read=%"PRId64, fd, c->audio_frames_read);
         break;
     case in_stat_video_frame_read:
-        elv_log("IN STAT fd=%d, video frame read=%"PRId64, fd, c->video_frames_read);
+        if (debug_frame_level)
+            elv_dbg("IN STAT fd=%d, video frame read=%"PRId64, fd, c->video_frames_read);
         break;
     default:
         elv_err("IN STATS fd=%d, invalid input stat=%d", stat_type);
@@ -499,6 +511,7 @@ out_write_packet(
     ioctx_t *outctx = (ioctx_t *)opaque;
     int fd = *(int *)outctx->opaque;
     int bwritten;
+    txparams_t *xcparams = outctx->inctx->params;
 
     if (fd < 0) {
         /* If there is no space in outctx->buf, reallocate the buffer */
@@ -508,7 +521,8 @@ out_write_packet(
             outctx->bufsz = outctx->bufsz*2;
             free(outctx->buf);
             outctx->buf = tmp;
-            elv_dbg("OUT WRITE growing the buffer to %d", outctx->bufsz);
+            if (xcparams->debug_frame_level)
+                elv_dbg("OUT WRITE growing the buffer to %d", outctx->bufsz);
         }
 
         elv_dbg("OUT WRITE MEMORY write sz=%d", buf_size);
@@ -533,8 +547,9 @@ out_write_packet(
         outctx->write_reported = outctx->written_bytes;
     }
 
-    elv_dbg("OUT WRITE fd=%d type=%d size=%d written=%d pos=%"PRId64" total=%"PRId64,
-        fd, outctx->type, buf_size, bwritten, outctx->write_pos, outctx->written_bytes);
+    if (xcparams->debug_frame_level)
+        elv_dbg("OUT WRITE fd=%d type=%d size=%d written=%d pos=%"PRId64" total=%"PRId64,
+            fd, outctx->type, buf_size, bwritten, outctx->write_pos, outctx->written_bytes);
     return bwritten;
 }
 
@@ -585,6 +600,7 @@ out_stat(
 {
     ioctx_t *outctx = (ioctx_t *)opaque;
     int64_t fd;
+    txparams_t *xcparams = outctx->inctx->params;
 
     /* Some error happened and fd is not set */
     if (!outctx || !outctx->opaque)
@@ -602,17 +618,20 @@ out_stat(
 
     switch (stat_type) {
     case out_stat_bytes_written:
-        elv_log("OUT STAT fd=%d, type=%d, write offset=%"PRId64,
-            fd, outctx->type, outctx->written_bytes);
+        if (xcparams->debug_frame_level)
+            elv_dbg("OUT STAT fd=%d, type=%d, write offset=%"PRId64,
+                fd, outctx->type, outctx->written_bytes);
         break;
     case out_stat_encoding_end_pts:
-        elv_log("OUT STAT fd=%d, video encoding end PTS=%"PRId64
+        if (xcparams->debug_frame_level)
+            elv_dbg("OUT STAT fd=%d, video encoding end PTS=%"PRId64
                 ", audio encoding end PTS=%"PRId64,
                 fd, outctx->encoder_ctx->video_last_pts_sent_encode,
                 outctx->encoder_ctx->audio_last_pts_sent_encode);
         break;
     case out_stat_frame_written:
-        elv_log("OUT STAT fd=%d, type=%d, total_frames_written=%"PRId64
+        if (xcparams->debug_frame_level)
+            elv_dbg("OUT STAT fd=%d, type=%d, total_frames_written=%"PRId64
                 ", frames_written=%"PRId64,
                 fd, outctx->type, outctx->total_frames_written,
                 outctx->frames_written);
@@ -649,6 +668,7 @@ txparam_copy(
     txparams_t *p2 = (txparams_t *) calloc(1, sizeof(txparams_t));
 
     *p2 = *p;
+    p2->url = strdup(p->url);
     p2->crf_str = safe_strdup(p->crf_str);
     p2->crypt_iv = safe_strdup(p->crypt_iv);
     p2->crypt_key = safe_strdup(p->crypt_key);
@@ -701,12 +721,12 @@ tx_thread_func(
          * (This is needed when repeating the same command with etx.)
          */
         txparams_t *txparams = txparam_copy(params->txparams);
-        if ((rc = avpipe_init(&txctx, params->in_handlers, params->out_handlers, txparams, params->filename)) != eav_success) {
+        if ((rc = avpipe_init(&txctx, params->in_handlers, params->out_handlers, txparams)) != eav_success) {
             elv_err("THREAD %d, iteration %d, failed to initialize avpipe rc=%d", params->thread_number, i+1, rc);
             continue;
         }
 
-        if ((rc = avpipe_xc(txctx, 0, 1)) != eav_success) {
+        if ((rc = avpipe_xc(txctx, 0)) != eav_success) {
             avpipe_fini(&txctx);
             elv_err("THREAD %d, iteration %d error in transcoding, err=%d", params->thread_number, i+1, rc);
             continue;
@@ -717,7 +737,7 @@ tx_thread_func(
             pthread_join(txctx->inctx->utid, NULL);
         }
 
-        elv_dbg("Releasing all the resources, filename=%s", params->filename);
+        elv_dbg("Releasing all the resources, filename=%s", txparams->url);
         avpipe_fini(&txctx);
         free(txparams);
     }
@@ -1161,6 +1181,7 @@ main(
         .watermark_shadow_color = strdup("white"),  /* Default shadow color */
         .gpu_index = -1,
         .seg_duration = NULL,
+        .debug_frame_level = 0,
     };
 
     i = 1;
@@ -1524,6 +1545,7 @@ main(
     if (filename == NULL) {
         usage(argv[0], "-f", EXIT_FAILURE);
     }
+    p.url = filename;
 
     // Set AV libs log level and handle using elv_log
     av_log_set_level(AV_LOG_DEBUG);

@@ -605,6 +605,7 @@ func doTranscode(cmd *cobra.Command, args []string) error {
 	}
 
 	params := &avpipe.TxParams{
+		Url:                    filename,
 		BypassTranscoding:      bypass,
 		Format:                 format,
 		StartTimeTs:            startTimeTs,
@@ -659,6 +660,7 @@ func doTranscode(cmd *cobra.Command, args []string) error {
 		SkipDecoding:           skipDecoding,
 		ExtractImageIntervalTs: extractImageIntervalTs,
 		ChannelLayout:          channelLayout,
+		DebugFrameLevel:        true,
 	}
 
 	err = getAudioIndexes(params, audioIndex)
@@ -680,9 +682,9 @@ func doTranscode(cmd *cobra.Command, args []string) error {
 	for i := 0; i < int(nThreads); i++ {
 		go func(params *avpipe.TxParams, filename string) {
 
-			err := avpipe.Tx(params, filename, true)
+			err := avpipe.Tx(params)
 			if err != nil {
-				done <- fmt.Errorf("Failed transcoding %s", filename)
+				done <- fmt.Errorf("Failed transcoding %s, err=%v", filename, err)
 			} else {
 				done <- nil
 			}

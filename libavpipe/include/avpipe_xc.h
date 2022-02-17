@@ -125,6 +125,8 @@ typedef struct io_mux_ctx_t {
     mux_input_ctx_t captions[MAX_CAPTION_MUX];
 } io_mux_ctx_t;
 
+typedef struct txparams_t txparams_t;
+
 typedef struct ioctx_t {
     /* Application specific IO context */
     void                *opaque;
@@ -172,6 +174,8 @@ typedef struct ioctx_t {
      * multiple output (i.e multiple segment files, dash and init_stream files).
      */
     struct ioctx_t  *inctx;
+
+    txparams_t      *params;
 
     volatile int    closed; /* If it is set that means inctx is closed */
 } ioctx_t;
@@ -336,6 +340,7 @@ typedef enum image_type {
 //   * rc_max_rate and rc_buffer_size must be set together or not at all; they correspond to ffmpeg's bufsize and maxrate
 //   * setting video_bitrate clobbers rc_max_rate and rc_buffer_size
 typedef struct txparams_t {
+    char    *url;                   // URL of the input for transcoding
     int     bypass_transcoding;     // if 0 means do transcoding, otherwise bypass transcoding (only copy)
     char    *format;                // Output format [Required, Values: dash, hls, mp4, fmp4]
     int64_t start_time_ts;          // Transcode the source starting from this time
@@ -404,6 +409,8 @@ typedef struct txparams_t {
     int64_t     extract_image_interval_ts;  // Write frames at this interval. Default: -1 (will use DEFAULT_FRAME_INTERVAL_S)
     int64_t     *extract_images_ts;         // Write frames at these timestamps. Mutually exclusive with extract_image_interval_ts
     int         extract_images_sz;          // Size of the array extract_images_ts
+
+    int         debug_frame_level;
 } txparams_t;
 
 #define MAX_CODEC_NAME  256
@@ -517,7 +524,6 @@ typedef struct encoding_frame_stats_t {
  *                          by the application before calling this function.
  * @param   out_handlers    A pointer to output handlers. Must be properly set up by the application.
  * @param   params          A pointer to the parameters for transcoding.
- * @param   url             Points to input url or filename.
  *
  * @return  Returns 0 if the initialization of an avpipe txctx_t is successful, otherwise returns corresponding eav error.
  */
@@ -526,8 +532,7 @@ avpipe_init(
     txctx_t **txctx,
     avpipe_io_handler_t *in_handlers,
     avpipe_io_handler_t *out_handlers,
-    txparams_t *params,
-    char *url);
+    txparams_t *params);
 
 /**
  * @brief   Frees the memory and other resources allocated by ffmpeg.
@@ -583,8 +588,7 @@ avpipe_probe(
 int
 avpipe_xc(
     txctx_t *txctx,
-    int do_instrument,
-    int debug_frame_level);
+    int do_instrument);
 
 /**
  * @brief   Initializes the avpipe muxer.
@@ -593,7 +597,6 @@ avpipe_xc(
  * @param   in_handlers     A pointer to input handlers. Must be properly set up by the application.
  * @param   out_handlers    A pointer to output handlers. Must be properly set up by the application.
  * @param   params          A pointer to the parameters for transcoding/muxing.
- * @param   url             Output url name (filename)
  * @return  Returns 0 if initializing the muxer is successful, otherwise -1.
  */
 int
@@ -602,8 +605,7 @@ avpipe_init_muxer(
     avpipe_io_handler_t *in_handlers,
     io_mux_ctx_t *in_mux_ctx,
     avpipe_io_handler_t *out_handlers,
-    txparams_t *params,
-    char *url);
+    txparams_t *params);
 
 /**
  * @brief   Frees the memory and other resources allocated by avpipe muxer/ffmpeg.

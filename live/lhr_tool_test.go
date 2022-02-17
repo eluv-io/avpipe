@@ -33,7 +33,7 @@ import (
 //   TESTSaveToDir = "~/temp"
 //
 const manifestURLStr = "http://origin1.skynews.mobile.skydvn.com/skynews/1404/latest.m3u8"
-const verboseLogging = false
+const debugFrameLevel = false
 
 var tlog = elog.Get("/eluvio/avpipe/live/test")
 var requestURLTable map[string]*testCtx = map[string]*testCtx{}
@@ -124,6 +124,7 @@ func _TestHLSVideoOnly(t *testing.T) {
 		EncHeight:       720,
 		EncWidth:        1280,
 		TxType:          avpipe.TxVideo,
+		DebugFrameLevel: debugFrameLevel,
 	}
 
 	setupLogging()
@@ -144,9 +145,10 @@ func _TestHLSVideoOnly(t *testing.T) {
 	tlog.Info("Tx start", "params", fmt.Sprintf("%+v", *params))
 	avpipe.InitIOHandler(&inputOpener{}, &outputOpener{})
 	url := "video_hls"
+	params.Url = url
 	reqCtx := &testCtx{url: url, r: reader.Pipe}
 	putReqCtxByURL(url, reqCtx)
-	err = avpipe.Tx(params, url, verboseLogging)
+	err = avpipe.Tx(params)
 	tlog.Info("Tx done", "err", err)
 	if err != nil {
 		t.Error("video transcoding error", "errTx", err)
@@ -171,6 +173,7 @@ func _TestHLSAudioOnly(t *testing.T) {
 		Ecodec:          "aac", // "ac3", "aac"
 		Dcodec:          "aac",
 		TxType:          avpipe.TxAudio,
+		DebugFrameLevel: debugFrameLevel,
 		//BypassTranscoding: true,
 	}
 
@@ -195,9 +198,10 @@ func _TestHLSAudioOnly(t *testing.T) {
 	tlog.Info("Tx start", "params", fmt.Sprintf("%+v", *params))
 	avpipe.InitIOHandler(&inputOpener{}, &outputOpener{})
 	url := "audio_hls"
+	params.Url = url
 	reqCtx := &testCtx{url: url, r: reader.Pipe}
 	putReqCtxByURL(url, reqCtx)
-	err = avpipe.Tx(params, url, verboseLogging)
+	err = avpipe.Tx(params)
 	tlog.Info("Tx done", "err", err)
 	if err != nil {
 		t.Error("video transcoding error", "errTx", err)
@@ -245,6 +249,7 @@ func _TestAudioVideoHlsLive(t *testing.T) {
 		Ecodec:          "aac", // "ac3", "aac"
 		Dcodec:          "aac",
 		TxType:          avpipe.TxAudio,
+		DebugFrameLevel: debugFrameLevel,
 		//BypassTranscoding: true,
 	}
 
@@ -254,9 +259,10 @@ func _TestAudioVideoHlsLive(t *testing.T) {
 	go func(reader io.Reader) {
 		tlog.Info("audio mez Tx start", "params", fmt.Sprintf("%+v", *audioParams))
 		url := "audio_mez_hls"
+		audioParams.Url = url
 		reqCtx := &testCtx{url: url, r: reader}
 		putReqCtxByURL(url, reqCtx)
-		err := avpipe.Tx(audioParams, url, verboseLogging)
+		err := avpipe.Tx(audioParams)
 		tlog.Info("audio mez Tx done", "err", err)
 		if err != nil {
 			t.Error("audio mez transcoding error", "err", err)
@@ -275,14 +281,15 @@ func _TestAudioVideoHlsLive(t *testing.T) {
 		EncHeight:       720,
 		EncWidth:        1280,
 		TxType:          avpipe.TxVideo,
+		Url:             "video_mez_hls",
+		DebugFrameLevel: debugFrameLevel,
 		//BypassTranscoding: true,
 	}
 	go func(reader io.Reader) {
 		tlog.Info("video mez Tx start", "params", fmt.Sprintf("%+v", *videoParams))
-		url := "video_mez_hls"
-		reqCtx := &testCtx{url: url, r: reader}
-		putReqCtxByURL(url, reqCtx)
-		err := avpipe.Tx(videoParams, url, verboseLogging)
+		reqCtx := &testCtx{url: videoParams.Url, r: reader}
+		putReqCtxByURL(videoParams.Url, reqCtx)
+		err := avpipe.Tx(videoParams)
 		tlog.Info("video mez Tx done", "err", err)
 		if err != nil {
 			t.Error("video mez transcoding error", "err", err)
@@ -308,9 +315,10 @@ func _TestAudioVideoHlsLive(t *testing.T) {
 		for i, url := range audioMezFiles {
 			tlog.Info("audio dash Tx start", "params", fmt.Sprintf("%+v", *audioParams), "url", url)
 			reqCtx := &testCtx{url: url}
+			audioParams.Url = url
 			putReqCtxByURL(url, reqCtx)
 			audioParams.StartSegmentStr = fmt.Sprintf("%d", i*15+1)
-			err := avpipe.Tx(audioParams, url, true)
+			err := avpipe.Tx(audioParams)
 			tlog.Info("audio dash Tx done", "err", err)
 			if err != nil {
 				t.Error("audio dash transcoding error", "err", err, "url", url)
@@ -330,9 +338,10 @@ func _TestAudioVideoHlsLive(t *testing.T) {
 		for i, url := range videoMezFiles {
 			tlog.Info("video dash Tx start", "videoParams", fmt.Sprintf("%+v", *videoParams), "url", url)
 			reqCtx := &testCtx{url: url}
+			videoParams.Url = url
 			putReqCtxByURL(url, reqCtx)
 			videoParams.StartSegmentStr = fmt.Sprintf("%d", i*15+1)
-			err := avpipe.Tx(videoParams, url, true)
+			err := avpipe.Tx(videoParams)
 			tlog.Info("video dash Tx done", "err", err)
 			if err != nil {
 				t.Error("video dash transcoding error", "err", err, "url", url)
@@ -380,7 +389,7 @@ func (io *inputOpener) Open(fd int64, url string) (avpipe.InputHandler, error) {
 }
 
 func (i *inputCtx) Read(buf []byte) (int, error) {
-	if verboseLogging {
+	if debugFrameLevel {
 		tlog.Debug("IN_READ", "url", i.tc.url, "len", len(buf))
 	}
 	n, err := i.r.Read(buf)
@@ -389,7 +398,7 @@ func (i *inputCtx) Read(buf []byte) (int, error) {
 		return 0, err
 	}
 	i.tc.bytesRead += n
-	if verboseLogging {
+	if debugFrameLevel {
 		tlog.Debug("IN_READ DONE", "url", i.tc.url, "len", len(buf), "n", n,
 			"bytesRead", i.tc.bytesRead, "bytesWritten", i.tc.bytesWritten, "err", err)
 	}
@@ -404,7 +413,9 @@ func (i *inputCtx) Seek(offset int64, whence int) (int64, error) {
 	}
 
 	n, err := i.r.(*os.File).Seek(offset, whence)
-	tlog.Debug("IN_SEEK", "url", i.tc.url, "fd", i.tc.fd, "n", n, "err", err)
+	if debugFrameLevel {
+		tlog.Debug("IN_SEEK", "url", i.tc.url, "fd", i.tc.fd, "n", n, "err", err)
+	}
 	return n, err
 }
 
@@ -412,14 +423,18 @@ func (i *inputCtx) Close() (err error) {
 	tlog.Debug("IN_CLOSE", "url", i.tc.url)
 
 	if i.tc.wc != nil {
-		tlog.Debug("IN_CLOSE closing write side", "url", i.tc.url)
+		if debugFrameLevel {
+			tlog.Debug("IN_CLOSE closing write side", "url", i.tc.url)
+		}
 		err = i.tc.wc.Close()
 	}
 
 	if _, ok := i.r.(*os.File); ok {
 		err = i.r.(*os.File).Close()
 	} else if _, ok := i.r.(*RWBuffer); ok {
-		tlog.Debug("IN_CLOSE closing RWBuffer", "url", i.tc.url)
+		if debugFrameLevel {
+			tlog.Debug("IN_CLOSE closing RWBuffer", "url", i.tc.url)
+		}
 		err = i.r.(*RWBuffer).Close()
 	} else if _, ok := i.r.(*io.PipeReader); ok {
 		err = i.r.(*io.PipeReader).Close()
@@ -429,7 +444,9 @@ func (i *inputCtx) Close() (err error) {
 
 func (i *inputCtx) Size() int64 {
 	if i.tc.url[0:3] == "udp" {
-		tlog.Debug("IN_SIZE", "url", i.tc.url)
+		if debugFrameLevel {
+			tlog.Debug("IN_SIZE", "url", i.tc.url)
+		}
 		return -1
 	}
 
@@ -442,7 +459,9 @@ func (i *inputCtx) Stat(statType avpipe.AVStatType, statArgs interface{}) error 
 	switch statType {
 	case avpipe.AV_IN_STAT_BYTES_READ:
 		readOffset := statArgs.(*uint64)
-		log.Info("STAT read offset", *readOffset)
+		if debugFrameLevel {
+			log.Debug("STAT read offset", *readOffset)
+		}
 	}
 	return nil
 }
@@ -501,7 +520,7 @@ func (oo *outputOpener) Open(h, fd int64, stream_index, seg_index int, _ int64,
 }
 
 func (o *outputCtx) Write(buf []byte) (int, error) {
-	if verboseLogging {
+	if debugFrameLevel {
 		tlog.Debug("OUT_WRITE", "url", o.tc.url, "len", len(buf))
 	}
 	n, err := o.w.Write(buf)
@@ -516,7 +535,7 @@ func (o *outputCtx) Write(buf []byte) (int, error) {
 	if o.tc.bytesRead-o.tc.bytesWritten > o.tc.rwDiffMax {
 		o.tc.rwDiffMax = o.tc.bytesRead - o.tc.bytesWritten
 	}
-	if verboseLogging {
+	if debugFrameLevel {
 		tlog.Debug("OUT_WRITE DONE", "url", o.tc.url, "len", len(buf), "n", n, "err", err,
 			"bytesRead", o.tc.bytesRead, "bytesWritten", o.tc.bytesWritten, "diff", o.tc.rwDiffMax)
 	}
@@ -539,10 +558,14 @@ func (o *outputCtx) Stat(avType avpipe.AVType, statType avpipe.AVStatType, statA
 	switch statType {
 	case avpipe.AV_OUT_STAT_BYTES_WRITTEN:
 		writeOffset := statArgs.(*uint64)
-		log.Info("STAT, write offset", *writeOffset)
+		if debugFrameLevel {
+			log.Debug("STAT, write offset", *writeOffset)
+		}
 	case avpipe.AV_OUT_STAT_ENCODING_END_PTS:
 		endPTS := statArgs.(*uint64)
-		log.Info("STAT, endPTS", *endPTS)
+		if debugFrameLevel {
+			log.Debug("STAT, endPTS", *endPTS)
+		}
 	}
 	return nil
 }

@@ -5,8 +5,6 @@
 int32_t
 tx_init(
     txparams_t *params,
-    char *filename,
-    int debug_frame_level,
     int32_t *handle);
 
 int
@@ -19,15 +17,11 @@ tx_cancel(
 
 int
 tx(
-    txparams_t *params,
-    char *filename,
-    int debug_frame_level);
+    txparams_t *params);
 
 int
 mux(
-    txparams_t *params,
-    char *filename,
-    int debug_frame_level);
+    txparams_t *params);
 
 const char *
 get_pix_fmt_name(

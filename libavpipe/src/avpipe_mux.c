@@ -219,11 +219,10 @@ avpipe_init_muxer(
     avpipe_io_handler_t *in_handlers,
     io_mux_ctx_t *in_mux_ctx,
     avpipe_io_handler_t *out_handlers,
-    txparams_t *p,
-    char *url)
+    txparams_t *p)
 {
     int ret;
-    char *out_filename = url;
+    char *out_filename = p->url;
     txctx_t *p_txctx;
 
     if ((ret = init_mux_ctx(p->mux_spec, out_filename, in_mux_ctx)) != eav_success) {

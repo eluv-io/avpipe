@@ -149,6 +149,7 @@ const MaxAudioMux = C.MAX_AUDIO_MUX
 
 // TxParams should match with txparams_t in avpipe_xc.h
 type TxParams struct {
+	Url                    string             `json:"url"`
 	BypassTranscoding      bool               `json:"bypass,omitempty"`
 	Format                 string             `json:"format,omitempty"`
 	StartTimeTs            int64              `json:"start_time_ts,omitempty"`
@@ -208,6 +209,7 @@ type TxParams struct {
 	Listen                 bool               `json:"listen"`
 	FilterDescriptor       string             `json:"filter_descriptor"`
 	SkipDecoding           bool               `json:"skip_decoding"`
+	DebugFrameLevel        bool               `json:"debug_frame_level"`
 	ExtractImageIntervalTs int64              `json:"extract_image_interval_ts,omitempty"`
 	ExtractImagesTs        []int64            `json:"extract_images_ts,omitempty"`
 }
@@ -1137,6 +1139,7 @@ func getCParams(params *TxParams) (*C.txparams_t, error) {
 
 	// same field order as avpipe_xc.h
 	cparams := &C.txparams_t{
+		url:                       C.CString(params.Url),
 		format:                    C.CString(params.Format),
 		start_time_ts:             C.int64_t(params.StartTimeTs),
 		skip_over_pts:             C.int64_t(params.SkipOverPts),
@@ -1231,6 +1234,10 @@ func getCParams(params *TxParams) (*C.txparams_t, error) {
 		return nil, fmt.Errorf("Invalid number of audio streams NumAudio=%d", params.NumAudio)
 	}
 
+	if params.DebugFrameLevel {
+		cparams.debug_frame_level = C.int(1)
+	}
+
 	for i := 0; i < int(params.NumAudio); i++ {
 		cparams.audio_index[i] = C.int(params.AudioIndex[i])
 	}
@@ -1248,61 +1255,46 @@ func getCParams(params *TxParams) (*C.txparams_t, error) {
 }
 
 // params: transcoding parameters
-// url: input filename that has to be transcoded
-func Tx(params *TxParams, url string, debugFrameLevel bool) error {
+func Tx(params *TxParams) error {
 
 	// Convert TxParams to C.txparams_t
 	if params == nil {
-		log.Error("Failed transcoding, params is not set.", "url", url)
+		log.Error("Failed transcoding, params are not set.")
 		return EAV_PARAM
 	}
 
 	cparams, err := getCParams(params)
 	if err != nil {
-		log.Error("Transcoding failed", err, "url", url)
+		log.Error("Transcoding failed", err, "url", params.Url)
 	}
 
-	var debugFrameLevelInt int
-	if debugFrameLevel {
-		debugFrameLevelInt = 1
-	} else {
-		debugFrameLevelInt = 0
-	}
-
-	rc := C.tx((*C.txparams_t)(unsafe.Pointer(cparams)), C.CString(url), C.int(debugFrameLevelInt))
+	rc := C.tx((*C.txparams_t)(unsafe.Pointer(cparams)))
 
 	gMutex.Lock()
 	defer gMutex.Unlock()
-	delete(gURLInputOpeners, url)
-	delete(gURLOutputOpeners, url)
+	delete(gURLInputOpeners, params.Url)
+	delete(gURLOutputOpeners, params.Url)
 
 	return avpipeError(rc)
 }
 
-func Mux(params *TxParams, url string, debugFrameLevel bool) error {
+func Mux(params *TxParams) error {
 	if params == nil {
-		log.Error("Failed muxing, params is not set.", "url", url)
+		log.Error("Failed muxing, params are not set")
 		return EAV_PARAM
 	}
 
 	cparams, err := getCParams(params)
 	if err != nil {
-		log.Error("Muxing failed", err, "url", url)
+		log.Error("Muxing failed", err, "url", params.Url)
 	}
 
-	var debugFrameLevelInt int
-	if debugFrameLevel {
-		debugFrameLevelInt = 1
-	} else {
-		debugFrameLevelInt = 0
-	}
-
-	rc := C.mux((*C.txparams_t)(unsafe.Pointer(cparams)), C.CString(url), C.int(debugFrameLevelInt))
+	rc := C.mux((*C.txparams_t)(unsafe.Pointer(cparams)))
 
 	gMutex.Lock()
 	defer gMutex.Unlock()
-	delete(gURLInputOpeners, url)
-	delete(gURLOutputOpeners, url)
+	delete(gURLInputOpeners, params.Url)
+	delete(gURLOutputOpeners, params.Url)
 
 	return avpipeError(rc)
 
@@ -1426,28 +1418,20 @@ func Probe(url string, seekable bool) (*ProbeInfo, error) {
 
 // Returns a handle and error (if there is any error)
 // In case of error the handle would be zero
-func TxInit(params *TxParams, url string, debugFrameLevel bool) (int32, error) {
+func TxInit(params *TxParams) (int32, error) {
 	// Convert TxParams to C.txparams_t
 	if params == nil {
-		log.Error("Failed transcoding, params is not set.", "url", url)
+		log.Error("Failed transcoding, params are not set.")
 		return -1, EAV_PARAM
 	}
 
 	cparams, err := getCParams(params)
 	if err != nil {
-		log.Error("Initializing transcoder failed", err, "url", url)
-	}
-
-	var debugFrameLevelInt int
-	if debugFrameLevel {
-		debugFrameLevelInt = 1
-	} else {
-		debugFrameLevelInt = 0
+		log.Error("Initializing transcoder failed", err, "url", params.Url)
 	}
 
 	var handle C.int32_t
-	rc := C.tx_init((*C.txparams_t)(unsafe.Pointer(cparams)),
-		C.CString(url), C.int(debugFrameLevelInt), (*C.int32_t)(unsafe.Pointer(&handle)))
+	rc := C.tx_init((*C.txparams_t)(unsafe.Pointer(cparams)), (*C.int32_t)(unsafe.Pointer(&handle)))
 	if rc != C.eav_success {
 		return -1, avpipeError(rc)
 	}

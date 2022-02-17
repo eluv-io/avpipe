@@ -361,7 +361,7 @@ do_mux(
 
     memset(&in_mux_ctx, 0, sizeof(io_mux_ctx_t));
 
-    rc = avpipe_init_muxer(&txctx, in_handlers, &in_mux_ctx, out_handlers, params, url);
+    rc = avpipe_init_muxer(&txctx, in_handlers, &in_mux_ctx, out_handlers, params);
     if (rc < 0) {
         printf("Error: avpipe init muxer failed, url=%s.\n", url);
         goto end_muxing;
