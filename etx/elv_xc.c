@@ -747,33 +747,33 @@ tx_thread_func(
     return 0;
 }
 
-static tx_type_t
-tx_type_from_string(
-    char *tx_type_str
+static xc_type_t
+xc_type_from_string(
+    char *xc_type_str
 )
 {
-    if (!strcmp(tx_type_str, "all"))
-        return tx_all;
+    if (!strcmp(xc_type_str, "all"))
+        return xc_all;
 
-    if (!strcmp(tx_type_str, "video"))
-        return tx_video;
+    if (!strcmp(xc_type_str, "video"))
+        return xc_video;
 
-    if (!strcmp(tx_type_str, "audio"))
-        return tx_audio;
+    if (!strcmp(xc_type_str, "audio"))
+        return xc_audio;
 
-    if (!strcmp(tx_type_str, "audio-merge"))
-        return tx_audio_merge;
+    if (!strcmp(xc_type_str, "audio-merge"))
+        return xc_audio_merge;
 
-    if (!strcmp(tx_type_str, "audio-join"))
-        return tx_audio_join;
+    if (!strcmp(xc_type_str, "audio-join"))
+        return xc_audio_join;
 
-    if (!strcmp(tx_type_str, "audio-pan"))
-        return tx_audio_pan;
+    if (!strcmp(xc_type_str, "audio-pan"))
+        return xc_audio_pan;
 
-    if (!strcmp(tx_type_str, "extract-images"))
-        return tx_extract_images;
+    if (!strcmp(xc_type_str, "extract-images"))
+        return xc_extract_images;
 
-    return tx_none;
+    return xc_none;
 }
 
 static int
@@ -1168,7 +1168,7 @@ main(
         .start_time_ts = 0,                 /* same units as input stream PTS */
         .start_fragment_index = 0,          /* Default is zero */
         .sync_audio_to_stream_id = -1,      /* Default -1 (no sync to a video stream) */
-        .tx_type = tx_none,
+        .xc_type = xc_none,
         .video_bitrate = -1,                /* not used if using CRF */
         .watermark_text = NULL,
         .watermark_timecode = NULL,
@@ -1475,7 +1475,7 @@ main(
                     strcmp(argv[i+1], "extract-images")) {
                     usage(argv[0], argv[i], EXIT_FAILURE);
                 }
-                p.tx_type = tx_type_from_string(argv[i+1]);
+                p.xc_type = xc_type_from_string(argv[i+1]);
             } else if (sscanf(argv[i+1], "%d", &n_threads) != 1) {
                 usage(argv[0], argv[i], EXIT_FAILURE);
             }
@@ -1567,14 +1567,14 @@ main(
         strcmp(p.format, "fmp4-segment") &&
         strcmp(p.format, "mp4") &&
         p.seg_duration == NULL &&
-        p.audio_seg_duration_ts <= 0 && p.tx_type & tx_audio) {
+        p.audio_seg_duration_ts <= 0 && p.xc_type & xc_audio) {
         usage(argv[0], "audio_seg_duration_ts or seg_duration", EXIT_FAILURE);
     }
     if (strcmp(p.format, "segment") &&
         strcmp(p.format, "fmp4-segment") &&
         strcmp(p.format, "mp4") &&
         p.seg_duration == NULL &&
-        p.video_seg_duration_ts <= 0 && p.tx_type & tx_video && p.tx_type != tx_extract_images) {
+        p.video_seg_duration_ts <= 0 && p.xc_type & xc_video && p.xc_type != xc_extract_images) {
         usage(argv[0], "video-seg-duration-ts or seg-duration", EXIT_FAILURE);
     }
 

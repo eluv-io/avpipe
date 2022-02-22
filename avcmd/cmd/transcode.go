@@ -458,8 +458,8 @@ func doTranscode(cmd *cobra.Command, args []string) error {
 		txTypeStr != "extract-images" {
 		return fmt.Errorf("Transcoding type is not valid, with no stream-id can be 'all', 'video', 'audio', 'audio-join', 'audio-pan', 'audio-merge', or 'extract-images'")
 	}
-	txType := avpipe.TxTypeFromString(txTypeStr)
-	if txType == avpipe.TxAudio && len(encoder) == 0 {
+	txType := avpipe.XcTypeFromString(txTypeStr)
+	if txType == avpipe.XcAudio && len(encoder) == 0 {
 		encoder = "aac"
 	}
 
@@ -550,14 +550,14 @@ func doTranscode(cmd *cobra.Command, args []string) error {
 	if err != nil ||
 		(format != "segment" && format != "fmp4-segment" &&
 			audioSegDurationTs == 0 &&
-			(txType == avpipe.TxAll || txType == avpipe.TxAudio ||
-				txType == avpipe.TxAudioJoin || txType == avpipe.TxAudioMerge)) {
+			(txType == avpipe.XcAll || txType == avpipe.XcAudio ||
+				txType == avpipe.XcAudioJoin || txType == avpipe.XcAudioMerge)) {
 		return fmt.Errorf("Audio seg duration ts is not valid")
 	}
 
 	videoSegDurationTs, err := cmd.Flags().GetInt64("video-seg-duration-ts")
 	if err != nil || (format != "segment" && format != "fmp4-segment" && format != "mp4" &&
-		videoSegDurationTs == 0 && (txType == avpipe.TxAll || txType == avpipe.TxVideo)) {
+		videoSegDurationTs == 0 && (txType == avpipe.XcAll || txType == avpipe.XcVideo)) {
 		return fmt.Errorf("Video seg duration ts is not valid")
 	}
 
@@ -632,7 +632,7 @@ func doTranscode(cmd *cobra.Command, args []string) error {
 		CryptKID:               cryptKID,
 		CryptKeyURL:            cryptKeyURL,
 		CryptScheme:            cryptScheme,
-		TxType:                 txType,
+		XcType:                 txType,
 		WatermarkTimecode:      watermarkTimecode,
 		WatermarkTimecodeRate:  watermarkTimecodeRate,
 		WatermarkText:          watermarkText,
@@ -682,7 +682,7 @@ func doTranscode(cmd *cobra.Command, args []string) error {
 	for i := 0; i < int(nThreads); i++ {
 		go func(params *avpipe.XcParams, filename string) {
 
-			err := avpipe.Tx(params)
+			err := avpipe.Xc(params)
 			if err != nil {
 				done <- fmt.Errorf("Failed transcoding %s, err=%v", filename, err)
 			} else {

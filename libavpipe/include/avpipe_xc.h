@@ -313,17 +313,17 @@ typedef enum crypt_scheme_t {
     crypt_cbcs
 } crypt_scheme_t;
 
-typedef enum tx_type_t {
-    tx_none           = 0,
-    tx_video          = 1,
-    tx_audio          = 2,
-    tx_all            = 3,    // tx_video | tx_audio
-    tx_audio_merge    = 6,    // 0x04 | tx_audio
-    tx_audio_join     = 10,   // 0x08 | tx_audio
-    tx_audio_pan      = 18,   // 0x10 | tx_audio
-    tx_mux            = 32,
-    tx_extract_images = 65
-} tx_type_t;
+typedef enum xc_type_t {
+    xc_none           = 0,
+    xc_video          = 1,
+    xc_audio          = 2,
+    xc_all            = 3,    // xc_video | xc_audio
+    xc_audio_merge    = 6,    // 0x04 | xc_audio
+    xc_audio_join     = 10,   // 0x08 | xc_audio
+    xc_audio_pan      = 18,   // 0x10 | xc_audio
+    xc_mux            = 32,
+    xc_extract_images = 65
+} xc_type_t;
 
 /* handled image types in get_overlay_filter_string*/
 typedef enum image_type {
@@ -364,9 +364,9 @@ typedef struct xcparams_t {
     int     force_keyint;           // Force a key (IDR) frame at this interval
     int     force_equal_fduration;  // Force all frames to have equal frame duration 
     char    *ecodec;                // Video encoder
-    char    *ecodec2;               // Audio encoder when tx_type & tx_audio
+    char    *ecodec2;               // Audio encoder when xc_type & xc_audio
     char    *dcodec;                // Video decoder
-    char    *dcodec2;               // Audio decoder when tx_type & tx_audio
+    char    *dcodec2;               // Audio decoder when xc_type & xc_audio
     int     gpu_index;              // GPU index for transcoding, must be >= 0
     int     enc_height;
     int     enc_width;
@@ -377,7 +377,7 @@ typedef struct xcparams_t {
     int     skip_decoding;          // If set, then skip the packets until start_time_ts without decoding
 
     crypt_scheme_t  crypt_scheme;   // Content protection / DRM / encryption [Optional, Default: crypt_none]
-    tx_type_t       tx_type;        // Default: 0 means transcode 'everything'
+    xc_type_t       xc_type;        // Default: 0 means transcode 'everything'
 
     int         seekable;                   // Default: 0 means not seekable. A non seekable stream with moov box in
                                             //          the end causes a lot of reads up to moov atom.
@@ -502,7 +502,7 @@ typedef struct out_tracker_t {
     ioctx_t                     *last_outctx;
     int                         seg_index;
     ioctx_t                     *inctx;         /* Points to input context */
-    tx_type_t                   tx_type;
+    xc_type_t                   xc_type;
 
     /** Needed to detect type of encoding frame */
     int video_stream_index;

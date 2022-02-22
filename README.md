@@ -37,7 +37,7 @@ The following repositories can be checked out in any directory, but for better o
   - `go test -timeout 2000s`
   
 # Design
-- Avpipe library has been built on top of the different libraries of ffmpeg, the most important ones are libx264, libx265, libavcodec, libavformat, libavfilter and libswresample. But in order to achieve all the features and capabilities some parts of ffmpeg library have been changed. Avpipe library is capable of transcoding and or probing an input file and producing output media. In order to start a transcoding job the transcoding parameters have to be set.
+- Avpipe library has been built on top of the different libraries of ffmpeg, the most important ones are libx264, libx265, libavcodec, libavformat, libavfilter and libswresample. But in order to achieve all the features and capabilities some parts of ffmpeg library have been changed. Avpipe library is capable of transcoding and or probing an input source (i.e a media file, or an UDP/RTMP stream) and producing output media. In order to start a transcoding job the transcoding parameters have to be set.
 - This section describes some of the capabilities and features of avpipe library and how to set the parameters to utilize those features.
 
 

@@ -115,8 +115,8 @@ dump_encoder(
     if (!format_context)
         return;
 
-    elv_dbg("ENCODER url=%s, tx_type=%d, nb_streams=%d\n",
-        url, params->tx_type,
+    elv_dbg("ENCODER url=%s, xc_type=%d, nb_streams=%d\n",
+        url, params->xc_type,
         format_context->nb_streams);
 
     for (int i = 0; i < format_context->nb_streams; i++) {
