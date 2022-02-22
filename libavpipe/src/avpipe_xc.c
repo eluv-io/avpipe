@@ -45,13 +45,13 @@ init_video_filters(
     const char *filters_descr,
     coderctx_t *decoder_context,
     coderctx_t *encoder_context,
-    txparams_t *params);
+    xcparams_t *params);
 
 extern int
 init_audio_filters(
     coderctx_t *decoder_context,
     coderctx_t *encoder_context,
-    txparams_t *params);
+    xcparams_t *params);
 
 int
 init_audio_pan_filters(
@@ -69,7 +69,7 @@ extern int
 init_audio_join_filters(
     coderctx_t *decoder_context,
     coderctx_t *encoder_context,
-    txparams_t *params);
+    xcparams_t *params);
 
 extern int
 elv_io_open(
@@ -322,7 +322,7 @@ calc_timebase(
 
 static int
 selected_audio_index(
-    txparams_t *params,
+    xcparams_t *params,
     int index)
 {
     if (params->n_audio <= 0)
@@ -357,7 +357,7 @@ prepare_decoder(
     coderctx_t *decoder_context,
     avpipe_io_handler_t *in_handlers,
     ioctx_t *inctx,
-    txparams_t *params,
+    xcparams_t *params,
     int seekable)
 {
     int rc;
@@ -648,7 +648,7 @@ static int
 set_encoder_options(
     coderctx_t *encoder_context,
     coderctx_t *decoder_context,
-    txparams_t *params,
+    xcparams_t *params,
     int stream_index,
     int timebase)
 {
@@ -809,7 +809,7 @@ static void
 set_h264_params(
     coderctx_t *encoder_context,
     coderctx_t *decoder_context,
-    txparams_t *params)
+    xcparams_t *params)
 {
     int index = decoder_context->video_stream_index;
     AVCodecContext *encoder_codec_context = encoder_context->codec_context[index];
@@ -843,7 +843,7 @@ static void
 set_h265_params(
     coderctx_t *encoder_context,
     coderctx_t *decoder_context,
-    txparams_t *params)
+    xcparams_t *params)
 {
     int index = decoder_context->video_stream_index;
     AVCodecContext *encoder_codec_context = encoder_context->codec_context[index];
@@ -910,7 +910,7 @@ static void
 set_nvidia_params(
     coderctx_t *encoder_context,
     coderctx_t *decoder_context,
-    txparams_t *params)
+    xcparams_t *params)
 {
     int index = decoder_context->video_stream_index;
     AVCodecContext *encoder_codec_context = encoder_context->codec_context[index];
@@ -967,7 +967,7 @@ set_nvidia_params(
 static int
 set_pixel_fmt(
     AVCodecContext *encoder_codec_context,
-    txparams_t *params)
+    xcparams_t *params)
 {
     if (encoder_codec_context->codec_id == AV_CODEC_ID_MJPEG) {
         //                               AV_PIX_FMT_YUV420P does not work
@@ -1007,7 +1007,7 @@ static int
 prepare_video_encoder(
     coderctx_t *encoder_context,
     coderctx_t *decoder_context,
-    txparams_t *params)
+    xcparams_t *params)
 {
     int rc = 0;
     int index = decoder_context->video_stream_index;
@@ -1187,7 +1187,7 @@ static int
 prepare_audio_encoder(
     coderctx_t *encoder_context,
     coderctx_t *decoder_context,
-    txparams_t *params)
+    xcparams_t *params)
 {
     int index = decoder_context->audio_stream_index[0];
     char *ecodec;
@@ -1352,7 +1352,7 @@ prepare_encoder(
     coderctx_t *decoder_context,
     avpipe_io_handler_t *out_handlers,
     ioctx_t *inctx,
-    txparams_t *params)
+    xcparams_t *params)
 {
     out_tracker_t *out_tracker;
     char *filename = "";
@@ -1595,7 +1595,7 @@ static void
 set_idr_frame_key_flag(
     AVFrame *frame,
     coderctx_t *encoder_context,
-    txparams_t *params,
+    xcparams_t *params,
     int debug_frame_level)
 {
     if (!frame)
@@ -1648,7 +1648,7 @@ set_idr_frame_key_flag(
 
 static int
 is_frame_extraction_done(coderctx_t *encoder_context,
-    txparams_t *p)
+    xcparams_t *p)
 {
     if (p->tx_type != tx_extract_images) {
         return 1;
@@ -1676,7 +1676,7 @@ is_frame_extraction_done(coderctx_t *encoder_context,
 static int
 should_extract_frame(
     coderctx_t *encoder_context,
-    txparams_t *p,
+    xcparams_t *p,
     AVFrame *frame)
 {
     if (p->tx_type != tx_extract_images) {
@@ -1712,7 +1712,7 @@ should_skip_encoding(
     coderctx_t *decoder_context,
     coderctx_t *encoder_context,
     int stream_index,
-    txparams_t *p,
+    xcparams_t *p,
     AVFrame *frame)
 {
     if (!frame ||
@@ -1801,7 +1801,7 @@ encode_frame(
     coderctx_t *encoder_context,
     AVFrame *frame,
     int stream_index,
-    txparams_t *params,
+    xcparams_t *params,
     int debug_frame_level)
 {
     int ret;
@@ -2053,7 +2053,7 @@ do_bypass(
     coderctx_t *decoder_context,
     coderctx_t *encoder_context,
     AVPacket *packet,
-    txparams_t *p,
+    xcparams_t *p,
     int debug_frame_level)
 {
     av_packet_rescale_ts(packet,
@@ -2146,7 +2146,7 @@ transcode_audio(
     AVFrame *frame,
     AVFrame *filt_frame,
     int stream_index,
-    txparams_t *p,
+    xcparams_t *p,
     int debug_frame_level)
 {
     int ret;
@@ -2245,7 +2245,7 @@ transcode_audio_aac(
     AVPacket *packet,
     AVFrame *frame,
     int stream_index,
-    txparams_t *p,
+    xcparams_t *p,
     int debug_frame_level)
 {
     AVCodecContext *codec_context = decoder_context->codec_context[stream_index];
@@ -2438,7 +2438,7 @@ transcode_video(
     AVFrame *frame,
     AVFrame *filt_frame,
     int stream_index,
-    txparams_t *p,
+    xcparams_t *p,
     int do_instrument,
     int debug_frame_level)
 {
@@ -2613,10 +2613,10 @@ void *
 transcode_video_func(
     void *p)
 {
-    txctx_t *xctx = (txctx_t *) p;
+    xctx_t *xctx = (xctx_t *) p;
     coderctx_t *decoder_context = &xctx->decoder_ctx;
     coderctx_t *encoder_context = &xctx->encoder_ctx;
-    txparams_t *params = xctx->params;
+    xcparams_t *params = xctx->params;
     xc_frame_t *xc_frame;
     int err = 0;
 
@@ -2696,10 +2696,10 @@ void *
 transcode_audio_func(
     void *p)
 {
-    txctx_t *xctx = (txctx_t *) p;
+    xctx_t *xctx = (xctx_t *) p;
     coderctx_t *decoder_context = &xctx->decoder_ctx;
     coderctx_t *encoder_context = &xctx->encoder_ctx;
-    txparams_t *params = xctx->params;
+    xcparams_t *params = xctx->params;
     xc_frame_t *xc_frame;
     int err = 0;
 
@@ -2792,7 +2792,7 @@ flush_decoder(
     coderctx_t *decoder_context,
     coderctx_t *encoder_context,
     int stream_index,
-    txparams_t *p,
+    xcparams_t *p,
     int debug_frame_level)
 {
     int ret;
@@ -2869,7 +2869,7 @@ should_stop_decoding(
     AVPacket *input_packet,
     coderctx_t *decoder_context,
     coderctx_t *encoder_context,
-    txparams_t *params,
+    xcparams_t *params,
     int64_t audio_frames_read,
     int64_t video_frames_read,
     int *frames_read_past_duration,
@@ -2948,7 +2948,7 @@ static int
 skip_until_start_time_pts(
     coderctx_t *decoder_context,
     AVPacket *input_packet,
-    txparams_t *params)
+    xcparams_t *params)
 {
     if (params->start_time_ts <= 0 || !params->skip_decoding)
         return 0;
@@ -2984,7 +2984,7 @@ static int
 skip_for_sync(
     coderctx_t *decoder_context,
     AVPacket *input_packet,
-    txparams_t *params)
+    xcparams_t *params)
 {
     if (params->sync_audio_to_stream_id < 0)
         return 0;
@@ -3105,7 +3105,7 @@ static int
 get_filter_str(
     char **filter_str,
     coderctx_t *encoder_context,
-    txparams_t *params)
+    xcparams_t *params)
 {
     *filter_str = NULL;
 
@@ -3233,17 +3233,17 @@ get_filter_str(
 
 int
 avpipe_xc(
-    txctx_t *txctx,
+    xctx_t *xctx,
     int do_instrument)
 {
     /* Set scale filter */
     char *filter_str = NULL;
-    coderctx_t *decoder_context = &txctx->decoder_ctx;
-    coderctx_t *encoder_context = &txctx->encoder_ctx;
-    txparams_t *params = txctx->params;
+    coderctx_t *decoder_context = &xctx->decoder_ctx;
+    coderctx_t *encoder_context = &xctx->encoder_ctx;
+    xcparams_t *params = xctx->params;
     int debug_frame_level = params->debug_frame_level;
-    avpipe_io_handler_t *in_handlers = txctx->in_handlers;
-    ioctx_t *inctx = txctx->inctx;
+    avpipe_io_handler_t *in_handlers = xctx->in_handlers;
+    ioctx_t *inctx = xctx->inctx;
     int rc = 0;
     AVPacket *input_packet = NULL;
 
@@ -3253,7 +3253,7 @@ avpipe_xc(
             goto xc_done;
         }
 
-        if ((rc = init_video_filters(filter_str, decoder_context, encoder_context, txctx->params)) != eav_success) {
+        if ((rc = init_video_filters(filter_str, decoder_context, encoder_context, xctx->params)) != eav_success) {
             free(filter_str);
             elv_err("Failed to initialize video filter, url=%s", params->url);
             goto xc_done;
@@ -3266,28 +3266,28 @@ avpipe_xc(
         params->tx_type != tx_audio_join &&
         params->tx_type != tx_audio_pan &&
         params->tx_type != tx_audio_merge &&
-        (rc = init_audio_filters(decoder_context, encoder_context, txctx->params)) != eav_success) {
+        (rc = init_audio_filters(decoder_context, encoder_context, xctx->params)) != eav_success) {
         elv_err("Failed to initialize audio filter, url=%s", params->url);
         goto xc_done;
     }
 
     if (!params->bypass_transcoding &&
         params->tx_type == tx_audio_pan &&
-        (rc = init_audio_pan_filters(txctx->params->filter_descriptor, decoder_context, encoder_context)) != eav_success) {
+        (rc = init_audio_pan_filters(xctx->params->filter_descriptor, decoder_context, encoder_context)) != eav_success) {
         elv_err("Failed to initialize audio pan filter, url=%s", params->url);
         goto xc_done;
     }
         
     if (!params->bypass_transcoding &&
         params->tx_type == tx_audio_join &&
-        (rc = init_audio_join_filters(decoder_context, encoder_context, txctx->params)) != eav_success) {
+        (rc = init_audio_join_filters(decoder_context, encoder_context, xctx->params)) != eav_success) {
         elv_err("Failed to initialize audio join filter, url=%s", params->url);
         goto xc_done;
     }
 
     if (!params->bypass_transcoding &&
         params->tx_type == tx_audio_merge &&
-        (rc = init_audio_merge_pan_filters(txctx->params->filter_descriptor, decoder_context, encoder_context)) != eav_success) {
+        (rc = init_audio_merge_pan_filters(xctx->params->filter_descriptor, decoder_context, encoder_context)) != eav_success) {
         elv_err("Failed to initialize audio merge pan filter, url=%s", params->url);
         goto xc_done;
     }
@@ -3358,8 +3358,8 @@ avpipe_xc(
         elv_log("calculated_frame_duration=%d", encoder_context->calculated_frame_duration);
     }
 
-    txctx->do_instrument = do_instrument;
-    txctx->debug_frame_level = debug_frame_level;
+    xctx->do_instrument = do_instrument;
+    xctx->debug_frame_level = debug_frame_level;
 
     elv_dbg("START TIME %d SKIP_PTS %d, START PTS %d (output), DURATION %d",
         params->start_time_ts, params->skip_over_pts,
@@ -3407,7 +3407,7 @@ avpipe_xc(
     const int frames_allowed_past_duration = 5;
 
     /* If there is a transcoding error, break the main loop */
-    while (!txctx->err) {
+    while (!xctx->err) {
         input_packet = av_packet_alloc();
         if (!input_packet) {
             elv_err("Failed to allocated memory for AVPacket, url=%s", params->url);
@@ -3511,7 +3511,7 @@ avpipe_xc(
             xc_frame_t *xc_frame = (xc_frame_t *) calloc(1, sizeof(xc_frame_t));
             xc_frame->packet = input_packet;
             xc_frame->stream_index = input_packet->stream_index;
-            elv_channel_send(txctx->vc, xc_frame);
+            elv_channel_send(xctx->vc, xc_frame);
 
         } else if (selected_decoded_audio(decoder_context, input_packet->stream_index) >= 0 &&
             params->tx_type & tx_audio) {
@@ -3527,7 +3527,7 @@ avpipe_xc(
             xc_frame_t *xc_frame = (xc_frame_t *) calloc(1, sizeof(xc_frame_t));
             xc_frame->packet = input_packet;
             xc_frame->stream_index = input_packet->stream_index;
-            elv_channel_send(txctx->ac, xc_frame);
+            elv_channel_send(xctx->ac, xc_frame);
 
         } else {
             if (debug_frame_level)
@@ -3540,28 +3540,28 @@ avpipe_xc(
 xc_done:
     elv_dbg("av_read_frame() rc=%d, url=%s", rc, params->url);
 
-    txctx->stop = 1;
+    xctx->stop = 1;
     /* Don't purge the channels, let the receiver to drain it */
-    elv_channel_close(txctx->vc, 0);
-    elv_channel_close(txctx->ac, 0);
-    pthread_join(txctx->vthread_id, NULL);
-    pthread_join(txctx->athread_id, NULL);
+    elv_channel_close(xctx->vc, 0);
+    elv_channel_close(xctx->ac, 0);
+    pthread_join(xctx->vthread_id, NULL);
+    pthread_join(xctx->athread_id, NULL);
 
     /*
      * Flush all frames, first flush decoder buffers, then encoder buffers by passing NULL frame.
      */
-    if (params->tx_type & tx_video && txctx->err != eav_write_frame)
+    if (params->tx_type & tx_video && xctx->err != eav_write_frame)
         flush_decoder(decoder_context, encoder_context, encoder_context->video_stream_index, params, debug_frame_level);
-    if (params->tx_type & tx_audio && txctx->err != eav_write_frame)
+    if (params->tx_type & tx_audio && xctx->err != eav_write_frame)
         flush_decoder(decoder_context, encoder_context, encoder_context->audio_stream_index[0], params, debug_frame_level);
     if (params->tx_type & tx_audio_join || params->tx_type & tx_audio_merge) {
         for (int i=0; i<decoder_context->n_audio; i++)
             flush_decoder(decoder_context, encoder_context, decoder_context->audio_stream_index[i], params, debug_frame_level);
     }
 
-    if (!params->bypass_transcoding && (params->tx_type & tx_video) && txctx->err != eav_write_frame)
+    if (!params->bypass_transcoding && (params->tx_type & tx_video) && xctx->err != eav_write_frame)
         encode_frame(decoder_context, encoder_context, NULL, encoder_context->video_stream_index, params, debug_frame_level);
-    if (!params->bypass_transcoding && params->tx_type & tx_audio && txctx->err != eav_write_frame)
+    if (!params->bypass_transcoding && params->tx_type & tx_audio && xctx->err != eav_write_frame)
         encode_frame(decoder_context, encoder_context, NULL, encoder_context->audio_stream_index[0], params, debug_frame_level);
 
     dump_trackers(decoder_context->format_context, encoder_context->format_context);
@@ -3571,7 +3571,7 @@ xc_done:
     if ((params->tx_type & tx_audio) && rc == eav_success)
         av_write_trailer(encoder_context->format_context2);
 
-    elv_log("avpipe_xc done url=%s, rc=%d, txctx->err=%d, tx-type=%d, "
+    elv_log("avpipe_xc done url=%s, rc=%d, xctx->err=%d, tx-type=%d, "
         "last video_pts=%"PRId64" audio_pts=%"PRId64
         " video_input_start_pts=%"PRId64" audio_input_start_pts=%"PRId64
         " video_last_dts=%"PRId64" audio_last_dts="PRId64
@@ -3579,7 +3579,7 @@ xc_done:
         " video_pts_sent_encode=%"PRId64" audio_pts_sent_encode=%"PRId64
         " last_pts_encoded=%"PRId64" last_pts_encoded2=%"PRId64,
         params->url,
-        rc, txctx->err, params->tx_type,
+        rc, xctx->err, params->tx_type,
         encoder_context->video_pts,
         encoder_context->audio_pts,
         encoder_context->video_input_start_pts,
@@ -3597,7 +3597,7 @@ xc_done:
     encoder_context->stopped = 1;
 
     if (decoder_context->cancelled) {
-        elv_warn("transcoding session cancelled, handle=%d, url=%s", txctx->handle, params->url);
+        elv_warn("transcoding session cancelled, handle=%d, url=%s", xctx->handle, params->url);
         return eav_cancelled;
     }
 
@@ -3606,7 +3606,7 @@ xc_done:
         return rc;
 
     /* Return transcoding error code */
-    return txctx->err;
+    return xctx->err;
 }
 
 typedef struct channel_layout_info_t {
@@ -3802,13 +3802,13 @@ avpipe_probe(
     char *url,
     avpipe_io_handler_t *in_handlers,
     int seekable,
-    txprobe_t **txprobe,
+    xcprobe_t **xcprobe,
     int *n_streams)
 {
     ioctx_t inctx;
     coderctx_t decoder_ctx;
     stream_info_t *stream_probes, *stream_probes_ptr;
-    txprobe_t *probe;
+    xcprobe_t *probe;
     int rc = 0;
 
     if (!in_handlers) {
@@ -3838,7 +3838,7 @@ avpipe_probe(
     }
 
     int nb_skipped_streams = 0;
-    probe = (txprobe_t *)calloc(1, sizeof(txprobe_t));
+    probe = (xcprobe_t *)calloc(1, sizeof(xcprobe_t));
     stream_probes = (stream_info_t *)calloc(1, sizeof(stream_info_t)*nb_streams);
     for (int i=0; i<nb_streams; i++) {
         AVStream *s = decoder_ctx.format_context->streams[i];
@@ -3907,7 +3907,7 @@ avpipe_probe(
     inctx.closed = 1;
     probe->stream_info = stream_probes;
     probe->container_info.format_name = strdup(decoder_ctx.format_context->iformat->name);
-    *txprobe = probe;
+    *xcprobe = probe;
     *n_streams = nb_streams - nb_skipped_streams;
 
 avpipe_probe_end:
@@ -3936,7 +3936,7 @@ avpipe_probe_end:
 
 static int
 check_params(
-    txparams_t *params)
+    xcparams_t *params)
 {
     if (!params->url) {
         elv_err("Invalid params, url is null");
@@ -4070,13 +4070,13 @@ check_params(
 
 int
 avpipe_init(
-    txctx_t **txctx,
+    xctx_t **xctx,
     avpipe_io_handler_t *in_handlers,
     avpipe_io_handler_t *out_handlers,
-    txparams_t *p)
+    xcparams_t *p)
 {
-    txctx_t *p_txctx = NULL;
-    txparams_t *params;
+    xctx_t *p_xctx = NULL;
+    xcparams_t *params;
     int rc = 0;
     ioctx_t *inctx = (ioctx_t *)calloc(1, sizeof(ioctx_t));
 
@@ -4095,20 +4095,20 @@ avpipe_init(
         goto avpipe_init_failed;
     }
 
-    if (!txctx) {
+    if (!xctx) {
         elv_err("Trancoding context is NULL, url=%s", p->url);
         rc = eav_param;
         goto avpipe_init_failed;
     }
 
-    p_txctx = (txctx_t *) calloc(1, sizeof(txctx_t));
-    params = (txparams_t *) calloc(1, sizeof(txparams_t));
+    p_xctx = (xctx_t *) calloc(1, sizeof(xctx_t));
+    params = (xcparams_t *) calloc(1, sizeof(xcparams_t));
     *params = *p;
-    p_txctx->params = params;
-    p_txctx->inctx = inctx;
-    p_txctx->in_handlers = in_handlers;
-    p_txctx->out_handlers = out_handlers;
-    p_txctx->debug_frame_level = p->debug_frame_level;
+    p_xctx->params = params;
+    p_xctx->inctx = inctx;
+    p_xctx->in_handlers = in_handlers;
+    p_xctx->out_handlers = out_handlers;
+    p_xctx->debug_frame_level = p->debug_frame_level;
     inctx->params = params;
 
     if (!params->format ||
@@ -4121,9 +4121,9 @@ avpipe_init(
          strcmp(params->format, "fmp4-segment"))) {
         elv_err("Output format can be only \"dash\", \"hls\", \"image2\", \"mp4\", \"fmp4\", \"segment\", or \"fmp4-segment\", url=%s", p->url);
         rc = eav_param;
-        free(p_txctx);
+        free(p_xctx);
         free(params);
-        p_txctx = NULL;
+        p_xctx = NULL;
         goto avpipe_init_failed;
     }
 
@@ -4220,41 +4220,41 @@ avpipe_init(
         goto avpipe_init_failed;
     }
 
-    if ((rc = prepare_decoder(&p_txctx->decoder_ctx,
+    if ((rc = prepare_decoder(&p_xctx->decoder_ctx,
             in_handlers, inctx, params, params->seekable)) != eav_success) {
         elv_err("Failure in preparing decoder, url=%s", params->url);
         goto avpipe_init_failed;
     }
 
-    if ((rc = prepare_encoder(&p_txctx->encoder_ctx,
-        &p_txctx->decoder_ctx, out_handlers, inctx, params)) != eav_success) {
+    if ((rc = prepare_encoder(&p_xctx->encoder_ctx,
+        &p_xctx->decoder_ctx, out_handlers, inctx, params)) != eav_success) {
         elv_err("Failure in preparing encoder, url=%s", params->url);
         goto avpipe_init_failed;
     }
 
-    elv_channel_init(&p_txctx->vc, 10000, NULL);
-    elv_channel_init(&p_txctx->ac, 10000, NULL);
+    elv_channel_init(&p_xctx->vc, 10000, NULL);
+    elv_channel_init(&p_xctx->ac, 10000, NULL);
 
     /* Create threads for decoder and encoder */
-    pthread_create(&p_txctx->vthread_id, NULL, transcode_video_func, p_txctx);
-    pthread_create(&p_txctx->athread_id, NULL, transcode_audio_func, p_txctx);
-    *txctx = p_txctx;
+    pthread_create(&p_xctx->vthread_id, NULL, transcode_video_func, p_xctx);
+    pthread_create(&p_xctx->athread_id, NULL, transcode_audio_func, p_xctx);
+    *xctx = p_xctx;
 
     return eav_success;
 
 avpipe_init_failed:
-    if (txctx)
-        *txctx = NULL;
-    if (p_txctx)
-        avpipe_fini(&p_txctx);
+    if (xctx)
+        *xctx = NULL;
+    if (p_xctx)
+        avpipe_fini(&p_xctx);
     return rc;
 }
 
 static void
 avpipe_free_params(
-    txctx_t *txctx)
+    xctx_t *xctx)
 {
-    txparams_t *params = txctx->params;
+    xcparams_t *params = xctx->params;
 
     if (!params)
         return;
@@ -4286,35 +4286,35 @@ avpipe_free_params(
     free(params->mux_spec);
     free(params->extract_images_ts);
     free(params);
-    txctx->params = NULL;
+    xctx->params = NULL;
 }
 
 int
 avpipe_fini(
-    txctx_t **txctx)
+    xctx_t **xctx)
 {
     coderctx_t *decoder_context;
     coderctx_t *encoder_context;
 
-    if (!txctx || !(*txctx))
+    if (!xctx || !(*xctx))
         return 0;
 
-    if ((*txctx)->inctx && (*txctx)->inctx->url)
-        elv_dbg("Releasing all the resources, url=%s", (*txctx)->inctx->url);
+    if ((*xctx)->inctx && (*xctx)->inctx->url)
+        elv_dbg("Releasing all the resources, url=%s", (*xctx)->inctx->url);
 
     /* Close input handler resources if it is not a muxing command */
-    if (!(*txctx)->in_mux_ctx)
-        (*txctx)->in_handlers->avpipe_closer((*txctx)->inctx);
-    free((*txctx)->in_handlers);
-    free((*txctx)->out_handlers);
+    if (!(*xctx)->in_mux_ctx)
+        (*xctx)->in_handlers->avpipe_closer((*xctx)->inctx);
+    free((*xctx)->in_handlers);
+    free((*xctx)->out_handlers);
 
 
-    decoder_context = &(*txctx)->decoder_ctx;
-    encoder_context = &(*txctx)->encoder_ctx;
+    decoder_context = &(*xctx)->decoder_ctx;
+    encoder_context = &(*xctx)->encoder_ctx;
 
     /* note: the internal buffer could have changed, and be != avio_ctx_buffer */
     if (decoder_context && decoder_context->format_context) {
-        if ((*txctx)->inctx && strncmp((*txctx)->inctx->url, "rtmp", 4)) {
+        if ((*xctx)->inctx && strncmp((*xctx)->inctx->url, "rtmp", 4)) {
             AVIOContext *avioctx = (AVIOContext *) decoder_context->format_context->pb;
             if (avioctx) {
                 av_freep(&avioctx->buffer);
@@ -4356,20 +4356,20 @@ avpipe_fini(
         }
     }
 
-    if ((*txctx)->params && !strcmp((*txctx)->params->ecodec2, "aac")) {
+    if ((*xctx)->params && !strcmp((*xctx)->params->ecodec2, "aac")) {
         av_audio_fifo_free(decoder_context->fifo);
         swr_free(&decoder_context->resampler_context);
     }
 
-    if ((*txctx)->inctx && (*txctx)->inctx->udp_channel)
-        elv_channel_fini(&((*txctx)->inctx->udp_channel));
-    free((*txctx)->inctx);
-    elv_channel_fini(&((*txctx)->vc));
-    elv_channel_fini(&((*txctx)->ac));
+    if ((*xctx)->inctx && (*xctx)->inctx->udp_channel)
+        elv_channel_fini(&((*xctx)->inctx->udp_channel));
+    free((*xctx)->inctx);
+    elv_channel_fini(&((*xctx)->vc));
+    elv_channel_fini(&((*xctx)->ac));
 
-    avpipe_free_params(*txctx);
-    free(*txctx);
-    *txctx = NULL;
+    avpipe_free_params(*xctx);
+    free(*xctx);
+    *xctx = NULL;
 
     return 0;
 }
@@ -4389,7 +4389,7 @@ avpipe_version()
 
 void
 init_extract_images(
-    txparams_t *params,
+    xcparams_t *params,
     int size)
 {
     params->extract_images_ts = calloc(size, sizeof(int64_t));
@@ -4398,7 +4398,7 @@ init_extract_images(
 
 void 
 set_extract_images(
-    txparams_t *params,
+    xcparams_t *params,
     int index,
     int64_t value)
 {

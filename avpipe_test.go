@@ -315,7 +315,7 @@ func (o fileOutput) Stat(avType avpipe.AVType, statType avpipe.AVStatType, statA
 func TestAudioSeg(t *testing.T) {
 	url := videoErstePath
 	outputDir := path.Join(baseOutPath, fn())
-	params := &avpipe.TxParams{
+	params := &avpipe.XcParams{
 		BypassTranscoding:      false,
 		Format:                 "fmp4-segment",
 		AudioBitrate:           128000,
@@ -348,7 +348,7 @@ func TestAudioSeg(t *testing.T) {
 func TestVideoSeg(t *testing.T) {
 	url := videoErstePath
 	outputDir := path.Join(baseOutPath, fn())
-	params := &avpipe.TxParams{
+	params := &avpipe.XcParams{
 		BypassTranscoding:      false,
 		Format:                 "fmp4-segment",
 		AudioBitrate:           128000,
@@ -383,7 +383,7 @@ func TestSingleABRTranscode(t *testing.T) {
 	filename := videoErstePath
 	outputDir := path.Join(baseOutPath, fn())
 
-	params := &avpipe.TxParams{
+	params := &avpipe.XcParams{
 		BypassTranscoding:  false,
 		Format:             "hls",
 		StartTimeTs:        0,
@@ -415,7 +415,7 @@ func TestSingleABRTranscodeByStreamId(t *testing.T) {
 	filename := videoErstePath
 	outputDir := path.Join(baseOutPath, fn())
 
-	params := &avpipe.TxParams{
+	params := &avpipe.XcParams{
 		BypassTranscoding:  false,
 		Format:             "hls",
 		StartTimeTs:        0,
@@ -446,7 +446,7 @@ func TestSingleABRTranscodeWithWatermark(t *testing.T) {
 	filename := videoErstePath
 	outputDir := path.Join(baseOutPath, fn())
 
-	params := &avpipe.TxParams{
+	params := &avpipe.XcParams{
 		BypassTranscoding:     false,
 		Format:                "hls",
 		StartTimeTs:           0,
@@ -482,7 +482,7 @@ func TestSingleABRTranscodeWithOverlayWatermark(t *testing.T) {
 	overlayImage, err := ioutil.ReadFile("./media/fox_watermark.png")
 	failNowOnError(t, err)
 
-	params := &avpipe.TxParams{
+	params := &avpipe.XcParams{
 		BypassTranscoding:    false,
 		Format:               "hls",
 		StartTimeTs:          0,
@@ -513,7 +513,7 @@ func TestV2SingleABRTranscode(t *testing.T) {
 	filename := videoErstePath
 	outputDir := path.Join(baseOutPath, fn())
 
-	params := &avpipe.TxParams{
+	params := &avpipe.XcParams{
 		BypassTranscoding:  false,
 		Format:             "hls",
 		StartTimeTs:        0,
@@ -546,7 +546,7 @@ func TestV2SingleABRTranscodeIOHandler(t *testing.T) {
 	filename := videoErstePath
 	outputDir := path.Join(baseOutPath, fn())
 
-	params := &avpipe.TxParams{
+	params := &avpipe.XcParams{
 		BypassTranscoding:  false,
 		Format:             "hls",
 		StartTimeTs:        0,
@@ -580,7 +580,7 @@ func TestV2SingleABRTranscodeCancelling(t *testing.T) {
 	outputDir := path.Join(baseOutPath, fn())
 	boilerplate(t, outputDir, filename)
 
-	params := &avpipe.TxParams{
+	params := &avpipe.XcParams{
 		BypassTranscoding:  false,
 		Format:             "hls",
 		StartTimeTs:        0,
@@ -628,7 +628,7 @@ func TestV2SingleABRTranscodeCancelling(t *testing.T) {
 	assert.Error(t, err)
 }
 
-func doTranscode(t *testing.T, p *avpipe.TxParams, nThreads int, outputDir,
+func doTranscode(t *testing.T, p *avpipe.XcParams, nThreads int, outputDir,
 	filename string, reportFailure string) {
 
 	avpipe.InitIOHandler(&fileInputOpener{url: filename},
@@ -636,7 +636,7 @@ func doTranscode(t *testing.T, p *avpipe.TxParams, nThreads int, outputDir,
 
 	done := make(chan struct{})
 	for i := 0; i < nThreads; i++ {
-		go func(params *avpipe.TxParams) {
+		go func(params *avpipe.XcParams) {
 			err := avpipe.Tx(params)
 			done <- struct{}{} // Signal the main goroutine
 			if err != nil && reportFailure == "" {
@@ -659,7 +659,7 @@ func TestNvidiaABRTranscode(t *testing.T) {
 	filename := videoRockyPath
 	nThreads := 10
 
-	params := &avpipe.TxParams{
+	params := &avpipe.XcParams{
 		Format:             "hls",
 		StartTimeTs:        0,
 		DurationTs:         -1,
@@ -686,7 +686,7 @@ func TestConcurrentABRTranscode(t *testing.T) {
 	filename := videoRockyPath
 	nThreads := 10
 
-	params := &avpipe.TxParams{
+	params := &avpipe.XcParams{
 		Format:             "hls",
 		StartTimeTs:        0,
 		DurationTs:         -1,
@@ -711,7 +711,7 @@ func TestAudioAAC2AACMezMaker(t *testing.T) {
 	filename := "./media/bond-seg1.aac"
 	outputDir := path.Join(baseOutPath, fn())
 
-	params := &avpipe.TxParams{
+	params := &avpipe.XcParams{
 		BypassTranscoding:   false,
 		Format:              "fmp4-segment",
 		StartTimeTs:         0,
@@ -743,7 +743,7 @@ func TestAudioAC3Ts2AC3MezMaker(t *testing.T) {
 	filename := "./media/FS1-19-10-15-2-min.ts"
 	outputDir := path.Join(baseOutPath, fn())
 
-	params := &avpipe.TxParams{
+	params := &avpipe.XcParams{
 		BypassTranscoding:   false,
 		Format:              "fmp4-segment",
 		StartTimeTs:         0,
@@ -777,7 +777,7 @@ func TestAudioAC3Ts2AACMezMaker(t *testing.T) {
 	filename := "./media/FS1-19-10-15-2-min.ts"
 	outputDir := path.Join(baseOutPath, fn())
 
-	params := &avpipe.TxParams{
+	params := &avpipe.XcParams{
 		BypassTranscoding:   false,
 		Format:              "fmp4-segment",
 		StartTimeTs:         0,
@@ -812,7 +812,7 @@ func TestAudioMP2Ts2AACMezMaker(t *testing.T) {
 	filename := "./media/FS1-19-10-15-2-min.ts"
 	outputDir := path.Join(baseOutPath, fn())
 
-	params := &avpipe.TxParams{
+	params := &avpipe.XcParams{
 		BypassTranscoding:   false,
 		Format:              "fmp4-segment",
 		StartTimeTs:         0,
@@ -847,7 +847,7 @@ func TestAudioDownmix2AACMezMaker(t *testing.T) {
 	filename := "./media/BOND23-CLIP-downmix-2min.mov"
 	outputDir := path.Join(baseOutPath, fn())
 
-	params := &avpipe.TxParams{
+	params := &avpipe.XcParams{
 		BypassTranscoding:   false,
 		Format:              "fmp4-segment",
 		StartTimeTs:         0,
@@ -884,7 +884,7 @@ func TestAudio2MonoTo1Stereo(t *testing.T) {
 	filename := "./media/AGAIG-clip-2mono.mp4"
 	outputDir := path.Join(baseOutPath, fn())
 
-	params := &avpipe.TxParams{
+	params := &avpipe.XcParams{
 		BypassTranscoding:   false,
 		Format:              "fmp4-segment",
 		StartTimeTs:         0,
@@ -920,7 +920,7 @@ func TestAudio5_1To5_1(t *testing.T) {
 	filename := "./media/case_1_video_and_5.1_audio.mp4"
 	outputDir := path.Join(baseOutPath, fn())
 
-	params := &avpipe.TxParams{
+	params := &avpipe.XcParams{
 		BypassTranscoding:   false,
 		Format:              "fmp4-segment",
 		StartTimeTs:         0,
@@ -952,7 +952,7 @@ func TestAudio5_1ToStereo(t *testing.T) {
 	filename := "./media/case_1_video_and_5.1_audio.mp4"
 	outputDir := path.Join(baseOutPath, fn())
 
-	params := &avpipe.TxParams{
+	params := &avpipe.XcParams{
 		BypassTranscoding:   false,
 		Format:              "fmp4-segment",
 		StartTimeTs:         0,
@@ -986,7 +986,7 @@ func TestAudioMonoToMono(t *testing.T) {
 	filename := "./media/case_1_video_and_mono_audio.mp4"
 	outputDir := path.Join(baseOutPath, fn())
 
-	params := &avpipe.TxParams{
+	params := &avpipe.XcParams{
 		BypassTranscoding:   false,
 		Format:              "fmp4-segment",
 		StartTimeTs:         0,
@@ -1021,7 +1021,7 @@ func TestAudioQuadToQuad(t *testing.T) {
 	filename := "./media/case_1_video_and_quad_audio.mp4"
 	outputDir := path.Join(baseOutPath, fn())
 
-	params := &avpipe.TxParams{
+	params := &avpipe.XcParams{
 		BypassTranscoding:   false,
 		Format:              "fmp4-segment",
 		StartTimeTs:         0,
@@ -1056,7 +1056,7 @@ func TestAudio6MonoTo5_1(t *testing.T) {
 	filename := "./media/case_2_video_and_8_mono_audio.mp4"
 	outputDir := path.Join(baseOutPath, fn())
 
-	params := &avpipe.TxParams{
+	params := &avpipe.XcParams{
 		BypassTranscoding:   false,
 		Format:              "fmp4-segment",
 		StartTimeTs:         0,
@@ -1097,7 +1097,7 @@ func TestAudio6MonoUnequalChannelLayoutsTo5_1(t *testing.T) {
 	filename := "./media/cmbyn_th-2348159_aud-comp-30sec.mov"
 	outputDir := path.Join(baseOutPath, fn())
 
-	params := &avpipe.TxParams{
+	params := &avpipe.XcParams{
 		BypassTranscoding:   false,
 		Format:              "fmp4-segment",
 		StartTimeTs:         0,
@@ -1138,7 +1138,7 @@ func TestAudio10Channel_s16To6Channel_5_1(t *testing.T) {
 	filename := "./media/case_3_video_and_10_channel_audio_10sec.mov"
 	outputDir := path.Join(baseOutPath, fn())
 
-	params := &avpipe.TxParams{
+	params := &avpipe.XcParams{
 		BypassTranscoding:   false,
 		Format:              "fmp4-segment",
 		StartTimeTs:         0,
@@ -1174,7 +1174,7 @@ func TestAudio2Channel1Stereo(t *testing.T) {
 	filename := "./media/multichannel_audio_clip.mov"
 	outputDir := path.Join(baseOutPath, fn())
 
-	params := &avpipe.TxParams{
+	params := &avpipe.XcParams{
 		BypassTranscoding:   false,
 		Format:              "fmp4-segment",
 		StartTimeTs:         0,
@@ -1212,7 +1212,7 @@ func TestIrregularTsMezMaker_1001_60000(t *testing.T) {
 	filename := "./media/BOB923HL_clip_timebase_1001_60000.MXF"
 	outputDir := path.Join(baseOutPath, fn())
 
-	params := &avpipe.TxParams{
+	params := &avpipe.XcParams{
 		BypassTranscoding:   false,
 		Format:              "fmp4-segment",
 		StartTimeTs:         0,
@@ -1248,7 +1248,7 @@ func TestIrregularTsMezMaker_1_24(t *testing.T) {
 	filename := "./media/Rigify-2min.mp4"
 	outputDir := path.Join(baseOutPath, fn())
 
-	params := &avpipe.TxParams{
+	params := &avpipe.XcParams{
 		BypassTranscoding:   false,
 		Format:              "fmp4-segment",
 		StartTimeTs:         0,
@@ -1289,7 +1289,7 @@ func TestIrregularTsMezMaker_1_10000(t *testing.T) {
 	filename := "./media/Rigify-2min-10000ts.mp4"
 	outputDir := path.Join(baseOutPath, fn())
 
-	params := &avpipe.TxParams{
+	params := &avpipe.XcParams{
 		BypassTranscoding:   false,
 		Format:              "fmp4-segment",
 		StartTimeTs:         0,
@@ -1334,7 +1334,7 @@ func TestMXF_H265MezMaker(t *testing.T) {
 	filename := "./media/across_the_universe_4k_clip_60sec.mxf"
 	outputDir := path.Join(baseOutPath, f)
 
-	params := &avpipe.TxParams{
+	params := &avpipe.XcParams{
 		BypassTranscoding: false,
 		Format:            "fmp4-segment",
 		StartTimeTs:       0,
@@ -1365,7 +1365,7 @@ func TestHEVC_H264MezMaker(t *testing.T) {
 	filename := "./media/across_the_universe_4k_clip_30sec.mp4"
 	outputDir := path.Join(baseOutPath, fn())
 
-	params := &avpipe.TxParams{
+	params := &avpipe.XcParams{
 		BypassTranscoding: false,
 		Format:            "fmp4-segment",
 		StartTimeTs:       0,
@@ -1405,7 +1405,7 @@ func TestHEVC_H265ABRTranscode(t *testing.T) {
 	filename := "./media/across_the_universe_4k_clip_30sec.mp4"
 	outputDir := path.Join(baseOutPath, fn())
 
-	params := &avpipe.TxParams{
+	params := &avpipe.XcParams{
 		BypassTranscoding: false,
 		Format:            "dash",
 		StartTimeTs:       0,
@@ -1429,7 +1429,7 @@ func TestAVPipeStats(t *testing.T) {
 	filename := "./media/Rigify-2min.mp4"
 	outputDir := path.Join(baseOutPath, fn())
 
-	params := &avpipe.TxParams{
+	params := &avpipe.XcParams{
 		BypassTranscoding:   false,
 		Format:              "fmp4-segment",
 		StartTimeTs:         0,
@@ -1488,7 +1488,7 @@ func TestABRMuxing(t *testing.T) {
 
 	// Create video mez files
 	setupOutDir(t, videoMezDir)
-	params := &avpipe.TxParams{
+	params := &avpipe.XcParams{
 		BypassTranscoding: false,
 		Format:            "fmp4-segment",
 		StartTimeTs:       0,
@@ -1578,7 +1578,7 @@ func TestABRMuxing(t *testing.T) {
 }
 
 func TestMarshalParams(t *testing.T) {
-	params := &avpipe.TxParams{
+	params := &avpipe.XcParams{
 		VideoBitrate:       8000000,
 		VideoSegDurationTs: 180000,
 		EncHeight:          720,
@@ -1592,7 +1592,7 @@ func TestMarshalParams(t *testing.T) {
 }
 
 func TestUnmarshalParams(t *testing.T) {
-	var params avpipe.TxParams
+	var params avpipe.XcParams
 	bytes := []byte(`{"video_bitrate":8000000,"seg_duration_ts":180000,"seg_duration_fr":50,"enc_height":720,"enc_width":1280,"tx_type":1}`)
 	err := json.Unmarshal(bytes, &params)
 	assert.NoError(t, err)
@@ -1698,7 +1698,7 @@ func TestProbeWithData(t *testing.T) {
 func TestExtractImagesInterval(t *testing.T) {
 	url := videoErstePath
 	outPath := path.Join(baseOutPath, fn())
-	params := &avpipe.TxParams{
+	params := &avpipe.XcParams{
 		Format:                 "image2",
 		AudioBitrate:           128000,
 		AudioSegDurationTs:     -1,
@@ -1742,7 +1742,7 @@ func TestExtractImagesInterval(t *testing.T) {
 func TestExtractImagesList(t *testing.T) {
 	url := videoErstePath
 	outPath := path.Join(baseOutPath, fn())
-	params := &avpipe.TxParams{
+	params := &avpipe.XcParams{
 		Format:                 "image2",
 		AudioBitrate:           128000,
 		AudioSegDurationTs:     -1,
@@ -1789,7 +1789,7 @@ func TestExtractImagesListFast(t *testing.T) {
 	url := videoErstePath
 	outPath := path.Join(baseOutPath, fn())
 
-	params := &avpipe.TxParams{
+	params := &avpipe.XcParams{
 		Format:                 "image2",
 		AudioBitrate:           128000,
 		AudioSegDurationTs:     -1,
@@ -1833,7 +1833,7 @@ func TestMain(m *testing.M) {
 	os.Exit(m.Run())
 }
 
-func xcTest(t *testing.T, outputDir string, params *avpipe.TxParams, xcTestResult *XcTestResult) {
+func xcTest(t *testing.T, outputDir string, params *avpipe.XcParams, xcTestResult *XcTestResult) {
 	boilerplate(t, outputDir, params.Url)
 	boilerTx(t, params)
 	boilerProbe(t, xcTestResult)
@@ -1885,12 +1885,12 @@ func boilerProbe(t *testing.T, result *XcTestResult) (probeInfoArray []*avpipe.P
 	return
 }
 
-func boilerTx(t *testing.T, params *avpipe.TxParams) {
+func boilerTx(t *testing.T, params *avpipe.XcParams) {
 	err := avpipe.Tx(params)
 	failNowOnError(t, err)
 }
 
-func xcTest2(t *testing.T, outputDir string, params *avpipe.TxParams, xcTestResult *XcTestResult) {
+func xcTest2(t *testing.T, outputDir string, params *avpipe.XcParams, xcTestResult *XcTestResult) {
 	boilerplate(t, outputDir, params.Url)
 	boilerTx2(t, params)
 	boilerProbe(t, xcTestResult)
@@ -1901,7 +1901,7 @@ func xcTest2(t *testing.T, outputDir string, params *avpipe.TxParams, xcTestResu
 //   - TxInit()
 // - to run the tx session
 //   - TxRun()
-func boilerTx2(t *testing.T, params *avpipe.TxParams) {
+func boilerTx2(t *testing.T, params *avpipe.XcParams) {
 	handle, err := avpipe.TxInit(params)
 	failNowOnError(t, err)
 	assert.Greater(t, handle, int32(0))
@@ -1909,7 +1909,7 @@ func boilerTx2(t *testing.T, params *avpipe.TxParams) {
 	failNowOnError(t, err)
 }
 
-func setFastEncodeParams(p *avpipe.TxParams, force bool) bool {
+func setFastEncodeParams(p *avpipe.XcParams, force bool) bool {
 	if !force && !testing.Short() {
 		return false
 	}

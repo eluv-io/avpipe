@@ -3,25 +3,25 @@
 #include "avpipe_xc.h"
 
 int32_t
-tx_init(
-    txparams_t *params,
+xc_init(
+    xcparams_t *params,
     int32_t *handle);
 
 int
-tx_run(
+xc_run(
     int32_t handle);
 
 int
-tx_cancel(
+xc_cancel(
     int32_t handle);
 
 int
-tx(
-    txparams_t *params);
+xc(
+    xcparams_t *params);
 
 int
 mux(
-    txparams_t *params);
+    xcparams_t *params);
 
 const char *
 get_pix_fmt_name(
@@ -36,7 +36,7 @@ int
 probe(
     char *filename,
     int seekable,
-    txprobe_t **txprobe,
+    xcprobe_t **xcprobe,
     int *n_streams);
 
 void

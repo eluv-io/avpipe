@@ -110,7 +110,7 @@ void
 dump_encoder(
     char *url,
     AVFormatContext *format_context,
-    txparams_t *params)
+    xcparams_t *params)
 {
     if (!format_context)
         return;

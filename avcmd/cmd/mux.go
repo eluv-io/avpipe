@@ -214,7 +214,7 @@ func doMux(cmd *cobra.Command, args []string) error {
 	}
 	log.Debug("doMux", "mux_spec", string(muxSpec))
 
-	params := &avpipe.TxParams{
+	params := &avpipe.XcParams{
 		MuxingSpec:      string(muxSpec),
 		Url:             filename,
 		DebugFrameLevel: true,

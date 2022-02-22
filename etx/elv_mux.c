@@ -332,7 +332,7 @@ out_mux_stat(
 
 int
 do_mux(
-    txparams_t *params,
+    xcparams_t *params,
     char *out_filename
 )
 {
@@ -341,7 +341,7 @@ do_mux(
     avpipe_io_handler_t *out_handlers;
     //char *url = "fsegment-%05d.mp4";
     char *url = out_filename;
-    txctx_t *txctx;
+    xctx_t *xctx;
     int rc = 0;
 
     in_handlers = (avpipe_io_handler_t *) calloc(1, sizeof(avpipe_io_handler_t));
@@ -361,13 +361,13 @@ do_mux(
 
     memset(&in_mux_ctx, 0, sizeof(io_mux_ctx_t));
 
-    rc = avpipe_init_muxer(&txctx, in_handlers, &in_mux_ctx, out_handlers, params);
+    rc = avpipe_init_muxer(&xctx, in_handlers, &in_mux_ctx, out_handlers, params);
     if (rc < 0) {
         printf("Error: avpipe init muxer failed, url=%s.\n", url);
         goto end_muxing;
     }
 
-    rc = avpipe_mux(txctx);
+    rc = avpipe_mux(xctx);
     if (rc < 0) {
         printf("Error: avpipe muxing failed url=%s.\n", url);
         goto end_muxing;
@@ -375,6 +375,6 @@ do_mux(
 
 end_muxing:
     elv_dbg("Releasing all the muxing resources");
-    avpipe_mux_fini(&txctx);
+    avpipe_mux_fini(&xctx);
     return rc;
 }

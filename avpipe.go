@@ -147,8 +147,8 @@ const (
 
 const MaxAudioMux = C.MAX_AUDIO_MUX
 
-// TxParams should match with txparams_t in avpipe_xc.h
-type TxParams struct {
+// XcParams should match with txparams_t in avpipe_xc.h
+type XcParams struct {
 	Url                    string             `json:"url"`
 	BypassTranscoding      bool               `json:"bypass,omitempty"`
 	Format                 string             `json:"format,omitempty"`
@@ -214,9 +214,9 @@ type TxParams struct {
 	ExtractImagesTs        []int64            `json:"extract_images_ts,omitempty"`
 }
 
-// NewTxParams initializes a TxParams struct with unset/default values
-func NewTxParams() *TxParams {
-	return &TxParams{
+// NewXcParams initializes a XcParams struct with unset/default values
+func NewXcParams() *XcParams {
+	return &XcParams{
 		AudioBitrate:           128000,
 		AudioSegDurationTs:     -1,
 		BitDepth:               8,
@@ -1134,11 +1134,11 @@ func Version() string {
 	return C.GoString((*C.char)(unsafe.Pointer(C.avpipe_version())))
 }
 
-func getCParams(params *TxParams) (*C.txparams_t, error) {
+func getCParams(params *XcParams) (*C.xcparams_t, error) {
 	extractImagesSize := len(params.ExtractImagesTs)
 
 	// same field order as avpipe_xc.h
-	cparams := &C.txparams_t{
+	cparams := &C.xcparams_t{
 		url:                       C.CString(params.Url),
 		format:                    C.CString(params.Format),
 		start_time_ts:             C.int64_t(params.StartTimeTs),
@@ -1243,10 +1243,10 @@ func getCParams(params *TxParams) (*C.txparams_t, error) {
 	}
 
 	if extractImagesSize > 0 {
-		C.init_extract_images((*C.txparams_t)(unsafe.Pointer(cparams)),
+		C.init_extract_images((*C.xcparams_t)(unsafe.Pointer(cparams)),
 			C.int(extractImagesSize))
 		for i := 0; i < extractImagesSize; i++ {
-			C.set_extract_images((*C.txparams_t)(unsafe.Pointer(cparams)),
+			C.set_extract_images((*C.xcparams_t)(unsafe.Pointer(cparams)),
 				C.int(i), C.int64_t(params.ExtractImagesTs[i]))
 		}
 	}
@@ -1255,9 +1255,9 @@ func getCParams(params *TxParams) (*C.txparams_t, error) {
 }
 
 // params: transcoding parameters
-func Tx(params *TxParams) error {
+func Tx(params *XcParams) error {
 
-	// Convert TxParams to C.txparams_t
+	// Convert XcParams to C.txparams_t
 	if params == nil {
 		log.Error("Failed transcoding, params are not set.")
 		return EAV_PARAM
@@ -1268,7 +1268,7 @@ func Tx(params *TxParams) error {
 		log.Error("Transcoding failed", err, "url", params.Url)
 	}
 
-	rc := C.tx((*C.txparams_t)(unsafe.Pointer(cparams)))
+	rc := C.xc((*C.xcparams_t)(unsafe.Pointer(cparams)))
 
 	gMutex.Lock()
 	defer gMutex.Unlock()
@@ -1278,7 +1278,7 @@ func Tx(params *TxParams) error {
 	return avpipeError(rc)
 }
 
-func Mux(params *TxParams) error {
+func Mux(params *XcParams) error {
 	if params == nil {
 		log.Error("Failed muxing, params are not set")
 		return EAV_PARAM
@@ -1289,7 +1289,7 @@ func Mux(params *TxParams) error {
 		log.Error("Muxing failed", err, "url", params.Url)
 	}
 
-	rc := C.mux((*C.txparams_t)(unsafe.Pointer(cparams)))
+	rc := C.mux((*C.xcparams_t)(unsafe.Pointer(cparams)))
 
 	gMutex.Lock()
 	defer gMutex.Unlock()
@@ -1336,7 +1336,7 @@ func GetProfileName(codecId int, profile int) string {
 }
 
 func Probe(url string, seekable bool) (*ProbeInfo, error) {
-	var cprobe *C.txprobe_t
+	var cprobe *C.xcprobe_t
 	var cseekable C.int
 	var n_streams C.int
 
@@ -1346,7 +1346,7 @@ func Probe(url string, seekable bool) (*ProbeInfo, error) {
 		cseekable = C.int(0)
 	}
 
-	rc := C.probe(C.CString(url), cseekable, (**C.txprobe_t)(unsafe.Pointer(&cprobe)), (*C.int)(unsafe.Pointer(&n_streams)))
+	rc := C.probe(C.CString(url), cseekable, (**C.xcprobe_t)(unsafe.Pointer(&cprobe)), (*C.int)(unsafe.Pointer(&n_streams)))
 	if int(rc) != 0 {
 		return nil, avpipeError(rc)
 	}
@@ -1418,8 +1418,8 @@ func Probe(url string, seekable bool) (*ProbeInfo, error) {
 
 // Returns a handle and error (if there is any error)
 // In case of error the handle would be zero
-func TxInit(params *TxParams) (int32, error) {
-	// Convert TxParams to C.txparams_t
+func TxInit(params *XcParams) (int32, error) {
+	// Convert XcParams to C.txparams_t
 	if params == nil {
 		log.Error("Failed transcoding, params are not set.")
 		return -1, EAV_PARAM
@@ -1431,7 +1431,7 @@ func TxInit(params *TxParams) (int32, error) {
 	}
 
 	var handle C.int32_t
-	rc := C.tx_init((*C.txparams_t)(unsafe.Pointer(cparams)), (*C.int32_t)(unsafe.Pointer(&handle)))
+	rc := C.xc_init((*C.xcparams_t)(unsafe.Pointer(cparams)), (*C.int32_t)(unsafe.Pointer(&handle)))
 	if rc != C.eav_success {
 		return -1, avpipeError(rc)
 	}
@@ -1440,7 +1440,7 @@ func TxInit(params *TxParams) (int32, error) {
 }
 
 func TxRun(handle int32) error {
-	rc := C.tx_run(C.int32_t(handle))
+	rc := C.xc_run(C.int32_t(handle))
 	if rc == 0 {
 		return nil
 	}
@@ -1449,7 +1449,7 @@ func TxRun(handle int32) error {
 }
 
 func TxCancel(handle int32) error {
-	rc := C.tx_cancel(C.int32_t(handle))
+	rc := C.xc_cancel(C.int32_t(handle))
 	if rc == 0 {
 		return nil
 	}

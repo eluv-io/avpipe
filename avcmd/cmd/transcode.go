@@ -210,7 +210,7 @@ func (o *avcmdOutput) Stat(avType avpipe.AVType, statType avpipe.AVStatType, sta
 	return nil
 }
 
-func getAudioIndexes(params *avpipe.TxParams, audioIndexes string) (err error) {
+func getAudioIndexes(params *avpipe.XcParams, audioIndexes string) (err error) {
 	params.NumAudio = 0
 	if len(audioIndexes) == 0 {
 		return
@@ -230,8 +230,8 @@ func getAudioIndexes(params *avpipe.TxParams, audioIndexes string) (err error) {
 }
 
 // parseExtractImagesTs converts the extract-images-ts string parameter, e.g.
-// "0,64000,128000,1152000", to an int64 array in avpipe.TxParams
-func parseExtractImagesTs(params *avpipe.TxParams, s string) (err error) {
+// "0,64000,128000,1152000", to an int64 array in avpipe.XcParams
+func parseExtractImagesTs(params *avpipe.XcParams, s string) (err error) {
 	if len(s) == 0 {
 		return
 	}
@@ -604,7 +604,7 @@ func doTranscode(cmd *cobra.Command, args []string) error {
 		os.Mkdir(dir, 0755)
 	}
 
-	params := &avpipe.TxParams{
+	params := &avpipe.XcParams{
 		Url:                    filename,
 		BypassTranscoding:      bypass,
 		Format:                 format,
@@ -680,7 +680,7 @@ func doTranscode(cmd *cobra.Command, args []string) error {
 	done := make(chan interface{})
 
 	for i := 0; i < int(nThreads); i++ {
-		go func(params *avpipe.TxParams, filename string) {
+		go func(params *avpipe.XcParams, filename string) {
 
 			err := avpipe.Tx(params)
 			if err != nil {

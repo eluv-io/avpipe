@@ -125,7 +125,7 @@ typedef struct io_mux_ctx_t {
     mux_input_ctx_t captions[MAX_CAPTION_MUX];
 } io_mux_ctx_t;
 
-typedef struct txparams_t txparams_t;
+typedef struct xcparams_t xcparams_t;
 
 typedef struct ioctx_t {
     /* Application specific IO context */
@@ -175,7 +175,7 @@ typedef struct ioctx_t {
      */
     struct ioctx_t  *inctx;
 
-    txparams_t      *params;
+    xcparams_t      *params;
 
     volatile int    closed; /* If it is set that means inctx is closed */
 } ioctx_t;
@@ -339,7 +339,7 @@ typedef enum image_type {
 // Notes:
 //   * rc_max_rate and rc_buffer_size must be set together or not at all; they correspond to ffmpeg's bufsize and maxrate
 //   * setting video_bitrate clobbers rc_max_rate and rc_buffer_size
-typedef struct txparams_t {
+typedef struct xcparams_t {
     char    *url;                   // URL of the input for transcoding
     int     bypass_transcoding;     // if 0 means do transcoding, otherwise bypass transcoding (only copy)
     char    *format;                // Output format [Required, Values: dash, hls, mp4, fmp4]
@@ -411,7 +411,7 @@ typedef struct txparams_t {
     int         extract_images_sz;          // Size of the array extract_images_ts
 
     int         debug_frame_level;
-} txparams_t;
+} xcparams_t;
 
 #define MAX_CODEC_NAME  256
 
@@ -450,15 +450,15 @@ typedef struct container_info_t {
 } container_info_t;
 
 /* The data structure that is filled by avpipe_probe */
-typedef struct txprobe_t {
+typedef struct xcprobe_t {
     container_info_t container_info;
     stream_info_t *stream_info;    // An array of stream_info_t (usually 2)
-} txprobe_t;
+} xcprobe_t;
 
-typedef struct txctx_t {
+typedef struct xctx_t {
     coderctx_t          decoder_ctx;
     coderctx_t          encoder_ctx;
-    txparams_t          *params;
+    xcparams_t          *params;
     int32_t             index;  // index in tx table
     int32_t             handle; // handle for V2 API
     ioctx_t             *inctx;
@@ -486,7 +486,7 @@ typedef struct txctx_t {
     pthread_t           athread_id;
     volatile int        stop;
     volatile int        err;        // Return code of transcoding
-} txctx_t;
+} xctx_t;
 
 /* Params that are needed to decode/encode a frame in a thread */
 typedef struct xc_frame_t {
@@ -515,34 +515,34 @@ typedef struct encoding_frame_stats_t {
 } encoding_frame_stats_t;
 
 /**
- * @brief   Allocates and initializes a txctx_t (transcoder context) for piplining the input stream.
+ * @brief   Allocates and initializes a xctx_t (transcoder context) for piplining the input stream.
  *          In case of failure avpipe_fini() should be called to avoid resource leak.
  *
- * @param   txctx           Points to allocated and initialized memory (different fields are initialized by ffmpeg).
+ * @param   xctx            Points to allocated and initialized memory (different fields are initialized by ffmpeg).
  * @param   in_handlers     A pointer to input handlers. Must be properly set up by the application.
  * @param   inctx           A pointer to ioctx_t for input stream. This has to be allocated and initialized
  *                          by the application before calling this function.
  * @param   out_handlers    A pointer to output handlers. Must be properly set up by the application.
  * @param   params          A pointer to the parameters for transcoding.
  *
- * @return  Returns 0 if the initialization of an avpipe txctx_t is successful, otherwise returns corresponding eav error.
+ * @return  Returns 0 if the initialization of an avpipe xctx_t is successful, otherwise returns corresponding eav error.
  */
 int
 avpipe_init(
-    txctx_t **txctx,
+    xctx_t **xctx,
     avpipe_io_handler_t *in_handlers,
     avpipe_io_handler_t *out_handlers,
-    txparams_t *params);
+    xcparams_t *params);
 
 /**
  * @brief   Frees the memory and other resources allocated by ffmpeg.
  *
- * @param   txctx       A pointer to the trascoding context that would be destructed.
+ * @param   xctx       A pointer to the trascoding context that would be destructed.
  * @return  Returns 0.
  */
 int
 avpipe_fini(
-    txctx_t **txctx);
+    xctx_t **xctx);
 
 /*
  * @brief   Returns channel layout name.
@@ -564,7 +564,7 @@ avpipe_channel_name(
  * @param   url             url/filename of the media content to probe
  * @param   in_handlers     A pointer to input handlers that direct the probe
  * @param   seekable        A flag to specify whether input stream is seakable or no
- * @param   txprob          A pointer to the txprobe_t that could contain probing info.
+ * @param   xcprob          A pointer to the xcprobe_t that could contain probing info.
  * @param   n_streams       Will contail number of streams that are probed if successful.
  * @return  Returns 0 if successful, otherwise corresponding eav error.
  */
@@ -573,27 +573,27 @@ avpipe_probe(
     char *url,
     avpipe_io_handler_t *in_handlers,
     int seekable,
-    txprobe_t **txprobe,
+    xcprobe_t **xcprobe,
     int *n_streams);
 
 /**
  * @brief   Starts transcoding.
  *          In case of failure avpipe_fini() should be called to avoid resource leak.
  *
- * @param   txctx               A pointer to transcoding context.
+ * @param   xctx                A pointer to transcoding context.
  * @param   do_intrument        If 0 there will be no instrumentation, otherwise it does some instrumentation
  *                              for some ffmpeg functions.
  * @return  Returns 0 if transcoding is successful, otherwise -1.
  */
 int
 avpipe_xc(
-    txctx_t *txctx,
+    xctx_t *xctx,
     int do_instrument);
 
 /**
  * @brief   Initializes the avpipe muxer.
  *
- * @param   txctx           A pointer to a transcoding context.
+ * @param   xctx            A pointer to a transcoding context.
  * @param   in_handlers     A pointer to input handlers. Must be properly set up by the application.
  * @param   out_handlers    A pointer to output handlers. Must be properly set up by the application.
  * @param   params          A pointer to the parameters for transcoding/muxing.
@@ -601,31 +601,31 @@ avpipe_xc(
  */
 int
 avpipe_init_muxer(
-    txctx_t **txctx,
+    xctx_t **xctx,
     avpipe_io_handler_t *in_handlers,
     io_mux_ctx_t *in_mux_ctx,
     avpipe_io_handler_t *out_handlers,
-    txparams_t *params);
+    xcparams_t *params);
 
 /**
  * @brief   Frees the memory and other resources allocated by avpipe muxer/ffmpeg.
  *
- * @param   txctx       A pointer to the trascoding context that would be destructed.
+ * @param   xctx        A pointer to the trascoding context that would be destructed.
  * @return  Returns 0.
  */
 int
 avpipe_mux_fini(
-    txctx_t **txctx);
+    xctx_t **xctx);
 
 /**
  * @brief   Starts avpipe muxer.
  *
- * @param   txctx           A pointer to a transcoding context.
+ * @param   xctx            A pointer to a transcoding context.
  * @return  Returns 0 if muxing is successful, otherwise -1.
  */
 int
 avpipe_mux(
-    txctx_t *txctx);
+    xctx_t *xctx);
 
 /**
  * @brief   Returns avpipe GIT version
@@ -641,7 +641,7 @@ avpipe_version();
  */
 void
 init_extract_images(
-    txparams_t *params,
+    xcparams_t *params,
     int size);
 
 /**
@@ -654,7 +654,7 @@ init_extract_images(
  */
 void
 set_extract_images(
-    txparams_t *params,
+    xcparams_t *params,
     int index,
     int64_t value);
 
