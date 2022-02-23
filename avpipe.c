@@ -379,7 +379,7 @@ udp_in_opener(
 
     sockfd = udp_socket(url_parser.host, url_parser.port, &sa, &salen);
     if (sockfd < 0) {
-        elv_err("Failed to open input udp url=%s error=%d", url, errno);
+        elv_err("Failed to open input udp url=%s, error=%d", url, errno);
         inctx->opaque = NULL;
         return -1;
     }
@@ -387,7 +387,7 @@ udp_in_opener(
     setsockopt(sockfd, SOL_SOCKET, SO_REUSEADDR, &on, sizeof(on));
     if ((rc = bind(sockfd, sa, salen)) < 0) {
         /* Can not bind, fail and exit */
-        elv_err("Failed to bind UDP socket, rc=%d, url=%s", rc, url);
+        elv_err("Failed to bind UDP socket, rc=%d, url=%s, errno=%d", rc, url, errno);
         return -1;
     }
 
@@ -395,13 +395,13 @@ udp_in_opener(
     tv.tv_sec = UDP_PIPE_TIMEOUT;
     tv.tv_usec = 0;
     if ((rc = setsockopt(sockfd, SOL_SOCKET, SO_RCVTIMEO, &tv, sizeof(tv))) < 0) {
-        elv_err("Failed to set UDP socket timeout, rc=%d, url=%s", rc, url);
+        elv_err("Failed to set UDP socket timeout, rc=%d, url=%s, errno=%d", rc, url, errno);
         return -1;
     }
 
     size_t bufsz = UDP_PIPE_BUFSIZE;
     if (setsockopt(sockfd, SOL_SOCKET, SO_RCVBUF, (const void *)&bufsz, (socklen_t)sizeof(bufsz)) == -1) {
-        elv_warn("Failed to set UDP socket buf size to=%"PRId64", url=%s", bufsz, url);
+        elv_warn("Failed to set UDP socket buf size to=%"PRId64", url=%s, errno=%d", bufsz, url, errno);
     }
 
     elv_channel_init(&inctx->udp_channel, MAX_UDP_CHANNEL, NULL);
