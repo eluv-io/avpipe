@@ -64,12 +64,12 @@ int     CError(char *);
 
 #define MAX_TX  128    /* Maximum transcodings per system */
 
-typedef struct xctx_entry_t {
+typedef struct xc_entry_t {
     int32_t         handle;
     xctx_t          *xctx;
-} xctx_entry_t;
+} xc_entry_t;
 
-xctx_entry_t          *xc_table[MAX_TX];
+xc_entry_t          *xc_table[MAX_TX];
 static pthread_mutex_t tx_mutex = PTHREAD_MUTEX_INITIALIZER;
 
 static int
@@ -791,13 +791,13 @@ static int32_t
 xc_table_put(
     xctx_t *xctx)
 {
-    xctx_entry_t *txe = NULL;
+    xc_entry_t *txe = NULL;
     xctx->index = -1;
 
     pthread_mutex_lock(&tx_mutex);
     for (int i=0; i<MAX_TX; i++) {
         if (xc_table[i] == NULL) {
-            txe = calloc(1, sizeof(xctx_entry_t));
+            txe = calloc(1, sizeof(xc_entry_t));
             txe->handle = rand();
             if (txe->handle < 0)
                 txe->handle = (-1) * txe->handle;
@@ -816,7 +816,7 @@ xc_table_put(
     return -1;
 }
 
-static xctx_entry_t*
+static xc_entry_t*
 xc_table_find(
     int32_t handle)
 {
@@ -993,7 +993,7 @@ xc_run(
     int32_t handle)
 {
     int rc = 0;
-    xctx_entry_t *xe = xc_table_find(handle);
+    xc_entry_t *xe = xc_table_find(handle);
 
     if (!xe) {
         elv_err("tx_run invalid handle=%d", handle);
