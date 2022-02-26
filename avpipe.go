@@ -92,30 +92,30 @@ const (
 	XcExtractImages        = 65 // XcVideo | 2^6
 )
 
-func XcTypeFromString(txTypeStr string) XcType {
-	var txType XcType
-	switch txTypeStr {
+func XcTypeFromString(xcTypeStr string) XcType {
+	var xcType XcType
+	switch xcTypeStr {
 	case "all":
-		txType = XcAll
+		xcType = XcAll
 	case "video":
-		txType = XcVideo
+		xcType = XcVideo
 	case "audio":
-		txType = XcAudio
+		xcType = XcAudio
 	case "audio-join":
-		txType = XcAudioJoin
+		xcType = XcAudioJoin
 	case "audio-merge":
-		txType = XcAudioMerge
+		xcType = XcAudioMerge
 	case "audio-pan":
-		txType = XcAudioPan
+		xcType = XcAudioPan
 	case "mux":
-		txType = XcMux
+		xcType = XcMux
 	case "extract-images":
-		txType = XcExtractImages
+		xcType = XcExtractImages
 	default:
-		txType = XcNone
+		xcType = XcNone
 	}
 
-	return txType
+	return xcType
 }
 
 type ImageType int
