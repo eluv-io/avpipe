@@ -119,30 +119,30 @@ typedef struct xcparams_t {
 
 ```
 
-- Determining input: the url parameter uniquely identifies the input source that will be transcoded. It can be a filename, a network URL that identifies a stream (i.e udp://localhost:22001), or another source that contains the input audio/video for transcoding.
+- **Determining input:** the url parameter uniquely identifies the input source that will be transcoded. It can be a filename, a network URL that identifies a stream (i.e udp://localhost:22001), or another source that contains the input audio/video for transcoding.
 
-- Determining output format: avpipe library can produce different output formats. These formats are DASH/HLS adaptive bitrate (ABR) segments, fragmented MP4 segments, fragmented MP4 (one file), and image files. The format field has to be set to “dash”, “hls”, “fmp4-segment”, or “image2” to specify corresponding output format.
-- Specifying input streams: this might need setting different params as follows:
+- **Determining output format:** avpipe library can produce different output formats. These formats are DASH/HLS adaptive bitrate (ABR) segments, fragmented MP4 segments, fragmented MP4 (one file), and image files. The format field has to be set to “dash”, “hls”, “fmp4-segment”, or “image2” to specify corresponding output format.
+- **Specifying input streams:** this might need setting different params as follows:
   - If xc_type=xc_audio and audio_inex is set to audio stream id, then only specified audio stream will be transcoded.
   - If xc_type=xc_video then avpipe library automatically picks the first detected input video stream for transcoding.
   - If xc_type=xc_audio_join then avpipe library creates an audio join filter graph and joins the selected input audio streams to produce a joint audio stream.
   - If xc_type=xc_audio_pan then avpipe library creates an audio pan filter graph to pan multiple channels in one input stream to one output stereo stream.
-- Specifying decoder/encoder: the ecodec/decodec params are used to set video encoder/decoder. Also ecodec2/decodec2 params are used to set audio encoder/decoder. For video the decoder can be one of "h264", "h264_cuvid", "jpeg2000", "hevc" and encoder can be "libx264", "libx265", "h264_nvenc", "h264_videotoolbox", or "mjpeg". For audio the decoder can be “aac” or “ac3” and the encoder can be "aac", "ac3", "mp2" or "mp3".
-- Joining/merging multiple audio: avpipe library has the capability to join and pan multiple audio input streams by setting xc_type parameter to xc_audio_join and xc_audio_pan respectively (merging multiple audio is not complete yet).
-- Using GPU: avpipe library can utilize NVIDIA cards for transcoding. In order to utilize the NVIDIA GPU, the gpu_index must be set (the default is using GPU with index 0). To find the existing GPU indexes on a machine, nvidia-smi command can be used. In addition, the decoder and encoder should be set to "h264_cuvid" or "h264_nvenc" respectively. And finally, in order to pick the correct GPU index the following environment variable must be set “CUDA_DEVICE_ORDER=PCI_BUS_ID” before running the program.
-- Text watermarking: this can be done with setting watermark_text, watermark_xloc, watermark_yloc, watermark_relative_sz, and watermark_font_color while transcoding a video (xc_type=xc_video), which makes specified watermark text to appear at specified location.
-- Image watermarking: this can be done with setting watermark_overlay (the buffer containing overlay image), watermark_overlay_len, watermark_xloc, and watermark_yloc while transcoding a video (xc_type=xc_video).
-- Live streaming with UDP/HLS/RTMP: avpipe library has the capability to transcode an input live stream and generate MP4 or ABR segments. Although the parameter setting would be similar to transcoding any other input file, setting up input/output handlers would be different (this is discussed in sections 6 and 8).
-- Extracting images:
-- HDR support: avpipe library allows to create HDR output while transcoding with H.265 encoder. To make an HDR content two parameters max_cll and master_display have to be set.
-- Bypass feature: setting bypass_transcoding to 1, would avoid transcoding and copies the input packets to output. This feature is very useful (saves a lot of CPU and time) when input data matches with output and we can skip transcoding.
-- Muxing audio/video ABR segments and creating MP4 files: this feature allows the creation of MP4 files from transcoded audio/video segments. In order to do this a muxing spec has to be made to tell avpipe which ABR segments should be stitched together to produce the final MP4. To make this feature working xc_type should be set to xc_mux and the mux_spec param should point to a buffer containing muxing spec.
-- Transcoding from specific timebase offset: the parameter start_time_ts can be used to skip some input and transcode from specified TS in start_time_ts. This feature is also very useful to start transcoding from a certain point and not from the beginning of file/stream.
-- Audio join/pan/merge filters:
+- **Specifying decoder/encoder:** the ecodec/decodec params are used to set video encoder/decoder. Also ecodec2/decodec2 params are used to set audio encoder/decoder. For video the decoder can be one of "h264", "h264_cuvid", "jpeg2000", "hevc" and encoder can be "libx264", "libx265", "h264_nvenc", "h264_videotoolbox", or "mjpeg". For audio the decoder can be “aac” or “ac3” and the encoder can be "aac", "ac3", "mp2" or "mp3".
+- **Joining/merging multiple audio:** avpipe library has the capability to join and pan multiple audio input streams by setting xc_type parameter to xc_audio_join and xc_audio_pan respectively (merging multiple audio is not complete yet).
+- **Using GPU:** avpipe library can utilize NVIDIA cards for transcoding. In order to utilize the NVIDIA GPU, the gpu_index must be set (the default is using GPU with index 0). To find the existing GPU indexes on a machine, nvidia-smi command can be used. In addition, the decoder and encoder should be set to "h264_cuvid" or "h264_nvenc" respectively. And finally, in order to pick the correct GPU index the following environment variable must be set “CUDA_DEVICE_ORDER=PCI_BUS_ID” before running the program.
+- **Text watermarking:** this can be done with setting watermark_text, watermark_xloc, watermark_yloc, watermark_relative_sz, and watermark_font_color while transcoding a video (xc_type=xc_video), which makes specified watermark text to appear at specified location.
+- **Image watermarking:** this can be done with setting watermark_overlay (the buffer containing overlay image), watermark_overlay_len, watermark_xloc, and watermark_yloc while transcoding a video (xc_type=xc_video).
+- **Live streaming with UDP/HLS/RTMP:** avpipe library has the capability to transcode an input live stream and generate MP4 or ABR segments. Although the parameter setting would be similar to transcoding any other input file, setting up input/output handlers would be different (this is discussed in sections 6 and 8).
+- **Extracting images:** avpipe library can extract images either using a time interval or specific timestamps. 
+- **HDR support:** avpipe library allows to create HDR output while transcoding with H.265 encoder. To make an HDR content two parameters max_cll and master_display have to be set.
+- **Bypass feature:** setting bypass_transcoding to 1, would avoid transcoding and copies the input packets to output. This feature is very useful (saves a lot of CPU and time) when input data matches with output and we can skip transcoding.
+- **Muxing audio/video ABR segments and creating MP4 files:** this feature allows the creation of MP4 files from transcoded audio/video segments. In order to do this a muxing spec has to be made to tell avpipe which ABR segments should be stitched together to produce the final MP4. To make this feature working xc_type should be set to xc_mux and the mux_spec param should point to a buffer containing muxing spec.
+- **Transcoding from specific timebase offset:** the parameter start_time_ts can be used to skip some input and transcode from specified TS in start_time_ts. This feature is also very useful to start transcoding from a certain point and not from the beginning of file/stream.
+- **Audio join/pan/merge filters:**
   - setting xc_type = xc_audio_join would join 2 or more audio inputs and create a new audio output (for example joining two mono streams and creating one stereo).
   - setting xc_type = xc_audio_pan would pick different audio channels from input and create a new audio stream (for example picking different channels from a 5.1 channel layout and producing a stereo containing two channels).
   - setting xc_type = xc_audio_merge would merge different input audio streams and produce a new multi-channel output stream (for example, merging different input mono streams and create a new 5.1)
-- Debugging with frames: if the parameter debug_frame_level is on then the logs will also include very low level debug messages to trace reading/writing every piece of data.
+- **Debugging with frames:** if the parameter debug_frame_level is on then the logs will also include very low level debug messages to trace reading/writing every piece of data.
 
 ### Counters
 
@@ -224,7 +224,7 @@ Avpipe library has the following transcoding options to transcode audio/video:
 - xc_extract_images: in this mode avpipe will extract specific images/frames at specific times from a video.
 
 ### Audio specific params
-- channel_layout: In all of the above cases channel_layout parameter can be set to specify the output channel layout. If the channel_layout param is not set then the input channel layout would carry to the output.
+- channel_layout: In all the above cases channel_layout parameter can be set to specify the output channel layout. If the channel_layout param is not set then the input channel layout would carry to the output.
 - audio_index: The audio_index param can be used to pick the specified audio (using stream index) for transcoding. 
 - audio_seg_duration_ts: This param determines the duration of the generated audio segment in TS.
 - audio_bitrate: This param sets the audio bitrate in the output.
@@ -243,7 +243,7 @@ Avpipe library has the following transcoding options to transcode audio/video:
 ## Transcoding with preset
 
 - Avpipe has the capability to apply preset parameter when encoding using H264 encoder.
-- The experiments shows that using preset `faster` instead of `medium` would generate almost the same size output/bandwidth while keeping the picture quality high.
+- The experiments show that using preset `faster` instead of `medium` would generate almost the same size output/bandwidth while keeping the picture quality high.
 - The other advantage of using preset `faster` instead of `medium` is that it would consume less CPU and encode faster.
 - To compare the following command is used to generate the mezzanines for `creed_5_min.mov`:
 

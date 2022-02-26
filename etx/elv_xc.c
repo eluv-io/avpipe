@@ -1045,7 +1045,7 @@ usage(
         "\t-enc-width :             (optional) Default: -1 (use source width)\n"
         "\t-equal-fduration :       (optional) Force equal frame duration. Must be 0 or 1 and only valid for \"fmp4-segment\" format.\n"
         "\t-extract-image-interval-ts : (optional) Write frames at this interval. Default: -1 (10 seconds)\n"
-        "\t-extract-images-ts :     (optional) Write frames at these timestamps (comma separated). Mutually exclusive with extract-image-interval-ts"
+        "\t-extract-images-ts :     (optional) Write frames at these timestamps (comma separated). Mutually exclusive with extract-image-interval-ts\n"
         "\t-f :                     (mandatory) Input filename for transcoding. Valid formats are: a filename that points to a valid file, or udp://127.0.0.1:<port>.\n"
         "\t                                    Output goes to directory ./O\n"
         "\t-filter-descriptor :     (mandatory if tx-type is audio-pan). Audio filter descriptor the same as ffmpeg format.\n"
