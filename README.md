@@ -69,9 +69,9 @@ typedef struct xcparams_t {
     int     force_keyint;               // Force a key (IDR) frame at this interval
     int     force_equal_fduration;      // Force all frames to have equal frame duration
     char    *ecodec;                    // Video encoder
-    char    *ecodec2;                   // Audio encoder when xc_type & tc_audio
+    char    *ecodec2;                   // Audio encoder when xc_type & xc_audio
     char    *dcodec;                    // Video decoder
-    char    *dcodec2;                   // Audio decoder when tc_type & tc_audio
+    char    *dcodec2;                   // Audio decoder when xc_type & xc_audio
     int     gpu_index;                  // GPU index for transcoding, must be >= 0
     int     enc_height;
     int     enc_width;
@@ -123,7 +123,7 @@ typedef struct xcparams_t {
 
 - **Determining output format:** avpipe library can produce different output formats. These formats are DASH/HLS adaptive bitrate (ABR) segments, fragmented MP4 segments, fragmented MP4 (one file), and image files. The format field has to be set to “dash”, “hls”, “fmp4-segment”, or “image2” to specify corresponding output format.
 - **Specifying input streams:** this might need setting different params as follows:
-  - If xc_type=xc_audio and audio_inex is set to audio stream id, then only specified audio stream will be transcoded.
+  - If xc_type=xc_audio and audio_index is set to audio stream id, then only specified audio stream will be transcoded.
   - If xc_type=xc_video then avpipe library automatically picks the first detected input video stream for transcoding.
   - If xc_type=xc_audio_join then avpipe library creates an audio join filter graph and joins the selected input audio streams to produce a joint audio stream.
   - If xc_type=xc_audio_pan then avpipe library creates an audio pan filter graph to pan multiple channels in one input stream to one output stereo stream.
@@ -151,7 +151,7 @@ typedef struct xcparams_t {
   - avformat_find_stream_info
   - decoding first packet/frame
   - producing the first encoded frame
-  - make the first write to the first outout segment
+  - make the first write to the first output segment
   - finish the first output segment
 
 - time spent in reading source data (min/max and total time or avaerage)
