@@ -64,7 +64,7 @@ prepare_input_muxer(
     coderctx_t *muxer_ctx,
     avpipe_io_handler_t *in_handlers,
     ioctx_t *inctx,
-    txparams_t *params)
+    xcparams_t *params)
 {
     int rc = 0;
     io_mux_ctx_t *in_mux_ctx = inctx->in_mux_ctx;
@@ -215,36 +215,36 @@ init_mux_ctx(
  */
 int
 avpipe_init_muxer(
-    txctx_t **txctx,
+    xctx_t **xctx,
     avpipe_io_handler_t *in_handlers,
     io_mux_ctx_t *in_mux_ctx,
     avpipe_io_handler_t *out_handlers,
-    txparams_t *p)
+    xcparams_t *p)
 {
     int ret;
     char *out_filename = p->url;
-    txctx_t *p_txctx;
+    xctx_t *p_xctx;
 
     if ((ret = init_mux_ctx(p->mux_spec, out_filename, in_mux_ctx)) != eav_success) {
         elv_err("Initializing mux context failed, ret=%d", ret);
         return ret;
     }
 
-    p_txctx = (txctx_t *) calloc(1, sizeof(txctx_t));
-    if (!txctx) {
+    p_xctx = (xctx_t *) calloc(1, sizeof(xctx_t));
+    if (!xctx) {
         elv_err("Trancoding context is NULL (muxer)");
         return eav_mem_alloc;
     }
 
-    coderctx_t *out_muxer_ctx = &p_txctx->out_muxer_ctx;
+    coderctx_t *out_muxer_ctx = &p_xctx->out_muxer_ctx;
 
     /* Prepare video, audio, captions input muxer */
     for (int i=0; i<in_mux_ctx->last_audio_index+in_mux_ctx->last_caption_index+1; i++) {
         ioctx_t *inctx = (ioctx_t *)calloc(1, sizeof(ioctx_t));
         inctx->in_mux_index = i;
         inctx->in_mux_ctx = in_mux_ctx;
-        prepare_input_muxer(&p_txctx->in_muxer_ctx[i], in_handlers, inctx, p);
-        p_txctx->inctx_muxer[i] = inctx;
+        prepare_input_muxer(&p_xctx->in_muxer_ctx[i], in_handlers, inctx, p);
+        p_xctx->inctx_muxer[i] = inctx;
     }
 
     /* allocate the output format context */
@@ -269,13 +269,13 @@ avpipe_init_muxer(
         /* Add a new stream to output format for each input in muxer context (source) */
         out_muxer_ctx->stream[i] = avformat_new_stream(out_muxer_ctx->format_context, NULL);
 
-        if (!p_txctx->in_muxer_ctx[i].format_context) {
+        if (!p_xctx->in_muxer_ctx[i].format_context) {
             elv_err("Muxer input format context is NULL, i=%d", i);
             return eav_codec_context;
         }
 
         /* Copy input stream params to output stream params */
-        AVStream *in_stream = p_txctx->in_muxer_ctx[i].format_context->streams[0];
+        AVStream *in_stream = p_xctx->in_muxer_ctx[i].format_context->streams[0];
         ret = avcodec_parameters_copy(out_muxer_ctx->stream[i]->codecpar, in_stream->codecpar);
         if (ret < 0) {
             elv_err("Failed to copy codec parameters of input stream muxer, i=%d", i);
@@ -287,22 +287,22 @@ avpipe_init_muxer(
 
 #if 0
         /* Find codec and then initialize codec_context with the codec */
-        AVCodec *codec = avcodec_find_encoder(p_txctx->in_muxer_ctx[i].codec_parameters[0]->codec_id);
+        AVCodec *codec = avcodec_find_encoder(p_xctx->in_muxer_ctx[i].codec_parameters[0]->codec_id);
         if (!codec) {
-            elv_err("Could not find muxer encoder codec_id=%d", p_txctx->in_muxer_ctx[i].codec_parameters[0]->codec_id);
+            elv_err("Could not find muxer encoder codec_id=%d", p_xctx->in_muxer_ctx[i].codec_parameters[0]->codec_id);
         }
 
         AVCodecContext *c = avcodec_alloc_context3(codec);
         c->time_base = out_muxer_ctx->stream[i]->time_base = in_stream->time_base;
-        c->pix_fmt = p_txctx->in_muxer_ctx[i].codec_context[0]->pix_fmt;
-        c->width = p_txctx->in_muxer_ctx[i].codec_context[0]->width;
-        c->height = p_txctx->in_muxer_ctx[i].codec_context[0]->height;
-        if (p_txctx->in_muxer_ctx[i].codec[0]->sample_fmts)
-            c->sample_fmt = p_txctx->in_muxer_ctx[i].codec[0]->sample_fmts[0];
+        c->pix_fmt = p_xctx->in_muxer_ctx[i].codec_context[0]->pix_fmt;
+        c->width = p_xctx->in_muxer_ctx[i].codec_context[0]->width;
+        c->height = p_xctx->in_muxer_ctx[i].codec_context[0]->height;
+        if (p_xctx->in_muxer_ctx[i].codec[0]->sample_fmts)
+            c->sample_fmt = p_xctx->in_muxer_ctx[i].codec[0]->sample_fmts[0];
         else
             c->sample_fmt = AV_SAMPLE_FMT_FLTP;
-        c->sample_rate = p_txctx->in_muxer_ctx[i].codec_context[0]->sample_rate;
-        c->channels = p_txctx->in_muxer_ctx[i].codec_context[0]->channels;
+        c->sample_rate = p_xctx->in_muxer_ctx[i].codec_context[0]->sample_rate;
+        c->channels = p_xctx->in_muxer_ctx[i].codec_context[0]->channels;
         c->channel_layout = AV_CH_LAYOUT_STEREO;
 
         /* Initialize AVCodecContext using codec */
@@ -334,61 +334,61 @@ avpipe_init_muxer(
         return eav_write_header;
     }
 
-    txparams_t *params = (txparams_t *) calloc(1, sizeof(txparams_t));
+    xcparams_t *params = (xcparams_t *) calloc(1, sizeof(xcparams_t));
     *params = *p;
-    p_txctx->in_mux_ctx = in_mux_ctx;
-    p_txctx->params = params;
-    p_txctx->in_handlers = in_handlers;
-    p_txctx->out_handlers = out_handlers;
-    *txctx = p_txctx;
+    p_xctx->in_mux_ctx = in_mux_ctx;
+    p_xctx->params = params;
+    p_xctx->in_handlers = in_handlers;
+    p_xctx->out_handlers = out_handlers;
+    *xctx = p_xctx;
 
     return eav_success;
 }
 
 static int
 get_next_packet(
-    txctx_t *txctx,
+    xctx_t *xctx,
     AVPacket *pkt)
 {
-    io_mux_ctx_t *in_mux_ctx = txctx->in_mux_ctx;
-    AVPacket *pkts = txctx->pkt_array;
+    io_mux_ctx_t *in_mux_ctx = xctx->in_mux_ctx;
+    AVPacket *pkts = xctx->pkt_array;
     int index = 0;
     int ret = 0;
     int i;
 
     for (i=0; i<in_mux_ctx->last_audio_index + in_mux_ctx->last_caption_index + 1; i++) {
-        if (txctx->is_pkt_valid[i]) {
+        if (xctx->is_pkt_valid[i]) {
             index = i;
             break;
         }
     }
 
     for (i=index+1; i<in_mux_ctx->last_audio_index + in_mux_ctx->last_caption_index + 1; i++) {
-        if (!txctx->is_pkt_valid[i])
+        if (!xctx->is_pkt_valid[i])
             continue;
-        AVStream *stream1 = txctx->in_muxer_ctx[i].format_context->streams[0];
-        AVStream *stream2 = txctx->in_muxer_ctx[index].format_context->streams[0];
+        AVStream *stream1 = xctx->in_muxer_ctx[i].format_context->streams[0];
+        AVStream *stream2 = xctx->in_muxer_ctx[index].format_context->streams[0];
         if (av_compare_ts(pkts[i].pts, stream1->time_base, pkts[index].pts, stream2->time_base) <= 0)
             index = i;
     }
 
     /* If there is no valid packet anymore return */
-    if (!txctx->is_pkt_valid[index])
+    if (!xctx->is_pkt_valid[index])
         return 0;
 
     *pkt = pkts[index];
     pkt->stream_index = index;
-    txctx->is_pkt_valid[index] = 0;
+    xctx->is_pkt_valid[index] = 0;
 
-    dump_packet(pkt->stream_index, "MUX IN ", pkt, txctx->debug_frame_level);
+    dump_packet(pkt->stream_index, "MUX IN ", pkt, xctx->debug_frame_level);
 
 read_frame_again:
-    ret = av_read_frame(txctx->in_muxer_ctx[index].format_context, &pkts[index]);
+    ret = av_read_frame(xctx->in_muxer_ctx[index].format_context, &pkts[index]);
     /* ret is -AVERROR_INVALIDDATA when switching to new mez file */
     if (ret >= 0) {
         if (pkts[index].pts == pkt->pts)
             goto read_frame_again;
-        txctx->is_pkt_valid[index] = 1;
+        xctx->is_pkt_valid[index] = 1;
         if (pkt->pts > 0) {
             if (index == 0) {
                 if (pkt->pts > in_mux_ctx->last_video_pts)
@@ -416,7 +416,7 @@ read_frame_again:
 
 int
 avpipe_mux(
-    txctx_t *txctx)
+    xctx_t *xctx)
 {
     int ret = 0;
     AVPacket pkt;
@@ -424,29 +424,29 @@ avpipe_mux(
     int *valid_pkts;
     io_mux_ctx_t *in_mux_ctx;
 
-    if (!txctx) {
+    if (!xctx) {
         elv_err("Invalid transcoding context for muxing");
         return eav_param;
     }
 
-    pkts = txctx->pkt_array;
-    valid_pkts = txctx->is_pkt_valid;
-    in_mux_ctx = txctx->in_mux_ctx;
+    pkts = xctx->pkt_array;
+    valid_pkts = xctx->is_pkt_valid;
+    in_mux_ctx = xctx->in_mux_ctx;
 
     for (int i=0; i<in_mux_ctx->last_caption_index + in_mux_ctx->last_audio_index + 1; i++) {
-        ret = av_read_frame(txctx->in_muxer_ctx[i].format_context, &pkts[i]);
+        ret = av_read_frame(xctx->in_muxer_ctx[i].format_context, &pkts[i]);
         if (ret >= 0)
             valid_pkts[i] = 1;
     }
 
     while (1) {
-        ret = get_next_packet(txctx, &pkt);
+        ret = get_next_packet(xctx, &pkt);
         if (ret <= 0)
             break;
 
         dump_packet(pkt.stream_index, "MUX OUT ", &pkt, 1);
 
-        if (av_interleaved_write_frame(txctx->out_muxer_ctx.format_context, &pkt) < 0) {
+        if (av_interleaved_write_frame(xctx->out_muxer_ctx.format_context, &pkt) < 0) {
             elv_err("Failure in copying mux packet");
             ret = eav_write_frame;
             break;
@@ -454,40 +454,40 @@ avpipe_mux(
         av_packet_unref(&pkt);
     }
 
-    av_write_trailer(txctx->out_muxer_ctx.format_context);
+    av_write_trailer(xctx->out_muxer_ctx.format_context);
 
     return ret;
 }
 
 int
 avpipe_mux_fini(
-    txctx_t **txctx)
+    xctx_t **xctx)
 {
-    txctx_t *p_txctx;
+    xctx_t *p_xctx;
     io_mux_ctx_t *in_mux_ctx;
 
-    if (!txctx || !*txctx)
+    if (!xctx || !*xctx)
         return 0;
 
-    p_txctx = *txctx;
-    in_mux_ctx = p_txctx->in_mux_ctx;
+    p_xctx = *xctx;
+    in_mux_ctx = p_xctx->in_mux_ctx;
 
     for (int i=0; i<in_mux_ctx->last_audio_index+in_mux_ctx->last_caption_index+1; i++) {
-        avcodec_close(p_txctx->in_muxer_ctx[i].codec_context[0]);
-        avcodec_free_context(&p_txctx->in_muxer_ctx[i].codec_context[0]);
+        avcodec_close(p_xctx->in_muxer_ctx[i].codec_context[0]);
+        avcodec_free_context(&p_xctx->in_muxer_ctx[i].codec_context[0]);
 
-        AVIOContext *avioctx = (AVIOContext *) p_txctx->in_muxer_ctx[i].format_context->pb;
+        AVIOContext *avioctx = (AVIOContext *) p_xctx->in_muxer_ctx[i].format_context->pb;
         if (avioctx) {
             av_freep(&avioctx->buffer);
             av_freep(&avioctx);
         }
 
-        avformat_close_input(&p_txctx->in_muxer_ctx[i].format_context);
-        free(p_txctx->inctx_muxer[i]);
+        avformat_close_input(&p_xctx->in_muxer_ctx[i].format_context);
+        free(p_xctx->inctx_muxer[i]);
     }
 
-    avformat_free_context(p_txctx->out_muxer_ctx.format_context);
+    avformat_free_context(p_xctx->out_muxer_ctx.format_context);
 
-    return avpipe_fini(txctx);
+    return avpipe_fini(xctx);
 }
 

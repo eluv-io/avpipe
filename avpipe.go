@@ -78,44 +78,44 @@ const (
 // This is corresponding to AV_NOPTS_VALUE
 const AvNoPtsValue = uint64(C.uint64_t(0x8000000000000000))
 
-type TxType int
+type XcType int
 
 const (
-	TxNone          TxType = iota
-	TxVideo                = 1
-	TxAudio                = 2
-	TxAll                  = 3  // TxAudio | TxVideo
-	TxAudioMerge           = 6  // TxAudio | 0x04
-	TxAudioJoin            = 10 // TxAudio | 0x08
-	TxAudioPan             = 18 // TxAudio | 0x10
-	TxMux                  = 32
-	TxExtractImages        = 65 // TxVideo | 2^6
+	XcNone          XcType = iota
+	XcVideo                = 1
+	XcAudio                = 2
+	XcAll                  = 3  // XcAudio | XcVideo
+	XcAudioMerge           = 6  // XcAudio | 0x04
+	XcAudioJoin            = 10 // XcAudio | 0x08
+	XcAudioPan             = 18 // XcAudio | 0x10
+	XcMux                  = 32
+	XcExtractImages        = 65 // XcVideo | 2^6
 )
 
-func TxTypeFromString(txTypeStr string) TxType {
-	var txType TxType
-	switch txTypeStr {
+func XcTypeFromString(xcTypeStr string) XcType {
+	var xcType XcType
+	switch xcTypeStr {
 	case "all":
-		txType = TxAll
+		xcType = XcAll
 	case "video":
-		txType = TxVideo
+		xcType = XcVideo
 	case "audio":
-		txType = TxAudio
+		xcType = XcAudio
 	case "audio-join":
-		txType = TxAudioJoin
+		xcType = XcAudioJoin
 	case "audio-merge":
-		txType = TxAudioMerge
+		xcType = XcAudioMerge
 	case "audio-pan":
-		txType = TxAudioPan
+		xcType = XcAudioPan
 	case "mux":
-		txType = TxMux
+		xcType = XcMux
 	case "extract-images":
-		txType = TxExtractImages
+		xcType = XcExtractImages
 	default:
-		txType = TxNone
+		xcType = XcNone
 	}
 
-	return txType
+	return xcType
 }
 
 type ImageType int
@@ -147,8 +147,8 @@ const (
 
 const MaxAudioMux = C.MAX_AUDIO_MUX
 
-// TxParams should match with txparams_t in avpipe_xc.h
-type TxParams struct {
+// XcParams should match with txparams_t in avpipe_xc.h
+type XcParams struct {
 	Url                    string             `json:"url"`
 	BypassTranscoding      bool               `json:"bypass,omitempty"`
 	Format                 string             `json:"format,omitempty"`
@@ -181,7 +181,7 @@ type TxParams struct {
 	CryptKID               string             `json:"crypt_kid,omitempty"`
 	CryptKeyURL            string             `json:"crypt_key_url,omitempty"`
 	CryptScheme            CryptScheme        `json:"crypt_scheme,omitempty"`
-	TxType                 TxType             `json:"tx_type,omitempty"`
+	XcType                 XcType             `json:"xc_type,omitempty"`
 	Seekable               bool               `json:"seekable,omitempty"`
 	WatermarkText          string             `json:"watermark_text,omitempty"`
 	WatermarkTimecode      string             `json:"watermark_timecode,omitempty"`
@@ -214,9 +214,9 @@ type TxParams struct {
 	ExtractImagesTs        []int64            `json:"extract_images_ts,omitempty"`
 }
 
-// NewTxParams initializes a TxParams struct with unset/default values
-func NewTxParams() *TxParams {
-	return &TxParams{
+// NewXcParams initializes a XcParams struct with unset/default values
+func NewXcParams() *XcParams {
+	return &XcParams{
 		AudioBitrate:           128000,
 		AudioSegDurationTs:     -1,
 		BitDepth:               8,
@@ -439,7 +439,7 @@ func InitMuxIOHandler(inputOpener InputOpener, muxOutputOpener MuxOutputOpener) 
 
 // This is used to set input/output opener specific to a URL.
 // The input/output opener set by this function, is only valid for the URL and will be unset after
-// Tx() or Probe() is complete.
+// Xc() or Probe() is complete.
 func InitUrlIOHandler(url string, inputOpener InputOpener, outputOpener OutputOpener) {
 	if inputOpener != nil {
 		gMutex.Lock()
@@ -1134,11 +1134,11 @@ func Version() string {
 	return C.GoString((*C.char)(unsafe.Pointer(C.avpipe_version())))
 }
 
-func getCParams(params *TxParams) (*C.txparams_t, error) {
+func getCParams(params *XcParams) (*C.xcparams_t, error) {
 	extractImagesSize := len(params.ExtractImagesTs)
 
 	// same field order as avpipe_xc.h
-	cparams := &C.txparams_t{
+	cparams := &C.xcparams_t{
 		url:                       C.CString(params.Url),
 		format:                    C.CString(params.Format),
 		start_time_ts:             C.int64_t(params.StartTimeTs),
@@ -1169,7 +1169,7 @@ func getCParams(params *TxParams) (*C.txparams_t, error) {
 		crypt_kid:                 C.CString(params.CryptKID),
 		crypt_key_url:             C.CString(params.CryptKeyURL),
 		crypt_scheme:              C.crypt_scheme_t(params.CryptScheme),
-		tx_type:                   C.tx_type_t(params.TxType),
+		xc_type:                   C.xc_type_t(params.XcType),
 		watermark_text:            C.CString(params.WatermarkText),
 		watermark_timecode:        C.CString(params.WatermarkTimecode),
 		watermark_timecode_rate:   C.float(params.WatermarkTimecodeRate),
@@ -1243,10 +1243,10 @@ func getCParams(params *TxParams) (*C.txparams_t, error) {
 	}
 
 	if extractImagesSize > 0 {
-		C.init_extract_images((*C.txparams_t)(unsafe.Pointer(cparams)),
+		C.init_extract_images((*C.xcparams_t)(unsafe.Pointer(cparams)),
 			C.int(extractImagesSize))
 		for i := 0; i < extractImagesSize; i++ {
-			C.set_extract_images((*C.txparams_t)(unsafe.Pointer(cparams)),
+			C.set_extract_images((*C.xcparams_t)(unsafe.Pointer(cparams)),
 				C.int(i), C.int64_t(params.ExtractImagesTs[i]))
 		}
 	}
@@ -1255,9 +1255,9 @@ func getCParams(params *TxParams) (*C.txparams_t, error) {
 }
 
 // params: transcoding parameters
-func Tx(params *TxParams) error {
+func Xc(params *XcParams) error {
 
-	// Convert TxParams to C.txparams_t
+	// Convert XcParams to C.txparams_t
 	if params == nil {
 		log.Error("Failed transcoding, params are not set.")
 		return EAV_PARAM
@@ -1268,7 +1268,7 @@ func Tx(params *TxParams) error {
 		log.Error("Transcoding failed", err, "url", params.Url)
 	}
 
-	rc := C.tx((*C.txparams_t)(unsafe.Pointer(cparams)))
+	rc := C.xc((*C.xcparams_t)(unsafe.Pointer(cparams)))
 
 	gMutex.Lock()
 	defer gMutex.Unlock()
@@ -1278,7 +1278,7 @@ func Tx(params *TxParams) error {
 	return avpipeError(rc)
 }
 
-func Mux(params *TxParams) error {
+func Mux(params *XcParams) error {
 	if params == nil {
 		log.Error("Failed muxing, params are not set")
 		return EAV_PARAM
@@ -1289,7 +1289,7 @@ func Mux(params *TxParams) error {
 		log.Error("Muxing failed", err, "url", params.Url)
 	}
 
-	rc := C.mux((*C.txparams_t)(unsafe.Pointer(cparams)))
+	rc := C.mux((*C.xcparams_t)(unsafe.Pointer(cparams)))
 
 	gMutex.Lock()
 	defer gMutex.Unlock()
@@ -1336,7 +1336,7 @@ func GetProfileName(codecId int, profile int) string {
 }
 
 func Probe(url string, seekable bool) (*ProbeInfo, error) {
-	var cprobe *C.txprobe_t
+	var cprobe *C.xcprobe_t
 	var cseekable C.int
 	var n_streams C.int
 
@@ -1346,7 +1346,7 @@ func Probe(url string, seekable bool) (*ProbeInfo, error) {
 		cseekable = C.int(0)
 	}
 
-	rc := C.probe(C.CString(url), cseekable, (**C.txprobe_t)(unsafe.Pointer(&cprobe)), (*C.int)(unsafe.Pointer(&n_streams)))
+	rc := C.probe(C.CString(url), cseekable, (**C.xcprobe_t)(unsafe.Pointer(&cprobe)), (*C.int)(unsafe.Pointer(&n_streams)))
 	if int(rc) != 0 {
 		return nil, avpipeError(rc)
 	}
@@ -1418,8 +1418,8 @@ func Probe(url string, seekable bool) (*ProbeInfo, error) {
 
 // Returns a handle and error (if there is any error)
 // In case of error the handle would be zero
-func TxInit(params *TxParams) (int32, error) {
-	// Convert TxParams to C.txparams_t
+func XcInit(params *XcParams) (int32, error) {
+	// Convert XcParams to C.txparams_t
 	if params == nil {
 		log.Error("Failed transcoding, params are not set.")
 		return -1, EAV_PARAM
@@ -1431,7 +1431,7 @@ func TxInit(params *TxParams) (int32, error) {
 	}
 
 	var handle C.int32_t
-	rc := C.tx_init((*C.txparams_t)(unsafe.Pointer(cparams)), (*C.int32_t)(unsafe.Pointer(&handle)))
+	rc := C.xc_init((*C.xcparams_t)(unsafe.Pointer(cparams)), (*C.int32_t)(unsafe.Pointer(&handle)))
 	if rc != C.eav_success {
 		return -1, avpipeError(rc)
 	}
@@ -1439,8 +1439,8 @@ func TxInit(params *TxParams) (int32, error) {
 	return int32(handle), nil
 }
 
-func TxRun(handle int32) error {
-	rc := C.tx_run(C.int32_t(handle))
+func XcRun(handle int32) error {
+	rc := C.xc_run(C.int32_t(handle))
 	if rc == 0 {
 		return nil
 	}
@@ -1448,8 +1448,8 @@ func TxRun(handle int32) error {
 	return avpipeError(rc)
 }
 
-func TxCancel(handle int32) error {
-	rc := C.tx_cancel(C.int32_t(handle))
+func XcCancel(handle int32) error {
+	rc := C.xc_cancel(C.int32_t(handle))
 	if rc == 0 {
 		return nil
 	}

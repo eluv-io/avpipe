@@ -26,7 +26,7 @@ static pthread_mutex_t lock = PTHREAD_MUTEX_INITIALIZER;
 
 extern int
 do_mux(
-    txparams_t *params,
+    xcparams_t *params,
     char *out_filename
 );
 
@@ -217,7 +217,7 @@ in_read_packet(
     int buf_size)
 {
     ioctx_t *c = (ioctx_t *)opaque;
-    txparams_t *xcparams = c->params;
+    xcparams_t *xcparams = c->params;
     int r = 0;
 
     if (c->udp_channel) {
@@ -325,7 +325,7 @@ in_stat(
 {
     int64_t fd;
     ioctx_t *c = (ioctx_t *)opaque;
-    txparams_t *xcparams = c->params;
+    xcparams_t *xcparams = c->params;
     int debug_frame_level = (xcparams != NULL) ? xcparams->debug_frame_level : 0;
 
     if (!c || !c->opaque)
@@ -511,7 +511,7 @@ out_write_packet(
     ioctx_t *outctx = (ioctx_t *)opaque;
     int fd = *(int *)outctx->opaque;
     int bwritten;
-    txparams_t *xcparams = outctx->inctx->params;
+    xcparams_t *xcparams = outctx->inctx->params;
 
     if (fd < 0) {
         /* If there is no space in outctx->buf, reallocate the buffer */
@@ -600,7 +600,7 @@ out_stat(
 {
     ioctx_t *outctx = (ioctx_t *)opaque;
     int64_t fd;
-    txparams_t *xcparams = outctx->inctx->params;
+    xcparams_t *xcparams = outctx->inctx->params;
 
     /* Some error happened and fd is not set */
     if (!outctx || !outctx->opaque)
@@ -646,7 +646,7 @@ typedef struct tx_thread_params_t {
     int thread_number;
     char *filename;
     int repeats;
-    txparams_t *txparams;
+    xcparams_t *xcparams;
     avpipe_io_handler_t *in_handlers;
     avpipe_io_handler_t *out_handlers;
 } tx_thread_params_t;
@@ -661,11 +661,11 @@ safe_strdup(
     return NULL;
 }
 
-static txparams_t *
+static xcparams_t *
 txparam_copy(
-    txparams_t *p)
+    xcparams_t *p)
 {
-    txparams_t *p2 = (txparams_t *) calloc(1, sizeof(txparams_t));
+    xcparams_t *p2 = (xcparams_t *) calloc(1, sizeof(xcparams_t));
 
     *p2 = *p;
     p2->url = strdup(p->url);
@@ -709,7 +709,7 @@ tx_thread_func(
     void *thread_params)
 {
     tx_thread_params_t *params = (tx_thread_params_t *) thread_params;
-    txctx_t *txctx;
+    xctx_t *xctx;
     int i;
     int rc;
 
@@ -720,26 +720,26 @@ tx_thread_func(
          * Pass a copy of params since avpipe_fini() releases all the params memory.
          * (This is needed when repeating the same command with etx.)
          */
-        txparams_t *txparams = txparam_copy(params->txparams);
-        if ((rc = avpipe_init(&txctx, params->in_handlers, params->out_handlers, txparams)) != eav_success) {
+        xcparams_t *xcparams = txparam_copy(params->xcparams);
+        if ((rc = avpipe_init(&xctx, params->in_handlers, params->out_handlers, xcparams)) != eav_success) {
             elv_err("THREAD %d, iteration %d, failed to initialize avpipe rc=%d", params->thread_number, i+1, rc);
             continue;
         }
 
-        if ((rc = avpipe_xc(txctx, 0)) != eav_success) {
-            avpipe_fini(&txctx);
+        if ((rc = avpipe_xc(xctx, 0)) != eav_success) {
+            avpipe_fini(&xctx);
             elv_err("THREAD %d, iteration %d error in transcoding, err=%d", params->thread_number, i+1, rc);
             continue;
         }
 
         /* If url is UDP, then wait for UDP thread to be finished */
-        if (txctx->inctx->utid) {
-            pthread_join(txctx->inctx->utid, NULL);
+        if (xctx->inctx->utid) {
+            pthread_join(xctx->inctx->utid, NULL);
         }
 
-        elv_dbg("Releasing all the resources, filename=%s", txparams->url);
-        avpipe_fini(&txctx);
-        free(txparams);
+        elv_dbg("Releasing all the resources, filename=%s", xcparams->url);
+        avpipe_fini(&xctx);
+        free(xcparams);
     }
 
     elv_log("TRANSCODER THREAD %d ENDS", params->thread_number);
@@ -747,33 +747,33 @@ tx_thread_func(
     return 0;
 }
 
-static tx_type_t
-tx_type_from_string(
-    char *tx_type_str
+static xc_type_t
+xc_type_from_string(
+    char *xc_type_str
 )
 {
-    if (!strcmp(tx_type_str, "all"))
-        return tx_all;
+    if (!strcmp(xc_type_str, "all"))
+        return xc_all;
 
-    if (!strcmp(tx_type_str, "video"))
-        return tx_video;
+    if (!strcmp(xc_type_str, "video"))
+        return xc_video;
 
-    if (!strcmp(tx_type_str, "audio"))
-        return tx_audio;
+    if (!strcmp(xc_type_str, "audio"))
+        return xc_audio;
 
-    if (!strcmp(tx_type_str, "audio-merge"))
-        return tx_audio_merge;
+    if (!strcmp(xc_type_str, "audio-merge"))
+        return xc_audio_merge;
 
-    if (!strcmp(tx_type_str, "audio-join"))
-        return tx_audio_join;
+    if (!strcmp(xc_type_str, "audio-join"))
+        return xc_audio_join;
 
-    if (!strcmp(tx_type_str, "audio-pan"))
-        return tx_audio_pan;
+    if (!strcmp(xc_type_str, "audio-pan"))
+        return xc_audio_pan;
 
-    if (!strcmp(tx_type_str, "extract-images"))
-        return tx_extract_images;
+    if (!strcmp(xc_type_str, "extract-images"))
+        return xc_extract_images;
 
-    return tx_none;
+    return xc_none;
 }
 
 static int
@@ -783,7 +783,7 @@ do_probe(
 )
 {
     avpipe_io_handler_t in_handlers;
-    txprobe_t *probe = NULL;
+    xcprobe_t *probe = NULL;
     int n_streams;
     int rc;
 
@@ -907,7 +907,7 @@ read_file(
 static int
 read_muxing_spec(
     char *spec_filename,
-    txparams_t *params
+    xcparams_t *params
 )
 {
     char *buf;
@@ -922,7 +922,7 @@ read_muxing_spec(
 static int
 read_image(
     char *overlay_filename,
-    txparams_t *params
+    xcparams_t *params
 )
 {
     char *buf;
@@ -954,7 +954,7 @@ get_image_type(
 static int
 get_audio_index(
     char *s,
-    txparams_t *params)
+    xcparams_t *params)
 {
     char *ptr;
     int n_index = 0;
@@ -980,7 +980,7 @@ get_audio_index(
 }
 
 // parse command line input
-static int get_extract_images_ts(char *s, txparams_t *params) {
+static int get_extract_images_ts(char *s, xcparams_t *params) {
     int i;
     char *lasts;
     char *pts;
@@ -1045,7 +1045,7 @@ usage(
         "\t-enc-width :             (optional) Default: -1 (use source width)\n"
         "\t-equal-fduration :       (optional) Force equal frame duration. Must be 0 or 1 and only valid for \"fmp4-segment\" format.\n"
         "\t-extract-image-interval-ts : (optional) Write frames at this interval. Default: -1 (10 seconds)\n"
-        "\t-extract-images-ts :     (optional) Write frames at these timestamps (comma separated). Mutually exclusive with extract-image-interval-ts"
+        "\t-extract-images-ts :     (optional) Write frames at these timestamps (comma separated). Mutually exclusive with extract-image-interval-ts\n"
         "\t-f :                     (mandatory) Input filename for transcoding. Valid formats are: a filename that points to a valid file, or udp://127.0.0.1:<port>.\n"
         "\t                                    Output goes to directory ./O\n"
         "\t-filter-descriptor :     (mandatory if tx-type is audio-pan). Audio filter descriptor the same as ffmpeg format.\n"
@@ -1125,7 +1125,7 @@ main(
     u_int64_t log_size = 100;
 
     /* Parameters */
-    txparams_t p = {
+    xcparams_t p = {
         .stream_id = -1,
         .audio_bitrate = 128000,            /* Default bitrate */
         .n_audio = 0,                       /* # of audio index */
@@ -1168,7 +1168,7 @@ main(
         .start_time_ts = 0,                 /* same units as input stream PTS */
         .start_fragment_index = 0,          /* Default is zero */
         .sync_audio_to_stream_id = -1,      /* Default -1 (no sync to a video stream) */
-        .tx_type = tx_none,
+        .xc_type = xc_none,
         .video_bitrate = -1,                /* not used if using CRF */
         .watermark_text = NULL,
         .watermark_timecode = NULL,
@@ -1475,7 +1475,7 @@ main(
                     strcmp(argv[i+1], "extract-images")) {
                     usage(argv[0], argv[i], EXIT_FAILURE);
                 }
-                p.tx_type = tx_type_from_string(argv[i+1]);
+                p.xc_type = xc_type_from_string(argv[i+1]);
             } else if (sscanf(argv[i+1], "%d", &n_threads) != 1) {
                 usage(argv[0], argv[i], EXIT_FAILURE);
             }
@@ -1567,14 +1567,14 @@ main(
         strcmp(p.format, "fmp4-segment") &&
         strcmp(p.format, "mp4") &&
         p.seg_duration == NULL &&
-        p.audio_seg_duration_ts <= 0 && p.tx_type & tx_audio) {
+        p.audio_seg_duration_ts <= 0 && p.xc_type & xc_audio) {
         usage(argv[0], "audio_seg_duration_ts or seg_duration", EXIT_FAILURE);
     }
     if (strcmp(p.format, "segment") &&
         strcmp(p.format, "fmp4-segment") &&
         strcmp(p.format, "mp4") &&
         p.seg_duration == NULL &&
-        p.video_seg_duration_ts <= 0 && p.tx_type & tx_video && p.tx_type != tx_extract_images) {
+        p.video_seg_duration_ts <= 0 && p.xc_type & xc_video && p.xc_type != xc_extract_images) {
         usage(argv[0], "video-seg-duration-ts or seg-duration", EXIT_FAILURE);
     }
 
@@ -1606,7 +1606,7 @@ main(
 
     thread_params.filename = strdup(filename);
     thread_params.repeats = repeats;
-    thread_params.txparams = &p;
+    thread_params.xcparams = &p;
     thread_params.in_handlers = in_handlers;
     thread_params.out_handlers = out_handlers;
 

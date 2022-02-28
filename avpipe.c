@@ -64,12 +64,12 @@ int     CError(char *);
 
 #define MAX_TX  128    /* Maximum transcodings per system */
 
-typedef struct txctx_entry_t {
+typedef struct xc_entry_t {
     int32_t         handle;
-    txctx_t         *txctx;
-} txctx_entry_t;
+    xctx_t          *xctx;
+} xc_entry_t;
 
-txctx_entry_t          *tx_table[MAX_TX];
+xc_entry_t          *xc_table[MAX_TX];
 static pthread_mutex_t tx_mutex = PTHREAD_MUTEX_INITIALIZER;
 
 static int
@@ -83,7 +83,7 @@ in_opener(
     ioctx_t *inctx)
 {
     int64_t size;
-    txparams_t *xcparams = (inctx != NULL) ? inctx->params : NULL;
+    xcparams_t *xcparams = (inctx != NULL) ? inctx->params : NULL;
 
 #ifdef CHECK_C_READ
     struct stat stb;
@@ -135,7 +135,7 @@ in_closer(
 #endif
 
     int64_t h = *((int64_t *)(inctx->opaque));
-    txparams_t *xcparams = (inctx != NULL) ? inctx->params : NULL;
+    xcparams_t *xcparams = (inctx != NULL) ? inctx->params : NULL;
     if (xcparams && xcparams->debug_frame_level)
         elv_dbg("IN CLOSER h=%d", h);
     AVPipeCloseInput(h);
@@ -149,7 +149,7 @@ in_read_packet(
     int buf_size)
 {
     ioctx_t *inctx = (ioctx_t *)opaque;
-    txparams_t *xcparams = (inctx != NULL) ? inctx->params : NULL;
+    xcparams_t *xcparams = (inctx != NULL) ? inctx->params : NULL;
     int r;
     int64_t fd;
 
@@ -213,7 +213,7 @@ in_seek(
 {
     int64_t fd;
     ioctx_t *inctx = (ioctx_t *)opaque;
-    txparams_t *xcparams = (inctx != NULL) ? inctx->params : NULL;
+    xcparams_t *xcparams = (inctx != NULL) ? inctx->params : NULL;
     int64_t rc;
 
     fd = *((int64_t *)(inctx->opaque));
@@ -289,7 +289,7 @@ udp_thread_func(
     void *thread_params)
 {
     udp_thread_params_t *params = (udp_thread_params_t *) thread_params;
-    txparams_t *xcparams = params->inctx->params;
+    xcparams_t *xcparams = params->inctx->params;
     int debug_frame_level = (xcparams != NULL) ? xcparams->debug_frame_level : 0;
     char *url = (xcparams != NULL) ? xcparams->url : "";
     struct sockaddr     ca;
@@ -379,7 +379,7 @@ udp_in_opener(
 
     sockfd = udp_socket(url_parser.host, url_parser.port, &sa, &salen);
     if (sockfd < 0) {
-        elv_err("Failed to open input udp url=%s error=%d", url, errno);
+        elv_err("Failed to open input udp url=%s, error=%d", url, errno);
         inctx->opaque = NULL;
         return -1;
     }
@@ -387,7 +387,7 @@ udp_in_opener(
     setsockopt(sockfd, SOL_SOCKET, SO_REUSEADDR, &on, sizeof(on));
     if ((rc = bind(sockfd, sa, salen)) < 0) {
         /* Can not bind, fail and exit */
-        elv_err("Failed to bind UDP socket, rc=%d, url=%s", rc, url);
+        elv_err("Failed to bind UDP socket, rc=%d, url=%s, errno=%d", rc, url, errno);
         return -1;
     }
 
@@ -395,13 +395,13 @@ udp_in_opener(
     tv.tv_sec = UDP_PIPE_TIMEOUT;
     tv.tv_usec = 0;
     if ((rc = setsockopt(sockfd, SOL_SOCKET, SO_RCVTIMEO, &tv, sizeof(tv))) < 0) {
-        elv_err("Failed to set UDP socket timeout, rc=%d, url=%s", rc, url);
+        elv_err("Failed to set UDP socket timeout, rc=%d, url=%s, errno=%d", rc, url, errno);
         return -1;
     }
 
     size_t bufsz = UDP_PIPE_BUFSIZE;
     if (setsockopt(sockfd, SOL_SOCKET, SO_RCVBUF, (const void *)&bufsz, (socklen_t)sizeof(bufsz)) == -1) {
-        elv_warn("Failed to set UDP socket buf size to=%"PRId64", url=%s", bufsz, url);
+        elv_warn("Failed to set UDP socket buf size to=%"PRId64", url=%s, errno=%d", bufsz, url, errno);
     }
 
     elv_channel_init(&inctx->udp_channel, MAX_UDP_CHANNEL, NULL);
@@ -451,7 +451,7 @@ udp_in_read_packet(
     int buf_size)
 {
     ioctx_t *c = (ioctx_t *)opaque;
-    txparams_t *xcparams = c->params;
+    xcparams_t *xcparams = c->params;
     int debug_frame_level = (xcparams != NULL) ? xcparams->debug_frame_level : 0;
     int r = 0;
 
@@ -518,7 +518,7 @@ udp_in_write_packet(
     int buf_size)
 {
     ioctx_t *inctx = (ioctx_t *)opaque;
-    txparams_t *xcparams = inctx->params;
+    xcparams_t *xcparams = inctx->params;
     int debug_frame_level = (xcparams != NULL) ? xcparams->debug_frame_level : 0;
     if (debug_frame_level)
         elv_dbg("IN WRITE UDP, url=%s", inctx->url);
@@ -532,7 +532,7 @@ udp_in_seek(
     int whence)
 {
     ioctx_t *c = (ioctx_t *)opaque;
-    txparams_t *xcparams = c->params;
+    xcparams_t *xcparams = c->params;
     int debug_frame_level = (xcparams != NULL) ? xcparams->debug_frame_level : 0;
     int fd = *((int *)(c->opaque));
     int64_t rc = lseek(fd, offset, whence);
@@ -565,7 +565,7 @@ udp_in_stat(
     if (!c || !c->opaque)
         return 0;
 
-    txparams_t *xcparams = c->params;
+    xcparams_t *xcparams = c->params;
     int debug_frame_level = (xcparams != NULL) ? xcparams->debug_frame_level : 0;
     fd = *((int64_t *)(c->opaque));
     switch (stat_type) {
@@ -604,7 +604,7 @@ out_opener(
     ioctx_t *outctx)
 {
     ioctx_t *inctx = outctx->inctx;
-    txparams_t *xcparams = inctx->params;
+    xcparams_t *xcparams = inctx->params;
     int64_t fd;
     int64_t h;
 
@@ -649,7 +649,7 @@ out_write_packet(
 {
     ioctx_t *outctx = (ioctx_t *)opaque;
     ioctx_t *inctx = outctx->inctx;
-    txparams_t *xcparams = inctx->params;
+    xcparams_t *xcparams = inctx->params;
     int64_t h = *((int64_t *)(inctx->opaque));
     int64_t fd = *(int64_t *)outctx->opaque;
     int bwritten = AVPipeWriteOutput(h, fd, buf, buf_size);
@@ -784,47 +784,47 @@ init_tx_module()
 }
 
 /*
- * Puts txctx in the tx table and returns the handle to txctx entry.
+ * Puts xctx in the tx table and returns the handle to xctx entry.
  * If tx table is full, it would return -1.
  */
 static int32_t
-tx_table_put(
-    txctx_t *txctx)
+xc_table_put(
+    xctx_t *xctx)
 {
-    txctx_entry_t *txe = NULL;
-    txctx->index = -1;
+    xc_entry_t *txe = NULL;
+    xctx->index = -1;
 
     pthread_mutex_lock(&tx_mutex);
     for (int i=0; i<MAX_TX; i++) {
-        if (tx_table[i] == NULL) {
-            txe = calloc(1, sizeof(txctx_entry_t));
+        if (xc_table[i] == NULL) {
+            txe = calloc(1, sizeof(xc_entry_t));
             txe->handle = rand();
             if (txe->handle < 0)
                 txe->handle = (-1) * txe->handle;
-            txe->txctx = txctx;
-            tx_table[i] = txe;
-            txctx->index = i;
-            txctx->handle = txe->handle;
+            txe->xctx = xctx;
+            xc_table[i] = txe;
+            xctx->index = i;
+            xctx->handle = txe->handle;
             break;
         }
     }
     pthread_mutex_unlock(&tx_mutex);
 
-    elv_dbg("tx_table_put handle=%d, url=%s", txe->handle, txctx->inctx->url);
+    elv_dbg("xc_table_put handle=%d, url=%s", txe->handle, xctx->inctx->url);
     if (txe != NULL)
         return txe->handle;
     return -1;
 }
 
-static txctx_entry_t*
-tx_table_find(
+static xc_entry_t*
+xc_table_find(
     int32_t handle)
 {
     pthread_mutex_lock(&tx_mutex);
     for (int i=0; i<MAX_TX; i++) {
-        if (tx_table[i] != NULL && tx_table[i]->handle == handle) {
+        if (xc_table[i] != NULL && xc_table[i]->handle == handle) {
             pthread_mutex_unlock(&tx_mutex);
-            return tx_table[i];
+            return xc_table[i];
         }
     }
     pthread_mutex_unlock(&tx_mutex);
@@ -833,19 +833,19 @@ tx_table_find(
 }
 
 static void
-tx_table_free(
+xc_table_free(
     int32_t handle)
 {
-    elv_dbg("tx_table_free handle=%d", handle);
+    elv_dbg("xc_table_free handle=%d", handle);
     pthread_mutex_lock(&tx_mutex);
     for (int i=0; i<MAX_TX; i++) {
-        if (tx_table[i] != NULL && tx_table[i]->handle == handle) {
-            if (tx_table[i]->txctx->index == i) {
-                free(tx_table[i]);
-                tx_table[i] = NULL;
+        if (xc_table[i] != NULL && xc_table[i]->handle == handle) {
+            if (xc_table[i]->xctx->index == i) {
+                free(xc_table[i]);
+                xc_table[i] = NULL;
             } else
-                elv_err("tx_table_free index=%d doesn't match with handle=%d at %d",
-                    tx_table[i]->txctx->index, handle, i);
+                elv_err("xc_table_free index=%d doesn't match with handle=%d at %d",
+                    xc_table[i]->xctx->index, handle, i);
             pthread_mutex_unlock(&tx_mutex);
             return;
         }
@@ -854,29 +854,29 @@ tx_table_free(
 }
 
 static int
-tx_table_cancel(
+xc_table_cancel(
     int32_t handle)
 {
     int rc = 0;
-    elv_dbg("tx_table_cancel handle=%d", handle);
+    elv_dbg("xc_table_cancel handle=%d", handle);
     pthread_mutex_lock(&tx_mutex);
     for (int i=0; i<MAX_TX; i++) {
-        if (tx_table[i] != NULL && tx_table[i]->handle == handle) {
-            txctx_t *txctx = tx_table[i]->txctx;
+        if (xc_table[i] != NULL && xc_table[i]->handle == handle) {
+            xctx_t *xctx = xc_table[i]->xctx;
 
-            if (txctx->index == i) {
-                txctx->decoder_ctx.cancelled = 1;
-                txctx->encoder_ctx.cancelled = 1;
+            if (xctx->index == i) {
+                xctx->decoder_ctx.cancelled = 1;
+                xctx->encoder_ctx.cancelled = 1;
                 /* If there is a UDP thread running wait for it to be finished */
-                if ( txctx->inctx && txctx->inctx->utid ) {
-                    txctx->inctx->closed = 1;
+                if ( xctx->inctx && xctx->inctx->utid ) {
+                    xctx->inctx->closed = 1;
                     /* Close and purge the channel */
-                    elv_channel_close(txctx->inctx->udp_channel, 1);
-                    pthread_join(txctx->inctx->utid, NULL);
+                    elv_channel_close(xctx->inctx->udp_channel, 1);
+                    pthread_join(xctx->inctx->utid, NULL);
                 }
             } else {
-                elv_err("tx_table_cancel index=%d doesn't match with handle=%d at %d",
-                    tx_table[i]->txctx->index, handle, i);
+                elv_err("xc_table_cancel index=%d doesn't match with handle=%d at %d",
+                    xc_table[i]->xctx->index, handle, i);
                 rc = -1;
             }
             pthread_mutex_unlock(&tx_mutex);
@@ -943,11 +943,11 @@ set_handlers(
  * If initialization is not successfull it return -1.
  */
 int32_t
-tx_init(
-    txparams_t *params,
+xc_init(
+    xcparams_t *params,
     int32_t *handle)
 {
-    txctx_t *txctx = NULL;
+    xctx_t *xctx = NULL;
     int64_t rc = 0;
     uint32_t h;
     avpipe_io_handler_t *in_handlers = NULL;
@@ -963,25 +963,25 @@ tx_init(
         goto end_tx_init;
     }
 
-    if ((rc = avpipe_init(&txctx, in_handlers, out_handlers, params)) != eav_success) {
+    if ((rc = avpipe_init(&xctx, in_handlers, out_handlers, params)) != eav_success) {
         goto end_tx_init;
     }
 
-    if ((h = tx_table_put(txctx)) < 0) {
-        elv_err("tx_init tx_table is full, cancelling transcoding %s", params->url);
+    if ((h = xc_table_put(xctx)) < 0) {
+        elv_err("xc_init xc_table is full, cancelling transcoding %s", params->url);
         rc = eav_xc_table;
         goto end_tx_init;
     }
 
-    txctx->in_handlers = in_handlers;
-    txctx->out_handlers = out_handlers;
+    xctx->in_handlers = in_handlers;
+    xctx->out_handlers = out_handlers;
 
     *handle = h;
     return eav_success;
 
 end_tx_init:
 
-    avpipe_fini(&txctx);
+    avpipe_fini(&xctx);
     free(in_handlers);
     free(out_handlers);
 
@@ -989,36 +989,36 @@ end_tx_init:
 }
 
 int
-tx_run(
+xc_run(
     int32_t handle)
 {
     int rc = 0;
-    txctx_entry_t *txe = tx_table_find(handle);
+    xc_entry_t *xe = xc_table_find(handle);
 
-    if (!txe) {
+    if (!xe) {
         elv_err("tx_run invalid handle=%d", handle);
         return eav_param;
     }
 
-    txctx_t *txctx = txe->txctx;
-    if ((rc = avpipe_xc(txctx, 0)) != eav_success) {
+    xctx_t *xctx = xe->xctx;
+    if ((rc = avpipe_xc(xctx, 0)) != eav_success) {
         if (rc != eav_cancelled)
             elv_err("Error in transcoding, handle=%d, err=%d", handle, rc);
         goto end_tx;
     }
 
 end_tx:
-    tx_table_free(handle);
-    avpipe_fini(&txctx);
+    xc_table_free(handle);
+    avpipe_fini(&xctx);
 
     return rc;
 }
 
 int
-tx_cancel(
+xc_cancel(
     int32_t handle)
 { 
-    return tx_table_cancel(handle);
+    return xc_table_cancel(handle);
 }
 
 /*
@@ -1027,10 +1027,10 @@ tx_cancel(
  * 3) Releases avpipe resources.
  */
 int
-tx(
-    txparams_t *params)
+xc(
+    xcparams_t *params)
 {
-    txctx_t *txctx = NULL;
+    xctx_t *xctx = NULL;
     int rc = 0;
     avpipe_io_handler_t *in_handlers;
     avpipe_io_handler_t *out_handlers;
@@ -1046,17 +1046,17 @@ tx(
 
     set_handlers(params->url, &in_handlers, &out_handlers);
 
-    if ((rc = avpipe_init(&txctx, in_handlers, out_handlers, params)) != eav_success) {
+    if ((rc = avpipe_init(&xctx, in_handlers, out_handlers, params)) != eav_success) {
         goto end_tx;
     }
 
-    if ((rc = avpipe_xc(txctx, 0)) != eav_success) {
+    if ((rc = avpipe_xc(xctx, 0)) != eav_success) {
         elv_err("Transcoding failed url=%s, rc=%d", params->url, rc);
         goto end_tx;
     }
 
 end_tx:
-    avpipe_fini(&txctx);
+    avpipe_fini(&xctx);
 
     return rc;
 }
@@ -1096,7 +1096,7 @@ in_mux_read_packet(
     int buf_size)
 {
     ioctx_t *c = (ioctx_t *)opaque;
-    txparams_t *xcparams = c->params;
+    xcparams_t *xcparams = c->params;
     int debug_frame_level = (xcparams != NULL) ? xcparams->debug_frame_level : 0;
     int r;
     int64_t fd;
@@ -1189,7 +1189,7 @@ in_mux_seek(
     int whence)
 {
     ioctx_t *c = (ioctx_t *)opaque;
-    txparams_t *xcparams = (c != NULL) ? c->params : NULL;
+    xcparams_t *xcparams = (c != NULL) ? c->params : NULL;
     if (xcparams != NULL && xcparams->debug_frame_level)
         elv_dbg("IN MUX SEEK index=%d, offset=%"PRId64" whence=%d", c->in_mux_index, offset, whence);
     return -1;
@@ -1202,7 +1202,7 @@ out_mux_opener(
 {
     int64_t fd;
     ioctx_t *inctx = outctx->inctx;
-    txparams_t *xcparams = (inctx != NULL) ? inctx->params : NULL;
+    xcparams_t *xcparams = (inctx != NULL) ? inctx->params : NULL;
 
     /* Allocate the buffers. The data will be copied to the buffers */
     outctx->bufsz = AVIO_OUT_BUF_SIZE;
@@ -1242,7 +1242,7 @@ out_mux_write_packet(
 {
     ioctx_t *outctx = (ioctx_t *)opaque;
     ioctx_t *inctx = outctx->inctx;
-    txparams_t *xcparams = (inctx != NULL) ? inctx->params : NULL;
+    xcparams_t *xcparams = (inctx != NULL) ? inctx->params : NULL;
     int64_t fd = *(int64_t *)outctx->opaque;
     int bwritten = AVPipeWriteMuxOutput(fd, buf, buf_size);
     if (bwritten >= 0) {
@@ -1265,7 +1265,7 @@ out_mux_seek(
 {
     ioctx_t *outctx = (ioctx_t *)opaque;
     ioctx_t *inctx = outctx->inctx;
-    txparams_t *xcparams = (inctx != NULL) ? inctx->params : NULL;
+    xcparams_t *xcparams = (inctx != NULL) ? inctx->params : NULL;
     int64_t fd = *(int64_t *)outctx->opaque;
     int rc = AVPipeSeekMuxOutput(fd, offset, whence);
     if (xcparams != NULL && xcparams->debug_frame_level)
@@ -1330,10 +1330,10 @@ set_mux_handlers(
  */
 int
 mux(
-    txparams_t *params)
+    xcparams_t *params)
 {
     io_mux_ctx_t *in_mux_ctx = NULL;
-    txctx_t *txctx = NULL;
+    xctx_t *xctx = NULL;
     int rc = 0;
     avpipe_io_handler_t *in_handlers;
     avpipe_io_handler_t *out_handlers;
@@ -1346,20 +1346,20 @@ mux(
     set_mux_handlers(&in_handlers, &out_handlers);
     in_mux_ctx = (io_mux_ctx_t *)calloc(1, sizeof(io_mux_ctx_t));
 
-    if ((rc = avpipe_init_muxer(&txctx,
+    if ((rc = avpipe_init_muxer(&xctx,
         in_handlers, in_mux_ctx, out_handlers, params)) != eav_success) {
         elv_err("Initializing muxer failed, url=%s", params->url);
         goto end_mux;
     }
 
-    if ((rc = avpipe_mux(txctx)) != eav_success) {
+    if ((rc = avpipe_mux(xctx)) != eav_success) {
         elv_err("Muxing failed");
         goto end_mux;
     }
 
 end_mux:
     elv_dbg("Releasing all the muxing resources, url=%s", params->url);
-    avpipe_mux_fini(&txctx);
+    avpipe_mux_fini(&xctx);
     free(in_mux_ctx);
 
     return rc;
@@ -1384,11 +1384,11 @@ int
 probe(
     char *url,
     int seekable,
-    txprobe_t **txprobe,
+    xcprobe_t **xcprobe,
     int *n_streams)
 {
     avpipe_io_handler_t *in_handlers;
-    txprobe_t *probes;
+    xcprobe_t *probes;
     int rc;
 
     rc = set_handlers(url, &in_handlers, NULL);
@@ -1399,7 +1399,7 @@ probe(
     if (rc != eav_success)
         goto end_probe;
 
-    *txprobe = probes;
+    *xcprobe = probes;
 
 end_probe:
     elv_dbg("Releasing probe resources, url=%s", url != NULL ? url : "");

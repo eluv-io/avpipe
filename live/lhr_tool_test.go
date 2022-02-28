@@ -113,7 +113,7 @@ func putReqCtxByFD(fd int64, reqCtx *testCtx) {
 }
 
 func _TestHLSVideoOnly(t *testing.T) {
-	params := &avpipe.TxParams{
+	params := &avpipe.XcParams{
 		Format:          "fmp4-segment",
 		DurationTs:      3 * 2700000,
 		StartSegmentStr: "1",
@@ -123,7 +123,7 @@ func _TestHLSVideoOnly(t *testing.T) {
 		Ecodec:          defaultVideoEncoder(),
 		EncHeight:       720,
 		EncWidth:        1280,
-		TxType:          avpipe.TxVideo,
+		XcType:          avpipe.XcVideo,
 		DebugFrameLevel: debugFrameLevel,
 	}
 
@@ -134,7 +134,7 @@ func _TestHLSVideoOnly(t *testing.T) {
 	if err != nil {
 		t.Error(err)
 	}
-	readers, err := NewHLSReaders(manifestURL, avpipe.TxVideo) //readers, err := NewHLSReaders(manifestURL, STVideoOnly)
+	readers, err := NewHLSReaders(manifestURL, avpipe.XcVideo) //readers, err := NewHLSReaders(manifestURL, STVideoOnly)
 	if err != nil {
 		t.Error(err)
 	}
@@ -148,7 +148,7 @@ func _TestHLSVideoOnly(t *testing.T) {
 	params.Url = url
 	reqCtx := &testCtx{url: url, r: reader.Pipe}
 	putReqCtxByURL(url, reqCtx)
-	err = avpipe.Tx(params)
+	err = avpipe.Xc(params)
 	tlog.Info("Tx done", "err", err)
 	if err != nil {
 		t.Error("video transcoding error", "errTx", err)
@@ -163,7 +163,7 @@ func _TestHLSVideoOnly(t *testing.T) {
 }
 
 func _TestHLSAudioOnly(t *testing.T) {
-	params := &avpipe.TxParams{
+	params := &avpipe.XcParams{
 		Format:          "fmp4-segment",
 		DurationTs:      3 * 2700000,
 		StartSegmentStr: "1",
@@ -172,7 +172,7 @@ func _TestHLSAudioOnly(t *testing.T) {
 		SegDuration:     "30",
 		Ecodec:          "aac", // "ac3", "aac"
 		Dcodec:          "aac",
-		TxType:          avpipe.TxAudio,
+		XcType:          avpipe.XcAudio,
 		DebugFrameLevel: debugFrameLevel,
 		//BypassTranscoding: true,
 	}
@@ -187,7 +187,7 @@ func _TestHLSAudioOnly(t *testing.T) {
 	if err != nil {
 		t.Error(err)
 	}
-	readers, err := NewHLSReaders(manifestURL, avpipe.TxAudio)
+	readers, err := NewHLSReaders(manifestURL, avpipe.XcAudio)
 	if err != nil {
 		t.Error(err)
 	}
@@ -201,7 +201,7 @@ func _TestHLSAudioOnly(t *testing.T) {
 	params.Url = url
 	reqCtx := &testCtx{url: url, r: reader.Pipe}
 	putReqCtxByURL(url, reqCtx)
-	err = avpipe.Tx(params)
+	err = avpipe.Xc(params)
 	tlog.Info("Tx done", "err", err)
 	if err != nil {
 		t.Error("video transcoding error", "errTx", err)
@@ -226,7 +226,7 @@ func _TestAudioVideoHlsLive(t *testing.T) {
 	if err != nil {
 		t.Error(err)
 	}
-	readers, err := NewHLSReaders(manifestURL, avpipe.TxNone)
+	readers, err := NewHLSReaders(manifestURL, avpipe.XcNone)
 	if err != nil {
 		t.Error(err)
 	}
@@ -239,7 +239,7 @@ func _TestAudioVideoHlsLive(t *testing.T) {
 	done := make(chan bool, 2)
 	avpipe.InitIOHandler(&inputOpener{}, &outputOpener{})
 
-	audioParams := &avpipe.TxParams{
+	audioParams := &avpipe.XcParams{
 		Format:          "fmp4-segment",
 		DurationTs:      3 * 2700000,
 		StartSegmentStr: "1",
@@ -248,7 +248,7 @@ func _TestAudioVideoHlsLive(t *testing.T) {
 		SegDuration:     "30",
 		Ecodec:          "aac", // "ac3", "aac"
 		Dcodec:          "aac",
-		TxType:          avpipe.TxAudio,
+		XcType:          avpipe.XcAudio,
 		DebugFrameLevel: debugFrameLevel,
 		//BypassTranscoding: true,
 	}
@@ -262,7 +262,7 @@ func _TestAudioVideoHlsLive(t *testing.T) {
 		audioParams.Url = url
 		reqCtx := &testCtx{url: url, r: reader}
 		putReqCtxByURL(url, reqCtx)
-		err := avpipe.Tx(audioParams)
+		err := avpipe.Xc(audioParams)
 		tlog.Info("audio mez Tx done", "err", err)
 		if err != nil {
 			t.Error("audio mez transcoding error", "err", err)
@@ -270,7 +270,7 @@ func _TestAudioVideoHlsLive(t *testing.T) {
 		done <- true
 	}(audioReader)
 
-	videoParams := &avpipe.TxParams{
+	videoParams := &avpipe.XcParams{
 		Format:          "fmp4-segment",
 		DurationTs:      3 * 2700000,
 		StartSegmentStr: "1",
@@ -280,7 +280,7 @@ func _TestAudioVideoHlsLive(t *testing.T) {
 		Ecodec:          defaultVideoEncoder(),
 		EncHeight:       720,
 		EncWidth:        1280,
-		TxType:          avpipe.TxVideo,
+		XcType:          avpipe.XcVideo,
 		Url:             "video_mez_hls",
 		DebugFrameLevel: debugFrameLevel,
 		//BypassTranscoding: true,
@@ -289,7 +289,7 @@ func _TestAudioVideoHlsLive(t *testing.T) {
 		tlog.Info("video mez Tx start", "params", fmt.Sprintf("%+v", *videoParams))
 		reqCtx := &testCtx{url: videoParams.Url, r: reader}
 		putReqCtxByURL(videoParams.Url, reqCtx)
-		err := avpipe.Tx(videoParams)
+		err := avpipe.Xc(videoParams)
 		tlog.Info("video mez Tx done", "err", err)
 		if err != nil {
 			t.Error("video mez transcoding error", "err", err)
@@ -318,7 +318,7 @@ func _TestAudioVideoHlsLive(t *testing.T) {
 			audioParams.Url = url
 			putReqCtxByURL(url, reqCtx)
 			audioParams.StartSegmentStr = fmt.Sprintf("%d", i*15+1)
-			err := avpipe.Tx(audioParams)
+			err := avpipe.Xc(audioParams)
 			tlog.Info("audio dash Tx done", "err", err)
 			if err != nil {
 				t.Error("audio dash transcoding error", "err", err, "url", url)
@@ -341,7 +341,7 @@ func _TestAudioVideoHlsLive(t *testing.T) {
 			videoParams.Url = url
 			putReqCtxByURL(url, reqCtx)
 			videoParams.StartSegmentStr = fmt.Sprintf("%d", i*15+1)
-			err := avpipe.Tx(videoParams)
+			err := avpipe.Xc(videoParams)
 			tlog.Info("video dash Tx done", "err", err)
 			if err != nil {
 				t.Error("video dash transcoding error", "err", err, "url", url)

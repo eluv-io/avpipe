@@ -34,7 +34,7 @@ var log = elog.Get("/eluvio/avpipe/live")
 // stream with the highest bitrate.
 type HLSReader struct {
 	Pipe            io.ReadWriteCloser //
-	Type            avpipe.TxType      //
+	Type            avpipe.XcType      //
 	client          *http.Client       //
 	durationReadSec float64            //
 	nextSeqNo       int                // The next segment sequence number to record (the first sequence number in a stream is 0)
@@ -139,7 +139,7 @@ func isVideoOnly(v *m3u8.Variant) bool {
 // must be used to maintain playback state.
 //
 // TODO Probably should change approach to selecting a variant first, then finding the audio/video streams. Also test against different playlists.
-func NewHLSReaders(playlistURL *url.URL, xcType avpipe.TxType) (
+func NewHLSReaders(playlistURL *url.URL, xcType avpipe.XcType) (
 	readers []*HLSReader, err error) {
 
 	logContext := fmt.Sprintf("url=%s", playlistURL.String())
@@ -177,7 +177,7 @@ func NewHLSReaders(playlistURL *url.URL, xcType avpipe.TxType) (
 	master := playlist.(*m3u8.MasterPlaylist)
 
 	if v := findTopVariant(master.Variants, compareMuxedVariant); v != nil {
-		if lhr, err = NewHLSReaderV(v, playlistURL, avpipe.TxMux); err == nil {
+		if lhr, err = NewHLSReaderV(v, playlistURL, avpipe.XcMux); err == nil {
 			readers = append(readers, lhr)
 		} else {
 			err = et(err)
@@ -186,16 +186,16 @@ func NewHLSReaders(playlistURL *url.URL, xcType avpipe.TxType) (
 	}
 
 	var topVideo *m3u8.Variant
-	if xcType != avpipe.TxAudio {
+	if xcType != avpipe.XcAudio {
 		if topVideo = findTopVariant(master.Variants, compareVideoVariant); topVideo != nil {
-			if lhr, err = NewHLSReaderV(topVideo, playlistURL, avpipe.TxVideo); err != nil {
+			if lhr, err = NewHLSReaderV(topVideo, playlistURL, avpipe.XcVideo); err != nil {
 				return nil, et(err)
 			}
 			readers = append(readers, lhr)
 		}
 	}
 
-	if xcType != avpipe.TxVideo {
+	if xcType != avpipe.XcVideo {
 		var lhr *HLSReader
 
 		// Use audio stream associated with the variant
@@ -207,7 +207,7 @@ func NewHLSReaders(playlistURL *url.URL, xcType avpipe.TxType) (
 
 		if lhr == nil {
 			if v := findTopVariant(master.Variants, compareAudioVariant); v != nil {
-				lhr, err = NewHLSReaderV(v, playlistURL, avpipe.TxAudio)
+				lhr, err = NewHLSReaderV(v, playlistURL, avpipe.XcAudio)
 			}
 		}
 
@@ -244,7 +244,7 @@ func NewHLSReaders(playlistURL *url.URL, xcType avpipe.TxType) (
 
 // NewHLSReader creates and returns a media playlist reader, and starts
 // goroutines to download the segments. Close the Reader to clean up.
-func NewHLSReader(playlistURL *url.URL, xcType avpipe.TxType) *HLSReader {
+func NewHLSReader(playlistURL *url.URL, xcType avpipe.XcType) *HLSReader {
 	return &HLSReader{
 		client:          &http.Client{},
 		nextSeqNo:       -1,
@@ -255,7 +255,7 @@ func NewHLSReader(playlistURL *url.URL, xcType avpipe.TxType) *HLSReader {
 	}
 }
 
-func NewHLSReaderV(v *m3u8.Variant, masterPlaylistURL *url.URL, xcType avpipe.TxType) (
+func NewHLSReaderV(v *m3u8.Variant, masterPlaylistURL *url.URL, xcType avpipe.XcType) (
 	lhr *HLSReader, err error) {
 
 	var playlistURL *url.URL
@@ -288,7 +288,7 @@ func NewHLSReaderA(a *m3u8.Alternative, masterPlaylistURL *url.URL) (
 		"LANGUAGE", a.Language,
 		"NAME", a.Name)
 
-	lhr = NewHLSReader(playlistURL, avpipe.TxAudio)
+	lhr = NewHLSReader(playlistURL, avpipe.XcAudio)
 	return
 }
 

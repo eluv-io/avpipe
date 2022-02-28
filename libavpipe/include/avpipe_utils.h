@@ -30,7 +30,7 @@ void
 dump_encoder(
     char *url,
     AVFormatContext *format_context,
-    txparams_t *params);
+    xcparams_t *params);
 
 void
 dump_codec_context(

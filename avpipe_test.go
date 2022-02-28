@@ -315,7 +315,7 @@ func (o fileOutput) Stat(avType avpipe.AVType, statType avpipe.AVStatType, statA
 func TestAudioSeg(t *testing.T) {
 	url := videoErstePath
 	outputDir := path.Join(baseOutPath, fn())
-	params := &avpipe.TxParams{
+	params := &avpipe.XcParams{
 		BypassTranscoding:      false,
 		Format:                 "fmp4-segment",
 		AudioBitrate:           128000,
@@ -337,7 +337,7 @@ func TestAudioSeg(t *testing.T) {
 		SyncAudioToStreamId:    -1,
 		VideoBitrate:           -1,
 		VideoSegDurationTs:     -1,
-		TxType:                 avpipe.TxAudio,
+		XcType:                 avpipe.XcAudio,
 		Url:                    url,
 		DebugFrameLevel:        debugFrameLevel,
 	}
@@ -348,7 +348,7 @@ func TestAudioSeg(t *testing.T) {
 func TestVideoSeg(t *testing.T) {
 	url := videoErstePath
 	outputDir := path.Join(baseOutPath, fn())
-	params := &avpipe.TxParams{
+	params := &avpipe.XcParams{
 		BypassTranscoding:      false,
 		Format:                 "fmp4-segment",
 		AudioBitrate:           128000,
@@ -370,7 +370,7 @@ func TestVideoSeg(t *testing.T) {
 		SyncAudioToStreamId:    -1,
 		VideoBitrate:           -1,
 		VideoSegDurationTs:     -1,
-		TxType:                 avpipe.TxVideo,
+		XcType:                 avpipe.XcVideo,
 		Url:                    url,
 		DebugFrameLevel:        debugFrameLevel,
 	}
@@ -383,7 +383,7 @@ func TestSingleABRTranscode(t *testing.T) {
 	filename := videoErstePath
 	outputDir := path.Join(baseOutPath, fn())
 
-	params := &avpipe.TxParams{
+	params := &avpipe.XcParams{
 		BypassTranscoding:  false,
 		Format:             "hls",
 		StartTimeTs:        0,
@@ -397,7 +397,7 @@ func TestSingleABRTranscode(t *testing.T) {
 		Ecodec:             h264Codec,
 		EncHeight:          720,
 		EncWidth:           1280,
-		TxType:             avpipe.TxVideo,
+		XcType:             avpipe.XcVideo,
 		StreamId:           -1,
 		Url:                filename,
 		DebugFrameLevel:    debugFrameLevel,
@@ -405,7 +405,7 @@ func TestSingleABRTranscode(t *testing.T) {
 	setFastEncodeParams(params, false)
 	xcTest(t, outputDir, params, nil)
 
-	params.TxType = avpipe.TxAudio
+	params.XcType = avpipe.XcAudio
 	params.Ecodec2 = "aac"
 	params.NumAudio = -1
 	xcTest(t, outputDir, params, nil)
@@ -415,7 +415,7 @@ func TestSingleABRTranscodeByStreamId(t *testing.T) {
 	filename := videoErstePath
 	outputDir := path.Join(baseOutPath, fn())
 
-	params := &avpipe.TxParams{
+	params := &avpipe.XcParams{
 		BypassTranscoding:  false,
 		Format:             "hls",
 		StartTimeTs:        0,
@@ -446,7 +446,7 @@ func TestSingleABRTranscodeWithWatermark(t *testing.T) {
 	filename := videoErstePath
 	outputDir := path.Join(baseOutPath, fn())
 
-	params := &avpipe.TxParams{
+	params := &avpipe.XcParams{
 		BypassTranscoding:     false,
 		Format:                "hls",
 		StartTimeTs:           0,
@@ -459,7 +459,7 @@ func TestSingleABRTranscodeWithWatermark(t *testing.T) {
 		Ecodec:                h264Codec,
 		EncHeight:             720,
 		EncWidth:              1280,
-		TxType:                avpipe.TxVideo,
+		XcType:                avpipe.XcVideo,
 		WatermarkText:         "This is avpipe watermarking",
 		WatermarkYLoc:         "H*0.5",
 		WatermarkXLoc:         "W/2",
@@ -482,7 +482,7 @@ func TestSingleABRTranscodeWithOverlayWatermark(t *testing.T) {
 	overlayImage, err := ioutil.ReadFile("./media/fox_watermark.png")
 	failNowOnError(t, err)
 
-	params := &avpipe.TxParams{
+	params := &avpipe.XcParams{
 		BypassTranscoding:    false,
 		Format:               "hls",
 		StartTimeTs:          0,
@@ -495,7 +495,7 @@ func TestSingleABRTranscodeWithOverlayWatermark(t *testing.T) {
 		Ecodec:               h264Codec,
 		EncHeight:            720,
 		EncWidth:             1280,
-		TxType:               avpipe.TxVideo,
+		XcType:               avpipe.XcVideo,
 		WatermarkYLoc:        "main_h*0.7",
 		WatermarkXLoc:        "main_w/2-overlay_w/2",
 		WatermarkOverlay:     string(overlayImage),
@@ -513,7 +513,7 @@ func TestV2SingleABRTranscode(t *testing.T) {
 	filename := videoErstePath
 	outputDir := path.Join(baseOutPath, fn())
 
-	params := &avpipe.TxParams{
+	params := &avpipe.XcParams{
 		BypassTranscoding:  false,
 		Format:             "hls",
 		StartTimeTs:        0,
@@ -527,7 +527,7 @@ func TestV2SingleABRTranscode(t *testing.T) {
 		Ecodec:             h264Codec,
 		EncHeight:          720,
 		EncWidth:           1280,
-		TxType:             avpipe.TxVideo,
+		XcType:             avpipe.XcVideo,
 		StreamId:           -1,
 		Url:                filename,
 		DebugFrameLevel:    debugFrameLevel,
@@ -535,7 +535,7 @@ func TestV2SingleABRTranscode(t *testing.T) {
 	setFastEncodeParams(params, false)
 	xcTest(t, outputDir, params, nil)
 
-	params.TxType = avpipe.TxAudio
+	params.XcType = avpipe.XcAudio
 	params.Ecodec2 = "aac"
 	params.NumAudio = 1
 	params.AudioIndex[0] = 1
@@ -546,7 +546,7 @@ func TestV2SingleABRTranscodeIOHandler(t *testing.T) {
 	filename := videoErstePath
 	outputDir := path.Join(baseOutPath, fn())
 
-	params := &avpipe.TxParams{
+	params := &avpipe.XcParams{
 		BypassTranscoding:  false,
 		Format:             "hls",
 		StartTimeTs:        0,
@@ -560,7 +560,7 @@ func TestV2SingleABRTranscodeIOHandler(t *testing.T) {
 		Ecodec:             h264Codec,
 		EncHeight:          720,
 		EncWidth:           1280,
-		TxType:             avpipe.TxVideo,
+		XcType:             avpipe.XcVideo,
 		StreamId:           -1,
 		Url:                filename,
 		DebugFrameLevel:    debugFrameLevel,
@@ -568,7 +568,7 @@ func TestV2SingleABRTranscodeIOHandler(t *testing.T) {
 	setFastEncodeParams(params, false)
 	xcTest(t, outputDir, params, nil)
 
-	params.TxType = avpipe.TxAudio
+	params.XcType = avpipe.XcAudio
 	params.Ecodec2 = "aac"
 	params.NumAudio = 1
 	params.AudioIndex[0] = 1
@@ -580,7 +580,7 @@ func TestV2SingleABRTranscodeCancelling(t *testing.T) {
 	outputDir := path.Join(baseOutPath, fn())
 	boilerplate(t, outputDir, filename)
 
-	params := &avpipe.TxParams{
+	params := &avpipe.XcParams{
 		BypassTranscoding:  false,
 		Format:             "hls",
 		StartTimeTs:        0,
@@ -594,7 +594,7 @@ func TestV2SingleABRTranscodeCancelling(t *testing.T) {
 		Ecodec:             h264Codec,
 		EncHeight:          720,
 		EncWidth:           1280,
-		TxType:             avpipe.TxVideo,
+		XcType:             avpipe.XcVideo,
 		StreamId:           -1,
 		Url:                filename,
 		DebugFrameLevel:    debugFrameLevel,
@@ -603,32 +603,32 @@ func TestV2SingleABRTranscodeCancelling(t *testing.T) {
 	params.EncHeight = 360 // slow down a bit to allow for the cancel
 	params.EncWidth = 640
 
-	handle, err := avpipe.TxInit(params)
+	handle, err := avpipe.XcInit(params)
 	failNowOnError(t, err)
 	assert.Greater(t, handle, int32(0))
 	go func(handle int32) {
 		// Wait for 2 sec the transcoding starts, then cancel it.
 		time.Sleep(2 * time.Second)
-		err := avpipe.TxCancel(handle)
+		err := avpipe.XcCancel(handle)
 		assert.NoError(t, err)
 	}(handle)
-	err2 := avpipe.TxRun(handle)
+	err2 := avpipe.XcRun(handle)
 	assert.Error(t, err2)
 
-	params.TxType = avpipe.TxAudio
+	params.XcType = avpipe.XcAudio
 	params.Ecodec2 = "aac"
 	params.NumAudio = 1
 	params.AudioIndex[0] = 1
-	handleA, err := avpipe.TxInit(params)
+	handleA, err := avpipe.XcInit(params)
 	assert.NoError(t, err)
 	assert.Greater(t, handleA, int32(0))
-	err = avpipe.TxCancel(handleA)
+	err = avpipe.XcCancel(handleA)
 	assert.NoError(t, err)
-	err = avpipe.TxRun(handleA)
+	err = avpipe.XcRun(handleA)
 	assert.Error(t, err)
 }
 
-func doTranscode(t *testing.T, p *avpipe.TxParams, nThreads int, outputDir,
+func doTranscode(t *testing.T, p *avpipe.XcParams, nThreads int, outputDir,
 	filename string, reportFailure string) {
 
 	avpipe.InitIOHandler(&fileInputOpener{url: filename},
@@ -636,8 +636,8 @@ func doTranscode(t *testing.T, p *avpipe.TxParams, nThreads int, outputDir,
 
 	done := make(chan struct{})
 	for i := 0; i < nThreads; i++ {
-		go func(params *avpipe.TxParams) {
-			err := avpipe.Tx(params)
+		go func(params *avpipe.XcParams) {
+			err := avpipe.Xc(params)
 			done <- struct{}{} // Signal the main goroutine
 			if err != nil && reportFailure == "" {
 				failNowOnError(t, err)
@@ -659,7 +659,7 @@ func TestNvidiaABRTranscode(t *testing.T) {
 	filename := videoRockyPath
 	nThreads := 10
 
-	params := &avpipe.TxParams{
+	params := &avpipe.XcParams{
 		Format:             "hls",
 		StartTimeTs:        0,
 		DurationTs:         -1,
@@ -672,7 +672,7 @@ func TestNvidiaABRTranscode(t *testing.T) {
 		Ecodec:             "h264_nvenc",
 		EncHeight:          720,
 		EncWidth:           1280,
-		TxType:             avpipe.TxVideo,
+		XcType:             avpipe.XcVideo,
 		StreamId:           -1,
 		Url:                filename,
 	}
@@ -686,7 +686,7 @@ func TestConcurrentABRTranscode(t *testing.T) {
 	filename := videoRockyPath
 	nThreads := 10
 
-	params := &avpipe.TxParams{
+	params := &avpipe.XcParams{
 		Format:             "hls",
 		StartTimeTs:        0,
 		DurationTs:         -1,
@@ -698,7 +698,7 @@ func TestConcurrentABRTranscode(t *testing.T) {
 		Ecodec:             h264Codec,
 		EncHeight:          720,
 		EncWidth:           1280,
-		TxType:             avpipe.TxVideo,
+		XcType:             avpipe.XcVideo,
 		StreamId:           -1,
 		Url:                filename,
 		DebugFrameLevel:    debugFrameLevel,
@@ -711,7 +711,7 @@ func TestAudioAAC2AACMezMaker(t *testing.T) {
 	filename := "./media/bond-seg1.aac"
 	outputDir := path.Join(baseOutPath, fn())
 
-	params := &avpipe.TxParams{
+	params := &avpipe.XcParams{
 		BypassTranscoding:   false,
 		Format:              "fmp4-segment",
 		StartTimeTs:         0,
@@ -724,7 +724,7 @@ func TestAudioAAC2AACMezMaker(t *testing.T) {
 		SampleRate:          48000,
 		EncHeight:           -1,
 		EncWidth:            -1,
-		TxType:              avpipe.TxAudio,
+		XcType:              avpipe.XcAudio,
 		StreamId:            -1,
 		SyncAudioToStreamId: -1,
 		Url:                 filename,
@@ -743,7 +743,7 @@ func TestAudioAC3Ts2AC3MezMaker(t *testing.T) {
 	filename := "./media/FS1-19-10-15-2-min.ts"
 	outputDir := path.Join(baseOutPath, fn())
 
-	params := &avpipe.TxParams{
+	params := &avpipe.XcParams{
 		BypassTranscoding:   false,
 		Format:              "fmp4-segment",
 		StartTimeTs:         0,
@@ -756,7 +756,7 @@ func TestAudioAC3Ts2AC3MezMaker(t *testing.T) {
 		SampleRate:          48000,
 		EncHeight:           -1,
 		EncWidth:            -1,
-		TxType:              avpipe.TxAudio,
+		XcType:              avpipe.XcAudio,
 		NumAudio:            1,
 		StreamId:            -1,
 		SyncAudioToStreamId: -1,
@@ -777,7 +777,7 @@ func TestAudioAC3Ts2AACMezMaker(t *testing.T) {
 	filename := "./media/FS1-19-10-15-2-min.ts"
 	outputDir := path.Join(baseOutPath, fn())
 
-	params := &avpipe.TxParams{
+	params := &avpipe.XcParams{
 		BypassTranscoding:   false,
 		Format:              "fmp4-segment",
 		StartTimeTs:         0,
@@ -790,7 +790,7 @@ func TestAudioAC3Ts2AACMezMaker(t *testing.T) {
 		SampleRate:          48000,
 		EncHeight:           -1,
 		EncWidth:            -1,
-		TxType:              avpipe.TxAudio,
+		XcType:              avpipe.XcAudio,
 		NumAudio:            1,
 		StreamId:            -1,
 		SyncAudioToStreamId: -1,
@@ -812,7 +812,7 @@ func TestAudioMP2Ts2AACMezMaker(t *testing.T) {
 	filename := "./media/FS1-19-10-15-2-min.ts"
 	outputDir := path.Join(baseOutPath, fn())
 
-	params := &avpipe.TxParams{
+	params := &avpipe.XcParams{
 		BypassTranscoding:   false,
 		Format:              "fmp4-segment",
 		StartTimeTs:         0,
@@ -825,7 +825,7 @@ func TestAudioMP2Ts2AACMezMaker(t *testing.T) {
 		SampleRate:          48000,
 		EncHeight:           -1,
 		EncWidth:            -1,
-		TxType:              avpipe.TxAudio,
+		XcType:              avpipe.XcAudio,
 		NumAudio:            1,
 		StreamId:            -1,
 		SyncAudioToStreamId: -1,
@@ -847,7 +847,7 @@ func TestAudioDownmix2AACMezMaker(t *testing.T) {
 	filename := "./media/BOND23-CLIP-downmix-2min.mov"
 	outputDir := path.Join(baseOutPath, fn())
 
-	params := &avpipe.TxParams{
+	params := &avpipe.XcParams{
 		BypassTranscoding:   false,
 		Format:              "fmp4-segment",
 		StartTimeTs:         0,
@@ -860,7 +860,7 @@ func TestAudioDownmix2AACMezMaker(t *testing.T) {
 		SampleRate:          48000,
 		EncHeight:           -1,
 		EncWidth:            -1,
-		TxType:              avpipe.TxAudio,
+		XcType:              avpipe.XcAudio,
 		ChannelLayout:       avpipe.ChannelLayout("stereo"),
 		NumAudio:            1,
 		StreamId:            -1,
@@ -884,7 +884,7 @@ func TestAudio2MonoTo1Stereo(t *testing.T) {
 	filename := "./media/AGAIG-clip-2mono.mp4"
 	outputDir := path.Join(baseOutPath, fn())
 
-	params := &avpipe.TxParams{
+	params := &avpipe.XcParams{
 		BypassTranscoding:   false,
 		Format:              "fmp4-segment",
 		StartTimeTs:         0,
@@ -893,7 +893,7 @@ func TestAudio2MonoTo1Stereo(t *testing.T) {
 		SegDuration:         "30",
 		Ecodec2:             "aac",
 		Dcodec2:             "",
-		TxType:              avpipe.TxAudioJoin,
+		XcType:              avpipe.XcAudioJoin,
 		ChannelLayout:       avpipe.ChannelLayout("stereo"),
 		NumAudio:            2,
 		StreamId:            -1,
@@ -920,7 +920,7 @@ func TestAudio5_1To5_1(t *testing.T) {
 	filename := "./media/case_1_video_and_5.1_audio.mp4"
 	outputDir := path.Join(baseOutPath, fn())
 
-	params := &avpipe.TxParams{
+	params := &avpipe.XcParams{
 		BypassTranscoding:   false,
 		Format:              "fmp4-segment",
 		StartTimeTs:         0,
@@ -929,7 +929,7 @@ func TestAudio5_1To5_1(t *testing.T) {
 		SegDuration:         "30",
 		Ecodec2:             "aac",
 		Dcodec2:             "",
-		TxType:              avpipe.TxAudio,
+		XcType:              avpipe.XcAudio,
 		StreamId:            -1,
 		SyncAudioToStreamId: -1,
 		Url:                 filename,
@@ -952,7 +952,7 @@ func TestAudio5_1ToStereo(t *testing.T) {
 	filename := "./media/case_1_video_and_5.1_audio.mp4"
 	outputDir := path.Join(baseOutPath, fn())
 
-	params := &avpipe.TxParams{
+	params := &avpipe.XcParams{
 		BypassTranscoding:   false,
 		Format:              "fmp4-segment",
 		StartTimeTs:         0,
@@ -961,7 +961,7 @@ func TestAudio5_1ToStereo(t *testing.T) {
 		SegDuration:         "30",
 		Ecodec2:             "aac",
 		Dcodec2:             "",
-		TxType:              avpipe.TxAudioPan,
+		XcType:              avpipe.XcAudioPan,
 		FilterDescriptor:    "[0:1]pan=stereo|c0<c0+c4+0.707*c2|c1<c1+c5+0.707*c2[aout]",
 		ChannelLayout:       avpipe.ChannelLayout("stereo"),
 		StreamId:            -1,
@@ -986,7 +986,7 @@ func TestAudioMonoToMono(t *testing.T) {
 	filename := "./media/case_1_video_and_mono_audio.mp4"
 	outputDir := path.Join(baseOutPath, fn())
 
-	params := &avpipe.TxParams{
+	params := &avpipe.XcParams{
 		BypassTranscoding:   false,
 		Format:              "fmp4-segment",
 		StartTimeTs:         0,
@@ -995,7 +995,7 @@ func TestAudioMonoToMono(t *testing.T) {
 		SegDuration:         "30",
 		Ecodec2:             "aac",
 		Dcodec2:             "",
-		TxType:              avpipe.TxAudio,
+		XcType:              avpipe.XcAudio,
 		NumAudio:            1,
 		ChannelLayout:       avpipe.ChannelLayout("mono"),
 		StreamId:            -1,
@@ -1021,7 +1021,7 @@ func TestAudioQuadToQuad(t *testing.T) {
 	filename := "./media/case_1_video_and_quad_audio.mp4"
 	outputDir := path.Join(baseOutPath, fn())
 
-	params := &avpipe.TxParams{
+	params := &avpipe.XcParams{
 		BypassTranscoding:   false,
 		Format:              "fmp4-segment",
 		StartTimeTs:         0,
@@ -1030,7 +1030,7 @@ func TestAudioQuadToQuad(t *testing.T) {
 		SegDuration:         "30",
 		Ecodec2:             "aac",
 		Dcodec2:             "",
-		TxType:              avpipe.TxAudio,
+		XcType:              avpipe.XcAudio,
 		NumAudio:            1,
 		ChannelLayout:       avpipe.ChannelLayout("quad"),
 		StreamId:            -1,
@@ -1056,7 +1056,7 @@ func TestAudio6MonoTo5_1(t *testing.T) {
 	filename := "./media/case_2_video_and_8_mono_audio.mp4"
 	outputDir := path.Join(baseOutPath, fn())
 
-	params := &avpipe.TxParams{
+	params := &avpipe.XcParams{
 		BypassTranscoding:   false,
 		Format:              "fmp4-segment",
 		StartTimeTs:         0,
@@ -1065,7 +1065,7 @@ func TestAudio6MonoTo5_1(t *testing.T) {
 		SegDuration:         "30",
 		Ecodec2:             "aac",
 		Dcodec2:             "",
-		TxType:              avpipe.TxAudioMerge,
+		XcType:              avpipe.XcAudioMerge,
 		NumAudio:            6,
 		ChannelLayout:       avpipe.ChannelLayout("5.1"),
 		FilterDescriptor:    "[0:3][0:4][0:5][0:6][0:7][0:8]amerge=inputs=6,pan=5.1|c0=c0|c1=c1|c2=c2| c3=c3|c4=c4|c5=c5[aout]",
@@ -1097,7 +1097,7 @@ func TestAudio6MonoUnequalChannelLayoutsTo5_1(t *testing.T) {
 	filename := "./media/cmbyn_th-2348159_aud-comp-30sec.mov"
 	outputDir := path.Join(baseOutPath, fn())
 
-	params := &avpipe.TxParams{
+	params := &avpipe.XcParams{
 		BypassTranscoding:   false,
 		Format:              "fmp4-segment",
 		StartTimeTs:         0,
@@ -1106,7 +1106,7 @@ func TestAudio6MonoUnequalChannelLayoutsTo5_1(t *testing.T) {
 		SegDuration:         "30",
 		Ecodec2:             "aac",
 		Dcodec2:             "",
-		TxType:              avpipe.TxAudioMerge,
+		XcType:              avpipe.XcAudioMerge,
 		NumAudio:            6,
 		ChannelLayout:       avpipe.ChannelLayout("5.1"),
 		FilterDescriptor:    "[0:0][0:1][0:2][0:3][0:4][0:5]amerge=inputs=6,pan=5.1|c0=c0|c1=c1|c2=c2|c3=c3|c4=c4|c5=c5[aout]",
@@ -1138,7 +1138,7 @@ func TestAudio10Channel_s16To6Channel_5_1(t *testing.T) {
 	filename := "./media/case_3_video_and_10_channel_audio_10sec.mov"
 	outputDir := path.Join(baseOutPath, fn())
 
-	params := &avpipe.TxParams{
+	params := &avpipe.XcParams{
 		BypassTranscoding:   false,
 		Format:              "fmp4-segment",
 		StartTimeTs:         0,
@@ -1147,7 +1147,7 @@ func TestAudio10Channel_s16To6Channel_5_1(t *testing.T) {
 		SegDuration:         "30",
 		Ecodec2:             "aac",
 		Dcodec2:             "",
-		TxType:              avpipe.TxAudioPan,
+		XcType:              avpipe.XcAudioPan,
 		NumAudio:            1,
 		ChannelLayout:       avpipe.ChannelLayout("5.1"),
 		FilterDescriptor:    "[0:1]pan=5.1|c0=c3|c1=c4|c2=c5|c3=c6|c4=c7|c5=c8[aout]",
@@ -1174,7 +1174,7 @@ func TestAudio2Channel1Stereo(t *testing.T) {
 	filename := "./media/multichannel_audio_clip.mov"
 	outputDir := path.Join(baseOutPath, fn())
 
-	params := &avpipe.TxParams{
+	params := &avpipe.XcParams{
 		BypassTranscoding:   false,
 		Format:              "fmp4-segment",
 		StartTimeTs:         0,
@@ -1183,7 +1183,7 @@ func TestAudio2Channel1Stereo(t *testing.T) {
 		SegDuration:         "30",
 		Ecodec2:             "aac",
 		Dcodec2:             "",
-		TxType:              avpipe.TxAudioPan,
+		XcType:              avpipe.XcAudioPan,
 		ChannelLayout:       avpipe.ChannelLayout("stereo"),
 		NumAudio:            1,
 		StreamId:            -1,
@@ -1212,7 +1212,7 @@ func TestIrregularTsMezMaker_1001_60000(t *testing.T) {
 	filename := "./media/BOB923HL_clip_timebase_1001_60000.MXF"
 	outputDir := path.Join(baseOutPath, fn())
 
-	params := &avpipe.TxParams{
+	params := &avpipe.XcParams{
 		BypassTranscoding:   false,
 		Format:              "fmp4-segment",
 		StartTimeTs:         0,
@@ -1223,7 +1223,7 @@ func TestIrregularTsMezMaker_1001_60000(t *testing.T) {
 		Dcodec:              "",
 		EncHeight:           720,
 		EncWidth:            1280,
-		TxType:              avpipe.TxVideo,
+		XcType:              avpipe.XcVideo,
 		StreamId:            -1,
 		SyncAudioToStreamId: -1,
 		ForceKeyInt:         120,
@@ -1248,7 +1248,7 @@ func TestIrregularTsMezMaker_1_24(t *testing.T) {
 	filename := "./media/Rigify-2min.mp4"
 	outputDir := path.Join(baseOutPath, fn())
 
-	params := &avpipe.TxParams{
+	params := &avpipe.XcParams{
 		BypassTranscoding:   false,
 		Format:              "fmp4-segment",
 		StartTimeTs:         0,
@@ -1259,7 +1259,7 @@ func TestIrregularTsMezMaker_1_24(t *testing.T) {
 		Dcodec:              "",
 		EncHeight:           720,
 		EncWidth:            1280,
-		TxType:              avpipe.TxVideo,
+		XcType:              avpipe.XcVideo,
 		StreamId:            -1,
 		SyncAudioToStreamId: -1,
 		ForceKeyInt:         48,
@@ -1289,7 +1289,7 @@ func TestIrregularTsMezMaker_1_10000(t *testing.T) {
 	filename := "./media/Rigify-2min-10000ts.mp4"
 	outputDir := path.Join(baseOutPath, fn())
 
-	params := &avpipe.TxParams{
+	params := &avpipe.XcParams{
 		BypassTranscoding:   false,
 		Format:              "fmp4-segment",
 		StartTimeTs:         0,
@@ -1300,7 +1300,7 @@ func TestIrregularTsMezMaker_1_10000(t *testing.T) {
 		Dcodec:              "",
 		EncHeight:           720,
 		EncWidth:            1280,
-		TxType:              avpipe.TxVideo,
+		XcType:              avpipe.XcVideo,
 		StreamId:            -1,
 		SyncAudioToStreamId: -1,
 		ForceKeyInt:         48,
@@ -1334,7 +1334,7 @@ func TestMXF_H265MezMaker(t *testing.T) {
 	filename := "./media/across_the_universe_4k_clip_60sec.mxf"
 	outputDir := path.Join(baseOutPath, f)
 
-	params := &avpipe.TxParams{
+	params := &avpipe.XcParams{
 		BypassTranscoding: false,
 		Format:            "fmp4-segment",
 		StartTimeTs:       0,
@@ -1345,7 +1345,7 @@ func TestMXF_H265MezMaker(t *testing.T) {
 		Dcodec:            "jpeg2000",
 		EncHeight:         -1,
 		EncWidth:          -1,
-		TxType:            avpipe.TxVideo,
+		XcType:            avpipe.XcVideo,
 		StreamId:          -1,
 		Url:               filename,
 		DebugFrameLevel:   debugFrameLevel,
@@ -1365,7 +1365,7 @@ func TestHEVC_H264MezMaker(t *testing.T) {
 	filename := "./media/across_the_universe_4k_clip_30sec.mp4"
 	outputDir := path.Join(baseOutPath, fn())
 
-	params := &avpipe.TxParams{
+	params := &avpipe.XcParams{
 		BypassTranscoding: false,
 		Format:            "fmp4-segment",
 		StartTimeTs:       0,
@@ -1376,7 +1376,7 @@ func TestHEVC_H264MezMaker(t *testing.T) {
 		Dcodec:            "hevc",
 		EncHeight:         -1,
 		EncWidth:          -1,
-		TxType:            avpipe.TxVideo,
+		XcType:            avpipe.XcVideo,
 		StreamId:          -1,
 		Url:               filename,
 		DebugFrameLevel:   debugFrameLevel,
@@ -1405,7 +1405,7 @@ func TestHEVC_H265ABRTranscode(t *testing.T) {
 	filename := "./media/across_the_universe_4k_clip_30sec.mp4"
 	outputDir := path.Join(baseOutPath, fn())
 
-	params := &avpipe.TxParams{
+	params := &avpipe.XcParams{
 		BypassTranscoding: false,
 		Format:            "dash",
 		StartTimeTs:       0,
@@ -1416,7 +1416,7 @@ func TestHEVC_H265ABRTranscode(t *testing.T) {
 		Dcodec:            "hevc",
 		EncHeight:         -1,
 		EncWidth:          -1,
-		TxType:            avpipe.TxVideo,
+		XcType:            avpipe.XcVideo,
 		StreamId:          -1,
 		Url:               filename,
 		DebugFrameLevel:   debugFrameLevel,
@@ -1429,7 +1429,7 @@ func TestAVPipeStats(t *testing.T) {
 	filename := "./media/Rigify-2min.mp4"
 	outputDir := path.Join(baseOutPath, fn())
 
-	params := &avpipe.TxParams{
+	params := &avpipe.XcParams{
 		BypassTranscoding:   false,
 		Format:              "fmp4-segment",
 		StartTimeTs:         0,
@@ -1441,7 +1441,7 @@ func TestAVPipeStats(t *testing.T) {
 		Ecodec2:             "aac",
 		EncHeight:           720,
 		EncWidth:            1280,
-		TxType:              avpipe.TxAll,
+		XcType:              avpipe.XcAll,
 		StreamId:            -1,
 		SyncAudioToStreamId: -1,
 		ForceKeyInt:         48,
@@ -1488,7 +1488,7 @@ func TestABRMuxing(t *testing.T) {
 
 	// Create video mez files
 	setupOutDir(t, videoMezDir)
-	params := &avpipe.TxParams{
+	params := &avpipe.XcParams{
 		BypassTranscoding: false,
 		Format:            "fmp4-segment",
 		StartTimeTs:       0,
@@ -1501,7 +1501,7 @@ func TestABRMuxing(t *testing.T) {
 		Ecodec:            h264Codec,
 		EncHeight:         720,
 		EncWidth:          1280,
-		TxType:            avpipe.TxVideo,
+		XcType:            avpipe.XcVideo,
 		StreamId:          -1,
 		NumAudio:          -1,
 		Url:               filename,
@@ -1509,39 +1509,39 @@ func TestABRMuxing(t *testing.T) {
 	}
 	setFastEncodeParams(params, false)
 	avpipe.InitUrlIOHandler(filename, &fileInputOpener{url: filename}, &fileOutputOpener{dir: videoMezDir})
-	boilerTx(t, params)
+	boilerXc(t, params)
 
 	log.Debug("STARTING audio mez for muxing", "file", filename)
 	// Create audio mez files
 	setupOutDir(t, audioMezDir)
-	params.TxType = avpipe.TxAudio
+	params.XcType = avpipe.XcAudio
 	params.Ecodec2 = "aac"
 	params.ChannelLayout = avpipe.ChannelLayout("stereo")
 	avpipe.InitUrlIOHandler(filename, &fileInputOpener{url: filename}, &fileOutputOpener{dir: audioMezDir})
-	boilerTx(t, params)
+	boilerXc(t, params)
 
 	// Create video ABR files
 	setupOutDir(t, videoABRDir)
 	filename = videoMezDir + "/vsegment-1.mp4"
 	log.Debug("STARTING video ABR for muxing", "file", filename)
-	params.TxType = avpipe.TxVideo
+	params.XcType = avpipe.XcVideo
 	params.Format = "dash"
 	params.VideoSegDurationTs = 48000
 	params.Url = filename
 	avpipe.InitUrlIOHandler(filename, &fileInputOpener{url: filename}, &fileOutputOpener{dir: videoABRDir})
-	boilerTx(t, params)
+	boilerXc(t, params)
 
 	// Create audio ABR files
 	setupOutDir(t, audioABRDir)
 	filename = audioMezDir + "/asegment-1.mp4"
 	log.Debug("STARTING audio ABR for muxing", "file", filename)
-	params.TxType = avpipe.TxAudio
+	params.XcType = avpipe.XcAudio
 	params.Format = "dash"
 	params.Ecodec2 = "aac"
 	params.AudioSegDurationTs = 96000
 	params.Url = filename
 	avpipe.InitUrlIOHandler(filename, &fileInputOpener{url: filename}, &fileOutputOpener{dir: audioABRDir})
-	boilerTx(t, params)
+	boilerXc(t, params)
 
 	// Create playable file by muxing audio/video segments
 	setupOutDir(t, muxOutDir)
@@ -1578,12 +1578,12 @@ func TestABRMuxing(t *testing.T) {
 }
 
 func TestMarshalParams(t *testing.T) {
-	params := &avpipe.TxParams{
+	params := &avpipe.XcParams{
 		VideoBitrate:       8000000,
 		VideoSegDurationTs: 180000,
 		EncHeight:          720,
 		EncWidth:           1280,
-		TxType:             avpipe.TxVideo,
+		XcType:             avpipe.XcVideo,
 	}
 	bytes, err := json.Marshal(params)
 	assert.NoError(t, err)
@@ -1592,11 +1592,11 @@ func TestMarshalParams(t *testing.T) {
 }
 
 func TestUnmarshalParams(t *testing.T) {
-	var params avpipe.TxParams
-	bytes := []byte(`{"video_bitrate":8000000,"seg_duration_ts":180000,"seg_duration_fr":50,"enc_height":720,"enc_width":1280,"tx_type":1}`)
+	var params avpipe.XcParams
+	bytes := []byte(`{"video_bitrate":8000000,"seg_duration_ts":180000,"seg_duration_fr":50,"enc_height":720,"enc_width":1280,"xc_type":1}`)
 	err := json.Unmarshal(bytes, &params)
 	assert.NoError(t, err)
-	assert.Equal(t, avpipe.TxVideo, int(params.TxType))
+	assert.Equal(t, avpipe.XcVideo, int(params.XcType))
 	// TODO: More checks
 }
 
@@ -1698,7 +1698,7 @@ func TestProbeWithData(t *testing.T) {
 func TestExtractImagesInterval(t *testing.T) {
 	url := videoErstePath
 	outPath := path.Join(baseOutPath, fn())
-	params := &avpipe.TxParams{
+	params := &avpipe.XcParams{
 		Format:                 "image2",
 		AudioBitrate:           128000,
 		AudioSegDurationTs:     -1,
@@ -1719,7 +1719,7 @@ func TestExtractImagesInterval(t *testing.T) {
 		SyncAudioToStreamId:    -1,
 		VideoBitrate:           -1,
 		VideoSegDurationTs:     -1,
-		TxType:                 avpipe.TxExtractImages,
+		XcType:                 avpipe.XcExtractImages,
 		Url:                    url,
 		DebugFrameLevel:        debugFrameLevel,
 	}
@@ -1742,7 +1742,7 @@ func TestExtractImagesInterval(t *testing.T) {
 func TestExtractImagesList(t *testing.T) {
 	url := videoErstePath
 	outPath := path.Join(baseOutPath, fn())
-	params := &avpipe.TxParams{
+	params := &avpipe.XcParams{
 		Format:                 "image2",
 		AudioBitrate:           128000,
 		AudioSegDurationTs:     -1,
@@ -1763,7 +1763,7 @@ func TestExtractImagesList(t *testing.T) {
 		SyncAudioToStreamId:    -1,
 		VideoBitrate:           -1,
 		VideoSegDurationTs:     -1,
-		TxType:                 avpipe.TxExtractImages,
+		XcType:                 avpipe.XcExtractImages,
 		Url:                    url,
 		DebugFrameLevel:        debugFrameLevel,
 	}
@@ -1789,7 +1789,7 @@ func TestExtractImagesListFast(t *testing.T) {
 	url := videoErstePath
 	outPath := path.Join(baseOutPath, fn())
 
-	params := &avpipe.TxParams{
+	params := &avpipe.XcParams{
 		Format:                 "image2",
 		AudioBitrate:           128000,
 		AudioSegDurationTs:     -1,
@@ -1810,7 +1810,7 @@ func TestExtractImagesListFast(t *testing.T) {
 		SyncAudioToStreamId:    -1,
 		VideoBitrate:           -1,
 		VideoSegDurationTs:     -1,
-		TxType:                 avpipe.TxExtractImages,
+		XcType:                 avpipe.XcExtractImages,
 		Url:                    url,
 		DebugFrameLevel:        debugFrameLevel,
 	}
@@ -1833,9 +1833,9 @@ func TestMain(m *testing.M) {
 	os.Exit(m.Run())
 }
 
-func xcTest(t *testing.T, outputDir string, params *avpipe.TxParams, xcTestResult *XcTestResult) {
+func xcTest(t *testing.T, outputDir string, params *avpipe.XcParams, xcTestResult *XcTestResult) {
 	boilerplate(t, outputDir, params.Url)
-	boilerTx(t, params)
+	boilerXc(t, params)
 	boilerProbe(t, xcTestResult)
 }
 
@@ -1885,31 +1885,31 @@ func boilerProbe(t *testing.T, result *XcTestResult) (probeInfoArray []*avpipe.P
 	return
 }
 
-func boilerTx(t *testing.T, params *avpipe.TxParams) {
-	err := avpipe.Tx(params)
+func boilerXc(t *testing.T, params *avpipe.XcParams) {
+	err := avpipe.Xc(params)
 	failNowOnError(t, err)
 }
 
-func xcTest2(t *testing.T, outputDir string, params *avpipe.TxParams, xcTestResult *XcTestResult) {
+func xcTest2(t *testing.T, outputDir string, params *avpipe.XcParams, xcTestResult *XcTestResult) {
 	boilerplate(t, outputDir, params.Url)
-	boilerTx2(t, params)
+	boilerXc2(t, params)
 	boilerProbe(t, xcTestResult)
 }
 
 // This test uses the following new APIs
 // - to obtain a handle of running session:
-//   - TxInit()
+//   - XcInit()
 // - to run the tx session
-//   - TxRun()
-func boilerTx2(t *testing.T, params *avpipe.TxParams) {
-	handle, err := avpipe.TxInit(params)
+//   - XcRun()
+func boilerXc2(t *testing.T, params *avpipe.XcParams) {
+	handle, err := avpipe.XcInit(params)
 	failNowOnError(t, err)
 	assert.Greater(t, handle, int32(0))
-	err = avpipe.TxRun(handle)
+	err = avpipe.XcRun(handle)
 	failNowOnError(t, err)
 }
 
-func setFastEncodeParams(p *avpipe.TxParams, force bool) bool {
+func setFastEncodeParams(p *avpipe.XcParams, force bool) bool {
 	if !force && !testing.Short() {
 		return false
 	}

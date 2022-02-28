@@ -30,7 +30,7 @@ func TestUdpToMp4(t *testing.T) {
 		t.Error(err)
 	}
 
-	XCParams := &avpipe.TxParams{
+	XCParams := &avpipe.XcParams{
 		Format:          "fmp4-segment",
 		Seekable:        false,
 		DurationTs:      -1,
@@ -44,7 +44,7 @@ func TestUdpToMp4(t *testing.T) {
 		Ecodec:          "libx264", // libx264 software / h264_videotoolbox mac hardware
 		EncHeight:       720,       // 1080
 		EncWidth:        1280,      // 1920
-		TxType:          avpipe.TxAll,
+		XcType:          avpipe.XcAll,
 		StreamId:        -1,
 		Url:             url,
 		DebugFrameLevel: debugFrameLevel,
@@ -57,7 +57,7 @@ func TestUdpToMp4(t *testing.T) {
 	avpipe.InitIOHandler(&inputOpener{dir: outputDir}, &outputOpener{dir: outputDir})
 
 	tlog.Info("Transcoding UDP stream start", "params", fmt.Sprintf("%+v", *XCParams))
-	err = avpipe.Tx(XCParams)
+	err = avpipe.Xc(XCParams)
 	tlog.Info("Transcoding UDP stream done", "err", err, "last pts", nil)
 	if err != nil {
 		t.Error("Transcoding UDP stream failed", "err", err)
@@ -66,7 +66,7 @@ func TestUdpToMp4(t *testing.T) {
 	XCParams.Format = "dash"
 	XCParams.Dcodec2 = "aac"
 	XCParams.AudioSegDurationTs = 96106 // almost 2 * 48000
-	XCParams.TxType = avpipe.TxAudio
+	XCParams.XcType = avpipe.XcAudio
 	audioMezFiles := [3]string{"audio-mez-udp-segment-1.mp4", "audio-mez-udp-segment-2.mp4", "audio-mez-udp-segment-3.mp4"}
 
 	// Now create audio dash segments out of audio mezzanines
@@ -77,7 +77,7 @@ func TestUdpToMp4(t *testing.T) {
 			XCParams.Url = url
 			putReqCtxByURL(url, reqCtx)
 			XCParams.StartSegmentStr = fmt.Sprintf("%d", i*15+1)
-			err := avpipe.Tx(XCParams)
+			err := avpipe.Xc(XCParams)
 			tlog.Info("Transcoding Audio Dash done", "err", err)
 			if err != nil {
 				t.Error("Transcoding Audio Dash failed", "err", err, "url", url)
@@ -92,7 +92,7 @@ func TestUdpToMp4(t *testing.T) {
 
 	XCParams.Format = "dash"
 	XCParams.VideoSegDurationTs = 180000 // almost 2 * 90000
-	XCParams.TxType = avpipe.TxVideo
+	XCParams.XcType = avpipe.XcVideo
 	videoMezFiles := [3]string{"video-mez-udp-segment-1.mp4", "video-mez-udp-segment-2.mp4", "video-mez-udp-segment-3.mp4"}
 
 	// Now create video dash segments out of audio mezzanines
@@ -103,7 +103,7 @@ func TestUdpToMp4(t *testing.T) {
 			XCParams.Url = url
 			putReqCtxByURL(url, reqCtx)
 			XCParams.StartSegmentStr = fmt.Sprintf("%d", i*15+1)
-			err := avpipe.Tx(XCParams)
+			err := avpipe.Xc(XCParams)
 			tlog.Info("Transcoding Video Dash done", "err", err)
 			if err != nil {
 				t.Error("Transcoding Video Dash failed", "err", err, "url", url)
@@ -119,7 +119,7 @@ func TestUdpToMp4(t *testing.T) {
 	testComplet <- true
 }
 
-// Cancels the live stream transcoding immediately after initializing the transcoding (after TxInit).
+// Cancels the live stream transcoding immediately after initializing the transcoding (after XcInit).
 func TestUdpToMp4WithCancelling1(t *testing.T) {
 	setupLogging()
 	outputDir := "TestUdpToMp4WithCancelling1"
@@ -138,7 +138,7 @@ func TestUdpToMp4WithCancelling1(t *testing.T) {
 		t.Error(err)
 	}
 
-	XCParams := &avpipe.TxParams{
+	XCParams := &avpipe.XcParams{
 		Format:          "fmp4-segment",
 		Seekable:        false,
 		DurationTs:      -1,
@@ -152,7 +152,7 @@ func TestUdpToMp4WithCancelling1(t *testing.T) {
 		Ecodec:          "libx264", // libx264 software / h264_videotoolbox mac hardware
 		EncHeight:       720,       // 1080
 		EncWidth:        1280,      // 1920
-		TxType:          avpipe.TxAll,
+		XcType:          avpipe.XcAll,
 		StreamId:        -1,
 		Url:             url,
 		DebugFrameLevel: debugFrameLevel,
@@ -165,11 +165,11 @@ func TestUdpToMp4WithCancelling1(t *testing.T) {
 	avpipe.InitIOHandler(&inputOpener{dir: outputDir}, &outputOpener{dir: outputDir})
 
 	tlog.Info("Transcoding UDP stream start", "params", fmt.Sprintf("%+v", *XCParams))
-	handle, err := avpipe.TxInit(XCParams)
+	handle, err := avpipe.XcInit(XCParams)
 	if err != nil {
-		t.Error("TxInitializing UDP stream failed", "err", err)
+		t.Error("XcInitializing UDP stream failed", "err", err)
 	}
-	err = avpipe.TxCancel(handle)
+	err = avpipe.XcCancel(handle)
 	assert.NoError(t, err)
 	if err != nil {
 		t.Error("Cancelling UDP stream failed", "err", err, "url", url)
@@ -179,7 +179,7 @@ func TestUdpToMp4WithCancelling1(t *testing.T) {
 	}
 }
 
-// Cancels the live stream transcoding immediately after starting the transcoding (1 sec after TxRun).
+// Cancels the live stream transcoding immediately after starting the transcoding (1 sec after XcRun).
 func TestUdpToMp4WithCancelling2(t *testing.T) {
 	setupLogging()
 	outputDir := "TestUdpToMp4WithCancelling2"
@@ -199,7 +199,7 @@ func TestUdpToMp4WithCancelling2(t *testing.T) {
 		t.Error(err)
 	}
 
-	XCParams := &avpipe.TxParams{
+	XCParams := &avpipe.XcParams{
 		Format:          "fmp4-segment",
 		Seekable:        false,
 		DurationTs:      -1,
@@ -213,7 +213,7 @@ func TestUdpToMp4WithCancelling2(t *testing.T) {
 		Ecodec:          "libx264", // libx264 software / h264_videotoolbox mac hardware
 		EncHeight:       720,       // 1080
 		EncWidth:        1280,      // 1920
-		TxType:          avpipe.TxAll,
+		XcType:          avpipe.XcAll,
 		StreamId:        -1,
 		Url:             url,
 		DebugFrameLevel: debugFrameLevel,
@@ -226,12 +226,12 @@ func TestUdpToMp4WithCancelling2(t *testing.T) {
 	avpipe.InitIOHandler(&inputOpener{dir: outputDir}, &outputOpener{dir: outputDir})
 
 	tlog.Info("Transcoding UDP stream start", "params", fmt.Sprintf("%+v", *XCParams))
-	handle, err := avpipe.TxInit(XCParams)
+	handle, err := avpipe.XcInit(XCParams)
 	if err != nil {
-		t.Error("TxInitializing UDP stream failed", "err", err)
+		t.Error("XcInitializing UDP stream failed", "err", err)
 	}
 	go func() {
-		err := avpipe.TxRun(handle)
+		err := avpipe.XcRun(handle)
 		if err != nil && err != avpipe.EAV_CANCELLED {
 			t.Error("Transcoding UDP stream failed", "err", err)
 		}
@@ -241,7 +241,7 @@ func TestUdpToMp4WithCancelling2(t *testing.T) {
 	// Wait 1 second for transcoding to start
 	time.Sleep(1 * time.Second)
 
-	err = avpipe.TxCancel(handle)
+	err = avpipe.XcCancel(handle)
 	assert.NoError(t, err)
 	if err != nil {
 		t.Error("Cancelling UDP stream failed", "err", err)
@@ -253,7 +253,7 @@ func TestUdpToMp4WithCancelling2(t *testing.T) {
 	<-done
 }
 
-// Cancels the live stream transcoding some time after starting the transcoding (20 sec after TxRun).
+// Cancels the live stream transcoding some time after starting the transcoding (20 sec after XcRun).
 func TestUdpToMp4WithCancelling3(t *testing.T) {
 	setupLogging()
 	outputDir := "TestUdpToMp4WithCancelling3"
@@ -273,7 +273,7 @@ func TestUdpToMp4WithCancelling3(t *testing.T) {
 		t.Error(err)
 	}
 
-	XCParams := &avpipe.TxParams{
+	XCParams := &avpipe.XcParams{
 		Format:          "fmp4-segment",
 		Seekable:        false,
 		DurationTs:      -1,
@@ -287,7 +287,7 @@ func TestUdpToMp4WithCancelling3(t *testing.T) {
 		Ecodec:          "libx264", // libx264 software / h264_videotoolbox mac hardware
 		EncHeight:       720,       // 1080
 		EncWidth:        1280,      // 1920
-		TxType:          avpipe.TxAll,
+		XcType:          avpipe.XcAll,
 		StreamId:        -1,
 		Url:             url,
 		DebugFrameLevel: debugFrameLevel,
@@ -300,12 +300,12 @@ func TestUdpToMp4WithCancelling3(t *testing.T) {
 	avpipe.InitIOHandler(&inputOpener{dir: outputDir}, &outputOpener{dir: outputDir})
 
 	tlog.Info("Transcoding UDP stream start", "params", fmt.Sprintf("%+v", *XCParams))
-	handle, err := avpipe.TxInit(XCParams)
+	handle, err := avpipe.XcInit(XCParams)
 	if err != nil {
-		t.Error("TxInitializing UDP stream failed", "err", err)
+		t.Error("XcInitializing UDP stream failed", "err", err)
 	}
 	go func() {
-		err := avpipe.TxRun(handle)
+		err := avpipe.XcRun(handle)
 		if err != nil && err != avpipe.EAV_CANCELLED {
 			t.Error("Transcoding UDP stream failed", "err", err)
 		}
@@ -315,7 +315,7 @@ func TestUdpToMp4WithCancelling3(t *testing.T) {
 	// Wait 20 second for transcoding to start
 	time.Sleep(20 * time.Second)
 
-	err = avpipe.TxCancel(handle)
+	err = avpipe.XcCancel(handle)
 	assert.NoError(t, err)
 	if err != nil {
 		t.Error("Cancelling UDP stream failed", "err", err, "url", url)
@@ -327,7 +327,7 @@ func TestUdpToMp4WithCancelling3(t *testing.T) {
 	<-done
 }
 
-// Cancels the live stream transcoding immediately 1 sec after starting the transcoding (after TxRun), while there is no source.
+// Cancels the live stream transcoding immediately 1 sec after starting the transcoding (after XcRun), while there is no source.
 func TestUdpToMp4WithCancelling4(t *testing.T) {
 	setupLogging()
 	outputDir := "TestUdpToMp4WithCancelling4"
@@ -347,7 +347,7 @@ func TestUdpToMp4WithCancelling4(t *testing.T) {
 		t.Error(err)
 	}
 
-	XCParams := &avpipe.TxParams{
+	XCParams := &avpipe.XcParams{
 		Format:          "fmp4-segment",
 		Seekable:        false,
 		DurationTs:      -1,
@@ -361,7 +361,7 @@ func TestUdpToMp4WithCancelling4(t *testing.T) {
 		Ecodec:          "libx264", // libx264 software / h264_videotoolbox mac hardware
 		EncHeight:       720,       // 1080
 		EncWidth:        1280,      // 1920
-		TxType:          avpipe.TxAll,
+		XcType:          avpipe.XcAll,
 		StreamId:        -1,
 		Url:             url,
 		DebugFrameLevel: debugFrameLevel,
@@ -373,13 +373,13 @@ func TestUdpToMp4WithCancelling4(t *testing.T) {
 	avpipe.InitIOHandler(&inputOpener{dir: outputDir}, &outputOpener{dir: outputDir})
 	tlog.Info("Transcoding UDP stream start", "params", fmt.Sprintf("%+v", *XCParams))
 
-	handle, err := avpipe.TxInit(XCParams)
+	handle, err := avpipe.XcInit(XCParams)
 	if err != nil {
-		t.Error("TxInitializing UDP stream failed", "err", err)
+		t.Error("XcInitializing UDP stream failed", "err", err)
 	}
 
 	go func() {
-		err := avpipe.TxRun(handle)
+		err := avpipe.XcRun(handle)
 		if err != nil && err != avpipe.EAV_CANCELLED {
 			t.Error("Transcoding UDP stream failed", "err", err)
 		}
@@ -389,7 +389,7 @@ func TestUdpToMp4WithCancelling4(t *testing.T) {
 	time.Sleep(1 * time.Second)
 	liveSource.Stop()
 
-	err = avpipe.TxCancel(handle)
+	err = avpipe.XcCancel(handle)
 	assert.NoError(t, err)
 	if err != nil {
 		t.Error("Cancelling UDP stream failed", "err", err, "url", url)

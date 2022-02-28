@@ -35,13 +35,13 @@ func (l *LiveSource) Start() (err error) {
 
 	var ffmpeg string
 
-	if toolchain, ok := os.LookupEnv("ELV_TOOLCHAIN"); ok {
+	if toolchain, ok := os.LookupEnv("FFMPEG_DIST"); ok {
 		ffmpeg = filepath.Join(toolchain, "bin/ffmpeg")
 		if _, err = os.Stat(ffmpeg); err != nil {
-			log.Warn("ffmpeg in ELV_TOOLCHAIN not found", "command", ffmpeg)
+			log.Warn("ffmpeg in FFMPEG_DIST not found", "command", ffmpeg)
 			ffmpeg = ""
 		} else {
-			log.Debug("using ffmpeg from ELV_TOOLCHAIN", "command", ffmpeg)
+			log.Debug("using ffmpeg from FFMPEG_DIST", "command", ffmpeg)
 		}
 	}
 

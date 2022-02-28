@@ -14,7 +14,7 @@ init_video_filters(
     const char *filters_descr,
     coderctx_t *decoder_context,
     coderctx_t *encoder_context,
-    txparams_t *params)
+    xcparams_t *params)
 {
     AVCodecContext *dec_codec_ctx = decoder_context->codec_context[decoder_context->video_stream_index];
 
@@ -126,7 +126,7 @@ int
 init_audio_filters(
     coderctx_t *decoder_context,
     coderctx_t *encoder_context,
-    txparams_t *params)
+    xcparams_t *params)
 {
     if (decoder_context->n_audio < 0) {
         return eav_num_streams;
@@ -550,7 +550,7 @@ int
 init_audio_join_filters(
     coderctx_t *decoder_context,
     coderctx_t *encoder_context,
-    txparams_t *params)
+    xcparams_t *params)
 {
     if (decoder_context->n_audio < 0 ||
         decoder_context->n_audio > MAX_AUDIO_MUX) {
