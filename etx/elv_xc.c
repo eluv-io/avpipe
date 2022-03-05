@@ -44,6 +44,7 @@ typedef struct udp_thread_params_t {
     int             fd;             /* Socket fd to read UDP datagrams */
     elv_channel_t   *udp_channel;   /* udp channel to keep incomming UDP packets */
     socklen_t       salen;
+    ioctx_t         *inctx;
 } udp_thread_params_t;
 
 void *
@@ -51,24 +52,67 @@ udp_thread_func(
     void *thread_params)
 {
     udp_thread_params_t *params = (udp_thread_params_t *) thread_params;
+    xcparams_t *xcparams = params->inctx->params;
+    int debug_frame_level = (xcparams != NULL) ? xcparams->debug_frame_level : 0;
+    char *url = (xcparams != NULL) ? xcparams->url : "";
     struct sockaddr     ca;
     socklen_t len;
     udp_packet_t *udp_packet;
+    int ret;
+    int first = 1;
 
     int pkt_num = 0;
+    int timedout = 0;
+
     for ( ; ; ) {
-        if (readable_timeout(params->fd, UDP_PIPE_TIMEOUT) <= 0) {
-            elv_log("UDP recv timeout");
+        if (params->inctx->closed)
             break;
+
+        ret = readable_timeout(params->fd, 1);
+        if (ret == -1) {
+            if (errno == EINTR)
+                continue;
+            elv_err("UDP select error fd=%d, err=%d, url=%s", params->fd, errno, url);
+            break;
+        } else if (ret == 0) {
+            /* If no packet has not received yet, continue */
+            if (first)
+                continue;
+            if (timedout++ == UDP_PIPE_TIMEOUT) {
+                elv_err("UDP recv timeout fd=%d, url=%s", params->fd, url);
+                break;
+            }
+            continue;
         }
 
         len = params->salen;
         udp_packet = (udp_packet_t *) calloc(1, sizeof(udp_packet_t));
         
+recv_again:
+        if (params->inctx->closed)
+            break;
         udp_packet->len = recvfrom(params->fd, udp_packet->buf, MAX_UDP_PKT_LEN, 0, &ca, &len);
+        if (udp_packet->len < 0) {
+            if (errno == EINTR)
+                goto recv_again;
+            elv_err("UDP recvfrom fd=%d, errno=%d, url=%s", params->fd, errno, url);
+            break;
+        }
+
+        if (first) {
+            first = 0;
+            elv_log("UDP FIRST url=%s", url);
+        }
+
         pkt_num++;
-        elv_channel_send(params->udp_channel, udp_packet);
-        elv_log("Received UDP packet=%d, len=%d", pkt_num, udp_packet->len);
+        udp_packet->pkt_num = pkt_num;
+        /* If the channel is closed, exit the thread */
+        if (elv_channel_send(params->udp_channel, udp_packet) < 0) {
+            break;
+        }
+        if (debug_frame_level)
+            elv_dbg("Received UDP packet=%d, len=%d, url=%s", pkt_num, udp_packet->len, url);
+        timedout = 0;
     }
 
     return NULL;
@@ -140,6 +184,7 @@ in_opener(
         params->fd = fd;
         params->salen = salen;
         params->udp_channel = inctx->udp_channel;
+        params->inctx = inctx;
 
         pthread_create(&inctx->utid, NULL, udp_thread_func, params);
 
@@ -240,10 +285,27 @@ in_read_packet(
             return r;        
         }
 
+read_channel_again:
+        if (c->closed)
+            return -1;
+
         rc = elv_channel_timed_receive(c->udp_channel, UDP_PIPE_TIMEOUT*1000000, (void **)&udp_packet);
         if (rc == ETIMEDOUT) {
-            elv_dbg("TIMEDOUT in UDP rcv channel");
+            if (c->is_udp_started) {
+                elv_log("TIMEDOUT in UDP rcv channel, url=%s", c->url);
+                return -1;
+            }
+            goto read_channel_again;
+        }
+
+        if (rc == EPIPE || elv_channel_is_closed(c->udp_channel)) {
+            elv_dbg("IN READ UDP channel closed, url=%s", c->url);
             return -1;
+        }
+
+        if (!c->is_udp_started) {
+            elv_log("READ first UDP packet url=%d", c->url);
+            c->is_udp_started = 1;
         }
 
         r = buf_size > udp_packet->len ? udp_packet->len : buf_size;
@@ -1048,7 +1110,7 @@ usage(
         "\t-extract-images-ts :     (optional) Write frames at these timestamps (comma separated). Mutually exclusive with extract-image-interval-ts\n"
         "\t-f :                     (mandatory) Input filename for transcoding. Valid formats are: a filename that points to a valid file, or udp://127.0.0.1:<port>.\n"
         "\t                                    Output goes to directory ./O\n"
-        "\t-filter-descriptor :     (mandatory if tx-type is audio-pan). Audio filter descriptor the same as ffmpeg format.\n"
+        "\t-filter-descriptor :     (mandatory if xc-type is audio-pan). Audio filter descriptor the same as ffmpeg format.\n"
         "\t                                    For example: -filter-descriptor [0:1]pan=stereo|c0<c1+0.707*c2|c1<c2+0.707*c1[aout]\n"
         "\t-format :                (optional) Package format. Default is \"dash\", can be: \"dash\", \"hls\", \"mp4\", \"fmp4\", \"segment\", \"fmp4-segment\", or \"image2\"\n"
         "\t                                    Using \"segment\" format produces self contained mp4 segments with start pts from 0 for each segment\n"
@@ -1078,7 +1140,7 @@ usage(
         "\t-stream-id :             (optional) Default: -1, if it is valid it will be used to transcode elementary stream with that stream-id.\n"
         "\t-sync-audio-to-stream-id:(optional) Default: -1, sync audio to video iframe of specific stream-id when input stream is mpegts.\n"
         "\t-t :                     (optional) Transcoding threads. Default is 1 thread, must be bigger than 1\n"
-        "\t-tx-type :               (optional) Transcoding type. Default is \"all\", can be \"video\", \"audio\", \"audio-merge\", \"audio-join\", \"audio-pan\", \"all\", or \"extract-images\"\n"
+        "\t-xc-type :               (optional) Transcoding type. Default is \"all\", can be \"video\", \"audio\", \"audio-merge\", \"audio-join\", \"audio-pan\", \"all\", or \"extract-images\"\n"
         "\t                                    \"all\" means transcoding video and audio together.\n"
         "\t-video-bitrate :         (optional) Mutually exclusive with crf. Default: -1 (unused)\n"
         "\t-video-seg-duration-ts : (mandatory If format is not \"segment\" and transcoding video) video segment duration time base (positive integer).\n"
@@ -1465,18 +1527,7 @@ main(
             }
             break;
         case 't':
-            if (!strcmp(argv[i], "-tx-type")) {
-                if (strcmp(argv[i+1], "all") &&
-                    strcmp(argv[i+1], "video") &&
-                    strcmp(argv[i+1], "audio") &&
-                    strcmp(argv[i+1], "audio-join") &&
-                    strcmp(argv[i+1], "audio-pan") &&
-                    strcmp(argv[i+1], "audio-merge") &&
-                    strcmp(argv[i+1], "extract-images")) {
-                    usage(argv[0], argv[i], EXIT_FAILURE);
-                }
-                p.xc_type = xc_type_from_string(argv[i+1]);
-            } else if (sscanf(argv[i+1], "%d", &n_threads) != 1) {
+            if (sscanf(argv[i+1], "%d", &n_threads) != 1) {
                 usage(argv[0], argv[i], EXIT_FAILURE);
             }
             if ( n_threads < 1 ) usage(argv[0], argv[i], EXIT_FAILURE);
@@ -1534,6 +1585,20 @@ main(
                 p.watermark_shadow_color = strdup(argv[i+1]);
             } else {
                 usage(argv[0], argv[i], EXIT_FAILURE);
+            }
+            break;
+        case 'x':
+            if (!strcmp(argv[i], "-xc-type")) {
+                if (strcmp(argv[i+1], "all") &&
+                    strcmp(argv[i+1], "video") &&
+                    strcmp(argv[i+1], "audio") &&
+                    strcmp(argv[i+1], "audio-join") &&
+                    strcmp(argv[i+1], "audio-pan") &&
+                    strcmp(argv[i+1], "audio-merge") &&
+                    strcmp(argv[i+1], "extract-images")) {
+                    usage(argv[0], argv[i], EXIT_FAILURE);
+                }
+                p.xc_type = xc_type_from_string(argv[i+1]);
             }
             break;
         default:

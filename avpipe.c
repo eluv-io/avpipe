@@ -426,7 +426,7 @@ udp_in_opener(
     params->inctx = inctx;
 
     pthread_create(&inctx->utid, NULL, udp_thread_func, params);
-    elv_dbg("IN OPEN UDP fd=%d url=%s, tid=%"PRId64, fd, url, inctx->utid);
+    elv_dbg("IN OPEN UDP fd=%d, sockfd=%d, url=%s, tid=%"PRId64, fd, sockfd, url, inctx->utid);
     return 0;
 }
 
@@ -437,10 +437,11 @@ udp_in_closer(
     if (!inctx->opaque)
         return 0;
 
-    int fd = *((int *)((int64_t *)inctx->opaque+1));
-    elv_dbg("IN CLOSE UDP fd=%d, url=%s\n", fd, inctx->url);
+    int fd = *((int64_t *)inctx->opaque);
+    int sockfd = *((int *)((int64_t *)inctx->opaque+1));
+    elv_dbg("IN CLOSE UDP fd=%d, sockfd=%d, url=%s\n", fd, sockfd, inctx->url);
     free(inctx->opaque);
-    close(fd);
+    close(sockfd);
     return 0;
 }
 
@@ -479,18 +480,30 @@ udp_in_read_packet(
 
         /*
          * If there is no source then avpipe_init() would block forever when preparing decoder.
-         * In this situation, cancelling a transcoding would become impossible since tx_init() has not completed yet.
-         * In order to avoid this situation, there will be a 60 sec timeout.
+         * In this situation, cancelling a transcoding would become impossible since xc_init() has not completed yet.
+         * In order to avoid this situation, there will be a UDP_PIPE_TIMEOUT sec timeout when reading from channel.
          */
+read_channel_again:
+        if (c->closed)
+            return -1;
+
         rc = elv_channel_timed_receive(c->udp_channel, UDP_PIPE_TIMEOUT*1000000, (void **)&udp_packet);
         if (rc == ETIMEDOUT) {
-            elv_dbg("TIMEDOUT in UDP rcv channel, url=%s", c->url);
-            return -1;
+            if (c->is_udp_started) {
+                elv_log("TIMEDOUT in UDP rcv channel, url=%s", c->url);
+                return -1;
+            }
+            goto read_channel_again;
         }
 
         if (rc == EPIPE || elv_channel_is_closed(c->udp_channel)) {
             elv_dbg("IN READ UDP channel closed, url=%s", c->url);
             return -1;
+        }
+
+        if (!c->is_udp_started) {
+            elv_log("READ first UDP packet url=%d", c->url);
+            c->is_udp_started = 1;
         }
 
         r = buf_size > udp_packet->len ? udp_packet->len : buf_size;

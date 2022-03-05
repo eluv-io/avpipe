@@ -133,6 +133,7 @@ typedef struct ioctx_t {
     struct coderctx_t   *encoder_ctx;   /* Needed to get access for stats */
     elv_channel_t       *udp_channel;   /* This is set if input is a UDP url */
     udp_packet_t        *cur_packet;    /* Current UDP packet not consumed fully */
+    int                 is_udp_started; /* Is the first UDP read started? */
     int                 cur_pread;      /* Current packet read */
     pthread_t           utid;           /* UDP thread id */
 
