@@ -116,6 +116,35 @@ end:
     return ret;
 }
 
+static void
+get_avfilter_args(
+    coderctx_t *decoder_context,
+    int index,
+    char *args,
+    int len)
+{
+    AVCodecContext *dec_codec_ctx = decoder_context->codec_context[index];
+    AVStream *s = decoder_context->format_context->streams[index];
+
+    if (!dec_codec_ctx->channel_layout)
+        dec_codec_ctx->channel_layout = av_get_default_channel_layout(dec_codec_ctx->channels);
+
+    if (dec_codec_ctx->channel_layout == 0)
+        snprintf(args, len,
+            "time_base=%d/%d:sample_rate=%d:sample_fmt=%s:channels=%d",
+            s->time_base.num, s->time_base.den,
+            dec_codec_ctx->sample_rate,
+            av_get_sample_fmt_name(dec_codec_ctx->sample_fmt),
+            dec_codec_ctx->channels);
+    else
+        snprintf(args, len,
+            "time_base=%d/%d:sample_rate=%d:sample_fmt=%s:channel_layout=0x%"PRIx64,
+            s->time_base.num, s->time_base.den,
+            dec_codec_ctx->sample_rate,
+            av_get_sample_fmt_name(dec_codec_ctx->sample_fmt),
+            dec_codec_ctx->channel_layout);
+}
+
 /*
  * @brief   Used to initialize audio filter.
  * @return  Returns 0 if successful.
@@ -143,7 +172,6 @@ init_audio_filters(
     const AVFilter *buffersink = avfilter_get_by_name("abuffersink");
     const AVFilter *aformat = avfilter_get_by_name("aformat");
     AVFilterGraph *filter_graph;
-    AVStream *s = decoder_context->format_context->streams[decoder_context->audio_stream_index[0]];
 
     if (!dec_codec_ctx) {
         elv_err("init_audio_filters, audio decoder was not initialized!");
@@ -158,15 +186,7 @@ init_audio_filters(
         goto end;
     }
 
-    if (!dec_codec_ctx->channel_layout)
-        dec_codec_ctx->channel_layout = av_get_default_channel_layout(dec_codec_ctx->channels);
-
-    snprintf(args, sizeof(args),
-        "time_base=%d/%d:sample_rate=%d:sample_fmt=%s:channel_layout=0x%"PRIx64,
-        s->time_base.num, s->time_base.den,
-        dec_codec_ctx->sample_rate,
-        av_get_sample_fmt_name(dec_codec_ctx->sample_fmt),
-        dec_codec_ctx->channel_layout);
+    get_avfilter_args(decoder_context, decoder_context->audio_stream_index[0], args, sizeof(args));
     elv_dbg("init_audio_filters, audio srcfilter args=%s", args);
 
     /* decoder_context->n_audio is 1 */
@@ -285,7 +305,6 @@ init_audio_pan_filters(
     const AVFilter *buffersink = avfilter_get_by_name("abuffersink");
     const AVFilter *bufferformat = avfilter_get_by_name("aformat");
     AVFilterGraph *filter_graph;
-    AVStream *s = decoder_context->format_context->streams[decoder_context->audio_stream_index[0]];
 
     if (!dec_codec_ctx) {
         elv_err("init_audio_pan_filters, audio decoder was not initialized!");
@@ -300,16 +319,8 @@ init_audio_pan_filters(
         goto end;
     }
 
-    if (!dec_codec_ctx->channel_layout)
-        dec_codec_ctx->channel_layout = av_get_default_channel_layout(dec_codec_ctx->channels);
-
-    snprintf(args, sizeof(args),
-        "time_base=%d/%d:sample_rate=%d:sample_fmt=%s:channel_layout=0x%"PRIx64,
-        s->time_base.num, s->time_base.den,
-        dec_codec_ctx->sample_rate,
-        av_get_sample_fmt_name(dec_codec_ctx->sample_fmt),
-        dec_codec_ctx->channel_layout);
-    elv_dbg("Audio srcfilter args=%s", args);
+    get_avfilter_args(decoder_context, decoder_context->audio_stream_index[0], args, sizeof(args));
+    elv_dbg("init_audio_pan_filters srcfilter args=%s", args);
 
     /* decoder_context->n_audio is 1 */
     abuffersrc_ctx = decoder_context->audio_buffersrc_ctx;
@@ -436,7 +447,6 @@ init_audio_merge_pan_filters(
     const AVFilter *buffersrc = avfilter_get_by_name("abuffer");
     const AVFilter *buffersink = avfilter_get_by_name("abuffersink");
     AVFilterGraph *filter_graph;
-    AVStream *s = decoder_context->format_context->streams[decoder_context->audio_stream_index[0]];
     char *source_names[] = {"in_0", "in_1", "in_2", "in_3", "in_4", "in_5", "in_6", "in_7"};
 
     filter_graph = avfilter_graph_alloc();
@@ -491,16 +501,7 @@ init_audio_merge_pan_filters(
             goto end;
         }
 
-        if (!dec_codec_ctx->channel_layout)
-            dec_codec_ctx->channel_layout = av_get_default_channel_layout(dec_codec_ctx->channels);
-
-        /* Set the parameters of each input stream */
-        snprintf(args, sizeof(args),
-            "time_base=%d/%d:sample_rate=%d:sample_fmt=%s:channel_layout=0x%"PRIx64,
-            s->time_base.num, s->time_base.den,
-            dec_codec_ctx->sample_rate,
-            av_get_sample_fmt_name(dec_codec_ctx->sample_fmt),
-            dec_codec_ctx->channel_layout);
+        get_avfilter_args(decoder_context, decoder_context->audio_stream_index[i], args, sizeof(args));
         elv_dbg("init_audio_merge_pan_filters, audio srcfilter args=%s", args);
 
         ret = avfilter_graph_create_filter(&abuffersrc_ctx[i], buffersrc, source_names[i], args, NULL, filter_graph);
@@ -590,7 +591,6 @@ init_audio_join_filters(
     /* For each audio input create an audio source filter and link it to join filter */
     for (int i=0; i<decoder_context->n_audio; i++) {
         AVCodecContext *dec_codec_ctx = decoder_context->codec_context[decoder_context->audio_stream_index[i]];
-        AVStream *s = decoder_context->format_context->streams[decoder_context->audio_stream_index[i]];
         char filt_name[32];
 
         if (!dec_codec_ctx) {
@@ -599,15 +599,7 @@ init_audio_join_filters(
             goto end;
         }
 
-        if (!dec_codec_ctx->channel_layout)
-            dec_codec_ctx->channel_layout = av_get_default_channel_layout(dec_codec_ctx->channels);
-
-        snprintf(args, sizeof(args),
-            "time_base=%d/%d:sample_rate=%d:sample_fmt=%s:channel_layout=0x%"PRIx64,
-            s->time_base.num, s->time_base.den,
-            dec_codec_ctx->sample_rate,
-            av_get_sample_fmt_name(dec_codec_ctx->sample_fmt),
-            dec_codec_ctx->channel_layout);
+        get_avfilter_args(decoder_context, decoder_context->audio_stream_index[i], args, sizeof(args));
 
         sprintf(filt_name, "in_%d", i);
         elv_dbg("init_audio_join_filters, audio srcfilter=%s args=%s", filt_name, args);
