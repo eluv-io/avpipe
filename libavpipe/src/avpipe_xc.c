@@ -883,6 +883,54 @@ set_h265_params(
      */
 }
 
+static void
+set_netint_h264_params(
+    coderctx_t *encoder_context,
+    coderctx_t *decoder_context,
+    xcparams_t *params)
+{
+    char enc_params[256];
+    int index = decoder_context->video_stream_index;
+    AVCodecContext *encoder_codec_context = encoder_context->codec_context[index];
+    AVStream *s = decoder_context->stream[decoder_context->video_stream_index];
+
+    if (params->force_keyint > 0)
+        sprintf(enc_params, "gopPresetIdx=2:lowDelay=1:frameRate=%d:frameRateDenom=%d:intraPeriod=%d",
+            s->avg_frame_rate.num, s->avg_frame_rate.den, params->force_keyint);
+    else
+        sprintf(enc_params, "gopPresetIdx=2:lowDelay=1:frameRate=%d:frameRateDenom=%d",
+            s->avg_frame_rate.num, s->avg_frame_rate.den);
+    elv_dbg("set_netint_h264_params encoding params=%s, url=%s", enc_params, params->url);
+    av_opt_set(encoder_codec_context->priv_data, "xcoder-params", enc_params, 0);
+}
+
+static void
+set_netint_h265_params(
+    coderctx_t *encoder_context,
+    coderctx_t *decoder_context,
+    xcparams_t *params)
+{
+    char enc_params[256];
+    int profile;
+    int index = decoder_context->video_stream_index;
+    AVCodecContext *encoder_codec_context = encoder_context->codec_context[index];
+    AVStream *s = decoder_context->stream[decoder_context->video_stream_index];
+
+    /*
+     * netint only supports bitdepth of 8 and 10 for h265.
+     * 1 = profile main, for bitdepth 8
+     * 2 = profile main10, for bitdepth 10
+     */
+    if (params->bitdepth == 8)
+        profile = 1;
+    else
+        profile = 2;
+    sprintf(enc_params, "gopPresetIdx=2:lowDelay=1:profile=%d:frameRate=%d:frameRateDenom=%d",
+        profile, s->avg_frame_rate.num, s->avg_frame_rate.den);
+    elv_dbg("set_netint_h265_params encoding params=%s, url=%s", enc_params, params->url);
+    av_opt_set(encoder_codec_context->priv_data, "xcoder-params", enc_params, 0);
+}
+
 /* Borrowed from libavcodec/nvenc.h since it is not exposed */
 enum {
     NV_ENC_H264_PROFILE_BASELINE,
@@ -1151,6 +1199,12 @@ prepare_video_encoder(
     else if (!strcmp(params->ecodec, "libx265"))
         /* Set H265 specific params (profile and level) */
         set_h265_params(encoder_context, decoder_context, params);
+    else if (!strcmp(params->ecodec, "h264_ni_enc"))
+        /* Set netint H264 codensity params */
+        set_netint_h264_params(encoder_context, decoder_context, params);
+    else if (!strcmp(params->ecodec, "h265_ni_enc"))
+        /* Set netint H265 codensity params */
+        set_netint_h265_params(encoder_context, decoder_context, params);
     else
         /* Set H264 specific params (profile and level) */
         set_h264_params(encoder_context, decoder_context, params);
@@ -2167,6 +2221,10 @@ transcode_audio(
 
     response = avcodec_send_packet(codec_context, packet);
     if (response < 0) {
+        /*
+         * AVERROR_INVALIDDATA means the frame is invalid (mostly because of bad header).
+         * Ignore the error and continue.
+         */
         elv_err("Failure while sending an audio packet to the decoder: err=%d, %s, url=%s",
             response, av_err2str(response), p->url);
         // Ignore the error and continue
@@ -2268,6 +2326,10 @@ transcode_audio_aac(
 
     response = avcodec_send_packet(codec_context, packet);
     if (response < 0) {
+        /*
+         * AVERROR_INVALIDDATA means the frame is invalid (mostly because of bad header).
+         * Ignore the error and continue.
+         */
         elv_err("Failure while sending an audio packet to the decoder: err=%d, %s, url=%s",
             response, av_err2str(response), p->url);
         // Ignore the error and continue
@@ -3878,7 +3940,6 @@ avpipe_probe(
             stream_probes_ptr->display_aspect_ratio = dar;
         } else {
             stream_probes_ptr->sample_aspect_ratio = codec_context->sample_aspect_ratio;
-            stream_probes_ptr->display_aspect_ratio = s->display_aspect_ratio;
         }
 
         stream_probes_ptr->frame_rate = s->r_frame_rate;

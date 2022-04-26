@@ -999,6 +999,10 @@ func AVPipeCloseMuxOutput(fd C.int64_t) C.int {
 
 func (h *ioHandler) OutCloser(fd C.int64_t) error {
 	outHandler := h.getOutTable(int64(fd))
+	if outHandler == nil {
+		log.Warn("OutCloser() outHandler already closed", "fd", int64(fd))
+		return nil
+	}
 	err := outHandler.Close()
 	log.Debug("OutCloser()", "fd", int64(fd), "error", err)
 	return err

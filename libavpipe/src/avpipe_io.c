@@ -209,12 +209,17 @@ elv_io_close(
         outctx != NULL ? outctx->url : "", outctx != NULL ? outctx->stream_index : -1, outctx != NULL ? outctx->seg_index : -1, pb, pb->opaque, avioctx->buffer,
 	    out_tracker != NULL ? out_tracker[0].last_outctx : 0, out_tracker != NULL ? out_tracker[1].last_outctx : 0);
     if (out_handlers) {
+#if 0
+        // PENDING (RM): this crashes with ffmpeg-4.4, needs to be fixed
         out_handlers->avpipe_stater(outctx, out_stat_encoding_end_pts);
+#endif
         out_handlers->avpipe_closer(outctx);
     }
     if (outctx)
         free(outctx->url);
     free(outctx);
+    pb->opaque = NULL;
+    out_tracker->last_outctx = NULL;
     av_freep(&avioctx->buffer);
     avio_context_free(&avioctx);
     return;
