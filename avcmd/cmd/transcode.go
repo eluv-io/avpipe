@@ -260,6 +260,7 @@ func InitTranscode(cmdRoot *cobra.Command) error {
 
 	cmdTranscode.PersistentFlags().StringP("filename", "f", "", "(mandatory) filename to be transcoded.")
 	cmdTranscode.PersistentFlags().BoolP("bypass", "b", false, "bypass transcoding.")
+	cmdTranscode.PersistentFlags().BoolP("debug-frame-level", "", false, "debug frame level.")
 	cmdTranscode.PersistentFlags().BoolP("skip-decoding", "", false, "skip decoding when start-time-ts is set.")
 	cmdTranscode.PersistentFlags().BoolP("listen", "", false, "listen mode for RTMP.")
 	cmdTranscode.PersistentFlags().Int32P("threads", "t", 1, "transcoding threads.")
@@ -331,6 +332,11 @@ func doTranscode(cmd *cobra.Command, args []string) error {
 	bypass, err := cmd.Flags().GetBool("bypass")
 	if err != nil {
 		return fmt.Errorf("Invalid bypass flag")
+	}
+
+	debugFrameLevel, err := cmd.Flags().GetBool("debug-frame-level")
+	if err != nil {
+		return fmt.Errorf("Invalid debug-frame-level flag")
 	}
 
 	skipDecoding, err := cmd.Flags().GetBool("skip-decoding")
@@ -660,7 +666,7 @@ func doTranscode(cmd *cobra.Command, args []string) error {
 		SkipDecoding:           skipDecoding,
 		ExtractImageIntervalTs: extractImageIntervalTs,
 		ChannelLayout:          channelLayout,
-		DebugFrameLevel:        true,
+		DebugFrameLevel:        debugFrameLevel,
 	}
 
 	err = getAudioIndexes(params, audioIndex)

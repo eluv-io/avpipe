@@ -5,7 +5,6 @@ require (
 	github.com/eluv-io/errors-go v1.0.0
 	github.com/eluv-io/log-go v1.0.1
 	github.com/grafov/m3u8 v0.11.1
-	github.com/qluvio/legacy_imf_dash_extract v0.0.0-20220105005320-f6ffc1a5a8fa
 	github.com/spf13/cobra v0.0.5
 	github.com/stretchr/testify v1.7.0
 )

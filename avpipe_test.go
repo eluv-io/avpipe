@@ -24,7 +24,7 @@ import (
 const baseOutPath = "test_out"
 const debugFrameLevel = false
 const h264Codec = "libx264"
-const videoErstePath = "media/ErsteChristmas.mp4"
+const videoBigBuckBunnyPath = "media/bbb_1080p_30fps_60sec.mp4"
 const videoRockyPath = "media/rocky.mp4"
 
 type XcTestResult struct {
@@ -154,15 +154,15 @@ func (oo *fileOutputOpener) Open(_, _ int64, streamIndex, segIndex int,
 
 	switch outType {
 	case avpipe.DASHVideoInit:
-		fallthrough
+		filename = fmt.Sprintf("./%s/vinit-stream%d.m4s", oo.dir, streamIndex)
 	case avpipe.DASHAudioInit:
-		filename = fmt.Sprintf("./%s/init-stream%d.mp4", oo.dir, streamIndex)
+		filename = fmt.Sprintf("./%s/ainit-stream%d.m4s", oo.dir, streamIndex)
 	case avpipe.DASHManifest:
 		filename = fmt.Sprintf("./%s/dash.mpd", oo.dir)
 	case avpipe.DASHVideoSegment:
-		fallthrough
+		filename = fmt.Sprintf("./%s/vchunk-stream%d-%05d.m4s", oo.dir, streamIndex, segIndex)
 	case avpipe.DASHAudioSegment:
-		filename = fmt.Sprintf("./%s/chunk-stream%d-%05d.mp4", oo.dir, streamIndex, segIndex)
+		filename = fmt.Sprintf("./%s/achunk-stream%d-%05d.m4s", oo.dir, streamIndex, segIndex)
 	case avpipe.HLSMasterM3U:
 		filename = fmt.Sprintf("./%s/master.m3u8", oo.dir)
 	case avpipe.HLSVideoM3U:
@@ -215,15 +215,15 @@ func (coo *concurrentOutputOpener) Open(h, _ int64, streamIndex, segIndex int,
 
 	switch outType {
 	case avpipe.DASHVideoInit:
-		fallthrough
+		filename = fmt.Sprintf("./%s/vinit-stream%d.m4s", dir, streamIndex)
 	case avpipe.DASHAudioInit:
-		filename = fmt.Sprintf("./%s/init-stream%d.mp4", dir, streamIndex)
+		filename = fmt.Sprintf("./%s/ainit-stream%d.m4s", dir, streamIndex)
 	case avpipe.DASHManifest:
 		filename = fmt.Sprintf("./%s/dash.mpd", dir)
 	case avpipe.DASHVideoSegment:
-		fallthrough
+		filename = fmt.Sprintf("./%s/vchunk-stream%d-%05d.m4s", dir, streamIndex, segIndex)
 	case avpipe.DASHAudioSegment:
-		filename = fmt.Sprintf("./%s/chunk-stream%d-%05d.mp4", dir, streamIndex, segIndex)
+		filename = fmt.Sprintf("./%s/achunk-stream%d-%05d.m4s", dir, streamIndex, segIndex)
 	case avpipe.HLSMasterM3U:
 		filename = fmt.Sprintf("./%s/master.m3u8", dir)
 	case avpipe.HLSVideoM3U:
@@ -263,7 +263,7 @@ type fileOutput struct {
 func (o *fileOutput) Write(buf []byte) (int, error) {
 	n, err := o.file.Write(buf)
 	if debugFrameLevel {
-		log.Debug("fileOutput.Write", "err", err, "n", n)
+		log.Debug("fileOutput.Write", "err", err, "n", n, "filename", o.url)
 	}
 	return n, err
 }
@@ -279,7 +279,7 @@ func (o *fileOutput) Seek(offset int64, whence int) (int64, error) {
 func (o *fileOutput) Close() error {
 	err := o.file.Close()
 	if debugFrameLevel {
-		log.Debug("fileOutput.Close", "err", err)
+		log.Debug("fileOutput.Close", "err", err, "filename", o.url)
 	}
 	return err
 }
@@ -313,7 +313,7 @@ func (o fileOutput) Stat(avType avpipe.AVType, statType avpipe.AVStatType, statA
 }
 
 func TestAudioSeg(t *testing.T) {
-	url := videoErstePath
+	url := videoBigBuckBunnyPath
 	outputDir := path.Join(baseOutPath, fn())
 	params := &avpipe.XcParams{
 		BypassTranscoding:      false,
@@ -323,7 +323,6 @@ func TestAudioSeg(t *testing.T) {
 		BitDepth:               8,
 		CrfStr:                 "23",
 		DurationTs:             -1,
-		Ecodec:                 "libx264",
 		Ecodec2:                "aac",
 		EncHeight:              -1,
 		EncWidth:               -1,
@@ -342,11 +341,11 @@ func TestAudioSeg(t *testing.T) {
 		DebugFrameLevel:        debugFrameLevel,
 	}
 	setFastEncodeParams(params, true)
-	xcTest(t, outputDir, params, nil)
+	xcTest(t, outputDir, params, nil, true)
 }
 
 func TestVideoSeg(t *testing.T) {
-	url := videoErstePath
+	url := videoBigBuckBunnyPath
 	outputDir := path.Join(baseOutPath, fn())
 	params := &avpipe.XcParams{
 		BypassTranscoding:      false,
@@ -357,7 +356,6 @@ func TestVideoSeg(t *testing.T) {
 		CrfStr:                 "23",
 		DurationTs:             -1,
 		Ecodec:                 "libx264",
-		Ecodec2:                "aac",
 		EncHeight:              -1,
 		EncWidth:               -1,
 		ExtractImageIntervalTs: -1,
@@ -375,12 +373,12 @@ func TestVideoSeg(t *testing.T) {
 		DebugFrameLevel:        debugFrameLevel,
 	}
 	setFastEncodeParams(params, true)
-	xcTest(t, outputDir, params, nil)
+	xcTest(t, outputDir, params, nil, true)
 
 }
 
 func TestSingleABRTranscode(t *testing.T) {
-	filename := videoErstePath
+	filename := videoBigBuckBunnyPath
 	outputDir := path.Join(baseOutPath, fn())
 
 	params := &avpipe.XcParams{
@@ -392,9 +390,10 @@ func TestSingleABRTranscode(t *testing.T) {
 		VideoBitrate:       2560000,
 		AudioBitrate:       64000,
 		SampleRate:         44100,
-		VideoSegDurationTs: 1001 * 60,
-		AudioSegDurationTs: 1001 * 60,
+		VideoSegDurationTs: 60000,
+		AudioSegDurationTs: 96000,
 		Ecodec:             h264Codec,
+		Ecodec2:            "aac",
 		EncHeight:          720,
 		EncWidth:           1280,
 		XcType:             avpipe.XcVideo,
@@ -403,16 +402,16 @@ func TestSingleABRTranscode(t *testing.T) {
 		DebugFrameLevel:    debugFrameLevel,
 	}
 	setFastEncodeParams(params, false)
-	xcTest(t, outputDir, params, nil)
+	xcTest(t, outputDir, params, nil, true)
 
 	params.XcType = avpipe.XcAudio
 	params.Ecodec2 = "aac"
 	params.NumAudio = -1
-	xcTest(t, outputDir, params, nil)
+	xcTest(t, outputDir, params, nil, false)
 }
 
 func TestSingleABRTranscodeByStreamId(t *testing.T) {
-	filename := videoErstePath
+	filename := videoBigBuckBunnyPath
 	outputDir := path.Join(baseOutPath, fn())
 
 	params := &avpipe.XcParams{
@@ -424,8 +423,8 @@ func TestSingleABRTranscodeByStreamId(t *testing.T) {
 		VideoBitrate:       2560000,
 		AudioBitrate:       64000,
 		SampleRate:         44100,
-		VideoSegDurationTs: 1001 * 60,
-		AudioSegDurationTs: 1001 * 60,
+		VideoSegDurationTs: 60000,
+		AudioSegDurationTs: 96000,
 		Ecodec:             h264Codec,
 		EncHeight:          720,
 		EncWidth:           1280,
@@ -435,15 +434,15 @@ func TestSingleABRTranscodeByStreamId(t *testing.T) {
 		DebugFrameLevel:    debugFrameLevel,
 	}
 	setFastEncodeParams(params, false)
-	xcTest(t, outputDir, params, nil)
+	xcTest(t, outputDir, params, nil, true)
 
 	params.StreamId = 2
 	params.Ecodec2 = "aac"
-	xcTest(t, outputDir, params, nil)
+	xcTest(t, outputDir, params, nil, false)
 }
 
 func TestSingleABRTranscodeWithWatermark(t *testing.T) {
-	filename := videoErstePath
+	filename := videoBigBuckBunnyPath
 	outputDir := path.Join(baseOutPath, fn())
 
 	params := &avpipe.XcParams{
@@ -455,12 +454,12 @@ func TestSingleABRTranscodeWithWatermark(t *testing.T) {
 		VideoBitrate:          2560000,
 		AudioBitrate:          64000,
 		SampleRate:            44100,
-		VideoSegDurationTs:    1001 * 60,
+		VideoSegDurationTs:    60000,
 		Ecodec:                h264Codec,
 		EncHeight:             720,
 		EncWidth:              1280,
 		XcType:                avpipe.XcVideo,
-		WatermarkText:         "This is avpipe watermarking",
+		WatermarkText:         "This is avpipe text watermarking",
 		WatermarkYLoc:         "H*0.5",
 		WatermarkXLoc:         "W/2",
 		WatermarkRelativeSize: 0.05,
@@ -472,14 +471,14 @@ func TestSingleABRTranscodeWithWatermark(t *testing.T) {
 		DebugFrameLevel:       debugFrameLevel,
 	}
 	setFastEncodeParams(params, false)
-	xcTest(t, outputDir, params, nil)
+	xcTest(t, outputDir, params, nil, true)
 }
 
 func TestSingleABRTranscodeWithOverlayWatermark(t *testing.T) {
-	filename := videoErstePath
+	filename := videoBigBuckBunnyPath
 	outputDir := path.Join(baseOutPath, fn())
 
-	overlayImage, err := ioutil.ReadFile("./media/fox_watermark.png")
+	overlayImage, err := ioutil.ReadFile("./media/avpipe.png")
 	failNowOnError(t, err)
 
 	params := &avpipe.XcParams{
@@ -491,7 +490,7 @@ func TestSingleABRTranscodeWithOverlayWatermark(t *testing.T) {
 		VideoBitrate:         2560000,
 		AudioBitrate:         64000,
 		SampleRate:           44100,
-		VideoSegDurationTs:   1001 * 60,
+		VideoSegDurationTs:   60000,
 		Ecodec:               h264Codec,
 		EncHeight:            720,
 		EncWidth:             1280,
@@ -506,11 +505,11 @@ func TestSingleABRTranscodeWithOverlayWatermark(t *testing.T) {
 		DebugFrameLevel:      debugFrameLevel,
 	}
 	setFastEncodeParams(params, false)
-	xcTest(t, outputDir, params, nil)
+	xcTest(t, outputDir, params, nil, true)
 }
 
 func TestV2SingleABRTranscode(t *testing.T) {
-	filename := videoErstePath
+	filename := videoBigBuckBunnyPath
 	outputDir := path.Join(baseOutPath, fn())
 
 	params := &avpipe.XcParams{
@@ -522,8 +521,8 @@ func TestV2SingleABRTranscode(t *testing.T) {
 		VideoBitrate:       2560000,
 		AudioBitrate:       64000,
 		SampleRate:         44100,
-		VideoSegDurationTs: 1001 * 60,
-		AudioSegDurationTs: 1001 * 60,
+		VideoSegDurationTs: 60000,
+		AudioSegDurationTs: 96000,
 		Ecodec:             h264Codec,
 		EncHeight:          720,
 		EncWidth:           1280,
@@ -533,17 +532,17 @@ func TestV2SingleABRTranscode(t *testing.T) {
 		DebugFrameLevel:    debugFrameLevel,
 	}
 	setFastEncodeParams(params, false)
-	xcTest(t, outputDir, params, nil)
+	xcTest(t, outputDir, params, nil, true)
 
 	params.XcType = avpipe.XcAudio
 	params.Ecodec2 = "aac"
 	params.NumAudio = 1
 	params.AudioIndex[0] = 1
-	xcTest(t, outputDir, params, nil)
+	xcTest(t, outputDir, params, nil, false)
 }
 
 func TestV2SingleABRTranscodeIOHandler(t *testing.T) {
-	filename := videoErstePath
+	filename := videoBigBuckBunnyPath
 	outputDir := path.Join(baseOutPath, fn())
 
 	params := &avpipe.XcParams{
@@ -555,8 +554,8 @@ func TestV2SingleABRTranscodeIOHandler(t *testing.T) {
 		VideoBitrate:       2560000,
 		AudioBitrate:       64000,
 		SampleRate:         44100,
-		VideoSegDurationTs: 1001 * 60,
-		AudioSegDurationTs: 1001 * 60,
+		VideoSegDurationTs: 60000,
+		AudioSegDurationTs: 96000,
 		Ecodec:             h264Codec,
 		EncHeight:          720,
 		EncWidth:           1280,
@@ -566,17 +565,17 @@ func TestV2SingleABRTranscodeIOHandler(t *testing.T) {
 		DebugFrameLevel:    debugFrameLevel,
 	}
 	setFastEncodeParams(params, false)
-	xcTest(t, outputDir, params, nil)
+	xcTest(t, outputDir, params, nil, true)
 
 	params.XcType = avpipe.XcAudio
 	params.Ecodec2 = "aac"
 	params.NumAudio = 1
 	params.AudioIndex[0] = 1
-	xcTest(t, outputDir, params, nil)
+	xcTest(t, outputDir, params, nil, false)
 }
 
 func TestV2SingleABRTranscodeCancelling(t *testing.T) {
-	filename := videoErstePath
+	filename := videoBigBuckBunnyPath
 	outputDir := path.Join(baseOutPath, fn())
 	boilerplate(t, outputDir, filename)
 
@@ -589,8 +588,8 @@ func TestV2SingleABRTranscodeCancelling(t *testing.T) {
 		VideoBitrate:       2560000,
 		AudioBitrate:       64000,
 		SampleRate:         44100,
-		VideoSegDurationTs: 1001 * 60,
-		AudioSegDurationTs: 1001 * 60,
+		VideoSegDurationTs: 60000,
+		AudioSegDurationTs: 96000,
 		Ecodec:             h264Codec,
 		EncHeight:          720,
 		EncWidth:           1280,
@@ -656,7 +655,7 @@ func doTranscode(t *testing.T, p *avpipe.XcParams, nThreads int, outputDir,
 func TestNvidiaABRTranscode(t *testing.T) {
 	outputDir := path.Join(baseOutPath, fn())
 	boilerplate(t, outputDir, "")
-	filename := videoRockyPath
+	filename := videoBigBuckBunnyPath
 	nThreads := 10
 
 	params := &avpipe.XcParams{
@@ -667,8 +666,8 @@ func TestNvidiaABRTranscode(t *testing.T) {
 		VideoBitrate:       2560000,
 		AudioBitrate:       64000,
 		SampleRate:         44100,
-		VideoSegDurationTs: 1001 * 60,
-		AudioSegDurationTs: 1001 * 60,
+		VideoSegDurationTs: 60000,
+		AudioSegDurationTs: 96000,
 		Ecodec:             "h264_nvenc",
 		EncHeight:          720,
 		EncWidth:           1280,
@@ -683,7 +682,7 @@ func TestNvidiaABRTranscode(t *testing.T) {
 func TestConcurrentABRTranscode(t *testing.T) {
 	outputDir := path.Join(baseOutPath, fn())
 	boilerplate(t, outputDir, "")
-	filename := videoRockyPath
+	filename := videoBigBuckBunnyPath
 	nThreads := 10
 
 	params := &avpipe.XcParams{
@@ -694,7 +693,8 @@ func TestConcurrentABRTranscode(t *testing.T) {
 		VideoBitrate:       2560000,
 		AudioBitrate:       64000,
 		SampleRate:         44100,
-		VideoSegDurationTs: 1001 * 60,
+		VideoSegDurationTs: 60000,
+		AudioSegDurationTs: 96000,
 		Ecodec:             h264Codec,
 		EncHeight:          720,
 		EncWidth:           1280,
@@ -708,7 +708,7 @@ func TestConcurrentABRTranscode(t *testing.T) {
 }
 
 func TestAudioAAC2AACMezMaker(t *testing.T) {
-	filename := "./media/bond-seg1.aac"
+	filename := "./media/bbb-audio-stereo-2min.aac"
 	outputDir := path.Join(baseOutPath, fn())
 
 	params := &avpipe.XcParams{
@@ -736,11 +736,11 @@ func TestAudioAAC2AACMezMaker(t *testing.T) {
 		timeScale:  48000,
 		sampleRate: 48000,
 	}
-	xcTest(t, outputDir, params, xcTestResult)
+	xcTest(t, outputDir, params, xcTestResult, true)
 }
 
 func TestAudioAC3Ts2AC3MezMaker(t *testing.T) {
-	filename := "./media/FS1-19-10-15-2-min.ts"
+	filename := "./media/bbb_sunflower_2160p_30fps_normal_2min.ts"
 	outputDir := path.Join(baseOutPath, fn())
 
 	params := &avpipe.XcParams{
@@ -763,18 +763,18 @@ func TestAudioAC3Ts2AC3MezMaker(t *testing.T) {
 		Url:                 filename,
 		DebugFrameLevel:     debugFrameLevel,
 	}
-	params.AudioIndex[0] = 0
+	params.AudioIndex[0] = 2
 
 	xcTestResult := &XcTestResult{
 		mezFile:    []string{fmt.Sprintf("%s/asegment-1.mp4", outputDir)},
 		timeScale:  48000,
 		sampleRate: 48000,
 	}
-	xcTest(t, outputDir, params, xcTestResult)
+	xcTest(t, outputDir, params, xcTestResult, true)
 }
 
 func TestAudioAC3Ts2AACMezMaker(t *testing.T) {
-	filename := "./media/FS1-19-10-15-2-min.ts"
+	filename := "./media/bbb_sunflower_2160p_30fps_normal_2min.ts"
 	outputDir := path.Join(baseOutPath, fn())
 
 	params := &avpipe.XcParams{
@@ -797,7 +797,7 @@ func TestAudioAC3Ts2AACMezMaker(t *testing.T) {
 		Url:                 filename,
 		DebugFrameLevel:     debugFrameLevel,
 	}
-	params.AudioIndex[0] = 0
+	params.AudioIndex[0] = 2
 
 	xcTestResult := &XcTestResult{
 		mezFile:    []string{fmt.Sprintf("%s/asegment-1.mp4", outputDir)},
@@ -805,11 +805,11 @@ func TestAudioAC3Ts2AACMezMaker(t *testing.T) {
 		sampleRate: 48000,
 	}
 
-	xcTest(t, outputDir, params, xcTestResult)
+	xcTest(t, outputDir, params, xcTestResult, true)
 }
 
-func TestAudioMP2Ts2AACMezMaker(t *testing.T) {
-	filename := "./media/FS1-19-10-15-2-min.ts"
+func TestAudioMP3Ts2AACMezMaker(t *testing.T) {
+	filename := "./media/bbb_sunflower_2160p_30fps_normal_2min.ts"
 	outputDir := path.Join(baseOutPath, fn())
 
 	params := &avpipe.XcParams{
@@ -819,8 +819,8 @@ func TestAudioMP2Ts2AACMezMaker(t *testing.T) {
 		DurationTs:          -1,
 		StartSegmentStr:     "1",
 		SegDuration:         "30",
-		Ecodec2:             "mp2",
-		Dcodec2:             "mp2",
+		Ecodec2:             "aac",
+		Dcodec2:             "mp3",
 		AudioBitrate:        128000,
 		SampleRate:          48000,
 		EncHeight:           -1,
@@ -840,11 +840,11 @@ func TestAudioMP2Ts2AACMezMaker(t *testing.T) {
 		sampleRate: 48000,
 	}
 
-	xcTest(t, outputDir, params, xcTestResult)
+	xcTest(t, outputDir, params, xcTestResult, true)
 }
 
 func TestAudioDownmix2AACMezMaker(t *testing.T) {
-	filename := "./media/BOND23-CLIP-downmix-2min.mov"
+	filename := "./media/SIN4_Audio_51-2_120s_CCBYblendercloud.mov"
 	outputDir := path.Join(baseOutPath, fn())
 
 	params := &avpipe.XcParams{
@@ -877,11 +877,11 @@ func TestAudioDownmix2AACMezMaker(t *testing.T) {
 		channelLayoutName: "stereo",
 	}
 
-	xcTest(t, outputDir, params, xcTestResult)
+	xcTest(t, outputDir, params, xcTestResult, true)
 }
 
 func TestAudio2MonoTo1Stereo(t *testing.T) {
-	filename := "./media/AGAIG-clip-2mono.mp4"
+	filename := "./media/gabby_shading_2mono_1080p.mp4"
 	outputDir := path.Join(baseOutPath, fn())
 
 	params := &avpipe.XcParams{
@@ -901,19 +901,19 @@ func TestAudio2MonoTo1Stereo(t *testing.T) {
 		Url:                 filename,
 		DebugFrameLevel:     debugFrameLevel,
 	}
-	params.AudioIndex[0] = 1
-	params.AudioIndex[1] = 2
+	params.AudioIndex[0] = 0
+	params.AudioIndex[1] = 1
 
 	xcTestResult := &XcTestResult{
-		timeScale:         48000,
-		sampleRate:        48000,
+		timeScale:         44100,
+		sampleRate:        44100,
 		channelLayoutName: "stereo",
 	}
 	for i := 1; i <= 2; i++ {
 		xcTestResult.mezFile = append(xcTestResult.mezFile, fmt.Sprintf("%s/asegment-%d.mp4", outputDir, i))
 	}
 
-	xcTest(t, outputDir, params, xcTestResult)
+	xcTest(t, outputDir, params, xcTestResult, true)
 }
 
 func TestAudio5_1To5_1(t *testing.T) {
@@ -945,7 +945,7 @@ func TestAudio5_1To5_1(t *testing.T) {
 		xcTestResult.mezFile = append(xcTestResult.mezFile, fmt.Sprintf("%s/asegment-%d.mp4", outputDir, i))
 	}
 
-	xcTest(t, outputDir, params, xcTestResult)
+	xcTest(t, outputDir, params, xcTestResult, true)
 }
 
 func TestAudio5_1ToStereo(t *testing.T) {
@@ -979,7 +979,7 @@ func TestAudio5_1ToStereo(t *testing.T) {
 		xcTestResult.mezFile = append(xcTestResult.mezFile, fmt.Sprintf("%s/asegment-%d.mp4", outputDir, i))
 	}
 
-	xcTest(t, outputDir, params, xcTestResult)
+	xcTest(t, outputDir, params, xcTestResult, true)
 }
 
 func TestAudioMonoToMono(t *testing.T) {
@@ -1014,7 +1014,7 @@ func TestAudioMonoToMono(t *testing.T) {
 		xcTestResult.mezFile = append(xcTestResult.mezFile, fmt.Sprintf("%s/asegment-%d.mp4", outputDir, i))
 	}
 
-	xcTest(t, outputDir, params, xcTestResult)
+	xcTest(t, outputDir, params, xcTestResult, true)
 }
 
 func TestAudioQuadToQuad(t *testing.T) {
@@ -1049,7 +1049,7 @@ func TestAudioQuadToQuad(t *testing.T) {
 		xcTestResult.mezFile = append(xcTestResult.mezFile, fmt.Sprintf("%s/asegment-%d.mp4", outputDir, i))
 	}
 
-	xcTest(t, outputDir, params, xcTestResult)
+	xcTest(t, outputDir, params, xcTestResult, true)
 }
 
 func TestAudio6MonoTo5_1(t *testing.T) {
@@ -1090,11 +1090,11 @@ func TestAudio6MonoTo5_1(t *testing.T) {
 		xcTestResult.mezFile = append(xcTestResult.mezFile, fmt.Sprintf("%s/asegment-%d.mp4", outputDir, i))
 	}
 
-	xcTest(t, outputDir, params, xcTestResult)
+	xcTest(t, outputDir, params, xcTestResult, true)
 }
 
 func TestAudio6MonoUnequalChannelLayoutsTo5_1(t *testing.T) {
-	filename := "./media/cmbyn_th-2348159_aud-comp-30sec.mov"
+	filename := "./media/TOS8_Audio_51-2_60s_CCBYblendercloud.mov"
 	outputDir := path.Join(baseOutPath, fn())
 
 	params := &avpipe.XcParams{
@@ -1131,7 +1131,7 @@ func TestAudio6MonoUnequalChannelLayoutsTo5_1(t *testing.T) {
 		xcTestResult.mezFile = append(xcTestResult.mezFile, fmt.Sprintf("%s/asegment-%d.mp4", outputDir, i))
 	}
 
-	xcTest(t, outputDir, params, xcTestResult)
+	xcTest(t, outputDir, params, xcTestResult, true)
 }
 
 func TestAudio10Channel_s16To6Channel_5_1(t *testing.T) {
@@ -1167,11 +1167,11 @@ func TestAudio10Channel_s16To6Channel_5_1(t *testing.T) {
 		xcTestResult.mezFile = append(xcTestResult.mezFile, fmt.Sprintf("%s/asegment-%d.mp4", outputDir, i))
 	}
 
-	xcTest(t, outputDir, params, xcTestResult)
+	xcTest(t, outputDir, params, xcTestResult, true)
 }
 
 func TestAudio2Channel1Stereo(t *testing.T) {
-	filename := "./media/multichannel_audio_clip.mov"
+	filename := "./media/ELD2_FHD_4_60s_CCBYblendercloud.mov"
 	outputDir := path.Join(baseOutPath, fn())
 
 	params := &avpipe.XcParams{
@@ -1204,12 +1204,12 @@ func TestAudio2Channel1Stereo(t *testing.T) {
 		xcTestResult.mezFile = append(xcTestResult.mezFile, fmt.Sprintf("%s/asegment-%d.mp4", outputDir, i))
 	}
 
-	xcTest(t, outputDir, params, xcTestResult)
+	xcTest(t, outputDir, params, xcTestResult, true)
 }
 
-// Timebase of BOB923HL_clip_timebase_1001_60000.MXF is 1001/60000
+// Timebase of BBB0_HD_8_XDCAM_120s_CCBYblendercloud.mxf is 1001/60000
 func TestIrregularTsMezMaker_1001_60000(t *testing.T) {
-	filename := "./media/BOB923HL_clip_timebase_1001_60000.MXF"
+	filename := "./media/BBB0_HD_8_XDCAM_120s_CCBYblendercloud.mxf"
 	outputDir := path.Join(baseOutPath, fn())
 
 	params := &avpipe.XcParams{
@@ -1240,7 +1240,7 @@ func TestIrregularTsMezMaker_1001_60000(t *testing.T) {
 		xcTestResult.mezFile = append(xcTestResult.mezFile, fmt.Sprintf("%s/vsegment-%d.mp4", outputDir, i))
 	}
 
-	xcTest(t, outputDir, params, xcTestResult)
+	xcTest(t, outputDir, params, xcTestResult, true)
 }
 
 // Timebase of Rigify-2min is 1/24
@@ -1281,7 +1281,7 @@ func TestIrregularTsMezMaker_1_24(t *testing.T) {
 		xcTestResult.mezFile = append(xcTestResult.mezFile, fmt.Sprintf("%s/vsegment-%d.mp4", outputDir, i))
 	}
 
-	xcTest(t, outputDir, params, xcTestResult)
+	xcTest(t, outputDir, params, xcTestResult, true)
 }
 
 // Timebase of Rigify-2min is 1/10000
@@ -1322,7 +1322,7 @@ func TestIrregularTsMezMaker_1_10000(t *testing.T) {
 		xcTestResult.mezFile = append(xcTestResult.mezFile, fmt.Sprintf("%s/vsegment-%d.mp4", outputDir, i))
 	}
 
-	xcTest(t, outputDir, params, xcTestResult)
+	xcTest(t, outputDir, params, xcTestResult, true)
 }
 
 func TestMXF_H265MezMaker(t *testing.T) {
@@ -1331,7 +1331,7 @@ func TestMXF_H265MezMaker(t *testing.T) {
 		// 558.20s on 2018 MacBook Pro (2.9 GHz 6-Core i9, 32 GB RAM, Radeon Pro 560X 4 GB)
 		t.Skip("SKIPPING " + f)
 	}
-	filename := "./media/across_the_universe_4k_clip_60sec.mxf"
+	filename := "./media/SIN5_4K_MOS_J2K_60s_CCBYblendercloud.mxf"
 	outputDir := path.Join(baseOutPath, f)
 
 	params := &avpipe.XcParams{
@@ -1358,11 +1358,11 @@ func TestMXF_H265MezMaker(t *testing.T) {
 		pixelFmt:  "yuv420p",
 	}
 
-	xcTest(t, outputDir, params, xcTestResult)
+	xcTest(t, outputDir, params, xcTestResult, true)
 }
 
 func TestHEVC_H264MezMaker(t *testing.T) {
-	filename := "./media/across_the_universe_4k_clip_30sec.mp4"
+	filename := "./media/SIN6_4K_MOS_HEVC_60s.mp4"
 	outputDir := path.Join(baseOutPath, fn())
 
 	params := &avpipe.XcParams{
@@ -1393,7 +1393,7 @@ func TestHEVC_H264MezMaker(t *testing.T) {
 		xcTestResult.level = 30
 	}
 
-	xcTest(t, outputDir, params, xcTestResult)
+	xcTest(t, outputDir, params, xcTestResult, true)
 }
 
 func TestHEVC_H265ABRTranscode(t *testing.T) {
@@ -1402,16 +1402,18 @@ func TestHEVC_H265ABRTranscode(t *testing.T) {
 		// 403.23s on 2018 MacBook Pro (2.9 GHz 6-Core i9, 32 GB RAM, Radeon Pro 560X 4 GB)
 		t.Skip("SKIPPING " + f)
 	}
-	filename := "./media/across_the_universe_4k_clip_30sec.mp4"
-	outputDir := path.Join(baseOutPath, fn())
+	filename := "./media/SIN6_4K_MOS_HEVC_60s.mp4"
+
+	videoMezDir := path.Join(baseOutPath, f, "VideoMez4H265")
+	videoABRDir := path.Join(baseOutPath, f, "VideoABR4H265")
 
 	params := &avpipe.XcParams{
 		BypassTranscoding: false,
-		Format:            "dash",
+		Format:            "fmp4-segment",
 		StartTimeTs:       0,
 		DurationTs:        -1,
 		StartSegmentStr:   "1",
-		SegDuration:       "15.03",
+		SegDuration:       "30",
 		Ecodec:            "libx265",
 		Dcodec:            "hevc",
 		EncHeight:         -1,
@@ -1422,7 +1424,19 @@ func TestHEVC_H265ABRTranscode(t *testing.T) {
 		DebugFrameLevel:   debugFrameLevel,
 	}
 
-	xcTest(t, outputDir, params, nil)
+	setupOutDir(t, videoMezDir)
+	xcTest(t, videoMezDir, params, nil, true)
+
+	setupOutDir(t, videoABRDir)
+	filename = videoMezDir + "/vsegment-1.mp4"
+	log.Debug("STARTING video ABR for", "file", filename)
+	params.XcType = avpipe.XcVideo
+	params.Format = "dash"
+	params.VideoSegDurationTs = 48000
+	params.Url = filename
+	avpipe.InitUrlIOHandler(filename, &fileInputOpener{url: filename}, &fileOutputOpener{dir: videoABRDir})
+	boilerXc(t, params)
+
 }
 
 func TestAVPipeStats(t *testing.T) {
@@ -1459,7 +1473,7 @@ func TestAVPipeStats(t *testing.T) {
 		xcTestResult.mezFile = append(xcTestResult.mezFile, fmt.Sprintf("%s/vsegment-%d.mp4", outputDir, i))
 	}
 
-	xcTest(t, outputDir, params, xcTestResult)
+	xcTest(t, outputDir, params, xcTestResult, true)
 
 	assert.Equal(t, int64(2880), statsInfo.encodingVideoFrameStats.TotalFramesWritten)
 	assert.Equal(t, int64(5625), statsInfo.encodingAudioFrameStats.TotalFramesWritten)
@@ -1478,7 +1492,7 @@ func TestAVPipeStats(t *testing.T) {
 func TestABRMuxing(t *testing.T) {
 	f := fn()
 	log.Info("STARTING " + f)
-	filename := "./media/creed_1_min.mov"
+	filename := "./media/TOS8_FHD_51-2_PRHQ_60s_CCBYblendercloud.mov"
 
 	videoMezDir := path.Join(baseOutPath, f, "VideoMez4Muxing")
 	audioMezDir := path.Join(baseOutPath, f, "AudioMez4Muxing")
@@ -1496,7 +1510,7 @@ func TestABRMuxing(t *testing.T) {
 		StartSegmentStr:   "1",
 		VideoBitrate:      2560000,
 		AudioBitrate:      128000,
-		SampleRate:        44100,
+		SampleRate:        48000,
 		SegDuration:       "30.03",
 		Ecodec:            h264Codec,
 		EncHeight:         720,
@@ -1546,13 +1560,13 @@ func TestABRMuxing(t *testing.T) {
 	// Create playable file by muxing audio/video segments
 	setupOutDir(t, muxOutDir)
 	muxSpec := "abr-mux\n"
-	muxSpec += "audio,1," + audioABRDir + "/init-stream0.mp4\n"
+	muxSpec += "audio,1," + audioABRDir + "/ainit-stream0.m4s\n"
 	for i := 1; i <= 15; i++ {
-		muxSpec += fmt.Sprintf("%s%s%s%02d%s\n", "audio,1,", audioABRDir, "/chunk-stream0-000", i, ".mp4")
+		muxSpec += fmt.Sprintf("%s%s%s%02d%s\n", "audio,1,", audioABRDir, "/achunk-stream0-000", i, ".m4s")
 	}
-	muxSpec += "video,1," + videoABRDir + "/init-stream0.mp4\n"
+	muxSpec += "video,1," + videoABRDir + "/vinit-stream0.m4s\n"
 	for i := 1; i <= 15; i++ {
-		muxSpec += fmt.Sprintf("%s%s%s%02d%s\n", "video,1,", videoABRDir, "/chunk-stream0-000", i, ".mp4")
+		muxSpec += fmt.Sprintf("%s%s%s%02d%s\n", "video,1,", videoABRDir, "/vchunk-stream0-000", i, ".m4s")
 	}
 	filename = muxOutDir + "/segment-1.mp4"
 	params.MuxingSpec = muxSpec
@@ -1563,14 +1577,23 @@ func TestABRMuxing(t *testing.T) {
 	err := avpipe.Mux(params)
 	failNowOnError(t, err)
 
-	xcTestResult := &XcTestResult{}
+	xcTestResult := &XcTestResult{
+		mezFile:   []string{fmt.Sprintf("%s/vsegment-1.mp4", videoMezDir)},
+		timeScale: 24000,
+		level:     42,
+		pixelFmt:  "yuv420p",
+	}
 	// Now probe mez video and output file and become sure both have the same duration
-	xcTestResult.mezFile = []string{fmt.Sprintf("%s/vsegment-1.mp4", videoMezDir)}
 	avpipe.InitIOHandler(&fileInputOpener{url: xcTestResult.mezFile[0]}, &fileOutputOpener{dir: videoMezDir})
 	// Now probe the generated files
 	videoMezProbeInfo := boilerProbe(t, xcTestResult)
 
-	xcTestResult.mezFile = []string{fmt.Sprintf("%s/segment-1.mp4", muxOutDir)}
+	xcTestResult = &XcTestResult{
+		mezFile:   []string{fmt.Sprintf("%s/segment-1.mp4", muxOutDir)},
+		timeScale: 24000,
+		level:     42,
+		pixelFmt:  "yuv420p",
+	}
 	avpipe.InitIOHandler(&fileInputOpener{url: xcTestResult.mezFile[0]}, &fileOutputOpener{dir: muxOutDir})
 	muxOutProbeInfo := boilerProbe(t, xcTestResult)
 
@@ -1601,67 +1624,81 @@ func TestUnmarshalParams(t *testing.T) {
 }
 
 func TestProbe(t *testing.T) {
-	filename := "./media/ErsteChristmas.mp4"
+	filename := videoBigBuckBunnyPath
 
 	avpipe.InitIOHandler(&fileInputOpener{url: filename}, &concurrentOutputOpener{dir: "O"})
 	probe, err := avpipe.Probe(filename, true)
 	failNowOnError(t, err)
-	assert.Equal(t, 2, len(probe.StreamInfo))
+	assert.Equal(t, 3, len(probe.StreamInfo))
 
 	assert.Equal(t, 27, probe.StreamInfo[0].CodecID)
 	assert.Equal(t, "h264", probe.StreamInfo[0].CodecName)
-	assert.Equal(t, 77, probe.StreamInfo[0].Profile) // 77 = FF_PROFILE_H264_MAIN
-	assert.Equal(t, 31, probe.StreamInfo[0].Level)
-	assert.Equal(t, int64(2428), probe.StreamInfo[0].NBFrames)
-	assert.Equal(t, int64(0), probe.StreamInfo[0].StartTime)
-	assert.Equal(t, int64(506151), probe.StreamInfo[0].BitRate)
-	assert.Equal(t, 1280, probe.StreamInfo[0].Width)
-	assert.Equal(t, 720, probe.StreamInfo[0].Height)
-	assert.Equal(t, int64(12800), probe.StreamInfo[0].TimeBase.Denom().Int64())
+	assert.Equal(t, 100, probe.StreamInfo[0].Profile) // 77 = FF_PROFILE_H264_MAIN
+	assert.Equal(t, 41, probe.StreamInfo[0].Level)
+	assert.Equal(t, int64(1800), probe.StreamInfo[0].NBFrames)
+	assert.Equal(t, int64(1980), probe.StreamInfo[0].StartTime)
+	assert.Equal(t, int64(3081772), probe.StreamInfo[0].BitRate)
+	assert.Equal(t, 1920, probe.StreamInfo[0].Width)
+	assert.Equal(t, 1080, probe.StreamInfo[0].Height)
+	assert.Equal(t, int64(30000), probe.StreamInfo[0].TimeBase.Denom().Int64())
 
-	assert.Equal(t, 86018, probe.StreamInfo[1].CodecID)
-	assert.Equal(t, "aac", probe.StreamInfo[1].CodecName)
-	assert.Equal(t, 1, probe.StreamInfo[1].Profile) // 1 = FF_PROFILE_AAC_LOW
+	assert.Equal(t, 86017, probe.StreamInfo[1].CodecID)
+	assert.Equal(t, "mp3float", probe.StreamInfo[1].CodecName)
+	assert.Equal(t, -99, probe.StreamInfo[1].Profile) // 1 = FF_PROFILE_AAC_LOW
 	assert.Equal(t, -99, probe.StreamInfo[1].Level)
-	assert.Equal(t, int64(4183), probe.StreamInfo[1].NBFrames)
+	assert.Equal(t, int64(2500), probe.StreamInfo[1].NBFrames)
 	assert.Equal(t, int64(0), probe.StreamInfo[1].StartTime)
-	assert.Equal(t, int64(127999), probe.StreamInfo[1].BitRate)
+	assert.Equal(t, int64(160000), probe.StreamInfo[1].BitRate)
 	assert.Equal(t, 0, probe.StreamInfo[1].Width)
 	assert.Equal(t, 0, probe.StreamInfo[1].Height)
-	assert.Equal(t, int64(44100), probe.StreamInfo[1].TimeBase.Denom().Int64())
+	assert.Equal(t, int64(48000), probe.StreamInfo[1].TimeBase.Denom().Int64())
+
+	assert.Equal(t, 86019, probe.StreamInfo[2].CodecID)
+	assert.Equal(t, "ac3", probe.StreamInfo[2].CodecName)
+	assert.Equal(t, -99, probe.StreamInfo[2].Profile) // 1 = FF_PROFILE_AAC_LOW
+	assert.Equal(t, -99, probe.StreamInfo[2].Level)
+	assert.Equal(t, int64(1875), probe.StreamInfo[2].NBFrames)
+	assert.Equal(t, int64(0), probe.StreamInfo[2].StartTime)
+	assert.Equal(t, int64(320000), probe.StreamInfo[2].BitRate)
+	assert.Equal(t, 0, probe.StreamInfo[2].Width)
+	assert.Equal(t, 0, probe.StreamInfo[2].Height)
+	assert.Equal(t, int64(48000), probe.StreamInfo[2].TimeBase.Denom().Int64())
+	assert.Equal(t, 6, probe.StreamInfo[2].Channels)
+	assert.Equal(t, "5.1(side)", avpipe.ChannelLayoutName(probe.StreamInfo[2].Channels, probe.StreamInfo[2].ChannelLayout))
 
 	// Test StreamInfoAsArray
 	a := avpipe.StreamInfoAsArray(probe.StreamInfo)
 	assert.Equal(t, "h264", a[0].CodecName)
-	assert.Equal(t, "aac", a[1].CodecName)
+	assert.Equal(t, "mp3float", a[1].CodecName)
+	assert.Equal(t, "ac3", a[2].CodecName)
 }
 
 func TestProbeWithData(t *testing.T) {
-	filename := "./media/ActOfLove-30sec.mov"
+	filename := "./media/TOS8_FHD_51-2_PRHQ_60s_CCBYblendercloud.mov"
 
 	avpipe.InitIOHandler(&fileInputOpener{url: filename}, &concurrentOutputOpener{dir: "O"})
 	probe, err := avpipe.Probe(filename, true)
 	failNowOnError(t, err)
-	assert.Equal(t, 4, len(probe.StreamInfo))
+	assert.Equal(t, 9, len(probe.StreamInfo))
 
 	assert.Equal(t, 147, probe.StreamInfo[0].CodecID)
 	assert.Equal(t, "prores", probe.StreamInfo[0].CodecName)
 	assert.Equal(t, 3, probe.StreamInfo[0].Profile) // 3 = FF_PROFILE_MPEG4_MAIN
 	assert.Equal(t, -99, probe.StreamInfo[0].Level)
-	assert.Equal(t, int64(900), probe.StreamInfo[0].NBFrames)
+	assert.Equal(t, int64(1439), probe.StreamInfo[0].NBFrames)
 	assert.Equal(t, int64(0), probe.StreamInfo[0].StartTime)
-	assert.Equal(t, int64(59664772), probe.StreamInfo[0].BitRate)
-	assert.Equal(t, 720, probe.StreamInfo[0].Width)
-	assert.Equal(t, 486, probe.StreamInfo[0].Height)
-	assert.Equal(t, int64(11988), probe.StreamInfo[0].TimeBase.Denom().Int64())
+	assert.Equal(t, int64(249054569), probe.StreamInfo[0].BitRate)
+	assert.Equal(t, 1920, probe.StreamInfo[0].Width)
+	assert.Equal(t, 1080, probe.StreamInfo[0].Height)
+	assert.Equal(t, int64(24000), probe.StreamInfo[0].TimeBase.Denom().Int64())
 
 	assert.Equal(t, 65548, probe.StreamInfo[1].CodecID)
 	assert.Equal(t, "pcm_s24le", probe.StreamInfo[1].CodecName)
 	assert.Equal(t, -99, probe.StreamInfo[1].Profile)
 	assert.Equal(t, -99, probe.StreamInfo[1].Level)
-	assert.Equal(t, int64(1441552), probe.StreamInfo[1].NBFrames)
+	assert.Equal(t, int64(2880480), probe.StreamInfo[1].NBFrames)
 	assert.Equal(t, int64(0), probe.StreamInfo[1].StartTime)
-	assert.Equal(t, int64(2304000), probe.StreamInfo[1].BitRate)
+	assert.Equal(t, int64(1152000), probe.StreamInfo[1].BitRate)
 	assert.Equal(t, 0, probe.StreamInfo[1].Width)
 	assert.Equal(t, 0, probe.StreamInfo[1].Height)
 	assert.Equal(t, int64(48000), probe.StreamInfo[1].TimeBase.Denom().Int64())
@@ -1670,33 +1707,33 @@ func TestProbeWithData(t *testing.T) {
 	assert.Equal(t, "pcm_s24le", probe.StreamInfo[2].CodecName)
 	assert.Equal(t, -99, probe.StreamInfo[2].Profile)
 	assert.Equal(t, -99, probe.StreamInfo[2].Level)
-	assert.Equal(t, int64(1441552), probe.StreamInfo[2].NBFrames)
+	assert.Equal(t, int64(2880480), probe.StreamInfo[2].NBFrames)
 	assert.Equal(t, int64(0), probe.StreamInfo[2].StartTime)
-	assert.Equal(t, int64(2304000), probe.StreamInfo[2].BitRate)
+	assert.Equal(t, int64(1152000), probe.StreamInfo[2].BitRate)
 	assert.Equal(t, 0, probe.StreamInfo[2].Width)
 	assert.Equal(t, 0, probe.StreamInfo[2].Height)
 	assert.Equal(t, int64(48000), probe.StreamInfo[2].TimeBase.Denom().Int64())
 
-	assert.Equal(t, 0, probe.StreamInfo[3].CodecID)
-	assert.Equal(t, "", probe.StreamInfo[3].CodecName)
-	assert.Equal(t, -99, probe.StreamInfo[3].Profile)
-	assert.Equal(t, -99, probe.StreamInfo[3].Level)
-	assert.Equal(t, int64(1), probe.StreamInfo[3].NBFrames)
-	assert.Equal(t, int64(0), probe.StreamInfo[3].StartTime)
-	assert.Equal(t, int64(1), probe.StreamInfo[3].BitRate)
-	assert.Equal(t, 0, probe.StreamInfo[3].Width)
-	assert.Equal(t, 0, probe.StreamInfo[3].Height)
-	assert.Equal(t, int64(30), probe.StreamInfo[3].TimeBase.Denom().Int64())
+	assert.Equal(t, 0, probe.StreamInfo[8].CodecID)
+	assert.Equal(t, "", probe.StreamInfo[8].CodecName)
+	assert.Equal(t, -99, probe.StreamInfo[8].Profile)
+	assert.Equal(t, -99, probe.StreamInfo[8].Level)
+	assert.Equal(t, int64(1), probe.StreamInfo[8].NBFrames)
+	assert.Equal(t, int64(0), probe.StreamInfo[8].StartTime)
+	assert.Equal(t, int64(0), probe.StreamInfo[8].BitRate)
+	assert.Equal(t, 0, probe.StreamInfo[8].Width)
+	assert.Equal(t, 0, probe.StreamInfo[8].Height)
+	assert.Equal(t, int64(24000), probe.StreamInfo[8].TimeBase.Denom().Int64())
 
 	// Test StreamInfoAsArray
 	a := avpipe.StreamInfoAsArray(probe.StreamInfo)
 	assert.Equal(t, "prores", a[0].CodecName)
-	assert.Equal(t, "", a[1].CodecName)
+	assert.Equal(t, "pcm_s24le", a[1].CodecName)
 	assert.Equal(t, "pcm_s24le", a[2].CodecName)
 }
 
 func TestExtractImagesInterval(t *testing.T) {
-	url := videoErstePath
+	url := videoBigBuckBunnyPath
 	outPath := path.Join(baseOutPath, fn())
 	params := &avpipe.XcParams{
 		Format:                 "image2",
@@ -1729,18 +1766,18 @@ func TestExtractImagesInterval(t *testing.T) {
 
 	files, err := ioutil.ReadDir(outPath)
 	failNowOnError(t, err)
-	assert.Equal(t, 10, len(files))
+	assert.Equal(t, 6, len(files))
 	var sum int
 	for _, f := range files {
 		pts, err2 := strconv.ParseInt(strings.Split(f.Name(), ".")[0], 10, 32)
 		assert.NoError(t, err2)
 		sum += int(pts)
 	}
-	assert.Equal(t, 5760000, sum)
+	assert.Equal(t, 4511880, sum)
 }
 
 func TestExtractImagesList(t *testing.T) {
-	url := videoErstePath
+	url := videoBigBuckBunnyPath
 	outPath := path.Join(baseOutPath, fn())
 	params := &avpipe.XcParams{
 		Format:                 "image2",
@@ -1767,7 +1804,7 @@ func TestExtractImagesList(t *testing.T) {
 		Url:                    url,
 		DebugFrameLevel:        debugFrameLevel,
 	}
-	params.ExtractImagesTs = []int64{0, 512, 12800, 513024, 1242624}
+	params.ExtractImagesTs = []int64{1980, 2980, 72980, 169980, 339980}
 	setFastEncodeParams(params, true)
 
 	xcTest2(t, outPath, params, nil)
@@ -1781,12 +1818,12 @@ func TestExtractImagesList(t *testing.T) {
 		assert.NoError(t, err2)
 		sum += int(pts)
 	}
-	assert.Equal(t, 512+12800+513024+1242624, sum)
+	assert.Equal(t, 1980+2980+72980+169980+339980, sum)
 }
 
 // Should exit after extracting the first frame
 func TestExtractImagesListFast(t *testing.T) {
-	url := videoErstePath
+	url := videoBigBuckBunnyPath
 	outPath := path.Join(baseOutPath, fn())
 
 	params := &avpipe.XcParams{
@@ -1814,7 +1851,7 @@ func TestExtractImagesListFast(t *testing.T) {
 		Url:                    url,
 		DebugFrameLevel:        debugFrameLevel,
 	}
-	params.ExtractImagesTs = []int64{0}
+	params.ExtractImagesTs = []int64{1980}
 	setFastEncodeParams(params, true)
 
 	xcTest2(t, outPath, params, nil)
@@ -1824,7 +1861,7 @@ func TestExtractImagesListFast(t *testing.T) {
 	assert.Equal(t, 1, len(files))
 	pts, err := strconv.ParseInt(strings.Split(files[0].Name(), ".")[0], 10, 32)
 	assert.NoError(t, err)
-	assert.Equal(t, int64(0), pts)
+	assert.Equal(t, int64(1980), pts)
 }
 
 func TestMain(m *testing.M) {
@@ -1833,8 +1870,10 @@ func TestMain(m *testing.M) {
 	os.Exit(m.Run())
 }
 
-func xcTest(t *testing.T, outputDir string, params *avpipe.XcParams, xcTestResult *XcTestResult) {
-	boilerplate(t, outputDir, params.Url)
+func xcTest(t *testing.T, outputDir string, params *avpipe.XcParams, xcTestResult *XcTestResult, isNewTest bool) {
+	if isNewTest {
+		boilerplate(t, outputDir, params.Url)
+	}
 	boilerXc(t, params)
 	boilerProbe(t, xcTestResult)
 }
@@ -1998,6 +2037,7 @@ func setupLogging() {
 		File: &log.LumberjackConfig{
 			Filename:  "avpipe-test.log",
 			LocalTime: true,
+			MaxSize:   1000,
 		},
 	})
 	avpipe.SetCLoggers()

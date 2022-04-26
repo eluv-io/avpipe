@@ -62,7 +62,7 @@ func (l *LiveSource) Start() (err error) {
 	l.cmd = exec.Command(ffmpeg,
 		"-re",
 		"-i",
-		"../media/FS1-19-10-15-70sec.ts",
+		"../media/BBB4_HD_51_AVC_120s_CCBYblendercloud.ts",
 		"-c",
 		"copy",
 		"-f",

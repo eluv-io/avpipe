@@ -10,10 +10,13 @@ import (
 	"strings"
 	"time"
 
-	"github.com/qluvio/legacy_imf_dash_extract/abr"
-
 	elog "github.com/eluv-io/log-go"
 )
+
+/*
+ * PENDING (RM): the linear module needs to be rewritten,
+ * There has been an unnecessary dependency to legacy dash module, which I temporarily cleaned that up using interfaces.
+ */
 
 var log = elog.Get("/eluvio/avpipe/linear")
 
@@ -27,10 +30,30 @@ const (
 	Live
 )
 
+type EncryptionOverridesInterface interface {
+	AudioAlwaysClear() bool
+	AudioClearInit() bool
+	AudioClearLeadMediaSegs() int
+	VideoClearInit() bool
+	VideoClearLeadMediaSegs() int
+}
+
+type OfferingInterface interface {
+	GetVideoStreamFirst() (int64, int, error) // Returns durationTs, ts and error
+	GetAudioStreamFirst() (int64, int, error) // Returns durationTs, ts and error
+	GetPlaylistSlice(
+		sliceStart, sliceEnd, sliceTruncate *big.Rat,
+		offeringId, playoutFormatId, streamId, repId, vodObjectHash string,
+		licenseServers map[string][]*url.URL,
+		encryptionOverrides EncryptionOverridesInterface,
+		urlValues url.Values,
+	) (string, error)
+}
+
 type ManifestMaker struct {
 	Format        string
 	LiveOfferings map[string]*OfferingInfo
-	Offerings     map[string]*abr.Offering
+	Offerings     map[string]OfferingInterface
 	Query         url.Values
 	MediaSequence MediaSequence
 	Mode          Mode
@@ -48,7 +71,7 @@ func NewManifestMaker(mode Mode) *ManifestMaker {
 	return &ManifestMaker{
 		Format:        "hls-clear",
 		LiveOfferings: make(map[string]*OfferingInfo),
-		Offerings:     make(map[string]*abr.Offering),
+		Offerings:     make(map[string]OfferingInterface),
 		Query:         url.Values{},
 		MediaSequence: MediaSequence{},
 		Mode:          mode,
@@ -289,7 +312,7 @@ func (mm *ManifestMaker) makeSlicePlaylistForVodPlayable(
 	playlist string, remainingSecOut float32, err error) {
 
 	licenseServers := make(map[string][]*url.URL, 0)
-	encOverrides := abr.NewEncryptionOverrides()
+	var encOverrides EncryptionOverridesInterface
 	remainingSecOut = remainingSec
 	isAudio := strings.Contains(strings.ToLower(streamId), "audio")
 
@@ -299,11 +322,7 @@ func (mm *ManifestMaker) makeSlicePlaylistForVodPlayable(
 		return
 	}
 
-	vs, err := offering.MediaStruct.VideoStreamFirst()
-	if err != nil {
-		return
-	}
-	ts, err := vs.Timescale()
+	durationTs, ts, err := offering.GetVideoStreamFirst()
 	if err != nil {
 		return
 	}
@@ -311,11 +330,7 @@ func (mm *ManifestMaker) makeSlicePlaylistForVodPlayable(
 	timescale := videoTs
 	audioTs := videoTs
 	if isAudio {
-		as, er := offering.MediaStruct.AudioStreamFirst()
-		if er != nil {
-			return
-		}
-		ts, er = as.Timescale()
+		_, ts, er := offering.GetAudioStreamFirst()
 		if er != nil {
 			return
 		}
@@ -327,7 +342,7 @@ func (mm *ManifestMaker) makeSlicePlaylistForVodPlayable(
 	sliceStart := big.NewRat(slice.StartPts*audioTs, timescale*videoTs)
 	var sliceEnd *big.Rat
 	if slice.DurationTs == -1 {
-		sliceEnd = big.NewRat((slice.StartPts+vs.Duration.Ts())*audioTs, timescale*videoTs)
+		sliceEnd = big.NewRat((slice.StartPts+durationTs)*audioTs, timescale*videoTs)
 	} else {
 		sliceEnd = big.NewRat((slice.StartPts+slice.DurationTs)*audioTs, timescale*videoTs)
 	}

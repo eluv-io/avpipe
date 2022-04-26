@@ -1,19 +1,16 @@
 package linear
 
 import (
-	"encoding/json"
 	"io/ioutil"
 	"math"
+	"math/big"
 	"net/url"
 	"os"
-	"path/filepath"
 	"strconv"
 	"strings"
 	"testing"
 	"time"
 
-	"github.com/qluvio/legacy_imf_dash_extract/abr"
-	"github.com/qluvio/legacy_imf_dash_extract/conv_utils"
 	"github.com/stretchr/testify/require"
 )
 
@@ -57,7 +54,7 @@ func _TestManifestMaker_makeSlicePlaylistOpenEnd(t *testing.T) {
 func _TestMockSequence(t *testing.T) {
 	streamId := "video"
 	licenseServers := make(map[string][]*url.URL, 0)
-	encOverrides := abr.NewEncryptionOverrides()
+	var encOverrides EncryptionOverridesInterface
 	mm := ConstructManifestMaker(t, Vod, "flag")
 
 	var sb strings.Builder
@@ -75,8 +72,8 @@ func _TestMockSequence(t *testing.T) {
 		offering := mm.Offerings[slice.QHash]
 		require.NotNil(t, offering)
 		// TODO this conversion is not safe
-		sliceStart, _ := conv_utils.NewRatFromInts(int(slice.StartPts), 90000)
-		sliceEnd, _ := conv_utils.NewRatFromInts(int(slice.StartPts+slice.DurationTs), 90000)
+		sliceStart := big.NewRat(int64(slice.StartPts), int64(90000))
+		sliceEnd := big.NewRat(int64(slice.StartPts+slice.DurationTs), int64(90000))
 		playlist, err := offering.GetPlaylistSlice(
 			sliceStart,
 			sliceEnd,
@@ -231,13 +228,15 @@ func ConstructManifestMaker(t *testing.T, mode Mode, offering string) *ManifestM
 					VideoTimescale: 90000,
 					SegDurationTs:  180180,
 				}
-		} else {
+		} /*else {
 			mm.Offerings[slice.QHash] = SampleOffering(t)
 		}
+		*/
 	}
 	return mm
 }
 
+/*
 func SampleOffering(t *testing.T) *abr.Offering {
 	filePath, err := filepath.Abs("./offering_sample_aes.json")
 	//filePath, err := filepath.Abs("./offering_trimmed.json")
@@ -250,3 +249,4 @@ func SampleOffering(t *testing.T) *abr.Offering {
 	require.NoError(t, err)
 	return o
 }
+*/

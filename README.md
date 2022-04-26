@@ -28,11 +28,11 @@ The following repositories can be checked out in any directory, but for better o
 
 ## Test avpipe
 
-- Download media test files from https://console.cloud.google.com/storage/browser/qluvio-test-assets into _media_ directory inside _<avpipe-path>_
+- Download media test files from https://console.cloud.google.com/storage/browser/eluvio-test-assets into _media_ directory inside _<avpipe-path>_
   - `cd avpipe`
   - `mkdir ./media`  
   - `cd ./media`
-  - `gsutil -m cp 'gs://qluvio-test-assets/*' .`
+  - `gsutil -m cp 'gs://eluvio-test-assets/*' .`
 - Inside _<avpipe-path>_ run
   - `go test -timeout 2000s`
   

@@ -57,7 +57,7 @@ case $arg in
 
     --copy)
     check_filename "$2"
-    $FFMPEG_BIN/ffmpeg -i "$2" -ss "$3" -to "$4"  -copytb 0 -enc_time_base -1 -c:v copy -c:a copy "$5"
+    $FFMPEG_BIN/ffmpeg -i "$2" -ss "$3" -to "$4"  -copytb 0 -enc_time_base -1 -c:v copy -c:a copy -map 0 "$5"
     shift
     shift
     ;;
@@ -86,6 +86,13 @@ case $arg in
     --dump-frames)
     check_stream_filename "$2" "$3"
     $FFMPEG_BIN/ffprobe -hide_banner -show_frames -select_streams "$2" -print_format json "$3"
+    shift
+    shift
+    ;;
+
+    --dump-packets)
+    check_stream_filename "$2" "$3"
+    $FFMPEG_BIN/ffprobe -hide_banner -show_packets -select_streams "$2" -print_format json "$3"
     shift
     shift
     ;;

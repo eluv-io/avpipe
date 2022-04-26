@@ -3508,6 +3508,11 @@ avpipe_xc(
             }
         }
 
+        /* This is a very special case, sometimes pts is not set but dts has a value. */
+        if (input_packet->pts == AV_NOPTS_VALUE &&
+            input_packet->dts != AV_NOPTS_VALUE)
+            input_packet->pts = input_packet->dts;
+
         /* Execute for both audio and video streams:
          * - used for syncing audio to first video key frame
          */
@@ -3633,7 +3638,7 @@ xc_done:
     if ((params->xc_type & xc_audio) && rc == eav_success)
         av_write_trailer(encoder_context->format_context2);
 
-    elv_log("avpipe_xc done url=%s, rc=%d, xctx->err=%d, tx-type=%d, "
+    elv_log("avpipe_xc done url=%s, rc=%d, xctx->err=%d, xc-type=%d, "
         "last video_pts=%"PRId64" audio_pts=%"PRId64
         " video_input_start_pts=%"PRId64" audio_input_start_pts=%"PRId64
         " video_last_dts=%"PRId64" audio_last_dts="PRId64

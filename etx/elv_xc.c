@@ -1101,6 +1101,7 @@ usage(
         "\t-crypt-url :             (optional) Specify a key URL in the HLS manifest\n"
         "\t-d :                     (optional) Decoder name. For video default is \"h264\", can be: \"h264\", \"h264_cuvid\", \"jpeg2000\", \"hevc\"\n"
         "\t                                    For audio default is \"aac\", but for ts files should be set to \"ac3\"\n"
+        "\t-debug-frame-level :     (optional) Enable/disable debug frame level. Default is 0, must be 0 or 1.\n"
         "\t-duration-ts :           (optional) Default: -1 (entire stream)\n"
         "\t-e :                     (optional) Video encoder name. Default is \"libx264\", can be: \"libx264\", \"libx265\", \"h264_nvenc\", \"h264_videotoolbox\", or \"mjpeg\"\n"
         "\t-enc-height :            (optional) Default: -1 (use source height)\n"
@@ -1339,6 +1340,13 @@ main(
         case 'd':
             if (!strcmp(argv[i], "-duration-ts")) {
                 if (sscanf(argv[i+1], "%"PRId64, &p.duration_ts) != 1) {
+                    usage(argv[0], argv[i], EXIT_FAILURE);
+                }
+            } else if (!strcmp(argv[i], "-debug-frame-level")) {
+                if (sscanf(argv[i+1], "%d", &p.debug_frame_level) != 1) {
+                    usage(argv[0], argv[i], EXIT_FAILURE);
+                }
+                if (p.debug_frame_level != 0 && p.debug_frame_level != 1) {
                     usage(argv[0], argv[i], EXIT_FAILURE);
                 }
             } else if (strlen(argv[i]) > 2) {
