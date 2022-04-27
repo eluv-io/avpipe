@@ -8,16 +8,16 @@ FLAGS=-O0 -ggdb -Wall -fPIC -fstack-check
 
 OBJS=$(SRCS:%.c=$(BINDIR)/%.o)
 
-all: etx install
+all: exc install
 
 install:
 	@(if [ ! -d $(TOP_DIR)/../$(BINDIR) ]; then mkdir $(TOP_DIR)/../$(BINDIR); fi)
-	@echo Installing etx
-	@cp $(BINDIR)/etx $(TOP_DIR)/../$(BINDIR)
+	@echo Installing exc
+	@cp $(BINDIR)/exc $(TOP_DIR)/../$(BINDIR)
 
-etx: $(OBJS)
-	@echo Making etx
-	gcc $? ${LIBDIRS} ${LIBS} -o $(BINDIR)/etx
+exc: $(OBJS)
+	@echo Making exc
+	gcc $? ${LIBDIRS} ${LIBS} -o $(BINDIR)/exc
 
 $(BINDIR)/%.o: %.c
 	@(if [ ! -d $(BINDIR) ]; then mkdir $(BINDIR); fi)

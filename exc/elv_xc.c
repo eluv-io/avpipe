@@ -780,7 +780,7 @@ tx_thread_func(
     for (i=0; i<params->repeats; i++) {
         /*
          * Pass a copy of params since avpipe_fini() releases all the params memory.
-         * (This is needed when repeating the same command with etx.)
+         * (This is needed when repeating the same command with exc.)
          */
         xcparams_t *xcparams = txparam_copy(params->xcparams);
         if ((rc = avpipe_init(&xctx, params->in_handlers, params->out_handlers, xcparams)) != eav_success) {
@@ -1092,7 +1092,7 @@ usage(
         "\t-bitdepth :              (optional) Bitdepth of color space. Default is 8, can be 8, 10, or 12.\n"
         "\t-bypass :                (optional) Bypass transcoding. Default is 0, must be 0 or 1\n"
         "\t-channel-layout :        (optional) Channel layout for audio, can be \"mono\", \"stereo\", \"5.0\" or \"5.1\"....\n"
-        "\t-command :               (optional) Directing command of etx, can be \"transcode\", \"probe\" or \"mux\" (default is transcode).\n"
+        "\t-command :               (optional) Directing command of exc, can be \"transcode\", \"probe\" or \"mux\" (default is transcode).\n"
         "\t-crf :                   (optional) Mutually exclusive with video-bitrate. Default: 23\n"
         "\t-crypt-iv :              (optional) 128-bit AES IV, as hex\n"
         "\t-crypt-key :             (optional) 128-bit AES key, as hex\n"
@@ -1624,7 +1624,7 @@ main(
     av_log_set_level(AV_LOG_DEBUG);
     connect_ffmpeg_log();
 
-    elv_logger_open(NULL, "etx", 10, log_size*1024*1024, elv_log_file);
+    elv_logger_open(NULL, "exc", 10, log_size*1024*1024, elv_log_file);
     elv_set_log_level(elv_log_debug);
 
     if (!strcmp(command, "probe")) {

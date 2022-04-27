@@ -1,7 +1,7 @@
 include ./rules.make
 
 TOP_DIR ?= $(shell pwd)
-SUBDIRS=utils libavpipe etx avcmd
+SUBDIRS=utils libavpipe exc elvxc
 
 SRCS=avpipe_handler.c
 OBJS=$(SRCS:%.c=$(BINDIR)/%.o)

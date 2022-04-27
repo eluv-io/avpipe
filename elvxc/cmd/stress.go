@@ -2,9 +2,9 @@
  This module is designed to generate stress load on one/multiple avpipe server persistent cache.
  Generating load test on a server persistent cache has two phases:
  1) Generate data and force the server to store segments in persistent cache using following command:
-    avcmd stress warmup -c stress.json
+    elvxc stress warmup -c stress.json
  2) Generate load against the segments that are saved in persistent cache using following command:
-    avcmd stress run -c stress.json
+    elvxc stress run -c stress.json
 */
 package cmd
 
@@ -25,7 +25,7 @@ import (
 	"github.com/spf13/cobra"
 )
 
-var log = elog.Get("/eluvio/avcmd")
+var log = elog.Get("/eluvio/elvxc")
 
 const MaxIdleConnections = 100
 

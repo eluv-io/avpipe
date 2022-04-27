@@ -36,7 +36,7 @@ func doProbe(cmd *cobra.Command, args []string) error {
 	}
 	log.Debug("doProbe", "seekable", seekable, "filename", filename)
 
-	avpipe.InitIOHandler(&avcmdInputOpener{url: filename}, &avcmdOutputOpener{dir: ""})
+	avpipe.InitIOHandler(&elvxcInputOpener{url: filename}, &elvxcOutputOpener{dir: ""})
 
 	probe, err := avpipe.Probe(filename, seekable)
 	if err != nil {

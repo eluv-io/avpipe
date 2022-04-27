@@ -16,13 +16,13 @@ type AVCmdMuxInputOpener struct {
 }
 
 func (inputOpener *AVCmdMuxInputOpener) Open(fd int64, url string) (avpipe.InputHandler, error) {
-	log.Debug("avcmdMuxInputOpener", "url", url)
+	log.Debug("elvxcMuxInputOpener", "url", url)
 	if url[:7] == "http://" || url[:8] == "https://" {
 		resp, err := http.Get(url)
 		if err != nil {
 			return nil, err
 		}
-		muxInput := &avcmdMuxInput{
+		muxInput := &elvxcMuxInput{
 			resp: resp,
 		}
 
@@ -35,7 +35,7 @@ func (inputOpener *AVCmdMuxInputOpener) Open(fd int64, url string) (avpipe.Input
 	}
 
 	inputOpener.URL = url
-	muxInput := &avcmdMuxInput{
+	muxInput := &elvxcMuxInput{
 		file: f,
 	}
 
@@ -43,19 +43,19 @@ func (inputOpener *AVCmdMuxInputOpener) Open(fd int64, url string) (avpipe.Input
 }
 
 // Implement InputHandler
-type avcmdMuxInput struct {
+type elvxcMuxInput struct {
 	file *os.File       // Input file
 	resp *http.Response // If the url is a http/https request
 	body []byte         // Body of http request if url is a http/https request
 	rpos int            // Read position
 }
 
-func (muxInput *avcmdMuxInput) Read(buf []byte) (n int, err error) {
+func (muxInput *elvxcMuxInput) Read(buf []byte) (n int, err error) {
 	// If it is network url
 	if muxInput.resp != nil {
 		if muxInput.body == nil {
 			muxInput.body, err = ioutil.ReadAll(muxInput.resp.Body)
-			log.Debug("avcmdMuxInput Read", "body size", len(muxInput.body), "err", err)
+			log.Debug("elvxcMuxInput Read", "body size", len(muxInput.body), "err", err)
 			if err != nil && err != io.EOF {
 				return -1, err
 			}
@@ -65,7 +65,7 @@ func (muxInput *avcmdMuxInput) Read(buf []byte) (n int, err error) {
 		}
 		copied := copy(buf, muxInput.body[muxInput.rpos:])
 		muxInput.rpos += copied
-		log.Debug("avcmdMuxInput Read (network)", "buf len", len(buf), "rpos", muxInput.rpos, "copied", copied)
+		log.Debug("elvxcMuxInput Read (network)", "buf len", len(buf), "rpos", muxInput.rpos, "copied", copied)
 		return copied, nil
 	}
 
@@ -76,7 +76,7 @@ func (muxInput *avcmdMuxInput) Read(buf []byte) (n int, err error) {
 	return
 }
 
-func (muxInput *avcmdMuxInput) Seek(offset int64, whence int) (int64, error) {
+func (muxInput *elvxcMuxInput) Seek(offset int64, whence int) (int64, error) {
 	if muxInput.resp != nil {
 		return 0, fmt.Errorf("No Seek for network IO")
 	}
@@ -84,7 +84,7 @@ func (muxInput *avcmdMuxInput) Seek(offset int64, whence int) (int64, error) {
 	return n, err
 }
 
-func (muxInput *avcmdMuxInput) Close() (err error) {
+func (muxInput *elvxcMuxInput) Close() (err error) {
 	if muxInput.resp != nil {
 		muxInput.resp.Body.Close()
 		return
@@ -93,7 +93,7 @@ func (muxInput *avcmdMuxInput) Close() (err error) {
 	return err
 }
 
-func (muxInput *avcmdMuxInput) Size() int64 {
+func (muxInput *elvxcMuxInput) Size() int64 {
 	fi, err := muxInput.file.Stat()
 	if err != nil {
 		return -1
@@ -101,17 +101,17 @@ func (muxInput *avcmdMuxInput) Size() int64 {
 	return fi.Size()
 }
 
-func (muxInput *avcmdMuxInput) Stat(statType avpipe.AVStatType, statArgs interface{}) error {
+func (muxInput *elvxcMuxInput) Stat(statType avpipe.AVStatType, statArgs interface{}) error {
 	switch statType {
 	case avpipe.AV_IN_STAT_BYTES_READ:
 		readOffset := statArgs.(*uint64)
-		log.Info("avcmdMuxInput", "stat read offset", *readOffset)
+		log.Info("elvxcMuxInput", "stat read offset", *readOffset)
 	case avpipe.AV_IN_STAT_DECODING_AUDIO_START_PTS:
 		startPTS := statArgs.(*uint64)
-		log.Info("avcmdMuxInput", "audio start PTS", *startPTS)
+		log.Info("elvxcMuxInput", "audio start PTS", *startPTS)
 	case avpipe.AV_IN_STAT_DECODING_VIDEO_START_PTS:
 		startPTS := statArgs.(*uint64)
-		log.Info("avcmdMuxInput", "video start PTS", *startPTS)
+		log.Info("elvxcMuxInput", "video start PTS", *startPTS)
 	}
 
 	return nil
@@ -129,14 +129,14 @@ func (outputOpener *AVCmdMuxOutputOpener) Open(filename string, fd int64, outTyp
 		return nil, fmt.Errorf("Invalid outType=%d", outType)
 	}
 
-	log.Debug("avcmdMuxOutputOpener", "filename", filename)
+	log.Debug("elvxcMuxOutputOpener", "filename", filename)
 
 	f, err := os.OpenFile(filename, os.O_RDWR|os.O_CREATE|os.O_TRUNC, 0644)
 	if err != nil {
 		return nil, err
 	}
 
-	oh := &avcmdMuxOutput{
+	oh := &elvxcMuxOutput{
 		url:  filename,
 		file: f}
 
@@ -144,35 +144,35 @@ func (outputOpener *AVCmdMuxOutputOpener) Open(filename string, fd int64, outTyp
 }
 
 // Implement OutputHandler
-type avcmdMuxOutput struct {
+type elvxcMuxOutput struct {
 	url  string
 	file *os.File
 }
 
-func (muxOutput *avcmdMuxOutput) Write(buf []byte) (int, error) {
-	log.Debug("avcmdMuxOutput Write", "buf len", len(buf))
+func (muxOutput *elvxcMuxOutput) Write(buf []byte) (int, error) {
+	log.Debug("elvxcMuxOutput Write", "buf len", len(buf))
 	n, err := muxOutput.file.Write(buf)
 	return n, err
 }
 
-func (muxOutput *avcmdMuxOutput) Seek(offset int64, whence int) (int64, error) {
+func (muxOutput *elvxcMuxOutput) Seek(offset int64, whence int) (int64, error) {
 	n, err := muxOutput.file.Seek(offset, whence)
 	return n, err
 }
 
-func (muxOutput *avcmdMuxOutput) Close() error {
+func (muxOutput *elvxcMuxOutput) Close() error {
 	err := muxOutput.file.Close()
 	return err
 }
 
-func (muxOutput *avcmdMuxOutput) Stat(avType avpipe.AVType, statType avpipe.AVStatType, statArgs interface{}) error {
+func (muxOutput *elvxcMuxOutput) Stat(avType avpipe.AVType, statType avpipe.AVStatType, statArgs interface{}) error {
 	switch statType {
 	case avpipe.AV_OUT_STAT_BYTES_WRITTEN:
 		writeOffset := statArgs.(*uint64)
-		log.Info("avcmdMuxOutput", "STAT, write offset", *writeOffset)
+		log.Info("elvxcMuxOutput", "STAT, write offset", *writeOffset)
 	case avpipe.AV_OUT_STAT_ENCODING_END_PTS:
 		endPTS := statArgs.(*uint64)
-		log.Info("avcmdMuxOutput", "STAT, endPTS", *endPTS)
+		log.Info("elvxcMuxOutput", "STAT, endPTS", *endPTS)
 
 	}
 

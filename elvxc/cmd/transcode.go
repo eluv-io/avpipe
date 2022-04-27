@@ -12,16 +12,16 @@ import (
 	"github.com/spf13/cobra"
 )
 
-// avcmdInputOpener implements avpipe.InputOpener
-type avcmdInputOpener struct {
+// elvxcInputOpener implements avpipe.InputOpener
+type elvxcInputOpener struct {
 	url string
 }
 
-func (io *avcmdInputOpener) Open(fd int64, url string) (avpipe.InputHandler, error) {
+func (io *elvxcInputOpener) Open(fd int64, url string) (avpipe.InputHandler, error) {
 	log.Debug("AVCMD InputOpener.Open", "fd", fd, "url", url)
 
 	if (len(url) >= 4 && url[0:4] == "rtmp") || (len(url) >= 3 && url[0:3] == "udp") {
-		return &avcmdInput{url: url}, nil
+		return &elvxcInput{url: url}, nil
 	}
 
 	f, err := os.OpenFile(url, os.O_RDONLY, 0755)
@@ -30,21 +30,21 @@ func (io *avcmdInputOpener) Open(fd int64, url string) (avpipe.InputHandler, err
 	}
 
 	io.url = url
-	etxInput := &avcmdInput{
+	excInput := &elvxcInput{
 		file: f,
 		url:  url,
 	}
 
-	return etxInput, nil
+	return excInput, nil
 }
 
-// avcmdInput implements avpipe.InputHandler
-type avcmdInput struct {
+// elvxcInput implements avpipe.InputHandler
+type elvxcInput struct {
 	url  string
 	file *os.File // Input file
 }
 
-func (i *avcmdInput) Read(buf []byte) (int, error) {
+func (i *elvxcInput) Read(buf []byte) (int, error) {
 	if i.url[0:4] == "rtmp" {
 		return 0, nil
 	}
@@ -55,7 +55,7 @@ func (i *avcmdInput) Read(buf []byte) (int, error) {
 	return n, err
 }
 
-func (i *avcmdInput) Seek(offset int64, whence int) (int64, error) {
+func (i *elvxcInput) Seek(offset int64, whence int) (int64, error) {
 	if i.url[0:4] == "rtmp" {
 		return 0, nil
 	}
@@ -64,7 +64,7 @@ func (i *avcmdInput) Seek(offset int64, whence int) (int64, error) {
 	return n, err
 }
 
-func (i *avcmdInput) Close() error {
+func (i *elvxcInput) Close() error {
 	if i.url[0:4] == "rtmp" {
 		return nil
 	}
@@ -73,7 +73,7 @@ func (i *avcmdInput) Close() error {
 	return err
 }
 
-func (i *avcmdInput) Size() int64 {
+func (i *elvxcInput) Size() int64 {
 	fi, err := i.file.Stat()
 	if err != nil {
 		return -1
@@ -81,7 +81,7 @@ func (i *avcmdInput) Size() int64 {
 	return fi.Size()
 }
 
-func (i *avcmdInput) Stat(statType avpipe.AVStatType, statArgs interface{}) error {
+func (i *elvxcInput) Stat(statType avpipe.AVStatType, statArgs interface{}) error {
 	switch statType {
 	case avpipe.AV_IN_STAT_BYTES_READ:
 		readOffset := statArgs.(*uint64)
@@ -103,12 +103,12 @@ func (i *avcmdInput) Stat(statType avpipe.AVStatType, statArgs interface{}) erro
 	return nil
 }
 
-// avcmdOutputOpener implements avpipe.OutputOpener
-type avcmdOutputOpener struct {
+// elvxcOutputOpener implements avpipe.OutputOpener
+type elvxcOutputOpener struct {
 	dir string
 }
 
-func (oo *avcmdOutputOpener) Open(h, fd int64, stream_index, seg_index int,
+func (oo *elvxcOutputOpener) Open(h, fd int64, stream_index, seg_index int,
 	pts int64, out_type avpipe.AVType) (avpipe.OutputHandler, error) {
 
 	log.Debug("AVCMD OutputOpener.Open", "h", h, "fd", fd,
@@ -161,7 +161,7 @@ func (oo *avcmdOutputOpener) Open(h, fd int64, stream_index, seg_index int,
 		return nil, err
 	}
 
-	oh := &avcmdOutput{
+	oh := &elvxcOutput{
 		url:          filename,
 		stream_index: stream_index,
 		seg_index:    seg_index,
@@ -170,30 +170,30 @@ func (oo *avcmdOutputOpener) Open(h, fd int64, stream_index, seg_index int,
 	return oh, nil
 }
 
-// avcmdOutput implement avpipe.OutputHandler
-type avcmdOutput struct {
+// elvxcOutput implement avpipe.OutputHandler
+type elvxcOutput struct {
 	url          string
 	stream_index int
 	seg_index    int
 	file         *os.File
 }
 
-func (o *avcmdOutput) Write(buf []byte) (int, error) {
+func (o *elvxcOutput) Write(buf []byte) (int, error) {
 	n, err := o.file.Write(buf)
 	return n, err
 }
 
-func (o *avcmdOutput) Seek(offset int64, whence int) (int64, error) {
+func (o *elvxcOutput) Seek(offset int64, whence int) (int64, error) {
 	n, err := o.file.Seek(offset, whence)
 	return n, err
 }
 
-func (o *avcmdOutput) Close() error {
+func (o *elvxcOutput) Close() error {
 	err := o.file.Close()
 	return err
 }
 
-func (o *avcmdOutput) Stat(avType avpipe.AVType, statType avpipe.AVStatType, statArgs interface{}) error {
+func (o *elvxcOutput) Stat(avType avpipe.AVType, statType avpipe.AVStatType, statArgs interface{}) error {
 
 	switch statType {
 	case avpipe.AV_OUT_STAT_BYTES_WRITTEN:
@@ -681,7 +681,7 @@ func doTranscode(cmd *cobra.Command, args []string) error {
 		return err
 	}
 
-	avpipe.InitIOHandler(&avcmdInputOpener{url: filename}, &avcmdOutputOpener{dir: dir})
+	avpipe.InitIOHandler(&elvxcInputOpener{url: filename}, &elvxcOutputOpener{dir: dir})
 
 	done := make(chan interface{})
 

@@ -60,9 +60,8 @@ dkms.conf
 
 /bin/
 /include/
-/avcmd/avcmd
+/elvxc/elvxc
 /etx/bin/
-/goetx/goetx
 O/
 *.log
 !go.mod

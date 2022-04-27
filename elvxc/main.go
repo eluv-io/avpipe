@@ -7,13 +7,13 @@ import (
 	"github.com/eluv-io/log-go"
 
 	"github.com/qluvio/avpipe"
-	"github.com/qluvio/avpipe/avcmd/cmd"
+	"github.com/qluvio/avpipe/elvxc/cmd"
 	"github.com/spf13/cobra"
 )
 
 func main() {
 	cmdRoot := &cobra.Command{
-		Use:          "avcmd",
+		Use:          "elvxc",
 		Short:        "Audio Video Command",
 		Long:         "",
 		SilenceUsage: false,
@@ -23,13 +23,13 @@ func main() {
 		Level:   "debug",
 		Handler: "text",
 		File: &log.LumberjackConfig{
-			Filename:  "avcmd.log",
+			Filename:  "elvxc.log",
 			LocalTime: true,
 		},
 	})
 	avpipe.SetCLoggers()
 
-	log.Info("Starting avcmd", "version", avpipe.Version())
+	log.Info("Starting elvxc", "version", avpipe.Version())
 
 	err := cmd.InitTranscode(cmdRoot)
 	if err != nil {
