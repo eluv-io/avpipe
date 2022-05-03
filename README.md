@@ -12,9 +12,9 @@ The following libraries must be installed:
 The following repositories can be checked out in any directory, but for better organization it is recommended to be cloned in the same parent directory like _src_
 (_src_ is the workspace containing FFmpeg and avpipe).
  - elv-io/FFmpeg:
-   - `git clone  git@github.com:eluv-io/FFmpeg.git`
- - qluvio/avpipe: (this will be moved to elv-io)
-   - `git clone git@github.com:qluvio/avpipe.git`
+   - `git clone git@github.com:eluv-io/FFmpeg.git`
+ - eluv-io/avpipe:
+   - `git clone git@github.com:eluv-io/avpipe.git`
     
 ## Build FFmpeg and avpipe
 
