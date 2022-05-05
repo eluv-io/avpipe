@@ -980,9 +980,12 @@ set_nvidia_params(
         encoder_codec_context->profile = FF_PROFILE_H264_HIGH;
     }
 
+if 0
+    /* Don't set the level, and let the encoder picks up the level automatically */
     encoder_codec_context->level = find_level(encoder_codec_context->width,
         encoder_codec_context->height, decoder_context);
     av_opt_set_int(encoder_codec_context->priv_data, "level", encoder_codec_context->level, 0);
+#endif
 
     /*
      * According to https://superuser.com/questions/1296374/best-settings-for-ffmpeg-with-nvenc
