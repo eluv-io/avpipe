@@ -7,6 +7,7 @@ import (
 	"io/ioutil"
 	"math/big"
 	"os"
+	"os/exec"
 	"path"
 	"path/filepath"
 	"runtime"
@@ -677,6 +678,40 @@ func TestNvidiaABRTranscode(t *testing.T) {
 	}
 	setFastEncodeParams(params, false)
 	doTranscode(t, params, nThreads, outputDir, filename, "H264_NVIDIA encoder might not be enabled or hardware might not be available")
+}
+
+func TestNvidiaABRTranscode2(t *testing.T) {
+	if !nvidiaExist() {
+		return
+	}
+	outputDir := path.Join(baseOutPath, fn())
+	boilerplate(t, outputDir, "")
+	filename := videoBigBuckBunnyPath
+
+	params := &avpipe.XcParams{
+		Format:          "fmp4-segment",
+		StartTimeTs:     0,
+		DurationTs:      -1,
+		StartSegmentStr: "1",
+		VideoBitrate:    2560000,
+		AudioBitrate:    64000,
+		SampleRate:      44100,
+		SegDuration:     "30",
+		Ecodec:          "h264_nvenc",
+		EncHeight:       642,
+		EncWidth:        1532,
+		XcType:          avpipe.XcVideo,
+		StreamId:        -1,
+		Url:             filename,
+	}
+	setFastEncodeParams(params, false)
+
+	xcTestResult := &XcTestResult{
+		mezFile:  []string{fmt.Sprintf("%s/vsegment-1.mp4", outputDir)},
+		level:    32,
+		pixelFmt: "yuv420p",
+	}
+	xcTest(t, outputDir, params, xcTestResult, true)
 }
 
 func TestConcurrentABRTranscode(t *testing.T) {
@@ -2053,4 +2088,17 @@ func setupOutDir(t *testing.T, dir string) {
 		err = removeDirContents(dir)
 	}
 	failNowOnError(t, err)
+}
+
+func nvidiaExist() bool {
+	cmd := exec.Command("nvidia-smi")
+	cmd.Stdout = nil
+	cmd.Stderr = nil
+
+	err := cmd.Start()
+	if err == nil {
+		return true
+	}
+
+	return false
 }

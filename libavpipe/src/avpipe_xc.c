@@ -980,7 +980,7 @@ set_nvidia_params(
         encoder_codec_context->profile = FF_PROFILE_H264_HIGH;
     }
 
-if 0
+#if 0
     /* Don't set the level, and let the encoder picks up the level automatically */
     encoder_codec_context->level = find_level(encoder_codec_context->width,
         encoder_codec_context->height, decoder_context);
