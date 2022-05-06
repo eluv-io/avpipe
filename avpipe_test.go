@@ -654,10 +654,15 @@ func doTranscode(t *testing.T, p *avpipe.XcParams, nThreads int, outputDir,
 }
 
 func TestNvidiaABRTranscode(t *testing.T) {
+	if !nvidiaExist() {
+		log.Info("Ignoring ", "test", fn())
+		return
+	}
+
 	outputDir := path.Join(baseOutPath, fn())
 	boilerplate(t, outputDir, "")
 	filename := videoBigBuckBunnyPath
-	nThreads := 10
+	nThreads := 2
 
 	params := &avpipe.XcParams{
 		Format:             "hls",
@@ -682,6 +687,7 @@ func TestNvidiaABRTranscode(t *testing.T) {
 
 func TestNvidiaABRTranscode2(t *testing.T) {
 	if !nvidiaExist() {
+		log.Info("Ignoring ", "test", fn())
 		return
 	}
 	outputDir := path.Join(baseOutPath, fn())
@@ -703,6 +709,7 @@ func TestNvidiaABRTranscode2(t *testing.T) {
 		XcType:          avpipe.XcVideo,
 		StreamId:        -1,
 		Url:             filename,
+		DebugFrameLevel: debugFrameLevel,
 	}
 	setFastEncodeParams(params, false)
 
@@ -2100,5 +2107,6 @@ func nvidiaExist() bool {
 		return true
 	}
 
+	log.Info("NVIDIA doesn't exist")
 	return false
 }
