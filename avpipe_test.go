@@ -628,8 +628,10 @@ func TestV2SingleABRTranscodeCancelling(t *testing.T) {
 	assert.Error(t, err)
 }
 
-func doTranscode(t *testing.T, p *avpipe.XcParams, nThreads int, outputDir,
-	filename string, reportFailure string) {
+func doTranscode(t *testing.T,
+	p *avpipe.XcParams,
+	nThreads int,
+	outputDir, filename string) {
 
 	avpipe.InitIOHandler(&fileInputOpener{url: filename},
 		&concurrentOutputOpener{dir: outputDir})
@@ -639,11 +641,8 @@ func doTranscode(t *testing.T, p *avpipe.XcParams, nThreads int, outputDir,
 		go func(params *avpipe.XcParams) {
 			err := avpipe.Xc(params)
 			done <- struct{}{} // Signal the main goroutine
-			if err != nil && reportFailure == "" {
+			if err != nil {
 				failNowOnError(t, err)
-			} else if err != nil {
-				fmt.Printf("Ignoring error: %s\n", reportFailure)
-				log.Error("doTranscode failed", err)
 			}
 		}(p)
 	}
@@ -682,7 +681,7 @@ func TestNvidiaABRTranscode(t *testing.T) {
 		Url:                filename,
 	}
 	setFastEncodeParams(params, false)
-	doTranscode(t, params, nThreads, outputDir, filename, "H264_NVIDIA encoder might not be enabled or hardware might not be available")
+	doTranscode(t, params, nThreads, outputDir, filename)
 }
 
 func TestNvidiaABRTranscode2(t *testing.T) {
@@ -746,7 +745,7 @@ func TestConcurrentABRTranscode(t *testing.T) {
 		DebugFrameLevel:    debugFrameLevel,
 	}
 	setFastEncodeParams(params, false)
-	doTranscode(t, params, nThreads, outputDir, filename, "")
+	doTranscode(t, params, nThreads, outputDir, filename)
 }
 
 func TestAudioAAC2AACMezMaker(t *testing.T) {
