@@ -685,7 +685,7 @@ func TestNvidiaABRTranscode(t *testing.T) {
 }
 
 // Check nvidia transcoding with weird aspect ratio
-func TestNvidiaABRTranscode2(t *testing.T) {
+func TestNvidiaFmp4SegmentAspectRatio(t *testing.T) {
 	if !nvidiaExist() {
 		log.Info("Ignoring ", "test", fn())
 		return
