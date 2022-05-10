@@ -3816,6 +3816,7 @@ get_channel_layout_for_encoder(int channel_layout)
         break;
     }
 
+    /* If there is no input channel layout, set the default encoder channel layout to stereo */
     if (channel_layout == 0)
         channel_layout = AV_CH_LAYOUT_STEREO;
 
