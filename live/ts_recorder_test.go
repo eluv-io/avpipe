@@ -7,7 +7,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/qluvio/avpipe"
+	"github.com/eluv-io/avpipe"
 )
 
 func TestUdpToMp4(t *testing.T) {

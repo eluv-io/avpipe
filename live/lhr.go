@@ -16,7 +16,7 @@ import (
 	"time"
 
 	"github.com/eluv-io/errors-go"
-	"github.com/qluvio/avpipe"
+	"github.com/eluv-io/avpipe"
 
 	"github.com/grafov/m3u8"
 

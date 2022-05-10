@@ -18,7 +18,7 @@ import (
 
 	"github.com/eluv-io/errors-go"
 	elog "github.com/eluv-io/log-go"
-	"github.com/qluvio/avpipe"
+	"github.com/eluv-io/avpipe"
 )
 
 //
