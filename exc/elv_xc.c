@@ -929,7 +929,8 @@ do_probe(
 
 end_probe:
     elv_dbg("Releasing probe resources");
-    free(probe->stream_info);
+    if (probe)
+        free(probe->stream_info);
     free(probe);
     return rc;
 }

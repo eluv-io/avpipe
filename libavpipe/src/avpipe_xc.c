@@ -3816,6 +3816,9 @@ get_channel_layout_for_encoder(int channel_layout)
         break;
     }
 
+    if (channel_layout == 0)
+        channel_layout = AV_CH_LAYOUT_STEREO;
+
     return channel_layout;
 }
 
