@@ -11,8 +11,8 @@ import (
 
 	"github.com/Comcast/gots/packet"
 	"github.com/eluv-io/log-go"
-	"github.com/qluvio/avpipe/live"
-	"github.com/qluvio/avpipe/ts"
+	"github.com/eluv-io/avpipe/live"
+	"github.com/eluv-io/avpipe/ts"
 )
 
 func main() {

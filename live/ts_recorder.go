@@ -6,7 +6,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/qluvio/avpipe"
+	"github.com/eluv-io/avpipe"
 )
 
 type TsReader struct {

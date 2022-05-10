@@ -3,7 +3,7 @@ package cmd
 import "C"
 import (
 	"fmt"
-	"github.com/qluvio/avpipe"
+	"github.com/eluv-io/avpipe"
 	"github.com/spf13/cobra"
 	"io"
 	"io/ioutil"

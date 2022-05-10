@@ -6,7 +6,7 @@ import (
 	"io/ioutil"
 	"time"
 
-	"github.com/qluvio/avpipe/ts"
+	"github.com/eluv-io/avpipe/ts"
 )
 
 func MakeMockSource1(sr *SignalRecorder) *SignalSource {

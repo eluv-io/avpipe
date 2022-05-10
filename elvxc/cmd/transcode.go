@@ -8,7 +8,7 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/qluvio/avpipe"
+	"github.com/eluv-io/avpipe"
 	"github.com/spf13/cobra"
 )
 

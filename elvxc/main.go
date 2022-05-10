@@ -6,8 +6,8 @@ import (
 
 	"github.com/eluv-io/log-go"
 
-	"github.com/qluvio/avpipe"
-	"github.com/qluvio/avpipe/elvxc/cmd"
+	"github.com/eluv-io/avpipe"
+	"github.com/eluv-io/avpipe/elvxc/cmd"
 	"github.com/spf13/cobra"
 )
 

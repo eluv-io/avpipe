@@ -1,4 +1,4 @@
-module github.com/qluvio/avpipe
+module github.com/eluv-io/avpipe
 
 require (
 	github.com/Comcast/gots v0.0.0-20200213175321-9799558ed3e2
