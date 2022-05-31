@@ -1,5 +1,16 @@
 # avpipe
 
+# Introduction
+The avpipe library is basically a C/Go library on top of FFmpeg with very simple transcoding APIs.
+This library helps third party developers to develop server programs or apps for transcoding audio/video in C or Go.
+The avpipe library has the capability to transcode audio/video input files and produce MP4 or M4S (for HLS/DASH playout) segments on the fly.
+The source of input files for transcoding can be a file on disk, a network connection, or some objects on the cloud.
+Depending on the location of the source file, the input of avpipe library can be set via some handlers (callback functions) in both C or Go.
+Similarly the output of avpipe library can be set by some callback functions to send the result to a file on disk, a network connection or some objects on the cloud.
+
+Usually the media segments are either fragmented MP4 or TS segments.
+So far, the work on avpipe has been focused on generating fragmented MP4 segments (the TS format might be added later).
+
 # Build
 
 ## Prerequisites
@@ -165,36 +176,19 @@ typedef struct xcparams_t {
 
 ## Design map
 
-### Input (reading from source)
+### C/Go interaction architecture
 
-INIT
+Avpipe library has two main layers (components): avpipe C library and avpipe C/GO library.
 
-libavpipe avpipe_init
-  - allocaes txctx
-  - in_handlers - avpipe_reader
+#### C layer:
+The first layer is the C code that has been built on top of the different libraries of ffmpeg like libx264, libx265, libavcodec, libavformat, libavfilter and libswresample.
+This is the main transcoding engine of avpipe and defines low level C transcoding API of avpipe library.
+Avpipe uses the callbacks in avio_alloc_context() to read, write, or seek into the media files.
 
-SETUP
-  - avformat_open_input                   --> read()
-  - avformat_find_stream_info             --> read()
-
-WORK LOOP
-
-  - avpipe_tx()
-    - write header
-	- loop
-	  - read_frame                        --> read()
-	  - decode_packet
-	    - avcodec_send_packet     (to decoder)
-		- while - avcodec_receive_frame   (from decoder)
-
-        - av_buffersrc_add_frame_flags()
-		- while - av_buffersink_get_frame()
-
-		- encode_frame
-          - avcodec_send_frame
-		  - avcodec_receive_packet
-
-		  - av_write_frame               --> open() write() close()
+#### C/Go layer:
+The second layer is the C/GO code, mainly avpipe.go,  that provides the API for Go programs, and avpipe.c, which glues the Go layer to avpipe C library.
+The handlers in avpipe.c are the callback functions that get called by ffmpeg and they call the Go layer callback functions themselves.
+This component is discussed in more detail in section 6.2.
 
 ## Avpipe stat reports
 - Avpipe library reports some input and output stats via some events.
