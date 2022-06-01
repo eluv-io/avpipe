@@ -219,7 +219,8 @@ elv_io_close(
         free(outctx->url);
     free(outctx);
     pb->opaque = NULL;
-    out_tracker->last_outctx = NULL;
+    if (out_tracker)
+        out_tracker->last_outctx = NULL;
     av_freep(&avioctx->buffer);
     avio_context_free(&avioctx);
     return;
