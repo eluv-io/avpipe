@@ -18,13 +18,13 @@ The following repositories can be checked out in any directory, but for better o
     
 ## Build FFmpeg and avpipe
 
-- Build ffmpeg: in FFmpeg directory (_<ffmpeg-path>_) run
+- Build ffmpeg: in FFmpeg directory `<ffmpeg-path>` run
   - `./build.sh`
 - Set environment variables: in avpipe directory run
   - `source init-env.sh <ffmpeg-path>`
 - Build avpipe: in avpipe directory run
   - `make`
-- This installs the binaries under _<avpipe-path>/bin_
+- This installs the binaries under `<avpipe-path>/bin`
 
 ## Test avpipe
 
