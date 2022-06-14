@@ -4378,9 +4378,6 @@ avpipe_fini(
     /* Close input handler resources if it is not a muxing command */
     if (!(*xctx)->in_mux_ctx)
         (*xctx)->in_handlers->avpipe_closer((*xctx)->inctx);
-    free((*xctx)->in_handlers);
-    free((*xctx)->out_handlers);
-
 
     decoder_context = &(*xctx)->decoder_ctx;
     encoder_context = &(*xctx)->encoder_ctx;
@@ -4433,6 +4430,9 @@ avpipe_fini(
         av_audio_fifo_free(decoder_context->fifo);
         swr_free(&decoder_context->resampler_context);
     }
+
+    free((*xctx)->in_handlers);
+    free((*xctx)->out_handlers);
 
     if ((*xctx)->inctx && (*xctx)->inctx->udp_channel)
         elv_channel_fini(&((*xctx)->inctx->udp_channel));
