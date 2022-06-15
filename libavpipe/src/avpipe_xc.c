@@ -4404,12 +4404,14 @@ avpipe_fini(
         avfilter_graph_free(&decoder_context->audio_filter_graph);
 
     if (encoder_context && encoder_context->format_context) {
-        free(encoder_context->format_context->avpipe_opaque);
+        void *avpipe_opaque = encoder_context->format_context->avpipe_opaque;
         avformat_free_context(encoder_context->format_context);
+        free(avpipe_opaque);
     }
     if (encoder_context && encoder_context->format_context2) {
-        free(encoder_context->format_context2->avpipe_opaque);
+        void *avpipe_opaque = encoder_context->format_context2->avpipe_opaque;
         avformat_free_context(encoder_context->format_context2);
+        free(avpipe_opaque);
     }
 
     for (int i=0; i<MAX_STREAMS; i++) {
