@@ -3,7 +3,8 @@ SRCS=avpipe_xc.c \
     avpipe_utils.c \
     avpipe_filters.c \
     avpipe_io.c \
-    avpipe_mux.c
+    avpipe_mux.c \
+    avpipe_level.c
 
 BINDIR=bin
 LIBDIR=lib
@@ -23,7 +24,7 @@ else
 VERSION := $(GIT_VERSION)
 endif
 
-FLAGS=-O0 -ggdb -Wall -fPIC -fstack-check -DVERSION=\"$(VERSION)\"
+FLAGS=-O0 -ggdb -Wall -fPIC -DVERSION=\"$(VERSION)\"
 
 all: avpipelib install
 

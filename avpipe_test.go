@@ -16,9 +16,9 @@ import (
 	"testing"
 	"time"
 
-	"github.com/eluv-io/log-go"
 	"github.com/eluv-io/avpipe"
 	"github.com/eluv-io/avpipe/elvxc/cmd"
+	"github.com/eluv-io/log-go"
 	"github.com/stretchr/testify/assert"
 )
 
@@ -1311,7 +1311,7 @@ func TestIrregularTsMezMaker_1_24(t *testing.T) {
 
 	xcTestResult := &XcTestResult{
 		timeScale: 12288,
-		level:     42,
+		level:     31,
 		pixelFmt:  "yuv420p",
 	}
 
@@ -1352,7 +1352,7 @@ func TestIrregularTsMezMaker_1_10000(t *testing.T) {
 
 	xcTestResult := &XcTestResult{
 		timeScale: 10000,
-		level:     42,
+		level:     31,
 		pixelFmt:  "yuv420p",
 	}
 
@@ -1622,7 +1622,7 @@ func TestABRMuxing(t *testing.T) {
 	xcTestResult := &XcTestResult{
 		mezFile:   []string{fmt.Sprintf("%s/vsegment-1.mp4", videoMezDir)},
 		timeScale: 24000,
-		level:     42,
+		level:     31,
 		pixelFmt:  "yuv420p",
 	}
 	// Now probe mez video and output file and become sure both have the same duration
@@ -1633,7 +1633,7 @@ func TestABRMuxing(t *testing.T) {
 	xcTestResult = &XcTestResult{
 		mezFile:   []string{fmt.Sprintf("%s/segment-1.mp4", muxOutDir)},
 		timeScale: 24000,
-		level:     42,
+		level:     31,
 		pixelFmt:  "yuv420p",
 	}
 	avpipe.InitIOHandler(&fileInputOpener{url: xcTestResult.mezFile[0]}, &fileOutputOpener{dir: muxOutDir})

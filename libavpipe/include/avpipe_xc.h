@@ -181,6 +181,20 @@ typedef struct ioctx_t {
     volatile int    closed; /* If it is set that means inctx is closed */
 } ioctx_t;
 
+typedef struct h264_level_descriptor {
+    const char *name;
+    uint8_t     level_idc;
+    uint8_t     constraint_set3_flag;
+    uint32_t    max_mbps;
+    uint32_t    max_fs;
+    uint32_t    max_dpb_mbs;
+    uint32_t    max_br;
+    uint32_t    max_cpb;
+    uint16_t    max_v_mv_r;
+    uint8_t     min_cr;
+    uint8_t     max_mvs_per_2mb;
+} h264_level_descriptor;
+
 typedef int
 (*avpipe_opener_f)(
     const char *url,
@@ -658,5 +672,13 @@ set_extract_images(
     xcparams_t *params,
     int index,
     int64_t value);
+
+int
+avpipe_h264_guess_level(
+    char *url,
+    int profile_idc,
+    int64_t bitrate,
+    int framerate,
+    int width, int height);
 
 #endif
