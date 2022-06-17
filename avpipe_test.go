@@ -1906,6 +1906,36 @@ func TestExtractImagesListFast(t *testing.T) {
 	assert.Equal(t, int64(1980), pts)
 }
 
+type LevelParams struct {
+	profile       int
+	bitrate       int64
+	framerate     int
+	width         int
+	height        int
+	expectedLevel int
+}
+
+func TestLevel(t *testing.T) {
+	levelParams := []LevelParams{
+		{100, 7498181, 30, 3840, 2160, 51},
+		{100, 4001453, 60, 1920, 1080, 42},
+		{100, 3081772, 30, 1920, 1080, 40},
+		{100, 8173343, 24, 2048, 858, 40},
+		{77, 921161, 25, 2048, 864, 40},
+		{100, 207245, 25, 1532, 642, 32},
+		{100, 1530884, 30, 1280, 720, 31},
+		{100, 409778, 24, 720, 302, 30},
+		{100, 348377, 24, 640, 268, 21},
+		{100, 324552, 30, 480, 272, 21},
+		{100, 115986, 24, 320, 144, 12},
+	}
+
+	for i := 0; i < len(levelParams); i++ {
+		level := avpipe.H264GuessLevel("", levelParams[i].profile, levelParams[i].bitrate, levelParams[i].framerate, levelParams[i].width, levelParams[i].height)
+		assert.Equal(t, levelParams[i].expectedLevel, level)
+	}
+}
+
 func TestMain(m *testing.M) {
 	// call flag.Parse() here if TestMain uses flags
 	setupLogging()

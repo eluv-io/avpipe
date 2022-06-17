@@ -1480,3 +1480,15 @@ func StreamInfoAsArray(s []StreamInfo) []StreamInfo {
 	}
 	return a
 }
+
+func H264GuessLevel(url string, profile int, bitrate int64, framerate, width, height int) int {
+	level := C.avpipe_h264_guess_level(
+		C.CString(url),
+		C.int(profile),
+		C.int64_t(bitrate),
+		C.int(framerate),
+		C.int(width),
+		C.int(height))
+
+	return int(level)
+}
