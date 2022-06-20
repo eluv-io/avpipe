@@ -199,14 +199,19 @@ avpipe_h264_guess_profile(
 {
     int profile;
 
-    /*
-     * For low resolutions pick baseline profile.
-     * It allows the video playout on most of the mobile devices.
-     */
     if ((height <= 480 && width <= 720) ||
         (width <= 480 && height <= 720))
+        /*
+         * FF_PROFILE_H264_BASELINE is primarily for lower-cost applications with limited computing resources,
+         * this profile is used widely in videoconferencing and mobile applications.
+         * For low resolutions pick baseline profile, so it allows the video playout on most of the mobile devices.
+         */
         profile = FF_PROFILE_H264_BASELINE;
     else if (bitdepth == 8)
+        /*
+         * FF_PROFILE_H264_HIGH is the primary profile for broadcast and disc storage applications,
+         * particularly for high-definition television applications.
+         */
         profile = FF_PROFILE_H264_HIGH;
     else
         profile = FF_PROFILE_H264_HIGH_10;

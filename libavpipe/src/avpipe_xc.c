@@ -760,20 +760,8 @@ set_h264_params(
     int framerate = 0;
 
     /* Codec level and profile must be set correctly per H264 spec */
-    if (encoder_codec_context->height <= 480)
-        /*
-         * FF_PROFILE_H264_BASELINE is primarily for lower-cost applications with limited computing resources,
-         * this profile is used widely in videoconferencing and mobile applications.
-         */
-        encoder_codec_context->profile = FF_PROFILE_H264_BASELINE;
-    else if (params->bitdepth == 8)
-        /*
-         * FF_PROFILE_H264_HIGH is the primary profile for broadcast and disc storage applications,
-         * particularly for high-definition television applications.
-         */
-        encoder_codec_context->profile = FF_PROFILE_H264_HIGH;
-    else /* params->bitdepth == 10 */
-        encoder_codec_context->profile = FF_PROFILE_H264_HIGH_10;
+    encoder_codec_context->profile = avpipe_h264_guess_profile(params->bitdepth,
+        encoder_codec_context->width, encoder_codec_context->height);
 
     if (encoder_codec_context->framerate.den != 0)
         framerate = encoder_codec_context->framerate.num/encoder_codec_context->framerate.den;
