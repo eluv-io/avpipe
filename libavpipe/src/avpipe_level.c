@@ -170,7 +170,8 @@ avpipe_h264_guess_level(
     int profile_idc,
     int64_t bitrate,
     int framerate,
-    int width, int height)
+    int width,
+    int height)
 {
     int level;
     const h264_level_descriptor *level_descriptor = h264_guess_level(profile_idc,
@@ -190,3 +191,25 @@ avpipe_h264_guess_level(
     return level;
 }
 
+int
+avpipe_h264_guess_profile(
+    int bitdepth,
+    int width,
+    int height)
+{
+    int profile;
+
+    /*
+     * For low resolutions pick baseline profile.
+     * It allows the video playout on most of the mobile devices.
+     */
+    if ((height <= 480 && width <= 720) ||
+        (width <= 480 && height <= 720))
+        profile = FF_PROFILE_H264_BASELINE;
+    else if (bitdepth == 8)
+        profile = FF_PROFILE_H264_HIGH;
+    else
+        profile = FF_PROFILE_H264_HIGH_10;
+
+    return profile;
+}

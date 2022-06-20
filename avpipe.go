@@ -92,6 +92,15 @@ const (
 	XcExtractImages        = 65 // XcVideo | 2^6
 )
 
+type XcProfile int
+
+const (
+	XcProfileNone         XcProfile = iota
+	XcProfileH264BaseLine           = C.FF_PROFILE_H264_BASELINE // 66
+	XcProfileH264Heigh              = C.FF_PROFILE_H264_HIGH     // 100
+	XcProfileH264Heigh10            = C.FF_PROFILE_H264_HIGH_10  // 110
+)
+
 func XcTypeFromString(xcTypeStr string) XcType {
 	var xcType XcType
 	switch xcTypeStr {
@@ -1491,4 +1500,13 @@ func H264GuessLevel(url string, profile int, bitrate int64, framerate, width, he
 		C.int(height))
 
 	return int(level)
+}
+
+func H264GuessProfile(bandwidth, width, height int) int {
+	profile := C.avpipe_h264_guess_profile(
+		C.int(bandwidth),
+		C.int(width),
+		C.int(height))
+
+	return int(profile)
 }

@@ -1936,6 +1936,28 @@ func TestLevel(t *testing.T) {
 	}
 }
 
+type ProfileParams struct {
+	bitDepth        int
+	width           int
+	height          int
+	expectedProfile int
+}
+
+func TestProfile(t *testing.T) {
+	profileParams := []ProfileParams{
+		{8, 320, 540, avpipe.XcProfileH264BaseLine},
+		{8, 1280, 720, avpipe.XcProfileH264Heigh},
+		{8, 1920, 1080, avpipe.XcProfileH264Heigh},
+		{8, 3840, 2169, avpipe.XcProfileH264Heigh},
+		{10, 3840, 2169, avpipe.XcProfileH264Heigh10},
+	}
+
+	for i := 0; i < len(profileParams); i++ {
+		profile := avpipe.H264GuessProfile(profileParams[i].bitDepth, profileParams[i].width, profileParams[i].height)
+		assert.Equal(t, profileParams[i].expectedProfile, profile)
+	}
+}
+
 func TestMain(m *testing.M) {
 	// call flag.Parse() here if TestMain uses flags
 	setupLogging()
