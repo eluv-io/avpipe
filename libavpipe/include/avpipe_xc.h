@@ -181,6 +181,20 @@ typedef struct ioctx_t {
     volatile int    closed; /* If it is set that means inctx is closed */
 } ioctx_t;
 
+typedef struct h264_level_descriptor {
+    const char *name;
+    uint8_t     level_idc;
+    uint8_t     constraint_set3_flag;
+    uint32_t    max_mbps;
+    uint32_t    max_fs;
+    uint32_t    max_dpb_mbs;
+    uint32_t    max_br;
+    uint32_t    max_cpb;
+    uint16_t    max_v_mv_r;
+    uint8_t     min_cr;
+    uint8_t     max_mvs_per_2mb;
+} h264_level_descriptor;
+
 typedef int
 (*avpipe_opener_f)(
     const char *url,
@@ -649,14 +663,51 @@ init_extract_images(
  * @brief   Helper function avoid dealing with array pointers in Go to set
  *          extract_images_ts
  * 
- * @param   params  Transcoding parameters
- * @param   index   Array index to set
- * @param   value   Array value (frame PTS)
+ * @param   params  Transcoding parameters.
+ * @param   index   Array index to set.
+ * @param   value   Array value (frame PTS).
  */
 void
 set_extract_images(
     xcparams_t *params,
     int index,
     int64_t value);
+
+/**
+ * @brief   Returns the level based on the input values
+ *
+ * @param   url             Url of the video.
+ * @param   profile_idc     Profile of the video.
+ * @param   bitrate         Bit rate of the video.
+ * @param   framerate       Frame rate of the video.
+ * @param   width           Width of the video.
+ * @param   height          Height of the video.
+ *
+ * @return  Returns the level.
+ */
+int
+avpipe_h264_guess_level(
+    char *url,
+    int profile_idc,
+    int64_t bitrate,
+    int framerate,
+    int width,
+    int height);
+
+/**
+ * @brief   Returns the profile based on the input values
+ *
+ * @param   bitdepth    Bitdepth of the video.
+ * @param   width       Width of the video.
+ * @param   height      Height of the video.
+ *
+ * @return  Returns the profile.
+ */
+int
+avpipe_h264_guess_profile(
+    int bitdepth,
+    int width,
+    int height);
+
 
 #endif

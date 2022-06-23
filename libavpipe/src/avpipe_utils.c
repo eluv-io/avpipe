@@ -121,11 +121,13 @@ dump_encoder(
 
     for (int i = 0; i < format_context->nb_streams; i++) {
         AVStream *s = format_context->streams[i];
+        AVCodecParameters *params = s->codecpar;
         AVRational codec_time_base = av_stream_get_codec_timebase(s);
-        elv_dbg("ENCODER[%d] stream_index=%d url=%s, id=%d, codec_type=%d start_time=%d duration=%d nb_frames=%d "
-                "time_base=%d/%d codec_time_base=%d/%d frame_rate=%d/%d avg_frame_rate=%d/%d\n", i,
-            s->index, s->id, url,
-            s->codecpar->codec_type,
+        elv_dbg("ENCODER[%d] stream_index=%d url=%s profile=%d level=%d id=%d codec_type=%d start_time=%d duration=%d nb_frames=%d "
+            "time_base=%d/%d codec_time_base=%d/%d frame_rate=%d/%d avg_frame_rate=%d/%d\n",
+            i, s->index, url,
+            params->profile, params->level, s->id,
+            params->codec_type,
             (int)s->start_time, (int)s->duration, (int)s->nb_frames,
             s->time_base.num, s->time_base.den,
             codec_time_base.num, codec_time_base.den,

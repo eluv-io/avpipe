@@ -7,6 +7,7 @@ import (
 	"io/ioutil"
 	"math/big"
 	"os"
+	"os/exec"
 	"path"
 	"path/filepath"
 	"runtime"
@@ -15,9 +16,9 @@ import (
 	"testing"
 	"time"
 
-	"github.com/eluv-io/log-go"
 	"github.com/eluv-io/avpipe"
 	"github.com/eluv-io/avpipe/elvxc/cmd"
+	"github.com/eluv-io/log-go"
 	"github.com/stretchr/testify/assert"
 )
 
@@ -627,8 +628,10 @@ func TestV2SingleABRTranscodeCancelling(t *testing.T) {
 	assert.Error(t, err)
 }
 
-func doTranscode(t *testing.T, p *avpipe.XcParams, nThreads int, outputDir,
-	filename string, reportFailure string) {
+func doTranscode(t *testing.T,
+	p *avpipe.XcParams,
+	nThreads int,
+	outputDir, filename string) {
 
 	avpipe.InitIOHandler(&fileInputOpener{url: filename},
 		&concurrentOutputOpener{dir: outputDir})
@@ -638,11 +641,8 @@ func doTranscode(t *testing.T, p *avpipe.XcParams, nThreads int, outputDir,
 		go func(params *avpipe.XcParams) {
 			err := avpipe.Xc(params)
 			done <- struct{}{} // Signal the main goroutine
-			if err != nil && reportFailure == "" {
+			if err != nil {
 				failNowOnError(t, err)
-			} else if err != nil {
-				fmt.Printf("Ignoring error: %s\n", reportFailure)
-				log.Error("doTranscode failed", err)
 			}
 		}(p)
 	}
@@ -653,10 +653,15 @@ func doTranscode(t *testing.T, p *avpipe.XcParams, nThreads int, outputDir,
 }
 
 func TestNvidiaABRTranscode(t *testing.T) {
+	if !nvidiaExist() {
+		log.Info("Ignoring ", "test", fn())
+		return
+	}
+
 	outputDir := path.Join(baseOutPath, fn())
 	boilerplate(t, outputDir, "")
 	filename := videoBigBuckBunnyPath
-	nThreads := 10
+	nThreads := 2
 
 	params := &avpipe.XcParams{
 		Format:             "hls",
@@ -676,7 +681,44 @@ func TestNvidiaABRTranscode(t *testing.T) {
 		Url:                filename,
 	}
 	setFastEncodeParams(params, false)
-	doTranscode(t, params, nThreads, outputDir, filename, "H264_NVIDIA encoder might not be enabled or hardware might not be available")
+	doTranscode(t, params, nThreads, outputDir, filename)
+}
+
+// Check nvidia transcoding with weird aspect ratio
+func TestNvidiaFmp4SegmentAspectRatio(t *testing.T) {
+	if !nvidiaExist() {
+		log.Info("Ignoring ", "test", fn())
+		return
+	}
+	outputDir := path.Join(baseOutPath, fn())
+	boilerplate(t, outputDir, "")
+	filename := videoBigBuckBunnyPath
+
+	params := &avpipe.XcParams{
+		Format:          "fmp4-segment",
+		StartTimeTs:     0,
+		DurationTs:      -1,
+		StartSegmentStr: "1",
+		VideoBitrate:    2560000,
+		AudioBitrate:    64000,
+		SampleRate:      44100,
+		SegDuration:     "30",
+		Ecodec:          "h264_nvenc",
+		EncHeight:       642,
+		EncWidth:        1532,
+		XcType:          avpipe.XcVideo,
+		StreamId:        -1,
+		Url:             filename,
+		DebugFrameLevel: debugFrameLevel,
+	}
+	setFastEncodeParams(params, false)
+
+	xcTestResult := &XcTestResult{
+		mezFile:  []string{fmt.Sprintf("%s/vsegment-1.mp4", outputDir)},
+		level:    32,
+		pixelFmt: "yuv420p",
+	}
+	xcTest(t, outputDir, params, xcTestResult, true)
 }
 
 func TestConcurrentABRTranscode(t *testing.T) {
@@ -704,7 +746,7 @@ func TestConcurrentABRTranscode(t *testing.T) {
 		DebugFrameLevel:    debugFrameLevel,
 	}
 	setFastEncodeParams(params, false)
-	doTranscode(t, params, nThreads, outputDir, filename, "")
+	doTranscode(t, params, nThreads, outputDir, filename)
 }
 
 func TestAudioAAC2AACMezMaker(t *testing.T) {
@@ -1269,7 +1311,7 @@ func TestIrregularTsMezMaker_1_24(t *testing.T) {
 
 	xcTestResult := &XcTestResult{
 		timeScale: 12288,
-		level:     42,
+		level:     31,
 		pixelFmt:  "yuv420p",
 	}
 
@@ -1310,7 +1352,7 @@ func TestIrregularTsMezMaker_1_10000(t *testing.T) {
 
 	xcTestResult := &XcTestResult{
 		timeScale: 10000,
-		level:     42,
+		level:     31,
 		pixelFmt:  "yuv420p",
 	}
 
@@ -1580,7 +1622,7 @@ func TestABRMuxing(t *testing.T) {
 	xcTestResult := &XcTestResult{
 		mezFile:   []string{fmt.Sprintf("%s/vsegment-1.mp4", videoMezDir)},
 		timeScale: 24000,
-		level:     42,
+		level:     31,
 		pixelFmt:  "yuv420p",
 	}
 	// Now probe mez video and output file and become sure both have the same duration
@@ -1591,7 +1633,7 @@ func TestABRMuxing(t *testing.T) {
 	xcTestResult = &XcTestResult{
 		mezFile:   []string{fmt.Sprintf("%s/segment-1.mp4", muxOutDir)},
 		timeScale: 24000,
-		level:     42,
+		level:     31,
 		pixelFmt:  "yuv420p",
 	}
 	avpipe.InitIOHandler(&fileInputOpener{url: xcTestResult.mezFile[0]}, &fileOutputOpener{dir: muxOutDir})
@@ -1864,6 +1906,58 @@ func TestExtractImagesListFast(t *testing.T) {
 	assert.Equal(t, int64(1980), pts)
 }
 
+type LevelParams struct {
+	profile       int
+	bitrate       int64
+	framerate     int
+	width         int
+	height        int
+	expectedLevel int
+}
+
+func TestLevel(t *testing.T) {
+	levelParams := []LevelParams{
+		{100, 7498181, 30, 3840, 2160, 51},
+		{100, 4001453, 60, 1920, 1080, 42},
+		{100, 3081772, 30, 1920, 1080, 40},
+		{100, 8173343, 24, 2048, 858, 40},
+		{77, 921161, 25, 2048, 864, 40},
+		{100, 207245, 25, 1532, 642, 32},
+		{100, 1530884, 30, 1280, 720, 31},
+		{100, 409778, 24, 720, 302, 30},
+		{100, 348377, 24, 640, 268, 21},
+		{100, 324552, 30, 480, 272, 21},
+		{100, 115986, 24, 320, 144, 12},
+	}
+
+	for i := 0; i < len(levelParams); i++ {
+		level := avpipe.H264GuessLevel("", levelParams[i].profile, levelParams[i].bitrate, levelParams[i].framerate, levelParams[i].width, levelParams[i].height)
+		assert.Equal(t, levelParams[i].expectedLevel, level)
+	}
+}
+
+type ProfileParams struct {
+	bitDepth        int
+	width           int
+	height          int
+	expectedProfile int
+}
+
+func TestProfile(t *testing.T) {
+	profileParams := []ProfileParams{
+		{8, 320, 540, avpipe.XcProfileH264BaseLine},
+		{8, 1280, 720, avpipe.XcProfileH264Heigh},
+		{8, 1920, 1080, avpipe.XcProfileH264Heigh},
+		{8, 3840, 2169, avpipe.XcProfileH264Heigh},
+		{10, 3840, 2169, avpipe.XcProfileH264Heigh10},
+	}
+
+	for i := 0; i < len(profileParams); i++ {
+		profile := avpipe.H264GuessProfile(profileParams[i].bitDepth, profileParams[i].width, profileParams[i].height)
+		assert.Equal(t, profileParams[i].expectedProfile, profile)
+	}
+}
+
 func TestMain(m *testing.M) {
 	// call flag.Parse() here if TestMain uses flags
 	setupLogging()
@@ -2053,4 +2147,18 @@ func setupOutDir(t *testing.T, dir string) {
 		err = removeDirContents(dir)
 	}
 	failNowOnError(t, err)
+}
+
+func nvidiaExist() bool {
+	cmd := exec.Command("nvidia-smi")
+	cmd.Stdout = nil
+	cmd.Stderr = nil
+
+	err := cmd.Start()
+	if err == nil {
+		return true
+	}
+
+	log.Info("NVIDIA doesn't exist")
+	return false
 }

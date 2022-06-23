@@ -746,62 +746,6 @@ set_encoder_options(
     return 0;
 }
 
-static int
-find_level(
-    int width,
-    int height,
-    coderctx_t *decoder_context)
-{
-    int level;
-    float frame_rate = 0;
-
-    if (decoder_context->stream[decoder_context->video_stream_index]->avg_frame_rate.den != 0)
-        frame_rate = ((float)decoder_context->stream[decoder_context->video_stream_index]->avg_frame_rate.num) /
-            decoder_context->stream[decoder_context->video_stream_index]->avg_frame_rate.den;
-
-    /*
-     * Reference: https://en.wikipedia.org/wiki/Advanced_Video_Coding
-     */
-    if (height <= 480) {
-        if (frame_rate <= 30.0)
-            level = 30;
-        else
-            level = 31;
-    } else if (height <= 720)
-        level = 31;
-    else if (height <= 1080)
-        level = 42;
-    else if (height <= 1920)
-        level = 50;
-    else if (height <= 2160)
-        level = 51;
-    else
-        level = 52;
-
-    if (level < 31 && width >= 720)
-        level = 31;
-
-    if (level < 42 && width >= 1280 && height >= 720)
-        level = 42;
-
-    if (level < 50 && width >= 1920 && height >= 1080)
-        level = 50;
-
-    if (level < 51 && width >= 2560 && height >= 1920) {
-        if (frame_rate < 32.0)
-            level = 51;
-        else if (frame_rate < 67.0)
-            level = 52;
-        else
-            level = 60;
-    }
-
-    if (level < 60 && width > 3840 && height > 2160)
-        level = 60;
-
-    return level;
-}
-
 /*
  * Set H264 specific params profile, and level based on encoding height.
  */
@@ -813,30 +757,21 @@ set_h264_params(
 {
     int index = decoder_context->video_stream_index;
     AVCodecContext *encoder_codec_context = encoder_context->codec_context[index];
+    int framerate = 0;
 
     /* Codec level and profile must be set correctly per H264 spec */
-    if (encoder_codec_context->height <= 480)
-        /*
-         * FF_PROFILE_H264_BASELINE is primarily for lower-cost applications with limited computing resources,
-         * this profile is used widely in videoconferencing and mobile applications.
-         */
-        encoder_codec_context->profile = FF_PROFILE_H264_BASELINE;
-    else if (params->bitdepth == 8)
-        /*
-         * FF_PROFILE_H264_HIGH is the primary profile for broadcast and disc storage applications,
-         * particularly for high-definition television applications.
-         */
-        encoder_codec_context->profile = FF_PROFILE_H264_HIGH;
-    else /* params->bitdepth == 10 */
-        encoder_codec_context->profile = FF_PROFILE_H264_HIGH_10;
+    encoder_codec_context->profile = avpipe_h264_guess_profile(params->bitdepth,
+        encoder_codec_context->width, encoder_codec_context->height);
 
+    if (encoder_codec_context->framerate.den != 0)
+        framerate = encoder_codec_context->framerate.num/encoder_codec_context->framerate.den;
 
-    /*
-     * These are set according to
-     * https://en.wikipedia.org/wiki/Advanced_Video_Coding#Levels
-     * https://developer.apple.com/documentation/http_live_streaming/hls_authoring_specification_for_apple_devices
-     */
-    encoder_codec_context->level = find_level(encoder_codec_context->width, encoder_codec_context->height, decoder_context);
+    encoder_codec_context->level = avpipe_h264_guess_level(params->url,
+                                                encoder_codec_context->profile,
+                                                encoder_codec_context->bit_rate,
+                                                framerate,
+                                                encoder_codec_context->width,
+                                                encoder_codec_context->height);
 }
 
 static void
@@ -962,6 +897,7 @@ set_nvidia_params(
 {
     int index = decoder_context->video_stream_index;
     AVCodecContext *encoder_codec_context = encoder_context->codec_context[index];
+    int framerate = 0;
 
     av_opt_set(encoder_codec_context->priv_data, "forced-idr", "on", 0);
 
@@ -980,8 +916,15 @@ set_nvidia_params(
         encoder_codec_context->profile = FF_PROFILE_H264_HIGH;
     }
 
-    encoder_codec_context->level = find_level(encoder_codec_context->width,
-        encoder_codec_context->height, decoder_context);
+    if (encoder_codec_context->framerate.den != 0)
+        framerate = encoder_codec_context->framerate.num/encoder_codec_context->framerate.den;
+
+    encoder_codec_context->level = avpipe_h264_guess_level(params->url,
+                                                encoder_codec_context->profile,
+                                                encoder_codec_context->bit_rate,
+                                                framerate,
+                                                encoder_codec_context->width,
+                                                encoder_codec_context->height);
     av_opt_set_int(encoder_codec_context->priv_data, "level", encoder_codec_context->level, 0);
 
     /*
@@ -3813,6 +3756,10 @@ get_channel_layout_for_encoder(int channel_layout)
         break;
     }
 
+    /* If there is no input channel layout, set the default encoder channel layout to stereo */
+    if (channel_layout == 0)
+        channel_layout = AV_CH_LAYOUT_STEREO;
+
     return channel_layout;
 }
 
@@ -4371,9 +4318,6 @@ avpipe_fini(
     /* Close input handler resources if it is not a muxing command */
     if (!(*xctx)->in_mux_ctx)
         (*xctx)->in_handlers->avpipe_closer((*xctx)->inctx);
-    free((*xctx)->in_handlers);
-    free((*xctx)->out_handlers);
-
 
     decoder_context = &(*xctx)->decoder_ctx;
     encoder_context = &(*xctx)->encoder_ctx;
@@ -4400,12 +4344,14 @@ avpipe_fini(
         avfilter_graph_free(&decoder_context->audio_filter_graph);
 
     if (encoder_context && encoder_context->format_context) {
-        free(encoder_context->format_context->avpipe_opaque);
+        void *avpipe_opaque = encoder_context->format_context->avpipe_opaque;
         avformat_free_context(encoder_context->format_context);
+        free(avpipe_opaque);
     }
     if (encoder_context && encoder_context->format_context2) {
-        free(encoder_context->format_context2->avpipe_opaque);
+        void *avpipe_opaque = encoder_context->format_context2->avpipe_opaque;
         avformat_free_context(encoder_context->format_context2);
+        free(avpipe_opaque);
     }
 
     for (int i=0; i<MAX_STREAMS; i++) {
@@ -4426,6 +4372,9 @@ avpipe_fini(
         av_audio_fifo_free(decoder_context->fifo);
         swr_free(&decoder_context->resampler_context);
     }
+
+    free((*xctx)->in_handlers);
+    free((*xctx)->out_handlers);
 
     if ((*xctx)->inctx && (*xctx)->inctx->udp_channel)
         elv_channel_fini(&((*xctx)->inctx->udp_channel));

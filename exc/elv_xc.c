@@ -929,7 +929,8 @@ do_probe(
 
 end_probe:
     elv_dbg("Releasing probe resources");
-    free(probe->stream_info);
+    if (probe)
+        free(probe->stream_info);
     free(probe);
     return rc;
 }
@@ -1103,7 +1104,7 @@ usage(
         "\t                                    For audio default is \"aac\", but for ts files should be set to \"ac3\"\n"
         "\t-debug-frame-level :     (optional) Enable/disable debug frame level. Default is 0, must be 0 or 1.\n"
         "\t-duration-ts :           (optional) Default: -1 (entire stream)\n"
-        "\t-e :                     (optional) Video encoder name. Default is \"libx264\", can be: \"libx264\", \"libx265\", \"h264_nvenc\", \"h264_videotoolbox\", or \"mjpeg\"\n"
+        "\t-e :                     (optional) Video encoder name. Default is \"libx264\", can be: \"libx264\", \"libx265\", \"h264_nvenc\", \"hevc_nvenc\", \"h264_videotoolbox\", or \"mjpeg\"\n"
         "\t-enc-height :            (optional) Default: -1 (use source height)\n"
         "\t-enc-width :             (optional) Default: -1 (use source width)\n"
         "\t-equal-fduration :       (optional) Force equal frame duration. Must be 0 or 1 and only valid for \"fmp4-segment\" format.\n"
