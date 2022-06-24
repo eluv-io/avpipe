@@ -783,8 +783,16 @@ tx_thread_func(
          * (This is needed when repeating the same command with exc.)
          */
         xcparams_t *xcparams = txparam_copy(params->xcparams);
-        if ((rc = avpipe_init(&xctx, params->in_handlers, params->out_handlers, xcparams)) != eav_success) {
+        avpipe_io_handler_t *in_handlers = (avpipe_io_handler_t *)calloc(1, sizeof(avpipe_io_handler_t));
+        avpipe_io_handler_t *out_handlers = (avpipe_io_handler_t *)calloc(1, sizeof(avpipe_io_handler_t));
+        *in_handlers = *params->in_handlers;
+        *out_handlers = *params->out_handlers;
+        if ((rc = avpipe_init(&xctx, in_handlers, out_handlers, xcparams)) != eav_success) {
             elv_err("THREAD %d, iteration %d, failed to initialize avpipe rc=%d", params->thread_number, i+1, rc);
+            if (rc == eav_open_input) {
+                free(in_handlers);
+                free(out_handlers);
+            }
             continue;
         }
 
