@@ -1063,9 +1063,7 @@ static int get_extract_images_ts(char *s, xcparams_t *params) {
         if (s[i] == ',')
             sz++;
     }
-    if (sz == 0) {
-        return 0;
-    }
+
     sz++; // number of commas + 1
     init_extract_images(params, sz);
 
