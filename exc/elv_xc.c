@@ -789,6 +789,7 @@ tx_thread_func(
         *out_handlers = *params->out_handlers;
         if ((rc = avpipe_init(&xctx, in_handlers, out_handlers, xcparams)) != eav_success) {
             elv_err("THREAD %d, iteration %d, failed to initialize avpipe rc=%d", params->thread_number, i+1, rc);
+            /* avpipe_fini() will release all the resources if the open is successful */
             if (rc == eav_open_input) {
                 free(in_handlers);
                 free(out_handlers);
