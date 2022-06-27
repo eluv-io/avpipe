@@ -783,8 +783,17 @@ tx_thread_func(
          * (This is needed when repeating the same command with exc.)
          */
         xcparams_t *xcparams = txparam_copy(params->xcparams);
-        if ((rc = avpipe_init(&xctx, params->in_handlers, params->out_handlers, xcparams)) != eav_success) {
+        avpipe_io_handler_t *in_handlers = (avpipe_io_handler_t *)calloc(1, sizeof(avpipe_io_handler_t));
+        avpipe_io_handler_t *out_handlers = (avpipe_io_handler_t *)calloc(1, sizeof(avpipe_io_handler_t));
+        *in_handlers = *params->in_handlers;
+        *out_handlers = *params->out_handlers;
+        if ((rc = avpipe_init(&xctx, in_handlers, out_handlers, xcparams)) != eav_success) {
             elv_err("THREAD %d, iteration %d, failed to initialize avpipe rc=%d", params->thread_number, i+1, rc);
+            /* avpipe_fini() will release all the resources if the open is successful */
+            if (rc == eav_open_input) {
+                free(in_handlers);
+                free(out_handlers);
+            }
             continue;
         }
 
@@ -1055,9 +1064,7 @@ static int get_extract_images_ts(char *s, xcparams_t *params) {
         if (s[i] == ',')
             sz++;
     }
-    if (sz == 0) {
-        return 0;
-    }
+
     sz++; // number of commas + 1
     init_extract_images(params, sz);
 
