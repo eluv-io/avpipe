@@ -19,6 +19,7 @@ func Probe(cmdRoot *cobra.Command) error {
 
 	cmdProbe.PersistentFlags().StringP("filename", "f", "", "(mandatory) filename to be probed")
 	cmdProbe.PersistentFlags().BoolP("seekable", "", false, "(optional) seekable stream")
+	cmdProbe.PersistentFlags().BoolP("listen", "", false, "listen mode for RTMP.")
 
 	return nil
 }
@@ -36,9 +37,20 @@ func doProbe(cmd *cobra.Command, args []string) error {
 	}
 	log.Debug("doProbe", "seekable", seekable, "filename", filename)
 
+	listen, err := cmd.Flags().GetBool("listen")
+	if err != nil {
+		return fmt.Errorf("Invalid listen flag")
+	}
+
+	params := &avpipe.XcParams{
+		Url:      filename,
+		Seekable: seekable,
+		Listen:   listen,
+	}
+
 	avpipe.InitIOHandler(&elvxcInputOpener{url: filename}, &elvxcOutputOpener{dir: ""})
 
-	probe, err := avpipe.Probe(filename, seekable)
+	probe, err := avpipe.Probe(params)
 	if err != nil {
 		return fmt.Errorf("Probing failed. file=%s", filename)
 	}

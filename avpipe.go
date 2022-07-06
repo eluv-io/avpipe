@@ -1348,18 +1348,21 @@ func GetProfileName(codecId int, profile int) string {
 	return ""
 }
 
-func Probe(url string, seekable bool) (*ProbeInfo, error) {
+func Probe(params *XcParams) (*ProbeInfo, error) {
 	var cprobe *C.xcprobe_t
-	var cseekable C.int
 	var n_streams C.int
 
-	if seekable {
-		cseekable = C.int(1)
-	} else {
-		cseekable = C.int(0)
+	if params == nil {
+		log.Error("Failed probing, params are not set.")
+		return nil, EAV_PARAM
 	}
 
-	rc := C.probe(C.CString(url), cseekable, (**C.xcprobe_t)(unsafe.Pointer(&cprobe)), (*C.int)(unsafe.Pointer(&n_streams)))
+	cparams, err := getCParams(params)
+	if err != nil {
+		log.Error("Probing failed", err, "url", params.Url)
+	}
+
+	rc := C.probe((*C.xcparams_t)(unsafe.Pointer(cparams)), (**C.xcprobe_t)(unsafe.Pointer(&cprobe)), (*C.int)(unsafe.Pointer(&n_streams)))
 	if int(rc) != 0 {
 		return nil, avpipeError(rc)
 	}
@@ -1423,8 +1426,8 @@ func Probe(url string, seekable bool) (*ProbeInfo, error) {
 
 	gMutex.Lock()
 	defer gMutex.Unlock()
-	delete(gURLInputOpeners, url)
-	delete(gURLOutputOpeners, url)
+	delete(gURLInputOpeners, params.Url)
+	delete(gURLOutputOpeners, params.Url)
 
 	return probeInfo, nil
 }

@@ -34,8 +34,7 @@ get_profile_name(
 
 int
 probe(
-    char *filename,
-    int seekable,
+    xcparams_t *params,
     xcprobe_t **xcprobe,
     int *n_streams);
 

@@ -3813,9 +3813,8 @@ get_xc_type_name(
 
 int
 avpipe_probe(
-    char *url,
     avpipe_io_handler_t *in_handlers,
-    int seekable,
+    xcparams_t *params,
     xcprobe_t **xcprobe,
     int *n_streams)
 {
@@ -3824,6 +3823,18 @@ avpipe_probe(
     stream_info_t *stream_probes, *stream_probes_ptr;
     xcprobe_t *probe;
     int rc = 0;
+    char *url;
+
+    memset(&inctx, 0, sizeof(ioctx_t));
+    memset(&decoder_ctx, 0, sizeof(coderctx_t));
+
+    if (!params) {
+        elv_err("avpipe_probe parameters are not set");
+        rc = eav_param;
+        goto avpipe_probe_end;
+    }
+
+    url = params->url;
 
     if (!in_handlers) {
         elv_err("avpipe_probe NULL handlers, url=%s", url);
@@ -3831,16 +3842,12 @@ avpipe_probe(
         goto avpipe_probe_end;
     }
 
-    memset(&inctx, 0, sizeof(ioctx_t));
-
     if (in_handlers->avpipe_opener(url, &inctx) < 0) {
         rc = eav_open_input;
         goto avpipe_probe_end;
     }
 
-    memset(&decoder_ctx, 0, sizeof(coderctx_t));
-
-    if ((rc = prepare_decoder(&decoder_ctx, in_handlers, &inctx, NULL, seekable)) != eav_success) {
+    if ((rc = prepare_decoder(&decoder_ctx, in_handlers, &inctx, params, params->seekable)) != eav_success) {
         elv_err("avpipe_probe failed to prepare decoder, url=%s", url);
         goto avpipe_probe_end;
     }
