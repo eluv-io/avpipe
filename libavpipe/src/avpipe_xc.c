@@ -389,6 +389,13 @@ prepare_decoder(
     AVDictionary *opts = NULL;
     if (params && params->listen)
         av_dict_set(&opts, "listen", "1" , 0);
+
+    if (decoder_context->is_rtmp && params->connection_timeout > 0) {
+        char timeout[32];
+        sprintf(timeout, "%d", params->connection_timeout);
+        av_dict_set(&opts, "timeout", timeout, 0);
+    }
+
     /* Allocate AVFormatContext in format_context and find input file format */
     rc = avformat_open_input(&decoder_context->format_context, inctx->url, NULL, &opts);
     if (rc != 0) {
@@ -3932,11 +3939,12 @@ avpipe_probe(
 
 avpipe_probe_end:
     if (decoder_ctx.format_context) {
-        AVIOContext *avioctx = (AVIOContext *) decoder_ctx.format_context->pb;
+        /*AVIOContext *avioctx = (AVIOContext *) decoder_ctx.format_context->pb;
         if (avioctx) {
             av_freep(&avioctx->buffer);
             av_freep(&avioctx);
         }
+*/
         avformat_close_input(&decoder_ctx.format_context);
     }
 

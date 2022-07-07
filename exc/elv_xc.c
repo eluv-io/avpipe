@@ -1109,6 +1109,7 @@ usage(
         "\t-bypass :                (optional) Bypass transcoding. Default is 0, must be 0 or 1\n"
         "\t-channel-layout :        (optional) Channel layout for audio, can be \"mono\", \"stereo\", \"5.0\" or \"5.1\"....\n"
         "\t-command :               (optional) Directing command of exc, can be \"transcode\", \"probe\" or \"mux\" (default is transcode).\n"
+        "\t-connection-timeout:     (optional) Default 10 sec. Connection timeout for rtmp or mpegts protocols.\n"
         "\t-crf :                   (optional) Mutually exclusive with video-bitrate. Default: 23\n"
         "\t-crypt-iv :              (optional) 128-bit AES IV, as hex\n"
         "\t-crypt-key :             (optional) 128-bit AES key, as hex\n"
@@ -1239,6 +1240,7 @@ main(
         .rc_max_rate = 0,
         .sample_rate = -1,                  /* Audio sampling rate 44100 */
         .channel_layout = 0,                /* Preserve input channel layout */
+        .connection_timeout = 10,
         .seekable = 0,
         .video_seg_duration_ts = -1,        /* input argument, same units as input stream PTS */
         .audio_seg_duration_ts = -1,        /* input argument, same units as input stream PTS */
@@ -1324,6 +1326,10 @@ main(
                 }
             } else if (!strcmp(argv[i], "-crf")) {
                 p.crf_str = strdup(argv[i+1]);
+            } else if (!strcmp(argv[i], "-connection-timeout")) {
+                if (sscanf(argv[i+1], "%d", &p.connection_timeout) != 1) {
+                    usage(argv[0], argv[i], EXIT_FAILURE);
+                }
             } else if (!strcmp(argv[i], "-channel-layout")) {
                 p.channel_layout = av_get_channel_layout(argv[i+1]);
                 if (p.channel_layout == 0)

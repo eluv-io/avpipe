@@ -427,6 +427,7 @@ typedef struct xcparams_t {
     int         extract_images_sz;          // Size of the array extract_images_ts
 
     int         debug_frame_level;
+    int         connection_timeout;         // Connection timeout for RTMP or MPEGTS protocols
 } xcparams_t;
 
 #define MAX_CODEC_NAME  256
