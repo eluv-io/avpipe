@@ -90,6 +90,7 @@ const (
 	XcAudioPan             = 18 // XcAudio | 0x10
 	XcMux                  = 32
 	XcExtractImages        = 65 // XcVideo | 2^6
+	Xcprobe                = 128
 )
 
 type XcProfile int

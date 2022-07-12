@@ -16,9 +16,9 @@ import (
 	"sync"
 	"testing"
 
+	"github.com/eluv-io/avpipe"
 	"github.com/eluv-io/errors-go"
 	elog "github.com/eluv-io/log-go"
-	"github.com/eluv-io/avpipe"
 )
 
 //
@@ -356,10 +356,15 @@ func _TestAudioVideoHlsLive(t *testing.T) {
 
 func (io *inputOpener) Open(fd int64, url string) (avpipe.InputHandler, error) {
 	tlog.Debug("IN_OPEN", "fd", fd, "url", url)
+
 	io.url = url
 	tc, err := getReqCtxByURL(url)
 	if err != nil {
 		return nil, err
+	}
+
+	if (len(url) >= 4 && url[0:4] == "rtmp") || (len(url) >= 3 && url[0:3] == "udp") {
+		return &inputCtx{tc: tc}, nil
 	}
 
 	tc.fd = fd
@@ -443,7 +448,8 @@ func (i *inputCtx) Close() (err error) {
 }
 
 func (i *inputCtx) Size() int64 {
-	if i.tc.url[0:3] == "udp" {
+	if (len(i.tc.url) > 3 && i.tc.url[0:3] == "udp") ||
+		(len(i.tc.url) > 4 && i.tc.url[0:4] == "rtmp") {
 		if debugFrameLevel {
 			tlog.Debug("IN_SIZE", "url", i.tc.url)
 		}

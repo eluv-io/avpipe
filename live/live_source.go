@@ -6,6 +6,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strings"
 
 	"github.com/eluv-io/errors-go"
 )
@@ -25,8 +26,20 @@ type LiveSource struct {
 	cmd  *exec.Cmd
 }
 
-func (l *LiveSource) Start() (err error) {
-	log.Debug("In LiveSource start")
+func (l *LiveSource) Start(stream string) (err error) {
+	e := errors.Template("start live source", errors.K.NotImplemented)
+	switch strings.ToLower(stream) {
+	case "udp":
+		return l.startUDP()
+	case "rtmp":
+		return l.startRTMP()
+	}
+
+	return e(fmt.Errorf("Invalid stream %s", stream))
+}
+
+func (l *LiveSource) startUDP() (err error) {
+	log.Debug("In LiveSource startUDP")
 	e := errors.Template("start live source", errors.K.IO)
 
 	if l.cmd != nil {
@@ -73,7 +86,74 @@ func (l *LiveSource) Start() (err error) {
 
 	err = l.cmd.Start()
 	if err != nil {
-		log.Error("Failed to start live source", "port", l.Port)
+		log.Error("Failed to start UDP live source", "port", l.Port)
+		return e(err)
+	}
+
+	l.Pid = l.cmd.Process.Pid
+	go func() {
+		err := l.cmd.Wait()
+		if err != nil {
+			log.Error("Failed to run command", err, "pid", l.Pid, "cmd", fmt.Sprintf("%s %s", l.cmd.Path, l.cmd.Args))
+		}
+	}()
+
+	return nil
+}
+
+func (l *LiveSource) startRTMP() (err error) {
+	log.Debug("In LiveSource startRTMP")
+	e := errors.Template("start live source", errors.K.IO)
+
+	if l.cmd != nil {
+		return e("reason", "already started")
+	}
+
+	var ffmpeg string
+
+	if toolchain, ok := os.LookupEnv("FFMPEG_DIST"); ok {
+		ffmpeg = filepath.Join(toolchain, "bin/ffmpeg")
+		if _, err = os.Stat(ffmpeg); err != nil {
+			log.Warn("ffmpeg in FFMPEG_DIST not found", "command", ffmpeg)
+			ffmpeg = ""
+		} else {
+			log.Debug("using ffmpeg from FFMPEG_DIST", "command", ffmpeg)
+		}
+	}
+
+	if ffmpeg == "" {
+		ffmpeg, err = exec.LookPath("ffmpeg")
+		if err != nil {
+			log.Error("Failed to find ffmpeg binary, check ELV_TOOLCHAIN env variable")
+			return e(err, "reason", "failed to find ffmpeg binary, check ELV_TOOLCHAIN env variable")
+		}
+		log.Debug("using system ffmpeg", "command", ffmpeg)
+	}
+
+	sourceUrl := fmt.Sprintf("rtmp://localhost:%d/rtmp/Doj1Nr3S", l.Port)
+
+	log.Info("starting RTMP live source", "url", sourceUrl)
+
+	// i.e ffmpeg -re -i ../media/bbb_1080p_30fps_60sec.mp4 -listen 1 -c:v libx264 -c:a aac -f flv rtmp://localhost/rtmp/Doj1Nr3S
+	l.cmd = exec.Command(ffmpeg,
+		"-re",
+		"-i",
+		"../media/bbb_1080p_30fps_60sec.mp4",
+		"-listen",
+		"1",
+		"-c:v",
+		"libx264",
+		"-c:a",
+		"aac",
+		"-f",
+		"flv",
+		sourceUrl)
+	l.cmd.Stdout = nil
+	l.cmd.Stderr = nil
+
+	err = l.cmd.Start()
+	if err != nil {
+		log.Error("Failed to start RTMP live source", "port", l.Port)
 		return e(err)
 	}
 

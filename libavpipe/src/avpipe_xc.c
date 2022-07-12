@@ -3844,6 +3844,7 @@ avpipe_probe(
     url = params->url;
     // Disable sync audio to stream id when probing
     params->sync_audio_to_stream_id = -1;
+    params->stream_id = -1;
 
     if (!in_handlers) {
         elv_err("avpipe_probe NULL handlers, url=%s", url);
