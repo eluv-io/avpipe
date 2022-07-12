@@ -5,12 +5,47 @@
 #include "avpipe_xc.h"
 #include "elv_log.h"
 
+static int
+init_video_filters_with_deinterlaced(
+    const char *filters_descr,
+    coderctx_t *decoder_context,
+    coderctx_t *encoder_context,
+    xcparams_t *params);
+
+static int
+init_video_filters_no_deinterlaced(
+    const char *filters_descr,
+    coderctx_t *decoder_context,
+    coderctx_t *encoder_context,
+    xcparams_t *params);
+
 /*
  * @brief   Used to initialize video filter.
  * @return  Returns 0 if successful, otherwise eav_filter_init if there is an error.
  */
 int
 init_video_filters(
+    const char *filters_descr,
+    coderctx_t *decoder_context,
+    coderctx_t *encoder_context,
+    xcparams_t *params)
+{
+    if (!params->deinterlace_filter || strlen(params->deinterlace_filter) == 0)
+        return init_video_filters_no_deinterlaced(
+            filters_descr,
+            decoder_context,
+            encoder_context,
+            params);
+
+    return init_video_filters_with_deinterlaced(
+            filters_descr,
+            decoder_context,
+            encoder_context,
+            params);
+}
+
+static int
+init_video_filters_no_deinterlaced(
     const char *filters_descr,
     coderctx_t *decoder_context,
     coderctx_t *encoder_context,
@@ -102,6 +137,102 @@ init_video_filters(
     if ((ret = avfilter_graph_parse_ptr(decoder_context->video_filter_graph, filters_descr,
                                     &inputs, &outputs, NULL)) < 0)
         goto end;
+
+    if ((ret = avfilter_graph_config(decoder_context->video_filter_graph, NULL)) < 0)
+        goto end;
+
+end:
+    avfilter_inout_free(&inputs);
+    avfilter_inout_free(&outputs);
+
+    if (ret < 0)
+        return eav_filter_init;
+
+    return ret;
+}
+
+static int
+init_video_filters_with_deinterlaced(
+    const char *filters_descr,
+    coderctx_t *decoder_context,
+    coderctx_t *encoder_context,
+    xcparams_t *params)
+{
+    AVCodecContext *dec_codec_ctx = decoder_context->codec_context[decoder_context->video_stream_index];
+
+    char args[512];
+    int ret = 0;
+    AVFilterContext *deinterlaced_ctx = NULL;
+    const AVFilter *buffersrc  = avfilter_get_by_name("buffer");
+    const AVFilter *buffersink = avfilter_get_by_name("buffersink");
+    const AVFilter *deinterlaced = avfilter_get_by_name(params->deinterlace_filter);
+    AVFilterInOut *outputs = avfilter_inout_alloc();
+    AVFilterInOut *inputs  = avfilter_inout_alloc();
+    AVRational time_base;
+    enum AVPixelFormat pix_fmts[] = { AV_PIX_FMT_YUV422P /* AV_PIX_FMT_GRAY8 */, AV_PIX_FMT_NONE };
+
+    /* If there is no video stream, then return */
+    if (decoder_context->video_stream_index < 0)
+        return 0;
+
+    time_base = decoder_context->format_context->streams[decoder_context->video_stream_index]->time_base;
+
+    decoder_context->video_filter_graph = avfilter_graph_alloc();
+    if (!outputs || !inputs || !decoder_context->video_filter_graph) {
+        ret = AVERROR(ENOMEM);
+        goto end;
+    }
+
+    /* buffer video source: the decoded frames from the decoder will be inserted here. */
+    snprintf(args, sizeof(args),
+        "video_size=%dx%d:pix_fmt=%d:time_base=%d/%d:pixel_aspect=%d/%d",
+        dec_codec_ctx->width, dec_codec_ctx->height, dec_codec_ctx->pix_fmt,
+        time_base.num, time_base.den,
+        dec_codec_ctx->sample_aspect_ratio.num, dec_codec_ctx->sample_aspect_ratio.den);
+    elv_dbg("init_video_filters_with_deinterlaced, video srcfilter args=%s", args);
+
+    /* video_stream_index should be the same in both encoder and decoder context */
+    pix_fmts[0] = encoder_context->codec_context[decoder_context->video_stream_index]->pix_fmt;
+
+    ret = avfilter_graph_create_filter(&decoder_context->video_buffersrc_ctx, buffersrc, "in",
+                                       args, NULL, decoder_context->video_filter_graph);
+    if (ret < 0) {
+        elv_err("init_video_filters_with_deinterlaced cannot create buffer source err=%d\n", ret);
+        goto end;
+    }
+
+    ret = avfilter_graph_create_filter(&deinterlaced_ctx, deinterlaced,
+                "deinterlaced", NULL, NULL, decoder_context->video_filter_graph);
+    if (ret < 0) {
+        elv_err("init_video_filters_with_deinterlaced cannot create deinterlaced filter err=%d\n", ret);
+        goto end;
+    }
+
+
+    if ((ret = avfilter_link(decoder_context->video_buffersrc_ctx, 0, deinterlaced_ctx, 0)) < 0) {
+        elv_err("init_video_filters_with_deinterlaced failed to link buffersrc to deinterlaced filter");
+        goto end;
+    }
+
+    /* buffer video sink: to terminate the filter chain. */
+    ret = avfilter_graph_create_filter(&decoder_context->video_buffersink_ctx, buffersink, "out",
+                                       NULL, NULL, decoder_context->video_filter_graph);
+    if (ret < 0) {
+        elv_err("init_video_filters_with_deinterlaced, cannot create buffer sink\n");
+        goto end;
+    }
+
+    ret = av_opt_set_int_list(decoder_context->video_buffersink_ctx, "pix_fmts", pix_fmts,
+                              AV_PIX_FMT_NONE, AV_OPT_SEARCH_CHILDREN);
+    if (ret < 0) {
+        elv_err("init_video_filters_with_deinterlaced, cannot set output pixel format\n");
+        goto end;
+    }
+
+    if ((ret = avfilter_link(deinterlaced_ctx, 0, decoder_context->video_buffersink_ctx, 0)) < 0) {
+        elv_err("init_video_filters_with_deinterlaced failed to link buffer sink to deinterlaced filter");
+        goto end;
+    }
 
     if ((ret = avfilter_graph_config(decoder_context->video_filter_graph, NULL)) < 0)
         goto end;

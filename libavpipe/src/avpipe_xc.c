@@ -4078,6 +4078,15 @@ check_params(
         }
     }
 
+    if (params->deinterlace_filter) {
+        if (strcmp(params->deinterlace_filter, "pullup") &&
+            strcmp(params->deinterlace_filter, "bwdif") &&
+            strcmp(params->deinterlace_filter, "yadif")) {
+            elv_err("Invalid deinterlace filter is used, can be \"pullup\", \"bwdif\", \"yadif\"");
+            return eav_param;
+        }
+    }
+
     return eav_success;
 }
 
@@ -4204,7 +4213,8 @@ avpipe_init(
         "master_display=\"%s\" "
         "filter_descriptor=\"%s\" "
         "extract_image_interval_ts=%"PRId64" "
-        "extract_images_sz=%d ",
+        "extract_images_sz=%d "
+        "deinterlace_filter=\"%s\" ",
         params->stream_id, p->url,
         avpipe_version(),
         params->bypass_transcoding, params->skip_decoding,
@@ -4226,7 +4236,8 @@ avpipe_init(
         params->max_cll ? params->max_cll : "",
         params->master_display ? params->master_display : "",
         params->filter_descriptor,
-        params->extract_image_interval_ts, params->extract_images_sz);
+        params->extract_image_interval_ts, params->extract_images_sz,
+        params->deinterlace_filter ? params->deinterlace_filter : "");
     elv_log("AVPIPE XCPARAMS %s", buf);
 
     if ((rc = check_params(params)) != eav_success) {
@@ -4298,6 +4309,7 @@ avpipe_free_params(
     free(params->filter_descriptor);
     free(params->mux_spec);
     free(params->extract_images_ts);
+    free(params->deinterlace_filter);
     free(params);
     xctx->params = NULL;
 }

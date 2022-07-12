@@ -1110,6 +1110,7 @@ usage(
         "\t-d :                     (optional) Decoder name. For video default is \"h264\", can be: \"h264\", \"h264_cuvid\", \"jpeg2000\", \"hevc\"\n"
         "\t                                    For audio default is \"aac\", but for ts files should be set to \"ac3\"\n"
         "\t-debug-frame-level :     (optional) Enable/disable debug frame level. Default is 0, must be 0 or 1.\n"
+        "\t-deinterlace-filter :    (optional) Deinterlace filtername, can be \"pullup\", \"bwdif\", \"yadif\".\n"
         "\t-duration-ts :           (optional) Default: -1 (entire stream)\n"
         "\t-e :                     (optional) Video encoder name. Default is \"libx264\", can be: \"libx264\", \"libx265\", \"h264_nvenc\", \"hevc_nvenc\", \"h264_videotoolbox\", or \"mjpeg\"\n"
         "\t-enc-height :            (optional) Default: -1 (use source height)\n"
@@ -1253,6 +1254,7 @@ main(
         .gpu_index = -1,
         .seg_duration = NULL,
         .debug_frame_level = 0,
+        .deinterlace_filter = "",
     };
 
     i = 1;
@@ -1357,6 +1359,11 @@ main(
                 if (p.debug_frame_level != 0 && p.debug_frame_level != 1) {
                     usage(argv[0], argv[i], EXIT_FAILURE);
                 }
+            } else if (!strcmp(argv[i], "-deinterlace-filter")) {
+                if (argv[i+1])
+                    p.deinterlace_filter = strdup(argv[i+1]);
+                else
+                    usage(argv[0], argv[i], EXIT_FAILURE);
             } else if (strlen(argv[i]) > 2) {
                 usage(argv[0], argv[i], EXIT_FAILURE);
             } else {

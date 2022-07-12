@@ -390,6 +390,7 @@ typedef struct xcparams_t {
     char    *crypt_kid;             // 16-byte UUID in hex [Optional, required for CENC]
     char    *crypt_key_url;         // Specify a key URL in the manifest [Optional, Default: key.bin]
     int     skip_decoding;          // If set, then skip the packets until start_time_ts without decoding
+    char    *deinterlace_filter;    // Can be set to "pullup", "bwdif", "yadif" for deinterlacing video
 
     crypt_scheme_t  crypt_scheme;   // Content protection / DRM / encryption [Optional, Default: crypt_none]
     xc_type_t       xc_type;        // Default: 0 means transcode 'everything'

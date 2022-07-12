@@ -219,6 +219,7 @@ type XcParams struct {
 	FilterDescriptor       string             `json:"filter_descriptor"`
 	SkipDecoding           bool               `json:"skip_decoding"`
 	DebugFrameLevel        bool               `json:"debug_frame_level"`
+	DeinterlaceFilter      string             `json:"deinterlace_filter"`
 	ExtractImageIntervalTs int64              `json:"extract_image_interval_ts,omitempty"`
 	ExtractImagesTs        []int64            `json:"extract_images_ts,omitempty"`
 }
@@ -1211,6 +1212,7 @@ func getCParams(params *XcParams) (*C.xcparams_t, error) {
 		skip_decoding:             C.int(0),
 		extract_image_interval_ts: C.int64_t(params.ExtractImageIntervalTs),
 		extract_images_sz:         C.int(extractImagesSize),
+		deinterlace_filter:        C.CString(params.DeinterlaceFilter),
 
 		// All boolean params are handled below
 	}
