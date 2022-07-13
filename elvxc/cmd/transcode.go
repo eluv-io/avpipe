@@ -263,6 +263,7 @@ func InitTranscode(cmdRoot *cobra.Command) error {
 	cmdTranscode.PersistentFlags().BoolP("debug-frame-level", "", false, "debug frame level.")
 	cmdTranscode.PersistentFlags().BoolP("skip-decoding", "", false, "skip decoding when start-time-ts is set.")
 	cmdTranscode.PersistentFlags().BoolP("listen", "", false, "listen mode for RTMP.")
+	cmdTranscode.PersistentFlags().Int32("connection-timeout", 0, "connection timeout for RTMP when listening on a port.")
 	cmdTranscode.PersistentFlags().Int32P("threads", "t", 1, "transcoding threads.")
 	cmdTranscode.PersistentFlags().StringP("audio-index", "", "", "the indexes of audio stream (comma separated).")
 	cmdTranscode.PersistentFlags().StringP("channel-layout", "", "", "audio channel layout.")
@@ -347,6 +348,11 @@ func doTranscode(cmd *cobra.Command, args []string) error {
 	listen, err := cmd.Flags().GetBool("listen")
 	if err != nil {
 		return fmt.Errorf("Invalid listen flag")
+	}
+
+	connectionTimeout, err := cmd.Flags().GetInt32("connection-timeout")
+	if err != nil {
+		return fmt.Errorf("Invalid connection-timeout flag")
 	}
 
 	forceEqualFrameDuration, err := cmd.Flags().GetBool("equal-fduration")
@@ -662,6 +668,7 @@ func doTranscode(cmd *cobra.Command, args []string) error {
 		SyncAudioToStreamId:    int(syncAudioToStreamId),
 		StreamId:               streamId,
 		Listen:                 listen,
+		ConnectionTimeout:      int(connectionTimeout),
 		FilterDescriptor:       filterDescriptor,
 		SkipDecoding:           skipDecoding,
 		ExtractImageIntervalTs: extractImageIntervalTs,

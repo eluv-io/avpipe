@@ -28,11 +28,14 @@ type LiveSource struct {
 
 func (l *LiveSource) Start(stream string) (err error) {
 	e := errors.Template("start live source", errors.K.NotImplemented)
-	switch strings.ToLower(stream) {
+	streamingMode := strings.ToLower(stream)
+	switch streamingMode {
 	case "udp":
 		return l.startUDP()
-	case "rtmp":
-		return l.startRTMP()
+	case "rtmp_connect":
+		fallthrough
+	case "rtmp_listen":
+		return l.startRTMP(streamingMode)
 	}
 
 	return e(fmt.Errorf("Invalid stream %s", stream))
@@ -101,7 +104,7 @@ func (l *LiveSource) startUDP() (err error) {
 	return nil
 }
 
-func (l *LiveSource) startRTMP() (err error) {
+func (l *LiveSource) startRTMP(streamingMode string) (err error) {
 	log.Debug("In LiveSource startRTMP")
 	e := errors.Template("start live source", errors.K.IO)
 
@@ -132,28 +135,44 @@ func (l *LiveSource) startRTMP() (err error) {
 
 	sourceUrl := fmt.Sprintf("rtmp://localhost:%d/rtmp/Doj1Nr3S", l.Port)
 
-	log.Info("starting RTMP live source", "url", sourceUrl)
+	log.Info("starting RTMP live source", "url", sourceUrl, "streamingMode", streamingMode)
 
-	// i.e ffmpeg -re -i ../media/bbb_1080p_30fps_60sec.mp4 -listen 1 -c:v libx264 -c:a aac -f flv rtmp://localhost/rtmp/Doj1Nr3S
-	l.cmd = exec.Command(ffmpeg,
-		"-re",
-		"-i",
-		"../media/bbb_1080p_30fps_60sec.mp4",
-		"-listen",
-		"1",
-		"-c:v",
-		"libx264",
-		"-c:a",
-		"aac",
-		"-f",
-		"flv",
-		sourceUrl)
+	if streamingMode == "rtmp_listen" {
+		// i.e ffmpeg -re -i ../media/bbb_1080p_30fps_60sec.mp4 -listen 1 -c:v libx264 -c:a aac -f flv rtmp://localhost/rtmp/Doj1Nr3S
+		l.cmd = exec.Command(ffmpeg,
+			"-re",
+			"-i",
+			"../media/bbb_1080p_30fps_60sec.mp4",
+			"-listen",
+			"1",
+			"-c:v",
+			"libx264",
+			"-c:a",
+			"aac",
+			"-f",
+			"flv",
+			sourceUrl)
+	} else {
+		// i.e ffmpeg -re -i ../media/bbb_1080p_30fps_60sec.mp4 -c:v libx264 -c:a aac -f flv rtmp://localhost/rtmp/Doj1Nr3S
+		l.cmd = exec.Command(ffmpeg,
+			"-re",
+			"-i",
+			"../media/bbb_1080p_30fps_60sec.mp4",
+			"-c:v",
+			"libx264",
+			"-c:a",
+			"aac",
+			"-f",
+			"flv",
+			sourceUrl)
+
+	}
 	l.cmd.Stdout = nil
 	l.cmd.Stderr = nil
 
 	err = l.cmd.Start()
 	if err != nil {
-		log.Error("Failed to start RTMP live source", "port", l.Port)
+		log.Error("Failed to start RTMP live source", "port", l.Port, "streamingMode", streamingMode)
 		return e(err)
 	}
 

@@ -217,6 +217,7 @@ type XcParams struct {
 	ForceEqualFDuration    bool               `json:"force_equal_frame_duration,omitempty"`
 	MuxingSpec             string             `json:"muxing_spec,omitempty"`
 	Listen                 bool               `json:"listen"`
+	ConnectionTimeout      int                `json:"connection_timeout"`
 	FilterDescriptor       string             `json:"filter_descriptor"`
 	SkipDecoding           bool               `json:"skip_decoding"`
 	DebugFrameLevel        bool               `json:"debug_frame_level"`
@@ -1208,6 +1209,7 @@ func getCParams(params *XcParams) (*C.xcparams_t, error) {
 		sync_audio_to_stream_id:   C.int(params.SyncAudioToStreamId),
 		gpu_index:                 C.int(params.GPUIndex),
 		listen:                    C.int(0),
+		connection_timeout:        C.int(params.ConnectionTimeout),
 		filter_descriptor:         C.CString(params.FilterDescriptor),
 		skip_decoding:             C.int(0),
 		extract_image_interval_ts: C.int64_t(params.ExtractImageIntervalTs),
