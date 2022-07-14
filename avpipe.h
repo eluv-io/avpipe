@@ -1,7 +1,7 @@
 /*
  * avpipe.h
  *
- * Defines all the interfaces available to Go layer.
+ * Defines all the interfaces available to the Go layer.
  * There are two sets of API's available for transcoding/probing in this layer:
  * - APIs with handle: these APIs allow the client application to cancel a transcoding if it is necessary.
  *   - xc_init(): to initialize a transcoding and obtain a handle.
@@ -22,7 +22,7 @@
 
 /**
  * @brief   Initializes a transcoding context and returns its handle.
- *          The transcoding context is internal to C/Go layer.
+ *          The transcoding context is internal to the C/Go layer.
  *
  * @param   params          Transcoding parameters.
  * @param   handle          Pointer to the handle of transcoding context.
@@ -38,7 +38,6 @@ xc_init(
  * @brief   Starts the transcoding specified by handle.
  *
  * @param   handle      The handle of transcoding context that is obtained by xc_init().
- *
  * @return  If it is successful it returns eav_success, otherwise corresponding error.
  */
 int
@@ -49,7 +48,6 @@ xc_run(
  * @brief   Cancels or stops the transcoding specified by handle.
  *
  * @param   handle      The handle of transcoding context that is obtained by xc_init().
- *
  * @return  If it is successful it returns eav_success, otherwise eav_xc_table.
  */
 int
@@ -60,7 +58,6 @@ xc_cancel(
  * @brief   Starts a transcoding job.
  *
  * @param   params      Transcoding parameters.
- *
  * @return  If it is successful it returns eav_success, otherwise corresponding error.
  */
 int
@@ -71,7 +68,6 @@ xc(
  * @brief   Starts a muxing job.
  *
  * @param   params      Muxing parameters.
- *
  * @return  If it is successful it returns eav_success, otherwise corresponding error.
  */
 int
@@ -82,7 +78,6 @@ mux(
  * @brief   Returns pixel format name.
  *
  * @param   pix_fmt     pixel format id.
- *
  * @return  Returns pixel format name.
  */
 const char *
@@ -94,7 +89,6 @@ get_pix_fmt_name(
  *
  * @param   codec_id    codec id.
  * @param   profile     profile id.
- *
  * @return  Returns profile name.
  */
 const char *
@@ -108,7 +102,6 @@ get_profile_name(
  * @param   params      Probing parameters.
  * @param   xcprobe     Probing information array, will be allocated inside this API.
  * @param   n_streams   Number of entries/streams in probing information array.
- *
  * @return  If it is successful it returns eav_success and fills xcprobe array and n_streams,
  *          otherwise returns corresponding error.
  */
