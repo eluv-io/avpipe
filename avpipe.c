@@ -297,9 +297,9 @@ udp_thread_func(
     udp_packet_t *udp_packet;
     int ret;
     int first = 1;
-
     int pkt_num = 0;
     int timedout = 0;
+    int connection_timeout = xcparams->connection_timeout;
 
     for ( ; ; ) {
         if (params->inctx->closed)
@@ -312,9 +312,18 @@ udp_thread_func(
             elv_err("UDP select error fd=%d, err=%d, url=%s", params->fd, errno, url);
             break;
         } else if (ret == 0) {
-            /* If no packet has not received yet, continue */
-            if (first)
+            /* If no packet has not received yet, check connection_timeout */
+            if (first) {
+                if (connection_timeout > 0) {
+                    connection_timeout--;
+                    if (connection_timeout == 0) {
+                        elv_channel_close(params->udp_channel, 1);
+                        break;
+                    }
+                }
                 continue;
+            }
+
             if (timedout++ == UDP_PIPE_TIMEOUT) {
                 elv_err("UDP recv timeout fd=%d, url=%s", params->fd, url);
                 break;

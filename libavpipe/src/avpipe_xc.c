@@ -3852,6 +3852,7 @@ avpipe_probe(
         goto avpipe_probe_end;
     }
 
+    inctx.params = params;
     if (in_handlers->avpipe_opener(url, &inctx) < 0) {
         rc = eav_open_input;
         goto avpipe_probe_end;
@@ -4107,7 +4108,7 @@ avpipe_init(
     xcparams_t *p)
 {
     xctx_t *p_xctx = NULL;
-    xcparams_t *params;
+    xcparams_t *params = NULL;
     int rc = 0;
     ioctx_t *inctx = (ioctx_t *)calloc(1, sizeof(ioctx_t));
 
@@ -4118,6 +4119,9 @@ avpipe_init(
         goto avpipe_init_failed;
     }
 
+    params = (xcparams_t *) calloc(1, sizeof(xcparams_t));
+    *params = *p;
+    inctx->params = params;
     if (!p->url || p->url[0] == '\0' ||
         in_handlers->avpipe_opener(p->url, inctx) < 0) {
         elv_err("Failed to open avpipe input \"%s\"", p->url != NULL ? p->url : "");
@@ -4133,14 +4137,11 @@ avpipe_init(
     }
 
     p_xctx = (xctx_t *) calloc(1, sizeof(xctx_t));
-    params = (xcparams_t *) calloc(1, sizeof(xcparams_t));
-    *params = *p;
     p_xctx->params = params;
     p_xctx->inctx = inctx;
     p_xctx->in_handlers = in_handlers;
     p_xctx->out_handlers = out_handlers;
     p_xctx->debug_frame_level = p->debug_frame_level;
-    inctx->params = params;
 
     if (!params->format ||
         (strcmp(params->format, "dash") &&

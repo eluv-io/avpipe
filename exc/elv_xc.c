@@ -60,9 +60,9 @@ udp_thread_func(
     udp_packet_t *udp_packet;
     int ret;
     int first = 1;
-
     int pkt_num = 0;
     int timedout = 0;
+    int connection_timeout = xcparams->connection_timeout;
 
     for ( ; ; ) {
         if (params->inctx->closed)
@@ -75,10 +75,19 @@ udp_thread_func(
             elv_err("UDP select error fd=%d, err=%d, url=%s", params->fd, errno, url);
             break;
         } else if (ret == 0) {
-            elv_log("XXX UDP read timeout");
-            /* If no packet has not received yet, continue */
-            if (first)
+            elv_log("XXX UDP read timeout, connection_timeout=%d", connection_timeout);
+            /* If no packet has not received yet, check connection_timeout */
+            if (first) {
+                if (connection_timeout > 0) {
+                    connection_timeout--;
+                    if (connection_timeout == 0) {
+                        elv_channel_close(params->udp_channel, 1);
+                        break;
+                    }
+                }
                 continue;
+            }
+
             if (timedout++ == UDP_PIPE_TIMEOUT) {
                 elv_err("UDP recv timeout fd=%d, url=%s", params->fd, url);
                 break;
@@ -794,8 +803,6 @@ tx_thread_func(
             elv_err("THREAD %d, iteration %d, failed to initialize avpipe rc=%d", params->thread_number, i+1, rc);
             /* avpipe_fini() will release all the resources if the open is successful */
             if (rc == eav_open_input) {
-                free(in_handlers);
-                free(out_handlers);
                 params->err = rc;
                 break;
             }
@@ -1724,6 +1731,7 @@ main(
         pthread_create(&tids[0], NULL, tx_thread_func, tp);
         pthread_join(tids[0], NULL);
         rc = tp->err;
+        return rc;
     }
 
     tx_thread_params_t *tp = (tx_thread_params_t *) calloc(n_threads, sizeof(tx_thread_params_t));
