@@ -20,7 +20,7 @@ func Probe(cmdRoot *cobra.Command) error {
 	cmdProbe.PersistentFlags().StringP("filename", "f", "", "(mandatory) filename to be probed")
 	cmdProbe.PersistentFlags().BoolP("seekable", "", false, "(optional) seekable stream")
 	cmdProbe.PersistentFlags().BoolP("listen", "", false, "listen mode for RTMP.")
-	cmdProbe.PersistentFlags().Int32("connection-timeout", 0, "connection timeout for RTMP when listening on a port.")
+	cmdProbe.PersistentFlags().Int32("connection-timeout", 0, "connection timeout for RTMP when listening on a port or MPEGTS to receive first UDP datagram.")
 
 	return nil
 }

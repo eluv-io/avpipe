@@ -263,7 +263,7 @@ func InitTranscode(cmdRoot *cobra.Command) error {
 	cmdTranscode.PersistentFlags().BoolP("debug-frame-level", "", false, "debug frame level.")
 	cmdTranscode.PersistentFlags().BoolP("skip-decoding", "", false, "skip decoding when start-time-ts is set.")
 	cmdTranscode.PersistentFlags().BoolP("listen", "", false, "listen mode for RTMP.")
-	cmdTranscode.PersistentFlags().Int32("connection-timeout", 0, "connection timeout for RTMP when listening on a port.")
+	cmdTranscode.PersistentFlags().Int32("connection-timeout", 0, "connection timeout for RTMP when listening on a port or MPEGTS to receive first UDP datagram.")
 	cmdTranscode.PersistentFlags().Int32P("threads", "t", 1, "transcoding threads.")
 	cmdTranscode.PersistentFlags().StringP("audio-index", "", "", "the indexes of audio stream (comma separated).")
 	cmdTranscode.PersistentFlags().StringP("channel-layout", "", "", "audio channel layout.")

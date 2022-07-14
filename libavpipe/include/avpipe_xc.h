@@ -579,8 +579,7 @@ avpipe_channel_name(
  * @brief   Probes object stream specified by input handler.
  *
  * @param   in_handlers     A pointer to input handlers that direct the probe
- * @param   seekable        A flag to specify whether input stream is seakable or no
- * @param   params          A pointer to the parameters for transcoding.
+ * @param   params          A pointer to the parameters for transcoding/probing.
  * @param   xcprob          A pointer to the xcprobe_t that could contain probing info.
  * @param   n_streams       Will contail number of streams that are probed if successful.
  * @return  Returns 0 if successful, otherwise corresponding eav error.

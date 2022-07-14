@@ -32,7 +32,6 @@ func TestProbeRTMPConnect(t *testing.T) {
 		DebugFrameLevel: debugFrameLevel,
 	}
 
-	// Transcode audio mez files in background
 	reqCtx := &testCtx{url: url}
 	putReqCtxByURL(url, reqCtx)
 
@@ -74,7 +73,6 @@ func TestProbeRTMPListen(t *testing.T) {
 		ConnectionTimeout: 5,
 	}
 
-	// Transcode audio mez files in background
 	reqCtx := &testCtx{url: url}
 	putReqCtxByURL(url, reqCtx)
 
@@ -137,7 +135,6 @@ func TestProbeUDPConnect(t *testing.T) {
 		ConnectionTimeout: 5,
 	}
 
-	// Transcode audio mez files in background
 	reqCtx := &testCtx{url: url}
 	putReqCtxByURL(url, reqCtx)
 
@@ -178,7 +175,6 @@ func TestProbeUDPListen(t *testing.T) {
 		DebugFrameLevel: debugFrameLevel,
 	}
 
-	// Transcode audio mez files in background
 	reqCtx := &testCtx{url: url}
 	putReqCtxByURL(url, reqCtx)
 

@@ -109,7 +109,8 @@ get_profile_name(
  * @param   xcprobe     Probing information array, will be allocated inside this API.
  * @param   n_streams   Number of entries/streams in probing information array.
  *
- * @return  If it is successful it returns eav_success, otherwise corresponding error.
+ * @return  If it is successful it returns eav_success and fills xcprobe array and n_streams,
+ *          otherwise returns corresponding error.
  */
 int
 probe(

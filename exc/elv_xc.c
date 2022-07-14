@@ -1750,6 +1750,5 @@ main(
 
     free(tids);
 
-    elv_log("rc=%d", rc);
     return rc;
 }
