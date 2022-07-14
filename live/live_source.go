@@ -74,7 +74,7 @@ func (l *LiveSource) startUDP() (err error) {
 
 	log.Info("starting live source", "url", sourceUrl)
 
-	// i.e ffmpeg -re -i media/FS1-19-10-15-70sec.ts -c copy -f mpegts udp://127.0.0.1:21001?pkt_size=1316
+	// i.e ffmpeg -re -i media/BBB4_HD_51_AVC_120s_CCBYblendercloud.ts -c copy -f mpegts udp://127.0.0.1:21001?pkt_size=1316
 	l.cmd = exec.Command(ffmpeg,
 		"-re",
 		"-i",
