@@ -4,7 +4,6 @@ import (
 	"fmt"
 	"github.com/eluv-io/avpipe"
 	"github.com/stretchr/testify/assert"
-	"os"
 	"testing"
 	"time"
 )
@@ -13,12 +12,6 @@ import (
 // 2) avpipe probe connects to listening ffmpeg and probes the stream
 func TestProbeRTMPConnect(t *testing.T) {
 	setupLogging()
-	outputDir := "TestProbeRTMPConnect"
-
-	// Create output directory if it doesn't exist
-	if _, err := os.Stat(outputDir); os.IsNotExist(err) {
-		os.Mkdir(outputDir, 0755)
-	}
 
 	liveSource := NewLiveSource()
 	url := fmt.Sprintf("rtmp://localhost:%d/rtmp/Doj1Nr3S", liveSource.Port)
@@ -43,7 +36,7 @@ func TestProbeRTMPConnect(t *testing.T) {
 	reqCtx := &testCtx{url: url}
 	putReqCtxByURL(url, reqCtx)
 
-	avpipe.InitIOHandler(&inputOpener{dir: outputDir}, &outputOpener{dir: outputDir})
+	avpipe.InitIOHandler(&inputOpener{}, &outputOpener{})
 
 	tlog.Info("Probing RTMP stream start", "params", fmt.Sprintf("%+v", *XCParams))
 	probeInfo, err := avpipe.Probe(XCParams)
@@ -68,12 +61,6 @@ func TestProbeRTMPConnect(t *testing.T) {
 // 2) Starts ffmpeg to connect to listening avpipe
 func TestProbeRTMPListen(t *testing.T) {
 	setupLogging()
-	outputDir := "TestProbeRTMPListen"
-
-	// Create output directory if it doesn't exist
-	if _, err := os.Stat(outputDir); os.IsNotExist(err) {
-		os.Mkdir(outputDir, 0755)
-	}
 
 	liveSource := NewLiveSource()
 	url := fmt.Sprintf("rtmp://localhost:%d/rtmp/Doj1Nr3S", liveSource.Port)
@@ -91,7 +78,7 @@ func TestProbeRTMPListen(t *testing.T) {
 	reqCtx := &testCtx{url: url}
 	putReqCtxByURL(url, reqCtx)
 
-	avpipe.InitIOHandler(&inputOpener{dir: outputDir}, &outputOpener{dir: outputDir})
+	avpipe.InitIOHandler(&inputOpener{}, &outputOpener{})
 
 	done := make(chan bool, 1)
 	var probeInfo *avpipe.ProbeInfo
@@ -129,12 +116,6 @@ func TestProbeRTMPListen(t *testing.T) {
 // 2) avpipe probe reads the generated UDP stream and probes the stream
 func TestProbeUDPConnect(t *testing.T) {
 	setupLogging()
-	outputDir := "TestProbeUDPConnect"
-
-	// Create output directory if it doesn't exist
-	if _, err := os.Stat(outputDir); os.IsNotExist(err) {
-		os.Mkdir(outputDir, 0755)
-	}
 
 	liveSource := NewLiveSource()
 	url := fmt.Sprintf("udp://localhost:%d", liveSource.Port)
@@ -160,7 +141,7 @@ func TestProbeUDPConnect(t *testing.T) {
 	reqCtx := &testCtx{url: url}
 	putReqCtxByURL(url, reqCtx)
 
-	avpipe.InitIOHandler(&inputOpener{dir: outputDir}, &outputOpener{dir: outputDir})
+	avpipe.InitIOHandler(&inputOpener{}, &outputOpener{})
 
 	tlog.Info("Probing MPEGTS stream start", "params", fmt.Sprintf("%+v", *XCParams))
 	probeInfo, err := avpipe.Probe(XCParams)
@@ -185,12 +166,6 @@ func TestProbeUDPConnect(t *testing.T) {
 // 2) Starts ffmpeg for streaming UDP MPEGTS
 func TestProbeUDPListen(t *testing.T) {
 	setupLogging()
-	outputDir := "TestProbeUDPConnect"
-
-	// Create output directory if it doesn't exist
-	if _, err := os.Stat(outputDir); os.IsNotExist(err) {
-		os.Mkdir(outputDir, 0755)
-	}
 
 	liveSource := NewLiveSource()
 	url := fmt.Sprintf("udp://localhost:%d", liveSource.Port)
@@ -207,7 +182,7 @@ func TestProbeUDPListen(t *testing.T) {
 	reqCtx := &testCtx{url: url}
 	putReqCtxByURL(url, reqCtx)
 
-	avpipe.InitIOHandler(&inputOpener{dir: outputDir}, &outputOpener{dir: outputDir})
+	avpipe.InitIOHandler(&inputOpener{}, &outputOpener{})
 
 	done := make(chan bool, 1)
 	var probeInfo *avpipe.ProbeInfo
