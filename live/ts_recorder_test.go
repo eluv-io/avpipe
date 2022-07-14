@@ -25,7 +25,7 @@ func TestUdpToMp4(t *testing.T) {
 	done := make(chan bool, 1)
 	testComplet := make(chan bool, 1)
 
-	err := liveSource.Start()
+	err := liveSource.Start("udp")
 	if err != nil {
 		t.Error(err)
 	}
@@ -133,7 +133,7 @@ func TestUdpToMp4WithCancelling1(t *testing.T) {
 	liveSource := NewLiveSource()
 	url := fmt.Sprintf("udp://localhost:%d", liveSource.Port)
 
-	err := liveSource.Start()
+	err := liveSource.Start("udp")
 	if err != nil {
 		t.Error(err)
 	}
@@ -194,7 +194,7 @@ func TestUdpToMp4WithCancelling2(t *testing.T) {
 	url := fmt.Sprintf("udp://localhost:%d", liveSource.Port)
 	done := make(chan bool, 1)
 
-	err := liveSource.Start()
+	err := liveSource.Start("udp")
 	if err != nil {
 		t.Error(err)
 	}
@@ -268,7 +268,7 @@ func TestUdpToMp4WithCancelling3(t *testing.T) {
 	url := fmt.Sprintf("udp://localhost:%d", liveSource.Port)
 	done := make(chan bool, 1)
 
-	err := liveSource.Start()
+	err := liveSource.Start("udp")
 	if err != nil {
 		t.Error(err)
 	}
@@ -342,7 +342,7 @@ func TestUdpToMp4WithCancelling4(t *testing.T) {
 	url := fmt.Sprintf("udp://localhost:%d", liveSource.Port)
 	done := make(chan bool, 1)
 
-	err := liveSource.Start()
+	err := liveSource.Start("udp")
 	if err != nil {
 		t.Error(err)
 	}

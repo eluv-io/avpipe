@@ -1669,7 +1669,11 @@ func TestProbe(t *testing.T) {
 	filename := videoBigBuckBunnyPath
 
 	avpipe.InitIOHandler(&fileInputOpener{url: filename}, &concurrentOutputOpener{dir: "O"})
-	probe, err := avpipe.Probe(filename, true)
+	xcparams := &avpipe.XcParams{
+		Url:      filename,
+		Seekable: true,
+	}
+	probe, err := avpipe.Probe(xcparams)
 	failNowOnError(t, err)
 	assert.Equal(t, 3, len(probe.StreamInfo))
 
@@ -1719,7 +1723,11 @@ func TestProbeWithData(t *testing.T) {
 	filename := "./media/TOS8_FHD_51-2_PRHQ_60s_CCBYblendercloud.mov"
 
 	avpipe.InitIOHandler(&fileInputOpener{url: filename}, &concurrentOutputOpener{dir: "O"})
-	probe, err := avpipe.Probe(filename, true)
+	xcparams := &avpipe.XcParams{
+		Url:      filename,
+		Seekable: true,
+	}
+	probe, err := avpipe.Probe(xcparams)
 	failNowOnError(t, err)
 	assert.Equal(t, 9, len(probe.StreamInfo))
 
@@ -1990,7 +1998,11 @@ func boilerProbe(t *testing.T, result *XcTestResult) (probeInfoArray []*avpipe.P
 	}
 
 	for _, mezFile := range result.mezFile {
-		probeInfo, err := avpipe.Probe(mezFile, true)
+		xcparams := &avpipe.XcParams{
+			Url:      mezFile,
+			Seekable: true,
+		}
+		probeInfo, err := avpipe.Probe(xcparams)
 		failNowOnError(t, err)
 
 		si := probeInfo.StreamInfo[0]

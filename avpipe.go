@@ -90,6 +90,7 @@ const (
 	XcAudioPan             = 18 // XcAudio | 0x10
 	XcMux                  = 32
 	XcExtractImages        = 65 // XcVideo | 2^6
+	Xcprobe                = 128
 )
 
 type XcProfile int
@@ -216,6 +217,7 @@ type XcParams struct {
 	ForceEqualFDuration    bool               `json:"force_equal_frame_duration,omitempty"`
 	MuxingSpec             string             `json:"muxing_spec,omitempty"`
 	Listen                 bool               `json:"listen"`
+	ConnectionTimeout      int                `json:"connection_timeout"`
 	FilterDescriptor       string             `json:"filter_descriptor"`
 	SkipDecoding           bool               `json:"skip_decoding"`
 	DebugFrameLevel        bool               `json:"debug_frame_level"`
@@ -1207,6 +1209,7 @@ func getCParams(params *XcParams) (*C.xcparams_t, error) {
 		sync_audio_to_stream_id:   C.int(params.SyncAudioToStreamId),
 		gpu_index:                 C.int(params.GPUIndex),
 		listen:                    C.int(0),
+		connection_timeout:        C.int(params.ConnectionTimeout),
 		filter_descriptor:         C.CString(params.FilterDescriptor),
 		skip_decoding:             C.int(0),
 		extract_image_interval_ts: C.int64_t(params.ExtractImageIntervalTs),
@@ -1348,18 +1351,21 @@ func GetProfileName(codecId int, profile int) string {
 	return ""
 }
 
-func Probe(url string, seekable bool) (*ProbeInfo, error) {
+func Probe(params *XcParams) (*ProbeInfo, error) {
 	var cprobe *C.xcprobe_t
-	var cseekable C.int
 	var n_streams C.int
 
-	if seekable {
-		cseekable = C.int(1)
-	} else {
-		cseekable = C.int(0)
+	if params == nil {
+		log.Error("Failed probing, params are not set.")
+		return nil, EAV_PARAM
 	}
 
-	rc := C.probe(C.CString(url), cseekable, (**C.xcprobe_t)(unsafe.Pointer(&cprobe)), (*C.int)(unsafe.Pointer(&n_streams)))
+	cparams, err := getCParams(params)
+	if err != nil {
+		log.Error("Probing failed", err, "url", params.Url)
+	}
+
+	rc := C.probe((*C.xcparams_t)(unsafe.Pointer(cparams)), (**C.xcprobe_t)(unsafe.Pointer(&cprobe)), (*C.int)(unsafe.Pointer(&n_streams)))
 	if int(rc) != 0 {
 		return nil, avpipeError(rc)
 	}
@@ -1423,8 +1429,8 @@ func Probe(url string, seekable bool) (*ProbeInfo, error) {
 
 	gMutex.Lock()
 	defer gMutex.Unlock()
-	delete(gURLInputOpeners, url)
-	delete(gURLOutputOpeners, url)
+	delete(gURLInputOpeners, params.Url)
+	delete(gURLOutputOpeners, params.Url)
 
 	return probeInfo, nil
 }

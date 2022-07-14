@@ -389,6 +389,13 @@ prepare_decoder(
     AVDictionary *opts = NULL;
     if (params && params->listen)
         av_dict_set(&opts, "listen", "1" , 0);
+
+    if (decoder_context->is_rtmp && params->connection_timeout > 0) {
+        char timeout[32];
+        sprintf(timeout, "%d", params->connection_timeout);
+        av_dict_set(&opts, "timeout", timeout, 0);
+    }
+
     /* Allocate AVFormatContext in format_context and find input file format */
     rc = avformat_open_input(&decoder_context->format_context, inctx->url, NULL, &opts);
     if (rc != 0) {
@@ -3813,9 +3820,8 @@ get_xc_type_name(
 
 int
 avpipe_probe(
-    char *url,
     avpipe_io_handler_t *in_handlers,
-    int seekable,
+    xcparams_t *params,
     xcprobe_t **xcprobe,
     int *n_streams)
 {
@@ -3824,6 +3830,21 @@ avpipe_probe(
     stream_info_t *stream_probes, *stream_probes_ptr;
     xcprobe_t *probe;
     int rc = 0;
+    char *url;
+
+    memset(&inctx, 0, sizeof(ioctx_t));
+    memset(&decoder_ctx, 0, sizeof(coderctx_t));
+
+    if (!params) {
+        elv_err("avpipe_probe parameters are not set");
+        rc = eav_param;
+        goto avpipe_probe_end;
+    }
+
+    url = params->url;
+    // Disable sync audio to stream id when probing
+    params->sync_audio_to_stream_id = -1;
+    params->stream_id = -1;
 
     if (!in_handlers) {
         elv_err("avpipe_probe NULL handlers, url=%s", url);
@@ -3831,16 +3852,13 @@ avpipe_probe(
         goto avpipe_probe_end;
     }
 
-    memset(&inctx, 0, sizeof(ioctx_t));
-
+    inctx.params = params;
     if (in_handlers->avpipe_opener(url, &inctx) < 0) {
         rc = eav_open_input;
         goto avpipe_probe_end;
     }
 
-    memset(&decoder_ctx, 0, sizeof(coderctx_t));
-
-    if ((rc = prepare_decoder(&decoder_ctx, in_handlers, &inctx, NULL, seekable)) != eav_success) {
+    if ((rc = prepare_decoder(&decoder_ctx, in_handlers, &inctx, params, params->seekable)) != eav_success) {
         elv_err("avpipe_probe failed to prepare decoder, url=%s", url);
         goto avpipe_probe_end;
     }
@@ -3925,11 +3943,6 @@ avpipe_probe(
 
 avpipe_probe_end:
     if (decoder_ctx.format_context) {
-        AVIOContext *avioctx = (AVIOContext *) decoder_ctx.format_context->pb;
-        if (avioctx) {
-            av_freep(&avioctx->buffer);
-            av_freep(&avioctx);
-        }
         avformat_close_input(&decoder_ctx.format_context);
     }
 
@@ -4089,7 +4102,7 @@ avpipe_init(
     xcparams_t *p)
 {
     xctx_t *p_xctx = NULL;
-    xcparams_t *params;
+    xcparams_t *params = NULL;
     int rc = 0;
     ioctx_t *inctx = (ioctx_t *)calloc(1, sizeof(ioctx_t));
 
@@ -4100,6 +4113,9 @@ avpipe_init(
         goto avpipe_init_failed;
     }
 
+    params = (xcparams_t *) calloc(1, sizeof(xcparams_t));
+    *params = *p;
+    inctx->params = params;
     if (!p->url || p->url[0] == '\0' ||
         in_handlers->avpipe_opener(p->url, inctx) < 0) {
         elv_err("Failed to open avpipe input \"%s\"", p->url != NULL ? p->url : "");
@@ -4115,14 +4131,11 @@ avpipe_init(
     }
 
     p_xctx = (xctx_t *) calloc(1, sizeof(xctx_t));
-    params = (xcparams_t *) calloc(1, sizeof(xcparams_t));
-    *params = *p;
     p_xctx->params = params;
     p_xctx->inctx = inctx;
     p_xctx->in_handlers = in_handlers;
     p_xctx->out_handlers = out_handlers;
     p_xctx->debug_frame_level = p->debug_frame_level;
-    inctx->params = params;
 
     if (!params->format ||
         (strcmp(params->format, "dash") &&

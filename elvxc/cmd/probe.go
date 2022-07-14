@@ -19,6 +19,8 @@ func Probe(cmdRoot *cobra.Command) error {
 
 	cmdProbe.PersistentFlags().StringP("filename", "f", "", "(mandatory) filename to be probed")
 	cmdProbe.PersistentFlags().BoolP("seekable", "", false, "(optional) seekable stream")
+	cmdProbe.PersistentFlags().BoolP("listen", "", false, "listen mode for RTMP.")
+	cmdProbe.PersistentFlags().Int32("connection-timeout", 0, "connection timeout for RTMP when listening on a port or MPEGTS to receive first UDP datagram.")
 
 	return nil
 }
@@ -34,11 +36,27 @@ func doProbe(cmd *cobra.Command, args []string) error {
 	if err != nil {
 		return fmt.Errorf("Invalid seekable flag")
 	}
-	log.Debug("doProbe", "seekable", seekable, "filename", filename)
+
+	connectionTimeout, err := cmd.Flags().GetInt32("connection-timeout")
+	if err != nil {
+		return fmt.Errorf("Invalid connection-timeout flag")
+	}
+
+	listen, err := cmd.Flags().GetBool("listen")
+	if err != nil {
+		return fmt.Errorf("Invalid listen flag")
+	}
+
+	params := &avpipe.XcParams{
+		Url:               filename,
+		Seekable:          seekable,
+		Listen:            listen,
+		ConnectionTimeout: int(connectionTimeout),
+	}
 
 	avpipe.InitIOHandler(&elvxcInputOpener{url: filename}, &elvxcOutputOpener{dir: ""})
 
-	probe, err := avpipe.Probe(filename, seekable)
+	probe, err := avpipe.Probe(params)
 	if err != nil {
 		return fmt.Errorf("Probing failed. file=%s", filename)
 	}
