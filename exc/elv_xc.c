@@ -75,7 +75,6 @@ udp_thread_func(
             elv_err("UDP select error fd=%d, err=%d, url=%s", params->fd, errno, url);
             break;
         } else if (ret == 0) {
-            elv_log("XXX UDP read timeout, connection_timeout=%d", connection_timeout);
             /* If no packet has not received yet, check connection_timeout */
             if (first) {
                 if (connection_timeout > 0) {
