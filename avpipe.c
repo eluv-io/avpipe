@@ -879,7 +879,7 @@ static int
 xc_table_cancel(
     int32_t handle)
 {
-    int rc = 0;
+    int rc = eav_success;
     elv_dbg("xc_table_cancel handle=%d", handle);
     pthread_mutex_lock(&tx_mutex);
     for (int i=0; i<MAX_TX; i++) {
@@ -899,7 +899,7 @@ xc_table_cancel(
             } else {
                 elv_err("xc_table_cancel index=%d doesn't match with handle=%d at %d",
                     xc_table[i]->xctx->index, handle, i);
-                rc = -1;
+                rc = eav_xc_table;
             }
             pthread_mutex_unlock(&tx_mutex);
             return rc;

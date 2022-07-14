@@ -364,6 +364,8 @@ func (io *inputOpener) Open(fd int64, url string) (avpipe.InputHandler, error) {
 	}
 
 	if (len(url) >= 4 && url[0:4] == "rtmp") || (len(url) >= 3 && url[0:3] == "udp") {
+		tc.fd = fd
+		putReqCtxByFD(fd, tc)
 		return &inputCtx{tc: tc}, nil
 	}
 
