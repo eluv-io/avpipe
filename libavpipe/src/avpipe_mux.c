@@ -256,8 +256,8 @@ avpipe_init_muxer(
     }
 
     /* The output format has to be fragmented to avoid doing seeks */
-    av_opt_set(out_muxer_ctx->format_context->priv_data, "movflags", "frag_every_frame", 0);
-    //av_opt_set(out_muxer_ctx->format_context->priv_data, "segment_format_options", "movflags=faststart", 0);
+    //av_opt_set(out_muxer_ctx->format_context->priv_data, "movflags", "frag_every_frame", 0);
+    av_opt_set(out_muxer_ctx->format_context->priv_data, "movflags", "frag_keyframe", 0);
 
     out_muxer_ctx->format_context->avpipe_opaque = out_handlers;
 
