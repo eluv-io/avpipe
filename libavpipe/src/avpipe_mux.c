@@ -255,8 +255,10 @@ avpipe_init_muxer(
         return eav_codec_context;
     }
 
-    /* The output format has to be fragmented to avoid doing seeks */
-    //av_opt_set(out_muxer_ctx->format_context->priv_data, "movflags", "frag_every_frame", 0);
+    /* The output format has to be fragmented to avoid doing seeks in the output.
+     * Don't set frag_every_frame in movflags because it causes audio/video to become out of sync
+     * when doing random access on the muxed file.
+     */
     av_opt_set(out_muxer_ctx->format_context->priv_data, "movflags", "frag_keyframe", 0);
 
     out_muxer_ctx->format_context->avpipe_opaque = out_handlers;
