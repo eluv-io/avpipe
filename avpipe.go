@@ -1501,9 +1501,9 @@ func H264GuessLevel(profile int, bitrate int64, framerate, width, height int) in
 	return int(level)
 }
 
-func H264GuessProfile(bandwidth, width, height int) int {
+func H264GuessProfile(bitdepth, width, height int) int {
 	profile := C.avpipe_h264_guess_profile(
-		C.int(bandwidth),
+		C.int(bitdepth),
 		C.int(width),
 		C.int(height))
 
