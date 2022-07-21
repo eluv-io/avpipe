@@ -676,7 +676,6 @@ set_extract_images(
 /**
  * @brief   Returns the level based on the input values
  *
- * @param   url             Url of the video.
  * @param   profile_idc     Profile of the video.
  * @param   bitrate         Bit rate of the video.
  * @param   framerate       Frame rate of the video.
@@ -687,7 +686,6 @@ set_extract_images(
  */
 int
 avpipe_h264_guess_level(
-    char *url,
     int profile_idc,
     int64_t bitrate,
     int framerate,

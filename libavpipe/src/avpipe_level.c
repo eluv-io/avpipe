@@ -166,7 +166,6 @@ h264_guess_level(int profile_idc,
 
 int
 avpipe_h264_guess_level(
-    char *url,
     int profile_idc,
     int64_t bitrate,
     int framerate,
@@ -185,7 +184,7 @@ avpipe_h264_guess_level(
     else {
         // Fallback to traditional avpipe find_level() if h264_guess_level() fails to find the level.
         level = find_level(framerate, width, height);
-        elv_warn("CHECK LEVEL url=%s h264_guess_level failed to find level descriptor, fallback to find_level (found level=%d)", url, level);
+        elv_warn("CHECK LEVEL h264_guess_level failed to find level descriptor, fallback to find_level (found level=%d)", level);
     }
 
     return level;
