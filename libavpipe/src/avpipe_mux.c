@@ -260,6 +260,7 @@ avpipe_init_muxer(
      * when doing random access on the muxed file.
      */
     av_opt_set(out_muxer_ctx->format_context->priv_data, "movflags", "frag_keyframe", 0);
+    av_opt_set(out_muxer_ctx->format_context->priv_data, "movflags", "cmaf", 0);
 
     out_muxer_ctx->format_context->avpipe_opaque = out_handlers;
 
