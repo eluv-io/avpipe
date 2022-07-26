@@ -1939,7 +1939,7 @@ func TestLevel(t *testing.T) {
 	}
 
 	for i := 0; i < len(levelParams); i++ {
-		level := avpipe.H264GuessLevel("", levelParams[i].profile, levelParams[i].bitrate, levelParams[i].framerate, levelParams[i].width, levelParams[i].height)
+		level := avpipe.H264GuessLevel(levelParams[i].profile, levelParams[i].bitrate, levelParams[i].framerate, levelParams[i].width, levelParams[i].height)
 		assert.Equal(t, levelParams[i].expectedLevel, level)
 	}
 }

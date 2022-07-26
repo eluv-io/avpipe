@@ -1496,9 +1496,8 @@ func StreamInfoAsArray(s []StreamInfo) []StreamInfo {
 	return a
 }
 
-func H264GuessLevel(url string, profile int, bitrate int64, framerate, width, height int) int {
+func H264GuessLevel(profile int, bitrate int64, framerate, width, height int) int {
 	level := C.avpipe_h264_guess_level(
-		C.CString(url),
 		C.int(profile),
 		C.int64_t(bitrate),
 		C.int(framerate),
@@ -1508,9 +1507,9 @@ func H264GuessLevel(url string, profile int, bitrate int64, framerate, width, he
 	return int(level)
 }
 
-func H264GuessProfile(bandwidth, width, height int) int {
+func H264GuessProfile(bitdepth, width, height int) int {
 	profile := C.avpipe_h264_guess_profile(
-		C.int(bandwidth),
+		C.int(bitdepth),
 		C.int(width),
 		C.int(height))
 

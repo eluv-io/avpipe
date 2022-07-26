@@ -773,7 +773,7 @@ set_h264_params(
     if (encoder_codec_context->framerate.den != 0)
         framerate = encoder_codec_context->framerate.num/encoder_codec_context->framerate.den;
 
-    encoder_codec_context->level = avpipe_h264_guess_level(params->url,
+    encoder_codec_context->level = avpipe_h264_guess_level(
                                                 encoder_codec_context->profile,
                                                 encoder_codec_context->bit_rate,
                                                 framerate,
@@ -926,7 +926,7 @@ set_nvidia_params(
     if (encoder_codec_context->framerate.den != 0)
         framerate = encoder_codec_context->framerate.num/encoder_codec_context->framerate.den;
 
-    encoder_codec_context->level = avpipe_h264_guess_level(params->url,
+    encoder_codec_context->level = avpipe_h264_guess_level(
                                                 encoder_codec_context->profile,
                                                 encoder_codec_context->bit_rate,
                                                 framerate,
