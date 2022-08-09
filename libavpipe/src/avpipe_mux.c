@@ -383,6 +383,7 @@ get_next_packet(
     pkt->stream_index = index;
     xctx->is_pkt_valid[index] = 0;
 
+    pkt->dts = pkt->pts;
     dump_packet(pkt->stream_index, "MUX IN ", pkt, xctx->debug_frame_level);
 
 read_frame_again:
@@ -392,7 +393,7 @@ read_frame_again:
         if (pkts[index].pts == pkt->pts)
             goto read_frame_again;
         xctx->is_pkt_valid[index] = 1;
-        if (pkt->pts > 0) {
+        if (pkt->pts >= 0) {
             if (index == 0) {
                 if (pkt->pts > in_mux_ctx->last_video_pts)
                     in_mux_ctx->last_video_pts = pkt->pts;
@@ -447,7 +448,7 @@ avpipe_mux(
         if (ret <= 0)
             break;
 
-        dump_packet(pkt.stream_index, "MUX OUT ", &pkt, 1);
+        dump_packet(pkt.stream_index, "MUX OUT ", &pkt, xctx->debug_frame_level);
 
         if (av_interleaved_write_frame(xctx->out_muxer_ctx.format_context, &pkt) < 0) {
             elv_err("Failure in copying mux packet");
