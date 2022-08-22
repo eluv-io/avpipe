@@ -1115,7 +1115,7 @@ usage(
         "\t-bypass :                (optional) Bypass transcoding. Default is 0, must be 0 or 1\n"
         "\t-channel-layout :        (optional) Channel layout for audio, can be \"mono\", \"stereo\", \"5.0\" or \"5.1\"....\n"
         "\t-command :               (optional) Directing command of exc, can be \"transcode\", \"probe\" or \"mux\" (default is transcode).\n"
-        "\t-connection-timeout:     (optional) Default 10 sec. Connection timeout for rtmp or mpegts protocols.\n"
+        "\t-connection-timeout:     (optional) Seconds (default 10). Connection timeout for rtmp or mpegts protocols.\n"
         "\t-crf :                   (optional) Mutually exclusive with video-bitrate. Default: 23\n"
         "\t-crypt-iv :              (optional) 128-bit AES IV, as hex\n"
         "\t-crypt-key :             (optional) 128-bit AES key, as hex\n"
