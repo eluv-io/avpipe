@@ -1488,12 +1488,6 @@ func TestMezMakerWithInputOpenError(t *testing.T) {
 
 	handle, err := avpipe.XcInit(params)
 	assert.Less(t, handle, int32(0))
-	go func(handle int32) {
-		// Wait for 2 sec the transcoding starts, then cancel it.
-		time.Sleep(2 * time.Second)
-		err := avpipe.XcCancel(handle)
-		assert.NoError(t, err)
-	}(handle)
 	err = avpipe.XcRun(handle)
 	assert.Error(t, err)
 
@@ -1534,12 +1528,6 @@ func TestMezMakerWithReadError(t *testing.T) {
 
 	handle, err := avpipe.XcInit(params)
 	assert.Less(t, handle, int32(0))
-	go func(handle int32) {
-		// Wait for 2 sec the transcoding starts, then cancel it.
-		time.Sleep(2 * time.Second)
-		err := avpipe.XcCancel(handle)
-		assert.NoError(t, err)
-	}(handle)
 	err = avpipe.XcRun(handle)
 	assert.Error(t, err)
 
