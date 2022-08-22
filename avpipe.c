@@ -975,6 +975,7 @@ xc_init(
     avpipe_io_handler_t *in_handlers = NULL;
     avpipe_io_handler_t *out_handlers = NULL;
 
+    *handle = -1;
     if (!params || !params->url || params->url[0] == '\0' )
         return eav_param;
 
@@ -1002,10 +1003,7 @@ xc_init(
     return eav_success;
 
 end_tx_init:
-
     avpipe_fini(&xctx);
-    free(in_handlers);
-    free(out_handlers);
 
     return rc;
 }
