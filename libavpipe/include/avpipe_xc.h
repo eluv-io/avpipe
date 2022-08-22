@@ -337,7 +337,8 @@ typedef enum xc_type_t {
     xc_audio_join     = 10,   // 0x08 | xc_audio
     xc_audio_pan      = 18,   // 0x10 | xc_audio
     xc_mux            = 32,
-    xc_extract_images = 65
+    xc_extract_images = 65,
+    xc_probe          = 128
 } xc_type_t;
 
 /* handled image types in get_overlay_filter_string*/
@@ -426,6 +427,7 @@ typedef struct xcparams_t {
     int         extract_images_sz;          // Size of the array extract_images_ts
 
     int         debug_frame_level;
+    int         connection_timeout;         // Connection timeout in sec for RTMP or MPEGTS protocols
 } xcparams_t;
 
 #define MAX_CODEC_NAME  256
@@ -576,18 +578,16 @@ avpipe_channel_name(
 /**
  * @brief   Probes object stream specified by input handler.
  *
- * @param   url             url/filename of the media content to probe
  * @param   in_handlers     A pointer to input handlers that direct the probe
- * @param   seekable        A flag to specify whether input stream is seakable or no
+ * @param   params          A pointer to the parameters for transcoding/probing.
  * @param   xcprob          A pointer to the xcprobe_t that could contain probing info.
  * @param   n_streams       Will contail number of streams that are probed if successful.
  * @return  Returns 0 if successful, otherwise corresponding eav error.
  */
 int
 avpipe_probe(
-    char *url,
     avpipe_io_handler_t *in_handlers,
-    int seekable,
+    xcparams_t *params,
     xcprobe_t **xcprobe,
     int *n_streams);
 

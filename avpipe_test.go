@@ -1539,7 +1539,9 @@ func TestABRMuxing(t *testing.T) {
 	videoMezDir := path.Join(baseOutPath, f, "VideoMez4Muxing")
 	audioMezDir := path.Join(baseOutPath, f, "AudioMez4Muxing")
 	videoABRDir := path.Join(baseOutPath, f, "VideoABR4Muxing")
+	videoABRDir2 := path.Join(baseOutPath, f, "VideoABR4Muxing2")
 	audioABRDir := path.Join(baseOutPath, f, "AudioABR4Muxing")
+	audioABRDir2 := path.Join(baseOutPath, f, "AudioABR4Muxing2")
 	muxOutDir := path.Join(baseOutPath, f, "MuxingOutput")
 
 	// Create video mez files
@@ -1576,10 +1578,10 @@ func TestABRMuxing(t *testing.T) {
 	avpipe.InitUrlIOHandler(filename, &fileInputOpener{url: filename}, &fileOutputOpener{dir: audioMezDir})
 	boilerXc(t, params)
 
-	// Create video ABR files
+	// Create video ABR files for the first mez segment
 	setupOutDir(t, videoABRDir)
 	filename = videoMezDir + "/vsegment-1.mp4"
-	log.Debug("STARTING video ABR for muxing", "file", filename)
+	log.Debug("STARTING video ABR for muxing (first segment)", "file", filename)
 	params.XcType = avpipe.XcVideo
 	params.Format = "dash"
 	params.VideoSegDurationTs = 48000
@@ -1587,7 +1589,20 @@ func TestABRMuxing(t *testing.T) {
 	avpipe.InitUrlIOHandler(filename, &fileInputOpener{url: filename}, &fileOutputOpener{dir: videoABRDir})
 	boilerXc(t, params)
 
-	// Create audio ABR files
+	// Create video ABR files for the second mez segment
+	setupOutDir(t, videoABRDir2)
+	filename = videoMezDir + "/vsegment-2.mp4"
+	log.Debug("STARTING video ABR for muxing (second segment)", "file", filename)
+	params.XcType = avpipe.XcVideo
+	params.Format = "dash"
+	params.VideoSegDurationTs = 48000
+	params.Url = filename
+	params.StartSegmentStr = "16"
+	params.StartPts = 721720
+	avpipe.InitUrlIOHandler(filename, &fileInputOpener{url: filename}, &fileOutputOpener{dir: videoABRDir2})
+	boilerXc(t, params)
+
+	// Create audio ABR files for the first mez segment
 	setupOutDir(t, audioABRDir)
 	filename = audioMezDir + "/asegment-1.mp4"
 	log.Debug("STARTING audio ABR for muxing", "file", filename)
@@ -1596,7 +1611,23 @@ func TestABRMuxing(t *testing.T) {
 	params.Ecodec2 = "aac"
 	params.AudioSegDurationTs = 96000
 	params.Url = filename
+	params.StartSegmentStr = "1"
+	params.StartPts = 0
 	avpipe.InitUrlIOHandler(filename, &fileInputOpener{url: filename}, &fileOutputOpener{dir: audioABRDir})
+	boilerXc(t, params)
+
+	// Create audio ABR files for the second mez segment
+	setupOutDir(t, audioABRDir2)
+	filename = audioMezDir + "/asegment-2.mp4"
+	log.Debug("STARTING audio ABR for muxing (first segment)", "file", filename)
+	params.XcType = avpipe.XcAudio
+	params.Format = "dash"
+	params.Ecodec2 = "aac"
+	params.AudioSegDurationTs = 96000
+	params.Url = filename
+	params.StartPts = 1441792
+	params.StartSegmentStr = "16"
+	avpipe.InitUrlIOHandler(filename, &fileInputOpener{url: filename}, &fileOutputOpener{dir: audioABRDir2})
 	boilerXc(t, params)
 
 	// Create playable file by muxing audio/video segments
@@ -1606,9 +1637,16 @@ func TestABRMuxing(t *testing.T) {
 	for i := 1; i <= 15; i++ {
 		muxSpec += fmt.Sprintf("%s%s%s%02d%s\n", "audio,1,", audioABRDir, "/achunk-stream0-000", i, ".m4s")
 	}
+	for i := 16; i <= 30; i++ {
+		muxSpec += fmt.Sprintf("%s%s%s%02d%s\n", "audio,1,", audioABRDir2, "/achunk-stream0-000", i, ".m4s")
+	}
+
 	muxSpec += "video,1," + videoABRDir + "/vinit-stream0.m4s\n"
 	for i := 1; i <= 15; i++ {
 		muxSpec += fmt.Sprintf("%s%s%s%02d%s\n", "video,1,", videoABRDir, "/vchunk-stream0-000", i, ".m4s")
+	}
+	for i := 16; i <= 30; i++ {
+		muxSpec += fmt.Sprintf("%s%s%s%02d%s\n", "video,1,", videoABRDir2, "/vchunk-stream0-000", i, ".m4s")
 	}
 	filename = muxOutDir + "/segment-1.mp4"
 	params.MuxingSpec = muxSpec
@@ -1630,6 +1668,17 @@ func TestABRMuxing(t *testing.T) {
 	// Now probe the generated files
 	videoMezProbeInfo := boilerProbe(t, xcTestResult)
 
+	xcTestResult2 := &XcTestResult{
+		mezFile:   []string{fmt.Sprintf("%s/vsegment-2.mp4", videoMezDir)},
+		timeScale: 24000,
+		level:     31,
+		pixelFmt:  "yuv420p",
+	}
+	// Now probe mez video and output file and become sure both have the same duration
+	avpipe.InitIOHandler(&fileInputOpener{url: xcTestResult.mezFile[0]}, &fileOutputOpener{dir: videoMezDir})
+	// Now probe the generated files
+	videoMezProbeInfo2 := boilerProbe(t, xcTestResult2)
+
 	xcTestResult = &XcTestResult{
 		mezFile:   []string{fmt.Sprintf("%s/segment-1.mp4", muxOutDir)},
 		timeScale: 24000,
@@ -1639,7 +1688,7 @@ func TestABRMuxing(t *testing.T) {
 	avpipe.InitIOHandler(&fileInputOpener{url: xcTestResult.mezFile[0]}, &fileOutputOpener{dir: muxOutDir})
 	muxOutProbeInfo := boilerProbe(t, xcTestResult)
 
-	assert.Equal(t, true, int(videoMezProbeInfo[0].ContainerInfo.Duration) == int(muxOutProbeInfo[0].ContainerInfo.Duration))
+	assert.Equal(t, true, int(videoMezProbeInfo[0].ContainerInfo.Duration+videoMezProbeInfo2[0].ContainerInfo.Duration) == int(muxOutProbeInfo[0].ContainerInfo.Duration))
 }
 
 func TestMarshalParams(t *testing.T) {
@@ -1669,7 +1718,11 @@ func TestProbe(t *testing.T) {
 	filename := videoBigBuckBunnyPath
 
 	avpipe.InitIOHandler(&fileInputOpener{url: filename}, &concurrentOutputOpener{dir: "O"})
-	probe, err := avpipe.Probe(filename, true)
+	xcparams := &avpipe.XcParams{
+		Url:      filename,
+		Seekable: true,
+	}
+	probe, err := avpipe.Probe(xcparams)
 	failNowOnError(t, err)
 	assert.Equal(t, 3, len(probe.StreamInfo))
 
@@ -1719,7 +1772,11 @@ func TestProbeWithData(t *testing.T) {
 	filename := "./media/TOS8_FHD_51-2_PRHQ_60s_CCBYblendercloud.mov"
 
 	avpipe.InitIOHandler(&fileInputOpener{url: filename}, &concurrentOutputOpener{dir: "O"})
-	probe, err := avpipe.Probe(filename, true)
+	xcparams := &avpipe.XcParams{
+		Url:      filename,
+		Seekable: true,
+	}
+	probe, err := avpipe.Probe(xcparams)
 	failNowOnError(t, err)
 	assert.Equal(t, 9, len(probe.StreamInfo))
 
@@ -1990,7 +2047,11 @@ func boilerProbe(t *testing.T, result *XcTestResult) (probeInfoArray []*avpipe.P
 	}
 
 	for _, mezFile := range result.mezFile {
-		probeInfo, err := avpipe.Probe(mezFile, true)
+		xcparams := &avpipe.XcParams{
+			Url:      mezFile,
+			Seekable: true,
+		}
+		probeInfo, err := avpipe.Probe(xcparams)
 		failNowOnError(t, err)
 
 		si := probeInfo.StreamInfo[0]
