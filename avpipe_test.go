@@ -52,7 +52,7 @@ type fileInputOpener struct {
 	t                *testing.T
 	url              string
 	errorOnOpenInput bool // Generate error in opening input
-	errorOnRead      bool // Generate error in reading input
+	errorOnReadInput bool // Generate error in reading input
 }
 
 func (fio *fileInputOpener) Open(_ int64, url string) (
@@ -71,17 +71,17 @@ func (fio *fileInputOpener) Open(_ int64, url string) (
 
 	fio.url = url
 	handler = &fileInput{t: fio.t,
-		file:        f,
-		errorOnRead: fio.errorOnRead,
+		file:             f,
+		errorOnReadInput: fio.errorOnReadInput,
 	}
 	return
 }
 
 // Implements avpipe.InputHandler
 type fileInput struct {
-	t           *testing.T
-	file        *os.File // Input file
-	errorOnRead bool     // Generate error in reading input
+	t                *testing.T
+	file             *os.File // Input file
+	errorOnReadInput bool     // Generate error in reading input
 }
 
 func (i *fileInput) Read(buf []byte) (int, error) {
@@ -89,7 +89,7 @@ func (i *fileInput) Read(buf []byte) (int, error) {
 	if err == io.EOF {
 		return 0, nil
 	}
-	if i.errorOnRead {
+	if i.errorOnReadInput {
 		err = io.ErrNoProgress
 		n = -1
 	}
@@ -1455,7 +1455,7 @@ func TestHEVC_H264MezMaker(t *testing.T) {
 
 // Run a mez making session and fail on opening the input.
 // This simulates the cases when opening the input fails time to time (for example, opening the cloud object).
-func TestMezMakerWithInputOpenError(t *testing.T) {
+func TestMezMakerWithOpenInputError(t *testing.T) {
 	filename := "./media/SIN6_4K_MOS_HEVC_60s.mp4"
 	outputDir := path.Join(baseOutPath, fn())
 
@@ -1495,7 +1495,7 @@ func TestMezMakerWithInputOpenError(t *testing.T) {
 
 // Run a mez making session and fail on reading from input.
 // This simulates the cases when reading the input fails time to time (for example, reading from cloud).
-func TestMezMakerWithReadError(t *testing.T) {
+func TestMezMakerWithReadInputError(t *testing.T) {
 	filename := "./media/SIN6_4K_MOS_HEVC_60s.mp4"
 	outputDir := path.Join(baseOutPath, fn())
 
@@ -1518,7 +1518,7 @@ func TestMezMakerWithReadError(t *testing.T) {
 
 	boilerplate(t, outputDir, filename)
 
-	fio := &fileInputOpener{t: t, url: filename, errorOnRead: true}
+	fio := &fileInputOpener{t: t, url: filename, errorOnReadInput: true}
 	foo := &fileOutputOpener{t: t, dir: outputDir}
 	avpipe.InitIOHandler(fio, foo)
 
