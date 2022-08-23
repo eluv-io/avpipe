@@ -1533,6 +1533,28 @@ func TestMezMakerWithReadInputError(t *testing.T) {
 
 }
 
+// Run a probe and fail on reading from input.
+// This simulates the cases when reading the input fails time to time (for example, reading from cloud).
+func TestProbeWithReadInputError(t *testing.T) {
+	filename := "./media/SIN6_4K_MOS_HEVC_60s.mp4"
+	outputDir := path.Join(baseOutPath, fn())
+
+	boilerplate(t, outputDir, filename)
+
+	fio := &fileInputOpener{t: t, url: filename, errorOnReadInput: true}
+	foo := &fileOutputOpener{t: t, dir: outputDir}
+	avpipe.InitIOHandler(fio, foo)
+
+	params := &avpipe.XcParams{
+		Url:      filename,
+		Seekable: true,
+	}
+	probe, err := avpipe.Probe(params)
+	assert.Error(t, err)
+	assert.Equal(t, (*avpipe.ProbeInfo)(nil), probe)
+
+}
+
 func TestHEVC_H265ABRTranscode(t *testing.T) {
 	f := fn()
 	if testing.Short() {
