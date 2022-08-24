@@ -110,6 +110,33 @@ func TestProbeRTMPListen(t *testing.T) {
 	liveSource.Stop()
 }
 
+func TestProbeRTMPNoStream(t *testing.T) {
+	setupLogging()
+
+	liveSource := NewLiveSource()
+	url := fmt.Sprintf("rtmp://localhost:%d/rtmp/Doj1Nr3S", liveSource.Port)
+
+	XCParams := &avpipe.XcParams{
+		Seekable:          false,
+		XcType:            avpipe.Xcprobe,
+		StreamId:          -1,
+		Url:               url,
+		DebugFrameLevel:   debugFrameLevel,
+		ConnectionTimeout: 2,
+	}
+
+	reqCtx := &testCtx{url: url}
+	putReqCtxByURL(url, reqCtx)
+
+	avpipe.InitIOHandler(&inputOpener{}, &outputOpener{})
+
+	tlog.Info("Probing RTMP stream start", "params", fmt.Sprintf("%+v", *XCParams))
+	probeInfo, err := avpipe.Probe(XCParams)
+
+	assert.Error(t, err)
+	assert.Equal(t, (*avpipe.ProbeInfo)(nil), probeInfo)
+}
+
 // 1) Starts ffmpeg for streaming UDP MPEGTS
 // 2) avpipe probe reads the generated UDP stream and probes the stream
 func TestProbeUDPConnect(t *testing.T) {
@@ -162,6 +189,7 @@ func TestProbeUDPConnect(t *testing.T) {
 // 1) Starts avpipe probe to read UDP stream and probes the stream
 // 2) Starts ffmpeg for streaming UDP MPEGTS
 func TestProbeUDPListen(t *testing.T) {
+
 	setupLogging()
 
 	liveSource := NewLiveSource()
@@ -210,4 +238,32 @@ func TestProbeUDPListen(t *testing.T) {
 	assert.Equal(t, 1551, probeInfo.StreamInfo[1].ChannelLayout)
 
 	liveSource.Stop()
+}
+
+func TestProbeUDPNoStream(t *testing.T) {
+
+	setupLogging()
+
+	liveSource := NewLiveSource()
+	url := fmt.Sprintf("udp://localhost:%d", liveSource.Port)
+
+	XCParams := &avpipe.XcParams{
+		Seekable:          false,
+		XcType:            avpipe.Xcprobe,
+		StreamId:          -1,
+		Url:               url,
+		DebugFrameLevel:   debugFrameLevel,
+		ConnectionTimeout: 2,
+	}
+
+	reqCtx := &testCtx{url: url}
+	putReqCtxByURL(url, reqCtx)
+
+	avpipe.InitIOHandler(&inputOpener{}, &outputOpener{})
+
+	tlog.Info("Probing MPEGTS stream start", "params", fmt.Sprintf("%+v", *XCParams))
+	probeInfo, err := avpipe.Probe(XCParams)
+
+	assert.Error(t, err)
+	assert.Equal(t, (*avpipe.ProbeInfo)(nil), probeInfo)
 }

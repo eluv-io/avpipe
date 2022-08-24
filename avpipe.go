@@ -1459,6 +1459,9 @@ func XcInit(params *XcParams) (int32, error) {
 }
 
 func XcRun(handle int32) error {
+	if handle < 0 {
+		return EAV_BAD_HANDLE
+	}
 	rc := C.xc_run(C.int32_t(handle))
 	if rc == 0 {
 		return nil

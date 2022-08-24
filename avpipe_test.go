@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"io/fs"
 	"io/ioutil"
 	"math/big"
 	"os"
@@ -48,12 +49,18 @@ var statsInfo testStatsInfo
 
 // Implements avpipe.InputOpener
 type fileInputOpener struct {
-	t   *testing.T
-	url string
+	t                *testing.T
+	url              string
+	errorOnOpenInput bool // Generate error in opening input
+	errorOnReadInput bool // Generate error in reading input
 }
 
 func (fio *fileInputOpener) Open(_ int64, url string) (
 	handler avpipe.InputHandler, err error) {
+
+	if fio.errorOnOpenInput {
+		return nil, fs.ErrPermission
+	}
 
 	var f *os.File
 	f, err = os.Open(url)
@@ -63,20 +70,28 @@ func (fio *fileInputOpener) Open(_ int64, url string) (
 	}
 
 	fio.url = url
-	handler = &fileInput{t: fio.t, file: f}
+	handler = &fileInput{t: fio.t,
+		file:             f,
+		errorOnReadInput: fio.errorOnReadInput,
+	}
 	return
 }
 
 // Implements avpipe.InputHandler
 type fileInput struct {
-	t    *testing.T
-	file *os.File // Input file
+	t                *testing.T
+	file             *os.File // Input file
+	errorOnReadInput bool     // Generate error in reading input
 }
 
 func (i *fileInput) Read(buf []byte) (int, error) {
 	n, err := i.file.Read(buf)
 	if err == io.EOF {
 		return 0, nil
+	}
+	if i.errorOnReadInput {
+		err = io.ErrNoProgress
+		n = -1
 	}
 	if debugFrameLevel {
 		log.Debug("fileInput.Read", "err", err, "n", n)
@@ -1436,6 +1451,108 @@ func TestHEVC_H264MezMaker(t *testing.T) {
 	}
 
 	xcTest(t, outputDir, params, xcTestResult, true)
+}
+
+// Run a mez making session and fail on opening the input.
+// This simulates the cases when opening the input fails time to time (for example, opening the cloud object).
+func TestMezMakerWithOpenInputError(t *testing.T) {
+	filename := "./media/SIN6_4K_MOS_HEVC_60s.mp4"
+	outputDir := path.Join(baseOutPath, fn())
+
+	params := &avpipe.XcParams{
+		BypassTranscoding: false,
+		Format:            "fmp4-segment",
+		StartTimeTs:       0,
+		DurationTs:        -1,
+		StartSegmentStr:   "1",
+		SegDuration:       "15.03",
+		Ecodec:            h264Codec,
+		Dcodec:            "hevc",
+		EncHeight:         -1,
+		EncWidth:          -1,
+		XcType:            avpipe.XcVideo,
+		StreamId:          -1,
+		Url:               filename,
+		DebugFrameLevel:   debugFrameLevel,
+	}
+
+	boilerplate(t, outputDir, filename)
+
+	fio := &fileInputOpener{t: t, url: filename, errorOnOpenInput: true}
+	foo := &fileOutputOpener{t: t, dir: outputDir}
+	avpipe.InitIOHandler(fio, foo)
+
+	setFastEncodeParams(params, false)
+	params.EncHeight = 360 // slow down a bit to allow for the cancel
+	params.EncWidth = 640
+
+	handle, err := avpipe.XcInit(params)
+	assert.Less(t, handle, int32(0))
+	err = avpipe.XcRun(handle)
+	assert.Error(t, err)
+
+}
+
+// Run a mez making session and fail on reading from input.
+// This simulates the cases when reading the input fails time to time (for example, reading from cloud).
+func TestMezMakerWithReadInputError(t *testing.T) {
+	filename := "./media/SIN6_4K_MOS_HEVC_60s.mp4"
+	outputDir := path.Join(baseOutPath, fn())
+
+	params := &avpipe.XcParams{
+		BypassTranscoding: false,
+		Format:            "fmp4-segment",
+		StartTimeTs:       0,
+		DurationTs:        -1,
+		StartSegmentStr:   "1",
+		SegDuration:       "15.03",
+		Ecodec:            h264Codec,
+		Dcodec:            "hevc",
+		EncHeight:         -1,
+		EncWidth:          -1,
+		XcType:            avpipe.XcVideo,
+		StreamId:          -1,
+		Url:               filename,
+		DebugFrameLevel:   debugFrameLevel,
+	}
+
+	boilerplate(t, outputDir, filename)
+
+	fio := &fileInputOpener{t: t, url: filename, errorOnReadInput: true}
+	foo := &fileOutputOpener{t: t, dir: outputDir}
+	avpipe.InitIOHandler(fio, foo)
+
+	setFastEncodeParams(params, false)
+	params.EncHeight = 360 // slow down a bit to allow for the cancel
+	params.EncWidth = 640
+
+	handle, err := avpipe.XcInit(params)
+	assert.Less(t, handle, int32(0))
+	err = avpipe.XcRun(handle)
+	assert.Error(t, err)
+
+}
+
+// Run a probe and fail on reading from input.
+// This simulates the cases when reading the input fails time to time (for example, reading from cloud).
+func TestProbeWithReadInputError(t *testing.T) {
+	filename := "./media/SIN6_4K_MOS_HEVC_60s.mp4"
+	outputDir := path.Join(baseOutPath, fn())
+
+	boilerplate(t, outputDir, filename)
+
+	fio := &fileInputOpener{t: t, url: filename, errorOnReadInput: true}
+	foo := &fileOutputOpener{t: t, dir: outputDir}
+	avpipe.InitIOHandler(fio, foo)
+
+	params := &avpipe.XcParams{
+		Url:      filename,
+		Seekable: true,
+	}
+	probe, err := avpipe.Probe(params)
+	assert.Error(t, err)
+	assert.Equal(t, (*avpipe.ProbeInfo)(nil), probe)
+
 }
 
 func TestHEVC_H265ABRTranscode(t *testing.T) {
