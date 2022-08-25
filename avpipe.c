@@ -961,8 +961,8 @@ set_handlers(
 }
 
 /*
- * Returns a handle that refers to an initialized trasncoding session.
- * If initialization is not successfull it return -1.
+ * Obtains a handle that refers to an initialized trasncoding session with specified params.
+ * If initialization is successfull it return eav_success, otherwise it returns corresponding error code.
  */
 int32_t
 xc_init(
@@ -1406,7 +1406,7 @@ probe(
     xcprobe_t **xcprobe,
     int *n_streams)
 {
-    avpipe_io_handler_t *in_handlers;
+    avpipe_io_handler_t *in_handlers = NULL;
     xcprobe_t *probes;
     int rc;
 
