@@ -40,6 +40,8 @@
 #define FILTER_STRING_SZ            (1024 + WATERMARK_STRING_SZ)
 #define DEFAULT_FRAME_INTERVAL_S    10
 
+#define DEFAULT_ACC_SAMPLE_RATE     48000
+
 extern int
 init_video_filters(
     const char *filters_descr,
@@ -1188,6 +1190,20 @@ prepare_video_encoder(
 }
 
 static int
+is_valid_aac_sample_rate(
+    int sample_rate)
+{
+    int valid_sample_rates[] = {8000, 12000, 16000, 22050, 24000, 32000, 44100, 48000, 88200, 96000};
+
+    for (int i=0; i<sizeof(valid_sample_rates)/sizeof(int); i++) {
+        if (sample_rate == valid_sample_rates[i])
+            return 1;
+    }
+
+    return 0;
+}
+
+static int
 prepare_audio_encoder(
     coderctx_t *encoder_context,
     coderctx_t *decoder_context,
@@ -1275,22 +1291,36 @@ prepare_audio_encoder(
         encoder_context->codec_context[index]->channel_layout = AV_CH_LAYOUT_STEREO;    // AV_CH_LAYOUT_STEREO is av_get_default_channel_layout(encoder_context->codec_context[index]->channels)
     }
 
-    elv_dbg("ENCODER channels=%d, channel_layout=%d (%s), sample_fmt=%s",
+    elv_dbg("ENCODER channels=%d, channel_layout=%d (%s), sample_fmt=%s, sample_rate=%d",
         encoder_context->codec_context[index]->channels,
         encoder_context->codec_context[index]->channel_layout,
         avpipe_channel_layout_name(encoder_context->codec_context[index]->channel_layout),
-        av_get_sample_fmt_name(encoder_context->codec_context[index]->sample_fmt));
-    if (params->sample_rate > 0 && strcmp(ecodec, "aac")) {
+        av_get_sample_fmt_name(encoder_context->codec_context[index]->sample_fmt),
+        encoder_context->codec_context[index]->sample_rate);
+
+    int sample_rate = params->sample_rate;
+    if (!strcmp(ecodec, "aac") &&
+        !is_valid_aac_sample_rate(encoder_context->codec_context[index]->sample_rate) &&
+        sample_rate <= 0)
+        sample_rate = DEFAULT_ACC_SAMPLE_RATE;
+
+    /* 
+     *  If sample_rate is set and 
+     *      - encoder is not "aac" or
+     *      - if encoder is "aac" and encoder sample_rate is not valid
+     *  then
+     *      - set encoder sample_rate to the specified sample_rate.
+     */
+    if (sample_rate > 0 && (strcmp(ecodec, "aac") || !is_valid_aac_sample_rate(encoder_context->codec_context[index]->sample_rate))) {
         /*
          * Audio resampling, which is active for aac encoder, needs more work to adjust sampling properly
-         * when input sample rate is different from output sample rate.
-         * Therefore, set the sample rate to params->sample_rate if the encoder is not aac (-RM).
+         * when input sample rate is different from output sample rate. (--RM)
          */
-        encoder_context->codec_context[index]->sample_rate = params->sample_rate;
+        encoder_context->codec_context[index]->sample_rate = sample_rate;
 
         /* Update timebase for the new sample rate */
-        encoder_context->codec_context[index]->time_base = (AVRational){1, params->sample_rate};
-        encoder_context->stream[index]->time_base = (AVRational){1, params->sample_rate};
+        encoder_context->codec_context[index]->time_base = (AVRational){1, sample_rate};
+        encoder_context->stream[index]->time_base = (AVRational){1, sample_rate};
     }
 
     encoder_context->codec_context[index]->bit_rate = params->audio_bitrate;
@@ -1333,7 +1363,11 @@ prepare_audio_encoder(
     }
 
 #ifdef USE_RESAMPLE_AAC
-    if (!strcmp(ecodec, "aac") && params->xc_type & xc_audio) {
+    if (!strcmp(ecodec, "aac") &&
+        params->xc_type & xc_audio &&
+        params->xc_type != xc_audio_merge &&
+        params->xc_type != xc_audio_join &&
+        params->xc_type != xc_audio_pan) {
         init_resampler(decoder_context->codec_context[index], encoder_context->codec_context[index],
                        &decoder_context->resampler_context);
 
@@ -4031,6 +4065,14 @@ check_params(
     if (params->bitdepth == 0) {
         params->bitdepth = 8;
         elv_log("Set bitdepth=%d, url=%s", params->bitdepth, params->url);
+    }
+
+    if (params->xc_type & xc_audio &&
+        params->sample_rate > 0 &&
+        !strcmp(params->ecodec2, "aac") &&
+        !is_valid_aac_sample_rate(params->sample_rate)) {
+        elv_err("Invalid sample_rate for aac encoder, url=%s", params->url);
+        return eav_param;
     }
 
     if (params->xc_type & xc_audio &&
