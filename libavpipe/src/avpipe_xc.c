@@ -1304,8 +1304,8 @@ prepare_audio_encoder(
         sample_rate <= 0)
         sample_rate = DEFAULT_ACC_SAMPLE_RATE;
 
-    /* 
-     *  If sample_rate is set and 
+    /*
+     *  If sample_rate is set and
      *      - encoder is not "aac" or
      *      - if encoder is "aac" and encoder sample_rate is not valid and transcoding is pan/merge/join
      *  then
