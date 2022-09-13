@@ -1264,6 +1264,44 @@ func TestAudio2Channel1Stereo(t *testing.T) {
 	xcTest(t, outputDir, params, xcTestResult, true)
 }
 
+// Transcode pcm_s24le 60000 sample rate, into aac 48000 sample rate
+func TestAudio2Channel1Stereo_pcm_60000(t *testing.T) {
+	filename := "./media/Sintel_30s_6ch_pcm_s24le_60000Hz.mov"
+	outputDir := path.Join(baseOutPath, fn())
+
+	params := &avpipe.XcParams{
+		BypassTranscoding:   false,
+		Format:              "fmp4-segment",
+		StartTimeTs:         0,
+		DurationTs:          -1,
+		StartSegmentStr:     "1",
+		SegDuration:         "30",
+		Ecodec2:             "aac",
+		Dcodec2:             "",
+		XcType:              avpipe.XcAudioPan,
+		ChannelLayout:       avpipe.ChannelLayout("stereo"),
+		NumAudio:            1,
+		StreamId:            -1,
+		SyncAudioToStreamId: -1,
+		FilterDescriptor:    "[0:6]pan=stereo|c0=c0|c1=c0[aout]",
+		Url:                 filename,
+		DebugFrameLevel:     debugFrameLevel,
+	}
+	params.AudioIndex[0] = 6
+
+	xcTestResult := &XcTestResult{
+		timeScale:         48000,
+		sampleRate:        48000,
+		channelLayoutName: "stereo",
+	}
+
+	for i := 1; i <= 1; i++ {
+		xcTestResult.mezFile = append(xcTestResult.mezFile, fmt.Sprintf("%s/asegment-%d.mp4", outputDir, i))
+	}
+
+	xcTest(t, outputDir, params, xcTestResult, true)
+}
+
 // Timebase of BBB0_HD_8_XDCAM_120s_CCBYblendercloud.mxf is 1001/60000
 func TestIrregularTsMezMaker_1001_60000(t *testing.T) {
 	filename := "./media/BBB0_HD_8_XDCAM_120s_CCBYblendercloud.mxf"

@@ -10,9 +10,9 @@ import (
 	"os"
 
 	"github.com/Comcast/gots/packet"
-	"github.com/eluv-io/log-go"
 	"github.com/eluv-io/avpipe/live"
 	"github.com/eluv-io/avpipe/ts"
+	"github.com/eluv-io/log-go"
 )
 
 func main() {
