@@ -1664,8 +1664,8 @@ set_idr_frame_key_flag(
             if (encoder_context->is_mpegts && encoder_context->calculated_frame_duration > 0)
                 missing_frames = diff / encoder_context->calculated_frame_duration;
             if (debug_frame_level) {
-                elv_dbg("FRAME SET KEY flag, seg_duration_ts=%d pts=%"PRId64", missing_frames=%d",
-                    params->video_seg_duration_ts, frame->pts, missing_frames);
+                elv_dbg("FRAME SET KEY flag, seg_duration_ts=%d pts=%"PRId64", missing_frames=%d, last_key_frame_pts=%"PRId64,
+                    params->video_seg_duration_ts, frame->pts, missing_frames, encoder_context->last_key_frame);
             }
             frame->pict_type = AV_PICTURE_TYPE_I;
             encoder_context->last_key_frame = frame->pts - missing_frames * encoder_context->calculated_frame_duration;
@@ -1680,6 +1680,7 @@ set_idr_frame_key_flag(
                     params->force_keyint, frame->pts);
             }
             frame->pict_type = AV_PICTURE_TYPE_I;
+            encoder_context->last_key_frame = frame->pts;
             encoder_context->forced_keyint_countdown = params->force_keyint;
         }
         encoder_context->forced_keyint_countdown --;
