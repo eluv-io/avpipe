@@ -159,40 +159,155 @@ typedef struct xcparams_t {
 - **Connection timeout:** This parameter is useful when recording / transcoding RTMP or MPEGTS streams. If avpipe is listening for an RTMP stream, connection_timeout determines the time in sec to listen for an incoming RTMP stream. If avpipe is listening for incoming UDP MPEGTS packets, connection_timeout determines the time in sec to wait for the first incoming UDP packet (if no packet is received during connection_timeout, then timeout would happen and an error would be generated).
 
 
-### Counters
-
-- bytes read from source when completing
-  - avformat_open_input
-  - avformat_find_stream_info
-  - decoding first packet/frame
-  - producing the first encoded frame
-  - make the first write to the first output segment
-  - finish the first output segment
-
-- time spent in reading source data (min/max and total time or avaerage)
-- time to generating each segment
-
-- exceptions
-  - number of segments starting without a keyframe
-
-
-
-
-## Design map
 
 ### C/Go interaction architecture
 
 Avpipe library has two main layers (components): avpipe C library and avpipe C/GO library.
 
-#### C layer:
-The first layer is the C code that has been built on top of the different libraries of ffmpeg like libx264, libx265, libavcodec, libavformat, libavfilter and libswresample.
+### Avpipe C library:
+The first layer is the C code, mainly libavpipe directory, that has been built on top of the different libraries of ffmpeg like libx264, libx265, libavcodec, libavformat, libavfilter and libswresample.
 This is the main transcoding engine of avpipe and defines low level C transcoding API of avpipe library.
 Avpipe uses the callbacks in avio_alloc_context() to read, write, or seek into the media files.
 
-#### C/Go layer:
+As mentioned before this layer uses the callbacks in avio_alloc_context() to read, write, or seek into the media files. These callbacks are used by FFmpeg libraries to read, and seek into the input file (or write and seek to the output file). Avpipe C library provides avpipe_io_handler_t struct to client applications for transcoding (at this moment exc and Go layer are the users of avpipe_io_handler_t); notice that three of these functions are exactly matched to read, write, seek callback functions of avio_alloc_context(), but three more functions are also added to open, close and stat the input or output:
+
+```
+typedef struct avpipe_io_handler_t {
+  avpipe_opener_f avpipe_opener;
+  avpipe_closer_f avpipe_closer;
+  avpipe_reader_f avpipe_reader;
+  avpipe_writer_f avpipe_writer;
+  avpipe_seeker_f avpipe_seeker;
+  avpipe_stater_f avpipe_stater;
+} avpipe_io_handler_t;
+```
+
+- The _avpipe_opener()_ callback function opens the media file (makes a transcoding session) and initializes an ioctx_t structure.
+- The _avpipe_closer()_ callback function closes the corresponding resources that were allocated for the media file (releases the resources that were allocated with the opener).
+- The _avpipe_reader()_ callback function reads the packets/frames of the opened media file for transcoding. This callback function automatically gets called by ffmpeg during transcoding.
+- The _avpipe_writer()_ callback function writes the transcoded packets/frames to the output media file. This callback function automatically gets called by ffmpeg during transcoding.
+- The _avpipe_seeker()_ callback function seeks to a specific offset and gets called automatically by ffmpeg during transcoding.
+- The _avpipe_stater()_ callback function publishes different statistics about transcoding and gets called by the avpipe library itself.
+
+In order to start a transcoding session with avpipe C library, the following APIs are provided:
+
+- _avpipe_init(xctx_t **xctx, avpipe_io_handler_t *in_handlers, avpipe_io_handler_t *out_handlers, txparams_t *p):_ this initialises a transcoding context with provided input handlers, output handlers, and transcoding parameters.
+- _avpipe_fini(xctx_t **xctx):_ This releases all the resources associated with the already initialized transcoding context.
+- _avpipe_xc(xctx_t *xctx, int do_instrument):_ this starts the transcoding corresponding to the transcoding context that was already initialized by avpipe_init(). If do_instrument is set it will also do some instrumentation while transcoding.
+- _avpipe_probe(avpipe_io_handler_t *in_handlers, txparams_t *p,    xcprobe_t **xcprobe, int *n_streams):_ this function probes an input media which can be accessed by in_handlers callback functions. It is recommended to set the seekable parameter to make searching and finding some meta data faster in the input stream if the input stream is not a live stream. Of course, for a live stream seekable should not be set since it is not possible to seek back and forth in live input data.
+
+
+
+### C/Go layer:
 The second layer is the C/GO code, mainly avpipe.go,  that provides the API for Go programs, and avpipe.c, which glues the Go layer to avpipe C library.
 The handlers in avpipe.c are the callback functions that get called by ffmpeg and they call the Go layer callback functions themselves.
-This component is discussed in more detail in section 6.2.
+
+Avpipe C/Go layer provides APIs that can be used by Go programs. The implementation of this layer is in two files avpipe.c and avpipe.go. The transcoding APIs exposed to Go client programs are designed and implemented in two categories:
+
+**1) APIs with no handle:** these APIs are very simple to use and are useful when the client application is dealing with short transcodings (i.e transcodings that would take 20-30 secs) and the application doesn’t need to cancel the transcoding
+ 
+**2) Handle based APIs:** which work based on a handle and corresponding transcoding can be cancelled using the specified handle. These transcoding APIs are useful, for example, when dealing with live streams and the application wants to cancel a live stream recording. 
+ 
+All the APIs in the C/Go library can be categories as the following:
+
+#### No handle based transcoding APIs are:
+- _Xc(params *XcParams):_ initializes a transcoding context in avpipe and starts running the corresponding transcoding job.
+- _Mux(params *XcParams):_ initializes a transcoding context in avpipe and starts running the corresponding muxing job.
+- _Probe(params *XcParams):_ starts probing the specified input in the url parameter. In order to make probing faster, it is better to set seekable in params to true when probing non-live inputs.
+
+#### Handle based transcoding APIs are:
+- _XcInit(params *XcParams):_ initializes a transcoding context in avpipe and returns its corresponding 32bit handle to the client code. This handle can be used to start or cancel the transcoding job.
+- _XcRun(handle int32):_ starts the transcoding job that corresponds to the obtained handle by _XcInit()_.
+- _XcCancel(handle int32):_ cancels or stops the transcoding job corresponding to the handle.
+
+#### IO handler APIs are:
+- _InitIOHandler(inputOpener InputOpener, outputOpener OutputOpener):_ This is used to set global input/output opener for avpipe transcoding. If there is no specific input or output opener for a URL the global input/output opener will be used.
+- _InitUrlIOHandler(url string, inputOpener InputOpener, outputOpener OutputOpener):_ This is used to set input/output opener specific to a URL when transcoding. The input or output opener set by this function is only valid for the specified url and will be unset after _Xc()_ or _Probe()_ is complete.
+- _InitMuxIOHandler(inputOpener InputOpener, outputOpener OutputOpener):_ Sets the global handler for muxing (similar to InitIOHandler for transcoding).
+- _InitUrlMuxIOHandler(url string, inputOpener InputOpener, outputOpener OutputOpener):_ This is used to set input/output opener specific to a URL when muxing (similar to InitUrlIOHandler for transcoding).
+
+#### Miscellaneous APIs are:
+- _H264GuessProfile(bitdepth, width, height int):_ returns the profile.
+- _H264GuessLevel(profile int, bitrate int64, framerate, width, height int):_ returns the level.
+
+
+### Setting up Go IO handlers
+As mentioned before the source of transcoding in avpipe library can be a file on a disk, a TCP connection like RTMP, some UDP datagrams like MPEGTS stream, or even an object on the cloud. Similarly the output of transcoding in avpipe can be a file on a disk, some memory cache, or another object on the cloud. This flexibility in avpipe is achieved by two interfaces: InputOpener and OutputOpener interface.
+
+#### InputOpener interface: 
+This interface has only one Open() method that must be implemented. This method is called just before transcoding, probing, or muxing starts. In avpipe library every input is determined by a url and a unique fd (the same way a file is determined by an fd in your operating system) and when open() is called the fd and the url is passed to it. Then the Open() returns an implementation of the InputHandler interface. The Read() method in InputHandler interface is used to read the input, the Seek() method is used to seek to a specific position in the input, Close() is used to close the input, Size() is used to obtain info about size of input, and Stat() is used to report some statistics of input.
+
+```
+type InputOpener interface {
+  // fd determines uniquely opening input.
+  // url determines input string for transcoding
+  Open(fd int64, url string) (InputHandler, error)
+}
+
+type InputHandler interface {
+  // Reads from input stream into buf.
+  // Returns (0, nil) to indicate EOF.
+  Read(buf []byte) (int, error)
+
+  // Seeks to a specific offset of the input.
+  Seek(offset int64, whence int) (int64, error)
+
+  // Closes the input.
+  Close() error
+
+  // Returns the size of input, if the size is not known returns 0 or -1.
+  Size() int64
+
+  // Reports some stats
+  Stat(statType AVStatType, statArgs interface{}) error
+}
+```
+
+#### OutputOpener interface: 
+Similar to InputOpener this interface has only one open() method that must be implemented. This open() method is called before a new transcoding segment is generated. The new transcoding segments generated by avpipe can be HLS/DASH segments (m4s files), or fragmented MP4 files; in either case the open() method would be called before the segment is generated. This open() method has to return an implementation of the OutputHandler interface, which is used to seek, write, close and stat output segments. More specifically, in OutputHandler interface the Write() method is used to write to the output segment, the Seek() method is used to seek into the output segment, Close() method is used to close the output segment and Stat() is used to report some statistics of output.
+
+```
+type OutputOpener interface {
+  // h determines uniquely opening input.
+  // fd determines uniquely opening output.
+  Open(h, fd int64, stream_index, seg_index int, pts int64, out_type AVType) (OutputHandler, error)
+}
+
+type OutputHandler interface {
+  // Writes encoded stream to the output.
+  Write(buf []byte) (int, error)
+
+  // Seeks to specific offset of the output.
+  Seek(offset int64, whence int) (int64, error)
+
+  // Closes the output.
+  Close() error
+
+  // Reports some stats
+  Stat(avType AVType, statType AVStatType, statArgs interface{}) error
+}
+```
+
+Note that the methods in InputHandler and OutputHandler interfaces are called indirectly by ffmpeg. For some examples of the implementations of these interfaces you can refer to avpipe_test.go or elvxc directory.
+
+## Transcoding Audio/Video
+Avpipe library has the following transcoding options to transcode audio/video:
+
+- _xc_all:_ in this mode both audio and video will be decoded and encoded according to transcoding params. Usually there is no need to specify decoder and decoder is detected automatically.
+- _xc_video:_ in this mode video will be decoded and encoded according to transcoding params.
+- _xc_audio:_ in this mode audio will be decoded and encoded according to encoder param (by default it is AAC).
+- _xc_audio_pan:_ in this mode audio pan filter will be used before injecting the audio frames into the encoder.
+- _xc_audio_merge:_ in this mode audio merge filter will be used before injecting the audio frames into the encoder.
+- _xc_mux:_ in this mode avpipe would mux some audio and video ABR segments and produce an MP4 output. In this case, it is needed to provide a mux_spec which points to ABR segments to be muxed.
+- _xc_extract_images:_ in this mode avpipe will extract specific images/frames at specific times from a video.
+
+### Audio specific params
+- _channel_layout:_ In all the above cases channel_layout parameter can be set to specify the output channel layout. If the channel_layout param is not set then the input channel layout would carry to the output.
+- _audio_index:_ The audio_index param can be used to pick the specified audio (using stream index) for transcoding.
+- _audio_seg_duration_ts:_ This param determines the duration of the generated audio segment in TS.
+- _audio_bitrate:_ This param sets the audio bitrate in the output.
+- _filter_descriptor:_ The filter_descriptor param must be set when transcoding type is xc_audio_pan/xc_audio_merge.
+
 
 ## Avpipe stat reports
 - Avpipe library reports some input and output stats via some events.
@@ -210,24 +325,6 @@ This component is discussed in more detail in section 6.2.
   - out_stat_encoding_end_pts: end pts of generated segment. This event is generated when an output segment is complete and it is closing.
 - Output stats are reported via output handlers avpipe_stater() callback function.
 - A GO client of avpipe library, must implement OutputHandler.Stat() method.
-
-## Transcoding Audio/Video
-Avpipe library has the following transcoding options to transcode audio/video:
-- xc_all: in this mode both audio and video will be decoded and encoded according to transcoding params. Usually there is no need to specify decoder and decoder is detected automatically.
-- xc_video: in this mode video will be decoded and encoded according to transcoding params.
-- xc_audio: in this mode audio will be decoded and encoded according to encoder param (by default it is AAC).
-- xc_audio_pan: in this mode audio pan filter will be used before injecting the audio frames into the encoder.
-- xc_audio_merge: in this mode audio merge filter will be used before injecting the audio frames into the encoder.
-- xc_mux: in this mode avpipe would mux some audio and video ABR segments and produce an MP4 output. In this case, it is needed to provide a mux_spec which points to ABR segments to be muxed.
-- xc_extract_images: in this mode avpipe will extract specific images/frames at specific times from a video.
-
-### Audio specific params
-- channel_layout: In all the above cases channel_layout parameter can be set to specify the output channel layout. If the channel_layout param is not set then the input channel layout would carry to the output.
-- audio_index: The audio_index param can be used to pick the specified audio (using stream index) for transcoding. 
-- audio_seg_duration_ts: This param determines the duration of the generated audio segment in TS.
-- audio_bitrate: This param sets the audio bitrate in the output.
-- filter_descriptor: The filter_descriptor param must be set when transcoding type is xc_audio_pan/xc_audio_merge.
-
 
 ## Setting up live
 
