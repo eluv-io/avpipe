@@ -1273,12 +1273,12 @@ func getCParams(params *XcParams) (*C.xcparams_t, error) {
 // params: transcoding parameters
 func Xc(params *XcParams) error {
 
-	// Convert XcParams to C.txparams_t
 	if params == nil {
 		log.Error("Failed transcoding, params are not set.")
 		return EAV_PARAM
 	}
 
+	// Convert XcParams to C.txparams_t
 	cparams, err := getCParams(params)
 	if err != nil {
 		log.Error("Transcoding failed", err, "url", params.Url)
