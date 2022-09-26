@@ -40,6 +40,8 @@
 #define FILTER_STRING_SZ            (1024 + WATERMARK_STRING_SZ)
 #define DEFAULT_FRAME_INTERVAL_S    10
 
+#define DEFAULT_ACC_SAMPLE_RATE     48000
+
 extern int
 init_video_filters(
     const char *filters_descr,
@@ -389,6 +391,13 @@ prepare_decoder(
     AVDictionary *opts = NULL;
     if (params && params->listen)
         av_dict_set(&opts, "listen", "1" , 0);
+
+    if (decoder_context->is_rtmp && params->connection_timeout > 0) {
+        char timeout[32];
+        sprintf(timeout, "%d", params->connection_timeout);
+        av_dict_set(&opts, "timeout", timeout, 0);
+    }
+
     /* Allocate AVFormatContext in format_context and find input file format */
     rc = avformat_open_input(&decoder_context->format_context, inctx->url, NULL, &opts);
     if (rc != 0) {
@@ -766,7 +775,7 @@ set_h264_params(
     if (encoder_codec_context->framerate.den != 0)
         framerate = encoder_codec_context->framerate.num/encoder_codec_context->framerate.den;
 
-    encoder_codec_context->level = avpipe_h264_guess_level(params->url,
+    encoder_codec_context->level = avpipe_h264_guess_level(
                                                 encoder_codec_context->profile,
                                                 encoder_codec_context->bit_rate,
                                                 framerate,
@@ -916,16 +925,21 @@ set_nvidia_params(
         encoder_codec_context->profile = FF_PROFILE_H264_HIGH;
     }
 
+/*
+    For nvidia let the encoder to pick the level, in some cases level is different from h264 encoder and
+    avpipe_h264_guess_level() function would not pick the right level for nvidia.
+
     if (encoder_codec_context->framerate.den != 0)
         framerate = encoder_codec_context->framerate.num/encoder_codec_context->framerate.den;
 
-    encoder_codec_context->level = avpipe_h264_guess_level(params->url,
+    encoder_codec_context->level = avpipe_h264_guess_level(
                                                 encoder_codec_context->profile,
                                                 encoder_codec_context->bit_rate,
                                                 framerate,
                                                 encoder_codec_context->width,
                                                 encoder_codec_context->height);
     av_opt_set_int(encoder_codec_context->priv_data, "level", encoder_codec_context->level, 0);
+*/
 
     /*
      * According to https://superuser.com/questions/1296374/best-settings-for-ffmpeg-with-nvenc
@@ -1181,6 +1195,20 @@ prepare_video_encoder(
 }
 
 static int
+is_valid_aac_sample_rate(
+    int sample_rate)
+{
+    int valid_sample_rates[] = {8000, 12000, 16000, 22050, 24000, 32000, 44100, 48000, 88200, 96000};
+
+    for (int i=0; i<sizeof(valid_sample_rates)/sizeof(int); i++) {
+        if (sample_rate == valid_sample_rates[i])
+            return 1;
+    }
+
+    return 0;
+}
+
+static int
 prepare_audio_encoder(
     coderctx_t *encoder_context,
     coderctx_t *decoder_context,
@@ -1268,22 +1296,38 @@ prepare_audio_encoder(
         encoder_context->codec_context[index]->channel_layout = AV_CH_LAYOUT_STEREO;    // AV_CH_LAYOUT_STEREO is av_get_default_channel_layout(encoder_context->codec_context[index]->channels)
     }
 
-    elv_dbg("ENCODER channels=%d, channel_layout=%d (%s), sample_fmt=%s",
+    elv_dbg("ENCODER channels=%d, channel_layout=%d (%s), sample_fmt=%s, sample_rate=%d",
         encoder_context->codec_context[index]->channels,
         encoder_context->codec_context[index]->channel_layout,
         avpipe_channel_layout_name(encoder_context->codec_context[index]->channel_layout),
-        av_get_sample_fmt_name(encoder_context->codec_context[index]->sample_fmt));
-    if (params->sample_rate > 0 && strcmp(ecodec, "aac")) {
+        av_get_sample_fmt_name(encoder_context->codec_context[index]->sample_fmt),
+        encoder_context->codec_context[index]->sample_rate);
+
+    int sample_rate = params->sample_rate;
+    if (!strcmp(ecodec, "aac") &&
+        !is_valid_aac_sample_rate(encoder_context->codec_context[index]->sample_rate) &&
+        sample_rate <= 0)
+        sample_rate = DEFAULT_ACC_SAMPLE_RATE;
+
+    /*
+     *  If sample_rate is set and
+     *      - encoder is not "aac" or
+     *      - if encoder is "aac" and encoder sample_rate is not valid and transcoding is pan/merge/join
+     *  then
+     *      - set encoder sample_rate to the specified sample_rate.
+     */
+    if (sample_rate > 0 &&
+        (strcmp(ecodec, "aac") || !is_valid_aac_sample_rate(encoder_context->codec_context[index]->sample_rate)) &&
+        (params->xc_type == xc_audio_merge || params->xc_type == xc_audio_pan || params->xc_type == xc_audio_join)) {
         /*
          * Audio resampling, which is active for aac encoder, needs more work to adjust sampling properly
-         * when input sample rate is different from output sample rate.
-         * Therefore, set the sample rate to params->sample_rate if the encoder is not aac (-RM).
+         * when input sample rate is different from output sample rate. (--RM)
          */
-        encoder_context->codec_context[index]->sample_rate = params->sample_rate;
+        encoder_context->codec_context[index]->sample_rate = sample_rate;
 
         /* Update timebase for the new sample rate */
-        encoder_context->codec_context[index]->time_base = (AVRational){1, params->sample_rate};
-        encoder_context->stream[index]->time_base = (AVRational){1, params->sample_rate};
+        encoder_context->codec_context[index]->time_base = (AVRational){1, sample_rate};
+        encoder_context->stream[index]->time_base = (AVRational){1, sample_rate};
     }
 
     encoder_context->codec_context[index]->bit_rate = params->audio_bitrate;
@@ -1326,7 +1370,11 @@ prepare_audio_encoder(
     }
 
 #ifdef USE_RESAMPLE_AAC
-    if (!strcmp(ecodec, "aac") && params->xc_type & xc_audio) {
+    if (!strcmp(ecodec, "aac") &&
+        params->xc_type & xc_audio &&
+        params->xc_type != xc_audio_merge &&
+        params->xc_type != xc_audio_join &&
+        params->xc_type != xc_audio_pan) {
         init_resampler(decoder_context->codec_context[index], encoder_context->codec_context[index],
                        &decoder_context->resampler_context);
 
@@ -1621,8 +1669,8 @@ set_idr_frame_key_flag(
             if (encoder_context->is_mpegts && encoder_context->calculated_frame_duration > 0)
                 missing_frames = diff / encoder_context->calculated_frame_duration;
             if (debug_frame_level) {
-                elv_dbg("FRAME SET KEY flag, seg_duration_ts=%d pts=%"PRId64", missing_frames=%d",
-                    params->video_seg_duration_ts, frame->pts, missing_frames);
+                elv_dbg("FRAME SET KEY flag, seg_duration_ts=%d pts=%"PRId64", missing_frames=%d, last_key_frame_pts=%"PRId64,
+                    params->video_seg_duration_ts, frame->pts, missing_frames, encoder_context->last_key_frame);
             }
             frame->pict_type = AV_PICTURE_TYPE_I;
             encoder_context->last_key_frame = frame->pts - missing_frames * encoder_context->calculated_frame_duration;
@@ -1637,6 +1685,7 @@ set_idr_frame_key_flag(
                     params->force_keyint, frame->pts);
             }
             frame->pict_type = AV_PICTURE_TYPE_I;
+            encoder_context->last_key_frame = frame->pts;
             encoder_context->forced_keyint_countdown = params->force_keyint;
         }
         encoder_context->forced_keyint_countdown --;
@@ -3813,9 +3862,8 @@ get_xc_type_name(
 
 int
 avpipe_probe(
-    char *url,
     avpipe_io_handler_t *in_handlers,
-    int seekable,
+    xcparams_t *params,
     xcprobe_t **xcprobe,
     int *n_streams)
 {
@@ -3824,6 +3872,21 @@ avpipe_probe(
     stream_info_t *stream_probes, *stream_probes_ptr;
     xcprobe_t *probe;
     int rc = 0;
+    char *url;
+
+    memset(&inctx, 0, sizeof(ioctx_t));
+    memset(&decoder_ctx, 0, sizeof(coderctx_t));
+
+    if (!params) {
+        elv_err("avpipe_probe parameters are not set");
+        rc = eav_param;
+        goto avpipe_probe_end;
+    }
+
+    url = params->url;
+    // Disable sync audio to stream id when probing
+    params->sync_audio_to_stream_id = -1;
+    params->stream_id = -1;
 
     if (!in_handlers) {
         elv_err("avpipe_probe NULL handlers, url=%s", url);
@@ -3831,16 +3894,13 @@ avpipe_probe(
         goto avpipe_probe_end;
     }
 
-    memset(&inctx, 0, sizeof(ioctx_t));
-
+    inctx.params = params;
     if (in_handlers->avpipe_opener(url, &inctx) < 0) {
         rc = eav_open_input;
         goto avpipe_probe_end;
     }
 
-    memset(&decoder_ctx, 0, sizeof(coderctx_t));
-
-    if ((rc = prepare_decoder(&decoder_ctx, in_handlers, &inctx, NULL, seekable)) != eav_success) {
+    if ((rc = prepare_decoder(&decoder_ctx, in_handlers, &inctx, params, params->seekable)) != eav_success) {
         elv_err("avpipe_probe failed to prepare decoder, url=%s", url);
         goto avpipe_probe_end;
     }
@@ -3925,11 +3985,6 @@ avpipe_probe(
 
 avpipe_probe_end:
     if (decoder_ctx.format_context) {
-        AVIOContext *avioctx = (AVIOContext *) decoder_ctx.format_context->pb;
-        if (avioctx) {
-            av_freep(&avioctx->buffer);
-            av_freep(&avioctx);
-        }
         avformat_close_input(&decoder_ctx.format_context);
     }
 
@@ -4021,6 +4076,14 @@ check_params(
     }
 
     if (params->xc_type & xc_audio &&
+        params->sample_rate > 0 &&
+        !strcmp(params->ecodec2, "aac") &&
+        !is_valid_aac_sample_rate(params->sample_rate)) {
+        elv_err("Invalid sample_rate for aac encoder, url=%s", params->url);
+        return eav_param;
+    }
+
+    if (params->xc_type & xc_audio &&
         params->seg_duration <= 0 &&
         params->audio_seg_duration_ts <= 0 &&
         strcmp(params->format, "mp4")) {
@@ -4098,7 +4161,7 @@ avpipe_init(
     xcparams_t *p)
 {
     xctx_t *p_xctx = NULL;
-    xcparams_t *params;
+    xcparams_t *params = NULL;
     int rc = 0;
     ioctx_t *inctx = (ioctx_t *)calloc(1, sizeof(ioctx_t));
 
@@ -4109,6 +4172,9 @@ avpipe_init(
         goto avpipe_init_failed;
     }
 
+    params = (xcparams_t *) calloc(1, sizeof(xcparams_t));
+    *params = *p;
+    inctx->params = params;
     if (!p->url || p->url[0] == '\0' ||
         in_handlers->avpipe_opener(p->url, inctx) < 0) {
         elv_err("Failed to open avpipe input \"%s\"", p->url != NULL ? p->url : "");
@@ -4124,14 +4190,11 @@ avpipe_init(
     }
 
     p_xctx = (xctx_t *) calloc(1, sizeof(xctx_t));
-    params = (xcparams_t *) calloc(1, sizeof(xcparams_t));
-    *params = *p;
     p_xctx->params = params;
     p_xctx->inctx = inctx;
     p_xctx->in_handlers = in_handlers;
     p_xctx->out_handlers = out_handlers;
     p_xctx->debug_frame_level = p->debug_frame_level;
-    inctx->params = params;
 
     if (!params->format ||
         (strcmp(params->format, "dash") &&

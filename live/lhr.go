@@ -15,8 +15,8 @@ import (
 	"strings"
 	"time"
 
-	"github.com/eluv-io/errors-go"
 	"github.com/eluv-io/avpipe"
+	"github.com/eluv-io/errors-go"
 
 	"github.com/grafov/m3u8"
 

@@ -77,9 +77,13 @@ parse_url(
     /* Protocol */
     parsed_url->protocol = local_url;
 
-    /* Invalid URL */
-    if (colon[0] != '/' && colon[1] != '/')
-        return 1;
+    /* URL doesn't have ://, so consider the entire url as a filename */
+    if (colon[0] != '/' && colon[1] != '/') {
+        parsed_url->protocol = strdup("file");
+        free(local_url);
+        parsed_url->path = strdup(url);
+        return 0;
+    }
 
     /* pass "://" */
     colon = &colon[2];

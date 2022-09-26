@@ -297,9 +297,9 @@ udp_thread_func(
     udp_packet_t *udp_packet;
     int ret;
     int first = 1;
-
     int pkt_num = 0;
     int timedout = 0;
+    int connection_timeout = xcparams->connection_timeout;
 
     for ( ; ; ) {
         if (params->inctx->closed)
@@ -312,9 +312,18 @@ udp_thread_func(
             elv_err("UDP select error fd=%d, err=%d, url=%s", params->fd, errno, url);
             break;
         } else if (ret == 0) {
-            /* If no packet has not received yet, continue */
-            if (first)
+            /* If no packet has not received yet, check connection_timeout */
+            if (first) {
+                if (connection_timeout > 0) {
+                    connection_timeout--;
+                    if (connection_timeout == 0) {
+                        elv_channel_close(params->udp_channel, 1);
+                        break;
+                    }
+                }
                 continue;
+            }
+
             if (timedout++ == UDP_PIPE_TIMEOUT) {
                 elv_err("UDP recv timeout fd=%d, url=%s", params->fd, url);
                 break;
@@ -870,7 +879,7 @@ static int
 xc_table_cancel(
     int32_t handle)
 {
-    int rc = 0;
+    int rc = eav_success;
     elv_dbg("xc_table_cancel handle=%d", handle);
     pthread_mutex_lock(&tx_mutex);
     for (int i=0; i<MAX_TX; i++) {
@@ -890,7 +899,7 @@ xc_table_cancel(
             } else {
                 elv_err("xc_table_cancel index=%d doesn't match with handle=%d at %d",
                     xc_table[i]->xctx->index, handle, i);
-                rc = -1;
+                rc = eav_xc_table;
             }
             pthread_mutex_unlock(&tx_mutex);
             return rc;
@@ -952,8 +961,8 @@ set_handlers(
 }
 
 /*
- * Returns a handle that refers to an initialized trasncoding session.
- * If initialization is not successfull it return -1.
+ * Obtains a handle that refers to an initialized trasncoding session with specified params.
+ * If initialization is successfull it return eav_success, otherwise it returns corresponding error code.
  */
 int32_t
 xc_init(
@@ -966,7 +975,8 @@ xc_init(
     avpipe_io_handler_t *in_handlers = NULL;
     avpipe_io_handler_t *out_handlers = NULL;
 
-    if (!params->url || params->url[0] == '\0' )
+    *handle = -1;
+    if (!params || !params->url || params->url[0] == '\0' )
         return eav_param;
 
     init_tx_module();
@@ -993,10 +1003,7 @@ xc_init(
     return eav_success;
 
 end_tx_init:
-
     avpipe_fini(&xctx);
-    free(in_handlers);
-    free(out_handlers);
 
     return rc;
 }
@@ -1048,7 +1055,7 @@ xc(
     avpipe_io_handler_t *in_handlers;
     avpipe_io_handler_t *out_handlers;
 
-    if (!params->url || params->url[0] == '\0' )
+    if (!params || !params->url || params->url[0] == '\0' )
         return eav_param;
 
     // Note: If log handler functions are set, log levels set through
@@ -1351,7 +1358,7 @@ mux(
     avpipe_io_handler_t *in_handlers;
     avpipe_io_handler_t *out_handlers;
 
-    if (!params->url || params->url[0] == '\0' )
+    if (!params || !params->url || params->url[0] == '\0' )
         return eav_param;
 
     connect_ffmpeg_log();
@@ -1395,27 +1402,29 @@ get_profile_name(
 
 int
 probe(
-    char *url,
-    int seekable,
+    xcparams_t *params,
     xcprobe_t **xcprobe,
     int *n_streams)
 {
-    avpipe_io_handler_t *in_handlers;
+    avpipe_io_handler_t *in_handlers = NULL;
     xcprobe_t *probes;
     int rc;
 
-    rc = set_handlers(url, &in_handlers, NULL);
+    if (!params || !params->url || params->url[0] == '\0' )
+        return eav_param;
+
+    rc = set_handlers(params->url, &in_handlers, NULL);
     if (rc != eav_success)
         goto end_probe;
 
-    rc = avpipe_probe(url, in_handlers, seekable, &probes, n_streams);
+    rc = avpipe_probe(in_handlers, params, &probes, n_streams);
     if (rc != eav_success)
         goto end_probe;
 
     *xcprobe = probes;
 
 end_probe:
-    elv_dbg("Releasing probe resources, url=%s", url != NULL ? url : "");
+    elv_dbg("Releasing probe resources, url=%s", params->url);
     free(in_handlers);
     return rc;
 }

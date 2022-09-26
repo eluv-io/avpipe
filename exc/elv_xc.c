@@ -60,9 +60,9 @@ udp_thread_func(
     udp_packet_t *udp_packet;
     int ret;
     int first = 1;
-
     int pkt_num = 0;
     int timedout = 0;
+    int connection_timeout = xcparams->connection_timeout;
 
     for ( ; ; ) {
         if (params->inctx->closed)
@@ -75,9 +75,18 @@ udp_thread_func(
             elv_err("UDP select error fd=%d, err=%d, url=%s", params->fd, errno, url);
             break;
         } else if (ret == 0) {
-            /* If no packet has not received yet, continue */
-            if (first)
+            /* If no packet has not received yet, check connection_timeout */
+            if (first) {
+                if (connection_timeout > 0) {
+                    connection_timeout--;
+                    if (connection_timeout == 0) {
+                        elv_channel_close(params->udp_channel, 1);
+                        break;
+                    }
+                }
                 continue;
+            }
+
             if (timedout++ == UDP_PIPE_TIMEOUT) {
                 elv_err("UDP recv timeout fd=%d, url=%s", params->fd, url);
                 break;
@@ -280,7 +289,7 @@ in_read_packet(
             }
             c->read_bytes += r;
             c->read_pos += r;
-            if (xcparams->debug_frame_level)
+            if (xcparams && xcparams->debug_frame_level)
                 elv_dbg("IN READ UDP partial read=%d pos=%"PRId64" total=%"PRId64, r, c->read_pos, c->read_bytes);
             return r;        
         }
@@ -318,7 +327,7 @@ read_channel_again:
         } else {
             free(udp_packet);
         }
-        if (xcparams->debug_frame_level)
+        if (xcparams && xcparams->debug_frame_level)
             elv_dbg("IN READ UDP read=%d pos=%"PRId64" total=%"PRId64, r, c->read_pos, c->read_bytes);
         return r;
     } else {
@@ -705,12 +714,13 @@ out_stat(
 }
 
 typedef struct tx_thread_params_t {
-    int thread_number;
-    char *filename;
-    int repeats;
-    xcparams_t *xcparams;
+    int                 thread_number;
+    char                *filename;
+    int                 repeats;
+    xcparams_t          *xcparams;
     avpipe_io_handler_t *in_handlers;
     avpipe_io_handler_t *out_handlers;
+    int                 err;
 } tx_thread_params_t;
 
 static char *
@@ -773,8 +783,9 @@ tx_thread_func(
     tx_thread_params_t *params = (tx_thread_params_t *) thread_params;
     xctx_t *xctx;
     int i;
-    int rc;
+    int rc = 0;
 
+    elv_log("tp=%p, err=%d", params, params->err);
     elv_log("TRANSCODER THREAD %d STARTS", params->thread_number);
 
     for (i=0; i<params->repeats; i++) {
@@ -791,8 +802,12 @@ tx_thread_func(
             elv_err("THREAD %d, iteration %d, failed to initialize avpipe rc=%d", params->thread_number, i+1, rc);
             /* avpipe_fini() will release all the resources if the open is successful */
             if (rc == eav_open_input) {
-                free(in_handlers);
-                free(out_handlers);
+                params->err = rc;
+                break;
+            }
+            if (rc == eav_codec_context) {
+                params->err = rc;
+                break;
             }
             continue;
         }
@@ -813,7 +828,7 @@ tx_thread_func(
         free(xcparams);
     }
 
-    elv_log("TRANSCODER THREAD %d ENDS", params->thread_number);
+    elv_log("TRANSCODER THREAD %d ENDS, rc=%d", params->thread_number, params->err);
 
     return 0;
 }
@@ -849,8 +864,7 @@ xc_type_from_string(
 
 static int
 do_probe(
-    char *filename,
-    int seekable
+    xcparams_t *xcparams
 )
 {
     avpipe_io_handler_t in_handlers;
@@ -864,9 +878,9 @@ do_probe(
     in_handlers.avpipe_writer = in_write_packet;
     in_handlers.avpipe_seeker = in_seek;
 
-    rc = avpipe_probe(filename, &in_handlers, seekable, &probe, &n_streams);
+    rc = avpipe_probe(&in_handlers, xcparams, &probe, &n_streams);
     if (rc != eav_success) {
-        printf("Error: avpipe probe failed on file %s with no valid stream (err=%d).\n", filename, rc);
+        printf("Error: avpipe probe failed on file %s with no valid stream (err=%d).\n", xcparams->url, rc);
         goto end_probe;
     }
 
@@ -1101,6 +1115,7 @@ usage(
         "\t-bypass :                (optional) Bypass transcoding. Default is 0, must be 0 or 1\n"
         "\t-channel-layout :        (optional) Channel layout for audio, can be \"mono\", \"stereo\", \"5.0\" or \"5.1\"....\n"
         "\t-command :               (optional) Directing command of exc, can be \"transcode\", \"probe\" or \"mux\" (default is transcode).\n"
+        "\t-connection-timeout:     (optional) Seconds (default 10). Connection timeout for rtmp or mpegts protocols.\n"
         "\t-crf :                   (optional) Mutually exclusive with video-bitrate. Default: 23\n"
         "\t-crypt-iv :              (optional) 128-bit AES IV, as hex\n"
         "\t-crypt-key :             (optional) 128-bit AES key, as hex\n"
@@ -1195,6 +1210,7 @@ main(
     int wm_shadow = 0;
     url_parser_t url_parser;
     u_int64_t log_size = 100;
+    int rc = 0;
 
     /* Parameters */
     xcparams_t p = {
@@ -1231,6 +1247,7 @@ main(
         .rc_max_rate = 0,
         .sample_rate = -1,                  /* Audio sampling rate 44100 */
         .channel_layout = 0,                /* Preserve input channel layout */
+        .connection_timeout = 10,
         .seekable = 0,
         .video_seg_duration_ts = -1,        /* input argument, same units as input stream PTS */
         .audio_seg_duration_ts = -1,        /* input argument, same units as input stream PTS */
@@ -1317,6 +1334,10 @@ main(
                 }
             } else if (!strcmp(argv[i], "-crf")) {
                 p.crf_str = strdup(argv[i+1]);
+            } else if (!strcmp(argv[i], "-connection-timeout")) {
+                if (sscanf(argv[i+1], "%d", &p.connection_timeout) != 1) {
+                    usage(argv[0], argv[i], EXIT_FAILURE);
+                }
             } else if (!strcmp(argv[i], "-channel-layout")) {
                 p.channel_layout = av_get_channel_layout(argv[i+1]);
                 if (p.channel_layout == 0)
@@ -1643,8 +1664,10 @@ main(
     elv_set_log_level(elv_log_debug);
 
     if (!strcmp(command, "probe")) {
-        return do_probe(filename, p.seekable);
+        p.xc_type = xc_probe;
+        return do_probe(&p);
     } else if (!strcmp(command, "mux")) {
+        p.xc_type = xc_mux;
         return do_mux(&p, filename);
     }
 
@@ -1692,6 +1715,7 @@ main(
     out_handlers->avpipe_seeker = out_seek;
     out_handlers->avpipe_stater = out_stat;
 
+    memset(&thread_params, 0, sizeof(thread_params));
     thread_params.filename = strdup(filename);
     thread_params.repeats = repeats;
     thread_params.xcparams = &p;
@@ -1712,21 +1736,26 @@ main(
         tp->thread_number = 1;
         pthread_create(&tids[0], NULL, tx_thread_func, tp);
         pthread_join(tids[0], NULL);
-        return 0;
+        rc = tp->err;
+        return rc;
     }
 
+    tx_thread_params_t *tp = (tx_thread_params_t *) calloc(n_threads, sizeof(tx_thread_params_t));
     for (i=0; i<n_threads; i++) {
-        tx_thread_params_t *tp = (tx_thread_params_t *) malloc(sizeof(tx_thread_params_t));
-        *tp = thread_params;
-        tp->thread_number = i+1;
-        pthread_create(&tids[i], NULL, tx_thread_func, tp);
+        tp[i] = thread_params;
+        tp[i].thread_number = i+1;
+        pthread_create(&tids[i], NULL, tx_thread_func, &tp[i]);
     }
 
     for (i=0; i<n_threads; i++) {
         pthread_join(tids[i], NULL);
+        /* If there is any error in one of the threads, pick the error */
+        if (tp[i].err && !rc) {
+            rc = tp[i].err;
+        }
     }
 
     free(tids);
 
-    return 0;
+    return rc;
 }
