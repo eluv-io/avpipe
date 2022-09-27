@@ -92,6 +92,7 @@ typedef struct xcparams_t {
     char    *crypt_kid;                 // 16-byte UUID in hex (Optional, required for CENC)
     char    *crypt_key_url;             // Specify a key URL in the manifest (Optional, Default: key.bin)
     int     skip_decoding;              // If set, then skip the packets until start_time_ts without decoding
+    char    *deinterlace_filter;        // Can be set to "pullup", "bwdif", "yadif" for deinterlacing video
 
     crypt_scheme_t  crypt_scheme;       // Content protection / DRM / encryption (Default: crypt_none)
     xc_type_t       xc_type;            // Default: 0 means transcode 'everything'
@@ -144,6 +145,7 @@ typedef struct xcparams_t {
 - **Joining/merging multiple audio:** avpipe library has the capability to join and pan multiple audio input streams by setting xc_type parameter to xc_audio_join and xc_audio_pan respectively (merging multiple audio is not complete yet).
 - **Using GPU:** avpipe library can utilize NVIDIA cards for transcoding. In order to utilize the NVIDIA GPU, the gpu_index must be set (the default is using GPU with index 0). To find the existing GPU indexes on a machine, nvidia-smi command can be used. In addition, the decoder and encoder should be set to "h264_cuvid" or "h264_nvenc" respectively. And finally, in order to pick the correct GPU index the following environment variable must be set “CUDA_DEVICE_ORDER=PCI_BUS_ID” before running the program.
 - **Text watermarking:** this can be done with setting watermark_text, watermark_xloc, watermark_yloc, watermark_relative_sz, and watermark_font_color while transcoding a video (xc_type=xc_video), which makes specified watermark text to appear at specified location.
+- **Deinterlacing video:** this can be done by setting deinterlace_filter while transcoding a video (xc_type=xc_video). Possible values are "pullup", "bwdif", or "yadif".
 - **Image watermarking:** this can be done with setting watermark_overlay (the buffer containing overlay image), watermark_overlay_len, watermark_xloc, and watermark_yloc while transcoding a video (xc_type=xc_video).
 - **Live streaming with UDP/HLS/RTMP:** avpipe library has the capability to transcode an input live stream and generate MP4 or ABR segments. Although the parameter setting would be similar to transcoding any other input file, setting up input/output handlers would be different (this is discussed in sections 6 and 8).
 - **Extracting images:** avpipe library can extract images either using a time interval or specific timestamps. 
