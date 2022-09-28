@@ -1271,7 +1271,7 @@ main(
         .gpu_index = -1,
         .seg_duration = NULL,
         .debug_frame_level = 0,
-        .deinterlace_filter = "",
+        .deinterlace_filter = strdup(""),
     };
 
     i = 1;

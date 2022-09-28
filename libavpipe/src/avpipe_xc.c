@@ -4141,7 +4141,7 @@ check_params(
         }
     }
 
-    if (params->deinterlace_filter) {
+    if (params->deinterlace_filter && strlen(params->deinterlace_filter) > 0) {
         if (strcmp(params->deinterlace_filter, "pullup") &&
             strcmp(params->deinterlace_filter, "bwdif") &&
             strcmp(params->deinterlace_filter, "yadif")) {

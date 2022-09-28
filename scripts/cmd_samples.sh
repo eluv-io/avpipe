@@ -40,6 +40,9 @@ ffmpeg -y -i ./media/case_2_video_and_8_mono_audio.mp4 -vn -filter_complex "[0:3
 $FFMPEG_BIN/ffmpeg -listen 1 -i rtmp://192.168.90.202:1935/rtmp/XQjNir3S -c copy -flags +global_header -f segment -segment_time 60 -segment_format_options movflags=+faststart -reset_timestamps 1 test%d.mp4
 
 
+# Deinterlacing video
+./bin/exc -f media/interlaced_tv_sample.mov -format fmp4-segment -xc-type video -force-keyint 30 -seg-duration 30 -deinterlace-filter yadif -debug-frame-level 1
+
 # Extract frames every 2s (default 10s if interval is not set)
 ./bin/exc -f ./media/TOS8_FHD_51-2_PRHQ_60s_CCBYblendercloud.mov -format image2 -e mjpeg -xc-type extract-images -extract-image-interval-ts 48000
 # Extract specified frames
