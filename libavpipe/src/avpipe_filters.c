@@ -208,6 +208,10 @@ init_video_filters_with_deinterlacing(
         goto end;
     }
 
+    /* FIXME: Still two frames are generated from the source!!! */
+    if (!strcmp(params->deinterlace_filter, "bwdif") || !strcmp(params->deinterlace_filter, "yadif"))
+        av_opt_set(deinterlaced_ctx->priv, "mode", "send_frame", AV_OPT_SEARCH_CHILDREN);
+
 
     if ((ret = avfilter_link(decoder_context->video_buffersrc_ctx, 0, deinterlaced_ctx, 0)) < 0) {
         elv_err("init_video_filters_with_deinterlacing failed to link buffersrc to deinterlaced filter");
