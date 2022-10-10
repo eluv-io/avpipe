@@ -3402,12 +3402,13 @@ avpipe_xc(
     }
 #endif
 
+    int video_stream_index = decoder_context->video_stream_index;
     if (params->xc_type & xc_video) {
         if (encoder_context->format_context->streams[0]->avg_frame_rate.num != 0 &&
-            decoder_context->stream[0]->time_base.num != 0) {
+            decoder_context->stream[video_stream_index]->time_base.num != 0) {
             encoder_context->calculated_frame_duration =
-                decoder_context->stream[0]->time_base.den * encoder_context->format_context->streams[0]->avg_frame_rate.den /
-                    (encoder_context->format_context->streams[0]->avg_frame_rate.num * decoder_context->stream[0]->time_base.num);
+                decoder_context->stream[video_stream_index]->time_base.den * encoder_context->format_context->streams[0]->avg_frame_rate.den /
+                    (encoder_context->format_context->streams[0]->avg_frame_rate.num * decoder_context->stream[video_stream_index]->time_base.num);
         }
         elv_log("calculated_frame_duration=%d", encoder_context->calculated_frame_duration);
     }
