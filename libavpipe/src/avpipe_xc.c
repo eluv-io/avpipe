@@ -906,7 +906,6 @@ set_nvidia_params(
 {
     int index = decoder_context->video_stream_index;
     AVCodecContext *encoder_codec_context = encoder_context->codec_context[index];
-    int framerate = 0;
 
     av_opt_set(encoder_codec_context->priv_data, "forced-idr", "on", 0);
 
