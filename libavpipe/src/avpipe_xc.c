@@ -3406,8 +3406,9 @@ avpipe_xc(
         if (encoder_context->format_context->streams[0]->avg_frame_rate.num != 0 &&
             decoder_context->stream[video_stream_index]->time_base.num != 0) {
             encoder_context->calculated_frame_duration =
-                decoder_context->stream[video_stream_index]->time_base.den * encoder_context->format_context->streams[0]->avg_frame_rate.den /
-                    (encoder_context->format_context->streams[0]->avg_frame_rate.num * decoder_context->stream[video_stream_index]->time_base.num);
+                /* In very rare cases this might overflow, so type cast to 64bit int to avoid overflow */
+                ((int64_t)decoder_context->stream[video_stream_index]->time_base.den * (int64_t)encoder_context->format_context->streams[0]->avg_frame_rate.den) /
+                    ((int64_t)encoder_context->format_context->streams[0]->avg_frame_rate.num * (int64_t) decoder_context->stream[video_stream_index]->time_base.num);
         }
         elv_log("calculated_frame_duration=%d", encoder_context->calculated_frame_duration);
     }
