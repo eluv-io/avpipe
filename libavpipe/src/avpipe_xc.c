@@ -4012,7 +4012,7 @@ check_params(
         return eav_param;
     }
 
-    if (params->stream_id >= 0 && (params->xc_type != xc_none || params->n_audio > 0)) {
+    if (params->stream_id >= 0 && (params->xc_type != xc_all || params->n_audio > 0)) {
         elv_err("Incompatible params, stream_id=%d, xc_type=%d, n_audio=%d, url=%s",
             params->stream_id, params->xc_type, params->n_audio, params->url);
         return eav_param;
