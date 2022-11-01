@@ -102,7 +102,7 @@ const char*
 avpipe_channel_layout_name(
     int channel_layout);
 
-#define USE_RESAMPLE_AAC
+//#define USE_RESAMPLE_AAC
 /* This will be removed after more testing with new audio transcoding using filters */
 #ifdef USE_RESAMPLE_AAC
 

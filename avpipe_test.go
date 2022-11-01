@@ -1673,7 +1673,7 @@ func TestAVPipeStats(t *testing.T) {
 	xcTest(t, outputDir, params, xcTestResult, true)
 
 	assert.Equal(t, int64(2880), statsInfo.encodingVideoFrameStats.TotalFramesWritten)
-	assert.Equal(t, int64(5625), statsInfo.encodingAudioFrameStats.TotalFramesWritten)
+	assert.Equal(t, int64(5626), statsInfo.encodingAudioFrameStats.TotalFramesWritten)
 	// FIXME
 	//assert.Equal(t, int64(720), statsInfo.encodingVideoFrameStats.FramesWritten)
 	//assert.Equal(t, int64(1406), statsInfo.encodingAudioFrameStats.FramesWritten)
