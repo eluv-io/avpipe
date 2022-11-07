@@ -1908,10 +1908,10 @@ encode_frame(
                 }
 
                 // Adjust audio frame pts such that first frame sent to the encoder has PTS 0
-                if (frame->pts != AV_NOPTS_VALUE)
+                if (frame->pts != AV_NOPTS_VALUE) {
                     frame->pts -= encoder_context->first_encoding_audio_pts;
-                if (frame->pkt_dts != AV_NOPTS_VALUE)
-                    frame->pkt_dts -= encoder_context->first_encoding_audio_pts;
+                    frame->pkt_dts = frame->pts;
+                }
                 if (frame->best_effort_timestamp != AV_NOPTS_VALUE)
                     frame->best_effort_timestamp -= encoder_context->first_encoding_audio_pts;
             }
@@ -2027,12 +2027,8 @@ encode_frame(
             encoder_context->video_encoder_prev_pts = output_packet->pts;
 
         /* Rescale using the stream time_base (not the codec context). */
-#ifdef USE_RESAMPLE_AAC
-        /* Don't rescale if using audio FIFO - PTS is already set in output time base. */
-        if (stream_index == decoder_context->video_stream_index &&
-#else
-        if (
-#endif
+        if ((stream_index == decoder_context->video_stream_index ||
+            !decoder_context->is_mpegts) &&
             (decoder_context->stream[stream_index]->time_base.den !=
             encoder_context->stream[stream_index]->time_base.den ||
             decoder_context->stream[stream_index]->time_base.num !=
@@ -3450,6 +3446,7 @@ avpipe_xc(
     decoder_context->first_decoding_audio_pts = -1;
     encoder_context->first_encoding_video_pts = -1;
     encoder_context->first_encoding_audio_pts = -1;
+
     for (int j=0; j<MAX_STREAMS; j++)
         encoder_context->first_read_frame_pts[j] = -1;
     decoder_context->first_key_frame_pts = -1;
