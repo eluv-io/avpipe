@@ -1931,6 +1931,10 @@ encode_frame(
             encoder_context->first_encoding_video_pts = frame->pts;
         }
 
+        if (params->xc_type & xc_audio &&
+            selected_decoded_audio(decoder_context, stream_index) >= 0)
+            frame->pkt_duration = 0;
+
         dump_frame(selected_decoded_audio(decoder_context, stream_index) >= 0,
             "TOENC ", codec_context->frame_number, frame, debug_frame_level);
     }
@@ -1962,6 +1966,16 @@ encode_frame(
         } else if (ret < 0) {
             elv_err("Failure while receiving a packet from the encoder: %s, url=%s", av_err2str(ret), params->url);
             rc = eav_receive_packet;
+            goto end_encode_frame;
+        }
+
+        /*
+         * Sometimes the first audio frame comes out from encoder with a negarive pts (i.e replay rtmp with ffmpeg),
+         * and after rescaling it becomes pretty big number which causes audio sync problem.
+         * The only solution that I could come up for this was skipping this frame. (-RM)
+         */
+        if (selected_decoded_audio(decoder_context, stream_index) >= 0 && output_packet->pts < 0) {
+            elv_log("Skipping encoded packet with negative pts %"PRId64, output_packet->pts);
             goto end_encode_frame;
         }
 
@@ -2000,14 +2014,6 @@ encode_frame(
             encoder_context->video_last_pts_encoded = output_packet->pts;
         }
 
-        if (selected_decoded_audio(decoder_context, stream_index) >= 0) {
-            encoder_context->audio_pts = output_packet->pts;
-            encoder_context->audio_frames_written++;
-        } else {
-            encoder_context->video_pts = output_packet->pts;
-            encoder_context->video_frames_written++;
-        }
-
         output_packet->pts += params->start_pts;
         output_packet->dts += params->start_pts;
 
@@ -2037,6 +2043,20 @@ encode_frame(
                 decoder_context->stream[stream_index]->time_base,
                 encoder_context->stream[stream_index]->time_base
             );
+        }
+
+        if (selected_decoded_audio(decoder_context, stream_index) >= 0) {
+            /* Set the packet duration if it is not the first audio packet */
+            if (encoder_context->audio_pts != AV_NOPTS_VALUE)
+                output_packet->duration = output_packet->pts - encoder_context->audio_pts;
+            else
+                output_packet->duration = 0;
+            encoder_context->audio_pts = output_packet->pts;
+            encoder_context->audio_frames_written++;
+        } else {
+            output_packet->duration = output_packet->pts - encoder_context->video_pts;
+            encoder_context->video_pts = output_packet->pts;
+            encoder_context->video_frames_written++;
         }
 
         dump_packet(selected_decoded_audio(decoder_context, stream_index) >= 0,
@@ -3446,6 +3466,7 @@ avpipe_xc(
     decoder_context->first_decoding_audio_pts = -1;
     encoder_context->first_encoding_video_pts = -1;
     encoder_context->first_encoding_audio_pts = -1;
+    encoder_context->audio_pts = AV_NOPTS_VALUE;
 
     for (int j=0; j<MAX_STREAMS; j++)
         encoder_context->first_read_frame_pts[j] = -1;
