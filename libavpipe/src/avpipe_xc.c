@@ -2054,7 +2054,10 @@ encode_frame(
             encoder_context->audio_pts = output_packet->pts;
             encoder_context->audio_frames_written++;
         } else {
-            output_packet->duration = output_packet->pts - encoder_context->video_pts;
+            if (encoder_context->video_pts != AV_NOPTS_VALUE)
+                output_packet->duration = output_packet->pts - encoder_context->video_pts;
+            else
+                output_packet->duration = 0;
             encoder_context->video_pts = output_packet->pts;
             encoder_context->video_frames_written++;
         }
@@ -3467,6 +3470,7 @@ avpipe_xc(
     encoder_context->first_encoding_video_pts = -1;
     encoder_context->first_encoding_audio_pts = -1;
     encoder_context->audio_pts = AV_NOPTS_VALUE;
+    encoder_context->video_pts = AV_NOPTS_VALUE;
 
     for (int j=0; j<MAX_STREAMS; j++)
         encoder_context->first_read_frame_pts[j] = -1;
