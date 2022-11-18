@@ -133,8 +133,10 @@ elv_channel_timed_receive(
         }
     }
 
-    if (channel->_closed)
+    if (channel->_closed) {
+        pthread_mutex_unlock(&channel->_mutex);
         return EPIPE;
+    }
 
     channel->_count--;
     msg = channel->_items[channel->_front];
