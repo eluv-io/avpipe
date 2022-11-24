@@ -2032,9 +2032,15 @@ encode_frame(
             output_packet->pts != AV_NOPTS_VALUE)
             encoder_context->video_encoder_prev_pts = output_packet->pts;
 
-        /* Rescale using the stream time_base (not the codec context). */
+        /*
+         * Rescale using the stream time_base (not the codec context):
+         *   - if the stream is a video or
+         *   - if it is audio then the decoding stream and encoding stream has the same codec id.
+         */
         if ((stream_index == decoder_context->video_stream_index ||
-            !decoder_context->is_mpegts) &&
+            (selected_decoded_audio(decoder_context, stream_index) >= 0 &&
+             params->ecodec2 != NULL &&
+             !strcmp(avcodec_get_name(decoder_context->codec_parameters[stream_index]->codec_id), params->ecodec2))) &&
             (decoder_context->stream[stream_index]->time_base.den !=
             encoder_context->stream[stream_index]->time_base.den ||
             decoder_context->stream[stream_index]->time_base.num !=
