@@ -1295,13 +1295,6 @@ prepare_audio_encoder(
         encoder_context->codec_context[index]->channel_layout = AV_CH_LAYOUT_STEREO;    // AV_CH_LAYOUT_STEREO is av_get_default_channel_layout(encoder_context->codec_context[index]->channels)
     }
 
-    elv_dbg("ENCODER channels=%d, channel_layout=%d (%s), sample_fmt=%s, sample_rate=%d",
-        encoder_context->codec_context[index]->channels,
-        encoder_context->codec_context[index]->channel_layout,
-        avpipe_channel_layout_name(encoder_context->codec_context[index]->channel_layout),
-        av_get_sample_fmt_name(encoder_context->codec_context[index]->sample_fmt),
-        encoder_context->codec_context[index]->sample_rate);
-
     int sample_rate = params->sample_rate;
     if (!strcmp(ecodec, "aac") &&
         !is_valid_aac_sample_rate(encoder_context->codec_context[index]->sample_rate) &&
@@ -1328,6 +1321,13 @@ prepare_audio_encoder(
         encoder_context->codec_context[index]->time_base = (AVRational){1, sample_rate};
         encoder_context->stream[index]->time_base = (AVRational){1, sample_rate};
     }
+
+    elv_dbg("ENCODER channels=%d, channel_layout=%d (%s), sample_fmt=%s, sample_rate=%d",
+        encoder_context->codec_context[index]->channels,
+        encoder_context->codec_context[index]->channel_layout,
+        avpipe_channel_layout_name(encoder_context->codec_context[index]->channel_layout),
+        av_get_sample_fmt_name(encoder_context->codec_context[index]->sample_fmt),
+        encoder_context->codec_context[index]->sample_rate);
 
     encoder_context->codec_context[index]->bit_rate = params->audio_bitrate;
 
