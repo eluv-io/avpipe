@@ -30,7 +30,7 @@ try_again:
     udp_packet->len = recvfrom(sock, udp_packet->buf, MAX_UDP_PKT_LEN, 0, ca, len);
     if (udp_packet->len < 0) {
         if (errno == EINTR) {
-            elv_log("XXX Got EINTR recvfrom");
+            elv_dbg("Got EINTR recvfrom");
             goto try_again;
         }
         return errno;
@@ -64,7 +64,7 @@ udp_thread_func(
         ret = readable_timeout(params->fd, 1);
         if (ret == -1) {
             if (errno == EINTR) {
-                elv_log("XXX Got EINTR select");
+                elv_dbg("Got EINTR select");
                 continue;
             }
             elv_err("UDP select error fd=%d, err=%d, url=%s", params->fd, errno, url);
@@ -82,7 +82,7 @@ udp_thread_func(
                 continue;
             }
 
-            elv_err("XXX UDP recv fd=%d, url=%s, errno=%d, timeout=%dsec", params->fd, url, errno, timedout+1);
+            elv_log("UDP recv fd=%d, url=%s, errno=%d, timeout=%dsec", params->fd, url, errno, timedout+1);
             if (timedout++ == UDP_PIPE_TIMEOUT) {
                 elv_err("UDP recv timeout fd=%d, url=%s, errno=%d", params->fd, url, errno);
                 break;
@@ -118,7 +118,7 @@ recv_again:
         if (elv_channel_send(params->udp_channel, udp_packet) < 0) {
             break;
         }
-        elv_dbg("Rcv UDP packet=%d, len=%d", pkt_num, udp_packet->len);
+        //elv_dbg("Rcv UDP packet=%d, len=%d", pkt_num, udp_packet->len);
         if (debug_frame_level)
             elv_dbg("Received UDP packet=%d, len=%d, url=%s", pkt_num, udp_packet->len, url);
         timedout = 0;

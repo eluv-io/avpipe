@@ -336,6 +336,12 @@ udp_in_opener(
         elv_warn("Failed to set UDP socket buf size to=%"PRId64", url=%s, errno=%d", bufsz, url, errno);
     }
 
+    if (set_sock_nonblocking(sockfd) < 0) {
+        elv_err("Failed to make UDP socket nonblocking, errno=%d", errno);
+        return -1;
+    }
+
+
     elv_channel_init(&inctx->udp_channel, MAX_UDP_CHANNEL, NULL);
     inctx->opaque = (int *) calloc(1, sizeof(int)+sizeof(int64_t));
     *((int *)((int64_t *)inctx->opaque+1)) = sockfd;
