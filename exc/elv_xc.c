@@ -1,5 +1,7 @@
 /*
- * Test a/v transcoding pipeline
+ * elv_xc.c
+ *
+ * Command line utility using avpipe framework for transcoding audio/video files/content.
  *
  */
 
@@ -30,6 +32,10 @@ do_mux(
     char *out_filename
 );
 
+extern void *
+udp_thread_func(
+    void *thread_params);
+
 int
 in_stat(
     void *opaque,
@@ -46,86 +52,6 @@ typedef struct udp_thread_params_t {
     socklen_t       salen;
     ioctx_t         *inctx;
 } udp_thread_params_t;
-
-void *
-udp_thread_func(
-    void *thread_params)
-{
-    udp_thread_params_t *params = (udp_thread_params_t *) thread_params;
-    xcparams_t *xcparams = params->inctx->params;
-    int debug_frame_level = (xcparams != NULL) ? xcparams->debug_frame_level : 0;
-    char *url = (xcparams != NULL) ? xcparams->url : "";
-    struct sockaddr     ca;
-    socklen_t len;
-    udp_packet_t *udp_packet;
-    int ret;
-    int first = 1;
-    int pkt_num = 0;
-    int timedout = 0;
-    int connection_timeout = xcparams->connection_timeout;
-
-    for ( ; ; ) {
-        if (params->inctx->closed)
-            break;
-
-        ret = readable_timeout(params->fd, 1);
-        if (ret == -1) {
-            if (errno == EINTR)
-                continue;
-            elv_err("UDP select error fd=%d, err=%d, url=%s", params->fd, errno, url);
-            break;
-        } else if (ret == 0) {
-            /* If no packet has not received yet, check connection_timeout */
-            if (first) {
-                if (connection_timeout > 0) {
-                    connection_timeout--;
-                    if (connection_timeout == 0) {
-                        elv_channel_close(params->udp_channel, 1);
-                        break;
-                    }
-                }
-                continue;
-            }
-
-            if (timedout++ == UDP_PIPE_TIMEOUT) {
-                elv_err("UDP recv timeout fd=%d, url=%s", params->fd, url);
-                break;
-            }
-            continue;
-        }
-
-        len = params->salen;
-        udp_packet = (udp_packet_t *) calloc(1, sizeof(udp_packet_t));
-        
-recv_again:
-        if (params->inctx->closed)
-            break;
-        udp_packet->len = recvfrom(params->fd, udp_packet->buf, MAX_UDP_PKT_LEN, 0, &ca, &len);
-        if (udp_packet->len < 0) {
-            if (errno == EINTR)
-                goto recv_again;
-            elv_err("UDP recvfrom fd=%d, errno=%d, url=%s", params->fd, errno, url);
-            break;
-        }
-
-        if (first) {
-            first = 0;
-            elv_log("UDP FIRST url=%s", url);
-        }
-
-        pkt_num++;
-        udp_packet->pkt_num = pkt_num;
-        /* If the channel is closed, exit the thread */
-        if (elv_channel_send(params->udp_channel, udp_packet) < 0) {
-            break;
-        }
-        if (debug_frame_level)
-            elv_dbg("Received UDP packet=%d, len=%d, url=%s", pkt_num, udp_packet->len, url);
-        timedout = 0;
-    }
-
-    return NULL;
-}
 
 int
 in_opener(
@@ -176,6 +102,11 @@ in_opener(
         size_t bufsz = UDP_PIPE_BUFSIZE;
         if (setsockopt(fd, SOL_SOCKET, SO_RCVBUF, (const void *)&bufsz, (socklen_t)sizeof(bufsz)) == -1) {
             elv_warn("Failed to set UDP socket buf size to=%"PRId64, bufsz);
+        }
+
+        if (set_sock_nonblocking(fd) < 0) {
+            elv_err("Failed to make UDP socket nonblocking, errno=%d", errno);
+            return -1;
         }
 
         elv_channel_init(&inctx->udp_channel, MAX_UDP_CHANNEL, NULL);

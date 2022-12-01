@@ -33,6 +33,17 @@ avcodec_profile_name(
     enum AVCodecID codec_id,
     int profile);
 
+extern void *
+udp_thread_func(
+    void *thread_params);
+
+typedef struct udp_thread_params_t {
+    int             fd;             /* Socket fd to read UDP datagrams */
+    elv_channel_t   *udp_channel;   /* udp channel to keep incomming UDP packets */
+    socklen_t       salen;
+    ioctx_t         *inctx;
+} udp_thread_params_t;
+
 static int
 out_stat(
     void *opaque,
@@ -275,94 +286,6 @@ in_stat(
         rc = -1;
     }
     return rc;
-}
-
-typedef struct udp_thread_params_t {
-    int             fd;             /* Socket fd to read UDP datagrams */
-    elv_channel_t   *udp_channel;   /* udp channel to keep incomming UDP packets */
-    socklen_t       salen;
-    ioctx_t         *inctx;
-} udp_thread_params_t;
-
-void *
-udp_thread_func(
-    void *thread_params)
-{
-    udp_thread_params_t *params = (udp_thread_params_t *) thread_params;
-    xcparams_t *xcparams = params->inctx->params;
-    int debug_frame_level = (xcparams != NULL) ? xcparams->debug_frame_level : 0;
-    char *url = (xcparams != NULL) ? xcparams->url : "";
-    struct sockaddr     ca;
-    socklen_t len;
-    udp_packet_t *udp_packet;
-    int ret;
-    int first = 1;
-    int pkt_num = 0;
-    int timedout = 0;
-    int connection_timeout = xcparams->connection_timeout;
-
-    for ( ; ; ) {
-        if (params->inctx->closed)
-            break;
-
-        ret = readable_timeout(params->fd, 1);
-        if (ret == -1) {
-            if (errno == EINTR)
-                continue;
-            elv_err("UDP select error fd=%d, err=%d, url=%s", params->fd, errno, url);
-            break;
-        } else if (ret == 0) {
-            /* If no packet has not received yet, check connection_timeout */
-            if (first) {
-                if (connection_timeout > 0) {
-                    connection_timeout--;
-                    if (connection_timeout == 0) {
-                        elv_channel_close(params->udp_channel, 1);
-                        break;
-                    }
-                }
-                continue;
-            }
-
-            if (timedout++ == UDP_PIPE_TIMEOUT) {
-                elv_err("UDP recv timeout fd=%d, url=%s", params->fd, url);
-                break;
-            }
-            continue;
-        }
-
-        len = params->salen;
-        udp_packet = (udp_packet_t *) calloc(1, sizeof(udp_packet_t));
-        
-recv_again:
-        if (params->inctx->closed)
-            break;
-        udp_packet->len = recvfrom(params->fd, udp_packet->buf, MAX_UDP_PKT_LEN, 0, &ca, &len);
-        if (udp_packet->len < 0) {
-            if (errno == EINTR)
-                goto recv_again;
-            elv_err("UDP recvfrom fd=%d, errno=%d, url=%s", params->fd, errno, url);
-            break;
-        }
-
-        if (first) {
-            first = 0;
-            elv_log("UDP FIRST url=%s", url);
-        }
-
-        pkt_num++;
-        udp_packet->pkt_num = pkt_num;
-        /* If the channel is closed, exit the thread */
-        if (elv_channel_send(params->udp_channel, udp_packet) < 0) {
-            break;
-        }
-        if (debug_frame_level)
-            elv_dbg("Received UDP packet=%d, len=%d, url=%s", pkt_num, udp_packet->len, url);
-        timedout = 0;
-    }
-
-    elv_log("UDP thread terminated, url=%s", url);
-    return NULL;
 }
 
 static int
