@@ -1264,8 +1264,9 @@ func TestAudio2Channel1Stereo(t *testing.T) {
 	xcTest(t, outputDir, params, xcTestResult, true)
 }
 
-// Transcode pcm_s24le 60000 sample rate, into aac 48000 sample rate
-func TestAudio2Channel1Stereo_pcm_60000(t *testing.T) {
+// Transcode audio pan pcm_s24le with 60000 sample rate, into aac 48000 sample rate.
+// This is case 1 with audio input sample rate incompatible with AAC
+func TestAudioPan2Channel1Stereo_pcm_60000(t *testing.T) {
 	filename := "./media/Sintel_30s_6ch_pcm_s24le_60000Hz.mov"
 	outputDir := path.Join(baseOutPath, fn())
 
@@ -1288,6 +1289,44 @@ func TestAudio2Channel1Stereo_pcm_60000(t *testing.T) {
 		DebugFrameLevel:     debugFrameLevel,
 	}
 	params.AudioIndex[0] = 6
+
+	xcTestResult := &XcTestResult{
+		timeScale:         48000,
+		sampleRate:        48000,
+		channelLayoutName: "stereo",
+	}
+
+	for i := 1; i <= 1; i++ {
+		xcTestResult.mezFile = append(xcTestResult.mezFile, fmt.Sprintf("%s/asegment-%d.mp4", outputDir, i))
+	}
+
+	xcTest(t, outputDir, params, xcTestResult, true)
+}
+
+// Transcode mono pcm_s24le with 60000 sample rate, into aac stereo 48000 sample rate.
+// This is case 2 with audio input sample rate incompatible with AAC
+func TestAudioMonoToStereo_pcm_60000(t *testing.T) {
+	filename := "./media/Sintel_30s_6ch_pcm_s24le_60000Hz.mov"
+	outputDir := path.Join(baseOutPath, fn())
+
+	params := &avpipe.XcParams{
+		BypassTranscoding:   false,
+		Format:              "fmp4-segment",
+		StartTimeTs:         0,
+		DurationTs:          -1,
+		StartSegmentStr:     "1",
+		SegDuration:         "30",
+		Ecodec2:             "aac",
+		Dcodec2:             "",
+		XcType:              avpipe.XcAudio,
+		ChannelLayout:       avpipe.ChannelLayout("stereo"),
+		NumAudio:            1,
+		StreamId:            -1,
+		SyncAudioToStreamId: -1,
+		Url:                 filename,
+		DebugFrameLevel:     debugFrameLevel,
+	}
+	params.AudioIndex[0] = 3
 
 	xcTestResult := &XcTestResult{
 		timeScale:         48000,
@@ -1444,7 +1483,7 @@ func TestMXF_H265MezMaker(t *testing.T) {
 		StreamId:          -1,
 		Url:               filename,
 		DebugFrameLevel:   debugFrameLevel,
-		ForceKeyInt:         48,
+		ForceKeyInt:       48,
 	}
 
 	xcTestResult := &XcTestResult{

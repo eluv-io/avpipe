@@ -1309,8 +1309,7 @@ prepare_audio_encoder(
      *      - set encoder sample_rate to the specified sample_rate.
      */
     if (sample_rate > 0 &&
-        (strcmp(ecodec, "aac") || !is_valid_aac_sample_rate(encoder_context->codec_context[index]->sample_rate)) &&
-        (params->xc_type == xc_audio_merge || params->xc_type == xc_audio_pan || params->xc_type == xc_audio_join)) {
+        (strcmp(ecodec, "aac") || !is_valid_aac_sample_rate(encoder_context->codec_context[index]->sample_rate))) {
         /*
          * Audio resampling, which is active for aac encoder, needs more work to adjust sampling properly
          * when input sample rate is different from output sample rate. (--RM)
