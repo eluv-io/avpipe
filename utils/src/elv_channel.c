@@ -129,7 +129,6 @@ elv_channel_timed_receive(
         rc = pthread_cond_timedwait(&channel->_cond_send, &channel->_mutex, &ts);
         /* ETIMEDOUT is not a real error */
         if (rc != 0) {
-            elv_log("XXX pthread_cond_timedwait rc=%d, count=%d, front=%d, rear=%d", rc, channel->_count, channel->_front, channel->_rear);
             pthread_mutex_unlock(&channel->_mutex);
             return rc;
         }
@@ -177,7 +176,7 @@ elv_channel_close(
     pthread_cond_signal(&channel->_cond_recv);
     pthread_cond_signal(&channel->_cond_send);
 
-    elv_log("XXX elv_channel_close count=%d, front=%d, rear=%d", channel->_count, channel->_front, channel->_rear);
+    elv_dbg("elv_channel_close count=%d, front=%d, rear=%d", channel->_count, channel->_front, channel->_rear);
     /* Purge the channel if the flag is set */
     while (purge_channel && channel->_count > 0) {
         channel->_count--;

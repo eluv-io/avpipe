@@ -19,15 +19,19 @@ typedef struct udp_thread_params_t {
     ioctx_t         *inctx;
 } udp_thread_params_t;
 
+/*
+ * Returns 0 if the reading UDP datagaram is successful, otherwise corresponding errno will be returned.
+ */
 int
 read_one_udp_datagram(
     int sock,
     udp_packet_t *udp_packet,
-    struct sockaddr *ca,
     socklen_t *len)
 {
+    struct sockaddr_storage sa;
+
 try_again:
-    udp_packet->len = recvfrom(sock, udp_packet->buf, MAX_UDP_PKT_LEN, 0, ca, len);
+    udp_packet->len = recvfrom(sock, udp_packet->buf, MAX_UDP_PKT_LEN, 0, (struct sockaddr *) &sa, len);
     if (udp_packet->len < 0) {
         if (errno == EINTR) {
             elv_dbg("Got EINTR recvfrom");
@@ -48,7 +52,6 @@ udp_thread_func(
     xcparams_t *xcparams = params->inctx->params;
     int debug_frame_level = (xcparams != NULL) ? xcparams->debug_frame_level : 0;
     char *url = (xcparams != NULL) ? xcparams->url : "";
-    struct sockaddr     ca;
     socklen_t len;
     udp_packet_t *udp_packet;
     int ret;
@@ -82,9 +85,9 @@ udp_thread_func(
                 continue;
             }
 
-            elv_log("UDP recv fd=%d, url=%s, errno=%d, timeout=%dsec", params->fd, url, errno, timedout+1);
+            elv_log("UDP recv fd=%d, url=%s, errno=%d, timeout=%dsec, pkt_num=%d", params->fd, url, errno, timedout+1, pkt_num);
             if (timedout++ == UDP_PIPE_TIMEOUT) {
-                elv_err("UDP recv timeout fd=%d, url=%s, errno=%d", params->fd, url, errno);
+                elv_err("UDP recv timeout fd=%d, url=%s, errno=%d, pkt_num=%d", params->fd, url, errno, pkt_num);
                 break;
             }
             continue;
@@ -96,15 +99,21 @@ recv_again:
 
         if (params->inctx->closed)
             break;
-        ret = read_one_udp_datagram(params->fd, udp_packet, &ca, &len);
-        if (ret == EAGAIN || ret == EWOULDBLOCK || udp_packet->len == 0) {
+        ret = read_one_udp_datagram(params->fd, udp_packet, &len);
+        if (ret == EAGAIN || ret == EWOULDBLOCK) {
             free(udp_packet);
             timedout = 0;
             continue;
         }
+
         if (ret != 0) {
             elv_err("UDP recvfrom fd=%d, errno=%d, url=%s", params->fd, errno, url);
             break;
+        }
+
+        if (udp_packet->len == 0) {
+            free(udp_packet);
+            goto recv_again;
         }
 
         if (first) {
