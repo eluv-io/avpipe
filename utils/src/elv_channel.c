@@ -8,6 +8,7 @@
 #include <sys/time.h>
 
 #include "elv_channel.h"
+#include "elv_log.h"
 
 struct elv_channel_t
 {
@@ -133,16 +134,18 @@ elv_channel_timed_receive(
         }
     }
 
-    if (channel->_closed)
+    if (channel->_closed) {
+        pthread_mutex_unlock(&channel->_mutex);
         return EPIPE;
+    }
 
     channel->_count--;
     msg = channel->_items[channel->_front];
     channel->_front = (channel->_front+1) % channel->_capacity;
+    *rcvdmsg = msg;
     pthread_cond_signal(&channel->_cond_recv);
     pthread_mutex_unlock(&channel->_mutex);
 
-    *rcvdmsg = msg;
     return 0;
 }
 
@@ -173,6 +176,7 @@ elv_channel_close(
     pthread_cond_signal(&channel->_cond_recv);
     pthread_cond_signal(&channel->_cond_send);
 
+    elv_dbg("elv_channel_close count=%d, front=%d, rear=%d", channel->_count, channel->_front, channel->_rear);
     /* Purge the channel if the flag is set */
     while (purge_channel && channel->_count > 0) {
         channel->_count--;

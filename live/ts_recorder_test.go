@@ -35,8 +35,8 @@ func TestUdpToMp4(t *testing.T) {
 		Seekable:        false,
 		DurationTs:      -1,
 		StartSegmentStr: "1",
-		AudioBitrate:    384000,   // FS1-19-10-14.ts audio bitrate
-		VideoBitrate:    20000000, // fox stream bitrate
+		AudioBitrate:    384000,
+		VideoBitrate:    20000000,
 		ForceKeyInt:     120,
 		SegDuration:     "30.03", // seconds
 		Dcodec2:         "ac3",
@@ -143,8 +143,8 @@ func TestUdpToMp4WithCancelling1(t *testing.T) {
 		Seekable:        false,
 		DurationTs:      -1,
 		StartSegmentStr: "1",
-		AudioBitrate:    384000,   // FS1-19-10-14.ts audio bitrate
-		VideoBitrate:    20000000, // fox stream bitrate
+		AudioBitrate:    384000,
+		VideoBitrate:    20000000,
 		ForceKeyInt:     120,
 		SegDuration:     "30.03", // seconds
 		Dcodec2:         "ac3",
@@ -278,8 +278,8 @@ func TestUdpToMp4WithCancelling3(t *testing.T) {
 		Seekable:        false,
 		DurationTs:      -1,
 		StartSegmentStr: "1",
-		AudioBitrate:    384000,   // FS1-19-10-14.ts audio bitrate
-		VideoBitrate:    20000000, // fox stream bitrate
+		AudioBitrate:    384000,
+		VideoBitrate:    20000000,
 		ForceKeyInt:     120,
 		SegDuration:     "30.03", // seconds
 		Dcodec2:         "ac3",
@@ -352,8 +352,8 @@ func TestUdpToMp4WithCancelling4(t *testing.T) {
 		Seekable:        false,
 		DurationTs:      -1,
 		StartSegmentStr: "1",
-		AudioBitrate:    384000,   // FS1-19-10-14.ts audio bitrate
-		VideoBitrate:    20000000, // fox stream bitrate
+		AudioBitrate:    384000,
+		VideoBitrate:    20000000,
 		ForceKeyInt:     120,
 		SegDuration:     "30.03", // seconds
 		Dcodec2:         "ac3",

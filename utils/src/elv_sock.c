@@ -7,6 +7,9 @@
 #include <netdb.h>
 #include <stdlib.h>
 #include <string.h>
+#include <unistd.h>
+#include <fcntl.h>
+
 
 #include "elv_sock.h"
 #include "elv_log.h"
@@ -88,6 +91,17 @@ tcp_connect(
         return -1;
 
     return sockfd;
+}
+
+int
+set_sock_nonblocking(
+    int sock)
+{
+    int flags = fcntl(sock, F_GETFL);
+    if (flags == -1)
+        return -1;
+
+    return fcntl(sock, F_SETFL, flags | O_NONBLOCK);
 }
 
 #if 0

@@ -4,7 +4,8 @@ SRCS=avpipe_xc.c \
     avpipe_filters.c \
     avpipe_io.c \
     avpipe_mux.c \
-    avpipe_level.c
+    avpipe_level.c \
+    avpipe_udp_thread.c
 
 BINDIR=bin
 LIBDIR=lib
