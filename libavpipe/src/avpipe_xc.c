@@ -102,7 +102,7 @@ const char*
 avpipe_channel_layout_name(
     int channel_layout);
 
-#define USE_RESAMPLE_AAC
+//#define USE_RESAMPLE_AAC
 /* This will be removed after more testing with new audio transcoding using filters */
 #ifdef USE_RESAMPLE_AAC
 
@@ -1295,13 +1295,6 @@ prepare_audio_encoder(
         encoder_context->codec_context[index]->channel_layout = AV_CH_LAYOUT_STEREO;    // AV_CH_LAYOUT_STEREO is av_get_default_channel_layout(encoder_context->codec_context[index]->channels)
     }
 
-    elv_dbg("ENCODER channels=%d, channel_layout=%d (%s), sample_fmt=%s, sample_rate=%d",
-        encoder_context->codec_context[index]->channels,
-        encoder_context->codec_context[index]->channel_layout,
-        avpipe_channel_layout_name(encoder_context->codec_context[index]->channel_layout),
-        av_get_sample_fmt_name(encoder_context->codec_context[index]->sample_fmt),
-        encoder_context->codec_context[index]->sample_rate);
-
     int sample_rate = params->sample_rate;
     if (!strcmp(ecodec, "aac") &&
         !is_valid_aac_sample_rate(encoder_context->codec_context[index]->sample_rate) &&
@@ -1316,8 +1309,7 @@ prepare_audio_encoder(
      *      - set encoder sample_rate to the specified sample_rate.
      */
     if (sample_rate > 0 &&
-        (strcmp(ecodec, "aac") || !is_valid_aac_sample_rate(encoder_context->codec_context[index]->sample_rate)) &&
-        (params->xc_type == xc_audio_merge || params->xc_type == xc_audio_pan || params->xc_type == xc_audio_join)) {
+        (strcmp(ecodec, "aac") || !is_valid_aac_sample_rate(encoder_context->codec_context[index]->sample_rate))) {
         /*
          * Audio resampling, which is active for aac encoder, needs more work to adjust sampling properly
          * when input sample rate is different from output sample rate. (--RM)
@@ -1328,6 +1320,13 @@ prepare_audio_encoder(
         encoder_context->codec_context[index]->time_base = (AVRational){1, sample_rate};
         encoder_context->stream[index]->time_base = (AVRational){1, sample_rate};
     }
+
+    elv_dbg("ENCODER channels=%d, channel_layout=%d (%s), sample_fmt=%s, sample_rate=%d",
+        encoder_context->codec_context[index]->channels,
+        encoder_context->codec_context[index]->channel_layout,
+        avpipe_channel_layout_name(encoder_context->codec_context[index]->channel_layout),
+        av_get_sample_fmt_name(encoder_context->codec_context[index]->sample_fmt),
+        encoder_context->codec_context[index]->sample_rate);
 
     encoder_context->codec_context[index]->bit_rate = params->audio_bitrate;
 
@@ -1910,10 +1909,10 @@ encode_frame(
                 }
 
                 // Adjust audio frame pts such that first frame sent to the encoder has PTS 0
-                if (frame->pts != AV_NOPTS_VALUE)
+                if (frame->pts != AV_NOPTS_VALUE) {
                     frame->pts -= encoder_context->first_encoding_audio_pts;
-                if (frame->pkt_dts != AV_NOPTS_VALUE)
-                    frame->pkt_dts -= encoder_context->first_encoding_audio_pts;
+                    frame->pkt_dts = frame->pts;
+                }
                 if (frame->best_effort_timestamp != AV_NOPTS_VALUE)
                     frame->best_effort_timestamp -= encoder_context->first_encoding_audio_pts;
             }
@@ -1932,6 +1931,10 @@ encode_frame(
             encoder_context->first_encoding_video_pts == -1) {
             encoder_context->first_encoding_video_pts = frame->pts;
         }
+
+        if (params->xc_type & xc_audio &&
+            selected_decoded_audio(decoder_context, stream_index) >= 0)
+            frame->pkt_duration = 0;
 
         dump_frame(selected_decoded_audio(decoder_context, stream_index) >= 0,
             "TOENC ", codec_context->frame_number, frame, debug_frame_level);
@@ -1964,6 +1967,16 @@ encode_frame(
         } else if (ret < 0) {
             elv_err("Failure while receiving a packet from the encoder: %s, url=%s", av_err2str(ret), params->url);
             rc = eav_receive_packet;
+            goto end_encode_frame;
+        }
+
+        /*
+         * Sometimes the first audio frame comes out from encoder with a negarive pts (i.e replay rtmp with ffmpeg),
+         * and after rescaling it becomes pretty big number which causes audio sync problem.
+         * The only solution that I could come up for this was skipping this frame. (-RM)
+         */
+        if (selected_decoded_audio(decoder_context, stream_index) >= 0 && output_packet->pts < 0) {
+            elv_log("Skipping encoded packet with negative pts %"PRId64, output_packet->pts);
             goto end_encode_frame;
         }
 
@@ -2002,14 +2015,6 @@ encode_frame(
             encoder_context->video_last_pts_encoded = output_packet->pts;
         }
 
-        if (selected_decoded_audio(decoder_context, stream_index) >= 0) {
-            encoder_context->audio_pts = output_packet->pts;
-            encoder_context->audio_frames_written++;
-        } else {
-            encoder_context->video_pts = output_packet->pts;
-            encoder_context->video_frames_written++;
-        }
-
         output_packet->pts += params->start_pts;
         output_packet->dts += params->start_pts;
 
@@ -2029,13 +2034,15 @@ encode_frame(
             output_packet->pts != AV_NOPTS_VALUE)
             encoder_context->video_encoder_prev_pts = output_packet->pts;
 
-        /* Rescale using the stream time_base (not the codec context). */
-#ifdef USE_RESAMPLE_AAC
-        /* Don't rescale if using audio FIFO - PTS is already set in output time base. */
-        if (stream_index == decoder_context->video_stream_index &&
-#else
-        if (
-#endif
+        /*
+         * Rescale using the stream time_base (not the codec context):
+         *   - if the stream is a video or
+         *   - if it is audio then the decoding stream and encoding stream has the same codec id.
+         */
+        if ((stream_index == decoder_context->video_stream_index ||
+            (selected_decoded_audio(decoder_context, stream_index) >= 0 &&
+             params->ecodec2 != NULL &&
+             !strcmp(avcodec_get_name(decoder_context->codec_parameters[stream_index]->codec_id), params->ecodec2))) &&
             (decoder_context->stream[stream_index]->time_base.den !=
             encoder_context->stream[stream_index]->time_base.den ||
             decoder_context->stream[stream_index]->time_base.num !=
@@ -2044,6 +2051,23 @@ encode_frame(
                 decoder_context->stream[stream_index]->time_base,
                 encoder_context->stream[stream_index]->time_base
             );
+        }
+
+        if (selected_decoded_audio(decoder_context, stream_index) >= 0) {
+            /* Set the packet duration if it is not the first audio packet */
+            if (encoder_context->audio_pts != AV_NOPTS_VALUE)
+                output_packet->duration = output_packet->pts - encoder_context->audio_pts;
+            else
+                output_packet->duration = 0;
+            encoder_context->audio_pts = output_packet->pts;
+            encoder_context->audio_frames_written++;
+        } else {
+            if (encoder_context->video_pts != AV_NOPTS_VALUE)
+                output_packet->duration = output_packet->pts - encoder_context->video_pts;
+            else
+                output_packet->duration = 0;
+            encoder_context->video_pts = output_packet->pts;
+            encoder_context->video_frames_written++;
         }
 
         dump_packet(selected_decoded_audio(decoder_context, stream_index) >= 0,
@@ -3453,6 +3477,9 @@ avpipe_xc(
     decoder_context->first_decoding_audio_pts = -1;
     encoder_context->first_encoding_video_pts = -1;
     encoder_context->first_encoding_audio_pts = -1;
+    encoder_context->audio_pts = AV_NOPTS_VALUE;
+    encoder_context->video_pts = AV_NOPTS_VALUE;
+
     for (int j=0; j<MAX_STREAMS; j++)
         encoder_context->first_read_frame_pts[j] = -1;
     decoder_context->first_key_frame_pts = -1;
