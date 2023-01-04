@@ -1677,7 +1677,7 @@ set_idr_frame_key_flag(
     }
 
     if (params->force_keyint > 0) {
-        if (encoder_context->forced_keyint_countdown == 0) {
+        if (encoder_context->forced_keyint_countdown <= 0) {
             if (debug_frame_level) {
                 elv_dbg("FRAME SET KEY flag, forced_keyint=%d pts=%"PRId64,
                     params->force_keyint, frame->pts);
@@ -2025,6 +2025,8 @@ encode_frame(
             params->xc_type != xc_extract_images) {
             elv_log("GAP detected, packet->pts=%"PRId64", video_encoder_prev_pts=%"PRId64", url=%s",
                 output_packet->pts, encoder_context->video_encoder_prev_pts, params->url);
+            encoder_context->forced_keyint_countdown -=
+                (output_packet->pts - encoder_context->video_encoder_prev_pts)/encoder_context->calculated_frame_duration - 1;
         }
 
         if (stream_index == decoder_context->video_stream_index &&
