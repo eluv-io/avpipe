@@ -1682,9 +1682,11 @@ set_idr_frame_key_flag(
                 elv_dbg("FRAME SET KEY flag, forced_keyint=%d pts=%"PRId64,
                     params->force_keyint, frame->pts);
             }
+            if (encoder_context->forced_keyint_countdown < 0)
+                elv_log("force_keyint_countdown=%d", encoder_context->forced_keyint_countdown);
             frame->pict_type = AV_PICTURE_TYPE_I;
             encoder_context->last_key_frame = frame->pts;
-            encoder_context->forced_keyint_countdown = params->force_keyint;
+            encoder_context->forced_keyint_countdown += params->force_keyint;
         }
         encoder_context->forced_keyint_countdown --;
     }
