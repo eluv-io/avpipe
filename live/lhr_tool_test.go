@@ -34,7 +34,8 @@ import (
 // To save HLS files, add the following to the test:
 //   TESTSaveToDir = "~/temp"
 //
-const manifestURLStr = "https://test-streams.mux.dev/x36xhzz/x36xhzz.m3u8"
+// Akamai live stream
+const manifestURLStr = "https://moctobpltc-i.akamaihd.net/hls/live/571329/eight/playlist.m3u8"
 const debugFrameLevel = false
 
 const baseOutPath = "test_out"
@@ -136,7 +137,6 @@ func TestHLSVideoOnly(t *testing.T) {
 	outputDir := path.Join(baseOutPath, fn())
 	setupOutDir(t, outputDir)
 
-	//manifestURLStr2 := "https://bc6b7c8cb2d118295b8e4d9c3bbfeb67.7wzuvg.channel-assembly.mediatailor.us-east-1.amazonaws.com/v1/channel/CH1/index.m3u8"
 	manifestURL, err := url.Parse(manifestURLStr)
 	if err != nil {
 		t.Error(err)
@@ -178,14 +178,13 @@ func TestHLSAudioOnly(t *testing.T) {
 		SampleRate:      48000,
 		SegDuration:     "30",
 		Ecodec2:         "aac", // "ac3", "aac"
-		Dcodec2:         "aac",
 		XcType:          avpipe.XcAudio,
 		DebugFrameLevel: debugFrameLevel,
 		StreamId:        -1,
 	}
 
 	params.NumAudio = 1
-	params.AudioIndex[0] = 0
+	params.AudioIndex[0] = 1
 
 	setupLogging()
 	outputDir := path.Join(baseOutPath, fn())
@@ -225,8 +224,8 @@ func TestHLSAudioOnly(t *testing.T) {
 
 // Creates 3 audio and 3 video HLS mez files in "test_out/" (the source is a live hls stream)
 // Then creates DASH abr-segments for each generated audio/video mez file.
-// All the output files will be saved in "./O".
-func _TestAudioVideoHlsLive(t *testing.T) {
+// All the output files will be saved in directory determined by outputDir.
+func TestAudioVideoHlsLive(t *testing.T) {
 	setupLogging()
 	outputDir := path.Join(baseOutPath, fn())
 	setupOutDir(t, outputDir)
@@ -262,7 +261,7 @@ func _TestAudioVideoHlsLive(t *testing.T) {
 	}
 
 	audioParams.NumAudio = 1
-	audioParams.AudioIndex[0] = 0
+	audioParams.AudioIndex[0] = 1
 
 	go func(reader io.Reader) {
 		tlog.Info("audio mez Xc start", "params", fmt.Sprintf("%+v", *audioParams))
@@ -284,7 +283,7 @@ func _TestAudioVideoHlsLive(t *testing.T) {
 		StartSegmentStr: "1",
 		VideoBitrate:    5000000,
 		SegDuration:     "30",
-		ForceKeyInt:     50,
+		ForceKeyInt:     60,
 		Ecodec:          defaultVideoEncoder(),
 		EncHeight:       720,
 		EncWidth:        1280,
@@ -317,19 +316,20 @@ func _TestAudioVideoHlsLive(t *testing.T) {
 
 	// Create audio dash segments out of audio mezzanines
 	audioParams.Format = "dash"
+	audioParams.AudioIndex[0] = 0
 	audioParams.AudioSegDurationTs = 2 * 48000
 	audioMezFiles := [3]string{"audio-mez-segment-1.mp4", "audio-mez-segment-2.mp4", "audio-mez-segment-3.mp4"}
 	go func() {
 		for i, url := range audioMezFiles {
-			tlog.Info("audio dash Xc start", "params", fmt.Sprintf("%+v", *audioParams), "url", url)
-			reqCtx := &testCtx{url: url}
-			audioParams.Url = url
-			putReqCtxByURL(url, reqCtx)
+			audioParams.Url = outputDir + "/" + url
+			tlog.Info("audio dash Xc start", "params", fmt.Sprintf("%+v", *audioParams), "url", audioParams.Url)
+			reqCtx := &testCtx{url: audioParams.Url}
+			putReqCtxByURL(audioParams.Url, reqCtx)
 			audioParams.StartSegmentStr = fmt.Sprintf("%d", i*15+1)
 			err := avpipe.Xc(audioParams)
 			tlog.Info("audio dash Xc done", "err", err)
 			if err != nil {
-				t.Error("audio dash transcoding error", "err", err, "url", url)
+				t.Error("audio dash transcoding error", "err", err, "url", audioParams.Url)
 			}
 			done <- true
 		}
@@ -344,15 +344,15 @@ func _TestAudioVideoHlsLive(t *testing.T) {
 	videoMezFiles := [3]string{"video-mez-segment-1.mp4", "video-mez-segment-2.mp4", "video-mez-segment-3.mp4"}
 	go func() {
 		for i, url := range videoMezFiles {
-			tlog.Info("video dash Xc start", "videoParams", fmt.Sprintf("%+v", *videoParams), "url", url)
-			reqCtx := &testCtx{url: url}
-			videoParams.Url = url
-			putReqCtxByURL(url, reqCtx)
+			videoParams.Url = outputDir + "/" + url
+			tlog.Info("video dash Xc start", "videoParams", fmt.Sprintf("%+v", *videoParams), "url", videoParams.Url)
+			reqCtx := &testCtx{url: videoParams.Url}
+			putReqCtxByURL(videoParams.Url, reqCtx)
 			videoParams.StartSegmentStr = fmt.Sprintf("%d", i*15+1)
 			err := avpipe.Xc(videoParams)
 			tlog.Info("video dash Xc done", "err", err)
 			if err != nil {
-				t.Error("video dash transcoding error", "err", err, "url", url)
+				t.Error("video dash transcoding error", "err", err, "url", videoParams.Url)
 			}
 			done <- true
 		}
@@ -383,10 +383,9 @@ func (io *inputOpener) Open(fd int64, url string) (avpipe.InputHandler, error) {
 	var file *os.File
 	// A convention for abr segmentation in our tests
 	if strings.Contains(url, "mez") && strings.Contains(url, "mp4") {
-		filepath := fmt.Sprintf("%s/%s", io.dir, url)
-		file, err = os.Open(filepath)
+		file, err = os.Open(url)
 		if err != nil {
-			tlog.Error("Failed to open", "file", filepath)
+			tlog.Error("Failed to open", "file", url)
 		}
 
 		input := &inputCtx{
@@ -478,8 +477,12 @@ func (i *inputCtx) Size() int64 {
 	}
 
 	fi, err := file.Stat()
-	tlog.Debug("IN_SIZE", "url", i.tc.url, "fd", i.tc.fd, "size", fi.Size(), "err", err)
-	return fi.Size()
+	if err == nil {
+		tlog.Debug("IN_SIZE", "url", i.tc.url, "fd", i.tc.fd, "size", fi.Size(), "err", err)
+		return fi.Size()
+	}
+	tlog.Debug("IN_SIZE", "url", i.tc.url, "fd", i.tc.fd, "err", err)
+	return -1
 }
 
 func (i *inputCtx) Stat(statType avpipe.AVStatType, statArgs interface{}) error {
@@ -512,19 +515,19 @@ func (oo *outputOpener) Open(h, fd int64, stream_index, seg_index int, _ int64,
 	case avpipe.DASHVideoInit:
 		fallthrough
 	case avpipe.DASHAudioInit:
-		filename = fmt.Sprintf("./%s/%s-init-stream%d.mp4", oo.dir, url, stream_index)
+		filename = fmt.Sprintf("./%s/video-init-stream%d.mp4", oo.dir, stream_index)
 	case avpipe.DASHManifest:
-		filename = fmt.Sprintf("./%s/%s-dash.mpd", oo.dir, url)
+		filename = fmt.Sprintf("./%s/dash.mpd", oo.dir)
 	case avpipe.DASHVideoSegment:
-		fallthrough
+		filename = fmt.Sprintf("./%s/video-chunk-stream%d-%05d.mp4", oo.dir, stream_index, seg_index)
 	case avpipe.DASHAudioSegment:
-		filename = fmt.Sprintf("./%s/%s-chunk-stream%d-%05d.mp4", oo.dir, url, stream_index, seg_index)
+		filename = fmt.Sprintf("./%s/audio-chunk-stream%d-%05d.mp4", oo.dir, stream_index, seg_index)
 	case avpipe.HLSMasterM3U:
-		filename = fmt.Sprintf("./%s/%s-master.m3u8", oo.dir, url)
+		filename = fmt.Sprintf("./%s/master.m3u8", oo.dir)
 	case avpipe.HLSVideoM3U:
-		fallthrough
+		filename = fmt.Sprintf("./%s/video-media_%d.m3u8", oo.dir, stream_index)
 	case avpipe.HLSAudioM3U:
-		filename = fmt.Sprintf("./%s/%s-media_%d.m3u8", oo.dir, url, stream_index)
+		filename = fmt.Sprintf("./%s/audio-media_%d.m3u8", oo.dir, stream_index)
 	case avpipe.AES128Key:
 		filename = fmt.Sprintf("./%s/%s-key.bin", oo.dir, url)
 	case avpipe.MP4Segment:
