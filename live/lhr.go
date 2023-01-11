@@ -363,8 +363,10 @@ func saveManifestToFile(client *http.Client, u *url.URL, parentPath string) (
 }
 
 func saveSegment(
-	client *http.Client, u *url.URL, s *m3u8.MediaSegment, parentPath string) (
-	written int64, err error) {
+	client *http.Client,
+	u *url.URL,
+	s *m3u8.MediaSegment,
+	parentPath string) (written int64, err error) {
 
 	msURL, err := resolve(s.URI, u)
 	if err != nil {
@@ -384,8 +386,10 @@ func saveSegment(
 }
 
 func readSegment(
-	client *http.Client, u *url.URL, s *m3u8.MediaSegment, w io.Writer) (
-	written int64, err error) {
+	client *http.Client,
+	u *url.URL,
+	s *m3u8.MediaSegment,
+	w io.Writer) (written int64, err error) {
 
 	log.Debug("AVLR readSegment start", "segment", fmt.Sprintf("%+v", *s))
 
@@ -444,8 +448,7 @@ func readSegment(
 // readPlaylist retrieves the media playlist and reads the available segments.
 // Starts reading at sequence number lhr.nextSeqNo. Returns complete or error
 // when the stream is done or failed irrecoverably
-func (lhr *HLSReader) readPlaylist() (
-	complete bool, err error) {
+func (lhr *HLSReader) readPlaylist() (complete bool, err error) {
 
 	logContext := fmt.Sprintf("url=%s seqNo=%d type=%d",
 		lhr.playlistURL.String(), lhr.nextSeqNo, lhr.Type)
@@ -482,7 +485,7 @@ func (lhr *HLSReader) readPlaylist() (
 	// 4.3.3.4. EXT-X-ENDLIST indicates that no more Media Segments will be added
 	complete = mediaPlaylist.Closed
 	if complete {
-		log.Info("HLS stream ended", "c", logContext)
+		log.Info("HLS stream got EOF (closed)", "context", logContext)
 	}
 	// 6.3.4. When a Playlist file has changed, the client MUST wait for at
 	// least the target duration before reload. If it has not changed, wait for
@@ -590,6 +593,7 @@ func (lhr *HLSReader) fill() (err error) {
 		complete, err = lhr.readPlaylist()
 		pollingPeriod := time.Duration(lhr.playlistPollSec * float64(time.Second))
 		if complete {
+			log.Info("HLSReader fill() got EOF")
 			break
 		} else if err != nil {
 			if _, ok := err.(*url.Error); ok {
