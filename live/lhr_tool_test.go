@@ -225,7 +225,7 @@ func TestHLSAudioOnly(t *testing.T) {
 // Creates 3 audio and 3 video HLS mez files in "test_out/" (the source is a live hls stream)
 // Then creates DASH abr-segments for each generated audio/video mez file.
 // All the output files will be saved in directory determined by outputDir.
-func TestAudioVideoHlsLive(t *testing.T) {
+func TestHLSAudioVideoLive(t *testing.T) {
 	setupLogging()
 	outputDir := path.Join(baseOutPath, fn())
 	setupOutDir(t, outputDir)
