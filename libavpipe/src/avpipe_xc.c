@@ -1457,7 +1457,7 @@ prepare_encoder(
         }
     }
 
-    if (params->xc_type == xc_extract_images) {
+    if (params->xc_type == xc_extract_images || params->xc_type == xc_extract_all_images) {
         // Tell the image2 muxer to expand the filename with PTS instead of sequential numbering
         av_opt_set(encoder_context->format_context->priv_data, "frame_pts", "true", 0);
     }
@@ -1694,9 +1694,9 @@ static int
 is_frame_extraction_done(coderctx_t *encoder_context,
     xcparams_t *p)
 {
-    if (p->xc_type != xc_extract_images) {
+    if (p->xc_type != xc_extract_images && p->xc_type != xc_extract_all_images)
         return 1;
-    }
+
     if (p->extract_images_sz > 0) {
         for (int i = 0; i < p->extract_images_sz; i++) {
             const int64_t wanted = p->extract_images_ts[i];
@@ -1723,9 +1723,11 @@ should_extract_frame(
     xcparams_t *p,
     AVFrame *frame)
 {
-    if (p->xc_type != xc_extract_images) {
+    if (p->xc_type == xc_extract_all_images)
+        return 1;
+
+    if (p->xc_type != xc_extract_images)
         return 0;
-    }
 
     if (p->extract_images_sz > 0) {
         /* Extract specified frames */
@@ -1825,7 +1827,7 @@ should_skip_encoding(
         }
     }
 
-    if (p->xc_type == xc_extract_images) {
+    if (p->xc_type == xc_extract_images || p->xc_type == xc_extract_all_images) {
         return !should_extract_frame(encoder_context, p, frame);
     }    
 
@@ -2022,7 +2024,8 @@ encode_frame(
             output_packet->pts != AV_NOPTS_VALUE &&
             output_packet->pts - encoder_context->video_encoder_prev_pts >
                 3*encoder_context->calculated_frame_duration &&
-            params->xc_type != xc_extract_images) {
+            params->xc_type != xc_extract_images &&
+            params->xc_type != xc_extract_all_images) {
             elv_log("GAP detected, packet->pts=%"PRId64", video_encoder_prev_pts=%"PRId64", url=%s",
                 output_packet->pts, encoder_context->video_encoder_prev_pts, params->url);
         }
@@ -2724,7 +2727,7 @@ transcode_video_func(
         // else if (!(packet->flags & AV_PKT_FLAG_KEY) ...) {
         //     continue;
         // }
-        if (params->xc_type == xc_extract_images) {
+        if (params->xc_type == xc_extract_images || params->xc_type == xc_extract_all_images) {
             if (is_frame_extraction_done(encoder_context, params)) {
                 elv_dbg("all frames already extracted, url=%s", params->url);
                 av_packet_free(&packet);
@@ -3881,6 +3884,8 @@ get_xc_type_name(
         return "xc_audio_merge";
     case xc_extract_images:
         return "xc_extract_images";
+    case xc_extract_all_images:
+        return "xc_extract_all_images";
     default:
         return "none";
     }
@@ -4119,7 +4124,9 @@ check_params(
         return eav_param;
     }
 
-    if (params->xc_type & xc_video && params->xc_type != xc_extract_images &&
+    if (params->xc_type & xc_video &&
+        params->xc_type != xc_extract_images &&
+        params->xc_type != xc_extract_all_images &&
         params->seg_duration <= 0 &&
         params->video_seg_duration_ts <= 0 &&
         strcmp(params->format, "mp4")) {

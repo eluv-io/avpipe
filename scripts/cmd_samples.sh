@@ -42,5 +42,9 @@ $FFMPEG_BIN/ffmpeg -listen 1 -i rtmp://192.168.90.202:1935/rtmp/XQjNir3S -c copy
 
 # Extract frames every 2s (default 10s if interval is not set)
 ./bin/exc -f ./media/TOS8_FHD_51-2_PRHQ_60s_CCBYblendercloud.mov -format image2 -e mjpeg -xc-type extract-images -extract-image-interval-ts 48000
+
 # Extract specified frames
 /bin/exc -f ./media/TOS8_FHD_51-2_PRHQ_60s_CCBYblendercloud.mov -format image2 -e mjpeg -xc-type extract-images -extract-images-ts "72000,240000,432000"
+
+# Extract all frames
+./bin/exc -f media/bbb_1080p_30fps_60sec.mp4 -xc-type extract-all-images -format image2 -e mjpeg
