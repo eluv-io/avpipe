@@ -330,16 +330,17 @@ typedef enum crypt_scheme_t {
 } crypt_scheme_t;
 
 typedef enum xc_type_t {
-    xc_none           = 0,
-    xc_video          = 1,
-    xc_audio          = 2,
-    xc_all            = 3,    // xc_video | xc_audio
-    xc_audio_merge    = 6,    // 0x04 | xc_audio
-    xc_audio_join     = 10,   // 0x08 | xc_audio
-    xc_audio_pan      = 18,   // 0x10 | xc_audio
-    xc_mux            = 32,
-    xc_extract_images = 65,
-    xc_probe          = 128
+    xc_none                 = 0,
+    xc_video                = 1,
+    xc_audio                = 2,
+    xc_all                  = 3,    // xc_video | xc_audio
+    xc_audio_merge          = 6,    // 0x04 | xc_audio
+    xc_audio_join           = 10,   // 0x08 | xc_audio
+    xc_audio_pan            = 18,   // 0x10 | xc_audio
+    xc_mux                  = 32,
+    xc_extract_images       = 65,   // 0x40 | xc_video
+    xc_extract_all_images   = 129,  // 0x80 | xc_video
+    xc_probe                = 256
 } xc_type_t;
 
 /* handled image types in get_overlay_filter_string*/

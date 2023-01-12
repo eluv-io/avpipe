@@ -81,16 +81,17 @@ const AvNoPtsValue = uint64(C.uint64_t(0x8000000000000000))
 type XcType int
 
 const (
-	XcNone          XcType = iota
-	XcVideo                = 1
-	XcAudio                = 2
-	XcAll                  = 3  // XcAudio | XcVideo
-	XcAudioMerge           = 6  // XcAudio | 0x04
-	XcAudioJoin            = 10 // XcAudio | 0x08
-	XcAudioPan             = 18 // XcAudio | 0x10
-	XcMux                  = 32
-	XcExtractImages        = 65 // XcVideo | 2^6
-	Xcprobe                = 128
+	XcNone             XcType = iota
+	XcVideo                   = 1
+	XcAudio                   = 2
+	XcAll                     = 3  // XcAudio | XcVideo
+	XcAudioMerge              = 6  // XcAudio | 0x04
+	XcAudioJoin               = 10 // XcAudio | 0x08
+	XcAudioPan                = 18 // XcAudio | 0x10
+	XcMux                     = 32
+	XcExtractImages           = 65  // XcVideo | 2^6
+	XcExtractAllImages        = 129 // XcVideo | 2^7
+	Xcprobe                   = 256
 )
 
 type XcProfile int
@@ -121,6 +122,8 @@ func XcTypeFromString(xcTypeStr string) XcType {
 		xcType = XcMux
 	case "extract-images":
 		xcType = XcExtractImages
+	case "extract-all-images":
+		xcType = XcExtractAllImages
 	default:
 		xcType = XcNone
 	}

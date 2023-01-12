@@ -790,6 +790,9 @@ xc_type_from_string(
     if (!strcmp(xc_type_str, "extract-images"))
         return xc_extract_images;
 
+    if (!strcmp(xc_type_str, "extract-all-images"))
+        return xc_extract_all_images;
+
     return xc_none;
 }
 
@@ -1095,8 +1098,8 @@ usage(
         "\t-stream-id :             (optional) Default: -1, if it is valid it will be used to transcode elementary stream with that stream-id.\n"
         "\t-sync-audio-to-stream-id:(optional) Default: -1, sync audio to video iframe of specific stream-id when input stream is mpegts.\n"
         "\t-t :                     (optional) Transcoding threads. Default is 1 thread, must be bigger than 1\n"
-        "\t-xc-type :               (optional) Transcoding type. Default is \"all\", can be \"video\", \"audio\", \"audio-merge\", \"audio-join\", \"audio-pan\", \"all\", or \"extract-images\"\n"
-        "\t                                    \"all\" means transcoding video and audio together.\n"
+        "\t-xc-type :               (optional) Transcoding type. Default is \"all\", can be \"video\", \"audio\", \"audio-merge\", \"audio-join\", \"audio-pan\", \"all\", \"extract-images\"\n"
+        "\t                                    or \"extract-all-images\". \"all\" means transcoding video and audio together.\n"
         "\t-video-bitrate :         (optional) Mutually exclusive with crf. Default: -1 (unused)\n"
         "\t-video-seg-duration-ts : (mandatory If format is not \"segment\" and transcoding video) video segment duration time base (positive integer).\n"
         "\t-wm-text :               (optional) Watermark text that will be presented in every video frame if it exist. It has higher priority than overlay watermark.\n"
@@ -1563,7 +1566,8 @@ main(
                     strcmp(argv[i+1], "audio-join") &&
                     strcmp(argv[i+1], "audio-pan") &&
                     strcmp(argv[i+1], "audio-merge") &&
-                    strcmp(argv[i+1], "extract-images")) {
+                    strcmp(argv[i+1], "extract-images") &&
+                    strcmp(argv[i+1], "extract-all-images")) {
                     usage(argv[0], argv[i], EXIT_FAILURE);
                 }
                 p.xc_type = xc_type_from_string(argv[i+1]);
@@ -1609,7 +1613,10 @@ main(
         strcmp(p.format, "fmp4-segment") &&
         strcmp(p.format, "mp4") &&
         p.seg_duration == NULL &&
-        p.video_seg_duration_ts <= 0 && p.xc_type & xc_video && p.xc_type != xc_extract_images) {
+        p.video_seg_duration_ts <= 0 &&
+        p.xc_type & xc_video &&
+        p.xc_type != xc_extract_images &&
+        p.xc_type != xc_extract_all_images) {
         usage(argv[0], "video-seg-duration-ts or seg-duration", EXIT_FAILURE);
     }
 

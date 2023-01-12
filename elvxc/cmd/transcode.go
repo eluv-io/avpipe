@@ -278,7 +278,7 @@ func InitTranscode(cmdRoot *cobra.Command) error {
 	cmdTranscode.PersistentFlags().StringP("filter-descriptor", "", "", " Audio filter descriptor the same as ffmpeg format")
 	cmdTranscode.PersistentFlags().Int32P("force-keyint", "", 0, "force IDR key frame in this interval.")
 	cmdTranscode.PersistentFlags().BoolP("equal-fduration", "", false, "force equal frame duration. Must be 0 or 1 and only valid for 'fmp4-segment' format.")
-	cmdTranscode.PersistentFlags().StringP("xc-type", "", "", "transcoding type, can be 'all', 'video', 'audio', 'audio-join', 'audio-pan', 'audio-merge', or 'extract-images'.")
+	cmdTranscode.PersistentFlags().StringP("xc-type", "", "", "transcoding type, can be 'all', 'video', 'audio', 'audio-join', 'audio-pan', 'audio-merge', 'extract-images' or 'extract-all-images'.")
 	cmdTranscode.PersistentFlags().Int32P("crf", "", 23, "mutually exclusive with video-bitrate.")
 	cmdTranscode.PersistentFlags().StringP("preset", "", "medium", "Preset string to determine compression speed, can be: 'ultrafast', 'superfast', 'veryfast', 'faster', 'fast', 'medium', 'slow', 'slower', 'veryslow'")
 	cmdTranscode.PersistentFlags().Int64P("start-time-ts", "", 0, "offset to start transcoding")
@@ -460,18 +460,19 @@ func doTranscode(cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("stream-id is not valid, must be >= 0")
 	}
 
-	txTypeStr := cmd.Flag("xc-type").Value.String()
-	if streamId < 0 && txTypeStr != "all" &&
-		txTypeStr != "video" &&
-		txTypeStr != "audio" &&
-		txTypeStr != "audio-join" &&
-		txTypeStr != "audio-pan" &&
-		txTypeStr != "audio-merge" &&
-		txTypeStr != "extract-images" {
+	xcTypeStr := cmd.Flag("xc-type").Value.String()
+	if streamId < 0 && xcTypeStr != "all" &&
+		xcTypeStr != "video" &&
+		xcTypeStr != "audio" &&
+		xcTypeStr != "audio-join" &&
+		xcTypeStr != "audio-pan" &&
+		xcTypeStr != "audio-merge" &&
+		xcTypeStr != "extract-images" &&
+		xcTypeStr != "extract-all-images" {
 		return fmt.Errorf("Transcoding type is not valid, with no stream-id can be 'all', 'video', 'audio', 'audio-join', 'audio-pan', 'audio-merge', or 'extract-images'")
 	}
-	txType := avpipe.XcTypeFromString(txTypeStr)
-	if txType == avpipe.XcAudio && len(encoder) == 0 {
+	xcType := avpipe.XcTypeFromString(xcTypeStr)
+	if xcType == avpipe.XcAudio && len(encoder) == 0 {
 		encoder = "aac"
 	}
 
@@ -562,14 +563,14 @@ func doTranscode(cmd *cobra.Command, args []string) error {
 	if err != nil ||
 		(format != "segment" && format != "fmp4-segment" &&
 			audioSegDurationTs == 0 &&
-			(txType == avpipe.XcAll || txType == avpipe.XcAudio ||
-				txType == avpipe.XcAudioJoin || txType == avpipe.XcAudioMerge)) {
+			(xcType == avpipe.XcAll || xcType == avpipe.XcAudio ||
+				xcType == avpipe.XcAudioJoin || xcType == avpipe.XcAudioMerge)) {
 		return fmt.Errorf("Audio seg duration ts is not valid")
 	}
 
 	videoSegDurationTs, err := cmd.Flags().GetInt64("video-seg-duration-ts")
 	if err != nil || (format != "segment" && format != "fmp4-segment" && format != "mp4" &&
-		videoSegDurationTs == 0 && (txType == avpipe.XcAll || txType == avpipe.XcVideo)) {
+		videoSegDurationTs == 0 && (xcType == avpipe.XcAll || xcType == avpipe.XcVideo)) {
 		return fmt.Errorf("Video seg duration ts is not valid")
 	}
 
@@ -644,7 +645,7 @@ func doTranscode(cmd *cobra.Command, args []string) error {
 		CryptKID:               cryptKID,
 		CryptKeyURL:            cryptKeyURL,
 		CryptScheme:            cryptScheme,
-		XcType:                 txType,
+		XcType:                 xcType,
 		WatermarkTimecode:      watermarkTimecode,
 		WatermarkTimecodeRate:  watermarkTimecodeRate,
 		WatermarkText:          watermarkText,
