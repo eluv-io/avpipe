@@ -402,13 +402,13 @@ func readSegment(
 	// Handle AES-128 encryption
 	// Key should only be set if it changed from the last segment
 	var dw *decryptWriter
-	if s.Key != nil {
+	if s.Key != nil && strings.ToUpper(s.Key.Method) != "NONE" {
 		var key []byte
 		if key, err = httpGetBytes(u, s.Key.URI); err != nil {
 			log.Error("AVLR Failed to download AES key", "err", err, "uri", s.Key.URI)
 			return
 		} else if len(key) != 16 { // Assumption: s.Key.Method is AES-128
-			return 0, errors.E("Bad AES key size", "len", len(key), "uri", s.Key.URI)
+			return 0, errors.E("Bad AES key size", "len", len(key), "uri", s.Key.URI, "method", s.Key.Method, "format", s.Key.Keyformat)
 		}
 
 		var iv []byte
@@ -431,7 +431,7 @@ func readSegment(
 	}
 	defer log.Call(content.Close, "close url reader", log.Error)
 
-	if s.Key != nil {
+	if s.Key != nil && strings.ToUpper(s.Key.Method) != "NONE" {
 		if written, err = io.Copy(dw, content); err != nil {
 			return
 		}

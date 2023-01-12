@@ -123,7 +123,7 @@ func TestHLSVideoOnly(t *testing.T) {
 		DurationTs:      3 * 2700000,
 		StartSegmentStr: "1",
 		VideoBitrate:    5000000,
-		SegDuration:     "30",
+		SegDuration:     "30.03",
 		ForceKeyInt:     60,
 		Ecodec:          defaultVideoEncoder(),
 		EncHeight:       720,
