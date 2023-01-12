@@ -3,7 +3,7 @@ package live
 import (
 	"fmt"
 	"github.com/stretchr/testify/assert"
-	"os"
+	"path"
 	"testing"
 	"time"
 
@@ -12,25 +12,21 @@ import (
 
 func TestUdpToMp4(t *testing.T) {
 	setupLogging()
-	outputDir := "TestUdpToMp4"
-
-	// Create output directory if it doesn't exist
-	if _, err := os.Stat(outputDir); os.IsNotExist(err) {
-		os.Mkdir(outputDir, 0755)
-	}
+	outputDir := path.Join(baseOutPath, fn())
+	setupOutDir(t, outputDir)
 
 	liveSource := NewLiveSource()
 	url := fmt.Sprintf("udp://localhost:%d", liveSource.Port)
 
 	done := make(chan bool, 1)
-	testComplet := make(chan bool, 1)
+	testComplete := make(chan bool, 1)
 
 	err := liveSource.Start("udp")
 	if err != nil {
 		t.Error(err)
 	}
 
-	XCParams := &avpipe.XcParams{
+	xcParams := &avpipe.XcParams{
 		Format:          "fmp4-segment",
 		Seekable:        false,
 		DurationTs:      -1,
@@ -56,31 +52,31 @@ func TestUdpToMp4(t *testing.T) {
 
 	avpipe.InitIOHandler(&inputOpener{dir: outputDir}, &outputOpener{dir: outputDir})
 
-	tlog.Info("Transcoding UDP stream start", "params", fmt.Sprintf("%+v", *XCParams))
-	err = avpipe.Xc(XCParams)
+	tlog.Info("Transcoding UDP stream start", "params", fmt.Sprintf("%+v", *xcParams))
+	err = avpipe.Xc(xcParams)
 	tlog.Info("Transcoding UDP stream done", "err", err, "last pts", nil)
 	if err != nil {
 		t.Error("Transcoding UDP stream failed", "err", err)
 	}
 
-	XCParams.Format = "dash"
-	XCParams.Dcodec2 = "aac"
-	XCParams.AudioSegDurationTs = 96106 // almost 2 * 48000
-	XCParams.XcType = avpipe.XcAudio
-	audioMezFiles := [3]string{"audio-mez-udp-segment-1.mp4", "audio-mez-udp-segment-2.mp4", "audio-mez-udp-segment-3.mp4"}
+	xcParams.Format = "dash"
+	xcParams.Dcodec2 = "aac"
+	xcParams.AudioSegDurationTs = 96106 // almost 2 * 48000
+	xcParams.XcType = avpipe.XcAudio
+	audioMezFiles := [3]string{"audio-mez-segment-1.mp4", "audio-mez-segment-2.mp4", "audio-mez-segment-3.mp4"}
 
 	// Now create audio dash segments out of audio mezzanines
 	go func() {
 		for i, url := range audioMezFiles {
-			tlog.Info("Transcoding Audio Dash start", "audioParams", fmt.Sprintf("%+v", *XCParams), "url", url)
-			reqCtx := &testCtx{url: url}
-			XCParams.Url = url
-			putReqCtxByURL(url, reqCtx)
-			XCParams.StartSegmentStr = fmt.Sprintf("%d", i*15+1)
-			err := avpipe.Xc(XCParams)
+			xcParams.Url = outputDir + "/" + url
+			tlog.Info("Transcoding Audio Dash start", "audioParams", fmt.Sprintf("%+v", *xcParams), "url", xcParams.Url)
+			reqCtx := &testCtx{url: xcParams.Url}
+			putReqCtxByURL(xcParams.Url, reqCtx)
+			xcParams.StartSegmentStr = fmt.Sprintf("%d", i*15+1)
+			err := avpipe.Xc(xcParams)
 			tlog.Info("Transcoding Audio Dash done", "err", err)
 			if err != nil {
-				t.Error("Transcoding Audio Dash failed", "err", err, "url", url)
+				t.Error("Transcoding Audio Dash failed", "err", err, "url", xcParams.Url)
 			}
 			done <- true
 		}
@@ -90,23 +86,23 @@ func TestUdpToMp4(t *testing.T) {
 		<-done
 	}
 
-	XCParams.Format = "dash"
-	XCParams.VideoSegDurationTs = 180000 // almost 2 * 90000
-	XCParams.XcType = avpipe.XcVideo
-	videoMezFiles := [3]string{"video-mez-udp-segment-1.mp4", "video-mez-udp-segment-2.mp4", "video-mez-udp-segment-3.mp4"}
+	xcParams.Format = "dash"
+	xcParams.VideoSegDurationTs = 180000 // almost 2 * 90000
+	xcParams.XcType = avpipe.XcVideo
+	videoMezFiles := [3]string{"video-mez-segment-1.mp4", "video-mez-segment-2.mp4", "video-mez-segment-3.mp4"}
 
 	// Now create video dash segments out of audio mezzanines
 	go func() {
 		for i, url := range videoMezFiles {
-			tlog.Info("AVL Video Dash transcoding start", "videoParams", fmt.Sprintf("%+v", *XCParams), "url", url)
-			reqCtx := &testCtx{url: url}
-			XCParams.Url = url
-			putReqCtxByURL(url, reqCtx)
-			XCParams.StartSegmentStr = fmt.Sprintf("%d", i*15+1)
-			err := avpipe.Xc(XCParams)
+			xcParams.Url = outputDir + "/" + url
+			tlog.Info("AVL Video Dash transcoding start", "videoParams", fmt.Sprintf("%+v", *xcParams), "url", xcParams.Url)
+			reqCtx := &testCtx{url: xcParams.Url}
+			putReqCtxByURL(xcParams.Url, reqCtx)
+			xcParams.StartSegmentStr = fmt.Sprintf("%d", i*15+1)
+			err := avpipe.Xc(xcParams)
 			tlog.Info("Transcoding Video Dash done", "err", err)
 			if err != nil {
-				t.Error("Transcoding Video Dash failed", "err", err, "url", url)
+				t.Error("Transcoding Video Dash failed", "err", err, "url", xcParams.Url)
 			}
 			done <- true
 		}
@@ -116,19 +112,16 @@ func TestUdpToMp4(t *testing.T) {
 		<-done
 	}
 
-	testComplet <- true
+	testComplete <- true
 }
 
 // Cancels the live stream transcoding immediately after initializing the transcoding (after XcInit).
 func TestUdpToMp4WithCancelling1(t *testing.T) {
 	setupLogging()
-	outputDir := "TestUdpToMp4WithCancelling1"
-	log.Info("STARTING " + outputDir)
+	outputDir := path.Join(baseOutPath, fn())
+	setupOutDir(t, outputDir)
 
-	// Create output directory if it doesn't exist
-	if _, err := os.Stat(outputDir); os.IsNotExist(err) {
-		os.Mkdir(outputDir, 0755)
-	}
+	log.Info("STARTING " + outputDir)
 
 	liveSource := NewLiveSource()
 	url := fmt.Sprintf("udp://localhost:%d", liveSource.Port)
@@ -138,7 +131,7 @@ func TestUdpToMp4WithCancelling1(t *testing.T) {
 		t.Error(err)
 	}
 
-	XCParams := &avpipe.XcParams{
+	xcParams := &avpipe.XcParams{
 		Format:          "fmp4-segment",
 		Seekable:        false,
 		DurationTs:      -1,
@@ -164,8 +157,8 @@ func TestUdpToMp4WithCancelling1(t *testing.T) {
 
 	avpipe.InitIOHandler(&inputOpener{dir: outputDir}, &outputOpener{dir: outputDir})
 
-	tlog.Info("Transcoding UDP stream start", "params", fmt.Sprintf("%+v", *XCParams))
-	handle, err := avpipe.XcInit(XCParams)
+	tlog.Info("Transcoding UDP stream start", "params", fmt.Sprintf("%+v", *xcParams))
+	handle, err := avpipe.XcInit(xcParams)
 	if err != nil {
 		t.Error("XcInitializing UDP stream failed", "err", err)
 	}
@@ -182,13 +175,10 @@ func TestUdpToMp4WithCancelling1(t *testing.T) {
 // Cancels the live stream transcoding immediately after starting the transcoding (1 sec after XcRun).
 func TestUdpToMp4WithCancelling2(t *testing.T) {
 	setupLogging()
-	outputDir := "TestUdpToMp4WithCancelling2"
-	log.Info("STARTING " + outputDir)
+	outputDir := path.Join(baseOutPath, fn())
+	setupOutDir(t, outputDir)
 
-	// Create output directory if it doesn't exist
-	if _, err := os.Stat(outputDir); os.IsNotExist(err) {
-		os.Mkdir(outputDir, 0755)
-	}
+	log.Info("STARTING " + outputDir)
 
 	liveSource := NewLiveSource()
 	url := fmt.Sprintf("udp://localhost:%d", liveSource.Port)
@@ -199,7 +189,7 @@ func TestUdpToMp4WithCancelling2(t *testing.T) {
 		t.Error(err)
 	}
 
-	XCParams := &avpipe.XcParams{
+	xcParams := &avpipe.XcParams{
 		Format:          "fmp4-segment",
 		Seekable:        false,
 		DurationTs:      -1,
@@ -225,8 +215,8 @@ func TestUdpToMp4WithCancelling2(t *testing.T) {
 
 	avpipe.InitIOHandler(&inputOpener{dir: outputDir}, &outputOpener{dir: outputDir})
 
-	tlog.Info("Transcoding UDP stream start", "params", fmt.Sprintf("%+v", *XCParams))
-	handle, err := avpipe.XcInit(XCParams)
+	tlog.Info("Transcoding UDP stream start", "params", fmt.Sprintf("%+v", *xcParams))
+	handle, err := avpipe.XcInit(xcParams)
 	if err != nil {
 		t.Error("XcInitializing UDP stream failed", "err", err)
 	}
@@ -256,13 +246,10 @@ func TestUdpToMp4WithCancelling2(t *testing.T) {
 // Cancels the live stream transcoding some time after starting the transcoding (20 sec after XcRun).
 func TestUdpToMp4WithCancelling3(t *testing.T) {
 	setupLogging()
-	outputDir := "TestUdpToMp4WithCancelling3"
-	log.Info("STARTING " + outputDir)
+	outputDir := path.Join(baseOutPath, fn())
+	setupOutDir(t, outputDir)
 
-	// Create output directory if it doesn't exist
-	if _, err := os.Stat(outputDir); os.IsNotExist(err) {
-		os.Mkdir(outputDir, 0755)
-	}
+	log.Info("STARTING " + outputDir)
 
 	liveSource := NewLiveSource()
 	url := fmt.Sprintf("udp://localhost:%d", liveSource.Port)
@@ -273,7 +260,7 @@ func TestUdpToMp4WithCancelling3(t *testing.T) {
 		t.Error(err)
 	}
 
-	XCParams := &avpipe.XcParams{
+	xcParams := &avpipe.XcParams{
 		Format:          "fmp4-segment",
 		Seekable:        false,
 		DurationTs:      -1,
@@ -299,8 +286,8 @@ func TestUdpToMp4WithCancelling3(t *testing.T) {
 
 	avpipe.InitIOHandler(&inputOpener{dir: outputDir}, &outputOpener{dir: outputDir})
 
-	tlog.Info("Transcoding UDP stream start", "params", fmt.Sprintf("%+v", *XCParams))
-	handle, err := avpipe.XcInit(XCParams)
+	tlog.Info("Transcoding UDP stream start", "params", fmt.Sprintf("%+v", *xcParams))
+	handle, err := avpipe.XcInit(xcParams)
 	if err != nil {
 		t.Error("XcInitializing UDP stream failed", "err", err)
 	}
@@ -330,13 +317,10 @@ func TestUdpToMp4WithCancelling3(t *testing.T) {
 // Cancels the live stream transcoding immediately 1 sec after starting the transcoding (after XcRun), while there is no source.
 func TestUdpToMp4WithCancelling4(t *testing.T) {
 	setupLogging()
-	outputDir := "TestUdpToMp4WithCancelling4"
-	log.Info("STARTING " + outputDir)
+	outputDir := path.Join(baseOutPath, fn())
+	setupOutDir(t, outputDir)
 
-	// Create output directory if it doesn't exist
-	if _, err := os.Stat(outputDir); os.IsNotExist(err) {
-		os.Mkdir(outputDir, 0755)
-	}
+	log.Info("STARTING " + outputDir)
 
 	liveSource := NewLiveSource()
 	url := fmt.Sprintf("udp://localhost:%d", liveSource.Port)
@@ -347,7 +331,7 @@ func TestUdpToMp4WithCancelling4(t *testing.T) {
 		t.Error(err)
 	}
 
-	XCParams := &avpipe.XcParams{
+	xcParams := &avpipe.XcParams{
 		Format:          "fmp4-segment",
 		Seekable:        false,
 		DurationTs:      -1,
@@ -371,9 +355,9 @@ func TestUdpToMp4WithCancelling4(t *testing.T) {
 	putReqCtxByURL(url, reqCtx)
 
 	avpipe.InitIOHandler(&inputOpener{dir: outputDir}, &outputOpener{dir: outputDir})
-	tlog.Info("Transcoding UDP stream start", "params", fmt.Sprintf("%+v", *XCParams))
+	tlog.Info("Transcoding UDP stream start", "params", fmt.Sprintf("%+v", *xcParams))
 
-	handle, err := avpipe.XcInit(XCParams)
+	handle, err := avpipe.XcInit(xcParams)
 	if err != nil {
 		t.Error("XcInitializing UDP stream failed", "err", err)
 	}
