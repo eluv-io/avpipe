@@ -1648,6 +1648,20 @@ set_idr_frame_key_flag(
     if ((params->xc_type & xc_video) == 0)
         return;
 
+    if (encoder_context->video_decoder_prev_pts != AV_NOPTS_VALUE &&
+        encoder_context->calculated_frame_duration > 0 &&
+        frame->pts != AV_NOPTS_VALUE &&
+        frame->pts - encoder_context->video_decoder_prev_pts >= 2*encoder_context->calculated_frame_duration &&
+        params->xc_type != xc_extract_images) {
+            elv_log("GAP detected, frame->pts=%"PRId64", video_decoder_prev_pts=%"PRId64", url=%s",
+                frame->pts, encoder_context->video_decoder_prev_pts, params->url);
+            encoder_context->forced_keyint_countdown -=
+                (frame->pts - encoder_context->video_decoder_prev_pts)/encoder_context->calculated_frame_duration - 1;
+    }
+
+    if (frame->pts != AV_NOPTS_VALUE)
+        encoder_context->video_decoder_prev_pts = frame->pts;
+
     /*
      * If format is "dash" or "hls" then don't clear the flag, because dash/hls uses pict_type to determine end of segment.
      * The reset of the formats would be good to clear before encoding (see doc/examples/transcoding.c).
@@ -1658,8 +1672,7 @@ set_idr_frame_key_flag(
     /*
      * Set key frame in the beginning of every segment (doesn't matter it is mez segment or abr segment).
      */
-    if (!strcmp(params->format, "fmp4-segment") || !strcmp(params->format, "segment") ||
-        !strcmp(params->format, "dash") || !strcmp(params->format, "hls")) {
+    if (!strcmp(params->format, "dash") || !strcmp(params->format, "hls")) {
         if (frame->pts >= encoder_context->last_key_frame + params->video_seg_duration_ts) {
             int64_t diff = frame->pts - (encoder_context->last_key_frame + params->video_seg_duration_ts);
             int missing_frames = 0;
@@ -1683,7 +1696,8 @@ set_idr_frame_key_flag(
                     params->force_keyint, frame->pts);
             }
             if (encoder_context->forced_keyint_countdown < 0)
-                elv_log("force_keyint_countdown=%d", encoder_context->forced_keyint_countdown);
+                elv_log("force_keyint_countdown=%d, last_key_frame=%"PRId64", frame->pts=%"PRId64,
+                    encoder_context->forced_keyint_countdown, encoder_context->last_key_frame, frame->pts);
             frame->pict_type = AV_PICTURE_TYPE_I;
             encoder_context->last_key_frame = frame->pts;
             encoder_context->forced_keyint_countdown += params->force_keyint;
@@ -2019,24 +2033,6 @@ encode_frame(
 
         output_packet->pts += params->start_pts;
         output_packet->dts += params->start_pts;
-
-        if (encoder_context->video_encoder_prev_pts > 0 &&
-            stream_index == decoder_context->video_stream_index &&
-            encoder_context->calculated_frame_duration > 0 &&
-            output_packet->pts != AV_NOPTS_VALUE &&
-            output_packet->pts - encoder_context->video_encoder_prev_pts >
-                3*encoder_context->calculated_frame_duration &&
-            params->xc_type != xc_extract_images &&
-            params->xc_type != xc_extract_all_images) {
-            elv_log("GAP detected, packet->pts=%"PRId64", video_encoder_prev_pts=%"PRId64", url=%s",
-                output_packet->pts, encoder_context->video_encoder_prev_pts, params->url);
-            encoder_context->forced_keyint_countdown -=
-                (output_packet->pts - encoder_context->video_encoder_prev_pts)/encoder_context->calculated_frame_duration - 1;
-        }
-
-        if (stream_index == decoder_context->video_stream_index &&
-            output_packet->pts != AV_NOPTS_VALUE)
-            encoder_context->video_encoder_prev_pts = output_packet->pts;
 
         /*
          * Rescale using the stream time_base (not the codec context):
@@ -3476,7 +3472,7 @@ avpipe_xc(
     decoder_context->video_duration = -1;
     encoder_context->audio_duration = -1;
     decoder_context->audio_input_prev_pts = -1;
-    encoder_context->video_encoder_prev_pts = -1;
+    encoder_context->video_decoder_prev_pts = AV_NOPTS_VALUE;
     decoder_context->first_decoding_video_pts = -1;
     decoder_context->first_decoding_audio_pts = -1;
     encoder_context->first_encoding_video_pts = -1;
