@@ -1048,7 +1048,10 @@ prepare_video_encoder(
         }
 
         /* Set output stream timebase when bypass encoding */
-        out_stream->time_base = in_stream->time_base;
+        if (params->video_time_base.num != 0 && params->video_time_base.den != 0)
+            out_stream->time_base = params->video_time_base;
+        else
+            out_stream->time_base = in_stream->time_base;
         out_stream->codecpar->codec_tag = 0;
 
         rc = set_encoder_options(encoder_context, decoder_context, params, decoder_context->video_stream_index,
@@ -1091,7 +1094,10 @@ prepare_video_encoder(
         encoder_codec_context->gop_size = params->force_keyint;
     }
 
-    encoder_context->stream[encoder_context->video_stream_index]->time_base = decoder_context->codec_context[index]->time_base;
+    if (params->video_time_base.num != 0 && params->video_time_base.den != 0)
+        encoder_context->stream[encoder_context->video_stream_index]->time_base = params->video_time_base;
+    else
+        encoder_context->stream[encoder_context->video_stream_index]->time_base = decoder_context->codec_context[index]->time_base;
     rc = set_encoder_options(encoder_context, decoder_context, params, decoder_context->video_stream_index,
         decoder_context->stream[decoder_context->video_stream_index]->time_base.den);
     if (rc < 0) {
@@ -1102,7 +1108,10 @@ prepare_video_encoder(
     /* Set codec context parameters */
     encoder_codec_context->height = params->enc_height != -1 ? params->enc_height : decoder_context->codec_context[index]->height;
     encoder_codec_context->width = params->enc_width != -1 ? params->enc_width : decoder_context->codec_context[index]->width;
-    encoder_codec_context->time_base = decoder_context->codec_context[index]->time_base;
+    if (params->video_time_base.num != 0 && params->video_time_base.den != 0)
+        encoder_codec_context->time_base = params->video_time_base;
+    else
+        encoder_codec_context->time_base = decoder_context->codec_context[index]->time_base;
     encoder_codec_context->sample_aspect_ratio = decoder_context->codec_context[index]->sample_aspect_ratio;
     if (params->video_bitrate > 0)
         encoder_codec_context->bit_rate = params->video_bitrate;
@@ -1187,7 +1196,10 @@ prepare_video_encoder(
     /* Set stream parameters - after avcodec_open2 and parameters from context.
      * This is necessary for the output to preserve the timebase and framerate of the input.
      */
-    encoder_context->stream[index]->time_base = decoder_context->stream[decoder_context->video_stream_index]->time_base;
+    if (params->video_time_base.num != 0 && params->video_time_base.den != 0)
+        encoder_context->stream[index]->time_base = params->video_time_base;
+    else
+        encoder_context->stream[index]->time_base = decoder_context->stream[decoder_context->video_stream_index]->time_base;
     encoder_context->stream[index]->avg_frame_rate = decoder_context->stream[decoder_context->video_stream_index]->avg_frame_rate;
 
     return 0;
