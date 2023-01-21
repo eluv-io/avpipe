@@ -4314,7 +4314,9 @@ avpipe_init(
         "master_display=\"%s\" "
         "filter_descriptor=\"%s\" "
         "extract_image_interval_ts=%"PRId64" "
-        "extract_images_sz=%d ",
+        "extract_images_sz=%d "
+        "video_time_base=%d/%d "
+        "audio_time_base=%d/%d",
         params->stream_id, p->url,
         avpipe_version(),
         params->bypass_transcoding, params->skip_decoding,
@@ -4336,7 +4338,9 @@ avpipe_init(
         params->max_cll ? params->max_cll : "",
         params->master_display ? params->master_display : "",
         params->filter_descriptor,
-        params->extract_image_interval_ts, params->extract_images_sz);
+        params->extract_image_interval_ts, params->extract_images_sz,
+        params->video_time_base.num, params->video_time_base.den,
+        params->audio_time_base.num, params->audio_time_base.den);
     elv_log("AVPIPE XCPARAMS %s", buf);
 
     if ((rc = check_params(params)) != eav_success) {
