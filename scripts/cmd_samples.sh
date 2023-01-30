@@ -1,3 +1,6 @@
+# Create 30 sec mezzanines
+./bin/exc -f media/bbb_sunflower_1080p_30fps_normal.mp4 -xc-type video -format fmp4-segment -force-keyint 60 -seg-duration 30
+
 # Text watermarking
 ./bin/exc -seg-duration 30 -xc-type video -f media/TOS8_FHD_51-2_PRHQ_60s_CCBYblendercloud.mov -wm-text "TEST WATERMARK" -wm-color black -wm-relative-size 0.05 -wm-xloc W/2 -wm-yloc H*0.9 -format fmp4-segment
 ./bin/exc -seg-duration 30 -xc-type video -f media/TOS8_FHD_51-2_PRHQ_60s_CCBYblendercloud.mov -wm-text "%{pts\\:gmtime\\:1602968400\\:%d-%m-%Y %T}" -wm-color black -wm-relative-size 0.05 -wm-xloc W/2 -wm-yloc H*0.9 -format fmp4-segment
