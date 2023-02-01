@@ -309,12 +309,19 @@ prepare_input(
 
 static int
 calc_timebase(
+    xcparams_t *params,
+    int is_video,
     int timebase)
 {
     if (timebase <= 0) {
         elv_err("calc_timebase invalid timebase=%d", timebase);
         return timebase;
     }
+
+    if (is_video && params->video_time_base.den != 0 && params->video_time_base.num == 1)
+        return params->video_time_base.den;
+    else if (!is_video && params->audio_time_base.den != 0 && params->audio_time_base.num == 1)
+        return params->audio_time_base.den;
 
     while (timebase < TIMEBASE_THRESHOLD)
         timebase *= 2;
@@ -716,7 +723,7 @@ set_encoder_options(
         if (params->seg_duration) {
             seg_duration = atof(params->seg_duration);
             if (stream_index == decoder_context->video_stream_index)
-                timebase = calc_timebase(timebase);
+                timebase = calc_timebase(params, 1, timebase);
             seg_duration_ts = seg_duration * timebase;
         }
         if (selected_decoded_audio(decoder_context, stream_index) >= 0) {
@@ -3401,10 +3408,10 @@ avpipe_xc(
     // FIXME: error occurs incorrectly if source timebase is small, e.g. 24 (due calc_timebase's TIMEBASE_THRESHOLD)
     if (params->xc_type & xc_video && params->xc_type != xc_extract_images &&
         encoder_context->codec_context[encoder_context->video_stream_index] &&
-        calc_timebase(encoder_context->codec_context[encoder_context->video_stream_index]->time_base.den)
+        calc_timebase(params, 1, encoder_context->codec_context[encoder_context->video_stream_index]->time_base.den)
             != encoder_context->stream[encoder_context->video_stream_index]->time_base.den) {
         elv_err("Internal error in calculating timebase, calc_timebase=%d, stream_timebase=%d, url=%s",
-            calc_timebase(encoder_context->codec_context[encoder_context->video_stream_index]->time_base.den),
+            calc_timebase(params, 1, encoder_context->codec_context[encoder_context->video_stream_index]->time_base.den),
             encoder_context->stream[encoder_context->video_stream_index]->time_base.den, params->url);
         rc = eav_timebase;
         goto xc_done;
