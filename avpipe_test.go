@@ -2158,6 +2158,45 @@ func TestExtractImagesListFast(t *testing.T) {
 	assert.Equal(t, int64(1980), pts)
 }
 
+func TestExtractAllImages(t *testing.T) {
+	url := videoBigBuckBunnyPath
+	outPath := path.Join(baseOutPath, fn())
+
+	params := &avpipe.XcParams{
+		Format:                 "image2",
+		AudioBitrate:           128000,
+		AudioSegDurationTs:     -1,
+		BitDepth:               8,
+		CrfStr:                 "23",
+		DurationTs:             -1,
+		Ecodec:                 "mjpeg",
+		EncHeight:              -1,
+		EncWidth:               -1,
+		ExtractImageIntervalTs: -1,
+		GPUIndex:               -1,
+		SampleRate:             -1,
+		SegDuration:            "30",
+		StartFragmentIndex:     1,
+		StartSegmentStr:        "1",
+		StreamId:               -1,
+		SyncAudioToStreamId:    -1,
+		VideoBitrate:           -1,
+		VideoSegDurationTs:     -1,
+		XcType:                 avpipe.XcExtractAllImages,
+		Url:                    url,
+		DebugFrameLevel:        debugFrameLevel,
+	}
+
+	xcTest2(t, outPath, params, nil)
+
+	files, err := ioutil.ReadDir(outPath)
+	failNowOnError(t, err)
+	assert.Equal(t, 1800, len(files))
+	pts, err := strconv.ParseInt(strings.Split(files[0].Name(), ".")[0], 10, 32)
+	assert.NoError(t, err)
+	assert.Equal(t, int64(1000980), pts)
+}
+
 type LevelParams struct {
 	profile       int
 	bitrate       int64

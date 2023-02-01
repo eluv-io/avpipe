@@ -10,6 +10,7 @@ import (
 	"io"
 	"net/url"
 	"os"
+	"path"
 	"path/filepath"
 	"runtime"
 	"strings"
@@ -19,6 +20,7 @@ import (
 	"github.com/eluv-io/avpipe"
 	"github.com/eluv-io/errors-go"
 	elog "github.com/eluv-io/log-go"
+	"github.com/stretchr/testify/assert"
 )
 
 //
@@ -32,8 +34,11 @@ import (
 // To save HLS files, add the following to the test:
 //   TESTSaveToDir = "~/temp"
 //
-const manifestURLStr = "http://origin1.skynews.mobile.skydvn.com/skynews/1404/latest.m3u8"
+// Akamai live stream
+const manifestURLStr = "https://moctobpltc-i.akamaihd.net/hls/live/571329/eight/playlist.m3u8"
 const debugFrameLevel = false
+
+const baseOutPath = "test_out"
 
 var tlog = elog.Get("/eluvio/avpipe/live/test")
 var requestURLTable map[string]*testCtx = map[string]*testCtx{}
@@ -112,23 +117,25 @@ func putReqCtxByFD(fd int64, reqCtx *testCtx) {
 	requestFDTable[fd] = reqCtx
 }
 
-func _TestHLSVideoOnly(t *testing.T) {
+func TestHLSVideoOnly(t *testing.T) {
 	params := &avpipe.XcParams{
 		Format:          "fmp4-segment",
 		DurationTs:      3 * 2700000,
 		StartSegmentStr: "1",
 		VideoBitrate:    5000000,
-		SegDuration:     "30",
-		ForceKeyInt:     50,
+		SegDuration:     "30.03",
+		ForceKeyInt:     60,
 		Ecodec:          defaultVideoEncoder(),
 		EncHeight:       720,
 		EncWidth:        1280,
 		XcType:          avpipe.XcVideo,
 		DebugFrameLevel: debugFrameLevel,
+		StreamId:        -1,
 	}
 
 	setupLogging()
-	setupOutDir("./O")
+	outputDir := path.Join(baseOutPath, fn())
+	setupOutDir(t, outputDir)
 
 	manifestURL, err := url.Parse(manifestURLStr)
 	if err != nil {
@@ -142,16 +149,16 @@ func _TestHLSVideoOnly(t *testing.T) {
 	endChan := make(chan error, 1)
 	reader.Start(endChan)
 
-	tlog.Info("Tx start", "params", fmt.Sprintf("%+v", *params))
-	avpipe.InitIOHandler(&inputOpener{}, &outputOpener{})
+	tlog.Info("Xc start", "params", fmt.Sprintf("%+v", *params))
+	avpipe.InitIOHandler(&inputOpener{}, &outputOpener{dir: outputDir})
 	url := "video_hls"
 	params.Url = url
 	reqCtx := &testCtx{url: url, r: reader.Pipe}
 	putReqCtxByURL(url, reqCtx)
 	err = avpipe.Xc(params)
-	tlog.Info("Tx done", "err", err)
+	tlog.Info("Xc done", "err", err)
 	if err != nil {
-		t.Error("video transcoding error", "errTx", err)
+		t.Error("video transcoding error", "errXc", err)
 	}
 
 	log.Call(reader.Pipe.Close, "close hls reader", tlog.Error)
@@ -162,7 +169,7 @@ func _TestHLSVideoOnly(t *testing.T) {
 	}
 }
 
-func _TestHLSAudioOnly(t *testing.T) {
+func TestHLSAudioOnly(t *testing.T) {
 	params := &avpipe.XcParams{
 		Format:          "fmp4-segment",
 		DurationTs:      3 * 2700000,
@@ -170,18 +177,18 @@ func _TestHLSAudioOnly(t *testing.T) {
 		AudioBitrate:    128000,
 		SampleRate:      48000,
 		SegDuration:     "30",
-		Ecodec:          "aac", // "ac3", "aac"
-		Dcodec:          "aac",
+		Ecodec2:         "aac", // "ac3", "aac"
 		XcType:          avpipe.XcAudio,
 		DebugFrameLevel: debugFrameLevel,
-		//BypassTranscoding: true,
+		StreamId:        -1,
 	}
 
 	params.NumAudio = 1
-	params.AudioIndex[0] = 0
+	params.AudioIndex[0] = 1
 
 	setupLogging()
-	setupOutDir("./O")
+	outputDir := path.Join(baseOutPath, fn())
+	setupOutDir(t, outputDir)
 
 	manifestURL, err := url.Parse(manifestURLStr)
 	if err != nil {
@@ -195,16 +202,16 @@ func _TestHLSAudioOnly(t *testing.T) {
 	endChan := make(chan error, 1)
 	reader.Start(endChan)
 
-	tlog.Info("Tx start", "params", fmt.Sprintf("%+v", *params))
-	avpipe.InitIOHandler(&inputOpener{}, &outputOpener{})
+	tlog.Info("Xc start", "params", fmt.Sprintf("%+v", *params))
+	avpipe.InitIOHandler(&inputOpener{}, &outputOpener{dir: outputDir})
 	url := "audio_hls"
 	params.Url = url
 	reqCtx := &testCtx{url: url, r: reader.Pipe}
 	putReqCtxByURL(url, reqCtx)
 	err = avpipe.Xc(params)
-	tlog.Info("Tx done", "err", err)
+	tlog.Info("Xc done", "err", err)
 	if err != nil {
-		t.Error("video transcoding error", "errTx", err)
+		t.Error("video transcoding error", "errXc", err)
 	}
 
 	log.Call(reader.Pipe.Close, "close hls reader", tlog.Error)
@@ -215,12 +222,13 @@ func _TestHLSAudioOnly(t *testing.T) {
 	}
 }
 
-// Creates 3 audio and 3 video HLS mez files in "./O" (the source is a live hls stream)
+// Creates 3 audio and 3 video HLS mez files in "test_out/" (the source is a live hls stream)
 // Then creates DASH abr-segments for each generated audio/video mez file.
-// All the output files will be saved in "./O".
-func _TestAudioVideoHlsLive(t *testing.T) {
+// All the output files will be saved in directory determined by outputDir.
+func TestHLSAudioVideoLive(t *testing.T) {
 	setupLogging()
-	setupOutDir("./O")
+	outputDir := path.Join(baseOutPath, fn())
+	setupOutDir(t, outputDir)
 
 	manifestURL, err := url.Parse(manifestURLStr)
 	if err != nil {
@@ -237,7 +245,7 @@ func _TestAudioVideoHlsLive(t *testing.T) {
 	videoReader := io.TeeReader(reader.Pipe, audioReader)
 
 	done := make(chan bool, 2)
-	avpipe.InitIOHandler(&inputOpener{}, &outputOpener{})
+	avpipe.InitIOHandler(&inputOpener{}, &outputOpener{dir: outputDir})
 
 	audioParams := &avpipe.XcParams{
 		Format:          "fmp4-segment",
@@ -246,24 +254,23 @@ func _TestAudioVideoHlsLive(t *testing.T) {
 		AudioBitrate:    128000,
 		SampleRate:      48000,
 		SegDuration:     "30",
-		Ecodec:          "aac", // "ac3", "aac"
-		Dcodec:          "aac",
+		Ecodec2:         "aac",
 		XcType:          avpipe.XcAudio,
 		DebugFrameLevel: debugFrameLevel,
-		//BypassTranscoding: true,
+		StreamId:        -1,
 	}
 
 	audioParams.NumAudio = 1
 	audioParams.AudioIndex[0] = 1
 
 	go func(reader io.Reader) {
-		tlog.Info("audio mez Tx start", "params", fmt.Sprintf("%+v", *audioParams))
+		tlog.Info("audio mez Xc start", "params", fmt.Sprintf("%+v", *audioParams))
 		url := "audio_mez_hls"
 		audioParams.Url = url
 		reqCtx := &testCtx{url: url, r: reader}
 		putReqCtxByURL(url, reqCtx)
 		err := avpipe.Xc(audioParams)
-		tlog.Info("audio mez Tx done", "err", err)
+		tlog.Info("audio mez Xc done", "err", err)
 		if err != nil {
 			t.Error("audio mez transcoding error", "err", err)
 		}
@@ -276,21 +283,21 @@ func _TestAudioVideoHlsLive(t *testing.T) {
 		StartSegmentStr: "1",
 		VideoBitrate:    5000000,
 		SegDuration:     "30",
-		ForceKeyInt:     50,
+		ForceKeyInt:     60,
 		Ecodec:          defaultVideoEncoder(),
 		EncHeight:       720,
 		EncWidth:        1280,
 		XcType:          avpipe.XcVideo,
 		Url:             "video_mez_hls",
 		DebugFrameLevel: debugFrameLevel,
-		//BypassTranscoding: true,
+		StreamId:        -1,
 	}
 	go func(reader io.Reader) {
-		tlog.Info("video mez Tx start", "params", fmt.Sprintf("%+v", *videoParams))
+		tlog.Info("video mez Xc start", "params", fmt.Sprintf("%+v", *videoParams))
 		reqCtx := &testCtx{url: videoParams.Url, r: reader}
 		putReqCtxByURL(videoParams.Url, reqCtx)
 		err := avpipe.Xc(videoParams)
-		tlog.Info("video mez Tx done", "err", err)
+		tlog.Info("video mez Xc done", "err", err)
 		if err != nil {
 			t.Error("video mez transcoding error", "err", err)
 		}
@@ -309,19 +316,20 @@ func _TestAudioVideoHlsLive(t *testing.T) {
 
 	// Create audio dash segments out of audio mezzanines
 	audioParams.Format = "dash"
+	audioParams.AudioIndex[0] = 0
 	audioParams.AudioSegDurationTs = 2 * 48000
-	audioMezFiles := [3]string{"audio_mez_hls-segment-1.mp4", "audio_mez_hls-segment-2.mp4", "audio_mez_hls-segment-3.mp4"}
+	audioMezFiles := [3]string{"audio-mez-segment-1.mp4", "audio-mez-segment-2.mp4", "audio-mez-segment-3.mp4"}
 	go func() {
 		for i, url := range audioMezFiles {
-			tlog.Info("audio dash Tx start", "params", fmt.Sprintf("%+v", *audioParams), "url", url)
-			reqCtx := &testCtx{url: url}
-			audioParams.Url = url
-			putReqCtxByURL(url, reqCtx)
+			audioParams.Url = outputDir + "/" + url
+			tlog.Info("audio dash Xc start", "params", fmt.Sprintf("%+v", *audioParams), "url", audioParams.Url)
+			reqCtx := &testCtx{url: audioParams.Url}
+			putReqCtxByURL(audioParams.Url, reqCtx)
 			audioParams.StartSegmentStr = fmt.Sprintf("%d", i*15+1)
 			err := avpipe.Xc(audioParams)
-			tlog.Info("audio dash Tx done", "err", err)
+			tlog.Info("audio dash Xc done", "err", err)
 			if err != nil {
-				t.Error("audio dash transcoding error", "err", err, "url", url)
+				t.Error("audio dash transcoding error", "err", err, "url", audioParams.Url)
 			}
 			done <- true
 		}
@@ -333,18 +341,18 @@ func _TestAudioVideoHlsLive(t *testing.T) {
 	// Create video dash segments out of video mezzanines
 	videoParams.Format = "dash"
 	videoParams.VideoSegDurationTs = 2 * 90000
-	videoMezFiles := [3]string{"video_mez_hls-segment-1.mp4", "video_mez_hls-segment-2.mp4", "video_mez_hls-segment-3.mp4"}
+	videoMezFiles := [3]string{"video-mez-segment-1.mp4", "video-mez-segment-2.mp4", "video-mez-segment-3.mp4"}
 	go func() {
 		for i, url := range videoMezFiles {
-			tlog.Info("video dash Tx start", "videoParams", fmt.Sprintf("%+v", *videoParams), "url", url)
-			reqCtx := &testCtx{url: url}
-			videoParams.Url = url
-			putReqCtxByURL(url, reqCtx)
+			videoParams.Url = outputDir + "/" + url
+			tlog.Info("video dash Xc start", "videoParams", fmt.Sprintf("%+v", *videoParams), "url", videoParams.Url)
+			reqCtx := &testCtx{url: videoParams.Url}
+			putReqCtxByURL(videoParams.Url, reqCtx)
 			videoParams.StartSegmentStr = fmt.Sprintf("%d", i*15+1)
 			err := avpipe.Xc(videoParams)
-			tlog.Info("video dash Tx done", "err", err)
+			tlog.Info("video dash Xc done", "err", err)
 			if err != nil {
-				t.Error("video dash transcoding error", "err", err, "url", url)
+				t.Error("video dash transcoding error", "err", err, "url", videoParams.Url)
 			}
 			done <- true
 		}
@@ -375,10 +383,9 @@ func (io *inputOpener) Open(fd int64, url string) (avpipe.InputHandler, error) {
 	var file *os.File
 	// A convention for abr segmentation in our tests
 	if strings.Contains(url, "mez") && strings.Contains(url, "mp4") {
-		filepath := fmt.Sprintf("%s/%s", io.dir, url)
-		file, err = os.Open(filepath)
+		file, err = os.Open(url)
 		if err != nil {
-			tlog.Error("Failed to open", "file", filepath)
+			tlog.Error("Failed to open", "file", url)
 		}
 
 		input := &inputCtx{
@@ -413,13 +420,18 @@ func (i *inputCtx) Read(buf []byte) (int, error) {
 }
 
 func (i *inputCtx) Seek(offset int64, whence int) (int64, error) {
-
 	if i.tc.url[0:3] == "udp" {
 		tlog.Error("IN_SEEK", "url", i.tc.url)
 		return 0, fmt.Errorf("IN_SEEK url=%s", i.tc.url)
 	}
 
-	n, err := i.r.(*os.File).Seek(offset, whence)
+	file, ok := i.r.(*os.File)
+	if !ok {
+		tlog.Debug("Seek() not allowed on non-file input", "url", i.tc.url)
+		return 0, fmt.Errorf("IN_SEEK url=%s", i.tc.url)
+	}
+
+	n, err := file.Seek(offset, whence)
 	if debugFrameLevel {
 		tlog.Debug("IN_SEEK", "url", i.tc.url, "fd", i.tc.fd, "n", n, "err", err)
 	}
@@ -458,9 +470,19 @@ func (i *inputCtx) Size() int64 {
 		return -1
 	}
 
-	fi, err := i.r.(*os.File).Stat()
-	tlog.Debug("IN_SIZE", "url", i.tc.url, "fd", i.tc.fd, "size", fi.Size(), "err", err)
-	return fi.Size()
+	file, ok := i.r.(*os.File)
+	if !ok {
+		tlog.Debug("Size() not allowed on non-file input", "url", i.tc.url)
+		return -1
+	}
+
+	fi, err := file.Stat()
+	if err == nil {
+		tlog.Debug("IN_SIZE", "url", i.tc.url, "fd", i.tc.fd, "size", fi.Size(), "err", err)
+		return fi.Size()
+	}
+	tlog.Debug("IN_SIZE", "url", i.tc.url, "fd", i.tc.fd, "err", err)
+	return -1
 }
 
 func (i *inputCtx) Stat(statType avpipe.AVStatType, statArgs interface{}) error {
@@ -493,27 +515,27 @@ func (oo *outputOpener) Open(h, fd int64, stream_index, seg_index int, _ int64,
 	case avpipe.DASHVideoInit:
 		fallthrough
 	case avpipe.DASHAudioInit:
-		filename = fmt.Sprintf("./%s/%s-init-stream%d.mp4", oo.dir, url, stream_index)
+		filename = fmt.Sprintf("./%s/video-init-stream%d.mp4", oo.dir, stream_index)
 	case avpipe.DASHManifest:
-		filename = fmt.Sprintf("./%s/%s-dash.mpd", oo.dir, url)
+		filename = fmt.Sprintf("./%s/dash.mpd", oo.dir)
 	case avpipe.DASHVideoSegment:
-		fallthrough
+		filename = fmt.Sprintf("./%s/video-chunk-stream%d-%05d.mp4", oo.dir, stream_index, seg_index)
 	case avpipe.DASHAudioSegment:
-		filename = fmt.Sprintf("./%s/%s-chunk-stream%d-%05d.mp4", oo.dir, url, stream_index, seg_index)
+		filename = fmt.Sprintf("./%s/audio-chunk-stream%d-%05d.mp4", oo.dir, stream_index, seg_index)
 	case avpipe.HLSMasterM3U:
-		filename = fmt.Sprintf("./%s/%s-master.m3u8", oo.dir, url)
+		filename = fmt.Sprintf("./%s/master.m3u8", oo.dir)
 	case avpipe.HLSVideoM3U:
-		fallthrough
+		filename = fmt.Sprintf("./%s/video-media_%d.m3u8", oo.dir, stream_index)
 	case avpipe.HLSAudioM3U:
-		filename = fmt.Sprintf("./%s/%s-media_%d.m3u8", oo.dir, url, stream_index)
+		filename = fmt.Sprintf("./%s/audio-media_%d.m3u8", oo.dir, stream_index)
 	case avpipe.AES128Key:
 		filename = fmt.Sprintf("./%s/%s-key.bin", oo.dir, url)
 	case avpipe.MP4Segment:
 		filename = fmt.Sprintf("./%s/segment-%d.mp4", oo.dir, seg_index)
 	case avpipe.FMP4AudioSegment:
-		filename = fmt.Sprintf("./%s/audio-mez-udp-segment-%d.mp4", oo.dir, seg_index)
+		filename = fmt.Sprintf("./%s/audio-mez-segment-%d.mp4", oo.dir, seg_index)
 	case avpipe.FMP4VideoSegment:
-		filename = fmt.Sprintf("./%s/video-mez-udp-segment-%d.mp4", oo.dir, seg_index)
+		filename = fmt.Sprintf("./%s/video-mez-segment-%d.mp4", oo.dir, seg_index)
 	}
 
 	tlog.Debug("OUT_OPEN", "url", tc.url, "h", h, "stream_index", stream_index, "seg_index", seg_index, "filename", filename)
@@ -642,6 +664,13 @@ func defaultVideoEncoder() string {
 	return ecodec
 }
 
+func failNowOnError(t *testing.T, err error) {
+	if err != nil {
+		assert.NoError(t, err)
+		t.FailNow()
+	}
+}
+
 func removeDirContents(dir string) error {
 	d, err := os.Open(dir)
 	if err != nil {
@@ -661,18 +690,28 @@ func removeDirContents(dir string) error {
 	return nil
 }
 
-func setupOutDir(dir string) error {
-	_, err := os.Stat(dir)
-	if os.IsNotExist(err) {
-		os.Mkdir(dir, 0755)
-	} else {
-		err = removeDirContents(dir)
-		if err != nil {
-			return err
+// fn returns the caller's function name, e.g. pkg.Foo
+func fn() (fname string) {
+	fname = "unknown"
+	if pc, _, _, ok := runtime.Caller(1); ok {
+		if f := runtime.FuncForPC(pc); f != nil {
+			fname = path.Base(f.Name())
 		}
 	}
+	return
+}
 
-	return nil
+func setupOutDir(t *testing.T, dir string) {
+
+	var err error
+	if _, err = os.Stat(dir); err != nil {
+		if os.IsNotExist(err) {
+			err = os.MkdirAll(dir, 0755)
+		}
+	} else {
+		err = removeDirContents(dir)
+	}
+	failNowOnError(t, err)
 }
 
 func setupLogging() {
