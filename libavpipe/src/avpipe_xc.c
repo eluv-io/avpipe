@@ -1666,8 +1666,8 @@ set_idr_frame_key_flag(
             /* We can have some missing_frames only when transcoding UDP MPEG-TS */
             if (encoder_context->is_mpegts && encoder_context->calculated_frame_duration > 0)
                 missing_frames = diff / encoder_context->calculated_frame_duration;
-            elv_dbg("FRAME SET KEY flag, seg_duration_ts=%d pts=%"PRId64", missing_frames=%d, last_key_frame_pts=%"PRId64,
-                params->video_seg_duration_ts, frame->pts, missing_frames, encoder_context->last_key_frame);
+            elv_dbg("FRAME SET KEY flag, format=%s, seg_duration_ts=%d pts=%"PRId64", missing_frames=%d, last_key_frame_pts=%"PRId64,
+                params->format, params->video_seg_duration_ts, frame->pts, missing_frames, encoder_context->last_key_frame);
             if (debug_frame_level) {
                 elv_dbg("FRAME SET KEY flag, seg_duration_ts=%d pts=%"PRId64", missing_frames=%d, last_key_frame_pts=%"PRId64,
                     params->video_seg_duration_ts, frame->pts, missing_frames, encoder_context->last_key_frame);
