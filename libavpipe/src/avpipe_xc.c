@@ -1656,18 +1656,15 @@ set_idr_frame_key_flag(
         frame->pict_type = AV_PICTURE_TYPE_NONE;
 
     /*
-     * Set key frame in the beginning of every segment (doesn't matter it is mez segment or abr segment).
+     * Set key frame in the beginning of every abr segment.
      */
-    if (!strcmp(params->format, "fmp4-segment") || !strcmp(params->format, "segment") ||
-        !strcmp(params->format, "dash") || !strcmp(params->format, "hls")) {
+    if (!strcmp(params->format, "dash") || !strcmp(params->format, "hls")) {
         if (frame->pts >= encoder_context->last_key_frame + params->video_seg_duration_ts) {
             int64_t diff = frame->pts - (encoder_context->last_key_frame + params->video_seg_duration_ts);
             int missing_frames = 0;
             /* We can have some missing_frames only when transcoding UDP MPEG-TS */
             if (encoder_context->is_mpegts && encoder_context->calculated_frame_duration > 0)
                 missing_frames = diff / encoder_context->calculated_frame_duration;
-            elv_dbg("FRAME SET KEY flag, format=%s, seg_duration_ts=%d pts=%"PRId64", missing_frames=%d, last_key_frame_pts=%"PRId64,
-                params->format, params->video_seg_duration_ts, frame->pts, missing_frames, encoder_context->last_key_frame);
             if (debug_frame_level) {
                 elv_dbg("FRAME SET KEY flag, seg_duration_ts=%d pts=%"PRId64", missing_frames=%d, last_key_frame_pts=%"PRId64,
                     params->video_seg_duration_ts, frame->pts, missing_frames, encoder_context->last_key_frame);
