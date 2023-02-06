@@ -295,7 +295,7 @@ func InitTranscode(cmdRoot *cobra.Command) error {
 	cmdTranscode.PersistentFlags().Int32P("enc-height", "", -1, "default -1 means use source height.")
 	cmdTranscode.PersistentFlags().Int32P("enc-width", "", -1, "default -1 means use source width.")
 	cmdTranscode.PersistentFlags().Int32P("video-time-base-den", "", 0, "Video encoder timebase denominator, must be > 0.")
-	cmdTranscode.PersistentFlags().Int32P("video-time-base-num", "", 1, "Video encoder timebase numerator, must be > 0.")
+	cmdTranscode.PersistentFlags().Int32P("video-time-base-num", "", 1, "Video encoder timebase numerator, must be > 0 (currently only 1 is acceptable).")
 	cmdTranscode.PersistentFlags().Int64P("duration-ts", "", -1, "default -1 means entire stream.")
 	cmdTranscode.PersistentFlags().Int64P("audio-seg-duration-ts", "", 0, "(mandatory if format is not 'segment' and transcoding audio) audio segment duration time base (positive integer).")
 	cmdTranscode.PersistentFlags().Int64P("video-seg-duration-ts", "", 0, "(mandatory if format is not 'segment' and transcoding video) video segment duration time base (positive integer).")

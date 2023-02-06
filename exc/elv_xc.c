@@ -1105,7 +1105,7 @@ usage(
         "\t-video-bitrate :         (optional) Mutually exclusive with crf. Default: -1 (unused)\n"
         "\t-video-seg-duration-ts : (mandatory If format is not \"segment\" and transcoding video) video segment duration time base (positive integer).\n"
         "\t-video-time-base-den :   (optional) Video encoder timebase denominator, must be > 0.\n"
-        "\t-video-time-base-num :   (optional) Video encoder timebase numenator, must be > 0.\n"
+        "\t-video-time-base-num :   (optional) Video encoder timebase numenator, must be > 0 (currently only 1 is acceptable).\n"
         "\t-wm-text :               (optional) Watermark text that will be presented in every video frame if it exist. It has higher priority than overlay watermark.\n"
         "\t-wm-timecode :           (optional) Watermark timecode string (i.e 00\\:00\\:00\\:00). It has higher priority than text watermark.\n"
         "\t-wm-timecode-rate :      (optional) Watermark timecode frame rate. Only applies if watermark timecode is enabled.\n"
