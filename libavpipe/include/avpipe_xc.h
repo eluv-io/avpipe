@@ -429,7 +429,6 @@ typedef struct xcparams_t {
     int         extract_images_sz;          // Size of the array extract_images_ts
 
     AVRational  video_time_base;            // New video encoder time_base
-    AVRational  audio_time_base;            // New audio encoder time_base
 
     int         debug_frame_level;
     int         connection_timeout;         // Connection timeout in sec for RTMP or MPEGTS protocols

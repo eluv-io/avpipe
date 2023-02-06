@@ -1208,7 +1208,6 @@ main(
         .gpu_index = -1,
         .seg_duration = NULL,
         .debug_frame_level = 0,
-        .audio_time_base = {1,0},
         .video_time_base = {1,0},
     };
 
@@ -1242,18 +1241,6 @@ main(
                 if (sscanf(argv[i+1], "%"PRId64, &p.audio_seg_duration_ts) != 1) {
                     usage(argv[0], argv[i], EXIT_FAILURE);
                 }
-            } else if (!strcmp(argv[i], "-audio-time-base-den")) {
-                if (sscanf(argv[i+1], "%d", &p.audio_time_base.den) != 1) {
-                    usage(argv[0], argv[i], EXIT_FAILURE);
-                }
-                if (p.audio_time_base.den <= 0)
-                    usage(argv[0], argv[i], EXIT_FAILURE);
-            } else if (!strcmp(argv[i], "-audio-time-base-num")) {
-                if (sscanf(argv[i+1], "%d", &p.audio_time_base.num) != 1) {
-                    usage(argv[0], argv[i], EXIT_FAILURE);
-                }
-                if (p.audio_time_base.num <= 0)
-                    usage(argv[0], argv[i], EXIT_FAILURE);
             } else {
                 usage(argv[0], argv[i], EXIT_FAILURE);
             }

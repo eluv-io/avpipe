@@ -320,8 +320,6 @@ calc_timebase(
 
     if (is_video && params->video_time_base.den != 0 && params->video_time_base.num == 1)
         return params->video_time_base.den;
-    else if (!is_video && params->audio_time_base.den != 0 && params->audio_time_base.num == 1)
-        return params->audio_time_base.den;
 
     while (timebase < TIMEBASE_THRESHOLD)
         timebase *= 2;
@@ -4079,6 +4077,13 @@ check_params(
         return eav_param;
     }
 
+    if (params->video_time_base.num != 0 && params->video_time_base.den != 0) {
+        if (params->video_time_base.num != 1) {
+            elv_err("Video timebase numerator must be 1 instead of %d, url=%s", params->video_time_base.num, params->url);
+            return eav_param;
+        }
+    }
+
     if (params->watermark_text != NULL && (strlen(params->watermark_text) > (WATERMARK_STRING_SZ-1))){
         elv_err("Watermark too large, url=%s", params->url);
         return eav_param;
@@ -4322,8 +4327,7 @@ avpipe_init(
         "filter_descriptor=\"%s\" "
         "extract_image_interval_ts=%"PRId64" "
         "extract_images_sz=%d "
-        "video_time_base=%d/%d "
-        "audio_time_base=%d/%d",
+        "video_time_base=%d/%d",
         params->stream_id, p->url,
         avpipe_version(),
         params->bypass_transcoding, params->skip_decoding,
@@ -4346,8 +4350,7 @@ avpipe_init(
         params->master_display ? params->master_display : "",
         params->filter_descriptor,
         params->extract_image_interval_ts, params->extract_images_sz,
-        params->video_time_base.num, params->video_time_base.den,
-        params->audio_time_base.num, params->audio_time_base.den);
+        params->video_time_base.num, params->video_time_base.den);
     elv_log("AVPIPE XCPARAMS %s", buf);
 
     if ((rc = check_params(params)) != eav_success) {
