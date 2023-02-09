@@ -6,6 +6,7 @@ import (
 	"io"
 	"io/fs"
 	"io/ioutil"
+	"math"
 	"math/big"
 	"os"
 	"os/exec"
@@ -1919,7 +1920,8 @@ func TestABRMuxing(t *testing.T) {
 	avpipe.InitIOHandler(&fileInputOpener{url: xcTestResult.mezFile[0]}, &fileOutputOpener{dir: muxOutDir})
 	muxOutProbeInfo := boilerProbe(t, xcTestResult)
 
-	assert.Equal(t, true, int(videoMezProbeInfo[0].ContainerInfo.Duration+videoMezProbeInfo2[0].ContainerInfo.Duration) == int(muxOutProbeInfo[0].ContainerInfo.Duration))
+	assert.Equal(t, true,
+		math.Abs(videoMezProbeInfo[0].ContainerInfo.Duration+videoMezProbeInfo2[0].ContainerInfo.Duration-muxOutProbeInfo[0].ContainerInfo.Duration) < 0.03)
 }
 
 func TestMarshalParams(t *testing.T) {
