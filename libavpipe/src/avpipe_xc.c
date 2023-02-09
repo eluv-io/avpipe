@@ -1656,10 +1656,9 @@ set_idr_frame_key_flag(
         frame->pict_type = AV_PICTURE_TYPE_NONE;
 
     /*
-     * Set key frame in the beginning of every segment (doesn't matter it is mez segment or abr segment).
+     * Set key frame in the beginning of every abr segment.
      */
-    if (!strcmp(params->format, "fmp4-segment") || !strcmp(params->format, "segment") ||
-        !strcmp(params->format, "dash") || !strcmp(params->format, "hls")) {
+    if (!strcmp(params->format, "dash") || !strcmp(params->format, "hls")) {
         if (frame->pts >= encoder_context->last_key_frame + params->video_seg_duration_ts) {
             int64_t diff = frame->pts - (encoder_context->last_key_frame + params->video_seg_duration_ts);
             int missing_frames = 0;
@@ -1677,14 +1676,16 @@ set_idr_frame_key_flag(
     }
 
     if (params->force_keyint > 0) {
-        if (encoder_context->forced_keyint_countdown == 0) {
+        if (encoder_context->forced_keyint_countdown <= 0) {
             if (debug_frame_level) {
                 elv_dbg("FRAME SET KEY flag, forced_keyint=%d pts=%"PRId64,
                     params->force_keyint, frame->pts);
             }
+            if (encoder_context->forced_keyint_countdown < 0)
+                elv_log("force_keyint_countdown=%d", encoder_context->forced_keyint_countdown);
             frame->pict_type = AV_PICTURE_TYPE_I;
             encoder_context->last_key_frame = frame->pts;
-            encoder_context->forced_keyint_countdown = params->force_keyint;
+            encoder_context->forced_keyint_countdown += params->force_keyint;
         }
         encoder_context->forced_keyint_countdown --;
     }
@@ -2022,12 +2023,14 @@ encode_frame(
             stream_index == decoder_context->video_stream_index &&
             encoder_context->calculated_frame_duration > 0 &&
             output_packet->pts != AV_NOPTS_VALUE &&
-            output_packet->pts - encoder_context->video_encoder_prev_pts >
-                3*encoder_context->calculated_frame_duration &&
+            output_packet->pts - encoder_context->video_encoder_prev_pts >=
+                2*encoder_context->calculated_frame_duration &&
             params->xc_type != xc_extract_images &&
             params->xc_type != xc_extract_all_images) {
             elv_log("GAP detected, packet->pts=%"PRId64", video_encoder_prev_pts=%"PRId64", url=%s",
                 output_packet->pts, encoder_context->video_encoder_prev_pts, params->url);
+            encoder_context->forced_keyint_countdown -=
+                (output_packet->pts - encoder_context->video_encoder_prev_pts)/encoder_context->calculated_frame_duration - 1;
         }
 
         if (stream_index == decoder_context->video_stream_index &&
