@@ -2037,6 +2037,15 @@ encode_frame(
             output_packet->pts != AV_NOPTS_VALUE)
             encoder_context->video_encoder_prev_pts = output_packet->pts;
 
+        if (selected_decoded_audio(decoder_context, stream_index) >= 0) {
+            elv_log("decoder_context->stream[stream_index]->time_base=%d/%d, encoder_context->stream[stream_index]->time_base=%d/%d, codec=%s",
+                decoder_context->stream[stream_index]->time_base.num,
+                decoder_context->stream[stream_index]->time_base.den,
+                encoder_context->stream[stream_index]->time_base.num,
+                encoder_context->stream[stream_index]->time_base.den,
+                avcodec_get_name(decoder_context->codec_parameters[stream_index]->codec_id));
+        }
+
         /*
          * Rescale using the stream time_base (not the codec context):
          *   - if the stream is a video or
@@ -2044,8 +2053,8 @@ encode_frame(
          */
         if ((stream_index == decoder_context->video_stream_index ||
             (selected_decoded_audio(decoder_context, stream_index) >= 0 &&
-             params->ecodec2 != NULL &&
-             !strcmp(avcodec_get_name(decoder_context->codec_parameters[stream_index]->codec_id), params->ecodec2))) &&
+             params->ecodec2 != NULL)) &&
+             //!strcmp(avcodec_get_name(decoder_context->codec_parameters[stream_index]->codec_id), params->ecodec2))) &&
             (decoder_context->stream[stream_index]->time_base.den !=
             encoder_context->stream[stream_index]->time_base.den ||
             decoder_context->stream[stream_index]->time_base.num !=
