@@ -558,10 +558,13 @@ prepare_decoder(
             return eav_open_codec;
         }
 
-        elv_log("Input stream=%d pixel_format=%s, timebase=%d, sample_fmt=%s, frame_size=%d, url=%s",
+        elv_log("Input stream=%d pixel_format=%s, stream timebase=%d/%d, codec context time_base=%d/%d, sample_fmt=%s, frame_size=%d, url=%s",
             i,
             av_get_pix_fmt_name(decoder_context->codec_context[i]->pix_fmt),
+            decoder_context->stream[i]->time_base.num,
             decoder_context->stream[i]->time_base.den,
+            decoder_context->codec_context[i]->time_base.num,
+            decoder_context->codec_context[i]->time_base.den,
             av_get_sample_fmt_name(decoder_context->codec_context[i]->sample_fmt),
             decoder_context->codec_context[i]->frame_size, url);
 
@@ -1319,6 +1322,7 @@ prepare_audio_encoder(
         /* Update timebase for the new sample rate */
         encoder_context->codec_context[index]->time_base = (AVRational){1, sample_rate};
         encoder_context->stream[index]->time_base = (AVRational){1, sample_rate};
+        elv_log("SET time_base=%d/%d", 1, sample_rate);
     }
 
     elv_dbg("ENCODER channels=%d, channel_layout=%d (%s), sample_fmt=%s, sample_rate=%d",
@@ -1933,9 +1937,11 @@ encode_frame(
             encoder_context->first_encoding_video_pts = frame->pts;
         }
 
+#if 0
         if (params->xc_type & xc_audio &&
             selected_decoded_audio(decoder_context, stream_index) >= 0)
             frame->pkt_duration = 0;
+#endif
 
         dump_frame(selected_decoded_audio(decoder_context, stream_index) >= 0,
             "TOENC ", codec_context->frame_number, frame, debug_frame_level);
@@ -1995,6 +2001,9 @@ encode_frame(
             goto end_encode_frame;
         }
 
+        dump_packet(selected_decoded_audio(decoder_context, stream_index) >= 0,
+            "OUT0 ", output_packet, debug_frame_level);
+
         /*
          * Set packet duration manually if not set by the encoder.
          * The logic is borrowed from dashenc.c dash_write_packet.
@@ -2004,8 +2013,9 @@ encode_frame(
          */
         if (params->xc_type == xc_video)
             assert(output_packet->duration == 0); /* Only to notice if this ever gets set */
-        if (selected_decoded_audio(decoder_context, stream_index) >= 0 && params->xc_type == xc_all) {
-            if (!output_packet->duration && encoder_context->audio_last_dts != AV_NOPTS_VALUE)
+        if (selected_decoded_audio(decoder_context, stream_index) >= 0 && params->xc_type && xc_audio) {
+            //if (!output_packet->duration && encoder_context->audio_last_dts != AV_NOPTS_VALUE)
+            if (output_packet->duration != output_packet->dts - encoder_context->audio_last_dts && encoder_context->audio_last_dts != AV_NOPTS_VALUE)
                 output_packet->duration = output_packet->dts - encoder_context->audio_last_dts;
             encoder_context->audio_last_dts = output_packet->dts;
             encoder_context->audio_last_pts_encoded = output_packet->pts;
@@ -2038,22 +2048,32 @@ encode_frame(
             encoder_context->video_encoder_prev_pts = output_packet->pts;
 
         if (selected_decoded_audio(decoder_context, stream_index) >= 0) {
-            elv_log("decoder_context->stream[stream_index]->time_base=%d/%d, encoder_context->stream[stream_index]->time_base=%d/%d, codec=%s",
+            elv_log("OUT decoder_context->codec_context[i]->time_base=%d/%d, decoder_context->stream[i]->time_base=%d/%d, encoder_context->stream[i]->time_base=%d/%d, encoder_context->codec_context[i]->time_base=%d/%d, format_context->streams[0]->time_base=%d/%d, codec=%s, output_packet->pts=%"PRId64", packet->duration=%d",
+                decoder_context->codec_context[stream_index]->time_base.num,
+                decoder_context->codec_context[stream_index]->time_base.den,
                 decoder_context->stream[stream_index]->time_base.num,
                 decoder_context->stream[stream_index]->time_base.den,
                 encoder_context->stream[stream_index]->time_base.num,
                 encoder_context->stream[stream_index]->time_base.den,
-                avcodec_get_name(decoder_context->codec_parameters[stream_index]->codec_id));
+                encoder_context->codec_context[stream_index]->time_base.num,
+                encoder_context->codec_context[stream_index]->time_base.den,
+                format_context->streams[0]->time_base.num,
+                format_context->streams[0]->time_base.den,
+                avcodec_get_name(decoder_context->codec_parameters[stream_index]->codec_id),
+                output_packet->pts,
+                output_packet->duration);
         }
 
-        /*
+       /*
          * Rescale using the stream time_base (not the codec context):
          *   - if the stream is a video or
          *   - if it is audio then the decoding stream and encoding stream has the same codec id.
          */
+#if 1
         if ((stream_index == decoder_context->video_stream_index ||
             (selected_decoded_audio(decoder_context, stream_index) >= 0 &&
-             params->ecodec2 != NULL)) &&
+            output_packet->duration != 1024)) &&
+            // params->ecodec2 != NULL)) &&
              //!strcmp(avcodec_get_name(decoder_context->codec_parameters[stream_index]->codec_id), params->ecodec2))) &&
             (decoder_context->stream[stream_index]->time_base.den !=
             encoder_context->stream[stream_index]->time_base.den ||
@@ -2064,7 +2084,9 @@ encode_frame(
                 encoder_context->stream[stream_index]->time_base
             );
         }
+#endif
 
+#if 0
         if (selected_decoded_audio(decoder_context, stream_index) >= 0) {
             /* Set the packet duration if it is not the first audio packet */
             if (encoder_context->audio_pts != AV_NOPTS_VALUE)
@@ -2081,6 +2103,7 @@ encode_frame(
             encoder_context->video_pts = output_packet->pts;
             encoder_context->video_frames_written++;
         }
+#endif
 
         dump_packet(selected_decoded_audio(decoder_context, stream_index) >= 0,
             "OUT ", output_packet, debug_frame_level);
@@ -3618,7 +3641,27 @@ avpipe_xc(
         } else if (selected_decoded_audio(decoder_context, input_packet->stream_index) >= 0 &&
             params->xc_type & xc_audio) {
 
-            encoder_context->audio_last_dts = input_packet->dts;
+            elv_log("XXX1 decoder_context->stream[stream_index]->time_base=%d/%d, input_format->timebase=%d/%d, codec_context->time_base=%d/%d, input_packet->pts=%"PRId64,
+                decoder_context->stream[stream_index]->time_base.num,
+                decoder_context->stream[stream_index]->time_base.den,
+                decoder_context->format_context->streams[stream_index]->time_base.num,
+                decoder_context->format_context->streams[stream_index]->time_base.den,
+                decoder_context->codec_context[stream_index]->time_base.num,
+                decoder_context->codec_context[stream_index]->time_base.den,
+                input_packet->pts);
+
+            av_packet_rescale_ts(input_packet,
+                decoder_context->format_context->streams[stream_index]->time_base,
+                decoder_context->codec_context[stream_index]->time_base);
+
+            elv_log("XXX2 decoder_context->stream[stream_index]->time_base=%d/%d, input_format->timebase=%d/%d, codec_context->time_base=%d/%d, input_packet->pts=%"PRId64,
+                decoder_context->stream[stream_index]->time_base.num,
+                decoder_context->stream[stream_index]->time_base.den,
+                decoder_context->format_context->streams[stream_index]->time_base.num,
+                decoder_context->format_context->streams[stream_index]->time_base.den,
+                decoder_context->codec_context[stream_index]->time_base.num,
+                decoder_context->codec_context[stream_index]->time_base.den,
+                input_packet->pts);
 
             dump_packet(1, "IN ", input_packet, debug_frame_level);
 
