@@ -2069,12 +2069,9 @@ encode_frame(
          *   - if the stream is a video or
          *   - if it is audio then the decoding stream and encoding stream has the same codec id.
          */
-#if 1
         if ((stream_index == decoder_context->video_stream_index ||
             (selected_decoded_audio(decoder_context, stream_index) >= 0 &&
             output_packet->duration != 1024)) &&
-            // params->ecodec2 != NULL)) &&
-             //!strcmp(avcodec_get_name(decoder_context->codec_parameters[stream_index]->codec_id), params->ecodec2))) &&
             (decoder_context->stream[stream_index]->time_base.den !=
             encoder_context->stream[stream_index]->time_base.den ||
             decoder_context->stream[stream_index]->time_base.num !=
@@ -2084,26 +2081,15 @@ encode_frame(
                 encoder_context->stream[stream_index]->time_base
             );
         }
-#endif
 
-#if 0
         if (selected_decoded_audio(decoder_context, stream_index) >= 0) {
             /* Set the packet duration if it is not the first audio packet */
-            if (encoder_context->audio_pts != AV_NOPTS_VALUE)
-                output_packet->duration = output_packet->pts - encoder_context->audio_pts;
-            else
-                output_packet->duration = 0;
             encoder_context->audio_pts = output_packet->pts;
             encoder_context->audio_frames_written++;
         } else {
-            if (encoder_context->video_pts != AV_NOPTS_VALUE)
-                output_packet->duration = output_packet->pts - encoder_context->video_pts;
-            else
-                output_packet->duration = 0;
             encoder_context->video_pts = output_packet->pts;
             encoder_context->video_frames_written++;
         }
-#endif
 
         dump_packet(selected_decoded_audio(decoder_context, stream_index) >= 0,
             "OUT ", output_packet, debug_frame_level);
@@ -3641,27 +3627,9 @@ avpipe_xc(
         } else if (selected_decoded_audio(decoder_context, input_packet->stream_index) >= 0 &&
             params->xc_type & xc_audio) {
 
-            elv_log("XXX1 decoder_context->stream[stream_index]->time_base=%d/%d, input_format->timebase=%d/%d, codec_context->time_base=%d/%d, input_packet->pts=%"PRId64,
-                decoder_context->stream[stream_index]->time_base.num,
-                decoder_context->stream[stream_index]->time_base.den,
-                decoder_context->format_context->streams[stream_index]->time_base.num,
-                decoder_context->format_context->streams[stream_index]->time_base.den,
-                decoder_context->codec_context[stream_index]->time_base.num,
-                decoder_context->codec_context[stream_index]->time_base.den,
-                input_packet->pts);
-
             av_packet_rescale_ts(input_packet,
                 decoder_context->format_context->streams[stream_index]->time_base,
                 decoder_context->codec_context[stream_index]->time_base);
-
-            elv_log("XXX2 decoder_context->stream[stream_index]->time_base=%d/%d, input_format->timebase=%d/%d, codec_context->time_base=%d/%d, input_packet->pts=%"PRId64,
-                decoder_context->stream[stream_index]->time_base.num,
-                decoder_context->stream[stream_index]->time_base.den,
-                decoder_context->format_context->streams[stream_index]->time_base.num,
-                decoder_context->format_context->streams[stream_index]->time_base.den,
-                decoder_context->codec_context[stream_index]->time_base.num,
-                decoder_context->codec_context[stream_index]->time_base.den,
-                input_packet->pts);
 
             dump_packet(1, "IN ", input_packet, debug_frame_level);
 
