@@ -1031,7 +1031,7 @@ in_mux_opener(
 
     if (size > 0)
         inctx->sz = size;
-    elv_dbg("IN MUX OPEN fd=%"PRId64", size=%"PRId64, fd, size);
+    elv_dbg("IN MUX OPEN url=%s, fd=%"PRId64", size=%"PRId64, url, fd, size);
 
     *((int64_t *)(inctx->opaque)) = fd;
     return 0;
