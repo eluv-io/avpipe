@@ -1788,10 +1788,6 @@ should_skip_encoding(
     else
         frame_in_pts_offset = frame->pts - decoder_context->video_input_start_pts;
 
-    /* If there is no video transcoding return 0 */
-    if ((p->xc_type & xc_video) == 0)
-        return 0;
-
     /* Drop frames before the desired 'start_time'
      * If the format is dash or hls, we skip the frames in skip_until_start_time_pts()
      * without decoding the frame.
