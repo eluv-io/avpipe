@@ -3029,7 +3029,7 @@ skip_until_start_time_pts(
     AVPacket *input_packet,
     xcparams_t *params)
 {
-    if (params->start_time_ts <= 0 || !params->skip_decoding)
+    if (params->start_time_ts <= 0 || !params->bypass_transcoding)
         return 0;
 
     /* If the format is not dash/hls then return.
