@@ -1937,6 +1937,7 @@ encode_frame(
             "TOENC ", codec_context->frame_number, frame, debug_frame_level);
     }
 
+    // Send the frame to the encoder
     ret = avcodec_send_frame(codec_context, frame);
     if (ret < 0) {
         elv_err("Failed to send frame for encoding err=%d, url=%s", ret, params->url);
@@ -1955,6 +1956,7 @@ encode_frame(
         output_packet->data = NULL;
         output_packet->size = 0;
 
+        // Get the output packet from encoder
         ret = avcodec_receive_packet(codec_context, output_packet);
 
         if (ret == AVERROR(EAGAIN) || ret == AVERROR_EOF) {
@@ -2236,6 +2238,7 @@ transcode_audio(
         return do_bypass(1, decoder_context, encoder_context, packet, p, debug_frame_level);
     }
 
+    // Send the packet to the decoder
     response = avcodec_send_packet(codec_context, packet);
     if (response < 0) {
         /*
@@ -2249,6 +2252,7 @@ transcode_audio(
     }
 
     while (response >= 0) {
+        // Get decoded frame
         response = avcodec_receive_frame(codec_context, frame);
         if (response == AVERROR(EAGAIN) || response == AVERROR_EOF) {
             break;
@@ -3029,7 +3033,10 @@ skip_until_start_time_pts(
     AVPacket *input_packet,
     xcparams_t *params)
 {
-    if (params->start_time_ts <= 0 || !params->bypass_transcoding)
+    /* If start_time_ts > 0 and it is a bypass skip here
+     * Also if start_time_ts > 0 and skip_decoding is set then skip here
+     */
+    if (params->start_time_ts <= 0 || (!params->skip_decoding && !params->bypass_transcoding))
         return 0;
 
     /* If the format is not dash/hls then return.
