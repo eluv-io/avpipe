@@ -1807,13 +1807,6 @@ should_skip_encoding(
         return 1;
     }
 
-    /* Skip beginning based on input packet pts */
-    if (p->skip_over_pts > 0 && frame->pts <= p->skip_over_pts) {
-        elv_dbg("ENCODE SKIP frame early pts=%" PRId64 ", frame_in_pts_offset=%" PRId64 ", skip_over_pts=%" PRId64,
-            frame->pts, frame_in_pts_offset, p->skip_over_pts);
-        return 1;
-    }
-
     /* To allow for packet reordering frames can come with pts past the desired duration */
     if (p->duration_ts > 0) {
         const int64_t max_valid_ts = p->start_time_ts + p->duration_ts;
@@ -3448,10 +3441,6 @@ avpipe_xc(
 
     xctx->do_instrument = do_instrument;
     xctx->debug_frame_level = debug_frame_level;
-
-    elv_dbg("START TIME %d SKIP_PTS %d, START PTS %d (output), DURATION %d",
-        params->start_time_ts, params->skip_over_pts,
-        params->start_pts, params->duration_ts);
 
 #if INPUT_IS_SEEKABLE
     /* Seek to start position */
