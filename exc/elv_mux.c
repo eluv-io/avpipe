@@ -23,6 +23,7 @@ in_mux_opener(
         return -1;
     }
 
+    elv_dbg("IN MUX OPEN fd=%"PRId64, fd);
     *((int *)(inctx->opaque)) = fd;
     return 0;
 }
@@ -120,6 +121,8 @@ read_next_input:
         c->opaque = (int *) calloc(1, sizeof(int));
         if (in_mux_opener(filepath, c) < 0) {
             elv_err("in_mux_read_packet failed to open file=%s", filepath);
+            free(c->opaque);
+            c->opaque = NULL;
             return -1;
         }
         fd = *((int64_t *)(c->opaque));

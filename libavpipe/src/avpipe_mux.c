@@ -343,6 +343,7 @@ avpipe_init_muxer(
     p_xctx->params = params;
     p_xctx->in_handlers = in_handlers;
     p_xctx->out_handlers = out_handlers;
+    p_xctx->debug_frame_level = params->debug_frame_level;
     *xctx = p_xctx;
 
     return eav_success;
@@ -371,8 +372,10 @@ get_next_packet(
             continue;
         AVStream *stream1 = xctx->in_muxer_ctx[i].format_context->streams[0];
         AVStream *stream2 = xctx->in_muxer_ctx[index].format_context->streams[0];
-        if (av_compare_ts(pkts[i].pts, stream1->time_base, pkts[index].pts, stream2->time_base) <= 0)
+        if (av_compare_ts(pkts[i].pts, stream1->time_base, pkts[index].pts, stream2->time_base) <= 0) {
             index = i;
+            break;
+        }
     }
 
     /* If there is no valid packet anymore return */

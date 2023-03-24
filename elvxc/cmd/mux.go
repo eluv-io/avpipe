@@ -117,7 +117,7 @@ func (muxInput *elvxcMuxInput) Stat(statType avpipe.AVStatType, statArgs interfa
 	return nil
 }
 
-//Implement AVPipeOutputOpener
+// Implement AVPipeOutputOpener
 type AVCmdMuxOutputOpener struct {
 }
 

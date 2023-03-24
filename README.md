@@ -61,7 +61,6 @@ typedef struct xcparams_t {
     int     bypass_transcoding;         // if 0 means do transcoding, otherwise bypass transcoding
     char    *format;                    // Output format [Required, Values: dash, hls, mp4, fmp4]
     int64_t start_time_ts;              // Transcode the source starting from this time
-    int64_t skip_over_pts;              // Like start_time_ts but expressed in input pts
     int64_t start_pts;                  // Starting PTS for output
     int64_t duration_ts;                // Transcode time period from start_time_ts (-1 for entire source)
     char    *start_segment_str;         // Specify index of the first segment  TODO: change type to int
