@@ -198,6 +198,9 @@ init_mux_ctx(
         }
     }
 
+    if (in_mux_ctx->video.n_parts == 0)
+        in_mux_ctx->start_index = 1;
+
     if (found_muxing_input <= 0)
         return eav_param;
 
@@ -238,8 +241,10 @@ avpipe_init_muxer(
 
     coderctx_t *out_muxer_ctx = &p_xctx->out_muxer_ctx;
 
+    /* If there is no video (audio only muxing) */
+
     /* Prepare video, audio, captions input muxer */
-    for (int i=0; i<in_mux_ctx->last_audio_index+in_mux_ctx->last_caption_index+1; i++) {
+    for (int i=in_mux_ctx->start_index; i<in_mux_ctx->last_audio_index+in_mux_ctx->last_caption_index+1; i++) {
         ioctx_t *inctx = (ioctx_t *)calloc(1, sizeof(ioctx_t));
         inctx->in_mux_index = i;
         inctx->in_mux_ctx = in_mux_ctx;
@@ -268,7 +273,7 @@ avpipe_init_muxer(
     out_muxer_ctx->format_context->io_open = elv_mux_open;
     out_muxer_ctx->format_context->io_close = elv_mux_close;
 
-    for (int i=0; i<in_mux_ctx->last_audio_index+in_mux_ctx->last_caption_index+1; i++) {
+    for (int i=in_mux_ctx->start_index; i<in_mux_ctx->last_audio_index+in_mux_ctx->last_caption_index+1; i++) {
         /* Add a new stream to output format for each input in muxer context (source) */
         out_muxer_ctx->stream[i] = avformat_new_stream(out_muxer_ctx->format_context, NULL);
 
@@ -360,7 +365,7 @@ get_next_packet(
     int ret = 0;
     int i;
 
-    for (i=0; i<in_mux_ctx->last_audio_index + in_mux_ctx->last_caption_index + 1; i++) {
+    for (i=in_mux_ctx->start_index; i<in_mux_ctx->last_audio_index + in_mux_ctx->last_caption_index + 1; i++) {
         if (xctx->is_pkt_valid[i]) {
             index = i;
             break;
@@ -383,7 +388,9 @@ get_next_packet(
         return 0;
 
     *pkt = pkts[index];
-    pkt->stream_index = index;
+    /* If there is both video and audio set the stream index */
+    if (in_mux_ctx->start_index == 0)
+        pkt->stream_index = index;
     xctx->is_pkt_valid[index] = 0;
 
     pkt->dts = pkt->pts;
@@ -440,7 +447,7 @@ avpipe_mux(
     valid_pkts = xctx->is_pkt_valid;
     in_mux_ctx = xctx->in_mux_ctx;
 
-    for (int i=0; i<in_mux_ctx->last_caption_index + in_mux_ctx->last_audio_index + 1; i++) {
+    for (int i=in_mux_ctx->start_index; i<in_mux_ctx->last_caption_index + in_mux_ctx->last_audio_index + 1; i++) {
         ret = av_read_frame(xctx->in_muxer_ctx[i].format_context, &pkts[i]);
         if (ret >= 0)
             valid_pkts[i] = 1;
@@ -479,7 +486,7 @@ avpipe_mux_fini(
     p_xctx = *xctx;
     in_mux_ctx = p_xctx->in_mux_ctx;
 
-    for (int i=0; i<in_mux_ctx->last_audio_index+in_mux_ctx->last_caption_index+1; i++) {
+    for (int i=in_mux_ctx->start_index; i<in_mux_ctx->last_audio_index+in_mux_ctx->last_caption_index+1; i++) {
         avcodec_close(p_xctx->in_muxer_ctx[i].codec_context[0]);
         avcodec_free_context(&p_xctx->in_muxer_ctx[i].codec_context[0]);
 

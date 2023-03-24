@@ -117,6 +117,7 @@ typedef struct mux_input_ctx_t {
 typedef struct io_mux_ctx_t {
     char            *out_filename;              /* Output filename/url for this muxing */
     char            *mux_type;                  /* "mux-mez" or "mux-abr" */
+    int             start_index;                /* video always is at index 0, if there is no video start_index is 1 */
     mux_input_ctx_t video;
     int64_t         last_video_pts;
     int             last_audio_index;
