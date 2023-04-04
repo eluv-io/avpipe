@@ -1724,9 +1724,6 @@ should_extract_frame(
     xcparams_t *p,
     AVFrame *frame)
 {
-    if (p->xc_type == xc_extract_all_images)
-        return 1;
-
     if (p->xc_type != xc_extract_images)
         return 0;
 
