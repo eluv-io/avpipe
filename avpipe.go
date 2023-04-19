@@ -166,7 +166,6 @@ type XcParams struct {
 	BypassTranscoding      bool               `json:"bypass,omitempty"`
 	Format                 string             `json:"format,omitempty"`
 	StartTimeTs            int64              `json:"start_time_ts,omitempty"`
-	SkipOverPts            int64              `json:"skip_over_pts,omitempty"`
 	StartPts               int64              `json:"start_pts,omitempty"` // Start PTS for output
 	DurationTs             int64              `json:"duration_ts,omitempty"`
 	StartSegmentStr        string             `json:"start_segment_str,omitempty"`
@@ -1161,7 +1160,6 @@ func getCParams(params *XcParams) (*C.xcparams_t, error) {
 		url:                       C.CString(params.Url),
 		format:                    C.CString(params.Format),
 		start_time_ts:             C.int64_t(params.StartTimeTs),
-		skip_over_pts:             C.int64_t(params.SkipOverPts),
 		start_pts:                 C.int64_t(params.StartPts),
 		duration_ts:               C.int64_t(params.DurationTs),
 		start_segment_str:         C.CString(params.StartSegmentStr),

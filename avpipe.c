@@ -1031,7 +1031,7 @@ in_mux_opener(
 
     if (size > 0)
         inctx->sz = size;
-    elv_dbg("IN MUX OPEN fd=%"PRId64", size=%"PRId64, fd, size);
+    elv_dbg("IN MUX OPEN url=%s, fd=%"PRId64", size=%"PRId64, url, fd, size);
 
     *((int64_t *)(inctx->opaque)) = fd;
     return 0;
@@ -1253,7 +1253,7 @@ set_mux_handlers(
 {
     if (p_in_handlers) {
         avpipe_io_handler_t *in_handlers = (avpipe_io_handler_t *)calloc(1, sizeof(avpipe_io_handler_t));
-        in_handlers->avpipe_opener = in_opener;
+        in_handlers->avpipe_opener = in_mux_opener;
         in_handlers->avpipe_closer = in_closer;
         in_handlers->avpipe_reader = in_mux_read_packet;
         in_handlers->avpipe_writer = in_write_packet;

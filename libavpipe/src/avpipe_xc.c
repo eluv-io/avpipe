@@ -1805,10 +1805,6 @@ should_skip_encoding(
     else
         frame_in_pts_offset = frame->pts - decoder_context->video_input_start_pts;
 
-    /* If there is no video transcoding return 0 */
-    if ((p->xc_type & xc_video) == 0)
-        return 0;
-
     /* Drop frames before the desired 'start_time'
      * If the format is dash or hls, we skip the frames in skip_until_start_time_pts()
      * without decoding the frame.
@@ -1825,13 +1821,6 @@ should_skip_encoding(
     } else if (p->start_time_ts > 0 && frame_in_pts_offset < p->start_time_ts) {
         elv_dbg("ENCODE SKIP frame early pts=%" PRId64 ", frame_in_pts_offset=%" PRId64 ", start_time_ts=%" PRId64,
             frame->pts, frame_in_pts_offset, p->start_time_ts);
-        return 1;
-    }
-
-    /* Skip beginning based on input packet pts */
-    if (p->skip_over_pts > 0 && frame->pts <= p->skip_over_pts) {
-        elv_dbg("ENCODE SKIP frame early pts=%" PRId64 ", frame_in_pts_offset=%" PRId64 ", skip_over_pts=%" PRId64,
-            frame->pts, frame_in_pts_offset, p->skip_over_pts);
         return 1;
     }
 
@@ -1958,6 +1947,7 @@ encode_frame(
             "TOENC ", codec_context->frame_number, frame, debug_frame_level);
     }
 
+    // Send the frame to the encoder
     ret = avcodec_send_frame(codec_context, frame);
     if (ret < 0) {
         elv_err("Failed to send frame for encoding err=%d, url=%s", ret, params->url);
@@ -1976,6 +1966,7 @@ encode_frame(
         output_packet->data = NULL;
         output_packet->size = 0;
 
+        // Get the output packet from encoder
         ret = avcodec_receive_packet(codec_context, output_packet);
 
         if (ret == AVERROR(EAGAIN) || ret == AVERROR_EOF) {
@@ -2257,6 +2248,7 @@ transcode_audio(
         return do_bypass(1, decoder_context, encoder_context, packet, p, debug_frame_level);
     }
 
+    // Send the packet to the decoder
     response = avcodec_send_packet(codec_context, packet);
     if (response < 0) {
         /*
@@ -2270,6 +2262,7 @@ transcode_audio(
     }
 
     while (response >= 0) {
+        // Get decoded frame
         response = avcodec_receive_frame(codec_context, frame);
         if (response == AVERROR(EAGAIN) || response == AVERROR_EOF) {
             break;
@@ -3050,7 +3043,10 @@ skip_until_start_time_pts(
     AVPacket *input_packet,
     xcparams_t *params)
 {
-    if (params->start_time_ts <= 0 || !params->skip_decoding)
+    /* If start_time_ts > 0 and it is a bypass skip here
+     * Also if start_time_ts > 0 and skip_decoding is set then skip here
+     */
+    if (params->start_time_ts <= 0 || (!params->skip_decoding && !params->bypass_transcoding))
         return 0;
 
     /* If the format is not dash/hls then return.
@@ -3462,10 +3458,6 @@ avpipe_xc(
 
     xctx->do_instrument = do_instrument;
     xctx->debug_frame_level = debug_frame_level;
-
-    elv_dbg("START TIME %d SKIP_PTS %d, START PTS %d (output), DURATION %d",
-        params->start_time_ts, params->skip_over_pts,
-        params->start_pts, params->duration_ts);
 
 #if INPUT_IS_SEEKABLE
     /* Seek to start position */
