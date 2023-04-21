@@ -2038,8 +2038,8 @@ encode_frame(
             output_packet->pts != AV_NOPTS_VALUE)
             encoder_context->video_encoder_prev_pts = output_packet->pts;
 
-        if (selected_decoded_audio(decoder_context, stream_index) >= 0) {
-            elv_log("OUT decoder_context->codec_context[i]->time_base=%d/%d, decoder_context->stream[i]->time_base=%d/%d, encoder_context->stream[i]->time_base=%d/%d, encoder_context->codec_context[i]->time_base=%d/%d, format_context->streams[0]->time_base=%d/%d, codec=%s, output_packet->pts=%"PRId64", packet->duration=%d",
+        if (params->debug_frame_level && selected_decoded_audio(decoder_context, stream_index) >= 0) {
+            elv_dbg("OUT decoder_context->codec_context[i]->time_base=%d/%d, decoder_context->stream[i]->time_base=%d/%d, encoder_context->stream[i]->time_base=%d/%d, encoder_context->codec_context[i]->time_base=%d/%d, format_context->streams[0]->time_base=%d/%d, codec=%s, output_packet->pts=%"PRId64", packet->duration=%d",
                 decoder_context->codec_context[stream_index]->time_base.num,
                 decoder_context->codec_context[stream_index]->time_base.den,
                 decoder_context->stream[stream_index]->time_base.num,
