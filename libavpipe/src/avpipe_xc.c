@@ -1649,13 +1649,12 @@ set_idr_frame_key_flag(
         return;
 
     /*
-     * If format is "dash" or "hls" then don't clear the flag, because dash/hls uses pict_type to determine end of segment.
-     * The reset of the formats would be good to clear before encoding (see doc/examples/transcoding.c).
+     * If frame is key frame or IDR key frame, then clear pict_type and let the encoder decides for pict_type.
+     * AV_PICTURE_TYPE_I = Intra frame
+     * AV_PICTURE_TYPE_SI = Switching Intra frame
      */
-#if 0
-    if (strcmp(params->format, "dash") && strcmp(params->format, "hls"))
+    if (frame->pict_type == AV_PICTURE_TYPE_I || frame->pict_type == AV_PICTURE_TYPE_SI)
         frame->pict_type = AV_PICTURE_TYPE_NONE;
-#endif
 
     /*
      * Set key frame in the beginning of every abr segment.
