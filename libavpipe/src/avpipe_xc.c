@@ -3070,11 +3070,11 @@ skip_for_sync(
         return 0;
 
     /* No need to sync if:
-     * - it is not mpeg ts
+     * - it is not mpegts and not rtmp
      * - or it is already synced
      * - or format is not fmp4-segment.
      */
-    if (!decoder_context->is_mpegts ||
+    if ((!decoder_context->is_mpegts && !decoder_context->is_rtmp) ||
         decoder_context->mpegts_synced ||
         strcmp(params->format, "fmp4-segment"))
         return 0;
