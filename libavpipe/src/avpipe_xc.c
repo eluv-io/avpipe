@@ -1653,7 +1653,8 @@ set_idr_frame_key_flag(
      * AV_PICTURE_TYPE_I = Intra frame
      * AV_PICTURE_TYPE_SI = Switching Intra frame
      */
-    if (frame->pict_type == AV_PICTURE_TYPE_I || frame->pict_type == AV_PICTURE_TYPE_SI)
+    if (strcmp(params->format, "dash") && strcmp(params->format, "hls") &&
+        (frame->pict_type == AV_PICTURE_TYPE_I || frame->pict_type == AV_PICTURE_TYPE_SI))
         frame->pict_type = AV_PICTURE_TYPE_NONE;
 
     /*
