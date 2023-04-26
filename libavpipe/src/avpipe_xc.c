@@ -1637,6 +1637,7 @@ prepare_encoder(
 static void
 set_idr_frame_key_flag(
     AVFrame *frame,
+    coderctx_t *decoder_context,
     coderctx_t *encoder_context,
     xcparams_t *params,
     int debug_frame_level)
@@ -1653,8 +1654,13 @@ set_idr_frame_key_flag(
      * AV_PICTURE_TYPE_I = Intra frame
      * AV_PICTURE_TYPE_SI = Switching Intra frame
      */
+#if 0
     if (strcmp(params->format, "dash") && strcmp(params->format, "hls") &&
-        (frame->pict_type == AV_PICTURE_TYPE_I || frame->pict_type == AV_PICTURE_TYPE_SI))
+        (frame->pict_type == AV_PICTURE_TYPE_I || frame->pict_type == AV_PICTURE_TYPE_SI || frame->pict_type == AV_PICTURE_TYPE_BI))
+#else
+    if (decoder_context->codec_parameters[decoder_context->video_stream_index]->codec_id == 147 ||
+        decoder_context->codec_parameters[decoder_context->video_stream_index]->codec_id == 88)
+#endif
         frame->pict_type = AV_PICTURE_TYPE_NONE;
 
     /*
@@ -1914,7 +1920,7 @@ encode_frame(
         // Signal if we need IDR frames
         if (params->xc_type & xc_video &&
             stream_index == decoder_context->video_stream_index) {
-            set_idr_frame_key_flag(frame, encoder_context, params, debug_frame_level);
+            set_idr_frame_key_flag(frame, decoder_context, encoder_context, params, debug_frame_level);
         }
 
         // Special case to extract the first frame image
