@@ -117,6 +117,10 @@ func (muxInput *elvxcMuxInput) Stat(statType avpipe.AVStatType, statArgs interfa
 	return nil
 }
 
+func (muxInput *elvxcMuxInput) FrameReady(frameNumber int, params *avpipe.XcParams, avFrame *avpipe.AvFrame) int {
+	return 0
+}
+
 // Implement AVPipeOutputOpener
 type AVCmdMuxOutputOpener struct {
 }

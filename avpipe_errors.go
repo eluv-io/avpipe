@@ -109,6 +109,9 @@ var EAV_IO_TIMEOUT = errors.New("EAV_IO_TIMEOUT")
 // EAV_BAD_HANDLE is the error returned when the transcoding session handle is not valid
 var EAV_BAD_HANDLE = errors.New("EAV_BAD_HANDLE")
 
+// EAV_BAD_FRAME is the error returned when verifying decoded/encoded frames and the frame is bad
+var EAV_BAD_FRAME = errors.New("EAV_BAD_FRAME")
+
 // EAV_UNKNOWN is the error returned when error code doesn't exist in avpipeErrors table (below).
 var EAV_UNKNOWN = errors.New("EAV_UNKNOWN")
 
@@ -139,6 +142,7 @@ var avpipeErrors = map[int]error{
 	int(C.eav_pts_wrapped):          EAV_PTS_WRAPPED,
 	int(C.eav_io_timeout):           EAV_IO_TIMEOUT,
 	int(C.eav_bad_handle):           EAV_BAD_HANDLE,
+	int(C.eav_bad_frame):            EAV_BAD_FRAME,
 }
 
 func avpipeError(code C.int) error {

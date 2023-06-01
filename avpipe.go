@@ -1,16 +1,15 @@
 /*
 Package avpipe has four main interfaces that has to be implemented by the client code:
 
-  1) InputOpener: is the input factory interface that needs an implementation to generate an InputHandler.
+ 1. InputOpener: is the input factory interface that needs an implementation to generate an InputHandler.
 
-  2) InputHandler: is the input handler with Read/Seek/Size/Close methods. An implementation of this
-     interface is needed by ffmpeg to process input streams properly.
+ 2. InputHandler: is the input handler with Read/Seek/Size/Close methods. An implementation of this
+    interface is needed by ffmpeg to process input streams properly.
 
-  3) OutputOpener: is the output factory interface that needs an implementation to generate an OutputHandler.
+ 3. OutputOpener: is the output factory interface that needs an implementation to generate an OutputHandler.
 
-  4) OutputHandler: is the output handler with Write/Seek/Close methods. An implementation of this
-     interface is needed by ffmpeg to write encoded streams properly.
-
+ 4. OutputHandler: is the output handler with Write/Seek/Close methods. An implementation of this
+    interface is needed by ffmpeg to write encoded streams properly.
 */
 package avpipe
 
@@ -82,16 +81,17 @@ type XcType int
 
 const (
 	XcNone             XcType = iota
-	XcVideo                   = 1
-	XcAudio                   = 2
-	XcAll                     = 3  // XcAudio | XcVideo
-	XcAudioMerge              = 6  // XcAudio | 0x04
-	XcAudioJoin               = 10 // XcAudio | 0x08
-	XcAudioPan                = 18 // XcAudio | 0x10
-	XcMux                     = 32
+	XcVideo                   = 1   // XcVideo
+	XcAudio                   = 2   // XcAudio
+	XcAll                     = 3   // XcAudio | XcVideo
+	XcAudioMerge              = 6   // XcAudio | 0x04
+	XcAudioJoin               = 10  // XcAudio | 0x08
+	XcAudioPan                = 18  // XcAudio | 0x10
+	XcMux                     = 32  // XcMux
 	XcExtractImages           = 65  // XcVideo | 2^6
 	XcExtractAllImages        = 129 // XcVideo | 2^7
 	Xcprobe                   = 256
+	XcVerify                  = 512
 )
 
 type XcProfile int
@@ -112,6 +112,8 @@ func XcTypeFromString(xcTypeStr string) XcType {
 		xcType = XcVideo
 	case "audio":
 		xcType = XcAudio
+	case "verify":
+		xcType = XcVerify
 	case "audio-join":
 		xcType = XcAudioJoin
 	case "audio-merge":
@@ -354,6 +356,41 @@ type ProbeInfo struct {
 	StreamInfo    []StreamInfo  `json:"streams"`
 }
 
+type AVPictType int
+
+const (
+	AVPictureTypeI  = 1
+	AVPictureTypeP  = 2
+	AVPictureTypeB  = 3
+	AVPictureTypeS  = 4
+	AVPictureTypeSI = 5
+	AVPictureTypeSP = 6
+	AVPictureTypeBI = 7
+)
+
+// This is a portion of FFmpeg AVFrame (only useful meta)
+type AvFrame struct {
+	Width             int          // Width of video frame
+	Height            int          // Height of video frame
+	NbSamples         int          // Number of audio samples
+	Format            int          // AVPixelFormat for video, AVSampleFormat for audio
+	KeyFrame          bool         // Is key frame (video)
+	PictType          AVPictType   // Picture type (video AVPictureType)
+	AspectRatio       C.AVRational // Sample aspect ratio
+	Pts               int64        // Presentation time stamp
+	Dts               int64        // Packet dts
+	CodedPictNumber   int          // Picture number in bitstream order
+	DisplayPictNumber int          // Display picture number
+	Quality           int          // Quality between 1 (good) and FF_LAMBDA_MAX (bad)
+	RepeatPict        int          // Repeating picture
+	InterlacedFrame   bool         // Interlaced ?
+	TopFieldFirst     bool         // If it is interlaced, top field first?
+	SampleRate        int          // Sample rate of audio
+	ChannelLayout     uint64       // Audio channel layout
+	PacketDuration    int64        // Packet duration
+	Channels          int          // Number of audio channels
+}
+
 // IOHandler defines handlers that will be called from the C interface functions
 type IOHandler interface {
 	InReader(buf []byte) (int, error)
@@ -388,6 +425,9 @@ type InputHandler interface {
 
 	// Reports some stats
 	Stat(statType AVStatType, statArgs interface{}) error
+
+	// Invokes in xc_verify mode and notifies a frame is decoded / encoded.
+	FrameReady(frameNumber int, params *XcParams, avFrame *AvFrame) int
 }
 
 type OutputOpener interface {
@@ -708,6 +748,24 @@ func AVPipeStatInput(fd C.int64_t, avp_stat C.avp_stat_t, stat_args unsafe.Point
 	}
 
 	return C.int(0)
+}
+
+//export AVPipeFrameReady
+func AVPipeFrameReady(fd C.int64_t, frame_num C.int, frame unsafe.Pointer, params unsafe.Pointer) C.int {
+	gMutex.Lock()
+	h := gHandlers[int64(fd)]
+	if h == nil {
+		gMutex.Unlock()
+		return C.int(-1)
+	}
+	gMutex.Unlock()
+
+	xcParams := getGoParams(params)
+	avFrame := getAvFrame(frame)
+	ret := h.input.FrameReady(int(frame_num), xcParams, avFrame)
+	//fmt.Printf("frame_num=%d, xcParams=%v, avFrame=%v\n", int(frame_num), xcParams, avFrame)
+
+	return C.int(ret)
 }
 
 func (h *ioHandler) InStat(avp_stat C.avp_stat_t, stat_args unsafe.Pointer) error {
@@ -1149,6 +1207,167 @@ func SetCLoggers() {
 // GetVersion ...
 func Version() string {
 	return C.GoString((*C.char)(unsafe.Pointer(C.avpipe_version())))
+}
+
+func getAVPictureType(pictType C.unsigned) AVPictType {
+	var avPictType AVPictType
+	switch pictType {
+	case C.AV_PICTURE_TYPE_I:
+		avPictType = AVPictureTypeI
+	case C.AV_PICTURE_TYPE_B:
+		avPictType = AVPictureTypeB
+	case C.AV_PICTURE_TYPE_P:
+		avPictType = AVPictureTypeP
+	case C.AV_PICTURE_TYPE_SI:
+		avPictType = AVPictureTypeSI
+	case C.AV_PICTURE_TYPE_BI:
+		avPictType = AVPictureTypeBI
+	case C.AV_PICTURE_TYPE_SP:
+		avPictType = AVPictureTypeSP
+	}
+
+	return avPictType
+}
+
+func getAvFrame(ptr unsafe.Pointer) *AvFrame {
+	frame := (*C.AVFrame)(ptr)
+	avFrame := &AvFrame{
+		Width:             int(frame.width),
+		Height:            int(frame.height),
+		NbSamples:         int(frame.nb_samples),
+		Format:            int(frame.format),
+		PictType:          getAVPictureType(C.unsigned(frame.pict_type)),
+		AspectRatio:       frame.sample_aspect_ratio,
+		Pts:               int64(frame.pts),
+		Dts:               int64(frame.pkt_dts),
+		CodedPictNumber:   int(frame.coded_picture_number),
+		DisplayPictNumber: int(frame.display_picture_number),
+		Quality:           int(frame.quality),
+		RepeatPict:        int(frame.repeat_pict),
+		SampleRate:        int(frame.sample_rate),
+		ChannelLayout:     uint64(frame.channel_layout),
+		PacketDuration:    int64(frame.pkt_duration),
+		Channels:          int(frame.channels),
+	}
+
+	if int(frame.key_frame) > 0 {
+		avFrame.KeyFrame = true
+	}
+
+	if int(frame.interlaced_frame) > 0 {
+		avFrame.InterlacedFrame = true
+	}
+
+	if int(frame.top_field_first) > 0 {
+		avFrame.TopFieldFirst = true
+	}
+
+	return avFrame
+}
+
+func getGoParams(params unsafe.Pointer) *XcParams {
+	cParams := (*C.xcparams_t)(params)
+	xcParams := &XcParams{
+		Url:                    C.GoString((*C.char)(unsafe.Pointer(cParams.url))),
+		Format:                 C.GoString((*C.char)(unsafe.Pointer(cParams.format))),
+		StartTimeTs:            int64(cParams.start_time_ts),
+		StartPts:               int64(cParams.start_pts),
+		DurationTs:             int64(cParams.duration_ts),
+		StartSegmentStr:        C.GoString((*C.char)(unsafe.Pointer(cParams.start_segment_str))),
+		VideoBitrate:           int32(cParams.video_bitrate),
+		AudioBitrate:           int32(cParams.audio_bitrate),
+		SampleRate:             int32(cParams.sample_rate),
+		CrfStr:                 C.GoString((*C.char)(unsafe.Pointer(cParams.crf_str))),
+		Preset:                 C.GoString((*C.char)(unsafe.Pointer(cParams.preset))),
+		RcMaxRate:              int32(cParams.rc_max_rate),
+		RcBufferSize:           int32(cParams.rc_buffer_size),
+		AudioSegDurationTs:     int64(cParams.audio_seg_duration_ts),
+		VideoSegDurationTs:     int64(cParams.video_seg_duration_ts),
+		SegDuration:            C.GoString((*C.char)(unsafe.Pointer(cParams.seg_duration))),
+		StartFragmentIndex:     int32(cParams.start_fragment_index),
+		ForceKeyInt:            int32(cParams.force_keyint),
+		Ecodec:                 C.GoString((*C.char)(unsafe.Pointer(cParams.ecodec))),
+		Ecodec2:                C.GoString((*C.char)(unsafe.Pointer(cParams.ecodec2))),
+		Dcodec:                 C.GoString((*C.char)(unsafe.Pointer(cParams.dcodec))),
+		Dcodec2:                C.GoString((*C.char)(unsafe.Pointer(cParams.dcodec2))),
+		EncHeight:              int32(cParams.enc_height),
+		EncWidth:               int32(cParams.enc_width),
+		CryptIV:                C.GoString((*C.char)(unsafe.Pointer(cParams.crypt_iv))),
+		CryptKey:               C.GoString((*C.char)(unsafe.Pointer(cParams.crypt_key))),
+		CryptKID:               C.GoString((*C.char)(unsafe.Pointer(cParams.crypt_kid))),
+		CryptKeyURL:            C.GoString((*C.char)(unsafe.Pointer(cParams.crypt_key_url))),
+		CryptScheme:            CryptScheme(cParams.crypt_scheme),
+		XcType:                 XcType(cParams.xc_type),
+		WatermarkText:          C.GoString((*C.char)(unsafe.Pointer(cParams.watermark_text))),
+		WatermarkTimecode:      C.GoString((*C.char)(unsafe.Pointer(cParams.watermark_timecode))),
+		WatermarkTimecodeRate:  float32(cParams.watermark_timecode_rate),
+		WatermarkXLoc:          C.GoString((*C.char)(unsafe.Pointer(cParams.watermark_xloc))),
+		WatermarkYLoc:          C.GoString((*C.char)(unsafe.Pointer(cParams.watermark_yloc))),
+		WatermarkRelativeSize:  float32(cParams.watermark_relative_sz),
+		WatermarkFontColor:     C.GoString((*C.char)(unsafe.Pointer(cParams.watermark_font_color))),
+		WatermarkShadowColor:   C.GoString((*C.char)(unsafe.Pointer(cParams.watermark_shadow_color))),
+		WatermarkOverlay:       C.GoString((*C.char)(unsafe.Pointer(cParams.watermark_overlay))),
+		WatermarkOverlayLen:    int(cParams.watermark_overlay_len),
+		WatermarkOverlayType:   ImageType(cParams.watermark_overlay_type),
+		NumAudio:               int32(cParams.n_audio),
+		ChannelLayout:          int(cParams.channel_layout),
+		StreamId:               int32(cParams.stream_id),
+		MaxCLL:                 C.GoString((*C.char)(unsafe.Pointer(cParams.max_cll))),
+		MasterDisplay:          C.GoString((*C.char)(unsafe.Pointer(cParams.master_display))),
+		BitDepth:               int32(cParams.bitdepth),
+		MuxingSpec:             C.GoString((*C.char)(unsafe.Pointer(cParams.mux_spec))),
+		SyncAudioToStreamId:    int(cParams.sync_audio_to_stream_id),
+		GPUIndex:               int32(cParams.gpu_index),
+		ConnectionTimeout:      int(cParams.connection_timeout),
+		FilterDescriptor:       C.GoString((*C.char)(unsafe.Pointer(cParams.filter_descriptor))),
+		ExtractImageIntervalTs: int64(cParams.extract_image_interval_ts),
+	}
+
+	if cParams.bypass_transcoding == C.int(1) {
+		xcParams.BypassTranscoding = true
+	}
+
+	if cParams.seekable == C.int(1) {
+		xcParams.Seekable = true
+	}
+
+	if cParams.watermark_shadow == C.int(1) {
+		xcParams.WatermarkShadow = true
+	}
+
+	if cParams.force_equal_fduration == C.int(1) {
+		xcParams.ForceEqualFDuration = true
+	}
+
+	if cParams.audio_fill_gap == C.int(1) {
+		xcParams.AudioFillGap = true
+	}
+
+	if cParams.skip_decoding == C.int(1) {
+		xcParams.SkipDecoding = true
+	}
+
+	if cParams.listen == C.int(1) {
+		xcParams.Listen = true
+	}
+
+	if cParams.debug_frame_level == C.int(1) {
+		xcParams.DebugFrameLevel = true
+	}
+
+	for i := 0; i < int(xcParams.NumAudio); i++ {
+		xcParams.AudioIndex[i] = int32(cParams.audio_index[i])
+	}
+
+	if int(cParams.extract_images_sz) > 0 {
+		xcParams.ExtractImagesTs = make([]int64, int(cParams.extract_images_sz))
+		for i := 0; i < int(cParams.extract_images_sz); i++ {
+			//xcParams.ExtractImagesTs[i] = int64((*C.int64_t)((unsafe.Pointer)(cParams.extract_images_ts))[i])
+			xcParams.ExtractImagesTs[i] = int64(C.get_extract_images(cParams, C.int(i)))
+		}
+	}
+
+	return xcParams
 }
 
 func getCParams(params *XcParams) (*C.xcparams_t, error) {

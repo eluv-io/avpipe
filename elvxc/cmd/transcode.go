@@ -1,5 +1,6 @@
 package cmd
 
+import "C"
 import (
 	"fmt"
 	"io"
@@ -18,7 +19,7 @@ type elvxcInputOpener struct {
 }
 
 func (io *elvxcInputOpener) Open(fd int64, url string) (avpipe.InputHandler, error) {
-	log.Debug("AVCMD InputOpener.Open", "fd", fd, "url", url)
+	log.Debug("elvxcInputOpener.Open", "fd", fd, "url", url)
 
 	if (len(url) >= 4 && url[0:4] == "rtmp") || (len(url) >= 3 && url[0:3] == "udp") {
 		return &elvxcInput{url: url}, nil
@@ -85,22 +86,38 @@ func (i *elvxcInput) Stat(statType avpipe.AVStatType, statArgs interface{}) erro
 	switch statType {
 	case avpipe.AV_IN_STAT_BYTES_READ:
 		readOffset := statArgs.(*uint64)
-		log.Info("AVCMD InputHandler.Stat", "read offset", *readOffset)
+		log.Info("elvxcInput.Stat", "read offset", *readOffset)
 	case avpipe.AV_IN_STAT_AUDIO_FRAME_READ:
 		audioFrameRead := statArgs.(*uint64)
-		log.Info("AVCMD InputHandler.Stat", "audioFrameRead", *audioFrameRead)
+		log.Info("elvxcInput.Stat", "audioFrameRead", *audioFrameRead)
 	case avpipe.AV_IN_STAT_VIDEO_FRAME_READ:
 		videoFrameRead := statArgs.(*uint64)
-		log.Info("AVCMD InputHandler.Stat", "videoFrameRead", *videoFrameRead)
+		log.Info("elvxcInputOpener.Stat", "videoFrameRead", *videoFrameRead)
 	case avpipe.AV_IN_STAT_DECODING_AUDIO_START_PTS:
 		startPTS := statArgs.(*uint64)
-		log.Info("AVCMD InputHandler.Stat", "audio start PTS", *startPTS)
+		log.Info("elvxcInputOpener.Stat", "audio start PTS", *startPTS)
 	case avpipe.AV_IN_STAT_DECODING_VIDEO_START_PTS:
 		startPTS := statArgs.(*uint64)
-		log.Info("AVCMD InputHandler.Stat", "video start PTS", *startPTS)
+		log.Info("elvxcInputOpener.Stat", "video start PTS", *startPTS)
 	}
 
 	return nil
+}
+
+// This is invoked only vith xc_verify mode.
+func (i *elvxcInput) FrameReady(frameNumber int, params *avpipe.XcParams, avFrame *avpipe.AvFrame) int {
+	forceKeyint := int32(0)
+	if params != nil {
+		forceKeyint = params.ForceKeyInt
+	}
+
+	// If it is video frame
+	if avFrame.Channels == 0 && forceKeyint > 0 && frameNumber%int(forceKeyint) == 1 {
+		if !avFrame.KeyFrame || (avFrame.PictType != avpipe.AVPictureTypeI && avFrame.PictType != avpipe.AVPictureTypeSI) {
+			return 1
+		}
+	}
+	return 0
 }
 
 // elvxcOutputOpener implements avpipe.OutputOpener
@@ -111,7 +128,7 @@ type elvxcOutputOpener struct {
 func (oo *elvxcOutputOpener) Open(h, fd int64, stream_index, seg_index int,
 	pts int64, out_type avpipe.AVType) (avpipe.OutputHandler, error) {
 
-	log.Debug("AVCMD OutputOpener.Open", "h", h, "fd", fd,
+	log.Debug("elvxcOutputOpener.Open", "h", h, "fd", fd,
 		"stream_index", stream_index, "seg_index", seg_index, "pts", pts, "out_type", out_type)
 
 	var filename string
@@ -198,13 +215,13 @@ func (o *elvxcOutput) Stat(avType avpipe.AVType, statType avpipe.AVStatType, sta
 	switch statType {
 	case avpipe.AV_OUT_STAT_BYTES_WRITTEN:
 		writeOffset := statArgs.(*uint64)
-		log.Info("AVCMD OutputHandler.Stat", "write offset", *writeOffset)
+		log.Info("elvxcOutput.Stat", "write offset", *writeOffset)
 	case avpipe.AV_OUT_STAT_ENCODING_END_PTS:
 		endPTS := statArgs.(*uint64)
-		log.Info("AVCMD OutputHandler.Stat", "endPTS", *endPTS)
+		log.Info("elvxcOutput.Stat", "endPTS", *endPTS)
 	case avpipe.AV_OUT_STAT_FRAME_WRITTEN:
 		encodingStats := statArgs.(*avpipe.EncodingFrameStats)
-		log.Info("AVCMD OutputHandler.Stat", "avType", avType,
+		log.Info("elvxcOutput.Stat", "avType", avType,
 			"encodingStats", encodingStats)
 	}
 	return nil
@@ -467,9 +484,10 @@ func doTranscode(cmd *cobra.Command, args []string) error {
 		xcTypeStr != "audio-join" &&
 		xcTypeStr != "audio-pan" &&
 		xcTypeStr != "audio-merge" &&
+		xcTypeStr != "verify" &&
 		xcTypeStr != "extract-images" &&
 		xcTypeStr != "extract-all-images" {
-		return fmt.Errorf("Transcoding type is not valid, with no stream-id can be 'all', 'video', 'audio', 'audio-join', 'audio-pan', 'audio-merge', or 'extract-images'")
+		return fmt.Errorf("Transcoding type is not valid, with no stream-id can be 'all', 'video', 'audio', 'audio-join', 'audio-pan', 'verify', 'audio-merge', or 'extract-images'")
 	}
 	xcType := avpipe.XcTypeFromString(xcTypeStr)
 	if xcType == avpipe.XcAudio && len(encoder) == 0 {

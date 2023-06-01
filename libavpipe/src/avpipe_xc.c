@@ -432,6 +432,7 @@ prepare_decoder(
             elv_dbg("VIDEO STREAM %d, codec_id=%s, stream_id=%d, timebase=%d, xc_type=%d, url=%s",
                 i, avcodec_get_name(decoder_context->codec_parameters[i]->codec_id), decoder_context->stream[i]->id,
                 decoder_context->stream[i]->time_base.den, params ? params->xc_type : xc_none, url);
+            elv_dbg("VIDEO coded id=%d", decoder_context->codec_parameters[i]->codec_id);
             break;
 
         case AVMEDIA_TYPE_AUDIO:
@@ -1637,6 +1638,7 @@ prepare_encoder(
 static void
 set_idr_frame_key_flag(
     AVFrame *frame,
+    coderctx_t *decoder_context,
     coderctx_t *encoder_context,
     xcparams_t *params,
     int debug_frame_level)
@@ -1653,8 +1655,12 @@ set_idr_frame_key_flag(
      * AV_PICTURE_TYPE_I = Intra frame
      * AV_PICTURE_TYPE_SI = Switching Intra frame
      */
+#if 0
     if (strcmp(params->format, "dash") && strcmp(params->format, "hls") &&
         (frame->pict_type == AV_PICTURE_TYPE_I || frame->pict_type == AV_PICTURE_TYPE_SI))
+#endif
+    if (decoder_context->codec_parameters[decoder_context->video_stream_index]->codec_id == 147 ||
+        decoder_context->codec_parameters[decoder_context->video_stream_index]->codec_id == 88)
         frame->pict_type = AV_PICTURE_TYPE_NONE;
 
     /*
@@ -1914,7 +1920,7 @@ encode_frame(
         // Signal if we need IDR frames
         if (params->xc_type & xc_video &&
             stream_index == decoder_context->video_stream_index) {
-            set_idr_frame_key_flag(frame, encoder_context, params, debug_frame_level);
+            set_idr_frame_key_flag(frame, decoder_context, encoder_context, params, debug_frame_level);
         }
 
         // Special case to extract the first frame image
@@ -2099,6 +2105,16 @@ encode_frame(
             out_handlers->avpipe_stater(outctx, out_stat_frame_written);
         }
 
+
+        /* Verify output packet if it is xc_verify */
+        if (params->xc_type & xc_verify && out_handlers->avpipe_packet_ready) {
+            ret = out_handlers->avpipe_packet_ready(outctx, stream_index == decoder_context->video_stream_index, output_packet);
+            if (ret != 0) {
+                ret = eav_bad_frame;
+                break;
+            }
+        }
+
         /* mux encoded frame */
         ret = av_interleaved_write_frame(format_context, output_packet);
         if (ret != 0) {
@@ -2219,6 +2235,7 @@ transcode_audio(
 {
     int ret;
     AVCodecContext *codec_context = decoder_context->codec_context[stream_index];
+    avpipe_io_handler_t *in_handlers = decoder_context->in_handlers;
     int audio_enc_stream_index = encoder_context->audio_enc_stream_index;
     int response;
 
@@ -2255,6 +2272,14 @@ transcode_audio(
             elv_err("Failure while receiving a frame from the decoder: %s, url=%s",
                 av_err2str(response), p->url);
             return eav_receive_frame;
+        }
+
+        if (p->xc_type == xc_verify && in_handlers->avpipe_frame_ready) {
+            ret = in_handlers->avpipe_frame_ready(decoder_context->inctx, codec_context->frame_number, frame);
+            av_frame_unref(frame);
+            if (ret != 0)
+                return eav_bad_frame;
+            return eav_success;
         }
 
         if (decoder_context->first_decoding_audio_pts < 0)
@@ -2524,6 +2549,7 @@ transcode_video(
     struct timeval tv;
     u_int64_t since;
     AVCodecContext *codec_context = decoder_context->codec_context[stream_index];
+    avpipe_io_handler_t *in_handlers = decoder_context->in_handlers;
     int response;
 
     if (debug_frame_level)
@@ -2584,6 +2610,14 @@ transcode_video(
             elv_err("Failure while receiving a frame from the decoder: %s, url=%s",
                 av_err2str(response), p->url);
             return eav_receive_frame;
+        }
+
+        if (p->xc_type == xc_verify && in_handlers->avpipe_frame_ready) {
+            ret = in_handlers->avpipe_frame_ready(decoder_context->inctx, codec_context->frame_number, frame);
+            av_frame_unref(frame);
+            if (ret != 0)
+                return eav_bad_frame;
+            return eav_success;
         }
 
         if (decoder_context->first_decoding_video_pts < 0)
@@ -2651,12 +2685,6 @@ transcode_video(
                 elv_since(&tv, &since);
                 elv_log("INSTRMNT av_buffersink_get_frame time=%"PRId64, since);
             }
-
-#if 0
-            // TEST ONLY - save gray scale frame
-            save_gray_frame(filt_frame->data[0], filt_frame->linesize[0], filt_frame->width, filt_frame->height,
-            "frame-filt", codec_context->frame_number);
-#endif
 
             dump_frame(0, "FILT ", codec_context->frame_number, filt_frame, debug_frame_level);
             filt_frame->pkt_dts = filt_frame->pts;
@@ -3579,7 +3607,7 @@ avpipe_xc(
         }
 
         if (input_packet->stream_index == decoder_context->video_stream_index &&
-            (params->xc_type & xc_video)) {
+            (params->xc_type & xc_video || params->xc_type & xc_verify)) {
             // Video packet
             dump_packet(0, "IN ", input_packet, debug_frame_level);
 
@@ -3601,7 +3629,7 @@ avpipe_xc(
             elv_channel_send(xctx->vc, xc_frame);
 
         } else if (selected_decoded_audio(decoder_context, input_packet->stream_index) >= 0 &&
-            params->xc_type & xc_audio) {
+            (params->xc_type & xc_audio || params->xc_type & xc_verify)) {
 
             encoder_context->audio_last_dts = input_packet->dts;
 
@@ -3883,6 +3911,8 @@ get_xc_type_name(
         return "xc_extract_images";
     case xc_extract_all_images:
         return "xc_extract_all_images";
+    case xc_verify:
+        return "xc_verify";
     default:
         return "none";
     }
@@ -4517,4 +4547,16 @@ set_extract_images(
         return;
     }
     params->extract_images_ts[index] = value;
+}
+
+int64_t 
+get_extract_images(
+    xcparams_t *params,
+    int index)
+{
+    if (index >= params->extract_images_sz) {
+        elv_err("set_extract_images - index out of bounds: %d, url=%s", index, params->url);
+        return 0;
+    }
+    return params->extract_images_ts[index];
 }

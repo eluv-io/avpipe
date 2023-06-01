@@ -12,6 +12,7 @@
 #include <libavfilter/buffersrc.h>
 #include <libswresample/swresample.h>
 #include <libavutil/audio_fifo.h>
+#include <libavutil/avutil.h>
 #include <libavutil/opt.h>
 
 #include <pthread.h>
@@ -56,7 +57,8 @@ typedef enum avpipe_error_t {
     eav_xc_table                = 23,   // Error in trancoding table
     eav_pts_wrapped             = 24,   // PTS wrapped error
     eav_io_timeout              = 25,   // IO timeout
-    eav_bad_handle              = 26    // Bad handle
+    eav_bad_handle              = 26,   // Bad handle
+    eav_bad_frame               = 27    // Bad frame
 } avpipe_error_t;
 
 typedef enum avpipe_buftype_t {
@@ -228,13 +230,27 @@ typedef int
     void *opaque,
     avp_stat_t stat_type);
 
+typedef int
+(*avpipe_frame_ready_f)(
+    void *opaque,
+    int frame_number,
+    AVFrame *frame);
+
+typedef int
+(*avpipe_packet_ready_f)(
+    void *opaque,
+    int is_video,
+    AVPacket *packet);
+
 typedef struct avpipe_io_handler_t {
-    avpipe_opener_f avpipe_opener;
-    avpipe_closer_f avpipe_closer;
-    avpipe_reader_f avpipe_reader;
-    avpipe_writer_f avpipe_writer;
-    avpipe_seeker_f avpipe_seeker;
-    avpipe_stater_f avpipe_stater;
+    avpipe_opener_f         avpipe_opener;
+    avpipe_closer_f         avpipe_closer;
+    avpipe_reader_f         avpipe_reader;
+    avpipe_writer_f         avpipe_writer;
+    avpipe_seeker_f         avpipe_seeker;
+    avpipe_stater_f         avpipe_stater;
+    avpipe_frame_ready_f    avpipe_frame_ready;
+    avpipe_packet_ready_f   avpipe_packet_ready;
 } avpipe_io_handler_t;
 
 #define MAX_WRAP_PTS    ((int64_t)8589000000)
@@ -340,7 +356,8 @@ typedef enum xc_type_t {
     xc_mux                  = 32,
     xc_extract_images       = 65,   // 0x40 | xc_video
     xc_extract_all_images   = 129,  // 0x80 | xc_video
-    xc_probe                = 256
+    xc_probe                = 256,
+    xc_verify               = 512,
 } xc_type_t;
 
 /* handled image types in get_overlay_filter_string*/
@@ -673,6 +690,11 @@ set_extract_images(
     xcparams_t *params,
     int index,
     int64_t value);
+
+int64_t
+get_extract_images(
+    xcparams_t *params,
+    int index);
 
 /**
  * @brief   Returns the level based on the input values

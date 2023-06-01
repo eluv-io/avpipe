@@ -55,6 +55,7 @@ int     AVPipeReadInput(int64_t, uint8_t *, int);
 int64_t AVPipeSeekInput(int64_t, int64_t, int);
 int     AVPipeCloseInput(int64_t);
 int     AVPipeStatInput(int64_t, avp_stat_t, void *);
+int     AVPipeFrameReady(int64_t, int, void *, void*);
 int64_t AVPipeOpenOutput(int64_t, int, int, int64_t, int);
 int64_t AVPipeOpenMuxOutput(char *, int);
 int     AVPipeWriteOutput(int64_t, int64_t, uint8_t *, int);
@@ -286,6 +287,21 @@ in_stat(
         rc = -1;
     }
     return rc;
+}
+
+static int
+in_frame_ready(
+    void *opaque,
+    int frame_number,
+    AVFrame *frame)
+{
+    int64_t fd;
+    ioctx_t *inctx = (ioctx_t *) opaque;
+    xcparams_t *xcparams = (inctx != NULL) ? inctx->params : NULL;
+
+    fd = *((int64_t *)(inctx->opaque));
+
+    return AVPipeFrameReady(fd, frame_number, frame, xcparams);
 }
 
 static int
@@ -840,11 +856,12 @@ xc_table_cancel(
 
 static int
 set_handlers(
-    char *url,
+    xcparams_t *params,
     avpipe_io_handler_t **p_in_handlers,
     avpipe_io_handler_t **p_out_handlers)
 {
     url_parser_t url_parser;
+    char *url = params->url;
 
     if (url && parse_url(url, &url_parser)) {
         elv_err("Failed to parse input url=%s", url);
@@ -863,6 +880,8 @@ set_handlers(
         in_handlers->avpipe_writer = udp_in_write_packet;
         in_handlers->avpipe_seeker = udp_in_seek;
         in_handlers->avpipe_stater = udp_in_stat;
+        if (params->xc_type == xc_verify)
+            in_handlers->avpipe_frame_ready = in_frame_ready;
         *p_in_handlers = in_handlers;
     } else if (p_in_handlers) {
         avpipe_io_handler_t *in_handlers = (avpipe_io_handler_t *)calloc(1, sizeof(avpipe_io_handler_t));
@@ -872,6 +891,8 @@ set_handlers(
         in_handlers->avpipe_writer = in_write_packet;
         in_handlers->avpipe_seeker = in_seek;
         in_handlers->avpipe_stater = in_stat;
+        if (params->xc_type == xc_verify)
+            in_handlers->avpipe_frame_ready = in_frame_ready;
         *p_in_handlers = in_handlers;
     }
 
@@ -883,6 +904,8 @@ set_handlers(
         out_handlers->avpipe_writer = out_write_packet;
         out_handlers->avpipe_seeker = out_seek;
         out_handlers->avpipe_stater = out_stat;
+        if (params->xc_type == xc_verify)
+            out_handlers->avpipe_frame_ready = in_frame_ready;
         *p_out_handlers = out_handlers;
     }
 
@@ -911,7 +934,7 @@ xc_init(
     init_tx_module();
 
     connect_ffmpeg_log();
-    if ((rc = set_handlers(params->url, &in_handlers, &out_handlers)) != eav_success) {
+    if ((rc = set_handlers(params, &in_handlers, &out_handlers)) != eav_success) {
         goto end_tx_init;
     }
 
@@ -993,7 +1016,7 @@ xc(
     connect_ffmpeg_log();
     //elv_set_log_level(elv_log_debug);
 
-    set_handlers(params->url, &in_handlers, &out_handlers);
+    set_handlers(params, &in_handlers, &out_handlers);
 
     if ((rc = avpipe_init(&xctx, in_handlers, out_handlers, params)) != eav_success) {
         goto end_tx;
@@ -1342,7 +1365,7 @@ probe(
     if (!params || !params->url || params->url[0] == '\0' )
         return eav_param;
 
-    rc = set_handlers(params->url, &in_handlers, NULL);
+    rc = set_handlers(params, &in_handlers, NULL);
     if (rc != eav_success)
         goto end_probe;
 

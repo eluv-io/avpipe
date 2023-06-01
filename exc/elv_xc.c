@@ -363,6 +363,36 @@ in_stat(
     return 0;
 }
 
+static int
+in_frame_ready(
+    void *opaque,
+    int frame_number,
+    AVFrame *frame)
+{
+    ioctx_t *inctx = (ioctx_t *) opaque;
+    xcparams_t *xcparams = (inctx != NULL) ? inctx->params : NULL;
+    int force_keyint = 0;
+
+    if (!frame)
+        return 0;
+
+    if (xcparams != NULL)
+        force_keyint = xcparams->force_keyint;
+
+    /* If it is video frame then check key frames every force_keyint */
+    if (frame->channels == 0 && frame->format < AV_PIX_FMT_NB && av_pix_fmt_desc_get(frame->format) != NULL
+        && force_keyint && frame_number % force_keyint == 1) {
+        if (!frame->key_frame ||
+            (frame->pict_type != AV_PICTURE_TYPE_I &&
+            frame->pict_type != AV_PICTURE_TYPE_SI &&
+            frame->pict_type != AV_PICTURE_TYPE_BI))
+        return 1;
+    }
+
+    return 0;
+}
+
+
 int
 out_opener(
     const char *url,
@@ -644,6 +674,32 @@ out_stat(
     return 0;
 }
 
+int
+out_packet_ready(
+    void *opaque,
+    int is_video,
+    AVPacket *packet)
+{
+    ioctx_t *outctx = (ioctx_t *)opaque;
+    xcparams_t *xcparams = (outctx != NULL) ? outctx->params : NULL;
+    int force_keyint = 0;
+
+    if (!packet || !is_video)
+        return 0;
+
+    if (xcparams != NULL)
+        force_keyint = xcparams->force_keyint;
+
+    if (outctx->frames_written % force_keyint == 1) {
+        if (packet->flags & AV_PKT_FLAG_KEY) {
+            return 0;
+        }
+    }
+
+    return 1;
+}
+
+
 typedef struct tx_thread_params_t {
     int                 thread_number;
     char                *filename;
@@ -792,6 +848,9 @@ xc_type_from_string(
 
     if (!strcmp(xc_type_str, "extract-all-images"))
         return xc_extract_all_images;
+
+    if (!strcmp(xc_type_str, "verify"))
+        return xc_verify;
 
     return xc_none;
 }
@@ -1099,7 +1158,7 @@ usage(
         "\t-sync-audio-to-stream-id:(optional) Default: -1, sync audio to video iframe of specific stream-id when input stream is mpegts.\n"
         "\t-t :                     (optional) Transcoding threads. Default is 1 thread, must be bigger than 1\n"
         "\t-xc-type :               (optional) Transcoding type. Default is \"all\", can be \"video\", \"audio\", \"audio-merge\", \"audio-join\", \"audio-pan\", \"all\", \"extract-images\"\n"
-        "\t                                    or \"extract-all-images\". \"all\" means transcoding video and audio together.\n"
+        "\t                                    \"extract-all-images\" or \"verify\". \"all\" means transcoding video and audio together.\n"
         "\t-video-bitrate :         (optional) Mutually exclusive with crf. Default: -1 (unused)\n"
         "\t-video-seg-duration-ts : (mandatory If format is not \"segment\" and transcoding video) video segment duration time base (positive integer).\n"
         "\t-wm-text :               (optional) Watermark text that will be presented in every video frame if it exist. It has higher priority than overlay watermark.\n"
@@ -1567,6 +1626,7 @@ main(
                     strcmp(argv[i+1], "audio-pan") &&
                     strcmp(argv[i+1], "audio-merge") &&
                     strcmp(argv[i+1], "extract-images") &&
+                    strcmp(argv[i+1], "verify") &&
                     strcmp(argv[i+1], "extract-all-images")) {
                     usage(argv[0], argv[i], EXIT_FAILURE);
                 }
@@ -1637,6 +1697,7 @@ main(
     in_handlers->avpipe_writer = in_write_packet;
     in_handlers->avpipe_seeker = in_seek;
     in_handlers->avpipe_stater = in_stat;
+    in_handlers->avpipe_frame_ready = in_frame_ready;
 
     out_handlers = (avpipe_io_handler_t *) calloc(1, sizeof(avpipe_io_handler_t));
     out_handlers->avpipe_opener = out_opener;

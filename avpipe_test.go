@@ -158,6 +158,21 @@ func (i *fileInput) Stat(statType avpipe.AVStatType, statArgs interface{}) error
 	return nil
 }
 
+func (i *fileInput) FrameReady(frameNumber int, params *avpipe.XcParams, avFrame *avpipe.AvFrame) int {
+	forceKeyint := int32(0)
+	if params != nil {
+		forceKeyint = params.ForceKeyInt
+	}
+
+	// If it is video frame
+	if avFrame.Channels == 0 && forceKeyint > 0 && frameNumber%int(forceKeyint) == 1 {
+		if !avFrame.KeyFrame || (avFrame.PictType != avpipe.AVPictureTypeI && avFrame.PictType != avpipe.AVPictureTypeSI) {
+			return 1
+		}
+	}
+	return 0
+}
+
 // Implements avpipe.OutputOpener
 type fileOutputOpener struct {
 	t   *testing.T
@@ -395,10 +410,17 @@ func TestVideoSeg(t *testing.T) {
 		VideoSegDurationTs:     -1,
 		XcType:                 avpipe.XcVideo,
 		Url:                    url,
+		ForceKeyInt:            60,
 		DebugFrameLevel:        debugFrameLevel,
 	}
 	setFastEncodeParams(params, true)
 	xcTest(t, outputDir, params, nil, true)
+
+	// Go through the created mez and verify the output mez
+	params.Url = fmt.Sprintf("%s/vsegment-1.mp4", outputDir)
+	params.XcType = avpipe.XcVerify
+	avpipe.InitUrlIOHandler(url, &fileInputOpener{url: url}, &fileOutputOpener{dir: outputDir})
+	boilerXc(t, params)
 
 }
 
@@ -426,6 +448,7 @@ func TestSingleABRTranscode(t *testing.T) {
 		EncHeight:          720,
 		EncWidth:           1280,
 		XcType:             avpipe.XcVideo,
+		ForceKeyInt:        60,
 		StreamId:           -1,
 		Url:                url,
 		DebugFrameLevel:    debugFrameLevel,
