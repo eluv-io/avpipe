@@ -1650,18 +1650,16 @@ set_idr_frame_key_flag(
     if ((params->xc_type & xc_video) == 0)
         return;
 
-    /*
-     * If frame is key frame or IDR key frame, then clear pict_type and let the encoder decides for pict_type.
-     * AV_PICTURE_TYPE_I = Intra frame
-     * AV_PICTURE_TYPE_SI = Switching Intra frame
-     */
 #if 0
     if (strcmp(params->format, "dash") && strcmp(params->format, "hls") &&
-        (frame->pict_type == AV_PICTURE_TYPE_I || frame->pict_type == AV_PICTURE_TYPE_SI))
-#endif
+        (frame->pict_type == AV_PICTURE_TYPE_I || frame->pict_type == AV_PICTURE_TYPE_SI || frame->pict_type == AV_PICTURE_TYPE_BI))
+#else
+    /*
+     * If decoder is prores or jpeg2000, then clear pict_type key frame flag and let the encoder to decide for that.
+     */
     if (decoder_context->codec_parameters[decoder_context->video_stream_index]->codec_id == 147 ||
         decoder_context->codec_parameters[decoder_context->video_stream_index]->codec_id == 88)
-        frame->pict_type = AV_PICTURE_TYPE_NONE;
+#endif
 
     /*
      * Set key frame in the beginning of every abr segment.
