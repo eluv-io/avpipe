@@ -3,6 +3,7 @@ package main
 import (
 	"fmt"
 	"os"
+	"os/signal"
 
 	"github.com/eluv-io/log-go"
 
@@ -29,6 +30,19 @@ func main() {
 	})
 	avpipe.SetCLoggers()
 
+	done := make(chan os.Signal, 1)
+
+	// Notify this channel when a SIGINT is received
+	signal.Notify(done, os.Interrupt)
+
+	// Fire off a goroutine to loop until that channel receives a signal.
+	// When a signal is received simply exit the program
+	go func() {
+		for _ = range done {
+			os.Exit(0)
+		}
+	}()
+
 	log.Info("Starting elvxc", "version", avpipe.Version())
 
 	err := cmd.InitTranscode(cmdRoot)
@@ -50,6 +64,12 @@ func main() {
 	}
 
 	err = cmd.AnalyseLog(cmdRoot)
+	if err != nil {
+		fmt.Println(err)
+		os.Exit(1)
+	}
+
+	err = cmd.AnalyseStream(cmdRoot)
 	if err != nil {
 		fmt.Println(err)
 		os.Exit(1)

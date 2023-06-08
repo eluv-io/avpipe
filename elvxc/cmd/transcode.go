@@ -251,9 +251,8 @@ func InitTranscode(cmdRoot *cobra.Command) error {
 	cmdTranscode := &cobra.Command{
 		Use:   "transcode",
 		Short: "Transcode a media file",
-		Long:  "Transcode a media file and produce segment files in O directory",
-		//Args:  cobra.ExactArgs(1),
-		RunE: doTranscode,
+		Long:  "Transcode a media file and produce ABR segment or mp4 files for audio or video",
+		RunE:  doTranscode,
 	}
 
 	cmdRoot.AddCommand(cmdTranscode)
