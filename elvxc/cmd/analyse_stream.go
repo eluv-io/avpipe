@@ -123,6 +123,8 @@ func analyseVariant(manifestUrl string, testDuration int32, outputDir string, va
 	var curSequenceNumber int
 	var prevSequenceNumber int
 
+	mp4Analyser := newMp4Analyser(variantOutputDir)
+
 	for now.Before(endTime) {
 		log.Debug("NewRequest", "url", manifestUrl)
 		req, err := http.NewRequest("GET", manifestUrl, nil)
@@ -147,6 +149,9 @@ func analyseVariant(manifestUrl string, testDuration int32, outputDir string, va
 		if err != nil {
 			fmt.Printf("Error=%v\n%s\n\n", err, string(manifestBytes))
 		}
+
+		// Push the first segment in the manifest into the mp4 analyser queue to download
+		mp4Analyser.push(curHlsManifest)
 
 		prevSequenceNumber = curSequenceNumber
 		curSequenceNumber = curHlsManifest.headers["#EXT-X-MEDIA-SEQUENCE"].(int)
@@ -292,10 +297,11 @@ type parsedHlsManifest struct {
 }
 
 type hlsSegment struct {
-	isInit             bool
-	isDiscontinuityTag bool
-	uri                string
-	duration           float64
+	isInit                bool
+	isDiscontinuityTag    bool
+	discontinuitySequence int
+	uri                   string
+	duration              float64
 }
 
 func parseManifest(manifest string) (*parsedHlsManifest, error) {
@@ -304,7 +310,8 @@ func parseManifest(manifest string) (*parsedHlsManifest, error) {
 	}
 
 	hlsLines := strings.Split(manifest, "\n")
-	var discontinuityIndex int
+	var discontinuityIndex int    // line number of DISCONTINUITY tag in the hls manifest
+	var discontinuitySequence int // discontinuity sequence of the manifest
 
 	i := 0
 	for i < len(hlsLines) {
@@ -325,14 +332,15 @@ func parseManifest(manifest string) (*parsedHlsManifest, error) {
 				i++
 			} else if strings.Contains(hlsLines[i], "#EXT-X-DISCONTINUITY-SEQUENCE") {
 				discontinuityLine := strings.Split(hlsLines[i], ":")
-				discontinuitySequence, _ := strconv.Atoi(discontinuityLine[1])
+				discontinuitySequence, _ = strconv.Atoi(discontinuityLine[1])
 				hlsManifest.headers[discontinuityLine[0]] = discontinuitySequence
 				i++
 			} else if strings.Contains(hlsLines[i], "#EXT-X-MAP:URI") {
 				xmapLine := strings.Split(hlsLines[i], "=")
 				initSeg := hlsSegment{
-					isInit: true,
-					uri:    xmapLine[1],
+					isInit:                true,
+					uri:                   xmapLine[1],
+					discontinuitySequence: discontinuitySequence,
 				}
 				hlsManifest.segments = append(hlsManifest.segments, initSeg)
 				// If this is some init segment in the middle of manifest, check prev segment should be discontinuity segment
@@ -350,8 +358,9 @@ func parseManifest(manifest string) (*parsedHlsManifest, error) {
 				duration, _ := strconv.ParseFloat(infLine[1][:len(infLine[1])-2], 64)
 				i++
 				seg := hlsSegment{
-					uri:      hlsLines[i],
-					duration: duration,
+					uri:                   hlsLines[i],
+					duration:              duration,
+					discontinuitySequence: discontinuitySequence,
 				}
 				hlsManifest.segments = append(hlsManifest.segments, seg)
 				i++
