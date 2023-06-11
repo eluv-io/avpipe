@@ -63,17 +63,15 @@ func doAnalyseStream(cmd *cobra.Command, args []string) error {
 
 	done := make(chan bool)
 	for i := 0; i < len(parsedMasterPlaylist.variants); i++ {
-		manifestUrl := buildManifestUrl(url, &parsedMasterPlaylist.variants[i])
-		log.Debug("analyse-stream", "manifestUrl", manifestUrl)
-		go func(manifestUrl string, testDuration int32, outputDir string, variant *hlsVariant) {
-			err := analyseVariant(manifestUrl, testDuration, outputDir, variant)
+		go func(url string, testDuration int32, outputDir string, variant *hlsVariant) {
+			err := analyseVariant(url, testDuration, outputDir, variant)
 			if err != nil {
 				log.Error("analyse-stream", "err", err)
 			} else {
 				log.Info("analyse-stream finished", "duration", time.Second*time.Duration(testDuration))
 			}
 			done <- true
-		}(manifestUrl, testDuration, outputDir, &parsedMasterPlaylist.variants[i])
+		}(url, testDuration, outputDir, &parsedMasterPlaylist.variants[i])
 	}
 
 	for i := 0; i < len(parsedMasterPlaylist.variants); i++ {
@@ -91,7 +89,9 @@ func buildManifestUrl(url string, variant *hlsVariant) string {
 	return newUrl
 }
 
-func analyseVariant(manifestUrl string, testDuration int32, outputDir string, variant *hlsVariant) error {
+func analyseVariant(url string, testDuration int32, outputDir string, variant *hlsVariant) error {
+
+	manifestUrl := buildManifestUrl(url, variant)
 
 	client := &http.Client{
 		Transport: &http.Transport{
@@ -114,7 +114,7 @@ func analyseVariant(manifestUrl string, testDuration int32, outputDir string, va
 	now := time.Now()
 	endTime := now.Add(time.Duration(testDuration) * time.Second)
 
-	log.Debug("analyseVariant", "variantOutputDir", variantOutputDir, "now", now, "endTime", endTime)
+	log.Debug("analyseVariant", "variantOutputDir", variantOutputDir, "now", now, "endTime", endTime, "manifestUrl", manifestUrl)
 
 	var prevHlsManifest, curHlsManifest *parsedHlsManifest
 	var manifestBytes []byte
@@ -123,7 +123,7 @@ func analyseVariant(manifestUrl string, testDuration int32, outputDir string, va
 	var curSequenceNumber int
 	var prevSequenceNumber int
 
-	mp4Analyser := newMp4Analyser(variantOutputDir)
+	mp4Analyser := newMp4Analyser(url, variantOutputDir)
 
 	for now.Before(endTime) {
 		log.Debug("NewRequest", "url", manifestUrl)
@@ -450,7 +450,7 @@ func verifyHlsManifest(prevHlsManifest, curHlsManifest *parsedHlsManifest) error
 	//fmt.Printf("XXX j=%d, diffSequence=%d, startIndex=%d\n", j, diffSequence, startIndex)
 
 	for i := startIndex; i < len(prevHlsManifest.segments); i++ {
-		if prevHlsManifest.segments[i] != curHlsManifest.segments[i-startIndex+1] {
+		if prevHlsManifest.segments[i].uri != curHlsManifest.segments[i-startIndex+1].uri {
 			return fmt.Errorf("Incorrect transition from media sequence %d (seg[%d]=%v) to media sequence %d (seg[%d]=%v)",
 				prevMediaSequence, i, prevHlsManifest.segments[i], curMediaSequenece, i-startIndex+1, curHlsManifest.segments[i-startIndex+1])
 		}
