@@ -1684,8 +1684,8 @@ set_idr_frame_key_flag(
     if (params->force_keyint > 0) {
         if (encoder_context->forced_keyint_countdown <= 0) {
             if (debug_frame_level) {
-                elv_dbg("FRAME SET KEY flag, forced_keyint=%d pts=%"PRId64,
-                    params->force_keyint, frame->pts);
+                elv_dbg("FRAME SET KEY flag, forced_keyint=%d pts=%"PRId64", forced_keyint_countdown=%d",
+                    params->force_keyint, frame->pts, encoder_context->forced_keyint_countdown);
             }
             if (encoder_context->forced_keyint_countdown < 0)
                 elv_log("force_keyint_countdown=%d", encoder_context->forced_keyint_countdown);
@@ -3094,10 +3094,13 @@ skip_for_sync(
                 decoder_context->first_key_frame_pts, input_packet->stream_index);
 
             dump_packet(0, "SYNC ", input_packet, 1);
-            if (params->xc_type & xc_video)
-                return 0;
+            return 0;
         }
-        return 1;
+        if (decoder_context->first_key_frame_pts < 0) {
+            dump_packet(0, "SYNC SKIP ", input_packet, 1);
+            return 1;
+        }
+        return 0;
     }
 
     /* We are processing the audio packets now.
