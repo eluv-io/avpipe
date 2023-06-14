@@ -2,6 +2,8 @@ package cmd
 
 import (
 	"fmt"
+	"io"
+	"net/http"
 	"os"
 	"path/filepath"
 	"strings"
@@ -19,9 +21,9 @@ type mp4Analyser struct {
 	stop                      bool
 	variantOutputDir          string
 	baseUrl                   string
-	lastSequenceNumber        int
 	lastDiscontinuitySequence int
-	lastHlsManifest           *parsedHlsManifest
+	prevHlsManifest           *parsedHlsManifest // previous HLS manifest
+	savedSegIndex             int                // starts from 1 and will be incremented every time an ABR segment is saved
 }
 
 func newMp4Analyser(url, variantOutputDir string) *mp4Analyser {
@@ -33,37 +35,69 @@ func newMp4Analyser(url, variantOutputDir string) *mp4Analyser {
 	}
 }
 
-func (this *mp4Analyser) start() {
-	for !this.stop {
-		segment := this.queue.dequeue()
-		this.saveSegment(segment)
-	}
-}
-
-func (this *mp4Analyser) saveSegment(segment *hlsSegment) {
-	if len(this.variantOutputDir) == 0 {
-		return
-	}
-}
-
 func (this *mp4Analyser) push(hlsManifest *parsedHlsManifest) {
 
-	discontinuitySequence := hlsManifest.headers["#EXT-X-DISCONTINUITY-SEQUENCE"].(int)
-	discontinuityDir := filepath.Join(this.variantOutputDir, fmt.Sprintf("disc-%d", discontinuitySequence))
-	os.Mkdir(discontinuityDir, os.ModePerm)
+	if this.prevHlsManifest == nil {
+		this.prevHlsManifest = hlsManifest
+		return
+	}
+
+	prevDiscontinuitySequence := 0
+	if _, ok := this.prevHlsManifest.headers["#EXT-X-DISCONTINUITY-SEQUENCE"]; ok {
+		prevDiscontinuitySequence = this.prevHlsManifest.headers["#EXT-X-DISCONTINUITY-SEQUENCE"].(int)
+	}
+
+	prevSequenceNumber := 0
+	if _, ok := this.prevHlsManifest.headers["#EXT-X-MEDIA-SEQUENCE"]; ok {
+		prevSequenceNumber = this.prevHlsManifest.headers["#EXT-X-MEDIA-SEQUENCE"].(int)
+	}
+
+	prevDiscontinuityDir := filepath.Join(this.variantOutputDir, fmt.Sprintf("disc-%d", prevDiscontinuitySequence))
+	os.Mkdir(prevDiscontinuityDir, os.ModePerm)
 
 	sequenceNumber := hlsManifest.headers["#EXT-X-MEDIA-SEQUENCE"].(int)
 
 	j := 0
-	for i := 0; i < sequenceNumber-this.lastSequenceNumber; j++ {
-		if hlsManifest.segments[j].isInit {
-			saveSegment(discontinuityDir, "init.m4s")
+	for i := 0; i < sequenceNumber-prevSequenceNumber; j++ {
+		log.Debug("XXX", "sequenceNumber", sequenceNumber, "prevSequenceNumber", prevSequenceNumber, "i", i, "j", j, "segment", hlsManifest.segments[j])
+		if hlsManifest.segments[j].isDiscontinuityTag {
+			continue
 		}
+		this.saveSegment(prevDiscontinuityDir, &hlsManifest.segments[j])
+		i++
 	}
 
+	this.prevHlsManifest = hlsManifest
 }
 
-func saveSegment()
+func (this *mp4Analyser) saveSegment(dir string, segment *hlsSegment) error {
+	segUri := this.baseUrl + segment.uri
+	log.Debug("saveSegment", "segUri", segUri)
+	resp, err := http.Get(segUri)
+	if err != nil {
+		return err
+	}
+	defer resp.Body.Close()
+	body, err := io.ReadAll(resp.Body)
+
+	var segName string
+	var segNameInfo string
+	if segment.isInit {
+		segName = "init.m4s"
+	} else {
+		segName = fmt.Sprintf("%d.m4s", this.savedSegIndex)
+		segNameInfo = fmt.Sprintf("%d.info", this.savedSegIndex)
+		this.savedSegIndex++
+	}
+
+	segPath := filepath.Join(dir, segName)
+	os.WriteFile(segPath, body, 0644)
+
+	segInfo := filepath.Join(dir, segNameInfo)
+	os.WriteFile(segInfo, []byte(segment.uri), 0644)
+
+	return nil
+}
 
 func (this *mp4Analyser) buildAbrSegmentUrl(segUrl string) string {
 	newUrl := this.baseUrl + segUrl
