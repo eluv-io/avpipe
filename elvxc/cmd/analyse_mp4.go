@@ -10,14 +10,14 @@ import (
 	"sync"
 )
 
-type segQueue struct {
-	arr   []*hlsSegment
+type manifestQueue struct {
+	arr   []*parsedHlsManifest
 	mutex *sync.RWMutex
 	cond  *sync.Cond
 }
 
 type mp4Analyser struct {
-	queue                     *segQueue
+	queue                     *manifestQueue
 	stop                      bool
 	variantOutputDir          string
 	baseUrl                   string
@@ -29,45 +29,62 @@ type mp4Analyser struct {
 func newMp4Analyser(url, variantOutputDir string) *mp4Analyser {
 	index := strings.LastIndex(url, "/")
 	return &mp4Analyser{
-		queue:            newSegQueue(),
+		queue:            newManifestQueue(),
 		variantOutputDir: variantOutputDir,
 		baseUrl:          url[:index+1],
 	}
 }
 
-func (this *mp4Analyser) push(hlsManifest *parsedHlsManifest) {
+func (this *mp4Analyser) Start() {
+	go func() {
+		for !this.stop {
+			hlsManifest := this.queue.dequeue()
 
-	if this.prevHlsManifest == nil {
-		this.prevHlsManifest = hlsManifest
-		return
-	}
+			if this.prevHlsManifest == nil {
+				this.prevHlsManifest = hlsManifest
+				continue
+			}
 
-	prevDiscontinuitySequence := 0
-	if _, ok := this.prevHlsManifest.headers["#EXT-X-DISCONTINUITY-SEQUENCE"]; ok {
-		prevDiscontinuitySequence = this.prevHlsManifest.headers["#EXT-X-DISCONTINUITY-SEQUENCE"].(int)
-	}
+			prevDiscontinuitySequence := 0
+			if _, ok := this.prevHlsManifest.headers["#EXT-X-DISCONTINUITY-SEQUENCE"]; ok {
+				prevDiscontinuitySequence = this.prevHlsManifest.headers["#EXT-X-DISCONTINUITY-SEQUENCE"].(int)
+			}
 
-	prevSequenceNumber := 0
-	if _, ok := this.prevHlsManifest.headers["#EXT-X-MEDIA-SEQUENCE"]; ok {
-		prevSequenceNumber = this.prevHlsManifest.headers["#EXT-X-MEDIA-SEQUENCE"].(int)
-	}
+			prevSequenceNumber := 0
+			if _, ok := this.prevHlsManifest.headers["#EXT-X-MEDIA-SEQUENCE"]; ok {
+				prevSequenceNumber = this.prevHlsManifest.headers["#EXT-X-MEDIA-SEQUENCE"].(int)
+			}
 
-	prevDiscontinuityDir := filepath.Join(this.variantOutputDir, fmt.Sprintf("disc-%d", prevDiscontinuitySequence))
-	os.Mkdir(prevDiscontinuityDir, os.ModePerm)
+			prevDiscontinuityDir := filepath.Join(this.variantOutputDir, fmt.Sprintf("disc-%d", prevDiscontinuitySequence))
+			os.Mkdir(prevDiscontinuityDir, os.ModePerm)
 
-	sequenceNumber := hlsManifest.headers["#EXT-X-MEDIA-SEQUENCE"].(int)
+			sequenceNumber := hlsManifest.headers["#EXT-X-MEDIA-SEQUENCE"].(int)
 
-	j := 0
-	for i := 0; i < sequenceNumber-prevSequenceNumber; j++ {
-		log.Debug("XXX", "sequenceNumber", sequenceNumber, "prevSequenceNumber", prevSequenceNumber, "i", i, "j", j, "segment", hlsManifest.segments[j])
-		if hlsManifest.segments[j].isDiscontinuityTag {
-			continue
+			j := 0
+			for i := 0; i < sequenceNumber-prevSequenceNumber; j++ {
+				log.Debug("XXX", "sequenceNumber", sequenceNumber, "prevSequenceNumber", prevSequenceNumber, "i", i, "j", j, "segment", hlsManifest.segments[j])
+				if hlsManifest.segments[j].isDiscontinuityTag {
+					continue
+				}
+				if hlsManifest.segments[j].isInit {
+					this.saveSegment(prevDiscontinuityDir, &this.prevHlsManifest.segments[j])
+					continue
+				}
+				this.saveSegment(prevDiscontinuityDir, &this.prevHlsManifest.segments[j])
+				i++
+			}
+
+			this.prevHlsManifest = hlsManifest
 		}
-		this.saveSegment(prevDiscontinuityDir, &hlsManifest.segments[j])
-		i++
-	}
+	}()
+}
 
-	this.prevHlsManifest = hlsManifest
+func (this *mp4Analyser) Stop() {
+	this.stop = true
+}
+
+func (this *mp4Analyser) Push(hlsManifest *parsedHlsManifest) {
+	this.queue.enqueue(hlsManifest)
 }
 
 func (this *mp4Analyser) saveSegment(dir string, segment *hlsSegment) error {
@@ -104,8 +121,8 @@ func (this *mp4Analyser) buildAbrSegmentUrl(segUrl string) string {
 	return newUrl
 }
 
-func newSegQueue() *segQueue {
-	q := &segQueue{
+func newManifestQueue() *manifestQueue {
+	q := &manifestQueue{
 		mutex: &sync.RWMutex{},
 	}
 
@@ -113,20 +130,21 @@ func newSegQueue() *segQueue {
 	return q
 }
 
-func (q *segQueue) enqueue(seg *hlsSegment) {
+func (q *manifestQueue) enqueue(hlsManifest *parsedHlsManifest) {
 	q.mutex.Lock()
+	q.arr = append(q.arr, hlsManifest)
+	q.cond.Broadcast()
 	defer q.mutex.Unlock()
-	q.arr = append(q.arr, seg)
 }
 
-func (q *segQueue) dequeue() *hlsSegment {
+func (q *manifestQueue) dequeue() *parsedHlsManifest {
 	q.mutex.Lock()
 	for len(q.arr) == 0 {
 		q.cond.Wait()
 	}
 
-	seg := q.arr[0]
+	hlsManifest := q.arr[0]
 	q.arr = q.arr[1:]
 	q.mutex.Unlock()
-	return seg
+	return hlsManifest
 }

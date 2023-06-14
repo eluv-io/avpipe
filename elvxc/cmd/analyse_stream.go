@@ -124,6 +124,7 @@ func analyseVariant(url string, testDuration int32, outputDir string, variant *h
 	var prevSequenceNumber int
 
 	mp4Analyser := newMp4Analyser(manifestUrl, variantOutputDir)
+	mp4Analyser.Start()
 
 	for now.Before(endTime) {
 		log.Debug("NewRequest", "url", manifestUrl)
@@ -151,7 +152,7 @@ func analyseVariant(url string, testDuration int32, outputDir string, variant *h
 		}
 
 		// Push the first segment in the manifest into the mp4 analyser queue to download
-		mp4Analyser.push(curHlsManifest)
+		mp4Analyser.Push(curHlsManifest)
 
 		prevSequenceNumber = curSequenceNumber
 		curSequenceNumber = curHlsManifest.headers["#EXT-X-MEDIA-SEQUENCE"].(int)
@@ -162,7 +163,7 @@ func analyseVariant(url string, testDuration int32, outputDir string, variant *h
 		}
 		saveManifest(variantOutputDir, curSequenceNumber, manifestBytes, discontinuitySequence)
 
-		log.Debug("Verifying", "manifest", string(manifestBytes))
+		//log.Debug("Verifying", "manifest", string(manifestBytes))
 
 		err = verifyHlsManifest(prevHlsManifest, curHlsManifest)
 		if err != nil {
@@ -341,7 +342,6 @@ func parseManifest(manifest string) (*parsedHlsManifest, error) {
 					uri:                   hlsLines[i][len("#EXT-X-MAP:URI=")+1 : len(hlsLines[i])-1],
 					discontinuitySequence: discontinuitySequence,
 				}
-				log.Debug("AAA", "initUri", initSeg.uri)
 				hlsManifest.segments = append(hlsManifest.segments, initSeg)
 				// If this is some init segment in the middle of manifest, check prev segment should be discontinuity segment
 				if len(hlsManifest.segments) > 1 {
