@@ -5,6 +5,7 @@ import (
 	"github.com/eluv-io/avpipe"
 	"github.com/spf13/cobra"
 	"io"
+	"math"
 	"net/http"
 	"os"
 	"path/filepath"
@@ -167,6 +168,7 @@ func analyseVariant(url string, testDuration int32, outputDir string, variant *h
 
 		err = verifyHlsManifest(prevHlsManifest, curHlsManifest)
 		if err != nil {
+			log.Error("Manifest verification failed", "err", err)
 			fmt.Printf("Error %v\n", err)
 			fmt.Printf("mediaSequenec=%d\n%s\n\n", prevSequenceNumber, string(prevManifestBytes))
 			fmt.Printf("mediaSequence=%d\n%s\n\n", curSequenceNumber, string(manifestBytes))
@@ -475,11 +477,16 @@ func equalManifests(manifest1, manifest2 *parsedHlsManifest) bool {
 		}
 	}
 
-	if len(manifest1.segments) != len(manifest2.segments) {
+	minLen := len(manifest1.segments)
+	if minLen > len(manifest2.segments) {
+		minLen = len(manifest2.segments)
+	}
+
+	if math.Abs(float64(len(manifest1.segments)-minLen)) > 1 || math.Abs(float64(len(manifest2.segments)-minLen)) > 1 {
 		return false
 	}
 
-	for i := 0; i < len(manifest1.segments); i++ {
+	for i := 0; i < minLen; i++ {
 		if manifest1.segments[i] != manifest2.segments[i] {
 			//log.Debug("NOOOT EQUAL", "seg1", manifest1.segments[i], "seg2", manifest2.segments[i])
 			return false

@@ -83,10 +83,16 @@ func (this *mp4Analyser) Start() {
 					continue
 				}
 				if hlsManifest.segments[j].isInit {
-					this.saveSegment(prevDiscontinuityDir, &this.prevHlsManifest.segments[j])
+					err := this.saveSegment(prevDiscontinuityDir, &this.prevHlsManifest.segments[j])
+					if err != nil {
+						log.Error("Failed to save", "segment", this.prevHlsManifest.segments[j], "err", err)
+					}
 					continue
 				}
-				this.saveSegment(prevDiscontinuityDir, &this.prevHlsManifest.segments[j])
+				err := this.saveSegment(prevDiscontinuityDir, &this.prevHlsManifest.segments[j])
+				if err != nil {
+					log.Error("Failed to save", "segment", this.prevHlsManifest.segments[j], "err", err)
+				}
 				i++
 			}
 
@@ -119,6 +125,9 @@ func (this *mp4Analyser) saveSegment(dir string, segment *hlsSegment) error {
 	}
 	defer resp.Body.Close()
 	body, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return err
+	}
 
 	var segName string
 	var segNameInfo string
@@ -133,7 +142,7 @@ func (this *mp4Analyser) saveSegment(dir string, segment *hlsSegment) error {
 	segPath := filepath.Join(dir, segName)
 	os.WriteFile(segPath, body, 0644)
 
-	this.analyseMp4Boxes(body)
+	this.analyseMp4Boxes(body, segment.uri)
 
 	segInfo := filepath.Join(dir, segNameInfo)
 	os.WriteFile(segInfo, []byte(segment.uri), 0644)
@@ -141,7 +150,7 @@ func (this *mp4Analyser) saveSegment(dir string, segment *hlsSegment) error {
 	return nil
 }
 
-func (this *mp4Analyser) analyseMp4Boxes(segment []byte) {
+func (this *mp4Analyser) analyseMp4Boxes(segment []byte, uri string) {
 
 	r := bytes.NewReader(segment)
 
@@ -187,22 +196,22 @@ func (this *mp4Analyser) analyseMp4Boxes(segment []byte) {
 	// Check first sequenceNo with last seen sequenceNo from prev segment
 	if this.lastSequenceNo != 0 && len(fragments) > 0 {
 		if fragments[0].sequenceNo < this.lastSequenceNo {
-			fmt.Printf("ERROR: last segment sequence number (%d) is smaller than starting sequence number of current segment (%d)\n",
-				this.lastSequenceNo, fragments[0].sequenceNo)
+			fmt.Printf("%s\nERROR: last segment sequence number (%d) is bigger than starting sequence number of current segment (%d)\n",
+				uri, this.lastSequenceNo, fragments[0].sequenceNo)
 		}
 	}
 
 	for i := 0; i < len(fragments)-1; i++ {
 		if fragments[i].sequenceNo+1 != fragments[i+1].sequenceNo {
-			fmt.Printf("WARNING: sequence number is not consequtive from frame %d to frame %d\n", i, i+1)
+			fmt.Printf("%s\nWARNING: sequence number is not consequtive from frame %d to frame %d\n", uri, i, i+1)
 		}
 
 		if fragments[i].pts >= fragments[i+1].pts {
-			fmt.Printf("ERROR: frame %d has pts %d > frame %d pts %d\n", i, fragments[i].pts, i+1, fragments[i+1].pts)
+			fmt.Printf("%s\nERROR: frame %d has pts %d > frame %d pts %d\n", uri, i, fragments[i].pts, i+1, fragments[i+1].pts)
 		}
 
 		if fragments[i].dts >= fragments[i+1].dts {
-			fmt.Printf("ERROR: frame %d has dts %d > frame %d dts %d\n", i, fragments[i].dts, i+1, fragments[i+1].dts)
+			fmt.Printf("%s\nERROR: frame %d has dts %d > frame %d dts %d\n", uri, i, fragments[i].dts, i+1, fragments[i+1].dts)
 		}
 	}
 
