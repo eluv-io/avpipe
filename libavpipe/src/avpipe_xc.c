@@ -1649,9 +1649,12 @@ set_idr_frame_key_flag(
     if ((params->xc_type & xc_video) == 0)
         return;
 
-#if 0
-    if (strcmp(params->format, "dash") && strcmp(params->format, "hls") &&
-        (frame->pict_type == AV_PICTURE_TYPE_I || frame->pict_type == AV_PICTURE_TYPE_SI || frame->pict_type == AV_PICTURE_TYPE_BI))
+#if 1
+    /*
+     * If format is "dash" or "hls" then don't clear the flag, because dash/hls uses pict_type to determine end of segment.
+     * The reset of the formats would be good to clear before encoding (see doc/examples/transcoding.c).
+     */
+    if (strcmp(params->format, "dash") && strcmp(params->format, "hls"))
 #else
     /*
      * If decoder is prores or jpeg2000, then clear pict_type key frame flag and let the encoder to decide for that.
