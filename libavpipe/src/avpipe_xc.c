@@ -1637,6 +1637,7 @@ prepare_encoder(
 static void
 set_idr_frame_key_flag(
     AVFrame *frame,
+    coderctx_t *decoder_context,
     coderctx_t *encoder_context,
     xcparams_t *params,
     int debug_frame_level)
@@ -1648,11 +1649,19 @@ set_idr_frame_key_flag(
     if ((params->xc_type & xc_video) == 0)
         return;
 
+#if 1
     /*
      * If format is "dash" or "hls" then don't clear the flag, because dash/hls uses pict_type to determine end of segment.
      * The reset of the formats would be good to clear before encoding (see doc/examples/transcoding.c).
      */
     if (strcmp(params->format, "dash") && strcmp(params->format, "hls"))
+#else
+    /*
+     * If decoder is prores or jpeg2000, then clear pict_type key frame flag and let the encoder to decide for that.
+     */
+    if (decoder_context->codec_parameters[decoder_context->video_stream_index]->codec_id == 147 ||
+        decoder_context->codec_parameters[decoder_context->video_stream_index]->codec_id == 88)
+#endif
         frame->pict_type = AV_PICTURE_TYPE_NONE;
 
     /*
@@ -1678,8 +1687,8 @@ set_idr_frame_key_flag(
     if (params->force_keyint > 0) {
         if (encoder_context->forced_keyint_countdown <= 0) {
             if (debug_frame_level) {
-                elv_dbg("FRAME SET KEY flag, forced_keyint=%d pts=%"PRId64,
-                    params->force_keyint, frame->pts);
+                elv_dbg("FRAME SET KEY flag, forced_keyint=%d pts=%"PRId64", forced_keyint_countdown=%d",
+                    params->force_keyint, frame->pts, encoder_context->forced_keyint_countdown);
             }
             if (encoder_context->forced_keyint_countdown < 0)
                 elv_log("force_keyint_countdown=%d", encoder_context->forced_keyint_countdown);
@@ -1912,7 +1921,7 @@ encode_frame(
         // Signal if we need IDR frames
         if (params->xc_type & xc_video &&
             stream_index == decoder_context->video_stream_index) {
-            set_idr_frame_key_flag(frame, encoder_context, params, debug_frame_level);
+            set_idr_frame_key_flag(frame, decoder_context, encoder_context, params, debug_frame_level);
         }
 
         // Special case to extract the first frame image
@@ -3069,11 +3078,11 @@ skip_for_sync(
         return 0;
 
     /* No need to sync if:
-     * - it is not mpeg ts
+     * - it is not mpegts and not rtmp
      * - or it is already synced
      * - or format is not fmp4-segment.
      */
-    if (!decoder_context->is_mpegts ||
+    if ((!decoder_context->is_mpegts && !decoder_context->is_rtmp) ||
         decoder_context->mpegts_synced ||
         strcmp(params->format, "fmp4-segment"))
         return 0;
@@ -3088,10 +3097,13 @@ skip_for_sync(
                 decoder_context->first_key_frame_pts, input_packet->stream_index);
 
             dump_packet(0, "SYNC ", input_packet, 1);
-            if (params->xc_type & xc_video)
-                return 0;
+            return 0;
         }
-        return 1;
+        if (decoder_context->first_key_frame_pts < 0) {
+            dump_packet(0, "SYNC SKIP ", input_packet, 1);
+            return 1;
+        }
+        return 0;
     }
 
     /* We are processing the audio packets now.
