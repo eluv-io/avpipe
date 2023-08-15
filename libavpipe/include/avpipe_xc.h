@@ -259,7 +259,8 @@ typedef struct coderctx_t {
     int audio_stream_index[MAX_AUDIO_MUX];              /* Audio input stream indexes */
     int n_audio;                                        /* Number of audio streams that will be decoded */
 
-    int data_stream_index;
+    int data_scte35_stream_index;                       /* Index of SCTE-35 data stream */
+    int data_stream_index;                              /* Index of an unrecognized data stream */
     int audio_enc_stream_index;                         /* Audio output stream index */
 
     int64_t video_last_wrapped_pts;                     /* Video last wrapped pts */

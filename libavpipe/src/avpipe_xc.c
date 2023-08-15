@@ -20,6 +20,7 @@
 #include "url_parser.h"
 #include "avpipe_version.h"
 #include "base64.h"
+#include "scte35.h"
 
 #include <stdio.h>
 #include <fcntl.h>
@@ -463,10 +464,23 @@ prepare_decoder(
         case AVMEDIA_TYPE_DATA:
             decoder_context->codec_parameters[i] = decoder_context->format_context->streams[i]->codecpar;
             decoder_context->stream[i] = decoder_context->format_context->streams[i];
-            decoder_context->data_stream_index = i;
-            elv_dbg("DATA STREAM %d, codec_id=%s, stream_id=%d, url=%s",
-                i, avcodec_get_name(decoder_context->codec_parameters[i]->codec_id),
-                decoder_context->stream[i]->id, url);
+
+            switch (decoder_context->codec_parameters[i]->codec_id) {
+            case AV_CODEC_ID_SCTE_35:
+                decoder_context->data_scte35_stream_index = i;
+                elv_dbg("DATA STREAM SCTE-35 %d, codec_id=%s, stream_id=%d, url=%s",
+                    i, avcodec_get_name(decoder_context->codec_parameters[i]->codec_id),
+                    decoder_context->stream[i]->id, url);
+                break;
+            default:
+                // Unrecognized data stream
+                decoder_context->data_stream_index = i;
+                elv_dbg("DATA STREAM UNRECOGNIZED %d, codec_id=%s, stream_id=%d, url=%s",
+                    i, avcodec_get_name(decoder_context->codec_parameters[i]->codec_id),
+                    decoder_context->stream[i]->id, url);
+                break;
+            }
+
             break;
 
         default:
@@ -3368,7 +3382,7 @@ avpipe_xc(
         elv_err("Failed to initialize audio pan filter, url=%s", params->url);
         goto xc_done;
     }
-        
+
     if (!params->bypass_transcoding &&
         params->xc_type == xc_audio_join &&
         (rc = init_audio_join_filters(decoder_context, encoder_context, xctx->params)) != eav_success) {
@@ -3627,9 +3641,28 @@ avpipe_xc(
             elv_channel_send(xctx->ac, xc_frame);
 
         } else {
-            if (debug_frame_level)
-                elv_dbg("Skip stream - packet index=%d, pts=%"PRId64", url=%s",
-                    input_packet->stream_index, input_packet->pts, params->url);
+            if (stream_index == decoder_context->data_scte35_stream_index) {
+                uint8_t scte35_command_type;
+                int res = parse_scte35_pkt(&scte35_command_type, input_packet);
+                if (res < 0) {
+                    elv_warn("SCTE [%d] fail to parse pts=%"PRId64" size=%d",
+                        input_packet->stream_index, input_packet->pts, input_packet->size);
+                }
+                if (scte35_command_type != 0 /* Skip SCTE-35 command 'NULL' */) {
+                    char hex_str[2048];
+                    hex_encode(input_packet->data, input_packet->size, hex_str);
+                    elv_log("SCTE [%d] pts=%"PRId64" duration=%"PRId64" flag=%d size=%d "
+                        "data=%s sidelems=%d",
+                        input_packet->stream_index, input_packet->pts, input_packet->duration,
+                        input_packet->flags, input_packet->size,
+                        hex_str,
+                        input_packet->side_data_elems);
+                }
+            } else {
+                if (debug_frame_level)
+                    elv_dbg("Skip stream - packet index=%d, pts=%"PRId64", url=%s",
+                        input_packet->stream_index, input_packet->pts, params->url);
+            }
             av_packet_free(&input_packet);
         }
     }

@@ -6,11 +6,14 @@ SUBDIRS=utils libavpipe exc elvxc
 SRCS=avpipe_handler.c
 OBJS=$(SRCS:%.c=$(BINDIR)/%.o)
 
-.PHONY: all test clean
+.PHONY: all test clean help
 
 .DEFAULT_GOAL := dynamic
 
-all install: copy_libs check-env
+help: ## Show help
+	@grep -h -E '^[a-zA-Z_-]+:.*?## .*$$' $(MAKEFILE_LIST) | sort | awk 'BEGIN {FS = ":.*?## "}; {printf "\033[36m%-30s\033[0m %s\n", $$1, $$2}'
+
+all install: copy_libs check-env ## Build C and Go artifacts
 	@for dir in $(SUBDIRS); do \
 	echo "Making $@ in $$dir..."; \
 	(cd $$dir; make $@) || exit 1; \
@@ -18,11 +21,13 @@ all install: copy_libs check-env
 
 dynamic: copy_libs_all all
 
-clean: lclean
+clean: lclean ## Clean C and Go build artifacts
 	@for dir in $(SUBDIRS); do \
 	echo "Making $@ in $$dir..."; \
 	(cd $$dir; make $@) || exit 1; \
 	done
+	@echo "Go clean"
+	@go clean -modcache -testcache -cache -i -r
 
 copy_libs:
 	@(if [ ! -d $(LIBDIR) ]; then mkdir $(LIBDIR); fi)
@@ -67,5 +72,5 @@ ifndef FFMPEG_DIST
   $(error FFMPEG_DIST is undefined)
 endif
 
-test:
+test: ## Run basic tests
 	@./run_tests.sh
