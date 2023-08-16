@@ -540,8 +540,12 @@ udp_in_stat(
         if (debug_frame_level)
             elv_dbg("IN STAT UDP fd=%d, video frame read=%"PRId64", url=%s", fd, c->video_frames_read, c->url);
         break;
+    case in_stat_data_scte35:
+        elv_log("IN STAT UDP SCTE35 fd=%d stat_type=%d", fd, stat_type);
+        (void)AVPipeStatInput(fd, stat_type, c->data);
+        break;
     default:
-        elv_err("IN STATS UDP fd=%d, invalid input stat=%d, url=%s", stat_type, c->url);
+        elv_err("IN STAT UDP fd=%d, invalid input stat=%d, url=%s", stat_type, c->url);
         return 1;
     }
 

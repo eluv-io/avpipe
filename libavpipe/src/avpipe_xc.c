@@ -3656,15 +3656,16 @@ avpipe_xc(
                 case 6: // We may not need '6'
                     hex_encode(input_packet->data, input_packet->size, hex_str);
                     elv_log("SCTE [%d] pts=%"PRId64" duration=%"PRId64" flag=%d size=%d "
-                        "data=%s sidelems=%d",
+                        "data=%s command=%d",
                         input_packet->stream_index, input_packet->pts, input_packet->duration,
                         input_packet->flags, input_packet->size,
-                        hex_str,
-                        input_packet->side_data_elems);
+                        hex_str, scte35_command_type);
 
                     if (in_handlers->avpipe_stater) {
                         inctx->data = (uint8_t *)hex_str;
                         in_handlers->avpipe_stater(inctx, in_stat_data_scte35);
+                    } else {
+                        elv_log("SCTE FAIL - no avpipe_stater");
                     }
                     break;
                 }
@@ -4559,7 +4560,7 @@ init_extract_images(
     params->extract_images_sz = size;
 }
 
-void 
+void
 set_extract_images(
     xcparams_t *params,
     int index,
