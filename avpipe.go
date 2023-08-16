@@ -1,16 +1,15 @@
 /*
 Package avpipe has four main interfaces that has to be implemented by the client code:
 
-  1) InputOpener: is the input factory interface that needs an implementation to generate an InputHandler.
+ 1. InputOpener: is the input factory interface that needs an implementation to generate an InputHandler.
 
-  2) InputHandler: is the input handler with Read/Seek/Size/Close methods. An implementation of this
-     interface is needed by ffmpeg to process input streams properly.
+ 2. InputHandler: is the input handler with Read/Seek/Size/Close methods. An implementation of this
+    interface is needed by ffmpeg to process input streams properly.
 
-  3) OutputOpener: is the output factory interface that needs an implementation to generate an OutputHandler.
+ 3. OutputOpener: is the output factory interface that needs an implementation to generate an OutputHandler.
 
-  4) OutputHandler: is the output handler with Write/Seek/Close methods. An implementation of this
-     interface is needed by ffmpeg to write encoded streams properly.
-
+ 4. OutputHandler: is the output handler with Write/Seek/Close methods. An implementation of this
+    interface is needed by ffmpeg to write encoded streams properly.
 */
 package avpipe
 
@@ -313,6 +312,7 @@ const (
 	AV_OUT_STAT_BYTES_WRITTEN           = 32
 	AV_OUT_STAT_FRAME_WRITTEN           = 64
 	AV_OUT_STAT_ENCODING_END_PTS        = 128
+	AV_IN_STAT_DATA_SCTE35              = 256
 )
 
 type StreamInfo struct {
@@ -729,6 +729,9 @@ func (h *ioHandler) InStat(avp_stat C.avp_stat_t, stat_args unsafe.Pointer) erro
 	case C.in_stat_video_frame_read:
 		statArgs := *(*uint64)(stat_args)
 		err = h.input.Stat(AV_IN_STAT_VIDEO_FRAME_READ, &statArgs)
+	case C.in_stat_data_scte35:
+		statArgs := *(*uint64)(stat_args)
+		err = h.input.Stat(AV_IN_STAT_DATA_SCTE35, &statArgs)
 	}
 
 	return err

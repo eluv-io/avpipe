@@ -88,10 +88,11 @@ typedef enum avp_stat_t {
     in_stat_audio_frame_read = 2,
     in_stat_video_frame_read = 4,
     in_stat_decoding_audio_start_pts = 8,
-    in_stat_decoding_video_start_pts = 16,
-    out_stat_bytes_written = 32,
-    out_stat_frame_written = 64,
-    out_stat_encoding_end_pts = 128
+    in_stat_decoding_video_start_pts = 16, // 0x0010
+    out_stat_bytes_written = 32,           // 0x0020
+    out_stat_frame_written = 64,           // 0x0040
+    out_stat_encoding_end_pts = 128,       // 0x0080
+    in_stat_data_scte35 = 256              // 0x0100
 } avp_stat_t;
 
 struct coderctx_t;
@@ -167,6 +168,8 @@ typedef struct ioctx_t {
     int64_t pts;                /* frame pts */
     int     stream_index;       /* usually (but not always) video=0 and audio=1 */
     int     seg_index;          /* segment index if this ioctx is a segment */
+
+    uint8_t *data;  /* Data stream buffer (e.g. SCTE-35) */
 
     io_mux_ctx_t    *in_mux_ctx;   /* Input muxer context */
     int             in_mux_index;

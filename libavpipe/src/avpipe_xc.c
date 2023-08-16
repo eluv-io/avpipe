@@ -3648,8 +3648,12 @@ avpipe_xc(
                     elv_warn("SCTE [%d] fail to parse pts=%"PRId64" size=%d",
                         input_packet->stream_index, input_packet->pts, input_packet->size);
                 }
-                if (scte35_command_type != 0 /* Skip SCTE-35 command 'NULL' */) {
-                    char hex_str[2048];
+                char hex_str[2048];
+                switch (scte35_command_type) {
+                case 3:
+                case 4:
+                case 5:
+                case 6: // We may not need '6'
                     hex_encode(input_packet->data, input_packet->size, hex_str);
                     elv_log("SCTE [%d] pts=%"PRId64" duration=%"PRId64" flag=%d size=%d "
                         "data=%s sidelems=%d",
@@ -3657,6 +3661,12 @@ avpipe_xc(
                         input_packet->flags, input_packet->size,
                         hex_str,
                         input_packet->side_data_elems);
+
+                    if (in_handlers->avpipe_stater) {
+                        inctx->data = (uint8_t *)hex_str;
+                        in_handlers->avpipe_stater(inctx, in_stat_data_scte35);
+                    }
+                    break;
                 }
             } else {
                 if (debug_frame_level)

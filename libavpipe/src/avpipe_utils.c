@@ -314,6 +314,9 @@ checksum(byte *addr, unsigned int count)
 void
 hex_encode(byte *buf, int sz, char *str)
 {
+    if (str == NULL) {
+        return;
+    }
     for (int i = 0; i < sz; i ++) {
         sprintf(str + 2 * i, "%02x", buf[i]);
     }
