@@ -730,8 +730,8 @@ func (h *ioHandler) InStat(avp_stat C.avp_stat_t, stat_args unsafe.Pointer) erro
 		statArgs := *(*uint64)(stat_args)
 		err = h.input.Stat(AV_IN_STAT_VIDEO_FRAME_READ, &statArgs)
 	case C.in_stat_data_scte35:
-		statArgs := *(*uint64)(stat_args)
-		err = h.input.Stat(AV_IN_STAT_DATA_SCTE35, &statArgs)
+		statArgs := C.GoString((*C.char)(stat_args))
+		err = h.input.Stat(AV_IN_STAT_DATA_SCTE35, statArgs)
 	}
 
 	return err
