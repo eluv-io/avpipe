@@ -2988,6 +2988,7 @@ should_stop_decoding(
         if (decoder_context->video_input_start_pts == -1) {
             avpipe_io_handler_t *in_handlers = decoder_context->in_handlers;
             decoder_context->video_input_start_pts = input_packet->pts;
+            decoder_context->inctx->decoding_start_pts = input_packet->pts;
             elv_log("video_input_start_pts=%"PRId64,
                 decoder_context->video_input_start_pts);
             if (in_handlers->avpipe_stater)
