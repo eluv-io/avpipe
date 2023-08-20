@@ -356,11 +356,11 @@ in_stat(
             elv_dbg("IN STAT fd=%d, video frame read=%"PRId64, fd, c->video_frames_read);
         break;
     case in_stat_data_scte35:
-        if (debug_frame_level || 1)
+        if (debug_frame_level)
             elv_dbg("IN STAT fd=%d, data=%s", fd, c->data);
         break;
     default:
-        elv_err("IN STATS fd=%d, invalid input stat=%d", fd, stat_type);
+        elv_err("IN STAT fd=%d, invalid input stat=%d", fd, stat_type);
         return 1;
     }
 

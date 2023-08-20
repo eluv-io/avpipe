@@ -544,7 +544,8 @@ udp_in_stat(
             elv_dbg("IN STAT UDP fd=%d, video frame read=%"PRId64", url=%s", fd, c->video_frames_read, c->url);
         break;
     case in_stat_data_scte35:
-        elv_log("IN STAT UDP SCTE35 fd=%d stat_type=%d", fd, stat_type);
+        if (debug_frame_level)
+            elv_dbg("IN STAT UDP SCTE35 fd=%d, stat_type=%d, url=%s", fd, stat_type, c->url);
         rc = AVPipeStatInput(fd, stat_type, c->data);
         break;
     default:

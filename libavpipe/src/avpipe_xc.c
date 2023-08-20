@@ -3652,12 +3652,11 @@ avpipe_xc(
                 } else {
                     char hex_str[2 * input_packet->size + 1];
                     switch (scte35_command_type) {
-                    case 3:
                     case 4:
                     case 5:
                     case 6:
                         hex_encode(input_packet->data, input_packet->size, hex_str);
-                        elv_log("SCTE [%d] pts=%"PRId64" duration=%"PRId64" flag=%d size=%d "
+                        elv_dbg("SCTE [%d] pts=%"PRId64" duration=%"PRId64" flag=%d size=%d "
                             "data=%s command=%d",
                             input_packet->stream_index, input_packet->pts, input_packet->duration,
                             input_packet->flags, input_packet->size,
@@ -3666,8 +3665,6 @@ avpipe_xc(
                         if (in_handlers->avpipe_stater) {
                             inctx->data = (uint8_t *)hex_str;
                             in_handlers->avpipe_stater(inctx, in_stat_data_scte35);
-                        } else {
-                            elv_log("SCTE FAIL - no avpipe_stater");
                         }
                         break;
                     }
