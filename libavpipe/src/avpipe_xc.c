@@ -373,6 +373,7 @@ prepare_decoder(
     decoder_context->in_handlers = in_handlers;
     decoder_context->inctx = inctx;
     decoder_context->video_stream_index = -1;
+    decoder_context->data_scte35_stream_index = -1;
     for (int j=0; j<MAX_AUDIO_MUX; j++)
         decoder_context->audio_stream_index[j] = -1;
 
