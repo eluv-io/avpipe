@@ -5,7 +5,8 @@ SRCS=avpipe_xc.c \
     avpipe_io.c \
     avpipe_mux.c \
     avpipe_level.c \
-    avpipe_udp_thread.c
+    avpipe_udp_thread.c \
+    scte35.c
 
 BINDIR=bin
 LIBDIR=lib

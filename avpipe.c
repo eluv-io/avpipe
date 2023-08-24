@@ -350,7 +350,7 @@ udp_in_opener(
     if (fd <= 0 )
         return -1;
 
-    if (size > 0) 
+    if (size > 0)
         inctx->sz = size;
 
     *((int64_t *)(inctx->opaque)) = fd;
@@ -413,7 +413,7 @@ udp_in_read_packet(
             c->read_bytes += r;
             c->read_pos += r;
             //elv_dbg("IN READ UDP partial read=%d pos=%"PRId64" total=%"PRId64, r, c->read_pos, c->read_bytes);
-            return r;        
+            return r;
         }
 
         /*
@@ -512,6 +512,7 @@ udp_in_stat(
 {
     int64_t fd;
     ioctx_t *c = (ioctx_t *)opaque;
+    int64_t rc;
 
     if (!c || !c->opaque)
         return 0;
@@ -527,10 +528,12 @@ udp_in_stat(
     case in_stat_decoding_audio_start_pts:
         if (debug_frame_level)
             elv_dbg("IN STAT UDP fd=%d, audio start PTS=%"PRId64", url=%s", fd, c->decoding_start_pts, c->url);
+        rc = AVPipeStatInput(fd, stat_type, &c->decoding_start_pts);
         break;
     case in_stat_decoding_video_start_pts:
         if (debug_frame_level)
             elv_dbg("IN STAT UDP fd=%d, video start PTS=%"PRId64", url=%s", fd, c->decoding_start_pts, c->url);
+        rc = AVPipeStatInput(fd, stat_type, &c->decoding_start_pts);
         break;
     case in_stat_audio_frame_read:
         if (debug_frame_level)
@@ -540,12 +543,17 @@ udp_in_stat(
         if (debug_frame_level)
             elv_dbg("IN STAT UDP fd=%d, video frame read=%"PRId64", url=%s", fd, c->video_frames_read, c->url);
         break;
+    case in_stat_data_scte35:
+        if (debug_frame_level)
+            elv_dbg("IN STAT UDP SCTE35 fd=%d, stat_type=%d, url=%s", fd, stat_type, c->url);
+        rc = AVPipeStatInput(fd, stat_type, c->data);
+        break;
     default:
-        elv_err("IN STATS UDP fd=%d, invalid input stat=%d, url=%s", stat_type, c->url);
+        elv_err("IN STAT UDP fd=%d, invalid input stat=%d, url=%s", stat_type, c->url);
         return 1;
     }
 
-    return 0;
+    return rc;
 }
 
 
