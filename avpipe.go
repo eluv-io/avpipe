@@ -344,6 +344,7 @@ type StreamInfo struct {
 }
 
 type ContainerInfo struct {
+	Filename   string  `json:"filename"`
 	Duration   float64 `json:"duration"`
 	FormatName string  `json:"format_name"`
 }
@@ -1425,6 +1426,7 @@ func Probe(params *XcParams) (*ProbeInfo, error) {
 		probeInfo.StreamInfo[i].Level = int(probeArray[i].level)
 	}
 
+	probeInfo.ContainerInfo.Filename = params.Url
 	probeInfo.ContainerInfo.FormatName = C.GoString((*C.char)(unsafe.Pointer(cprobe.container_info.format_name)))
 	probeInfo.ContainerInfo.Duration = float64(cprobe.container_info.duration)
 

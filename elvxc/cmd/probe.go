@@ -101,6 +101,7 @@ func doProbe(cmd *cobra.Command, args []string) error {
 	}
 
 	fmt.Printf("Container\n")
+	fmt.Printf("\tfilename: %s\n", probe.ContainerInfo.Filename)
 	fmt.Printf("\tformat_name: %s\n", probe.ContainerInfo.FormatName)
 	fmt.Printf("\tduration: %.5f\n", probe.ContainerInfo.Duration)
 
