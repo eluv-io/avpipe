@@ -493,14 +493,15 @@ prepare_decoder(
 
         /* Is this the stream selected for transcoding? */
         int selected_stream = 0;
-        if (params && decoder_context->stream[i]->id == params->stream_id) {
+        int this_stream_id =  decoder_context->is_rtmp ? i : decoder_context->stream[i]->id;
+        if (params && this_stream_id == params->stream_id) {
             elv_log("STREAM MATCH stream_id=%d, stream_index=%d, xc_type=%d, url=%s",
                 params->stream_id, i, params->xc_type, url);
             stream_id_index = i;
             selected_stream = 1;
         }
 
-        if (params && decoder_context->stream[i]->id == params->sync_audio_to_stream_id) {
+        if (params && this_stream_id == params->sync_audio_to_stream_id) {
             if (decoder_context->stream[i]->codecpar->codec_type != AVMEDIA_TYPE_VIDEO) {
                 elv_err("Syncing to non-video stream is not possible, sync_audio_to_stream_id=%d, url=%s",
                     params->sync_audio_to_stream_id, url);
@@ -525,13 +526,13 @@ prepare_decoder(
          */
         if (params != NULL && params->dcodec != NULL && params->dcodec[0] != '\0' && 
             decoder_context->format_context->streams[i]->codecpar->codec_type == AVMEDIA_TYPE_VIDEO) {
-            elv_log("STREAM SELECTED id=%d idx=%d xc_type=%d dcodec=%s, url=%s",
-                decoder_context->stream[i]->id, i, params->xc_type, params->dcodec, url);
+            elv_log("STREAM SELECTED this_stream_id=%d, id=%d idx=%d xc_type=%d dcodec=%s, url=%s",
+                this_stream_id, decoder_context->stream[i]->id, i, params->xc_type, params->dcodec, url);
             decoder_context->codec[i] = avcodec_find_decoder_by_name(params->dcodec);
         } else if (params != NULL && params->dcodec2 != NULL && params->dcodec2[0] != '\0' && selected_stream &&
             decoder_context->format_context->streams[i]->codecpar->codec_type == AVMEDIA_TYPE_AUDIO) {
-            elv_log("STREAM SELECTED id=%d idx=%d xc_type=%d dcodec2=%s, url=%s",
-                decoder_context->stream[i]->id, i, params->xc_type, params->dcodec2, url);
+            elv_log("STREAM SELECTED this_stream_id=%d, id=%d idx=%d xc_type=%d dcodec2=%s, url=%s",
+                this_stream_id, decoder_context->stream[i]->id, i, params->xc_type, params->dcodec2, url);
             decoder_context->codec[i] = avcodec_find_decoder_by_name(params->dcodec2);
         } else {
             decoder_context->codec[i] = avcodec_find_decoder(decoder_context->codec_parameters[i]->codec_id);
