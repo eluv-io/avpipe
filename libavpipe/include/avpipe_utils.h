@@ -74,3 +74,8 @@ checksum(
     byte *addr,
     unsigned int count);
 
+void
+hex_encode(
+    byte *buf,
+    int sz,
+    char *str);
