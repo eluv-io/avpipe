@@ -27,23 +27,24 @@ func TestUdpToMp4(t *testing.T) {
 	}
 
 	xcParams := &avpipe.XcParams{
-		Format:          "fmp4-segment",
-		Seekable:        false,
-		DurationTs:      -1,
-		StartSegmentStr: "1",
-		AudioBitrate:    384000,
-		VideoBitrate:    20000000,
-		ForceKeyInt:     120,
-		SegDuration:     "30.03", // seconds
-		Dcodec2:         "ac3",
-		Ecodec2:         "aac",     // "aac"
-		Ecodec:          "libx264", // libx264 software / h264_videotoolbox mac hardware
-		EncHeight:       720,       // 1080
-		EncWidth:        1280,      // 1920
-		XcType:          avpipe.XcAll,
-		StreamId:        -1,
-		Url:             url,
-		DebugFrameLevel: debugFrameLevel,
+		Format:              "fmp4-segment",
+		Seekable:            false,
+		DurationTs:          -1,
+		StartSegmentStr:     "1",
+		AudioBitrate:        384000,
+		VideoBitrate:        20000000,
+		ForceKeyInt:         120,
+		SegDuration:         "30.03", // seconds
+		Dcodec2:             "ac3",
+		Ecodec2:             "aac",     // "aac"
+		Ecodec:              "libx264", // libx264 software / h264_videotoolbox mac hardware
+		EncHeight:           720,       // 1080
+		EncWidth:            1280,      // 1920
+		XcType:              avpipe.XcAll,
+		StreamId:            -1,
+		Url:                 url,
+		SyncAudioToStreamId: -1,
+		DebugFrameLevel:     debugFrameLevel,
 	}
 
 	// Transcode audio mez files in background
@@ -132,23 +133,24 @@ func TestUdpToMp4WithCancelling1(t *testing.T) {
 	}
 
 	xcParams := &avpipe.XcParams{
-		Format:          "fmp4-segment",
-		Seekable:        false,
-		DurationTs:      -1,
-		StartSegmentStr: "1",
-		AudioBitrate:    384000,
-		VideoBitrate:    20000000,
-		ForceKeyInt:     120,
-		SegDuration:     "30.03", // seconds
-		Dcodec2:         "ac3",
-		Ecodec2:         "aac",     // "aac"
-		Ecodec:          "libx264", // libx264 software / h264_videotoolbox mac hardware
-		EncHeight:       720,       // 1080
-		EncWidth:        1280,      // 1920
-		XcType:          avpipe.XcAll,
-		StreamId:        -1,
-		Url:             url,
-		DebugFrameLevel: debugFrameLevel,
+		Format:              "fmp4-segment",
+		Seekable:            false,
+		DurationTs:          -1,
+		StartSegmentStr:     "1",
+		AudioBitrate:        384000,
+		VideoBitrate:        20000000,
+		ForceKeyInt:         120,
+		SegDuration:         "30.03", // seconds
+		Dcodec2:             "ac3",
+		Ecodec2:             "aac",     // "aac"
+		Ecodec:              "libx264", // libx264 software / h264_videotoolbox mac hardware
+		EncHeight:           720,       // 1080
+		EncWidth:            1280,      // 1920
+		XcType:              avpipe.XcAll,
+		StreamId:            -1,
+		Url:                 url,
+		SyncAudioToStreamId: -1,
+		DebugFrameLevel:     debugFrameLevel,
 	}
 
 	// Transcode audio/video mez files in background
@@ -190,23 +192,24 @@ func TestUdpToMp4WithCancelling2(t *testing.T) {
 	}
 
 	xcParams := &avpipe.XcParams{
-		Format:          "fmp4-segment",
-		Seekable:        false,
-		DurationTs:      -1,
-		StartSegmentStr: "1",
-		AudioBitrate:    384000,   // FS1-19-10-14.ts audio bitrate
-		VideoBitrate:    20000000, // fox stream bitrate
-		ForceKeyInt:     120,
-		SegDuration:     "30.03", // seconds
-		Dcodec2:         "ac3",
-		Ecodec2:         "aac",     // "aac"
-		Ecodec:          "libx264", // libx264 software / h264_videotoolbox mac hardware
-		EncHeight:       720,       // 1080
-		EncWidth:        1280,      // 1920
-		XcType:          avpipe.XcAll,
-		StreamId:        -1,
-		Url:             url,
-		DebugFrameLevel: debugFrameLevel,
+		Format:              "fmp4-segment",
+		Seekable:            false,
+		DurationTs:          -1,
+		StartSegmentStr:     "1",
+		AudioBitrate:        384000,   // FS1-19-10-14.ts audio bitrate
+		VideoBitrate:        20000000, // fox stream bitrate
+		ForceKeyInt:         120,
+		SegDuration:         "30.03", // seconds
+		Dcodec2:             "ac3",
+		Ecodec2:             "aac",     // "aac"
+		Ecodec:              "libx264", // libx264 software / h264_videotoolbox mac hardware
+		EncHeight:           720,       // 1080
+		EncWidth:            1280,      // 1920
+		XcType:              avpipe.XcAll,
+		StreamId:            -1,
+		Url:                 url,
+		SyncAudioToStreamId: -1,
+		DebugFrameLevel:     debugFrameLevel,
 	}
 
 	// Transcode audio/video mez files in background
@@ -261,23 +264,24 @@ func TestUdpToMp4WithCancelling3(t *testing.T) {
 	}
 
 	xcParams := &avpipe.XcParams{
-		Format:          "fmp4-segment",
-		Seekable:        false,
-		DurationTs:      -1,
-		StartSegmentStr: "1",
-		AudioBitrate:    384000,
-		VideoBitrate:    20000000,
-		ForceKeyInt:     120,
-		SegDuration:     "30.03", // seconds
-		Dcodec2:         "ac3",
-		Ecodec2:         "aac",     // "aac"
-		Ecodec:          "libx264", // libx264 software / h264_videotoolbox mac hardware
-		EncHeight:       720,       // 1080
-		EncWidth:        1280,      // 1920
-		XcType:          avpipe.XcAll,
-		StreamId:        -1,
-		Url:             url,
-		DebugFrameLevel: debugFrameLevel,
+		Format:              "fmp4-segment",
+		Seekable:            false,
+		DurationTs:          -1,
+		StartSegmentStr:     "1",
+		AudioBitrate:        384000,
+		VideoBitrate:        20000000,
+		ForceKeyInt:         120,
+		SegDuration:         "30.03", // seconds
+		Dcodec2:             "ac3",
+		Ecodec2:             "aac",     // "aac"
+		Ecodec:              "libx264", // libx264 software / h264_videotoolbox mac hardware
+		EncHeight:           720,       // 1080
+		EncWidth:            1280,      // 1920
+		XcType:              avpipe.XcAll,
+		StreamId:            -1,
+		Url:                 url,
+		SyncAudioToStreamId: -1,
+		DebugFrameLevel:     debugFrameLevel,
 	}
 
 	// Transcode audio/video mez files in background
@@ -332,23 +336,24 @@ func TestUdpToMp4WithCancelling4(t *testing.T) {
 	}
 
 	xcParams := &avpipe.XcParams{
-		Format:          "fmp4-segment",
-		Seekable:        false,
-		DurationTs:      -1,
-		StartSegmentStr: "1",
-		AudioBitrate:    384000,
-		VideoBitrate:    20000000,
-		ForceKeyInt:     120,
-		SegDuration:     "30.03", // seconds
-		Dcodec2:         "ac3",
-		Ecodec2:         "aac",     // "aac"
-		Ecodec:          "libx264", // libx264 software / h264_videotoolbox mac hardware
-		EncHeight:       720,       // 1080
-		EncWidth:        1280,      // 1920
-		XcType:          avpipe.XcAll,
-		StreamId:        -1,
-		Url:             url,
-		DebugFrameLevel: debugFrameLevel,
+		Format:              "fmp4-segment",
+		Seekable:            false,
+		DurationTs:          -1,
+		StartSegmentStr:     "1",
+		AudioBitrate:        384000,
+		VideoBitrate:        20000000,
+		ForceKeyInt:         120,
+		SegDuration:         "30.03", // seconds
+		Dcodec2:             "ac3",
+		Ecodec2:             "aac",     // "aac"
+		Ecodec:              "libx264", // libx264 software / h264_videotoolbox mac hardware
+		EncHeight:           720,       // 1080
+		EncWidth:            1280,      // 1920
+		XcType:              avpipe.XcAll,
+		StreamId:            -1,
+		Url:                 url,
+		SyncAudioToStreamId: -1,
+		DebugFrameLevel:     debugFrameLevel,
 	}
 
 	reqCtx := &testCtx{url: url}

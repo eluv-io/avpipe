@@ -20,6 +20,7 @@
 #include "url_parser.h"
 #include "avpipe_version.h"
 #include "base64.h"
+#include "scte35.h"
 
 #include <stdio.h>
 #include <fcntl.h>
@@ -372,6 +373,7 @@ prepare_decoder(
     decoder_context->in_handlers = in_handlers;
     decoder_context->inctx = inctx;
     decoder_context->video_stream_index = -1;
+    decoder_context->data_scte35_stream_index = -1;
     for (int j=0; j<MAX_AUDIO_MUX; j++)
         decoder_context->audio_stream_index[j] = -1;
 
@@ -463,10 +465,23 @@ prepare_decoder(
         case AVMEDIA_TYPE_DATA:
             decoder_context->codec_parameters[i] = decoder_context->format_context->streams[i]->codecpar;
             decoder_context->stream[i] = decoder_context->format_context->streams[i];
-            decoder_context->data_stream_index = i;
-            elv_dbg("DATA STREAM %d, codec_id=%s, stream_id=%d, url=%s",
-                i, avcodec_get_name(decoder_context->codec_parameters[i]->codec_id),
-                decoder_context->stream[i]->id, url);
+
+            switch (decoder_context->codec_parameters[i]->codec_id) {
+            case AV_CODEC_ID_SCTE_35:
+                decoder_context->data_scte35_stream_index = i;
+                elv_dbg("DATA STREAM SCTE-35 %d, codec_id=%s, stream_id=%d, url=%s",
+                    i, avcodec_get_name(decoder_context->codec_parameters[i]->codec_id),
+                    decoder_context->stream[i]->id, url);
+                break;
+            default:
+                // Unrecognized data stream
+                decoder_context->data_stream_index = i;
+                elv_dbg("DATA STREAM UNRECOGNIZED %d, codec_id=%s, stream_id=%d, url=%s",
+                    i, avcodec_get_name(decoder_context->codec_parameters[i]->codec_id),
+                    decoder_context->stream[i]->id, url);
+                break;
+            }
+
             break;
 
         default:
@@ -478,14 +493,15 @@ prepare_decoder(
 
         /* Is this the stream selected for transcoding? */
         int selected_stream = 0;
-        if (params && decoder_context->stream[i]->id == params->stream_id) {
+        int this_stream_id =  decoder_context->is_rtmp ? i : decoder_context->stream[i]->id;
+        if (params && this_stream_id == params->stream_id) {
             elv_log("STREAM MATCH stream_id=%d, stream_index=%d, xc_type=%d, url=%s",
                 params->stream_id, i, params->xc_type, url);
             stream_id_index = i;
             selected_stream = 1;
         }
 
-        if (params && decoder_context->stream[i]->id == params->sync_audio_to_stream_id) {
+        if (params && this_stream_id == params->sync_audio_to_stream_id) {
             if (decoder_context->stream[i]->codecpar->codec_type != AVMEDIA_TYPE_VIDEO) {
                 elv_err("Syncing to non-video stream is not possible, sync_audio_to_stream_id=%d, url=%s",
                     params->sync_audio_to_stream_id, url);
@@ -510,13 +526,13 @@ prepare_decoder(
          */
         if (params != NULL && params->dcodec != NULL && params->dcodec[0] != '\0' && 
             decoder_context->format_context->streams[i]->codecpar->codec_type == AVMEDIA_TYPE_VIDEO) {
-            elv_log("STREAM SELECTED id=%d idx=%d xc_type=%d dcodec=%s, url=%s",
-                decoder_context->stream[i]->id, i, params->xc_type, params->dcodec, url);
+            elv_log("STREAM SELECTED this_stream_id=%d, id=%d idx=%d xc_type=%d dcodec=%s, url=%s",
+                this_stream_id, decoder_context->stream[i]->id, i, params->xc_type, params->dcodec, url);
             decoder_context->codec[i] = avcodec_find_decoder_by_name(params->dcodec);
         } else if (params != NULL && params->dcodec2 != NULL && params->dcodec2[0] != '\0' && selected_stream &&
             decoder_context->format_context->streams[i]->codecpar->codec_type == AVMEDIA_TYPE_AUDIO) {
-            elv_log("STREAM SELECTED id=%d idx=%d xc_type=%d dcodec2=%s, url=%s",
-                decoder_context->stream[i]->id, i, params->xc_type, params->dcodec2, url);
+            elv_log("STREAM SELECTED this_stream_id=%d, id=%d idx=%d xc_type=%d dcodec2=%s, url=%s",
+                this_stream_id, decoder_context->stream[i]->id, i, params->xc_type, params->dcodec2, url);
             decoder_context->codec[i] = avcodec_find_decoder_by_name(params->dcodec2);
         } else {
             decoder_context->codec[i] = avcodec_find_decoder(decoder_context->codec_parameters[i]->codec_id);
@@ -2974,6 +2990,7 @@ should_stop_decoding(
         if (decoder_context->video_input_start_pts == -1) {
             avpipe_io_handler_t *in_handlers = decoder_context->in_handlers;
             decoder_context->video_input_start_pts = input_packet->pts;
+            decoder_context->inctx->decoding_start_pts = input_packet->pts;
             elv_log("video_input_start_pts=%"PRId64,
                 decoder_context->video_input_start_pts);
             if (in_handlers->avpipe_stater)
@@ -2986,6 +3003,7 @@ should_stop_decoding(
         if (decoder_context->audio_input_start_pts == -1) {
             avpipe_io_handler_t *in_handlers = decoder_context->in_handlers;
             decoder_context->audio_input_start_pts = input_packet->pts;
+            decoder_context->inctx->decoding_start_pts = input_packet->pts;
             elv_log("audio_input_start_pts=%"PRId64,
                 decoder_context->audio_input_start_pts);
             if (in_handlers->avpipe_stater)
@@ -3368,7 +3386,7 @@ avpipe_xc(
         elv_err("Failed to initialize audio pan filter, url=%s", params->url);
         goto xc_done;
     }
-        
+
     if (!params->bypass_transcoding &&
         params->xc_type == xc_audio_join &&
         (rc = init_audio_join_filters(decoder_context, encoder_context, xctx->params)) != eav_success) {
@@ -3627,9 +3645,37 @@ avpipe_xc(
             elv_channel_send(xctx->ac, xc_frame);
 
         } else {
-            if (debug_frame_level)
-                elv_dbg("Skip stream - packet index=%d, pts=%"PRId64", url=%s",
-                    input_packet->stream_index, input_packet->pts, params->url);
+            if (stream_index == decoder_context->data_scte35_stream_index) {
+                uint8_t scte35_command_type;
+                int res = parse_scte35_pkt(&scte35_command_type, input_packet);
+                if (res < 0) {
+                    elv_warn("SCTE [%d] fail to parse pts=%"PRId64" size=%d",
+                        input_packet->stream_index, input_packet->pts, input_packet->size);
+                } else {
+                    char hex_str[2 * input_packet->size + 1];
+                    switch (scte35_command_type) {
+                    case 4:
+                    case 5:
+                    case 6:
+                        hex_encode(input_packet->data, input_packet->size, hex_str);
+                        elv_dbg("SCTE [%d] pts=%"PRId64" duration=%"PRId64" flag=%d size=%d "
+                            "data=%s command=%d",
+                            input_packet->stream_index, input_packet->pts, input_packet->duration,
+                            input_packet->flags, input_packet->size,
+                            hex_str, scte35_command_type);
+
+                        if (in_handlers->avpipe_stater) {
+                            inctx->data = (uint8_t *)hex_str;
+                            in_handlers->avpipe_stater(inctx, in_stat_data_scte35);
+                        }
+                        break;
+                    }
+                }
+            } else {
+                if (debug_frame_level)
+                    elv_dbg("Skip stream - packet index=%d, pts=%"PRId64", url=%s",
+                        input_packet->stream_index, input_packet->pts, params->url);
+            }
             av_packet_free(&input_packet);
         }
     }
@@ -4516,7 +4562,7 @@ init_extract_images(
     params->extract_images_sz = size;
 }
 
-void 
+void
 set_extract_images(
     xcparams_t *params,
     int index,
