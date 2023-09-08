@@ -282,6 +282,11 @@ in_stat(
     case in_stat_video_frame_read:
         rc = AVPipeStatInput(fd, stat_type, &c->video_frames_read);
         break;
+
+    case in_stat_first_keyframe_pts:
+        rc = AVPipeStatInput(fd, stat_type, &c->first_key_frame_pts);
+        break;
+
     default:
         rc = -1;
     }

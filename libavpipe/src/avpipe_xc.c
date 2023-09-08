@@ -2280,8 +2280,15 @@ transcode_audio(
             return eav_receive_frame;
         }
 
-        if (decoder_context->first_decoding_audio_pts < 0)
+        if (decoder_context->first_decoding_audio_pts == AV_NOPTS_VALUE) {
             decoder_context->first_decoding_audio_pts = frame->pts;
+            avpipe_io_handler_t *in_handlers = decoder_context->in_handlers;
+            decoder_context->inctx->decoding_start_pts = decoder_context->first_decoding_audio_pts;
+            elv_log("first_decoding_audio_pts=%"PRId64,
+                decoder_context->first_decoding_audio_pts);
+            if (in_handlers->avpipe_stater)
+                in_handlers->avpipe_stater(decoder_context->inctx, in_stat_decoding_audio_start_pts);
+        }
 
         dump_frame(1, "IN ", codec_context->frame_number, frame, debug_frame_level);
 
@@ -2385,8 +2392,15 @@ transcode_audio_aac(
             return eav_receive_frame;
         }
 
-        if (decoder_context->first_decoding_audio_pts < 0)
+        if (decoder_context->first_decoding_audio_pts == AV_NOPTS_VALUE) {
             decoder_context->first_decoding_audio_pts = frame->pts;
+            avpipe_io_handler_t *in_handlers = decoder_context->in_handlers;
+            decoder_context->inctx->decoding_start_pts = decoder_context->first_decoding_audio_pts;
+            elv_log("first_decoding_audio_pts=%"PRId64,
+                decoder_context->first_decoding_audio_pts);
+            if (in_handlers->avpipe_stater)
+                in_handlers->avpipe_stater(decoder_context->inctx, in_stat_decoding_audio_start_pts);
+        }
 
         dump_frame(1, "IN ", codec_context->frame_number, frame, debug_frame_level);
 
@@ -2609,8 +2623,15 @@ transcode_video(
             return eav_receive_frame;
         }
 
-        if (decoder_context->first_decoding_video_pts < 0)
+        if (decoder_context->first_decoding_video_pts == AV_NOPTS_VALUE) {
             decoder_context->first_decoding_video_pts = frame->pts;
+            avpipe_io_handler_t *in_handlers = decoder_context->in_handlers;
+            decoder_context->inctx->decoding_start_pts = decoder_context->first_decoding_video_pts;
+            elv_log("first_decoding_video_pts=%"PRId64,
+                decoder_context->first_decoding_video_pts);
+            if (in_handlers->avpipe_stater)
+                in_handlers->avpipe_stater(decoder_context->inctx, in_stat_decoding_video_start_pts);
+        }
 
         /* If force_equal_fduration is set then frame_duration > 0 is true */
         if (decoder_context->frame_duration > 0) {
@@ -2987,27 +3008,19 @@ should_stop_decoding(
 
     if (input_packet->stream_index == decoder_context->video_stream_index &&
         (params->xc_type & xc_video)) {
-        if (decoder_context->video_input_start_pts == -1) {
-            avpipe_io_handler_t *in_handlers = decoder_context->in_handlers;
+        if (decoder_context->video_input_start_pts == AV_NOPTS_VALUE) {
             decoder_context->video_input_start_pts = input_packet->pts;
-            decoder_context->inctx->decoding_start_pts = input_packet->pts;
             elv_log("video_input_start_pts=%"PRId64,
                 decoder_context->video_input_start_pts);
-            if (in_handlers->avpipe_stater)
-                in_handlers->avpipe_stater(decoder_context->inctx, in_stat_decoding_video_start_pts);
         }
 
         input_packet_rel_pts = input_packet->pts - decoder_context->video_input_start_pts;
     } else if (selected_decoded_audio(decoder_context, input_packet->stream_index) >= 0 &&
         params->xc_type & xc_audio) {
-        if (decoder_context->audio_input_start_pts == -1) {
-            avpipe_io_handler_t *in_handlers = decoder_context->in_handlers;
+        if (decoder_context->audio_input_start_pts == AV_NOPTS_VALUE) {
             decoder_context->audio_input_start_pts = input_packet->pts;
-            decoder_context->inctx->decoding_start_pts = input_packet->pts;
             elv_log("audio_input_start_pts=%"PRId64,
                 decoder_context->audio_input_start_pts);
-            if (in_handlers->avpipe_stater)
-                in_handlers->avpipe_stater(decoder_context->inctx, in_stat_decoding_audio_start_pts);
         }
 
         input_packet_rel_pts = input_packet->pts - decoder_context->audio_input_start_pts;
@@ -3110,9 +3123,14 @@ skip_for_sync(
         /* first_key_frame_pts points to first video key frame. */
         if (decoder_context->first_key_frame_pts < 0 &&
             input_packet->flags == AV_PKT_FLAG_KEY) {
+            avpipe_io_handler_t *in_handlers = decoder_context->in_handlers;
             decoder_context->first_key_frame_pts = input_packet->pts;
+            decoder_context->inctx->first_key_frame_pts = decoder_context->first_key_frame_pts;
             elv_log("PTS first_key_frame_pts=%"PRId64" sidx=%d",
                 decoder_context->first_key_frame_pts, input_packet->stream_index);
+
+            if (in_handlers->avpipe_stater)
+                in_handlers->avpipe_stater(decoder_context->inctx, in_stat_first_keyframe_pts);
 
             dump_packet(0, "SYNC ", input_packet, 1);
             return 0;
@@ -3492,14 +3510,14 @@ avpipe_xc(
         /* PENDING (RM) add new start_time_ts for audio */
     }
 
-    decoder_context->video_input_start_pts = -1;
-    decoder_context->audio_input_start_pts = -1;
+    decoder_context->video_input_start_pts = AV_NOPTS_VALUE;
+    decoder_context->audio_input_start_pts = AV_NOPTS_VALUE;
     decoder_context->video_duration = -1;
     encoder_context->audio_duration = -1;
     decoder_context->audio_input_prev_pts = -1;
     encoder_context->video_encoder_prev_pts = -1;
-    decoder_context->first_decoding_video_pts = -1;
-    decoder_context->first_decoding_audio_pts = -1;
+    decoder_context->first_decoding_video_pts = AV_NOPTS_VALUE;
+    decoder_context->first_decoding_audio_pts = AV_NOPTS_VALUE;
     encoder_context->first_encoding_video_pts = -1;
     encoder_context->first_encoding_audio_pts = -1;
     encoder_context->audio_pts = AV_NOPTS_VALUE;
@@ -3580,8 +3598,8 @@ avpipe_xc(
             // PENDING(SSS) - this logic can be done after decoding where we know concretely that we decoded all frames
             // we need to encode.
             if (should_stop_decoding(input_packet, decoder_context, encoder_context,
-                params, inctx->audio_frames_read, inctx->video_frames_read,
-                &frames_read_past_duration, frames_allowed_past_duration)) {
+                    params, inctx->audio_frames_read, inctx->video_frames_read,
+                    &frames_read_past_duration, frames_allowed_past_duration)) {
                 av_packet_free(&input_packet);
                 if (decoder_context->cancelled)
                     rc = eav_cancelled;
@@ -3614,6 +3632,16 @@ avpipe_xc(
             inctx->video_frames_read++;
             if (in_handlers->avpipe_stater)
                 in_handlers->avpipe_stater(inctx, in_stat_video_frame_read);
+
+            if (decoder_context->first_key_frame_pts < 0 &&
+                    input_packet->flags == AV_PKT_FLAG_KEY) {
+                decoder_context->first_key_frame_pts = input_packet->pts;
+                decoder_context->inctx->first_key_frame_pts = decoder_context->first_key_frame_pts;
+                elv_log("PTS first_key_frame_pts=%"PRId64" sidx=%d",
+                    decoder_context->first_key_frame_pts, input_packet->stream_index);
+                if (in_handlers->avpipe_stater)
+                    in_handlers->avpipe_stater(decoder_context->inctx, in_stat_first_keyframe_pts);
+            }
 
             // Assert DTS is growing as expected (accommodate non integer and irregular frame duration)
             if (video_last_dts + input_packet->duration * 1.5 < input_packet->dts &&

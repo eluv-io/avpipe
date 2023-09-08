@@ -84,15 +84,16 @@ typedef enum avpipe_buftype_t {
 #define AUDIO_BYTES_WRITE_REPORT        (64*1024)
 
 typedef enum avp_stat_t {
-    in_stat_bytes_read = 1,
-    in_stat_audio_frame_read = 2,
-    in_stat_video_frame_read = 4,
-    in_stat_decoding_audio_start_pts = 8,
-    in_stat_decoding_video_start_pts = 16,
-    out_stat_bytes_written = 32,
-    out_stat_frame_written = 64,
-    out_stat_encoding_end_pts = 128,
-    in_stat_data_scte35 = 256
+    in_stat_bytes_read = 1,                 // # of bytes read from input stream
+    in_stat_audio_frame_read = 2,           // # of audio frames read from the input stream
+    in_stat_video_frame_read = 4,           // # of video frames read from the input stream
+    in_stat_decoding_audio_start_pts = 8,   // PTS of first audio packet went to the decoder
+    in_stat_decoding_video_start_pts = 16,  // PTS of first video packet went to the decoder
+    out_stat_bytes_written = 32,            // # of bytes written to the output stream
+    out_stat_frame_written = 64,            // # of frames written to the output stream
+    in_stat_first_keyframe_pts = 128,       // First keyframe in the input stream
+    out_stat_encoding_end_pts = 256,        // 
+    in_stat_data_scte35 = 512               // SCTE data arrived
 } avp_stat_t;
 
 struct coderctx_t;
@@ -163,6 +164,7 @@ typedef struct ioctx_t {
 
     /* Audio/video decoding start pts for stat reporting */
     int64_t decoding_start_pts;
+    int64_t first_key_frame_pts;
 
     /* Output handlers specific data */
     int64_t pts;                /* frame pts */
