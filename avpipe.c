@@ -548,6 +548,11 @@ udp_in_stat(
         if (debug_frame_level)
             elv_dbg("IN STAT UDP fd=%d, video frame read=%"PRId64", url=%s", fd, c->video_frames_read, c->url);
         break;
+    case in_stat_first_keyframe_pts:
+        if (debug_frame_level)
+            elv_dbg("IN STAT UDP fd=%d, first keyframe PTS=%"PRId64", url=%s", fd, c->first_key_frame_pts, c->url);
+        rc = AVPipeStatInput(fd, stat_type, &c->first_key_frame_pts);
+        break;
     case in_stat_data_scte35:
         if (debug_frame_level)
             elv_dbg("IN STAT UDP SCTE35 fd=%d, stat_type=%d, url=%s", fd, stat_type, c->url);
