@@ -1203,7 +1203,7 @@ main(
         .overlay_filename = NULL,
         .watermark_overlay = NULL,
         .watermark_overlay_len = 0,
-        .watermark_overlay_type = png_image,
+        .watermark_overlay_type = unknown_image,
         .watermark_shadow_color = strdup("white"),  /* Default shadow color */
         .gpu_index = -1,
         .seg_duration = NULL,

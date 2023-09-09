@@ -289,8 +289,14 @@ prepare_input(
 
     /* For RTMP protocol don't create input callbacks */
     decoder_context->is_rtmp = 0;
+    decoder_context->is_srt = 0;
     if (inctx->url && !strncmp(inctx->url, "rtmp", 4)) {
         decoder_context->is_rtmp = 1;
+        return 0;
+    }
+
+    if (inctx->url && !strncmp(inctx->url, "srt", 3)) {
+        decoder_context->is_srt = 1;
         return 0;
     }
 
@@ -1892,7 +1898,7 @@ encode_frame(
         const char *st = stream_type_str(encoder_context, stream_index);
 
         // Adjust PTS if input stream starts at an arbitrary value (MPEG-TS/RTMP)
-        if ((decoder_context->is_mpegts || decoder_context->is_rtmp)
+        if ((decoder_context->is_mpegts || decoder_context->is_rtmp || decoder_context->is_srt)
             && (!strcmp(params->format, "fmp4-segment"))) {
             if (stream_index == decoder_context->video_stream_index) {
                 if (encoder_context->first_encoding_video_pts == -1) {
@@ -3100,7 +3106,7 @@ skip_for_sync(
      * - or it is already synced
      * - or format is not fmp4-segment.
      */
-    if ((!decoder_context->is_mpegts && !decoder_context->is_rtmp) ||
+    if ((!decoder_context->is_mpegts && !decoder_context->is_rtmp && !decoder_context->is_srt) ||
         decoder_context->mpegts_synced ||
         strcmp(params->format, "fmp4-segment"))
         return 0;
@@ -4475,7 +4481,7 @@ avpipe_fini(
 
     /* note: the internal buffer could have changed, and be != avio_ctx_buffer */
     if (decoder_context && decoder_context->format_context) {
-        if ((*xctx)->inctx && strncmp((*xctx)->inctx->url, "rtmp", 4)) {
+        if ((*xctx)->inctx && strncmp((*xctx)->inctx->url, "rtmp", 4) && strncmp((*xctx)->inctx->url, "srt", 3)) {
             AVIOContext *avioctx = (AVIOContext *) decoder_context->format_context->pb;
             if (avioctx) {
                 av_freep(&avioctx->buffer);
