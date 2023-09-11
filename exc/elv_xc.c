@@ -132,7 +132,7 @@ in_opener(
         return 0;
     }
 
-    if (!strcmp(url_parser.protocol, "rtmp")) {
+    if (!strcmp(url_parser.protocol, "rtmp") || !strcmp(url_parser.protocol, "srt")) {
         inctx->opaque = (int *) calloc(2, sizeof(int));
         inctx->url = strdup(url);
         pthread_mutex_lock(&lock);
@@ -146,7 +146,7 @@ in_opener(
 
     /* If input is not file */
     if (strcmp(url_parser.protocol, "file")) {
-        elv_err("Invalid input url=%s, can be only udp or file", url);
+        elv_err("Invalid input url=%s, can be udp, rtmp, srt or file", url);
         inctx->opaque = NULL;
         return -1;
     }
