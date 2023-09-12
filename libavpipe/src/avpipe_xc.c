@@ -3121,7 +3121,7 @@ skip_for_sync(
     /* Check if the packet is video and it is a key frame */
     if (input_packet->stream_index == decoder_context->video_stream_index) {
         /* first_key_frame_pts points to first video key frame. */
-        if (decoder_context->first_key_frame_pts < 0 &&
+        if (decoder_context->first_key_frame_pts == AV_NOPTS_VALUE &&
             input_packet->flags == AV_PKT_FLAG_KEY) {
             avpipe_io_handler_t *in_handlers = decoder_context->in_handlers;
             decoder_context->first_key_frame_pts = input_packet->pts;
@@ -3135,7 +3135,7 @@ skip_for_sync(
             dump_packet(0, "SYNC ", input_packet, 1);
             return 0;
         }
-        if (decoder_context->first_key_frame_pts < 0) {
+        if (decoder_context->first_key_frame_pts == AV_NOPTS_VALUE) {
             dump_packet(0, "SYNC SKIP ", input_packet, 1);
             return 1;
         }
@@ -3146,7 +3146,7 @@ skip_for_sync(
      * Skip until the audio PTS has reached the first video key frame PTS
      * PENDING(SSS) - this is incorrect if audio PTS is muxed ahead of video
      */
-    if (decoder_context->first_key_frame_pts < 0 ||
+    if (decoder_context->first_key_frame_pts == AV_NOPTS_VALUE ||
         input_packet->pts < decoder_context->first_key_frame_pts) {
         elv_log("PTS SYNC SKIP audio_pts=%"PRId64" first_key_frame_pts=%"PRId64,
             input_packet->pts, decoder_context->first_key_frame_pts);
@@ -3525,7 +3525,7 @@ avpipe_xc(
 
     for (int j=0; j<MAX_STREAMS; j++)
         encoder_context->first_read_frame_pts[j] = -1;
-    decoder_context->first_key_frame_pts = -1;
+    decoder_context->first_key_frame_pts = AV_NOPTS_VALUE;
     decoder_context->mpegts_synced = 0;
     encoder_context->video_last_pts_sent_encode = -1;
     encoder_context->audio_last_pts_sent_encode = -1;
@@ -3633,7 +3633,7 @@ avpipe_xc(
             if (in_handlers->avpipe_stater)
                 in_handlers->avpipe_stater(inctx, in_stat_video_frame_read);
 
-            if (decoder_context->first_key_frame_pts < 0 &&
+            if (decoder_context->first_key_frame_pts == AV_NOPTS_VALUE &&
                     input_packet->flags == AV_PKT_FLAG_KEY) {
                 decoder_context->first_key_frame_pts = input_packet->pts;
                 decoder_context->inctx->first_key_frame_pts = decoder_context->first_key_frame_pts;
