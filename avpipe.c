@@ -282,6 +282,11 @@ in_stat(
     case in_stat_video_frame_read:
         rc = AVPipeStatInput(fd, stat_type, &c->video_frames_read);
         break;
+
+    case in_stat_first_keyframe_pts:
+        rc = AVPipeStatInput(fd, stat_type, &c->first_key_frame_pts);
+        break;
+
     default:
         rc = -1;
     }
@@ -542,6 +547,11 @@ udp_in_stat(
     case in_stat_video_frame_read:
         if (debug_frame_level)
             elv_dbg("IN STAT UDP fd=%d, video frame read=%"PRId64", url=%s", fd, c->video_frames_read, c->url);
+        break;
+    case in_stat_first_keyframe_pts:
+        if (debug_frame_level)
+            elv_dbg("IN STAT UDP fd=%d, first keyframe PTS=%"PRId64", url=%s", fd, c->first_key_frame_pts, c->url);
+        rc = AVPipeStatInput(fd, stat_type, &c->first_key_frame_pts);
         break;
     case in_stat_data_scte35:
         if (debug_frame_level)

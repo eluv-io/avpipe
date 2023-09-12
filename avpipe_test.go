@@ -25,7 +25,7 @@ import (
 )
 
 const baseOutPath = "test_out"
-const debugFrameLevel = false
+const debugFrameLevel = true
 const h264Codec = "libx264"
 const videoBigBuckBunnyPath = "media/bbb_1080p_30fps_60sec.mp4"
 const videoRockyPath = "media/rocky.mp4"
@@ -42,6 +42,7 @@ type XcTestResult struct {
 type testStatsInfo struct {
 	audioFramesRead         uint64
 	videoFramesRead         uint64
+	firstKeyFramePTS        uint64
 	encodingAudioFrameStats avpipe.EncodingFrameStats
 	encodingVideoFrameStats avpipe.EncodingFrameStats
 }
@@ -154,6 +155,12 @@ func (i *fileInput) Stat(statType avpipe.AVStatType, statArgs interface{}) error
 		if debugFrameLevel {
 			log.Debug("AVP TEST IN STAT", "video start PTS", *startPTS)
 		}
+	case avpipe.AV_IN_STAT_FIRST_KEYFRAME_PTS:
+		keyFramePTS := statArgs.(*uint64)
+		if debugFrameLevel {
+			log.Debug("AVP TEST IN STAT", "video first keyframe PTS", *keyFramePTS)
+		}
+		statsInfo.firstKeyFramePTS = *keyFramePTS
 	}
 	return nil
 }
@@ -1961,6 +1968,7 @@ func TestAVPipeStats(t *testing.T) {
 
 	assert.Equal(t, int64(2880), statsInfo.encodingVideoFrameStats.TotalFramesWritten)
 	assert.Equal(t, int64(5625), statsInfo.encodingAudioFrameStats.TotalFramesWritten)
+	assert.Equal(t, uint64(0), statsInfo.firstKeyFramePTS)
 	// FIXME
 	//assert.Equal(t, int64(720), statsInfo.encodingVideoFrameStats.FramesWritten)
 	//assert.Equal(t, int64(1406), statsInfo.encodingAudioFrameStats.FramesWritten)
