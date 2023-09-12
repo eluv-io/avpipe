@@ -1844,7 +1844,7 @@ should_skip_encoding(
 
     if (p->xc_type == xc_extract_images || p->xc_type == xc_extract_all_images) {
         return !should_extract_frame(encoder_context, p, frame);
-    }    
+    }
 
     return 0;
 }
@@ -1898,9 +1898,10 @@ encode_frame(
                 if (encoder_context->first_encoding_video_pts == -1) {
                     /* Remember the first video PTS to use as an offset later */
                     encoder_context->first_encoding_video_pts = frame->pts;
-                    elv_log("PTS first_encoding_video_pts=%"PRId64" dec=%"PRId64" read=%"PRId64" stream=%d:%s",
+                    elv_log("PTS first_encoding_video_pts=%"PRId64" dec=%"PRId64" pktdts=%"PRId64" read=%"PRId64" stream=%d:%s",
                         encoder_context->first_encoding_video_pts,
                         decoder_context->first_decoding_video_pts,
+                        frame->pkt_dts,
                         encoder_context->first_read_frame_pts[stream_index], params->xc_type, st);
                 }
 
@@ -2627,8 +2628,8 @@ transcode_video(
             decoder_context->first_decoding_video_pts = frame->pts;
             avpipe_io_handler_t *in_handlers = decoder_context->in_handlers;
             decoder_context->inctx->decoding_start_pts = decoder_context->first_decoding_video_pts;
-            elv_log("first_decoding_video_pts=%"PRId64,
-                decoder_context->first_decoding_video_pts);
+            elv_log("first_decoding_video_pts=%"PRId64" pktdts=%"PRId64,
+                decoder_context->first_decoding_video_pts, frame->pkt_dts);
             if (in_handlers->avpipe_stater)
                 in_handlers->avpipe_stater(decoder_context->inctx, in_stat_decoding_video_start_pts);
         }
@@ -3010,8 +3011,8 @@ should_stop_decoding(
         (params->xc_type & xc_video)) {
         if (decoder_context->video_input_start_pts == AV_NOPTS_VALUE) {
             decoder_context->video_input_start_pts = input_packet->pts;
-            elv_log("video_input_start_pts=%"PRId64,
-                decoder_context->video_input_start_pts);
+            elv_log("video_input_start_pts=%"PRId64" flags=%d dts=%"PRId64,
+                decoder_context->video_input_start_pts, input_packet->flags, input_packet->dts);
         }
 
         input_packet_rel_pts = input_packet->pts - decoder_context->video_input_start_pts;
@@ -3126,8 +3127,8 @@ skip_for_sync(
             avpipe_io_handler_t *in_handlers = decoder_context->in_handlers;
             decoder_context->first_key_frame_pts = input_packet->pts;
             decoder_context->inctx->first_key_frame_pts = decoder_context->first_key_frame_pts;
-            elv_log("PTS first_key_frame_pts=%"PRId64" sidx=%d",
-                decoder_context->first_key_frame_pts, input_packet->stream_index);
+            elv_log("PTS first_key_frame_pts=%"PRId64" sidx=%d flags=%d dts=%"PRId64,
+                decoder_context->first_key_frame_pts, input_packet->stream_index, input_packet->flags, input_packet->dts);
 
             if (in_handlers->avpipe_stater)
                 in_handlers->avpipe_stater(decoder_context->inctx, in_stat_first_keyframe_pts);
@@ -3637,8 +3638,8 @@ avpipe_xc(
                     input_packet->flags == AV_PKT_FLAG_KEY) {
                 decoder_context->first_key_frame_pts = input_packet->pts;
                 decoder_context->inctx->first_key_frame_pts = decoder_context->first_key_frame_pts;
-                elv_log("PTS first_key_frame_pts=%"PRId64" sidx=%d",
-                    decoder_context->first_key_frame_pts, input_packet->stream_index);
+                elv_log("PTS first_key_frame_pts=%"PRId64" sidx=%d flags=%d dts=%"PRId64,
+                    decoder_context->first_key_frame_pts, input_packet->stream_index, input_packet->flags, input_packet->dts);
                 if (in_handlers->avpipe_stater)
                     in_handlers->avpipe_stater(decoder_context->inctx, in_stat_first_keyframe_pts);
             }
