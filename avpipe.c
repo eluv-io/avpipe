@@ -543,10 +543,12 @@ udp_in_stat(
     case in_stat_audio_frame_read:
         if (debug_frame_level)
             elv_dbg("IN STAT UDP fd=%d, audio frame read=%"PRId64", url=%s", fd, c->audio_frames_read, c->url);
+        rc = AVPipeStatInput(fd, stat_type, &c->audio_frames_read);
         break;
     case in_stat_video_frame_read:
         if (debug_frame_level)
             elv_dbg("IN STAT UDP fd=%d, video frame read=%"PRId64", url=%s", fd, c->video_frames_read, c->url);
+        rc = AVPipeStatInput(fd, stat_type, &c->video_frames_read);
         break;
     case in_stat_first_keyframe_pts:
         if (debug_frame_level)
