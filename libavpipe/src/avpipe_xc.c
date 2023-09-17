@@ -4577,7 +4577,8 @@ avpipe_version()
     if (version_str[0] != '\0')
         return version_str;
 
-    snprintf(version_str, sizeof(version_str), "%d.%d@%s", AVPIPE_MAJOR_VERSION, AVPIPE_MINOR_VERSION, VERSION);
+    // TODO(reza): Fix this VERSION
+    snprintf(version_str, sizeof(version_str), "%d.%d@%s", AVPIPE_MAJOR_VERSION, AVPIPE_MINOR_VERSION, "0.0-jph");
 
     return version_str;
 }
