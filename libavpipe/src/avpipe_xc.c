@@ -276,6 +276,16 @@ static int init_output_frame(AVFrame **frame,
 
 #endif
 
+static int
+is_protocol(
+    coderctx_t *decoder_context)
+{
+    if (decoder_context->is_mpegts || decoder_context->is_rtmp || decoder_context->is_srt)
+        return 1;
+
+    return 0;
+}
+
 int
 prepare_input(
     avpipe_io_handler_t *in_handlers,
@@ -290,12 +300,12 @@ prepare_input(
     /* For RTMP protocol don't create input callbacks */
     decoder_context->is_rtmp = 0;
     decoder_context->is_srt = 0;
-    if (inctx->url && !strncmp(inctx->url, "rtmp", 4)) {
+    if (inctx->url && !strncmp(inctx->url, "rtmp://", 7)) {
         decoder_context->is_rtmp = 1;
         return 0;
     }
 
-    if (inctx->url && !strncmp(inctx->url, "srt", 3)) {
+    if (inctx->url && !strncmp(inctx->url, "srt://", 6)) {
         decoder_context->is_srt = 1;
         return 0;
     }
@@ -1898,8 +1908,7 @@ encode_frame(
         const char *st = stream_type_str(encoder_context, stream_index);
 
         // Adjust PTS if input stream starts at an arbitrary value (MPEG-TS/RTMP)
-        if ((decoder_context->is_mpegts || decoder_context->is_rtmp || decoder_context->is_srt)
-            && (!strcmp(params->format, "fmp4-segment"))) {
+        if ( is_protocol(decoder_context) && (!strcmp(params->format, "fmp4-segment"))) {
             if (stream_index == decoder_context->video_stream_index) {
                 if (encoder_context->first_encoding_video_pts == -1) {
                     /* Remember the first video PTS to use as an offset later */
@@ -3116,12 +3125,12 @@ skip_for_sync(
         return 0;
 
     /* No need to sync if:
-     * - it is not mpegts and not rtmp
+     * - it is not mpegts and not rtmp and not srt
      * - or it is already synced
      * - or format is not fmp4-segment.
      */
-    if ((!decoder_context->is_mpegts && !decoder_context->is_rtmp && !decoder_context->is_srt) ||
-        decoder_context->mpegts_synced ||
+    if (!is_protocol(decoder_context) ||
+        decoder_context->is_av_synced ||
         strcmp(params->format, "fmp4-segment"))
         return 0;
 
@@ -3161,7 +3170,7 @@ skip_for_sync(
         return 1;
     }
 
-    decoder_context->mpegts_synced = 1;
+    decoder_context->is_av_synced = 1;
     elv_log("PTS first_audio_frame_pts=%"PRId64, input_packet->pts);
     return 0;
 }
@@ -3533,7 +3542,7 @@ avpipe_xc(
     for (int j=0; j<MAX_STREAMS; j++)
         encoder_context->first_read_frame_pts[j] = -1;
     decoder_context->first_key_frame_pts = AV_NOPTS_VALUE;
-    decoder_context->mpegts_synced = 0;
+    decoder_context->is_av_synced = 0;
     encoder_context->video_last_pts_sent_encode = -1;
     encoder_context->audio_last_pts_sent_encode = -1;
 
@@ -4510,7 +4519,7 @@ avpipe_fini(
 
     /* note: the internal buffer could have changed, and be != avio_ctx_buffer */
     if (decoder_context && decoder_context->format_context) {
-        if ((*xctx)->inctx && strncmp((*xctx)->inctx->url, "rtmp", 4) && strncmp((*xctx)->inctx->url, "srt", 3)) {
+        if ((*xctx)->inctx && strncmp((*xctx)->inctx->url, "rtmp://", 7) && strncmp((*xctx)->inctx->url, "srt://", 6)) {
             AVIOContext *avioctx = (AVIOContext *) decoder_context->format_context->pb;
             if (avioctx) {
                 av_freep(&avioctx->buffer);
