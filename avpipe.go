@@ -311,8 +311,9 @@ const (
 	AV_IN_STAT_DECODING_VIDEO_START_PTS = 16
 	AV_OUT_STAT_BYTES_WRITTEN           = 32
 	AV_OUT_STAT_FRAME_WRITTEN           = 64
-	AV_OUT_STAT_ENCODING_END_PTS        = 128
-	AV_IN_STAT_DATA_SCTE35              = 256
+	AV_IN_STAT_FIRST_KEYFRAME_PTS       = 128
+	AV_OUT_STAT_ENCODING_END_PTS        = 256
+	AV_IN_STAT_DATA_SCTE35              = 512
 )
 
 type StreamInfo struct {
@@ -729,6 +730,9 @@ func (h *ioHandler) InStat(avp_stat C.avp_stat_t, stat_args unsafe.Pointer) erro
 	case C.in_stat_video_frame_read:
 		statArgs := *(*uint64)(stat_args)
 		err = h.input.Stat(AV_IN_STAT_VIDEO_FRAME_READ, &statArgs)
+	case C.in_stat_first_keyframe_pts:
+		statArgs := *(*uint64)(stat_args)
+		err = h.input.Stat(AV_IN_STAT_FIRST_KEYFRAME_PTS, &statArgs)
 	case C.in_stat_data_scte35:
 		statArgs := C.GoString((*C.char)(stat_args))
 		err = h.input.Stat(AV_IN_STAT_DATA_SCTE35, statArgs)
