@@ -33,6 +33,7 @@ ifeq ($(OSNAME), Darwin)
 		-lfreetype \
 		-liconv \
 		-lpthread \
+		-lsrt \
 		-framework OpenGL \
 		-framework CoreAudio \
 		-framework AudioToolbox \
@@ -74,6 +75,7 @@ ifeq ($(OSNAME), Linux)
 		-lva \
 		-lva-drm \
 		-lva-x11 \
-		-lpthread
+		-lpthread \
+		-lsrt
 endif
 

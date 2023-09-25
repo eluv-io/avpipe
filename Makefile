@@ -43,7 +43,7 @@ copy_libs_all:
 	cp -r ${FFMPEG_DIST}/include/* ${INCDIR}
 
 avpipe:
-	CGO_CFLAGS="-I./include" CGO_LDFLAGS="-L${TOP_DIR}/lib -lavcodec -lavformat -lavfilter -lavpipe -lavdevice -lswresample -libavresample -lswscale -lavutil -lpostproc -lutils -lz -lm -ldl -lvdpau -lva -lX11 -lpthread" go build -v
+	CGO_CFLAGS="-I./include" CGO_LDFLAGS="-L${TOP_DIR}/lib -lavcodec -lavformat -lavfilter -lavpipe -lavdevice -lswresample -libavresample -lswscale -lavutil -lpostproc -lutils -lz -lm -ldl -lvdpau -lva -lX11 -lpthread -lsrt" go build -v
 	mkdir -p ./O
 
 libavpipego: $(OBJS)

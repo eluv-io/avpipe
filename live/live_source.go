@@ -32,6 +32,8 @@ func (l *LiveSource) Start(stream string) (err error) {
 	switch streamingMode {
 	case "udp":
 		return l.startUDP()
+	case "srt":
+		return l.startSRT()
 	case "rtmp_connect":
 		fallthrough
 	case "rtmp_listen":
@@ -90,6 +92,69 @@ func (l *LiveSource) startUDP() (err error) {
 	err = l.cmd.Start()
 	if err != nil {
 		log.Error("Failed to start UDP live source", "port", l.Port)
+		return e(err)
+	}
+
+	l.Pid = l.cmd.Process.Pid
+	go func() {
+		err := l.cmd.Wait()
+		if err != nil {
+			log.Error("Failed to run command", err, "pid", l.Pid, "cmd", fmt.Sprintf("%s %s", l.cmd.Path, l.cmd.Args))
+		}
+	}()
+
+	return nil
+}
+
+func (l *LiveSource) startSRT() (err error) {
+	log.Debug("In LiveSource startSRT")
+	e := errors.Template("start live source", errors.K.IO)
+
+	if l.cmd != nil {
+		return e("reason", "already started")
+	}
+
+	var ffmpeg string
+
+	if toolchain, ok := os.LookupEnv("FFMPEG_DIST"); ok {
+		ffmpeg = filepath.Join(toolchain, "bin/ffmpeg")
+		if _, err = os.Stat(ffmpeg); err != nil {
+			log.Warn("ffmpeg in FFMPEG_DIST not found", "command", ffmpeg)
+			ffmpeg = ""
+		} else {
+			log.Debug("using ffmpeg from FFMPEG_DIST", "command", ffmpeg)
+		}
+	}
+
+	if ffmpeg == "" {
+		ffmpeg, err = exec.LookPath("ffmpeg")
+		if err != nil {
+			log.Error("Failed to find ffmpeg binary, check ELV_TOOLCHAIN env variable")
+			return e(err, "reason", "failed to find ffmpeg binary, check ELV_TOOLCHAIN env variable")
+		}
+		log.Debug("using system ffmpeg", "command", ffmpeg)
+	}
+
+	sourceUrl := fmt.Sprintf("srt://127.0.0.1:%d", l.Port)
+
+	log.Info("starting live source", "url", sourceUrl)
+
+	// i.e ffmpeg -re -i media/bbb_1080p_30fps_60sec.mp4 -c copy -f mpegts srt://localhost:22022
+	l.cmd = exec.Command(ffmpeg,
+		"-re",
+		"-i",
+		"../media/bbb_1080p_30fps_60sec.mp4",
+		"-c",
+		"copy",
+		"-f",
+		"mpegts",
+		sourceUrl+"?pkt_size=1316")
+	l.cmd.Stdout = nil
+	l.cmd.Stderr = nil
+
+	err = l.cmd.Start()
+	if err != nil {
+		log.Error("Failed to start SRT live source", "port", l.Port)
 		return e(err)
 	}
 

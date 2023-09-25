@@ -484,7 +484,7 @@ typedef struct xctx_t {
     coderctx_t          decoder_ctx;
     coderctx_t          encoder_ctx;
     xcparams_t          *params;
-    int32_t             index;  // index in tx table
+    int32_t             index;  // index in xc table
     int32_t             handle; // handle for V2 API
     ioctx_t             *inctx;
     avpipe_io_handler_t *in_handlers;
