@@ -99,6 +99,8 @@ func (i *elvxcInput) Stat(statType avpipe.AVStatType, statArgs interface{}) erro
 	case avpipe.AV_IN_STAT_DECODING_VIDEO_START_PTS:
 		startPTS := statArgs.(*uint64)
 		log.Info("AVCMD InputHandler.Stat", "video start PTS", *startPTS)
+	case avpipe.AV_IN_STAT_DATA_SCTE35:
+		log.Info("AVCMD InputHandler.Stat", "scte35", statArgs)
 	}
 
 	return nil

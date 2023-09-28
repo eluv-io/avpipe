@@ -20,6 +20,7 @@
 #include "url_parser.h"
 #include "avpipe_version.h"
 #include "base64.h"
+#include "scte35.h"
 
 #include <stdio.h>
 #include <fcntl.h>
@@ -377,6 +378,7 @@ prepare_decoder(
     decoder_context->in_handlers = in_handlers;
     decoder_context->inctx = inctx;
     decoder_context->video_stream_index = -1;
+    decoder_context->data_scte35_stream_index = -1;
     for (int j=0; j<MAX_AUDIO_MUX; j++)
         decoder_context->audio_stream_index[j] = -1;
 
@@ -468,10 +470,23 @@ prepare_decoder(
         case AVMEDIA_TYPE_DATA:
             decoder_context->codec_parameters[i] = decoder_context->format_context->streams[i]->codecpar;
             decoder_context->stream[i] = decoder_context->format_context->streams[i];
-            decoder_context->data_stream_index = i;
-            elv_dbg("DATA STREAM %d, codec_id=%s, stream_id=%d, url=%s",
-                i, avcodec_get_name(decoder_context->codec_parameters[i]->codec_id),
-                decoder_context->stream[i]->id, url);
+
+            switch (decoder_context->codec_parameters[i]->codec_id) {
+            case AV_CODEC_ID_SCTE_35:
+                decoder_context->data_scte35_stream_index = i;
+                elv_dbg("DATA STREAM SCTE-35 %d, codec_id=%s, stream_id=%d, url=%s",
+                    i, avcodec_get_name(decoder_context->codec_parameters[i]->codec_id),
+                    decoder_context->stream[i]->id, url);
+                break;
+            default:
+                // Unrecognized data stream
+                decoder_context->data_stream_index = i;
+                elv_dbg("DATA STREAM UNRECOGNIZED %d, codec_id=%s, stream_id=%d, url=%s",
+                    i, avcodec_get_name(decoder_context->codec_parameters[i]->codec_id),
+                    decoder_context->stream[i]->id, url);
+                break;
+            }
+
             break;
 
         default:
@@ -483,14 +498,15 @@ prepare_decoder(
 
         /* Is this the stream selected for transcoding? */
         int selected_stream = 0;
-        if (params && decoder_context->stream[i]->id == params->stream_id) {
+        int this_stream_id =  decoder_context->is_rtmp ? i : decoder_context->stream[i]->id;
+        if (params && this_stream_id == params->stream_id) {
             elv_log("STREAM MATCH stream_id=%d, stream_index=%d, xc_type=%d, url=%s",
                 params->stream_id, i, params->xc_type, url);
             stream_id_index = i;
             selected_stream = 1;
         }
 
-        if (params && decoder_context->stream[i]->id == params->sync_audio_to_stream_id) {
+        if (params && this_stream_id == params->sync_audio_to_stream_id) {
             if (decoder_context->stream[i]->codecpar->codec_type != AVMEDIA_TYPE_VIDEO) {
                 elv_err("Syncing to non-video stream is not possible, sync_audio_to_stream_id=%d, url=%s",
                     params->sync_audio_to_stream_id, url);
@@ -515,13 +531,13 @@ prepare_decoder(
          */
         if (params != NULL && params->dcodec != NULL && params->dcodec[0] != '\0' && 
             decoder_context->format_context->streams[i]->codecpar->codec_type == AVMEDIA_TYPE_VIDEO) {
-            elv_log("STREAM SELECTED id=%d idx=%d xc_type=%d dcodec=%s, url=%s",
-                decoder_context->stream[i]->id, i, params->xc_type, params->dcodec, url);
+            elv_log("STREAM SELECTED this_stream_id=%d, id=%d idx=%d xc_type=%d dcodec=%s, url=%s",
+                this_stream_id, decoder_context->stream[i]->id, i, params->xc_type, params->dcodec, url);
             decoder_context->codec[i] = avcodec_find_decoder_by_name(params->dcodec);
         } else if (params != NULL && params->dcodec2 != NULL && params->dcodec2[0] != '\0' && selected_stream &&
             decoder_context->format_context->streams[i]->codecpar->codec_type == AVMEDIA_TYPE_AUDIO) {
-            elv_log("STREAM SELECTED id=%d idx=%d xc_type=%d dcodec2=%s, url=%s",
-                decoder_context->stream[i]->id, i, params->xc_type, params->dcodec2, url);
+            elv_log("STREAM SELECTED this_stream_id=%d, id=%d idx=%d xc_type=%d dcodec2=%s, url=%s",
+                this_stream_id, decoder_context->stream[i]->id, i, params->xc_type, params->dcodec2, url);
             decoder_context->codec[i] = avcodec_find_decoder_by_name(params->dcodec2);
         } else {
             decoder_context->codec[i] = avcodec_find_decoder(decoder_context->codec_parameters[i]->codec_id);
@@ -1654,6 +1670,7 @@ prepare_encoder(
 static void
 set_idr_frame_key_flag(
     AVFrame *frame,
+    coderctx_t *decoder_context,
     coderctx_t *encoder_context,
     xcparams_t *params,
     int debug_frame_level)
@@ -1665,11 +1682,19 @@ set_idr_frame_key_flag(
     if ((params->xc_type & xc_video) == 0)
         return;
 
+#if 1
     /*
      * If format is "dash" or "hls" then don't clear the flag, because dash/hls uses pict_type to determine end of segment.
      * The reset of the formats would be good to clear before encoding (see doc/examples/transcoding.c).
      */
     if (strcmp(params->format, "dash") && strcmp(params->format, "hls"))
+#else
+    /*
+     * If decoder is prores or jpeg2000, then clear pict_type key frame flag and let the encoder to decide for that.
+     */
+    if (decoder_context->codec_parameters[decoder_context->video_stream_index]->codec_id == 147 ||
+        decoder_context->codec_parameters[decoder_context->video_stream_index]->codec_id == 88)
+#endif
         frame->pict_type = AV_PICTURE_TYPE_NONE;
 
     /*
@@ -1695,8 +1720,8 @@ set_idr_frame_key_flag(
     if (params->force_keyint > 0) {
         if (encoder_context->forced_keyint_countdown <= 0) {
             if (debug_frame_level) {
-                elv_dbg("FRAME SET KEY flag, forced_keyint=%d pts=%"PRId64,
-                    params->force_keyint, frame->pts);
+                elv_dbg("FRAME SET KEY flag, forced_keyint=%d pts=%"PRId64", forced_keyint_countdown=%d",
+                    params->force_keyint, frame->pts, encoder_context->forced_keyint_countdown);
             }
             if (encoder_context->forced_keyint_countdown < 0)
                 elv_log("force_keyint_countdown=%d", encoder_context->forced_keyint_countdown);
@@ -1836,7 +1861,7 @@ should_skip_encoding(
 
     if (p->xc_type == xc_extract_images || p->xc_type == xc_extract_all_images) {
         return !should_extract_frame(encoder_context, p, frame);
-    }    
+    }
 
     return 0;
 }
@@ -1890,9 +1915,10 @@ encode_frame(
                 if (encoder_context->first_encoding_video_pts == -1) {
                     /* Remember the first video PTS to use as an offset later */
                     encoder_context->first_encoding_video_pts = frame->pts;
-                    elv_log("PTS first_encoding_video_pts=%"PRId64" dec=%"PRId64" read=%"PRId64" stream=%d:%s",
+                    elv_log("PTS first_encoding_video_pts=%"PRId64" dec=%"PRId64" pktdts=%"PRId64" read=%"PRId64" stream=%d:%s",
                         encoder_context->first_encoding_video_pts,
                         decoder_context->first_decoding_video_pts,
+                        frame->pkt_dts,
                         encoder_context->first_read_frame_pts[stream_index], params->xc_type, st);
                 }
 
@@ -1929,7 +1955,7 @@ encode_frame(
         // Signal if we need IDR frames
         if (params->xc_type & xc_video &&
             stream_index == decoder_context->video_stream_index) {
-            set_idr_frame_key_flag(frame, encoder_context, params, debug_frame_level);
+            set_idr_frame_key_flag(frame, decoder_context, encoder_context, params, debug_frame_level);
         }
 
         // Special case to extract the first frame image
@@ -2272,8 +2298,15 @@ transcode_audio(
             return eav_receive_frame;
         }
 
-        if (decoder_context->first_decoding_audio_pts < 0)
+        if (decoder_context->first_decoding_audio_pts == AV_NOPTS_VALUE) {
             decoder_context->first_decoding_audio_pts = frame->pts;
+            avpipe_io_handler_t *in_handlers = decoder_context->in_handlers;
+            decoder_context->inctx->decoding_start_pts = decoder_context->first_decoding_audio_pts;
+            elv_log("first_decoding_audio_pts=%"PRId64,
+                decoder_context->first_decoding_audio_pts);
+            if (in_handlers->avpipe_stater)
+                in_handlers->avpipe_stater(decoder_context->inctx, in_stat_decoding_audio_start_pts);
+        }
 
         dump_frame(1, "IN ", codec_context->frame_number, frame, debug_frame_level);
 
@@ -2377,8 +2410,15 @@ transcode_audio_aac(
             return eav_receive_frame;
         }
 
-        if (decoder_context->first_decoding_audio_pts < 0)
+        if (decoder_context->first_decoding_audio_pts == AV_NOPTS_VALUE) {
             decoder_context->first_decoding_audio_pts = frame->pts;
+            avpipe_io_handler_t *in_handlers = decoder_context->in_handlers;
+            decoder_context->inctx->decoding_start_pts = decoder_context->first_decoding_audio_pts;
+            elv_log("first_decoding_audio_pts=%"PRId64,
+                decoder_context->first_decoding_audio_pts);
+            if (in_handlers->avpipe_stater)
+                in_handlers->avpipe_stater(decoder_context->inctx, in_stat_decoding_audio_start_pts);
+        }
 
         dump_frame(1, "IN ", codec_context->frame_number, frame, debug_frame_level);
 
@@ -2601,8 +2641,15 @@ transcode_video(
             return eav_receive_frame;
         }
 
-        if (decoder_context->first_decoding_video_pts < 0)
+        if (decoder_context->first_decoding_video_pts == AV_NOPTS_VALUE) {
             decoder_context->first_decoding_video_pts = frame->pts;
+            avpipe_io_handler_t *in_handlers = decoder_context->in_handlers;
+            decoder_context->inctx->decoding_start_pts = decoder_context->first_decoding_video_pts;
+            elv_log("first_decoding_video_pts=%"PRId64" pktdts=%"PRId64,
+                decoder_context->first_decoding_video_pts, frame->pkt_dts);
+            if (in_handlers->avpipe_stater)
+                in_handlers->avpipe_stater(decoder_context->inctx, in_stat_decoding_video_start_pts);
+        }
 
         /* If force_equal_fduration is set then frame_duration > 0 is true */
         if (decoder_context->frame_duration > 0) {
@@ -2979,25 +3026,19 @@ should_stop_decoding(
 
     if (input_packet->stream_index == decoder_context->video_stream_index &&
         (params->xc_type & xc_video)) {
-        if (decoder_context->video_input_start_pts == -1) {
-            avpipe_io_handler_t *in_handlers = decoder_context->in_handlers;
+        if (decoder_context->video_input_start_pts == AV_NOPTS_VALUE) {
             decoder_context->video_input_start_pts = input_packet->pts;
-            elv_log("video_input_start_pts=%"PRId64,
-                decoder_context->video_input_start_pts);
-            if (in_handlers->avpipe_stater)
-                in_handlers->avpipe_stater(decoder_context->inctx, in_stat_decoding_video_start_pts);
+            elv_log("video_input_start_pts=%"PRId64" flags=%d dts=%"PRId64,
+                decoder_context->video_input_start_pts, input_packet->flags, input_packet->dts);
         }
 
         input_packet_rel_pts = input_packet->pts - decoder_context->video_input_start_pts;
     } else if (selected_decoded_audio(decoder_context, input_packet->stream_index) >= 0 &&
         params->xc_type & xc_audio) {
-        if (decoder_context->audio_input_start_pts == -1) {
-            avpipe_io_handler_t *in_handlers = decoder_context->in_handlers;
+        if (decoder_context->audio_input_start_pts == AV_NOPTS_VALUE) {
             decoder_context->audio_input_start_pts = input_packet->pts;
             elv_log("audio_input_start_pts=%"PRId64,
                 decoder_context->audio_input_start_pts);
-            if (in_handlers->avpipe_stater)
-                in_handlers->avpipe_stater(decoder_context->inctx, in_stat_decoding_audio_start_pts);
         }
 
         input_packet_rel_pts = input_packet->pts - decoder_context->audio_input_start_pts;
@@ -3086,11 +3127,11 @@ skip_for_sync(
         return 0;
 
     /* No need to sync if:
-     * - it is not mpeg ts
+     * - it is not mpegts and not rtmp
      * - or it is already synced
      * - or format is not fmp4-segment.
      */
-    if (!decoder_context->is_mpegts ||
+    if ((!decoder_context->is_mpegts && !decoder_context->is_rtmp) ||
         decoder_context->mpegts_synced ||
         strcmp(params->format, "fmp4-segment"))
         return 0;
@@ -3098,24 +3139,32 @@ skip_for_sync(
     /* Check if the packet is video and it is a key frame */
     if (input_packet->stream_index == decoder_context->video_stream_index) {
         /* first_key_frame_pts points to first video key frame. */
-        if (decoder_context->first_key_frame_pts < 0 &&
+        if (decoder_context->first_key_frame_pts == AV_NOPTS_VALUE &&
             input_packet->flags == AV_PKT_FLAG_KEY) {
+            avpipe_io_handler_t *in_handlers = decoder_context->in_handlers;
             decoder_context->first_key_frame_pts = input_packet->pts;
-            elv_log("PTS first_key_frame_pts=%"PRId64" sidx=%d",
-                decoder_context->first_key_frame_pts, input_packet->stream_index);
+            decoder_context->inctx->first_key_frame_pts = decoder_context->first_key_frame_pts;
+            elv_log("PTS first_key_frame_pts=%"PRId64" sidx=%d flags=%d dts=%"PRId64,
+                decoder_context->first_key_frame_pts, input_packet->stream_index, input_packet->flags, input_packet->dts);
+
+            if (in_handlers->avpipe_stater)
+                in_handlers->avpipe_stater(decoder_context->inctx, in_stat_first_keyframe_pts);
 
             dump_packet(0, "SYNC ", input_packet, 1);
-            if (params->xc_type & xc_video)
-                return 0;
+            return 0;
         }
-        return 1;
+        if (decoder_context->first_key_frame_pts == AV_NOPTS_VALUE) {
+            dump_packet(0, "SYNC SKIP ", input_packet, 1);
+            return 1;
+        }
+        return 0;
     }
 
     /* We are processing the audio packets now.
      * Skip until the audio PTS has reached the first video key frame PTS
      * PENDING(SSS) - this is incorrect if audio PTS is muxed ahead of video
      */
-    if (decoder_context->first_key_frame_pts < 0 ||
+    if (decoder_context->first_key_frame_pts == AV_NOPTS_VALUE ||
         input_packet->pts < decoder_context->first_key_frame_pts) {
         elv_log("PTS SYNC SKIP audio_pts=%"PRId64" first_key_frame_pts=%"PRId64,
             input_packet->pts, decoder_context->first_key_frame_pts);
@@ -3373,7 +3422,7 @@ avpipe_xc(
         elv_err("Failed to initialize audio pan filter, url=%s", params->url);
         goto xc_done;
     }
-        
+
     if (!params->bypass_transcoding &&
         params->xc_type == xc_audio_join &&
         (rc = init_audio_join_filters(decoder_context, encoder_context, xctx->params)) != eav_success) {
@@ -3479,14 +3528,14 @@ avpipe_xc(
         /* PENDING (RM) add new start_time_ts for audio */
     }
 
-    decoder_context->video_input_start_pts = -1;
-    decoder_context->audio_input_start_pts = -1;
+    decoder_context->video_input_start_pts = AV_NOPTS_VALUE;
+    decoder_context->audio_input_start_pts = AV_NOPTS_VALUE;
     decoder_context->video_duration = -1;
     encoder_context->audio_duration = -1;
     decoder_context->audio_input_prev_pts = -1;
     encoder_context->video_encoder_prev_pts = -1;
-    decoder_context->first_decoding_video_pts = -1;
-    decoder_context->first_decoding_audio_pts = -1;
+    decoder_context->first_decoding_video_pts = AV_NOPTS_VALUE;
+    decoder_context->first_decoding_audio_pts = AV_NOPTS_VALUE;
     encoder_context->first_encoding_video_pts = -1;
     encoder_context->first_encoding_audio_pts = -1;
     encoder_context->audio_pts = AV_NOPTS_VALUE;
@@ -3494,7 +3543,7 @@ avpipe_xc(
 
     for (int j=0; j<MAX_STREAMS; j++)
         encoder_context->first_read_frame_pts[j] = -1;
-    decoder_context->first_key_frame_pts = -1;
+    decoder_context->first_key_frame_pts = AV_NOPTS_VALUE;
     decoder_context->mpegts_synced = 0;
     encoder_context->video_last_pts_sent_encode = -1;
     encoder_context->audio_last_pts_sent_encode = -1;
@@ -3567,8 +3616,8 @@ avpipe_xc(
             // PENDING(SSS) - this logic can be done after decoding where we know concretely that we decoded all frames
             // we need to encode.
             if (should_stop_decoding(input_packet, decoder_context, encoder_context,
-                params, inctx->audio_frames_read, inctx->video_frames_read,
-                &frames_read_past_duration, frames_allowed_past_duration)) {
+                    params, inctx->audio_frames_read, inctx->video_frames_read,
+                    &frames_read_past_duration, frames_allowed_past_duration)) {
                 av_packet_free(&input_packet);
                 if (decoder_context->cancelled)
                     rc = eav_cancelled;
@@ -3602,6 +3651,16 @@ avpipe_xc(
             if (in_handlers->avpipe_stater)
                 in_handlers->avpipe_stater(inctx, in_stat_video_frame_read);
 
+            if (decoder_context->first_key_frame_pts == AV_NOPTS_VALUE &&
+                    input_packet->flags == AV_PKT_FLAG_KEY) {
+                decoder_context->first_key_frame_pts = input_packet->pts;
+                decoder_context->inctx->first_key_frame_pts = decoder_context->first_key_frame_pts;
+                elv_log("PTS first_key_frame_pts=%"PRId64" sidx=%d flags=%d dts=%"PRId64,
+                    decoder_context->first_key_frame_pts, input_packet->stream_index, input_packet->flags, input_packet->dts);
+                if (in_handlers->avpipe_stater)
+                    in_handlers->avpipe_stater(decoder_context->inctx, in_stat_first_keyframe_pts);
+            }
+
             // Assert DTS is growing as expected (accommodate non integer and irregular frame duration)
             if (video_last_dts + input_packet->duration * 1.5 < input_packet->dts &&
                 video_last_dts != 0 && input_packet->duration > 0) {
@@ -3632,9 +3691,37 @@ avpipe_xc(
             elv_channel_send(xctx->ac, xc_frame);
 
         } else {
-            if (debug_frame_level)
-                elv_dbg("Skip stream - packet index=%d, pts=%"PRId64", url=%s",
-                    input_packet->stream_index, input_packet->pts, params->url);
+            if (stream_index == decoder_context->data_scte35_stream_index) {
+                uint8_t scte35_command_type;
+                int res = parse_scte35_pkt(&scte35_command_type, input_packet);
+                if (res < 0) {
+                    elv_warn("SCTE [%d] fail to parse pts=%"PRId64" size=%d",
+                        input_packet->stream_index, input_packet->pts, input_packet->size);
+                } else {
+                    char hex_str[2 * input_packet->size + 1];
+                    switch (scte35_command_type) {
+                    case 4:
+                    case 5:
+                    case 6:
+                        hex_encode(input_packet->data, input_packet->size, hex_str);
+                        elv_dbg("SCTE [%d] pts=%"PRId64" duration=%"PRId64" flag=%d size=%d "
+                            "data=%s command=%d",
+                            input_packet->stream_index, input_packet->pts, input_packet->duration,
+                            input_packet->flags, input_packet->size,
+                            hex_str, scte35_command_type);
+
+                        if (in_handlers->avpipe_stater) {
+                            inctx->data = (uint8_t *)hex_str;
+                            in_handlers->avpipe_stater(inctx, in_stat_data_scte35);
+                        }
+                        break;
+                    }
+                }
+            } else {
+                if (debug_frame_level)
+                    elv_dbg("Skip stream - packet index=%d, pts=%"PRId64", url=%s",
+                        input_packet->stream_index, input_packet->pts, params->url);
+            }
             av_packet_free(&input_packet);
         }
     }
@@ -4530,7 +4617,7 @@ init_extract_images(
     params->extract_images_sz = size;
 }
 
-void 
+void
 set_extract_images(
     xcparams_t *params,
     int index,
