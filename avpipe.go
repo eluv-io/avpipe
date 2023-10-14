@@ -13,19 +13,19 @@ Package avpipe has four main interfaces that has to be implemented by the client
 */
 package avpipe
 
-// #cgo pkg-config: libavcodec libavfilter libavformat libavutil libswresample libavresample libswscale
-// #cgo CFLAGS: -I./libavpipe/include 
-// #cgo CFLAGS: -I./utils/include
-// #cgo LDFLAGS: -lavpipe
-// #cgo LDFLAGS: -lavcodec
-// #cgo LDFLAGS: -lavformat
-// #cgo LDFLAGS: -lavfilter
+// #cgo pkg-config: libavcodec
+// #cgo pkg-config: libavfilter
+// #cgo pkg-config: libavformat
+// #cgo pkg-config: libavutil
+// #cgo pkg-config: libswresample
+// #cgo pkg-config: libavresample
+// #cgo CFLAGS: -I${SRCDIR}/libavpipe/include 
+// #cgo CFLAGS: -I${SRCDIR}/utils/include
+// #cgo LDFLAGS: -L${SRCDIR}
 // #cgo LDFLAGS: -lavdevice
-// #cgo LDFLAGS: -lswresample
 // #cgo LDFLAGS: -lswscale
 // #cgo LDFLAGS: -lavutil
 // #cgo LDFLAGS: -lpostproc
-// #cgo LDFLAGS: -lutils
 // #cgo LDFLAGS: -lm
 // #cgo LDFLAGS: -ldl
 // #cgo LDFLAGS: -lpthread

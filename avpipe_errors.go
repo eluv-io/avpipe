@@ -3,9 +3,22 @@
  */
 package avpipe
 
-// #cgo CFLAGS: -I./include
-// #cgo CFLAGS: -I./libavpipe/include
-// #cgo CFLAGS: -I./utils/include
+// #cgo pkg-config: libavcodec
+// #cgo pkg-config: libavfilter
+// #cgo pkg-config: libavformat
+// #cgo pkg-config: libavutil
+// #cgo pkg-config: libswresample
+// #cgo pkg-config: libavresample
+// #cgo CFLAGS: -I${SRCDIR}/include
+// #cgo CFLAGS: -I${SRCDIR}/libavpipe/include
+// #cgo CFLAGS: -I${SRCDIR}/utils/include
+// #cgo LDFLAGS: -L${SRCDIR}
+// #cgo LDFLAGS: -lavdevice
+// #cgo LDFLAGS: -lswscale
+// #cgo LDFLAGS: -lpostproc
+// #cgo LDFLAGS: -lm
+// #cgo LDFLAGS: -ldl
+// #cgo LDFLAGS: -lpthread
 // #include "avpipe.h"
 import "C"
 
