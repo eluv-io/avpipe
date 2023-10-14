@@ -4,6 +4,8 @@
 package avpipe
 
 // #cgo CFLAGS: -I./include
+// #cgo CFLAGS: -I./libavpipe/include
+// #cgo CFLAGS: -I./utils/include
 // #include "avpipe.h"
 import "C"
 
