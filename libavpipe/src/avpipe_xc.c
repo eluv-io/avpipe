@@ -4577,8 +4577,11 @@ avpipe_version()
     if (version_str[0] != '\0')
         return version_str;
 
-    // TODO(reza): Fix this VERSION
-    snprintf(version_str, sizeof(version_str), "%d.%d@%s", AVPIPE_MAJOR_VERSION, AVPIPE_MINOR_VERSION, "0.0-jph");
+    #ifdef VERSION
+    snprintf(version_str, sizeof(version_str), "%d.%d@%s", AVPIPE_MAJOR_VERSION, AVPIPE_MINOR_VERSION, VERSION);
+    #else
+    snprintf(version_str, sizeof(version_str), "%d.%d@%s", AVPIPE_MAJOR_VERSION, AVPIPE_MINOR_VERSION, "via-cgo");
+    #endif
 
     return version_str;
 }
