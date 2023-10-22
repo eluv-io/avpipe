@@ -29,6 +29,7 @@ package avpipe
 // #cgo LDFLAGS: -lm
 // #cgo LDFLAGS: -ldl
 // #cgo LDFLAGS: -lpthread
+// #cgo LDFLAGS: -static
 
 // #include <string.h>
 // #include <stdlib.h>
