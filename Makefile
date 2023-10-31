@@ -10,7 +10,7 @@ OBJS=$(SRCS:%.c=$(BINDIR)/%.o)
 
 .DEFAULT_GOAL := dynamic
 
-all install: copy_libs check-env
+all install: check-env
 	@for dir in $(SUBDIRS); do \
 	echo "Making $@ in $$dir..."; \
 	(cd $$dir; make $@) || exit 1; \
@@ -45,8 +45,8 @@ clean_test:
 	@rm -rf test_out avpipe-test*.log
 
 check-env:
-ifndef PKG_CONFIG_PATH
-  $(error PKG_CONFIG_PATH is undefined)
+ifndef FFMPEG_DIST
+  $(error FFMPEG_DIST is undefined)
 endif
 
 test:

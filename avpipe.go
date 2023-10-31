@@ -26,9 +26,6 @@ package avpipe
 // #cgo CFLAGS: -I${SRCDIR}/libavpipe/include
 // #cgo CFLAGS: -I${SRCDIR}/utils/include
 // #cgo LDFLAGS: -L${SRCDIR}
-// #cgo LDFLAGS: -lm
-// #cgo LDFLAGS: -ldl
-// #cgo LDFLAGS: -lpthread
 
 // #include <string.h>
 // #include <stdlib.h>

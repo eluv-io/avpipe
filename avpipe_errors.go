@@ -13,12 +13,6 @@ package avpipe
 // #cgo CFLAGS: -I${SRCDIR}/libavpipe/include
 // #cgo CFLAGS: -I${SRCDIR}/utils/include
 // #cgo LDFLAGS: -L${SRCDIR}
-// #cgo LDFLAGS: -lavdevice
-// #cgo LDFLAGS: -lswscale
-// #cgo LDFLAGS: -lpostproc
-// #cgo LDFLAGS: -lm
-// #cgo LDFLAGS: -ldl
-// #cgo LDFLAGS: -lpthread
 // #include "avpipe.h"
 import "C"
 

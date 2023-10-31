@@ -9,10 +9,12 @@ INCDIR=include
 
 OSNAME := $(shell uname -s)
 LDFLAGS := $(shell pkg-config --libs libavfilter libavcodec libavformat libavdevice libswresample libavresample libswscale libavutil libpostproc) \
+		-lavpipe \
+		-lutils \
 		-lm \
 		-ldl \
 		-lpthread
-CFLAGS := $(shell pkg-config --cflags libavfilter libavcodec libavformat libavdevice libswresample libavresample libswscale libavutil libpostproc) \
+CFLAGS := $(shell pkg-config --cflags libavfilter libavcodec libavformat libavdevice libswresample libavresample libswscale libavutil libpostproc)
 
 ifeq ($(OSNAME), Darwin)
 	LDFLAGS := ${LDFLAGS} \
