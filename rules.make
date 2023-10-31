@@ -8,12 +8,10 @@ LIBDIR=lib
 INCDIR=include
 
 OSNAME := $(shell uname -s)
-LDFLAGS := $(shell pkg-config --libs libavfilter libavcodec libavformat libavdevice libswresample libavresample libswscale libavutil libpostproc) \
+LDFLAGS := \
 		-lavpipe \
 		-lutils \
-		-lm \
-		-ldl \
-		-lpthread
+		$(shell pkg-config --libs libavfilter libavcodec libavformat libavdevice libswresample libavresample libswscale libavutil libpostproc)
 CFLAGS := $(shell pkg-config --cflags libavfilter libavcodec libavformat libavdevice libswresample libavresample libswscale libavutil libpostproc)
 
 ifeq ($(OSNAME), Darwin)
@@ -40,4 +38,3 @@ ifeq ($(OSNAME), Linux)
 		-lva-x11 \
 		-lpthread
 endif
-
