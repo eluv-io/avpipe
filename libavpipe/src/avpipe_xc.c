@@ -319,7 +319,7 @@ calc_timebase(
         return timebase;
     }
 
-    if (is_video && params->video_time_base != 0)
+    if (is_video && params->video_time_base > 0)
         return params->video_time_base;
 
     while (timebase < TIMEBASE_THRESHOLD)
@@ -1069,7 +1069,7 @@ prepare_video_encoder(
         }
 
         /* Set output stream timebase when bypass encoding */
-        if (params->video_time_base != 0)
+        if (params->video_time_base > 0)
             out_stream->time_base = (AVRational) {1, params->video_time_base};
         else
             out_stream->time_base = in_stream->time_base;
@@ -1115,7 +1115,7 @@ prepare_video_encoder(
         encoder_codec_context->gop_size = params->force_keyint;
     }
 
-    if (params->video_time_base != 0)
+    if (params->video_time_base > 0)
         encoder_context->stream[encoder_context->video_stream_index]->time_base = (AVRational) {1, params->video_time_base};
     else
         encoder_context->stream[encoder_context->video_stream_index]->time_base = decoder_context->codec_context[index]->time_base;
@@ -1129,7 +1129,7 @@ prepare_video_encoder(
     /* Set codec context parameters */
     encoder_codec_context->height = params->enc_height != -1 ? params->enc_height : decoder_context->codec_context[index]->height;
     encoder_codec_context->width = params->enc_width != -1 ? params->enc_width : decoder_context->codec_context[index]->width;
-    if (params->video_time_base != 0)
+    if (params->video_time_base > 0)
         encoder_codec_context->time_base = (AVRational) {1, params->video_time_base};
     else
         encoder_codec_context->time_base = decoder_context->codec_context[index]->time_base;
@@ -1217,7 +1217,7 @@ prepare_video_encoder(
     /* Set stream parameters - after avcodec_open2 and parameters from context.
      * This is necessary for the output to preserve the timebase and framerate of the input.
      */
-    if (params->video_time_base != 0)
+    if (params->video_time_base > 0)
         encoder_context->stream[index]->time_base = (AVRational) {1, params->video_time_base};
     else
         encoder_context->stream[index]->time_base = decoder_context->stream[decoder_context->video_stream_index]->time_base;
@@ -4156,11 +4156,6 @@ check_params(
 
     if (params->start_pts < 0) {
         elv_err("Start PTS can not be negative, url=%s", params->url);
-        return eav_param;
-    }
-
-    if (params->video_time_base <= 0) {
-        elv_err("Video timebase must be >= 1 instead of %d, url=%s", params->video_time_base, params->url);
         return eav_param;
     }
 
