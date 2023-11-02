@@ -438,8 +438,8 @@ func TestVideoSegDoubleTS(t *testing.T) {
 		XcType:                 avpipe.XcVideo,
 		Url:                    url,
 		DebugFrameLevel:        debugFrameLevel,
+		VideoTimeBase:          60000,
 	}
-	params.VideoTimeBase = big.NewRat(1, 60000)
 	setFastEncodeParams(params, true)
 	xcTest(t, outputDir, params, nil, true)
 

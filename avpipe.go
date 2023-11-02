@@ -224,7 +224,7 @@ type XcParams struct {
 	DebugFrameLevel        bool               `json:"debug_frame_level"`
 	ExtractImageIntervalTs int64              `json:"extract_image_interval_ts,omitempty"`
 	ExtractImagesTs        []int64            `json:"extract_images_ts,omitempty"`
-	VideoTimeBase          *big.Rat           `json:"video_time_base"`
+	VideoTimeBase          int                `json:"video_time_base"`
 }
 
 // NewXcParams initializes a XcParams struct with unset/default values
@@ -1223,6 +1223,7 @@ func getCParams(params *XcParams) (*C.xcparams_t, error) {
 		skip_decoding:             C.int(0),
 		extract_image_interval_ts: C.int64_t(params.ExtractImageIntervalTs),
 		extract_images_sz:         C.int(extractImagesSize),
+		video_time_base:           C.int(params.VideoTimeBase),
 
 		// All boolean params are handled below
 	}
@@ -1261,11 +1262,6 @@ func getCParams(params *XcParams) (*C.xcparams_t, error) {
 
 	if params.DebugFrameLevel {
 		cparams.debug_frame_level = C.int(1)
-	}
-
-	if params.VideoTimeBase != nil {
-		cparams.video_time_base.den = C.int(params.VideoTimeBase.Denom().Uint64())
-		cparams.video_time_base.num = C.int(params.VideoTimeBase.Num().Uint64())
 	}
 
 	for i := 0; i < int(params.NumAudio); i++ {

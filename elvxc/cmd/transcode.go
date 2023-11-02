@@ -4,7 +4,6 @@ import (
 	"fmt"
 	"io"
 	"io/ioutil"
-	"math/big"
 	"os"
 	"strconv"
 	"strings"
@@ -559,14 +558,9 @@ func doTranscode(cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("enc-width is not valid")
 	}
 
-	video_time_base_den, err := cmd.Flags().GetInt32("video-time-base-den")
+	video_time_base, err := cmd.Flags().GetInt("video-time-base")
 	if err != nil {
-		return fmt.Errorf("video-time-base-den is not valid")
-	}
-
-	video_time_base_num, err := cmd.Flags().GetInt32("video-time-base-num")
-	if err != nil {
-		return fmt.Errorf("video-time-base-num is not valid")
+		return fmt.Errorf("video-time-base is not valid")
 	}
 
 	durationTs, err := cmd.Flags().GetInt64("duration-ts")
@@ -692,8 +686,8 @@ func doTranscode(cmd *cobra.Command, args []string) error {
 		DebugFrameLevel:        debugFrameLevel,
 	}
 
-	if video_time_base_den > 0 {
-		params.VideoTimeBase = big.NewRat(int64(video_time_base_num), int64(video_time_base_den))
+	if video_time_base > 0 {
+		params.VideoTimeBase = video_time_base
 	}
 
 	err = getAudioIndexes(params, audioIndex)

@@ -319,8 +319,8 @@ calc_timebase(
         return timebase;
     }
 
-    if (is_video && params->video_time_base.den != 0 && params->video_time_base.num == 1)
-        return params->video_time_base.den;
+    if (is_video && params->video_time_base != 0)
+        return params->video_time_base;
 
     while (timebase < TIMEBASE_THRESHOLD)
         timebase *= 2;
@@ -1069,8 +1069,8 @@ prepare_video_encoder(
         }
 
         /* Set output stream timebase when bypass encoding */
-        if (params->video_time_base.num != 0 && params->video_time_base.den != 0)
-            out_stream->time_base = params->video_time_base;
+        if (params->video_time_base != 0)
+            out_stream->time_base = (AVRational) {1, params->video_time_base};
         else
             out_stream->time_base = in_stream->time_base;
         out_stream->codecpar->codec_tag = 0;
@@ -1115,8 +1115,8 @@ prepare_video_encoder(
         encoder_codec_context->gop_size = params->force_keyint;
     }
 
-    if (params->video_time_base.num != 0 && params->video_time_base.den != 0)
-        encoder_context->stream[encoder_context->video_stream_index]->time_base = params->video_time_base;
+    if (params->video_time_base != 0)
+        encoder_context->stream[encoder_context->video_stream_index]->time_base = (AVRational) {1, params->video_time_base};
     else
         encoder_context->stream[encoder_context->video_stream_index]->time_base = decoder_context->codec_context[index]->time_base;
     rc = set_encoder_options(encoder_context, decoder_context, params, decoder_context->video_stream_index,
@@ -1129,8 +1129,8 @@ prepare_video_encoder(
     /* Set codec context parameters */
     encoder_codec_context->height = params->enc_height != -1 ? params->enc_height : decoder_context->codec_context[index]->height;
     encoder_codec_context->width = params->enc_width != -1 ? params->enc_width : decoder_context->codec_context[index]->width;
-    if (params->video_time_base.num != 0 && params->video_time_base.den != 0)
-        encoder_codec_context->time_base = params->video_time_base;
+    if (params->video_time_base != 0)
+        encoder_codec_context->time_base = (AVRational) {1, params->video_time_base};
     else
         encoder_codec_context->time_base = decoder_context->codec_context[index]->time_base;
     encoder_codec_context->sample_aspect_ratio = decoder_context->codec_context[index]->sample_aspect_ratio;
@@ -1217,8 +1217,8 @@ prepare_video_encoder(
     /* Set stream parameters - after avcodec_open2 and parameters from context.
      * This is necessary for the output to preserve the timebase and framerate of the input.
      */
-    if (params->video_time_base.num != 0 && params->video_time_base.den != 0)
-        encoder_context->stream[index]->time_base = params->video_time_base;
+    if (params->video_time_base != 0)
+        encoder_context->stream[index]->time_base = (AVRational) {1, params->video_time_base};
     else
         encoder_context->stream[index]->time_base = decoder_context->stream[decoder_context->video_stream_index]->time_base;
     encoder_context->stream[index]->avg_frame_rate = decoder_context->stream[decoder_context->video_stream_index]->avg_frame_rate;
@@ -4159,11 +4159,9 @@ check_params(
         return eav_param;
     }
 
-    if (params->video_time_base.num != 0 && params->video_time_base.den != 0) {
-        if (params->video_time_base.num != 1) {
-            elv_err("Video timebase numerator must be 1 instead of %d, url=%s", params->video_time_base.num, params->url);
-            return eav_param;
-        }
+    if (params->video_time_base <= 0) {
+        elv_err("Video timebase must be >= 1 instead of %d, url=%s", params->video_time_base, params->url);
+        return eav_param;
     }
 
     if (params->watermark_text != NULL && (strlen(params->watermark_text) > (WATERMARK_STRING_SZ-1))){
@@ -4432,7 +4430,7 @@ avpipe_init(
         params->master_display ? params->master_display : "",
         params->filter_descriptor,
         params->extract_image_interval_ts, params->extract_images_sz,
-        params->video_time_base.num, params->video_time_base.den);
+        1, params->video_time_base);
     elv_log("AVPIPE XCPARAMS %s", buf);
 
     if ((rc = check_params(params)) != eav_success) {

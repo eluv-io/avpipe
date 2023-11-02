@@ -433,7 +433,7 @@ typedef struct xcparams_t {
     int64_t     *extract_images_ts;         // Write frames at these timestamps. Mutually exclusive with extract_image_interval_ts
     int         extract_images_sz;          // Size of the array extract_images_ts
 
-    AVRational  video_time_base;            // New video encoder time_base
+    int         video_time_base;            // New video encoder time_base (1/video_time_base)
 
     int         debug_frame_level;
     int         connection_timeout;         // Connection timeout in sec for RTMP or MPEGTS protocols
