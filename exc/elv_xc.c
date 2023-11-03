@@ -1049,6 +1049,8 @@ usage(
         "\t-audio-fill-gap :        (optional) Default: 0, must be 0 or 1. It only effects if encoder is aac.\n"
         "\t-audio-index :           (optional) Default: the indexes of audio stream (comma separated)\n"
         "\t-audio-seg-duration-ts : (mandatory If format is not \"segment\" and transcoding audio) audio segment duration time base (positive integer).\n"
+        "\t-audio-time-base-den :   (optional) Audio encoder timebase denominator, must be > 0.\n"
+        "\t-audio-time-base-num :   (optional) Audio encoder timebase numenator, must be > 0.\n"
         "\t-bitdepth :              (optional) Bitdepth of color space. Default is 8, can be 8, 10, or 12.\n"
         "\t-bypass :                (optional) Bypass transcoding. Default is 0, must be 0 or 1\n"
         "\t-channel-layout :        (optional) Channel layout for audio, can be \"mono\", \"stereo\", \"5.0\" or \"5.1\"....\n"
@@ -1106,6 +1108,7 @@ usage(
         "\t                                    or \"extract-all-images\". \"all\" means transcoding video and audio together.\n"
         "\t-video-bitrate :         (optional) Mutually exclusive with crf. Default: -1 (unused)\n"
         "\t-video-seg-duration-ts : (mandatory If format is not \"segment\" and transcoding video) video segment duration time base (positive integer).\n"
+        "\t-video-time-base :       (optional) Video encoder timebase, must be > 0 (the actual timebase would be 1/video-time-base).\n"
         "\t-wm-text :               (optional) Watermark text that will be presented in every video frame if it exist. It has higher priority than overlay watermark.\n"
         "\t-wm-timecode :           (optional) Watermark timecode string (i.e 00\\:00\\:00\\:00). It has higher priority than text watermark.\n"
         "\t-wm-timecode-rate :      (optional) Watermark timecode frame rate. Only applies if watermark timecode is enabled.\n"
@@ -1208,6 +1211,7 @@ main(
         .gpu_index = -1,
         .seg_duration = NULL,
         .debug_frame_level = 0,
+        .video_time_base = 0,
     };
 
     i = 1;
@@ -1502,10 +1506,12 @@ main(
             }
             break;
         case 't':
-            if (sscanf(argv[i+1], "%d", &n_threads) != 1) {
-                usage(argv[0], argv[i], EXIT_FAILURE);
+            if (!strcmp(argv[i], "-t")) {
+                if (sscanf(argv[i+1], "%d", &n_threads) != 1) {
+                    usage(argv[0], argv[i], EXIT_FAILURE);
+                }
+                if ( n_threads < 1 ) usage(argv[0], argv[i], EXIT_FAILURE);
             }
-            if ( n_threads < 1 ) usage(argv[0], argv[i], EXIT_FAILURE);
             break;
         case 'v':
             if (!strcmp(argv[i], "-video-bitrate")) {
@@ -1516,6 +1522,12 @@ main(
                 if (sscanf(argv[i+1], "%"PRId64, &p.video_seg_duration_ts) != 1) {
                     usage(argv[0], argv[i], EXIT_FAILURE);
                 }
+            } else if (!strcmp(argv[i], "-video-time-base")) {
+                if (sscanf(argv[i+1], "%d", &p.video_time_base) != 1) {
+                    usage(argv[0], argv[i], EXIT_FAILURE);
+                }
+                if (p.video_time_base <= 0)
+                    usage(argv[0], argv[i], EXIT_FAILURE);
             } else {
                 usage(argv[0], argv[i], EXIT_FAILURE);
             }
