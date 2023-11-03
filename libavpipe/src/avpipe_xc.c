@@ -4159,6 +4159,11 @@ check_params(
         return eav_param;
     }
 
+    if (params->video_time_base > 0 && params->video_time_base < 10000) {
+        elv_err("Invalid video timebase %d (must be >= 10000), url=%s", params->video_time_base, params->url);
+        return eav_param;
+    }
+
     if (params->watermark_text != NULL && (strlen(params->watermark_text) > (WATERMARK_STRING_SZ-1))){
         elv_err("Watermark too large, url=%s", params->url);
         return eav_param;
