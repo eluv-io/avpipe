@@ -61,7 +61,7 @@ dkms.conf
 /bin/
 /include/
 /elvxc/elvxc
-/etx/bin/
+/exc/bin/
 O/
 *.log
 !go.mod
