@@ -14,7 +14,7 @@ install: elvxc
 	@(if [ ! -d $(TOP_DIR)/../$(BINDIR) ]; then mkdir $(TOP_DIR)/../$(BINDIR); fi)
 	@echo "Installing elvxc"
 	@cp elvxc $(TOP_DIR)/../$(BINDIR)
-	
+
 check-env:
 ifndef FFMPEG_DIST
   $(error FFMPEG_DIST is undefined)
