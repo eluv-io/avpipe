@@ -18,18 +18,12 @@ avpipe_dir=$script_dir
 
 export FFMPEG_DIST=$elvdev_dir/FFmpeg/dist/
 export SRT_DIST=$2
-export GOPRIVATE="github.com/qluvio/*"
 
-export PKG_CONFIG_PATH="${FFMPEG_DIST}/lib/pkgconfig"
-export CGO_CFLAGS="-I${FFMPEG_DIST}/include -I$avpipe_dir/include -I${SRT_DIST} -I${SRT_DIST}/srtcore"
-export CGO_LDFLAGS="-L${FFMPEG_DIST}/lib -L${SRT_DIST} -L$avpipe_dir/lib \
--lavpipe -lavcodec -lavformat -lavfilter -lavdevice -lswresample -lswscale \
--lavutil -lpostproc -lutils -lm -ldl -lpthread -lsrt"
+unset PKG_CONFIG_PATH
+export PKG_CONFIG_PATH="${FFMPEG_DIST}/lib/pkgconfig:${SRT_DIST}:${PKG_CONFIG_PATH:-}"
 
 echo elvdev_dir=$elvdev_dir
 echo avpipe_dir=$avpipe_dir
 echo FFMPEG_DIST=$FFMPEG_DIST
 echo SRT_DIST=$SRT_DIST
 echo PKG_CONFIG_PATH=$PKG_CONFIG_PATH
-echo CGO_CFLAGS=$CGO_CFLAGS
-echo CGO_LDFLAGS=$CGO_LDFLAGS

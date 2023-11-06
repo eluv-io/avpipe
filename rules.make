@@ -8,32 +8,14 @@ LIBDIR=lib
 INCDIR=include
 
 OSNAME := $(shell uname -s)
+LDFLAGS := \
+		-lavpipe \
+		-lutils \
+		$(shell pkg-config --libs libavfilter libavcodec libavformat libavdevice libswresample libavresample libswscale libavutil libpostproc srt)
+CFLAGS := $(shell pkg-config --cflags libavfilter libavcodec libavformat libavdevice libswresample libavresample libswscale libavutil libpostproc srt)
 
 ifeq ($(OSNAME), Darwin)
-	LIBS=-lavpipe \
-		-lavformat \
-		-lavfilter \
-		-lavcodec \
-		-lavdevice \
-		-lswresample \
-		-lavresample \
-		-lswscale \
-		-lavutil \
-		-lpostproc \
-		-lutils \
-		-lz \
-		-lbz2 \
-		-lm \
-		-ldl \
-		-lmp3lame \
-		-lx264 \
-		-lxvidcore \
-		-lfontconfig \
-		-lfribidi \
-		-lfreetype \
-		-liconv \
-		-lpthread \
-		-lsrt \
+	LDFLAGS := ${LDFLAGS} \
 		-framework OpenGL \
 		-framework CoreAudio \
 		-framework AudioToolbox \
@@ -49,33 +31,11 @@ ifeq ($(OSNAME), Darwin)
 		-framework AppKit
 endif
 ifeq ($(OSNAME), Linux)
-	LIBS=-lavpipe \
-		-lavformat \
-		-lavfilter \
-		-lavcodec \
-		-lavdevice \
-		-lswresample \
-		-lavresample \
-		-lswscale \
-		-lavutil \
-		-lpostproc \
-		-lutils \
-		-lz \
-		-lm \
-		-ldl \
-		-lvdpau \
-		-lX11 \
-		-lmp3lame \
-		-lx264 \
-		-lxvidcore \
+	LDFLAGS := ${LDFLAGS} \
 		-lOpenCL \
-		-lfontconfig \
-		-lfribidi \
-		-lfreetype \
 		-lva \
 		-lva-drm \
 		-lva-x11 \
 		-lpthread \
 		-lsrt
 endif
-

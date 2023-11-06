@@ -10,13 +10,13 @@ OBJS=$(SRCS:%.c=$(BINDIR)/%.o)
 
 .DEFAULT_GOAL := dynamic
 
-all install: copy_libs check-env
+all install: check-env
 	@for dir in $(SUBDIRS); do \
 	echo "Making $@ in $$dir..."; \
 	(cd $$dir; make $@) || exit 1; \
 	done
 
-dynamic: copy_libs_all all
+dynamic: all
 
 clean: lclean
 	@for dir in $(SUBDIRS); do \
@@ -24,26 +24,8 @@ clean: lclean
 	(cd $$dir; make $@) || exit 1; \
 	done
 
-copy_libs:
-	@(if [ ! -d $(LIBDIR) ]; then mkdir $(LIBDIR); fi)
-	@(if [ ! -d $(INCDIR) ]; then mkdir $(INCDIR); fi)
-	cp ${FFMPEG_DIST}/lib/libav*.a ${LIBDIR}
-	cp ${FFMPEG_DIST}/lib/libswresample.a ${LIBDIR}
-	cp ${FFMPEG_DIST}/lib/libswscale.a ${LIBDIR}
-	cp ${FFMPEG_DIST}/lib/libpostproc.a ${LIBDIR}
-	cp -r ${FFMPEG_DIST}/include/* ${INCDIR}
-
-copy_libs_all:
-	@(if [ ! -d $(LIBDIR) ]; then mkdir $(LIBDIR); fi)
-	@(if [ ! -d $(INCDIR) ]; then mkdir $(INCDIR); fi)
-	cp ${FFMPEG_DIST}/lib/libav* ${LIBDIR}
-	cp ${FFMPEG_DIST}/lib/libswresample* ${LIBDIR}
-	cp ${FFMPEG_DIST}/lib/libswscale* ${LIBDIR}
-	cp ${FFMPEG_DIST}/lib/libpostproc* ${LIBDIR}
-	cp -r ${FFMPEG_DIST}/include/* ${INCDIR}
-
 avpipe:
-	CGO_CFLAGS="-I./include" CGO_LDFLAGS="-L${TOP_DIR}/lib -lavcodec -lavformat -lavfilter -lavpipe -lavdevice -lswresample -libavresample -lswscale -lavutil -lpostproc -lutils -lz -lm -ldl -lvdpau -lva -lX11 -lpthread -lsrt" go build -v
+	go build -v
 	mkdir -p ./O
 
 libavpipego: $(OBJS)
@@ -54,7 +36,7 @@ libavpipego: $(OBJS)
 $(BINDIR)/%.o: %.c
 	@(if [ ! -d $(BINDIR) ]; then mkdir $(BINDIR); fi)
 	@echo "Compiling " $<
-	gcc ${FLAGS} ${INCDIRS} -c $< -o $@
+	gcc ${CFLAGS} ${LDFLAGS} ${INCDIRS} -c $< -o $@
 
 lclean:
 	@rm -rf lib bin include
