@@ -21,3 +21,7 @@ tcp_connect(
     const char *host,
     const char *port);
 
+int
+set_sock_nonblocking(
+    int sock);
+

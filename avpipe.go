@@ -1,21 +1,32 @@
 /*
 Package avpipe has four main interfaces that has to be implemented by the client code:
 
-  1) InputOpener: is the input factory interface that needs an implementation to generate an InputHandler.
+ 1. InputOpener: is the input factory interface that needs an implementation to generate an InputHandler.
 
-  2) InputHandler: is the input handler with Read/Seek/Size/Close methods. An implementation of this
-     interface is needed by ffmpeg to process input streams properly.
+ 2. InputHandler: is the input handler with Read/Seek/Size/Close methods. An implementation of this
+    interface is needed by ffmpeg to process input streams properly.
 
-  3) OutputOpener: is the output factory interface that needs an implementation to generate an OutputHandler.
+ 3. OutputOpener: is the output factory interface that needs an implementation to generate an OutputHandler.
 
-  4) OutputHandler: is the output handler with Write/Seek/Close methods. An implementation of this
-     interface is needed by ffmpeg to write encoded streams properly.
-
+ 4. OutputHandler: is the output handler with Write/Seek/Close methods. An implementation of this
+    interface is needed by ffmpeg to write encoded streams properly.
 */
 package avpipe
 
-// #cgo pkg-config: libavcodec libavfilter libavformat libavutil libswresample libavresample libswscale
-// #cgo CFLAGS: -I./include
+// #cgo pkg-config: libavcodec
+// #cgo pkg-config: libavfilter
+// #cgo pkg-config: libavformat
+// #cgo pkg-config: libavutil
+// #cgo pkg-config: libswresample
+// #cgo pkg-config: libavresample
+// #cgo pkg-config: libavdevice
+// #cgo pkg-config: libswscale
+// #cgo pkg-config: libavutil
+// #cgo pkg-config: libpostproc
+// #cgo CFLAGS: -I${SRCDIR}/libavpipe/include
+// #cgo CFLAGS: -I${SRCDIR}/utils/include
+// #cgo LDFLAGS: -L${SRCDIR}
+
 // #include <string.h>
 // #include <stdlib.h>
 // #include "avpipe_xc.h"
@@ -81,16 +92,17 @@ const AvNoPtsValue = uint64(C.uint64_t(0x8000000000000000))
 type XcType int
 
 const (
-	XcNone          XcType = iota
-	XcVideo                = 1
-	XcAudio                = 2
-	XcAll                  = 3  // XcAudio | XcVideo
-	XcAudioMerge           = 6  // XcAudio | 0x04
-	XcAudioJoin            = 10 // XcAudio | 0x08
-	XcAudioPan             = 18 // XcAudio | 0x10
-	XcMux                  = 32
-	XcExtractImages        = 65 // XcVideo | 2^6
-	Xcprobe                = 128
+	XcNone             XcType = iota
+	XcVideo                   = 1
+	XcAudio                   = 2
+	XcAll                     = 3  // XcAudio | XcVideo
+	XcAudioMerge              = 6  // XcAudio | 0x04
+	XcAudioJoin               = 10 // XcAudio | 0x08
+	XcAudioPan                = 18 // XcAudio | 0x10
+	XcMux                     = 32
+	XcExtractImages           = 65  // XcVideo | 2^6
+	XcExtractAllImages        = 129 // XcVideo | 2^7
+	Xcprobe                   = 256
 )
 
 type XcProfile int
@@ -121,6 +133,8 @@ func XcTypeFromString(xcTypeStr string) XcType {
 		xcType = XcMux
 	case "extract-images":
 		xcType = XcExtractImages
+	case "extract-all-images":
+		xcType = XcExtractAllImages
 	default:
 		xcType = XcNone
 	}
@@ -163,7 +177,6 @@ type XcParams struct {
 	BypassTranscoding      bool               `json:"bypass,omitempty"`
 	Format                 string             `json:"format,omitempty"`
 	StartTimeTs            int64              `json:"start_time_ts,omitempty"`
-	SkipOverPts            int64              `json:"skip_over_pts,omitempty"`
 	StartPts               int64              `json:"start_pts,omitempty"` // Start PTS for output
 	DurationTs             int64              `json:"duration_ts,omitempty"`
 	StartSegmentStr        string             `json:"start_segment_str,omitempty"`
@@ -224,6 +237,7 @@ type XcParams struct {
 	DeinterlaceFilter      string             `json:"deinterlace_filter"`
 	ExtractImageIntervalTs int64              `json:"extract_image_interval_ts,omitempty"`
 	ExtractImagesTs        []int64            `json:"extract_images_ts,omitempty"`
+	VideoTimeBase          int                `json:"video_time_base"`
 }
 
 // NewXcParams initializes a XcParams struct with unset/default values
@@ -311,7 +325,9 @@ const (
 	AV_IN_STAT_DECODING_VIDEO_START_PTS = 16
 	AV_OUT_STAT_BYTES_WRITTEN           = 32
 	AV_OUT_STAT_FRAME_WRITTEN           = 64
-	AV_OUT_STAT_ENCODING_END_PTS        = 128
+	AV_IN_STAT_FIRST_KEYFRAME_PTS       = 128
+	AV_OUT_STAT_ENCODING_END_PTS        = 256
+	AV_IN_STAT_DATA_SCTE35              = 512
 )
 
 type StreamInfo struct {
@@ -728,6 +744,12 @@ func (h *ioHandler) InStat(avp_stat C.avp_stat_t, stat_args unsafe.Pointer) erro
 	case C.in_stat_video_frame_read:
 		statArgs := *(*uint64)(stat_args)
 		err = h.input.Stat(AV_IN_STAT_VIDEO_FRAME_READ, &statArgs)
+	case C.in_stat_first_keyframe_pts:
+		statArgs := *(*uint64)(stat_args)
+		err = h.input.Stat(AV_IN_STAT_FIRST_KEYFRAME_PTS, &statArgs)
+	case C.in_stat_data_scte35:
+		statArgs := C.GoString((*C.char)(stat_args))
+		err = h.input.Stat(AV_IN_STAT_DATA_SCTE35, statArgs)
 	}
 
 	return err
@@ -1158,7 +1180,6 @@ func getCParams(params *XcParams) (*C.xcparams_t, error) {
 		url:                       C.CString(params.Url),
 		format:                    C.CString(params.Format),
 		start_time_ts:             C.int64_t(params.StartTimeTs),
-		skip_over_pts:             C.int64_t(params.SkipOverPts),
 		start_pts:                 C.int64_t(params.StartPts),
 		duration_ts:               C.int64_t(params.DurationTs),
 		start_segment_str:         C.CString(params.StartSegmentStr),
@@ -1216,6 +1237,7 @@ func getCParams(params *XcParams) (*C.xcparams_t, error) {
 		extract_image_interval_ts: C.int64_t(params.ExtractImageIntervalTs),
 		extract_images_sz:         C.int(extractImagesSize),
 		deinterlace_filter:        C.CString(params.DeinterlaceFilter),
+		video_time_base:           C.int(params.VideoTimeBase),
 
 		// All boolean params are handled below
 	}

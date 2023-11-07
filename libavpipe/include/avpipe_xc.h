@@ -84,14 +84,16 @@ typedef enum avpipe_buftype_t {
 #define AUDIO_BYTES_WRITE_REPORT        (64*1024)
 
 typedef enum avp_stat_t {
-    in_stat_bytes_read = 1,
-    in_stat_audio_frame_read = 2,
-    in_stat_video_frame_read = 4,
-    in_stat_decoding_audio_start_pts = 8,
-    in_stat_decoding_video_start_pts = 16,
-    out_stat_bytes_written = 32,
-    out_stat_frame_written = 64,
-    out_stat_encoding_end_pts = 128
+    in_stat_bytes_read = 1,                 // # of bytes read from input stream
+    in_stat_audio_frame_read = 2,           // # of audio frames read from the input stream
+    in_stat_video_frame_read = 4,           // # of video frames read from the input stream
+    in_stat_decoding_audio_start_pts = 8,   // PTS of first audio packet went to the decoder
+    in_stat_decoding_video_start_pts = 16,  // PTS of first video packet went to the decoder
+    out_stat_bytes_written = 32,            // # of bytes written to the output stream
+    out_stat_frame_written = 64,            // # of frames written to the output stream
+    in_stat_first_keyframe_pts = 128,       // First keyframe in the input stream
+    out_stat_encoding_end_pts = 256,        // 
+    in_stat_data_scte35 = 512               // SCTE data arrived
 } avp_stat_t;
 
 struct coderctx_t;
@@ -162,11 +164,14 @@ typedef struct ioctx_t {
 
     /* Audio/video decoding start pts for stat reporting */
     int64_t decoding_start_pts;
+    int64_t first_key_frame_pts;
 
     /* Output handlers specific data */
     int64_t pts;                /* frame pts */
     int     stream_index;       /* usually (but not always) video=0 and audio=1 */
     int     seg_index;          /* segment index if this ioctx is a segment */
+
+    uint8_t *data;  /* Data stream buffer (e.g. SCTE-35) */
 
     io_mux_ctx_t    *in_mux_ctx;   /* Input muxer context */
     int             in_mux_index;
@@ -259,7 +264,8 @@ typedef struct coderctx_t {
     int audio_stream_index[MAX_AUDIO_MUX];              /* Audio input stream indexes */
     int n_audio;                                        /* Number of audio streams that will be decoded */
 
-    int data_stream_index;
+    int data_scte35_stream_index;                       /* Index of SCTE-35 data stream */
+    int data_stream_index;                              /* Index of an unrecognized data stream */
     int audio_enc_stream_index;                         /* Audio output stream index */
 
     int64_t video_last_wrapped_pts;                     /* Video last wrapped pts */
@@ -330,16 +336,17 @@ typedef enum crypt_scheme_t {
 } crypt_scheme_t;
 
 typedef enum xc_type_t {
-    xc_none           = 0,
-    xc_video          = 1,
-    xc_audio          = 2,
-    xc_all            = 3,    // xc_video | xc_audio
-    xc_audio_merge    = 6,    // 0x04 | xc_audio
-    xc_audio_join     = 10,   // 0x08 | xc_audio
-    xc_audio_pan      = 18,   // 0x10 | xc_audio
-    xc_mux            = 32,
-    xc_extract_images = 65,
-    xc_probe          = 128
+    xc_none                 = 0,
+    xc_video                = 1,
+    xc_audio                = 2,
+    xc_all                  = 3,    // xc_video | xc_audio
+    xc_audio_merge          = 6,    // 0x04 | xc_audio
+    xc_audio_join           = 10,   // 0x08 | xc_audio
+    xc_audio_pan            = 18,   // 0x10 | xc_audio
+    xc_mux                  = 32,
+    xc_extract_images       = 65,   // 0x40 | xc_video
+    xc_extract_all_images   = 129,  // 0x80 | xc_video
+    xc_probe                = 256
 } xc_type_t;
 
 /* handled image types in get_overlay_filter_string*/
@@ -361,7 +368,6 @@ typedef struct xcparams_t {
     int     bypass_transcoding;     // if 0 means do transcoding, otherwise bypass transcoding (only copy)
     char    *format;                // Output format [Required, Values: dash, hls, mp4, fmp4]
     int64_t start_time_ts;          // Transcode the source starting from this time
-    int64_t skip_over_pts;          // Like start_time_ts but expressed in input pts
     int64_t start_pts;              // Starting PTS for output
     int64_t duration_ts;            // Transcode time period [-1 for entire source length from start_time_ts]
     char    *start_segment_str;     // Specify index of the first segment  TODO: change type to int
@@ -427,6 +433,8 @@ typedef struct xcparams_t {
     int64_t     extract_image_interval_ts;  // Write frames at this interval. Default: -1 (will use DEFAULT_FRAME_INTERVAL_S)
     int64_t     *extract_images_ts;         // Write frames at these timestamps. Mutually exclusive with extract_image_interval_ts
     int         extract_images_sz;          // Size of the array extract_images_ts
+
+    int         video_time_base;            // New video encoder time_base (1/video_time_base)
 
     int         debug_frame_level;
     int         connection_timeout;         // Connection timeout in sec for RTMP or MPEGTS protocols

@@ -1,5 +1,7 @@
 /*
- * Test a/v transcoding pipeline
+ * elv_xc.c
+ *
+ * Command line utility using avpipe framework for transcoding audio/video files/content.
  *
  */
 
@@ -30,6 +32,10 @@ do_mux(
     char *out_filename
 );
 
+extern void *
+udp_thread_func(
+    void *thread_params);
+
 int
 in_stat(
     void *opaque,
@@ -46,86 +52,6 @@ typedef struct udp_thread_params_t {
     socklen_t       salen;
     ioctx_t         *inctx;
 } udp_thread_params_t;
-
-void *
-udp_thread_func(
-    void *thread_params)
-{
-    udp_thread_params_t *params = (udp_thread_params_t *) thread_params;
-    xcparams_t *xcparams = params->inctx->params;
-    int debug_frame_level = (xcparams != NULL) ? xcparams->debug_frame_level : 0;
-    char *url = (xcparams != NULL) ? xcparams->url : "";
-    struct sockaddr     ca;
-    socklen_t len;
-    udp_packet_t *udp_packet;
-    int ret;
-    int first = 1;
-    int pkt_num = 0;
-    int timedout = 0;
-    int connection_timeout = xcparams->connection_timeout;
-
-    for ( ; ; ) {
-        if (params->inctx->closed)
-            break;
-
-        ret = readable_timeout(params->fd, 1);
-        if (ret == -1) {
-            if (errno == EINTR)
-                continue;
-            elv_err("UDP select error fd=%d, err=%d, url=%s", params->fd, errno, url);
-            break;
-        } else if (ret == 0) {
-            /* If no packet has not received yet, check connection_timeout */
-            if (first) {
-                if (connection_timeout > 0) {
-                    connection_timeout--;
-                    if (connection_timeout == 0) {
-                        elv_channel_close(params->udp_channel, 1);
-                        break;
-                    }
-                }
-                continue;
-            }
-
-            if (timedout++ == UDP_PIPE_TIMEOUT) {
-                elv_err("UDP recv timeout fd=%d, url=%s", params->fd, url);
-                break;
-            }
-            continue;
-        }
-
-        len = params->salen;
-        udp_packet = (udp_packet_t *) calloc(1, sizeof(udp_packet_t));
-        
-recv_again:
-        if (params->inctx->closed)
-            break;
-        udp_packet->len = recvfrom(params->fd, udp_packet->buf, MAX_UDP_PKT_LEN, 0, &ca, &len);
-        if (udp_packet->len < 0) {
-            if (errno == EINTR)
-                goto recv_again;
-            elv_err("UDP recvfrom fd=%d, errno=%d, url=%s", params->fd, errno, url);
-            break;
-        }
-
-        if (first) {
-            first = 0;
-            elv_log("UDP FIRST url=%s", url);
-        }
-
-        pkt_num++;
-        udp_packet->pkt_num = pkt_num;
-        /* If the channel is closed, exit the thread */
-        if (elv_channel_send(params->udp_channel, udp_packet) < 0) {
-            break;
-        }
-        if (debug_frame_level)
-            elv_dbg("Received UDP packet=%d, len=%d, url=%s", pkt_num, udp_packet->len, url);
-        timedout = 0;
-    }
-
-    return NULL;
-}
 
 int
 in_opener(
@@ -176,6 +102,11 @@ in_opener(
         size_t bufsz = UDP_PIPE_BUFSIZE;
         if (setsockopt(fd, SOL_SOCKET, SO_RCVBUF, (const void *)&bufsz, (socklen_t)sizeof(bufsz)) == -1) {
             elv_warn("Failed to set UDP socket buf size to=%"PRId64, bufsz);
+        }
+
+        if (set_sock_nonblocking(fd) < 0) {
+            elv_err("Failed to make UDP socket nonblocking, errno=%d", errno);
+            return -1;
         }
 
         elv_channel_init(&inctx->udp_channel, MAX_UDP_CHANNEL, NULL);
@@ -424,8 +355,12 @@ in_stat(
         if (debug_frame_level)
             elv_dbg("IN STAT fd=%d, video frame read=%"PRId64, fd, c->video_frames_read);
         break;
+    case in_stat_data_scte35:
+        if (debug_frame_level)
+            elv_dbg("IN STAT fd=%d, data=%s", fd, c->data);
+        break;
     default:
-        elv_err("IN STATS fd=%d, invalid input stat=%d", stat_type);
+        elv_err("IN STAT fd=%d, invalid input stat=%d", fd, stat_type);
         return 1;
     }
 
@@ -859,6 +794,9 @@ xc_type_from_string(
     if (!strcmp(xc_type_str, "extract-images"))
         return xc_extract_images;
 
+    if (!strcmp(xc_type_str, "extract-all-images"))
+        return xc_extract_all_images;
+
     return xc_none;
 }
 
@@ -1111,6 +1049,8 @@ usage(
         "\t-audio-fill-gap :        (optional) Default: 0, must be 0 or 1. It only effects if encoder is aac.\n"
         "\t-audio-index :           (optional) Default: the indexes of audio stream (comma separated)\n"
         "\t-audio-seg-duration-ts : (mandatory If format is not \"segment\" and transcoding audio) audio segment duration time base (positive integer).\n"
+        "\t-audio-time-base-den :   (optional) Audio encoder timebase denominator, must be > 0.\n"
+        "\t-audio-time-base-num :   (optional) Audio encoder timebase numenator, must be > 0.\n"
         "\t-bitdepth :              (optional) Bitdepth of color space. Default is 8, can be 8, 10, or 12.\n"
         "\t-bypass :                (optional) Bypass transcoding. Default is 0, must be 0 or 1\n"
         "\t-channel-layout :        (optional) Channel layout for audio, can be \"mono\", \"stereo\", \"5.0\" or \"5.1\"....\n"
@@ -1165,10 +1105,11 @@ usage(
         "\t-stream-id :             (optional) Default: -1, if it is valid it will be used to transcode elementary stream with that stream-id.\n"
         "\t-sync-audio-to-stream-id:(optional) Default: -1, sync audio to video iframe of specific stream-id when input stream is mpegts.\n"
         "\t-t :                     (optional) Transcoding threads. Default is 1 thread, must be bigger than 1\n"
-        "\t-xc-type :               (optional) Transcoding type. Default is \"all\", can be \"video\", \"audio\", \"audio-merge\", \"audio-join\", \"audio-pan\", \"all\", or \"extract-images\"\n"
-        "\t                                    \"all\" means transcoding video and audio together.\n"
+        "\t-xc-type :               (optional) Transcoding type. Default is \"all\", can be \"video\", \"audio\", \"audio-merge\", \"audio-join\", \"audio-pan\", \"all\", \"extract-images\"\n"
+        "\t                                    or \"extract-all-images\". \"all\" means transcoding video and audio together.\n"
         "\t-video-bitrate :         (optional) Mutually exclusive with crf. Default: -1 (unused)\n"
         "\t-video-seg-duration-ts : (mandatory If format is not \"segment\" and transcoding video) video segment duration time base (positive integer).\n"
+        "\t-video-time-base :       (optional) Video encoder timebase, must be > 0 (the actual timebase would be 1/video-time-base).\n"
         "\t-wm-text :               (optional) Watermark text that will be presented in every video frame if it exist. It has higher priority than overlay watermark.\n"
         "\t-wm-timecode :           (optional) Watermark timecode string (i.e 00\\:00\\:00\\:00). It has higher priority than text watermark.\n"
         "\t-wm-timecode-rate :      (optional) Watermark timecode frame rate. Only applies if watermark timecode is enabled.\n"
@@ -1272,6 +1213,7 @@ main(
         .seg_duration = NULL,
         .debug_frame_level = 0,
         .deinterlace_filter = strdup(""),
+        .video_time_base = 0,
     };
 
     i = 1;
@@ -1571,10 +1513,12 @@ main(
             }
             break;
         case 't':
-            if (sscanf(argv[i+1], "%d", &n_threads) != 1) {
-                usage(argv[0], argv[i], EXIT_FAILURE);
+            if (!strcmp(argv[i], "-t")) {
+                if (sscanf(argv[i+1], "%d", &n_threads) != 1) {
+                    usage(argv[0], argv[i], EXIT_FAILURE);
+                }
+                if ( n_threads < 1 ) usage(argv[0], argv[i], EXIT_FAILURE);
             }
-            if ( n_threads < 1 ) usage(argv[0], argv[i], EXIT_FAILURE);
             break;
         case 'v':
             if (!strcmp(argv[i], "-video-bitrate")) {
@@ -1585,6 +1529,12 @@ main(
                 if (sscanf(argv[i+1], "%"PRId64, &p.video_seg_duration_ts) != 1) {
                     usage(argv[0], argv[i], EXIT_FAILURE);
                 }
+            } else if (!strcmp(argv[i], "-video-time-base")) {
+                if (sscanf(argv[i+1], "%d", &p.video_time_base) != 1) {
+                    usage(argv[0], argv[i], EXIT_FAILURE);
+                }
+                if (p.video_time_base <= 0)
+                    usage(argv[0], argv[i], EXIT_FAILURE);
             } else {
                 usage(argv[0], argv[i], EXIT_FAILURE);
             }
@@ -1639,7 +1589,8 @@ main(
                     strcmp(argv[i+1], "audio-join") &&
                     strcmp(argv[i+1], "audio-pan") &&
                     strcmp(argv[i+1], "audio-merge") &&
-                    strcmp(argv[i+1], "extract-images")) {
+                    strcmp(argv[i+1], "extract-images") &&
+                    strcmp(argv[i+1], "extract-all-images")) {
                     usage(argv[0], argv[i], EXIT_FAILURE);
                 }
                 p.xc_type = xc_type_from_string(argv[i+1]);
@@ -1685,7 +1636,10 @@ main(
         strcmp(p.format, "fmp4-segment") &&
         strcmp(p.format, "mp4") &&
         p.seg_duration == NULL &&
-        p.video_seg_duration_ts <= 0 && p.xc_type & xc_video && p.xc_type != xc_extract_images) {
+        p.video_seg_duration_ts <= 0 &&
+        p.xc_type & xc_video &&
+        p.xc_type != xc_extract_images &&
+        p.xc_type != xc_extract_all_images) {
         usage(argv[0], "video-seg-duration-ts or seg-duration", EXIT_FAILURE);
     }
 

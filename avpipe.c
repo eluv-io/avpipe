@@ -33,6 +33,17 @@ avcodec_profile_name(
     enum AVCodecID codec_id,
     int profile);
 
+extern void *
+udp_thread_func(
+    void *thread_params);
+
+typedef struct udp_thread_params_t {
+    int             fd;             /* Socket fd to read UDP datagrams */
+    elv_channel_t   *udp_channel;   /* udp channel to keep incomming UDP packets */
+    socklen_t       salen;
+    ioctx_t         *inctx;
+} udp_thread_params_t;
+
 static int
 out_stat(
     void *opaque,
@@ -271,98 +282,15 @@ in_stat(
     case in_stat_video_frame_read:
         rc = AVPipeStatInput(fd, stat_type, &c->video_frames_read);
         break;
+
+    case in_stat_first_keyframe_pts:
+        rc = AVPipeStatInput(fd, stat_type, &c->first_key_frame_pts);
+        break;
+
     default:
         rc = -1;
     }
     return rc;
-}
-
-typedef struct udp_thread_params_t {
-    int             fd;             /* Socket fd to read UDP datagrams */
-    elv_channel_t   *udp_channel;   /* udp channel to keep incomming UDP packets */
-    socklen_t       salen;
-    ioctx_t         *inctx;
-} udp_thread_params_t;
-
-void *
-udp_thread_func(
-    void *thread_params)
-{
-    udp_thread_params_t *params = (udp_thread_params_t *) thread_params;
-    xcparams_t *xcparams = params->inctx->params;
-    int debug_frame_level = (xcparams != NULL) ? xcparams->debug_frame_level : 0;
-    char *url = (xcparams != NULL) ? xcparams->url : "";
-    struct sockaddr     ca;
-    socklen_t len;
-    udp_packet_t *udp_packet;
-    int ret;
-    int first = 1;
-    int pkt_num = 0;
-    int timedout = 0;
-    int connection_timeout = xcparams->connection_timeout;
-
-    for ( ; ; ) {
-        if (params->inctx->closed)
-            break;
-
-        ret = readable_timeout(params->fd, 1);
-        if (ret == -1) {
-            if (errno == EINTR)
-                continue;
-            elv_err("UDP select error fd=%d, err=%d, url=%s", params->fd, errno, url);
-            break;
-        } else if (ret == 0) {
-            /* If no packet has not received yet, check connection_timeout */
-            if (first) {
-                if (connection_timeout > 0) {
-                    connection_timeout--;
-                    if (connection_timeout == 0) {
-                        elv_channel_close(params->udp_channel, 1);
-                        break;
-                    }
-                }
-                continue;
-            }
-
-            if (timedout++ == UDP_PIPE_TIMEOUT) {
-                elv_err("UDP recv timeout fd=%d, url=%s", params->fd, url);
-                break;
-            }
-            continue;
-        }
-
-        len = params->salen;
-        udp_packet = (udp_packet_t *) calloc(1, sizeof(udp_packet_t));
-        
-recv_again:
-        if (params->inctx->closed)
-            break;
-        udp_packet->len = recvfrom(params->fd, udp_packet->buf, MAX_UDP_PKT_LEN, 0, &ca, &len);
-        if (udp_packet->len < 0) {
-            if (errno == EINTR)
-                goto recv_again;
-            elv_err("UDP recvfrom fd=%d, errno=%d, url=%s", params->fd, errno, url);
-            break;
-        }
-
-        if (first) {
-            first = 0;
-            elv_log("UDP FIRST url=%s", url);
-        }
-
-        pkt_num++;
-        udp_packet->pkt_num = pkt_num;
-        /* If the channel is closed, exit the thread */
-        if (elv_channel_send(params->udp_channel, udp_packet) < 0) {
-            break;
-        }
-        if (debug_frame_level)
-            elv_dbg("Received UDP packet=%d, len=%d, url=%s", pkt_num, udp_packet->len, url);
-        timedout = 0;
-    }
-
-    elv_log("UDP thread terminated, url=%s", url);
-    return NULL;
 }
 
 static int
@@ -413,6 +341,12 @@ udp_in_opener(
         elv_warn("Failed to set UDP socket buf size to=%"PRId64", url=%s, errno=%d", bufsz, url, errno);
     }
 
+    if (set_sock_nonblocking(sockfd) < 0) {
+        elv_err("Failed to make UDP socket nonblocking, errno=%d", errno);
+        return -1;
+    }
+
+
     elv_channel_init(&inctx->udp_channel, MAX_UDP_CHANNEL, NULL);
     inctx->opaque = (int *) calloc(1, sizeof(int)+sizeof(int64_t));
     *((int *)((int64_t *)inctx->opaque+1)) = sockfd;
@@ -421,7 +355,7 @@ udp_in_opener(
     if (fd <= 0 )
         return -1;
 
-    if (size > 0) 
+    if (size > 0)
         inctx->sz = size;
 
     *((int64_t *)(inctx->opaque)) = fd;
@@ -484,7 +418,7 @@ udp_in_read_packet(
             c->read_bytes += r;
             c->read_pos += r;
             //elv_dbg("IN READ UDP partial read=%d pos=%"PRId64" total=%"PRId64, r, c->read_pos, c->read_bytes);
-            return r;        
+            return r;
         }
 
         /*
@@ -583,6 +517,7 @@ udp_in_stat(
 {
     int64_t fd;
     ioctx_t *c = (ioctx_t *)opaque;
+    int64_t rc;
 
     if (!c || !c->opaque)
         return 0;
@@ -598,25 +533,39 @@ udp_in_stat(
     case in_stat_decoding_audio_start_pts:
         if (debug_frame_level)
             elv_dbg("IN STAT UDP fd=%d, audio start PTS=%"PRId64", url=%s", fd, c->decoding_start_pts, c->url);
+        rc = AVPipeStatInput(fd, stat_type, &c->decoding_start_pts);
         break;
     case in_stat_decoding_video_start_pts:
         if (debug_frame_level)
             elv_dbg("IN STAT UDP fd=%d, video start PTS=%"PRId64", url=%s", fd, c->decoding_start_pts, c->url);
+        rc = AVPipeStatInput(fd, stat_type, &c->decoding_start_pts);
         break;
     case in_stat_audio_frame_read:
         if (debug_frame_level)
             elv_dbg("IN STAT UDP fd=%d, audio frame read=%"PRId64", url=%s", fd, c->audio_frames_read, c->url);
+        rc = AVPipeStatInput(fd, stat_type, &c->audio_frames_read);
         break;
     case in_stat_video_frame_read:
         if (debug_frame_level)
             elv_dbg("IN STAT UDP fd=%d, video frame read=%"PRId64", url=%s", fd, c->video_frames_read, c->url);
+        rc = AVPipeStatInput(fd, stat_type, &c->video_frames_read);
+        break;
+    case in_stat_first_keyframe_pts:
+        if (debug_frame_level)
+            elv_dbg("IN STAT UDP fd=%d, first keyframe PTS=%"PRId64", url=%s", fd, c->first_key_frame_pts, c->url);
+        rc = AVPipeStatInput(fd, stat_type, &c->first_key_frame_pts);
+        break;
+    case in_stat_data_scte35:
+        if (debug_frame_level)
+            elv_dbg("IN STAT UDP SCTE35 fd=%d, stat_type=%d, url=%s", fd, stat_type, c->url);
+        rc = AVPipeStatInput(fd, stat_type, c->data);
         break;
     default:
-        elv_err("IN STATS UDP fd=%d, invalid input stat=%d, url=%s", stat_type, c->url);
+        elv_err("IN STAT UDP fd=%d, invalid input stat=%d, url=%s", stat_type, c->url);
         return 1;
     }
 
-    return 0;
+    return rc;
 }
 
 
@@ -1102,7 +1051,7 @@ in_mux_opener(
 
     if (size > 0)
         inctx->sz = size;
-    elv_dbg("IN MUX OPEN fd=%"PRId64", size=%"PRId64, fd, size);
+    elv_dbg("IN MUX OPEN url=%s, fd=%"PRId64", size=%"PRId64, url, fd, size);
 
     *((int64_t *)(inctx->opaque)) = fd;
     return 0;
@@ -1324,7 +1273,7 @@ set_mux_handlers(
 {
     if (p_in_handlers) {
         avpipe_io_handler_t *in_handlers = (avpipe_io_handler_t *)calloc(1, sizeof(avpipe_io_handler_t));
-        in_handlers->avpipe_opener = in_opener;
+        in_handlers->avpipe_opener = in_mux_opener;
         in_handlers->avpipe_closer = in_closer;
         in_handlers->avpipe_reader = in_mux_read_packet;
         in_handlers->avpipe_writer = in_write_packet;
