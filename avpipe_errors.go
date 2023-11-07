@@ -9,6 +9,7 @@ package avpipe
 // #cgo pkg-config: libavutil
 // #cgo pkg-config: libswresample
 // #cgo pkg-config: libavresample
+// #cgo pkg-config: srt
 // #cgo CFLAGS: -I${SRCDIR}/include
 // #cgo CFLAGS: -I${SRCDIR}/libavpipe/include
 // #cgo CFLAGS: -I${SRCDIR}/utils/include
