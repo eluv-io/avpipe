@@ -2782,13 +2782,13 @@ transcode_video_func(
 
         xc_frame = elv_channel_receive(xctx->vc);
         if (!xc_frame) {
-            elv_dbg("trancode_video_func thread, there is no frame, url=%s", params->url);
+            elv_dbg("trancode_video_func, there is no frame, url=%s", params->url);
             continue;
         }
 
         AVPacket *packet = xc_frame->packet;
         if (!packet) {
-            elv_err("transcode_video packet is NULL, url=%s", params->url);
+            elv_err("transcode_video_func, packet is NULL, url=%s", params->url);
             free(xc_frame);
             continue;
         }
@@ -2865,13 +2865,13 @@ transcode_audio_func(
 
         xc_frame = elv_channel_receive(xctx->ac);
         if (!xc_frame) {
-            elv_dbg("trancode_audio thread, there is no frame, url=%s", params->url);
+            elv_dbg("trancode_audio_func, there is no frame, url=%s", params->url);
             continue;
         }
 
         AVPacket *packet = xc_frame->packet;
         if (!packet) {
-            elv_err("transcode_video packet is NULL, url=%s", params->url);
+            elv_err("transcode_audio_func, packet is NULL, url=%s", params->url);
             free(xc_frame);
             continue;
         }
