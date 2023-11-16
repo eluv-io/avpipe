@@ -4603,8 +4603,11 @@ avpipe_version()
     if (version_str[0] != '\0')
         return version_str;
 
-    snprintf(version_str, sizeof(version_str), "%d.%d@%s", AVPIPE_MAJOR_VERSION, AVPIPE_MINOR_VERSION, VERSION);
+#ifndef VERSION
+#define VERSION "0.0.0-develop"
+#endif
 
+    snprintf(version_str, sizeof(version_str), "%d.%d@%s", AVPIPE_MAJOR_VERSION, AVPIPE_MINOR_VERSION, VERSION);
     return version_str;
 }
 
