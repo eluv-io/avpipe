@@ -3390,6 +3390,7 @@ avpipe_xc(
     avpipe_io_handler_t *in_handlers = xctx->in_handlers;
     ioctx_t *inctx = xctx->inctx;
     int rc = 0;
+    int av_read_frame_rc = 0;
     AVPacket *input_packet = NULL;
 
     if (!params->bypass_transcoding &&
@@ -3563,6 +3564,7 @@ avpipe_xc(
         rc = av_read_frame(decoder_context->format_context, input_packet);
         if (rc < 0) {
             av_packet_free(&input_packet);
+            av_read_frame_rc = rc;
             if (rc == AVERROR_EOF || rc == -1)
                 rc = eav_success;
             else {
@@ -3727,7 +3729,7 @@ avpipe_xc(
     }
 
 xc_done:
-    elv_dbg("av_read_frame() rc=%d, url=%s", rc, params->url);
+    elv_dbg("av_read_frame() av_read_frame_rc=%d, rc=%d, url=%s", av_read_frame_rc, rc, params->url);
 
     xctx->stop = 1;
     /* Don't purge the channels, let the receiver to drain it */
