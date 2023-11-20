@@ -11,6 +11,8 @@ import (
 	"github.com/eluv-io/errors-go"
 )
 
+const RTMP_SOURCE = "rtmp://localhost:%d/rtmp/Doj1Nr3S"
+
 func NewLiveSource() *LiveSource {
 	port := rand.Intn(10000)
 	port += 10000
@@ -198,7 +200,7 @@ func (l *LiveSource) startRTMP(streamingMode string) (err error) {
 		log.Debug("using system ffmpeg", "command", ffmpeg)
 	}
 
-	sourceUrl := fmt.Sprintf("rtmp://localhost:%d/rtmp/Doj1Nr3S", l.Port)
+	sourceUrl := fmt.Sprintf(RTMP_SOURCE, l.Port)
 
 	log.Info("starting RTMP live source", "url", sourceUrl, "streamingMode", streamingMode)
 
