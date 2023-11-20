@@ -10,7 +10,7 @@ import (
 	"github.com/eluv-io/avpipe"
 )
 
-func TestRtmpToMp4(t *testing.T) {
+func TestRtmpToMp4_1(t *testing.T) {
 	setupLogging()
 	outputDir := path.Join(baseOutPath, fn())
 	setupOutDir(t, outputDir)
@@ -26,10 +26,11 @@ func TestRtmpToMp4(t *testing.T) {
 		Seekable:            false,
 		DurationTs:          -1,
 		StartSegmentStr:     "1",
-		AudioBitrate:        256000,
+		AudioBitrate:        394000,
 		VideoBitrate:        20000000,
 		ForceKeyInt:         60,
-		SegDuration:         "30",      // seconds
+		AudioSegDurationTs:  1428480, // 1428480=29.76s
+		VideoSegDurationTs:  480000,
 		Ecodec2:             "aac",     // "aac"
 		Ecodec:              "libx264", // libx264 software / h264_videotoolbox mac hardware
 		EncHeight:           720,       // 1080
@@ -39,6 +40,7 @@ func TestRtmpToMp4(t *testing.T) {
 		Url:                 url,
 		SyncAudioToStreamId: -1,
 		DebugFrameLevel:     debugFrameLevel,
+		Listen:              true,
 	}
 
 	xcParams.NumAudio = 1
