@@ -25,7 +25,7 @@ import (
 )
 
 const baseOutPath = "test_out"
-const debugFrameLevel = false
+const debugFrameLevel = true
 const h264Codec = "libx264"
 const videoBigBuckBunnyPath = "media/bbb_1080p_30fps_60sec.mp4"
 const videoRockyPath = "media/rocky.mp4"
@@ -42,6 +42,7 @@ type XcTestResult struct {
 type testStatsInfo struct {
 	audioFramesRead         uint64
 	videoFramesRead         uint64
+	firstKeyFramePTS        uint64
 	encodingAudioFrameStats avpipe.EncodingFrameStats
 	encodingVideoFrameStats avpipe.EncodingFrameStats
 }
@@ -154,6 +155,12 @@ func (i *fileInput) Stat(statType avpipe.AVStatType, statArgs interface{}) error
 		if debugFrameLevel {
 			log.Debug("AVP TEST IN STAT", "video start PTS", *startPTS)
 		}
+	case avpipe.AV_IN_STAT_FIRST_KEYFRAME_PTS:
+		keyFramePTS := statArgs.(*uint64)
+		if debugFrameLevel {
+			log.Debug("AVP TEST IN STAT", "video first keyframe PTS", *keyFramePTS)
+		}
+		statsInfo.firstKeyFramePTS = *keyFramePTS
 	}
 	return nil
 }
@@ -393,9 +400,45 @@ func TestVideoSeg(t *testing.T) {
 		SyncAudioToStreamId:    -1,
 		VideoBitrate:           -1,
 		VideoSegDurationTs:     -1,
+		ForceKeyInt:            60,
 		XcType:                 avpipe.XcVideo,
 		Url:                    url,
 		DebugFrameLevel:        debugFrameLevel,
+	}
+	setFastEncodeParams(params, true)
+	xcTest(t, outputDir, params, nil, true)
+
+}
+
+func TestVideoSegDoubleTS(t *testing.T) {
+	url := videoBigBuckBunnyPath
+	outputDir := path.Join(baseOutPath, fn())
+	params := &avpipe.XcParams{
+		BypassTranscoding:      false,
+		Format:                 "fmp4-segment",
+		AudioBitrate:           128000,
+		AudioSegDurationTs:     -1,
+		BitDepth:               8,
+		CrfStr:                 "23",
+		DurationTs:             -1,
+		Ecodec:                 "libx264",
+		EncHeight:              -1,
+		EncWidth:               -1,
+		ExtractImageIntervalTs: -1,
+		GPUIndex:               -1,
+		SampleRate:             -1,
+		SegDuration:            "30",
+		StartFragmentIndex:     1,
+		StartSegmentStr:        "1",
+		StreamId:               -1,
+		SyncAudioToStreamId:    -1,
+		VideoBitrate:           -1,
+		VideoSegDurationTs:     -1,
+		ForceKeyInt:            60,
+		XcType:                 avpipe.XcVideo,
+		Url:                    url,
+		DebugFrameLevel:        debugFrameLevel,
+		VideoTimeBase:          60000,
 	}
 	setFastEncodeParams(params, true)
 	xcTest(t, outputDir, params, nil, true)
@@ -1961,6 +2004,7 @@ func TestAVPipeStats(t *testing.T) {
 
 	assert.Equal(t, int64(2880), statsInfo.encodingVideoFrameStats.TotalFramesWritten)
 	assert.Equal(t, int64(5625), statsInfo.encodingAudioFrameStats.TotalFramesWritten)
+	assert.Equal(t, uint64(0), statsInfo.firstKeyFramePTS)
 	// FIXME
 	//assert.Equal(t, int64(720), statsInfo.encodingVideoFrameStats.FramesWritten)
 	//assert.Equal(t, int64(1406), statsInfo.encodingAudioFrameStats.FramesWritten)

@@ -17,12 +17,12 @@ install:
 
 exc: $(OBJS)
 	@echo Making exc
-	gcc $? ${LIBDIRS} ${LIBS} -o $(BINDIR)/exc
+	gcc $? ${CFLAGS} ${LDFLAGS} ${LIBDIRS} ${LIBS} -o $(BINDIR)/exc
 
 $(BINDIR)/%.o: %.c
 	@(if [ ! -d $(BINDIR) ]; then mkdir $(BINDIR); fi)
 	@echo "Compiling " $<
-	gcc ${FLAGS} ${INCDIRS} -c $< -o $@
+	gcc ${CFLAGS} ${INCDIRS} -c $< -o $@
 
 clean:
 	@rm -rf $(BINDIR)
@@ -31,4 +31,3 @@ check-env:
 ifndef FFMPEG_DIST
   $(error FFMPEG_DIST is undefined)
 endif
-
