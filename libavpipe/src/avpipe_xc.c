@@ -4456,13 +4456,13 @@ avpipe_init(
 
     if ((rc = prepare_decoder(&p_xctx->decoder_ctx,
             in_handlers, inctx, params, params->seekable)) != eav_success) {
-        elv_err("Failure in preparing decoder, url=%s", params->url);
+        elv_err("Failure in preparing decoder, url=%s, rc=%d", params->url, rc);
         goto avpipe_init_failed;
     }
 
     if ((rc = prepare_encoder(&p_xctx->encoder_ctx,
         &p_xctx->decoder_ctx, out_handlers, inctx, params)) != eav_success) {
-        elv_err("Failure in preparing encoder, url=%s", params->url);
+        elv_err("Failure in preparing encoder, url=%s, rc=%d", params->url, rc);
         goto avpipe_init_failed;
     }
 
