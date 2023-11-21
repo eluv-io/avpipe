@@ -415,7 +415,9 @@ prepare_decoder(
     if (params && params->listen)
         av_dict_set(&opts, "listen", "1" , 0);
 
-    if (decoder_context->is_rtmp && params->connection_timeout > 0) {
+    if (decoder_context->is_rtmp &&
+        params->listen &&
+        params->connection_timeout > 0) {
         char timeout[32];
         sprintf(timeout, "%d", params->connection_timeout);
         av_dict_set(&opts, "timeout", timeout, 0);

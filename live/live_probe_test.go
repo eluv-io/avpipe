@@ -14,7 +14,7 @@ func TestProbeRTMPConnect(t *testing.T) {
 	setupLogging()
 
 	liveSource := NewLiveSource()
-	url := fmt.Sprintf("rtmp://localhost:%d/rtmp/Doj1Nr3S", liveSource.Port)
+	url := fmt.Sprintf(RTMP_SOURCE, liveSource.Port)
 
 	// Start ffmpeg RTMP in listen mode
 	err := liveSource.Start("rtmp_listen")
@@ -44,13 +44,13 @@ func TestProbeRTMPConnect(t *testing.T) {
 	assert.Equal(t, "h264", probeInfo.StreamInfo[0].CodecName)
 	assert.Equal(t, 1920, probeInfo.StreamInfo[0].Width)
 	assert.Equal(t, 1080, probeInfo.StreamInfo[0].Height)
-	assert.Equal(t, 100, probeInfo.StreamInfo[0].Profile)
+	assert.Equal(t, 578, probeInfo.StreamInfo[0].Profile)
 	assert.Equal(t, 40, probeInfo.StreamInfo[0].Level)
 
 	assert.Equal(t, "aac", probeInfo.StreamInfo[1].CodecName)
-	assert.Equal(t, int64(394000), probeInfo.StreamInfo[1].BitRate)
-	assert.Equal(t, 6, probeInfo.StreamInfo[1].Channels)
-	assert.Equal(t, 0, probeInfo.StreamInfo[1].ChannelLayout)
+	assert.Equal(t, int64(55566), probeInfo.StreamInfo[1].BitRate)
+	assert.Equal(t, 2, probeInfo.StreamInfo[1].Channels)
+	assert.Equal(t, 3, probeInfo.StreamInfo[1].ChannelLayout)
 
 	liveSource.Stop()
 
@@ -71,6 +71,7 @@ func TestProbeRTMPListen(t *testing.T) {
 		Url:               url,
 		DebugFrameLevel:   debugFrameLevel,
 		ConnectionTimeout: 5,
+		Listen:            true,
 	}
 
 	reqCtx := &testCtx{url: url}
@@ -99,13 +100,13 @@ func TestProbeRTMPListen(t *testing.T) {
 	assert.Equal(t, "h264", probeInfo.StreamInfo[0].CodecName)
 	assert.Equal(t, 1920, probeInfo.StreamInfo[0].Width)
 	assert.Equal(t, 1080, probeInfo.StreamInfo[0].Height)
-	assert.Equal(t, 100, probeInfo.StreamInfo[0].Profile)
+	assert.Equal(t, 578, probeInfo.StreamInfo[0].Profile)
 	assert.Equal(t, 40, probeInfo.StreamInfo[0].Level)
 
 	assert.Equal(t, "aac", probeInfo.StreamInfo[1].CodecName)
-	assert.Equal(t, int64(394000), probeInfo.StreamInfo[1].BitRate)
-	assert.Equal(t, 6, probeInfo.StreamInfo[1].Channels)
-	assert.Equal(t, 0, probeInfo.StreamInfo[1].ChannelLayout)
+	assert.Equal(t, int64(55566), probeInfo.StreamInfo[1].BitRate)
+	assert.Equal(t, 2, probeInfo.StreamInfo[1].Channels)
+	assert.Equal(t, 3, probeInfo.StreamInfo[1].ChannelLayout)
 
 	liveSource.Stop()
 }

@@ -16,7 +16,10 @@ go test -run TestUdpToMp4 ./live/
 echo "Running live probe tests"
 go test -run TestProbe ./live/
 
-echo "Running live srt tests"
+echo "Running live RTMP tests"
+go test -run TestRtmpToMp4 ./live/
+
+echo "Running live SRT tests"
 go test -run TestSrtToMp4 ./live/
 
 #echo "Running live HLS tests"

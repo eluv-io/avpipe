@@ -250,6 +250,8 @@ func TestRtmpToMp4WithCancelling2(t *testing.T) {
 		if err != nil {
 			t.Error("XcInit initializing RTMP stream failed", "err", err)
 		}
+		done <- true
+		tlog.Info("Transcoding RTMP stream XcRun", "handle", handle)
 		err = avpipe.XcRun(handle)
 		if err != nil && err != avpipe.EAV_CANCELLED {
 			t.Error("Transcoding RTMP stream failed", "err", err)
@@ -264,6 +266,8 @@ func TestRtmpToMp4WithCancelling2(t *testing.T) {
 
 	// Wait 1 second for transcoding to start
 	time.Sleep(1 * time.Second)
+
+	<-done
 
 	err = avpipe.XcCancel(handle)
 	assert.NoError(t, err)
