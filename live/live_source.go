@@ -205,30 +205,30 @@ func (l *LiveSource) startRTMP(streamingMode string) (err error) {
 	log.Info("starting RTMP live source", "url", sourceUrl, "streamingMode", streamingMode)
 
 	if streamingMode == "rtmp_listen" {
-		// i.e ffmpeg -re -i ../media/bbb_1080p_30fps_60sec.mp4 -listen 1 -c:v libx264 -c:a aac -f flv rtmp://localhost/rtmp/Doj1Nr3S
+		// i.e ffmpeg -re -i ../mnt/bbb_4k_30fps_2hour_loop.mp4 -vcodec copy -acodec copy -f flv rtmp://localhost:1935/rtmp/test1
 		l.cmd = exec.Command(ffmpeg,
 			"-re",
 			"-i",
 			"../media/bbb_1080p_30fps_60sec.mp4",
 			"-listen",
 			"1",
-			"-c:v",
-			"libx264",
-			"-c:a",
-			"aac",
+			"-vcodec",
+			"copy",
+			"-acodec",
+			"copy",
 			"-f",
 			"flv",
 			sourceUrl)
 	} else {
-		// i.e ffmpeg -re -i ../media/bbb_1080p_30fps_60sec.mp4 -c:v libx264 -c:a aac -f flv rtmp://localhost/rtmp/Doj1Nr3S
+		// i.e ffmpeg -re -i ../mnt/bbb_4k_30fps_2hour_loop.mp4 -vcodec copy -acodec copy -f flv rtmp://localhost:1935/rtmp/test1
 		l.cmd = exec.Command(ffmpeg,
 			"-re",
 			"-i",
-			"../media/bbb_1080p_30fps_60sec.mp4",
-			"-c:v",
-			"libx264",
-			"-c:a",
-			"aac",
+			"../media/Rigify-2min.mp4",
+			"-vcodec",
+			"copy",
+			"-acodec",
+			"copy",
 			"-f",
 			"flv",
 			sourceUrl)
@@ -237,6 +237,7 @@ func (l *LiveSource) startRTMP(streamingMode string) (err error) {
 	l.cmd.Stdout = nil
 	l.cmd.Stderr = nil
 
+	log.Info("XXX", "cmd", l.cmd.Path, "args", l.cmd.Args)
 	err = l.cmd.Start()
 	if err != nil {
 		log.Error("Failed to start RTMP live source", "port", l.Port, "streamingMode", streamingMode)

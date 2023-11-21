@@ -29,8 +29,8 @@ func TestRtmpToMp4_1(t *testing.T) {
 		AudioBitrate:        394000,
 		VideoBitrate:        20000000,
 		ForceKeyInt:         60,
-		AudioSegDurationTs:  1428480, // 1428480=29.76s
 		VideoSegDurationTs:  480000,
+		AudioSegDurationTs:  1428480,   // 1428480=29.76s
 		Ecodec2:             "aac",     // "aac"
 		Ecodec:              "libx264", // libx264 software / h264_videotoolbox mac hardware
 		EncHeight:           720,       // 1080
@@ -61,6 +61,9 @@ func TestRtmpToMp4_1(t *testing.T) {
 		done <- true
 	}()
 
+	// Wait 1 second for transcoding to start
+	time.Sleep(1 * time.Second)
+
 	err := liveSource.Start("rtmp_connect")
 	if err != nil {
 		t.Error(err)
@@ -71,6 +74,7 @@ func TestRtmpToMp4_1(t *testing.T) {
 
 	xcParams.Format = "dash"
 	xcParams.Dcodec2 = "aac"
+	xcParams.NumAudio = 0
 	xcParams.AudioSegDurationTs = 96000 // almost 2 * 48000
 	xcParams.XcType = avpipe.XcAudio
 	audioMezFiles := [2]string{"audio-mez-segment-1.mp4", "audio-mez-segment-2.mp4"}
@@ -97,7 +101,7 @@ func TestRtmpToMp4_1(t *testing.T) {
 	}
 
 	xcParams.Format = "dash"
-	xcParams.VideoSegDurationTs = 180000 // almost 2 * 90000
+	xcParams.VideoSegDurationTs = 32000 // almost 2 * 16000
 	xcParams.XcType = avpipe.XcVideo
 	videoMezFiles := [2]string{"video-mez-segment-1.mp4", "video-mez-segment-2.mp4"}
 
@@ -145,8 +149,8 @@ func TestRtmpToMp4WithCancelling1(t *testing.T) {
 		AudioBitrate:        256000,
 		VideoBitrate:        20000000,
 		ForceKeyInt:         60,
-		SegDuration:         "30", // seconds
-		Dcodec2:             "ac3",
+		VideoSegDurationTs:  480000,
+		AudioSegDurationTs:  1428480,   // 1428480=29.76s
 		Ecodec2:             "aac",     // "aac"
 		Ecodec:              "libx264", // libx264 software / h264_videotoolbox mac hardware
 		EncHeight:           720,       // 1080
@@ -156,8 +160,11 @@ func TestRtmpToMp4WithCancelling1(t *testing.T) {
 		Url:                 url,
 		SyncAudioToStreamId: -1,
 		DebugFrameLevel:     debugFrameLevel,
+		Listen:              true,
 	}
 
+	xcParams.NumAudio = 1
+	xcParams.AudioIndex[0] = 1
 	// Transcode audio/video mez files in background
 	reqCtx := &testCtx{url: url}
 	putReqCtxByURL(url, reqCtx)
@@ -212,9 +219,9 @@ func TestRtmpToMp4WithCancelling2(t *testing.T) {
 		StartSegmentStr:     "1",
 		AudioBitrate:        384000,   // FS1-19-10-14.ts audio bitrate
 		VideoBitrate:        20000000, // fox stream bitrate
-		ForceKeyInt:         120,
-		SegDuration:         "30.03", // seconds
-		Dcodec2:             "ac3",
+		ForceKeyInt:         60,
+		VideoSegDurationTs:  480000,
+		AudioSegDurationTs:  1428480,   // 1428480=29.76s
 		Ecodec2:             "aac",     // "aac"
 		Ecodec:              "libx264", // libx264 software / h264_videotoolbox mac hardware
 		EncHeight:           720,       // 1080
@@ -224,8 +231,11 @@ func TestRtmpToMp4WithCancelling2(t *testing.T) {
 		Url:                 url,
 		SyncAudioToStreamId: -1,
 		DebugFrameLevel:     debugFrameLevel,
+		Listen:              true,
 	}
 
+	xcParams.NumAudio = 1
+	xcParams.AudioIndex[0] = 1
 	// Transcode audio/video mez files in background
 	reqCtx := &testCtx{url: url}
 	putReqCtxByURL(url, reqCtx)
@@ -287,8 +297,8 @@ func TestRtmpToMp4WithCancelling3(t *testing.T) {
 		AudioBitrate:        256000,
 		VideoBitrate:        20000000,
 		ForceKeyInt:         60,
-		SegDuration:         "30", // seconds
-		Dcodec2:             "ac3",
+		VideoSegDurationTs:  480000,
+		AudioSegDurationTs:  1428480,   // 1428480=29.76s
 		Ecodec2:             "aac",     // "aac"
 		Ecodec:              "libx264", // libx264 software / h264_videotoolbox mac hardware
 		EncHeight:           720,       // 1080
@@ -298,6 +308,7 @@ func TestRtmpToMp4WithCancelling3(t *testing.T) {
 		Url:                 url,
 		SyncAudioToStreamId: -1,
 		DebugFrameLevel:     debugFrameLevel,
+		Listen:              true,
 	}
 
 	// Transcode audio/video mez files in background
