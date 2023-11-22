@@ -384,8 +384,8 @@ func TestRtmpToMp4WithCancelling4(t *testing.T) {
 		AudioBitrate:        256000,
 		VideoBitrate:        20000000,
 		ForceKeyInt:         60,
-		SegDuration:         "30", // seconds
-		Dcodec2:             "ac3",
+		VideoSegDurationTs:  480000,
+		AudioSegDurationTs:  1428480,   // 1428480=29.76s
 		Ecodec2:             "aac",     // "aac"
 		Ecodec:              "libx264", // libx264 software / h264_videotoolbox mac hardware
 		EncHeight:           720,       // 1080
@@ -395,6 +395,7 @@ func TestRtmpToMp4WithCancelling4(t *testing.T) {
 		Url:                 url,
 		SyncAudioToStreamId: -1,
 		DebugFrameLevel:     debugFrameLevel,
+		Listen:              true,
 	}
 
 	reqCtx := &testCtx{url: url}
