@@ -125,7 +125,7 @@ typedef struct xcparams_t {
     int64_t     extract_image_interval_ts;  // Write frames at this interval. Default: -1 
     int64_t     *extract_images_ts;         // Write frames at these timestamps. 
     int         extract_images_sz;          // Size of the array extract_images_ts
-    
+
     int         video_time_base;            // New video encoder time_base (1/video_time_base)
 
     int         debug_frame_level;
