@@ -31,8 +31,9 @@ The following repositories can be checked out in any directory, but for better o
 
 - Build eluv-io/FFmpeg: in FFmpeg directory `<ffmpeg-path>` run
   - `./build.sh`
+- Build SRT: checkout SRT code `https://github.com/Haivision/srt` and build SRT
 - Set environment variables: in avpipe directory run
-  - `source init-env.sh <ffmpeg-path>`
+  - `source init-env.sh <ffmpeg-path> <srt_path>`
 - Build avpipe: in avpipe directory run
   - `make`
 - This installs the binaries under `<avpipe-path>/bin`
@@ -125,6 +126,8 @@ typedef struct xcparams_t {
     int64_t     *extract_images_ts;         // Write frames at these timestamps. 
     int         extract_images_sz;          // Size of the array extract_images_ts
 
+    int         video_time_base;            // New video encoder time_base (1/video_time_base)
+
     int         debug_frame_level;
     int         connection_timeout;         // Connection timeout in sec for RTMP or MPEGTS protocols
 } xcparams_t;
@@ -154,6 +157,7 @@ typedef struct xcparams_t {
   - setting xc_type = xc_audio_join would join 2 or more audio inputs and create a new audio output (for example joining two mono streams and creating one stereo).
   - setting xc_type = xc_audio_pan would pick different audio channels from input and create a new audio stream (for example picking different channels from a 5.1 channel layout and producing a stereo containing two channels).
   - setting xc_type = xc_audio_merge would merge different input audio streams and produce a new multi-channel output stream (for example, merging different input mono streams and create a new 5.1)
+- **Setting video timebase:** setting video_time_base will set the timebase of generated video to 1/video_time_base (the timebase has to be bigger than 10000). 
 - **Debugging with frames:** if the parameter debug_frame_level is on then the logs will also include very low level debug messages to trace reading/writing every piece of data.
 - **Connection timeout:** This parameter is useful when recording / transcoding RTMP or MPEGTS streams. If avpipe is listening for an RTMP stream, connection_timeout determines the time in sec to listen for an incoming RTMP stream. If avpipe is listening for incoming UDP MPEGTS packets, connection_timeout determines the time in sec to wait for the first incoming UDP packet (if no packet is received during connection_timeout, then timeout would happen and an error would be generated).
 

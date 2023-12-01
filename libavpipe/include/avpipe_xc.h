@@ -317,8 +317,9 @@ typedef struct coderctx_t {
     int     pts_residue;                /* Residue of pts lost in output */
 
     int     is_rtmp;
+    int     is_srt;
     int     is_mpegts;                  /* Set to 1 if input format name is "mpegts" */
-    int     mpegts_synced;              /* will be set to 1 if audio and video are synced */
+    int     is_av_synced;               /* will be set to 1 if audio and video are synced */
     int     frame_duration;             /* Will be > 0 if parameter set_equal_fduration is set and doing mez making */
     int     calculated_frame_duration;  /* Approximate/real frame duration of video stream, will be used to fill video frames */
 
@@ -485,7 +486,7 @@ typedef struct xctx_t {
     coderctx_t          decoder_ctx;
     coderctx_t          encoder_ctx;
     xcparams_t          *params;
-    int32_t             index;  // index in tx table
+    int32_t             index;  // index in xc table
     int32_t             handle; // handle for V2 API
     ioctx_t             *inctx;
     avpipe_io_handler_t *in_handlers;

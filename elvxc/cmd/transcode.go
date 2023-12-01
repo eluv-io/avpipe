@@ -20,7 +20,9 @@ type elvxcInputOpener struct {
 func (io *elvxcInputOpener) Open(fd int64, url string) (avpipe.InputHandler, error) {
 	log.Debug("AVCMD InputOpener.Open", "fd", fd, "url", url)
 
-	if (len(url) >= 4 && url[0:4] == "rtmp") || (len(url) >= 3 && url[0:3] == "udp") {
+	if (len(url) >= 4 && url[0:4] == "rtmp") ||
+		(len(url) >= 3 && url[0:3] == "udp") ||
+		(len(url) >= 3 && url[0:3] == "srt") {
 		return &elvxcInput{url: url}, nil
 	}
 

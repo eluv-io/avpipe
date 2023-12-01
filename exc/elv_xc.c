@@ -132,7 +132,7 @@ in_opener(
         return 0;
     }
 
-    if (!strcmp(url_parser.protocol, "rtmp")) {
+    if (!strcmp(url_parser.protocol, "rtmp") || !strcmp(url_parser.protocol, "srt")) {
         inctx->opaque = (int *) calloc(2, sizeof(int));
         inctx->url = strdup(url);
         pthread_mutex_lock(&lock);
@@ -146,7 +146,7 @@ in_opener(
 
     /* If input is not file */
     if (strcmp(url_parser.protocol, "file")) {
-        elv_err("Invalid input url=%s, can be only udp or file", url);
+        elv_err("Invalid input url=%s, can be udp, rtmp, srt or file", url);
         inctx->opaque = NULL;
         return -1;
     }
@@ -1049,8 +1049,6 @@ usage(
         "\t-audio-fill-gap :        (optional) Default: 0, must be 0 or 1. It only effects if encoder is aac.\n"
         "\t-audio-index :           (optional) Default: the indexes of audio stream (comma separated)\n"
         "\t-audio-seg-duration-ts : (mandatory If format is not \"segment\" and transcoding audio) audio segment duration time base (positive integer).\n"
-        "\t-audio-time-base-den :   (optional) Audio encoder timebase denominator, must be > 0.\n"
-        "\t-audio-time-base-num :   (optional) Audio encoder timebase numenator, must be > 0.\n"
         "\t-bitdepth :              (optional) Bitdepth of color space. Default is 8, can be 8, 10, or 12.\n"
         "\t-bypass :                (optional) Bypass transcoding. Default is 0, must be 0 or 1\n"
         "\t-channel-layout :        (optional) Channel layout for audio, can be \"mono\", \"stereo\", \"5.0\" or \"5.1\"....\n"
@@ -1206,7 +1204,7 @@ main(
         .overlay_filename = NULL,
         .watermark_overlay = NULL,
         .watermark_overlay_len = 0,
-        .watermark_overlay_type = png_image,
+        .watermark_overlay_type = unknown_image,
         .watermark_shadow_color = strdup("white"),  /* Default shadow color */
         .gpu_index = -1,
         .seg_duration = NULL,

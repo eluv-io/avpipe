@@ -11,8 +11,8 @@ OSNAME := $(shell uname -s)
 LDFLAGS := \
 		-lavpipe \
 		-lutils \
-		$(shell pkg-config --libs libavfilter libavcodec libavformat libavdevice libswresample libavresample libswscale libavutil libpostproc)
-CFLAGS := $(shell pkg-config --cflags libavfilter libavcodec libavformat libavdevice libswresample libavresample libswscale libavutil libpostproc)
+		$(shell pkg-config --libs libavfilter libavcodec libavformat libavdevice libswresample libavresample libswscale libavutil libpostproc xcoder srt)
+CFLAGS := $(shell pkg-config --cflags libavfilter libavcodec libavformat libavdevice libswresample libavresample libswscale libavutil libpostproc xcoder srt)
 
 ifeq ($(OSNAME), Darwin)
 	LDFLAGS := ${LDFLAGS} \
@@ -36,5 +36,6 @@ ifeq ($(OSNAME), Linux)
 		-lva \
 		-lva-drm \
 		-lva-x11 \
-		-lpthread
+		-lpthread \
+		-lsrt
 endif
