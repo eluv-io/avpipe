@@ -317,8 +317,9 @@ typedef struct coderctx_t {
     int     pts_residue;                /* Residue of pts lost in output */
 
     int     is_rtmp;
+    int     is_srt;
     int     is_mpegts;                  /* Set to 1 if input format name is "mpegts" */
-    int     mpegts_synced;              /* will be set to 1 if audio and video are synced */
+    int     is_av_synced;               /* will be set to 1 if audio and video are synced */
     int     frame_duration;             /* Will be > 0 if parameter set_equal_fduration is set and doing mez making */
     int     calculated_frame_duration;  /* Approximate/real frame duration of video stream, will be used to fill video frames */
 
@@ -433,6 +434,8 @@ typedef struct xcparams_t {
     int64_t     *extract_images_ts;         // Write frames at these timestamps. Mutually exclusive with extract_image_interval_ts
     int         extract_images_sz;          // Size of the array extract_images_ts
 
+    int         video_time_base;            // New video encoder time_base (1/video_time_base)
+
     int         debug_frame_level;
     int         connection_timeout;         // Connection timeout in sec for RTMP or MPEGTS protocols
 } xcparams_t;
@@ -483,7 +486,7 @@ typedef struct xctx_t {
     coderctx_t          decoder_ctx;
     coderctx_t          encoder_ctx;
     xcparams_t          *params;
-    int32_t             index;  // index in tx table
+    int32_t             index;  // index in xc table
     int32_t             handle; // handle for V2 API
     ioctx_t             *inctx;
     avpipe_io_handler_t *in_handlers;

@@ -15,6 +15,7 @@
 #include <libavutil/pixdesc.h>
 #include <errno.h>
 #include <pthread.h>
+#include <srt.h>
 
 #include "avpipe_utils.h"
 #include "avpipe_xc.h"
@@ -822,6 +823,77 @@ xc_table_free(
         }
     }
     pthread_mutex_unlock(&tx_mutex);
+}
+
+static int
+close_srt(
+    ioctx_t *inctx)
+{
+    int ss, st;
+    struct sockaddr_in sa;
+    struct hostent *host_entry;
+    url_parser_t url_parser;
+    char *url = inctx->url;
+
+    if (url && parse_url(url, &url_parser)) {
+        elv_err("close_srt() failed to parse input url=%s", url);
+        return eav_param;
+    }
+
+    host_entry = gethostbyname(url_parser.host);
+    if (host_entry == NULL) {
+        elv_err("close_srt() failed to obtain hostname %s", url_parser.host);
+        return 1;
+    }
+
+    ss = srt_create_socket();
+    if (ss == SRT_ERROR)
+    {
+        elv_err("close_srt() failed to create SRT socket: %s", srt_getlasterror_str());
+        return 1;
+    }
+
+    uint16_t port = atoi(url_parser.port);
+    int yes = 1;
+    sa.sin_family = AF_INET;
+    sa.sin_port = htons(port);
+    memmove(&sa.sin_addr, host_entry->h_addr_list[0], sizeof(&sa.sin_addr));
+
+    if (SRT_ERROR == srt_setsockflag(ss, SRTO_SENDER, &yes, sizeof yes))
+    {
+        elv_err("close_srt() srt_setsockflag: %s", srt_getlasterror_str());
+        return 1;
+    }
+
+    st = srt_connect(ss, (struct sockaddr*)&sa, sizeof sa);
+    if (st == SRT_ERROR)
+    {
+        elv_err("close_srt() srt_connect: %s", srt_getlasterror_str());
+        return 1;
+    }
+
+    st = srt_close(ss);
+    if (st == SRT_ERROR)
+    {
+        elv_err("srt_close: %s", srt_getlasterror_str());
+        return 1;
+    }
+
+    return 0;
+}
+
+static int
+close_inctx(
+    ioctx_t *inctx)
+{
+    if (!inctx || inctx->url == NULL || inctx->url[0] == '\0')
+        return 0;
+
+    if (!strncmp(inctx->url, "srt://", 6)) {
+        return close_srt(inctx);
+    }
+
+    return 0;
 }
 
 static int

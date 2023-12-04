@@ -13,8 +13,22 @@ Package avpipe has four main interfaces that has to be implemented by the client
 */
 package avpipe
 
-// #cgo pkg-config: libavcodec libavfilter libavformat libavutil libswresample libavresample libswscale
-// #cgo CFLAGS: -I./include
+// #cgo pkg-config: libavcodec
+// #cgo pkg-config: libavfilter
+// #cgo pkg-config: libavformat
+// #cgo pkg-config: libavutil
+// #cgo pkg-config: libswresample
+// #cgo pkg-config: libavresample
+// #cgo pkg-config: libavdevice
+// #cgo pkg-config: libswscale
+// #cgo pkg-config: libavutil
+// #cgo pkg-config: libpostproc
+// #cgo pkg-config: xcoder
+// #cgo pkg-config: srt
+// #cgo CFLAGS: -I${SRCDIR}/libavpipe/include
+// #cgo CFLAGS: -I${SRCDIR}/utils/include
+// #cgo LDFLAGS: -L${SRCDIR}
+
 // #include <string.h>
 // #include <stdlib.h>
 // #include "avpipe_xc.h"
@@ -224,6 +238,7 @@ type XcParams struct {
 	DebugFrameLevel        bool               `json:"debug_frame_level"`
 	ExtractImageIntervalTs int64              `json:"extract_image_interval_ts,omitempty"`
 	ExtractImagesTs        []int64            `json:"extract_images_ts,omitempty"`
+	VideoTimeBase          int                `json:"video_time_base"`
 }
 
 // NewXcParams initializes a XcParams struct with unset/default values
@@ -1222,6 +1237,7 @@ func getCParams(params *XcParams) (*C.xcparams_t, error) {
 		skip_decoding:             C.int(0),
 		extract_image_interval_ts: C.int64_t(params.ExtractImageIntervalTs),
 		extract_images_sz:         C.int(extractImagesSize),
+		video_time_base:           C.int(params.VideoTimeBase),
 
 		// All boolean params are handled below
 	}

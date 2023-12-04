@@ -276,6 +276,16 @@ static int init_output_frame(AVFrame **frame,
 
 #endif
 
+static int
+is_protocol(
+    coderctx_t *decoder_context)
+{
+    if (decoder_context->is_mpegts || decoder_context->is_rtmp || decoder_context->is_srt)
+        return 1;
+
+    return 0;
+}
+
 int
 prepare_input(
     avpipe_io_handler_t *in_handlers,
@@ -289,8 +299,14 @@ prepare_input(
 
     /* For RTMP protocol don't create input callbacks */
     decoder_context->is_rtmp = 0;
-    if (inctx->url && !strncmp(inctx->url, "rtmp", 4)) {
+    decoder_context->is_srt = 0;
+    if (inctx->url && !strncmp(inctx->url, "rtmp://", 7)) {
         decoder_context->is_rtmp = 1;
+        return 0;
+    }
+
+    if (inctx->url && !strncmp(inctx->url, "srt://", 6)) {
+        decoder_context->is_srt = 1;
         return 0;
     }
 
@@ -310,12 +326,17 @@ prepare_input(
 
 static int
 calc_timebase(
+    xcparams_t *params,
+    int is_video,
     int timebase)
 {
     if (timebase <= 0) {
         elv_err("calc_timebase invalid timebase=%d", timebase);
         return timebase;
     }
+
+    if (is_video && params->video_time_base > 0)
+        return params->video_time_base;
 
     while (timebase < TIMEBASE_THRESHOLD)
         timebase *= 2;
@@ -394,7 +415,9 @@ prepare_decoder(
     if (params && params->listen)
         av_dict_set(&opts, "listen", "1" , 0);
 
-    if (decoder_context->is_rtmp && params->connection_timeout > 0) {
+    if (decoder_context->is_rtmp &&
+        params->listen &&
+        params->connection_timeout > 0) {
         char timeout[32];
         sprintf(timeout, "%d", params->connection_timeout);
         av_dict_set(&opts, "timeout", timeout, 0);
@@ -732,7 +755,7 @@ set_encoder_options(
         if (params->seg_duration) {
             seg_duration = atof(params->seg_duration);
             if (stream_index == decoder_context->video_stream_index)
-                timebase = calc_timebase(timebase);
+                timebase = calc_timebase(params, 1, timebase);
             seg_duration_ts = seg_duration * timebase;
         }
         if (selected_decoded_audio(decoder_context, stream_index) >= 0) {
@@ -1064,7 +1087,10 @@ prepare_video_encoder(
         }
 
         /* Set output stream timebase when bypass encoding */
-        out_stream->time_base = in_stream->time_base;
+        if (params->video_time_base > 0)
+            out_stream->time_base = (AVRational) {1, params->video_time_base};
+        else
+            out_stream->time_base = in_stream->time_base;
         out_stream->codecpar->codec_tag = 0;
 
         rc = set_encoder_options(encoder_context, decoder_context, params, decoder_context->video_stream_index,
@@ -1107,7 +1133,10 @@ prepare_video_encoder(
         encoder_codec_context->gop_size = params->force_keyint;
     }
 
-    encoder_context->stream[encoder_context->video_stream_index]->time_base = decoder_context->codec_context[index]->time_base;
+    if (params->video_time_base > 0)
+        encoder_context->stream[encoder_context->video_stream_index]->time_base = (AVRational) {1, params->video_time_base};
+    else
+        encoder_context->stream[encoder_context->video_stream_index]->time_base = decoder_context->codec_context[index]->time_base;
     rc = set_encoder_options(encoder_context, decoder_context, params, decoder_context->video_stream_index,
         decoder_context->stream[decoder_context->video_stream_index]->time_base.den);
     if (rc < 0) {
@@ -1118,7 +1147,10 @@ prepare_video_encoder(
     /* Set codec context parameters */
     encoder_codec_context->height = params->enc_height != -1 ? params->enc_height : decoder_context->codec_context[index]->height;
     encoder_codec_context->width = params->enc_width != -1 ? params->enc_width : decoder_context->codec_context[index]->width;
-    encoder_codec_context->time_base = decoder_context->codec_context[index]->time_base;
+    if (params->video_time_base > 0)
+        encoder_codec_context->time_base = (AVRational) {1, params->video_time_base};
+    else
+        encoder_codec_context->time_base = decoder_context->codec_context[index]->time_base;
     encoder_codec_context->sample_aspect_ratio = decoder_context->codec_context[index]->sample_aspect_ratio;
     if (params->video_bitrate > 0)
         encoder_codec_context->bit_rate = params->video_bitrate;
@@ -1203,7 +1235,10 @@ prepare_video_encoder(
     /* Set stream parameters - after avcodec_open2 and parameters from context.
      * This is necessary for the output to preserve the timebase and framerate of the input.
      */
-    encoder_context->stream[index]->time_base = decoder_context->stream[decoder_context->video_stream_index]->time_base;
+    if (params->video_time_base > 0)
+        encoder_context->stream[index]->time_base = (AVRational) {1, params->video_time_base};
+    else
+        encoder_context->stream[index]->time_base = decoder_context->stream[decoder_context->video_stream_index]->time_base;
     encoder_context->stream[index]->avg_frame_rate = decoder_context->stream[decoder_context->video_stream_index]->avg_frame_rate;
 
     return 0;
@@ -1892,8 +1927,7 @@ encode_frame(
         const char *st = stream_type_str(encoder_context, stream_index);
 
         // Adjust PTS if input stream starts at an arbitrary value (MPEG-TS/RTMP)
-        if ((decoder_context->is_mpegts || decoder_context->is_rtmp)
-            && (!strcmp(params->format, "fmp4-segment"))) {
+        if ( is_protocol(decoder_context) && (!strcmp(params->format, "fmp4-segment"))) {
             if (stream_index == decoder_context->video_stream_index) {
                 if (encoder_context->first_encoding_video_pts == -1) {
                     /* Remember the first video PTS to use as an offset later */
@@ -2750,13 +2784,13 @@ transcode_video_func(
 
         xc_frame = elv_channel_receive(xctx->vc);
         if (!xc_frame) {
-            elv_dbg("trancode_video_func thread, there is no frame, url=%s", params->url);
+            elv_dbg("trancode_video_func, there is no frame, url=%s", params->url);
             continue;
         }
 
         AVPacket *packet = xc_frame->packet;
         if (!packet) {
-            elv_err("transcode_video packet is NULL, url=%s", params->url);
+            elv_err("transcode_video_func, packet is NULL, url=%s", params->url);
             free(xc_frame);
             continue;
         }
@@ -2833,13 +2867,13 @@ transcode_audio_func(
 
         xc_frame = elv_channel_receive(xctx->ac);
         if (!xc_frame) {
-            elv_dbg("trancode_audio thread, there is no frame, url=%s", params->url);
+            elv_dbg("trancode_audio_func, there is no frame, url=%s", params->url);
             continue;
         }
 
         AVPacket *packet = xc_frame->packet;
         if (!packet) {
-            elv_err("transcode_video packet is NULL, url=%s", params->url);
+            elv_err("transcode_audio_func, packet is NULL, url=%s", params->url);
             free(xc_frame);
             continue;
         }
@@ -3110,12 +3144,12 @@ skip_for_sync(
         return 0;
 
     /* No need to sync if:
-     * - it is not mpegts and not rtmp
+     * - it is not mpegts and not rtmp and not srt
      * - or it is already synced
      * - or format is not fmp4-segment.
      */
-    if ((!decoder_context->is_mpegts && !decoder_context->is_rtmp) ||
-        decoder_context->mpegts_synced ||
+    if (!is_protocol(decoder_context) ||
+        decoder_context->is_av_synced ||
         strcmp(params->format, "fmp4-segment"))
         return 0;
 
@@ -3155,7 +3189,7 @@ skip_for_sync(
         return 1;
     }
 
-    decoder_context->mpegts_synced = 1;
+    decoder_context->is_av_synced = 1;
     elv_log("PTS first_audio_frame_pts=%"PRId64, input_packet->pts);
     return 0;
 }
@@ -3373,6 +3407,7 @@ avpipe_xc(
     avpipe_io_handler_t *in_handlers = xctx->in_handlers;
     ioctx_t *inctx = xctx->inctx;
     int rc = 0;
+    int av_read_frame_rc = 0;
     AVPacket *input_packet = NULL;
 
     if (!params->bypass_transcoding &&
@@ -3437,10 +3472,10 @@ avpipe_xc(
     // FIXME: error occurs incorrectly if source timebase is small, e.g. 24 (due calc_timebase's TIMEBASE_THRESHOLD)
     if (params->xc_type & xc_video && params->xc_type != xc_extract_images &&
         encoder_context->codec_context[encoder_context->video_stream_index] &&
-        calc_timebase(encoder_context->codec_context[encoder_context->video_stream_index]->time_base.den)
+        calc_timebase(params, 1, encoder_context->codec_context[encoder_context->video_stream_index]->time_base.den)
             != encoder_context->stream[encoder_context->video_stream_index]->time_base.den) {
         elv_err("Internal error in calculating timebase, calc_timebase=%d, stream_timebase=%d, url=%s",
-            calc_timebase(encoder_context->codec_context[encoder_context->video_stream_index]->time_base.den),
+            calc_timebase(params, 1, encoder_context->codec_context[encoder_context->video_stream_index]->time_base.den),
             encoder_context->stream[encoder_context->video_stream_index]->time_base.den, params->url);
         rc = eav_timebase;
         goto xc_done;
@@ -3527,7 +3562,7 @@ avpipe_xc(
     for (int j=0; j<MAX_STREAMS; j++)
         encoder_context->first_read_frame_pts[j] = -1;
     decoder_context->first_key_frame_pts = AV_NOPTS_VALUE;
-    decoder_context->mpegts_synced = 0;
+    decoder_context->is_av_synced = 0;
     encoder_context->video_last_pts_sent_encode = -1;
     encoder_context->audio_last_pts_sent_encode = -1;
 
@@ -3546,6 +3581,7 @@ avpipe_xc(
         rc = av_read_frame(decoder_context->format_context, input_packet);
         if (rc < 0) {
             av_packet_free(&input_packet);
+            av_read_frame_rc = rc;
             if (rc == AVERROR_EOF || rc == -1)
                 rc = eav_success;
             else {
@@ -3710,7 +3746,7 @@ avpipe_xc(
     }
 
 xc_done:
-    elv_dbg("av_read_frame() rc=%d, url=%s", rc, params->url);
+    elv_dbg("av_read_frame() av_read_frame_rc=%d, rc=%d, url=%s", av_read_frame_rc, rc, params->url);
 
     xctx->stop = 1;
     /* Don't purge the channels, let the receiver to drain it */
@@ -4142,6 +4178,11 @@ check_params(
         return eav_param;
     }
 
+    if (params->video_time_base > 0 && params->video_time_base < 10000) {
+        elv_err("Invalid video timebase %d (must be >= 10000), url=%s", params->video_time_base, params->url);
+        return eav_param;
+    }
+
     if (params->watermark_text != NULL && (strlen(params->watermark_text) > (WATERMARK_STRING_SZ-1))){
         elv_err("Watermark too large, url=%s", params->url);
         return eav_param;
@@ -4384,7 +4425,8 @@ avpipe_init(
         "master_display=\"%s\" "
         "filter_descriptor=\"%s\" "
         "extract_image_interval_ts=%"PRId64" "
-        "extract_images_sz=%d ",
+        "extract_images_sz=%d "
+        "video_time_base=%d/%d",
         params->stream_id, p->url,
         avpipe_version(),
         params->bypass_transcoding, params->skip_decoding,
@@ -4406,7 +4448,8 @@ avpipe_init(
         params->max_cll ? params->max_cll : "",
         params->master_display ? params->master_display : "",
         params->filter_descriptor,
-        params->extract_image_interval_ts, params->extract_images_sz);
+        params->extract_image_interval_ts, params->extract_images_sz,
+        1, params->video_time_base);
     elv_log("AVPIPE XCPARAMS %s", buf);
 
     if ((rc = check_params(params)) != eav_success) {
@@ -4415,13 +4458,13 @@ avpipe_init(
 
     if ((rc = prepare_decoder(&p_xctx->decoder_ctx,
             in_handlers, inctx, params, params->seekable)) != eav_success) {
-        elv_err("Failure in preparing decoder, url=%s", params->url);
+        elv_err("Failure in preparing decoder, url=%s, rc=%d", params->url, rc);
         goto avpipe_init_failed;
     }
 
     if ((rc = prepare_encoder(&p_xctx->encoder_ctx,
         &p_xctx->decoder_ctx, out_handlers, inctx, params)) != eav_success) {
-        elv_err("Failure in preparing encoder, url=%s", params->url);
+        elv_err("Failure in preparing encoder, url=%s, rc=%d", params->url, rc);
         goto avpipe_init_failed;
     }
 
@@ -4504,7 +4547,7 @@ avpipe_fini(
 
     /* note: the internal buffer could have changed, and be != avio_ctx_buffer */
     if (decoder_context && decoder_context->format_context) {
-        if ((*xctx)->inctx && strncmp((*xctx)->inctx->url, "rtmp", 4)) {
+        if ((*xctx)->inctx && strncmp((*xctx)->inctx->url, "rtmp://", 7) && strncmp((*xctx)->inctx->url, "srt://", 6)) {
             AVIOContext *avioctx = (AVIOContext *) decoder_context->format_context->pb;
             if (avioctx) {
                 av_freep(&avioctx->buffer);
@@ -4577,8 +4620,11 @@ avpipe_version()
     if (version_str[0] != '\0')
         return version_str;
 
-    snprintf(version_str, sizeof(version_str), "%d.%d@%s", AVPIPE_MAJOR_VERSION, AVPIPE_MINOR_VERSION, VERSION);
+#ifndef VERSION
+#define VERSION "0.0.0-develop"
+#endif
 
+    snprintf(version_str, sizeof(version_str), "%d.%d@%s", AVPIPE_MAJOR_VERSION, AVPIPE_MINOR_VERSION, VERSION);
     return version_str;
 }
 
