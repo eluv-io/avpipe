@@ -29,7 +29,8 @@ package avpipe
 // #cgo CFLAGS: -I${SRCDIR}/libavpipe/include
 // #cgo CFLAGS: -I${SRCDIR}/utils/include
 // #cgo LDFLAGS: -L${SRCDIR}
-// #cgo LDFLAGS: -Wl,-rpath,$ORIGIN/../lib
+// #cgo darwin LDFLAGS: -Wl,-rpath,@loader_path/../lib
+// #cgo linux LDFLAGS: -Wl,-rpath,$ORIGIN/../lib
 
 // #include <string.h>
 // #include <stdlib.h>
