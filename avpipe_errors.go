@@ -19,8 +19,7 @@ package avpipe
 // #cgo CFLAGS: -I${SRCDIR}/libavpipe/include
 // #cgo CFLAGS: -I${SRCDIR}/utils/include
 // #cgo LDFLAGS: -L${SRCDIR}
-// #cgo darwin LDFLAGS: -Wl,-rpath,\@loader_path/../lib
-// #cgo linux LDFLAGS: -Wl,-rpathr,\$ORIGIN/../lib
+// #cgo LDFLAGS: -Wl,-rpath,$ORIGIN/../lib
 // #include "avpipe.h"
 import "C"
 
