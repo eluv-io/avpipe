@@ -37,7 +37,7 @@
 
 #define MPEGTS_THREAD_COUNT         16
 #define DEFAULT_THREAD_COUNT        8
-#define WATERMARK_STRING_SZ         1024    /* Max length of watermark text */
+#define WATERMARK_STRING_SZ         (16*1024)   /* Max length of watermark text */
 #define FILTER_STRING_SZ            (1024 + WATERMARK_STRING_SZ)
 #define DEFAULT_FRAME_INTERVAL_S    10
 
