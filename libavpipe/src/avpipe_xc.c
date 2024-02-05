@@ -2124,6 +2124,15 @@ encode_frame(
             encoder_context->video_frames_written++;
         }
 
+        /* If params->video_frame_duration_ts > 0, then set
+           output packet duration and pts/dts regardless of previous calculations */
+        if (stream_index == decoder_context->video_stream_index &&
+            params->video_frame_duration_ts > 0) {
+            output_packet->pts = output_packet->dts = params->start_pts + (encoder_context->video_frames_written - 1) * params->video_frame_duration_ts;
+            output_packet->duration = params->video_frame_duration_ts;
+            elv_dbg("XXX output_packet->pts=%"PRId64", frame_number=%d", output_packet->pts, encoder_context->video_frames_written);
+        }
+
         dump_packet(selected_decoded_audio(decoder_context, stream_index) >= 0,
             "OUT ", output_packet, debug_frame_level);
 
@@ -4426,7 +4435,8 @@ avpipe_init(
         "filter_descriptor=\"%s\" "
         "extract_image_interval_ts=%"PRId64" "
         "extract_images_sz=%d "
-        "video_time_base=%d/%d",
+        "video_time_base=%d/%d "
+        "video_frame_duration_ts=%d",
         params->stream_id, p->url,
         avpipe_version(),
         params->bypass_transcoding, params->skip_decoding,
@@ -4449,7 +4459,7 @@ avpipe_init(
         params->master_display ? params->master_display : "",
         params->filter_descriptor,
         params->extract_image_interval_ts, params->extract_images_sz,
-        1, params->video_time_base);
+        1, params->video_time_base, params->video_frame_duration_ts);
     elv_log("AVPIPE XCPARAMS %s", buf);
 
     if ((rc = check_params(params)) != eav_success) {
