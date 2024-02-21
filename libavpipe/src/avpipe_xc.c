@@ -2131,7 +2131,7 @@ encode_frame(
             params->video_frame_duration_ts > 0) {
             output_packet->pts = output_packet->dts = params->start_pts + (encoder_context->video_frames_written - 1) * params->video_frame_duration_ts;
             output_packet->duration = params->video_frame_duration_ts;
-            elv_dbg("XXX output_packet->pts=%"PRId64", frame_number=%d", output_packet->pts, encoder_context->video_frames_written);
+            elv_dbg("output_packet->pts=%"PRId64", frame_number=%d", output_packet->pts, encoder_context->video_frames_written);
         }
 
         dump_packet(selected_decoded_audio(decoder_context, stream_index) >= 0,
