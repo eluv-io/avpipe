@@ -825,6 +825,7 @@ xc_table_free(
     pthread_mutex_unlock(&tx_mutex);
 }
 
+#if 0
 static int
 close_srt(
     ioctx_t *inctx)
@@ -875,7 +876,7 @@ close_srt(
     st = srt_close(ss);
     if (st == SRT_ERROR)
     {
-        elv_err("srt_close: %s", srt_getlasterror_str());
+        elv_err("close_srt(): %s", srt_getlasterror_str());
         return 1;
     }
 
@@ -895,6 +896,7 @@ close_inctx(
 
     return 0;
 }
+#endif
 
 static int
 xc_table_cancel(
