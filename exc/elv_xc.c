@@ -1105,6 +1105,7 @@ usage(
         "\t-xc-type :               (optional) Transcoding type. Default is \"all\", can be \"video\", \"audio\", \"audio-merge\", \"audio-join\", \"audio-pan\", \"all\", \"extract-images\"\n"
         "\t                                    or \"extract-all-images\". \"all\" means transcoding video and audio together.\n"
         "\t-video-bitrate :         (optional) Mutually exclusive with crf. Default: -1 (unused)\n"
+        "\t-video-frame-duration-ts :  (optional) Frame duration of the output video in time base.\n"
         "\t-video-seg-duration-ts : (mandatory If format is not \"segment\" and transcoding video) video segment duration time base (positive integer).\n"
         "\t-video-time-base :       (optional) Video encoder timebase, must be > 0 (the actual timebase would be 1/video-time-base).\n"
         "\t-wm-text :               (optional) Watermark text that will be presented in every video frame if it exist. It has higher priority than overlay watermark.\n"
@@ -1210,6 +1211,7 @@ main(
         .seg_duration = NULL,
         .debug_frame_level = 0,
         .video_time_base = 0,
+        .video_frame_duration_ts = 0,
     };
 
     i = 1;
@@ -1514,6 +1516,10 @@ main(
         case 'v':
             if (!strcmp(argv[i], "-video-bitrate")) {
                 if (sscanf(argv[i+1], "%d", &p.video_bitrate) != 1) {
+                    usage(argv[0], argv[i], EXIT_FAILURE);
+                }
+            } else if (!strcmp(argv[i], "-video-frame-duration-ts")) {
+                if (sscanf(argv[i+1], "%d", &p.video_frame_duration_ts) != 1) {
                     usage(argv[0], argv[i], EXIT_FAILURE);
                 }
             } else if (!strcmp(argv[i], "-video-seg-duration-ts")) {
