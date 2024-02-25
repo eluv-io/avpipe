@@ -229,7 +229,7 @@ type XcParams struct {
 	MasterDisplay          string             `json:"master_display,omitempty"`
 	BitDepth               int32              `json:"bitdepth,omitempty"`
 	AudioFillGap           bool               `json:"audio_fill_gap,omitempty"`
-	SyncAudioToStreamId    int                `json:"sync_audio_to_stream_id,omitempty"`
+	SyncAudioToStreamId    *int               `json:"sync_audio_to_stream_id,omitempty"`
 	ForceEqualFDuration    bool               `json:"force_equal_frame_duration,omitempty"`
 	MuxingSpec             string             `json:"muxing_spec,omitempty"`
 	Listen                 bool               `json:"listen"`
