@@ -1245,7 +1245,7 @@ func getCParams(params *XcParams) (*C.xcparams_t, error) {
 		// All boolean params are handled below
 	}
 	if params.SyncAudioToStreamId != nil {
-		cparams.sync_audio_to_stream_id = *params.SyncAudioToStreamId
+		cparams.sync_audio_to_stream_id = C.int(*params.SyncAudioToStreamId)
 	}
 	if params.BypassTranscoding {
 		cparams.bypass_transcoding = C.int(1)
