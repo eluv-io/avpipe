@@ -262,7 +262,7 @@ func NewXcParams() *XcParams {
 		StartFragmentIndex:     1,
 		StartSegmentStr:        "1",
 		StreamId:               -1,
-		SyncAudioToStreamId:    -1,
+		SyncAudioToStreamId:    nil,
 		VideoBitrate:           -1,
 		VideoSegDurationTs:     -1,
 		WatermarkFontColor:     "white",
@@ -1231,7 +1231,7 @@ func getCParams(params *XcParams) (*C.xcparams_t, error) {
 		master_display:            C.CString(params.MasterDisplay),
 		bitdepth:                  C.int(params.BitDepth),
 		mux_spec:                  C.CString(params.MuxingSpec),
-		sync_audio_to_stream_id:   C.int(params.SyncAudioToStreamId),
+		sync_audio_to_stream_id:   C.int(-1),
 		gpu_index:                 C.int(params.GPUIndex),
 		listen:                    C.int(0),
 		connection_timeout:        C.int(params.ConnectionTimeout),
@@ -1244,7 +1244,9 @@ func getCParams(params *XcParams) (*C.xcparams_t, error) {
 
 		// All boolean params are handled below
 	}
-
+	if params.SyncAudioToStreamId != nil {
+		cparams.sync_audio_to_stream_id = *params.SyncAudioToStreamId
+	}
 	if params.BypassTranscoding {
 		cparams.bypass_transcoding = C.int(1)
 	}

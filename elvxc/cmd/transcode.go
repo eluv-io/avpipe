@@ -682,7 +682,7 @@ func doTranscode(cmd *cobra.Command, args []string) error {
 		BitDepth:               bitDepth,
 		ForceEqualFDuration:    forceEqualFrameDuration,
 		AudioFillGap:           audioFillGap,
-		SyncAudioToStreamId:    int(syncAudioToStreamId),
+		SyncAudioToStreamId:    new(int),
 		StreamId:               streamId,
 		Listen:                 listen,
 		ConnectionTimeout:      int(connectionTimeout),
@@ -694,6 +694,8 @@ func doTranscode(cmd *cobra.Command, args []string) error {
 		VideoTimeBase:          int(videoTimeBase),
 		VideoFrameDurationTs:   int(videoFrameDurationTs),
 	}
+
+	*params.SyncAudioToStreamId = int(syncAudioToStreamId)
 
 	err = getAudioIndexes(params, audioIndex)
 	if err != nil {
