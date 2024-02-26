@@ -1244,6 +1244,7 @@ func getCParams(params *XcParams) (*C.xcparams_t, error) {
 
 		// All boolean params are handled below
 	}
+
 	if params.BypassTranscoding {
 		cparams.bypass_transcoding = C.int(1)
 	}
