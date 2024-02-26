@@ -229,7 +229,7 @@ type XcParams struct {
 	MasterDisplay          string             `json:"master_display,omitempty"`
 	BitDepth               int32              `json:"bitdepth,omitempty"`
 	AudioFillGap           bool               `json:"audio_fill_gap,omitempty"`
-	SyncAudioToStreamId    *int               `json:"sync_audio_to_stream_id,omitempty"`
+	SyncAudioToStreamId    int                `json:"sync_audio_to_stream_id"`
 	ForceEqualFDuration    bool               `json:"force_equal_frame_duration,omitempty"`
 	MuxingSpec             string             `json:"muxing_spec,omitempty"`
 	Listen                 bool               `json:"listen"`
@@ -262,7 +262,7 @@ func NewXcParams() *XcParams {
 		StartFragmentIndex:     1,
 		StartSegmentStr:        "1",
 		StreamId:               -1,
-		SyncAudioToStreamId:    nil,
+		SyncAudioToStreamId:    -1,
 		VideoBitrate:           -1,
 		VideoSegDurationTs:     -1,
 		WatermarkFontColor:     "white",
@@ -1231,7 +1231,7 @@ func getCParams(params *XcParams) (*C.xcparams_t, error) {
 		master_display:            C.CString(params.MasterDisplay),
 		bitdepth:                  C.int(params.BitDepth),
 		mux_spec:                  C.CString(params.MuxingSpec),
-		sync_audio_to_stream_id:   C.int(-1),
+		sync_audio_to_stream_id:   C.int(params.SyncAudioToStreamId),
 		gpu_index:                 C.int(params.GPUIndex),
 		listen:                    C.int(0),
 		connection_timeout:        C.int(params.ConnectionTimeout),
@@ -1243,9 +1243,6 @@ func getCParams(params *XcParams) (*C.xcparams_t, error) {
 		video_frame_duration_ts:   C.int(params.VideoFrameDurationTs),
 
 		// All boolean params are handled below
-	}
-	if params.SyncAudioToStreamId != nil {
-		cparams.sync_audio_to_stream_id = C.int(*params.SyncAudioToStreamId)
 	}
 	if params.BypassTranscoding {
 		cparams.bypass_transcoding = C.int(1)

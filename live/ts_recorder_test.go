@@ -2,11 +2,10 @@ package live
 
 import (
 	"fmt"
+	"github.com/stretchr/testify/assert"
 	"path"
 	"testing"
 	"time"
-
-	"github.com/stretchr/testify/assert"
 
 	"github.com/eluv-io/avpipe"
 )
@@ -44,7 +43,7 @@ func TestUdpToMp4(t *testing.T) {
 		XcType:              avpipe.XcAll,
 		StreamId:            -1,
 		Url:                 url,
-		SyncAudioToStreamId: nil,
+		SyncAudioToStreamId: -1,
 		DebugFrameLevel:     debugFrameLevel,
 	}
 
@@ -150,7 +149,7 @@ func TestUdpToMp4WithCancelling1(t *testing.T) {
 		XcType:              avpipe.XcAll,
 		StreamId:            -1,
 		Url:                 url,
-		SyncAudioToStreamId: nil,
+		SyncAudioToStreamId: -1,
 		DebugFrameLevel:     debugFrameLevel,
 	}
 
@@ -209,7 +208,7 @@ func TestUdpToMp4WithCancelling2(t *testing.T) {
 		XcType:              avpipe.XcAll,
 		StreamId:            -1,
 		Url:                 url,
-		SyncAudioToStreamId: nil,
+		SyncAudioToStreamId: -1,
 		DebugFrameLevel:     debugFrameLevel,
 	}
 
@@ -281,7 +280,7 @@ func TestUdpToMp4WithCancelling3(t *testing.T) {
 		XcType:              avpipe.XcAll,
 		StreamId:            -1,
 		Url:                 url,
-		SyncAudioToStreamId: nil,
+		SyncAudioToStreamId: -1,
 		DebugFrameLevel:     debugFrameLevel,
 	}
 
@@ -353,7 +352,7 @@ func TestUdpToMp4WithCancelling4(t *testing.T) {
 		XcType:              avpipe.XcAll,
 		StreamId:            -1,
 		Url:                 url,
-		SyncAudioToStreamId: nil,
+		SyncAudioToStreamId: -1,
 		DebugFrameLevel:     debugFrameLevel,
 	}
 
