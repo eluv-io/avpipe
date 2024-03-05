@@ -104,6 +104,7 @@ elv_io_open(
                 // Assumes a filename like segment%d-%05d.mp4
                 outctx->stream_index = url[i] - '0';
             }
+            elv_dbg("XXX stream_index=%d", outctx->stream_index);
             if (!strncmp(url + strlen(url) - 3, "mpd", 3)) {
                 outctx->type = avpipe_manifest;
                 outctx->seg_index = -1;     // Special index for manifest
@@ -170,8 +171,8 @@ elv_io_open(
         AVIOContext *avioctx = avio_alloc_context(outctx->buf, outctx->bufsz, AVIO_FLAG_WRITE, (void *)outctx,
             out_handlers->avpipe_reader, out_handlers->avpipe_writer, out_handlers->avpipe_seeker);
 
-        elv_dbg("OUT elv_io_open url=%s, type=%d, seg_index=%d, last_outctx=%p, buf=%p",
-            url, outctx->type, outctx->seg_index, out_tracker[outctx->stream_index].last_outctx, avioctx->buffer);
+        elv_dbg("OUT elv_io_open url=%s, type=%d, stream_index=%d, seg_index=%d, last_outctx=%p, buf=%p",
+            url, outctx->type, outctx->stream_index, outctx->seg_index, out_tracker[outctx->stream_index].last_outctx, avioctx->buffer);
 
         /* libavformat expects seekable streams for mp4 */
         if (outctx->type == avpipe_mp4_stream || outctx->type == avpipe_mp4_segment)

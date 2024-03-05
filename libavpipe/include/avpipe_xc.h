@@ -242,17 +242,20 @@ typedef struct avpipe_io_handler_t {
     avpipe_stater_f avpipe_stater;
 } avpipe_io_handler_t;
 
-#define MAX_WRAP_PTS    ((int64_t)8589000000)
+#define MAX_WRAP_PTS        ((int64_t)8589000000)
+#define MAX_AVFILENAME_LEN  128
 
 /* Decoder/encoder context, keeps both video and audio stream ffmpeg contexts */
 typedef struct coderctx_t {
-    AVFormatContext     *format_context;        /* Input format context or video output format context */
-    AVFormatContext     *format_context2;       /* Audio output format context */
+    AVFormatContext     *format_context;                                /* Input format context or video output format context */
+    AVFormatContext     *format_context2[MAX_STREAMS];                  /* Audio output format context, indexed by audio index */
+    char                filename2[MAX_STREAMS][MAX_AVFILENAME_LEN];     /* Audio filename formats */
+    int                 n_audio_output;                                 /* Number of audio output streams, it is set for encoder */
 
     AVCodec             *codec[MAX_STREAMS];
     AVStream            *stream[MAX_STREAMS];
     AVCodecParameters   *codec_parameters[MAX_STREAMS];
-    AVCodecContext      *codec_context[MAX_STREAMS];
+    AVCodecContext      *codec_context[MAX_STREAMS];    /* Audio/video AVCodecContext, indexed by stream_index */
     SwrContext          *resampler_context;             /* resample context for audio */
     AVAudioFifo         *fifo;                          /* audio sampling fifo */
 
@@ -261,12 +264,11 @@ typedef struct coderctx_t {
     ioctx_t             *inctx;                         /* Input context needed for stat callbacks */
 
     int video_stream_index;
-    int audio_stream_index[MAX_AUDIO_MUX];              /* Audio input stream indexes */
+    int audio_stream_index[MAX_STREAMS];                /* Audio input stream indexes */
     int n_audio;                                        /* Number of audio streams that will be decoded */
 
     int data_scte35_stream_index;                       /* Index of SCTE-35 data stream */
     int data_stream_index;                              /* Index of an unrecognized data stream */
-    int audio_enc_stream_index;                         /* Audio output stream index */
 
     int64_t video_last_wrapped_pts;                     /* Video last wrapped pts */
     int64_t video_last_input_pts;                       /* Video last input pts */
@@ -291,9 +293,10 @@ typedef struct coderctx_t {
     AVFilterGraph   *video_filter_graph;
 
     /* Audio filter */
-    AVFilterContext *audio_buffersink_ctx;
+    AVFilterContext *audio_buffersink_ctx[MAX_STREAMS];
     AVFilterContext *audio_buffersrc_ctx[MAX_AUDIO_MUX];
-    AVFilterGraph   *audio_filter_graph;
+    AVFilterGraph   *audio_filter_graph[MAX_STREAMS];
+    int     n_audio_filters;                            /* Number of initialized audio filters */
 
     int64_t video_frames_written;                       /* Total video frames written so far */
     int64_t audio_frames_written;                       /* Total audio frames written so far */
