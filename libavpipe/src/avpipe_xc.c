@@ -1699,15 +1699,13 @@ prepare_encoder(
      */
     if (params->xc_type & xc_video) {
         out_tracker = (out_tracker_t *) calloc(MAX_STREAMS, sizeof(out_tracker_t));
-        for (int i=0; i<encoder_context->n_audio_output; i++) {
-            out_tracker[i].out_handlers = out_handlers;
-            out_tracker[i].inctx = inctx;
-            out_tracker[i].video_stream_index = decoder_context->video_stream_index;
-            out_tracker[i].audio_stream_index = decoder_context->audio_stream_index[i];
-            out_tracker[i].seg_index = atoi(params->start_segment_str);
-            out_tracker[i].encoder_ctx = encoder_context;
-            out_tracker[i].xc_type = xc_video;
-        }
+        out_tracker[0].out_handlers = out_handlers;
+        out_tracker[0].inctx = inctx;
+        out_tracker[0].video_stream_index = decoder_context->video_stream_index;
+        out_tracker[0].audio_stream_index = decoder_context->audio_stream_index[0];
+        out_tracker[0].seg_index = atoi(params->start_segment_str);
+        out_tracker[0].encoder_ctx = encoder_context;
+        out_tracker[0].xc_type = xc_video;
         encoder_context->format_context->avpipe_opaque = out_tracker;
     }
 

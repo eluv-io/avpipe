@@ -75,13 +75,13 @@ elv_io_open(
         (*pb) = avioctx;
         out_tracker[outctx->stream_index].last_outctx = outctx;
 
-        elv_dbg("OUT elv_io_open stream_index=%d, seg_index=%d avioctx=%p, avioctx->opaque=%p, buf=%p, outctx=%p, outtracker[0]->last_outctx=%p, outtracker[1]->last_outctx=%p",
-            outctx->stream_index, outctx->seg_index, avioctx, avioctx->opaque, avioctx->buffer, outctx, out_tracker[0].last_outctx, out_tracker[1].last_outctx);
+        elv_dbg("OUT elv_io_open stream_index=%d, seg_index=%d avioctx=%p, avioctx->opaque=%p, buf=%p, outctx=%p, outtracker->last_outctx=%p, outtracker->last_outctx=%p",
+            outctx->stream_index, outctx->seg_index, avioctx, avioctx->opaque, avioctx->buffer, outctx, out_tracker[outctx->stream_index].last_outctx, out_tracker[outctx->stream_index].last_outctx);
     } else {
         ioctx_t *outctx = (ioctx_t *) calloc(1, sizeof(ioctx_t));
         outctx->stream_index = 0;
-        outctx->encoder_ctx = out_tracker->encoder_ctx;
-        outctx->inctx = out_tracker[0].inctx;
+        outctx->encoder_ctx = out_tracker[outctx->stream_index].encoder_ctx;
+        outctx->inctx = out_tracker[outctx->stream_index].inctx;
         outctx->seg_index = 0; // init segment has stream_index and seg_index = 0
 
         if (!url || url[0] == '\0') {
