@@ -589,6 +589,13 @@ prepare_decoder(
         else
             decoder_context->codec_context[i]->thread_count = DEFAULT_THREAD_COUNT;
 
+        decoder_context->codec_context[i]->time_base = decoder_context->stream[i]->time_base;
+
+        /* Setting the frame_rate here causes slight changes to rates - leaving it unset works perfectly
+          decoder_context->codec_context[i]->framerate = av_guess_frame_rate(
+            decoder_context->format_context, decoder_context->format_context->streams[i], NULL);
+        */
+
         /* Open the decoder (initialize the decoder codec_context[i] using given codec[i]). */
         if (decoder_context->codec_parameters[i]->codec_type != AVMEDIA_TYPE_DATA &&
              (rc = avcodec_open2(decoder_context->codec_context[i], decoder_context->codec[i], NULL)) < 0) {
@@ -603,18 +610,6 @@ prepare_decoder(
             decoder_context->stream[i]->time_base.den,
             av_get_sample_fmt_name(decoder_context->codec_context[i]->sample_fmt),
             decoder_context->codec_context[i]->frame_size, url);
-
-        /* Video - set context parameters manually */
-        /* Setting the frame_rate here causes slight changes to rates - leaving it unset works perfectly
-          decoder_context->codec_context[i]->framerate = av_guess_frame_rate(
-            decoder_context->format_context, decoder_context->format_context->streams[i], NULL);
-        */
-
-        /*
-         * NOTE: Don't change the input stream or input codec_context timebase to 1/sample_rate.
-         * This will break transcoding audio if the input timebase doesn't match with output timebase. (-RM)
-         */
-        decoder_context->codec_context[i]->time_base = decoder_context->stream[i]->time_base;
 
         dump_stream(decoder_context->stream[i]);
         dump_codec_parameters(decoder_context->codec_parameters[i]);
@@ -768,7 +763,7 @@ set_encoder_options(
             elv_dbg("setting \"fmp4-segment\" audio segment_time to %s, seg_duration_ts=%"PRId64", url=%s",
                 params->seg_duration, seg_duration_ts, params->url);
             av_opt_set(encoder_context->format_context2->priv_data, "reset_timestamps", "on", 0);
-        } 
+        }
         if (stream_index == decoder_context->video_stream_index) {
             if (params->video_seg_duration_ts > 0)
                 seg_duration_ts = params->video_seg_duration_ts;
@@ -1091,6 +1086,7 @@ prepare_video_encoder(
             out_stream->time_base = (AVRational) {1, params->video_time_base};
         else
             out_stream->time_base = in_stream->time_base;
+        out_stream->avg_frame_rate = decoder_context->format_context->streams[decoder_context->video_stream_index]->avg_frame_rate;
         out_stream->codecpar->codec_tag = 0;
 
         rc = set_encoder_options(encoder_context, decoder_context, params, decoder_context->video_stream_index,
@@ -1137,6 +1133,8 @@ prepare_video_encoder(
         encoder_context->stream[encoder_context->video_stream_index]->time_base = (AVRational) {1, params->video_time_base};
     else
         encoder_context->stream[encoder_context->video_stream_index]->time_base = decoder_context->codec_context[index]->time_base;
+    encoder_context->stream[encoder_context->video_stream_index]->avg_frame_rate = decoder_context->stream[decoder_context->video_stream_index]->avg_frame_rate;
+
     rc = set_encoder_options(encoder_context, decoder_context, params, decoder_context->video_stream_index,
         decoder_context->stream[decoder_context->video_stream_index]->time_base.den);
     if (rc < 0) {
@@ -1231,15 +1229,6 @@ prepare_video_encoder(
         elv_dbg("could not copy encoder parameters to output stream");
         return eav_codec_param;
     }
-
-    /* Set stream parameters - after avcodec_open2 and parameters from context.
-     * This is necessary for the output to preserve the timebase and framerate of the input.
-     */
-    if (params->video_time_base > 0)
-        encoder_context->stream[index]->time_base = (AVRational) {1, params->video_time_base};
-    else
-        encoder_context->stream[index]->time_base = decoder_context->stream[decoder_context->video_stream_index]->time_base;
-    encoder_context->stream[index]->avg_frame_rate = decoder_context->stream[decoder_context->video_stream_index]->avg_frame_rate;
 
     return 0;
 }
@@ -3481,47 +3470,7 @@ avpipe_xc(
         goto xc_done;
     }
 
-    // FIXME: error occurs incorrectly if source timebase is small, e.g. 24 (due calc_timebase's TIMEBASE_THRESHOLD)
-    if (params->xc_type & xc_video && params->xc_type != xc_extract_images &&
-        encoder_context->codec_context[encoder_context->video_stream_index] &&
-        calc_timebase(params, 1, encoder_context->codec_context[encoder_context->video_stream_index]->time_base.den)
-            != encoder_context->stream[encoder_context->video_stream_index]->time_base.den) {
-        elv_err("Internal error in calculating timebase, calc_timebase=%d, stream_timebase=%d, url=%s",
-            calc_timebase(params, 1, encoder_context->codec_context[encoder_context->video_stream_index]->time_base.den),
-            encoder_context->stream[encoder_context->video_stream_index]->time_base.den, params->url);
-        rc = eav_timebase;
-        goto xc_done;
-    }
-
-    /*
-     * Sometimes avformat_write_header() changes the timebase of stream (for example 24 -> 512).
-     * In this case, reset the segment duration ts with new value to become sure cutting the segments are done properly.
-     * PENDING (RM): it might be needed to do the same thing for audio.
-     */
-#if 0
-    /* Will be removed after some more testing */
-    if (params->xc_type & xc_video &&
-        encoder_context->codec_context[encoder_context->video_stream_index] &&
-        encoder_context->codec_context[encoder_context->video_stream_index]->time_base.den
-            != encoder_context->stream[encoder_context->video_stream_index]->time_base.den) {
-        int64_t seg_duration_ts;
-        if (params->seg_duration && strlen(params->seg_duration) > 0) {
-            float seg_duration = atof(params->seg_duration);
-            seg_duration_ts = seg_duration * encoder_context->stream[encoder_context->video_stream_index]->time_base.den;
-        } else {
-            seg_duration_ts = params->video_seg_duration_ts *
-                encoder_context->stream[encoder_context->video_stream_index]->time_base.den /
-                encoder_context->codec_context[encoder_context->video_stream_index]->time_base.den;
-        }
-        elv_log("Stream orig ts=%"PRId64", new ts=%"PRId64", resetting \"fmp4-segment\" segment_time to %s, seg_duration_ts=%"PRId64,
-            encoder_context->codec_context[encoder_context->video_stream_index]->time_base.den,
-            encoder_context->stream[encoder_context->video_stream_index]->time_base.den,
-            params->seg_duration, seg_duration_ts);
-        encoder_context->codec_context[encoder_context->video_stream_index]->time_base =
-            encoder_context->stream[encoder_context->video_stream_index]->time_base;
-        av_opt_set_int(encoder_context->format_context->priv_data, "segment_duration_ts", seg_duration_ts, 0);
-    }
-#endif
+    dump_rate_info(encoder_context->format_context, encoder_context->codec_context[encoder_context->video_stream_index]);
 
     int video_stream_index = decoder_context->video_stream_index;
     if (params->xc_type & xc_video) {
@@ -4179,7 +4128,7 @@ check_params(
             params->stream_id, params->xc_type, params->n_audio, params->url);
         return eav_param;
     }
-    
+
     // By default transcode 'everything' if streamId < 0
     if (params->xc_type == xc_none && params->stream_id < 0) {
         params->xc_type = xc_all;
@@ -4187,11 +4136,6 @@ check_params(
 
     if (params->start_pts < 0) {
         elv_err("Start PTS can not be negative, url=%s", params->url);
-        return eav_param;
-    }
-
-    if (params->video_time_base > 0 && params->video_time_base < 10000) {
-        elv_err("Invalid video timebase %d (must be >= 10000), url=%s", params->video_time_base, params->url);
         return eav_param;
     }
 

@@ -254,6 +254,32 @@ dump_trackers(
         out_tracker->seg_index, out_tracker->last_outctx ? out_tracker->last_outctx->written_bytes:0);
 }
 
+void
+dump_rate_info(
+    AVFormatContext *format_context,
+    AVCodecContext *codec_context)
+{
+    AVFormatContext *fctx = format_context;
+    int video_stream_index = -1;
+    for (int i = 0; i < fctx->nb_streams; i++) {
+        AVStream *s = fctx->streams[i];
+        if (fctx->streams[i]->codecpar->codec_type == AVMEDIA_TYPE_VIDEO) {
+            video_stream_index = i;
+            elv_log("RATE INFO tb=%d/%d afr=%d/%d rfr=%d/%d cc-tb=%d/%d cc-tpf=%d rate=%d/%d rc b/x/n=%d/%d/%d q=%d/%d/%d/ vbv=%d/%d/%d cc-fr=%d/%d",
+                s->time_base.num, s->time_base.den,
+                s->avg_frame_rate.num, s->avg_frame_rate.den,
+                s->r_frame_rate.num, s->r_frame_rate.den,
+                codec_context->time_base.num, codec_context->time_base.den, codec_context->ticks_per_frame,
+                codec_context->bit_rate, codec_context->bit_rate_tolerance,
+                codec_context->rc_buffer_size, codec_context->rc_max_rate, codec_context->rc_min_rate,
+                codec_context->qmin, codec_context->qmax, codec_context->max_qdiff,
+                codec_context->rc_max_available_vbv_use, codec_context->rc_min_vbv_overflow_use, codec_context->rc_initial_buffer_occupancy,
+                codec_context->framerate.num, codec_context->framerate.den);
+        }
+    }
+}
+
+
 static void
 ffmpeg_log_handler(void* ptr, int level, const char* fmt, va_list vl) {
     elv_log_level_t elv_level;
