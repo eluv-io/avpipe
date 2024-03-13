@@ -1456,15 +1456,17 @@ prepare_audio_encoder(
 
 static int
 num_audio_output(
+    coderctx_t *decoder_context,
     xcparams_t *params)
 {
+    int n_decoder_auido = decoder_context ? decoder_context->n_audio : 0;
     if (!params)
         return 0;
 
     if (params->xc_type == xc_audio_merge || params->xc_type == xc_audio_join || params->xc_type == xc_audio_pan)
         return 1;
 
-    return params->n_audio;
+    return params->n_audio > 0 ? params->n_audio : n_decoder_auido;
 }
 
 static int
@@ -1528,7 +1530,7 @@ prepare_encoder(
         }
     }
     if (params->xc_type & xc_audio) {
-        encoder_context->n_audio_output = num_audio_output(params);
+        encoder_context->n_audio_output = num_audio_output(decoder_context, params);
         for (int i=0; i<encoder_context->n_audio_output; i++) {
             snprintf(encoder_context->filename2[i], MAX_AVFILENAME_LEN, "fsegment-audio%d-%s.mp4", i, "%05d");
             avformat_alloc_output_context2(&encoder_context->format_context2[i], NULL, format, encoder_context->filename2[i]);
