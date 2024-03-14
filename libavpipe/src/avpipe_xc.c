@@ -1224,8 +1224,8 @@ prepare_video_encoder(
         return eav_codec_param;
     }
 
-    encoder_context->stream[encoder_context->video_stream_index]->time_base = encoder_codec_context->time_base;
-    encoder_context->stream[encoder_context->video_stream_index]->avg_frame_rate = decoder_context->stream[decoder_context->video_stream_index]->avg_frame_rate;
+    encoder_context->stream[index]->time_base = encoder_codec_context->time_base;
+    encoder_context->stream[index]->avg_frame_rate = decoder_context->stream[decoder_context->video_stream_index]->avg_frame_rate;
 
     return 0;
 }
