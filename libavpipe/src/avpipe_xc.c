@@ -3468,8 +3468,8 @@ avpipe_xc(
     }
 
     // Muxer may adjust settings in 'write_header'
-    //dump_encoder(encoder_context->format_context->url, encoder_context->format_context, NULL);
-    //dump_codec_context(encoder_context->codec_context[encoder_context->video_stream_index]);
+    dump_encoder(encoder_context->format_context->url, encoder_context->format_context, NULL);
+    dump_codec_context(encoder_context->codec_context[encoder_context->video_stream_index]);
 
     int video_stream_index = decoder_context->video_stream_index;
     if (params->xc_type & xc_video) {
