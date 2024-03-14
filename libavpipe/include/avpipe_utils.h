@@ -59,11 +59,6 @@ dump_trackers(
     AVFormatContext *decoder_format_context);
 
 void
-dump_rate_info(
-    AVFormatContext *format_context,
-    AVCodecContext *codec_context);
-
-void
 connect_ffmpeg_log();
 
 const char *

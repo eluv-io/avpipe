@@ -116,7 +116,7 @@ dump_encoder(
         return;
 
     elv_dbg("ENCODER url=%s, xc_type=%d, nb_streams=%d\n",
-        url, params->xc_type,
+        url, params ? params->xc_type : 0,
         format_context->nb_streams);
 
     for (int i = 0; i < format_context->nb_streams; i++) {
@@ -147,12 +147,17 @@ dump_codec_context(
 
     elv_dbg("CODEC CONTEXT codec type=%d id=%d "
         "time_base=%d/%d framerate=%d/%d tpf=%d delay=%d "
+        "bit_rate=%d-%d rc=%d-%d-%d q=%d-%d-%d vbv=%f/%f/%d "
         "width=%d height=%d aspect_ratio=%d/%d coded_width=%d coded_height=%d gop=%d "
         "keyint_min=%d refs=%d "
         "frame_size=%d frame_number=%d"
         "\n",
         cc->codec_type, cc->codec_id,
         cc->time_base.num, cc->time_base.den, cc->framerate.num, cc->framerate.den, cc->ticks_per_frame, cc->delay,
+        (int)cc->bit_rate, cc->bit_rate_tolerance,
+        cc->rc_buffer_size, cc->rc_max_rate, cc->rc_min_rate,
+        cc->qmin, cc->qmax, cc->max_qdiff,
+        cc->rc_max_available_vbv_use, cc->rc_min_vbv_overflow_use, cc->rc_initial_buffer_occupancy,
         cc->width, cc->height, cc->sample_aspect_ratio.num, cc->sample_aspect_ratio.den,
         cc->coded_width, cc->coded_height, cc->gop_size,
         cc->keyint_min, cc->refs,
@@ -253,32 +258,6 @@ dump_trackers(
         (int)(ti - t0) / 1000, (int)(ti - t0) % 1000, inctx->read_pos,
         out_tracker->seg_index, out_tracker->last_outctx ? out_tracker->last_outctx->written_bytes:0);
 }
-
-void
-dump_rate_info(
-    AVFormatContext *format_context,
-    AVCodecContext *codec_context)
-{
-    AVFormatContext *fctx = format_context;
-    int video_stream_index = -1;
-    for (int i = 0; i < fctx->nb_streams; i++) {
-        AVStream *s = fctx->streams[i];
-        if (fctx->streams[i]->codecpar->codec_type == AVMEDIA_TYPE_VIDEO) {
-            video_stream_index = i;
-            elv_log("RATE INFO tb=%d/%d afr=%d/%d rfr=%d/%d cc-tb=%d/%d cc-tpf=%d rate=%d/%d rc b/x/n=%d/%d/%d q=%d/%d/%d/ vbv=%d/%d/%d cc-fr=%d/%d",
-                s->time_base.num, s->time_base.den,
-                s->avg_frame_rate.num, s->avg_frame_rate.den,
-                s->r_frame_rate.num, s->r_frame_rate.den,
-                codec_context->time_base.num, codec_context->time_base.den, codec_context->ticks_per_frame,
-                codec_context->bit_rate, codec_context->bit_rate_tolerance,
-                codec_context->rc_buffer_size, codec_context->rc_max_rate, codec_context->rc_min_rate,
-                codec_context->qmin, codec_context->qmax, codec_context->max_qdiff,
-                codec_context->rc_max_available_vbv_use, codec_context->rc_min_vbv_overflow_use, codec_context->rc_initial_buffer_occupancy,
-                codec_context->framerate.num, codec_context->framerate.den);
-        }
-    }
-}
-
 
 static void
 ffmpeg_log_handler(void* ptr, int level, const char* fmt, va_list vl) {

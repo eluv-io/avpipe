@@ -1090,7 +1090,7 @@ prepare_video_encoder(
         out_stream->codecpar->codec_tag = 0;
 
         rc = set_encoder_options(encoder_context, decoder_context, params, decoder_context->video_stream_index,
-            decoder_context->stream[decoder_context->video_stream_index]->time_base.den);
+            out_stream->time_base.den);
         if (rc < 0) {
             elv_err("Failed to set video encoder options with bypass, url=%s", params->url);
             return rc;
@@ -1106,8 +1106,7 @@ prepare_video_encoder(
 
     AVCodecContext *encoder_codec_context = encoder_context->codec_context[index];
 
-    /* Set encoder parameters */
-    AVDictionary *encoder_options = NULL;
+    /* Set encoder parameters (directly in the coder context priv_data dictionary) */
 
     /* Added to fix/improve encoding quality of the first frame - PENDING(SSS) research */
     if ( params->crf_str && strlen(params->crf_str) > 0 ) {
@@ -1127,19 +1126,6 @@ prepare_video_encoder(
 
     if (params->force_keyint > 0) {
         encoder_codec_context->gop_size = params->force_keyint;
-    }
-
-    if (params->video_time_base > 0)
-        encoder_context->stream[encoder_context->video_stream_index]->time_base = (AVRational) {1, params->video_time_base};
-    else
-        encoder_context->stream[encoder_context->video_stream_index]->time_base = decoder_context->codec_context[index]->time_base;
-    encoder_context->stream[encoder_context->video_stream_index]->avg_frame_rate = decoder_context->stream[decoder_context->video_stream_index]->avg_frame_rate;
-
-    rc = set_encoder_options(encoder_context, decoder_context, params, decoder_context->video_stream_index,
-        decoder_context->stream[decoder_context->video_stream_index]->time_base.den);
-    if (rc < 0) {
-        elv_err("Failed to set video encoder options, url=%s", params->url);
-        return rc;
     }
 
     /* Set codec context parameters */
@@ -1216,19 +1202,30 @@ prepare_video_encoder(
         encoder_codec_context->profile,
         encoder_codec_context->level);
 
+    /* Set encoder options after setting all codec context parameters */
+    rc = set_encoder_options(encoder_context, decoder_context, params, decoder_context->video_stream_index,
+        encoder_codec_context->time_base.den);
+    if (rc < 0) {
+        elv_err("Failed to set video encoder options, url=%s", params->url);
+        return rc;
+    }
+
     /* Open video encoder (initialize the encoder codec_context[i] using given codec[i]). */
-    if ((rc = avcodec_open2(encoder_context->codec_context[index], encoder_context->codec[index], &encoder_options)) < 0) {
+    if ((rc = avcodec_open2(encoder_context->codec_context[index], encoder_context->codec[index], NULL)) < 0) {
         elv_dbg("Could not open encoder for video, err=%d", rc);
         return eav_open_codec;
     }
 
-    /* This needs to happen after avcodec_open2() */
+    /* Set stream parameters after avcodec_open2() */
     if (avcodec_parameters_from_context(
             encoder_context->stream[index]->codecpar,
             encoder_context->codec_context[index]) < 0) {
         elv_dbg("could not copy encoder parameters to output stream");
         return eav_codec_param;
     }
+
+    encoder_context->stream[encoder_context->video_stream_index]->time_base = encoder_codec_context->time_base;
+    encoder_context->stream[encoder_context->video_stream_index]->avg_frame_rate = decoder_context->stream[decoder_context->video_stream_index]->avg_frame_rate;
 
     return 0;
 }
@@ -3470,7 +3467,9 @@ avpipe_xc(
         goto xc_done;
     }
 
-    dump_rate_info(encoder_context->format_context, encoder_context->codec_context[encoder_context->video_stream_index]);
+    // Muxer may adjust settings in 'write_header'
+    //dump_encoder(encoder_context->format_context->url, encoder_context->format_context, NULL);
+    //dump_codec_context(encoder_context->codec_context[encoder_context->video_stream_index]);
 
     int video_stream_index = decoder_context->video_stream_index;
     if (params->xc_type & xc_video) {
