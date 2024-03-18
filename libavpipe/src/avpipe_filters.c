@@ -173,10 +173,9 @@ init_audio_filters(
 
     for (int i=0; i<encoder_context->n_audio_output; i++) {
         int audio_stream_index = decoder_context->audio_stream_index[i];
-        int output_stream_index = audio_stream_index;
 
         AVCodecContext *dec_codec_ctx = decoder_context->codec_context[audio_stream_index];
-        AVCodecContext *enc_codec_ctx = encoder_context->codec_context[output_stream_index];
+        AVCodecContext *enc_codec_ctx = encoder_context->codec_context[audio_stream_index];
 
         if (!dec_codec_ctx) {
             elv_err("init_audio_filters, audio decoder was not initialized!");
@@ -255,7 +254,7 @@ init_audio_filters(
         }
 
         av_buffersink_set_frame_size(buffersink_ctx,
-            encoder_context->codec_context[output_stream_index]->frame_size);
+            encoder_context->codec_context[audio_stream_index]->frame_size);
     
         if ((ret = avfilter_graph_config(filter_graph, NULL)) < 0)
             goto end;
