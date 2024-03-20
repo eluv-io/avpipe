@@ -28,7 +28,7 @@ const baseOutPath = "test_out"
 const debugFrameLevel = true
 const h264Codec = "libx264"
 const videoBigBuckBunnyPath = "media/bbb_1080p_30fps_60sec.mp4"
-const videoRockyPath = "media/rocky.mp4"
+const videoBigBuckBunny3AudioPath = "media/BBB_3x-audio-streams_music_2min_48kHz.mp4"
 
 type XcTestResult struct {
 	mezFile           []string
@@ -200,7 +200,7 @@ func (oo *fileOutputOpener) Open(_, _ int64, streamIndex, segIndex int,
 	case avpipe.FMP4VideoSegment:
 		filename = fmt.Sprintf("./%s/vsegment-%d.mp4", oo.dir, segIndex)
 	case avpipe.FMP4AudioSegment:
-		filename = fmt.Sprintf("./%s/asegment-%d.mp4", oo.dir, segIndex)
+		filename = fmt.Sprintf("./%s/asegment%d-%d.mp4", oo.dir, streamIndex, segIndex)
 	case avpipe.FrameImage:
 		filename = fmt.Sprintf("./%s/%d.jpeg", oo.dir, pts)
 	}
@@ -368,7 +368,6 @@ func TestAudioSeg(t *testing.T) {
 		Url:                    url,
 		DebugFrameLevel:        debugFrameLevel,
 	}
-	setFastEncodeParams(params, true)
 	xcTest(t, outputDir, params, nil, true)
 }
 
@@ -1587,6 +1586,53 @@ func TestAudioMonoToStereo_pcm_60000(t *testing.T) {
 
 	for i := 1; i <= 1; i++ {
 		xcTestResult.mezFile = append(xcTestResult.mezFile, fmt.Sprintf("%s/asegment-%d.mp4", outputDir, i))
+	}
+
+	xcTest(t, outputDir, params, xcTestResult, true)
+}
+
+func TestMultiAudioXc(t *testing.T) {
+	url := videoBigBuckBunny3AudioPath
+
+	if fileMissing(url, fn()) {
+		return
+	}
+
+	outputDir := path.Join(baseOutPath, fn())
+
+	params := &avpipe.XcParams{
+		BypassTranscoding:   false,
+		Format:              "fmp4-segment",
+		StartTimeTs:         0,
+		DurationTs:          -1,
+		StartSegmentStr:     "1",
+		VideoSegDurationTs:  460800,
+		AudioSegDurationTs:  1428480,
+		Ecodec:              h264Codec,
+		Dcodec:              "",
+		Ecodec2:             "aac",
+		EncHeight:           720,
+		EncWidth:            1280,
+		XcType:              avpipe.XcAll,
+		StreamId:            -1,
+		SyncAudioToStreamId: -1,
+		ForceKeyInt:         60,
+		Url:                 url,
+		DebugFrameLevel:     debugFrameLevel,
+		NumAudio:            3,
+	}
+
+	params.AudioIndex[0] = 1
+	params.AudioIndex[1] = 2
+	params.AudioIndex[2] = 3
+
+	xcTestResult := &XcTestResult{
+		timeScale: 15360,
+		pixelFmt:  "yuv420p",
+	}
+
+	for i := 1; i <= 4; i++ {
+		xcTestResult.mezFile = append(xcTestResult.mezFile, fmt.Sprintf("%s/vsegment-%d.mp4", outputDir, i))
 	}
 
 	xcTest(t, outputDir, params, xcTestResult, true)
