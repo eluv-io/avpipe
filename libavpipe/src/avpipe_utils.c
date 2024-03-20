@@ -116,7 +116,7 @@ dump_encoder(
         return;
 
     elv_dbg("ENCODER url=%s, xc_type=%d, nb_streams=%d\n",
-        url, params->xc_type,
+        url, params ? params->xc_type : 0,
         format_context->nb_streams);
 
     for (int i = 0; i < format_context->nb_streams; i++) {
@@ -147,12 +147,17 @@ dump_codec_context(
 
     elv_dbg("CODEC CONTEXT codec type=%d id=%d "
         "time_base=%d/%d framerate=%d/%d tpf=%d delay=%d "
+        "bit_rate=%d-%d rc=%d-%d-%d q=%d-%d-%d vbv=%f/%f/%d "
         "width=%d height=%d aspect_ratio=%d/%d coded_width=%d coded_height=%d gop=%d "
         "keyint_min=%d refs=%d "
         "frame_size=%d frame_number=%d"
         "\n",
         cc->codec_type, cc->codec_id,
         cc->time_base.num, cc->time_base.den, cc->framerate.num, cc->framerate.den, cc->ticks_per_frame, cc->delay,
+        (int)cc->bit_rate, cc->bit_rate_tolerance,
+        cc->rc_buffer_size, cc->rc_max_rate, cc->rc_min_rate,
+        cc->qmin, cc->qmax, cc->max_qdiff,
+        cc->rc_max_available_vbv_use, cc->rc_min_vbv_overflow_use, cc->rc_initial_buffer_occupancy,
         cc->width, cc->height, cc->sample_aspect_ratio.num, cc->sample_aspect_ratio.den,
         cc->coded_width, cc->coded_height, cc->gop_size,
         cc->keyint_min, cc->refs,
