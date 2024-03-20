@@ -324,6 +324,9 @@ prepare_input(
 
 #define TIMEBASE_THRESHOLD  10000
 
+/* Calculate final output timebase based on the codec timebase by replicating
+ * the logic in the ffmpeg muxer: multiply by 2 until greater than 10,000
+ */
 static int
 calc_timebase(
     xcparams_t *params,
@@ -336,7 +339,7 @@ calc_timebase(
     }
 
     if (is_video && params->video_time_base > 0)
-        return params->video_time_base;
+        timebase = params->video_time_base;
 
     while (timebase < TIMEBASE_THRESHOLD)
         timebase *= 2;
@@ -589,13 +592,6 @@ prepare_decoder(
         else
             decoder_context->codec_context[i]->thread_count = DEFAULT_THREAD_COUNT;
 
-        decoder_context->codec_context[i]->time_base = decoder_context->stream[i]->time_base;
-
-        /* Setting the frame_rate here causes slight changes to rates - leaving it unset works perfectly
-          decoder_context->codec_context[i]->framerate = av_guess_frame_rate(
-            decoder_context->format_context, decoder_context->format_context->streams[i], NULL);
-        */
-
         /* Open the decoder (initialize the decoder codec_context[i] using given codec[i]). */
         if (decoder_context->codec_parameters[i]->codec_type != AVMEDIA_TYPE_DATA &&
              (rc = avcodec_open2(decoder_context->codec_context[i], decoder_context->codec[i], NULL)) < 0) {
@@ -610,6 +606,21 @@ prepare_decoder(
             decoder_context->stream[i]->time_base.den,
             av_get_sample_fmt_name(decoder_context->codec_context[i]->sample_fmt),
             decoder_context->codec_context[i]->frame_size, url);
+
+        /* Video - set context parameters manually */
+        /* Setting the frame_rate here causes slight changes to rates - leaving it unset works perfectly
+          decoder_context->codec_context[i]->framerate = av_guess_frame_rate(
+            decoder_context->format_context, decoder_context->format_context->streams[i], NULL);
+        */
+
+        /*
+         * Force codec timebase to be the same as the input stream.  This is not required in principle but
+         * downstream logic relies on it.
+         *
+         * NOTE: Don't change the input stream or input codec_context timebase to 1/sample_rate.
+         * This will break transcoding audio if the input timebase doesn't match with output timebase. (-RM)
+         */
+        decoder_context->codec_context[i]->time_base = decoder_context->stream[i]->time_base;
 
         dump_stream(decoder_context->stream[i]);
         dump_codec_parameters(decoder_context->codec_parameters[i]);
@@ -1766,6 +1777,7 @@ is_frame_extraction_done(coderctx_t *encoder_context,
  */
 static int
 should_extract_frame(
+    coderctx_t *decoder_context,
     coderctx_t *encoder_context,
     xcparams_t *p,
     AVFrame *frame)
@@ -1790,7 +1802,7 @@ should_extract_frame(
         int64_t interval = p->extract_image_interval_ts;
         if (interval < 0) {
             interval = DEFAULT_FRAME_INTERVAL_S *
-                encoder_context->codec_context[encoder_context->video_stream_index]->time_base.den;
+                decoder_context->stream[decoder_context->video_stream_index]->time_base.den;
         }
         const int64_t time_past = frame->pts - encoder_context->video_last_pts_sent_encode;
         if (time_past >= interval || encoder_context->first_encoding_video_pts == -1) {
@@ -1864,7 +1876,7 @@ should_skip_encoding(
     }
 
     if (p->xc_type == xc_extract_images || p->xc_type == xc_extract_all_images) {
-        return !should_extract_frame(encoder_context, p, frame);
+        return !should_extract_frame(decoder_context, encoder_context, p, frame);
     }
 
     return 0;
