@@ -275,7 +275,7 @@ typedef struct coderctx_t {
     int64_t audio_last_wrapped_pts;                     /* Audio last wrapped pts */
     int64_t audio_last_input_pts;                       /* Audio last input pts */
     int64_t video_last_dts;
-    int64_t audio_last_dts;
+    int64_t audio_last_dts[MAX_STREAMS];
     int64_t last_key_frame;                             /* pts of last key frame */
     int64_t forced_keyint_countdown;                    /* frames until next forced key frame */
     int64_t video_last_pts_read;                        /* Video input last pts read */
@@ -301,7 +301,7 @@ typedef struct coderctx_t {
     int64_t video_frames_written;                       /* Total video frames written so far */
     int64_t audio_frames_written;                       /* Total audio frames written so far */
     int64_t video_pts;                                  /* Video decoder/encoder pts */
-    int64_t audio_pts;                                  /* Audio decoder/encoder pts */
+    int64_t audio_pts[MAX_STREAMS];                     /* Audio decoder/encoder pts for each track/stream */
     int64_t video_input_start_pts;                      /* In case video input stream starts at PTS > 0 */
     int     video_input_start_pts_notified;             /* Will be set as soon as out_stat_decoding_video_start_pts is fired */
     int64_t audio_input_start_pts;                      /* In case audio input stream starts at PTS > 0 */
