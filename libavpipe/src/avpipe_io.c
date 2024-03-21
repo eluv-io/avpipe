@@ -97,12 +97,15 @@ elv_io_open(
             }
         } else {
             outctx->url = strdup(url);
-            int i = 0;
-            while (i < strlen(url) && !isdigit(url[i]))
-                i++;
-            if (i < strlen(url)) {
-                // Assumes a filename like segment%d-%05d.mp4
-                outctx->stream_index = url[i] - '0';
+            outctx->stream_index = 0;
+            if (!strstr(url, "m3u8")) {
+                int i = 0;
+                while (i < strlen(url) && !isdigit(url[i]))
+                    i++;
+                if (i < strlen(url)) {
+                    // Assumes a filename like segment%d-%05d.mp4
+                    outctx->stream_index = url[i] - '0';
+                }
             }
             outctx->encoder_ctx = out_tracker[outctx->stream_index].encoder_ctx;
             outctx->inctx = out_tracker[outctx->stream_index].inctx;

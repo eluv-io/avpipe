@@ -1046,7 +1046,6 @@ usage(
         "\t-audio-bitrate :         (optional) Default: 128000\n"
         "\t-audio-decoder :         (optional) Audio decoder name. For audio default is \"aac\", but for ts files should be set to \"ac3\"\n"
         "\t-audio-encoder :         (optional) Audio encoder name. Default is \"aac\", can be \"ac3\", \"mp2\" or \"mp3\"\n"
-        "\t-audio-fill-gap :        (optional) Default: 0, must be 0 or 1. It only effects if encoder is aac.\n"
         "\t-audio-index :           (optional) Default: the indexes of audio stream (comma separated)\n"
         "\t-audio-seg-duration-ts : (mandatory If format is not \"segment\" and transcoding audio) audio segment duration time base (positive integer).\n"
         "\t-bitdepth :              (optional) Bitdepth of color space. Default is 8, can be 8, 10, or 12.\n"
@@ -1156,7 +1155,6 @@ main(
         .stream_id = -1,
         .audio_bitrate = 128000,            /* Default bitrate */
         .n_audio = 0,                       /* # of audio index */
-        .audio_fill_gap = 0,                /* Don't fill gap if there is JUMP */
         .bitdepth = 8,
         .crf_str = strdup("23"),            /* 1 best -> 23 standard middle -> 52 poor */
         .crypt_iv = NULL,
@@ -1229,13 +1227,6 @@ main(
                 p.dcodec2 = strdup(argv[i+1]);
             } else if (!strcmp(argv[i], "-audio-encoder")) {
                 p.ecodec2 = strdup(argv[i+1]);
-            } else if (!strcmp(argv[i], "-audio-fill-gap")) {
-                if (sscanf(argv[i+1], "%d", &p.audio_fill_gap) != 1) {
-                    usage(argv[0], argv[i], EXIT_FAILURE);
-                }
-                if (p.audio_fill_gap != 0 && p.audio_fill_gap != 1) {
-                    usage(argv[0], argv[i], EXIT_FAILURE);
-                }
             } else if (!strcmp(argv[i], "-audio-bitrate")) {
                 if (sscanf(argv[i+1], "%d", &p.audio_bitrate) != 1) {
                     usage(argv[0], argv[i], EXIT_FAILURE);

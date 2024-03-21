@@ -312,7 +312,6 @@ typedef struct coderctx_t {
     int64_t first_encoding_audio_pts;                   /* PTS of first audio frame sent to the encoder */
     int64_t first_read_frame_pts[MAX_STREAMS];          /* PTS of first frame read - which might not be decodable */
 
-    int64_t audio_input_prev_pts;       /* Previous pts for audio input */
     int64_t video_encoder_prev_pts;     /* Previous pts for video output (encoder) */
     int64_t video_duration;             /* Duration/pts of original frame */
     int64_t audio_duration;             /* Audio duration/pts of original frame when tx_type == tx_all */
@@ -425,7 +424,6 @@ typedef struct xcparams_t {
 
     int         audio_index[MAX_AUDIO_MUX]; // Audio index(s) for mez making, may need to become an array of indexes
     int         n_audio;                    // Number of entries in audio_index
-    int         audio_fill_gap;             // Audio only, fills the gap if there is a jump in PTS
     int         sync_audio_to_stream_id;    // mpegts only, default is 0
     int         bitdepth;                   // Can be 8, 10, 12
     char        *max_cll;                   // Maximum Content Light Level (HDR only)

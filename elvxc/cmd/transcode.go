@@ -272,7 +272,6 @@ func InitTranscode(cmdRoot *cobra.Command) error {
 	cmdTranscode.PersistentFlags().StringP("audio-index", "", "", "the indexes of audio stream (comma separated).")
 	cmdTranscode.PersistentFlags().StringP("channel-layout", "", "", "audio channel layout.")
 	cmdTranscode.PersistentFlags().Int32P("gpu-index", "", -1, "Use the GPU with specified index for transcoding (export CUDA_DEVICE_ORDER=PCI_BUS_ID would use smi index).")
-	cmdTranscode.PersistentFlags().BoolP("audio-fill-gap", "", false, "fill audio gap when encoder is aac and decoder is mpegts")
 	cmdTranscode.PersistentFlags().Int32P("sync-audio-to-stream-id", "", -1, "sync audio to video iframe of specific stream-id when input stream is mpegts")
 	cmdTranscode.PersistentFlags().StringP("encoder", "e", "libx264", "encoder codec, default is 'libx264', can be: 'libx264', 'libx265', 'h264_nvenc', 'h264_videotoolbox', or 'mjpeg'.")
 	cmdTranscode.PersistentFlags().StringP("audio-encoder", "", "aac", "audio encoder, default is 'aac', can be: 'aac', 'ac3', 'mp2', 'mp3'.")
@@ -385,11 +384,6 @@ func doTranscode(cmd *cobra.Command, args []string) error {
 	gpuIndex, err := cmd.Flags().GetInt32("gpu-index")
 	if err != nil {
 		return fmt.Errorf("Invalid gpu index flag")
-	}
-
-	audioFillGap, err := cmd.Flags().GetBool("audio-fill-gap")
-	if err != nil {
-		return fmt.Errorf("Invalid audio-fill-gap flag")
 	}
 
 	syncAudioToStreamId, err := cmd.Flags().GetInt32("sync-audio-to-stream-id")
@@ -681,7 +675,6 @@ func doTranscode(cmd *cobra.Command, args []string) error {
 		MasterDisplay:          masterDisplay,
 		BitDepth:               bitDepth,
 		ForceEqualFDuration:    forceEqualFrameDuration,
-		AudioFillGap:           audioFillGap,
 		SyncAudioToStreamId:    int(syncAudioToStreamId),
 		StreamId:               streamId,
 		Listen:                 listen,

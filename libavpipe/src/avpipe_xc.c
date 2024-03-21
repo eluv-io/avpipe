@@ -2545,9 +2545,6 @@ transcode_audio_aac(
             return ret;
         }
 
-        if (decoder_context->audio_input_prev_pts < 0)
-            decoder_context->audio_input_prev_pts = frame->pts;
-
         decoder_context->audio_pts = packet->pts;
         /* Temporary storage for the converted input samples. */
         uint8_t **converted_input_samples = NULL;
@@ -2594,38 +2591,7 @@ transcode_audio_aac(
             }
 
             int64_t d;
-            // TODO this handles packet loss but not irregular PTS deltas that are not equal to pkt_duration
-            // If audio frames have irregular PTS the code will produce incorrect results - disabled by default
-            if (p->audio_fill_gap &&
-                (decoder_context->is_mpegts && frame->pts - decoder_context->audio_input_prev_pts > frame->pkt_duration)) {
-                /*
-                 * float pkt_ratio = ((float)(encoder_context->codec_context[stream_index]->sample_rate * frame->pkt_duration)) /
-                 *                    (((float) decoder_context->stream[stream_index]->time_base.den) * filt_frame->nb_samples);
-                 * pkt_ratio shows the transcoding ratio of output frames (packets) to input frames (packets).
-                 * For example, if input timebase is 90000 with pkt_duration = 2880,
-                 * and output sample rate is 48000 with frame duration = 1024 then pkt_ratio = 3/2 that means
-                 * for every 2 input audio frames, there would be 3 output audio frame.
-                 * Now to calculate output packet pts from input packet pts:
-                 * output_pkt_pts = decoder_context->audio_output_pts + d
-                 * where d = ((float) (frame->pts - decoder_context->audio_input_prev_pts) / frame->pkt_duration) * pkt_ratio * filt_frame->nb_samples
-                 * After simplification we will have d as follows:
-                 */
-                d = (frame->pts - decoder_context->audio_input_prev_pts) * (encoder_context->codec_context[stream_index]->time_base.den) /
-                        decoder_context->stream[stream_index]->time_base.den;
-
-                /* Round up d to nearest multiple of output frame size */
-                d = ((d+output_frame_size-1)/output_frame_size)*output_frame_size;
-                elv_warn("AUDIO JUMP from=%"PRId64", to=%"PRId64", frame->pts=%"PRId64", audio_input_prev_pts=%"PRId64", pkt_duration=%d",
-                    decoder_context->audio_output_pts,
-                    decoder_context->audio_output_pts + d,
-                    frame->pts,
-                    decoder_context->audio_input_prev_pts,
-                    frame->pkt_duration);
-            } else {
-                d = output_frame_size;
-            }
-
-            decoder_context->audio_input_prev_pts = frame->pts;
+            d = output_frame_size;
 
             while (d > 0) {
                 /* When using FIFO frames no longer have PTS */
@@ -2658,13 +2624,8 @@ transcode_audio_aac(
                         filt_frame->pts, decoder_context->audio_duration);
                 }
 
-                if (p->audio_fill_gap) {
-                    decoder_context->audio_output_pts += output_frame_size;
-                    d -= output_frame_size;
-                } else {
-                    decoder_context->audio_output_pts += d;
-                    d = 0;
-                }
+                decoder_context->audio_output_pts += d;
+                d = 0;
             }
 
             av_frame_unref(filt_frame);
@@ -3652,7 +3613,6 @@ avpipe_xc(
     decoder_context->audio_input_start_pts = AV_NOPTS_VALUE;
     decoder_context->video_duration = -1;
     encoder_context->audio_duration = -1;
-    decoder_context->audio_input_prev_pts = -1;
     encoder_context->video_encoder_prev_pts = -1;
     decoder_context->first_decoding_video_pts = AV_NOPTS_VALUE;
     decoder_context->first_decoding_audio_pts = AV_NOPTS_VALUE;
@@ -4535,7 +4495,6 @@ avpipe_init(
         "audio_index=%s "
         "channel_layout=%d (%s) "
         "sync_audio_to_stream_id=%d "
-        "audio_fill_gap=%d "
         "wm_overlay_type=%d "
         "wm_overlay_len=%d "
         "bitdepth=%d "
@@ -4562,7 +4521,7 @@ avpipe_init(
         params->crypt_iv, params->crypt_key, params->crypt_kid, params->crypt_key_url,
         params->crypt_scheme, params->n_audio, audio_index_str,
         params->channel_layout, avpipe_channel_layout_name(params->channel_layout),
-        params->sync_audio_to_stream_id, params->audio_fill_gap,
+        params->sync_audio_to_stream_id,
         params->watermark_overlay_type, params->watermark_overlay_len,
         params->bitdepth, params->listen,
         params->max_cll ? params->max_cll : "",

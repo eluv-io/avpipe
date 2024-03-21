@@ -228,7 +228,6 @@ type XcParams struct {
 	MaxCLL                 string             `json:"max_cll,omitempty"`
 	MasterDisplay          string             `json:"master_display,omitempty"`
 	BitDepth               int32              `json:"bitdepth,omitempty"`
-	AudioFillGap           bool               `json:"audio_fill_gap,omitempty"`
 	SyncAudioToStreamId    int                `json:"sync_audio_to_stream_id,omitempty"`
 	ForceEqualFDuration    bool               `json:"force_equal_frame_duration,omitempty"`
 	MuxingSpec             string             `json:"muxing_spec,omitempty"`
@@ -1259,10 +1258,6 @@ func getCParams(params *XcParams) (*C.xcparams_t, error) {
 
 	if params.ForceEqualFDuration {
 		cparams.force_equal_fduration = C.int(1)
-	}
-
-	if params.AudioFillGap {
-		cparams.audio_fill_gap = C.int(1)
 	}
 
 	if params.SkipDecoding {
