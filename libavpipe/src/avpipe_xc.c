@@ -1541,8 +1541,12 @@ prepare_encoder(
     if (params->xc_type & xc_audio) {
         encoder_context->n_audio_output = num_audio_output(decoder_context, params);
         for (int i=0; i<encoder_context->n_audio_output; i++) {
-            snprintf(encoder_context->filename2[i], MAX_AVFILENAME_LEN, "fsegment-audio%d-%s.mp4", i, "%05d");
-            avformat_alloc_output_context2(&encoder_context->format_context2[i], NULL, format, encoder_context->filename2[i]);
+            if (!strcmp(params->format, "hls") || !strcmp(params->format, "dash")) {
+                avformat_alloc_output_context2(&encoder_context->format_context2[i], NULL, format, filename2);
+            } else {
+                snprintf(encoder_context->filename2[i], MAX_AVFILENAME_LEN, "fsegment-audio%d-%s.mp4", i, "%05d");
+                avformat_alloc_output_context2(&encoder_context->format_context2[i], NULL, format, encoder_context->filename2[i]);
+            }
             if (!encoder_context->format_context2[i]) {
                 elv_dbg("could not allocate memory for audio output format stream_index=%d", params->audio_index[i]);
                 return eav_codec_context;

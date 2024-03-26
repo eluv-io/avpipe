@@ -64,7 +64,7 @@ func TestUdpToMp4(t *testing.T) {
 	xcParams.Dcodec2 = "aac"
 	xcParams.AudioSegDurationTs = 96106 // almost 2 * 48000
 	xcParams.XcType = avpipe.XcAudio
-	audioMezFiles := [3]string{"audio-mez-segment-1.mp4", "audio-mez-segment-2.mp4", "audio-mez-segment-3.mp4"}
+	audioMezFiles := [3]string{"audio-mez-segment0-1.mp4", "audio-mez-segment0-2.mp4", "audio-mez-segment0-3.mp4"}
 
 	// Now create audio dash segments out of audio mezzanines
 	go func() {
@@ -114,6 +114,90 @@ func TestUdpToMp4(t *testing.T) {
 	}
 
 	testComplete <- true
+}
+
+func TestMultiAudioUdpToMp4(t *testing.T) {
+	setupLogging()
+	outputDir := path.Join(baseOutPath, fn())
+	setupOutDir(t, outputDir)
+
+	liveSource := NewLiveSource()
+	url := fmt.Sprintf("udp://localhost:%d", liveSource.Port)
+
+	err := liveSource.Start("multi_audio_udp")
+	if err != nil {
+		t.Error(err)
+	}
+
+	xcParams := &avpipe.XcParams{
+		Format:              "fmp4-segment",
+		Seekable:            false,
+		DurationTs:          -1,
+		StartSegmentStr:     "1",
+		AudioBitrate:        384000,
+		VideoBitrate:        20000000,
+		ForceKeyInt:         60,
+		VideoSegDurationTs:  2700000,
+		AudioSegDurationTs:  1428480,
+		Ecodec2:             "aac",     // "aac"
+		Ecodec:              "libx264", // libx264 software / h264_videotoolbox mac hardware
+		EncHeight:           720,       // 1080
+		EncWidth:            1280,      // 1920
+		XcType:              avpipe.XcAll,
+		StreamId:            -1,
+		Url:                 url,
+		SyncAudioToStreamId: -1,
+		DebugFrameLevel:     debugFrameLevel,
+		NumAudio:            3,
+	}
+
+	xcParams.AudioIndex[0] = 1
+	xcParams.AudioIndex[1] = 2
+	xcParams.AudioIndex[2] = 3
+
+	// Transcode audio mez files in background
+	reqCtx := &testCtx{url: url}
+	putReqCtxByURL(url, reqCtx)
+
+	avpipe.InitIOHandler(&inputOpener{dir: outputDir}, &outputOpener{dir: outputDir})
+
+	tlog.Info("Transcoding UDP stream multi audio start", "params", fmt.Sprintf("%+v", *xcParams))
+	err = avpipe.Xc(xcParams)
+	tlog.Info("Transcoding UDP stream multi audio done", "err", err, "last pts", nil)
+	if err != nil {
+		t.Error("Transcoding UDP stream multi audio failed", "err", err)
+	}
+
+	done := make(chan bool, 1)
+
+	xcParams.NumAudio = 1
+	xcParams.AudioIndex[0] = 0
+	xcParams.Format = "dash"
+	xcParams.Dcodec2 = "aac"
+	xcParams.AudioSegDurationTs = 96106 // almost 2 * 48000
+	xcParams.XcType = avpipe.XcAudio
+	audioMezFiles := [3]string{"audio-mez-segment1-1.mp4", "audio-mez-segment1-2.mp4", "audio-mez-segment1-3.mp4"}
+
+	// Now create audio dash segments out of audio mezzanines
+	go func() {
+		for i, url := range audioMezFiles {
+			xcParams.Url = outputDir + "/" + url
+			tlog.Info("Transcoding Audio Dash start", "audioParams", fmt.Sprintf("%+v", *xcParams), "url", xcParams.Url)
+			reqCtx := &testCtx{url: xcParams.Url}
+			putReqCtxByURL(xcParams.Url, reqCtx)
+			xcParams.StartSegmentStr = fmt.Sprintf("%d", i*15+1)
+			err := avpipe.Xc(xcParams)
+			tlog.Info("Transcoding Audio Dash done", "err", err)
+			if err != nil {
+				t.Error("Transcoding Audio Dash failed", "err", err, "url", xcParams.Url)
+			}
+			done <- true
+		}
+	}()
+
+	for _ = range audioMezFiles {
+		<-done
+	}
 }
 
 // Cancels the live stream transcoding immediately after initializing the transcoding (after XcInit).

@@ -23,16 +23,16 @@ import (
 	"github.com/stretchr/testify/assert"
 )
 
-//
 // Test Streams
-// * FFmpeg HLS TS stream (separate a/v): ffmpeg -re -f lavfi -i sine=b=2 -f lavfi -i testsrc -map 0:a -map 1:v -f hls -hls_time 6 -c:a aac -ac 2 -c:v h264_videotoolbox -vf scale=1280:720 -profile:v high -pix_fmt yuv420p -r 25 -g 50 -force_key_frames "expr:gte(t,n_forced*2)" -var_stream_map "a:0,name:audio,agroup:audio v:0,name:video,agroup:audio" -hls_segment_filename "%v/%d.ts" -master_pl_name master.m3u8 "%v/playlist.m3u8"
-//   (use local HTTP server, e.g. http-server . -p 80 --cors)
-// * FFmpeg HLS TS stream (muxed a/v): ffmpeg -re -f lavfi -i sine=b=2 -f lavfi -i testsrc -map 0:a -map 1:v -f hls -hls_time 6 -c:a aac -ac 2 -c:v h264_videotoolbox -vf scale=1280:720 -profile:v high -pix_fmt yuv420p -r 25 -g 50 -force_key_frames "expr:gte(t,n_forced*2)" -var_stream_map "v:0,a:0,name:muxed" -hls_segment_filename "%v/%d.ts" -master_pl_name master.m3u8 "%v/playlist.m3u8"
-// * Sky 1080 stream: http://origin1.sedev02_newsdemuxclear.stage-cdhls.skydvn.com/cdsedev04demuxclearnews/13012/cd.m3u8
-// * Sky 720 stream: http://origin1.skynews.mobile.skydvn.com/skynews/1404/latest.m3u8
+//   - FFmpeg HLS TS stream (separate a/v): ffmpeg -re -f lavfi -i sine=b=2 -f lavfi -i testsrc -map 0:a -map 1:v -f hls -hls_time 6 -c:a aac -ac 2 -c:v h264_videotoolbox -vf scale=1280:720 -profile:v high -pix_fmt yuv420p -r 25 -g 50 -force_key_frames "expr:gte(t,n_forced*2)" -var_stream_map "a:0,name:audio,agroup:audio v:0,name:video,agroup:audio" -hls_segment_filename "%v/%d.ts" -master_pl_name master.m3u8 "%v/playlist.m3u8"
+//     (use local HTTP server, e.g. http-server . -p 80 --cors)
+//   - FFmpeg HLS TS stream (muxed a/v): ffmpeg -re -f lavfi -i sine=b=2 -f lavfi -i testsrc -map 0:a -map 1:v -f hls -hls_time 6 -c:a aac -ac 2 -c:v h264_videotoolbox -vf scale=1280:720 -profile:v high -pix_fmt yuv420p -r 25 -g 50 -force_key_frames "expr:gte(t,n_forced*2)" -var_stream_map "v:0,a:0,name:muxed" -hls_segment_filename "%v/%d.ts" -master_pl_name master.m3u8 "%v/playlist.m3u8"
+//   - Sky 1080 stream: http://origin1.sedev02_newsdemuxclear.stage-cdhls.skydvn.com/cdsedev04demuxclearnews/13012/cd.m3u8
+//   - Sky 720 stream: http://origin1.skynews.mobile.skydvn.com/skynews/1404/latest.m3u8
 //
 // To save HLS files, add the following to the test:
-//   TESTSaveToDir = "~/temp"
+//
+//	TESTSaveToDir = "~/temp"
 //
 // Akamai live stream
 const manifestURLStr = "https://moctobpltc-i.akamaihd.net/hls/live/571329/eight/playlist.m3u8"
@@ -56,7 +56,7 @@ type testCtx struct {
 	r            io.Reader
 }
 
-//Implement AVPipeInputOpener
+// Implement AVPipeInputOpener
 type inputOpener struct {
 	dir string
 	url string
@@ -496,8 +496,8 @@ func (i *inputCtx) Stat(statType avpipe.AVStatType, statArgs interface{}) error 
 	return nil
 }
 
-func (oo *outputOpener) Open(h, fd int64, stream_index, seg_index int, _ int64,
-	out_type avpipe.AVType) (avpipe.OutputHandler, error) {
+func (oo *outputOpener) Open(h, fd int64, streamIndex, segIndex int, _ int64,
+	outType avpipe.AVType) (avpipe.OutputHandler, error) {
 
 	tc, err := getReqCtxByFD(h)
 	if err != nil {
@@ -511,34 +511,34 @@ func (oo *outputOpener) Open(h, fd int64, stream_index, seg_index int, _ int64,
 
 	var filename string
 
-	switch out_type {
+	switch outType {
 	case avpipe.DASHVideoInit:
 		fallthrough
 	case avpipe.DASHAudioInit:
-		filename = fmt.Sprintf("./%s/video-init-stream%d.mp4", oo.dir, stream_index)
+		filename = fmt.Sprintf("./%s/video-init-stream%d.mp4", oo.dir, streamIndex)
 	case avpipe.DASHManifest:
 		filename = fmt.Sprintf("./%s/dash.mpd", oo.dir)
 	case avpipe.DASHVideoSegment:
-		filename = fmt.Sprintf("./%s/video-chunk-stream%d-%05d.mp4", oo.dir, stream_index, seg_index)
+		filename = fmt.Sprintf("./%s/video-chunk-stream%d-%05d.mp4", oo.dir, streamIndex, segIndex)
 	case avpipe.DASHAudioSegment:
-		filename = fmt.Sprintf("./%s/audio-chunk-stream%d-%05d.mp4", oo.dir, stream_index, seg_index)
+		filename = fmt.Sprintf("./%s/audio-chunk-stream%d-%05d.mp4", oo.dir, streamIndex, segIndex)
 	case avpipe.HLSMasterM3U:
 		filename = fmt.Sprintf("./%s/master.m3u8", oo.dir)
 	case avpipe.HLSVideoM3U:
-		filename = fmt.Sprintf("./%s/video-media_%d.m3u8", oo.dir, stream_index)
+		filename = fmt.Sprintf("./%s/video-media_%d.m3u8", oo.dir, streamIndex)
 	case avpipe.HLSAudioM3U:
-		filename = fmt.Sprintf("./%s/audio-media_%d.m3u8", oo.dir, stream_index)
+		filename = fmt.Sprintf("./%s/audio-media_%d.m3u8", oo.dir, streamIndex)
 	case avpipe.AES128Key:
 		filename = fmt.Sprintf("./%s/%s-key.bin", oo.dir, url)
 	case avpipe.MP4Segment:
-		filename = fmt.Sprintf("./%s/segment-%d.mp4", oo.dir, seg_index)
+		filename = fmt.Sprintf("./%s/segment-%d.mp4", oo.dir, segIndex)
 	case avpipe.FMP4AudioSegment:
-		filename = fmt.Sprintf("./%s/audio-mez-segment-%d.mp4", oo.dir, seg_index)
+		filename = fmt.Sprintf("./%s/audio-mez-segment%d-%d.mp4", oo.dir, streamIndex, segIndex)
 	case avpipe.FMP4VideoSegment:
-		filename = fmt.Sprintf("./%s/video-mez-segment-%d.mp4", oo.dir, seg_index)
+		filename = fmt.Sprintf("./%s/video-mez-segment-%d.mp4", oo.dir, segIndex)
 	}
 
-	tlog.Debug("OUT_OPEN", "url", tc.url, "h", h, "stream_index", stream_index, "seg_index", seg_index, "filename", filename)
+	tlog.Debug("OUT_OPEN", "url", tc.url, "h", h, "streamIndex", streamIndex, "segIndex", segIndex, "filename", filename, "outType", outType)
 
 	file, err := os.Create(filename)
 	if err != nil {
