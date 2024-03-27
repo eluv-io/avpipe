@@ -299,7 +299,7 @@ typedef struct coderctx_t {
     int     n_audio_filters;                            /* Number of initialized audio filters */
 
     int64_t video_frames_written;                       /* Total video frames written so far */
-    int64_t audio_frames_written;                       /* Total audio frames written so far */
+    int64_t audio_frames_written[MAX_STREAMS];          /* Total audio frames written so far */
     int64_t video_pts;                                  /* Video decoder/encoder pts */
     int64_t audio_pts[MAX_STREAMS];                     /* Audio decoder/encoder pts for each track/stream */
     int64_t video_input_start_pts;                      /* In case video input stream starts at PTS > 0 */
@@ -309,7 +309,7 @@ typedef struct coderctx_t {
     int64_t first_decoding_video_pts;                   /* PTS of first video frame read from the decoder */
     int64_t first_decoding_audio_pts[MAX_STREAMS];      /* PTS of first audio frame read from the decoder */
     int64_t first_encoding_video_pts;                   /* PTS of first video frame sent to the encoder */
-    int64_t first_encoding_audio_pts;                   /* PTS of first audio frame sent to the encoder */
+    int64_t first_encoding_audio_pts[MAX_STREAMS];      /* PTS of first audio frame sent to the encoder */
     int64_t first_read_frame_pts[MAX_STREAMS];          /* PTS of first frame read - which might not be decodable */
 
     int64_t video_encoder_prev_pts;     /* Previous pts for video output (encoder) */

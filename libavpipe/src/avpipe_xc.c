@@ -2029,23 +2029,23 @@ encode_frame(
             }
 #ifndef USE_RESAMPLE_AAC
             else if (selected_decoded_audio(decoder_context, stream_index) >= 0) {
-                if (encoder_context->first_encoding_audio_pts == -1) {
+                if (encoder_context->first_encoding_audio_pts[stream_index] == AV_NOPTS_VALUE) {
                     /* Remember the first video PTS to use as an offset later */
-                    encoder_context->first_encoding_audio_pts = frame->pts;
+                    encoder_context->first_encoding_audio_pts[stream_index] = frame->pts;
                     elv_log("PTS stream_index=%d first_encoding_audio_pts=%"PRId64" dec=%"PRId64" read=%"PRId64" stream=%d:%s",
                         stream_index,
-                        encoder_context->first_encoding_audio_pts,
+                        encoder_context->first_encoding_audio_pts[stream_index],
                         decoder_context->first_decoding_audio_pts[stream_index],
                         encoder_context->first_read_frame_pts[stream_index], params->xc_type, st);
                 }
 
                 // Adjust audio frame pts such that first frame sent to the encoder has PTS 0
                 if (frame->pts != AV_NOPTS_VALUE) {
-                    frame->pts -= encoder_context->first_encoding_audio_pts;
+                    frame->pts -= encoder_context->first_encoding_audio_pts[stream_index];
                     frame->pkt_dts = frame->pts;
                 }
                 if (frame->best_effort_timestamp != AV_NOPTS_VALUE)
-                    frame->best_effort_timestamp -= encoder_context->first_encoding_audio_pts;
+                    frame->best_effort_timestamp -= encoder_context->first_encoding_audio_pts[stream_index];
             }
 #endif
         }
@@ -2196,7 +2196,7 @@ encode_frame(
             else
                 output_packet->duration = 0;
             encoder_context->audio_pts[stream_index] = output_packet->pts;
-            encoder_context->audio_frames_written++;
+            encoder_context->audio_frames_written[stream_index]++;
         } else {
             if (encoder_context->video_pts != AV_NOPTS_VALUE)
                 output_packet->duration = output_packet->pts - encoder_context->video_pts;
@@ -2245,7 +2245,7 @@ encode_frame(
             if (stream_index == decoder_context->video_stream_index)
                 outctx->total_frames_written = encoder_context->video_frames_written;
             else
-                outctx->total_frames_written = encoder_context->audio_frames_written;
+                outctx->total_frames_written = encoder_context->audio_frames_written[stream_index];
             outctx->frames_written++;
             out_handlers->avpipe_stater(outctx, out_stat_frame_written);
         }
@@ -2316,9 +2316,9 @@ do_bypass(
         if (out_handlers->avpipe_stater && outctx) {
             if (is_audio) {
                 if (outctx->type != avpipe_audio_init_stream)
-                    encoder_context->audio_frames_written++;
+                    encoder_context->audio_frames_written[packet->stream_index]++;
                 encoder_context->audio_last_pts_sent_encode = packet->pts;
-                outctx->total_frames_written = encoder_context->audio_frames_written;
+                outctx->total_frames_written = encoder_context->audio_frames_written[packet->stream_index];
             } else {
                 if (outctx->type != avpipe_video_init_stream)
                     encoder_context->video_frames_written++;
@@ -3622,11 +3622,11 @@ avpipe_xc(
     encoder_context->video_encoder_prev_pts = -1;
     decoder_context->first_decoding_video_pts = AV_NOPTS_VALUE;
     encoder_context->first_encoding_video_pts = -1;
-    encoder_context->first_encoding_audio_pts = -1;
     encoder_context->video_pts = AV_NOPTS_VALUE;
 
     for (int j=0; j<MAX_STREAMS; j++) {
         decoder_context->first_decoding_audio_pts[j] = AV_NOPTS_VALUE;
+        encoder_context->first_encoding_audio_pts[j] = AV_NOPTS_VALUE;
         decoder_context->audio_input_start_pts[j] = AV_NOPTS_VALUE;
         encoder_context->audio_pts[j] = AV_NOPTS_VALUE;
         encoder_context->first_read_frame_pts[j] = -1;
