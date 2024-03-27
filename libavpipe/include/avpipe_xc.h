@@ -283,7 +283,7 @@ typedef struct coderctx_t {
     int64_t video_last_pts_sent_encode;                 /* Video last pts to encode if tx_type & tx_video */
     int64_t audio_last_pts_sent_encode[MAX_STREAMS];    /* Audio last pts to encode if tx_type & tx_audio */
     int64_t video_last_pts_encoded;                     /* Video last input pts encoded if tx_type & tx_video */
-    int64_t audio_last_pts_encoded;                     /* Audio last input pts encoded if tx_type & tx_audio */
+    int64_t audio_last_pts_encoded[MAX_STREAMS];        /* Audio last input pts encoded if tx_type & tx_audio */
 
     int64_t audio_output_pts;                           /* Used to set PTS directly when using audio FIFO */
 

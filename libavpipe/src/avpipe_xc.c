@@ -2140,7 +2140,7 @@ encode_frame(
             if (!output_packet->duration && encoder_context->audio_last_dts[stream_index] != AV_NOPTS_VALUE)
                 output_packet->duration = output_packet->dts - encoder_context->audio_last_dts[stream_index];
             encoder_context->audio_last_dts[stream_index] = output_packet->dts;
-            encoder_context->audio_last_pts_encoded = output_packet->pts;
+            encoder_context->audio_last_pts_encoded[stream_index] = output_packet->pts;
         } else {
             if (!output_packet->duration && encoder_context->video_last_dts != AV_NOPTS_VALUE)
                 output_packet->duration = output_packet->dts - encoder_context->video_last_dts;
@@ -3858,10 +3858,12 @@ xc_done:
     char audio_input_start_pts_buf[(MAX_STREAMS + 1) * 20];
     char audio_last_pts_read_buf[(MAX_STREAMS + 1) * 20];
     char audio_last_pts_sent_encode_buf[(MAX_STREAMS + 1) * 20];
+    char audio_last_pts_encoded_buf[(MAX_STREAMS + 1) * 20];
     audio_last_dts_buf[0] = '\0';
     audio_input_start_pts_buf[0] = '\0';
     audio_last_pts_read_buf[0] = '\0';
     audio_last_pts_sent_encode_buf[0] = '\0';
+    audio_last_pts_encoded_buf[0] = '\0';
     for (int i=0; i<params->n_audio; i++) {
         char buf[32];
         int audio_index = params->audio_index[i];
@@ -3870,6 +3872,7 @@ xc_done:
             strncat(audio_input_start_pts_buf, ",", (MAX_STREAMS + 1) * 20 - strlen(audio_input_start_pts_buf));
             strncat(audio_last_pts_read_buf, ",", (MAX_STREAMS + 1) * 20 - strlen(audio_last_pts_read_buf));
             strncat(audio_last_pts_sent_encode_buf, ",", (MAX_STREAMS + 1) * 20 - strlen(audio_last_pts_sent_encode_buf));
+            strncat(audio_last_pts_encoded_buf, ",", (MAX_STREAMS + 1) * 20 - strlen(audio_last_pts_encoded_buf));
         }
         sprintf(buf, "%"PRId64, encoder_context->audio_last_dts[audio_index]);
         strncat(audio_last_dts_buf, buf, (MAX_STREAMS + 1) * 20 - strlen(audio_last_dts_buf));
@@ -3879,6 +3882,8 @@ xc_done:
         strncat(audio_last_pts_read_buf, buf, (MAX_STREAMS + 1) * 20 - strlen(audio_last_pts_read_buf));
         sprintf(buf, "%"PRId64, encoder_context->audio_last_pts_sent_encode[audio_index]);
         strncat(audio_last_pts_sent_encode_buf, buf, (MAX_STREAMS + 1) * 20 - strlen(audio_last_pts_sent_encode_buf));
+        sprintf(buf, "%"PRId64, encoder_context->audio_last_pts_encoded[audio_index]);
+        strncat(audio_last_pts_encoded_buf, buf, (MAX_STREAMS + 1) * 20 - strlen(audio_last_pts_encoded_buf));
     } 
 
     elv_log("avpipe_xc done url=%s, rc=%d, xctx->err=%d, xc-type=%d, "
@@ -3887,7 +3892,7 @@ xc_done:
         " video_last_dts=%"PRId64" audio_last_dts=[%s]"
         " video_last_pts_read=%"PRId64" audio_last_pts_read=[%s]"
         " video_pts_sent_encode=%"PRId64" audio_last_pts_sent_encode=[%s]"
-        " last_pts_encoded=%"PRId64" last_pts_encoded2=%"PRId64,
+        " last_pts_encoded=%"PRId64" audio_last_pts_encoded=[%s]",
         params->url,
         rc, xctx->err, params->xc_type,
         encoder_context->video_pts,
@@ -3901,7 +3906,7 @@ xc_done:
         encoder_context->video_last_pts_sent_encode,
         audio_last_pts_sent_encode_buf,
         encoder_context->video_last_pts_encoded,
-        encoder_context->audio_last_pts_encoded);
+        audio_last_pts_encoded_buf);
 
     decoder_context->stopped = 1;
     encoder_context->stopped = 1;

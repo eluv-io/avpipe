@@ -255,7 +255,7 @@ init_audio_filters(
 
         av_buffersink_set_frame_size(buffersink_ctx,
             encoder_context->codec_context[audio_stream_index]->frame_size);
-    
+
         if ((ret = avfilter_graph_config(filter_graph, NULL)) < 0)
             goto end;
 
