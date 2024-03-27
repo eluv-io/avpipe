@@ -1909,7 +1909,7 @@ should_skip_encoding(
     }
 
     if (selected_decoded_audio(decoder_context, stream_index) >= 0)
-        frame_in_pts_offset = frame->pts - decoder_context->audio_input_start_pts;
+        frame_in_pts_offset = frame->pts - decoder_context->audio_input_start_pts[stream_index];
     else
         frame_in_pts_offset = frame->pts - decoder_context->video_input_start_pts;
 
@@ -2032,9 +2032,10 @@ encode_frame(
                 if (encoder_context->first_encoding_audio_pts == -1) {
                     /* Remember the first video PTS to use as an offset later */
                     encoder_context->first_encoding_audio_pts = frame->pts;
-                    elv_log("PTS first_encoding_audio_pts=%"PRId64" dec=%"PRId64" read=%"PRId64" stream=%d:%s",
+                    elv_log("PTS stream_index=%d first_encoding_audio_pts=%"PRId64" dec=%"PRId64" read=%"PRId64" stream=%d:%s",
+                        stream_index,
                         encoder_context->first_encoding_audio_pts,
-                        decoder_context->first_decoding_audio_pts,
+                        decoder_context->first_decoding_audio_pts[stream_index],
                         encoder_context->first_read_frame_pts[stream_index], params->xc_type, st);
                 }
 
@@ -2413,12 +2414,12 @@ transcode_audio(
             return eav_receive_frame;
         }
 
-        if (decoder_context->first_decoding_audio_pts == AV_NOPTS_VALUE) {
-            decoder_context->first_decoding_audio_pts = frame->pts;
+        if (decoder_context->first_decoding_audio_pts[stream_index] == AV_NOPTS_VALUE) {
+            decoder_context->first_decoding_audio_pts[stream_index] = frame->pts;
             avpipe_io_handler_t *in_handlers = decoder_context->in_handlers;
-            decoder_context->inctx->decoding_start_pts = decoder_context->first_decoding_audio_pts;
-            elv_log("first_decoding_audio_pts=%"PRId64,
-                decoder_context->first_decoding_audio_pts);
+            decoder_context->inctx->decoding_start_pts = decoder_context->first_decoding_audio_pts[stream_index];
+            elv_log("stream_index=%d first_decoding_audio_pts=%"PRId64,
+                stream_index, decoder_context->first_decoding_audio_pts[stream_index]);
             if (in_handlers->avpipe_stater)
                 in_handlers->avpipe_stater(decoder_context->inctx, in_stat_decoding_audio_start_pts);
         }
@@ -2528,12 +2529,12 @@ transcode_audio_aac(
             return eav_receive_frame;
         }
 
-        if (decoder_context->first_decoding_audio_pts == AV_NOPTS_VALUE) {
-            decoder_context->first_decoding_audio_pts = frame->pts;
+        if (decoder_context->first_decoding_audio_pts[stream_index] == AV_NOPTS_VALUE) {
+            decoder_context->first_decoding_audio_pts[stream_index] = frame->pts;
             avpipe_io_handler_t *in_handlers = decoder_context->in_handlers;
-            decoder_context->inctx->decoding_start_pts = decoder_context->first_decoding_audio_pts;
-            elv_log("first_decoding_audio_pts=%"PRId64,
-                decoder_context->first_decoding_audio_pts);
+            decoder_context->inctx->decoding_start_pts = decoder_context->first_decoding_audio_pts[stream_index];
+            elv_log("stream_index=%d first_decoding_audio_pts=%"PRId64,
+                stream_index, decoder_context->first_decoding_audio_pts);
             if (in_handlers->avpipe_stater)
                 in_handlers->avpipe_stater(decoder_context->inctx, in_stat_decoding_audio_start_pts);
         }
@@ -2605,7 +2606,7 @@ transcode_audio_aac(
                     decoder_context->audio_duration = filt_frame->pts;
 
                     int should_skip = 0;
-                    int64_t frame_in_pts_offset = frame->pts - decoder_context->audio_input_start_pts;
+                    int64_t frame_in_pts_offset = frame->pts - decoder_context->audio_input_start_pts[stream_index];
                     /* If frame PTS < start_time_ts then don't encode audio frame */
                     if (p->start_time_ts > 0 && frame_in_pts_offset < p->start_time_ts) {
                          elv_dbg("ENCODE SKIP audio frame early pts=%" PRId64
@@ -3095,15 +3096,16 @@ should_stop_decoding(
     int frames_allowed_past_duration)
 {
     int64_t input_packet_rel_pts = 0;
+    int stream_index = input_packet->stream_index;
 
     if (decoder_context->cancelled)
         return 1;
 
-    if (input_packet->stream_index != decoder_context->video_stream_index &&
-        selected_decoded_audio(decoder_context, input_packet->stream_index) < 0)
+    if (stream_index != decoder_context->video_stream_index &&
+        selected_decoded_audio(decoder_context, stream_index) < 0)
         return 0;
 
-    if (input_packet->stream_index == decoder_context->video_stream_index &&
+    if (stream_index == decoder_context->video_stream_index &&
         (params->xc_type & xc_video)) {
         if (decoder_context->video_input_start_pts == AV_NOPTS_VALUE) {
             decoder_context->video_input_start_pts = input_packet->pts;
@@ -3112,15 +3114,15 @@ should_stop_decoding(
         }
 
         input_packet_rel_pts = input_packet->pts - decoder_context->video_input_start_pts;
-    } else if (selected_decoded_audio(decoder_context, input_packet->stream_index) >= 0 &&
+    } else if (selected_decoded_audio(decoder_context, stream_index) >= 0 &&
         params->xc_type & xc_audio) {
-        if (decoder_context->audio_input_start_pts == AV_NOPTS_VALUE) {
-            decoder_context->audio_input_start_pts = input_packet->pts;
-            elv_log("audio_input_start_pts=%"PRId64,
-                decoder_context->audio_input_start_pts);
+        if (decoder_context->audio_input_start_pts[stream_index] == AV_NOPTS_VALUE) {
+            decoder_context->audio_input_start_pts[stream_index] = input_packet->pts;
+            elv_log("stream_index=%d audio_input_start_pts=%"PRId64,
+                stream_index, decoder_context->audio_input_start_pts[stream_index]);
         }
 
-        input_packet_rel_pts = input_packet->pts - decoder_context->audio_input_start_pts;
+        input_packet_rel_pts = input_packet->pts - decoder_context->audio_input_start_pts[stream_index];
     }
 
     /* PENDING (RM) for some of the live feeds (like RTMP) we need to scale input_packet_rel_pts */
@@ -3147,10 +3149,10 @@ should_stop_decoding(
     }
 
     if (input_packet->pts != AV_NOPTS_VALUE) {
-        if (selected_decoded_audio(decoder_context, input_packet->stream_index) >= 0 &&
+        if (selected_decoded_audio(decoder_context, stream_index) >= 0 &&
             params->xc_type & xc_audio)
             encoder_context->audio_last_pts_read = input_packet->pts;
-        else if (input_packet->stream_index == decoder_context->video_stream_index &&
+        else if (stream_index == decoder_context->video_stream_index &&
             params->xc_type & xc_video)
             encoder_context->video_last_pts_read = input_packet->pts;
     }
@@ -3181,13 +3183,14 @@ skip_until_start_time_pts(
     if (params->xc_type == xc_video)
         input_start_pts = decoder_context->video_input_start_pts;
     else
-        input_start_pts = decoder_context->audio_input_start_pts;
+        input_start_pts = decoder_context->audio_input_start_pts[input_packet->stream_index];
 
     const int64_t packet_in_pts_offset = input_packet->pts - input_start_pts;
     /* Drop frames before the desired 'start_time' */
     if (packet_in_pts_offset < params->start_time_ts) {
-        elv_dbg("PREDECODE SKIP frame early pts=%" PRId64 ", start_time_ts=%" PRId64
+        elv_dbg("PREDECODE SKIP frame early stream_index=%d, pts=%" PRId64 ", start_time_ts=%" PRId64
             ", input_start_pts=%" PRId64 ", packet_in_pts_offset=%" PRId64,
+            input_packet->stream_index,
             input_packet->pts, params->start_time_ts,
             input_start_pts, packet_in_pts_offset);
         return 1;
@@ -3614,17 +3617,17 @@ avpipe_xc(
     }
 
     decoder_context->video_input_start_pts = AV_NOPTS_VALUE;
-    decoder_context->audio_input_start_pts = AV_NOPTS_VALUE;
     decoder_context->video_duration = -1;
     encoder_context->audio_duration = -1;
     encoder_context->video_encoder_prev_pts = -1;
     decoder_context->first_decoding_video_pts = AV_NOPTS_VALUE;
-    decoder_context->first_decoding_audio_pts = AV_NOPTS_VALUE;
     encoder_context->first_encoding_video_pts = -1;
     encoder_context->first_encoding_audio_pts = -1;
     encoder_context->video_pts = AV_NOPTS_VALUE;
 
     for (int j=0; j<MAX_STREAMS; j++) {
+        decoder_context->first_decoding_audio_pts[j] = AV_NOPTS_VALUE;
+        decoder_context->audio_input_start_pts[j] = AV_NOPTS_VALUE;
         encoder_context->audio_pts[j] = AV_NOPTS_VALUE;
         encoder_context->first_read_frame_pts[j] = -1;
     }
@@ -3852,18 +3855,26 @@ xc_done:
     }
 
     char audio_last_dts_buf[(MAX_STREAMS + 1) * 20];
+    char audio_input_start_pts_buf[(MAX_STREAMS + 1) * 20];
     audio_last_dts_buf[0] = '\0';
-    for (int i=0; i<MAX_STREAMS; i++) {
+    audio_input_start_pts_buf[0] = '\0';
+    for (int i=0; i<params->n_audio; i++) {
         char buf[32];
-        sprintf(buf, "%"PRId64, encoder_context->audio_last_dts[i]);
-        strncat(audio_last_dts_buf, ",", (MAX_STREAMS + 1) * 20 - strlen(audio_last_dts_buf));
+        int audio_index = params->audio_index[i];
+        if (i > 0) {
+            strncat(audio_last_dts_buf, ",", (MAX_STREAMS + 1) * 20 - strlen(audio_last_dts_buf));
+            strncat(audio_input_start_pts_buf, ",", (MAX_STREAMS + 1) * 20 - strlen(audio_input_start_pts_buf));
+        }
+        sprintf(buf, "%"PRId64, encoder_context->audio_last_dts[audio_index]);
         strncat(audio_last_dts_buf, buf, (MAX_STREAMS + 1) * 20 - strlen(audio_last_dts_buf));
+        sprintf(buf, "%"PRId64, encoder_context->audio_input_start_pts[audio_index]);
+        strncat(audio_input_start_pts_buf, buf, (MAX_STREAMS + 1) * 20 - strlen(audio_input_start_pts_buf));
     } 
 
     elv_log("avpipe_xc done url=%s, rc=%d, xctx->err=%d, xc-type=%d, "
         "last video_pts=%"PRId64" audio_pts=%"PRId64
-        " video_input_start_pts=%"PRId64" audio_input_start_pts=%"PRId64
-        " video_last_dts=%"PRId64" audio_last_dts=%s"
+        " video_input_start_pts=%"PRId64" audio_input_start_pts=[%s]"
+        " video_last_dts=%"PRId64" audio_last_dts=[%s]"
         " last_pts_read=%"PRId64" last_pts_read2=%"PRId64
         " video_pts_sent_encode=%"PRId64" audio_pts_sent_encode=%"PRId64
         " last_pts_encoded=%"PRId64" last_pts_encoded2=%"PRId64,
@@ -3872,7 +3883,7 @@ xc_done:
         encoder_context->video_pts,
         encoder_context->audio_pts,
         encoder_context->video_input_start_pts,
-        encoder_context->audio_input_start_pts,
+        audio_input_start_pts_buf,
         encoder_context->video_last_dts,
         audio_last_dts_buf,
         encoder_context->video_last_pts_read,

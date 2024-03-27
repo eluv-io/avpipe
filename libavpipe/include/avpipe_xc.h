@@ -304,10 +304,10 @@ typedef struct coderctx_t {
     int64_t audio_pts[MAX_STREAMS];                     /* Audio decoder/encoder pts for each track/stream */
     int64_t video_input_start_pts;                      /* In case video input stream starts at PTS > 0 */
     int     video_input_start_pts_notified;             /* Will be set as soon as out_stat_decoding_video_start_pts is fired */
-    int64_t audio_input_start_pts;                      /* In case audio input stream starts at PTS > 0 */
+    int64_t audio_input_start_pts[MAX_STREAMS];         /* In case audio input stream starts at PTS > 0 */
     int     audio_input_start_pts_notified;             /* Will be set as soon as out_stat_decoding_audio_start_pts is fired */
     int64_t first_decoding_video_pts;                   /* PTS of first video frame read from the decoder */
-    int64_t first_decoding_audio_pts;                   /* PTS of first audio frame read from the decoder */
+    int64_t first_decoding_audio_pts[MAX_STREAMS];      /* PTS of first audio frame read from the decoder */
     int64_t first_encoding_video_pts;                   /* PTS of first video frame sent to the encoder */
     int64_t first_encoding_audio_pts;                   /* PTS of first audio frame sent to the encoder */
     int64_t first_read_frame_pts[MAX_STREAMS];          /* PTS of first frame read - which might not be decodable */
