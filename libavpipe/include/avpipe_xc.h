@@ -272,16 +272,16 @@ typedef struct coderctx_t {
 
     int64_t video_last_wrapped_pts;                     /* Video last wrapped pts */
     int64_t video_last_input_pts;                       /* Video last input pts */
-    int64_t audio_last_wrapped_pts;                     /* Audio last wrapped pts */
-    int64_t audio_last_input_pts;                       /* Audio last input pts */
+    int64_t audio_last_wrapped_pts[MAX_STREAMS];        /* Audio last wrapped pts */
+    int64_t audio_last_input_pts[MAX_STREAMS];          /* Audio last input pts */
     int64_t video_last_dts;
     int64_t audio_last_dts[MAX_STREAMS];
     int64_t last_key_frame;                             /* pts of last key frame */
     int64_t forced_keyint_countdown;                    /* frames until next forced key frame */
     int64_t video_last_pts_read;                        /* Video input last pts read */
-    int64_t audio_last_pts_read;                        /* Audio input last pts reas */
+    int64_t audio_last_pts_read[MAX_STREAMS];           /* Audio input last pts read */
     int64_t video_last_pts_sent_encode;                 /* Video last pts to encode if tx_type & tx_video */
-    int64_t audio_last_pts_sent_encode;                 /* Audio last pts to encode if tx_type & tx_audio */
+    int64_t audio_last_pts_sent_encode[MAX_STREAMS];    /* Audio last pts to encode if tx_type & tx_audio */
     int64_t video_last_pts_encoded;                     /* Video last input pts encoded if tx_type & tx_video */
     int64_t audio_last_pts_encoded;                     /* Audio last input pts encoded if tx_type & tx_audio */
 

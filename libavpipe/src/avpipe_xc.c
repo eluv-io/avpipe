@@ -1904,7 +1904,7 @@ should_skip_encoding(
             url = decoder_context->inctx->url;
         elv_warn("ENCODE SKIP invalid frame, stream_index=%d, url=%s, video_last_pts_read=%"PRId64", audio_last_pts_read=%"PRId64,
             stream_index, url,
-            encoder_context->video_last_pts_read, encoder_context->audio_last_pts_read);
+            encoder_context->video_last_pts_read, encoder_context->audio_last_pts_read[stream_index]);
         return 1;
     }
 
@@ -2079,7 +2079,7 @@ encode_frame(
 
     if (frame) {
         if (params->xc_type & xc_audio && selected_decoded_audio(decoder_context, stream_index) >= 0)
-            encoder_context->audio_last_pts_sent_encode = frame->pts;
+            encoder_context->audio_last_pts_sent_encode[stream_index] = frame->pts;
         else if (params->xc_type & xc_video && stream_index == decoder_context->video_stream_index)
             encoder_context->video_last_pts_sent_encode = frame->pts;
     }
@@ -2317,7 +2317,7 @@ do_bypass(
             if (is_audio) {
                 if (outctx->type != avpipe_audio_init_stream)
                     encoder_context->audio_frames_written[packet->stream_index]++;
-                encoder_context->audio_last_pts_sent_encode = packet->pts;
+                encoder_context->audio_last_pts_sent_encode[packet->stream_index] = packet->pts;
                 outctx->total_frames_written = encoder_context->audio_frames_written[packet->stream_index];
             } else {
                 if (outctx->type != avpipe_video_init_stream)
@@ -2426,8 +2426,8 @@ transcode_audio(
 
         dump_frame(1, "IN ", codec_context->frame_number, frame, debug_frame_level);
 
-        ret = check_pts_wrapped(&decoder_context->audio_last_wrapped_pts,
-            &decoder_context->audio_last_input_pts,
+        ret = check_pts_wrapped(&decoder_context->audio_last_wrapped_pts[stream_index],
+            &decoder_context->audio_last_input_pts[stream_index],
             frame,
             stream_index);
         if (ret == eav_pts_wrapped) {
@@ -2541,8 +2541,8 @@ transcode_audio_aac(
 
         dump_frame(1, "IN ", codec_context->frame_number, frame, debug_frame_level);
 
-        ret = check_pts_wrapped(&decoder_context->audio_last_wrapped_pts,
-            &decoder_context->audio_last_input_pts,
+        ret = check_pts_wrapped(&decoder_context->audio_last_wrapped_pts[stream_index],
+            &decoder_context->audio_last_input_pts[stream_index],
             frame,
             stream_index);
         if (ret == eav_pts_wrapped) {
@@ -3151,7 +3151,7 @@ should_stop_decoding(
     if (input_packet->pts != AV_NOPTS_VALUE) {
         if (selected_decoded_audio(decoder_context, stream_index) >= 0 &&
             params->xc_type & xc_audio)
-            encoder_context->audio_last_pts_read = input_packet->pts;
+            encoder_context->audio_last_pts_read[stream_index] = input_packet->pts;
         else if (stream_index == decoder_context->video_stream_index &&
             params->xc_type & xc_video)
             encoder_context->video_last_pts_read = input_packet->pts;
@@ -3630,11 +3630,11 @@ avpipe_xc(
         decoder_context->audio_input_start_pts[j] = AV_NOPTS_VALUE;
         encoder_context->audio_pts[j] = AV_NOPTS_VALUE;
         encoder_context->first_read_frame_pts[j] = -1;
+        encoder_context->audio_last_pts_sent_encode[j] = AV_NOPTS_VALUE;
     }
     decoder_context->first_key_frame_pts = AV_NOPTS_VALUE;
     decoder_context->is_av_synced = 0;
     encoder_context->video_last_pts_sent_encode = -1;
-    encoder_context->audio_last_pts_sent_encode = -1;
 
     int64_t video_last_dts = 0;
     int frames_read_past_duration = 0;
@@ -3856,27 +3856,37 @@ xc_done:
 
     char audio_last_dts_buf[(MAX_STREAMS + 1) * 20];
     char audio_input_start_pts_buf[(MAX_STREAMS + 1) * 20];
+    char audio_last_pts_read_buf[(MAX_STREAMS + 1) * 20];
+    char audio_last_pts_sent_encode_buf[(MAX_STREAMS + 1) * 20];
     audio_last_dts_buf[0] = '\0';
     audio_input_start_pts_buf[0] = '\0';
+    audio_last_pts_read_buf[0] = '\0';
+    audio_last_pts_sent_encode_buf[0] = '\0';
     for (int i=0; i<params->n_audio; i++) {
         char buf[32];
         int audio_index = params->audio_index[i];
         if (i > 0) {
             strncat(audio_last_dts_buf, ",", (MAX_STREAMS + 1) * 20 - strlen(audio_last_dts_buf));
             strncat(audio_input_start_pts_buf, ",", (MAX_STREAMS + 1) * 20 - strlen(audio_input_start_pts_buf));
+            strncat(audio_last_pts_read_buf, ",", (MAX_STREAMS + 1) * 20 - strlen(audio_last_pts_read_buf));
+            strncat(audio_last_pts_sent_encode_buf, ",", (MAX_STREAMS + 1) * 20 - strlen(audio_last_pts_sent_encode_buf));
         }
         sprintf(buf, "%"PRId64, encoder_context->audio_last_dts[audio_index]);
         strncat(audio_last_dts_buf, buf, (MAX_STREAMS + 1) * 20 - strlen(audio_last_dts_buf));
         sprintf(buf, "%"PRId64, encoder_context->audio_input_start_pts[audio_index]);
         strncat(audio_input_start_pts_buf, buf, (MAX_STREAMS + 1) * 20 - strlen(audio_input_start_pts_buf));
+        sprintf(buf, "%"PRId64, encoder_context->audio_last_pts_read[audio_index]);
+        strncat(audio_last_pts_read_buf, buf, (MAX_STREAMS + 1) * 20 - strlen(audio_last_pts_read_buf));
+        sprintf(buf, "%"PRId64, encoder_context->audio_last_pts_sent_encode[audio_index]);
+        strncat(audio_last_pts_sent_encode_buf, buf, (MAX_STREAMS + 1) * 20 - strlen(audio_last_pts_sent_encode_buf));
     } 
 
     elv_log("avpipe_xc done url=%s, rc=%d, xctx->err=%d, xc-type=%d, "
         "last video_pts=%"PRId64" audio_pts=%"PRId64
         " video_input_start_pts=%"PRId64" audio_input_start_pts=[%s]"
         " video_last_dts=%"PRId64" audio_last_dts=[%s]"
-        " last_pts_read=%"PRId64" last_pts_read2=%"PRId64
-        " video_pts_sent_encode=%"PRId64" audio_pts_sent_encode=%"PRId64
+        " video_last_pts_read=%"PRId64" audio_last_pts_read=[%s]"
+        " video_pts_sent_encode=%"PRId64" audio_last_pts_sent_encode=[%s]"
         " last_pts_encoded=%"PRId64" last_pts_encoded2=%"PRId64,
         params->url,
         rc, xctx->err, params->xc_type,
@@ -3887,9 +3897,9 @@ xc_done:
         encoder_context->video_last_dts,
         audio_last_dts_buf,
         encoder_context->video_last_pts_read,
-        encoder_context->audio_last_pts_read,
+        audio_last_pts_read_buf,
         encoder_context->video_last_pts_sent_encode,
-        encoder_context->audio_last_pts_sent_encode,
+        audio_last_pts_sent_encode_buf,
         encoder_context->video_last_pts_encoded,
         encoder_context->audio_last_pts_encoded);
 
