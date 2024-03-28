@@ -83,25 +83,25 @@ func (i *elvxcInput) Size() int64 {
 	return fi.Size()
 }
 
-func (i *elvxcInput) Stat(statType avpipe.AVStatType, statArgs interface{}) error {
+func (i *elvxcInput) Stat(streamIndex int, statType avpipe.AVStatType, statArgs interface{}) error {
 	switch statType {
 	case avpipe.AV_IN_STAT_BYTES_READ:
 		readOffset := statArgs.(*uint64)
-		log.Info("AVCMD InputHandler.Stat", "read offset", *readOffset)
+		log.Info("AVCMD InputHandler.Stat", "read offset", *readOffset, "streamIndex", streamIndex)
 	case avpipe.AV_IN_STAT_AUDIO_FRAME_READ:
 		audioFrameRead := statArgs.(*uint64)
-		log.Info("AVCMD InputHandler.Stat", "audioFrameRead", *audioFrameRead)
+		log.Info("AVCMD InputHandler.Stat", "audioFrameRead", *audioFrameRead, "streamIndex", streamIndex)
 	case avpipe.AV_IN_STAT_VIDEO_FRAME_READ:
 		videoFrameRead := statArgs.(*uint64)
-		log.Info("AVCMD InputHandler.Stat", "videoFrameRead", *videoFrameRead)
+		log.Info("AVCMD InputHandler.Stat", "videoFrameRead", *videoFrameRead, "streamIndex", streamIndex)
 	case avpipe.AV_IN_STAT_DECODING_AUDIO_START_PTS:
 		startPTS := statArgs.(*uint64)
-		log.Info("AVCMD InputHandler.Stat", "audio start PTS", *startPTS)
+		log.Info("AVCMD InputHandler.Stat", "audio start PTS", *startPTS, "streamIndex", streamIndex)
 	case avpipe.AV_IN_STAT_DECODING_VIDEO_START_PTS:
 		startPTS := statArgs.(*uint64)
-		log.Info("AVCMD InputHandler.Stat", "video start PTS", *startPTS)
+		log.Info("AVCMD InputHandler.Stat", "video start PTS", *startPTS, "streamIndex", streamIndex)
 	case avpipe.AV_IN_STAT_DATA_SCTE35:
-		log.Info("AVCMD InputHandler.Stat", "scte35", statArgs)
+		log.Info("AVCMD InputHandler.Stat", "scte35", statArgs, "streamIndex", streamIndex)
 	}
 
 	return nil
@@ -197,19 +197,19 @@ func (o *elvxcOutput) Close() error {
 	return err
 }
 
-func (o *elvxcOutput) Stat(avType avpipe.AVType, statType avpipe.AVStatType, statArgs interface{}) error {
+func (o *elvxcOutput) Stat(streamIndex int, avType avpipe.AVType, statType avpipe.AVStatType, statArgs interface{}) error {
 
 	switch statType {
 	case avpipe.AV_OUT_STAT_BYTES_WRITTEN:
 		writeOffset := statArgs.(*uint64)
-		log.Info("AVCMD OutputHandler.Stat", "write offset", *writeOffset)
+		log.Info("AVCMD OutputHandler.Stat", "write offset", *writeOffset, "streamIndex", streamIndex)
 	case avpipe.AV_OUT_STAT_ENCODING_END_PTS:
 		endPTS := statArgs.(*uint64)
-		log.Info("AVCMD OutputHandler.Stat", "endPTS", *endPTS)
+		log.Info("AVCMD OutputHandler.Stat", "endPTS", *endPTS, "streamIndex", streamIndex)
 	case avpipe.AV_OUT_STAT_FRAME_WRITTEN:
 		encodingStats := statArgs.(*avpipe.EncodingFrameStats)
 		log.Info("AVCMD OutputHandler.Stat", "avType", avType,
-			"encodingStats", encodingStats)
+			"encodingStats", encodingStats, "streamIndex", streamIndex)
 	}
 	return nil
 }

@@ -126,39 +126,39 @@ func (i *fileInput) Size() int64 {
 	return fi.Size()
 }
 
-func (i *fileInput) Stat(statType avpipe.AVStatType, statArgs interface{}) error {
+func (i *fileInput) Stat(streamIndex int, statType avpipe.AVStatType, statArgs interface{}) error {
 	switch statType {
 	case avpipe.AV_IN_STAT_BYTES_READ:
 		readOffset := statArgs.(*uint64)
 		if debugFrameLevel {
-			log.Debug("AVP TEST IN STAT", "STAT read offset", *readOffset)
+			log.Debug("AVP TEST IN STAT", "STAT read offset", *readOffset, "streamIndex", streamIndex)
 		}
 	case avpipe.AV_IN_STAT_AUDIO_FRAME_READ:
 		audioFramesRead := statArgs.(*uint64)
 		if debugFrameLevel {
-			log.Debug("AVP TEST IN STAT", "audioFramesRead", *audioFramesRead)
+			log.Debug("AVP TEST IN STAT", "audioFramesRead", *audioFramesRead, "streamIndex", streamIndex)
 		}
 		statsInfo.audioFramesRead = *audioFramesRead
 	case avpipe.AV_IN_STAT_VIDEO_FRAME_READ:
 		videoFramesRead := statArgs.(*uint64)
 		if debugFrameLevel {
-			log.Debug("AVP TEST IN STAT", "videoFramesRead", *videoFramesRead)
+			log.Debug("AVP TEST IN STAT", "videoFramesRead", *videoFramesRead, "streamIndex", streamIndex)
 		}
 		statsInfo.videoFramesRead = *videoFramesRead
 	case avpipe.AV_IN_STAT_DECODING_AUDIO_START_PTS:
 		startPTS := statArgs.(*uint64)
 		if debugFrameLevel {
-			log.Debug("AVP TEST IN STAT", "audio start PTS", *startPTS)
+			log.Debug("AVP TEST IN STAT", "audio start PTS", *startPTS, "streamIndex", streamIndex)
 		}
 	case avpipe.AV_IN_STAT_DECODING_VIDEO_START_PTS:
 		startPTS := statArgs.(*uint64)
 		if debugFrameLevel {
-			log.Debug("AVP TEST IN STAT", "video start PTS", *startPTS)
+			log.Debug("AVP TEST IN STAT", "video start PTS", *startPTS, "streamIndex", streamIndex)
 		}
 	case avpipe.AV_IN_STAT_FIRST_KEYFRAME_PTS:
 		keyFramePTS := statArgs.(*uint64)
 		if debugFrameLevel {
-			log.Debug("AVP TEST IN STAT", "video first keyframe PTS", *keyFramePTS)
+			log.Debug("AVP TEST IN STAT", "video first keyframe PTS", *keyFramePTS, "streamIndex", streamIndex)
 		}
 		statsInfo.firstKeyFramePTS = *keyFramePTS
 	}
@@ -308,23 +308,23 @@ func (o *fileOutput) Close() error {
 	return err
 }
 
-func (o fileOutput) Stat(avType avpipe.AVType, statType avpipe.AVStatType, statArgs interface{}) error {
+func (o fileOutput) Stat(streamIndex int, avType avpipe.AVType, statType avpipe.AVStatType, statArgs interface{}) error {
 	switch statType {
 	case avpipe.AV_OUT_STAT_BYTES_WRITTEN:
 		writeOffset := statArgs.(*uint64)
 		if debugFrameLevel {
-			log.Debug("AVP TEST OUT STAT", "STAT, write offset", *writeOffset)
+			log.Debug("AVP TEST OUT STAT", "STAT, write offset", *writeOffset, "streamIndex", streamIndex)
 		}
 	case avpipe.AV_OUT_STAT_ENCODING_END_PTS:
 		endPTS := statArgs.(*uint64)
 		if debugFrameLevel {
-			log.Debug("AVP TEST OUT STAT", "STAT, endPTS", *endPTS)
+			log.Debug("AVP TEST OUT STAT", "STAT, endPTS", *endPTS, "streamIndex", streamIndex)
 		}
 	case avpipe.AV_OUT_STAT_FRAME_WRITTEN:
 		encodingStats := statArgs.(*avpipe.EncodingFrameStats)
 		if debugFrameLevel {
 			log.Debug("AVP TEST OUT STAT", "avType", avType,
-				"encodingStats", encodingStats)
+				"encodingStats", encodingStats, "streamIndex", streamIndex)
 		}
 		if avType == avpipe.FMP4AudioSegment {
 			statsInfo.encodingAudioFrameStats = *encodingStats

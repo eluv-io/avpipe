@@ -376,11 +376,11 @@ type IOHandler interface {
 	InReader(buf []byte) (int, error)
 	InSeeker(offset C.int64_t, whence C.int) error
 	InCloser() error
-	InStat(avp_stat C.avp_stat_t, stat_args *C.void) error
+	InStat(stream_index C.int, avp_stat C.avp_stat_t, stat_args *C.void) error
 	OutWriter(fd C.int, buf []byte) (int, error)
 	OutSeeker(fd C.int, offset C.int64_t, whence C.int) (int64, error)
 	OutCloser(fd C.int) error
-	OutStat(avp_stat C.avp_stat_t, stat_args *C.void) error
+	OutStat(stream_index C.int, avp_stat C.avp_stat_t, stat_args *C.void) error
 }
 
 type InputOpener interface {
@@ -404,7 +404,7 @@ type InputHandler interface {
 	Size() int64
 
 	// Reports some stats
-	Stat(statType AVStatType, statArgs interface{}) error
+	Stat(streamIndex int, statType AVStatType, statArgs interface{}) error
 }
 
 type OutputOpener interface {
@@ -429,7 +429,7 @@ type OutputHandler interface {
 	Close() error
 
 	// Reports some stats
-	Stat(avType AVType, statType AVStatType, statArgs interface{}) error
+	Stat(streamIndex int, avType AVType, statType AVStatType, statArgs interface{}) error
 }
 
 // Implement IOHandler
@@ -710,7 +710,7 @@ func (h *ioHandler) InCloser() error {
 }
 
 //export AVPipeStatInput
-func AVPipeStatInput(fd C.int64_t, avp_stat C.avp_stat_t, stat_args unsafe.Pointer) C.int {
+func AVPipeStatInput(fd C.int64_t, stream_index C.int, avp_stat C.avp_stat_t, stat_args unsafe.Pointer) C.int {
 	gMutex.Lock()
 	h := gHandlers[int64(fd)]
 	if h == nil {
@@ -719,7 +719,7 @@ func AVPipeStatInput(fd C.int64_t, avp_stat C.avp_stat_t, stat_args unsafe.Point
 	}
 	gMutex.Unlock()
 
-	err := h.InStat(avp_stat, stat_args)
+	err := h.InStat(stream_index, avp_stat, stat_args)
 	if err != nil {
 		return C.int(-1)
 	}
@@ -727,31 +727,32 @@ func AVPipeStatInput(fd C.int64_t, avp_stat C.avp_stat_t, stat_args unsafe.Point
 	return C.int(0)
 }
 
-func (h *ioHandler) InStat(avp_stat C.avp_stat_t, stat_args unsafe.Pointer) error {
+func (h *ioHandler) InStat(stream_index C.int, avp_stat C.avp_stat_t, stat_args unsafe.Pointer) error {
 	var err error
 
+	streamIndex := (int)(stream_index)
 	switch avp_stat {
 	case C.in_stat_bytes_read:
 		statArgs := *(*uint64)(stat_args)
-		err = h.input.Stat(AV_IN_STAT_BYTES_READ, &statArgs)
+		err = h.input.Stat(streamIndex, AV_IN_STAT_BYTES_READ, &statArgs)
 	case C.in_stat_decoding_audio_start_pts:
 		statArgs := *(*uint64)(stat_args)
-		err = h.input.Stat(AV_IN_STAT_DECODING_AUDIO_START_PTS, &statArgs)
+		err = h.input.Stat(streamIndex, AV_IN_STAT_DECODING_AUDIO_START_PTS, &statArgs)
 	case C.in_stat_decoding_video_start_pts:
 		statArgs := *(*uint64)(stat_args)
-		err = h.input.Stat(AV_IN_STAT_DECODING_VIDEO_START_PTS, &statArgs)
+		err = h.input.Stat(streamIndex, AV_IN_STAT_DECODING_VIDEO_START_PTS, &statArgs)
 	case C.in_stat_audio_frame_read:
 		statArgs := *(*uint64)(stat_args)
-		err = h.input.Stat(AV_IN_STAT_AUDIO_FRAME_READ, &statArgs)
+		err = h.input.Stat(streamIndex, AV_IN_STAT_AUDIO_FRAME_READ, &statArgs)
 	case C.in_stat_video_frame_read:
 		statArgs := *(*uint64)(stat_args)
-		err = h.input.Stat(AV_IN_STAT_VIDEO_FRAME_READ, &statArgs)
+		err = h.input.Stat(streamIndex, AV_IN_STAT_VIDEO_FRAME_READ, &statArgs)
 	case C.in_stat_first_keyframe_pts:
 		statArgs := *(*uint64)(stat_args)
-		err = h.input.Stat(AV_IN_STAT_FIRST_KEYFRAME_PTS, &statArgs)
+		err = h.input.Stat(streamIndex, AV_IN_STAT_FIRST_KEYFRAME_PTS, &statArgs)
 	case C.in_stat_data_scte35:
 		statArgs := C.GoString((*C.char)(stat_args))
-		err = h.input.Stat(AV_IN_STAT_DATA_SCTE35, statArgs)
+		err = h.input.Stat(streamIndex, AV_IN_STAT_DATA_SCTE35, statArgs)
 	}
 
 	return err
@@ -1047,6 +1048,7 @@ func (h *ioHandler) OutCloser(fd C.int64_t) error {
 //export AVPipeStatOutput
 func AVPipeStatOutput(handler C.int64_t,
 	fd C.int64_t,
+	stream_index C.int,
 	buf_type C.avpipe_buftype_t,
 	avp_stat C.avp_stat_t,
 	stat_args unsafe.Pointer) C.int {
@@ -1059,7 +1061,7 @@ func AVPipeStatOutput(handler C.int64_t,
 	}
 	gMutex.Unlock()
 
-	err := h.OutStat(fd, buf_type, avp_stat, stat_args)
+	err := h.OutStat(fd, stream_index, buf_type, avp_stat, stat_args)
 	if err != nil {
 		return C.int(-1)
 	}
@@ -1068,7 +1070,7 @@ func AVPipeStatOutput(handler C.int64_t,
 }
 
 //export AVPipeStatMuxOutput
-func AVPipeStatMuxOutput(fd C.int64_t, avp_stat C.avp_stat_t, stat_args unsafe.Pointer) C.int {
+func AVPipeStatMuxOutput(fd C.int64_t, stream_index C.int, avp_stat C.avp_stat_t, stat_args unsafe.Pointer) C.int {
 	gMutex.Lock()
 	outHandler := gMuxHandlers[int64(fd)]
 	if outHandler == nil {
@@ -1077,14 +1079,15 @@ func AVPipeStatMuxOutput(fd C.int64_t, avp_stat C.avp_stat_t, stat_args unsafe.P
 	}
 	gMutex.Unlock()
 
+	streamIndex := (int)(stream_index)
 	var err error
 	switch avp_stat {
 	case C.out_stat_bytes_written:
 		statArgs := *(*uint64)(stat_args)
-		err = outHandler.Stat(MuxSegment, AV_OUT_STAT_BYTES_WRITTEN, &statArgs)
+		err = outHandler.Stat(streamIndex, MuxSegment, AV_OUT_STAT_BYTES_WRITTEN, &statArgs)
 	case C.out_stat_encoding_end_pts:
 		statArgs := *(*uint64)(stat_args)
-		err = outHandler.Stat(MuxSegment, AV_OUT_STAT_ENCODING_END_PTS, &statArgs)
+		err = outHandler.Stat(streamIndex, MuxSegment, AV_OUT_STAT_ENCODING_END_PTS, &statArgs)
 	}
 
 	if err != nil {
@@ -1100,6 +1103,7 @@ type EncodingFrameStats struct {
 }
 
 func (h *ioHandler) OutStat(fd C.int64_t,
+	stream_index C.int,
 	av_type C.avpipe_buftype_t,
 	avp_stat C.avp_stat_t,
 	stat_args unsafe.Pointer) error {
@@ -1110,21 +1114,22 @@ func (h *ioHandler) OutStat(fd C.int64_t,
 		return fmt.Errorf("OutStat nil handler, fd=%d", int64(fd))
 	}
 
+	streamIndex := (int)(stream_index)
 	avType := getAVType(C.int(av_type))
 	switch avp_stat {
 	case C.out_stat_bytes_written:
 		statArgs := *(*uint64)(stat_args)
-		err = outHandler.Stat(avType, AV_OUT_STAT_BYTES_WRITTEN, &statArgs)
+		err = outHandler.Stat(streamIndex, avType, AV_OUT_STAT_BYTES_WRITTEN, &statArgs)
 	case C.out_stat_encoding_end_pts:
 		statArgs := *(*uint64)(stat_args)
-		err = outHandler.Stat(avType, AV_OUT_STAT_ENCODING_END_PTS, &statArgs)
+		err = outHandler.Stat(streamIndex, avType, AV_OUT_STAT_ENCODING_END_PTS, &statArgs)
 	case C.out_stat_frame_written:
 		encodingFramesStats := (*C.encoding_frame_stats_t)(stat_args)
 		statArgs := &EncodingFrameStats{
 			TotalFramesWritten: int64(encodingFramesStats.total_frames_written),
 			FramesWritten:      int64(encodingFramesStats.frames_written),
 		}
-		err = outHandler.Stat(avType, AV_OUT_STAT_FRAME_WRITTEN, statArgs)
+		err = outHandler.Stat(streamIndex, avType, AV_OUT_STAT_FRAME_WRITTEN, statArgs)
 	}
 
 	return err

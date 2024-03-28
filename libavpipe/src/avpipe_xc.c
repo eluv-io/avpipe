@@ -4370,16 +4370,6 @@ check_params(
         return eav_param;
     }
 
-#if 0
-    if (params->xc_type != xc_audio_join &&
-        params->xc_type != xc_audio_pan &&
-        params->xc_type != xc_audio_merge &&
-        params->n_audio > 1) {
-        elv_err("Invalid number of audio streams, n_audio=%d, url=%s", params->n_audio, params->url);
-        return eav_param;
-    }
-#endif
-
     if (params->n_audio > MAX_AUDIO_MUX) {
         elv_err("Too many audio indexes, n_audio=%d, url=%s", params->n_audio, params->url);
         return eav_param;
