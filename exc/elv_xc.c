@@ -39,11 +39,13 @@ udp_thread_func(
 int
 in_stat(
     void *opaque,
+    int stream_index,
     avp_stat_t stat_type);
 
 int
 out_stat(
     void *opaque,
+    int stream_index,
     avp_stat_t stat_type);
 
 typedef struct udp_thread_params_t {
@@ -278,7 +280,8 @@ read_channel_again:
     }
 
     if (r > 0 && c->read_bytes - c->read_reported > BYTES_READ_REPORT) {
-        in_stat(opaque, in_stat_bytes_read);
+        /* Pass stream_index 0 (stream_index has no meaning for in_stat_bytes_read) */
+        in_stat(opaque, 0, in_stat_bytes_read);
         c->read_reported = c->read_bytes;
     }
 
@@ -323,6 +326,7 @@ in_seek(
 int
 in_stat(
     void *opaque,
+    int stream_index,
     avp_stat_t stat_type)
 {
     int64_t fd;
@@ -337,30 +341,30 @@ in_stat(
     switch (stat_type) {
     case in_stat_bytes_read:
         if (debug_frame_level)
-            elv_dbg("IN STAT fd=%d, read offset=%"PRId64, fd, c->read_bytes);
+            elv_dbg("IN STAT stream_index=%d, fd=%d, read offset=%"PRId64, stream_index, fd, c->read_bytes);
         break;
     case in_stat_decoding_audio_start_pts:
         if (debug_frame_level)
-            elv_dbg("IN STAT fd=%d, audio start PTS=%"PRId64, fd, c->decoding_start_pts);
+            elv_dbg("IN STAT stream_index=%d, fd=%d, audio start PTS=%"PRId64, stream_index, fd, c->decoding_start_pts);
         break;
     case in_stat_decoding_video_start_pts:
         if (debug_frame_level)
-            elv_dbg("IN STAT fd=%d, video start PTS=%"PRId64, fd, c->decoding_start_pts);
+            elv_dbg("IN STAT stream_index=%d, fd=%d, video start PTS=%"PRId64, stream_index, fd, c->decoding_start_pts);
         break;
     case in_stat_audio_frame_read:
         if (debug_frame_level)
-            elv_dbg("IN STAT fd=%d, audio frame read=%"PRId64, fd, c->audio_frames_read);
+            elv_dbg("IN STAT stream_index=%d, fd=%d, audio frame read=%"PRId64, stream_index, fd, c->audio_frames_read);
         break;
     case in_stat_video_frame_read:
         if (debug_frame_level)
-            elv_dbg("IN STAT fd=%d, video frame read=%"PRId64, fd, c->video_frames_read);
+            elv_dbg("IN STAT stream_index=%d, fd=%d, video frame read=%"PRId64, stream_index, fd, c->video_frames_read);
         break;
     case in_stat_data_scte35:
         if (debug_frame_level)
-            elv_dbg("IN STAT fd=%d, data=%s", fd, c->data);
+            elv_dbg("IN STAT stream_index=%d, fd=%d, data=%s", stream_index, fd, c->data);
         break;
     default:
-        elv_err("IN STAT fd=%d, invalid input stat=%d", fd, stat_type);
+        elv_err("IN STAT stream_index=%d, fd=%d, invalid input stat=%d", stream_index, fd, stat_type);
         return 1;
     }
 
@@ -549,7 +553,7 @@ out_write_packet(
         outctx->written_bytes - outctx->write_reported > VIDEO_BYTES_WRITE_REPORT) ||
         (outctx->type == avpipe_audio_fmp4_segment &&
         outctx->written_bytes - outctx->write_reported > AUDIO_BYTES_WRITE_REPORT)) {
-        out_stat(opaque, out_stat_bytes_written);
+        out_stat(opaque, outctx->stream_index, out_stat_bytes_written);
         outctx->write_reported = outctx->written_bytes;
     }
 
@@ -602,6 +606,7 @@ out_closer(
 int
 out_stat(
     void *opaque,
+    int stream_index,
     avp_stat_t stat_type)
 {
     ioctx_t *outctx = (ioctx_t *)opaque;
@@ -625,21 +630,21 @@ out_stat(
     switch (stat_type) {
     case out_stat_bytes_written:
         if (xcparams->debug_frame_level)
-            elv_dbg("OUT STAT fd=%d, type=%d, write offset=%"PRId64,
-                fd, outctx->type, outctx->written_bytes);
+            elv_dbg("OUT STAT stream_index=%d, fd=%d, type=%d, write offset=%"PRId64,
+                stream_index, fd, outctx->type, outctx->written_bytes);
         break;
     case out_stat_encoding_end_pts:
         if (xcparams->debug_frame_level)
-            elv_dbg("OUT STAT fd=%d, video encoding end PTS=%"PRId64
+            elv_dbg("OUT STAT stream_index=%d, fd=%d, video encoding end PTS=%"PRId64
                 ", audio encoding end PTS=%"PRId64,
-                fd, outctx->encoder_ctx->video_last_pts_sent_encode,
+                stream_index, fd, outctx->encoder_ctx->video_last_pts_sent_encode,
                 outctx->encoder_ctx->audio_last_pts_sent_encode);
         break;
     case out_stat_frame_written:
         if (xcparams->debug_frame_level)
-            elv_dbg("OUT STAT fd=%d, type=%d, total_frames_written=%"PRId64
+            elv_dbg("OUT STAT stream_index=%d, fd=%d, type=%d, total_frames_written=%"PRId64
                 ", frames_written=%"PRId64,
-                fd, outctx->type, outctx->total_frames_written,
+                stream_index, fd, outctx->type, outctx->total_frames_written,
                 outctx->frames_written);
         break;
     default:

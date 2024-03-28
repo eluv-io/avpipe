@@ -231,6 +231,7 @@ typedef int64_t
 typedef int
 (*avpipe_stater_f)(
     void *opaque,
+    int stream_index,           /* The stream_index is not valid for input stat in_stat_bytes_read. */
     avp_stat_t stat_type);
 
 typedef struct avpipe_io_handler_t {

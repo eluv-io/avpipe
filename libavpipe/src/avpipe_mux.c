@@ -41,8 +41,11 @@ elv_mux_close(
     ioctx_t *outctx = (ioctx_t *)pb->opaque;
 
     elv_dbg("OUT elv_mux_close avioctx=%p", pb);
-    if (out_handlers) {
-        out_handlers->avpipe_stater(outctx, out_stat_encoding_end_pts);
+    if (out_handlers && outctx) {
+        if (outctx->type == avpipe_video_fmp4_segment)
+            out_handlers->avpipe_stater(outctx, 0, out_stat_encoding_end_pts);
+        else
+            out_handlers->avpipe_stater(outctx, 1, out_stat_encoding_end_pts);
         out_handlers->avpipe_closer(outctx);
     }
     free(outctx);

@@ -48,6 +48,7 @@ typedef struct udp_thread_params_t {
 static int
 out_stat(
     void *opaque,
+    int stream_index,
     avp_stat_t stat_type);
 
 int64_t AVPipeOpenInput(char *, int64_t *);
@@ -87,6 +88,7 @@ static pthread_mutex_t tx_mutex = PTHREAD_MUTEX_INITIALIZER;
 static int
 in_stat(
     void *opaque,
+    int stream_index,
     avp_stat_t stat_type);
 
 static int
@@ -182,7 +184,8 @@ in_read_packet(
         inctx->read_pos += r;
 
         if (inctx->read_bytes - inctx->read_reported > BYTES_READ_REPORT) {
-            in_stat(opaque, in_stat_bytes_read);
+            /* Pass stream_index 0 (stream_index has no meaning for in_stat_bytes_read) */
+            in_stat(opaque, 0, in_stat_bytes_read);
             inctx->read_reported = inctx->read_bytes;
         }
     }
@@ -254,6 +257,7 @@ in_seek(
 static int
 in_stat(
     void *opaque,
+    int stream_index,
     avp_stat_t stat_type)
 {
     int64_t fd;
@@ -514,6 +518,7 @@ udp_in_seek(
 static int
 udp_in_stat(
     void *opaque,
+    int stream_index,
     avp_stat_t stat_type)
 {
     int64_t fd;
@@ -634,13 +639,13 @@ out_write_packet(
         outctx->written_bytes - outctx->write_reported > VIDEO_BYTES_WRITE_REPORT) ||
         (outctx->type == avpipe_audio_fmp4_segment &&
         outctx->written_bytes - outctx->write_reported > AUDIO_BYTES_WRITE_REPORT)) {
-        out_stat(opaque, out_stat_bytes_written);
+        out_stat(opaque, outctx->stream_index, out_stat_bytes_written);
         outctx->write_reported = outctx->written_bytes;
     }
 
     if (xcparams && xcparams->debug_frame_level)
-        elv_dbg("OUT WRITE fd=%"PRId64", size=%d written=%d pos=%d total=%d",
-            fd, buf_size, bwritten, outctx->write_pos, outctx->written_bytes);
+        elv_dbg("OUT WRITE stream_index=%d, fd=%"PRId64", size=%d written=%d pos=%d total=%d",
+            outctx->stream_index, fd, buf_size, bwritten, outctx->write_pos, outctx->written_bytes);
 
     return buf_size;
 }
@@ -691,6 +696,7 @@ out_closer(
 static int
 out_stat(
     void *opaque,
+    int stream_index,
     avp_stat_t stat_type)
 {
     ioctx_t *outctx = (ioctx_t *)opaque;
@@ -1216,7 +1222,8 @@ read_next_input:
     }
 
     if (c->read_bytes - c->read_reported > BYTES_READ_REPORT) {
-        in_stat(opaque, in_stat_bytes_read);
+        /* Pass stream_index 0 (stream_index has no meaning for in_stat_bytes_read) */
+        in_stat(opaque, 0, in_stat_bytes_read);
         c->read_reported = c->read_bytes;
     }
 
@@ -1319,6 +1326,7 @@ out_mux_seek(
 static int
 out_mux_stat(
     void *opaque,
+    int stream_index,
     avp_stat_t stat_type)
 {
     ioctx_t *outctx = (ioctx_t *)opaque;

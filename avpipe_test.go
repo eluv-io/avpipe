@@ -2074,7 +2074,7 @@ func TestABRMuxing(t *testing.T) {
 	videoMezDir := path.Join(baseOutPath, f, "VideoMez4Muxing")
 	audioMezDir := path.Join(baseOutPath, f, "AudioMez4Muxing")
 	videoABRDir := path.Join(baseOutPath, f, "VideoABR4Muxing")
-	videoABRDir2 := path.Join(baseOutPath, f, "VideoABR4Muxing2")
+	videoABRDir2 := path.Join(baseOutPath, f, "VideoABR4Mugooglexing2")
 	audioABRDir := path.Join(baseOutPath, f, "AudioABR4Muxing")
 	audioABRDir2 := path.Join(baseOutPath, f, "AudioABR4Muxing2")
 	muxOutDir := path.Join(baseOutPath, f, "MuxingOutput")

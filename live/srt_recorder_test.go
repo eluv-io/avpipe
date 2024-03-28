@@ -39,8 +39,7 @@ func TestSrtToMp4(t *testing.T) {
 		StreamId:            -1,
 		Url:                 url,
 		SyncAudioToStreamId: -1,
-		//DebugFrameLevel:     debugFrameLevel,
-		DebugFrameLevel: true,
+		DebugFrameLevel:     debugFrameLevel,
 	}
 
 	// Transcode audio mez files in background

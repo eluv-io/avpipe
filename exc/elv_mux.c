@@ -300,6 +300,7 @@ out_mux_closer(
 static int
 out_mux_stat(
     void *opaque,
+    int stream_index,
     avp_stat_t stat_type)
 {
     ioctx_t *outctx = (ioctx_t *)opaque;
@@ -316,7 +317,8 @@ out_mux_stat(
 
     switch (stat_type) {
     case out_stat_bytes_written:
-        elv_log("OUT MUX STAT fd=%d, write offset=%"PRId64, fd, outctx->written_bytes);
+        elv_log("OUT MUX STAT stream_index=%d, fd=%d, write offset=%"PRId64,
+            stream_index, fd, outctx->written_bytes);
         break;
 #if 0
     /* PENDING(RM) set the hooks properly for muxing */
