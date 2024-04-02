@@ -4321,7 +4321,7 @@ check_params(
         return eav_param;
     }
 
-    if (params->n_audio > MAX_AUDIO_MUX) {
+    if (params->n_audio > MAX_STREAMS) {
         elv_err("Too many audio indexes, n_audio=%d, url=%s", params->n_audio, params->url);
         return eav_param;
     }
@@ -4416,7 +4416,7 @@ avpipe_init(
     char index_str[10];
 
     audio_index_str[0] = '\0';
-    for (int i=0; i<params->n_audio && i<MAX_AUDIO_MUX; i++) {
+    for (int i=0; i<params->n_audio && i<MAX_STREAMS; i++) {
         snprintf(index_str, 10, "%d", params->audio_index[i]);
         strcat(audio_index_str, index_str);
         if (i < params->n_audio-1)

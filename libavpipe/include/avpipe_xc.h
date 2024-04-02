@@ -19,8 +19,6 @@
 
 #define MAX_STREAMS	        64
 #define MAX_MUX_IN_STREAM   4096
-#define MAX_AUDIO_MUX       8
-#define MAX_CAPTION_MUX     8
 
 #define AVIO_OUT_BUF_SIZE   (1*1024*1024)   // avio output buffer size
 #define AVIO_IN_BUF_SIZE    (1*1024*1024)   // avio input buffer size
@@ -122,10 +120,10 @@ typedef struct io_mux_ctx_t {
     mux_input_ctx_t video;
     int64_t         last_video_pts;
     int             last_audio_index;
-    mux_input_ctx_t audios[MAX_AUDIO_MUX];
+    mux_input_ctx_t audios[MAX_STREAMS];
     int64_t         last_audio_pts;
     int             last_caption_index;
-    mux_input_ctx_t captions[MAX_CAPTION_MUX];
+    mux_input_ctx_t captions[MAX_STREAMS];
 } io_mux_ctx_t;
 
 typedef struct xcparams_t xcparams_t;
@@ -295,7 +293,7 @@ typedef struct coderctx_t {
 
     /* Audio filter */
     AVFilterContext *audio_buffersink_ctx[MAX_STREAMS];
-    AVFilterContext *audio_buffersrc_ctx[MAX_AUDIO_MUX];
+    AVFilterContext *audio_buffersrc_ctx[MAX_STREAMS];
     AVFilterGraph   *audio_filter_graph[MAX_STREAMS];
     int     n_audio_filters;                            /* Number of initialized audio filters */
 
@@ -423,7 +421,7 @@ typedef struct xcparams_t {
     char        *watermark_timecode;        // Watermark timecode string (i.e 00\:00\:00\:00)
     float       watermark_timecode_rate;    // Watermark timecode frame rate
 
-    int         audio_index[MAX_AUDIO_MUX]; // Audio index(s) for mez making, may need to become an array of indexes
+    int         audio_index[MAX_STREAMS]; // Audio index(s) for mez making, may need to become an array of indexes
     int         n_audio;                    // Number of entries in audio_index
     int         sync_audio_to_stream_id;    // mpegts only, default is 0
     int         bitdepth;                   // Can be 8, 10, 12
@@ -502,13 +500,13 @@ typedef struct xctx_t {
      * Each video/audio/caption input stream can have multiple input files/parts.
      * Each video/audio/caption input stream has its own coderctx_t and ioctx_t.
      */
-    io_mux_ctx_t        *in_mux_ctx;                                        // Input muxer context
-    coderctx_t          in_muxer_ctx[MAX_AUDIO_MUX+MAX_CAPTION_MUX+1];      // Video, audio, captions coder input muxer context (one video, multiple audio/caption)
-    ioctx_t             *inctx_muxer[MAX_AUDIO_MUX+MAX_CAPTION_MUX+1];      // Video, audio, captions io muxer context (one video, multiple audio/caption)
-    coderctx_t          out_muxer_ctx;                                      // Output muxer
+    io_mux_ctx_t        *in_mux_ctx;                    // Input muxer context
+    coderctx_t          in_muxer_ctx[MAX_STREAMS];      // Video, audio, captions coder input muxer context (one video, multiple audio/caption)
+    ioctx_t             *inctx_muxer[MAX_STREAMS];      // Video, audio, captions io muxer context (one video, multiple audio/caption)
+    coderctx_t          out_muxer_ctx;                  // Output muxer
 
-    AVPacket            pkt_array[MAX_AUDIO_MUX+MAX_CAPTION_MUX+1];
-    int                 is_pkt_valid[MAX_AUDIO_MUX+MAX_CAPTION_MUX+1];
+    AVPacket            pkt_array[MAX_STREAMS];
+    int                 is_pkt_valid[MAX_STREAMS];
 
     elv_channel_t       *vc;        // Video frame channel
     elv_channel_t       *ac;        // Audio frame channel

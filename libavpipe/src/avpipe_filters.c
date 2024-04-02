@@ -560,7 +560,7 @@ init_audio_join_filters(
     xcparams_t *params)
 {
     if (decoder_context->n_audio < 0 ||
-        decoder_context->n_audio > MAX_AUDIO_MUX) {
+        decoder_context->n_audio > MAX_STREAMS) {
         return eav_num_streams;
     }
 

@@ -172,7 +172,7 @@ const (
 	CryptCBCS
 )
 
-const MaxAudioMux = C.MAX_AUDIO_MUX
+const MaxAudioMux = C.MAX_STREAMS
 
 // XcParams should match with txparams_t in avpipe_xc.h
 type XcParams struct {
