@@ -3797,9 +3797,11 @@ xc_done:
 
     if (!params->bypass_transcoding && (params->xc_type & xc_video) && xctx->err != eav_write_frame)
         encode_frame(decoder_context, encoder_context, NULL, decoder_context->video_stream_index, params, debug_frame_level);
-    /* XXX TODO: do I need to loop through and flush all audio frames ? */
-    if (!params->bypass_transcoding && params->xc_type & xc_audio && xctx->err != eav_write_frame)
-        encode_frame(decoder_context, encoder_context, NULL, decoder_context->audio_stream_index[0], params, debug_frame_level);
+    /* Loop through and flush all audio frames */
+    if (!params->bypass_transcoding && params->xc_type & xc_audio && xctx->err != eav_write_frame) {
+        for (int i=0; i<decoder_context->n_audio; i++)
+            encode_frame(decoder_context, encoder_context, NULL, decoder_context->audio_stream_index[i], params, debug_frame_level);
+    }
 
     dump_trackers(decoder_context->format_context, encoder_context->format_context);
 

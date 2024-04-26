@@ -109,7 +109,7 @@ elv_io_open(
             }
             outctx->encoder_ctx = out_tracker[outctx->stream_index].encoder_ctx;
             outctx->inctx = out_tracker[outctx->stream_index].inctx;
-            elv_dbg("XXX stream_index=%d", outctx->stream_index);
+            //elv_dbg("XXX stream_index=%d", outctx->stream_index);
             if (!strncmp(url + strlen(url) - 3, "mpd", 3)) {
                 outctx->type = avpipe_manifest;
                 outctx->seg_index = -1;     // Special index for manifest
