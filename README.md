@@ -127,6 +127,7 @@ typedef struct xcparams_t {
     int         extract_images_sz;          // Size of the array extract_images_ts
 
     int         video_time_base;            // New video encoder time_base (1/video_time_base)
+    int         video_frame_duration_ts;    // Frame duration of the output video in time base
 
     int         debug_frame_level;
     int         connection_timeout;         // Connection timeout in sec for RTMP or MPEGTS protocols
@@ -157,7 +158,8 @@ typedef struct xcparams_t {
   - setting xc_type = xc_audio_join would join 2 or more audio inputs and create a new audio output (for example joining two mono streams and creating one stereo).
   - setting xc_type = xc_audio_pan would pick different audio channels from input and create a new audio stream (for example picking different channels from a 5.1 channel layout and producing a stereo containing two channels).
   - setting xc_type = xc_audio_merge would merge different input audio streams and produce a new multi-channel output stream (for example, merging different input mono streams and create a new 5.1)
-- **Setting video timebase:** setting video_time_base will set the timebase of generated video to 1/video_time_base (the timebase has to be bigger than 10000). 
+- **Setting video timebase:** setting video_time_base will set the timebase of generated video to 1/video_time_base (the timebase has to be bigger than 10000).
+- **Video frame duration:** the parameter video_frame_duration_ts can be used to set the duration of each video frame with the specified timebase for output video. This along with video_time_base can be used to normalize the video frames and their duration. For example, for a stream with 60 fps and video_frame_duration_ts equal to 256, the video_time_base would be 15360. As another example, for a 59.94 fps, the video_frame_duration_ts can be 1001 and video_time_base would be 60000. In this case a segment of 1800 frames would be 1801800 timebase long.
 - **Debugging with frames:** if the parameter debug_frame_level is on then the logs will also include very low level debug messages to trace reading/writing every piece of data.
 - **Connection timeout:** This parameter is useful when recording / transcoding RTMP or MPEGTS streams. If avpipe is listening for an RTMP stream, connection_timeout determines the time in sec to listen for an incoming RTMP stream. If avpipe is listening for incoming UDP MPEGTS packets, connection_timeout determines the time in sec to wait for the first incoming UDP packet (if no packet is received during connection_timeout, then timeout would happen and an error would be generated).
 
