@@ -2149,7 +2149,7 @@ encode_frame(
         output_packet->pts += params->start_pts;
         output_packet->dts += params->start_pts;
 
-        if (decoder_context->is_mpegts &&
+        if ((decoder_context->is_mpegts || decoder_context->is_srt) &&
             encoder_context->video_encoder_prev_pts > 0 &&
             stream_index == decoder_context->video_stream_index &&
             encoder_context->calculated_frame_duration > 0 &&
