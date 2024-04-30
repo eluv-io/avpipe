@@ -2004,8 +2004,8 @@ encode_frame(
 
         const char *st = stream_type_str(encoder_context, stream_index);
 
-        // Adjust PTS if input stream starts at an arbitrary value (MPEG-TS/RTMP)
-        if ( is_protocol(decoder_context) && (!strcmp(params->format, "fmp4-segment"))) {
+        // Adjust PTS if input stream starts at an arbitrary value (i.e mostly for MPEG-TS/RTMP)
+        if (!strcmp(params->format, "fmp4-segment")) {
             if (stream_index == decoder_context->video_stream_index) {
                 if (encoder_context->first_encoding_video_pts == -1) {
                     /* Remember the first video PTS to use as an offset later */
