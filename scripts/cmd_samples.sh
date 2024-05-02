@@ -5,6 +5,9 @@
 ./bin/exc -seg-duration 30 -xc-type video -f media/TOS8_FHD_51-2_PRHQ_60s_CCBYblendercloud.mov -wm-text "TEST WATERMARK" -wm-color black -wm-relative-size 0.05 -wm-xloc W/2 -wm-yloc H*0.9 -format fmp4-segment
 ./bin/exc -seg-duration 30 -xc-type video -f media/TOS8_FHD_51-2_PRHQ_60s_CCBYblendercloud.mov -wm-text "%{pts\\:gmtime\\:1602968400\\:%d-%m-%Y %T}" -wm-color black -wm-relative-size 0.05 -wm-xloc W/2 -wm-yloc H*0.9 -format fmp4-segment
 ./bin/exc -seg-duration 30 -xc-type video -f media/TOS8_FHD_51-2_PRHQ_60s_CCBYblendercloud.mov -wm-text "%{localtime}" -wm-color black -wm-relative-size 0.05 -wm-xloc W/2 -wm-yloc H*0.9 -format fmp4-segment
+./bin/exc -seg-duration 30 -xc-type video -f media/TOS8_FHD_51-2_PRHQ_60s_CCBYblendercloud.mov -wm-text "新年快乐" -wm-color black -wm-relative-size 0.05 -wm-xloc W/2 -wm-yloc H*0.9 -format fmp4-segment
+
+ffmpeg -i $input -vf \"format=yuv444p, drawbox=y=ih/PHI:color=black@0.4:width=iw:height=48:t=max, drawtext=fontfile=$font:text='$text':fontcolor=white:fontsize=24:x=w-tw:y=(h/PHI)+th, format=yuv420p\" -c:v libx264 -c:a copy -movflags +faststart $output";
 
 # Timecode watermarking
 ./bin/elvxc transcode --seg-duration 30 --xc-type video -f media/TOS8_FHD_51-2_PRHQ_60s_CCBYblendercloud.mov --wm-timecode-rate 24 --wm-color black --wm-relative-size 0.05 --wm-xloc W/2 --wm-yloc H*0.9 --format fmp4-segment --wm-timecode "00\:00\:00\:00"

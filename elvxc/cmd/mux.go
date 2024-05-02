@@ -101,17 +101,17 @@ func (muxInput *elvxcMuxInput) Size() int64 {
 	return fi.Size()
 }
 
-func (muxInput *elvxcMuxInput) Stat(statType avpipe.AVStatType, statArgs interface{}) error {
+func (muxInput *elvxcMuxInput) Stat(streamIndex int, statType avpipe.AVStatType, statArgs interface{}) error {
 	switch statType {
 	case avpipe.AV_IN_STAT_BYTES_READ:
 		readOffset := statArgs.(*uint64)
-		log.Info("elvxcMuxInput", "stat read offset", *readOffset)
+		log.Info("elvxcMuxInput", "stat read offset", *readOffset, "streamIndex", streamIndex)
 	case avpipe.AV_IN_STAT_DECODING_AUDIO_START_PTS:
 		startPTS := statArgs.(*uint64)
-		log.Info("elvxcMuxInput", "audio start PTS", *startPTS)
+		log.Info("elvxcMuxInput", "audio start PTS", *startPTS, "streamIndex", streamIndex)
 	case avpipe.AV_IN_STAT_DECODING_VIDEO_START_PTS:
 		startPTS := statArgs.(*uint64)
-		log.Info("elvxcMuxInput", "video start PTS", *startPTS)
+		log.Info("elvxcMuxInput", "video start PTS", *startPTS, "streamIndex", streamIndex)
 	}
 
 	return nil
@@ -165,14 +165,14 @@ func (muxOutput *elvxcMuxOutput) Close() error {
 	return err
 }
 
-func (muxOutput *elvxcMuxOutput) Stat(avType avpipe.AVType, statType avpipe.AVStatType, statArgs interface{}) error {
+func (muxOutput *elvxcMuxOutput) Stat(streamIndex int, avType avpipe.AVType, statType avpipe.AVStatType, statArgs interface{}) error {
 	switch statType {
 	case avpipe.AV_OUT_STAT_BYTES_WRITTEN:
 		writeOffset := statArgs.(*uint64)
-		log.Info("elvxcMuxOutput", "STAT, write offset", *writeOffset)
+		log.Info("elvxcMuxOutput", "STAT, write offset", *writeOffset, "streamIndex", streamIndex)
 	case avpipe.AV_OUT_STAT_ENCODING_END_PTS:
 		endPTS := statArgs.(*uint64)
-		log.Info("elvxcMuxOutput", "STAT, endPTS", *endPTS)
+		log.Info("elvxcMuxOutput", "STAT, endPTS", *endPTS, "streamIndex", streamIndex)
 
 	}
 

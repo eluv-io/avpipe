@@ -70,7 +70,7 @@ func TestSrtToMp4(t *testing.T) {
 	xcParams.Dcodec2 = "aac"
 	xcParams.AudioSegDurationTs = 96000 // almost 2 * 48000
 	xcParams.XcType = avpipe.XcAudio
-	audioMezFiles := [2]string{"audio-mez-segment-1.mp4", "audio-mez-segment-2.mp4"}
+	audioMezFiles := [2]string{"audio-mez-segment0-1.mp4", "audio-mez-segment0-2.mp4"}
 
 	// Now create audio dash segments out of audio mezzanines
 	go func() {

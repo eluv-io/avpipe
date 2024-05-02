@@ -161,8 +161,6 @@ init_audio_filters(
         return eav_num_streams;
     }
 
-    AVCodecContext *dec_codec_ctx = decoder_context->codec_context[decoder_context->audio_stream_index[0]];
-    AVCodecContext *enc_codec_ctx = encoder_context->codec_context[encoder_context->audio_stream_index[0]];
     char args[512];
     int ret = 0;
     AVFilterContext **abuffersrc_ctx = NULL;
@@ -173,92 +171,99 @@ init_audio_filters(
     const AVFilter *aformat = avfilter_get_by_name("aformat");
     AVFilterGraph *filter_graph;
 
-    if (!dec_codec_ctx) {
-        elv_err("init_audio_filters, audio decoder was not initialized!");
-        ret = AVERROR_UNKNOWN;
-        goto end;
-    }
+    for (int i=0; i<encoder_context->n_audio_output; i++) {
+        int audio_stream_index = decoder_context->audio_stream_index[i];
 
-    filter_graph = avfilter_graph_alloc();
-    if (!buffersrc || !buffersink || !filter_graph) {
-        elv_err("init_audio_filters, audio filtering source or sink element not found");
-        ret = AVERROR_UNKNOWN;
-        goto end;
-    }
+        AVCodecContext *dec_codec_ctx = decoder_context->codec_context[audio_stream_index];
+        AVCodecContext *enc_codec_ctx = encoder_context->codec_context[audio_stream_index];
 
-    get_avfilter_args(decoder_context, decoder_context->audio_stream_index[0], args, sizeof(args));
-    elv_dbg("init_audio_filters, audio srcfilter args=%s", args);
+        if (!dec_codec_ctx) {
+            elv_err("init_audio_filters, audio decoder was not initialized!");
+            ret = AVERROR_UNKNOWN;
+            goto end;
+        }
 
-    /* decoder_context->n_audio is 1 */
-    abuffersrc_ctx = decoder_context->audio_buffersrc_ctx;
+        filter_graph = avfilter_graph_alloc();
+        if (!buffersrc || !buffersink || !filter_graph) {
+            elv_err("init_audio_filters, audio filtering source or sink element not found");
+            ret = AVERROR_UNKNOWN;
+            goto end;
+        }
 
-    ret = avfilter_graph_create_filter(&abuffersrc_ctx[0], buffersrc, "in", args, NULL, filter_graph);
-    if (ret < 0) {
-        elv_err("init_audio_filters, cannot create audio buffer source");
-        goto end;
-    }
+        get_avfilter_args(decoder_context, audio_stream_index, args, sizeof(args));
+        elv_dbg("init_audio_filters, audio srcfilter args=%s", args);
 
-    ret = avfilter_graph_create_filter(&buffersink_ctx, buffersink, "out", NULL, NULL, filter_graph);
-    if (ret < 0) {
-        elv_err("init_audio_filters, cannot create audio buffer sink");
-        goto end;
-    }
+        abuffersrc_ctx = decoder_context->audio_buffersrc_ctx;
 
-    ret = av_opt_set_bin(buffersink_ctx, "sample_fmts",
-        (uint8_t*)&enc_codec_ctx->sample_fmt, sizeof(enc_codec_ctx->sample_fmt),
-        AV_OPT_SEARCH_CHILDREN);
-    if (ret < 0) {
-        elv_err("init_audio_filters, cannot set output sample format");
-        goto end;
-    }
+        ret = avfilter_graph_create_filter(&abuffersrc_ctx[i], buffersrc, "in", args, NULL, filter_graph);
+        if (ret < 0) {
+            elv_err("init_audio_filters, cannot create audio buffer source");
+            goto end;
+        }
 
-    ret = av_opt_set_bin(buffersink_ctx, "sample_rates",
-        (uint8_t*)&enc_codec_ctx->sample_rate, sizeof(enc_codec_ctx->sample_rate),
-        AV_OPT_SEARCH_CHILDREN);
-    if (ret < 0) {
-        elv_err("init_audio_filters, cannot set output sample rate");
-        goto end;
-    }
+        ret = avfilter_graph_create_filter(&buffersink_ctx, buffersink, "out", NULL, NULL, filter_graph);
+        if (ret < 0) {
+            elv_err("init_audio_filters, cannot create audio buffer sink");
+            goto end;
+        }
 
-    ret = av_opt_set_bin(buffersink_ctx, "channel_layouts",
-        (uint8_t*)&enc_codec_ctx->channel_layout,
-        sizeof(enc_codec_ctx->channel_layout), AV_OPT_SEARCH_CHILDREN);
-    if (ret < 0) {
-        elv_err("init_audio_filters, cannot set output channel layout");
-        goto end;
-    }
+        ret = av_opt_set_bin(buffersink_ctx, "sample_fmts",
+            (uint8_t*)&enc_codec_ctx->sample_fmt, sizeof(enc_codec_ctx->sample_fmt),
+            AV_OPT_SEARCH_CHILDREN);
+        if (ret < 0) {
+            elv_err("init_audio_filters, cannot set output sample format");
+            goto end;
+        }
 
-    snprintf(args, sizeof(args),
+        ret = av_opt_set_bin(buffersink_ctx, "sample_rates",
+            (uint8_t*)&enc_codec_ctx->sample_rate, sizeof(enc_codec_ctx->sample_rate),
+            AV_OPT_SEARCH_CHILDREN);
+        if (ret < 0) {
+            elv_err("init_audio_filters, cannot set output sample rate");
+            goto end;
+        }
+
+        ret = av_opt_set_bin(buffersink_ctx, "channel_layouts",
+            (uint8_t*)&enc_codec_ctx->channel_layout,
+            sizeof(enc_codec_ctx->channel_layout), AV_OPT_SEARCH_CHILDREN);
+        if (ret < 0) {
+            elv_err("init_audio_filters, cannot set output channel layout");
+            goto end;
+        }
+
+        snprintf(args, sizeof(args),
              "sample_fmts=%s:sample_rates=%d:channel_layouts=0x%"PRIx64,
              av_get_sample_fmt_name(enc_codec_ctx->sample_fmt), enc_codec_ctx->sample_rate,
              (uint64_t)enc_codec_ctx->channel_layout);
-    elv_dbg("init_audio_filters, audio format_filter args=%s", args);
+        elv_dbg("init_audio_filters, audio format_filter args=%s", args);
 
-    ret = avfilter_graph_create_filter(&format_ctx, aformat, "format_out_0_0", args, NULL, filter_graph);
-    if (ret < 0) {
-        elv_err("init_audio_filters, cannot create audio format filter");
-        goto end;
+        ret = avfilter_graph_create_filter(&format_ctx, aformat, "format_out_0_0", args, NULL, filter_graph);
+        if (ret < 0) {
+            elv_err("init_audio_filters, cannot create audio format filter");
+            goto end;
+        }
+
+        if ((ret = avfilter_link(abuffersrc_ctx[i], 0, format_ctx, 0)) < 0) {
+            elv_err("init_audio_filters, failed to link audio src to format, ret=%d", ret);
+            goto end;
+        }
+
+        if ((ret = avfilter_link(format_ctx, 0, buffersink_ctx, 0)) < 0) {
+            elv_err("init_audio_filters, failed to link audio format to sink, ret=%d", ret);
+            goto end;
+        }
+
+        av_buffersink_set_frame_size(buffersink_ctx,
+            encoder_context->codec_context[audio_stream_index]->frame_size);
+
+        if ((ret = avfilter_graph_config(filter_graph, NULL)) < 0)
+            goto end;
+
+        /* Fill FilteringContext */
+        decoder_context->audio_filter_graph[i] = filter_graph;
+        decoder_context->audio_buffersink_ctx[i] = buffersink_ctx;
+        decoder_context->n_audio_filters++;
     }
-
-    if ((ret = avfilter_link(abuffersrc_ctx[0], 0, format_ctx, 0)) < 0) {
-        elv_err("init_audio_filters, failed to link audio src to format, ret=%d", ret);
-        goto end;
-    }
-
-    if ((ret = avfilter_link(format_ctx, 0, buffersink_ctx, 0)) < 0) {
-        elv_err("init_audio_filters, failed to link audio format to sink, ret=%d", ret);
-        goto end;
-    }
-
-    av_buffersink_set_frame_size(buffersink_ctx,
-        encoder_context->codec_context[decoder_context->audio_stream_index[0]]->frame_size);
-
-    if ((ret = avfilter_graph_config(filter_graph, NULL)) < 0)
-        goto end;
-
-    /* Fill FilteringContext */
-    decoder_context->audio_filter_graph = filter_graph;
-    decoder_context->audio_buffersink_ctx = buffersink_ctx;
 
 end:
     if (ret < 0)
@@ -390,14 +395,15 @@ init_audio_pan_filters(
     }
 
     av_buffersink_set_frame_size(buffersink_ctx,
-        encoder_context->codec_context[decoder_context->audio_stream_index[0]]->frame_size);
+        encoder_context->codec_context[0]->frame_size);
 
     if ((ret = avfilter_graph_config(filter_graph, NULL)) < 0)
         goto end;
 
     /* Fill FilteringContext */
-    decoder_context->audio_filter_graph = filter_graph;
-    decoder_context->audio_buffersink_ctx = buffersink_ctx;
+    decoder_context->audio_filter_graph[0] = filter_graph;
+    decoder_context->audio_buffersink_ctx[0] = buffersink_ctx;
+    decoder_context->n_audio_filters++;
 
 end:
     if (ret < 0)
@@ -523,15 +529,15 @@ init_audio_merge_pan_filters(
         goto end;
     }
 
-    av_buffersink_set_frame_size(buffersink_ctx,
-        encoder_context->codec_context[decoder_context->audio_stream_index[0]]->frame_size);
+    av_buffersink_set_frame_size(buffersink_ctx, encoder_context->codec_context[0]->frame_size);
 
     if ((ret = avfilter_graph_config(filter_graph, NULL)) < 0)
         goto end;
 
     /* Fill FilteringContext */
-    decoder_context->audio_filter_graph = filter_graph;
-    decoder_context->audio_buffersink_ctx = buffersink_ctx;
+    decoder_context->audio_filter_graph[0] = filter_graph;
+    decoder_context->audio_buffersink_ctx[0] = buffersink_ctx;
+    decoder_context->n_audio_filters++;
 
 end:
     if (ret < 0)
@@ -554,7 +560,7 @@ init_audio_join_filters(
     xcparams_t *params)
 {
     if (decoder_context->n_audio < 0 ||
-        decoder_context->n_audio > MAX_AUDIO_MUX) {
+        decoder_context->n_audio > MAX_STREAMS) {
         return eav_num_streams;
     }
 
@@ -571,8 +577,8 @@ init_audio_join_filters(
     const AVFilter *aformat = avfilter_get_by_name("aformat");
     const AVFilter *join = avfilter_get_by_name("join");
 
-    decoder_context->audio_filter_graph = avfilter_graph_alloc();
-    if (!buffersrc || !buffersink || !join || !decoder_context->audio_filter_graph) {
+    decoder_context->audio_filter_graph[0] = avfilter_graph_alloc();
+    if (!buffersrc || !buffersink || !join || !decoder_context->audio_filter_graph[0]) {
         elv_err("init_audio_join_filters, audio filtering source/sink/join filter not found");
         ret = AVERROR_UNKNOWN;
         goto end;
@@ -582,7 +588,7 @@ init_audio_join_filters(
 
     /* Create join filter with n inputs */
     sprintf(args, "inputs=%d", decoder_context->n_audio);
-    ret = avfilter_graph_create_filter(&join_ctx, join, "join", args, NULL, decoder_context->audio_filter_graph);
+    ret = avfilter_graph_create_filter(&join_ctx, join, "join", args, NULL, decoder_context->audio_filter_graph[0]);
     if (ret < 0) {
         elv_err("init_audio_join_filters, cannot create audio join");
         goto end;
@@ -590,7 +596,8 @@ init_audio_join_filters(
 
     /* For each audio input create an audio source filter and link it to join filter */
     for (int i=0; i<decoder_context->n_audio; i++) {
-        AVCodecContext *dec_codec_ctx = decoder_context->codec_context[decoder_context->audio_stream_index[i]];
+        int audio_stream_index = decoder_context->audio_stream_index[i];
+        AVCodecContext *dec_codec_ctx = decoder_context->codec_context[audio_stream_index];
         char filt_name[32];
 
         if (!dec_codec_ctx) {
@@ -599,12 +606,12 @@ init_audio_join_filters(
             goto end;
         }
 
-        get_avfilter_args(decoder_context, decoder_context->audio_stream_index[i], args, sizeof(args));
+        get_avfilter_args(decoder_context, audio_stream_index, args, sizeof(args));
 
         sprintf(filt_name, "in_%d", i);
         elv_dbg("init_audio_join_filters, audio srcfilter=%s args=%s", filt_name, args);
 
-        ret = avfilter_graph_create_filter(&abuffersrc_ctx[i], buffersrc, filt_name, args, NULL, decoder_context->audio_filter_graph);
+        ret = avfilter_graph_create_filter(&abuffersrc_ctx[i], buffersrc, filt_name, args, NULL, decoder_context->audio_filter_graph[0]);
         if (ret < 0) {
             elv_err("init_audio_join_filters, cannot create audio buffer source %d", i);
             goto end;
@@ -617,7 +624,7 @@ init_audio_join_filters(
 
     }
 
-    ret = avfilter_graph_create_filter(&buffersink_ctx, buffersink, "out", NULL, NULL, decoder_context->audio_filter_graph);
+    ret = avfilter_graph_create_filter(&buffersink_ctx, buffersink, "out", NULL, NULL, decoder_context->audio_filter_graph[0]);
     if (ret < 0) {
         elv_err("init_audio_join_filters, cannot create audio buffer sink");
         goto end;
@@ -653,7 +660,7 @@ init_audio_join_filters(
              (uint64_t)enc_codec_ctx->channel_layout);
     elv_dbg("init_audio_join_filters, audio format_filter args=%s", format_args);
 
-    ret = avfilter_graph_create_filter(&format_ctx, aformat, "format_out_0_0", format_args, NULL, decoder_context->audio_filter_graph);
+    ret = avfilter_graph_create_filter(&format_ctx, aformat, "format_out_0_0", format_args, NULL, decoder_context->audio_filter_graph[0]);
     if (ret < 0) {
         elv_err("Cannot create audio format filter");
         goto end;
@@ -672,11 +679,12 @@ init_audio_join_filters(
     av_buffersink_set_frame_size(buffersink_ctx,
         encoder_context->codec_context[encoder_context->audio_stream_index[0]]->frame_size);
 
-    if ((ret = avfilter_graph_config(decoder_context->audio_filter_graph, NULL)) < 0)
+    if ((ret = avfilter_graph_config(decoder_context->audio_filter_graph[0], NULL)) < 0)
         goto end;
 
     /* Save FilteringContext */
-    decoder_context->audio_buffersink_ctx = buffersink_ctx;
+    decoder_context->audio_buffersink_ctx[0] = buffersink_ctx;
+    decoder_context->n_audio_filters++;
 
 end:
     if (ret < 0)

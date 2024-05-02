@@ -28,7 +28,7 @@ const baseOutPath = "test_out"
 const debugFrameLevel = true
 const h264Codec = "libx264"
 const videoBigBuckBunnyPath = "media/bbb_1080p_30fps_60sec.mp4"
-const videoRockyPath = "media/rocky.mp4"
+const videoBigBuckBunny3AudioPath = "media/BBB_3x_audio_streams_music_2min_48kHz.mp4"
 
 type XcTestResult struct {
 	mezFile           []string
@@ -126,39 +126,39 @@ func (i *fileInput) Size() int64 {
 	return fi.Size()
 }
 
-func (i *fileInput) Stat(statType avpipe.AVStatType, statArgs interface{}) error {
+func (i *fileInput) Stat(streamIndex int, statType avpipe.AVStatType, statArgs interface{}) error {
 	switch statType {
 	case avpipe.AV_IN_STAT_BYTES_READ:
 		readOffset := statArgs.(*uint64)
 		if debugFrameLevel {
-			log.Debug("AVP TEST IN STAT", "STAT read offset", *readOffset)
+			log.Debug("AVP TEST IN STAT", "STAT read offset", *readOffset, "streamIndex", streamIndex)
 		}
 	case avpipe.AV_IN_STAT_AUDIO_FRAME_READ:
 		audioFramesRead := statArgs.(*uint64)
 		if debugFrameLevel {
-			log.Debug("AVP TEST IN STAT", "audioFramesRead", *audioFramesRead)
+			log.Debug("AVP TEST IN STAT", "audioFramesRead", *audioFramesRead, "streamIndex", streamIndex)
 		}
 		statsInfo.audioFramesRead = *audioFramesRead
 	case avpipe.AV_IN_STAT_VIDEO_FRAME_READ:
 		videoFramesRead := statArgs.(*uint64)
 		if debugFrameLevel {
-			log.Debug("AVP TEST IN STAT", "videoFramesRead", *videoFramesRead)
+			log.Debug("AVP TEST IN STAT", "videoFramesRead", *videoFramesRead, "streamIndex", streamIndex)
 		}
 		statsInfo.videoFramesRead = *videoFramesRead
 	case avpipe.AV_IN_STAT_DECODING_AUDIO_START_PTS:
 		startPTS := statArgs.(*uint64)
 		if debugFrameLevel {
-			log.Debug("AVP TEST IN STAT", "audio start PTS", *startPTS)
+			log.Debug("AVP TEST IN STAT", "audio start PTS", *startPTS, "streamIndex", streamIndex)
 		}
 	case avpipe.AV_IN_STAT_DECODING_VIDEO_START_PTS:
 		startPTS := statArgs.(*uint64)
 		if debugFrameLevel {
-			log.Debug("AVP TEST IN STAT", "video start PTS", *startPTS)
+			log.Debug("AVP TEST IN STAT", "video start PTS", *startPTS, "streamIndex", streamIndex)
 		}
 	case avpipe.AV_IN_STAT_FIRST_KEYFRAME_PTS:
 		keyFramePTS := statArgs.(*uint64)
 		if debugFrameLevel {
-			log.Debug("AVP TEST IN STAT", "video first keyframe PTS", *keyFramePTS)
+			log.Debug("AVP TEST IN STAT", "video first keyframe PTS", *keyFramePTS, "streamIndex", streamIndex)
 		}
 		statsInfo.firstKeyFramePTS = *keyFramePTS
 	}
@@ -200,7 +200,7 @@ func (oo *fileOutputOpener) Open(_, _ int64, streamIndex, segIndex int,
 	case avpipe.FMP4VideoSegment:
 		filename = fmt.Sprintf("./%s/vsegment-%d.mp4", oo.dir, segIndex)
 	case avpipe.FMP4AudioSegment:
-		filename = fmt.Sprintf("./%s/asegment-%d.mp4", oo.dir, segIndex)
+		filename = fmt.Sprintf("./%s/asegment%d-%d.mp4", oo.dir, streamIndex, segIndex)
 	case avpipe.FrameImage:
 		filename = fmt.Sprintf("./%s/%d.jpeg", oo.dir, pts)
 	}
@@ -308,23 +308,23 @@ func (o *fileOutput) Close() error {
 	return err
 }
 
-func (o fileOutput) Stat(avType avpipe.AVType, statType avpipe.AVStatType, statArgs interface{}) error {
+func (o fileOutput) Stat(streamIndex int, avType avpipe.AVType, statType avpipe.AVStatType, statArgs interface{}) error {
 	switch statType {
 	case avpipe.AV_OUT_STAT_BYTES_WRITTEN:
 		writeOffset := statArgs.(*uint64)
 		if debugFrameLevel {
-			log.Debug("AVP TEST OUT STAT", "STAT, write offset", *writeOffset)
+			log.Debug("AVP TEST OUT STAT", "STAT, write offset", *writeOffset, "streamIndex", streamIndex)
 		}
 	case avpipe.AV_OUT_STAT_ENCODING_END_PTS:
 		endPTS := statArgs.(*uint64)
 		if debugFrameLevel {
-			log.Debug("AVP TEST OUT STAT", "STAT, endPTS", *endPTS)
+			log.Debug("AVP TEST OUT STAT", "STAT, endPTS", *endPTS, "streamIndex", streamIndex)
 		}
 	case avpipe.AV_OUT_STAT_FRAME_WRITTEN:
 		encodingStats := statArgs.(*avpipe.EncodingFrameStats)
 		if debugFrameLevel {
 			log.Debug("AVP TEST OUT STAT", "avType", avType,
-				"encodingStats", encodingStats)
+				"encodingStats", encodingStats, "streamIndex", streamIndex)
 		}
 		if avType == avpipe.FMP4AudioSegment {
 			statsInfo.encodingAudioFrameStats = *encodingStats
@@ -368,7 +368,6 @@ func TestAudioSeg(t *testing.T) {
 		Url:                    url,
 		DebugFrameLevel:        debugFrameLevel,
 	}
-	setFastEncodeParams(params, true)
 	xcTest(t, outputDir, params, nil, true)
 }
 
@@ -980,7 +979,7 @@ func TestAudioAAC2AACMezMaker(t *testing.T) {
 	}
 
 	xcTestResult := &XcTestResult{
-		mezFile:    []string{fmt.Sprintf("%s/asegment-1.mp4", outputDir)},
+		mezFile:    []string{fmt.Sprintf("%s/asegment0-1.mp4", outputDir)},
 		timeScale:  48000,
 		sampleRate: 48000,
 	}
@@ -1018,7 +1017,7 @@ func TestAudioAC3Ts2AC3MezMaker(t *testing.T) {
 	params.AudioIndex[0] = 2
 
 	xcTestResult := &XcTestResult{
-		mezFile:    []string{fmt.Sprintf("%s/asegment-1.mp4", outputDir)},
+		mezFile:    []string{fmt.Sprintf("%s/asegment0-1.mp4", outputDir)},
 		timeScale:  48000,
 		sampleRate: 48000,
 	}
@@ -1056,7 +1055,7 @@ func TestAudioAC3Ts2AACMezMaker(t *testing.T) {
 	params.AudioIndex[0] = 2
 
 	xcTestResult := &XcTestResult{
-		mezFile:    []string{fmt.Sprintf("%s/asegment-1.mp4", outputDir)},
+		mezFile:    []string{fmt.Sprintf("%s/asegment0-1.mp4", outputDir)},
 		timeScale:  48000,
 		sampleRate: 48000,
 	}
@@ -1095,7 +1094,7 @@ func TestAudioMP3Ts2AACMezMaker(t *testing.T) {
 	params.AudioIndex[0] = 1
 
 	xcTestResult := &XcTestResult{
-		mezFile:    []string{fmt.Sprintf("%s/asegment-1.mp4", outputDir)},
+		mezFile:    []string{fmt.Sprintf("%s/asegment0-1.mp4", outputDir)},
 		timeScale:  48000,
 		sampleRate: 48000,
 	}
@@ -1135,7 +1134,7 @@ func TestAudioDownmix2AACMezMaker(t *testing.T) {
 	params.AudioIndex[0] = 6
 
 	xcTestResult := &XcTestResult{
-		mezFile:           []string{fmt.Sprintf("%s/asegment-1.mp4", outputDir)},
+		mezFile:           []string{fmt.Sprintf("%s/asegment0-1.mp4", outputDir)},
 		timeScale:         48000,
 		sampleRate:        48000,
 		channelLayoutName: "stereo",
@@ -1178,7 +1177,7 @@ func TestAudio2MonoTo1Stereo(t *testing.T) {
 		channelLayoutName: "stereo",
 	}
 	for i := 1; i <= 2; i++ {
-		xcTestResult.mezFile = append(xcTestResult.mezFile, fmt.Sprintf("%s/asegment-%d.mp4", outputDir, i))
+		xcTestResult.mezFile = append(xcTestResult.mezFile, fmt.Sprintf("%s/asegment0-%d.mp4", outputDir, i))
 	}
 
 	xcTest(t, outputDir, params, xcTestResult, true)
@@ -1214,7 +1213,7 @@ func TestAudio5_1To5_1(t *testing.T) {
 		channelLayoutName: "5.1",
 	}
 	for i := 1; i <= 2; i++ {
-		xcTestResult.mezFile = append(xcTestResult.mezFile, fmt.Sprintf("%s/asegment-%d.mp4", outputDir, i))
+		xcTestResult.mezFile = append(xcTestResult.mezFile, fmt.Sprintf("%s/asegment0-%d.mp4", outputDir, i))
 	}
 
 	xcTest(t, outputDir, params, xcTestResult, true)
@@ -1252,7 +1251,7 @@ func TestAudio5_1ToStereo(t *testing.T) {
 		channelLayoutName: "stereo",
 	}
 	for i := 1; i <= 2; i++ {
-		xcTestResult.mezFile = append(xcTestResult.mezFile, fmt.Sprintf("%s/asegment-%d.mp4", outputDir, i))
+		xcTestResult.mezFile = append(xcTestResult.mezFile, fmt.Sprintf("%s/asegment0-%d.mp4", outputDir, i))
 	}
 
 	xcTest(t, outputDir, params, xcTestResult, true)
@@ -1291,7 +1290,7 @@ func TestAudioMonoToMono(t *testing.T) {
 		channelLayoutName: "mono",
 	}
 	for i := 1; i <= 2; i++ {
-		xcTestResult.mezFile = append(xcTestResult.mezFile, fmt.Sprintf("%s/asegment-%d.mp4", outputDir, i))
+		xcTestResult.mezFile = append(xcTestResult.mezFile, fmt.Sprintf("%s/asegment0-%d.mp4", outputDir, i))
 	}
 
 	xcTest(t, outputDir, params, xcTestResult, true)
@@ -1330,7 +1329,7 @@ func TestAudioQuadToQuad(t *testing.T) {
 		channelLayoutName: "quad",
 	}
 	for i := 1; i <= 2; i++ {
-		xcTestResult.mezFile = append(xcTestResult.mezFile, fmt.Sprintf("%s/asegment-%d.mp4", outputDir, i))
+		xcTestResult.mezFile = append(xcTestResult.mezFile, fmt.Sprintf("%s/asegment0-%d.mp4", outputDir, i))
 	}
 
 	xcTest(t, outputDir, params, xcTestResult, true)
@@ -1375,7 +1374,7 @@ func TestAudio6MonoTo5_1(t *testing.T) {
 		channelLayoutName: "5.1",
 	}
 	for i := 1; i <= 2; i++ {
-		xcTestResult.mezFile = append(xcTestResult.mezFile, fmt.Sprintf("%s/asegment-%d.mp4", outputDir, i))
+		xcTestResult.mezFile = append(xcTestResult.mezFile, fmt.Sprintf("%s/asegment0-%d.mp4", outputDir, i))
 	}
 
 	xcTest(t, outputDir, params, xcTestResult, true)
@@ -1420,7 +1419,7 @@ func TestAudio6MonoUnequalChannelLayoutsTo5_1(t *testing.T) {
 		channelLayoutName: "5.1",
 	}
 	for i := 1; i < 2; i++ {
-		xcTestResult.mezFile = append(xcTestResult.mezFile, fmt.Sprintf("%s/asegment-%d.mp4", outputDir, i))
+		xcTestResult.mezFile = append(xcTestResult.mezFile, fmt.Sprintf("%s/asegment0-%d.mp4", outputDir, i))
 	}
 
 	xcTest(t, outputDir, params, xcTestResult, true)
@@ -1460,7 +1459,7 @@ func TestAudio10Channel_s16To6Channel_5_1(t *testing.T) {
 		channelLayoutName: "5.1",
 	}
 	for i := 1; i <= 1; i++ {
-		xcTestResult.mezFile = append(xcTestResult.mezFile, fmt.Sprintf("%s/asegment-%d.mp4", outputDir, i))
+		xcTestResult.mezFile = append(xcTestResult.mezFile, fmt.Sprintf("%s/asegment0-%d.mp4", outputDir, i))
 	}
 
 	xcTest(t, outputDir, params, xcTestResult, true)
@@ -1501,7 +1500,7 @@ func TestAudio2Channel1Stereo(t *testing.T) {
 	}
 
 	for i := 1; i <= 2; i++ {
-		xcTestResult.mezFile = append(xcTestResult.mezFile, fmt.Sprintf("%s/asegment-%d.mp4", outputDir, i))
+		xcTestResult.mezFile = append(xcTestResult.mezFile, fmt.Sprintf("%s/asegment0-%d.mp4", outputDir, i))
 	}
 
 	xcTest(t, outputDir, params, xcTestResult, true)
@@ -1544,7 +1543,7 @@ func TestAudioPan2Channel1Stereo_pcm_60000(t *testing.T) {
 	}
 
 	for i := 1; i <= 1; i++ {
-		xcTestResult.mezFile = append(xcTestResult.mezFile, fmt.Sprintf("%s/asegment-%d.mp4", outputDir, i))
+		xcTestResult.mezFile = append(xcTestResult.mezFile, fmt.Sprintf("%s/asegment0-%d.mp4", outputDir, i))
 	}
 
 	xcTest(t, outputDir, params, xcTestResult, true)
@@ -1586,7 +1585,54 @@ func TestAudioMonoToStereo_pcm_60000(t *testing.T) {
 	}
 
 	for i := 1; i <= 1; i++ {
-		xcTestResult.mezFile = append(xcTestResult.mezFile, fmt.Sprintf("%s/asegment-%d.mp4", outputDir, i))
+		xcTestResult.mezFile = append(xcTestResult.mezFile, fmt.Sprintf("%s/asegment0-%d.mp4", outputDir, i))
+	}
+
+	xcTest(t, outputDir, params, xcTestResult, true)
+}
+
+func TestMultiAudioXc(t *testing.T) {
+	url := videoBigBuckBunny3AudioPath
+
+	if fileMissing(url, fn()) {
+		return
+	}
+
+	outputDir := path.Join(baseOutPath, fn())
+
+	params := &avpipe.XcParams{
+		BypassTranscoding:   false,
+		Format:              "fmp4-segment",
+		StartTimeTs:         0,
+		DurationTs:          -1,
+		StartSegmentStr:     "1",
+		VideoSegDurationTs:  460800,
+		AudioSegDurationTs:  1428480,
+		Ecodec:              h264Codec,
+		Dcodec:              "",
+		Ecodec2:             "aac",
+		EncHeight:           720,
+		EncWidth:            1280,
+		XcType:              avpipe.XcAll,
+		StreamId:            -1,
+		SyncAudioToStreamId: -1,
+		ForceKeyInt:         60,
+		Url:                 url,
+		DebugFrameLevel:     debugFrameLevel,
+		NumAudio:            3,
+	}
+
+	params.AudioIndex[0] = 1
+	params.AudioIndex[1] = 2
+	params.AudioIndex[2] = 3
+
+	xcTestResult := &XcTestResult{
+		timeScale: 15360,
+		pixelFmt:  "yuv420p",
+	}
+
+	for i := 1; i <= 4; i++ {
+		xcTestResult.mezFile = append(xcTestResult.mezFile, fmt.Sprintf("%s/vsegment-%d.mp4", outputDir, i))
 	}
 
 	xcTest(t, outputDir, params, xcTestResult, true)
@@ -2028,7 +2074,7 @@ func TestABRMuxing(t *testing.T) {
 	videoMezDir := path.Join(baseOutPath, f, "VideoMez4Muxing")
 	audioMezDir := path.Join(baseOutPath, f, "AudioMez4Muxing")
 	videoABRDir := path.Join(baseOutPath, f, "VideoABR4Muxing")
-	videoABRDir2 := path.Join(baseOutPath, f, "VideoABR4Muxing2")
+	videoABRDir2 := path.Join(baseOutPath, f, "VideoABR4Mugooglexing2")
 	audioABRDir := path.Join(baseOutPath, f, "AudioABR4Muxing")
 	audioABRDir2 := path.Join(baseOutPath, f, "AudioABR4Muxing2")
 	muxOutDir := path.Join(baseOutPath, f, "MuxingOutput")
@@ -2095,7 +2141,7 @@ func TestABRMuxing(t *testing.T) {
 
 	// Create audio ABR files for the first mez segment
 	setupOutDir(t, audioABRDir)
-	url = audioMezDir + "/asegment-1.mp4"
+	url = audioMezDir + "/asegment0-1.mp4"
 	log.Debug("STARTING audio ABR for muxing", "file", url)
 	params.XcType = avpipe.XcAudio
 	params.Format = "dash"
@@ -2109,7 +2155,7 @@ func TestABRMuxing(t *testing.T) {
 
 	// Create audio ABR files for the second mez segment
 	setupOutDir(t, audioABRDir2)
-	url = audioMezDir + "/asegment-2.mp4"
+	url = audioMezDir + "/asegment0-2.mp4"
 	log.Debug("STARTING audio ABR for muxing (first segment)", "file", url)
 	params.XcType = avpipe.XcAudio
 	params.Format = "dash"

@@ -83,25 +83,25 @@ func (i *elvxcInput) Size() int64 {
 	return fi.Size()
 }
 
-func (i *elvxcInput) Stat(statType avpipe.AVStatType, statArgs interface{}) error {
+func (i *elvxcInput) Stat(streamIndex int, statType avpipe.AVStatType, statArgs interface{}) error {
 	switch statType {
 	case avpipe.AV_IN_STAT_BYTES_READ:
 		readOffset := statArgs.(*uint64)
-		log.Info("AVCMD InputHandler.Stat", "read offset", *readOffset)
+		log.Info("AVCMD InputHandler.Stat", "read offset", *readOffset, "streamIndex", streamIndex)
 	case avpipe.AV_IN_STAT_AUDIO_FRAME_READ:
 		audioFrameRead := statArgs.(*uint64)
-		log.Info("AVCMD InputHandler.Stat", "audioFrameRead", *audioFrameRead)
+		log.Info("AVCMD InputHandler.Stat", "audioFrameRead", *audioFrameRead, "streamIndex", streamIndex)
 	case avpipe.AV_IN_STAT_VIDEO_FRAME_READ:
 		videoFrameRead := statArgs.(*uint64)
-		log.Info("AVCMD InputHandler.Stat", "videoFrameRead", *videoFrameRead)
+		log.Info("AVCMD InputHandler.Stat", "videoFrameRead", *videoFrameRead, "streamIndex", streamIndex)
 	case avpipe.AV_IN_STAT_DECODING_AUDIO_START_PTS:
 		startPTS := statArgs.(*uint64)
-		log.Info("AVCMD InputHandler.Stat", "audio start PTS", *startPTS)
+		log.Info("AVCMD InputHandler.Stat", "audio start PTS", *startPTS, "streamIndex", streamIndex)
 	case avpipe.AV_IN_STAT_DECODING_VIDEO_START_PTS:
 		startPTS := statArgs.(*uint64)
-		log.Info("AVCMD InputHandler.Stat", "video start PTS", *startPTS)
+		log.Info("AVCMD InputHandler.Stat", "video start PTS", *startPTS, "streamIndex", streamIndex)
 	case avpipe.AV_IN_STAT_DATA_SCTE35:
-		log.Info("AVCMD InputHandler.Stat", "scte35", statArgs)
+		log.Info("AVCMD InputHandler.Stat", "scte35", statArgs, "streamIndex", streamIndex)
 	}
 
 	return nil
@@ -197,19 +197,19 @@ func (o *elvxcOutput) Close() error {
 	return err
 }
 
-func (o *elvxcOutput) Stat(avType avpipe.AVType, statType avpipe.AVStatType, statArgs interface{}) error {
+func (o *elvxcOutput) Stat(streamIndex int, avType avpipe.AVType, statType avpipe.AVStatType, statArgs interface{}) error {
 
 	switch statType {
 	case avpipe.AV_OUT_STAT_BYTES_WRITTEN:
 		writeOffset := statArgs.(*uint64)
-		log.Info("AVCMD OutputHandler.Stat", "write offset", *writeOffset)
+		log.Info("AVCMD OutputHandler.Stat", "write offset", *writeOffset, "streamIndex", streamIndex)
 	case avpipe.AV_OUT_STAT_ENCODING_END_PTS:
 		endPTS := statArgs.(*uint64)
-		log.Info("AVCMD OutputHandler.Stat", "endPTS", *endPTS)
+		log.Info("AVCMD OutputHandler.Stat", "endPTS", *endPTS, "streamIndex", streamIndex)
 	case avpipe.AV_OUT_STAT_FRAME_WRITTEN:
 		encodingStats := statArgs.(*avpipe.EncodingFrameStats)
 		log.Info("AVCMD OutputHandler.Stat", "avType", avType,
-			"encodingStats", encodingStats)
+			"encodingStats", encodingStats, "streamIndex", streamIndex)
 	}
 	return nil
 }
@@ -272,7 +272,6 @@ func InitTranscode(cmdRoot *cobra.Command) error {
 	cmdTranscode.PersistentFlags().StringP("audio-index", "", "", "the indexes of audio stream (comma separated).")
 	cmdTranscode.PersistentFlags().StringP("channel-layout", "", "", "audio channel layout.")
 	cmdTranscode.PersistentFlags().Int32P("gpu-index", "", -1, "Use the GPU with specified index for transcoding (export CUDA_DEVICE_ORDER=PCI_BUS_ID would use smi index).")
-	cmdTranscode.PersistentFlags().BoolP("audio-fill-gap", "", false, "fill audio gap when encoder is aac and decoder is mpegts")
 	cmdTranscode.PersistentFlags().Int32P("sync-audio-to-stream-id", "", -1, "sync audio to video iframe of specific stream-id when input stream is mpegts")
 	cmdTranscode.PersistentFlags().StringP("encoder", "e", "libx264", "encoder codec, default is 'libx264', can be: 'libx264', 'libx265', 'h264_nvenc', 'h264_videotoolbox', or 'mjpeg'.")
 	cmdTranscode.PersistentFlags().StringP("audio-encoder", "", "aac", "audio encoder, default is 'aac', can be: 'aac', 'ac3', 'mp2', 'mp3'.")
@@ -385,11 +384,6 @@ func doTranscode(cmd *cobra.Command, args []string) error {
 	gpuIndex, err := cmd.Flags().GetInt32("gpu-index")
 	if err != nil {
 		return fmt.Errorf("Invalid gpu index flag")
-	}
-
-	audioFillGap, err := cmd.Flags().GetBool("audio-fill-gap")
-	if err != nil {
-		return fmt.Errorf("Invalid audio-fill-gap flag")
 	}
 
 	syncAudioToStreamId, err := cmd.Flags().GetInt32("sync-audio-to-stream-id")
@@ -681,7 +675,6 @@ func doTranscode(cmd *cobra.Command, args []string) error {
 		MasterDisplay:          masterDisplay,
 		BitDepth:               bitDepth,
 		ForceEqualFDuration:    forceEqualFrameDuration,
-		AudioFillGap:           audioFillGap,
 		SyncAudioToStreamId:    int(syncAudioToStreamId),
 		StreamId:               streamId,
 		Listen:                 listen,

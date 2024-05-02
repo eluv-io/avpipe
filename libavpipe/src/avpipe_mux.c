@@ -41,8 +41,11 @@ elv_mux_close(
     ioctx_t *outctx = (ioctx_t *)pb->opaque;
 
     elv_dbg("OUT elv_mux_close avioctx=%p", pb);
-    if (out_handlers) {
-        out_handlers->avpipe_stater(outctx, out_stat_encoding_end_pts);
+    if (out_handlers && outctx) {
+        if (outctx->type == avpipe_video_fmp4_segment)
+            out_handlers->avpipe_stater(outctx, 0, out_stat_encoding_end_pts);
+        else
+            out_handlers->avpipe_stater(outctx, 1, out_stat_encoding_end_pts);
         out_handlers->avpipe_closer(outctx);
     }
     free(outctx);
@@ -163,11 +166,11 @@ init_mux_ctx(
             elv_err("init_mux_ctx invalid video stream_index=%d", stream_index);
             return eav_param;
         }
-        if (!strcmp(stream_type, "audio") && (stream_index > MAX_AUDIO_MUX || stream_index > in_mux_ctx->last_audio_index+1)) {
+        if (!strcmp(stream_type, "audio") && (stream_index > MAX_STREAMS || stream_index > in_mux_ctx->last_audio_index+1)) {
             elv_err("init_mux_ctx invalid audio stream_index=%d", stream_index);
             return eav_param;
         }
-        if (!strcmp(stream_type, "caption") && (stream_index > MAX_CAPTION_MUX || stream_index > in_mux_ctx->last_caption_index+1)) {
+        if (!strcmp(stream_type, "caption") && (stream_index > MAX_STREAMS || stream_index > in_mux_ctx->last_caption_index+1)) {
             elv_err("init_mux_ctx invalid caption stream_index=%d", stream_index);
             return eav_param;
         }

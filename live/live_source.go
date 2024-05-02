@@ -34,6 +34,8 @@ func (l *LiveSource) Start(stream string) (err error) {
 	switch streamingMode {
 	case "udp":
 		return l.startUDP()
+	case "multi_audio_udp":
+		return l.startMultiAudioUDP()
 	case "srt":
 		return l.startSRT()
 	case "rtmp_connect":
@@ -43,6 +45,73 @@ func (l *LiveSource) Start(stream string) (err error) {
 	}
 
 	return e(fmt.Errorf("Invalid stream %s", stream))
+}
+
+func (l *LiveSource) startMultiAudioUDP() (err error) {
+	log.Debug("In LiveSource startMultiAudioUDP")
+	e := errors.Template("start live source", errors.K.IO)
+
+	if l.cmd != nil {
+		return e("reason", "already started")
+	}
+
+	var ffmpeg string
+
+	if toolchain, ok := os.LookupEnv("FFMPEG_DIST"); ok {
+		ffmpeg = filepath.Join(toolchain, "bin/ffmpeg")
+		if _, err = os.Stat(ffmpeg); err != nil {
+			log.Warn("ffmpeg in FFMPEG_DIST not found", "command", ffmpeg)
+			ffmpeg = ""
+		} else {
+			log.Debug("using ffmpeg from FFMPEG_DIST", "command", ffmpeg)
+		}
+	}
+
+	if ffmpeg == "" {
+		ffmpeg, err = exec.LookPath("ffmpeg")
+		if err != nil {
+			log.Error("Failed to find ffmpeg binary, check ELV_TOOLCHAIN env variable")
+			return e(err, "reason", "failed to find ffmpeg binary, check ELV_TOOLCHAIN env variable")
+		}
+		log.Debug("using system ffmpeg", "command", ffmpeg)
+	}
+
+	sourceUrl := fmt.Sprintf("udp://127.0.0.1:%d", l.Port)
+
+	log.Info("starting multi audio live source", "url", sourceUrl)
+
+	// i.e $FFMPEG_BIN/ffmpeg -re -i media/BBB_3x_audio_streams_music_2min_48kHz.mp4 -map 0 -c:v copy -c:a aac  -f mpegts udp://localhost:22001
+	l.cmd = exec.Command(ffmpeg,
+		"-re",
+		"-i",
+		"../media/BBB_3x_audio_streams_music_2min_48kHz.mp4",
+		"-map",
+		"0",
+		"-c:v",
+		"copy",
+		"-c:a",
+		"aac",
+		"-f",
+		"mpegts",
+		sourceUrl)
+	l.cmd.Stdout = nil
+	l.cmd.Stderr = nil
+
+	err = l.cmd.Start()
+	if err != nil {
+		log.Error("Failed to start multi audio UDP live source", "port", l.Port)
+		return e(err)
+	}
+
+	l.Pid = l.cmd.Process.Pid
+	go func() {
+		err := l.cmd.Wait()
+		if err != nil {
+			log.Error("Failed to run command", err, "pid", l.Pid, "cmd", fmt.Sprintf("%s %s", l.cmd.Path, l.cmd.Args))
+		}
+	}()
+
+	return nil
 }
 
 func (l *LiveSource) startUDP() (err error) {

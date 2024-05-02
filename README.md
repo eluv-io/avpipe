@@ -127,6 +127,7 @@ typedef struct xcparams_t {
     int         extract_images_sz;          // Size of the array extract_images_ts
 
     int         video_time_base;            // New video encoder time_base (1/video_time_base)
+    int         video_frame_duration_ts;    // Frame duration of the output video in time base
 
     int         debug_frame_level;
     int         connection_timeout;         // Connection timeout in sec for RTMP or MPEGTS protocols
@@ -143,7 +144,7 @@ typedef struct xcparams_t {
   - If xc_type=xc_audio_join then avpipe library creates an audio join filter graph and joins the selected input audio streams to produce a joint audio stream.
   - If xc_type=xc_audio_pan then avpipe library creates an audio pan filter graph to pan multiple channels in one input stream to one output stereo stream.
 - **Specifying decoder/encoder:** the ecodec/decodec params are used to set video encoder/decoder. Also ecodec2/decodec2 params are used to set audio encoder/decoder. For video the decoder can be one of "h264", "h264_cuvid", "jpeg2000", "hevc" and encoder can be "libx264", "libx265", "h264_nvenc", "h264_videotoolbox", or "mjpeg". For audio the decoder can be “aac” or “ac3” and the encoder can be "aac", "ac3", "mp2" or "mp3".
-- **Joining/merging multiple audio:** avpipe library has the capability to join and pan multiple audio input streams by setting xc_type parameter to xc_audio_join and xc_audio_pan respectively (merging multiple audio is not complete yet).
+- **Transcoding multiple audio:** avpipe library has the capability to transcode one or multiple audio streams at the same time. The _audio_index_ array includes the audio index of the streams that will be transcoded. The parameter _n_audio_ determines the number of audio indexes in the _audio_index_ array.
 - **Using GPU:** avpipe library can utilize NVIDIA cards for transcoding. In order to utilize the NVIDIA GPU, the gpu_index must be set (the default is using GPU with index 0). To find the existing GPU indexes on a machine, nvidia-smi command can be used. In addition, the decoder and encoder should be set to "h264_cuvid" or "h264_nvenc" respectively. And finally, in order to pick the correct GPU index the following environment variable must be set “CUDA_DEVICE_ORDER=PCI_BUS_ID” before running the program.
 - **Text watermarking:** this can be done with setting watermark_text, watermark_xloc, watermark_yloc, watermark_relative_sz, and watermark_font_color while transcoding a video (xc_type=xc_video), which makes specified watermark text to appear at specified location.
 - **Image watermarking:** this can be done with setting watermark_overlay (the buffer containing overlay image), watermark_overlay_len, watermark_xloc, and watermark_yloc while transcoding a video (xc_type=xc_video).
@@ -157,7 +158,8 @@ typedef struct xcparams_t {
   - setting xc_type = xc_audio_join would join 2 or more audio inputs and create a new audio output (for example joining two mono streams and creating one stereo).
   - setting xc_type = xc_audio_pan would pick different audio channels from input and create a new audio stream (for example picking different channels from a 5.1 channel layout and producing a stereo containing two channels).
   - setting xc_type = xc_audio_merge would merge different input audio streams and produce a new multi-channel output stream (for example, merging different input mono streams and create a new 5.1)
-- **Setting video timebase:** setting video_time_base will set the timebase of generated video to 1/video_time_base (the timebase has to be bigger than 10000). 
+- **Setting video timebase:** setting _video_time_base_ will set the timebase of generated video to 1/video_time_base (the timebase has to be bigger than 10000).
+- **Video frame duration:** the parameter _video_frame_duration_ts_ can be used to set the duration of each video frame with the specified timebase for output video. This along with video_time_base can be used to normalize the video frames and their duration. For example, for a stream with 60 fps and _video_frame_duration_ts_ equal to 256, the _video_time_base_ would be 15360. As another example, for a 59.94 fps, the _video_frame_duration_ts_ can be 1001 and _video_time_base_ would be 60000. In this case a segment of 1800 frames would be 1801800 timebase long.
 - **Debugging with frames:** if the parameter debug_frame_level is on then the logs will also include very low level debug messages to trace reading/writing every piece of data.
 - **Connection timeout:** This parameter is useful when recording / transcoding RTMP or MPEGTS streams. If avpipe is listening for an RTMP stream, connection_timeout determines the time in sec to listen for an incoming RTMP stream. If avpipe is listening for incoming UDP MPEGTS packets, connection_timeout determines the time in sec to wait for the first incoming UDP packet (if no packet is received during connection_timeout, then timeout would happen and an error would be generated).
 

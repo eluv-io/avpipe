@@ -19,8 +19,6 @@
 
 #define MAX_STREAMS	        64
 #define MAX_MUX_IN_STREAM   4096
-#define MAX_AUDIO_MUX       8
-#define MAX_CAPTION_MUX     8
 
 #define AVIO_OUT_BUF_SIZE   (1*1024*1024)   // avio output buffer size
 #define AVIO_IN_BUF_SIZE    (1*1024*1024)   // avio input buffer size
@@ -122,10 +120,10 @@ typedef struct io_mux_ctx_t {
     mux_input_ctx_t video;
     int64_t         last_video_pts;
     int             last_audio_index;
-    mux_input_ctx_t audios[MAX_AUDIO_MUX];
+    mux_input_ctx_t audios[MAX_STREAMS];
     int64_t         last_audio_pts;
     int             last_caption_index;
-    mux_input_ctx_t captions[MAX_CAPTION_MUX];
+    mux_input_ctx_t captions[MAX_STREAMS];
 } io_mux_ctx_t;
 
 typedef struct xcparams_t xcparams_t;
@@ -231,6 +229,7 @@ typedef int64_t
 typedef int
 (*avpipe_stater_f)(
     void *opaque,
+    int stream_index,           /* The stream_index is not valid for input stat in_stat_bytes_read. */
     avp_stat_t stat_type);
 
 typedef struct avpipe_io_handler_t {
@@ -242,17 +241,20 @@ typedef struct avpipe_io_handler_t {
     avpipe_stater_f avpipe_stater;
 } avpipe_io_handler_t;
 
-#define MAX_WRAP_PTS    ((int64_t)8589000000)
+#define MAX_WRAP_PTS        ((int64_t)8589000000)
+#define MAX_AVFILENAME_LEN  128
 
 /* Decoder/encoder context, keeps both video and audio stream ffmpeg contexts */
 typedef struct coderctx_t {
-    AVFormatContext     *format_context;        /* Input format context or video output format context */
-    AVFormatContext     *format_context2;       /* Audio output format context */
+    AVFormatContext     *format_context;                                /* Input format context or video output format context */
+    AVFormatContext     *format_context2[MAX_STREAMS];                  /* Audio output format context, indexed by audio index */
+    char                filename2[MAX_STREAMS][MAX_AVFILENAME_LEN];     /* Audio filename formats */
+    int                 n_audio_output;                                 /* Number of audio output streams, it is set for encoder */
 
     AVCodec             *codec[MAX_STREAMS];
     AVStream            *stream[MAX_STREAMS];
     AVCodecParameters   *codec_parameters[MAX_STREAMS];
-    AVCodecContext      *codec_context[MAX_STREAMS];
+    AVCodecContext      *codec_context[MAX_STREAMS];    /* Audio/video AVCodecContext, indexed by stream_index */
     SwrContext          *resampler_context;             /* resample context for audio */
     AVAudioFifo         *fifo;                          /* audio sampling fifo */
 
@@ -261,27 +263,26 @@ typedef struct coderctx_t {
     ioctx_t             *inctx;                         /* Input context needed for stat callbacks */
 
     int video_stream_index;
-    int audio_stream_index[MAX_AUDIO_MUX];              /* Audio input stream indexes */
+    int audio_stream_index[MAX_STREAMS];                /* Audio input stream indexes */
     int n_audio;                                        /* Number of audio streams that will be decoded */
 
     int data_scte35_stream_index;                       /* Index of SCTE-35 data stream */
     int data_stream_index;                              /* Index of an unrecognized data stream */
-    int audio_enc_stream_index;                         /* Audio output stream index */
 
     int64_t video_last_wrapped_pts;                     /* Video last wrapped pts */
     int64_t video_last_input_pts;                       /* Video last input pts */
-    int64_t audio_last_wrapped_pts;                     /* Audio last wrapped pts */
-    int64_t audio_last_input_pts;                       /* Audio last input pts */
+    int64_t audio_last_wrapped_pts[MAX_STREAMS];        /* Audio last wrapped pts */
+    int64_t audio_last_input_pts[MAX_STREAMS];          /* Audio last input pts */
     int64_t video_last_dts;
-    int64_t audio_last_dts;
+    int64_t audio_last_dts[MAX_STREAMS];
     int64_t last_key_frame;                             /* pts of last key frame */
     int64_t forced_keyint_countdown;                    /* frames until next forced key frame */
     int64_t video_last_pts_read;                        /* Video input last pts read */
-    int64_t audio_last_pts_read;                        /* Audio input last pts reas */
+    int64_t audio_last_pts_read[MAX_STREAMS];           /* Audio input last pts read */
     int64_t video_last_pts_sent_encode;                 /* Video last pts to encode if tx_type & tx_video */
-    int64_t audio_last_pts_sent_encode;                 /* Audio last pts to encode if tx_type & tx_audio */
+    int64_t audio_last_pts_sent_encode[MAX_STREAMS];    /* Audio last pts to encode if tx_type & tx_audio */
     int64_t video_last_pts_encoded;                     /* Video last input pts encoded if tx_type & tx_video */
-    int64_t audio_last_pts_encoded;                     /* Audio last input pts encoded if tx_type & tx_audio */
+    int64_t audio_last_pts_encoded[MAX_STREAMS];        /* Audio last input pts encoded if tx_type & tx_audio */
 
     int64_t audio_output_pts;                           /* Used to set PTS directly when using audio FIFO */
 
@@ -291,25 +292,25 @@ typedef struct coderctx_t {
     AVFilterGraph   *video_filter_graph;
 
     /* Audio filter */
-    AVFilterContext *audio_buffersink_ctx;
-    AVFilterContext *audio_buffersrc_ctx[MAX_AUDIO_MUX];
-    AVFilterGraph   *audio_filter_graph;
+    AVFilterContext *audio_buffersink_ctx[MAX_STREAMS];
+    AVFilterContext *audio_buffersrc_ctx[MAX_STREAMS];
+    AVFilterGraph   *audio_filter_graph[MAX_STREAMS];
+    int     n_audio_filters;                            /* Number of initialized audio filters */
 
     int64_t video_frames_written;                       /* Total video frames written so far */
-    int64_t audio_frames_written;                       /* Total audio frames written so far */
+    int64_t audio_frames_written[MAX_STREAMS];          /* Total audio frames written so far */
     int64_t video_pts;                                  /* Video decoder/encoder pts */
-    int64_t audio_pts;                                  /* Audio decoder/encoder pts */
+    int64_t audio_pts[MAX_STREAMS];                     /* Audio decoder/encoder pts for each track/stream */
     int64_t video_input_start_pts;                      /* In case video input stream starts at PTS > 0 */
     int     video_input_start_pts_notified;             /* Will be set as soon as out_stat_decoding_video_start_pts is fired */
-    int64_t audio_input_start_pts;                      /* In case audio input stream starts at PTS > 0 */
+    int64_t audio_input_start_pts[MAX_STREAMS];         /* In case audio input stream starts at PTS > 0 */
     int     audio_input_start_pts_notified;             /* Will be set as soon as out_stat_decoding_audio_start_pts is fired */
     int64_t first_decoding_video_pts;                   /* PTS of first video frame read from the decoder */
-    int64_t first_decoding_audio_pts;                   /* PTS of first audio frame read from the decoder */
+    int64_t first_decoding_audio_pts[MAX_STREAMS];      /* PTS of first audio frame read from the decoder */
     int64_t first_encoding_video_pts;                   /* PTS of first video frame sent to the encoder */
-    int64_t first_encoding_audio_pts;                   /* PTS of first audio frame sent to the encoder */
+    int64_t first_encoding_audio_pts[MAX_STREAMS];      /* PTS of first audio frame sent to the encoder */
     int64_t first_read_frame_pts[MAX_STREAMS];          /* PTS of first frame read - which might not be decodable */
 
-    int64_t audio_input_prev_pts;       /* Previous pts for audio input */
     int64_t video_encoder_prev_pts;     /* Previous pts for video output (encoder) */
     int64_t video_duration;             /* Duration/pts of original frame */
     int64_t audio_duration;             /* Audio duration/pts of original frame when tx_type == tx_all */
@@ -420,9 +421,8 @@ typedef struct xcparams_t {
     char        *watermark_timecode;        // Watermark timecode string (i.e 00\:00\:00\:00)
     float       watermark_timecode_rate;    // Watermark timecode frame rate
 
-    int         audio_index[MAX_AUDIO_MUX]; // Audio index(s) for mez making, may need to become an array of indexes
+    int         audio_index[MAX_STREAMS]; // Audio index(s) for mez making, may need to become an array of indexes
     int         n_audio;                    // Number of entries in audio_index
-    int         audio_fill_gap;             // Audio only, fills the gap if there is a jump in PTS
     int         sync_audio_to_stream_id;    // mpegts only, default is 0
     int         bitdepth;                   // Can be 8, 10, 12
     char        *max_cll;                   // Maximum Content Light Level (HDR only)
@@ -500,13 +500,13 @@ typedef struct xctx_t {
      * Each video/audio/caption input stream can have multiple input files/parts.
      * Each video/audio/caption input stream has its own coderctx_t and ioctx_t.
      */
-    io_mux_ctx_t        *in_mux_ctx;                                        // Input muxer context
-    coderctx_t          in_muxer_ctx[MAX_AUDIO_MUX+MAX_CAPTION_MUX+1];      // Video, audio, captions coder input muxer context (one video, multiple audio/caption)
-    ioctx_t             *inctx_muxer[MAX_AUDIO_MUX+MAX_CAPTION_MUX+1];      // Video, audio, captions io muxer context (one video, multiple audio/caption)
-    coderctx_t          out_muxer_ctx;                                      // Output muxer
+    io_mux_ctx_t        *in_mux_ctx;                    // Input muxer context
+    coderctx_t          in_muxer_ctx[MAX_STREAMS];      // Video, audio, captions coder input muxer context (one video, multiple audio/caption)
+    ioctx_t             *inctx_muxer[MAX_STREAMS];      // Video, audio, captions io muxer context (one video, multiple audio/caption)
+    coderctx_t          out_muxer_ctx;                  // Output muxer
 
-    AVPacket            pkt_array[MAX_AUDIO_MUX+MAX_CAPTION_MUX+1];
-    int                 is_pkt_valid[MAX_AUDIO_MUX+MAX_CAPTION_MUX+1];
+    AVPacket            pkt_array[MAX_STREAMS];
+    int                 is_pkt_valid[MAX_STREAMS];
 
     elv_channel_t       *vc;        // Video frame channel
     elv_channel_t       *ac;        // Audio frame channel
