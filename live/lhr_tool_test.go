@@ -485,12 +485,12 @@ func (i *inputCtx) Size() int64 {
 	return -1
 }
 
-func (i *inputCtx) Stat(statType avpipe.AVStatType, statArgs interface{}) error {
+func (i *inputCtx) Stat(streamIndex int, statType avpipe.AVStatType, statArgs interface{}) error {
 	switch statType {
 	case avpipe.AV_IN_STAT_BYTES_READ:
 		readOffset := statArgs.(*uint64)
 		if debugFrameLevel {
-			log.Debug("STAT read offset", *readOffset)
+			log.Debug("STAT read offset", *readOffset, "streamIndex", streamIndex)
 		}
 	}
 	return nil
@@ -584,17 +584,17 @@ func (o *outputCtx) Close() error {
 	return nil
 }
 
-func (o *outputCtx) Stat(avType avpipe.AVType, statType avpipe.AVStatType, statArgs interface{}) error {
+func (o *outputCtx) Stat(streamIndex int, avType avpipe.AVType, statType avpipe.AVStatType, statArgs interface{}) error {
 	switch statType {
 	case avpipe.AV_OUT_STAT_BYTES_WRITTEN:
 		writeOffset := statArgs.(*uint64)
 		if debugFrameLevel {
-			log.Debug("STAT, write offset", *writeOffset)
+			log.Debug("STAT, write offset", *writeOffset, "streamIndex", streamIndex, "avType", avType)
 		}
 	case avpipe.AV_OUT_STAT_ENCODING_END_PTS:
 		endPTS := statArgs.(*uint64)
 		if debugFrameLevel {
-			log.Debug("STAT, endPTS", *endPTS)
+			log.Debug("STAT, endPTS", *endPTS, "streamIndex", streamIndex, "avType", avType)
 		}
 	}
 	return nil
