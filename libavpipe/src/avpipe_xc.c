@@ -2905,6 +2905,7 @@ transcode_video_func(
     if (!xctx->err)
         xctx->err = err;
 
+    elv_channel_close(xctx->vc, 0);
     elv_dbg("transcode_video_func err=%d, stop=%d, url=%s", err, xctx->stop, params->url);
 
     return NULL;
@@ -3000,7 +3001,8 @@ transcode_audio_func(
     if (!xctx->err)
         xctx->err = err;
     
-    elv_dbg("transcode_audio_func err=%d, stop=%d", err, xctx->stop);
+    elv_channel_close(xctx->ac, 0);
+    elv_dbg("transcode_audio_func err=%d, xctx->err=%d, stop=%d", err, xctx->err, xctx->stop);
 
     return NULL;
 }
