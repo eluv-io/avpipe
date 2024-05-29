@@ -29,6 +29,7 @@ const char *stream_type_str(
 void
 dump_frame(
     int is_audio,
+    int stream_index,
     char *msg,
     int num,
     AVFrame *frame,
@@ -37,11 +38,11 @@ dump_frame(
     if (!debug_frame_level || !frame)
         return;
 
-    elv_dbg("%s FRAME %s [%d] pts=%"PRId64" pkt_dts=%"PRId64" pkt_duration=%"PRId64" be_time_stamp=%"PRId64" key=%d pict_type=%d "
+    elv_dbg("%s FRAME %s, stream_index=%d, [%d] pts=%"PRId64" pkt_dts=%"PRId64" pkt_duration=%"PRId64" be_time_stamp=%"PRId64" key=%d pict_type=%d "
         "pkt_size=%d nb_samples=%d "
         "width=%d height=%d linesize=%d "
         "format=%d coded_pic_num=%d flags=%x channels=%d"
-        "\n", is_audio ? "AUDIO" : "VIDEO", msg, num,
+        "\n", is_audio ? "AUDIO" : "VIDEO", msg, stream_index, num,
         frame->pts, frame->pkt_dts, frame->pkt_duration, frame->best_effort_timestamp,
         frame->key_frame, frame->pict_type,
         frame->pkt_size, frame->nb_samples,
