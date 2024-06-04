@@ -324,7 +324,7 @@ func InitTranscode(cmdRoot *cobra.Command) error {
 	cmdTranscode.PersistentFlags().Int32("bitdepth", 8, "Refers to number of colors each pixel can have, can be 8, 10, 12.")
 	cmdTranscode.PersistentFlags().Int64P("extract-image-interval-ts", "", -1, "extract frames at this interval.")
 	cmdTranscode.PersistentFlags().StringP("extract-images-ts", "", "", "the frames to extract (PTS, comma separated).")
-	cmdTranscode.PersistentFlags().BoolP("seekable", "b", true, "seekable stream.")
+	cmdTranscode.PersistentFlags().BoolP("seekable", "", true, "seekable stream.")
 
 	return nil
 }
