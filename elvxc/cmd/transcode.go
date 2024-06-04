@@ -324,6 +324,7 @@ func InitTranscode(cmdRoot *cobra.Command) error {
 	cmdTranscode.PersistentFlags().Int32("bitdepth", 8, "Refers to number of colors each pixel can have, can be 8, 10, 12.")
 	cmdTranscode.PersistentFlags().Int64P("extract-image-interval-ts", "", -1, "extract frames at this interval.")
 	cmdTranscode.PersistentFlags().StringP("extract-images-ts", "", "", "the frames to extract (PTS, comma separated).")
+	cmdTranscode.PersistentFlags().BoolP("seekable", "b", true, "seekable stream.")
 
 	return nil
 }
@@ -338,6 +339,11 @@ func doTranscode(cmd *cobra.Command, args []string) error {
 	bypass, err := cmd.Flags().GetBool("bypass")
 	if err != nil {
 		return fmt.Errorf("Invalid bypass flag")
+	}
+
+	seekable, err := cmd.Flags().GetBool("seekable")
+	if err != nil {
+		return fmt.Errorf("Invalid seekable flag")
 	}
 
 	debugFrameLevel, err := cmd.Flags().GetBool("debug-frame-level")
@@ -686,6 +692,7 @@ func doTranscode(cmd *cobra.Command, args []string) error {
 		DebugFrameLevel:        debugFrameLevel,
 		VideoTimeBase:          int(videoTimeBase),
 		VideoFrameDurationTs:   int(videoFrameDurationTs),
+		Seekable:               seekable,
 	}
 
 	err = getAudioIndexes(params, audioIndex)
