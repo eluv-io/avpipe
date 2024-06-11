@@ -2002,10 +2002,13 @@ encode_frame(
     // Prepare packet before encoding - adjust PTS and IDR frame signaling
     if (frame) {
 
-        const char *st = stream_type_str(encoder_context, stream_index);
+        const char *st = stream_type_str(decoder_context, stream_index);
 
         // Adjust PTS if input stream starts at an arbitrary value (i.e mostly for MPEG-TS/RTMP)
-        if (!strcmp(params->format, "fmp4-segment")) {
+        if (params->xc_type != xc_audio_join &&
+            params->xc_type != xc_audio_pan &&
+            params->xc_type != xc_audio_merge &&
+            !strcmp(params->format, "fmp4-segment")) {
             if (stream_index == decoder_context->video_stream_index) {
                 if (encoder_context->first_encoding_video_pts == -1) {
                     /* Remember the first video PTS to use as an offset later */
@@ -2014,7 +2017,7 @@ encode_frame(
                         encoder_context->first_encoding_video_pts,
                         decoder_context->first_decoding_video_pts,
                         frame->pkt_dts,
-                        encoder_context->first_read_frame_pts[stream_index], params->xc_type, st);
+                        encoder_context->first_read_frame_pts[stream_index], stream_index, st);
                 }
 
                 // Adjust video frame pts such that first frame sent to the encoder has PTS 0
@@ -2028,13 +2031,13 @@ encode_frame(
 #ifndef USE_RESAMPLE_AAC
             else if (selected_decoded_audio(decoder_context, stream_index) >= 0) {
                 if (encoder_context->first_encoding_audio_pts[stream_index] == AV_NOPTS_VALUE) {
-                    /* Remember the first video PTS to use as an offset later */
+                    /* Remember the first audio PTS to use as an offset later */
                     encoder_context->first_encoding_audio_pts[stream_index] = frame->pts;
                     elv_log("PTS stream_index=%d first_encoding_audio_pts=%"PRId64" dec=%"PRId64" read=%"PRId64" stream=%d:%s",
                         stream_index,
                         encoder_context->first_encoding_audio_pts[stream_index],
                         decoder_context->first_decoding_audio_pts[stream_index],
-                        encoder_context->first_read_frame_pts[stream_index], params->xc_type, st);
+                        encoder_context->first_read_frame_pts[stream_index], stream_index, st);
                 }
 
                 // Adjust audio frame pts such that first frame sent to the encoder has PTS 0
@@ -2065,7 +2068,7 @@ encode_frame(
             selected_decoded_audio(decoder_context, stream_index) >= 0)
             frame->pkt_duration = 0;
 
-        dump_frame(selected_decoded_audio(decoder_context, stream_index) >= 0,
+        dump_frame(selected_decoded_audio(decoder_context, stream_index) >= 0, stream_index,
             "TOENC ", codec_context->frame_number, frame, debug_frame_level);
     }
 
@@ -2422,7 +2425,7 @@ transcode_audio(
                 in_handlers->avpipe_stater(decoder_context->inctx, stream_index, in_stat_decoding_audio_start_pts);
         }
 
-        dump_frame(1, "IN ", codec_context->frame_number, frame, debug_frame_level);
+        dump_frame(1, stream_index, "IN ", codec_context->frame_number, frame, debug_frame_level);
 
         ret = check_pts_wrapped(&decoder_context->audio_last_wrapped_pts[stream_index],
             &decoder_context->audio_last_input_pts[stream_index],
@@ -2462,7 +2465,7 @@ transcode_audio(
                 return eav_receive_filter_frame;
             }
 
-            dump_frame(1, "FILT ", codec_context->frame_number, filt_frame, debug_frame_level);
+            dump_frame(1, stream_index, "FILT ", codec_context->frame_number, filt_frame, debug_frame_level);
             ret = encode_frame(decoder_context, encoder_context, filt_frame, packet->stream_index, params, debug_frame_level);
             av_frame_unref(filt_frame);
             if (ret == eav_write_frame) {
@@ -2537,7 +2540,7 @@ transcode_audio_aac(
                 in_handlers->avpipe_stater(decoder_context->inctx, stream_index, in_stat_decoding_audio_start_pts);
         }
 
-        dump_frame(1, "IN ", codec_context->frame_number, frame, debug_frame_level);
+        dump_frame(1, stream_index, "IN ", codec_context->frame_number, frame, debug_frame_level);
 
         ret = check_pts_wrapped(&decoder_context->audio_last_wrapped_pts[stream_index],
             &decoder_context->audio_last_input_pts[stream_index],
@@ -2743,7 +2746,7 @@ transcode_video(
             frame->pkt_dts = frame->pts;
         }
 
-        dump_frame(0, "IN ", codec_context->frame_number, frame, debug_frame_level);
+        dump_frame(0, stream_index, "IN ", codec_context->frame_number, frame, debug_frame_level);
 
         ret = check_pts_wrapped(&decoder_context->video_last_wrapped_pts,
             &decoder_context->video_last_input_pts,
@@ -2798,7 +2801,7 @@ transcode_video(
             "frame-filt", codec_context->frame_number);
 #endif
 
-            dump_frame(0, "FILT ", codec_context->frame_number, filt_frame, debug_frame_level);
+            dump_frame(0, stream_index, "FILT ", codec_context->frame_number, filt_frame, debug_frame_level);
             filt_frame->pkt_dts = filt_frame->pts;
 
             elv_get_time(&tv);
@@ -2905,6 +2908,7 @@ transcode_video_func(
     if (!xctx->err)
         xctx->err = err;
 
+    elv_channel_close(xctx->vc, 0);
     elv_dbg("transcode_video_func err=%d, stop=%d, url=%s", err, xctx->stop, params->url);
 
     return NULL;
@@ -3000,7 +3004,8 @@ transcode_audio_func(
     if (!xctx->err)
         xctx->err = err;
     
-    elv_dbg("transcode_audio_func err=%d, stop=%d", err, xctx->stop);
+    elv_channel_close(xctx->ac, 0);
+    elv_dbg("transcode_audio_func err=%d, xctx->err=%d, stop=%d", err, xctx->err, xctx->stop);
 
     return NULL;
 }
@@ -3019,8 +3024,12 @@ flush_decoder(
     AVFilterContext *buffersink_ctx = decoder_context->video_buffersink_ctx;
     AVFilterContext *buffersrc_ctx = decoder_context->video_buffersrc_ctx;
     AVCodecContext *codec_context = decoder_context->codec_context[stream_index];
-    int response = avcodec_send_packet(codec_context, NULL);	/* Passing NULL means flush the decoder buffers */
+    int response = 0;
 
+    if (codec_context == NULL)
+        return eav_success;
+
+    response = avcodec_send_packet(codec_context, NULL);    /* Passing NULL means flush the decoder buffers */
     frame = av_frame_alloc();
     filt_frame = av_frame_alloc();
 
@@ -3041,7 +3050,7 @@ flush_decoder(
             continue; // PENDING(SSS) why continue and not break?
         }
 
-        dump_frame(selected_decoded_audio(decoder_context, stream_index) >= 0,
+        dump_frame(selected_decoded_audio(decoder_context, stream_index) >= 0, stream_index,
             "IN FLUSH", codec_context->frame_number, frame, debug_frame_level);
 
         if (codec_context->codec_type == AVMEDIA_TYPE_VIDEO ||
@@ -3065,7 +3074,7 @@ flush_decoder(
                     break;
                 }
 
-                dump_frame(selected_decoded_audio(decoder_context, stream_index) >= 0,
+                dump_frame(selected_decoded_audio(decoder_context, stream_index) >= 0, stream_index,
                     "FILT ", codec_context->frame_number, filt_frame, debug_frame_level);
 
                 ret = encode_frame(decoder_context, encoder_context, filt_frame, stream_index, p, debug_frame_level);

@@ -9,6 +9,7 @@
 void
 dump_frame(
     int is_audio,
+    int stream_index,
     char *msg,
     int num,
     AVFrame *frame,

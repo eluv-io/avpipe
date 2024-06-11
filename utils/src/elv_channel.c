@@ -57,8 +57,13 @@ elv_channel_send(
         return -1;
 
     pthread_mutex_lock(&channel->_mutex);
-    while (channel->_count >= channel->_capacity) {
+    while (channel->_count >= channel->_capacity && channel->_closed == 0) {
         pthread_cond_wait(&channel->_cond_recv, &channel->_mutex);
+    }
+
+    if (channel->_closed) {
+        pthread_mutex_unlock(&channel->_mutex);
+        return 0;
     }
 
     channel->_count++;
