@@ -2031,7 +2031,7 @@ encode_frame(
 #ifndef USE_RESAMPLE_AAC
             else if (selected_decoded_audio(decoder_context, stream_index) >= 0) {
                 if (encoder_context->first_encoding_audio_pts[stream_index] == AV_NOPTS_VALUE) {
-                    /* Remember the first video PTS to use as an offset later */
+                    /* Remember the first audio PTS to use as an offset later */
                     encoder_context->first_encoding_audio_pts[stream_index] = frame->pts;
                     elv_log("PTS stream_index=%d first_encoding_audio_pts=%"PRId64" dec=%"PRId64" read=%"PRId64" stream=%d:%s",
                         stream_index,
@@ -3024,8 +3024,12 @@ flush_decoder(
     AVFilterContext *buffersink_ctx = decoder_context->video_buffersink_ctx;
     AVFilterContext *buffersrc_ctx = decoder_context->video_buffersrc_ctx;
     AVCodecContext *codec_context = decoder_context->codec_context[stream_index];
-    int response = avcodec_send_packet(codec_context, NULL);	/* Passing NULL means flush the decoder buffers */
+    int response = 0;
 
+    if (codec_context == NULL)
+        return eav_success;
+
+    response = avcodec_send_packet(codec_context, NULL);    /* Passing NULL means flush the decoder buffers */
     frame = av_frame_alloc();
     filt_frame = av_frame_alloc();
 
