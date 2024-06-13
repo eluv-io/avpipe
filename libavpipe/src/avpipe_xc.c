@@ -2005,19 +2005,16 @@ encode_frame(
         const char *st = stream_type_str(decoder_context, stream_index);
 
         // Adjust PTS if input stream starts at an arbitrary value (i.e mostly for MPEG-TS/RTMP)
-        if (params->xc_type != xc_audio_join &&
-            params->xc_type != xc_audio_pan &&
-            params->xc_type != xc_audio_merge &&
-            !strcmp(params->format, "fmp4-segment")) {
+        if ( is_protocol(decoder_context) && (!strcmp(params->format, "fmp4-segment"))) {
             if (stream_index == decoder_context->video_stream_index) {
                 if (encoder_context->first_encoding_video_pts == -1) {
                     /* Remember the first video PTS to use as an offset later */
                     encoder_context->first_encoding_video_pts = frame->pts;
-                    elv_log("PTS first_encoding_video_pts=%"PRId64" dec=%"PRId64" pktdts=%"PRId64" read=%"PRId64" stream=%d:%s",
+                    elv_log("PTS first_encoding_video_pts=%"PRId64" dec=%"PRId64" pktdts=%"PRId64" first_read_packet_pts=%"PRId64" stream=%d:%s",
                         encoder_context->first_encoding_video_pts,
                         decoder_context->first_decoding_video_pts,
                         frame->pkt_dts,
-                        encoder_context->first_read_frame_pts[stream_index], stream_index, st);
+                        encoder_context->first_read_packet_pts[stream_index], stream_index, st);
                 }
 
                 // Adjust video frame pts such that first frame sent to the encoder has PTS 0
@@ -2033,11 +2030,11 @@ encode_frame(
                 if (encoder_context->first_encoding_audio_pts[stream_index] == AV_NOPTS_VALUE) {
                     /* Remember the first audio PTS to use as an offset later */
                     encoder_context->first_encoding_audio_pts[stream_index] = frame->pts;
-                    elv_log("PTS stream_index=%d first_encoding_audio_pts=%"PRId64" dec=%"PRId64" read=%"PRId64" stream=%d:%s",
+                    elv_log("PTS stream_index=%d first_encoding_audio_pts=%"PRId64" dec=%"PRId64" first_read_packet_pts=%"PRId64" stream=%d:%s",
                         stream_index,
                         encoder_context->first_encoding_audio_pts[stream_index],
                         decoder_context->first_decoding_audio_pts[stream_index],
-                        encoder_context->first_read_frame_pts[stream_index], stream_index, st);
+                        encoder_context->first_read_packet_pts[stream_index], stream_index, st);
                 }
 
                 // Adjust audio frame pts such that first frame sent to the encoder has PTS 0
@@ -3594,7 +3591,7 @@ avpipe_xc(
         encoder_context->first_encoding_audio_pts[j] = AV_NOPTS_VALUE;
         decoder_context->audio_input_start_pts[j] = AV_NOPTS_VALUE;
         encoder_context->audio_pts[j] = AV_NOPTS_VALUE;
-        encoder_context->first_read_frame_pts[j] = -1;
+        encoder_context->first_read_packet_pts[j] = AV_NOPTS_VALUE;
         encoder_context->audio_last_pts_sent_encode[j] = AV_NOPTS_VALUE;
     }
     decoder_context->first_key_frame_pts = AV_NOPTS_VALUE;
@@ -3633,16 +3630,16 @@ avpipe_xc(
         if ((stream_index == decoder_context->video_stream_index && (params->xc_type & xc_video)) ||
             (selected_decoded_audio(decoder_context, stream_index) >= 0 && (params->xc_type & xc_audio))) {
 
-            if (encoder_context->first_read_frame_pts[stream_index] == -1 && input_packet->pts != AV_NOPTS_VALUE) {
-                encoder_context->first_read_frame_pts[stream_index] = input_packet->pts;
-                elv_log("PTS first_read_frame=%"PRId64" stream=%d:%d:%s sidx=%d, url=%s",
-                    encoder_context->first_read_frame_pts[stream_index], params->xc_type, params->stream_id,
+            if (encoder_context->first_read_packet_pts[stream_index] == AV_NOPTS_VALUE && input_packet->pts != AV_NOPTS_VALUE) {
+                encoder_context->first_read_packet_pts[stream_index] = input_packet->pts;
+                elv_log("PTS first_read_packet_pts=%"PRId64" stream=%d:%d:%s sidx=%d, url=%s",
+                    encoder_context->first_read_packet_pts[stream_index], params->xc_type, params->stream_id,
                     st, stream_index, params->url);
-            } else if (input_packet->pts != AV_NOPTS_VALUE && input_packet->pts < encoder_context->first_read_frame_pts[stream_index]) {
+            } else if (input_packet->pts != AV_NOPTS_VALUE && input_packet->pts < encoder_context->first_read_packet_pts[stream_index]) {
                 /* Due to b-frame reordering */
-                encoder_context->first_read_frame_pts[stream_index] = input_packet->pts;
-                elv_log("PTS first_read_frame reorder new=%"PRId64" stream=%d:%d:%s, url=%s",
-                    encoder_context->first_read_frame_pts, params->xc_type, params->stream_id, st, params->url);
+                encoder_context->first_read_packet_pts[stream_index] = input_packet->pts;
+                elv_log("PTS first_read_packet reorder new=%"PRId64" stream=%d:%d:%s, url=%s",
+                    encoder_context->first_read_packet_pts, params->xc_type, params->stream_id, st, params->url);
             }
         }
 
