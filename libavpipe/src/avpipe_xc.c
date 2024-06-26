@@ -4210,6 +4210,8 @@ avpipe_probe(
 
 avpipe_probe_end:
     if (decoder_ctx.format_context) {
+        if (decoder_ctx.format_context->pb->buffer)
+            av_free(decoder_ctx.format_context->pb->buffer);
         avformat_close_input(&decoder_ctx.format_context);
     }
 
