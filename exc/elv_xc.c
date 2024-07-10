@@ -859,7 +859,8 @@ do_probe(
                 "\thas_b_frames: %d\n"
                 "\tfield_order: %d\n"
                 "\tsample_aspect_ratio: %d:%d\n"
-                "\tdisplay_aspect_ratio: %d:%d\n",
+                "\tdisplay_aspect_ratio: %d:%d\n"
+                "\tside_data_display_matrix_rotation:%f\n",
                 probe->stream_info[i].stream_index,
                 probe->stream_info[i].stream_id,
                 av_get_media_type_string(probe->stream_info[i].codec_type),
@@ -884,7 +885,8 @@ do_probe(
                 probe->stream_info[i].has_b_frames,
                 probe->stream_info[i].field_order,
                 probe->stream_info[i].sample_aspect_ratio.num, probe->stream_info[i].sample_aspect_ratio.den,
-                probe->stream_info[i].display_aspect_ratio.num, probe->stream_info[i].display_aspect_ratio.den
+                probe->stream_info[i].display_aspect_ratio.num, probe->stream_info[i].display_aspect_ratio.den,
+                probe->stream_info[i].side_data.display_matrix.rotation
                 );
     }
     printf("Container\n"

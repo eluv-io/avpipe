@@ -332,6 +332,12 @@ const (
 	AV_IN_STAT_DATA_SCTE35              = 512
 )
 
+type SideDataDisplayMatrix struct {
+	Rotation float64
+}
+type SideData struct {
+	DisplayMatrix SideDataDisplayMatrix
+}
 type StreamInfo struct {
 	StreamIndex        int      `json:"stream_index"`
 	StreamId           int32    `json:"stream_id"`
@@ -358,6 +364,7 @@ type StreamInfo struct {
 	FieldOrder         string   `json:"field_order,omitempty"`
 	Profile            int      `json:"profile,omitempty"`
 	Level              int      `json:"level,omitempty"`
+	SideData           SideData
 }
 
 type ContainerInfo struct {
@@ -1446,6 +1453,7 @@ func Probe(params *XcParams) (*ProbeInfo, error) {
 		probeInfo.StreamInfo[i].FieldOrder = AVFieldOrderNames[AVFieldOrder(probeArray[i].field_order)]
 		probeInfo.StreamInfo[i].Profile = int(probeArray[i].profile)
 		probeInfo.StreamInfo[i].Level = int(probeArray[i].level)
+		probeInfo.StreamInfo[i].SideData.DisplayMatrix.Rotation = float64(probeArray[i].side_data.display_matrix.rotation)
 	}
 
 	probeInfo.ContainerInfo.FormatName = C.GoString((*C.char)(unsafe.Pointer(cprobe.container_info.format_name)))

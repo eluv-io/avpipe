@@ -12,6 +12,7 @@
 #include "libavutil/audio_fifo.h"
 #include <libswscale/swscale.h>
 #include <libavutil/imgutils.h>
+#include <libavutil/display.h>
 
 #include "avpipe_xc.h"
 #include "avpipe_utils.h"
@@ -4197,6 +4198,18 @@ avpipe_probe(
             ((float)stream_probes_ptr->duration_ts)/stream_probes_ptr->time_base.den)
             probe->container_info.duration =
                 ((float)stream_probes_ptr->duration_ts)/stream_probes_ptr->time_base.den;
+
+        for (int i = 0; i < s->nb_side_data; i++) {
+            const AVPacketSideData *sd = &s->side_data[i];
+            switch (sd->type) {
+                case AV_PKT_DATA_DISPLAYMATRIX:
+                    stream_probes_ptr->side_data.display_matrix.rotation = av_display_rotation_get((int32_t *)sd->data);
+                    break;
+                default:
+                    // Not handled
+                    break;
+            }
+        }
     }
 
     inctx.closed = 1;

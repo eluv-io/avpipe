@@ -98,6 +98,9 @@ func doProbe(cmd *cobra.Command, args []string) error {
 		fmt.Printf("\tsample_aspect_ratio: %d:%d\n", info.SampleAspectRatio.Num(), info.SampleAspectRatio.Denom())
 		fmt.Printf("\tdisplay_aspect_ratio: %d:%d\n", info.DisplayAspectRatio.Num(), info.DisplayAspectRatio.Denom())
 		fmt.Printf("\tfield_order: %s\n", info.FieldOrder)
+		if info.SideData.DisplayMatrix.Rotation != 0 {
+			fmt.Printf("\tside_data_display_matrix_rotation: %f\n", info.SideData.DisplayMatrix.Rotation)
+		}
 	}
 
 	fmt.Printf("Container\n")

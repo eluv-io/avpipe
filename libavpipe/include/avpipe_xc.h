@@ -443,6 +443,12 @@ typedef struct xcparams_t {
 
 #define MAX_CODEC_NAME  256
 
+typedef struct side_data_display_matrix_t {
+    double rotation;
+} side_data_display_matrix_t;
+typedef struct side_data_t {
+    side_data_display_matrix_t display_matrix;
+} side_data_t;
 typedef struct stream_info_t {
     int         stream_index;       // Stream index in AVFormatContext
     int         stream_id;          // Format-specific stream ID, set by libavformat during decoding
@@ -470,6 +476,8 @@ typedef struct stream_info_t {
     enum AVFieldOrder   field_order;
     int                 profile;
     int                 level;
+    side_data_t         side_data;
+
 } stream_info_t;
 
 typedef struct container_info_t {
