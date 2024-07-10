@@ -128,8 +128,8 @@ recv_again:
             break;
         }
         //elv_dbg("Rcv UDP packet=%d, len=%d", pkt_num, udp_packet->len);
-        if (debug_frame_level)
-            elv_dbg("Received UDP packet=%d, len=%d, url=%s", pkt_num, udp_packet->len, url);
+        //if (debug_frame_level)
+        //    elv_dbg("Received UDP packet=%d, len=%d, url=%s", pkt_num, udp_packet->len, url);
         timedout = 0;
         goto recv_again;
     }
