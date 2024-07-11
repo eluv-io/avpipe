@@ -222,8 +222,9 @@ in_read_packet(
             }
             c->read_bytes += r;
             c->read_pos += r;
-            //if (xcparams && xcparams->debug_frame_level)
-            //    elv_dbg("IN READ UDP partial read=%d pos=%"PRId64" total=%"PRId64, r, c->read_pos, c->read_bytes);
+#ifdef DEBUG_UDP_PACKET
+            elv_dbg("IN READ UDP partial read=%d pos=%"PRId64" total=%"PRId64, r, c->read_pos, c->read_bytes);
+#endif
             return r;        
         }
 
@@ -260,8 +261,9 @@ read_channel_again:
         } else {
             free(udp_packet);
         }
-        //if (xcparams && xcparams->debug_frame_level)
-        //    elv_dbg("IN READ UDP read=%d pos=%"PRId64" total=%"PRId64, r, c->read_pos, c->read_bytes);
+#ifdef DEBUG_UDP_PACKET
+        elv_dbg("IN READ UDP read=%d pos=%"PRId64" total=%"PRId64, r, c->read_pos, c->read_bytes);
+#endif
         return r;
     } else {
         int fd = *((int *)(c->opaque));

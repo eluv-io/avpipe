@@ -50,7 +50,6 @@ udp_thread_func(
 {
     udp_thread_params_t *params = (udp_thread_params_t *) thread_params;
     xcparams_t *xcparams = params->inctx->params;
-    int debug_frame_level = (xcparams != NULL) ? xcparams->debug_frame_level : 0;
     char *url = (xcparams != NULL) ? xcparams->url : "";
     socklen_t len;
     udp_packet_t *udp_packet;
@@ -127,9 +126,9 @@ recv_again:
         if (elv_channel_send(params->udp_channel, udp_packet) < 0) {
             break;
         }
-        //elv_dbg("Rcv UDP packet=%d, len=%d", pkt_num, udp_packet->len);
-        //if (debug_frame_level)
-        //    elv_dbg("Received UDP packet=%d, len=%d, url=%s", pkt_num, udp_packet->len, url);
+#ifdef DEBUG_UDP_PACKET
+        elv_dbg("Received UDP packet=%d, len=%d, url=%s", pkt_num, udp_packet->len, url);
+#endif
         timedout = 0;
         goto recv_again;
     }
