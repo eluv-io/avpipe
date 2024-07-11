@@ -4196,6 +4196,13 @@ avpipe_probe(
 
 avpipe_probe_end:
     if (decoder_ctx.format_context) {
+        if (decoder_ctx.format_context->pb->buffer){
+            AVIOContext *avioctx = (AVIOContext *) decoder_ctx.format_context->pb;
+            if (avioctx) {
+                av_freep(&avioctx->buffer);
+                av_freep(&avioctx);
+            }
+	}
         avformat_close_input(&decoder_ctx.format_context);
     }
 
