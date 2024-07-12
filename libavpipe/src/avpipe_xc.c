@@ -2081,12 +2081,7 @@ encode_frame(
 
     while (ret >= 0) {
         /* The packet must be initialized before receiving */
-
-#pragma GCC diagnostic push
-#pragma GCC diagnostic ignored "-Wdeprecated-declarations"
         av_init_packet(output_packet);
-#pragma GCC diagnostic pop
-
         output_packet->data = NULL;
         output_packet->size = 0;
 
