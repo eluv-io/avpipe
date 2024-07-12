@@ -1515,7 +1515,7 @@ main(
                     usage(argv[0], argv[i], EXIT_FAILURE);
                 }
                 if ( n_threads < 1 ) usage(argv[0], argv[i], EXIT_FAILURE);
-            } 
+            }
             break;
         case 'v':
             if (!strcmp(argv[i], "-video-bitrate")) {
