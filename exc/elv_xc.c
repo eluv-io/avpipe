@@ -1097,6 +1097,7 @@ usage(
         "\t-r :                     (optional) number of repeats. Default is 1 repeat, must be bigger than 1\n"
         "\t-rc-buffer-size :        (optional) Determines the interval used to limit bit rate\n"
         "\t-rc-max-rate :           (optional) Maximum encoding bit rate, used in conjuction with rc-buffer-size\n"
+        "\t-rotate :                (optional) Rotate the input video. Default is 0 with no rotation, other values 90, 180, 270.\n"
         "\t-sample-rate :           (optional) Default: -1. For aac output sample rate is set to input sample rate and this parameter is ignored.\n"
         "\t-seekable :              (optional) Seekable stream. Default is 0, must be 0 or 1\n"
         "\t-seg-duration :          (mandatory if format is \"segment\") segment duration secs (positive integer). It is used for making mp4 segments.\n"
@@ -1201,6 +1202,7 @@ main(
         .start_time_ts = 0,                 /* same units as input stream PTS */
         .start_fragment_index = 0,          /* Default is zero */
         .sync_audio_to_stream_id = -1,      /* Default -1 (no sync to a video stream) */
+        .rotate = 0,                        /* Default 0 (means no transpose/rotation) */
         .xc_type = xc_none,
         .video_bitrate = -1,                /* not used if using CRF */
         .watermark_text = NULL,
@@ -1438,6 +1440,10 @@ main(
                 }
             } else if (!strcmp(argv[i], "-rc-max-rate")) {
                 if (sscanf(argv[i+1], "%d", &p.rc_max_rate) != 1) {
+                    usage(argv[0], argv[i], EXIT_FAILURE);
+                }
+            } else if (!strcmp(argv[i], "-rotate")) {
+                if (sscanf(argv[i+1], "%d", &p.rotate) != 1) {
                     usage(argv[0], argv[i], EXIT_FAILURE);
                 }
             } else if (strlen(argv[i]) > 2) {
