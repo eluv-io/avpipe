@@ -408,15 +408,11 @@ prepare_decoder(
         return eav_mem_alloc;
     }
 
-    /* Set global decoding options */
-    /* Disable timestamp wrapping */
-    decoder_context->format_context->correct_ts_overflow = 0;
-
     /* Set our custom reader */
     prepare_input(in_handlers, inctx, decoder_context, seekable);
 
     AVDictionary *opts = NULL;
-    if (params && params->listen)
+    if (params && params->listen && (decoder_context->is_rtmp || decoder_context->is_srt))
         av_dict_set(&opts, "listen", "1" , 0);
 
     if (decoder_context->is_rtmp &&
@@ -2333,20 +2329,16 @@ do_bypass(
 
 static avpipe_error_t
 check_pts_wrapped(
-    int64_t *last_wrapped_pts,
     int64_t *last_input_pts,
     AVFrame *frame,
     int stream_index)
 {
-
-    (void) last_wrapped_pts;
-
     if (!frame || !last_input_pts)
         return eav_success;
 
     /* If the stream was wrapped then issue an error */
     if (*last_input_pts && *last_input_pts - frame->pts > MAX_WRAP_PTS) {
-        elv_warn("PTS WRAPPED stream_index=%d, last_input_pts=%"PRId64, stream_index, *last_input_pts);
+        elv_warn("PTS WRAPPED stream_index=%d, last_input_pts=%"PRId64", frame->pts=%"PRId64, stream_index, *last_input_pts, frame->pts);
         return eav_pts_wrapped;
     }
 
@@ -2424,10 +2416,7 @@ transcode_audio(
 
         dump_frame(1, stream_index, "IN ", codec_context->frame_number, frame, debug_frame_level);
 
-        ret = check_pts_wrapped(&decoder_context->audio_last_wrapped_pts[stream_index],
-            &decoder_context->audio_last_input_pts[stream_index],
-            frame,
-            stream_index);
+        ret = check_pts_wrapped(&decoder_context->audio_last_input_pts[stream_index], frame, stream_index);
         if (ret == eav_pts_wrapped) {
             av_frame_unref(frame);
             return ret;
@@ -2539,10 +2528,7 @@ transcode_audio_aac(
 
         dump_frame(1, stream_index, "IN ", codec_context->frame_number, frame, debug_frame_level);
 
-        ret = check_pts_wrapped(&decoder_context->audio_last_wrapped_pts[stream_index],
-            &decoder_context->audio_last_input_pts[stream_index],
-            frame,
-            stream_index);
+        ret = check_pts_wrapped(&decoder_context->audio_last_input_pts[stream_index], frame, stream_index);
         if (ret == eav_pts_wrapped) {
             av_frame_unref(frame);
             return ret;
@@ -2745,10 +2731,7 @@ transcode_video(
 
         dump_frame(0, stream_index, "IN ", codec_context->frame_number, frame, debug_frame_level);
 
-        ret = check_pts_wrapped(&decoder_context->video_last_wrapped_pts,
-            &decoder_context->video_last_input_pts,
-            frame,
-            stream_index);
+        ret = check_pts_wrapped(&decoder_context->audio_last_input_pts[stream_index], frame, stream_index);
         if (ret == eav_pts_wrapped) {
             av_frame_unref(frame);
             return ret;
@@ -3621,6 +3604,12 @@ avpipe_xc(
                 rc = eav_read_input;
             }
             break;
+        }
+
+        if (input_packet->flags & AV_PKT_FLAG_CORRUPT) {
+            elv_warn("packet corrupt pts=%"PRId64, input_packet->pts);
+            av_packet_free(&input_packet);
+            continue;
         }
 
         const char *st = stream_type_str(encoder_context, input_packet->stream_index);
