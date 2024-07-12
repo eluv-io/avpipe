@@ -1459,3 +1459,50 @@ end_probe:
     free(in_handlers);
     return rc;
 }
+
+int
+dict_count(
+    AVDictionary *dict)
+{
+    return av_dict_count(dict);
+}
+
+char *
+dict_get_key(
+    AVDictionary *dict,
+    int i)
+{
+    AVDictionaryEntry *tag = NULL;
+    int c = 0;
+    while ((tag = av_dict_get(dict, "", tag, AV_DICT_IGNORE_SUFFIX))) {
+        if (c == i) {
+            return tag->key;
+        }
+        c ++;
+    }
+    return NULL;
+}
+
+char *
+dict_get_value(
+    AVDictionary *dict,
+    int i)
+{
+    AVDictionaryEntry *tag = NULL;
+    int c = 0;
+    while ((tag = av_dict_get(dict, "", tag, AV_DICT_IGNORE_SUFFIX))) {
+        if (c == i) {
+            return tag->value;
+        }
+        c ++;
+    }
+    return NULL;
+}
+
+int
+dict_free(
+    AVDictionary *dict)
+{
+    av_dict_free(&dict);
+    return 0;
+}

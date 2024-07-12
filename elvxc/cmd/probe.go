@@ -99,7 +99,15 @@ func doProbe(cmd *cobra.Command, args []string) error {
 		fmt.Printf("\tdisplay_aspect_ratio: %d:%d\n", info.DisplayAspectRatio.Num(), info.DisplayAspectRatio.Denom())
 		fmt.Printf("\tfield_order: %s\n", info.FieldOrder)
 		if info.SideData.DisplayMatrix.Rotation != 0 {
-			fmt.Printf("\tside_data_display_matrix_rotation: %f\n", info.SideData.DisplayMatrix.Rotation)
+			fmt.Printf("\tside_data:\n")
+			fmt.Printf("\t\tdisplay_matrix:\n")
+			fmt.Printf("\t\t\trotation: %f\n", info.SideData.DisplayMatrix.Rotation)
+		}
+		if info.Tags != nil {
+			fmt.Printf("\ttags:\n")
+			for k, v := range info.Tags {
+				fmt.Printf("\t\t%s: %s\n", k, v)
+			}
 		}
 	}
 

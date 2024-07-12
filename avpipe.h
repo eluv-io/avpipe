@@ -112,6 +112,50 @@ probe(
     int *n_streams);
 
 /**
+ * @brief   Get count of dictionary keys.
+ *
+ * @param   dict    Dictionary pointer.
+ * @return  Count of dictionary keys.
+ */
+int
+dict_count(
+    AVDictionary *dict);
+
+/**
+ * @brief   Get dictionary key at specified index.
+ *
+ * @param   dict    Dictionary pointer.
+ * @param   i       Key index.
+ * @return  Dictionary key.
+ */
+char *
+dict_get_key(
+    AVDictionary *dict,
+    int i);
+
+/**
+ * @brief   Get dictionary value at specified index.
+ *
+ * @param   dict    Dictionary pointer.
+ * @param   i       Key index.
+ * @return  Dictionary value.
+ */
+char *
+dict_get_value(
+    AVDictionary *dict,
+    int i);
+
+/**
+ * @brief   Free all dictionary memory.
+ *
+ * @param   dict    Dictionary pointer.
+ * @return  Return code (success: 0).
+ */
+int
+dict_free(
+    AVDictionary *dict);
+
+/**
  * @brief   Sets the Go loggers.
  *
  * @return  void.
