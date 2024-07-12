@@ -2081,7 +2081,12 @@ encode_frame(
 
     while (ret >= 0) {
         /* The packet must be initialized before receiving */
+
+#pragma GCC diagnostic push
+#pragma GCC diagnostic ignored "-Wdeprecated-declarations"
         av_init_packet(output_packet);
+#pragma GCC diagnostic pop
+
         output_packet->data = NULL;
         output_packet->size = 0;
 
@@ -4032,12 +4037,11 @@ avpipe_channel_name(
         return info->name;
     }
 
-    for (int i = 0, ch = 0; i < 64; i++) {
+    for (int i = 0; i < 64; i++) {
         if ((channel_layout & (UINT64_C(1) << i))) {
             const char *name = get_channel_name(i);
             if (name)
                 return name;
-            ch++;
         }
     }
 
@@ -4188,6 +4192,8 @@ avpipe_probe(
             probe->container_info.duration =
                 ((float)stream_probes_ptr->duration_ts)/stream_probes_ptr->time_base.den;
 
+        av_dict_copy(&stream_probes_ptr->tags, s->metadata, 0);
+
         for (int i = 0; i < s->nb_side_data; i++) {
             const AVPacketSideData *sd = &s->side_data[i];
             switch (sd->type) {
@@ -4231,6 +4237,19 @@ avpipe_probe_end:
     in_handlers->avpipe_closer(&inctx);
 
     return rc;
+}
+
+int avpipe_probe_free(xcprobe_t *probe, int n_streams) {
+    if (probe == NULL)
+        return 0;
+
+    for (int i=0; i<n_streams; i++) {
+        av_dict_free(&probe->stream_info[i].tags);
+    }
+    free(probe->stream_info);
+
+    free(probe);
+    return 0;
 }
 
 static int

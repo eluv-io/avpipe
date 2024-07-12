@@ -479,7 +479,7 @@ typedef struct stream_info_t {
     int                 profile;
     int                 level;
     side_data_t         side_data;
-
+    AVDictionary        *tags;
 } stream_info_t;
 
 typedef struct container_info_t {
@@ -601,7 +601,7 @@ avpipe_channel_name(
  *
  * @param   in_handlers     A pointer to input handlers that direct the probe
  * @param   params          A pointer to the parameters for transcoding/probing.
- * @param   xcprob          A pointer to the xcprobe_t that could contain probing info.
+ * @param   xcprobe         A pointer to the xcprobe_t that could contain probing info.
  * @param   n_streams       Will contail number of streams that are probed if successful.
  * @return  Returns 0 if successful, otherwise corresponding eav error.
  */
@@ -611,6 +611,18 @@ avpipe_probe(
     xcparams_t *params,
     xcprobe_t **xcprobe,
     int *n_streams);
+
+/**
+ * @brief   Free all memory allocated by avpipe_probe
+ *
+ * @param   xcprobe         A pointer to the xcprobe_t containing probing info.
+ * @param   n_streams       Number of streams in xcprobe.
+ * @return  Returns 0 if successful, otherwise corresponding eav error.
+ */
+int
+avpipe_probe_free(
+    xcprobe_t *xcprobe,
+    int n_streams);
 
 /**
  * @brief   Starts transcoding.
