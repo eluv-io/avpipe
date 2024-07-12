@@ -325,6 +325,7 @@ func InitTranscode(cmdRoot *cobra.Command) error {
 	cmdTranscode.PersistentFlags().Int64P("extract-image-interval-ts", "", -1, "extract frames at this interval.")
 	cmdTranscode.PersistentFlags().StringP("extract-images-ts", "", "", "the frames to extract (PTS, comma separated).")
 	cmdTranscode.PersistentFlags().BoolP("seekable", "", true, "seekable stream.")
+	cmdTranscode.PersistentFlags().Int32("rotate", 0, "Rotate the output video frame (valid values 0, 90, 180, 270).")
 
 	return nil
 }
@@ -598,6 +599,11 @@ func doTranscode(cmd *cobra.Command, args []string) error {
 	crfStr := strconv.Itoa(int(crf))
 	startSegmentStr := strconv.Itoa(int(startSegment))
 
+	rotate, err := cmd.Flags().GetInt32("rotate")
+	if err != nil {
+		return fmt.Errorf("Invalid rotate value")
+	}
+
 	cryptScheme := avpipe.CryptNone
 	val := cmd.Flag("crypt-scheme").Value.String()
 	if len(val) > 0 {
@@ -693,6 +699,7 @@ func doTranscode(cmd *cobra.Command, args []string) error {
 		VideoTimeBase:          int(videoTimeBase),
 		VideoFrameDurationTs:   int(videoFrameDurationTs),
 		Seekable:               seekable,
+		Rotate:                 int(rotate),
 	}
 
 	err = getAudioIndexes(params, audioIndex)

@@ -1145,6 +1145,12 @@ prepare_video_encoder(
     /* Set codec context parameters */
     encoder_codec_context->height = params->enc_height != -1 ? params->enc_height : decoder_context->codec_context[index]->height;
     encoder_codec_context->width = params->enc_width != -1 ? params->enc_width : decoder_context->codec_context[index]->width;
+
+    /* If the rotation param is set to 1 (90 decgree) or 3 (270 degree) the change width and hight */
+    if (params->rotate == 90 || params->rotate == 270) {
+        encoder_codec_context->height = params->enc_width != -1 ? params->enc_width : decoder_context->codec_context[index]->width;
+        encoder_codec_context->width = params->enc_height != -1 ? params->enc_height : decoder_context->codec_context[index]->height;
+    }
     if (params->video_time_base > 0)
         encoder_codec_context->time_base = (AVRational) {1, params->video_time_base};
     else
@@ -3340,6 +3346,23 @@ get_filter_str(
 {
     *filter_str = NULL;
 
+    if (params->rotate > 0) {
+        switch (params->rotate) {
+        case 90:
+            *filter_str = strdup("transpose=1");                // 90 degree rotation
+            return eav_success;
+        case 180:
+            *filter_str = strdup("transpose=1,transpose=1");    // 180 degree rotation
+            return eav_success;
+        case 270:
+            *filter_str = strdup("transpose=2");                // 270 degree rotation
+            return eav_success;
+        default:
+            elv_err("Invalid param rotate=%d", params->rotate);
+            return eav_param;
+        }
+    }
+
     if ((params->watermark_text && *params->watermark_text != '\0') ||
             (params->watermark_timecode && *params->watermark_timecode != '\0')) {
         char local_filter_str[FILTER_STRING_SZ];
@@ -4491,7 +4514,8 @@ avpipe_init(
         "extract_image_interval_ts=%"PRId64" "
         "extract_images_sz=%d "
         "video_time_base=%d/%d "
-        "video_frame_duration_ts=%d",
+        "video_frame_duration_ts=%d "
+        "rotate=%d",
         params->stream_id, p->url,
         avpipe_version(),
         params->bypass_transcoding, params->skip_decoding,
@@ -4514,7 +4538,7 @@ avpipe_init(
         params->master_display ? params->master_display : "",
         params->filter_descriptor,
         params->extract_image_interval_ts, params->extract_images_sz,
-        1, params->video_time_base, params->video_frame_duration_ts);
+        1, params->video_time_base, params->video_frame_duration_ts, params->rotate);
     elv_log("AVPIPE XCPARAMS %s", buf);
 
     if ((rc = check_params(params)) != eav_success) {

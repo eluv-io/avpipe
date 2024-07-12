@@ -409,6 +409,43 @@ func TestVideoSeg(t *testing.T) {
 
 }
 
+func TestVideoSegWithRotate(t *testing.T) {
+	url := videoBigBuckBunnyPath
+	if fileMissing(url, fn()) {
+		return
+	}
+
+	outputDir := path.Join(baseOutPath, fn())
+	params := &avpipe.XcParams{
+		BypassTranscoding:      false,
+		Format:                 "fmp4-segment",
+		AudioBitrate:           128000,
+		AudioSegDurationTs:     -1,
+		BitDepth:               8,
+		CrfStr:                 "23",
+		DurationTs:             -1,
+		Ecodec:                 "libx264",
+		EncHeight:              -1,
+		EncWidth:               -1,
+		ExtractImageIntervalTs: -1,
+		GPUIndex:               -1,
+		SampleRate:             -1,
+		StartFragmentIndex:     1,
+		StartSegmentStr:        "1",
+		StreamId:               -1,
+		SyncAudioToStreamId:    -1,
+		VideoBitrate:           -1,
+		VideoSegDurationTs:     900000,
+		ForceKeyInt:            60,
+		XcType:                 avpipe.XcVideo,
+		Url:                    url,
+		DebugFrameLevel:        debugFrameLevel,
+		Rotate:                 90,
+	}
+	xcTest(t, outputDir, params, nil, true)
+
+}
+
 func TestVideoSegDoubleTS(t *testing.T) {
 	url := videoBigBuckBunnyPath
 	outputDir := path.Join(baseOutPath, fn())
