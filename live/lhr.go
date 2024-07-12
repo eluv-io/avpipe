@@ -464,11 +464,11 @@ func (lhr *HLSReader) readPlaylist() (complete bool, err error) {
 
 	// HTTP GET playlist
 	content, err := openURL(lhr.client, lhr.playlistURL)
-	defer log.Call(content.Close, "close url reader", log.Error)
 	if err != nil {
 		log.Debug("failed to get playlist", "err", err, "c", logContext)
 		return // url.Error
 	}
+	defer log.Call(content.Close, "close url reader", log.Error)
 
 	// Decode/Unmarshal
 	playlist, listType, err := m3u8.DecodeFrom(content, true)

@@ -23,6 +23,8 @@
 #define AVIO_OUT_BUF_SIZE   (1*1024*1024)   // avio output buffer size
 #define AVIO_IN_BUF_SIZE    (1*1024*1024)   // avio input buffer size
 
+//#define DEBUG_UDP_PACKET  // Uncomment for development, debugging and testing
+
 /*
  * Adding/deleting an error code needs adding/deleting corresponding GO
  * error in avpipe_errors.go
