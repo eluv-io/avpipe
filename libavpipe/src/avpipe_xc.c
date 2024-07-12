@@ -1142,7 +1142,7 @@ prepare_video_encoder(
     encoder_codec_context->height = params->enc_height != -1 ? params->enc_height : decoder_context->codec_context[index]->height;
     encoder_codec_context->width = params->enc_width != -1 ? params->enc_width : decoder_context->codec_context[index]->width;
 
-    /* If the rotation param is set to 1 (90 decgree) or 3 (270 degree) the change width and hight */
+    /* If the rotation param is set to 90 or 270 degree then change width and hight */
     if (params->rotate == 90 || params->rotate == 270) {
         encoder_codec_context->height = params->enc_width != -1 ? params->enc_width : decoder_context->codec_context[index]->width;
         encoder_codec_context->width = params->enc_height != -1 ? params->enc_height : decoder_context->codec_context[index]->height;
