@@ -861,7 +861,9 @@ do_probe(
                 "\thas_b_frames: %d\n"
                 "\tfield_order: %d\n"
                 "\tsample_aspect_ratio: %d:%d\n"
-                "\tdisplay_aspect_ratio: %d:%d\n",
+                "\tdisplay_aspect_ratio: %d:%d\n"
+                "\tside_data_display_matrix_rotation:%f\n"
+                "\tside_data_display_matrix_rotation_cw:%f\n",
                 probe->stream_info[i].stream_index,
                 probe->stream_info[i].stream_id,
                 av_get_media_type_string(probe->stream_info[i].codec_type),
@@ -886,8 +888,20 @@ do_probe(
                 probe->stream_info[i].has_b_frames,
                 probe->stream_info[i].field_order,
                 probe->stream_info[i].sample_aspect_ratio.num, probe->stream_info[i].sample_aspect_ratio.den,
-                probe->stream_info[i].display_aspect_ratio.num, probe->stream_info[i].display_aspect_ratio.den
+                probe->stream_info[i].display_aspect_ratio.num, probe->stream_info[i].display_aspect_ratio.den,
+                probe->stream_info[i].side_data.display_matrix.rotation,
+                probe->stream_info[i].side_data.display_matrix.rotation_cw
                 );
+
+        if (probe->stream_info[i].tags != NULL) {
+            printf("\ttags:\n");
+            AVDictionaryEntry *tag = NULL;
+            while ((tag = av_dict_get(probe->stream_info[i].tags, "", tag, AV_DICT_IGNORE_SUFFIX))) {
+                if (tag != NULL) {
+                    printf("\t\t%s: %s\n", tag->key, tag->value);
+                }
+            }
+        }
     }
     printf("Container\n"
         "\tformat_name: %s\n"
@@ -897,9 +911,7 @@ do_probe(
 
 end_probe:
     elv_dbg("Releasing probe resources");
-    if (probe)
-        free(probe->stream_info);
-    free(probe);
+    avpipe_probe_free(probe, n_streams);
     return rc;
 }
 

@@ -333,32 +333,41 @@ const (
 	AV_IN_STAT_DATA_SCTE35              = 512
 )
 
+type SideDataDisplayMatrix struct {
+	Rotation   float64
+	RotationCw float64
+}
+type SideData struct {
+	DisplayMatrix SideDataDisplayMatrix
+}
 type StreamInfo struct {
-	StreamIndex        int      `json:"stream_index"`
-	StreamId           int32    `json:"stream_id"`
-	CodecType          string   `json:"codec_type"`
-	CodecID            int      `json:"codec_id,omitempty"`
-	CodecName          string   `json:"codec_name,omitempty"`
-	DurationTs         int64    `json:"duration_ts,omitempty"`
-	TimeBase           *big.Rat `json:"time_base,omitempty"`
-	NBFrames           int64    `json:"nb_frames,omitempty"`
-	StartTime          int64    `json:"start_time"` // in TS unit
-	AvgFrameRate       *big.Rat `json:"avg_frame_rate,omitempty"`
-	FrameRate          *big.Rat `json:"frame_rate,omitempty"`
-	SampleRate         int      `json:"sample_rate,omitempty"`
-	Channels           int      `json:"channels,omitempty"`
-	ChannelLayout      int      `json:"channel_layout,omitempty"`
-	TicksPerFrame      int      `json:"ticks_per_frame,omitempty"`
-	BitRate            int64    `json:"bit_rate,omitempty"`
-	Has_B_Frames       bool     `json:"has_b_frame"`
-	Width              int      `json:"width,omitempty"`  // Video only
-	Height             int      `json:"height,omitempty"` // Video only
-	PixFmt             int      `json:"pix_fmt"`          // Video only, it matches with enum AVPixelFormat in FFmpeg
-	SampleAspectRatio  *big.Rat `json:"sample_aspect_ratio,omitempty"`
-	DisplayAspectRatio *big.Rat `json:"display_aspect_ratio,omitempty"`
-	FieldOrder         string   `json:"field_order,omitempty"`
-	Profile            int      `json:"profile,omitempty"`
-	Level              int      `json:"level,omitempty"`
+	StreamIndex        int               `json:"stream_index"`
+	StreamId           int32             `json:"stream_id"`
+	CodecType          string            `json:"codec_type"`
+	CodecID            int               `json:"codec_id,omitempty"`
+	CodecName          string            `json:"codec_name,omitempty"`
+	DurationTs         int64             `json:"duration_ts,omitempty"`
+	TimeBase           *big.Rat          `json:"time_base,omitempty"`
+	NBFrames           int64             `json:"nb_frames,omitempty"`
+	StartTime          int64             `json:"start_time"` // in TS unit
+	AvgFrameRate       *big.Rat          `json:"avg_frame_rate,omitempty"`
+	FrameRate          *big.Rat          `json:"frame_rate,omitempty"`
+	SampleRate         int               `json:"sample_rate,omitempty"`
+	Channels           int               `json:"channels,omitempty"`
+	ChannelLayout      int               `json:"channel_layout,omitempty"`
+	TicksPerFrame      int               `json:"ticks_per_frame,omitempty"`
+	BitRate            int64             `json:"bit_rate,omitempty"`
+	Has_B_Frames       bool              `json:"has_b_frame"`
+	Width              int               `json:"width,omitempty"`  // Video only
+	Height             int               `json:"height,omitempty"` // Video only
+	PixFmt             int               `json:"pix_fmt"`          // Video only, it matches with enum AVPixelFormat in FFmpeg
+	SampleAspectRatio  *big.Rat          `json:"sample_aspect_ratio,omitempty"`
+	DisplayAspectRatio *big.Rat          `json:"display_aspect_ratio,omitempty"`
+	FieldOrder         string            `json:"field_order,omitempty"`
+	Profile            int               `json:"profile,omitempty"`
+	Level              int               `json:"level,omitempty"`
+	SideData           SideData          `json:"side_data,omitempty"`
+	Tags               map[string]string `json:"tags,omitempty"`
 }
 
 type ContainerInfo struct {
@@ -1448,6 +1457,20 @@ func Probe(params *XcParams) (*ProbeInfo, error) {
 		probeInfo.StreamInfo[i].FieldOrder = AVFieldOrderNames[AVFieldOrder(probeArray[i].field_order)]
 		probeInfo.StreamInfo[i].Profile = int(probeArray[i].profile)
 		probeInfo.StreamInfo[i].Level = int(probeArray[i].level)
+		probeInfo.StreamInfo[i].SideData.DisplayMatrix.Rotation = float64(probeArray[i].side_data.display_matrix.rotation)
+		probeInfo.StreamInfo[i].SideData.DisplayMatrix.RotationCw = float64(probeArray[i].side_data.display_matrix.rotation_cw)
+
+		// Convert AVDictionary data to Tags of type map[string]string using the built in av_dict_get() iterator
+		dict := (*C.AVDictionary)(unsafe.Pointer((probeArray[i].tags)))
+		var tag *C.AVDictionaryEntry = (*C.AVDictionaryEntry)(unsafe.Pointer(C.av_dict_get(dict, (*C.char)(C.CString("")), (*C.AVDictionaryEntry)(nil), C.AV_DICT_IGNORE_SUFFIX)))
+		if tag != nil {
+			probeInfo.StreamInfo[i].Tags = map[string]string{}
+			for tag != nil {
+				probeInfo.StreamInfo[i].Tags[C.GoString((*C.char)(unsafe.Pointer(tag.key)))] = C.GoString((*C.char)(unsafe.Pointer(tag.value)))
+				tag = (*C.AVDictionaryEntry)(unsafe.Pointer(C.av_dict_get(dict, (*C.char)(C.CString("")), tag, C.AV_DICT_IGNORE_SUFFIX)))
+			}
+		}
+		C.av_dict_free(&dict)
 	}
 
 	probeInfo.ContainerInfo.FormatName = C.GoString((*C.char)(unsafe.Pointer(cprobe.container_info.format_name)))

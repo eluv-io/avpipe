@@ -12,6 +12,7 @@
 #include "libavutil/audio_fifo.h"
 #include <libswscale/swscale.h>
 #include <libavutil/imgutils.h>
+#include <libavutil/display.h>
 
 #include "avpipe_xc.h"
 #include "avpipe_utils.h"
@@ -4054,12 +4055,11 @@ avpipe_channel_name(
         return info->name;
     }
 
-    for (int i = 0, ch = 0; i < 64; i++) {
+    for (int i = 0; i < 64; i++) {
         if ((channel_layout & (UINT64_C(1) << i))) {
             const char *name = get_channel_name(i);
             if (name)
                 return name;
-            ch++;
         }
     }
 
@@ -4209,6 +4209,25 @@ avpipe_probe(
             ((float)stream_probes_ptr->duration_ts)/stream_probes_ptr->time_base.den)
             probe->container_info.duration =
                 ((float)stream_probes_ptr->duration_ts)/stream_probes_ptr->time_base.den;
+
+        av_dict_copy(&stream_probes_ptr->tags, s->metadata, 0);
+
+        for (int i = 0; i < s->nb_side_data; i++) {
+            const AVPacketSideData *sd = &s->side_data[i];
+            switch (sd->type) {
+                case AV_PKT_DATA_DISPLAYMATRIX:
+                    stream_probes_ptr->side_data.display_matrix.rotation = av_display_rotation_get((int32_t *)sd->data);
+                    double rot = stream_probes_ptr->side_data.display_matrix.rotation;
+                    // Convert from CCW [-180:180] value to straight CW
+                    rot = rot >= 0 ? rot : 360.0 + rot;
+                    rot = rot > 0 ? 360 - rot : 0;
+                    stream_probes_ptr->side_data.display_matrix.rotation_cw = rot;
+                    break;
+                default:
+                    // Not handled
+                    break;
+            }
+        }
     }
 
     inctx.closed = 1;
@@ -4241,6 +4260,19 @@ avpipe_probe_end:
     in_handlers->avpipe_closer(&inctx);
 
     return rc;
+}
+
+int avpipe_probe_free(xcprobe_t *probe, int n_streams) {
+    if (probe == NULL)
+        return 0;
+
+    for (int i=0; i<n_streams; i++) {
+        av_dict_free(&probe->stream_info[i].tags);
+    }
+    free(probe->stream_info);
+
+    free(probe);
+    return 0;
 }
 
 static int
