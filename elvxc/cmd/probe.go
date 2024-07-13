@@ -102,6 +102,7 @@ func doProbe(cmd *cobra.Command, args []string) error {
 			fmt.Printf("\tside_data:\n")
 			fmt.Printf("\t\tdisplay_matrix:\n")
 			fmt.Printf("\t\t\trotation: %f\n", info.SideData.DisplayMatrix.Rotation)
+			fmt.Printf("\t\t\trotation_cw: %f\n", info.SideData.DisplayMatrix.RotationCw)
 		}
 		if info.Tags != nil {
 			fmt.Printf("\ttags:\n")

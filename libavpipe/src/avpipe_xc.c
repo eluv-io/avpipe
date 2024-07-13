@@ -4194,6 +4194,11 @@ avpipe_probe(
             switch (sd->type) {
                 case AV_PKT_DATA_DISPLAYMATRIX:
                     stream_probes_ptr->side_data.display_matrix.rotation = av_display_rotation_get((int32_t *)sd->data);
+                    double rot = stream_probes_ptr->side_data.display_matrix.rotation;
+                    // Convert from CCW [-180:180] value to straight CW
+                    rot = rot >= 0 ? rot : 360.0 + rot;
+                    rot = rot > 0 ? 360 - rot : 0;
+                    stream_probes_ptr->side_data.display_matrix.rotation_cw = rot;
                     break;
                 default:
                     // Not handled

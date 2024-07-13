@@ -446,7 +446,8 @@ typedef struct xcparams_t {
 #define MAX_CODEC_NAME  256
 
 typedef struct side_data_display_matrix_t {
-    double rotation;
+    double rotation;    // Original rotation is CCW with values from -180 to 180
+    double rotation_cw; // Computed CW rotation with values 0 to 360
 } side_data_display_matrix_t;
 typedef struct side_data_t {
     side_data_display_matrix_t display_matrix;

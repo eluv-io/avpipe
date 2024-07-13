@@ -333,7 +333,8 @@ const (
 )
 
 type SideDataDisplayMatrix struct {
-	Rotation float64
+	Rotation   float64
+	RotationCw float64
 }
 type SideData struct {
 	DisplayMatrix SideDataDisplayMatrix
@@ -1455,6 +1456,7 @@ func Probe(params *XcParams) (*ProbeInfo, error) {
 		probeInfo.StreamInfo[i].Profile = int(probeArray[i].profile)
 		probeInfo.StreamInfo[i].Level = int(probeArray[i].level)
 		probeInfo.StreamInfo[i].SideData.DisplayMatrix.Rotation = float64(probeArray[i].side_data.display_matrix.rotation)
+		probeInfo.StreamInfo[i].SideData.DisplayMatrix.RotationCw = float64(probeArray[i].side_data.display_matrix.rotation_cw)
 
 		dict := (*C.AVDictionary)(unsafe.Pointer((probeArray[i].tags)))
 		var tag *C.AVDictionaryEntry = (*C.AVDictionaryEntry)(unsafe.Pointer(C.av_dict_get(dict, (*C.char)(C.CString("")), (*C.AVDictionaryEntry)(nil), C.AV_DICT_IGNORE_SUFFIX)))
