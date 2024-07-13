@@ -1458,6 +1458,7 @@ func Probe(params *XcParams) (*ProbeInfo, error) {
 		probeInfo.StreamInfo[i].SideData.DisplayMatrix.Rotation = float64(probeArray[i].side_data.display_matrix.rotation)
 		probeInfo.StreamInfo[i].SideData.DisplayMatrix.RotationCw = float64(probeArray[i].side_data.display_matrix.rotation_cw)
 
+		// Convert AVDictionary data to Tags of type map[string]string using the built in av_dict_get() iterator
 		dict := (*C.AVDictionary)(unsafe.Pointer((probeArray[i].tags)))
 		var tag *C.AVDictionaryEntry = (*C.AVDictionaryEntry)(unsafe.Pointer(C.av_dict_get(dict, (*C.char)(C.CString("")), (*C.AVDictionaryEntry)(nil), C.AV_DICT_IGNORE_SUFFIX)))
 		if tag != nil {
