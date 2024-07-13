@@ -1456,17 +1456,16 @@ func Probe(params *XcParams) (*ProbeInfo, error) {
 		probeInfo.StreamInfo[i].Level = int(probeArray[i].level)
 		probeInfo.StreamInfo[i].SideData.DisplayMatrix.Rotation = float64(probeArray[i].side_data.display_matrix.rotation)
 
-		dict := (*C.AVDictionary)(probeArray[i].tags)
-		dictCount := (int)(C.dict_count(dict))
-		if dictCount > 0 {
-			probeInfo.StreamInfo[i].Tags = make(map[string]string, dictCount)
-			for c := 0; c < dictCount; c++ {
-				k := C.GoString((*C.char)(C.dict_get_key(dict, (C.int)(c))))
-				v := C.GoString((*C.char)(C.dict_get_value(dict, (C.int)(c))))
-				probeInfo.StreamInfo[i].Tags[k] = v
+		dict := (*C.AVDictionary)(unsafe.Pointer((probeArray[i].tags)))
+		var tag *C.AVDictionaryEntry = (*C.AVDictionaryEntry)(unsafe.Pointer(C.av_dict_get(dict, (*C.char)(C.CString("")), (*C.AVDictionaryEntry)(nil), C.AV_DICT_IGNORE_SUFFIX)))
+		if tag != nil {
+			probeInfo.StreamInfo[i].Tags = map[string]string{}
+			for tag != nil {
+				probeInfo.StreamInfo[i].Tags[C.GoString((*C.char)(unsafe.Pointer(tag.key)))] = C.GoString((*C.char)(unsafe.Pointer(tag.value)))
+				tag = (*C.AVDictionaryEntry)(unsafe.Pointer(C.av_dict_get(dict, (*C.char)(C.CString("")), tag, C.AV_DICT_IGNORE_SUFFIX)))
 			}
-			C.dict_free(dict)
 		}
+		C.av_dict_free(&dict)
 	}
 
 	probeInfo.ContainerInfo.FormatName = C.GoString((*C.char)(unsafe.Pointer(cprobe.container_info.format_name)))
