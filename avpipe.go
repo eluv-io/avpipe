@@ -1466,6 +1466,8 @@ func Probe(params *XcParams) (*ProbeInfo, error) {
 				RotationCw: float64(probeArray[i].side_data.display_matrix.rotation_cw),
 			}
 			probeInfo.StreamInfo[i].SideDataList[0] = displayMatrix
+		} else {
+			probeInfo.StreamInfo[i].SideDataList = make([]interface{}, 0)
 		}
 
 		// Convert AVDictionary data to Tags of type map[string]string using the built in av_dict_get() iterator
