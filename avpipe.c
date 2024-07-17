@@ -914,10 +914,14 @@ xc_table_cancel(
     for (int i=0; i<MAX_TX; i++) {
         if (xc_table[i] != NULL && xc_table[i]->handle == handle) {
             xctx_t *xctx = xc_table[i]->xctx;
-
             if (xctx->index == i) {
+                // TODO(Nate): Validate that this is totally deadlock safe
+                pthread_mutex_lock(&xctx->cancel_init_mu);
                 xctx->decoder_ctx.cancelled = 1;
                 xctx->encoder_ctx.cancelled = 1;
+                pthread_mutex_unlock(&xctx->cancel_init_mu);
+
+                // TODO(Nate): remove this logic, as we don't need to do this separately I think
                 /* If there is a UDP thread running wait for it to be finished */
                 if ( xctx->inctx && xctx->inctx->utid ) {
                     xctx->inctx->closed = 1;
@@ -938,6 +942,7 @@ xc_table_cancel(
     return rc;
 }
 
+// This operation either succeeds and allocates, or fails before modifying the in/out handlers
 static int
 set_handlers(
     char *url,
@@ -985,6 +990,33 @@ set_handlers(
         out_handlers->avpipe_stater = out_stat;
         *p_out_handlers = out_handlers;
     }
+    
+    // TODO: avoid leaking memory from the url parser
+
+    return eav_success;
+}
+
+int32_t
+xc_create_job(int32_t *handle)
+{
+    xctx_t *xctx;
+    uint32_t h;
+    
+
+    *handle = 1;
+    init_tx_module();
+    connect_ffmpeg_log();
+    if ((xctx = calloc(1, sizeof(xctx_t))) == NULL) {
+        return eav_mem_alloc;
+    }
+
+    if ((h = xc_table_put(xctx)) < 0) {
+        elv_err("xc_init xc_table is full, cancelling job creation");
+        free(xctx);
+        return eav_xc_table;
+    }
+
+    *handle = h;
 
     return eav_success;
 }
@@ -996,42 +1028,60 @@ set_handlers(
 int32_t
 xc_init(
     xcparams_t *params,
-    int32_t *handle)
+    int32_t handle)
 {
-    xctx_t *xctx = NULL;
+    xctx_t *xctx;
     int64_t rc = 0;
     uint32_t h;
     avpipe_io_handler_t *in_handlers = NULL;
     avpipe_io_handler_t *out_handlers = NULL;
 
-    *handle = -1;
+    xc_entry_t *xe = xc_table_find(handle);
+
+    if (!xe) {
+        elv_err("xx_init invalid handle=%d", handle);
+        return eav_bad_handle;
+    }
+
     if (!params || !params->url || params->url[0] == '\0' )
         return eav_param;
 
-    init_tx_module();
+    xctx = xe->xctx;
+    pthread_mutex_lock(&xctx->cancel_init_mu);
+    // Make sure that we initialize only exactly once, and only if we haven't yet cancelled
+    if (xctx->initialized) {
+        pthread_mutex_unlock(&xctx->cancel_init_mu);
+        elv_log("xc_init Job %d attempted double intialization", handle);
+        return eav_bad_handle;
+    } else if (xctx->decoder_ctx.cancelled || xctx->encoder_ctx.cancelled) {
+        pthread_mutex_unlock(&xctx->cancel_init_mu);
+        elv_log("xc_init Job %d is already cancelled", handle);
+        // CODEREVIEW: Should these return these errors? And should it free if cancelled?
+        return eav_cancelled;
+    }
 
-    connect_ffmpeg_log();
+    xctx->initialized = 1;
+    pthread_mutex_unlock(&xctx->cancel_init_mu);
+
     if ((rc = set_handlers(params->url, &in_handlers, &out_handlers)) != eav_success) {
         goto end_tx_init;
     }
 
-    if ((rc = avpipe_init(&xctx, in_handlers, out_handlers, params)) != eav_success) {
-        goto end_tx_init;
-    }
-
-    if ((h = xc_table_put(xctx)) < 0) {
-        elv_err("xc_init xc_table is full, cancelling transcoding %s", params->url);
-        rc = eav_xc_table;
+    // TODO: make everything that currently uses xc_init do create job -> init
+    if ((rc = avpipe_init(xctx, in_handlers, out_handlers, params)) != eav_success) {
+        // Need to free in and out handlers
+        xctx->in_handlers = in_handlers;
+        xctx->out_handlers = out_handlers;
         goto end_tx_init;
     }
 
     xctx->in_handlers = in_handlers;
     xctx->out_handlers = out_handlers;
 
-    *handle = h;
     return eav_success;
 
 end_tx_init:
+    xc_table_free(handle);
     avpipe_fini(&xctx);
 
     return rc;
@@ -1079,7 +1129,7 @@ int
 xc(
     xcparams_t *params)
 {
-    xctx_t *xctx = NULL;
+    xctx_t *xctx;
     int rc = 0;
     avpipe_io_handler_t *in_handlers;
     avpipe_io_handler_t *out_handlers;
@@ -1095,7 +1145,8 @@ xc(
 
     set_handlers(params->url, &in_handlers, &out_handlers);
 
-    if ((rc = avpipe_init(&xctx, in_handlers, out_handlers, params)) != eav_success) {
+    xctx = (xctx_t *)calloc(1, sizeof(xctx_t));
+    if ((rc = avpipe_init(xctx, in_handlers, out_handlers, params)) != eav_success) {
         goto end_tx;
     }
 

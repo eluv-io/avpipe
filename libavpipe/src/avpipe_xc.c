@@ -380,6 +380,12 @@ selected_decoded_audio(
     return -1;
 }
 
+int decode_interrupt_cb(void *ctx) {
+    coderctx_t *decoder_ctx = (coderctx_t *)ctx;
+    elv_log("interrupt callback checked. Cancelled is equal to %d", decoder_ctx->audio_duration);
+    return 1;
+}
+
 static int
 prepare_decoder(
     coderctx_t *decoder_context,
@@ -408,6 +414,10 @@ prepare_decoder(
         elv_err("Could not allocate memory for Format Context, url=%s", url);
         return eav_mem_alloc;
     }
+
+    decoder_context->audio_duration = 7077;
+    const AVIOInterruptCB int_cb = { decode_interrupt_cb, (void*)decoder_context};
+    decoder_context->format_context->interrupt_callback = int_cb;
 
     /* Set our custom reader */
     prepare_input(in_handlers, inctx, decoder_context, seekable);
@@ -4413,12 +4423,11 @@ check_params(
 
 int
 avpipe_init(
-    xctx_t **xctx,
+    xctx_t *xctx,
     avpipe_io_handler_t *in_handlers,
     avpipe_io_handler_t *out_handlers,
     xcparams_t *p)
 {
-    xctx_t *p_xctx = NULL;
     xcparams_t *params = NULL;
     int rc = 0;
     ioctx_t *inctx = (ioctx_t *)calloc(1, sizeof(ioctx_t));
@@ -4447,12 +4456,11 @@ avpipe_init(
         goto avpipe_init_failed;
     }
 
-    p_xctx = (xctx_t *) calloc(1, sizeof(xctx_t));
-    p_xctx->params = params;
-    p_xctx->inctx = inctx;
-    p_xctx->in_handlers = in_handlers;
-    p_xctx->out_handlers = out_handlers;
-    p_xctx->debug_frame_level = p->debug_frame_level;
+    xctx->params = params;
+    xctx->inctx = inctx;
+    xctx->in_handlers = in_handlers;
+    xctx->out_handlers = out_handlers;
+    xctx->debug_frame_level = p->debug_frame_level;
 
     if (!params->format ||
         (strcmp(params->format, "dash") &&
@@ -4464,9 +4472,9 @@ avpipe_init(
          strcmp(params->format, "fmp4-segment"))) {
         elv_err("Output format can be only \"dash\", \"hls\", \"image2\", \"mp4\", \"fmp4\", \"segment\", or \"fmp4-segment\", url=%s", p->url);
         rc = eav_param;
-        free(p_xctx);
+        free(xctx);
         free(params);
-        p_xctx = NULL;
+        xctx = NULL;
         goto avpipe_init_failed;
     }
 
@@ -4566,33 +4574,29 @@ avpipe_init(
         goto avpipe_init_failed;
     }
 
-    if ((rc = prepare_decoder(&p_xctx->decoder_ctx,
+    if ((rc = prepare_decoder(&xctx->decoder_ctx,
             in_handlers, inctx, params, params->seekable)) != eav_success) {
         elv_err("Failure in preparing decoder, url=%s, rc=%d", params->url, rc);
         goto avpipe_init_failed;
     }
 
-    if ((rc = prepare_encoder(&p_xctx->encoder_ctx,
-        &p_xctx->decoder_ctx, out_handlers, inctx, params)) != eav_success) {
+    if ((rc = prepare_encoder(&xctx->encoder_ctx,
+        &xctx->decoder_ctx, out_handlers, inctx, params)) != eav_success) {
         elv_err("Failure in preparing encoder, url=%s, rc=%d", params->url, rc);
         goto avpipe_init_failed;
     }
 
-    elv_channel_init(&p_xctx->vc, 10000, NULL);
-    elv_channel_init(&p_xctx->ac, 10000, NULL);
+    elv_channel_init(&xctx->vc, 10000, NULL);
+    elv_channel_init(&xctx->ac, 10000, NULL);
 
     /* Create threads for decoder and encoder */
-    pthread_create(&p_xctx->vthread_id, NULL, transcode_video_func, p_xctx);
-    pthread_create(&p_xctx->athread_id, NULL, transcode_audio_func, p_xctx);
-    *xctx = p_xctx;
+    pthread_create(&xctx->vthread_id, NULL, transcode_video_func, xctx);
+    pthread_create(&xctx->athread_id, NULL, transcode_audio_func, xctx);
 
     return eav_success;
 
 avpipe_init_failed:
-    if (xctx)
-        *xctx = NULL;
-    if (p_xctx)
-        avpipe_fini(&p_xctx);
+    // Caller is responsible for freeing xctx if this fails
     return rc;
 }
 

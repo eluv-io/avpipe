@@ -1501,8 +1501,16 @@ func XcInit(params *XcParams) (int32, error) {
 		log.Error("Initializing transcoder failed", err, "url", params.Url)
 	}
 
+	// This is literally just used to trigger C rebuild...
+	log.Info("rebuild version 7")
+
 	var handle C.int32_t
-	rc := C.xc_init((*C.xcparams_t)(unsafe.Pointer(cparams)), (*C.int32_t)(unsafe.Pointer(&handle)))
+	rc := C.xc_create_job((*C.int32_t)(unsafe.Pointer(&handle)))
+	if rc != C.eav_success {
+		return -1, avpipeError(rc)
+	}
+
+	rc = C.xc_init((*C.xcparams_t)(unsafe.Pointer(cparams)), handle)
 	if rc != C.eav_success {
 		return -1, avpipeError(rc)
 	}

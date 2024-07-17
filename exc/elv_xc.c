@@ -740,9 +740,10 @@ tx_thread_func(
         avpipe_io_handler_t *out_handlers = (avpipe_io_handler_t *)calloc(1, sizeof(avpipe_io_handler_t));
         *in_handlers = *params->in_handlers;
         *out_handlers = *params->out_handlers;
-        if ((rc = avpipe_init(&xctx, in_handlers, out_handlers, xcparams)) != eav_success) {
+        xctx = (xctx_t *)calloc(1, sizeof(xctx_t));
+        if ((rc = avpipe_init(xctx, in_handlers, out_handlers, xcparams)) != eav_success) {
             elv_err("THREAD %d, iteration %d, failed to initialize avpipe rc=%d", params->thread_number, i+1, rc);
-            /* avpipe_fini() will release all the resources if the open is successful */
+            avpipe_fini(&xctx);
             if (rc == eav_open_input) {
                 params->err = rc;
                 break;

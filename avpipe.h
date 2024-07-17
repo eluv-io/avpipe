@@ -4,7 +4,8 @@
  * Defines all the interfaces available to the Go layer.
  * There are two sets of API's available for transcoding/probing in this layer:
  * - APIs with handle: these APIs allow the client application to cancel a transcoding if it is necessary.
- *   - xc_init(): to initialize a transcoding and obtain a handle.
+ *   - xc_create_job(): to obtain a handle.
+ *   - xc_init(): to initialize a transcoding with obtained handle.
  *   - xc_run(): to start a transcoding with obtained handle.
  *   - xc_cancel(): to cancel/stop a transcoding with specified handle.
  * - APIs with no handle: these APIs are very simple to use and just need transcoding/probing params.
@@ -21,8 +22,26 @@
 #include "avpipe_xc.h"
 
 /**
- * @brief   Initializes a transcoding context and returns its handle.
+ * @brief   Creates and partially allocates a transcoding job and returns its handle.
+ *          This handle must be used exactly once in a call to xc_init.
+ *
+ * @param   handle          Pointer to the handle of transcoding context.
+ *
+ * @return  If it is successful it returns eav_success, otherwise corresponding error.
+ */
+int32_t
+xc_create_job(int32_t *handle);
+
+/**
+ * @brief   Initializes a transcoding context based on an existing handle and transcoding parameters.
  *          The transcoding context is internal to the C/Go layer.
+ *          
+ *          Context initialization also includes probing an input stream in some circumstances. If
+ *          there is no input data, this call will stall and require a call to xc_cancel to
+ *          terminate it.
+ *          
+ *          If unsuccessful, this function frees all resources, including those associated with
+ *          handle and the parameters passed in.
  *
  * @param   params          Transcoding parameters.
  * @param   handle          Pointer to the handle of transcoding context.
@@ -32,7 +51,7 @@
 int32_t
 xc_init(
     xcparams_t *params,
-    int32_t *handle);
+    int32_t handle);
 
 /**
  * @brief   Starts the transcoding specified by handle.

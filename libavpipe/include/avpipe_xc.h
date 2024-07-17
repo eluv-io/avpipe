@@ -520,6 +520,13 @@ typedef struct xctx_t {
     AVPacket            pkt_array[MAX_STREAMS];
     int                 is_pkt_valid[MAX_STREAMS];
 
+    // Mutex used to synchronized access to specifically
+    // - xctx_t.initialized
+    // - xctx_t.decoder_ctx.cancelled
+    // - xctx_t.encoder_ctx.cancelled
+    pthread_mutex_t     cancel_init_mu;
+    int                 initialized;
+
     elv_channel_t       *vc;        // Video frame channel
     elv_channel_t       *ac;        // Audio frame channel
     pthread_t           vthread_id;
@@ -558,7 +565,7 @@ typedef struct encoding_frame_stats_t {
  * @brief   Allocates and initializes a xctx_t (transcoder context) for piplining the input stream.
  *          In case of failure avpipe_fini() should be called to avoid resource leak.
  *
- * @param   xctx            Points to allocated and initialized memory (different fields are initialized by ffmpeg).
+ * @param   xctx            Points to a calloc-ed xctx_t (different fields are initialized by ffmpeg).
  * @param   in_handlers     A pointer to input handlers. Must be properly set up by the application.
  * @param   inctx           A pointer to ioctx_t for input stream. This has to be allocated and initialized
  *                          by the application before calling this function.
@@ -569,7 +576,7 @@ typedef struct encoding_frame_stats_t {
  */
 int
 avpipe_init(
-    xctx_t **xctx,
+    xctx_t *xctx,
     avpipe_io_handler_t *in_handlers,
     avpipe_io_handler_t *out_handlers,
     xcparams_t *params);
@@ -577,7 +584,7 @@ avpipe_init(
 /**
  * @brief   Frees the memory and other resources allocated by ffmpeg.
  *
- * @param   xctx       A pointer to the trascoding context that would be destructed.
+ * @param   xctx       A pointer to the transcoding context that would be destructed.
  * @return  Returns 0.
  */
 int
