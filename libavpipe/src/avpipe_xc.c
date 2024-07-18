@@ -415,7 +415,6 @@ prepare_decoder(
         return eav_mem_alloc;
     }
 
-    decoder_context->audio_duration = 7077;
     const AVIOInterruptCB int_cb = { decode_interrupt_cb, (void*)decoder_context};
     decoder_context->format_context->interrupt_callback = int_cb;
 
