@@ -1487,13 +1487,23 @@ func Probe(params *XcParams) (*ProbeInfo, error) {
 	return probeInfo, nil
 }
 
+func XcCreateJob() (int32, error) {
+	var handle C.int32_t
+	rc := C.xc_create_job((*C.int32_t)(unsafe.Pointer(&handle)))
+	if rc != C.eav_success {
+		return -1, avpipeError(rc)
+	}
+
+	return int32(handle), nil
+}
+
 // Returns a handle and error (if there is any error)
 // In case of error the handle would be zero
-func XcInit(params *XcParams) (int32, error) {
+func XcInit(params *XcParams, handle int32) error {
 	// Convert XcParams to C.txparams_t
 	if params == nil {
 		log.Error("Failed transcoding, params are not set.")
-		return -1, EAV_PARAM
+		return EAV_PARAM
 	}
 
 	cparams, err := getCParams(params)
@@ -1502,20 +1512,14 @@ func XcInit(params *XcParams) (int32, error) {
 	}
 
 	// This is literally just used to trigger C rebuild...
-	log.Info("rebuild version 7")
+	log.Info("rebuild version 14")
 
-	var handle C.int32_t
-	rc := C.xc_create_job((*C.int32_t)(unsafe.Pointer(&handle)))
+	rc = C.xc_init((*C.xcparams_t)(unsafe.Pointer(cparams)), C.int32_t(handle))
 	if rc != C.eav_success {
-		return -1, avpipeError(rc)
+		return avpipeError(rc)
 	}
 
-	rc = C.xc_init((*C.xcparams_t)(unsafe.Pointer(cparams)), handle)
-	if rc != C.eav_success {
-		return -1, avpipeError(rc)
-	}
-
-	return int32(handle), nil
+	return nil
 }
 
 func XcRun(handle int32) error {

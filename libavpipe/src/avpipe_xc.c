@@ -382,8 +382,8 @@ selected_decoded_audio(
 
 int decode_interrupt_cb(void *ctx) {
     coderctx_t *decoder_ctx = (coderctx_t *)ctx;
-    elv_log("interrupt callback checked. Cancelled is equal to %d", decoder_ctx->audio_duration);
-    return 1;
+    elv_log("interrupt callback checked. Cancelled is equal to %d", decoder_ctx->cancelled);
+    return decoder_ctx->cancelled;
 }
 
 static int
@@ -4645,6 +4645,15 @@ avpipe_fini(
 {
     coderctx_t *decoder_context;
     coderctx_t *encoder_context;
+
+    if (__STDC_VERSION__ >= 201710L)
+        printf("We are using C17!\n");
+    else if (__STDC_VERSION__ >= 201112L)
+        printf("We are using C11!\n");
+    else if (__STDC_VERSION__ >= 199901L)
+        printf("We are using C99!\n");
+    else
+        printf("We are using C89/C90!\n");
 
     if (!xctx || !(*xctx))
         return 0;

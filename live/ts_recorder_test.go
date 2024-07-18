@@ -2,10 +2,11 @@ package live
 
 import (
 	"fmt"
-	"github.com/stretchr/testify/assert"
 	"path"
 	"testing"
 	"time"
+
+	"github.com/stretchr/testify/assert"
 
 	"github.com/eluv-io/avpipe"
 )
@@ -244,9 +245,14 @@ func TestUdpToMp4WithCancelling1(t *testing.T) {
 	avpipe.InitIOHandler(&inputOpener{dir: outputDir}, &outputOpener{dir: outputDir})
 
 	tlog.Info("Transcoding UDP stream start", "params", fmt.Sprintf("%+v", *xcParams))
-	handle, err := avpipe.XcInit(xcParams)
+	handle, err := avpipe.XcCreateJob()
 	if err != nil {
-		t.Error("XcInitializing UDP stream failed", "err", err)
+		t.Error("XcCreateJob failed", "err", err)
+	}
+
+	err = avpipe.XcInit(xcParams, handle)
+	if err != nil {
+		t.Error("XcInit initializing UDP stream failed", "err", err)
 	}
 	err = avpipe.XcCancel(handle)
 	assert.NoError(t, err)
@@ -303,9 +309,14 @@ func TestUdpToMp4WithCancelling2(t *testing.T) {
 	avpipe.InitIOHandler(&inputOpener{dir: outputDir}, &outputOpener{dir: outputDir})
 
 	tlog.Info("Transcoding UDP stream start", "params", fmt.Sprintf("%+v", *xcParams))
-	handle, err := avpipe.XcInit(xcParams)
+	handle, err := avpipe.XcCreateJob()
 	if err != nil {
-		t.Error("XcInitializing UDP stream failed", "err", err)
+		t.Error("XcCreateJob failed", "err", err)
+	}
+
+	err = avpipe.XcInit(xcParams, handle)
+	if err != nil {
+		t.Error("XcInit initializing UDP stream failed", "err", err)
 	}
 	go func() {
 		err := avpipe.XcRun(handle)
@@ -375,9 +386,14 @@ func TestUdpToMp4WithCancelling3(t *testing.T) {
 	avpipe.InitIOHandler(&inputOpener{dir: outputDir}, &outputOpener{dir: outputDir})
 
 	tlog.Info("Transcoding UDP stream start", "params", fmt.Sprintf("%+v", *xcParams))
-	handle, err := avpipe.XcInit(xcParams)
+	handle, err := avpipe.XcCreateJob()
 	if err != nil {
-		t.Error("XcInitializing UDP stream failed", "err", err)
+		t.Error("XcCreateJob failed", "err", err)
+	}
+
+	err = avpipe.XcInit(xcParams, handle)
+	if err != nil {
+		t.Error("XcInit initializing UDP stream failed", "err", err)
 	}
 	go func() {
 		err := avpipe.XcRun(handle)
@@ -446,9 +462,14 @@ func TestUdpToMp4WithCancelling4(t *testing.T) {
 	avpipe.InitIOHandler(&inputOpener{dir: outputDir}, &outputOpener{dir: outputDir})
 	tlog.Info("Transcoding UDP stream start", "params", fmt.Sprintf("%+v", *xcParams))
 
-	handle, err := avpipe.XcInit(xcParams)
+	handle, err := avpipe.XcCreateJob()
 	if err != nil {
-		t.Error("XcInitializing UDP stream failed", "err", err)
+		t.Error("XcCreateJob failed", "err", err)
+	}
+
+	err = avpipe.XcInit(xcParams, handle)
+	if err != nil {
+		t.Error("XcInit initializing UDP stream failed", "err", err)
 	}
 
 	go func() {

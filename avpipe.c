@@ -788,7 +788,7 @@ xc_table_put(
     }
     pthread_mutex_unlock(&tx_mutex);
 
-    elv_dbg("xc_table_put handle=%d, url=%s", txe->handle, xctx->inctx->url);
+    elv_dbg("xc_table_put handle=%d", txe->handle);
     if (txe != NULL)
         return txe->handle;
     return -1;
@@ -1003,7 +1003,6 @@ xc_create_job(int32_t *handle)
     uint32_t h;
     
 
-    *handle = 1;
     init_tx_module();
     connect_ffmpeg_log();
     if ((xctx = calloc(1, sizeof(xctx_t))) == NULL) {

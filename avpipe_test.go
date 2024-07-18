@@ -734,8 +734,11 @@ func TestV2SingleABRTranscodeCancelling(t *testing.T) {
 	params.EncHeight = 360 // slow down a bit to allow for the cancel
 	params.EncWidth = 640
 
-	handle, err := avpipe.XcInit(params)
+	handle, err := avpipe.XcCreateJob()
 	failNowOnError(t, err)
+	err = avpipe.XcInit(params, handle)
+	failNowOnError(t, err)
+
 	assert.Greater(t, handle, int32(0))
 	go func(handle int32) {
 		// Wait for 2 sec the transcoding starts, then cancel it.
@@ -750,9 +753,12 @@ func TestV2SingleABRTranscodeCancelling(t *testing.T) {
 	params.Ecodec2 = "aac"
 	params.NumAudio = 1
 	params.AudioIndex[0] = 1
-	handleA, err := avpipe.XcInit(params)
+	handleA, err := avpipe.XcCreateJob()
 	assert.NoError(t, err)
 	assert.Greater(t, handleA, int32(0))
+	err = avpipe.XcInit(params, handle)
+	assert.NoError(t, err)
+
 	err = avpipe.XcCancel(handleA)
 	assert.NoError(t, err)
 	err = avpipe.XcRun(handleA)
@@ -1922,8 +1928,12 @@ func TestMezMakerWithOpenInputError(t *testing.T) {
 	params.EncHeight = 360 // slow down a bit to allow for the cancel
 	params.EncWidth = 640
 
-	handle, err := avpipe.XcInit(params)
-	assert.Less(t, handle, int32(0))
+	handle, err := avpipe.XcCreateJob()
+	assert.NoError(t, err)
+	assert.Greater(t, handle, int32(0))
+	err = avpipe.XcInit(params, handle)
+	assert.Error(t, err)
+
 	err = avpipe.XcRun(handle)
 	assert.Error(t, err)
 
@@ -1966,8 +1976,11 @@ func TestMezMakerWithReadInputError(t *testing.T) {
 	params.EncHeight = 360 // slow down a bit to allow for the cancel
 	params.EncWidth = 640
 
-	handle, err := avpipe.XcInit(params)
-	assert.Less(t, handle, int32(0))
+	handle, err := avpipe.XcCreateJob()
+	assert.NoError(t, err)
+	assert.Greater(t, handle, int32(0))
+	err = avpipe.XcInit(params, handle)
+	assert.Error(t, err)
 	err = avpipe.XcRun(handle)
 	assert.Error(t, err)
 
@@ -2734,9 +2747,11 @@ func xcTest2(t *testing.T, outputDir string, params *avpipe.XcParams, xcTestResu
 // - to run the tx session
 //   - XcRun()
 func boilerXc2(t *testing.T, params *avpipe.XcParams) {
-	handle, err := avpipe.XcInit(params)
+	handle, err := avpipe.XcCreateJob()
 	failNowOnError(t, err)
 	assert.Greater(t, handle, int32(0))
+	err = avpipe.XcInit(params, handle)
+	failNowOnError(t, err)
 	err = avpipe.XcRun(handle)
 	failNowOnError(t, err)
 }

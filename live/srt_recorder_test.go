@@ -2,10 +2,11 @@ package live
 
 import (
 	"fmt"
-	"github.com/stretchr/testify/assert"
 	"path"
 	"testing"
 	"time"
+
+	"github.com/stretchr/testify/assert"
 
 	"github.com/eluv-io/avpipe"
 )
@@ -165,7 +166,12 @@ func TestSrtToMp4WithCancelling1(t *testing.T) {
 	var err error
 	go func() {
 		tlog.Info("Transcoding SRT stream start", "params", fmt.Sprintf("%+v", *xcParams))
-		handle, err = avpipe.XcInit(xcParams)
+		handle, err = avpipe.XcCreateJob()
+		if err != nil {
+			t.Error("XcCreateJob failed", "err", err)
+		}
+
+		err = avpipe.XcInit(xcParams, handle)
 		if err != nil {
 			t.Error("XcInit initializing SRT stream failed", "err", err)
 		}
@@ -233,10 +239,16 @@ func TestSrtToMp4WithCancelling2(t *testing.T) {
 	var err error
 	go func() {
 		tlog.Info("Transcoding SRT stream start", "params", fmt.Sprintf("%+v", *xcParams))
-		handle, err = avpipe.XcInit(xcParams)
+		handle, err = avpipe.XcCreateJob()
+		if err != nil {
+			t.Error("XcCreateJob failed", "err", err)
+		}
+
+		err = avpipe.XcInit(xcParams, handle)
 		if err != nil {
 			t.Error("XcInit initializing SRT stream failed", "err", err)
 		}
+
 		err = avpipe.XcRun(handle)
 		if err != nil && err != avpipe.EAV_CANCELLED {
 			t.Error("Transcoding SRT stream failed", "err", err)
@@ -308,7 +320,12 @@ func TestSrtToMp4WithCancelling3(t *testing.T) {
 	go func() {
 
 		tlog.Info("Transcoding SRT stream start", "params", fmt.Sprintf("%+v", *xcParams))
-		handle, err = avpipe.XcInit(xcParams)
+		handle, err = avpipe.XcCreateJob()
+		if err != nil {
+			t.Error("XcCreateJob failed", "err", err)
+		}
+
+		err = avpipe.XcInit(xcParams, handle)
 		if err != nil {
 			t.Error("XcInit initializing SRT stream failed", "err", err)
 		}
@@ -389,9 +406,14 @@ func TestSrtToMp4WithCancelling4(t *testing.T) {
 	go func() {
 		tlog.Info("Transcoding SRT stream start", "params", fmt.Sprintf("%+v", *xcParams))
 
-		handle, err = avpipe.XcInit(xcParams)
+		handle, err = avpipe.XcCreateJob()
 		if err != nil {
-			t.Error("XcInitializing SRT stream failed", "err", err)
+			t.Error("XcCreateJob failed", "err", err)
+		}
+
+		err = avpipe.XcInit(xcParams, handle)
+		if err != nil {
+			t.Error("XcInit initializing SRT stream failed", "err", err)
 		}
 
 		done <- true
