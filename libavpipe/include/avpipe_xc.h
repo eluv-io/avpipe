@@ -520,12 +520,7 @@ typedef struct xctx_t {
     AVPacket            pkt_array[MAX_STREAMS];
     int                 is_pkt_valid[MAX_STREAMS];
 
-    // Mutex used to synchronized access to specifically
-    // - xctx_t.initialized
-    // - xctx_t.decoder_ctx.cancelled
-    // - xctx_t.encoder_ctx.cancelled
-    pthread_mutex_t     cancel_init_mu;
-    int                 initialized;
+    volatile int                 initialized;
 
     elv_channel_t       *vc;        // Video frame channel
     elv_channel_t       *ac;        // Audio frame channel

@@ -915,13 +915,11 @@ xc_table_cancel(
         if (xc_table[i] != NULL && xc_table[i]->handle == handle) {
             xctx_t *xctx = xc_table[i]->xctx;
             if (xctx->index == i) {
-                // TODO(Nate): Validate that this is totally deadlock safe
-                pthread_mutex_lock(&xctx->cancel_init_mu);
                 xctx->decoder_ctx.cancelled = 1;
                 xctx->encoder_ctx.cancelled = 1;
-                pthread_mutex_unlock(&xctx->cancel_init_mu);
 
                 // TODO(Nate): remove this logic, as we don't need to do this separately I think
+                // And even if so, waiting for the channel while holding hte lock seems dangerous
                 /* If there is a UDP thread running wait for it to be finished */
                 if ( xctx->inctx && xctx->inctx->utid ) {
                     xctx->inctx->closed = 1;
@@ -1046,21 +1044,17 @@ xc_init(
         return eav_param;
 
     xctx = xe->xctx;
-    pthread_mutex_lock(&xctx->cancel_init_mu);
     // Make sure that we initialize only exactly once, and only if we haven't yet cancelled
+    // CODEREVIEW: Should we make this truly safe? It's not actually thread-safe as-is...
     if (xctx->initialized) {
-        pthread_mutex_unlock(&xctx->cancel_init_mu);
         elv_log("xc_init Job %d attempted double intialization", handle);
         return eav_bad_handle;
     } else if (xctx->decoder_ctx.cancelled || xctx->encoder_ctx.cancelled) {
-        pthread_mutex_unlock(&xctx->cancel_init_mu);
         elv_log("xc_init Job %d is already cancelled", handle);
         // CODEREVIEW: Should these return these errors? And should it free if cancelled?
         return eav_cancelled;
     }
-
     xctx->initialized = 1;
-    pthread_mutex_unlock(&xctx->cancel_init_mu);
 
     if ((rc = set_handlers(params->url, &in_handlers, &out_handlers)) != eav_success) {
         goto end_tx_init;
