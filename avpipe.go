@@ -1512,7 +1512,7 @@ func XcInit(params *XcParams, handle int32) error {
 	}
 
 	// This is literally just used to trigger C rebuild...
-	log.Info("rebuild version 16")
+	log.Info("rebuild version 23")
 
 	rc := C.xc_init((*C.xcparams_t)(unsafe.Pointer(cparams)), C.int32_t(handle))
 	if rc != C.eav_success {

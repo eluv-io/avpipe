@@ -399,6 +399,7 @@ udp_in_read_packet(
     uint8_t *buf,
     int buf_size)
 {
+    // TODO(Nate): Try to get this in line with the ffmpeg handlers a bit more, see libavformat/url.h line 74
     ioctx_t *c = (ioctx_t *)opaque;
     xcparams_t *xcparams = c->params;
     int debug_frame_level = (xcparams != NULL) ? xcparams->debug_frame_level : 0;
@@ -431,6 +432,7 @@ udp_in_read_packet(
          * In this situation, cancelling a transcoding would become impossible since xc_init() has not completed yet.
          * In order to avoid this situation, there will be a UDP_PIPE_TIMEOUT sec timeout when reading from channel.
          */
+        // TODO(Nate): Consolidate this logic appropriately
 read_channel_again:
         if (c->closed)
             return -1;

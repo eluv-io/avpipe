@@ -4251,7 +4251,7 @@ avpipe_probe_end:
     if (decoder_ctx.format_context) {
         if (decoder_ctx.format_context->pb->buffer){
             AVIOContext *avioctx = (AVIOContext *) decoder_ctx.format_context->pb;
-            if (avioctx) {
+            if (avioctx && strncmp(params->url, "rtmp://", 7) && strncmp(params->url, "srt://", 6)) {
                 av_freep(&avioctx->buffer);
                 av_freep(&avioctx);
             }
