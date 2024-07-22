@@ -3330,6 +3330,10 @@ get_filter_str(
 {
     *filter_str = NULL;
 
+    // PENDING(SS) TEST DEINTERLACE
+    *filter_str = strdup("bwdif=mode=send_frame:parity=auto:deint=all");
+    return eav_success;
+
     if (params->rotate > 0) {
         switch (params->rotate) {
         case 90:
