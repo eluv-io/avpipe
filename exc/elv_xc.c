@@ -361,6 +361,10 @@ in_stat(
         if (debug_frame_level)
             elv_dbg("IN STAT stream_index=%d, fd=%d, video frame read=%"PRId64, stream_index, fd, c->video_frames_read);
         break;
+    case in_stat_first_keyframe_pts:
+        if (debug_frame_level)
+            elv_dbg("IN STAT fd=%d, first keyframe PTS=%"PRId64", url=%s", fd, c->first_key_frame_pts, c->url);
+        break;
     case in_stat_data_scte35:
         if (debug_frame_level)
             elv_dbg("IN STAT stream_index=%d, fd=%d, data=%s", stream_index, fd, c->data);
