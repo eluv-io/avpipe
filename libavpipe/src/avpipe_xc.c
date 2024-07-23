@@ -3481,10 +3481,31 @@ avpipe_xc(
     xcparams_t *params = xctx->params;
     int debug_frame_level = params->debug_frame_level;
     avpipe_io_handler_t *in_handlers = xctx->in_handlers;
+    avpipe_io_handler_t *out_handlers = xctx->out_handlers;
     ioctx_t *inctx = xctx->inctx;
     int rc = 0;
     int av_read_frame_rc = 0;
     AVPacket *input_packet = NULL;
+
+    if (!params->url || params->url[0] == '\0' ||
+        in_handlers->avpipe_opener(params->url, inctx) < 0) {
+        elv_err("Failed to open avpipe input \"%s\"", params->url != NULL ? params->url : "");
+        free(inctx);    
+        rc = eav_open_input;
+        goto xc_done;
+    }
+
+    if ((rc = prepare_decoder(&xctx->decoder_ctx,
+            in_handlers, inctx, params, params->seekable)) != eav_success) {
+        elv_err("Failure in preparing decoder, url=%s, rc=%d", params->url, rc);
+        goto xc_done;
+    }
+
+    if ((rc = prepare_encoder(&xctx->encoder_ctx,
+        &xctx->decoder_ctx, out_handlers, inctx, params)) != eav_success) {
+        elv_err("Failure in preparing encoder, url=%s, rc=%d", params->url, rc);
+        goto xc_done;
+    }
 
     if (!params->bypass_transcoding &&
         (params->xc_type & xc_video)) {
@@ -4563,18 +4584,6 @@ avpipe_init(
     elv_log("AVPIPE XCPARAMS %s", buf);
 
     if ((rc = check_params(params)) != eav_success) {
-        goto avpipe_init_failed;
-    }
-
-    if ((rc = prepare_decoder(&p_xctx->decoder_ctx,
-            in_handlers, inctx, params, params->seekable)) != eav_success) {
-        elv_err("Failure in preparing decoder, url=%s, rc=%d", params->url, rc);
-        goto avpipe_init_failed;
-    }
-
-    if ((rc = prepare_encoder(&p_xctx->encoder_ctx,
-        &p_xctx->decoder_ctx, out_handlers, inctx, params)) != eav_success) {
-        elv_err("Failure in preparing encoder, url=%s, rc=%d", params->url, rc);
         goto avpipe_init_failed;
     }
 
