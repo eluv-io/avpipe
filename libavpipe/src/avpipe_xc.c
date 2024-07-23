@@ -3331,7 +3331,12 @@ get_filter_str(
     *filter_str = NULL;
 
     // PENDING(SS) TEST DEINTERLACE
-    *filter_str = strdup("bwdif=mode=send_frame:parity=auto:deint=all");
+    // To try:
+    //  "bwdiff"
+    //  "bwdif=mode=send_frame:parity=auto:deint=all"
+    //
+    // ffprobe field_order tt bt ...
+    *filter_str = strdup("bwdiff");
     return eav_success;
 
     if (params->rotate > 0) {
