@@ -187,7 +187,7 @@ int
 in_closer(
     ioctx_t *inctx)
 {
-    if (!inctx->opaque)
+    if (!inctx || !inctx->opaque)
         return 0;
 
     int fd = *((int *)(inctx->opaque));

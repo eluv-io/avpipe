@@ -3490,22 +3490,29 @@ avpipe_xc(
     if (!params->url || params->url[0] == '\0' ||
         in_handlers->avpipe_opener(params->url, inctx) < 0) {
         elv_err("Failed to open avpipe input \"%s\"", params->url != NULL ? params->url : "");
-        free(inctx);    
+        free(inctx);
         rc = eav_open_input;
-        goto xc_done;
+        return rc;
     }
 
     if ((rc = prepare_decoder(&xctx->decoder_ctx,
             in_handlers, inctx, params, params->seekable)) != eav_success) {
         elv_err("Failure in preparing decoder, url=%s, rc=%d", params->url, rc);
-        goto xc_done;
+        return rc;
     }
 
     if ((rc = prepare_encoder(&xctx->encoder_ctx,
         &xctx->decoder_ctx, out_handlers, inctx, params)) != eav_success) {
         elv_err("Failure in preparing encoder, url=%s, rc=%d", params->url, rc);
-        goto xc_done;
+        return rc;
     }
+
+    elv_channel_init(&xctx->vc, 10000, NULL);
+    elv_channel_init(&xctx->ac, 10000, NULL);
+
+    /* Create threads for decoder and encoder */
+    pthread_create(&xctx->vthread_id, NULL, transcode_video_func, xctx);
+    pthread_create(&xctx->athread_id, NULL, transcode_audio_func, xctx);
 
     if (!params->bypass_transcoding &&
         (params->xc_type & xc_video)) {
@@ -4580,12 +4587,6 @@ avpipe_init(
         goto avpipe_init_failed;
     }
 
-    elv_channel_init(&p_xctx->vc, 10000, NULL);
-    elv_channel_init(&p_xctx->ac, 10000, NULL);
-
-    /* Create threads for decoder and encoder */
-    pthread_create(&p_xctx->vthread_id, NULL, transcode_video_func, p_xctx);
-    pthread_create(&p_xctx->athread_id, NULL, transcode_audio_func, p_xctx);
     *xctx = p_xctx;
 
     return eav_success;

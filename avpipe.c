@@ -148,6 +148,9 @@ in_closer(
     close(fd);
 #endif
 
+    if (!inctx || !inctx->opaque)
+        return 0;
+
     int64_t h = *((int64_t *)(inctx->opaque));
     xcparams_t *xcparams = (inctx != NULL) ? inctx->params : NULL;
     if (xcparams && xcparams->debug_frame_level)
