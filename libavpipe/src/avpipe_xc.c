@@ -4451,22 +4451,15 @@ avpipe_init(
         goto avpipe_init_failed;
     }
 
-    params = (xcparams_t *) calloc(1, sizeof(xcparams_t));
-    *params = *p;
-    inctx->params = params;
-    if (!p->url || p->url[0] == '\0' ||
-        in_handlers->avpipe_opener(p->url, inctx) < 0) {
-        elv_err("Failed to open avpipe input \"%s\"", p->url != NULL ? p->url : "");
-        free(inctx);
-        rc = eav_open_input;
-        goto avpipe_init_failed;
-    }
-
     if (!xctx) {
         elv_err("Trancoding context is NULL, url=%s", p->url);
         rc = eav_param;
         goto avpipe_init_failed;
     }
+
+    params = (xcparams_t *) calloc(1, sizeof(xcparams_t));
+    *params = *p;
+    inctx->params = params;
 
     p_xctx = (xctx_t *) calloc(1, sizeof(xctx_t));
     p_xctx->params = params;
