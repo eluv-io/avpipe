@@ -1097,6 +1097,7 @@ prepare_video_encoder(
             out_stream->time_base = (AVRational) {1, params->video_time_base};
         else
             out_stream->time_base = in_stream->time_base;
+
         out_stream->avg_frame_rate = decoder_context->format_context->streams[decoder_context->video_stream_index]->avg_frame_rate;
         out_stream->codecpar->codec_tag = 0;
 
@@ -1152,6 +1153,11 @@ prepare_video_encoder(
         encoder_codec_context->time_base = (AVRational) {1, params->video_time_base};
     else
         encoder_codec_context->time_base = decoder_context->codec_context[index]->time_base;
+
+    // TEST bwdif
+    encoder_codec_context->time_base.num = 1;
+    encoder_codec_context->time_base.den = 100;
+
     encoder_codec_context->sample_aspect_ratio = decoder_context->codec_context[index]->sample_aspect_ratio;
     if (params->video_bitrate > 0)
         encoder_codec_context->bit_rate = params->video_bitrate;
@@ -1159,7 +1165,12 @@ prepare_video_encoder(
         encoder_codec_context->rc_buffer_size = params->rc_buffer_size;
     if (params->rc_max_rate > 0)
         encoder_codec_context->rc_max_rate = params->rc_max_rate;
+
     encoder_codec_context->framerate = decoder_context->codec_context[index]->framerate;
+
+    // TEST bwdif
+    encoder_codec_context->framerate.num = 50;
+    encoder_codec_context->framerate.den = 1;
 
     // This needs to be set before open (ffmpeg samples have it wrong)
     if (encoder_context->format_context->oformat->flags & AVFMT_GLOBALHEADER) {
@@ -3336,7 +3347,7 @@ get_filter_str(
     //  "bwdif=mode=send_frame:parity=auto:deint=all"
     //
     // ffprobe field_order tt bt ...
-    *filter_str = strdup("bwdif");
+    *filter_str = strdup("bwdif=mode=send_field");
     return eav_success;
 
     if (params->rotate > 0) {
@@ -3494,6 +3505,10 @@ avpipe_xc(
     int rc = 0;
     int av_read_frame_rc = 0;
     AVPacket *input_packet = NULL;
+
+    // TEST bwdif
+    params->video_time_base = 100;
+    params->video_frame_duration_ts = 256; // Equivalent to 50 fps
 
     if (!params->bypass_transcoding &&
         (params->xc_type & xc_video)) {
