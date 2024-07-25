@@ -122,7 +122,7 @@ func TestSrtToMp4(t *testing.T) {
 	testComplete <- true
 }
 
-// Cancels the SRT live stream transcoding immediately after initializing the transcoding (after XcInit).
+// Cancels the SRT live stream transcoding, with no source, immediately after initializing the transcoding (after XcInit).
 // This test was hanging with avpipe release-1.15 and before (this is fixed in release-1.16).
 func TestSrtToMp4WithCancelling0(t *testing.T) {
 	setupLogging()
