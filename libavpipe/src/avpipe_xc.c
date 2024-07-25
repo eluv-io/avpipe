@@ -3502,8 +3502,6 @@ avpipe_xc(
     if (!params->url || params->url[0] == '\0' ||
         in_handlers->avpipe_opener(params->url, inctx) < 0) {
         elv_err("Failed to open avpipe input \"%s\"", params->url != NULL ? params->url : "");
-        free(inctx);
-        xctx->inctx = NULL;
         rc = eav_open_input;
         return rc;
     }

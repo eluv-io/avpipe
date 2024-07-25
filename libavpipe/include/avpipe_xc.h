@@ -626,7 +626,7 @@ avpipe_probe_free(
     int n_streams);
 
 /**
- * @brief   Starts transcoding.
+ * @brief   Starts transcoding. Multiple transcoding operations on the same transcoding context is UB.
  *          In case of failure avpipe_fini() should be called to avoid resource leak.
  *
  * @param   xctx                A pointer to transcoding context.
