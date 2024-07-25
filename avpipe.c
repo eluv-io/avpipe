@@ -918,6 +918,8 @@ set_handlers(
         *p_out_handlers = out_handlers;
     }
 
+    free_parsed_url(&url_parser);
+
     return eav_success;
 }
 
