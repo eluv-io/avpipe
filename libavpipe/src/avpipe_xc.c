@@ -4320,6 +4320,18 @@ static int
 check_params(
     xcparams_t *params)
 {
+    if (!params->format ||
+        (strcmp(params->format, "dash") &&
+         strcmp(params->format, "hls") &&
+         strcmp(params->format, "image2") &&
+         strcmp(params->format, "mp4") &&
+         strcmp(params->format, "fmp4") &&
+         strcmp(params->format, "segment") &&
+         strcmp(params->format, "fmp4-segment"))) {
+        elv_err("Output format can be only \"dash\", \"hls\", \"image2\", \"mp4\", \"fmp4\", \"segment\", or \"fmp4-segment\", url=%s", params->url);
+        return eav_param;
+    }
+
     if (!params->url) {
         elv_err("Invalid params, url is null");
         return eav_param;
@@ -4452,58 +4464,10 @@ check_params(
     return eav_success;
 }
 
-int
-avpipe_init(
-    xctx_t **xctx,
-    avpipe_io_handler_t *in_handlers,
-    avpipe_io_handler_t *out_handlers,
-    xcparams_t *p)
+void
+log_params(
+    xcparams_t *params)
 {
-    xctx_t *p_xctx = NULL;
-    xcparams_t *params = NULL;
-    int rc = 0;
-    ioctx_t *inctx = (ioctx_t *)calloc(1, sizeof(ioctx_t));
-
-    if (!p) {
-        elv_err("Parameters are not set");
-        free(inctx);
-        rc = eav_param;
-        goto avpipe_init_failed;
-    }
-
-    if (!xctx) {
-        elv_err("Trancoding context is NULL, url=%s", p->url);
-        rc = eav_param;
-        goto avpipe_init_failed;
-    }
-
-    params = (xcparams_t *) calloc(1, sizeof(xcparams_t));
-    *params = *p;
-    inctx->params = params;
-
-    p_xctx = (xctx_t *) calloc(1, sizeof(xctx_t));
-    p_xctx->params = params;
-    p_xctx->inctx = inctx;
-    p_xctx->in_handlers = in_handlers;
-    p_xctx->out_handlers = out_handlers;
-    p_xctx->debug_frame_level = p->debug_frame_level;
-
-    if (!params->format ||
-        (strcmp(params->format, "dash") &&
-         strcmp(params->format, "hls") &&
-         strcmp(params->format, "image2") &&
-         strcmp(params->format, "mp4") &&
-         strcmp(params->format, "fmp4") &&
-         strcmp(params->format, "segment") &&
-         strcmp(params->format, "fmp4-segment"))) {
-        elv_err("Output format can be only \"dash\", \"hls\", \"image2\", \"mp4\", \"fmp4\", \"segment\", or \"fmp4-segment\", url=%s", p->url);
-        rc = eav_param;
-        free(p_xctx);
-        free(params);
-        p_xctx = NULL;
-        goto avpipe_init_failed;
-    }
-
     char buf[4096];
     char audio_index_str[256];
     char index_str[10];
@@ -4571,7 +4535,7 @@ avpipe_init(
         "video_time_base=%d/%d "
         "video_frame_duration_ts=%d "
         "rotate=%d",
-        params->stream_id, p->url,
+        params->stream_id, params->url,
         avpipe_version(),
         params->bypass_transcoding, params->skip_decoding,
         get_xc_type_name(params->xc_type),
@@ -4595,8 +4559,91 @@ avpipe_init(
         params->extract_image_interval_ts, params->extract_images_sz,
         1, params->video_time_base, params->video_frame_duration_ts, params->rotate);
     elv_log("AVPIPE XCPARAMS %s", buf);
+}
+
+
+xcparams_t *
+avpipe_copy_xcparams(
+    xcparams_t *p)
+{
+    xcparams_t *p2 = (xcparams_t *) calloc(1, sizeof(xcparams_t));
+
+    *p2 = *p;
+    p2->url = safe_strdup(p->url);
+    p2->crf_str = safe_strdup(p->crf_str);
+    p2->crypt_iv = safe_strdup(p->crypt_iv);
+    p2->crypt_key = safe_strdup(p->crypt_key);
+    p2->crypt_key_url = safe_strdup(p->crypt_key_url);
+    p2->crypt_kid = safe_strdup(p->crypt_kid);
+    p2->dcodec = safe_strdup(p->dcodec);
+    p2->dcodec2 = safe_strdup(p->dcodec2);
+    p2->ecodec = safe_strdup(p->ecodec);
+    p2->ecodec2 = safe_strdup(p->ecodec2);
+    p2->filter_descriptor = safe_strdup(p->filter_descriptor);
+    p2->format = safe_strdup(p->format);
+    p2->max_cll = safe_strdup(p->max_cll);
+    p2->master_display = safe_strdup(p->master_display);
+    p2->preset = safe_strdup(p->preset);
+    p2->start_segment_str = safe_strdup(p->start_segment_str);
+    p2->watermark_text = safe_strdup(p->watermark_text);
+    p2->watermark_timecode = safe_strdup(p->watermark_timecode);
+    p2->overlay_filename = safe_strdup(p->overlay_filename);
+    if (p->watermark_overlay_len > 0) {
+        p2->watermark_overlay = (char *) calloc(1, p->watermark_overlay_len);
+        memcpy(p2->watermark_overlay, p->watermark_overlay, p->watermark_overlay_len);
+    }
+    p2->watermark_shadow_color = safe_strdup(p->watermark_shadow_color);
+    if (p2->extract_images_sz != 0) {
+        p2->extract_images_ts = calloc(p2->extract_images_sz, sizeof(int64_t));
+        int size = p2->extract_images_sz * sizeof(int64_t);
+        memcpy(p2->extract_images_ts, p->extract_images_ts, size);
+    }
+    p2->seg_duration = safe_strdup(p->seg_duration);
+
+    return p2;
+}
+
+int
+avpipe_init(
+    xctx_t **xctx,
+    avpipe_io_handler_t *in_handlers,
+    avpipe_io_handler_t *out_handlers,
+    xcparams_t *p)
+{
+    xctx_t *p_xctx = NULL;
+    xcparams_t *params = NULL;
+    int rc = 0;
+    ioctx_t *inctx = (ioctx_t *)calloc(1, sizeof(ioctx_t));
+
+    if (!p) {
+        elv_err("Parameters are not set");
+        free(inctx);
+        rc = eav_param;
+        goto avpipe_init_failed;
+    }
+
+    if (!xctx) {
+        elv_err("Trancoding context is NULL, url=%s", p->url);
+        free(inctx);
+        rc = eav_param;
+        goto avpipe_init_failed;
+    }
+
+    params = avpipe_copy_xcparams(p);
+    inctx->params = params;
+
+    p_xctx = (xctx_t *) calloc(1, sizeof(xctx_t));
+    p_xctx->params = params;
+    p_xctx->inctx = inctx;
+    p_xctx->in_handlers = in_handlers;
+    p_xctx->out_handlers = out_handlers;
+    p_xctx->debug_frame_level = p->debug_frame_level;
+
+    log_params(params);
 
     if ((rc = check_params(params)) != eav_success) {
+        p_xctx->in_handlers = NULL;
+        p_xctx->out_handlers = NULL;
         goto avpipe_init_failed;
     }
 
@@ -4778,4 +4825,14 @@ set_extract_images(
         return;
     }
     params->extract_images_ts[index] = value;
+}
+
+static char *
+safe_strdup(
+    char *s)
+{
+    if (s)
+        return strdup(s);
+
+    return NULL;
 }
