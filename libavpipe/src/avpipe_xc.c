@@ -4561,6 +4561,15 @@ log_params(
     elv_log("AVPIPE XCPARAMS %s", buf);
 }
 
+static char *
+safe_strdup(
+    char *s)
+{
+    if (s)
+        return strdup(s);
+
+    return NULL;
+}
 
 xcparams_t *
 avpipe_copy_xcparams(
@@ -4825,14 +4834,4 @@ set_extract_images(
         return;
     }
     params->extract_images_ts[index] = value;
-}
-
-static char *
-safe_strdup(
-    char *s)
-{
-    if (s)
-        return strdup(s);
-
-    return NULL;
 }

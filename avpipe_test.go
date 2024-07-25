@@ -1923,7 +1923,8 @@ func TestMezMakerWithOpenInputError(t *testing.T) {
 	params.EncWidth = 640
 
 	handle, err := avpipe.XcInit(params)
-	assert.Equal(t, handle, int32(-1))
+	assert.Greater(t, handle, int32(0))
+	failNowOnError(t, err)
 	err = avpipe.XcRun(handle)
 	assert.Error(t, err)
 
