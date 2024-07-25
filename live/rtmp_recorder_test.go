@@ -181,8 +181,13 @@ func TestRtmpToMp4WithCancelling0(t *testing.T) {
 			t.Error("XcInit initializing RTMP stream failed", "err", err)
 		}
 
+		err = avpipe.XcRun(handle)
+		assert.Equal(t, err, avpipe.EAV_OPEN_INPUT)
+
 		done <- true
 	}()
+
+	time.Sleep(1 * time.Second)
 
 	err = avpipe.XcCancel(handle)
 	assert.NoError(t, err)

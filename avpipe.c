@@ -891,6 +891,31 @@ close_srt(
 
     return 0;
 }
+#endif
+
+static int
+close_rtmp(
+    ioctx_t *inctx)
+{
+    int fd;
+    url_parser_t url_parser;
+    char *url = inctx->url;
+
+    if (url && parse_url(url, &url_parser)) {
+        elv_err("close_rtmp() failed to parse input url=%s", url);
+        return eav_param;
+    }
+
+    char *port = "1935";
+    if (url_parser.port != NULL && strlen(url_parser.port) > 0)
+        port = url_parser.port;
+
+    fd = tcp_connect(url_parser.host, port);
+    if (fd >= 0)
+        close(fd);
+
+    return 0;
+}
 
 static int
 close_inctx(
@@ -899,13 +924,19 @@ close_inctx(
     if (!inctx || inctx->url == NULL || inctx->url[0] == '\0')
         return 0;
 
+/*
     if (!strncmp(inctx->url, "srt://", 6)) {
         return close_srt(inctx);
+    }
+*/
+
+    elv_dbg("close-inctx url=%s", inctx->url);
+    if (!strncmp(inctx->url, "rtmp://", 7)) {
+        return close_rtmp(inctx);
     }
 
     return 0;
 }
-#endif
 
 static int
 xc_table_cancel(
@@ -927,6 +958,8 @@ xc_table_cancel(
                     /* Close and purge the channel */
                     elv_channel_close(xctx->inctx->udp_channel, 1);
                     pthread_join(xctx->inctx->utid, NULL);
+                } else if (xctx->decoder_ctx.is_rtmp || xctx->decoder_ctx.is_srt) {
+                    close_inctx(xctx->inctx);
                 }
             } else {
                 elv_err("xc_table_cancel index=%d doesn't match with handle=%d at %d",
@@ -934,10 +967,12 @@ xc_table_cancel(
                 rc = eav_xc_table;
             }
             pthread_mutex_unlock(&tx_mutex);
+            elv_dbg("xc_table_cancel handle=%d done, rc=%d", handle, rc);
             return rc;
         }
     }
     pthread_mutex_unlock(&tx_mutex);
+    elv_dbg("xc_table_cancel handle=%d not found, rc=%d", handle, rc);
     return rc;
 }
 
