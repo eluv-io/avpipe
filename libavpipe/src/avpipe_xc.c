@@ -381,6 +381,15 @@ selected_decoded_audio(
 }
 
 static int
+decode_interrupt_cb(
+    void *ctx) 
+{
+    coderctx_t *decoder_ctx = (coderctx_t *)ctx;
+    elv_log("interrupt callback checked. Cancelled is equal to %d", decoder_ctx->cancelled);
+    return decoder_ctx->cancelled;
+}
+
+static int
 prepare_decoder(
     coderctx_t *decoder_context,
     avpipe_io_handler_t *in_handlers,
@@ -408,6 +417,9 @@ prepare_decoder(
         elv_err("Could not allocate memory for Format Context, url=%s", url);
         return eav_mem_alloc;
     }
+
+    const AVIOInterruptCB int_cb = { decode_interrupt_cb, (void*)decoder_context};
+    decoder_context->format_context->interrupt_callback = int_cb;
 
     /* Set our custom reader */
     prepare_input(in_handlers, inctx, decoder_context, seekable);
