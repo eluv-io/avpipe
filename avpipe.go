@@ -334,12 +334,11 @@ const (
 )
 
 type SideDataDisplayMatrix struct {
-	Rotation   float64
-	RotationCw float64
+	Type       string  `json:"side_data_type"`
+	Rotation   float64 `json:"rotation"`
+	RotationCw float64 `json:"rotation_cw"`
 }
-type SideData struct {
-	DisplayMatrix SideDataDisplayMatrix
-}
+
 type StreamInfo struct {
 	StreamIndex        int               `json:"stream_index"`
 	StreamId           int32             `json:"stream_id"`
@@ -366,7 +365,7 @@ type StreamInfo struct {
 	FieldOrder         string            `json:"field_order,omitempty"`
 	Profile            int               `json:"profile,omitempty"`
 	Level              int               `json:"level,omitempty"`
-	SideData           SideData          `json:"side_data,omitempty"`
+	SideDataList       []interface{}     `json:"side_data_list,omitempty"`
 	Tags               map[string]string `json:"tags,omitempty"`
 }
 
@@ -1457,8 +1456,19 @@ func Probe(params *XcParams) (*ProbeInfo, error) {
 		probeInfo.StreamInfo[i].FieldOrder = AVFieldOrderNames[AVFieldOrder(probeArray[i].field_order)]
 		probeInfo.StreamInfo[i].Profile = int(probeArray[i].profile)
 		probeInfo.StreamInfo[i].Level = int(probeArray[i].level)
-		probeInfo.StreamInfo[i].SideData.DisplayMatrix.Rotation = float64(probeArray[i].side_data.display_matrix.rotation)
-		probeInfo.StreamInfo[i].SideData.DisplayMatrix.RotationCw = float64(probeArray[i].side_data.display_matrix.rotation_cw)
+
+		rot := float64(probeArray[i].side_data.display_matrix.rotation)
+		if rot != 0.0 {
+			probeInfo.StreamInfo[i].SideDataList = make([]interface{}, 1)
+			displayMatrix := SideDataDisplayMatrix{
+				Type:       "Display Matrix",
+				Rotation:   rot,
+				RotationCw: float64(probeArray[i].side_data.display_matrix.rotation_cw),
+			}
+			probeInfo.StreamInfo[i].SideDataList[0] = displayMatrix
+		} else {
+			probeInfo.StreamInfo[i].SideDataList = make([]interface{}, 0)
+		}
 
 		// Convert AVDictionary data to Tags of type map[string]string using the built in av_dict_get() iterator
 		dict := (*C.AVDictionary)(unsafe.Pointer((probeArray[i].tags)))
@@ -1541,7 +1551,7 @@ func StreamInfoAsArray(s []StreamInfo) []StreamInfo {
 		}
 	}
 	a := make([]StreamInfo, maxIdx+1)
-	for i, _ := range a {
+	for i := range a {
 		a[i].StreamIndex = i
 		a[i].CodecType = AVMediaTypeNames[AVMediaType(AVMEDIA_TYPE_UNKNOWN)]
 	}
