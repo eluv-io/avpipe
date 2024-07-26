@@ -385,7 +385,8 @@ decode_interrupt_cb(
     void *ctx) 
 {
     coderctx_t *decoder_ctx = (coderctx_t *)ctx;
-    elv_log("interrupt callback checked. Cancelled is equal to %d", decoder_ctx->cancelled);
+    if (decoder_ctx->cancelled)
+        elv_dbg("interrupt callback checked and stream decoding cancelled");
     return decoder_ctx->cancelled;
 }
 
