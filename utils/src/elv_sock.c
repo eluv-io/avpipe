@@ -74,20 +74,29 @@ udp_socket(
 
 int
 tcp_connect(
-    const char *host,
+    const char *hostname,
     const char *port)
 {
-    int sockfd, n;
-    struct addrinfo hints, *res;
+    struct hostent *he;
+    int sockfd;
+    struct sockaddr_in server_addr;
+    int port_num = atoi(port);
 
     sockfd = socket(AF_INET, SOCK_STREAM, 0);
     if (sockfd == -1)
         return -1;
 
-    if ( (n = getaddrinfo(host, port, &hints, &res)) != 0)
+    // Resolve the hostname to an IP address
+    if ((he = gethostbyname(hostname)) == NULL)
         return -1;
 
-    if (connect(sockfd, res->ai_addr, res->ai_addrlen) != 0)
+    // Set up the server address structure
+    memset(&server_addr, 0, sizeof(server_addr));
+    server_addr.sin_family = AF_INET;
+    server_addr.sin_port = htons(port_num);
+    server_addr.sin_addr = *((struct in_addr *)he->h_addr);
+
+    if (connect(sockfd, (struct sockaddr *)&server_addr, sizeof(server_addr)) == -1)
         return -1;
 
     return sockfd;

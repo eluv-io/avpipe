@@ -187,7 +187,7 @@ int
 in_closer(
     ioctx_t *inctx)
 {
-    if (!inctx->opaque)
+    if (!inctx || !inctx->opaque)
         return 0;
 
     int fd = *((int *)(inctx->opaque));
@@ -665,59 +665,6 @@ typedef struct tx_thread_params_t {
     int                 err;
 } tx_thread_params_t;
 
-static char *
-safe_strdup(
-    char *s)
-{
-    if (s)
-        return strdup(s);
-
-    return NULL;
-}
-
-static xcparams_t *
-txparam_copy(
-    xcparams_t *p)
-{
-    xcparams_t *p2 = (xcparams_t *) calloc(1, sizeof(xcparams_t));
-
-    *p2 = *p;
-    p2->url = strdup(p->url);
-    p2->crf_str = safe_strdup(p->crf_str);
-    p2->crypt_iv = safe_strdup(p->crypt_iv);
-    p2->crypt_key = safe_strdup(p->crypt_key);
-    p2->crypt_key_url = safe_strdup(p->crypt_key_url);
-    p2->crypt_kid = safe_strdup(p->crypt_kid);
-    p2->dcodec = safe_strdup(p->dcodec);
-    p2->dcodec2 = safe_strdup(p->dcodec2);
-    p2->ecodec = safe_strdup(p->ecodec);
-    p2->ecodec2 = safe_strdup(p->ecodec2);
-    p2->filter_descriptor = safe_strdup(p->filter_descriptor);
-    p2->format = safe_strdup(p->format);
-    p2->max_cll = safe_strdup(p->max_cll);
-    p2->master_display = safe_strdup(p->master_display);
-    p2->preset = safe_strdup(p->preset);
-    p2->start_segment_str = safe_strdup(p->start_segment_str);
-    p2->watermark_text = safe_strdup(p->watermark_text);
-    p2->watermark_timecode = safe_strdup(p->watermark_timecode);
-    p2->overlay_filename = safe_strdup(p->overlay_filename);
-    if (p->watermark_overlay_len > 0) {
-        p2->watermark_overlay = (char *) calloc(1, p->watermark_overlay_len);
-        memcpy(p2->watermark_overlay, p->watermark_overlay, p->watermark_overlay_len);
-    }
-    p2->watermark_shadow_color = safe_strdup(p->watermark_shadow_color);
-    if (p2->extract_images_sz != 0) {
-        p2->extract_images_ts = calloc(p2->extract_images_sz, sizeof(int64_t));
-        int size = p2->extract_images_sz * sizeof(int64_t);
-        memcpy(p2->extract_images_ts, p->extract_images_ts, size);
-    }
-
-    if (p->seg_duration)
-        p2->seg_duration = strdup(p->seg_duration);
-
-    return p2;
-}
-
 void *
 tx_thread_func(
     void *thread_params)
@@ -735,7 +682,7 @@ tx_thread_func(
          * Pass a copy of params since avpipe_fini() releases all the params memory.
          * (This is needed when repeating the same command with exc.)
          */
-        xcparams_t *xcparams = txparam_copy(params->xcparams);
+        xcparams_t *xcparams = avpipe_copy_xcparams(params->xcparams);
         avpipe_io_handler_t *in_handlers = (avpipe_io_handler_t *)calloc(1, sizeof(avpipe_io_handler_t));
         avpipe_io_handler_t *out_handlers = (avpipe_io_handler_t *)calloc(1, sizeof(avpipe_io_handler_t));
         *in_handlers = *params->in_handlers;
