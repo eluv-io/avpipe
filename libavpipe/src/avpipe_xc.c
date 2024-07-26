@@ -298,7 +298,7 @@ prepare_input(
     AVIOContext *avioctx;
     int bufin_sz = AVIO_IN_BUF_SIZE;
 
-    /* For RTMP protocol don't create input callbacks */
+    /* For RTMP or SRT protocol don't create input callbacks */
     decoder_context->is_rtmp = 0;
     decoder_context->is_srt = 0;
     if (inctx->url && !strncmp(inctx->url, "rtmp://", 7)) {
@@ -1145,8 +1145,8 @@ prepare_video_encoder(
 
     /* If the rotation param is set to 90 or 270 degree then change width and hight */
     if (params->rotate == 90 || params->rotate == 270) {
-        encoder_codec_context->height = params->enc_width != -1 ? params->enc_width : decoder_context->codec_context[index]->width;
-        encoder_codec_context->width = params->enc_height != -1 ? params->enc_height : decoder_context->codec_context[index]->height;
+        encoder_codec_context->height = params->enc_height != -1 ? params->enc_height : decoder_context->codec_context[index]->width;
+        encoder_codec_context->width = params->enc_width != -1 ? params->enc_width : decoder_context->codec_context[index]->height;
     }
     if (params->video_time_base > 0)
         encoder_codec_context->time_base = (AVRational) {1, params->video_time_base};
@@ -4238,13 +4238,13 @@ avpipe_probe(
 
 avpipe_probe_end:
     if (decoder_ctx.format_context) {
-        if (decoder_ctx.format_context->pb->buffer){
-            AVIOContext *avioctx = (AVIOContext *) decoder_ctx.format_context->pb;
+        if (decoder_ctx.format_context->flags & AVFMT_FLAG_CUSTOM_IO) {
+            AVIOContext *avioctx = decoder_ctx.format_context->pb;
             if (avioctx) {
                 av_freep(&avioctx->buffer);
                 av_freep(&avioctx);
             }
-	}
+        }
         avformat_close_input(&decoder_ctx.format_context);
     }
 
@@ -4657,8 +4657,8 @@ avpipe_fini(
 
     /* note: the internal buffer could have changed, and be != avio_ctx_buffer */
     if (decoder_context && decoder_context->format_context) {
-        if ((*xctx)->inctx && strncmp((*xctx)->inctx->url, "rtmp://", 7) && strncmp((*xctx)->inctx->url, "srt://", 6)) {
-            AVIOContext *avioctx = (AVIOContext *) decoder_context->format_context->pb;
+        if (decoder_context->format_context->flags & AVFMT_FLAG_CUSTOM_IO) {
+            AVIOContext *avioctx = decoder_context->format_context->pb;
             if (avioctx) {
                 av_freep(&avioctx->buffer);
                 av_freep(&avioctx);
