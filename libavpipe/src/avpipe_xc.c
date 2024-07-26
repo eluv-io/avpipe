@@ -298,7 +298,7 @@ prepare_input(
     AVIOContext *avioctx;
     int bufin_sz = AVIO_IN_BUF_SIZE;
 
-    /* For RTMP protocol don't create input callbacks */
+    /* For RTMP or SRT protocol don't create input callbacks */
     decoder_context->is_rtmp = 0;
     decoder_context->is_srt = 0;
     if (inctx->url && !strncmp(inctx->url, "rtmp://", 7)) {
@@ -1142,6 +1142,12 @@ prepare_video_encoder(
     /* Set codec context parameters */
     encoder_codec_context->height = params->enc_height != -1 ? params->enc_height : decoder_context->codec_context[index]->height;
     encoder_codec_context->width = params->enc_width != -1 ? params->enc_width : decoder_context->codec_context[index]->width;
+
+    /* If the rotation param is set to 90 or 270 degree then change width and hight */
+    if (params->rotate == 90 || params->rotate == 270) {
+        encoder_codec_context->height = params->enc_height != -1 ? params->enc_height : decoder_context->codec_context[index]->width;
+        encoder_codec_context->width = params->enc_width != -1 ? params->enc_width : decoder_context->codec_context[index]->height;
+    }
     if (params->video_time_base > 0)
         encoder_codec_context->time_base = (AVRational) {1, params->video_time_base};
     else
@@ -3324,6 +3330,23 @@ get_filter_str(
 {
     *filter_str = NULL;
 
+    if (params->rotate > 0) {
+        switch (params->rotate) {
+        case 90:
+            *filter_str = strdup("transpose=1");                // 90 degree rotation
+            return eav_success;
+        case 180:
+            *filter_str = strdup("transpose=1,transpose=1");    // 180 degree rotation
+            return eav_success;
+        case 270:
+            *filter_str = strdup("transpose=2");                // 270 degree rotation
+            return eav_success;
+        default:
+            elv_err("Invalid param rotate=%d", params->rotate);
+            return eav_param;
+        }
+    }
+
     if ((params->watermark_text && *params->watermark_text != '\0') ||
             (params->watermark_timecode && *params->watermark_timecode != '\0')) {
         char local_filter_str[FILTER_STRING_SZ];
@@ -4215,13 +4238,13 @@ avpipe_probe(
 
 avpipe_probe_end:
     if (decoder_ctx.format_context) {
-        if (decoder_ctx.format_context->pb->buffer){
-            AVIOContext *avioctx = (AVIOContext *) decoder_ctx.format_context->pb;
+        if (decoder_ctx.format_context->flags & AVFMT_FLAG_CUSTOM_IO) {
+            AVIOContext *avioctx = decoder_ctx.format_context->pb;
             if (avioctx) {
                 av_freep(&avioctx->buffer);
                 av_freep(&avioctx);
             }
-	}
+        }
         avformat_close_input(&decoder_ctx.format_context);
     }
 
@@ -4512,7 +4535,8 @@ avpipe_init(
         "extract_image_interval_ts=%"PRId64" "
         "extract_images_sz=%d "
         "video_time_base=%d/%d "
-        "video_frame_duration_ts=%d",
+        "video_frame_duration_ts=%d "
+        "rotate=%d",
         params->stream_id, p->url,
         avpipe_version(),
         params->bypass_transcoding, params->skip_decoding,
@@ -4535,7 +4559,7 @@ avpipe_init(
         params->master_display ? params->master_display : "",
         params->filter_descriptor,
         params->extract_image_interval_ts, params->extract_images_sz,
-        1, params->video_time_base, params->video_frame_duration_ts);
+        1, params->video_time_base, params->video_frame_duration_ts, params->rotate);
     elv_log("AVPIPE XCPARAMS %s", buf);
 
     if ((rc = check_params(params)) != eav_success) {
@@ -4633,8 +4657,8 @@ avpipe_fini(
 
     /* note: the internal buffer could have changed, and be != avio_ctx_buffer */
     if (decoder_context && decoder_context->format_context) {
-        if ((*xctx)->inctx && strncmp((*xctx)->inctx->url, "rtmp://", 7) && strncmp((*xctx)->inctx->url, "srt://", 6)) {
-            AVIOContext *avioctx = (AVIOContext *) decoder_context->format_context->pb;
+        if (decoder_context->format_context->flags & AVFMT_FLAG_CUSTOM_IO) {
+            AVIOContext *avioctx = decoder_context->format_context->pb;
             if (avioctx) {
                 av_freep(&avioctx->buffer);
                 av_freep(&avioctx);
