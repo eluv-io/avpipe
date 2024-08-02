@@ -298,6 +298,7 @@ in_stat(
     case in_stat_data_scte35:
         elv_log("IN STAT SCTE35 fd=%d, stat_type=%d, url=%s", fd, stat_type, c->url);
         rc = AVPipeStatInput(fd, stream_index, stat_type, c->data);
+        elv_log("IN STAT SCTE35 fd=%d, stat_type=%d, url=%s, rc=%d", fd, stat_type, c->url, rc);
         break;
 
     default:
