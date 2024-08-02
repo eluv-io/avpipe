@@ -3819,6 +3819,13 @@ avpipe_xc(
                             in_handlers->avpipe_stater(inctx, input_packet->stream_index, in_stat_data_scte35);
                         }
                         break;
+                    default:
+                        elv_dbg("SCTE unsupported [%d] pts=%"PRId64" duration=%"PRId64" flag=%d size=%d "
+                            "data=%s command=%d",
+                            input_packet->stream_index, input_packet->pts, input_packet->duration,
+                            input_packet->flags, input_packet->size,
+                            hex_str, scte35_command_type);
+                        break;
                     }
                 }
             } else {
