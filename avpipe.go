@@ -762,6 +762,7 @@ func (h *ioHandler) InStat(stream_index C.int, avp_stat C.avp_stat_t, stat_args 
 	case C.in_stat_data_scte35:
 		statArgs := C.GoString((*C.char)(stat_args))
 		err = h.input.Stat(streamIndex, AV_IN_STAT_DATA_SCTE35, statArgs)
+		log.Info("IN STAT SCTE35 GO", "err", err)
 	}
 
 	return err
