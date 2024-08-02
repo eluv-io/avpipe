@@ -295,6 +295,10 @@ in_stat(
         rc = AVPipeStatInput(fd, stream_index, stat_type, &c->first_key_frame_pts);
         break;
 
+    case in_stat_data_scte35:
+        rc = AVPipeStatInput(fd, stream_index, stat_type, c->data);
+        break;
+
     default:
         rc = -1;
     }
