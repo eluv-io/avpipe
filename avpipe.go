@@ -365,7 +365,7 @@ type StreamInfo struct {
 	FieldOrder         string            `json:"field_order,omitempty"`
 	Profile            int               `json:"profile,omitempty"`
 	Level              int               `json:"level,omitempty"`
-	SideDataList       []interface{}     `json:"side_data_list,omitempty"`
+	SideData           []interface{}     `json:"side_data,omitempty"`
 	Tags               map[string]string `json:"tags,omitempty"`
 }
 
@@ -762,7 +762,6 @@ func (h *ioHandler) InStat(stream_index C.int, avp_stat C.avp_stat_t, stat_args 
 	case C.in_stat_data_scte35:
 		statArgs := C.GoString((*C.char)(stat_args))
 		err = h.input.Stat(streamIndex, AV_IN_STAT_DATA_SCTE35, statArgs)
-		log.Info("IN STAT SCTE35 GO", "err", err)
 	}
 
 	return err
@@ -1460,15 +1459,15 @@ func Probe(params *XcParams) (*ProbeInfo, error) {
 
 		rot := float64(probeArray[i].side_data.display_matrix.rotation)
 		if rot != 0.0 {
-			probeInfo.StreamInfo[i].SideDataList = make([]interface{}, 1)
+			probeInfo.StreamInfo[i].SideData = make([]interface{}, 1)
 			displayMatrix := SideDataDisplayMatrix{
 				Type:       "Display Matrix",
 				Rotation:   rot,
 				RotationCw: float64(probeArray[i].side_data.display_matrix.rotation_cw),
 			}
-			probeInfo.StreamInfo[i].SideDataList[0] = displayMatrix
+			probeInfo.StreamInfo[i].SideData[0] = displayMatrix
 		} else {
-			probeInfo.StreamInfo[i].SideDataList = make([]interface{}, 0)
+			probeInfo.StreamInfo[i].SideData = make([]interface{}, 0)
 		}
 
 		// Convert AVDictionary data to Tags of type map[string]string using the built in av_dict_get() iterator

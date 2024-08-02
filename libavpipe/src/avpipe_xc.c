@@ -3796,7 +3796,6 @@ avpipe_xc(
 
         } else {
             if (stream_index == decoder_context->data_scte35_stream_index) {
-                elv_log("SCTE [%d] packet", input_packet->stream_index);
                 uint8_t scte35_command_type;
                 int res = parse_scte35_pkt(&scte35_command_type, input_packet);
                 if (res < 0) {
@@ -3809,7 +3808,7 @@ avpipe_xc(
                     case 5:
                     case 6:
                         hex_encode(input_packet->data, input_packet->size, hex_str);
-                        elv_log("SCTE [%d] pts=%"PRId64" duration=%"PRId64" flag=%d size=%d "
+                        elv_dbg("SCTE [%d] pts=%"PRId64" duration=%"PRId64" flag=%d size=%d "
                             "data=%s command=%d",
                             input_packet->stream_index, input_packet->pts, input_packet->duration,
                             input_packet->flags, input_packet->size,
@@ -3818,17 +3817,7 @@ avpipe_xc(
                         if (in_handlers->avpipe_stater) {
                             inctx->data = (uint8_t *)hex_str;
                             in_handlers->avpipe_stater(inctx, input_packet->stream_index, in_stat_data_scte35);
-                            elv_log("SCTE STATER DONE");
-                        } else {
-                            elv_log("SCTE NO STATER");
                         }
-                        break;
-                    default:
-                        elv_log("SCTE unsupported [%d] pts=%"PRId64" duration=%"PRId64" flag=%d size=%d "
-                            "data=%s command=%d",
-                            input_packet->stream_index, input_packet->pts, input_packet->duration,
-                            input_packet->flags, input_packet->size,
-                            hex_str, scte35_command_type);
                         break;
                     }
                 }
