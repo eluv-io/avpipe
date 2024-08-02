@@ -365,7 +365,7 @@ type StreamInfo struct {
 	FieldOrder         string            `json:"field_order,omitempty"`
 	Profile            int               `json:"profile,omitempty"`
 	Level              int               `json:"level,omitempty"`
-	SideData           []interface{}     `json:"side_data,omitempty"`
+	SideDataList       []interface{}     `json:"side_data_list,omitempty"`
 	Tags               map[string]string `json:"tags,omitempty"`
 }
 
@@ -1459,15 +1459,15 @@ func Probe(params *XcParams) (*ProbeInfo, error) {
 
 		rot := float64(probeArray[i].side_data.display_matrix.rotation)
 		if rot != 0.0 {
-			probeInfo.StreamInfo[i].SideData = make([]interface{}, 1)
+			probeInfo.StreamInfo[i].SideDataList = make([]interface{}, 1)
 			displayMatrix := SideDataDisplayMatrix{
 				Type:       "Display Matrix",
 				Rotation:   rot,
 				RotationCw: float64(probeArray[i].side_data.display_matrix.rotation_cw),
 			}
-			probeInfo.StreamInfo[i].SideData[0] = displayMatrix
+			probeInfo.StreamInfo[i].SideDataList[0] = displayMatrix
 		} else {
-			probeInfo.StreamInfo[i].SideData = make([]interface{}, 0)
+			probeInfo.StreamInfo[i].SideDataList = make([]interface{}, 0)
 		}
 
 		// Convert AVDictionary data to Tags of type map[string]string using the built in av_dict_get() iterator

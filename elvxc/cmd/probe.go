@@ -98,15 +98,11 @@ func doProbe(cmd *cobra.Command, args []string) error {
 		fmt.Printf("\tsample_aspect_ratio: %d:%d\n", info.SampleAspectRatio.Num(), info.SampleAspectRatio.Denom())
 		fmt.Printf("\tdisplay_aspect_ratio: %d:%d\n", info.DisplayAspectRatio.Num(), info.DisplayAspectRatio.Denom())
 		fmt.Printf("\tfield_order: %s\n", info.FieldOrder)
-		/* TODO: Make this a switch based on different SideData */
-		if info.SideData != nil && len(info.SideData) > 0 {
-			displayMatrix, ok := info.SideData[0].(avpipe.SideDataDisplayMatrix)
-			if ok {
-				fmt.Printf("\tside_data:\n")
-				fmt.Printf("\t\tdisplay_matrix:\n")
-				fmt.Printf("\t\t\trotation: %f\n", displayMatrix.Rotation)
-				fmt.Printf("\t\t\trotation_cw: %f\n", displayMatrix.RotationCw)
-			}
+		if info.SideData.DisplayMatrix.Rotation != 0 {
+			fmt.Printf("\tside_data:\n")
+			fmt.Printf("\t\tdisplay_matrix:\n")
+			fmt.Printf("\t\t\trotation: %f\n", info.SideData.DisplayMatrix.Rotation)
+			fmt.Printf("\t\t\trotation_cw: %f\n", info.SideData.DisplayMatrix.RotationCw)
 		}
 		if info.Tags != nil {
 			fmt.Printf("\ttags:\n")
