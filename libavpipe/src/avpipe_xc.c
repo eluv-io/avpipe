@@ -3079,8 +3079,11 @@ flush_decoder(
 
                 ret = encode_frame(decoder_context, encoder_context, filt_frame, stream_index, p, debug_frame_level);
                 av_frame_unref(filt_frame);
-                if (ret == eav_write_frame)
+                if (ret == eav_write_frame) {
+                    av_frame_free(&filt_frame);
+                    av_frame_free(&frame);
                     return ret;
+                }
             }
         }
         av_frame_unref(frame);
@@ -3519,8 +3522,8 @@ avpipe_xc(
         return rc;
     }
 
-    elv_channel_init(&xctx->vc, 10000, NULL);
-    elv_channel_init(&xctx->ac, 10000, NULL);
+    elv_channel_init(&xctx->vc, 10000, (free_elem_f) av_packet_free);
+    elv_channel_init(&xctx->ac, 10000, (free_elem_f) av_packet_free);
 
     /* Create threads for decoder and encoder */
     pthread_create(&xctx->vthread_id, NULL, transcode_video_func, xctx);
@@ -3870,6 +3873,10 @@ xc_done:
         for (int i=0; i<encoder_context->n_audio_output; i++)
             av_write_trailer(encoder_context->format_context2[i]);
     }
+
+    /* Purge the audio/video channels */
+    elv_channel_close(xctx->vc, 1);
+    elv_channel_close(xctx->ac, 1);
 
     char audio_last_dts_buf[(MAX_STREAMS + 1) * 20];
     char audio_input_start_pts_buf[(MAX_STREAMS + 1) * 20];
