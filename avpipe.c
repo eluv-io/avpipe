@@ -380,7 +380,14 @@ udp_in_opener(
     params->udp_channel = inctx->udp_channel;
     params->inctx = inctx;
 
-    pthread_create(&inctx->utid, NULL, udp_thread_func, params);
+    if ((rc = pthread_create(&inctx->utid, NULL, udp_thread_func, params)) < 0) {
+        elv_err("Failed to create UDP thread, rc=%d, errno=%d", rc, errno);
+        // CODEREVIEW: Did I close everything properly here? I'm assuming the fd gets closed by
+        // whoever closes the inctx 
+        free(params);
+        return -1;
+    }
+
     elv_dbg("IN OPEN UDP fd=%d, sockfd=%d, url=%s, tid=%"PRId64, fd, sockfd, url, inctx->utid);
     return 0;
 }
