@@ -4321,7 +4321,7 @@ avpipe_probe_end:
 
     for (int i=0; i<MAX_STREAMS; i++) {
         if (decoder_ctx.codec_context[i]) {
-            /* Corresponds to avcodecopen2() */
+            /* Corresponds to avcodec_open2() */
             avcodec_close(decoder_ctx.codec_context[i]);
             avcodec_free_context(&decoder_ctx.codec_context[i]);
         }
