@@ -391,6 +391,26 @@ decode_interrupt_cb(
 }
 
 static int
+check_stream_index(
+    xcparams_t *params,
+    coderctx_t *decoder_context)
+{
+    for (int i = 0; i < decoder_context->format_context->nb_streams && i < MAX_STREAMS && decoder_context->video_stream_index >= 0; i++) {
+        if (selected_audio_index(params, decoder_context->video_stream_index) >= 0)
+            return eav_param;
+    }
+
+    for (int i = 0; i < decoder_context->format_context->nb_streams && i < MAX_STREAMS; i++) {
+        if (selected_audio_index(params, decoder_context->data_scte35_stream_index) >= 0)
+            return eav_param;
+        if (selected_audio_index(params, decoder_context->data_stream_index) >= 0)
+            return eav_param;
+    }
+
+    return eav_success;
+}
+
+static int
 prepare_decoder(
     coderctx_t *decoder_context,
     avpipe_io_handler_t *in_handlers,
@@ -466,8 +486,11 @@ prepare_decoder(
             decoder_context->stream[i] = decoder_context->format_context->streams[i];
 
             /* If no stream ID specified - choose the first video stream encountered */
-            if (params && (params->xc_type & xc_video) && params->stream_id < 0 && decoder_context->video_stream_index < 0)
+            if (params && (params->xc_type & xc_video) && params->stream_id < 0 && decoder_context->video_stream_index < 0) {
                 decoder_context->video_stream_index = i;
+                if (check_stream_index(params, decoder_context) != eav_success)
+                    return eav_param;
+            }
             elv_dbg("VIDEO STREAM %d, codec_id=%s, stream_id=%d, timebase=%d, xc_type=%d, url=%s",
                 i, avcodec_get_name(decoder_context->codec_parameters[i]->codec_id), decoder_context->stream[i]->id,
                 decoder_context->stream[i]->time_base.den, params ? params->xc_type : xc_none, url);
@@ -509,6 +532,8 @@ prepare_decoder(
                 elv_dbg("DATA STREAM SCTE-35 %d, codec_id=%s, stream_id=%d, url=%s",
                     i, avcodec_get_name(decoder_context->codec_parameters[i]->codec_id),
                     decoder_context->stream[i]->id, url);
+                if (check_stream_index(params, decoder_context) != eav_success)
+                    return eav_param;
                 break;
             default:
                 // Unrecognized data stream
@@ -516,6 +541,8 @@ prepare_decoder(
                 elv_dbg("DATA STREAM UNRECOGNIZED %d, codec_id=%s, stream_id=%d, url=%s",
                     i, avcodec_get_name(decoder_context->codec_parameters[i]->codec_id),
                     decoder_context->stream[i]->id, url);
+                if (check_stream_index(params, decoder_context) != eav_success)
+                    return eav_param;
                 break;
             }
 
