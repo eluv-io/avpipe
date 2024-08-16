@@ -1495,7 +1495,6 @@ prepare_audio_encoder(
         }
 #endif
 
-        //encoder_context->audio_enc_stream_index[i] = stream_index; CLEAN
     }
 
     return 0;
@@ -4322,7 +4321,7 @@ avpipe_probe_end:
 
     for (int i=0; i<MAX_STREAMS; i++) {
         if (decoder_ctx.codec_context[i]) {
-            /* Corresponds to avcodec_open2() */
+            /* Corresponds to avcodecopen2() */
             avcodec_close(decoder_ctx.codec_context[i]);
             avcodec_free_context(&decoder_ctx.codec_context[i]);
         }
@@ -4425,6 +4424,13 @@ check_params(
         params->xc_type = xc_audio;
         params->channel_layout = AV_CH_LAYOUT_STEREO;
         params->n_audio = 1;
+    }
+
+    for (int i=0; i<params->n_audio; i++) {
+        for (int j=i+1; j<params->n_audio; j++) {
+            if (params->audio_index[i] == params->audio_index[j])
+                return eav_param;
+        }
     }
 
     if (params->bitdepth == 0) {
@@ -4808,10 +4814,12 @@ avpipe_fini(
         }
     }
 
+#ifdef USE_RESAMPLE_AAC
     if ((*xctx)->params && !strcmp((*xctx)->params->ecodec2, "aac")) {
         av_audio_fifo_free(decoder_context->fifo);
         swr_free(&decoder_context->resampler_context);
     }
+#endif
 
     free((*xctx)->in_handlers);
     free((*xctx)->out_handlers);
