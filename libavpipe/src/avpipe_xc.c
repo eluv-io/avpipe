@@ -353,7 +353,7 @@ selected_audio_index(
     xcparams_t *params,
     int index)
 {
-    if (params->n_audio <= 0)
+    if (params->n_audio <= 0 || index < 0)
         return -1;
 
     for (int i=0; i<params->n_audio; i++) {
@@ -395,12 +395,9 @@ check_stream_index(
     xcparams_t *params,
     coderctx_t *decoder_context)
 {
-    for (int i = 0; i < decoder_context->format_context->nb_streams && i < MAX_STREAMS && decoder_context->video_stream_index >= 0; i++) {
+    for (int i = 0; i < decoder_context->format_context->nb_streams && i < MAX_STREAMS; i++) {
         if (selected_audio_index(params, decoder_context->video_stream_index) >= 0)
             return eav_param;
-    }
-
-    for (int i = 0; i < decoder_context->format_context->nb_streams && i < MAX_STREAMS; i++) {
         if (selected_audio_index(params, decoder_context->data_scte35_stream_index) >= 0)
             return eav_param;
         if (selected_audio_index(params, decoder_context->data_stream_index) >= 0)
@@ -428,6 +425,7 @@ prepare_decoder(
     decoder_context->inctx = inctx;
     decoder_context->video_stream_index = -1;
     decoder_context->data_scte35_stream_index = -1;
+    decoder_context->data_stream_index = -1;
     for (int j=0; j<MAX_STREAMS; j++) {
         decoder_context->audio_stream_index[j] = -1;
         decoder_context->audio_last_dts[j] = AV_NOPTS_VALUE;
