@@ -222,8 +222,8 @@ type XcParams struct {
 	WatermarkOverlayLen    int         `json:"watermark_overlay_len,omitempty"`  // Length of overlay image
 	WatermarkOverlayType   ImageType   `json:"watermark_overlay_type,omitempty"` // Type of overlay image (i.e PngImage, ...)
 	StreamId               int32       `json:"stream_id"`                        // Specify stream by ID (instead of index)
-	AudioIndex             []int32     `json:"audio_index"`
-	ChannelLayout          int         `json:"channel_layout"` // Audio channel layout
+	AudioIndex             []int32     `json:"audio_index"`                      // the length of this is equal to the number of audios
+	ChannelLayout          int         `json:"channel_layout"`                   // Audio channel layout
 	MaxCLL                 string      `json:"max_cll,omitempty"`
 	MasterDisplay          string      `json:"master_display,omitempty"`
 	BitDepth               int32       `json:"bitdepth,omitempty"`
