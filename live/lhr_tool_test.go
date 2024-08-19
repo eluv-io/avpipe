@@ -183,7 +183,6 @@ func TestHLSAudioOnly(t *testing.T) {
 		StreamId:        -1,
 	}
 
-	params.NumAudio = 1
 	params.AudioIndex = []int32{1}
 
 	setupLogging()
@@ -260,7 +259,6 @@ func TestHLSAudioVideoLive(t *testing.T) {
 		StreamId:        -1,
 	}
 
-	audioParams.NumAudio = 1
 	audioParams.AudioIndex = []int32{1}
 
 	go func(reader io.Reader) {

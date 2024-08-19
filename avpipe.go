@@ -222,8 +222,7 @@ type XcParams struct {
 	WatermarkOverlayLen    int         `json:"watermark_overlay_len,omitempty"`  // Length of overlay image
 	WatermarkOverlayType   ImageType   `json:"watermark_overlay_type,omitempty"` // Type of overlay image (i.e PngImage, ...)
 	StreamId               int32       `json:"stream_id"`                        // Specify stream by ID (instead of index)
-	AudioIndex             []int32     `json:"audio_index,omitempty"`
-	NumAudio               int32       `json:"n_audio"`
+	AudioIndex             []int32     `json:"audio_index"`
 	ChannelLayout          int         `json:"channel_layout"` // Audio channel layout
 	MaxCLL                 string      `json:"max_cll,omitempty"`
 	MasterDisplay          string      `json:"master_display,omitempty"`
@@ -1235,7 +1234,7 @@ func getCParams(params *XcParams) (*C.xcparams_t, error) {
 		watermark_overlay:         C.CString(params.WatermarkOverlay),
 		watermark_overlay_len:     C.int(params.WatermarkOverlayLen),
 		watermark_overlay_type:    C.image_type(params.WatermarkOverlayType),
-		n_audio:                   C.int(params.NumAudio),
+		n_audio:                   C.int(len(params.AudioIndex)),
 		channel_layout:            C.int(params.ChannelLayout),
 		stream_id:                 C.int(params.StreamId),
 		bypass_transcoding:        C.int(0),
@@ -1283,15 +1282,15 @@ func getCParams(params *XcParams) (*C.xcparams_t, error) {
 		cparams.listen = C.int(1)
 	}
 
-	if params.NumAudio > MaxAudioMux || int(params.NumAudio) != len(params.AudioIndex) {
-		return nil, fmt.Errorf("Invalid number of audio streams NumAudio=%d, AudioIndexLen=%d", params.NumAudio, len(params.AudioIndex))
+	if int32(len(params.AudioIndex)) > MaxAudioMux {
+		return nil, fmt.Errorf("Invalid number of audio streams NumAudio=%d", len(params.AudioIndex))
 	}
 
 	if params.DebugFrameLevel {
 		cparams.debug_frame_level = C.int(1)
 	}
 
-	for i := 0; i < int(params.NumAudio); i++ {
+	for i := 0; i < len(params.AudioIndex); i++ {
 		cparams.audio_index[i] = C.int(params.AudioIndex[i])
 	}
 

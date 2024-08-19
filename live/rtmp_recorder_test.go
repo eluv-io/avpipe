@@ -44,7 +44,6 @@ func TestRtmpToMp4_1(t *testing.T) {
 		Listen:              true,
 	}
 
-	xcParams.NumAudio = 1
 	xcParams.AudioIndex = []int32{1}
 	// Transcode audio mez files in background
 	reqCtx := &testCtx{url: url}
@@ -75,7 +74,6 @@ func TestRtmpToMp4_1(t *testing.T) {
 
 	xcParams.Format = "dash"
 	xcParams.Dcodec2 = "aac"
-	xcParams.NumAudio = 0
 	xcParams.AudioSegDurationTs = 96000 // almost 2 * 48000
 	xcParams.XcType = avpipe.XcAudio
 	audioMezFiles := [2]string{"audio-mez-segment0-1.mp4", "audio-mez-segment0-2.mp4"}
@@ -165,7 +163,6 @@ func TestRtmpToMp4WithCancelling0(t *testing.T) {
 		Listen:              true,
 	}
 
-	xcParams.NumAudio = 1
 	xcParams.AudioIndex = []int32{1}
 	// Transcode audio/video mez files in background
 	reqCtx := &testCtx{url: url}
@@ -236,7 +233,6 @@ func TestRtmpToMp4WithCancelling1(t *testing.T) {
 		Listen:              true,
 	}
 
-	xcParams.NumAudio = 1
 	xcParams.AudioIndex = []int32{1}
 	// Transcode audio/video mez files in background
 	reqCtx := &testCtx{url: url}
@@ -307,7 +303,6 @@ func TestRtmpToMp4WithCancelling2(t *testing.T) {
 		Listen:              true,
 	}
 
-	xcParams.NumAudio = 1
 	xcParams.AudioIndex = []int32{1}
 	// Transcode audio/video mez files in background
 	reqCtx := &testCtx{url: url}

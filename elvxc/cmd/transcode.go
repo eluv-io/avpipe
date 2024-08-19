@@ -215,7 +215,6 @@ func (o *elvxcOutput) Stat(streamIndex int, avType avpipe.AVType, statType avpip
 }
 
 func getAudioIndexes(params *avpipe.XcParams, audioIndexes string) (err error) {
-	params.NumAudio = 0
 	if len(audioIndexes) == 0 {
 		return
 	}
@@ -227,7 +226,6 @@ func getAudioIndexes(params *avpipe.XcParams, audioIndexes string) (err error) {
 			return fmt.Errorf("Invalid audio indexes")
 		}
 		params.AudioIndex = append(params.AudioIndex, int32(index))
-		params.NumAudio++
 	}
 
 	return nil

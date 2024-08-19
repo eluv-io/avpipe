@@ -149,7 +149,6 @@ func TestMultiAudioUdpToMp4(t *testing.T) {
 		Url:                 url,
 		SyncAudioToStreamId: -1,
 		DebugFrameLevel:     debugFrameLevel,
-		NumAudio:            3,
 	}
 
 	xcParams.AudioIndex = []int32{1, 2, 3}
@@ -169,7 +168,6 @@ func TestMultiAudioUdpToMp4(t *testing.T) {
 
 	done := make(chan bool, 1)
 
-	xcParams.NumAudio = 1
 	xcParams.AudioIndex = []int32{0}
 	xcParams.Format = "dash"
 	xcParams.Dcodec2 = "aac"
