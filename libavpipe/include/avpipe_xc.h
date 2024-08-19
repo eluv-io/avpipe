@@ -555,13 +555,12 @@ typedef struct encoding_frame_stats_t {
 } encoding_frame_stats_t;
 
 /**
- * @brief   Allocates and initializes a xctx_t (transcoder context) for piplining the input stream.
- *          In case of failure avpipe_fini() should be called to avoid resource leak.
+ * @brief   Allocates and initializes a xctx_t (transcoder context) for pipelining the input stream.
+ *          in_handlers, out_handlers, and params ownership is always on the caller, and will never
+ *          be freed or modified by this function. In case of failure xctx is NULL.
  *
- * @param   xctx            Points to allocated and initialized memory (different fields are initialized by ffmpeg).
+ * @param   xctx            Pointer that will be filled with a partially initialized transcoding context.
  * @param   in_handlers     A pointer to input handlers. Must be properly set up by the application.
- * @param   inctx           A pointer to ioctx_t for input stream. This has to be allocated and initialized
- *                          by the application before calling this function.
  * @param   out_handlers    A pointer to output handlers. Must be properly set up by the application.
  * @param   params          A pointer to the parameters for transcoding.
  *
@@ -627,7 +626,7 @@ avpipe_probe_free(
     int n_streams);
 
 /**
- * @brief   Starts transcoding.
+ * @brief   Starts transcoding. Multiple transcoding operations on the same transcoding context is UB.
  *          In case of failure avpipe_fini() should be called to avoid resource leak.
  *
  * @param   xctx                A pointer to transcoding context.
@@ -742,5 +741,14 @@ avpipe_h264_guess_profile(
     int width,
     int height);
 
+/**
+ * @brief   Helper function to deep copy an xc_params. In the case of OOM, may fail to initialize
+ *          all fields.
+ * 
+ * @param   p  A pointer to the transcoding parameters to copy.
+ */
+xcparams_t *
+avpipe_copy_xcparams(
+    xcparams_t *p);
 
 #endif

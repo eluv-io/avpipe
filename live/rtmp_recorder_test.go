@@ -129,6 +129,78 @@ func TestRtmpToMp4_1(t *testing.T) {
 	testComplete <- true
 }
 
+// Cancels the RTMP live stream transcoding, with no source, immediately after initializing the transcoding (after XcInit).
+// This test was hanging with avpipe release-1.15 and before (this is fixed in release-1.16).
+func TestRtmpToMp4WithCancelling0(t *testing.T) {
+	setupLogging()
+	outputDir := path.Join(baseOutPath, fn())
+	setupOutDir(t, outputDir)
+
+	log.Info("STARTING " + outputDir)
+
+	done := make(chan bool, 1)
+	liveSource := NewLiveSource()
+	url := fmt.Sprintf(RTMP_SOURCE, liveSource.Port)
+
+	xcParams := &avpipe.XcParams{
+		Format:              "fmp4-segment",
+		Seekable:            false,
+		DurationTs:          -1,
+		StartSegmentStr:     "1",
+		AudioBitrate:        256000,
+		VideoBitrate:        20000000,
+		ForceKeyInt:         60,
+		VideoSegDurationTs:  480000,
+		AudioSegDurationTs:  1428480,   // 1428480=29.76s
+		Ecodec2:             "aac",     // "aac"
+		Ecodec:              "libx264", // libx264 software / h264_videotoolbox mac hardware
+		EncHeight:           720,       // 1080
+		EncWidth:            1280,      // 1920
+		XcType:              avpipe.XcAll,
+		StreamId:            -1,
+		Url:                 url,
+		SyncAudioToStreamId: -1,
+		DebugFrameLevel:     debugFrameLevel,
+		Listen:              true,
+	}
+
+	xcParams.NumAudio = 1
+	xcParams.AudioIndex[0] = 1
+	// Transcode audio/video mez files in background
+	reqCtx := &testCtx{url: url}
+	putReqCtxByURL(url, reqCtx)
+
+	avpipe.InitIOHandler(&inputOpener{dir: outputDir}, &outputOpener{dir: outputDir})
+
+	var handle int32
+	var err error
+	go func() {
+		tlog.Info("Transcoding RTMP stream start", "params", fmt.Sprintf("%+v", *xcParams))
+		handle, err = avpipe.XcInit(xcParams)
+		if err != nil {
+			t.Error("XcInit initializing RTMP stream failed", "err", err)
+		}
+
+		err = avpipe.XcRun(handle)
+		assert.Equal(t, err, avpipe.EAV_OPEN_INPUT)
+
+		done <- true
+	}()
+
+	time.Sleep(1 * time.Second)
+
+	err = avpipe.XcCancel(handle)
+	assert.NoError(t, err)
+	if err != nil {
+		t.Error("Cancelling RTMP stream failed", "err", err, "url", url)
+		t.FailNow()
+	} else {
+		tlog.Info("Cancelling RTMP stream completed", "err", err, "url", url)
+	}
+
+	<-done
+}
+
 // Cancels the RTMP live stream transcoding immediately after initializing the transcoding (after XcInit).
 func TestRtmpToMp4WithCancelling1(t *testing.T) {
 	setupLogging()
