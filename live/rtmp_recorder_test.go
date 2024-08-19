@@ -74,6 +74,7 @@ func TestRtmpToMp4_1(t *testing.T) {
 
 	xcParams.Format = "dash"
 	xcParams.Dcodec2 = "aac"
+	xcParams.AudioIndex = nil
 	xcParams.AudioSegDurationTs = 96000 // almost 2 * 48000
 	xcParams.XcType = avpipe.XcAudio
 	audioMezFiles := [2]string{"audio-mez-segment0-1.mp4", "audio-mez-segment0-2.mp4"}
