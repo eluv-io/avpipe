@@ -94,7 +94,7 @@ static void audio_encode_example(const char *filename)
     AVCodec *codec;
     AVCodecContext *c= NULL;
     AVFrame *frame;
-    AVPacket pkt;
+    AVPacket *pkt;
     int i, j, k, ret, got_output;
     int buffer_size;
     FILE *f;
@@ -165,13 +165,12 @@ static void audio_encode_example(const char *filename)
         fprintf(stderr, "Could not setup audio frame\n");
         exit(1);
     }
+    pkt = av_packet_alloc();
+
     /* encode a single tone sound */
     t = 0;
     tincr = 2 * M_PI * 440.0 / c->sample_rate;
     for (i = 0; i < 200; i++) {
-        av_init_packet(&pkt);
-        pkt.data = NULL; // packet data will be allocated by the encoder
-        pkt.size = 0;
         for (j = 0; j < c->frame_size; j++) {
             samples[2*j] = (int)(sin(t) * 10000);
             for (k = 1; k < c->channels; k++)
@@ -179,31 +178,32 @@ static void audio_encode_example(const char *filename)
             t += tincr;
         }
         /* encode the samples */
-        ret = avcodec_encode_audio2(c, &pkt, frame, &got_output);
+        ret = avcodec_encode_audio2(c, pkt, frame, &got_output);
         if (ret < 0) {
             fprintf(stderr, "Error encoding audio frame\n");
             exit(1);
         }
         if (got_output) {
-            fwrite(pkt.data, 1, pkt.size, f);
-            av_free_packet(&pkt);
+            fwrite(pkt->data, 1, pkt->size, f);
+            av_packet_unref(pkt);
         }
     }
     /* get the delayed frames */
     for (got_output = 1; got_output; i++) {
-        ret = avcodec_encode_audio2(c, &pkt, NULL, &got_output);
+        ret = avcodec_encode_audio2(c, pkt, NULL, &got_output);
         if (ret < 0) {
             fprintf(stderr, "Error encoding frame\n");
             exit(1);
         }
         if (got_output) {
-            fwrite(pkt.data, 1, pkt.size, f);
-            av_free_packet(&pkt);
+            fwrite(pkt->data, 1, pkt->size, f);
+            av_packet_unref(pkt);
         }
     }
     fclose(f);
     av_freep(&samples);
     av_frame_free(&frame);
+    av_packet_free(&pkt);
     avcodec_close(c);
     av_free(c);
 }
@@ -218,9 +218,9 @@ static void audio_decode_example(const char *outfilename, const char *filename)
     int len;
     FILE *f, *outfile;
     uint8_t inbuf[AUDIO_INBUF_SIZE + FF_INPUT_BUFFER_PADDING_SIZE];
-    AVPacket avpkt;
+    AVPacket *avpkt;
     AVFrame *decoded_frame = NULL;
-    av_init_packet(&avpkt);
+    avpkt = av_packet_alloc();
     printf("Decode audio file %s to %s\n", filename, outfilename);
     /* find the mpeg audio decoder */
     codec = avcodec_find_decoder(AV_CODEC_ID_MP2);
@@ -249,9 +249,9 @@ static void audio_decode_example(const char *outfilename, const char *filename)
         exit(1);
     }
     /* decode until eof */
-    avpkt.data = inbuf;
-    avpkt.size = fread(inbuf, 1, AUDIO_INBUF_SIZE, f);
-    while (avpkt.size > 0) {
+    avpkt->data = inbuf;
+    avpkt->size = fread(inbuf, 1, AUDIO_INBUF_SIZE, f);
+    while (avpkt->size > 0) {
         int i, ch;
         int got_frame = 0;
         if (!decoded_frame) {
@@ -277,21 +277,21 @@ static void audio_decode_example(const char *outfilename, const char *filename)
                 for (ch=0; ch<c->channels; ch++)
                     fwrite(decoded_frame->data[ch] + data_size*i, 1, data_size, outfile);
         }
-        avpkt.size -= len;
-        avpkt.data += len;
-        avpkt.dts =
-        avpkt.pts = AV_NOPTS_VALUE;
-        if (avpkt.size < AUDIO_REFILL_THRESH) {
+        avpkt->size -= len;
+        avpkt->data += len;
+        avpkt->dts =
+        avpkt->pts = AV_NOPTS_VALUE;
+        if (avpkt->size < AUDIO_REFILL_THRESH) {
             /* Refill the input buffer, to avoid trying to decode
              * incomplete frames. Instead of this, one could also use
              * a parser, or use a proper container format through
              * libavformat. */
-            memmove(inbuf, avpkt.data, avpkt.size);
-            avpkt.data = inbuf;
-            len = fread(avpkt.data + avpkt.size, 1,
-                        AUDIO_INBUF_SIZE - avpkt.size, f);
+            memmove(inbuf, avpkt->data, avpkt->size);
+            avpkt->data = inbuf;
+            len = fread(avpkt->data + avpkt->size, 1,
+                        AUDIO_INBUF_SIZE - avpkt->size, f);
             if (len > 0)
-                avpkt.size += len;
+                avpkt->size += len;
         }
     }
     fclose(outfile);
@@ -299,6 +299,7 @@ static void audio_decode_example(const char *outfilename, const char *filename)
     avcodec_close(c);
     av_free(c);
     av_frame_free(&decoded_frame);
+    av_packet_free(&avpkt);
 }
 
 /*
@@ -311,7 +312,7 @@ static void video_encode_example(const char *filename, int codec_id)
     int i, ret, x, y, got_output;
     FILE *f;
     AVFrame *frame;
-    AVPacket pkt;
+    AVPacket *pkt;
     uint8_t endcode[] = { 0, 0, 1, 0xb7 };
     printf("Encode video file %s\n", filename);
     /* find the mpeg1 video encoder */
@@ -369,11 +370,9 @@ static void video_encode_example(const char *filename, int codec_id)
         fprintf(stderr, "Could not allocate raw picture buffer\n");
         exit(1);
     }
+    pkt = av_packet_alloc();
     /* encode 1 second of video */
     for (i = 0; i < 25; i++) {
-        av_init_packet(&pkt);
-        pkt.data = NULL;    // packet data will be allocated by the encoder
-        pkt.size = 0;
         fflush(stdout);
         /* prepare a dummy image */
         /* Y */
@@ -391,29 +390,29 @@ static void video_encode_example(const char *filename, int codec_id)
         }
         frame->pts = i;
         /* encode the image */
-        ret = avcodec_encode_video2(c, &pkt, frame, &got_output);
+        ret = avcodec_encode_video2(c, pkt, frame, &got_output);
         if (ret < 0) {
             fprintf(stderr, "Error encoding frame\n");
             exit(1);
         }
         if (got_output) {
-            printf("Write frame %3d (size=%5d)\n", i, pkt.size);
-            fwrite(pkt.data, 1, pkt.size, f);
-            av_free_packet(&pkt);
+            printf("Write frame %3d (size=%5d)\n", i, pkt->size);
+            fwrite(pkt->data, 1, pkt->size, f);
+            av_packet_unref(pkt);
         }
     }
     /* get the delayed frames */
     for (got_output = 1; got_output; i++) {
         fflush(stdout);
-        ret = avcodec_encode_video2(c, &pkt, NULL, &got_output);
+        ret = avcodec_encode_video2(c, pkt, NULL, &got_output);
         if (ret < 0) {
             fprintf(stderr, "Error encoding frame\n");
             exit(1);
         }
         if (got_output) {
-            printf("Write frame %3d (size=%5d)\n", i, pkt.size);
-            fwrite(pkt.data, 1, pkt.size, f);
-            av_free_packet(&pkt);
+            printf("Write frame %3d (size=%5d)\n", i, pkt->size);
+            fwrite(pkt->data, 1, pkt->size, f);
+            av_packet_unref(pkt);
         }
     }
     /* add sequence end code to have a real mpeg file */
@@ -423,6 +422,7 @@ static void video_encode_example(const char *filename, int codec_id)
     av_free(c);
     av_freep(&frame->data[0]);
     av_frame_free(&frame);
+    av_packet_free(&pkt);
     printf("\n");
 }
 
@@ -475,8 +475,8 @@ static void video_decode_example(const char *outfilename, const char *filename)
     FILE *f;
     AVFrame *frame;
     uint8_t inbuf[INBUF_SIZE + FF_INPUT_BUFFER_PADDING_SIZE];
-    AVPacket avpkt;
-    av_init_packet(&avpkt);
+    AVPacket *avpkt;
+    avpkt = av_packet_alloc();
     /* set end of buffer to 0 (this ensures that no overreading happens for damaged mpeg streams) */
     memset(inbuf + INBUF_SIZE, 0, FF_INPUT_BUFFER_PADDING_SIZE);
     printf("Decode video file %s to %s\n", filename, outfilename);
@@ -513,8 +513,8 @@ static void video_decode_example(const char *outfilename, const char *filename)
     }
     frame_count = 0;
     for (;;) {
-        avpkt.size = fread(inbuf, 1, INBUF_SIZE, f);
-        if (avpkt.size == 0)
+        avpkt->size = fread(inbuf, 1, INBUF_SIZE, f);
+        if (avpkt->size == 0)
             break;
         /* NOTE1: some codecs are stream based (mpegvideo, mpegaudio)
            and this is the only method to use them because you cannot
@@ -528,21 +528,22 @@ static void video_decode_example(const char *outfilename, const char *filename)
            you should also take care of it */
         /* here, we use a stream based decoder (mpeg1video), so we
            feed decoder and see if it could decode a frame */
-        avpkt.data = inbuf;
-        while (avpkt.size > 0)
-            if (decode_write_frame(outfilename, c, frame, &frame_count, &avpkt, 0) < 0)
+        avpkt->data = inbuf;
+        while (avpkt->size > 0)
+            if (decode_write_frame(outfilename, c, frame, &frame_count, avpkt, 0) < 0)
                 exit(1);
     }
     /* some codecs, such as MPEG, transmit the I and P frame with a
        latency of one frame. You must do the following to have a
        chance to get the last frame of the video */
-    avpkt.data = NULL;
-    avpkt.size = 0;
-    decode_write_frame(outfilename, c, frame, &frame_count, &avpkt, 1);
+    avpkt->data = NULL;
+    avpkt->size = 0;
+    decode_write_frame(outfilename, c, frame, &frame_count, avpkt, 1);
     fclose(f);
     avcodec_close(c);
     av_free(c);
     av_frame_free(&frame);
+    av_packet_free(&avpkt);
     printf("\n");
 }
 

@@ -178,15 +178,6 @@ cleanup:
     return error < 0 ? error : AVERROR_EXIT;
 }
 
-/** Initialize one data packet for reading or writing. */
-static void init_packet(AVPacket *packet)
-{
-    av_init_packet(packet);
-    /** Set the packet data and size so that it is recognized as being empty. */
-    packet->data = NULL;
-    packet->size = 0;
-}
-
 /** Initialize one audio frame for reading from the input file */
 static int init_input_frame(AVFrame **frame)
 {
@@ -271,15 +262,16 @@ static int decode_audio_frame(AVFrame *frame,
                               int *data_present, int *finished)
 {
     /** Packet used for temporary storage. */
-    AVPacket input_packet;
+    AVPacket *input_packet;
     int error;
-    init_packet(&input_packet);
+    input_packet = av_packet_alloc();
     /** Read one audio frame from the input file into a temporary packet. */
-    if ((error = av_read_frame(input_format_context, &input_packet)) < 0) {
+    if ((error = av_read_frame(input_format_context, input_packet)) < 0) {
         /** If we are at the end of the file, flush the decoder below. */
         if (error == AVERROR_EOF)
             *finished = 1;
         else {
+            av_packet_free(&input_packet);
             fprintf(stderr, "Could not read frame (error '%s')\n",
                     get_error_text(error));
             return error;
@@ -292,10 +284,10 @@ static int decode_audio_frame(AVFrame *frame,
      * to flush it.
      */
     if ((error = avcodec_decode_audio4(input_codec_context, frame,
-                                       data_present, &input_packet)) < 0) {
+                                       data_present, input_packet)) < 0) {
         fprintf(stderr, "Could not decode frame (error '%s')\n",
                 get_error_text(error));
-        av_free_packet(&input_packet);
+        av_packet_free(&input_packet);
         return error;
     }
     /**
@@ -304,7 +296,7 @@ static int decode_audio_frame(AVFrame *frame,
      */
     if (*finished && *data_present)
         *finished = 0;
-    av_free_packet(&input_packet);
+    av_packet_free(&input_packet);
     return 0;
 }
 
@@ -497,29 +489,29 @@ static int encode_audio_frame(AVFrame *frame,
                               int *data_present)
 {
     /** Packet used for temporary storage. */
-    AVPacket output_packet;
+    AVPacket *output_packet;
     int error;
-    init_packet(&output_packet);
+    output_packet = av_packet_alloc();
     /**
      * Encode the audio frame and store it in the temporary packet.
      * The output audio stream encoder is used to do this.
      */
-    if ((error = avcodec_encode_audio2(output_codec_context, &output_packet,
+    if ((error = avcodec_encode_audio2(output_codec_context, output_packet,
                                        frame, data_present)) < 0) {
         fprintf(stderr, "Could not encode frame (error '%s')\n",
                 get_error_text(error));
-        av_free_packet(&output_packet);
+        av_packet_free(&output_packet);
         return error;
     }
     /** Write one audio frame from the temporary packet to the output file. */
     if (*data_present) {
-        if ((error = av_write_frame(output_format_context, &output_packet)) < 0) {
+        if ((error = av_write_frame(output_format_context, output_packet)) < 0) {
             fprintf(stderr, "Could not write frame (error '%s')\n",
                     get_error_text(error));
-            av_free_packet(&output_packet);
+            av_packet_free(&output_packet);
             return error;
         }
-        av_free_packet(&output_packet);
+        av_packet_free(&output_packet);
     }
     return 0;
 }
