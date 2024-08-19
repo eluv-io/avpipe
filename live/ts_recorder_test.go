@@ -2,10 +2,11 @@ package live
 
 import (
 	"fmt"
-	"github.com/stretchr/testify/assert"
 	"path"
 	"testing"
 	"time"
+
+	"github.com/stretchr/testify/assert"
 
 	"github.com/eluv-io/avpipe"
 )
@@ -151,9 +152,7 @@ func TestMultiAudioUdpToMp4(t *testing.T) {
 		NumAudio:            3,
 	}
 
-	xcParams.AudioIndex[0] = 1
-	xcParams.AudioIndex[1] = 2
-	xcParams.AudioIndex[2] = 3
+	xcParams.AudioIndex = []int32{1, 2, 3}
 
 	// Transcode audio mez files in background
 	reqCtx := &testCtx{url: url}
@@ -171,7 +170,7 @@ func TestMultiAudioUdpToMp4(t *testing.T) {
 	done := make(chan bool, 1)
 
 	xcParams.NumAudio = 1
-	xcParams.AudioIndex[0] = 0
+	xcParams.AudioIndex = []int32{0}
 	xcParams.Format = "dash"
 	xcParams.Dcodec2 = "aac"
 	xcParams.AudioSegDurationTs = 96106 // almost 2 * 48000

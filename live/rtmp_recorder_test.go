@@ -2,10 +2,11 @@ package live
 
 import (
 	"fmt"
-	"github.com/stretchr/testify/assert"
 	"path"
 	"testing"
 	"time"
+
+	"github.com/stretchr/testify/assert"
 
 	"github.com/eluv-io/avpipe"
 )
@@ -44,7 +45,7 @@ func TestRtmpToMp4_1(t *testing.T) {
 	}
 
 	xcParams.NumAudio = 1
-	xcParams.AudioIndex[0] = 1
+	xcParams.AudioIndex = []int32{1}
 	// Transcode audio mez files in background
 	reqCtx := &testCtx{url: url}
 	putReqCtxByURL(url, reqCtx)
@@ -165,7 +166,7 @@ func TestRtmpToMp4WithCancelling0(t *testing.T) {
 	}
 
 	xcParams.NumAudio = 1
-	xcParams.AudioIndex[0] = 1
+	xcParams.AudioIndex = []int32{1}
 	// Transcode audio/video mez files in background
 	reqCtx := &testCtx{url: url}
 	putReqCtxByURL(url, reqCtx)
@@ -236,7 +237,7 @@ func TestRtmpToMp4WithCancelling1(t *testing.T) {
 	}
 
 	xcParams.NumAudio = 1
-	xcParams.AudioIndex[0] = 1
+	xcParams.AudioIndex = []int32{1}
 	// Transcode audio/video mez files in background
 	reqCtx := &testCtx{url: url}
 	putReqCtxByURL(url, reqCtx)
@@ -307,7 +308,7 @@ func TestRtmpToMp4WithCancelling2(t *testing.T) {
 	}
 
 	xcParams.NumAudio = 1
-	xcParams.AudioIndex[0] = 1
+	xcParams.AudioIndex = []int32{1}
 	// Transcode audio/video mez files in background
 	reqCtx := &testCtx{url: url}
 	putReqCtxByURL(url, reqCtx)

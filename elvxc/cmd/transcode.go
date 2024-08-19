@@ -226,7 +226,7 @@ func getAudioIndexes(params *avpipe.XcParams, audioIndexes string) (err error) {
 		if err != nil {
 			return fmt.Errorf("Invalid audio indexes")
 		}
-		params.AudioIndex[params.NumAudio] = int32(index)
+		params.AudioIndex = append(params.AudioIndex, int32(index))
 		params.NumAudio++
 	}
 
