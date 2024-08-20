@@ -10,5 +10,5 @@
 
 /* Only increase these versions for release purposes */
 #define AVPIPE_MAJOR_VERSION    1
-#define AVPIPE_MINOR_VERSION    15
+#define AVPIPE_MINOR_VERSION    16
 
