@@ -183,8 +183,7 @@ func TestHLSAudioOnly(t *testing.T) {
 		StreamId:        -1,
 	}
 
-	params.NumAudio = 1
-	params.AudioIndex[0] = 1
+	params.AudioIndex = []int32{1}
 
 	setupLogging()
 	outputDir := path.Join(baseOutPath, fn())
@@ -260,8 +259,7 @@ func TestHLSAudioVideoLive(t *testing.T) {
 		StreamId:        -1,
 	}
 
-	audioParams.NumAudio = 1
-	audioParams.AudioIndex[0] = 1
+	audioParams.AudioIndex = []int32{1}
 
 	go func(reader io.Reader) {
 		tlog.Info("audio mez Xc start", "params", fmt.Sprintf("%+v", *audioParams))
@@ -316,7 +314,7 @@ func TestHLSAudioVideoLive(t *testing.T) {
 
 	// Create audio dash segments out of audio mezzanines
 	audioParams.Format = "dash"
-	audioParams.AudioIndex[0] = 0
+	audioParams.AudioIndex = []int32{0}
 	audioParams.AudioSegDurationTs = 2 * 48000
 	audioMezFiles := [3]string{"audio-mez-segment-1.mp4", "audio-mez-segment-2.mp4", "audio-mez-segment-3.mp4"}
 	go func() {
