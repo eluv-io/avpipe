@@ -2031,12 +2031,6 @@ encode_frame(
     if (skip)
         return eav_success;
 
-    AVPacket *output_packet = av_packet_alloc();
-    if (!output_packet) {
-        elv_dbg("could not allocate memory for output packet");
-        return eav_mem_alloc;
-    }
-
     // Prepare packet before encoding - adjust PTS and IDR frame signaling
     if (frame) {
 
@@ -2120,12 +2114,13 @@ encode_frame(
             encoder_context->video_last_pts_sent_encode = frame->pts;
     }
 
-    while (ret >= 0) {
-        /* The packet must be initialized before receiving */
-        av_init_packet(output_packet);
-        output_packet->data = NULL;
-        output_packet->size = 0;
+    AVPacket *output_packet = av_packet_alloc();
+    if (!output_packet) {
+        elv_dbg("could not allocate memory for output packet");
+        return eav_mem_alloc;
+    }
 
+    while (ret >= 0) {
         // Get the output packet from encoder
         ret = avcodec_receive_packet(codec_context, output_packet);
 
@@ -2294,6 +2289,9 @@ encode_frame(
             rc = eav_write_frame;
             break;
         }
+
+        /* Reset the packet to receive the next frame */
+        av_packet_unref(output_packet);
     }
 
 end_encode_frame:

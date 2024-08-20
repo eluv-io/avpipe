@@ -514,7 +514,6 @@ func TestSingleABRTranscode(t *testing.T) {
 
 	params.XcType = avpipe.XcAudio
 	params.Ecodec2 = "aac"
-	params.NumAudio = -1
 	xcTest(t, outputDir, params, nil, false)
 }
 
@@ -541,7 +540,6 @@ func TestSingleABRTranscodeByStreamId(t *testing.T) {
 		EncHeight:          720,
 		EncWidth:           1280,
 		StreamId:           1,
-		NumAudio:           -1,
 		Url:                url,
 		DebugFrameLevel:    debugFrameLevel,
 	}
@@ -660,8 +658,7 @@ func TestV2SingleABRTranscode(t *testing.T) {
 
 	params.XcType = avpipe.XcAudio
 	params.Ecodec2 = "aac"
-	params.NumAudio = 1
-	params.AudioIndex[0] = 1
+	params.AudioIndex = []int32{1}
 	xcTest(t, outputDir, params, nil, false)
 }
 
@@ -697,8 +694,7 @@ func TestV2SingleABRTranscodeIOHandler(t *testing.T) {
 
 	params.XcType = avpipe.XcAudio
 	params.Ecodec2 = "aac"
-	params.NumAudio = 1
-	params.AudioIndex[0] = 1
+	params.AudioIndex = []int32{1}
 	xcTest(t, outputDir, params, nil, false)
 }
 
@@ -748,8 +744,7 @@ func TestV2SingleABRTranscodeCancelling(t *testing.T) {
 
 	params.XcType = avpipe.XcAudio
 	params.Ecodec2 = "aac"
-	params.NumAudio = 1
-	params.AudioIndex[0] = 1
+	params.AudioIndex = []int32{1}
 	handleA, err := avpipe.XcInit(params)
 	assert.NoError(t, err)
 	assert.Greater(t, handleA, int32(0))
@@ -1045,13 +1040,12 @@ func TestAudioAC3Ts2AC3MezMaker(t *testing.T) {
 		EncHeight:           -1,
 		EncWidth:            -1,
 		XcType:              avpipe.XcAudio,
-		NumAudio:            1,
 		StreamId:            -1,
 		SyncAudioToStreamId: -1,
 		Url:                 url,
 		DebugFrameLevel:     debugFrameLevel,
 	}
-	params.AudioIndex[0] = 2
+	params.AudioIndex = []int32{2}
 
 	xcTestResult := &XcTestResult{
 		mezFile:    []string{fmt.Sprintf("%s/asegment0-1.mp4", outputDir)},
@@ -1083,13 +1077,12 @@ func TestAudioAC3Ts2AACMezMaker(t *testing.T) {
 		EncHeight:           -1,
 		EncWidth:            -1,
 		XcType:              avpipe.XcAudio,
-		NumAudio:            1,
 		StreamId:            -1,
 		SyncAudioToStreamId: -1,
 		Url:                 url,
 		DebugFrameLevel:     debugFrameLevel,
 	}
-	params.AudioIndex[0] = 2
+	params.AudioIndex = []int32{2}
 
 	xcTestResult := &XcTestResult{
 		mezFile:    []string{fmt.Sprintf("%s/asegment0-1.mp4", outputDir)},
@@ -1122,13 +1115,12 @@ func TestAudioMP3Ts2AACMezMaker(t *testing.T) {
 		EncHeight:           -1,
 		EncWidth:            -1,
 		XcType:              avpipe.XcAudio,
-		NumAudio:            1,
 		StreamId:            -1,
 		SyncAudioToStreamId: -1,
 		Url:                 url,
 		DebugFrameLevel:     debugFrameLevel,
 	}
-	params.AudioIndex[0] = 1
+	params.AudioIndex = []int32{1}
 
 	xcTestResult := &XcTestResult{
 		mezFile:    []string{fmt.Sprintf("%s/asegment0-1.mp4", outputDir)},
@@ -1162,13 +1154,12 @@ func TestAudioDownmix2AACMezMaker(t *testing.T) {
 		EncWidth:            -1,
 		XcType:              avpipe.XcAudio,
 		ChannelLayout:       avpipe.ChannelLayout("stereo"),
-		NumAudio:            1,
 		StreamId:            -1,
 		SyncAudioToStreamId: -1,
 		Url:                 url,
 		DebugFrameLevel:     debugFrameLevel,
 	}
-	params.AudioIndex[0] = 6
+	params.AudioIndex = []int32{6}
 
 	xcTestResult := &XcTestResult{
 		mezFile:           []string{fmt.Sprintf("%s/asegment0-1.mp4", outputDir)},
@@ -1199,14 +1190,12 @@ func TestAudio2MonoTo1Stereo(t *testing.T) {
 		Dcodec2:             "",
 		XcType:              avpipe.XcAudioJoin,
 		ChannelLayout:       avpipe.ChannelLayout("stereo"),
-		NumAudio:            2,
 		StreamId:            -1,
 		SyncAudioToStreamId: -1,
 		Url:                 url,
 		DebugFrameLevel:     debugFrameLevel,
 	}
-	params.AudioIndex[0] = 0
-	params.AudioIndex[1] = 1
+	params.AudioIndex = []int32{0, 1}
 
 	xcTestResult := &XcTestResult{
 		timeScale:         44100,
@@ -1312,14 +1301,13 @@ func TestAudioMonoToMono(t *testing.T) {
 		Ecodec2:             "aac",
 		Dcodec2:             "",
 		XcType:              avpipe.XcAudio,
-		NumAudio:            1,
 		ChannelLayout:       avpipe.ChannelLayout("mono"),
 		StreamId:            -1,
 		SyncAudioToStreamId: -1,
 		Url:                 url,
 		DebugFrameLevel:     debugFrameLevel,
 	}
-	params.AudioIndex[0] = 1
+	params.AudioIndex = []int32{1}
 
 	xcTestResult := &XcTestResult{
 		timeScale:         22050,
@@ -1351,14 +1339,13 @@ func TestAudioQuadToQuad(t *testing.T) {
 		Ecodec2:             "aac",
 		Dcodec2:             "",
 		XcType:              avpipe.XcAudio,
-		NumAudio:            1,
 		ChannelLayout:       avpipe.ChannelLayout("quad"),
 		StreamId:            -1,
 		SyncAudioToStreamId: -1,
 		Url:                 url,
 		DebugFrameLevel:     debugFrameLevel,
 	}
-	params.AudioIndex[0] = 1
+	params.AudioIndex = []int32{1}
 
 	xcTestResult := &XcTestResult{
 		timeScale:         22050,
@@ -1390,7 +1377,6 @@ func TestAudio6MonoTo5_1(t *testing.T) {
 		Ecodec2:             "aac",
 		Dcodec2:             "",
 		XcType:              avpipe.XcAudioMerge,
-		NumAudio:            6,
 		ChannelLayout:       avpipe.ChannelLayout("5.1"),
 		FilterDescriptor:    "[0:3][0:4][0:5][0:6][0:7][0:8]amerge=inputs=6,pan=5.1|c0=c0|c1=c1|c2=c2| c3=c3|c4=c4|c5=c5[aout]",
 		StreamId:            -1,
@@ -1398,12 +1384,7 @@ func TestAudio6MonoTo5_1(t *testing.T) {
 		Url:                 url,
 		DebugFrameLevel:     debugFrameLevel,
 	}
-	params.AudioIndex[0] = 3
-	params.AudioIndex[1] = 4
-	params.AudioIndex[2] = 5
-	params.AudioIndex[3] = 6
-	params.AudioIndex[4] = 7
-	params.AudioIndex[5] = 8
+	params.AudioIndex = []int32{3, 4, 5, 6, 7, 8}
 
 	xcTestResult := &XcTestResult{
 		timeScale:         44100,
@@ -1435,7 +1416,6 @@ func TestAudio6MonoUnequalChannelLayoutsTo5_1(t *testing.T) {
 		Ecodec2:             "aac",
 		Dcodec2:             "",
 		XcType:              avpipe.XcAudioMerge,
-		NumAudio:            6,
 		ChannelLayout:       avpipe.ChannelLayout("5.1"),
 		FilterDescriptor:    "[0:0][0:1][0:2][0:3][0:4][0:5]amerge=inputs=6,pan=5.1|c0=c0|c1=c1|c2=c2|c3=c3|c4=c4|c5=c5[aout]",
 		StreamId:            -1,
@@ -1443,12 +1423,7 @@ func TestAudio6MonoUnequalChannelLayoutsTo5_1(t *testing.T) {
 		Url:                 url,
 		DebugFrameLevel:     debugFrameLevel,
 	}
-	params.AudioIndex[0] = 0
-	params.AudioIndex[1] = 1
-	params.AudioIndex[2] = 2
-	params.AudioIndex[3] = 3
-	params.AudioIndex[4] = 4
-	params.AudioIndex[5] = 5
+	params.AudioIndex = []int32{0, 1, 2, 3, 4, 5}
 
 	xcTestResult := &XcTestResult{
 		timeScale:         48000,
@@ -1480,7 +1455,6 @@ func TestAudio10Channel_s16To6Channel_5_1(t *testing.T) {
 		Ecodec2:             "aac",
 		Dcodec2:             "",
 		XcType:              avpipe.XcAudioPan,
-		NumAudio:            1,
 		ChannelLayout:       avpipe.ChannelLayout("5.1"),
 		FilterDescriptor:    "[0:1]pan=5.1|c0=c3|c1=c4|c2=c5|c3=c6|c4=c7|c5=c8[aout]",
 		StreamId:            -1,
@@ -1488,7 +1462,7 @@ func TestAudio10Channel_s16To6Channel_5_1(t *testing.T) {
 		Url:                 url,
 		DebugFrameLevel:     debugFrameLevel,
 	}
-	params.AudioIndex[0] = 0
+	params.AudioIndex = []int32{0}
 
 	xcTestResult := &XcTestResult{
 		timeScale:         44100,
@@ -1521,14 +1495,13 @@ func TestAudio2Channel1Stereo(t *testing.T) {
 		Dcodec2:             "",
 		XcType:              avpipe.XcAudioPan,
 		ChannelLayout:       avpipe.ChannelLayout("stereo"),
-		NumAudio:            1,
 		StreamId:            -1,
 		SyncAudioToStreamId: -1,
 		FilterDescriptor:    "[0:1]pan=stereo|c0<c1+0.707*c2|c1<c2+0.707*c1[aout]",
 		Url:                 url,
 		DebugFrameLevel:     debugFrameLevel,
 	}
-	params.AudioIndex[0] = 1
+	params.AudioIndex = []int32{1}
 
 	xcTestResult := &XcTestResult{
 		timeScale:         48000,
@@ -1564,14 +1537,13 @@ func TestAudioPan2Channel1Stereo_pcm_60000(t *testing.T) {
 		Dcodec2:             "",
 		XcType:              avpipe.XcAudioPan,
 		ChannelLayout:       avpipe.ChannelLayout("stereo"),
-		NumAudio:            1,
 		StreamId:            -1,
 		SyncAudioToStreamId: -1,
 		FilterDescriptor:    "[0:6]pan=stereo|c0=c0|c1=c0[aout]",
 		Url:                 url,
 		DebugFrameLevel:     debugFrameLevel,
 	}
-	params.AudioIndex[0] = 6
+	params.AudioIndex = []int32{6}
 
 	xcTestResult := &XcTestResult{
 		timeScale:         48000,
@@ -1607,13 +1579,12 @@ func TestAudioMonoToStereo_pcm_60000(t *testing.T) {
 		Dcodec2:             "",
 		XcType:              avpipe.XcAudio,
 		ChannelLayout:       avpipe.ChannelLayout("stereo"),
-		NumAudio:            1,
 		StreamId:            -1,
 		SyncAudioToStreamId: -1,
 		Url:                 url,
 		DebugFrameLevel:     debugFrameLevel,
 	}
-	params.AudioIndex[0] = 3
+	params.AudioIndex = []int32{3}
 
 	xcTestResult := &XcTestResult{
 		timeScale:         48000,
@@ -1656,12 +1627,9 @@ func TestMultiAudioXc(t *testing.T) {
 		ForceKeyInt:         60,
 		Url:                 url,
 		DebugFrameLevel:     debugFrameLevel,
-		NumAudio:            3,
 	}
 
-	params.AudioIndex[0] = 1
-	params.AudioIndex[1] = 2
-	params.AudioIndex[2] = 3
+	params.AudioIndex = []int32{1, 2, 3}
 
 	xcTestResult := &XcTestResult{
 		timeScale: 15360,
@@ -2136,7 +2104,6 @@ func TestABRMuxing(t *testing.T) {
 		EncWidth:           1280,
 		XcType:             avpipe.XcVideo,
 		StreamId:           -1,
-		NumAudio:           -1,
 		Url:                url,
 		DebugFrameLevel:    debugFrameLevel,
 		ForceKeyInt:        48,
