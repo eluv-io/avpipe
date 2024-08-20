@@ -395,14 +395,12 @@ check_stream_index(
     xcparams_t *params,
     coderctx_t *decoder_context)
 {
-    for (int i = 0; i < decoder_context->format_context->nb_streams && i < MAX_STREAMS; i++) {
-        if (selected_audio_index(params, decoder_context->video_stream_index) >= 0)
-            return eav_param;
-        if (selected_audio_index(params, decoder_context->data_scte35_stream_index) >= 0)
-            return eav_param;
-        if (selected_audio_index(params, decoder_context->data_stream_index) >= 0)
-            return eav_param;
-    }
+    if (selected_audio_index(params, decoder_context->video_stream_index) >= 0)
+        return eav_param;
+    if (selected_audio_index(params, decoder_context->data_scte35_stream_index) >= 0)
+        return eav_param;
+    if (selected_audio_index(params, decoder_context->data_stream_index) >= 0)
+        return eav_param;
 
     return eav_success;
 }
