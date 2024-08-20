@@ -353,7 +353,7 @@ selected_audio_index(
     xcparams_t *params,
     int index)
 {
-    if (params->n_audio <= 0)
+    if (params->n_audio <= 0 || index < 0)
         return -1;
 
     for (int i=0; i<params->n_audio; i++) {
@@ -391,6 +391,21 @@ decode_interrupt_cb(
 }
 
 static int
+check_stream_index(
+    xcparams_t *params,
+    coderctx_t *decoder_context)
+{
+    if (selected_audio_index(params, decoder_context->video_stream_index) >= 0)
+        return eav_param;
+    if (selected_audio_index(params, decoder_context->data_scte35_stream_index) >= 0)
+        return eav_param;
+    if (selected_audio_index(params, decoder_context->data_stream_index) >= 0)
+        return eav_param;
+
+    return eav_success;
+}
+
+static int
 prepare_decoder(
     coderctx_t *decoder_context,
     avpipe_io_handler_t *in_handlers,
@@ -408,6 +423,7 @@ prepare_decoder(
     decoder_context->inctx = inctx;
     decoder_context->video_stream_index = -1;
     decoder_context->data_scte35_stream_index = -1;
+    decoder_context->data_stream_index = -1;
     for (int j=0; j<MAX_STREAMS; j++) {
         decoder_context->audio_stream_index[j] = -1;
         decoder_context->audio_last_dts[j] = AV_NOPTS_VALUE;
@@ -466,8 +482,11 @@ prepare_decoder(
             decoder_context->stream[i] = decoder_context->format_context->streams[i];
 
             /* If no stream ID specified - choose the first video stream encountered */
-            if (params && (params->xc_type & xc_video) && params->stream_id < 0 && decoder_context->video_stream_index < 0)
+            if (params && (params->xc_type & xc_video) && params->stream_id < 0 && decoder_context->video_stream_index < 0) {
                 decoder_context->video_stream_index = i;
+                if (check_stream_index(params, decoder_context) != eav_success)
+                    return eav_param;
+            }
             elv_dbg("VIDEO STREAM %d, codec_id=%s, stream_id=%d, timebase=%d, xc_type=%d, url=%s",
                 i, avcodec_get_name(decoder_context->codec_parameters[i]->codec_id), decoder_context->stream[i]->id,
                 decoder_context->stream[i]->time_base.den, params ? params->xc_type : xc_none, url);
@@ -509,6 +528,8 @@ prepare_decoder(
                 elv_dbg("DATA STREAM SCTE-35 %d, codec_id=%s, stream_id=%d, url=%s",
                     i, avcodec_get_name(decoder_context->codec_parameters[i]->codec_id),
                     decoder_context->stream[i]->id, url);
+                if (check_stream_index(params, decoder_context) != eav_success)
+                    return eav_param;
                 break;
             default:
                 // Unrecognized data stream
@@ -516,6 +537,8 @@ prepare_decoder(
                 elv_dbg("DATA STREAM UNRECOGNIZED %d, codec_id=%s, stream_id=%d, url=%s",
                     i, avcodec_get_name(decoder_context->codec_parameters[i]->codec_id),
                     decoder_context->stream[i]->id, url);
+                if (check_stream_index(params, decoder_context) != eav_success)
+                    return eav_param;
                 break;
             }
 
@@ -1470,7 +1493,6 @@ prepare_audio_encoder(
         }
 #endif
 
-        //encoder_context->audio_enc_stream_index[i] = stream_index; CLEAN
     }
 
     return 0;
@@ -3077,8 +3099,11 @@ flush_decoder(
 
                 ret = encode_frame(decoder_context, encoder_context, filt_frame, stream_index, p, debug_frame_level);
                 av_frame_unref(filt_frame);
-                if (ret == eav_write_frame)
+                if (ret == eav_write_frame) {
+                    av_frame_free(&filt_frame);
+                    av_frame_free(&frame);
                     return ret;
+                }
             }
         }
         av_frame_unref(frame);
@@ -3517,8 +3542,8 @@ avpipe_xc(
         return rc;
     }
 
-    elv_channel_init(&xctx->vc, 10000, NULL);
-    elv_channel_init(&xctx->ac, 10000, NULL);
+    elv_channel_init(&xctx->vc, 10000, (free_elem_f) av_packet_free);
+    elv_channel_init(&xctx->ac, 10000, (free_elem_f) av_packet_free);
 
     /* Create threads for decoder and encoder */
     pthread_create(&xctx->vthread_id, NULL, transcode_video_func, xctx);
@@ -3868,6 +3893,10 @@ xc_done:
         for (int i=0; i<encoder_context->n_audio_output; i++)
             av_write_trailer(encoder_context->format_context2[i]);
     }
+
+    /* Purge the audio/video channels */
+    elv_channel_close(xctx->vc, 1);
+    elv_channel_close(xctx->ac, 1);
 
     char audio_last_dts_buf[(MAX_STREAMS + 1) * 20];
     char audio_input_start_pts_buf[(MAX_STREAMS + 1) * 20];
@@ -4393,6 +4422,13 @@ check_params(
         params->n_audio = 1;
     }
 
+    for (int i=0; i<params->n_audio; i++) {
+        for (int j=i+1; j<params->n_audio; j++) {
+            if (params->audio_index[i] == params->audio_index[j])
+                return eav_param;
+        }
+    }
+
     if (params->bitdepth == 0) {
         params->bitdepth = 8;
         elv_log("Set bitdepth=%d, url=%s", params->bitdepth, params->url);
@@ -4718,7 +4754,7 @@ avpipe_fini(
         elv_dbg("Releasing all the resources, url=%s", (*xctx)->inctx->url);
 
     /* Close input handler resources if it is not a muxing command */
-    if (!(*xctx)->in_mux_ctx)
+    if (!(*xctx)->in_mux_ctx && (*xctx)->in_handlers)
         (*xctx)->in_handlers->avpipe_closer((*xctx)->inctx);
 
     decoder_context = &(*xctx)->decoder_ctx;
@@ -4774,10 +4810,12 @@ avpipe_fini(
         }
     }
 
+#ifdef USE_RESAMPLE_AAC
     if ((*xctx)->params && !strcmp((*xctx)->params->ecodec2, "aac")) {
         av_audio_fifo_free(decoder_context->fifo);
         swr_free(&decoder_context->resampler_context);
     }
+#endif
 
     free((*xctx)->in_handlers);
     free((*xctx)->out_handlers);
