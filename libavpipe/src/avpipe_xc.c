@@ -490,6 +490,20 @@ prepare_decoder(
             elv_dbg("VIDEO STREAM %d, codec_id=%s, stream_id=%d, timebase=%d, xc_type=%d, url=%s",
                 i, avcodec_get_name(decoder_context->codec_parameters[i]->codec_id), decoder_context->stream[i]->id,
                 decoder_context->stream[i]->time_base.den, params ? params->xc_type : xc_none, url);
+            
+            if (decoder_context->video_stream_index == i && decoder_context->format_context->streams[i]->codecpar->width == 0) {
+                /* This can sometimes happen when ffmpeg fails to decode any frames from the input
+                 * within the default probe size. Default parameters are written, but this is a sign
+                 * that the codec parameters have not been set. Downstream filter operations will
+                 * fail in this case, as it assumes that height/width/pixel info is set accurately.
+                 * 
+                 * In particular, this case can sometimes be triggered by the content-fabric
+                 * integration test that tests live restarts.
+                 * 
+                 * See libavformat/utils.c:has_codec_parameters for the checks in ffmpeg internals. */
+                elv_err("avformat_find_stream_info failed to get input stream info");
+                return eav_read_input;
+            }
             break;
 
         case AVMEDIA_TYPE_AUDIO:
