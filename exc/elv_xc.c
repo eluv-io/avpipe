@@ -1032,6 +1032,7 @@ usage(
         "\t-d :                     (optional) Decoder name. For video default is \"h264\", can be: \"h264\", \"h264_cuvid\", \"jpeg2000\", \"hevc\"\n"
         "\t                                    For audio default is \"aac\", but for ts files should be set to \"ac3\"\n"
         "\t-debug-frame-level :     (optional) Enable/disable debug frame level. Default is 0, must be 0 or 1.\n"
+        "\t-deinterlace :           (optional) Deinterlace filter. Default is 0 (none), can be: 1 (bwdif send_field), 2 (bwdif send_frame)\n"
         "\t-duration-ts :           (optional) Default: -1 (entire stream)\n"
         "\t-e :                     (optional) Video encoder name. Default is \"libx264\", can be: \"libx264\", \"libx265\", \"h264_nvenc\", \"hevc_nvenc\", \"h264_videotoolbox\", or \"mjpeg\"\n"
         "\t-enc-height :            (optional) Default: -1 (use source height)\n"
@@ -1166,6 +1167,7 @@ main(
         .start_fragment_index = 0,          /* Default is zero */
         .sync_audio_to_stream_id = -1,      /* Default -1 (no sync to a video stream) */
         .rotate = 0,                        /* Default 0 (means no transpose/rotation) */
+        .deinterlace = 0,                   /* Default 0 (no deinterlacing) */
         .xc_type = xc_none,
         .video_bitrate = -1,                /* not used if using CRF */
         .watermark_text = NULL,
@@ -1283,7 +1285,12 @@ main(
                 if (p.debug_frame_level != 0 && p.debug_frame_level != 1) {
                     usage(argv[0], argv[i], EXIT_FAILURE);
                 }
-            } else if (strlen(argv[i]) > 2) {
+            } else if (!strcmp(argv[i], "-deinterlace")) {
+                if (sscanf(argv[i+1], "%d", &p.deinterlace) != 1) {
+                    usage(argv[0], argv[i], EXIT_FAILURE);
+                }
+            }
+            else if (strlen(argv[i]) > 2) {
                 usage(argv[0], argv[i], EXIT_FAILURE);
             } else {
                 p.dcodec = strdup(argv[i+1]);

@@ -241,6 +241,7 @@ type XcParams struct {
 	VideoTimeBase          int                `json:"video_time_base"`
 	VideoFrameDurationTs   int                `json:"video_frame_duration_ts"`
 	Rotate                 int                `json:"rotate"`
+	Deinterlace            int                `json:"deinterlace"`
 }
 
 // NewXcParams initializes a XcParams struct with unset/default values
@@ -1255,6 +1256,7 @@ func getCParams(params *XcParams) (*C.xcparams_t, error) {
 		video_time_base:           C.int(params.VideoTimeBase),
 		video_frame_duration_ts:   C.int(params.VideoFrameDurationTs),
 		rotate:                    C.int(params.Rotate),
+		deinterlace:               C.dif_type(params.Deinterlace),
 
 		// All boolean params are handled below
 	}
