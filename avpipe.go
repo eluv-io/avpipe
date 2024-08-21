@@ -176,72 +176,71 @@ const MaxAudioMux = C.MAX_STREAMS
 
 // XcParams should match with txparams_t in avpipe_xc.h
 type XcParams struct {
-	Url                    string             `json:"url"`
-	BypassTranscoding      bool               `json:"bypass,omitempty"`
-	Format                 string             `json:"format,omitempty"`
-	StartTimeTs            int64              `json:"start_time_ts,omitempty"`
-	StartPts               int64              `json:"start_pts,omitempty"` // Start PTS for output
-	DurationTs             int64              `json:"duration_ts,omitempty"`
-	StartSegmentStr        string             `json:"start_segment_str,omitempty"`
-	VideoBitrate           int32              `json:"video_bitrate,omitempty"`
-	AudioBitrate           int32              `json:"audio_bitrate,omitempty"`
-	SampleRate             int32              `json:"sample_rate,omitempty"` // Audio sampling rate
-	RcMaxRate              int32              `json:"rc_max_rate,omitempty"`
-	RcBufferSize           int32              `json:"rc_buffer_size,omitempty"`
-	CrfStr                 string             `json:"crf_str,omitempty"`
-	Preset                 string             `json:"preset,omitempty"`
-	AudioSegDurationTs     int64              `json:"audio_seg_duration_ts,omitempty"`
-	VideoSegDurationTs     int64              `json:"video_seg_duration_ts,omitempty"`
-	SegDuration            string             `json:"seg_duration,omitempty"`
-	StartFragmentIndex     int32              `json:"start_fragment_index,omitempty"`
-	ForceKeyInt            int32              `json:"force_keyint,omitempty"`
-	Ecodec                 string             `json:"ecodec,omitempty"`    // Video encoder
-	Ecodec2                string             `json:"ecodec2,omitempty"`   // Audio encoder
-	Dcodec                 string             `json:"dcodec,omitempty"`    // Video decoder
-	Dcodec2                string             `json:"dcodec2,omitempty"`   // Audio decoder
-	GPUIndex               int32              `json:"gpu_index,omitempty"` // GPU index if encoder/decoder is GPU (nvidia)
-	EncHeight              int32              `json:"enc_height,omitempty"`
-	EncWidth               int32              `json:"enc_width,omitempty"`
-	CryptIV                string             `json:"crypt_iv,omitempty"`
-	CryptKey               string             `json:"crypt_key,omitempty"`
-	CryptKID               string             `json:"crypt_kid,omitempty"`
-	CryptKeyURL            string             `json:"crypt_key_url,omitempty"`
-	CryptScheme            CryptScheme        `json:"crypt_scheme,omitempty"`
-	XcType                 XcType             `json:"xc_type,omitempty"`
-	Seekable               bool               `json:"seekable,omitempty"`
-	WatermarkText          string             `json:"watermark_text,omitempty"`
-	WatermarkTimecode      string             `json:"watermark_timecode,omitempty"`
-	WatermarkTimecodeRate  float32            `json:"watermark_timecode_rate,omitempty"`
-	WatermarkXLoc          string             `json:"watermark_xloc,omitempty"`
-	WatermarkYLoc          string             `json:"watermark_yloc,omitempty"`
-	WatermarkRelativeSize  float32            `json:"watermark_relative_size,omitempty"`
-	WatermarkFontColor     string             `json:"watermark_font_color,omitempty"`
-	WatermarkShadow        bool               `json:"watermark_shadow,omitempty"`
-	WatermarkShadowColor   string             `json:"watermark_shadow_color,omitempty"`
-	WatermarkOverlay       string             `json:"watermark_overlay,omitempty"`      // Buffer containing overlay image
-	WatermarkOverlayLen    int                `json:"watermark_overlay_len,omitempty"`  // Length of overlay image
-	WatermarkOverlayType   ImageType          `json:"watermark_overlay_type,omitempty"` // Type of overlay image (i.e PngImage, ...)
-	StreamId               int32              `json:"stream_id"`                        // Specify stream by ID (instead of index)
-	AudioIndex             [MaxAudioMux]int32 `json:"audio_index,omitempty"`
-	NumAudio               int32              `json:"n_audio"`
-	ChannelLayout          int                `json:"channel_layout"` // Audio channel layout
-	MaxCLL                 string             `json:"max_cll,omitempty"`
-	MasterDisplay          string             `json:"master_display,omitempty"`
-	BitDepth               int32              `json:"bitdepth,omitempty"`
-	SyncAudioToStreamId    int                `json:"sync_audio_to_stream_id"`
-	ForceEqualFDuration    bool               `json:"force_equal_frame_duration,omitempty"`
-	MuxingSpec             string             `json:"muxing_spec,omitempty"`
-	Listen                 bool               `json:"listen"`
-	ConnectionTimeout      int                `json:"connection_timeout"`
-	FilterDescriptor       string             `json:"filter_descriptor"`
-	SkipDecoding           bool               `json:"skip_decoding"`
-	DebugFrameLevel        bool               `json:"debug_frame_level"`
-	ExtractImageIntervalTs int64              `json:"extract_image_interval_ts,omitempty"`
-	ExtractImagesTs        []int64            `json:"extract_images_ts,omitempty"`
-	VideoTimeBase          int                `json:"video_time_base"`
-	VideoFrameDurationTs   int                `json:"video_frame_duration_ts"`
-	Rotate                 int                `json:"rotate"`
-	Deinterlace            int                `json:"deinterlace"`
+	Url                    string      `json:"url"`
+	BypassTranscoding      bool        `json:"bypass,omitempty"`
+	Format                 string      `json:"format,omitempty"`
+	StartTimeTs            int64       `json:"start_time_ts,omitempty"`
+	StartPts               int64       `json:"start_pts,omitempty"` // Start PTS for output
+	DurationTs             int64       `json:"duration_ts,omitempty"`
+	StartSegmentStr        string      `json:"start_segment_str,omitempty"`
+	VideoBitrate           int32       `json:"video_bitrate,omitempty"`
+	AudioBitrate           int32       `json:"audio_bitrate,omitempty"`
+	SampleRate             int32       `json:"sample_rate,omitempty"` // Audio sampling rate
+	RcMaxRate              int32       `json:"rc_max_rate,omitempty"`
+	RcBufferSize           int32       `json:"rc_buffer_size,omitempty"`
+	CrfStr                 string      `json:"crf_str,omitempty"`
+	Preset                 string      `json:"preset,omitempty"`
+	AudioSegDurationTs     int64       `json:"audio_seg_duration_ts,omitempty"`
+	VideoSegDurationTs     int64       `json:"video_seg_duration_ts,omitempty"`
+	SegDuration            string      `json:"seg_duration,omitempty"`
+	StartFragmentIndex     int32       `json:"start_fragment_index,omitempty"`
+	ForceKeyInt            int32       `json:"force_keyint,omitempty"`
+	Ecodec                 string      `json:"ecodec,omitempty"`    // Video encoder
+	Ecodec2                string      `json:"ecodec2,omitempty"`   // Audio encoder
+	Dcodec                 string      `json:"dcodec,omitempty"`    // Video decoder
+	Dcodec2                string      `json:"dcodec2,omitempty"`   // Audio decoder
+	GPUIndex               int32       `json:"gpu_index,omitempty"` // GPU index if encoder/decoder is GPU (nvidia)
+	EncHeight              int32       `json:"enc_height,omitempty"`
+	EncWidth               int32       `json:"enc_width,omitempty"`
+	CryptIV                string      `json:"crypt_iv,omitempty"`
+	CryptKey               string      `json:"crypt_key,omitempty"`
+	CryptKID               string      `json:"crypt_kid,omitempty"`
+	CryptKeyURL            string      `json:"crypt_key_url,omitempty"`
+	CryptScheme            CryptScheme `json:"crypt_scheme,omitempty"`
+	XcType                 XcType      `json:"xc_type,omitempty"`
+	Seekable               bool        `json:"seekable,omitempty"`
+	WatermarkText          string      `json:"watermark_text,omitempty"`
+	WatermarkTimecode      string      `json:"watermark_timecode,omitempty"`
+	WatermarkTimecodeRate  float32     `json:"watermark_timecode_rate,omitempty"`
+	WatermarkXLoc          string      `json:"watermark_xloc,omitempty"`
+	WatermarkYLoc          string      `json:"watermark_yloc,omitempty"`
+	WatermarkRelativeSize  float32     `json:"watermark_relative_size,omitempty"`
+	WatermarkFontColor     string      `json:"watermark_font_color,omitempty"`
+	WatermarkShadow        bool        `json:"watermark_shadow,omitempty"`
+	WatermarkShadowColor   string      `json:"watermark_shadow_color,omitempty"`
+	WatermarkOverlay       string      `json:"watermark_overlay,omitempty"`      // Buffer containing overlay image
+	WatermarkOverlayLen    int         `json:"watermark_overlay_len,omitempty"`  // Length of overlay image
+	WatermarkOverlayType   ImageType   `json:"watermark_overlay_type,omitempty"` // Type of overlay image (i.e PngImage, ...)
+	StreamId               int32       `json:"stream_id"`                        // Specify stream by ID (instead of index)
+	AudioIndex             []int32     `json:"audio_index"`                      // the length of this is equal to the number of audios
+	ChannelLayout          int         `json:"channel_layout"`                   // Audio channel layout
+	MaxCLL                 string      `json:"max_cll,omitempty"`
+	MasterDisplay          string      `json:"master_display,omitempty"`
+	BitDepth               int32       `json:"bitdepth,omitempty"`
+	SyncAudioToStreamId    int         `json:"sync_audio_to_stream_id"`
+	ForceEqualFDuration    bool        `json:"force_equal_frame_duration,omitempty"`
+	MuxingSpec             string      `json:"muxing_spec,omitempty"`
+	Listen                 bool        `json:"listen"`
+	ConnectionTimeout      int         `json:"connection_timeout"`
+	FilterDescriptor       string      `json:"filter_descriptor"`
+	SkipDecoding           bool        `json:"skip_decoding"`
+	DebugFrameLevel        bool        `json:"debug_frame_level"`
+	ExtractImageIntervalTs int64       `json:"extract_image_interval_ts,omitempty"`
+	ExtractImagesTs        []int64     `json:"extract_images_ts,omitempty"`
+	VideoTimeBase          int         `json:"video_time_base"`
+	VideoFrameDurationTs   int         `json:"video_frame_duration_ts"`
+	Rotate                 int         `json:"rotate"`
+	Deinterlace            int         `json:"deinterlace"`
 }
 
 // NewXcParams initializes a XcParams struct with unset/default values
@@ -1236,7 +1235,7 @@ func getCParams(params *XcParams) (*C.xcparams_t, error) {
 		watermark_overlay:         C.CString(params.WatermarkOverlay),
 		watermark_overlay_len:     C.int(params.WatermarkOverlayLen),
 		watermark_overlay_type:    C.image_type(params.WatermarkOverlayType),
-		n_audio:                   C.int(params.NumAudio),
+		n_audio:                   C.int(len(params.AudioIndex)),
 		channel_layout:            C.int(params.ChannelLayout),
 		stream_id:                 C.int(params.StreamId),
 		bypass_transcoding:        C.int(0),
@@ -1285,15 +1284,15 @@ func getCParams(params *XcParams) (*C.xcparams_t, error) {
 		cparams.listen = C.int(1)
 	}
 
-	if params.NumAudio > MaxAudioMux {
-		return nil, fmt.Errorf("Invalid number of audio streams NumAudio=%d", params.NumAudio)
+	if int32(len(params.AudioIndex)) > MaxAudioMux {
+		return nil, fmt.Errorf("Invalid number of audio streams NumAudio=%d", len(params.AudioIndex))
 	}
 
 	if params.DebugFrameLevel {
 		cparams.debug_frame_level = C.int(1)
 	}
 
-	for i := 0; i < int(params.NumAudio); i++ {
+	for i := 0; i < len(params.AudioIndex); i++ {
 		cparams.audio_index[i] = C.int(params.AudioIndex[i])
 	}
 
