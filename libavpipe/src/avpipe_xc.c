@@ -451,6 +451,11 @@ prepare_decoder(
         char timeout[32];
         sprintf(timeout, "%d", params->connection_timeout);
         av_dict_set(&opts, "timeout", timeout, 0);
+    } else if (decoder_context->is_srt && params->listen && params->connection_timeout > 0) {
+        char timeout[32];
+        sprintf(timeout, "%d", params->connection_timeout * 1000000);
+        /* SRT timeout is in microseconds */
+        av_dict_set(&opts, "listen_timeout", timeout, 0);
     }
 
     /* Allocate AVFormatContext in format_context and find input file format */
