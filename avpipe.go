@@ -292,6 +292,7 @@ func (p *XcParams) UnmarshalJSON(data []byte) error {
 	}
 
 	var xcpd xcParamsDecoder
+	xcpd.xcpAlias = xcpAlias(*NewXcParams())
 	if err := json.Unmarshal(data, &xcpd); err != nil {
 		return err
 	}
