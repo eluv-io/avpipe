@@ -37,6 +37,7 @@ package avpipe
 // #include "elv_log.h"
 import "C"
 import (
+	"encoding/json"
 	"fmt"
 	"math/big"
 	"sync"
@@ -273,6 +274,30 @@ func NewXcParams() *XcParams {
 		WatermarkXLoc:          "W*0.05",
 		WatermarkYLoc:          "H*0.9",
 	}
+}
+
+// Custom unmarshalJSON for XcParams to make things backwards compatible with prior serialization
+func (p *XcParams) UnmarshalJSON(data []byte) error {
+	// The alias does not have the problematic unmarshal JSON that makes embedding XcParams into xcParamsDecoder bad
+	type xcpAlias XcParams
+
+	type xcParamsDecoder struct {
+		xcpAlias
+		NumAudio int32 `json:"n_audio"`
+	}
+
+	var xcpd xcParamsDecoder
+	if err := json.Unmarshal(data, &xcpd); err != nil {
+		return err
+	}
+
+	*p = XcParams(xcpd.xcpAlias)
+
+	if xcpd.NumAudio != 0 && len(p.AudioIndex) > int(xcpd.NumAudio) {
+		p.AudioIndex = p.AudioIndex[:xcpd.NumAudio]
+	}
+
+	return nil
 }
 
 type AVMediaType int

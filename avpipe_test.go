@@ -2259,6 +2259,19 @@ func TestUnmarshalParams(t *testing.T) {
 	// TODO: More checks
 }
 
+func TestUnmarshalParamsNumAudioBackwardsCompat(t *testing.T) {
+	var params avpipe.XcParams
+	bytesWithNAudio := []byte(`{"video_bitrate":8000000,"seg_duration_ts":180000,"seg_duration_fr":50,"enc_height":720,"enc_width":1280,"xc_type":1,"audio_index":[0,0,0,0,0,0,0,0],"n_audio":1}`)
+	err := json.Unmarshal(bytesWithNAudio, &params)
+	assert.NoError(t, err)
+	assert.Equal(t, len(params.AudioIndex), 1)
+
+	bytesNoNAudio := []byte(`{"video_bitrate":8000000,"seg_duration_ts":180000,"seg_duration_fr":50,"enc_height":720,"enc_width":1280,"xc_type":1,"audio_index":[0,0,0,0,0,0,0,0]}`)
+	err = json.Unmarshal(bytesNoNAudio, &params)
+	assert.NoError(t, err)
+	assert.Equal(t, len(params.AudioIndex), 8)
+}
+
 func TestProbe(t *testing.T) {
 	url := videoBigBuckBunnyPath
 	if fileMissing(url, fn()) {
