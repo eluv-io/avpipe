@@ -277,6 +277,11 @@ func NewXcParams() *XcParams {
 }
 
 // Custom unmarshalJSON for XcParams to make things backwards compatible with prior serialization
+//
+// Explanations of backwards compatible serializations:
+//  1. NEW: The number of audios is specified by the length of the `AudioIndex` slice.
+//     OLD: The number of audios was specified by a larger `AudioIndex` array and a `n_audio` field specifying the number.
+//     CONVERSION: If a `n_audio` field exists, the `AudioIndex` slice is shortened to be that length.
 func (p *XcParams) UnmarshalJSON(data []byte) error {
 	// The alias does not have the problematic unmarshal JSON that makes embedding XcParams into xcParamsDecoder bad
 	type xcpAlias XcParams
