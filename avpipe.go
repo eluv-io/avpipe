@@ -306,6 +306,15 @@ func (p *XcParams) UnmarshalJSON(data []byte) error {
 	return nil
 }
 
+func (p *XcParams) UnmarshalMap(m map[string]interface{}) error {
+	// Pass through JSON unmarshalling for centralization of unmarshalling
+	b, err := json.Marshal(m)
+	if err != nil {
+		return err
+	}
+	return p.UnmarshalJSON(b)
+}
+
 type AVMediaType int
 
 const (
