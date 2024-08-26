@@ -37,6 +37,7 @@ package avpipe
 // #include "elv_log.h"
 import "C"
 import (
+	"encoding/json"
 	"fmt"
 	"math/big"
 	"sync"
@@ -273,6 +274,45 @@ func NewXcParams() *XcParams {
 		WatermarkXLoc:          "W*0.05",
 		WatermarkYLoc:          "H*0.9",
 	}
+}
+
+// Custom unmarshalJSON for XcParams to make things backwards compatible with prior serialization
+//
+// Explanations of backwards compatible serializations:
+//  1. NEW: The number of audios is specified by the length of the `AudioIndex` slice.
+//     OLD: The number of audios was specified by a larger `AudioIndex` array and a `n_audio` field specifying the number.
+//     CONVERSION: If a `n_audio` field exists, the `AudioIndex` slice is shortened to be that length.
+func (p *XcParams) UnmarshalJSON(data []byte) error {
+	// The alias does not have the problematic unmarshal JSON that makes embedding XcParams into xcParamsDecoder bad
+	type xcpAlias XcParams
+
+	type xcParamsDecoder struct {
+		xcpAlias
+		NumAudio int32 `json:"n_audio"`
+	}
+
+	var xcpd xcParamsDecoder
+	xcpd.xcpAlias = xcpAlias(*p)
+	if err := json.Unmarshal(data, &xcpd); err != nil {
+		return err
+	}
+
+	*p = XcParams(xcpd.xcpAlias)
+
+	if xcpd.NumAudio != 0 && len(p.AudioIndex) > int(xcpd.NumAudio) {
+		p.AudioIndex = p.AudioIndex[:xcpd.NumAudio]
+	}
+
+	return nil
+}
+
+func (p *XcParams) UnmarshalMap(m map[string]interface{}) error {
+	// Pass through JSON unmarshalling for centralization of unmarshalling
+	b, err := json.Marshal(m)
+	if err != nil {
+		return err
+	}
+	return p.UnmarshalJSON(b)
 }
 
 type AVMediaType int
