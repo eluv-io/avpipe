@@ -1133,6 +1133,7 @@ prepare_video_encoder(
             out_stream->time_base = (AVRational) {1, params->video_time_base};
         else
             out_stream->time_base = in_stream->time_base;
+
         out_stream->avg_frame_rate = decoder_context->format_context->streams[decoder_context->video_stream_index]->avg_frame_rate;
         out_stream->codecpar->codec_tag = 0;
 
@@ -1188,6 +1189,7 @@ prepare_video_encoder(
         encoder_codec_context->time_base = (AVRational) {1, params->video_time_base};
     else
         encoder_codec_context->time_base = decoder_context->codec_context[index]->time_base;
+
     encoder_codec_context->sample_aspect_ratio = decoder_context->codec_context[index]->sample_aspect_ratio;
     if (params->video_bitrate > 0)
         encoder_codec_context->bit_rate = params->video_bitrate;
@@ -1195,6 +1197,7 @@ prepare_video_encoder(
         encoder_codec_context->rc_buffer_size = params->rc_buffer_size;
     if (params->rc_max_rate > 0)
         encoder_codec_context->rc_max_rate = params->rc_max_rate;
+
     encoder_codec_context->framerate = decoder_context->codec_context[index]->framerate;
 
     // This needs to be set before open (ffmpeg samples have it wrong)
@@ -3366,6 +3369,42 @@ get_filter_str(
 {
     *filter_str = NULL;
 
+    // Validate filter compatibility
+    // Note these filters can theoretically be made to work together but not a real use case
+    if (params->rotate > 0 || params->deinterlace != dif_none) {
+        if ((params->watermark_text && *params->watermark_text != '\0') ||
+            (params->watermark_overlay && params->watermark_overlay[0] != '\0')) {
+            elv_err("Incompatible filter parameters - watermark not supported with rotate and deinterlacing");
+            return eav_param;
+        }
+        if (params->rotate > 0 && params->deinterlace != dif_none) {
+            elv_err("Incompatible filter parameters - both rotate and deinterlacing");
+            return eav_param;
+        }
+        if (params->deinterlace == dif_bwdif) {
+            // This filter needs to create two output frames for each input frame and
+            // requires the caller to specify the new frame duration (1/2 of input frame duration)
+            if (params->video_frame_duration_ts == 0) {
+                elv_err("Incorrect filter spec - deinterlacing requires frame duration");
+                return eav_param;
+            }
+        }
+    }
+
+    //  General syntax for the bwdif filter:
+    //  "bwdif=mode=send_frame:parity=auto:deint=all"
+    switch (params->deinterlace) {
+        case dif_bwdif:
+            *filter_str = strdup("bwdif=mode=send_field");
+            return eav_success;
+        case dif_bwdif_frame:
+            *filter_str = strdup("bwdif=mode=send_frame");
+            return eav_success;
+        default:
+            // Nothing to do
+            break;
+    }
+
     if (params->rotate > 0) {
         switch (params->rotate) {
         case 90:
@@ -4567,7 +4606,8 @@ log_params(
         "extract_images_sz=%d "
         "video_time_base=%d/%d "
         "video_frame_duration_ts=%d "
-        "rotate=%d",
+        "rotate=%d "
+        "deinterlace=%d",
         params->stream_id, params->url,
         avpipe_version(),
         params->bypass_transcoding, params->skip_decoding,
@@ -4590,7 +4630,7 @@ log_params(
         params->master_display ? params->master_display : "",
         params->filter_descriptor,
         params->extract_image_interval_ts, params->extract_images_sz,
-        1, params->video_time_base, params->video_frame_duration_ts, params->rotate);
+        1, params->video_time_base, params->video_frame_duration_ts, params->rotate, params->deinterlace);
     elv_log("AVPIPE XCPARAMS %s", buf);
 }
 

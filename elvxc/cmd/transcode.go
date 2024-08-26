@@ -324,6 +324,7 @@ func InitTranscode(cmdRoot *cobra.Command) error {
 	cmdTranscode.PersistentFlags().StringP("extract-images-ts", "", "", "the frames to extract (PTS, comma separated).")
 	cmdTranscode.PersistentFlags().BoolP("seekable", "", true, "seekable stream.")
 	cmdTranscode.PersistentFlags().Int32("rotate", 0, "Rotate the output video frame (valid values 0, 90, 180, 270).")
+	cmdTranscode.PersistentFlags().Int32("deinterlace", 0, "Deinterlace filter (values 0 - none, 1 - bwdif, 2 - bwdif send-frame).")
 
 	return nil
 }
@@ -602,6 +603,11 @@ func doTranscode(cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("Invalid rotate value")
 	}
 
+	deinterlace, err := cmd.Flags().GetInt32("deinterlace")
+	if err != nil {
+		return fmt.Errorf("Invalid deinterlace value")
+	}
+
 	cryptScheme := avpipe.CryptNone
 	val := cmd.Flag("crypt-scheme").Value.String()
 	if len(val) > 0 {
@@ -698,6 +704,7 @@ func doTranscode(cmd *cobra.Command, args []string) error {
 		VideoFrameDurationTs:   int(videoFrameDurationTs),
 		Seekable:               seekable,
 		Rotate:                 int(rotate),
+		Deinterlace:            int(deinterlace),
 	}
 
 	err = getAudioIndexes(params, audioIndex)
