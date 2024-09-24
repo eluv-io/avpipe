@@ -3205,6 +3205,10 @@ should_stop_decoding(
             params->xc_type & xc_video)
             encoder_context->video_last_pts_read = input_packet->pts;
     }
+
+    if (params->xc_type == xc_extract_images && is_frame_extraction_done(encoder_context, params))
+        return 1;
+
     return 0;
 }
 
