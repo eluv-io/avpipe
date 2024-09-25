@@ -3793,7 +3793,7 @@ avpipe_xc(
              */
             if (input_packet &&
                 params->start_time_ts > 0 &&
-                (params->xc_type == xc_video || params->xc_type == xc_audio) &&
+                (params->xc_type == xc_video || params->xc_type == xc_audio || params->xc_type == xc_extract_images) &&
                 skip_until_start_time_pts(decoder_context, input_packet, params)) {
                     av_packet_unref(input_packet);
                     av_packet_free(&input_packet);
