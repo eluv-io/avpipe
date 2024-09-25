@@ -3238,6 +3238,16 @@ skip_until_start_time_pts(
         return 1;
     }
 
+    // Keep this logic only for extract images for now, in order not to mess with other code
+    if (params->xc_type == xc_extract_images && decoder_context->first_key_frame_pts == AV_NOPTS_VALUE) {
+        if (input_packet->stream_index == decoder_context->video_stream_index &&
+            !(input_packet->flags & AV_PKT_FLAG_KEY)) {
+            elv_log("PREDECODE SKIP until key frame pts=%"PRId64" sidx=%d flags=%d dts=%"PRId64,
+                decoder_context->first_key_frame_pts, input_packet->stream_index, input_packet->flags, input_packet->dts);
+        }
+        return 1;
+    }
+
     return 0;
 }
 
