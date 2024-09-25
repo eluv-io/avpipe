@@ -3295,7 +3295,7 @@ skip_for_sync(
     if (input_packet->stream_index == decoder_context->video_stream_index) {
         /* first_key_frame_pts points to first video key frame. */
         if (decoder_context->first_key_frame_pts == AV_NOPTS_VALUE &&
-            input_packet->flags == AV_PKT_FLAG_KEY) {
+            input_packet->flags & AV_PKT_FLAG_KEY) {
             avpipe_io_handler_t *in_handlers = decoder_context->in_handlers;
             decoder_context->first_key_frame_pts = input_packet->pts;
             decoder_context->inctx->first_key_frame_pts = decoder_context->first_key_frame_pts;
@@ -3821,7 +3821,7 @@ avpipe_xc(
                 in_handlers->avpipe_stater(inctx, input_packet->stream_index, in_stat_video_frame_read);
 
             if (decoder_context->first_key_frame_pts == AV_NOPTS_VALUE &&
-                    input_packet->flags == AV_PKT_FLAG_KEY) {
+                    input_packet->flags & AV_PKT_FLAG_KEY) {
                 decoder_context->first_key_frame_pts = input_packet->pts;
                 decoder_context->inctx->first_key_frame_pts = decoder_context->first_key_frame_pts;
                 elv_log("PTS first_key_frame_pts=%"PRId64" sidx=%d flags=%d dts=%"PRId64,
