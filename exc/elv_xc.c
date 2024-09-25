@@ -1579,6 +1579,7 @@ main(
         return do_probe(&p);
     } else if (!strcmp(command, "mux")) {
         p.xc_type = xc_mux;
+        p.format = strdup("fmp4-segment");
         return do_mux(&p, filename);
     }
 

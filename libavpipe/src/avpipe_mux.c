@@ -228,6 +228,12 @@ avpipe_init_muxer(
     char *out_filename = p->url;
     xctx_t *p_xctx;
 
+    in_mux_ctx->video.parts = (char **) calloc(MAX_MUX_IN_STREAM, sizeof(char *));
+    for (int stream=0; stream<MAX_STREAMS; stream++) {
+        in_mux_ctx->audios[stream].parts = (char **) calloc(MAX_MUX_IN_STREAM, sizeof(char *));
+        in_mux_ctx->captions[stream].parts = (char **) calloc(MAX_MUX_IN_STREAM, sizeof(char *));
+    }
+
     if ((ret = init_mux_ctx(p->mux_spec, out_filename, in_mux_ctx)) != eav_success) {
         elv_err("Initializing mux context failed, ret=%d", ret);
         return ret;
@@ -262,8 +268,10 @@ avpipe_init_muxer(
      * Don't set frag_every_frame in movflags because it causes audio/video to become out of sync
      * when doing random access on the muxed file.
      */
-    av_opt_set(out_muxer_ctx->format_context->priv_data, "movflags", "frag_keyframe", 0);
-    av_opt_set(out_muxer_ctx->format_context->priv_data, "movflags", "cmaf", 0);
+    if (p->format && !strcmp(p->format, "fmp4-segment")) {
+        av_opt_set(out_muxer_ctx->format_context->priv_data, "movflags", "frag_keyframe", 0);
+        av_opt_set(out_muxer_ctx->format_context->priv_data, "movflags", "cmaf", 0);
+    }
 
     out_muxer_ctx->format_context->avpipe_opaque = out_handlers;
 
@@ -290,40 +298,6 @@ avpipe_init_muxer(
         out_muxer_ctx->stream[i]->time_base = in_stream->time_base;
         out_muxer_ctx->stream[i]->avg_frame_rate = in_stream->avg_frame_rate;
         out_muxer_ctx->stream[i]->r_frame_rate = in_stream->r_frame_rate;
-
-#if 0
-        /* Find codec and then initialize codec_context with the codec */
-        AVCodec *codec = avcodec_find_encoder(p_xctx->in_muxer_ctx[i].codec_parameters[0]->codec_id);
-        if (!codec) {
-            elv_err("Could not find muxer encoder codec_id=%d", p_xctx->in_muxer_ctx[i].codec_parameters[0]->codec_id);
-        }
-
-        AVCodecContext *c = avcodec_alloc_context3(codec);
-        c->time_base = out_muxer_ctx->stream[i]->time_base = in_stream->time_base;
-        c->pix_fmt = p_xctx->in_muxer_ctx[i].codec_context[0]->pix_fmt;
-        c->width = p_xctx->in_muxer_ctx[i].codec_context[0]->width;
-        c->height = p_xctx->in_muxer_ctx[i].codec_context[0]->height;
-        if (p_xctx->in_muxer_ctx[i].codec[0]->sample_fmts)
-            c->sample_fmt = p_xctx->in_muxer_ctx[i].codec[0]->sample_fmts[0];
-        else
-            c->sample_fmt = AV_SAMPLE_FMT_FLTP;
-        c->sample_rate = p_xctx->in_muxer_ctx[i].codec_context[0]->sample_rate;
-        c->channels = p_xctx->in_muxer_ctx[i].codec_context[0]->channels;
-        c->channel_layout = AV_CH_LAYOUT_STEREO;
-
-        /* Initialize AVCodecContext using codec */
-        if ((ret = avcodec_open2(c, codec, NULL)) < 0) {
-            elv_dbg("Could not open encoder for stream %d, err=%d", i, ret);
-            return -1;
-        }
-
-        /* copy AVCodecContext c values to the stream codec parameters */
-        ret = avcodec_parameters_from_context(out_muxer_ctx->stream[i]->codecpar, c);
-        if (ret < 0) {
-            elv_err("Could not copy mux out stream parameters, ret=%d", ret);
-            return -1;
-        }
-#endif
 
     }
 
@@ -497,6 +471,12 @@ avpipe_mux_fini(
     }
 
     avformat_free_context(p_xctx->out_muxer_ctx.format_context);
+
+    free(in_mux_ctx->video.parts);
+    for (int stream=0; stream<MAX_STREAMS; stream++) {
+        free(in_mux_ctx->audios[stream].parts);
+        free(in_mux_ctx->captions[stream].parts);
+    }
 
     return avpipe_fini(xctx);
 }
