@@ -453,7 +453,8 @@ prepare_decoder(
         av_dict_set(&opts, "timeout", timeout, 0);
     } else if (decoder_context->is_srt && params->listen && params->connection_timeout > 0) {
         char timeout[32];
-        sprintf(timeout, "%d", params->connection_timeout * 1000000);
+        long long int connection_timeout_micros = MICRO_IN_SEC * params->connection_timeout;
+        sprintf(timeout, "%lld", connection_timeout_micros);
         /* SRT timeout is in microseconds */
         av_dict_set(&opts, "listen_timeout", timeout, 0);
     }
