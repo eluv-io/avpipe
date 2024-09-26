@@ -3705,9 +3705,10 @@ avpipe_xc(
         if (rc < 0) {
             av_packet_free(&input_packet);
             av_read_frame_rc = rc;
-            if (rc == AVERROR_EOF || rc == -1)
+            if (rc == AVERROR_EOF || rc == -1) {
+                elv_log("av_read_frame() EOF or -1 rc=%d, url=%s", rc, params->url);
                 rc = eav_success;
-            else {
+            } else {
                 elv_err("av_read_frame() rc=%d, url=%s", rc, params->url);
                 rc = eav_read_input;
             }

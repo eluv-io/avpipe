@@ -446,7 +446,7 @@ read_channel_again:
         if (rc == ETIMEDOUT) {
             if (c->is_udp_started) {
                 elv_log("TIMEDOUT in UDP rcv channel, url=%s", c->url);
-                return -1;
+                return AVERROR(ETIMEDOUT);
             }
             goto read_channel_again;
         }
