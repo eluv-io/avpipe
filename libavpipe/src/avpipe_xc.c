@@ -504,7 +504,8 @@ prepare_decoder(
                  * fail in this case, as it assumes that height/width/pixel info is set accurately.
                  * 
                  * In particular, this case can sometimes be triggered by the content-fabric
-                 * integration test that tests live restarts.
+                 * integration test that tests live restarts. In that case, it's been observed that
+                 * retrying the probe entirely fixes the issue.
                  * 
                  * See libavformat/utils.c:has_codec_parameters for the checks in ffmpeg internals. */
                 elv_err("avformat_find_stream_info failed to get input stream info");
