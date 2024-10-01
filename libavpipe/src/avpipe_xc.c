@@ -849,19 +849,28 @@ set_h264_params(
     AVCodecContext *encoder_codec_context = encoder_context->codec_context[index];
     int framerate = 0;
 
-    /* Codec level and profile must be set correctly per H264 spec */
-    encoder_codec_context->profile = avpipe_h264_guess_profile(params->bitdepth,
-        encoder_codec_context->width, encoder_codec_context->height);
+    if (avpipe_h264_profile(params->profile) > 0) {
+        /* If there is a valid parameter for profile use it */
+        encoder_codec_context->profile = avpipe_h264_profile(params->profile);
+    } else {
+        /* Codec level and profile must be set correctly per H264 spec */
+        encoder_codec_context->profile = avpipe_h264_guess_profile(params->bitdepth,
+            encoder_codec_context->width, encoder_codec_context->height);
+    }
 
     if (encoder_codec_context->framerate.den != 0)
         framerate = encoder_codec_context->framerate.num/encoder_codec_context->framerate.den;
 
-    encoder_codec_context->level = avpipe_h264_guess_level(
+    if (params->level > 0) {
+        encoder_codec_context->level = params->level;
+    } else {
+        encoder_codec_context->level = avpipe_h264_guess_level(
                                                 encoder_codec_context->profile,
                                                 encoder_codec_context->bit_rate,
                                                 framerate,
                                                 encoder_codec_context->width,
                                                 encoder_codec_context->height);
+    }
 }
 
 static void
@@ -878,7 +887,15 @@ set_h265_params(
      * which is the most common type of video used with consumer devices
      * For HDR10 we need MAIN 10 that supports 10 bit profile.
      */
-    if (params->bitdepth == 8) {
+    int profile = avpipe_h265_profile(params->profile);
+    if (profile > 0) {
+        /* Can be only main or main10 profiles */
+        av_opt_set(encoder_codec_context->priv_data, "profile", params->profile, 0);
+        if (params->bitdepth == 10) {
+            av_opt_set(encoder_codec_context->priv_data, "x265-params",
+                "hdr-opt=1:repeat-headers=1:colorprim=bt2020:transfer=smpte2084:colormatrix=bt2020nc", 0);
+        }
+    } else if (params->bitdepth == 8) {
         av_opt_set(encoder_codec_context->priv_data, "profile", "main", 0);
     } else if (params->bitdepth == 10) {
         av_opt_set(encoder_codec_context->priv_data, "profile", "main10", 0);
@@ -958,13 +975,6 @@ set_netint_h265_params(
 
 /* Borrowed from libavcodec/nvenc.h since it is not exposed */
 enum {
-    NV_ENC_H264_PROFILE_BASELINE,
-    NV_ENC_H264_PROFILE_MAIN,
-    NV_ENC_H264_PROFILE_HIGH,
-    NV_ENC_H264_PROFILE_HIGH_444P,
-};
-
-enum {
     PRESET_DEFAULT = 0,
     PRESET_SLOW,
     PRESET_MEDIUM,
@@ -997,7 +1007,11 @@ set_nvidia_params(
      * The encoder_codec_context->profile is set just for proper log message, otherwise it has no impact
      * when the encoder is nvidia.
      */
-    if (encoder_codec_context->height <= 480) {
+    int profile = avpipe_nvh264_profile(params->profile);
+    if (profile > 0) {
+        av_opt_set_int(encoder_codec_context->priv_data, "profile", profile, 0);
+        encoder_codec_context->profile = profile;
+    } else if (encoder_codec_context->height <= 480) {
         av_opt_set_int(encoder_codec_context->priv_data, "profile", NV_ENC_H264_PROFILE_BASELINE, 0);
         encoder_codec_context->profile = FF_PROFILE_H264_BASELINE;
     } else {
@@ -4494,6 +4508,11 @@ check_params(
         }
     }
 
+    if (avpipe_check_level(params->level) < 0) {
+        elv_err("Invalid level %d", params->level);
+        return eav_param;
+    }
+
     return eav_success;
 }
 
@@ -4567,7 +4586,9 @@ log_params(
         "extract_images_sz=%d "
         "video_time_base=%d/%d "
         "video_frame_duration_ts=%d "
-        "rotate=%d",
+        "rotate=%d "
+        "profile=%s "
+        "level=%d",
         params->stream_id, params->url,
         avpipe_version(),
         params->bypass_transcoding, params->skip_decoding,
@@ -4590,7 +4611,8 @@ log_params(
         params->master_display ? params->master_display : "",
         params->filter_descriptor,
         params->extract_image_interval_ts, params->extract_images_sz,
-        1, params->video_time_base, params->video_frame_duration_ts, params->rotate);
+        1, params->video_time_base, params->video_frame_duration_ts, params->rotate,
+        params->profile ? params->profile : "", params->level);
     elv_log("AVPIPE XCPARAMS %s", buf);
 }
 

@@ -217,3 +217,105 @@ avpipe_h264_guess_profile(
 
     return profile;
 }
+
+/*
+ * Returns corresponding h264 FFmpeg profile constant if it does exist.
+ * Returns 0 if profile name is not set.
+ * Returns -1 if the profile name is set but not supported.
+ */
+int
+avpipe_h264_profile(
+    char *profile_name)
+{
+    if (!profile_name || strlen(profile_name) == 0)
+        return 0;
+
+    if (!strcmp(profile_name, "baseline"))
+        return FF_PROFILE_H264_BASELINE;
+
+    if (!strcmp(profile_name, "main"))
+        return FF_PROFILE_H264_MAIN;
+
+    if (!strcmp(profile_name, "extended"))
+        return FF_PROFILE_H264_EXTENDED;
+
+    if (!strcmp(profile_name, "high"))
+        return FF_PROFILE_H264_HIGH;
+
+    if (!strcmp(profile_name, "high10"))
+        return FF_PROFILE_H264_HIGH_10;
+
+    if (!strcmp(profile_name, "high422"))
+        return FF_PROFILE_H264_HIGH_422;
+
+    if (!strcmp(profile_name, "high444"))
+        return FF_PROFILE_H264_HIGH_444;
+
+    return -1;
+}
+
+
+/*
+ * Returns corresponding h265 FFmpeg profile constant if it does exist.
+ * Returns 0 if profile name is not set.
+ * Returns -1 if the profile name is set but not supported.
+ */
+int
+avpipe_h265_profile(
+    char *profile_name)
+{
+    if (!profile_name || strlen(profile_name) == 0)
+        return 0;
+
+    if (!strcmp(profile_name, "main"))
+        return FF_PROFILE_HEVC_MAIN;
+
+    if (!strcmp(profile_name, "main10"))
+        return FF_PROFILE_HEVC_MAIN_10;
+
+    return -1;
+}
+
+/*
+ * Returns corresponding nvidia h264 FFmpeg profile constant if it does exist.
+ * Returns 0 if profile name is not set.
+ * Returns -1 if the profile name is set but not supported.
+ */
+int
+avpipe_nvh264_profile(
+    char *profile_name)
+{
+    if (!profile_name || strlen(profile_name) == 0)
+        return 0;
+
+    if (!strcmp(profile_name, "baseline"))
+        return NV_ENC_H264_PROFILE_BASELINE;
+
+    if (!strcmp(profile_name, "main"))
+        return NV_ENC_H264_PROFILE_MAIN;
+
+    if (!strcmp(profile_name, "high"))
+        return NV_ENC_H264_PROFILE_HIGH;
+
+    if (!strcmp(profile_name, "high444p"))
+        return NV_ENC_H264_PROFILE_HIGH_444P;
+
+    return -1;
+}
+
+int
+avpipe_check_level(
+    int level)
+{
+    static int levels[] = {10, 11, 12, 13, 20, 21, 22, 30, 31, 32, 40, 41, 42, 50, 51, 52, 60, 61, 62};
+
+    if (level <= 0)
+        return 1;
+
+    for (int i=0; i<sizeof(levels)/sizeof(int); i++) {
+        if (levels[i] == level)
+            return 1;
+    }
+
+    return 0;
+}
