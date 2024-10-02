@@ -18,7 +18,7 @@
 #include "elv_channel.h"
 
 #define MAX_STREAMS	        64
-#define MAX_MUX_IN_STREAM   (4*4096)
+#define MAX_MUX_IN_STREAM   (4*4096)        // Up to 4*4096 ABR segments
 
 #define AVIO_OUT_BUF_SIZE   (1*1024*1024)   // avio output buffer size
 #define AVIO_IN_BUF_SIZE    (1*1024*1024)   // avio input buffer size
