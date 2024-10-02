@@ -777,7 +777,7 @@ avpipe_h265_profile(
     char *profile_name);
 
 /**
- * @brief   Helper function to obtain FFmpeg constant for an nvidia h265 profile name. 
+ * @brief   Helper function to obtain FFmpeg constant for an nvidia h264 profile name. 
  * 
  * @param   profile_name  A pointer to the profile name.
  * @return  Returns the FFmpeg constant if profile name is valid.
@@ -791,8 +791,7 @@ avpipe_nvh264_profile(
  * @brief   Helper function to check level. 
  * 
  * @param   level
- * @return  Returns the FFmpeg constant if profile name is valid.
- *          Returns 0 if profile name is NULL. For invalid profile name return -1.
+ * @return  Returns 1 if the level is valid, otherwise return -1 for an invalid level.
  */
 int
 avpipe_check_level(
