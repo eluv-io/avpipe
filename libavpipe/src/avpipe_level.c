@@ -307,7 +307,7 @@ int
 avpipe_check_level(
     int level)
 {
-    static int levels[] = {10, 11, 12, 13, 20, 21, 22, 30, 31, 32, 40, 41, 42, 50, 51, 52, 60, 61, 62};
+    static int levels[] = {9, 10, 11, 12, 13, 20, 21, 22, 30, 31, 32, 40, 41, 42, 50, 51, 52, 60, 61, 62};
 
     if (level <= 0)
         return 1;
