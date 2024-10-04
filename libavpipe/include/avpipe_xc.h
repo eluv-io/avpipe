@@ -25,6 +25,14 @@
 
 //#define DEBUG_UDP_PACKET  // Uncomment for development, debugging and testing
 
+/* Borrowed from libavcodec/nvenc.h since it is not exposed */
+enum {
+    NV_ENC_H264_PROFILE_BASELINE,
+    NV_ENC_H264_PROFILE_MAIN,
+    NV_ENC_H264_PROFILE_HIGH,
+    NV_ENC_H264_PROFILE_HIGH_444P,
+};
+
 /*
  * Adding/deleting an error code needs adding/deleting corresponding GO
  * error in avpipe_errors.go
@@ -442,6 +450,8 @@ typedef struct xcparams_t {
     int         debug_frame_level;
     int         connection_timeout;         // Connection timeout in sec for RTMP or MPEGTS protocols
     int         rotate;                     // For video transpose or rotation
+    char        *profile;
+    int         level;
 } xcparams_t;
 
 #define MAX_CODEC_NAME  256
@@ -450,9 +460,11 @@ typedef struct side_data_display_matrix_t {
     double rotation;    // Original rotation is CCW with values from -180 to 180
     double rotation_cw; // Computed CW rotation with values 0 to 360
 } side_data_display_matrix_t;
+
 typedef struct side_data_t {
     side_data_display_matrix_t display_matrix;
 } side_data_t;
+
 typedef struct stream_info_t {
     int         stream_index;       // Stream index in AVFormatContext
     int         stream_id;          // Format-specific stream ID, set by libavformat during decoding
@@ -740,6 +752,50 @@ avpipe_h264_guess_profile(
     int bitdepth,
     int width,
     int height);
+
+/**
+ * @brief   Helper function to obtain FFmpeg constant for an h264 profile name. 
+ * 
+ * @param   profile_name  A pointer to the profile name.
+ * @return  Returns the FFmpeg constant if profile name is valid.
+ *          Returns 0 if profile name is NULL. For invalid profile name return -1.
+ */
+int
+avpipe_h264_profile(
+    char *profile_name);
+
+
+/**
+ * @brief   Helper function to obtain FFmpeg constant for an h265 profile name. 
+ * 
+ * @param   profile_name  A pointer to the profile name.
+ * @return  Returns the FFmpeg constant if profile name is valid.
+ *          Returns 0 if profile name is NULL. For invalid profile name return -1.
+ */
+int
+avpipe_h265_profile(
+    char *profile_name);
+
+/**
+ * @brief   Helper function to obtain FFmpeg constant for an nvidia h264 profile name. 
+ * 
+ * @param   profile_name  A pointer to the profile name.
+ * @return  Returns the FFmpeg constant if profile name is valid.
+ *          Returns 0 if profile name is NULL. For invalid profile name return -1.
+ */
+int
+avpipe_nvh264_profile(
+    char *profile_name);
+
+/**
+ * @brief   Helper function to check level. 
+ * 
+ * @param   level
+ * @return  Returns 1 if the level is valid, otherwise return -1 for an invalid level.
+ */
+int
+avpipe_check_level(
+    int level);
 
 /**
  * @brief   Helper function to deep copy an xc_params. In the case of OOM, may fail to initialize

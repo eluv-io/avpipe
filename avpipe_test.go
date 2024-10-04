@@ -34,6 +34,7 @@ type XcTestResult struct {
 	mezFile           []string
 	timeScale         int
 	sampleRate        int
+	profile           string
 	level             int
 	pixelFmt          string
 	channelLayoutName string
@@ -884,6 +885,44 @@ func TestConcurrentABRTranscode(t *testing.T) {
 	}
 	setFastEncodeParams(params, false)
 	doTranscode(t, params, nThreads, outputDir, url)
+}
+
+func TestSettingProfileLevel(t *testing.T) {
+	outputDir := path.Join(baseOutPath, fn())
+	boilerplate(t, outputDir, "")
+	url := videoBigBuckBunnyPath
+	if fileMissing(url, fn()) {
+		return
+	}
+
+	params := &avpipe.XcParams{
+		Format:             "fmp4-segment",
+		StartTimeTs:        0,
+		DurationTs:         -1,
+		StartSegmentStr:    "1",
+		VideoBitrate:       2560000,
+		AudioBitrate:       64000,
+		VideoSegDurationTs: 900000,
+		AudioSegDurationTs: 1428480,
+		Ecodec:             h264Codec,
+		EncHeight:          480,
+		EncWidth:           720,
+		XcType:             avpipe.XcVideo,
+		StreamId:           -1,
+		Url:                url,
+		DebugFrameLevel:    debugFrameLevel,
+		Profile:            "high",
+		Level:              51,
+	}
+	setFastEncodeParams(params, false)
+
+	xcTestResult := &XcTestResult{
+		mezFile:  []string{fmt.Sprintf("%s/vsegment-1.mp4", outputDir)},
+		level:    51,
+		profile:  "High",
+		pixelFmt: "yuv420p",
+	}
+	xcTest(t, outputDir, params, xcTestResult, true)
 }
 
 func TestStartTimeTsWithSkipDecoding(t *testing.T) {
@@ -2684,6 +2723,10 @@ func boilerProbe(t *testing.T, result *XcTestResult) (probeInfoArray []*avpipe.P
 
 		if result.level > 0 {
 			assert.Equal(t, result.level, si.Level)
+		}
+
+		if len(result.profile) > 0 {
+			assert.Equal(t, result.profile, avpipe.GetProfileName(si.CodecID, si.Profile))
 		}
 
 		if len(result.pixelFmt) > 0 {
