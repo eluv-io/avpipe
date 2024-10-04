@@ -1045,6 +1045,7 @@ usage(
         "\t                                    Using \"fmp4-segment\" generates segments that are appropriate for live streaming.\n"
         "\t-force-keyint :          (optional) Force IDR key frame in this interval.\n"
         "\t-gpu-index :             (optional) Use the GPU with specified index for transcoding (export CUDA_DEVICE_ORDER=PCI_BUS_ID would use smi index).\n"
+        "\t-level:                  (optional) Encoding level for video. If it is not determined, it will be set automatically.\n"
         "\t-listen:                 (optional) Listen mode for RTMP. Must be 0 or 1, by default is on (value 1)\n"
         "\t-log-size:               (optional) Log size in MB. Default is 100MB.\n"
         "\t-master-display :        (optional) Master display, only valid if encoder is libx265.\n"
@@ -1053,6 +1054,10 @@ usage(
         "\t-mux-spec :              (optional) Muxing spec file.\n"
         "\t-preset :                (optional) Preset string to determine compression speed. Default is \"medium\". Valid values are: \"ultrafast\", \"superfast\",\n"
         "\t                                    \"veryfast\", \"faster\", \"fast\", \"medium\", \"slow\", \"slower\", \"veryslow\".\n"
+        "\t-profile :               (optional) Encoding profile for video. If it is not determined, it will be set automatically.\n"
+        "\t                                    Valid H264 profiles: \"baseline\", \"main\", \"extended\", \"high\", \"high10\", \"high422\", \"high444\"\n"
+        "\t                                    Valid H265 profiles: \"main\", \"main10\"\n"
+        "\t                                    Valid NVIDIA H264 profiles: \"baseline\", \"main\", \"high\", \"high444p\"\n"
         "\t-r :                     (optional) number of repeats. Default is 1 repeat, must be bigger than 1\n"
         "\t-rc-buffer-size :        (optional) Determines the interval used to limit bit rate\n"
         "\t-rc-max-rate :           (optional) Maximum encoding bit rate, used in conjuction with rc-buffer-size\n"
@@ -1356,7 +1361,11 @@ main(
             }
             break;
         case 'l':
-            if (!strcmp(argv[i], "-listen")) {
+            if (!strcmp(argv[i], "-level")) {
+                if (sscanf(argv[i+1], "%d", &p.level) != 1) {
+                    usage(argv[0], argv[i], EXIT_FAILURE);
+                }
+            } else if (!strcmp(argv[i], "-listen")) {
                 if (sscanf(argv[i+1], "%d", &p.listen) != 1) {
                     usage(argv[0], argv[i], EXIT_FAILURE);
                 }
@@ -1388,6 +1397,8 @@ main(
         case 'p':
             if (!strcmp(argv[i], "-preset")) {
                 p.preset = strdup(argv[i+1]);
+            } else if (!strcmp(argv[i], "-profile")) {
+                p.profile = strdup(argv[i+1]);
             } else {
                 usage(argv[0], argv[i], EXIT_FAILURE);
             }
