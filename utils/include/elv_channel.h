@@ -19,6 +19,16 @@ elv_channel_init(
     u_int64_t capacity,
     free_elem_f free_elem);
 
+/**
+ * @brief   Send a message to the channel, blocking if the channel is full. The channel takes
+ *          ownership of the pointer passed, and will free it using either free or the free_elem
+ *          function used to initialize the channel.
+ * 
+ * @param   channel   Array index to set.
+ * @param   msg   Array value (frame PTS).
+ * 
+ * @return Returns -1 if the channel is null or closed, and 0 otherwise.
+ */
 int
 elv_channel_send(
     elv_channel_t *channel,
