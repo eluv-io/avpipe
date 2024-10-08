@@ -218,6 +218,7 @@ func doMux(cmd *cobra.Command, args []string) error {
 		MuxingSpec:      string(muxSpec),
 		Url:             filename,
 		DebugFrameLevel: true,
+		Format:          "fmp4-segment",
 	}
 
 	avpipe.InitUrlMuxIOHandler(filename, &AVCmdMuxInputOpener{URL: filename}, &AVCmdMuxOutputOpener{})
