@@ -509,7 +509,7 @@ prepare_decoder(
                  * 
                  * See libavformat/utils.c:has_codec_parameters for the checks in ffmpeg internals. */
                 elv_err("avformat_find_stream_info failed to get input stream info");
-                return eav_read_input;
+                return eav_stream_info;
             }
             break;
 
