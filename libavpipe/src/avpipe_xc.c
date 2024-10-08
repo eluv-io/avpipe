@@ -451,6 +451,12 @@ prepare_decoder(
         char timeout[32];
         sprintf(timeout, "%d", params->connection_timeout);
         av_dict_set(&opts, "timeout", timeout, 0);
+    } else if (decoder_context->is_srt && params->listen && params->connection_timeout > 0) {
+        char timeout[32];
+        long long int connection_timeout_micros = MICRO_IN_SEC * params->connection_timeout;
+        sprintf(timeout, "%lld", connection_timeout_micros);
+        /* SRT timeout is in microseconds */
+        av_dict_set(&opts, "listen_timeout", timeout, 0);
     }
 
     /* Allocate AVFormatContext in format_context and find input file format */
@@ -490,6 +496,21 @@ prepare_decoder(
             elv_dbg("VIDEO STREAM %d, codec_id=%s, stream_id=%d, timebase=%d, xc_type=%d, url=%s",
                 i, avcodec_get_name(decoder_context->codec_parameters[i]->codec_id), decoder_context->stream[i]->id,
                 decoder_context->stream[i]->time_base.den, params ? params->xc_type : xc_none, url);
+            
+            if (decoder_context->video_stream_index == i && decoder_context->format_context->streams[i]->codecpar->width == 0) {
+                /* This can sometimes happen when ffmpeg fails to decode any frames from the input
+                 * within the default probe size. Default parameters are written, but this is a sign
+                 * that the codec parameters have not been set. Downstream filter operations will
+                 * fail in this case, as it assumes that height/width/pixel info is set accurately.
+                 * 
+                 * In particular, this case can sometimes be triggered by the content-fabric
+                 * integration test that tests live restarts. In that case, it's been observed that
+                 * retrying the probe entirely fixes the issue.
+                 * 
+                 * See libavformat/utils.c:has_codec_parameters for the checks in ffmpeg internals. */
+                elv_err("avformat_find_stream_info failed to get input stream info");
+                return eav_stream_info;
+            }
             break;
 
         case AVMEDIA_TYPE_AUDIO:
@@ -3698,9 +3719,10 @@ avpipe_xc(
         if (rc < 0) {
             av_packet_free(&input_packet);
             av_read_frame_rc = rc;
-            if (rc == AVERROR_EOF || rc == -1)
+            if (rc == AVERROR_EOF || rc == -1) {
+                elv_log("av_read_frame() EOF or -1 rc=%d, url=%s", rc, params->url);
                 rc = eav_success;
-            else {
+            } else {
                 elv_err("av_read_frame() rc=%d, url=%s", rc, params->url);
                 rc = eav_read_input;
             }
