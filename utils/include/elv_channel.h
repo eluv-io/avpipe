@@ -6,7 +6,8 @@
 
 typedef struct elv_channel_t elv_channel_t;
 
-#define MICRO_IN_SEC    1000000
+#define MICRO_IN_SEC    ((int64_t)1000000)
+
 
 typedef void
 (*free_elem_f)(
