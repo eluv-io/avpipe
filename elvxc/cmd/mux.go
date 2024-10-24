@@ -192,6 +192,7 @@ func InitMux(cmdRoot *cobra.Command) error {
 
 	cmdTranscode.PersistentFlags().StringP("filename", "f", "", "(mandatory) muxing output filename.")
 	cmdTranscode.PersistentFlags().String("mux-spec", "", "(mandatory) muxing spec file.")
+	cmdTranscode.PersistentFlags().StringP("format", "", "fmp4-segment", "package format, can be 'dash', 'hls', 'mp4', 'fmp4', 'segment', 'fmp4-segment', or 'image2'.")
 
 	return nil
 }
@@ -208,6 +209,10 @@ func doMux(cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("mux-spec is needed to do muxing")
 	}
 
+	format := cmd.Flag("format").Value.String()
+	if format != "dash" && format != "hls" && format != "mp4" && format != "fmp4" && format != "segment" && format != "fmp4-segment" && format != "image2" {
+		return fmt.Errorf("Package format is not valid, can be 'dash', 'hls', 'mp4', 'fmp4', 'segment', 'fmp4-segment', or 'image2'")
+	}
 	muxSpec, err := ioutil.ReadFile(muxSpecFile)
 	if err != nil {
 		return fmt.Errorf("Could not read mux-spec file %s", muxSpecFile)
@@ -218,7 +223,7 @@ func doMux(cmd *cobra.Command, args []string) error {
 		MuxingSpec:      string(muxSpec),
 		Url:             filename,
 		DebugFrameLevel: true,
-		Format:          "fmp4-segment",
+		Format:          format,
 	}
 
 	avpipe.InitUrlMuxIOHandler(filename, &AVCmdMuxInputOpener{URL: filename}, &AVCmdMuxOutputOpener{})

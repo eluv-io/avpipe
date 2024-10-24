@@ -2,6 +2,10 @@
 #include "avpipe_utils.h"
 #include "elv_log.h"
 
+void
+log_params(
+    xcparams_t *params);
+
 int
 elv_mux_open(
     struct AVFormatContext *format_ctx,
@@ -233,6 +237,8 @@ avpipe_init_muxer(
         in_mux_ctx->audios[stream].parts = (char **) calloc(MAX_MUX_IN_STREAM, sizeof(char *));
         in_mux_ctx->captions[stream].parts = (char **) calloc(MAX_MUX_IN_STREAM, sizeof(char *));
     }
+
+    log_params(p);
 
     if ((ret = init_mux_ctx(p->mux_spec, out_filename, in_mux_ctx)) != eav_success) {
         elv_err("Initializing mux context failed, ret=%d", ret);
