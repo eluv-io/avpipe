@@ -4186,10 +4186,14 @@ get_xc_type_name(
         return "xc_audio_pan";
     case xc_audio_merge:
         return "xc_audio_merge";
+    case xc_mux:
+        return "xc_mux";
     case xc_extract_images:
         return "xc_extract_images";
     case xc_extract_all_images:
         return "xc_extract_all_images";
+    case xc_probe:
+        return "xc_probe";
     default:
         return "none";
     }

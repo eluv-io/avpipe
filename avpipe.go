@@ -1380,6 +1380,7 @@ func Mux(params *XcParams) error {
 		return EAV_PARAM
 	}
 
+	params.XcType = XcMux
 	cparams, err := getCParams(params)
 	if err != nil {
 		log.Error("Muxing failed", err, "url", params.Url)

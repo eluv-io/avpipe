@@ -18,7 +18,7 @@
 #include "elv_channel.h"
 
 #define MAX_STREAMS	        64
-#define MAX_MUX_IN_STREAM   4096
+#define MAX_MUX_IN_STREAM   (4*4096)        // Up to 4*4096 ABR segments
 
 #define AVIO_OUT_BUF_SIZE   (1*1024*1024)   // avio output buffer size
 #define AVIO_IN_BUF_SIZE    (1*1024*1024)   // avio input buffer size
@@ -120,7 +120,7 @@ typedef struct udp_packet_t {
 typedef struct mux_input_ctx_t {
     int     n_parts;                    /* Number of input parts */
     int     index;                      /* Index of current input part that should be processed */
-    char    *parts[MAX_MUX_IN_STREAM];  /* All the input parts */
+    char    **parts;                    /* All the input parts */
     int     header_size;
 } mux_input_ctx_t;
 
