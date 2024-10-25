@@ -39,6 +39,7 @@ import "C"
 import (
 	"encoding/json"
 	"fmt"
+	"io"
 	"math/big"
 	"sync"
 	"unsafe"
@@ -117,6 +118,13 @@ const (
 	XcProfileH264Heigh              = C.FF_PROFILE_H264_HIGH     // 100
 	XcProfileH264Heigh10            = C.FF_PROFILE_H264_HIGH_10  // 110
 )
+
+type SeekReadWriteCloser interface {
+	io.Seeker
+	io.Reader
+	io.Writer
+	io.Closer
+}
 
 func XcTypeFromString(xcTypeStr string) XcType {
 	var xcType XcType

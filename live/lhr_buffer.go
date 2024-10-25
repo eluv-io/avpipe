@@ -1,6 +1,7 @@
 package live
 
 import (
+	"github.com/eluv-io/avpipe"
 	"io"
 	"sync"
 
@@ -40,7 +41,7 @@ var blog = elog.Get("/eluvio/avpipe/live/rwb")
  * An EOF is issued for reader when the writer closed the buffer and there is no data
  * in the buffer.
  */
-func NewRWBuffer(capacity int) io.ReadWriteCloser {
+func NewRWBuffer(capacity int) avpipe.SeekReadWriteCloser {
 	if capacity < 0 {
 		return nil
 	}
