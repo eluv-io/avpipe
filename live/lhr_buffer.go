@@ -195,6 +195,11 @@ func (rwb *RWBuffer) Len() int {
 	return rwb.count
 }
 
+// Seek doesn't do anything for a RWBuffer
+func (rwb *RWBuffer) Seek(offset int64, whence int) (int64, error) {
+	return 0, nil
+}
+
 // io.Closer
 func (rwb *RWBuffer) Close() error {
 	return rwb.CloseSide(RWBufferWriteClosed)
