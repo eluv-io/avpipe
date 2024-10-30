@@ -401,7 +401,7 @@ read_frame_again:
             elv_err("Failed to read frame index=%d, ret=%d", index, ret);
     }
 
-    return 1;
+    return index;
 }
 
 int
@@ -413,10 +413,16 @@ avpipe_mux(
     AVPacket *pkts;
     int *valid_pkts;
     io_mux_ctx_t *in_mux_ctx;
+    int64_t first_pts_array[MAX_STREAMS];
+
 
     if (!xctx) {
         elv_err("Invalid transcoding context for muxing");
         return eav_param;
+    }
+
+    for (int i=0; i<MAX_STREAMS; i++) {
+        first_pts_array[i] = AV_NOPTS_VALUE;
     }
 
     pkts = xctx->pkt_array;
@@ -425,14 +431,24 @@ avpipe_mux(
 
     for (int i=0; i<in_mux_ctx->last_caption_index + in_mux_ctx->last_audio_index + 1; i++) {
         ret = av_read_frame(xctx->in_muxer_ctx[i].format_context, &pkts[i]);
-        if (ret >= 0)
+        if (ret >= 0) {
             valid_pkts[i] = 1;
+            first_pts_array[i] = pkts[i].pts;
+        }
     }
 
     while (1) {
         ret = get_next_packet(xctx, &pkt);
-        if (ret <= 0)
+        if (ret < 0)
             break;
+
+        if (first_pts_array[ret] == AV_NOPTS_VALUE) {
+            first_pts_array[ret] = pkt.pts;
+        }
+
+        /* Adjust PTS and DTS and start always from 0 */
+        pkt.pts -= first_pts_array[ret];
+        pkt.dts = pkt.pts;
 
         dump_packet(pkt.stream_index, "MUX OUT ", &pkt, xctx->debug_frame_level);
 
