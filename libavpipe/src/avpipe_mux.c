@@ -399,6 +399,7 @@ read_frame_again:
     } else {
         if (ret != AVERROR_EOF)
             elv_err("Failed to read frame index=%d, ret=%d", index, ret);
+        return ret;
     }
 
     return index;
