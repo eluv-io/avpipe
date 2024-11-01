@@ -463,6 +463,12 @@ avpipe_mux(
 
     av_write_trailer(xctx->out_muxer_ctx.format_context);
 
+    if (ret == AVERROR_EOF)
+        ret = 0;
+
+    elv_log("avpipe_mux done url=%s, rc=%d, xctx->err=%d",
+        xctx->params->url, ret, xctx->err);
+
     return ret;
 }
 

@@ -99,18 +99,18 @@ read_next_input:
         if (index == 0) {
             /* Reached end of videos */
             if (in_mux_ctx->video.index >= in_mux_ctx->video.n_parts)
-                return -1;
+                return AVERROR_EOF;
             filepath = in_mux_ctx->video.parts[in_mux_ctx->video.index];
             in_mux_ctx->video.index++;
         } else if (index <= in_mux_ctx->last_audio_index) {
             if (in_mux_ctx->audios[index-1].index >= in_mux_ctx->audios[index-1].n_parts)
-                return -1;
+                return AVERROR_EOF;
             filepath = in_mux_ctx->audios[index-1].parts[in_mux_ctx->audios[index-1].index];
             in_mux_ctx->audios[index-1].index++;
         } else if (index <= in_mux_ctx->last_audio_index+in_mux_ctx->last_caption_index) {
             if (in_mux_ctx->captions[index - in_mux_ctx->last_audio_index - 1].index >=
                 in_mux_ctx->captions[index - in_mux_ctx->last_audio_index - 1].n_parts)
-                return -1;
+                return AVERROR_EOF;
             filepath = in_mux_ctx->captions[index - in_mux_ctx->last_audio_index - 1].parts[in_mux_ctx->captions[index - in_mux_ctx->last_audio_index - 1].index];
             in_mux_ctx->captions[index - in_mux_ctx->last_audio_index - 1].index++;
         } else {
