@@ -2257,9 +2257,11 @@ encode_frame(
 
         if (selected_decoded_audio(decoder_context, stream_index) >= 0) {
             /* Set the packet duration if it is not the first audio packet */
-            if (encoder_context->audio_pts[stream_index] != AV_NOPTS_VALUE)
+            if (encoder_context->audio_pts[stream_index] != AV_NOPTS_VALUE) {
                 output_packet->duration = output_packet->pts - encoder_context->audio_pts[stream_index];
-            else
+                if (!strcmp(params->ecodec2, "aac"))
+                    output_packet->duration = 1024;
+            } else
                 output_packet->duration = 0;
             encoder_context->audio_pts[stream_index] = output_packet->pts;
             encoder_context->audio_frames_written[stream_index]++;
@@ -3698,6 +3700,7 @@ avpipe_xc(
         encoder_context->audio_pts[j] = AV_NOPTS_VALUE;
         encoder_context->first_read_packet_pts[j] = AV_NOPTS_VALUE;
         encoder_context->audio_last_pts_sent_encode[j] = AV_NOPTS_VALUE;
+        encoder_context->audio_last_pts_encoded[j] = AV_NOPTS_VALUE;
     }
     decoder_context->first_key_frame_pts = AV_NOPTS_VALUE;
     decoder_context->is_av_synced = 0;
