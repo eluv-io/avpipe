@@ -1496,11 +1496,11 @@ prepare_audio_encoder(
         }
 
         elv_dbg("encoder audio stream index=%d, bitrate=%d, sample_fmts=%s, timebase=%d, output frame_size=%d, sample_rate=%d, channel_layout=%s",
-            index, encoder_context->codec_context[output_stream_index]->bit_rate,
+            stream_index, encoder_context->codec_context[output_stream_index]->bit_rate,
             av_get_sample_fmt_name(encoder_context->codec_context[output_stream_index]->sample_fmt),
             encoder_context->codec_context[output_stream_index]->time_base.den, encoder_context->codec_context[output_stream_index]->frame_size,
             encoder_context->codec_context[output_stream_index]->sample_rate,
-    	channel_name);
+    	    channel_name);
 
         if (avcodec_parameters_from_context(
             encoder_context->stream[output_stream_index]->codecpar,
