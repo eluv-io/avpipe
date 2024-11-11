@@ -266,7 +266,7 @@ out_mux_seek(
     ioctx_t *outctx = (ioctx_t *)opaque;
     int fd = *(int *)outctx->opaque;
 
-    int rc = lseek(fd, offset, whence);
+    int64_t rc = lseek(fd, offset, whence);
     whence = whence & 0xFFFF; /* Mask out AVSEEK_SIZE and AVSEEK_FORCE */
     switch (whence) {
     case SEEK_SET:
@@ -281,7 +281,7 @@ out_mux_seek(
         elv_err("OUT MUX SEEK - weird seek\n");
     }
 
-    elv_dbg("OUT MUX SEEK offset=%"PRId64" whence=%d rc=%d", offset, whence, rc);
+    elv_dbg("OUT MUX SEEK offset=%"PRId64" whence=%d rc=%"PRId64, offset, whence, rc);
     return rc;
 }
 

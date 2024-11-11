@@ -99,7 +99,7 @@ prepare_input_muxer(
 
     rc = avformat_open_input(&muxer_ctx->format_context, inctx->url, NULL, NULL);
     if (rc != 0) {
-        elv_err("Could not open input muxer, err=%d", rc);
+        elv_err("Could not open input muxer, err=%d, url=%s", rc, inctx->url);
         return eav_open_input;
     }
 
@@ -415,6 +415,7 @@ avpipe_mux(
     int *valid_pkts;
     io_mux_ctx_t *in_mux_ctx;
     int64_t first_pts_array[MAX_STREAMS];
+    int found_keyframe = 0;
 
 
     if (!xctx) {
@@ -442,6 +443,14 @@ avpipe_mux(
         ret = get_next_packet(xctx, &pkt);
         if (ret < 0)
             break;
+
+        if (ret == 0 && pkt.flags == AV_PKT_FLAG_KEY)
+            found_keyframe = 1;
+
+        if (!found_keyframe) {
+            av_packet_unref(&pkt);
+            continue;
+        }
 
         if (first_pts_array[ret] == AV_NOPTS_VALUE) {
             first_pts_array[ret] = pkt.pts;

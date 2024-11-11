@@ -473,7 +473,7 @@ read_channel_again:
             free(udp_packet);
         }
         if (debug_frame_level)
-            elv_dbg("IN READ UDP read=%d pos=%"PRId64" total=%"PRId64", url=%s", r, c->read_pos, c->read_bytes, c->url);
+            elv_dbg("IN READ UDP read=%d, pos=%"PRId64", total=%"PRId64", url=%s", r, c->read_pos, c->read_bytes, c->url);
     }
 
     return r;
@@ -651,7 +651,7 @@ out_write_packet(
     }
 
     if (xcparams && xcparams->debug_frame_level)
-        elv_dbg("OUT WRITE stream_index=%d, fd=%"PRId64", size=%d written=%d pos=%d total=%d",
+        elv_dbg("OUT WRITE stream_index=%d, fd=%"PRId64", size=%d, written=%d, pos=%d, total=%d",
             outctx->stream_index, fd, buf_size, bwritten, outctx->write_pos, outctx->written_bytes);
 
     return buf_size;
@@ -667,7 +667,7 @@ out_seek(
     ioctx_t *inctx = outctx->inctx;
     int64_t h = *((int64_t *)(inctx->opaque));
     int64_t fd = *(int64_t *)outctx->opaque;
-    int rc = AVPipeSeekOutput(h, fd, offset, whence);
+    int64_t rc = AVPipeSeekOutput(h, fd, offset, whence);
     whence = whence & 0xFFFF; /* Mask out AVSEEK_SIZE and AVSEEK_FORCE */
     switch (whence) {
     case SEEK_SET:
@@ -680,7 +680,7 @@ out_seek(
         elv_dbg("OUT SEEK - weird seek\n");
     }
 
-    elv_dbg("OUT SEEK fd=%"PRId64" offset=%d whence=%d", fd, offset, whence);
+    elv_dbg("OUT SEEK fd=%"PRId64", offset=%d, whence=%d, rc=%"PRId64, fd, offset, whence, rc);
 
     return rc;
 }
