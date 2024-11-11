@@ -1015,36 +1015,36 @@ func (h *ioHandler) OutWriter(fd C.int64_t, buf []byte) (int, error) {
 }
 
 //export AVPipeSeekOutput
-func AVPipeSeekOutput(handler C.int64_t, fd C.int64_t, offset C.int64_t, whence C.int) C.int {
+func AVPipeSeekOutput(handler C.int64_t, fd C.int64_t, offset C.int64_t, whence C.int) C.int64_t {
 	gMutex.Lock()
 	h := gHandlers[int64(handler)]
 	if h == nil {
 		gMutex.Unlock()
-		return C.int(-1)
+		return C.int64_t(-1)
 	}
 	gMutex.Unlock()
 	n, err := h.OutSeeker(fd, offset, whence)
 	if err != nil {
-		return C.int(-1)
+		return C.int64_t(-1)
 	}
-	return C.int(n)
+	return C.int64_t(n)
 }
 
 //export AVPipeSeekMuxOutput
-func AVPipeSeekMuxOutput(fd C.int64_t, offset C.int64_t, whence C.int) C.int {
+func AVPipeSeekMuxOutput(fd C.int64_t, offset C.int64_t, whence C.int) C.int64_t {
 	gMutex.Lock()
 	outHandler := gMuxHandlers[int64(fd)]
 	if outHandler == nil {
 		gMutex.Unlock()
-		return C.int(-1)
+		return C.int64_t(-1)
 	}
 	gMutex.Unlock()
 
 	n, err := outHandler.Seek(int64(offset), int(whence))
 	if err != nil {
-		return C.int(-1)
+		return C.int64_t(-1)
 	}
-	return C.int(n)
+	return C.int64_t(n)
 }
 
 func (h *ioHandler) OutSeeker(fd C.int64_t, offset C.int64_t, whence C.int) (int64, error) {

@@ -61,8 +61,8 @@ int64_t AVPipeOpenOutput(int64_t, int, int, int64_t, int);
 int64_t AVPipeOpenMuxOutput(char *, int);
 int     AVPipeWriteOutput(int64_t, int64_t, uint8_t *, int);
 int     AVPipeWriteMuxOutput(int64_t, uint8_t *, int);
-int     AVPipeSeekOutput(int64_t, int64_t, int64_t, int);
-int     AVPipeSeekMuxOutput(int64_t, int64_t, int);
+int64_t AVPipeSeekOutput(int64_t, int64_t, int64_t, int);
+int64_t AVPipeSeekMuxOutput(int64_t, int64_t, int);
 int     AVPipeCloseOutput(int64_t, int64_t);
 int     AVPipeCloseMuxOutput(int64_t);
 int     AVPipeStatOutput(int64_t, int64_t, int, avpipe_buftype_t, avp_stat_t, void *);
@@ -1255,7 +1255,7 @@ out_mux_seek(
     ioctx_t *inctx = outctx->inctx;
     xcparams_t *xcparams = (inctx != NULL) ? inctx->params : NULL;
     int64_t fd = *(int64_t *)outctx->opaque;
-    int rc = AVPipeSeekMuxOutput(fd, offset, whence);
+    int64_t rc = AVPipeSeekMuxOutput(fd, offset, whence);
     if (xcparams != NULL && xcparams->debug_frame_level)
         elv_dbg("OUT MUX SEEK fd=%"PRId64" offset=%d whence=%d", fd, offset, whence);
     return rc;
