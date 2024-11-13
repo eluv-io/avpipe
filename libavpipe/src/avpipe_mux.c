@@ -508,6 +508,18 @@ avpipe_mux_fini(
         free(p_xctx->inctx_muxer[i]);
     }
 
+    /* Free avioctx of the output */
+    {
+        coderctx_t *out_muxer_ctx = &p_xctx->out_muxer_ctx;
+        if (out_muxer_ctx && out_muxer_ctx->format_context) {
+            AVIOContext *avioctx = (AVIOContext *) out_muxer_ctx->format_context->pb;
+            if (avioctx) {
+                av_freep(&avioctx->buffer);
+                av_freep(&avioctx);
+            }
+        }
+    }
+
     avformat_free_context(p_xctx->out_muxer_ctx.format_context);
 
     free(in_mux_ctx->video.parts);
