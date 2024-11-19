@@ -1593,7 +1593,8 @@ prepare_encoder(
         if (params->xc_type & xc_audio)
             filename2 = "fsegment-audio-%05d.mp4";
     } else if (!strcmp(params->format, "image2")) {
-        filename = "%d.jpeg";
+        // filenames are [PTS].jpeg
+        filename = "%"PRId64".jpeg";
     }
 
     /*
