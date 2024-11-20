@@ -607,7 +607,7 @@ out_opener(
         return -1;
     }
 
-    outctx->opaque = (int *) malloc(sizeof(int64_t));
+    outctx->opaque = (int64_t *) malloc(sizeof(int64_t));
     *((int64_t *)(outctx->opaque)) = fd;
 
     return 0;

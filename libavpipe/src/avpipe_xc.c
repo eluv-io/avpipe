@@ -3727,7 +3727,10 @@ avpipe_xc(
                 rc = eav_success;
             } else {
                 elv_err("av_read_frame() rc=%d, url=%s", rc, params->url);
-                rc = eav_read_input;
+                if (rc == AVERROR(ETIMEDOUT))
+                    rc = eav_io_timeout;
+                else
+                    rc = eav_read_input;
             }
             break;
         }
