@@ -1222,8 +1222,12 @@ main(
                 } else {
                     p.bypass_transcoding = bypass_transcoding;
                 }
-            } else if (!strcmp(argv[i], "-bitdepth")) { 
+            } else if (!strcmp(argv[i], "-bitdepth")) {
                 if (sscanf(argv[i+1], "%d", &p.bitdepth) != 1) {
+                    usage(argv[0], argv[i], EXIT_FAILURE);
+                }
+            } else if (!strcmp(argv[i], "-bframes")) {
+                if (sscanf(argv[i+1], "%d", &p.bframes) != 1) {
                     usage(argv[0], argv[i], EXIT_FAILURE);
                 }
             } else {
@@ -1268,6 +1272,10 @@ main(
                 }
             } else if (strcmp(argv[i], "-crypt-url") == 0) {
                 p.crypt_key_url = strdup(argv[i+1]);
+            } else if (strcmp(argv[i], "-cq") == 0) {
+                if (sscanf(argv[i+1], "%f", &p.cq) != 1) {
+                    usage(argv[0], argv[i], EXIT_FAILURE);
+                }
             } else {
                 usage(argv[0], argv[i], EXIT_FAILURE);
             }
@@ -1390,6 +1398,10 @@ main(
                 p.master_display = strdup(argv[i+1]);
             } else if (!strcmp(argv[i], "-max-cll")) {
                 p.max_cll = strdup(argv[i+1]);
+            } else if (!strcmp(argv[i], "-multi-pass")) {
+                if (sscanf(argv[i+1], "%d", &p.multi_pass) != 1) {
+                    usage(argv[0], argv[i], EXIT_FAILURE);
+                }
             } else {
                 usage(argv[0], argv[i], EXIT_FAILURE);
             }
@@ -1414,6 +1426,10 @@ main(
                 }
             } else if (!strcmp(argv[i], "-rotate")) {
                 if (sscanf(argv[i+1], "%d", &p.rotate) != 1) {
+                    usage(argv[0], argv[i], EXIT_FAILURE);
+                }
+            } else if (!strcmp(argv[i], "-rc-mode")) {
+                if (sscanf(argv[i+1], "%d", &p.rc_mode) != 1) {
                     usage(argv[0], argv[i], EXIT_FAILURE);
                 }
             } else if (strlen(argv[i]) > 2) {
@@ -1485,6 +1501,10 @@ main(
                     usage(argv[0], argv[i], EXIT_FAILURE);
                 }
                 if ( n_threads < 1 ) usage(argv[0], argv[i], EXIT_FAILURE);
+            } else if (!strcmp(argv[i], "-tune")) {
+                if (sscanf(argv[i+1], "%d", &p.tune) != 1) {
+                    usage(argv[0], argv[i], EXIT_FAILURE);
+                }
             }
             break;
         case 'v':

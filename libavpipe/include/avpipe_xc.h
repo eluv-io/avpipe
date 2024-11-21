@@ -450,8 +450,16 @@ typedef struct xcparams_t {
     int         debug_frame_level;
     int         connection_timeout;         // Connection timeout in sec for RTMP or MPEGTS protocols
     int         rotate;                     // For video transpose or rotation
+
     char        *profile;
     int         level;
+    int         rc_mode;                    // 0=constqp 1=vbr 2=cbr 8388610=cbr_hq 8388609=vbr_hq (default -1)
+    int         tune;                       // 1=hq 2=ll 3=ull 4=lossless
+    float       cq;                         // 0-51 0=automatic (default 0)
+    int         multi_pass;                 // 0=disabled 1=qres 2=fullres
+
+    int bframes;                            // 0-4 (default 0);
+
 } xcparams_t;
 
 #define MAX_CODEC_NAME  256

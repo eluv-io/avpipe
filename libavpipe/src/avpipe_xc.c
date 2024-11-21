@@ -1082,6 +1082,12 @@ set_nvidia_params(
      * sprintf(level, "%d.", 15);
      * av_opt_set(encoder_codec_context->priv_data, "cq", level, 0);
      */
+
+    av_opt_set_int(encoder_codec_context->priv_data, "rc", params->rc_mode, 0);
+    av_opt_set_int(encoder_codec_context->priv_data, "cq", params->cq, 0);
+    av_opt_set_int(encoder_codec_context->priv_data, "tune", params->tune, 0);
+    av_opt_set_int(encoder_codec_context->priv_data, "multipass", params->multi_pass, 0);
+
 }
 
 static int
@@ -4610,7 +4616,12 @@ log_params(
         "video_frame_duration_ts=%d "
         "rotate=%d "
         "profile=%s "
-        "level=%d",
+        "level=%d "
+        "rc_mode=%d "
+        "cq=%f "
+        "tune=%d "
+        "multi_pass=%d "
+        "bframes=%d",
         params->stream_id, params->url,
         avpipe_version(),
         params->bypass_transcoding, params->skip_decoding,
@@ -4634,7 +4645,8 @@ log_params(
         params->filter_descriptor,
         params->extract_image_interval_ts, params->extract_images_sz,
         1, params->video_time_base, params->video_frame_duration_ts, params->rotate,
-        params->profile ? params->profile : "", params->level);
+        params->profile ? params->profile : "", params->level,
+        params->rc_mode, params->cq, params->tune, params->multi_pass, params->bframes);
     elv_log("AVPIPE XCPARAMS %s", buf);
 }
 
