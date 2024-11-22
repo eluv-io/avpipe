@@ -99,18 +99,18 @@ read_next_input:
         if (index == 0) {
             /* Reached end of videos */
             if (in_mux_ctx->video.index >= in_mux_ctx->video.n_parts)
-                return -1;
+                return AVERROR_EOF;
             filepath = in_mux_ctx->video.parts[in_mux_ctx->video.index];
             in_mux_ctx->video.index++;
         } else if (index <= in_mux_ctx->last_audio_index) {
             if (in_mux_ctx->audios[index-1].index >= in_mux_ctx->audios[index-1].n_parts)
-                return -1;
+                return AVERROR_EOF;
             filepath = in_mux_ctx->audios[index-1].parts[in_mux_ctx->audios[index-1].index];
             in_mux_ctx->audios[index-1].index++;
         } else if (index <= in_mux_ctx->last_audio_index+in_mux_ctx->last_caption_index) {
             if (in_mux_ctx->captions[index - in_mux_ctx->last_audio_index - 1].index >=
                 in_mux_ctx->captions[index - in_mux_ctx->last_audio_index - 1].n_parts)
-                return -1;
+                return AVERROR_EOF;
             filepath = in_mux_ctx->captions[index - in_mux_ctx->last_audio_index - 1].parts[in_mux_ctx->captions[index - in_mux_ctx->last_audio_index - 1].index];
             in_mux_ctx->captions[index - in_mux_ctx->last_audio_index - 1].index++;
         } else {
@@ -266,7 +266,7 @@ out_mux_seek(
     ioctx_t *outctx = (ioctx_t *)opaque;
     int fd = *(int *)outctx->opaque;
 
-    int rc = lseek(fd, offset, whence);
+    int64_t rc = lseek(fd, offset, whence);
     whence = whence & 0xFFFF; /* Mask out AVSEEK_SIZE and AVSEEK_FORCE */
     switch (whence) {
     case SEEK_SET:
@@ -281,7 +281,7 @@ out_mux_seek(
         elv_err("OUT MUX SEEK - weird seek\n");
     }
 
-    elv_dbg("OUT MUX SEEK offset=%"PRId64" whence=%d rc=%d", offset, whence, rc);
+    elv_dbg("OUT MUX SEEK offset=%"PRId64" whence=%d rc=%"PRId64, offset, whence, rc);
     return rc;
 }
 

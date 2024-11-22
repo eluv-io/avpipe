@@ -57,7 +57,7 @@ func TestUdpToMp4(t *testing.T) {
 	tlog.Info("Transcoding UDP stream start", "params", fmt.Sprintf("%+v", *xcParams))
 	err = avpipe.Xc(xcParams)
 	tlog.Info("Transcoding UDP stream done", "err", err, "last pts", nil)
-	if err != nil {
+	if err != nil && err != avpipe.EAV_IO_TIMEOUT {
 		t.Error("Transcoding UDP stream failed", "err", err)
 	}
 

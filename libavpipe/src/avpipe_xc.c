@@ -1496,11 +1496,11 @@ prepare_audio_encoder(
         }
 
         elv_dbg("encoder audio stream index=%d, bitrate=%d, sample_fmts=%s, timebase=%d, output frame_size=%d, sample_rate=%d, channel_layout=%s",
-            index, encoder_context->codec_context[output_stream_index]->bit_rate,
+            stream_index, encoder_context->codec_context[output_stream_index]->bit_rate,
             av_get_sample_fmt_name(encoder_context->codec_context[output_stream_index]->sample_fmt),
             encoder_context->codec_context[output_stream_index]->time_base.den, encoder_context->codec_context[output_stream_index]->frame_size,
             encoder_context->codec_context[output_stream_index]->sample_rate,
-    	channel_name);
+    	    channel_name);
 
         if (avcodec_parameters_from_context(
             encoder_context->stream[output_stream_index]->codecpar,
@@ -2257,9 +2257,11 @@ encode_frame(
 
         if (selected_decoded_audio(decoder_context, stream_index) >= 0) {
             /* Set the packet duration if it is not the first audio packet */
-            if (encoder_context->audio_pts[stream_index] != AV_NOPTS_VALUE)
+            if (encoder_context->audio_pts[stream_index] != AV_NOPTS_VALUE) {
                 output_packet->duration = output_packet->pts - encoder_context->audio_pts[stream_index];
-            else
+                if (!strcmp(params->ecodec2, "aac"))
+                    output_packet->duration = 1024;
+            } else
                 output_packet->duration = 0;
             encoder_context->audio_pts[stream_index] = output_packet->pts;
             encoder_context->audio_frames_written[stream_index]++;
@@ -3698,6 +3700,7 @@ avpipe_xc(
         encoder_context->audio_pts[j] = AV_NOPTS_VALUE;
         encoder_context->first_read_packet_pts[j] = AV_NOPTS_VALUE;
         encoder_context->audio_last_pts_sent_encode[j] = AV_NOPTS_VALUE;
+        encoder_context->audio_last_pts_encoded[j] = AV_NOPTS_VALUE;
     }
     decoder_context->first_key_frame_pts = AV_NOPTS_VALUE;
     decoder_context->is_av_synced = 0;
@@ -3724,7 +3727,10 @@ avpipe_xc(
                 rc = eav_success;
             } else {
                 elv_err("av_read_frame() rc=%d, url=%s", rc, params->url);
-                rc = eav_read_input;
+                if (rc == AVERROR(ETIMEDOUT))
+                    rc = eav_io_timeout;
+                else
+                    rc = eav_read_input;
             }
             break;
         }
@@ -4186,10 +4192,14 @@ get_xc_type_name(
         return "xc_audio_pan";
     case xc_audio_merge:
         return "xc_audio_merge";
+    case xc_mux:
+        return "xc_mux";
     case xc_extract_images:
         return "xc_extract_images";
     case xc_extract_all_images:
         return "xc_extract_all_images";
+    case xc_probe:
+        return "xc_probe";
     default:
         return "none";
     }

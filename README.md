@@ -48,6 +48,9 @@ The following repositories can be checked out in any directory, but for better o
   - `gsutil -m cp 'gs://eluvio-test-assets/*' .`
 - Inside _<avpipe-path>_ run
   - `go test -timeout 2000s`
+- Instead of the above commands, you can run the following scripts:
+  - `run_tests.sh` to run avpipe core functionality and transcoding tests.
+  - `run_live_tests.sh`: to run avipe live-streaming functionality tests.
   
 # Design
 - Avpipe library has been built on top of the different libraries of ffmpeg, the most important ones are libx264, libx265, libavcodec, libavformat, libavfilter and libswresample. But in order to achieve all the features and capabilities some parts of ffmpeg library have been changed. Avpipe library is capable of transcoding or probing an input source (i.e a media file, or an UDP/RTMP stream) and producing output media or probe results. In order to start a transcoding job the transcoding parameters have to be set.
@@ -152,7 +155,7 @@ typedef struct xcparams_t {
 - **Extracting images:** avpipe library can extract images either using a time interval or specific timestamps. 
 - **HDR support:** avpipe library allows to create HDR output while transcoding with H.265 encoder. To make an HDR content two parameters max_cll and master_display have to be set.
 - **Bypass feature:** setting bypass_transcoding to 1, would avoid transcoding and copies the input packets to output. This feature is very useful (saves a lot of CPU and time) when input data matches with output and we can skip transcoding.
-- **Muxing audio/video ABR segments and creating MP4 files:** this feature allows the creation of MP4 files from transcoded audio/video segments. In order to do this a muxing spec has to be made to tell avpipe which ABR segments should be stitched together to produce the final MP4. To make this feature working xc_type should be set to xc_mux and the mux_spec param should point to a buffer containing muxing spec.
+- **Muxing audio/video ABR segments and creating fMP4/MP4 files:** this feature allows the creation of fMP4/MP4 files from transcoded audio/video segments. In order to do this a muxing spec has to be made to tell avpipe which ABR segments should be stitched together to produce the final fMP4/MP4. To make this feature working xc_type should be set to xc_mux and the mux_spec param should point to a buffer containing muxing spec. If the format is 'fmp4-segment' the output will be fMP4, otherwise MP4.
 - **Transcoding from specific timebase offset:** the parameter start_time_ts can be used to skip some input and transcode from specified TS in start_time_ts. This feature is also very useful to start transcoding from a certain point and not from the beginning of file/stream.
 - **Audio join/pan/merge filters:**
   - setting xc_type = xc_audio_join would join 2 or more audio inputs and create a new audio output (for example joining two mono streams and creating one stereo).
