@@ -4676,7 +4676,8 @@ log_params(
         "video_frame_duration_ts=%d "
         "rotate=%d "
         "profile=%s "
-        "level=%d",
+        "level=%d "
+        "rate_control=%s",
         params->stream_id, params->url,
         avpipe_version(),
         params->bypass_transcoding, params->skip_decoding,
@@ -4700,7 +4701,8 @@ log_params(
         params->filter_descriptor,
         params->extract_image_interval_ts, params->extract_images_sz,
         1, params->video_time_base, params->video_frame_duration_ts, params->rotate,
-        params->profile ? params->profile : "", params->level);
+        params->profile ? params->profile : "", params->level,
+        params->rc ? params->rc : "");
     elv_log("AVPIPE XCPARAMS %s", buf);
 }
 
