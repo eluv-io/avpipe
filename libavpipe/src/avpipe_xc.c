@@ -4599,9 +4599,7 @@ check_params(
         if (!strcmp(params->rc, "constqp") &&
             !strcmp(params->rc, "cbr") &&
             !strcmp(params->rc, "vbr") &&
-            !strcmp(params->rc, "cbr_ld_hq") &&
-            !strcmp(params->rc, "cbr_hq") &&
-            !strcmp(params->rc, "vbr_hq")) {
+            !strcmp(params->rc, "cbr_ld")) {
             elv_err("Invalid rate control %s, encoder=%s", params->rc, params->ecodec);
             return eav_param;
         }
