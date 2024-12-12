@@ -389,6 +389,7 @@ typedef struct xcparams_t {
     int     channel_layout;         // Audio channel layout for output
     char    *crf_str;
     char    *preset;                // Sets encoding speed to compression ratio
+    char    *tune;                  // Tune for rate control
     char    *rc;                    // Rate control
     int     rc_max_rate;            // Maximum encoding bit rate, used in conjuction with rc_buffer_size [Default: 0]
     int     rc_buffer_size;         // Determines the interval used to limit bit rate [Default: 0]

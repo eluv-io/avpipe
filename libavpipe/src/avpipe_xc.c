@@ -1117,6 +1117,12 @@ set_nvidia_params(
             elv_err("Failed to set rate control to %s", params->rc);
         }
     }
+
+    if (params->tune && strlen(params->tune) > 0) {
+        if (av_opt_set(encoder_codec_context->priv_data, "tune", params->tune, AV_OPT_SEARCH_CHILDREN) < 0) {
+            elv_err("Failed to set rate control tune to %s", params->tune);
+        }
+    }
 }
 
 static int
@@ -4677,7 +4683,8 @@ log_params(
         "rotate=%d "
         "profile=%s "
         "level=%d "
-        "rate_control=%s",
+        "rate_control=%s "
+        "tune=%s",
         params->stream_id, params->url,
         avpipe_version(),
         params->bypass_transcoding, params->skip_decoding,
@@ -4702,7 +4709,8 @@ log_params(
         params->extract_image_interval_ts, params->extract_images_sz,
         1, params->video_time_base, params->video_frame_duration_ts, params->rotate,
         params->profile ? params->profile : "", params->level,
-        params->rc ? params->rc : "");
+        params->rc ? params->rc : "",
+        params->tune ? params->tune : "");
     elv_log("AVPIPE XCPARAMS %s", buf);
 }
 

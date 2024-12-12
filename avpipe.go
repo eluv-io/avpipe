@@ -196,6 +196,7 @@ type XcParams struct {
 	AudioBitrate           int32       `json:"audio_bitrate,omitempty"`
 	SampleRate             int32       `json:"sample_rate,omitempty"` // Audio sampling rate
 	Rc                     string      `json:"rc"`                    // Rate control
+	Tune                   string      `json:"tune"`                  // Tune for encoding params
 	RcMaxRate              int32       `json:"rc_max_rate,omitempty"`
 	RcBufferSize           int32       `json:"rc_buffer_size,omitempty"`
 	CrfStr                 string      `json:"crf_str,omitempty"`
@@ -1255,6 +1256,7 @@ func getCParams(params *XcParams) (*C.xcparams_t, error) {
 		crf_str:                   C.CString(params.CrfStr),
 		preset:                    C.CString(params.Preset),
 		rc:                        C.CString(params.Rc),
+		tune:                      C.CString(params.Tune),
 		rc_max_rate:               C.int(params.RcMaxRate),
 		rc_buffer_size:            C.int(params.RcBufferSize),
 		audio_seg_duration_ts:     C.int64_t(params.AudioSegDurationTs),

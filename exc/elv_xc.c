@@ -1075,6 +1075,7 @@ usage(
         "\t-stream-id :             (optional) Default: -1, if it is valid it will be used to transcode elementary stream with that stream-id.\n"
         "\t-sync-audio-to-stream-id:(optional) Default: -1, sync audio to video iframe of specific stream-id when input stream is mpegts.\n"
         "\t-t :                     (optional) Transcoding threads. Default is 1 thread, must be bigger than 1\n"
+        "\t-tune :                  (optional) Tune for encoding.\n"
         "\t-xc-type :               (optional) Transcoding type. Default is \"all\", can be \"video\", \"audio\", \"audio-merge\", \"audio-join\", \"audio-pan\", \"all\", \"extract-images\"\n"
         "\t                                    or \"extract-all-images\". \"all\" means transcoding video and audio together.\n"
         "\t-video-bitrate :         (optional) Mutually exclusive with crf. Default: -1 (unused)\n"
@@ -1493,6 +1494,12 @@ main(
                     usage(argv[0], argv[i], EXIT_FAILURE);
                 }
                 if ( n_threads < 1 ) usage(argv[0], argv[i], EXIT_FAILURE);
+            } else if (!strcmp(argv[i], "-tune")) {
+                if (argv[i+1]) {
+                    p.tune = strdup(argv[i+1]);
+                } else {
+                    usage(argv[0], argv[i], EXIT_FAILURE);
+                }
             }
             break;
         case 'v':
