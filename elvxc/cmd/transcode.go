@@ -290,6 +290,7 @@ func InitTranscode(cmdRoot *cobra.Command) error {
 	cmdTranscode.PersistentFlags().Int32P("start-frag-index", "", 1, "start fragment index >= 1.")
 	cmdTranscode.PersistentFlags().Int32P("video-bitrate", "", -1, "output video bitrate, mutually exclusive with crf.")
 	cmdTranscode.PersistentFlags().Int32P("audio-bitrate", "", 128000, "output audio bitrate.")
+	cmdTranscode.PersistentFlags().StringP("rc", "", "", "rate control mode. Valid values for libx264 encoder are 'none', 'cbr', and 'vbr'. Valid values for h264_nvenc are 'constqp', 'vbr', 'cbr', 'cbr_ld_hq', 'cbr_hq', 'vbr_hq'.")
 	cmdTranscode.PersistentFlags().Int32P("rc-max-rate", "", 0, "maximum encoding bit rate, used in conjuction with rc-buffer-size.")
 	cmdTranscode.PersistentFlags().Int32P("rc-buffer-size", "", 0, "determines the interval used to limit bit rate.")
 	cmdTranscode.PersistentFlags().Int32P("enc-height", "", -1, "default -1 means use source height.")
@@ -415,6 +416,8 @@ func doTranscode(cmd *cobra.Command, args []string) error {
 	if format != "dash" && format != "hls" && format != "mp4" && format != "fmp4" && format != "segment" && format != "fmp4-segment" && format != "image2" {
 		return fmt.Errorf("Package format is not valid, can be 'dash', 'hls', 'mp4', 'fmp4', 'segment', 'fmp4-segment', or 'image2'")
 	}
+
+	rateControl := cmd.Flag("channel-layout").Value.String()
 
 	filterDescriptor := cmd.Flag("filter-descriptor").Value.String()
 
@@ -687,6 +690,7 @@ func doTranscode(cmd *cobra.Command, args []string) error {
 		WatermarkOverlay:       string(overlayImage),
 		WatermarkOverlayType:   watermarkOverlayType,
 		ForceKeyInt:            forceKeyInterval,
+		Rc:                     rateControl,
 		RcMaxRate:              rcMaxRate,
 		RcBufferSize:           rcBufferSize,
 		GPUIndex:               gpuIndex,

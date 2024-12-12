@@ -1058,7 +1058,9 @@ usage(
         "\t                                    Valid H264 profiles: \"baseline\", \"main\", \"extended\", \"high\", \"high10\", \"high422\", \"high444\"\n"
         "\t                                    Valid H265 profiles: \"main\", \"main10\"\n"
         "\t                                    Valid NVIDIA H264 profiles: \"baseline\", \"main\", \"high\", \"high444p\"\n"
-        "\t-r :                     (optional) number of repeats. Default is 1 repeat, must be bigger than 1\n"
+        "\t-r :                     (optional) Number of repeats. Default is 1 repeat, must be bigger than 1\n"
+        "\t-rc :                    (optional) Rate control. Default is vbr. Valid values for libx264 encoder are \"none\", \"cbr\", and \"vbr\".\n"
+        "\t                                    Valid values for h264_nvenc are \"constqp\", \"vbr\", \"cbr\", \"cbr_ld_hq\", \"cbr_hq\", \"vbr_hq\".\n"
         "\t-rc-buffer-size :        (optional) Determines the interval used to limit bit rate\n"
         "\t-rc-max-rate :           (optional) Maximum encoding bit rate, used in conjuction with rc-buffer-size\n"
         "\t-rotate :                (optional) Rotate the input video. Default is 0 with no rotation, other values 90, 180, 270.\n"
@@ -1404,7 +1406,13 @@ main(
             }
             break;
         case 'r':
-            if (!strcmp(argv[i], "-rc-buffer-size")) {
+            if (!strcmp(argv[i], "-rc")) {
+                if (argv[i+1]) {
+                    p.rc = strdup(argv[i+1]);
+                } else {
+                    usage(argv[0], argv[i], EXIT_FAILURE);
+                }
+            } else if (!strcmp(argv[i], "-rc-buffer-size")) {
                 if (sscanf(argv[i+1], "%d", &p.rc_buffer_size) != 1) {
                     usage(argv[0], argv[i], EXIT_FAILURE);
                 }
