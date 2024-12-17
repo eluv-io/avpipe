@@ -1022,22 +1022,6 @@ set_netint_h265_params(
     av_opt_set(encoder_codec_context->priv_data, "xcoder-params", enc_params, 0);
 }
 
-/* Borrowed from libavcodec/nvenc.h since it is not exposed */
-enum {
-    PRESET_DEFAULT = 0,
-    PRESET_SLOW,
-    PRESET_MEDIUM,
-    PRESET_FAST,
-    PRESET_HP,
-    PRESET_HQ,
-    PRESET_BD ,
-    PRESET_LOW_LATENCY_DEFAULT ,
-    PRESET_LOW_LATENCY_HQ ,
-    PRESET_LOW_LATENCY_HP,
-    PRESET_LOSSLESS_DEFAULT, // lossless presets must be the last ones
-    PRESET_LOSSLESS_HP,
-};
-
 static void
 set_nvidia_params(
     coderctx_t *encoder_context,
@@ -1067,29 +1051,6 @@ set_nvidia_params(
         av_opt_set_int(encoder_codec_context->priv_data, "profile", NV_ENC_H264_PROFILE_HIGH, 0);
         encoder_codec_context->profile = FF_PROFILE_H264_HIGH;
     }
-
-/*
-    For nvidia let the encoder to pick the level, in some cases level is different from h264 encoder and
-    avpipe_h264_guess_level() function would not pick the right level for nvidia.
-
-    if (encoder_codec_context->framerate.den != 0)
-        framerate = encoder_codec_context->framerate.num/encoder_codec_context->framerate.den;
-
-    encoder_codec_context->level = avpipe_h264_guess_level(
-                                                encoder_codec_context->profile,
-                                                encoder_codec_context->bit_rate,
-                                                framerate,
-                                                encoder_codec_context->width,
-                                                encoder_codec_context->height);
-    av_opt_set_int(encoder_codec_context->priv_data, "level", encoder_codec_context->level, 0);
-*/
-
-    /*
-     * According to https://superuser.com/questions/1296374/best-settings-for-ffmpeg-with-nvenc
-     * the best setting can be PRESET_LOW_LATENCY_HQ or PRESET_LOW_LATENCY_HP.
-     * (in my experiment PRESET_LOW_LATENCY_HQ is better than PRESET_LOW_LATENCY_HP)
-     */
-    av_opt_set_int(encoder_codec_context->priv_data, "preset", PRESET_LOW_LATENCY_HQ, 0);
 
     /*
      * We might want to set one of the following options in future:
@@ -1238,9 +1199,10 @@ prepare_video_encoder(
         // av_opt_set(encoder_codec_context->priv_data, "crf_max", params->crf_str, AV_OPT_FLAG_ENCODING_PARAM | AV_OPT_SEARCH_CHILDREN);
     }
 
-    if (params->preset && strlen(params->preset) > 0 &&
-        (!strcmp(params->format, "fmp4-segment") || !strcmp(params->format, "fmp4"))) {
-        av_opt_set(encoder_codec_context->priv_data, "preset", params->preset, AV_OPT_FLAG_ENCODING_PARAM | AV_OPT_SEARCH_CHILDREN);
+    if (params->preset && strlen(params->preset) > 0) {
+        if (av_opt_set(encoder_codec_context->priv_data, "preset", params->preset, AV_OPT_FLAG_ENCODING_PARAM | AV_OPT_SEARCH_CHILDREN) < 0) {
+            elv_err("Failed to set preset=%s, url=%s", params->preset, params->url, params->url);
+        }
     }
 
     if (!strcmp(params->format, "fmp4-segment") || !strcmp(params->format, "fmp4")) {
@@ -4590,7 +4552,7 @@ check_params(
         if (!strcmp(params->rc, "none") &&
             !strcmp(params->rc, "cbr") &&
             !strcmp(params->rc, "vbr")) {
-            elv_err("Invalid rate control %s, encoder=%s", params->rc, params->ecodec);
+            elv_err("Invalid rate control %s, encoder=%s, url=%s", params->rc, params->ecodec, params->url);
             return eav_param;
         }
     }
@@ -4600,9 +4562,19 @@ check_params(
             !strcmp(params->rc, "cbr") &&
             !strcmp(params->rc, "vbr") &&
             !strcmp(params->rc, "cbr_ld")) {
-            elv_err("Invalid rate control %s, encoder=%s", params->rc, params->ecodec);
+            elv_err("Invalid rate control %s, encoder=%s, url=%s", params->rc, params->ecodec, params->url);
             return eav_param;
         }
+    }
+
+    if (!strcmp(params->ecodec, "libx264") && !params->preset) {
+        params->preset = strdup("medium");
+        elv_log("Setting preset to medium, url=%s", params->url);
+    }
+
+    if (!strcmp(params->ecodec, "h264_nvenc") && !params->preset) {
+        params->preset = strdup("p1");
+        elv_log("Setting preset to p1, url=%s", params->url);
     }
 
     return eav_success;

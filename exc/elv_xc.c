@@ -1052,8 +1052,9 @@ usage(
         "\t-max-cll :               (optional) Maximum Content Light Level and Maximum Frame Average Light Level, only valid if encoder is libx265.\n"
         "\t                                    This parameter is a comma separated of max-cll and max-fall (i.e \"1514,172\").\n"
         "\t-mux-spec :              (optional) Muxing spec file.\n"
-        "\t-preset :                (optional) Preset string to determine compression speed. Default is \"medium\". Valid values are: \"ultrafast\", \"superfast\",\n"
-        "\t                                    \"veryfast\", \"faster\", \"fast\", \"medium\", \"slow\", \"slower\", \"veryslow\".\n"
+        "\t-preset :                (optional) Preset string to determine compression speed. For libx264 encoder the default is \"medium\".\n"
+        "\t                                    Valid values for libx264 are: \"ultrafast\", \"superfast\", \"veryfast\", \"faster\", \"fast\", \"medium\", \"slow\", \"slower\", \"veryslow\".\n"
+        "\t                                    Valid values for h264_nvenc are: \"p1\" (fastest encodeing lowest quality), \"p1\", \"p3\", \"p4\", \"p5\", \"p6\", \"p7\" (slowest encoding highest quality).\n"
         "\t-profile :               (optional) Encoding profile for video. If it is not determined, it will be set automatically.\n"
         "\t                                    Valid H264 profiles: \"baseline\", \"main\", \"extended\", \"high\", \"high10\", \"high422\", \"high444\"\n"
         "\t                                    Valid H265 profiles: \"main\", \"main10\"\n"
@@ -1075,7 +1076,7 @@ usage(
         "\t-stream-id :             (optional) Default: -1, if it is valid it will be used to transcode elementary stream with that stream-id.\n"
         "\t-sync-audio-to-stream-id:(optional) Default: -1, sync audio to video iframe of specific stream-id when input stream is mpegts.\n"
         "\t-t :                     (optional) Transcoding threads. Default is 1 thread, must be bigger than 1\n"
-        "\t-tune :                  (optional) Tune parameter for encoding.\n"
+        "\t-tune :                  (optional) Tune parameter for encoding. Valid values for h264_nvenc are: \"hq\", \"ll\", \"ull\", \"lossless\"\n"
         "\t-xc-type :               (optional) Transcoding type. Default is \"all\", can be \"video\", \"audio\", \"audio-merge\", \"audio-join\", \"audio-pan\", \"all\", \"extract-images\"\n"
         "\t                                    or \"extract-all-images\". \"all\" means transcoding video and audio together.\n"
         "\t-video-bitrate :         (optional) Mutually exclusive with crf. Default: -1 (unused)\n"
@@ -1154,7 +1155,7 @@ main(
         .listen = 1,
         .max_cll = NULL,
         .master_display = NULL,
-        .preset = strdup("medium"),
+        .preset = NULL,
         .rc_buffer_size = 0,
         .rc_max_rate = 0,
         .sample_rate = -1,                  /* Audio sampling rate 44100 */
