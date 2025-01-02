@@ -188,9 +188,11 @@ type XcParams struct {
 	Url                    string      `json:"url"`
 	BypassTranscoding      bool        `json:"bypass,omitempty"`
 	Format                 string      `json:"format,omitempty"`
-	StartTimeTs            int64       `json:"start_time_ts,omitempty"`
+	DecodingStartTs        int64       `json:"decoding_start_ts,omitempty"`
+	EncodingStartTs        int64       `json:"encoding_start_ts,omitempty"`
 	StartPts               int64       `json:"start_pts,omitempty"` // Start PTS for output
-	DurationTs             int64       `json:"duration_ts,omitempty"`
+	DecodingDurationTs     int64       `json:"decoding_duration_ts,omitempty"`
+	EncodingDurationTs     int64       `json:"encoding_duration_ts,omitempty"`
 	StartSegmentStr        string      `json:"start_segment_str,omitempty"`
 	VideoBitrate           int32       `json:"video_bitrate,omitempty"`
 	AudioBitrate           int32       `json:"audio_bitrate,omitempty"`
@@ -260,7 +262,8 @@ func NewXcParams() *XcParams {
 		AudioSegDurationTs:     -1,
 		BitDepth:               8,
 		CrfStr:                 "23",
-		DurationTs:             -1,
+		DecodingDurationTs:     -1,
+		EncodingDurationTs:     -1,
 		Ecodec:                 "libx264",
 		Ecodec2:                "aac",
 		EncHeight:              -1,
@@ -1244,9 +1247,11 @@ func getCParams(params *XcParams) (*C.xcparams_t, error) {
 	cparams := &C.xcparams_t{
 		url:                       C.CString(params.Url),
 		format:                    C.CString(params.Format),
-		start_time_ts:             C.int64_t(params.StartTimeTs),
+		decoding_start_ts:         C.int64_t(params.DecodingStartTs),
+		encoding_start_ts:         C.int64_t(params.EncodingStartTs),
 		start_pts:                 C.int64_t(params.StartPts),
-		duration_ts:               C.int64_t(params.DurationTs),
+		decoding_duration_ts:      C.int64_t(params.DecodingDurationTs),
+		encoding_duration_ts:      C.int64_t(params.EncodingDurationTs),
 		start_segment_str:         C.CString(params.StartSegmentStr),
 		video_bitrate:             C.int(params.VideoBitrate),
 		audio_bitrate:             C.int(params.AudioBitrate),

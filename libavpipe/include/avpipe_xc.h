@@ -64,7 +64,9 @@ typedef enum avpipe_error_t {
     eav_xc_table                = 23,   // Error in trancoding table
     eav_pts_wrapped             = 24,   // PTS wrapped error
     eav_io_timeout              = 25,   // IO timeout
-    eav_bad_handle              = 26    // Bad handle
+    eav_bad_handle              = 26,   // Bad handle
+    eav_skip_frame_late         = 27,   // When should skip decoding/encoding due to pts is passed the decoding/encoding duration pts
+    eav_skip_frame_early        = 28    // When should skip decoding/encoding due to pts is smaller than strating decoding/encoding pts
 } avpipe_error_t;
 
 typedef enum avpipe_buftype_t {
@@ -379,9 +381,12 @@ typedef struct xcparams_t {
     char    *url;                   // URL of the input for transcoding
     int     bypass_transcoding;     // if 0 means do transcoding, otherwise bypass transcoding (only copy)
     char    *format;                // Output format [Required, Values: dash, hls, mp4, fmp4]
-    int64_t start_time_ts;          // Transcode the source starting from this time
+    int64_t decoding_start_ts;      // Decode the source starting from this time
+    int64_t encoding_start_ts;      // Encode the sink starting from this time
+    int64_t seek_time_ts;           // Seek to the seek_time_ts before reading any frame
     int64_t start_pts;              // Starting PTS for output
-    int64_t duration_ts;            // Transcode time period [-1 for entire source length from start_time_ts]
+    int64_t decoding_duration_ts;   // Decoding time period (-1 for entire source length from start_time_ts)
+    int64_t encoding_duration_ts;   // Encoding time period (-1 for entire sink length)
     char    *start_segment_str;     // Specify index of the first segment  TODO: change type to int
     int     video_bitrate;
     int     audio_bitrate;
