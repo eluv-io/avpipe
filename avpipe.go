@@ -193,6 +193,7 @@ type XcParams struct {
 	StartPts               int64       `json:"start_pts,omitempty"` // Start PTS for output
 	DecodingDurationTs     int64       `json:"decoding_duration_ts,omitempty"`
 	EncodingDurationTs     int64       `json:"encoding_duration_ts,omitempty"`
+	SeekTimeTs             int64       `json:"seek_time_ts"`
 	StartSegmentStr        string      `json:"start_segment_str,omitempty"`
 	VideoBitrate           int32       `json:"video_bitrate,omitempty"`
 	AudioBitrate           int32       `json:"audio_bitrate,omitempty"`
@@ -264,6 +265,7 @@ func NewXcParams() *XcParams {
 		CrfStr:                 "23",
 		DecodingDurationTs:     -1,
 		EncodingDurationTs:     -1,
+		SeekTimeTs:             -1,
 		Ecodec:                 "libx264",
 		Ecodec2:                "aac",
 		EncHeight:              -1,
@@ -1252,6 +1254,7 @@ func getCParams(params *XcParams) (*C.xcparams_t, error) {
 		start_pts:                 C.int64_t(params.StartPts),
 		decoding_duration_ts:      C.int64_t(params.DecodingDurationTs),
 		encoding_duration_ts:      C.int64_t(params.EncodingDurationTs),
+		seek_time_ts:              C.int64_t(params.SeekTimeTs),
 		start_segment_str:         C.CString(params.StartSegmentStr),
 		video_bitrate:             C.int(params.VideoBitrate),
 		audio_bitrate:             C.int(params.AudioBitrate),

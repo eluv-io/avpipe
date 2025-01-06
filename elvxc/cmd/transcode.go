@@ -284,6 +284,7 @@ func InitTranscode(cmdRoot *cobra.Command) error {
 	cmdTranscode.PersistentFlags().StringP("preset", "", "medium", "Preset string to determine compression speed, can be: 'ultrafast', 'superfast', 'veryfast', 'faster', 'fast', 'medium', 'slow', 'slower', 'veryslow'")
 	cmdTranscode.PersistentFlags().Int64P("decoding-start-ts", "", 0, "offset to start decoding")
 	cmdTranscode.PersistentFlags().Int64P("encoding-start-ts", "", 0, "offset to start encoding")
+	cmdTranscode.PersistentFlags().Int64P("seek-time-ts", "", 0, "seek to the specific offset in input stream")
 	cmdTranscode.PersistentFlags().Int32P("stream-id", "", -1, "if it is valid it will be used to transcode elementary stream with that stream-id")
 	cmdTranscode.PersistentFlags().Int64P("start-pts", "", 0, "starting PTS for output.")
 	cmdTranscode.PersistentFlags().Int32P("sample-rate", "", -1, "For aac output sample rate is set to input sample rate and this parameter is ignored.")
@@ -588,6 +589,11 @@ func doTranscode(cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("Encoding duration ts is not valid")
 	}
 
+	seekTimeTs, err := cmd.Flags().GetInt64("seek-time-ts")
+	if err != nil {
+		return fmt.Errorf("Seek time ts is not valid")
+	}
+
 	audioSegDurationTs, err := cmd.Flags().GetInt64("audio-seg-duration-ts")
 	if err != nil ||
 		(format != "segment" && format != "fmp4-segment" &&
@@ -667,6 +673,7 @@ func doTranscode(cmd *cobra.Command, args []string) error {
 		StartPts:               startPts,
 		DecodingDurationTs:     decodingDurationTs,
 		EncodingDurationTs:     encodingDurationTs,
+		SeekTimeTs:             seekTimeTs,
 		StartSegmentStr:        startSegmentStr,
 		StartFragmentIndex:     startFragmentIndex,
 		VideoBitrate:           videoBitrate,
