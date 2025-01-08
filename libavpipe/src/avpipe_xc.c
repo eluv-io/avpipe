@@ -2002,7 +2002,10 @@ should_skip_encoding(
     }
 
     if (p->xc_type == xc_extract_images || p->xc_type == xc_extract_all_images) {
-        return !should_extract_frame(decoder_context, encoder_context, p, frame);
+        int ret = should_extract_frame(decoder_context, encoder_context, p, frame);
+        if (ret)
+            return eav_success;
+        return eav_skip_frame_early;
     }
 
     return eav_success;
