@@ -4570,6 +4570,8 @@ log_params(
         "format=%s "
         "seekable=%d "
         "decoding_start_ts=%"PRId64" "
+        "encoding_start_ts=%"PRId64" "
+        "seek_time_ts=%"PRId64" "
         "start_pts=%"PRId64" "
         "decoding_duration_ts=%"PRId64" "
         "encoding_duration_ts=%"PRId64" "
@@ -4621,8 +4623,9 @@ log_params(
         avpipe_version(),
         params->bypass_transcoding, params->skip_decoding,
         get_xc_type_name(params->xc_type),
-        params->format, params->seekable, params->decoding_start_ts, params->start_pts,
-        params->decoding_duration_ts, params->decoding_duration_ts, params->start_segment_str,
+        params->format, params->seekable, params->decoding_start_ts, params->encoding_start_ts,
+        params->seek_time_ts, params->start_pts,
+        params->decoding_duration_ts, params->encoding_duration_ts, params->start_segment_str,
         params->video_bitrate, params->audio_bitrate, params->sample_rate,
         params->crf_str, params->preset, params->rc_max_rate, params->rc_buffer_size,
         params->video_seg_duration_ts, params->audio_seg_duration_ts, params->seg_duration,
