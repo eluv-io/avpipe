@@ -2948,14 +2948,15 @@ transcode_video_func(
         free(xc_frame);
 
         if (err != eav_success) {
-            elv_err("Stop video transcoding, err=%d, url=%s", err, params->url);
+            if (err != eav_skip_frame_late)
+                elv_err("Stop video transcoding, err=%d, url=%s", err, params->url);
             break;
         }
     }
 
     av_frame_free(&frame);
     av_frame_free(&filt_frame);
-    if (!xctx->err)
+    if (!xctx->err && err != eav_skip_frame_late)
         xctx->err = err;
 
     elv_channel_close(xctx->vc, 0);
@@ -3043,7 +3044,8 @@ transcode_audio_func(
         free(xc_frame);
 
         if (err != eav_success) {
-            elv_err("Stop audio transcoding, err=%d, url=%s", err, params->url);
+            if (err != eav_skip_frame_late)
+                elv_err("Stop audio transcoding, err=%d, url=%s", err, params->url);
             break;
         }
 
@@ -3051,7 +3053,7 @@ transcode_audio_func(
 
     av_frame_free(&frame);
     av_frame_free(&filt_frame);
-    if (!xctx->err)
+    if (!xctx->err && err != eav_skip_frame_late)
         xctx->err = err;
     
     elv_channel_close(xctx->ac, 0);
