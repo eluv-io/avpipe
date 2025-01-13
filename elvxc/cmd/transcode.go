@@ -263,7 +263,6 @@ func InitTranscode(cmdRoot *cobra.Command) error {
 	cmdTranscode.PersistentFlags().StringP("filename", "f", "", "(mandatory) filename to be transcoded.")
 	cmdTranscode.PersistentFlags().BoolP("bypass", "b", false, "bypass transcoding.")
 	cmdTranscode.PersistentFlags().BoolP("debug-frame-level", "", false, "debug frame level.")
-	cmdTranscode.PersistentFlags().BoolP("skip-decoding", "", false, "skip decoding when start-time-ts is set.")
 	cmdTranscode.PersistentFlags().BoolP("listen", "", false, "listen mode for RTMP.")
 	cmdTranscode.PersistentFlags().Int32("connection-timeout", 0, "connection timeout for RTMP when listening on a port or MPEGTS to receive first UDP datagram.")
 	cmdTranscode.PersistentFlags().Int32P("threads", "t", 1, "transcoding threads.")
@@ -353,11 +352,6 @@ func doTranscode(cmd *cobra.Command, args []string) error {
 	debugFrameLevel, err := cmd.Flags().GetBool("debug-frame-level")
 	if err != nil {
 		return fmt.Errorf("Invalid debug-frame-level flag")
-	}
-
-	skipDecoding, err := cmd.Flags().GetBool("skip-decoding")
-	if err != nil {
-		return fmt.Errorf("Invalid skip-decoding flag")
 	}
 
 	listen, err := cmd.Flags().GetBool("listen")
@@ -720,7 +714,6 @@ func doTranscode(cmd *cobra.Command, args []string) error {
 		Listen:                 listen,
 		ConnectionTimeout:      int(connectionTimeout),
 		FilterDescriptor:       filterDescriptor,
-		SkipDecoding:           skipDecoding,
 		ExtractImageIntervalTs: extractImageIntervalTs,
 		ChannelLayout:          channelLayout,
 		DebugFrameLevel:        debugFrameLevel,

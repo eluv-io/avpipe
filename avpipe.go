@@ -245,7 +245,6 @@ type XcParams struct {
 	Listen                 bool        `json:"listen"`
 	ConnectionTimeout      int         `json:"connection_timeout"`
 	FilterDescriptor       string      `json:"filter_descriptor"`
-	SkipDecoding           bool        `json:"skip_decoding"`
 	DebugFrameLevel        bool        `json:"debug_frame_level"`
 	ExtractImageIntervalTs int64       `json:"extract_image_interval_ts,omitempty"`
 	ExtractImagesTs        []int64     `json:"extract_images_ts,omitempty"`
@@ -1306,7 +1305,6 @@ func getCParams(params *XcParams) (*C.xcparams_t, error) {
 		listen:                    C.int(0),
 		connection_timeout:        C.int(params.ConnectionTimeout),
 		filter_descriptor:         C.CString(params.FilterDescriptor),
-		skip_decoding:             C.int(0),
 		extract_image_interval_ts: C.int64_t(params.ExtractImageIntervalTs),
 		extract_images_sz:         C.int(extractImagesSize),
 		video_time_base:           C.int(params.VideoTimeBase),
@@ -1332,10 +1330,6 @@ func getCParams(params *XcParams) (*C.xcparams_t, error) {
 
 	if params.ForceEqualFDuration {
 		cparams.force_equal_fduration = C.int(1)
-	}
-
-	if params.SkipDecoding {
-		cparams.skip_decoding = C.int(1)
 	}
 
 	if params.Listen {

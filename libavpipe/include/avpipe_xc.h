@@ -381,7 +381,7 @@ typedef struct xcparams_t {
     char    *url;                   // URL of the input for transcoding
     int     bypass_transcoding;     // if 0 means do transcoding, otherwise bypass transcoding (only copy)
     char    *format;                // Output format [Required, Values: dash, hls, mp4, fmp4]
-    int64_t decoding_start_ts;      // Decode the source starting from this time
+    int64_t decoding_start_ts;      // Decode the source starting from this time, will skip the packets until reach decoding_start_ts
     int64_t encoding_start_ts;      // Encode the sink starting from this time
     int64_t seek_time_ts;           // Seek to the seek_time_ts before reading any frame
     int64_t start_pts;              // Starting PTS for output
@@ -414,7 +414,6 @@ typedef struct xcparams_t {
     char    *crypt_key;             // 16-byte AES key in hex [Optional, Default: Generated]
     char    *crypt_kid;             // 16-byte UUID in hex [Optional, required for CENC]
     char    *crypt_key_url;         // Specify a key URL in the manifest [Optional, Default: key.bin]
-    int     skip_decoding;          // If set, then skip the packets until start_time_ts without decoding
 
     crypt_scheme_t  crypt_scheme;   // Content protection / DRM / encryption [Optional, Default: crypt_none]
     xc_type_t       xc_type;        // Default: 0 means transcode 'everything'

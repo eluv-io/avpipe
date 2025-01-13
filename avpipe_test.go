@@ -951,7 +951,7 @@ func TestSettingProfileLevel(t *testing.T) {
 	xcTest(t, outputDir, params, xcTestResult, true)
 }
 
-func TestStartTimeTsWithSkipDecoding(t *testing.T) {
+func TestStartTimeTsWithEncodingDurationTs(t *testing.T) {
 	url := "./media/video-960.mp4"
 	if fileMissing(url, fn()) {
 		return
@@ -965,11 +965,10 @@ func TestStartTimeTsWithSkipDecoding(t *testing.T) {
 		Format:              "dash",
 		StartPts:            900000,
 		EncodingStartTs:     0,
-		DecodingDurationTs:  720000,
-		EncodingDurationTs:  -1,
+		EncodingDurationTs:  720000,
+		DecodingDurationTs:  -1,
 		StartSegmentStr:     "19",
 		VideoSegDurationTs:  60000,
-		SkipDecoding:        true,
 		StartFragmentIndex:  1081,
 		ForceKeyInt:         60,
 		SegDuration:         "30",
@@ -1000,7 +999,7 @@ func TestStartTimeTsWithSkipDecoding(t *testing.T) {
 	}
 }
 
-func TestStartTimeTsWithoutSkipDecoding(t *testing.T) {
+func TestStartTimeTsWithDecodingStartTs(t *testing.T) {
 	url := "./media/video-960.mp4"
 	if fileMissing(url, fn()) {
 		return
@@ -1019,7 +1018,6 @@ func TestStartTimeTsWithoutSkipDecoding(t *testing.T) {
 		EncodingDurationTs:  -1,
 		StartSegmentStr:     "19",
 		VideoSegDurationTs:  60000,
-		SkipDecoding:        false,
 		StartFragmentIndex:  1081,
 		ForceKeyInt:         60,
 		SegDuration:         "30",

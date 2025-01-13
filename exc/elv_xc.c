@@ -1164,7 +1164,6 @@ main(
         .seekable = 0,
         .video_seg_duration_ts = -1,        /* input argument, same units as input stream PTS */
         .audio_seg_duration_ts = -1,        /* input argument, same units as input stream PTS */
-        .skip_decoding = 0,
         .start_pts = 0,
         .start_segment_str = strdup("1"),   /* 1-based */
         .decoding_start_ts = 0,             /* same units as input stream PTS */
@@ -1449,10 +1448,6 @@ main(
                     usage(argv[0], argv[i], EXIT_FAILURE);
                 }
                 if (p.stream_id < 0) {
-                    usage(argv[0], argv[i], EXIT_FAILURE);
-                }
-            } else if (!strcmp(argv[i], "-skip-decoding")) {
-                if (sscanf(argv[i+1], "%d", &p.skip_decoding) != 1) {
                     usage(argv[0], argv[i], EXIT_FAILURE);
                 }
             } else if (!strcmp(argv[i], "-seekable")) {

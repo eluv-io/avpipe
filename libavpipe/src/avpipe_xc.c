@@ -3225,15 +3225,13 @@ should_stop_decoding(
 }
 
 static int
-skip_bypass_decoding_start_ts(
+skip_until_decoding_start_ts(
     coderctx_t *decoder_context,
     AVPacket *input_packet,
     xcparams_t *params)
 {
-    /* If decoding_start_ts > 0 and it is a bypass skip here
-     * Also if decoding_start_ts > 0 and skip_decoding is set then skip here
-     */
-    if (params->decoding_start_ts <= 0 || (!params->skip_decoding && !params->bypass_transcoding))
+    /* If decoding_start_ts > 0 skip here. */
+    if (params->decoding_start_ts <= 0)
         return 0;
 
     /* If the format is not dash/hls then return.
@@ -3804,7 +3802,7 @@ avpipe_xc(
             if (input_packet &&
                 params->decoding_start_ts > 0 &&
                 (params->xc_type == xc_video || params->xc_type == xc_audio) &&
-                skip_bypass_decoding_start_ts(decoder_context, input_packet, params)) {
+                skip_until_decoding_start_ts(decoder_context, input_packet, params)) {
                     av_packet_unref(input_packet);
                     av_packet_free(&input_packet);
                     continue;
@@ -4570,7 +4568,6 @@ log_params(
         "url=%s "
         "version=%s "
         "bypass=%d "
-        "skip_decoding=%d "
         "xc_type=%s "
         "format=%s "
         "seekable=%d "
@@ -4626,7 +4623,7 @@ log_params(
         "level=%d",
         params->stream_id, params->url,
         avpipe_version(),
-        params->bypass_transcoding, params->skip_decoding,
+        params->bypass_transcoding,
         get_xc_type_name(params->xc_type),
         params->format, params->seekable, params->decoding_start_ts, params->encoding_start_ts,
         params->seek_time_ts, params->start_pts,
