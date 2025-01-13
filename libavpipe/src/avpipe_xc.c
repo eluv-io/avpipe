@@ -3653,8 +3653,7 @@ avpipe_xc(
         if (av_seek_frame(decoder_context->format_context,
                 decoder_context->video_stream_index, params->seek_time_ts, SEEK_SET) < 0) {
             elv_err("Failed seeking to desired start frame=%"PRId64", url=%s, continue without seeking", params->seek_time_ts, params->url);
-            //rc = eav_seek;
-            //goto xc_done;
+            /* Continue after reporting error */
         }
     }
 #endif
