@@ -2659,23 +2659,11 @@ transcode_audio_aac(
                 if (decoder_context->audio_duration < filt_frame->pts) {
                     decoder_context->audio_duration = filt_frame->pts;
 
-                    int should_skip = 0;
-                    int64_t frame_in_pts_offset = frame->pts - decoder_context->audio_input_start_pts[stream_index];
-                    /* If frame PTS < decoding_start_ts then don't encode audio frame */
-                    if (p->decoding_start_ts > 0 && frame_in_pts_offset < p->decoding_start_ts) {
-                         elv_dbg("ENCODE SKIP audio frame early pts=%" PRId64
-                            ", frame_in_pts_offset=%" PRId64 ", decoding_start_ts=%" PRId64,
-                            filt_frame->pts, frame_in_pts_offset, p->decoding_start_ts);
-                        should_skip = 1;
-                    }
-
-                    if (!should_skip) {
-                        ret = encode_frame(decoder_context, encoder_context, filt_frame, stream_index, p, debug_frame_level);
-                        if (ret == eav_write_frame || ret == eav_skip_frame_late) {
-                            av_frame_unref(filt_frame);
-                            av_frame_free(&filt_frame);
-                            return ret;
-                        }
+                    ret = encode_frame(decoder_context, encoder_context, filt_frame, stream_index, p, debug_frame_level);
+                    if (ret == eav_write_frame || ret == eav_skip_frame_late) {
+                        av_frame_unref(filt_frame);
+                        av_frame_free(&filt_frame);
+                        return ret;
                     }
                 }
                 else {
