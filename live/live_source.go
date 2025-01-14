@@ -7,6 +7,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"strings"
+	"syscall"
 
 	"github.com/eluv-io/errors-go"
 )
@@ -105,10 +106,7 @@ func (l *LiveSource) startMultiAudioUDP() (err error) {
 
 	l.Pid = l.cmd.Process.Pid
 	go func() {
-		err := l.cmd.Wait()
-		if err != nil {
-			log.Error("Failed to run command", err, "pid", l.Pid, "cmd", fmt.Sprintf("%s %s", l.cmd.Path, l.cmd.Args))
-		}
+		l.Wait()
 	}()
 
 	return nil
@@ -168,10 +166,7 @@ func (l *LiveSource) startUDP() (err error) {
 
 	l.Pid = l.cmd.Process.Pid
 	go func() {
-		err := l.cmd.Wait()
-		if err != nil {
-			log.Error("Failed to run command", err, "pid", l.Pid, "cmd", fmt.Sprintf("%s %s", l.cmd.Path, l.cmd.Args))
-		}
+		l.Wait()
 	}()
 
 	return nil
@@ -231,10 +226,7 @@ func (l *LiveSource) startSRT() (err error) {
 
 	l.Pid = l.cmd.Process.Pid
 	go func() {
-		err := l.cmd.Wait()
-		if err != nil {
-			log.Error("Failed to run command", err, "pid", l.Pid, "cmd", fmt.Sprintf("%s %s", l.cmd.Path, l.cmd.Args))
-		}
+		l.Wait()
 	}()
 
 	return nil
@@ -315,13 +307,21 @@ func (l *LiveSource) startRTMP(streamingMode string) (err error) {
 
 	l.Pid = l.cmd.Process.Pid
 	go func() {
-		err := l.cmd.Wait()
-		if err != nil {
-			log.Error("Failed to run command", err, "pid", l.Pid, "cmd", fmt.Sprintf("%s %s", l.cmd.Path, l.cmd.Args))
-		}
+		l.Wait()
 	}()
 
 	return nil
+}
+
+func (l *LiveSource) Wait() {
+	err := l.cmd.Wait()
+	if err != nil {
+		if exitErr, ok := err.(*exec.ExitError); ok {
+			if status, ok := exitErr.Sys().(syscall.WaitStatus); ok && !status.Signaled() {
+				log.Error("Failed to run command", err, "pid", l.Pid, "cmd", fmt.Sprintf("%s %s", l.cmd.Path, l.cmd.Args), "status.Signaled", status.Signaled())
+			}
+		}
+	}
 }
 
 func (l *LiveSource) Stop() (err error) {
