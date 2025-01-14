@@ -963,6 +963,7 @@ set_netint_h264_params(
 
     if (params->force_keyint > 0) {
         if (!strcmp(params->ecodec, "h264_ni_quadra_enc"))
+            /* gopPresetIdx=9 is recommended by Netint when encoding using h264_ni_quadra_enc */
             sprintf(enc_params, "gopPresetIdx=9:lowDelay=1:frameRate=%d:frameRateDenom=%d:intraPeriod=%d:maxFrameSize=%d",
                 s->avg_frame_rate.num, s->avg_frame_rate.den, params->force_keyint, max_frame_size);
         else
