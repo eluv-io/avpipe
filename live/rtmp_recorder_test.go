@@ -25,7 +25,8 @@ func TestRtmpToMp4_1(t *testing.T) {
 	xcParams := &avpipe.XcParams{
 		Format:              "fmp4-segment",
 		Seekable:            false,
-		DurationTs:          -1,
+		DecodingDurationTs:  -1,
+		EncodingDurationTs:  -1,
 		StartSegmentStr:     "1",
 		AudioBitrate:        394000,
 		VideoBitrate:        20000000,
@@ -145,7 +146,8 @@ func TestRtmpToMp4WithCancelling0(t *testing.T) {
 	xcParams := &avpipe.XcParams{
 		Format:              "fmp4-segment",
 		Seekable:            false,
-		DurationTs:          -1,
+		DecodingDurationTs:  -1,
+		EncodingDurationTs:  -1,
 		StartSegmentStr:     "1",
 		AudioBitrate:        256000,
 		VideoBitrate:        20000000,
@@ -215,7 +217,8 @@ func TestRtmpToMp4WithCancelling1(t *testing.T) {
 	xcParams := &avpipe.XcParams{
 		Format:              "fmp4-segment",
 		Seekable:            false,
-		DurationTs:          -1,
+		DecodingDurationTs:  -1,
+		EncodingDurationTs:  -1,
 		StartSegmentStr:     "1",
 		AudioBitrate:        256000,
 		VideoBitrate:        20000000,
@@ -285,7 +288,8 @@ func TestRtmpToMp4WithCancelling2(t *testing.T) {
 	xcParams := &avpipe.XcParams{
 		Format:              "fmp4-segment",
 		Seekable:            false,
-		DurationTs:          -1,
+		DecodingDurationTs:  -1,
+		EncodingDurationTs:  -1,
 		StartSegmentStr:     "1",
 		AudioBitrate:        384000,   // FS1-19-10-14.ts audio bitrate
 		VideoBitrate:        20000000, // fox stream bitrate
@@ -365,7 +369,8 @@ func TestRtmpToMp4WithCancelling3(t *testing.T) {
 	xcParams := &avpipe.XcParams{
 		Format:              "fmp4-segment",
 		Seekable:            false,
-		DurationTs:          -1,
+		DecodingStartTs:     -1,
+		EncodingDurationTs:  -1,
 		StartSegmentStr:     "1",
 		AudioBitrate:        256000,
 		VideoBitrate:        20000000,
@@ -448,7 +453,8 @@ func TestRtmpToMp4WithCancelling4(t *testing.T) {
 	xcParams := &avpipe.XcParams{
 		Format:              "fmp4-segment",
 		Seekable:            false,
-		DurationTs:          -1,
+		DecodingDurationTs:  -1,
+		EncodingDurationTs:  -1,
 		StartSegmentStr:     "1",
 		AudioBitrate:        256000,
 		VideoBitrate:        20000000,
