@@ -1048,6 +1048,55 @@ func TestStartTimeTsWithDecodingStartTs(t *testing.T) {
 	}
 }
 
+func TestStartTimeTsWithDecodingStartTsBypass(t *testing.T) {
+	url := "./media/video-960.mp4"
+	if fileMissing(url, fn()) {
+		return
+	}
+
+	outputDir := path.Join(baseOutPath, fn())
+	boilerplate(t, outputDir, "")
+
+	params := &avpipe.XcParams{
+		BypassTranscoding:   true,
+		Format:              "dash",
+		StartPts:            900000,
+		DecodingStartTs:     180000,
+		EncodingStartTs:     0,
+		DecodingDurationTs:  720000,
+		EncodingDurationTs:  -1,
+		StartSegmentStr:     "19",
+		VideoSegDurationTs:  60000,
+		StartFragmentIndex:  1081,
+		ForceKeyInt:         60,
+		SegDuration:         "30",
+		Ecodec:              h264Codec,
+		EncHeight:           -1,
+		EncWidth:            -1,
+		XcType:              avpipe.XcVideo,
+		StreamId:            -1,
+		SyncAudioToStreamId: -1,
+		Url:                 url,
+		DebugFrameLevel:     debugFrameLevel,
+	}
+
+	avpipe.InitUrlIOHandler(url, &fileInputOpener{url: url}, &fileOutputOpener{dir: outputDir})
+	boilerXc(t, params)
+
+	files, err := ioutil.ReadDir(outputDir)
+	assert.NoError(t, err)
+	assert.Equal(t, 14, len(files))
+
+	// Check the ABR segment is within the expected chunks
+	// Starting chunk is "vchunk-stream0-00019.m4s" and ending chunk is "vchunk-stream0-00030.m4s".
+	for i := 0; i < len(files); i++ {
+		if files[i].Name() == "vchunk-stream0-00031.m4s" ||
+			files[i].Name() == "vchunk-stream0-00018.m4s" {
+			assert.Error(t, fmt.Errorf("failed skip decoding"))
+		}
+	}
+}
+
 func TestAudioAAC2AACMezMaker(t *testing.T) {
 	url := "./media/bbb-audio-stereo-2min.aac"
 	if fileMissing(url, fn()) {

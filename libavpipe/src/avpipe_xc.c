@@ -3779,7 +3779,7 @@ avpipe_xc(
             }
 
             /*
-             * Skip the input packet if the packet timestamp is smaller than decoding_start_ts and it is bypass mode.
+             * Skip the input packet if the packet timestamp is smaller than decoding_start_ts.
              * The fact that avpipe mezzanine generated files don't have B-frames let us to skip before decoding.
              * The assumption here is that the input stream does not have any B-frames, otherwise we can not skip
              * the input packets without decoding.
