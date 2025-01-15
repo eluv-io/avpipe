@@ -11,13 +11,13 @@ import (
 	"github.com/eluv-io/avpipe"
 )
 
-func TestRtmpToMp4_1(t *testing.T) {
-	setupLogging()
+func TestRtmpToMp4(t *testing.T) {
 	outputDir := path.Join(baseOutPath, fn())
 	setupOutDir(t, outputDir)
 
 	liveSource := NewLiveSource()
 	url := fmt.Sprintf(RTMP_SOURCE, liveSource.Port)
+	log.Info("STARTING " + fn() + " url=" + url)
 
 	done := make(chan bool, 1)
 	testComplete := make(chan bool, 1)
@@ -133,15 +133,13 @@ func TestRtmpToMp4_1(t *testing.T) {
 // Cancels the RTMP live stream transcoding, with no source, immediately after initializing the transcoding (after XcInit).
 // This test was hanging with avpipe release-1.15 and before (this is fixed in release-1.16).
 func TestRtmpToMp4WithCancelling0(t *testing.T) {
-	setupLogging()
 	outputDir := path.Join(baseOutPath, fn())
 	setupOutDir(t, outputDir)
-
-	log.Info("STARTING " + outputDir)
 
 	done := make(chan bool, 1)
 	liveSource := NewLiveSource()
 	url := fmt.Sprintf(RTMP_SOURCE, liveSource.Port)
+	log.Info("STARTING " + fn() + " url=" + url)
 
 	xcParams := &avpipe.XcParams{
 		Format:              "fmp4-segment",
@@ -204,15 +202,13 @@ func TestRtmpToMp4WithCancelling0(t *testing.T) {
 
 // Cancels the RTMP live stream transcoding immediately after initializing the transcoding (after XcInit).
 func TestRtmpToMp4WithCancelling1(t *testing.T) {
-	setupLogging()
 	outputDir := path.Join(baseOutPath, fn())
 	setupOutDir(t, outputDir)
-
-	log.Info("STARTING " + outputDir)
 
 	done := make(chan bool, 1)
 	liveSource := NewLiveSource()
 	url := fmt.Sprintf(RTMP_SOURCE, liveSource.Port)
+	log.Info("STARTING " + fn() + " url=" + url)
 
 	xcParams := &avpipe.XcParams{
 		Format:              "fmp4-segment",
@@ -275,14 +271,12 @@ func TestRtmpToMp4WithCancelling1(t *testing.T) {
 
 // Cancels the RTMP live stream transcoding immediately after starting the transcoding (1 sec after XcRun).
 func TestRtmpToMp4WithCancelling2(t *testing.T) {
-	setupLogging()
 	outputDir := path.Join(baseOutPath, fn())
 	setupOutDir(t, outputDir)
 
-	log.Info("STARTING " + outputDir)
-
 	liveSource := NewLiveSource()
 	url := fmt.Sprintf(RTMP_SOURCE, liveSource.Port)
+	log.Info("STARTING " + fn() + " url=" + url)
 	done := make(chan bool, 1)
 
 	xcParams := &avpipe.XcParams{
@@ -356,14 +350,12 @@ func TestRtmpToMp4WithCancelling2(t *testing.T) {
 
 // Cancels the RTMP live stream transcoding some time after starting the transcoding (20 sec after XcRun).
 func TestRtmpToMp4WithCancelling3(t *testing.T) {
-	setupLogging()
 	outputDir := path.Join(baseOutPath, fn())
 	setupOutDir(t, outputDir)
 
-	log.Info("STARTING " + outputDir)
-
 	liveSource := NewLiveSource()
 	url := fmt.Sprintf(RTMP_SOURCE, liveSource.Port)
+	log.Info("STARTING " + fn() + " url=" + url)
 	done := make(chan bool, 1)
 
 	xcParams := &avpipe.XcParams{
@@ -440,14 +432,12 @@ func TestRtmpToMp4WithCancelling3(t *testing.T) {
 
 // Cancels the RTMP live stream transcoding immediately 1 sec after starting the transcoding (after XcRun), while there is no source.
 func TestRtmpToMp4WithCancelling4(t *testing.T) {
-	setupLogging()
 	outputDir := path.Join(baseOutPath, fn())
 	setupOutDir(t, outputDir)
 
-	log.Info("STARTING " + outputDir)
-
 	liveSource := NewLiveSource()
 	url := fmt.Sprintf(RTMP_SOURCE, liveSource.Port)
+	log.Info("STARTING " + fn() + " url=" + url)
 	done := make(chan bool, 1)
 
 	xcParams := &avpipe.XcParams{

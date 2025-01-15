@@ -12,12 +12,12 @@ import (
 )
 
 func TestUdpToMp4(t *testing.T) {
-	setupLogging()
 	outputDir := path.Join(baseOutPath, fn())
 	setupOutDir(t, outputDir)
 
 	liveSource := NewLiveSource()
 	url := fmt.Sprintf("udp://localhost:%d", liveSource.Port)
+	log.Info("STARTING " + fn() + " url=" + url)
 
 	done := make(chan bool, 1)
 	testComplete := make(chan bool, 1)
@@ -119,12 +119,12 @@ func TestUdpToMp4(t *testing.T) {
 }
 
 func TestMultiAudioUdpToMp4(t *testing.T) {
-	setupLogging()
 	outputDir := path.Join(baseOutPath, fn())
 	setupOutDir(t, outputDir)
 
 	liveSource := NewLiveSource()
 	url := fmt.Sprintf("udp://localhost:%d", liveSource.Port)
+	log.Info("STARTING " + fn() + " url=" + url)
 
 	err := liveSource.Start("multi_audio_udp")
 	if err != nil {
@@ -201,14 +201,12 @@ func TestMultiAudioUdpToMp4(t *testing.T) {
 
 // Cancels the live stream transcoding immediately after initializing the transcoding (after XcInit).
 func TestUdpToMp4WithCancelling1(t *testing.T) {
-	setupLogging()
 	outputDir := path.Join(baseOutPath, fn())
 	setupOutDir(t, outputDir)
 
-	log.Info("STARTING " + outputDir)
-
 	liveSource := NewLiveSource()
 	url := fmt.Sprintf("udp://localhost:%d", liveSource.Port)
+	log.Info("STARTING " + fn() + " url=" + url)
 
 	err := liveSource.Start("udp")
 	if err != nil {
@@ -260,14 +258,12 @@ func TestUdpToMp4WithCancelling1(t *testing.T) {
 
 // Cancels the live stream transcoding immediately after starting the transcoding (1 sec after XcRun).
 func TestUdpToMp4WithCancelling2(t *testing.T) {
-	setupLogging()
 	outputDir := path.Join(baseOutPath, fn())
 	setupOutDir(t, outputDir)
 
-	log.Info("STARTING " + outputDir)
-
 	liveSource := NewLiveSource()
 	url := fmt.Sprintf("udp://localhost:%d", liveSource.Port)
+	log.Info("STARTING " + fn() + " url=" + url)
 	done := make(chan bool, 1)
 
 	err := liveSource.Start("udp")
@@ -333,14 +329,12 @@ func TestUdpToMp4WithCancelling2(t *testing.T) {
 
 // Cancels the live stream transcoding some time after starting the transcoding (20 sec after XcRun).
 func TestUdpToMp4WithCancelling3(t *testing.T) {
-	setupLogging()
 	outputDir := path.Join(baseOutPath, fn())
 	setupOutDir(t, outputDir)
 
-	log.Info("STARTING " + outputDir)
-
 	liveSource := NewLiveSource()
 	url := fmt.Sprintf("udp://localhost:%d", liveSource.Port)
+	log.Info("STARTING " + fn() + " url=" + url)
 	done := make(chan bool, 1)
 
 	err := liveSource.Start("udp")
@@ -406,14 +400,12 @@ func TestUdpToMp4WithCancelling3(t *testing.T) {
 
 // Cancels the live stream transcoding immediately 1 sec after starting the transcoding (after XcRun), while there is no source.
 func TestUdpToMp4WithCancelling4(t *testing.T) {
-	setupLogging()
 	outputDir := path.Join(baseOutPath, fn())
 	setupOutDir(t, outputDir)
 
-	log.Info("STARTING " + outputDir)
-
 	liveSource := NewLiveSource()
 	url := fmt.Sprintf("udp://localhost:%d", liveSource.Port)
+	log.Info("STARTING " + fn() + " url=" + url)
 	done := make(chan bool, 1)
 
 	err := liveSource.Start("udp")
