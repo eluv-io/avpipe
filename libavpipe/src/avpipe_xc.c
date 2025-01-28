@@ -451,6 +451,12 @@ prepare_decoder(
         char timeout[32];
         sprintf(timeout, "%d", params->connection_timeout);
         av_dict_set(&opts, "timeout", timeout, 0);
+    } else if (decoder_context->is_srt && params->listen && params->connection_timeout > 0) {
+        char timeout[32];
+        int64_t connection_timeout_micros = MICRO_IN_SEC * (int64_t)params->connection_timeout;
+        sprintf(timeout, "%"PRId64, connection_timeout_micros);
+        /* SRT timeout is in microseconds */
+        av_dict_set(&opts, "listen_timeout", timeout, 0);
     }
 
     /* Allocate AVFormatContext in format_context and find input file format */
@@ -490,6 +496,21 @@ prepare_decoder(
             elv_dbg("VIDEO STREAM %d, codec_id=%s, stream_id=%d, timebase=%d, xc_type=%d, url=%s",
                 i, avcodec_get_name(decoder_context->codec_parameters[i]->codec_id), decoder_context->stream[i]->id,
                 decoder_context->stream[i]->time_base.den, params ? params->xc_type : xc_none, url);
+            
+            if (decoder_context->video_stream_index == i && decoder_context->format_context->streams[i]->codecpar->width == 0) {
+                /* This can sometimes happen when ffmpeg fails to decode any frames from the input
+                 * within the default probe size. Default parameters are written, but this is a sign
+                 * that the codec parameters have not been set. Downstream filter operations will
+                 * fail in this case, as it assumes that height/width/pixel info is set accurately.
+                 * 
+                 * In particular, this case can sometimes be triggered by the content-fabric
+                 * integration test that tests live restarts. In that case, it's been observed that
+                 * retrying the probe entirely fixes the issue.
+                 * 
+                 * See libavformat/utils.c:has_codec_parameters for the checks in ffmpeg internals. */
+                elv_err("avformat_find_stream_info failed to get input stream info");
+                return eav_stream_info;
+            }
             break;
 
         case AVMEDIA_TYPE_AUDIO:
@@ -849,19 +870,28 @@ set_h264_params(
     AVCodecContext *encoder_codec_context = encoder_context->codec_context[index];
     int framerate = 0;
 
-    /* Codec level and profile must be set correctly per H264 spec */
-    encoder_codec_context->profile = avpipe_h264_guess_profile(params->bitdepth,
-        encoder_codec_context->width, encoder_codec_context->height);
+    if (avpipe_h264_profile(params->profile) > 0) {
+        /* If there is a valid parameter for profile use it */
+        encoder_codec_context->profile = avpipe_h264_profile(params->profile);
+    } else {
+        /* Codec level and profile must be set correctly per H264 spec */
+        encoder_codec_context->profile = avpipe_h264_guess_profile(params->bitdepth,
+            encoder_codec_context->width, encoder_codec_context->height);
+    }
 
     if (encoder_codec_context->framerate.den != 0)
         framerate = encoder_codec_context->framerate.num/encoder_codec_context->framerate.den;
 
-    encoder_codec_context->level = avpipe_h264_guess_level(
+    if (params->level > 0) {
+        encoder_codec_context->level = params->level;
+    } else {
+        encoder_codec_context->level = avpipe_h264_guess_level(
                                                 encoder_codec_context->profile,
                                                 encoder_codec_context->bit_rate,
                                                 framerate,
                                                 encoder_codec_context->width,
                                                 encoder_codec_context->height);
+    }
 }
 
 static void
@@ -878,7 +908,15 @@ set_h265_params(
      * which is the most common type of video used with consumer devices
      * For HDR10 we need MAIN 10 that supports 10 bit profile.
      */
-    if (params->bitdepth == 8) {
+    int profile = avpipe_h265_profile(params->profile);
+    if (profile > 0) {
+        /* Can be only main or main10 profiles */
+        av_opt_set(encoder_codec_context->priv_data, "profile", params->profile, 0);
+        if (params->bitdepth == 10) {
+            av_opt_set(encoder_codec_context->priv_data, "x265-params",
+                "hdr-opt=1:repeat-headers=1:colorprim=bt2020:transfer=smpte2084:colormatrix=bt2020nc", 0);
+        }
+    } else if (params->bitdepth == 8) {
         av_opt_set(encoder_codec_context->priv_data, "profile", "main", 0);
     } else if (params->bitdepth == 10) {
         av_opt_set(encoder_codec_context->priv_data, "profile", "main10", 0);
@@ -958,13 +996,6 @@ set_netint_h265_params(
 
 /* Borrowed from libavcodec/nvenc.h since it is not exposed */
 enum {
-    NV_ENC_H264_PROFILE_BASELINE,
-    NV_ENC_H264_PROFILE_MAIN,
-    NV_ENC_H264_PROFILE_HIGH,
-    NV_ENC_H264_PROFILE_HIGH_444P,
-};
-
-enum {
     PRESET_DEFAULT = 0,
     PRESET_SLOW,
     PRESET_MEDIUM,
@@ -997,7 +1028,11 @@ set_nvidia_params(
      * The encoder_codec_context->profile is set just for proper log message, otherwise it has no impact
      * when the encoder is nvidia.
      */
-    if (encoder_codec_context->height <= 480) {
+    int profile = avpipe_nvh264_profile(params->profile);
+    if (profile > 0) {
+        av_opt_set_int(encoder_codec_context->priv_data, "profile", profile, 0);
+        encoder_codec_context->profile = profile;
+    } else if (encoder_codec_context->height <= 480) {
         av_opt_set_int(encoder_codec_context->priv_data, "profile", NV_ENC_H264_PROFILE_BASELINE, 0);
         encoder_codec_context->profile = FF_PROFILE_H264_BASELINE;
     } else {
@@ -1464,11 +1499,11 @@ prepare_audio_encoder(
         }
 
         elv_dbg("encoder audio stream index=%d, bitrate=%d, sample_fmts=%s, timebase=%d, output frame_size=%d, sample_rate=%d, channel_layout=%s",
-            index, encoder_context->codec_context[output_stream_index]->bit_rate,
+            stream_index, encoder_context->codec_context[output_stream_index]->bit_rate,
             av_get_sample_fmt_name(encoder_context->codec_context[output_stream_index]->sample_fmt),
             encoder_context->codec_context[output_stream_index]->time_base.den, encoder_context->codec_context[output_stream_index]->frame_size,
             encoder_context->codec_context[output_stream_index]->sample_rate,
-    	channel_name);
+    	    channel_name);
 
         if (avcodec_parameters_from_context(
             encoder_context->stream[output_stream_index]->codecpar,
@@ -2225,9 +2260,11 @@ encode_frame(
 
         if (selected_decoded_audio(decoder_context, stream_index) >= 0) {
             /* Set the packet duration if it is not the first audio packet */
-            if (encoder_context->audio_pts[stream_index] != AV_NOPTS_VALUE)
+            if (encoder_context->audio_pts[stream_index] != AV_NOPTS_VALUE) {
                 output_packet->duration = output_packet->pts - encoder_context->audio_pts[stream_index];
-            else
+                if (!strcmp(params->ecodec2, "aac"))
+                    output_packet->duration = 1024;
+            } else
                 output_packet->duration = 0;
             encoder_context->audio_pts[stream_index] = output_packet->pts;
             encoder_context->audio_frames_written[stream_index]++;
@@ -3702,6 +3739,7 @@ avpipe_xc(
         encoder_context->audio_pts[j] = AV_NOPTS_VALUE;
         encoder_context->first_read_packet_pts[j] = AV_NOPTS_VALUE;
         encoder_context->audio_last_pts_sent_encode[j] = AV_NOPTS_VALUE;
+        encoder_context->audio_last_pts_encoded[j] = AV_NOPTS_VALUE;
     }
     decoder_context->first_key_frame_pts = AV_NOPTS_VALUE;
     decoder_context->is_av_synced = 0;
@@ -3723,11 +3761,15 @@ avpipe_xc(
         if (rc < 0) {
             av_packet_free(&input_packet);
             av_read_frame_rc = rc;
-            if (rc == AVERROR_EOF || rc == -1)
+            if (rc == AVERROR_EOF || rc == -1) {
+                elv_log("av_read_frame() EOF or -1 rc=%d, url=%s", rc, params->url);
                 rc = eav_success;
-            else {
+            } else {
                 elv_err("av_read_frame() rc=%d, url=%s", rc, params->url);
-                rc = eav_read_input;
+                if (rc == AVERROR(ETIMEDOUT))
+                    rc = eav_io_timeout;
+                else
+                    rc = eav_read_input;
             }
             break;
         }
@@ -4189,10 +4231,14 @@ get_xc_type_name(
         return "xc_audio_pan";
     case xc_audio_merge:
         return "xc_audio_merge";
+    case xc_mux:
+        return "xc_mux";
     case xc_extract_images:
         return "xc_extract_images";
     case xc_extract_all_images:
         return "xc_extract_all_images";
+    case xc_probe:
+        return "xc_probe";
     default:
         return "none";
     }
@@ -4533,6 +4579,11 @@ check_params(
         }
     }
 
+    if (avpipe_check_level(params->level) < 0) {
+        elv_err("Invalid level %d", params->level);
+        return eav_param;
+    }
+
     return eav_success;
 }
 
@@ -4607,6 +4658,8 @@ log_params(
         "video_time_base=%d/%d "
         "video_frame_duration_ts=%d "
         "rotate=%d "
+        "profile=%s "
+        "level=%d",
         "deinterlace=%d",
         params->stream_id, params->url,
         avpipe_version(),
@@ -4630,7 +4683,7 @@ log_params(
         params->master_display ? params->master_display : "",
         params->filter_descriptor,
         params->extract_image_interval_ts, params->extract_images_sz,
-        1, params->video_time_base, params->video_frame_duration_ts, params->rotate, params->deinterlace);
+        params->profile ? params->profile : "", params->level,  params->deinterlace);
     elv_log("AVPIPE XCPARAMS %s", buf);
 }
 

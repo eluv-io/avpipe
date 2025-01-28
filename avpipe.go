@@ -37,7 +37,9 @@ package avpipe
 // #include "elv_log.h"
 import "C"
 import (
+	"encoding/json"
 	"fmt"
+	"io"
 	"math/big"
 	"sync"
 	"unsafe"
@@ -116,6 +118,13 @@ const (
 	XcProfileH264Heigh              = C.FF_PROFILE_H264_HIGH     // 100
 	XcProfileH264Heigh10            = C.FF_PROFILE_H264_HIGH_10  // 110
 )
+
+type SeekReadWriteCloser interface {
+	io.Seeker
+	io.Reader
+	io.Writer
+	io.Closer
+}
 
 func XcTypeFromString(xcTypeStr string) XcType {
 	var xcType XcType
@@ -240,7 +249,9 @@ type XcParams struct {
 	VideoTimeBase          int         `json:"video_time_base"`
 	VideoFrameDurationTs   int         `json:"video_frame_duration_ts"`
 	Rotate                 int         `json:"rotate"`
-	Deinterlace            int         `json:"deinterlace"`
+	Profile                string      `json:"profile"`
+	Level                  int         `json:"level"`
+        Deinterlace            int         `json:"deinterlace"`
 }
 
 // NewXcParams initializes a XcParams struct with unset/default values
@@ -274,6 +285,45 @@ func NewXcParams() *XcParams {
 		WatermarkXLoc:          "W*0.05",
 		WatermarkYLoc:          "H*0.9",
 	}
+}
+
+// Custom unmarshalJSON for XcParams to make things backwards compatible with prior serialization
+//
+// Explanations of backwards compatible serializations:
+//  1. NEW: The number of audios is specified by the length of the `AudioIndex` slice.
+//     OLD: The number of audios was specified by a larger `AudioIndex` array and a `n_audio` field specifying the number.
+//     CONVERSION: If a `n_audio` field exists, the `AudioIndex` slice is shortened to be that length.
+func (p *XcParams) UnmarshalJSON(data []byte) error {
+	// The alias does not have the problematic unmarshal JSON that makes embedding XcParams into xcParamsDecoder bad
+	type xcpAlias XcParams
+
+	type xcParamsDecoder struct {
+		xcpAlias
+		NumAudio int32 `json:"n_audio"`
+	}
+
+	var xcpd xcParamsDecoder
+	xcpd.xcpAlias = xcpAlias(*p)
+	if err := json.Unmarshal(data, &xcpd); err != nil {
+		return err
+	}
+
+	*p = XcParams(xcpd.xcpAlias)
+
+	if xcpd.NumAudio != 0 && len(p.AudioIndex) > int(xcpd.NumAudio) {
+		p.AudioIndex = p.AudioIndex[:xcpd.NumAudio]
+	}
+
+	return nil
+}
+
+func (p *XcParams) UnmarshalMap(m map[string]interface{}) error {
+	// Pass through JSON unmarshalling for centralization of unmarshalling
+	b, err := json.Marshal(m)
+	if err != nil {
+		return err
+	}
+	return p.UnmarshalJSON(b)
 }
 
 type AVMediaType int
@@ -966,36 +1016,36 @@ func (h *ioHandler) OutWriter(fd C.int64_t, buf []byte) (int, error) {
 }
 
 //export AVPipeSeekOutput
-func AVPipeSeekOutput(handler C.int64_t, fd C.int64_t, offset C.int64_t, whence C.int) C.int {
+func AVPipeSeekOutput(handler C.int64_t, fd C.int64_t, offset C.int64_t, whence C.int) C.int64_t {
 	gMutex.Lock()
 	h := gHandlers[int64(handler)]
 	if h == nil {
 		gMutex.Unlock()
-		return C.int(-1)
+		return C.int64_t(-1)
 	}
 	gMutex.Unlock()
 	n, err := h.OutSeeker(fd, offset, whence)
 	if err != nil {
-		return C.int(-1)
+		return C.int64_t(-1)
 	}
-	return C.int(n)
+	return C.int64_t(n)
 }
 
 //export AVPipeSeekMuxOutput
-func AVPipeSeekMuxOutput(fd C.int64_t, offset C.int64_t, whence C.int) C.int {
+func AVPipeSeekMuxOutput(fd C.int64_t, offset C.int64_t, whence C.int) C.int64_t {
 	gMutex.Lock()
 	outHandler := gMuxHandlers[int64(fd)]
 	if outHandler == nil {
 		gMutex.Unlock()
-		return C.int(-1)
+		return C.int64_t(-1)
 	}
 	gMutex.Unlock()
 
 	n, err := outHandler.Seek(int64(offset), int(whence))
 	if err != nil {
-		return C.int(-1)
+		return C.int64_t(-1)
 	}
-	return C.int(n)
+	return C.int64_t(n)
 }
 
 func (h *ioHandler) OutSeeker(fd C.int64_t, offset C.int64_t, whence C.int) (int64, error) {
@@ -1255,7 +1305,9 @@ func getCParams(params *XcParams) (*C.xcparams_t, error) {
 		video_time_base:           C.int(params.VideoTimeBase),
 		video_frame_duration_ts:   C.int(params.VideoFrameDurationTs),
 		rotate:                    C.int(params.Rotate),
-		deinterlace:               C.dif_type(params.Deinterlace),
+		profile:                   C.CString(params.Profile),
+		level:                     C.int(params.Level),
+                deinterlace:               C.dif_type(params.Deinterlace),
 
 		// All boolean params are handled below
 	}
@@ -1338,6 +1390,7 @@ func Mux(params *XcParams) error {
 		return EAV_PARAM
 	}
 
+	params.XcType = XcMux
 	cparams, err := getCParams(params)
 	if err != nil {
 		log.Error("Muxing failed", err, "url", params.Url)

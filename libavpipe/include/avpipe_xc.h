@@ -18,12 +18,20 @@
 #include "elv_channel.h"
 
 #define MAX_STREAMS	        64
-#define MAX_MUX_IN_STREAM   4096
+#define MAX_MUX_IN_STREAM   (4*4096)        // Up to 4*4096 ABR segments
 
 #define AVIO_OUT_BUF_SIZE   (1*1024*1024)   // avio output buffer size
 #define AVIO_IN_BUF_SIZE    (1*1024*1024)   // avio input buffer size
 
 //#define DEBUG_UDP_PACKET  // Uncomment for development, debugging and testing
+
+/* Borrowed from libavcodec/nvenc.h since it is not exposed */
+enum {
+    NV_ENC_H264_PROFILE_BASELINE,
+    NV_ENC_H264_PROFILE_MAIN,
+    NV_ENC_H264_PROFILE_HIGH,
+    NV_ENC_H264_PROFILE_HIGH_444P,
+};
 
 /*
  * Adding/deleting an error code needs adding/deleting corresponding GO
@@ -112,7 +120,7 @@ typedef struct udp_packet_t {
 typedef struct mux_input_ctx_t {
     int     n_parts;                    /* Number of input parts */
     int     index;                      /* Index of current input part that should be processed */
-    char    *parts[MAX_MUX_IN_STREAM];  /* All the input parts */
+    char    **parts;                    /* All the input parts */
     int     header_size;
 } mux_input_ctx_t;
 
@@ -449,6 +457,8 @@ typedef struct xcparams_t {
     int         debug_frame_level;
     int         connection_timeout;         // Connection timeout in sec for RTMP or MPEGTS protocols
     int         rotate;                     // For video transpose or rotation
+    char        *profile;
+    int         level;
     dif_type    deinterlace;                // Deinterlacing filter
 } xcparams_t;
 
@@ -458,9 +468,11 @@ typedef struct side_data_display_matrix_t {
     double rotation;    // Original rotation is CCW with values from -180 to 180
     double rotation_cw; // Computed CW rotation with values 0 to 360
 } side_data_display_matrix_t;
+
 typedef struct side_data_t {
     side_data_display_matrix_t display_matrix;
 } side_data_t;
+
 typedef struct stream_info_t {
     int         stream_index;       // Stream index in AVFormatContext
     int         stream_id;          // Format-specific stream ID, set by libavformat during decoding
@@ -748,6 +760,50 @@ avpipe_h264_guess_profile(
     int bitdepth,
     int width,
     int height);
+
+/**
+ * @brief   Helper function to obtain FFmpeg constant for an h264 profile name. 
+ * 
+ * @param   profile_name  A pointer to the profile name.
+ * @return  Returns the FFmpeg constant if profile name is valid.
+ *          Returns 0 if profile name is NULL. For invalid profile name return -1.
+ */
+int
+avpipe_h264_profile(
+    char *profile_name);
+
+
+/**
+ * @brief   Helper function to obtain FFmpeg constant for an h265 profile name. 
+ * 
+ * @param   profile_name  A pointer to the profile name.
+ * @return  Returns the FFmpeg constant if profile name is valid.
+ *          Returns 0 if profile name is NULL. For invalid profile name return -1.
+ */
+int
+avpipe_h265_profile(
+    char *profile_name);
+
+/**
+ * @brief   Helper function to obtain FFmpeg constant for an nvidia h264 profile name. 
+ * 
+ * @param   profile_name  A pointer to the profile name.
+ * @return  Returns the FFmpeg constant if profile name is valid.
+ *          Returns 0 if profile name is NULL. For invalid profile name return -1.
+ */
+int
+avpipe_nvh264_profile(
+    char *profile_name);
+
+/**
+ * @brief   Helper function to check level. 
+ * 
+ * @param   level
+ * @return  Returns 1 if the level is valid, otherwise return -1 for an invalid level.
+ */
+int
+avpipe_check_level(
+    int level);
 
 /**
  * @brief   Helper function to deep copy an xc_params. In the case of OOM, may fail to initialize

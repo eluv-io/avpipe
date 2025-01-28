@@ -61,8 +61,8 @@ int64_t AVPipeOpenOutput(int64_t, int, int, int64_t, int);
 int64_t AVPipeOpenMuxOutput(char *, int);
 int     AVPipeWriteOutput(int64_t, int64_t, uint8_t *, int);
 int     AVPipeWriteMuxOutput(int64_t, uint8_t *, int);
-int     AVPipeSeekOutput(int64_t, int64_t, int64_t, int);
-int     AVPipeSeekMuxOutput(int64_t, int64_t, int);
+int64_t AVPipeSeekOutput(int64_t, int64_t, int64_t, int);
+int64_t AVPipeSeekMuxOutput(int64_t, int64_t, int);
 int     AVPipeCloseOutput(int64_t, int64_t);
 int     AVPipeCloseMuxOutput(int64_t);
 int     AVPipeStatOutput(int64_t, int64_t, int, avpipe_buftype_t, avp_stat_t, void *);
@@ -446,7 +446,7 @@ read_channel_again:
         if (rc == ETIMEDOUT) {
             if (c->is_udp_started) {
                 elv_log("TIMEDOUT in UDP rcv channel, url=%s", c->url);
-                return -1;
+                return AVERROR(ETIMEDOUT);
             }
             goto read_channel_again;
         }
@@ -473,7 +473,7 @@ read_channel_again:
             free(udp_packet);
         }
         if (debug_frame_level)
-            elv_dbg("IN READ UDP read=%d pos=%"PRId64" total=%"PRId64", url=%s", r, c->read_pos, c->read_bytes, c->url);
+            elv_dbg("IN READ UDP read=%d, pos=%"PRId64", total=%"PRId64", url=%s", r, c->read_pos, c->read_bytes, c->url);
     }
 
     return r;
@@ -607,7 +607,7 @@ out_opener(
         return -1;
     }
 
-    outctx->opaque = (int *) malloc(sizeof(int64_t));
+    outctx->opaque = (int64_t *) malloc(sizeof(int64_t));
     *((int64_t *)(outctx->opaque)) = fd;
 
     return 0;
@@ -651,7 +651,7 @@ out_write_packet(
     }
 
     if (xcparams && xcparams->debug_frame_level)
-        elv_dbg("OUT WRITE stream_index=%d, fd=%"PRId64", size=%d written=%d pos=%d total=%d",
+        elv_dbg("OUT WRITE stream_index=%d, fd=%"PRId64", size=%d, written=%d, pos=%d, total=%d",
             outctx->stream_index, fd, buf_size, bwritten, outctx->write_pos, outctx->written_bytes);
 
     return buf_size;
@@ -667,7 +667,7 @@ out_seek(
     ioctx_t *inctx = outctx->inctx;
     int64_t h = *((int64_t *)(inctx->opaque));
     int64_t fd = *(int64_t *)outctx->opaque;
-    int rc = AVPipeSeekOutput(h, fd, offset, whence);
+    int64_t rc = AVPipeSeekOutput(h, fd, offset, whence);
     whence = whence & 0xFFFF; /* Mask out AVSEEK_SIZE and AVSEEK_FORCE */
     switch (whence) {
     case SEEK_SET:
@@ -680,7 +680,7 @@ out_seek(
         elv_dbg("OUT SEEK - weird seek\n");
     }
 
-    elv_dbg("OUT SEEK fd=%"PRId64" offset=%d whence=%d", fd, offset, whence);
+    elv_dbg("OUT SEEK fd=%"PRId64", offset=%d, whence=%d, rc=%"PRId64, fd, offset, whence, rc);
 
     return rc;
 }
@@ -1100,18 +1100,18 @@ read_next_input:
         if (index == 0) {
             /* Reached end of videos */
             if (in_mux_ctx->video.index >= in_mux_ctx->video.n_parts)
-                return -1;
+                return AVERROR_EOF;
             filepath = in_mux_ctx->video.parts[in_mux_ctx->video.index];
             in_mux_ctx->video.index++;
         } else if (index <= in_mux_ctx->last_audio_index) {
             if (in_mux_ctx->audios[index-1].index >= in_mux_ctx->audios[index-1].n_parts)
-                return -1;
+                return AVERROR_EOF;
             filepath = in_mux_ctx->audios[index-1].parts[in_mux_ctx->audios[index-1].index];
             in_mux_ctx->audios[index-1].index++;
         } else if (index <= in_mux_ctx->last_audio_index+in_mux_ctx->last_caption_index) {
             i = index - in_mux_ctx->last_audio_index - 1;
             if (in_mux_ctx->captions[i].index >= in_mux_ctx->captions[i].n_parts)
-                return -1;
+                return AVERROR_EOF;
             filepath = in_mux_ctx->captions[i].parts[in_mux_ctx->captions[i].index];
             in_mux_ctx->captions[i].index++;
         } else {
@@ -1255,7 +1255,7 @@ out_mux_seek(
     ioctx_t *inctx = outctx->inctx;
     xcparams_t *xcparams = (inctx != NULL) ? inctx->params : NULL;
     int64_t fd = *(int64_t *)outctx->opaque;
-    int rc = AVPipeSeekMuxOutput(fd, offset, whence);
+    int64_t rc = AVPipeSeekMuxOutput(fd, offset, whence);
     if (xcparams != NULL && xcparams->debug_frame_level)
         elv_dbg("OUT MUX SEEK fd=%"PRId64" offset=%d whence=%d", fd, offset, whence);
     return rc;
