@@ -4659,7 +4659,7 @@ log_params(
         "video_frame_duration_ts=%d "
         "rotate=%d "
         "profile=%s "
-        "level=%d",
+        "level=%d "
         "deinterlace=%d",
         params->stream_id, params->url,
         avpipe_version(),
@@ -4683,6 +4683,7 @@ log_params(
         params->master_display ? params->master_display : "",
         params->filter_descriptor,
         params->extract_image_interval_ts, params->extract_images_sz,
+        1, params->video_time_base, params->video_frame_duration_ts, params->rotate,
         params->profile ? params->profile : "", params->level,  params->deinterlace);
     elv_log("AVPIPE XCPARAMS %s", buf);
 }
