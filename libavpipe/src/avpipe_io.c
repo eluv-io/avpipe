@@ -211,14 +211,11 @@ elv_io_close(
     if (out_tracker != NULL)
         out_handlers = out_tracker->out_handlers;
 
-    elv_dbg("OUT elv_io_close url=%s, stream_index=%d, seg_index=%d avioctx=%p, avioctx->opaque=%p buf=%p outtracker[0]->last_outctx=%p, outtracker[1]->last_outctx=%p",
+    elv_dbg("OUT elv_io_close url=%s, stream_index=%d, seg_index=%d avioctx=%p, avioctx->opaque=%p buf=%p outtracker[0]->last_outctx=%p, outtracker[1]->last_outctx=%p, outhandlers=%p",
         outctx != NULL ? outctx->url : "", outctx != NULL ? outctx->stream_index : -1, outctx != NULL ? outctx->seg_index : -1, pb, pb->opaque, avioctx->buffer,
-	    out_tracker != NULL ? out_tracker[0].last_outctx : 0, out_tracker != NULL ? out_tracker[1].last_outctx : 0);
+	    out_tracker != NULL ? out_tracker[0].last_outctx : 0, out_tracker != NULL ? out_tracker[1].last_outctx : 0, out_handlers);
     if (out_handlers) {
-#if 0
-        // PENDING (RM): this crashes with ffmpeg-4.4, needs to be fixed
-        out_handlers->avpipe_stater(outctx, out_stat_encoding_end_pts);
-#endif
+        out_handlers->avpipe_stater(outctx, 0, out_stat_encoding_end_pts);
         out_handlers->avpipe_closer(outctx);
     }
     if (outctx)
