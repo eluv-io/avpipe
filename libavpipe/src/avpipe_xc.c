@@ -984,13 +984,27 @@ set_netint_h264_params(
     int index = decoder_context->video_stream_index;
     AVCodecContext *encoder_codec_context = encoder_context->codec_context[index];
     AVStream *s = decoder_context->stream[decoder_context->video_stream_index];
+    int max_frame_size = 1554000; /* Some constant that is big enough for most of the cases */
 
-    if (params->force_keyint > 0)
-        sprintf(enc_params, "gopPresetIdx=2:lowDelay=1:frameRate=%d:frameRateDenom=%d:intraPeriod=%d",
-            s->avg_frame_rate.num, s->avg_frame_rate.den, params->force_keyint);
-    else
-        sprintf(enc_params, "gopPresetIdx=2:lowDelay=1:frameRate=%d:frameRateDenom=%d",
-            s->avg_frame_rate.num, s->avg_frame_rate.den);
+    if (s->codecpar)
+        max_frame_size = (s->codecpar->width * s->codecpar->height)/2;
+
+    if (params->force_keyint > 0) {
+        if (!strcmp(params->ecodec, "h264_ni_quadra_enc"))
+            /* gopPresetIdx=9 is recommended by Netint when encoding using h264_ni_quadra_enc */
+            sprintf(enc_params, "gopPresetIdx=9:lowDelay=1:frameRate=%d:frameRateDenom=%d:intraPeriod=%d:maxFrameSize=%d",
+                s->avg_frame_rate.num, s->avg_frame_rate.den, params->force_keyint, max_frame_size);
+        else
+            sprintf(enc_params, "gopPresetIdx=2:lowDelay=1:frameRate=%d:frameRateDenom=%d:intraPeriod=%d",
+                s->avg_frame_rate.num, s->avg_frame_rate.den, params->force_keyint);
+    } else {
+        if (!strcmp(params->ecodec, "h264_ni_quadra_enc"))
+            sprintf(enc_params, "gopPresetIdx=9:lowDelay=1:frameRate=%d:frameRateDenom=%d:maxFrameSize=%d",
+                s->avg_frame_rate.num, s->avg_frame_rate.den, max_frame_size);
+        else
+            sprintf(enc_params, "gopPresetIdx=2:lowDelay=1:frameRate=%d:frameRateDenom=%d",
+                s->avg_frame_rate.num, s->avg_frame_rate.den);
+    }
     elv_dbg("set_netint_h264_params encoding params=%s, url=%s", enc_params, params->url);
     av_opt_set(encoder_codec_context->priv_data, "xcoder-params", enc_params, 0);
 }
@@ -1278,7 +1292,7 @@ prepare_video_encoder(
     else if (!strcmp(params->ecodec, "libx265"))
         /* Set H265 specific params (profile and level) */
         set_h265_params(encoder_context, decoder_context, params);
-    else if (!strcmp(params->ecodec, "h264_ni_enc"))
+    else if (!strcmp(params->ecodec, "h264_ni_enc") || !strcmp(params->ecodec, "h264_ni_quadra_enc"))
         /* Set netint H264 codensity params */
         set_netint_h264_params(encoder_context, decoder_context, params);
     else if (!strcmp(params->ecodec, "h265_ni_enc"))
