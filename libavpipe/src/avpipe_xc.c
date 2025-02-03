@@ -1783,29 +1783,28 @@ prepare_encoder(
      * Needs to allocate up to number of streams when transcoding multiple streams at the same time.
      */
     if (params->xc_type & xc_video) {
-        out_tracker = (out_tracker_t *) calloc(MAX_STREAMS, sizeof(out_tracker_t));
-        out_tracker[0].out_handlers = out_handlers;
-        out_tracker[0].inctx = inctx;
-        out_tracker[0].video_stream_index = decoder_context->video_stream_index;
-        out_tracker[0].audio_stream_index = decoder_context->audio_stream_index[0];
-        out_tracker[0].seg_index = atoi(params->start_segment_str);
-        out_tracker[0].encoder_ctx = encoder_context;
-        out_tracker[0].xc_type = xc_video;
+        out_tracker = (out_tracker_t *) calloc(1, sizeof(out_tracker_t));
+        out_tracker->out_handlers = out_handlers;
+        out_tracker->inctx = inctx;
+        out_tracker->video_stream_index = decoder_context->video_stream_index;
+        out_tracker->audio_stream_index = decoder_context->audio_stream_index[0];
+        out_tracker->seg_index = atoi(params->start_segment_str);
+        out_tracker->encoder_ctx = encoder_context;
+        out_tracker->xc_type = xc_video;
         encoder_context->format_context->avpipe_opaque = out_tracker;
     }
 
     if (params->xc_type & xc_audio) {
         for (int j=0; j<encoder_context->n_audio_output; j++) {
-            out_tracker = (out_tracker_t *) calloc(MAX_STREAMS, sizeof(out_tracker_t));
-            for (int i=0; i<encoder_context->n_audio_output; i++) {
-                out_tracker[i].out_handlers = out_handlers;
-                out_tracker[i].inctx = inctx;
-                out_tracker[i].video_stream_index = decoder_context->video_stream_index;
-                out_tracker[i].audio_stream_index = decoder_context->audio_stream_index[i];
-                out_tracker[i].seg_index = atoi(params->start_segment_str);
-                out_tracker[i].encoder_ctx = encoder_context;
-                out_tracker[i].xc_type = xc_audio;
-            }
+            out_tracker = (out_tracker_t *) calloc(1, sizeof(out_tracker_t));
+            out_tracker->out_handlers = out_handlers;
+            out_tracker->inctx = inctx;
+            out_tracker->video_stream_index = decoder_context->video_stream_index;
+            out_tracker->audio_stream_index = decoder_context->audio_stream_index[j];
+            out_tracker->seg_index = atoi(params->start_segment_str);
+            out_tracker->encoder_ctx = encoder_context;
+            out_tracker->xc_type = xc_audio;
+            out_tracker->output_stream_index = j;
             encoder_context->format_context2[j]->avpipe_opaque = out_tracker;
         }
     }

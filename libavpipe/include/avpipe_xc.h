@@ -548,6 +548,15 @@ typedef struct xc_frame_t {
     int         stream_index;
 } xc_frame_t;
 
+/**
+ * out_tracker_t is used to keep information useful for providing stat
+ * information about a stream.
+ *
+ * It is kept within the `avpipe_opaque` field of the AVFormatContext. One
+ * out_tracker_t is created for each output stream. The `out_tracker_t`'s
+ * lifecycle is associated with the format context, and it will be freed in
+ * `avpipe_fini`.
+ */
 typedef struct out_tracker_t {
     struct avpipe_io_handler_t  *out_handlers;
     coderctx_t                  *encoder_ctx;   /* Needed to get access for stats */
@@ -559,6 +568,8 @@ typedef struct out_tracker_t {
     /** Needed to detect type of encoding frame */
     int video_stream_index;
     int audio_stream_index;
+
+    int output_stream_index;
 } out_tracker_t;
 
 typedef struct encoding_frame_stats_t {
