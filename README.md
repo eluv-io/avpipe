@@ -57,6 +57,14 @@ The following repositories can be checked out in any directory, but for better o
   - `run_tests.sh` to run avpipe core functionality and transcoding tests.
   - `run_live_tests.sh`: to run avipe live-streaming functionality tests.
 
+### Run `exc` and `elvxc`
+
+`exc` and `elvxc` are standalone variants of avpipe that are generally used for testing. They are both installed when running `make` in the root.
+
+`exc` is a lightweight C-only wrapper of avpipe. A detailed usage doc can be printed out by simply running `exc`. It is primarily usable for single-shot transcoding operations.
+
+`elvxc` is a standalone go binary that invokes the avpipe library to do probing, log analysis, muxing, and transcoding.
+
 ## Design
 
 - Avpipe library has been built on top of the different libraries of ffmpeg, the most important ones are libx264, libx265, libavcodec, libavformat, libavfilter and libswresample. But in order to achieve all the features and capabilities some parts of ffmpeg library have been changed. Avpipe library is capable of transcoding or probing an input source (i.e a media file, or an UDP/RTMP stream) and producing output media or probe results. In order to start a transcoding job the transcoding parameters have to be set.
