@@ -217,7 +217,7 @@ elv_io_close(
         outctx != NULL ? outctx->url : "", outctx != NULL ? outctx->stream_index : -1, outctx != NULL ? outctx->seg_index : -1, pb, pb->opaque, avioctx->buffer,
 	    out_tracker != NULL ? out_tracker->last_outctx : 0, out_handlers);
     if (out_handlers) {
-        out_handlers->avpipe_stater(outctx, 0, out_stat_encoding_end_pts);
+        out_handlers->avpipe_stater(outctx, out_tracker->output_stream_index, out_stat_encoding_end_pts);
         out_handlers->avpipe_closer(outctx);
     }
     if (outctx)
