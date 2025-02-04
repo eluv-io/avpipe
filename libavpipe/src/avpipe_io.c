@@ -39,6 +39,7 @@ elv_io_open(
 
     elv_dbg("OUT elv_io_open url=%s", url);
 
+    ioctx_t *outctx = (ioctx_t *) calloc(1, sizeof(ioctx_t));
     out_tracker_t *out_tracker = (out_tracker_t *) format_ctx->avpipe_opaque;
     avpipe_io_handler_t *out_handlers = out_tracker->out_handlers;
 
@@ -46,7 +47,6 @@ elv_io_open(
         /* Regular segment */
         char *endptr;
         AVDictionaryEntry *stream_opt = av_dict_get(*options, "stream_index", 0, 0);
-        ioctx_t *outctx = (ioctx_t *) calloc(1, sizeof(ioctx_t));
 
         /* The outctx is created after writing the first frame, so set frames_written to 1. */
         //outctx->frames_written = 1;
@@ -78,7 +78,6 @@ elv_io_open(
         elv_dbg("OUT elv_io_open stream_index=%d, seg_index=%d avioctx=%p, avioctx->opaque=%p, buf=%p, outctx=%p, outtracker->last_outctx=%p, outtracker->last_outctx=%p",
             outctx->stream_index, outctx->seg_index, avioctx, avioctx->opaque, avioctx->buffer, outctx, out_tracker->last_outctx, out_tracker->last_outctx);
     } else {
-        ioctx_t *outctx = (ioctx_t *) calloc(1, sizeof(ioctx_t));
         outctx->stream_index = 0;
         outctx->encoder_ctx = out_tracker->encoder_ctx;
         outctx->inctx = out_tracker->inctx;
@@ -195,6 +194,8 @@ elv_io_open(
         (*pb) = avioctx;
     }
 
+    out_handlers->avpipe_stater(outctx, out_tracker->output_stream_index, out_stat_start_file);
+
     return ret;
 }
 
@@ -218,6 +219,7 @@ elv_io_close(
 	    out_tracker != NULL ? out_tracker->last_outctx : 0, out_handlers);
     if (out_handlers) {
         out_handlers->avpipe_stater(outctx, out_tracker->output_stream_index, out_stat_encoding_end_pts);
+        out_handlers->avpipe_stater(outctx, out_tracker->output_stream_index, out_stat_end_file);
         out_handlers->avpipe_closer(outctx);
     }
     if (outctx)

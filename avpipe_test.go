@@ -321,6 +321,16 @@ func (o fileOutput) Stat(streamIndex int, avType avpipe.AVType, statType avpipe.
 		if debugFrameLevel {
 			log.Debug("AVP TEST OUT STAT", "STAT, endPTS", *endPTS, "streamIndex", streamIndex)
 		}
+	case avpipe.AV_OUT_STAT_START_FILE:
+		segIdx := statArgs.(*int)
+		if debugFrameLevel {
+			log.Debug("AVP TEST OUT STAT", "STAT, start file", *segIdx, "streamIndex", streamIndex)
+		}
+	case avpipe.AV_OUT_STAT_END_FILE:
+		segIdx := statArgs.(*int)
+		if debugFrameLevel {
+			log.Debug("AVP TEST OUT STAT", "STAT, end file", *segIdx, "streamIndex", streamIndex)
+		}
 	case avpipe.AV_OUT_STAT_FRAME_WRITTEN:
 		encodingStats := statArgs.(*avpipe.EncodingFrameStats)
 		if debugFrameLevel {

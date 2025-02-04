@@ -94,14 +94,16 @@ typedef enum avpipe_buftype_t {
 typedef enum avp_stat_t {
     in_stat_bytes_read = 1,                 // # of bytes read from input stream
     in_stat_audio_frame_read = 2,           // # of audio frames read from the input stream
-    in_stat_video_frame_read = 4,           // # of video frames read from the input stream
-    in_stat_decoding_audio_start_pts = 8,   // PTS of first audio packet went to the decoder
-    in_stat_decoding_video_start_pts = 16,  // PTS of first video packet went to the decoder
-    out_stat_bytes_written = 32,            // # of bytes written to the output stream
-    out_stat_frame_written = 64,            // # of frames written to the output stream
-    in_stat_first_keyframe_pts = 128,       // First keyframe in the input stream
-    out_stat_encoding_end_pts = 256,        // 
-    in_stat_data_scte35 = 512               // SCTE data arrived
+    in_stat_video_frame_read = 3,           // # of video frames read from the input stream
+    in_stat_decoding_audio_start_pts = 4,   // PTS of first audio packet went to the decoder
+    in_stat_decoding_video_start_pts = 5,   // PTS of first video packet went to the decoder
+    out_stat_bytes_written = 6,             // # of bytes written to the output stream
+    out_stat_frame_written = 7,             // # of frames written to the output stream
+    in_stat_first_keyframe_pts = 8,         // First keyframe in the input stream
+    out_stat_encoding_end_pts = 9,          //
+    out_stat_start_file = 10,               //
+    out_stat_end_file = 11,                 //
+    in_stat_data_scte35 = 12               // SCTE data arrived
 } avp_stat_t;
 
 struct coderctx_t;

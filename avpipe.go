@@ -372,14 +372,16 @@ type AVStatType int
 const (
 	AV_IN_STAT_BYTES_READ               = 1
 	AV_IN_STAT_AUDIO_FRAME_READ         = 2
-	AV_IN_STAT_VIDEO_FRAME_READ         = 4
-	AV_IN_STAT_DECODING_AUDIO_START_PTS = 8
-	AV_IN_STAT_DECODING_VIDEO_START_PTS = 16
-	AV_OUT_STAT_BYTES_WRITTEN           = 32
-	AV_OUT_STAT_FRAME_WRITTEN           = 64
-	AV_IN_STAT_FIRST_KEYFRAME_PTS       = 128
-	AV_OUT_STAT_ENCODING_END_PTS        = 256
-	AV_IN_STAT_DATA_SCTE35              = 512
+	AV_IN_STAT_VIDEO_FRAME_READ         = 3
+	AV_IN_STAT_DECODING_AUDIO_START_PTS = 4
+	AV_IN_STAT_DECODING_VIDEO_START_PTS = 5
+	AV_OUT_STAT_BYTES_WRITTEN           = 6
+	AV_OUT_STAT_FRAME_WRITTEN           = 7
+	AV_IN_STAT_FIRST_KEYFRAME_PTS       = 8
+	AV_OUT_STAT_ENCODING_END_PTS        = 9
+	AV_OUT_STAT_START_FILE              = 10
+	AV_OUT_STAT_END_FILE                = 11
+	AV_IN_STAT_DATA_SCTE35              = 12
 )
 
 type SideDataDisplayMatrix struct {
@@ -1181,6 +1183,12 @@ func (h *ioHandler) OutStat(fd C.int64_t,
 	case C.out_stat_encoding_end_pts:
 		statArgs := *(*uint64)(stat_args)
 		err = outHandler.Stat(streamIndex, avType, AV_OUT_STAT_ENCODING_END_PTS, &statArgs)
+	case C.out_stat_start_file:
+		statArgs := *(*int)(stat_args)
+		err = outHandler.Stat(streamIndex, avType, AV_OUT_STAT_START_FILE, &statArgs)
+	case C.out_stat_end_file:
+		statArgs := *(*int)(stat_args)
+		err = outHandler.Stat(streamIndex, avType, AV_OUT_STAT_END_FILE, &statArgs)
 	case C.out_stat_frame_written:
 		encodingFramesStats := (*C.encoding_frame_stats_t)(stat_args)
 		statArgs := &EncodingFrameStats{
