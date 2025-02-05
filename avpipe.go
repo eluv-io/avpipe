@@ -91,6 +91,45 @@ const (
 	FrameImage
 )
 
+func (a AVType) Name() string {
+	switch a {
+	case DASHManifest:
+		return "DASHManifest"
+	case DASHVideoInit:
+		return "DASHVideoInit"
+	case DASHVideoSegment:
+		return "DASHVideoSegment"
+	case DASHAudioInit:
+		return "DASHAudioInit"
+	case DASHAudioSegment:
+		return "DASHAudioSegment"
+	case HLSMasterM3U:
+		return "HLSMasterM3U"
+	case HLSVideoM3U:
+		return "HLSVideoM3U"
+	case HLSAudioM3U:
+		return "HLSAudioM3U"
+	case AES128Key:
+		return "AES128Key"
+	case MP4Stream:
+		return "MP4Stream"
+	case FMP4Stream:
+		return "FMP4Stream"
+	case MP4Segment:
+		return "MP4Segment"
+	case FMP4VideoSegment:
+		return "FMP4VideoSegment"
+	case FMP4AudioSegment:
+		return "FMP4AudioSegment"
+	case MuxSegment:
+		return "MuxSegment"
+	case FrameImage:
+		return "FrameImage"
+	default:
+		return fmt.Sprintf("Unknown(%d)", a)
+	}
+}
+
 // This is corresponding to AV_NOPTS_VALUE
 const AvNoPtsValue = uint64(C.uint64_t(0x8000000000000000))
 
@@ -383,6 +422,38 @@ const (
 	AV_OUT_STAT_END_FILE                = 11
 	AV_IN_STAT_DATA_SCTE35              = 12
 )
+
+func (a AVStatType) Name() string {
+	switch a {
+	case AV_IN_STAT_BYTES_READ:
+		return "AV_IN_STAT_BYTES_READ"
+	case AV_IN_STAT_AUDIO_FRAME_READ:
+		return "AV_IN_STAT_AUDIO_FRAME_READ"
+	case AV_IN_STAT_VIDEO_FRAME_READ:
+		return "AV_IN_STAT_VIDEO_FRAME_READ"
+	case AV_IN_STAT_DECODING_AUDIO_START_PTS:
+		return "AV_IN_STAT_DECODING_AUDIO_START_PTS"
+	case AV_IN_STAT_DECODING_VIDEO_START_PTS:
+		return "AV_IN_STAT_DECODING_VIDEO_START_PTS"
+	case AV_IN_STAT_FIRST_KEYFRAME_PTS:
+		return "AV_IN_STAT_FIRST_KEYFRAME_PTS"
+	case AV_OUT_STAT_BYTES_WRITTEN:
+		return "AV_OUT_STAT_BYTES_WRITTEN"
+	case AV_OUT_STAT_FRAME_WRITTEN:
+		return "AV_OUT_STAT_FRAME_WRITTEN"
+	case AV_OUT_STAT_ENCODING_END_PTS:
+		return "AV_OUT_STAT_ENCODING_END_PTS"
+	case AV_OUT_STAT_START_FILE:
+		return "AV_OUT_STAT_START_FILE"
+	case AV_OUT_STAT_END_FILE:
+		return "AV_OUT_STAT_END_FILE"
+	case AV_IN_STAT_DATA_SCTE35:
+		return "AV_IN_STAT_DATA_SCTE35"
+	default:
+		return fmt.Sprintf("Unknown(%d)", a)
+	}
+
+}
 
 type SideDataDisplayMatrix struct {
 	Type       string  `json:"side_data_type"`
