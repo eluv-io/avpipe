@@ -100,9 +100,9 @@ typedef enum avp_stat_t {
     out_stat_bytes_written = 6,             // # of bytes written to the output stream
     out_stat_frame_written = 7,             // # of frames written to the output stream
     in_stat_first_keyframe_pts = 8,         // First keyframe in the input stream
-    out_stat_encoding_end_pts = 9,          //
-    out_stat_start_file = 10,               //
-    out_stat_end_file = 11,                 //
+    out_stat_encoding_end_pts = 9,          // The last PTS encoded. This stat is recorded when a file is closed
+    out_stat_start_file = 10,               // Sent when a new file is opened and reports the segment index
+    out_stat_end_file = 11,                 // Sent when a file is closed and reports the segment index
     in_stat_data_scte35 = 12               // SCTE data arrived
 } avp_stat_t;
 

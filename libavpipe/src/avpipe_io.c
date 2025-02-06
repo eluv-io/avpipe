@@ -218,6 +218,10 @@ elv_io_close(
         outctx != NULL ? outctx->url : "", outctx != NULL ? outctx->stream_index : -1, outctx != NULL ? outctx->seg_index : -1, pb, pb->opaque, avioctx->buffer,
 	    out_tracker != NULL ? out_tracker->last_outctx : 0, out_handlers);
     if (out_handlers) {
+        // TODO(Nate): Separate out this stat into something more descriptive of the particular case
+        // For now, this double-stat is fine because the 'out_stat_encoding_end_pts' is also used
+        // for muxing, which doesn't have a meaningful value of 'seg_index'. Additionally, ABR and
+        // mez should be pretty separate. But that can be done later.
         out_handlers->avpipe_stater(outctx, out_tracker->output_stream_index, out_stat_encoding_end_pts);
         out_handlers->avpipe_stater(outctx, out_tracker->output_stream_index, out_stat_end_file);
         out_handlers->avpipe_closer(outctx);

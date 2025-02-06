@@ -310,33 +310,29 @@ func (o *fileOutput) Close() error {
 }
 
 func (o fileOutput) Stat(streamIndex int, avType avpipe.AVType, statType avpipe.AVStatType, statArgs interface{}) error {
+	doLog := func(args ...interface{}) {
+		if debugFrameLevel {
+			logArgs := []interface{}{"stat", statType.Name(), "avType", avType.Name(), "streamIndex", streamIndex}
+			logArgs = append(logArgs, args...)
+			log.Debug("AVP TEST OUT STAT", logArgs...)
+		}
+	}
 	switch statType {
 	case avpipe.AV_OUT_STAT_BYTES_WRITTEN:
 		writeOffset := statArgs.(*uint64)
-		if debugFrameLevel {
-			log.Debug("AVP TEST OUT STAT", "STAT, write offset", *writeOffset, "streamIndex", streamIndex)
-		}
+		doLog("write offset", *writeOffset)
 	case avpipe.AV_OUT_STAT_ENCODING_END_PTS:
 		endPTS := statArgs.(*uint64)
-		if debugFrameLevel {
-			log.Debug("AVP TEST OUT STAT", "STAT, endPTS", *endPTS, "streamIndex", streamIndex)
-		}
+		doLog("endPTS", *endPTS)
 	case avpipe.AV_OUT_STAT_START_FILE:
 		segIdx := statArgs.(*int)
-		if debugFrameLevel {
-			log.Debug("AVP TEST OUT STAT", "STAT, start file", *segIdx, "streamIndex", streamIndex)
-		}
+		doLog("segIdx", *segIdx)
 	case avpipe.AV_OUT_STAT_END_FILE:
 		segIdx := statArgs.(*int)
-		if debugFrameLevel {
-			log.Debug("AVP TEST OUT STAT", "STAT, end file", *segIdx, "streamIndex", streamIndex)
-		}
+		doLog("segIdx", *segIdx)
 	case avpipe.AV_OUT_STAT_FRAME_WRITTEN:
 		encodingStats := statArgs.(*avpipe.EncodingFrameStats)
-		if debugFrameLevel {
-			log.Debug("AVP TEST OUT STAT", "avType", avType,
-				"encodingStats", encodingStats, "streamIndex", streamIndex)
-		}
+		doLog("encodingStats", encodingStats)
 		if avType == avpipe.FMP4AudioSegment {
 			statsInfo.encodingAudioFrameStats = *encodingStats
 		} else {
