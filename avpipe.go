@@ -130,6 +130,23 @@ func (a AVType) Name() string {
 	}
 }
 
+func (a AVType) AVClass() string {
+	switch a {
+	case FMP4AudioSegment, FMP4VideoSegment:
+		return "mez_creation"
+	case DASHAudioInit, DASHAudioSegment, DASHVideoInit, DASHVideoSegment:
+		return "abr"
+	case HLSAudioM3U, HLSMasterM3U, HLSVideoM3U, DASHManifest:
+		return "manifest"
+	case FrameImage:
+		return "frame_extraction"
+	case MuxSegment, MP4Segment, MP4Stream, FMP4Stream:
+		return "mux"
+	default:
+		return "unknown"
+	}
+}
+
 // This is corresponding to AV_NOPTS_VALUE
 const AvNoPtsValue = uint64(C.uint64_t(0x8000000000000000))
 
