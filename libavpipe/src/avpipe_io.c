@@ -39,6 +39,7 @@ elv_io_open(
 
     elv_dbg("OUT elv_io_open url=%s", url);
 
+    ioctx_t *outctx = (ioctx_t *) calloc(1, sizeof(ioctx_t));
     out_tracker_t *out_tracker = (out_tracker_t *) format_ctx->avpipe_opaque;
     avpipe_io_handler_t *out_handlers = out_tracker->out_handlers;
 
@@ -46,7 +47,6 @@ elv_io_open(
         /* Regular segment */
         char *endptr;
         AVDictionaryEntry *stream_opt = av_dict_get(*options, "stream_index", 0, 0);
-        ioctx_t *outctx = (ioctx_t *) calloc(1, sizeof(ioctx_t));
 
         /* The outctx is created after writing the first frame, so set frames_written to 1. */
         //outctx->frames_written = 1;
@@ -54,13 +54,13 @@ elv_io_open(
         outctx->stream_index = (int) strtol(stream_opt->value, &endptr, 10);
         outctx->url = strdup(url);
         assert(outctx->stream_index == 0 || outctx->stream_index == 1);
-        if (out_tracker[outctx->stream_index].xc_type == xc_video)
+        if (out_tracker->xc_type == xc_video)
             outctx->type = avpipe_video_segment;
         else
             outctx->type = avpipe_audio_segment;
-        outctx->seg_index = out_tracker[outctx->stream_index].seg_index;
-        out_tracker[outctx->stream_index].seg_index++;
-        outctx->inctx = out_tracker[outctx->stream_index].inctx;
+        outctx->seg_index = out_tracker->seg_index;
+        out_tracker->seg_index++;
+        outctx->inctx = out_tracker->inctx;
 
         if (out_handlers->avpipe_opener(url, outctx) < 0) {
             free(outctx);
@@ -73,15 +73,14 @@ elv_io_open(
         avioctx->seekable = 0;
         avioctx->direct = 1;
         (*pb) = avioctx;
-        out_tracker[outctx->stream_index].last_outctx = outctx;
+        out_tracker->last_outctx = outctx;
 
         elv_dbg("OUT elv_io_open stream_index=%d, seg_index=%d avioctx=%p, avioctx->opaque=%p, buf=%p, outctx=%p, outtracker->last_outctx=%p, outtracker->last_outctx=%p",
-            outctx->stream_index, outctx->seg_index, avioctx, avioctx->opaque, avioctx->buffer, outctx, out_tracker[outctx->stream_index].last_outctx, out_tracker[outctx->stream_index].last_outctx);
+            outctx->stream_index, outctx->seg_index, avioctx, avioctx->opaque, avioctx->buffer, outctx, out_tracker->last_outctx, out_tracker->last_outctx);
     } else {
-        ioctx_t *outctx = (ioctx_t *) calloc(1, sizeof(ioctx_t));
         outctx->stream_index = 0;
-        outctx->encoder_ctx = out_tracker[outctx->stream_index].encoder_ctx;
-        outctx->inctx = out_tracker[outctx->stream_index].inctx;
+        outctx->encoder_ctx = out_tracker->encoder_ctx;
+        outctx->inctx = out_tracker->inctx;
         outctx->seg_index = 0; // init segment has stream_index and seg_index = 0
 
         if (!url || url[0] == '\0') {
@@ -107,8 +106,8 @@ elv_io_open(
                     outctx->stream_index = url[i] - '0';
                 }
             }
-            outctx->encoder_ctx = out_tracker[outctx->stream_index].encoder_ctx;
-            outctx->inctx = out_tracker[outctx->stream_index].inctx;
+            outctx->encoder_ctx = out_tracker->encoder_ctx;
+            outctx->inctx = out_tracker->inctx;
             //elv_dbg("XXX stream_index=%d", outctx->stream_index);
             if (!strncmp(url + strlen(url) - 3, "mpd", 3)) {
                 outctx->type = avpipe_manifest;
@@ -119,14 +118,14 @@ elv_io_open(
                 outctx->seg_index = -1;     // Special index for manifest
             }
             else if (!strncmp(url, "media", 5)) {
-                if (out_tracker[outctx->stream_index].xc_type == xc_video)
+                if (out_tracker->xc_type == xc_video)
                     outctx->type = avpipe_video_m3u;
                 else
                     outctx->type = avpipe_audio_m3u;
                 outctx->seg_index = -1;     // Special index for manifest
             }
             else if (!strncmp(url, "init", 4)) {
-                if (out_tracker[outctx->stream_index].xc_type == xc_video)
+                if (out_tracker->xc_type == xc_video)
                     outctx->type = avpipe_video_init_stream;
                 else
                     outctx->type = avpipe_audio_init_stream;
@@ -147,16 +146,16 @@ elv_io_open(
                     free(outctx);
                     return -1;
                 }
-                outctx->seg_index = out_tracker[outctx->stream_index].seg_index;
-                out_tracker[outctx->stream_index].seg_index++;
-                outctx->inctx = out_tracker[outctx->stream_index].inctx;
+                outctx->seg_index = out_tracker->seg_index;
+                out_tracker->seg_index++;
+                outctx->inctx = out_tracker->inctx;
             } else if (!strncmp(url, "fmp4", 4)) {
                 outctx->type = avpipe_fmp4_stream;
             } else if (strstr(url, "segment")) {
                 outctx->type = avpipe_mp4_segment;
-                outctx->seg_index = out_tracker[outctx->stream_index].seg_index;
-                out_tracker[outctx->stream_index].seg_index++;
-                outctx->inctx = out_tracker[outctx->stream_index].inctx;
+                outctx->seg_index = out_tracker->seg_index;
+                out_tracker->seg_index++;
+                outctx->inctx = out_tracker->inctx;
             }
         }
  
@@ -166,7 +165,7 @@ elv_io_open(
             outctx->type == avpipe_video_fmp4_segment ||
             outctx->type == avpipe_audio_fmp4_segment)
             // not set for outctx->type == avpipe_image because elv_io_close will free outctx for each frame extracted
-            out_tracker[outctx->stream_index].last_outctx = outctx;
+            out_tracker->last_outctx = outctx;
         /* Manifest or init segments */
         if (out_handlers->avpipe_opener(url, outctx) < 0) {
             free(outctx);
@@ -177,7 +176,7 @@ elv_io_open(
             out_handlers->avpipe_reader, out_handlers->avpipe_writer, out_handlers->avpipe_seeker);
 
         elv_dbg("OUT elv_io_open url=%s, type=%d, stream_index=%d, seg_index=%d, last_outctx=%p, buf=%p",
-            url, outctx->type, outctx->stream_index, outctx->seg_index, out_tracker[outctx->stream_index].last_outctx, avioctx->buffer);
+            url, outctx->type, outctx->stream_index, outctx->seg_index, out_tracker->last_outctx, avioctx->buffer);
 
         /* libavformat expects seekable streams for mp4 */
         if (outctx->type == avpipe_mp4_stream || outctx->type == avpipe_mp4_segment)
@@ -195,6 +194,8 @@ elv_io_open(
         (*pb) = avioctx;
     }
 
+    out_handlers->avpipe_stater(outctx, out_tracker->output_stream_index, out_stat_start_file);
+
     return ret;
 }
 
@@ -208,17 +209,21 @@ elv_io_close(
     ioctx_t *outctx = (ioctx_t *)pb->opaque;
     avpipe_io_handler_t *out_handlers = NULL;
 
-    if (out_tracker != NULL)
-        out_handlers = out_tracker->out_handlers;
 
-    elv_dbg("OUT elv_io_close url=%s, stream_index=%d, seg_index=%d avioctx=%p, avioctx->opaque=%p buf=%p outtracker[0]->last_outctx=%p, outtracker[1]->last_outctx=%p",
+    if (out_tracker != NULL) {
+        out_handlers = out_tracker->out_handlers;
+    }
+
+    elv_dbg("OUT elv_io_close url=%s, stream_index=%d, seg_index=%d avioctx=%p, avioctx->opaque=%p buf=%p outtracker->last_outctx=%p, outhandlers=%p",
         outctx != NULL ? outctx->url : "", outctx != NULL ? outctx->stream_index : -1, outctx != NULL ? outctx->seg_index : -1, pb, pb->opaque, avioctx->buffer,
-	    out_tracker != NULL ? out_tracker[0].last_outctx : 0, out_tracker != NULL ? out_tracker[1].last_outctx : 0);
+	    out_tracker != NULL ? out_tracker->last_outctx : 0, out_handlers);
     if (out_handlers) {
-#if 0
-        // PENDING (RM): this crashes with ffmpeg-4.4, needs to be fixed
-        out_handlers->avpipe_stater(outctx, out_stat_encoding_end_pts);
-#endif
+        // TODO(Nate): Separate out this stat into something more descriptive of the particular case
+        // For now, this double-stat is fine because the 'out_stat_encoding_end_pts' is also used
+        // for muxing, which doesn't have a meaningful value of 'seg_index'. Additionally, ABR and
+        // mez should be pretty separate. But that can be done later.
+        out_handlers->avpipe_stater(outctx, out_tracker->output_stream_index, out_stat_encoding_end_pts);
+        out_handlers->avpipe_stater(outctx, out_tracker->output_stream_index, out_stat_end_file);
         out_handlers->avpipe_closer(outctx);
     }
     if (outctx)

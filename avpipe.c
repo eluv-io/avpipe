@@ -733,6 +733,12 @@ out_stat(
         else
             rc = AVPipeStatOutput(h, fd, stream_index, buftype, stat_type, &outctx->encoder_ctx->video_last_pts_sent_encode);
         break;
+    case out_stat_start_file:
+        rc = AVPipeStatOutput(h, fd, stream_index, buftype, stat_type, &outctx->seg_index);
+        break;
+    case out_stat_end_file:
+        rc = AVPipeStatOutput(h, fd, stream_index, buftype, stat_type, &outctx->seg_index);
+        break;
     case out_stat_frame_written:
         {
             encoding_frame_stats_t encoding_frame_stats = {
