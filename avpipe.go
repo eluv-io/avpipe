@@ -91,6 +91,62 @@ const (
 	FrameImage
 )
 
+func (a AVType) Name() string {
+	switch a {
+	case DASHManifest:
+		return "DASHManifest"
+	case DASHVideoInit:
+		return "DASHVideoInit"
+	case DASHVideoSegment:
+		return "DASHVideoSegment"
+	case DASHAudioInit:
+		return "DASHAudioInit"
+	case DASHAudioSegment:
+		return "DASHAudioSegment"
+	case HLSMasterM3U:
+		return "HLSMasterM3U"
+	case HLSVideoM3U:
+		return "HLSVideoM3U"
+	case HLSAudioM3U:
+		return "HLSAudioM3U"
+	case AES128Key:
+		return "AES128Key"
+	case MP4Stream:
+		return "MP4Stream"
+	case FMP4Stream:
+		return "FMP4Stream"
+	case MP4Segment:
+		return "MP4Segment"
+	case FMP4VideoSegment:
+		return "FMP4VideoSegment"
+	case FMP4AudioSegment:
+		return "FMP4AudioSegment"
+	case MuxSegment:
+		return "MuxSegment"
+	case FrameImage:
+		return "FrameImage"
+	default:
+		return fmt.Sprintf("Unknown(%d)", a)
+	}
+}
+
+func (a AVType) AVClass() string {
+	switch a {
+	case FMP4AudioSegment, FMP4VideoSegment:
+		return "mez_creation"
+	case DASHAudioInit, DASHAudioSegment, DASHVideoInit, DASHVideoSegment:
+		return "abr"
+	case HLSAudioM3U, HLSMasterM3U, HLSVideoM3U, DASHManifest:
+		return "manifest"
+	case FrameImage:
+		return "frame_extraction"
+	case MuxSegment, MP4Segment, MP4Stream, FMP4Stream:
+		return "mux"
+	default:
+		return "unknown"
+	}
+}
+
 // This is corresponding to AV_NOPTS_VALUE
 const AvNoPtsValue = uint64(C.uint64_t(0x8000000000000000))
 
@@ -372,15 +428,49 @@ type AVStatType int
 const (
 	AV_IN_STAT_BYTES_READ               = 1
 	AV_IN_STAT_AUDIO_FRAME_READ         = 2
-	AV_IN_STAT_VIDEO_FRAME_READ         = 4
-	AV_IN_STAT_DECODING_AUDIO_START_PTS = 8
-	AV_IN_STAT_DECODING_VIDEO_START_PTS = 16
-	AV_OUT_STAT_BYTES_WRITTEN           = 32
-	AV_OUT_STAT_FRAME_WRITTEN           = 64
-	AV_IN_STAT_FIRST_KEYFRAME_PTS       = 128
-	AV_OUT_STAT_ENCODING_END_PTS        = 256
-	AV_IN_STAT_DATA_SCTE35              = 512
+	AV_IN_STAT_VIDEO_FRAME_READ         = 3
+	AV_IN_STAT_DECODING_AUDIO_START_PTS = 4
+	AV_IN_STAT_DECODING_VIDEO_START_PTS = 5
+	AV_OUT_STAT_BYTES_WRITTEN           = 6
+	AV_OUT_STAT_FRAME_WRITTEN           = 7
+	AV_IN_STAT_FIRST_KEYFRAME_PTS       = 8
+	AV_OUT_STAT_ENCODING_END_PTS        = 9
+	AV_OUT_STAT_START_FILE              = 10
+	AV_OUT_STAT_END_FILE                = 11
+	AV_IN_STAT_DATA_SCTE35              = 12
 )
+
+func (a AVStatType) Name() string {
+	switch a {
+	case AV_IN_STAT_BYTES_READ:
+		return "AV_IN_STAT_BYTES_READ"
+	case AV_IN_STAT_AUDIO_FRAME_READ:
+		return "AV_IN_STAT_AUDIO_FRAME_READ"
+	case AV_IN_STAT_VIDEO_FRAME_READ:
+		return "AV_IN_STAT_VIDEO_FRAME_READ"
+	case AV_IN_STAT_DECODING_AUDIO_START_PTS:
+		return "AV_IN_STAT_DECODING_AUDIO_START_PTS"
+	case AV_IN_STAT_DECODING_VIDEO_START_PTS:
+		return "AV_IN_STAT_DECODING_VIDEO_START_PTS"
+	case AV_IN_STAT_FIRST_KEYFRAME_PTS:
+		return "AV_IN_STAT_FIRST_KEYFRAME_PTS"
+	case AV_OUT_STAT_BYTES_WRITTEN:
+		return "AV_OUT_STAT_BYTES_WRITTEN"
+	case AV_OUT_STAT_FRAME_WRITTEN:
+		return "AV_OUT_STAT_FRAME_WRITTEN"
+	case AV_OUT_STAT_ENCODING_END_PTS:
+		return "AV_OUT_STAT_ENCODING_END_PTS"
+	case AV_OUT_STAT_START_FILE:
+		return "AV_OUT_STAT_START_FILE"
+	case AV_OUT_STAT_END_FILE:
+		return "AV_OUT_STAT_END_FILE"
+	case AV_IN_STAT_DATA_SCTE35:
+		return "AV_IN_STAT_DATA_SCTE35"
+	default:
+		return fmt.Sprintf("Unknown(%d)", a)
+	}
+
+}
 
 type SideDataDisplayMatrix struct {
 	Type       string  `json:"side_data_type"`
@@ -1181,6 +1271,12 @@ func (h *ioHandler) OutStat(fd C.int64_t,
 	case C.out_stat_encoding_end_pts:
 		statArgs := *(*uint64)(stat_args)
 		err = outHandler.Stat(streamIndex, avType, AV_OUT_STAT_ENCODING_END_PTS, &statArgs)
+	case C.out_stat_start_file:
+		statArgs := *(*int)(stat_args)
+		err = outHandler.Stat(streamIndex, avType, AV_OUT_STAT_START_FILE, &statArgs)
+	case C.out_stat_end_file:
+		statArgs := *(*int)(stat_args)
+		err = outHandler.Stat(streamIndex, avType, AV_OUT_STAT_END_FILE, &statArgs)
 	case C.out_stat_frame_written:
 		encodingFramesStats := (*C.encoding_frame_stats_t)(stat_args)
 		statArgs := &EncodingFrameStats{
