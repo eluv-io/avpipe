@@ -273,7 +273,6 @@ func InitTranscode(cmdRoot *cobra.Command) error {
 	cmdTranscode.PersistentFlags().StringP("filename", "f", "", "(mandatory) filename to be transcoded.")
 	cmdTranscode.PersistentFlags().BoolP("bypass", "b", false, "bypass transcoding.")
 	cmdTranscode.PersistentFlags().BoolP("debug-frame-level", "", false, "debug frame level.")
-	cmdTranscode.PersistentFlags().BoolP("skip-decoding", "", false, "skip decoding when start-time-ts is set.")
 	cmdTranscode.PersistentFlags().BoolP("listen", "", false, "listen mode for RTMP.")
 	cmdTranscode.PersistentFlags().Int32("connection-timeout", 0, "connection timeout for RTMP when listening on a port or MPEGTS to receive first UDP datagram.")
 	cmdTranscode.PersistentFlags().Int32P("threads", "t", 1, "transcoding threads.")
@@ -292,7 +291,9 @@ func InitTranscode(cmdRoot *cobra.Command) error {
 	cmdTranscode.PersistentFlags().StringP("xc-type", "", "", "transcoding type, can be 'all', 'video', 'audio', 'audio-join', 'audio-pan', 'audio-merge', 'extract-images' or 'extract-all-images'.")
 	cmdTranscode.PersistentFlags().Int32P("crf", "", 23, "mutually exclusive with video-bitrate.")
 	cmdTranscode.PersistentFlags().StringP("preset", "", "medium", "Preset string to determine compression speed, can be: 'ultrafast', 'superfast', 'veryfast', 'faster', 'fast', 'medium', 'slow', 'slower', 'veryslow'")
-	cmdTranscode.PersistentFlags().Int64P("start-time-ts", "", 0, "offset to start transcoding")
+	cmdTranscode.PersistentFlags().Int64P("decoding-start-ts", "", 0, "offset to start decoding")
+	cmdTranscode.PersistentFlags().Int64P("encoding-start-ts", "", 0, "offset to start encoding")
+	cmdTranscode.PersistentFlags().Int64P("seek-time-ts", "", 0, "seek to the specific offset in input stream")
 	cmdTranscode.PersistentFlags().Int32P("stream-id", "", -1, "if it is valid it will be used to transcode elementary stream with that stream-id")
 	cmdTranscode.PersistentFlags().Int64P("start-pts", "", 0, "starting PTS for output.")
 	cmdTranscode.PersistentFlags().Int32P("sample-rate", "", -1, "For aac output sample rate is set to input sample rate and this parameter is ignored.")
@@ -306,7 +307,8 @@ func InitTranscode(cmdRoot *cobra.Command) error {
 	cmdTranscode.PersistentFlags().Int32P("enc-width", "", -1, "default -1 means use source width.")
 	cmdTranscode.PersistentFlags().Int32P("video-time-base", "", 0, "Video encoder timebase, must be > 0 (the actual timebase would be 1/video-time-base).")
 	cmdTranscode.PersistentFlags().Int32P("video-frame-duration-ts", "", 0, "Frame duration of the output video in time base.")
-	cmdTranscode.PersistentFlags().Int64P("duration-ts", "", -1, "default -1 means entire stream.")
+	cmdTranscode.PersistentFlags().Int64P("decoding-duration-ts", "", -1, "default -1 means decoding entire input stream.")
+	cmdTranscode.PersistentFlags().Int64P("encoding-duration-ts", "", -1, "default -1 means encoding entire output stream.")
 	cmdTranscode.PersistentFlags().Int64P("audio-seg-duration-ts", "", 0, "(mandatory if format is not 'segment' and transcoding audio) audio segment duration time base (positive integer).")
 	cmdTranscode.PersistentFlags().Int64P("video-seg-duration-ts", "", 0, "(mandatory if format is not 'segment' and transcoding video) video segment duration time base (positive integer).")
 	cmdTranscode.PersistentFlags().StringP("seg-duration", "", "30", "(mandatory if format is 'segment') segment duration seconds (positive integer), default is 30.")
@@ -360,11 +362,6 @@ func doTranscode(cmd *cobra.Command, args []string) error {
 	debugFrameLevel, err := cmd.Flags().GetBool("debug-frame-level")
 	if err != nil {
 		return fmt.Errorf("Invalid debug-frame-level flag")
-	}
-
-	skipDecoding, err := cmd.Flags().GetBool("skip-decoding")
-	if err != nil {
-		return fmt.Errorf("Invalid skip-decoding flag")
 	}
 
 	listen, err := cmd.Flags().GetBool("listen")
@@ -511,9 +508,14 @@ func doTranscode(cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("preset is not valid, should be one of: 'ultrafast', 'superfast', 'veryfast', 'faster', 'fast', 'medium', 'slow', 'slower', 'veryslow'")
 	}
 
-	startTimeTs, err := cmd.Flags().GetInt64("start-time-ts")
+	decodingStartTs, err := cmd.Flags().GetInt64("decoding-start-ts")
 	if err != nil {
-		return fmt.Errorf("start-time-ts is not valid")
+		return fmt.Errorf("decoding-start-ts is not valid")
+	}
+
+	encodingStartTs, err := cmd.Flags().GetInt64("encoding-start-ts")
+	if err != nil {
+		return fmt.Errorf("encoding-start-ts is not valid")
 	}
 
 	startPts, err := cmd.Flags().GetInt64("start-pts")
@@ -581,9 +583,19 @@ func doTranscode(cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("video-frame-duration-ts is not valid")
 	}
 
-	durationTs, err := cmd.Flags().GetInt64("duration-ts")
+	decodingDurationTs, err := cmd.Flags().GetInt64("decoding-duration-ts")
 	if err != nil {
-		return fmt.Errorf("Duration ts is not valid")
+		return fmt.Errorf("Decoding duration ts is not valid")
+	}
+
+	encodingDurationTs, err := cmd.Flags().GetInt64("encoding-duration-ts")
+	if err != nil {
+		return fmt.Errorf("Encoding duration ts is not valid")
+	}
+
+	seekTimeTs, err := cmd.Flags().GetInt64("seek-time-ts")
+	if err != nil {
+		return fmt.Errorf("Seek time ts is not valid")
 	}
 
 	audioSegDurationTs, err := cmd.Flags().GetInt64("audio-seg-duration-ts")
@@ -660,9 +672,12 @@ func doTranscode(cmd *cobra.Command, args []string) error {
 		Url:                    filename,
 		BypassTranscoding:      bypass,
 		Format:                 format,
-		StartTimeTs:            startTimeTs,
+		DecodingStartTs:        decodingStartTs,
+		EncodingStartTs:        encodingStartTs,
 		StartPts:               startPts,
-		DurationTs:             durationTs,
+		DecodingDurationTs:     decodingDurationTs,
+		EncodingDurationTs:     encodingDurationTs,
+		SeekTimeTs:             seekTimeTs,
 		StartSegmentStr:        startSegmentStr,
 		StartFragmentIndex:     startFragmentIndex,
 		VideoBitrate:           videoBitrate,
@@ -709,7 +724,6 @@ func doTranscode(cmd *cobra.Command, args []string) error {
 		Listen:                 listen,
 		ConnectionTimeout:      int(connectionTimeout),
 		FilterDescriptor:       filterDescriptor,
-		SkipDecoding:           skipDecoding,
 		ExtractImageIntervalTs: extractImageIntervalTs,
 		ChannelLayout:          channelLayout,
 		DebugFrameLevel:        debugFrameLevel,

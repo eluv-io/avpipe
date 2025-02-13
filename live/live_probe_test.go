@@ -4,17 +4,24 @@ import (
 	"fmt"
 	"github.com/eluv-io/avpipe"
 	"github.com/stretchr/testify/assert"
+	"os"
 	"testing"
 	"time"
 )
 
+func TestMain(m *testing.M) {
+	// call flag.Parse() here if TestMain uses flags
+	setupLogging()
+	os.Exit(m.Run())
+}
+
 // 1) Starts ffmpeg for streaming RTMP in listen mode
 // 2) avpipe probe connects to listening ffmpeg and probes the stream
 func TestProbeRTMPConnect(t *testing.T) {
-	setupLogging()
-
 	liveSource := NewLiveSource()
 	url := fmt.Sprintf(RTMP_SOURCE, liveSource.Port)
+
+	log.Info("STARTING " + fn() + " url=" + url)
 
 	// Start ffmpeg RTMP in listen mode
 	err := liveSource.Start("rtmp_listen")
@@ -59,10 +66,10 @@ func TestProbeRTMPConnect(t *testing.T) {
 // 1) Starts avpipe probe to listen for an incoming RTMP stream
 // 2) Starts ffmpeg to connect to listening avpipe
 func TestProbeRTMPListen(t *testing.T) {
-	setupLogging()
-
 	liveSource := NewLiveSource()
 	url := fmt.Sprintf("rtmp://localhost:%d/rtmp/Doj1Nr3S", liveSource.Port)
+
+	log.Info("STARTING " + fn() + " url=" + url)
 
 	XCParams := &avpipe.XcParams{
 		Seekable:          false,
@@ -112,10 +119,10 @@ func TestProbeRTMPListen(t *testing.T) {
 }
 
 func TestProbeRTMPNoStream(t *testing.T) {
-	setupLogging()
-
 	liveSource := NewLiveSource()
 	url := fmt.Sprintf("rtmp://localhost:%d/rtmp/Doj1Nr3S", liveSource.Port)
+
+	log.Info("STARTING " + fn() + " url=" + url)
 
 	XCParams := &avpipe.XcParams{
 		Seekable:          false,
@@ -141,10 +148,10 @@ func TestProbeRTMPNoStream(t *testing.T) {
 // 1) Starts ffmpeg for streaming UDP MPEGTS
 // 2) avpipe probe reads the generated UDP stream and probes the stream
 func TestProbeUDPConnect(t *testing.T) {
-	setupLogging()
-
 	liveSource := NewLiveSource()
 	url := fmt.Sprintf("udp://localhost:%d", liveSource.Port)
+
+	log.Info("STARTING " + fn() + " url=" + url)
 
 	// Start ffmpeg UDP MPEGTS
 	err := liveSource.Start("udp")
@@ -190,11 +197,10 @@ func TestProbeUDPConnect(t *testing.T) {
 // 1) Starts avpipe probe to read UDP stream and probes the stream
 // 2) Starts ffmpeg for streaming UDP MPEGTS
 func TestProbeUDPListen(t *testing.T) {
-
-	setupLogging()
-
 	liveSource := NewLiveSource()
 	url := fmt.Sprintf("udp://localhost:%d", liveSource.Port)
+
+	log.Info("STARTING " + fn() + " url=" + url)
 
 	XCParams := &avpipe.XcParams{
 		Seekable:        false,
@@ -242,11 +248,10 @@ func TestProbeUDPListen(t *testing.T) {
 }
 
 func TestProbeUDPNoStream(t *testing.T) {
-
-	setupLogging()
-
 	liveSource := NewLiveSource()
 	url := fmt.Sprintf("udp://localhost:%d", liveSource.Port)
+
+	log.Info("STARTING " + fn() + " url=" + url)
 
 	XCParams := &avpipe.XcParams{
 		Seekable:          false,

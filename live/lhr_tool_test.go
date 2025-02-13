@@ -119,18 +119,18 @@ func putReqCtxByFD(fd int64, reqCtx *testCtx) {
 
 func TestHLSVideoOnly(t *testing.T) {
 	params := &avpipe.XcParams{
-		Format:          "fmp4-segment",
-		DurationTs:      3 * 2700000,
-		StartSegmentStr: "1",
-		VideoBitrate:    5000000,
-		SegDuration:     "30.03",
-		ForceKeyInt:     60,
-		Ecodec:          defaultVideoEncoder(),
-		EncHeight:       720,
-		EncWidth:        1280,
-		XcType:          avpipe.XcVideo,
-		DebugFrameLevel: debugFrameLevel,
-		StreamId:        -1,
+		Format:             "fmp4-segment",
+		DecodingDurationTs: 3 * 2700000,
+		StartSegmentStr:    "1",
+		VideoBitrate:       5000000,
+		SegDuration:        "30.03",
+		ForceKeyInt:        60,
+		Ecodec:             defaultVideoEncoder(),
+		EncHeight:          720,
+		EncWidth:           1280,
+		XcType:             avpipe.XcVideo,
+		DebugFrameLevel:    debugFrameLevel,
+		StreamId:           -1,
 	}
 
 	setupLogging()
@@ -171,16 +171,16 @@ func TestHLSVideoOnly(t *testing.T) {
 
 func TestHLSAudioOnly(t *testing.T) {
 	params := &avpipe.XcParams{
-		Format:          "fmp4-segment",
-		DurationTs:      3 * 2700000,
-		StartSegmentStr: "1",
-		AudioBitrate:    128000,
-		SampleRate:      48000,
-		SegDuration:     "30",
-		Ecodec2:         "aac", // "ac3", "aac"
-		XcType:          avpipe.XcAudio,
-		DebugFrameLevel: debugFrameLevel,
-		StreamId:        -1,
+		Format:             "fmp4-segment",
+		DecodingDurationTs: 3 * 2700000,
+		StartSegmentStr:    "1",
+		AudioBitrate:       128000,
+		SampleRate:         48000,
+		SegDuration:        "30",
+		Ecodec2:            "aac", // "ac3", "aac"
+		XcType:             avpipe.XcAudio,
+		DebugFrameLevel:    debugFrameLevel,
+		StreamId:           -1,
 	}
 
 	params.AudioIndex = []int32{1}
@@ -247,16 +247,16 @@ func TestHLSAudioVideoLive(t *testing.T) {
 	avpipe.InitIOHandler(&inputOpener{}, &outputOpener{dir: outputDir})
 
 	audioParams := &avpipe.XcParams{
-		Format:          "fmp4-segment",
-		DurationTs:      3 * 2700000,
-		StartSegmentStr: "1",
-		AudioBitrate:    128000,
-		SampleRate:      48000,
-		SegDuration:     "30",
-		Ecodec2:         "aac",
-		XcType:          avpipe.XcAudio,
-		DebugFrameLevel: debugFrameLevel,
-		StreamId:        -1,
+		Format:             "fmp4-segment",
+		DecodingDurationTs: 3 * 2700000,
+		StartSegmentStr:    "1",
+		AudioBitrate:       128000,
+		SampleRate:         48000,
+		SegDuration:        "30",
+		Ecodec2:            "aac",
+		XcType:             avpipe.XcAudio,
+		DebugFrameLevel:    debugFrameLevel,
+		StreamId:           -1,
 	}
 
 	audioParams.AudioIndex = []int32{1}
@@ -276,19 +276,19 @@ func TestHLSAudioVideoLive(t *testing.T) {
 	}(audioReader)
 
 	videoParams := &avpipe.XcParams{
-		Format:          "fmp4-segment",
-		DurationTs:      3 * 2700000,
-		StartSegmentStr: "1",
-		VideoBitrate:    5000000,
-		SegDuration:     "30",
-		ForceKeyInt:     60,
-		Ecodec:          defaultVideoEncoder(),
-		EncHeight:       720,
-		EncWidth:        1280,
-		XcType:          avpipe.XcVideo,
-		Url:             "video_mez_hls",
-		DebugFrameLevel: debugFrameLevel,
-		StreamId:        -1,
+		Format:             "fmp4-segment",
+		DecodingDurationTs: 3 * 2700000,
+		StartSegmentStr:    "1",
+		VideoBitrate:       5000000,
+		SegDuration:        "30",
+		ForceKeyInt:        60,
+		Ecodec:             defaultVideoEncoder(),
+		EncHeight:          720,
+		EncWidth:           1280,
+		XcType:             avpipe.XcVideo,
+		Url:                "video_mez_hls",
+		DebugFrameLevel:    debugFrameLevel,
+		StreamId:           -1,
 	}
 	go func(reader io.Reader) {
 		tlog.Info("video mez Xc start", "params", fmt.Sprintf("%+v", *videoParams))

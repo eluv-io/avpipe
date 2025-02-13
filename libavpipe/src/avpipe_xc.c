@@ -34,7 +34,7 @@
 #include <pthread.h>
 
 #define AUDIO_BUF_SIZE              (128*1024)
-#define INPUT_IS_SEEKABLE           0
+#define INPUT_IS_SEEKABLE           1
 
 #define MPEGTS_THREAD_COUNT         16
 #define DEFAULT_THREAD_COUNT        8
@@ -1974,7 +1974,7 @@ should_skip_encoding(
     if (!frame ||
         p->xc_type == xc_audio_join ||
         p->xc_type == xc_audio_merge)
-        return 0;
+        return eav_success;
 
     int64_t frame_in_pts_offset;
 
@@ -1989,7 +1989,7 @@ should_skip_encoding(
         elv_warn("ENCODE SKIP invalid frame, stream_index=%d, url=%s, video_last_pts_read=%"PRId64", audio_last_pts_read=%"PRId64,
             stream_index, url,
             encoder_context->video_last_pts_read, encoder_context->audio_last_pts_read[stream_index]);
-        return 1;
+        return eav_skip_frame_early;
     }
 
     if (selected_decoded_audio(decoder_context, stream_index) >= 0)
@@ -1997,40 +1997,31 @@ should_skip_encoding(
     else
         frame_in_pts_offset = frame->pts - decoder_context->video_input_start_pts;
 
-    /* Drop frames before the desired 'start_time'
-     * If the format is dash or hls, we skip the frames in skip_until_start_time_pts()
-     * without decoding the frame.
-     */
-    if (p->skip_decoding) {
-        if (p->start_time_ts > 0 &&
-            frame_in_pts_offset < p->start_time_ts &&
-            strcmp(p->format, "dash") &&
-            strcmp(p->format, "hls")) {
-            elv_dbg("ENCODE SKIP frame early pts=%" PRId64 ", frame_in_pts_offset=%" PRId64 ", start_time_ts=%" PRId64,
-                frame->pts, frame_in_pts_offset, p->start_time_ts);
-            return 1;
-        }
-    } else if (p->start_time_ts > 0 && frame_in_pts_offset < p->start_time_ts) {
-        elv_dbg("ENCODE SKIP frame early pts=%" PRId64 ", frame_in_pts_offset=%" PRId64 ", start_time_ts=%" PRId64,
-            frame->pts, frame_in_pts_offset, p->start_time_ts);
-        return 1;
+    /* Drop frames before the desired 'start_time' */
+    if (p->encoding_start_ts > 0 && frame_in_pts_offset < p->encoding_start_ts) {
+        elv_dbg("ENCODE SKIP frame early pts=%" PRId64 ", frame_in_pts_offset=%" PRId64 ", encoding_start_ts=%" PRId64,
+            frame->pts, frame_in_pts_offset, p->encoding_start_ts);
+        return eav_skip_frame_early;
     }
 
     /* To allow for packet reordering frames can come with pts past the desired duration */
-    if (p->duration_ts > 0) {
-        const int64_t max_valid_ts = p->start_time_ts + p->duration_ts;
+    if (p->encoding_duration_ts > 0) {
+        const int64_t max_valid_ts = p->encoding_start_ts + p->encoding_duration_ts;
         if (frame_in_pts_offset >= max_valid_ts) {
             elv_dbg("ENCODE SKIP frame late pts=%" PRId64 ", frame_in_pts_offset=%" PRId64 ", max_valid_ts=%" PRId64,
                 frame->pts, frame_in_pts_offset, max_valid_ts);
-            return 1;
+            return eav_skip_frame_late;
         }
     }
 
     if (p->xc_type == xc_extract_images || p->xc_type == xc_extract_all_images) {
-        return !should_extract_frame(decoder_context, encoder_context, p, frame);
+        int ret = should_extract_frame(decoder_context, encoder_context, p, frame);
+        if (ret)
+            return eav_success;
+        return eav_skip_frame_early;
     }
 
-    return 0;
+    return eav_success;
 }
 
 /*
@@ -2076,8 +2067,10 @@ encode_frame(
     }
 
     int skip = should_skip_encoding(decoder_context, encoder_context, stream_index, params, frame);
-    if (skip)
+    if (skip == eav_skip_frame_early)
         return eav_success;
+    if (skip == eav_skip_frame_late)
+        return eav_skip_frame_late;
 
     // Prepare packet before encoding - adjust PTS and IDR frame signaling
     if (frame) {
@@ -2544,7 +2537,7 @@ transcode_audio(
             dump_frame(1, stream_index, "FILT ", codec_context->frame_number, filt_frame, debug_frame_level);
             ret = encode_frame(decoder_context, encoder_context, filt_frame, packet->stream_index, params, debug_frame_level);
             av_frame_unref(filt_frame);
-            if (ret == eav_write_frame) {
+            if (ret == eav_write_frame || ret == eav_skip_frame_late) {
                 av_frame_unref(frame);
                 return ret;
             }
@@ -2679,23 +2672,11 @@ transcode_audio_aac(
                 if (decoder_context->audio_duration < filt_frame->pts) {
                     decoder_context->audio_duration = filt_frame->pts;
 
-                    int should_skip = 0;
-                    int64_t frame_in_pts_offset = frame->pts - decoder_context->audio_input_start_pts[stream_index];
-                    /* If frame PTS < start_time_ts then don't encode audio frame */
-                    if (p->start_time_ts > 0 && frame_in_pts_offset < p->start_time_ts) {
-                         elv_dbg("ENCODE SKIP audio frame early pts=%" PRId64
-                            ", frame_in_pts_offset=%" PRId64 ", start_time_ts=%" PRId64,
-                            filt_frame->pts, frame_in_pts_offset, p->start_time_ts);
-                        should_skip = 1;
-                    }
-
-                    if (!should_skip) {
-                        ret = encode_frame(decoder_context, encoder_context, filt_frame, stream_index, p, debug_frame_level);
-                        if (ret == eav_write_frame) {
-                            av_frame_unref(filt_frame);
-                            av_frame_free(&filt_frame);
-                            return ret;
-                        }
+                    ret = encode_frame(decoder_context, encoder_context, filt_frame, stream_index, p, debug_frame_level);
+                    if (ret == eav_write_frame || ret == eav_skip_frame_late) {
+                        av_frame_unref(filt_frame);
+                        av_frame_free(&filt_frame);
+                        return ret;
                     }
                 }
                 else {
@@ -2878,7 +2859,7 @@ transcode_video(
             if (decoder_context->video_duration < filt_frame->pts) {
                 decoder_context->video_duration = filt_frame->pts;
                 ret = encode_frame(decoder_context, encoder_context, filt_frame, stream_index, p, debug_frame_level);
-                if (ret == eav_write_frame) {
+                if (ret == eav_write_frame || ret == eav_skip_frame_late) {
                     av_frame_unref(filt_frame);
                     av_frame_unref(frame);
                     return ret;
@@ -2968,14 +2949,15 @@ transcode_video_func(
         free(xc_frame);
 
         if (err != eav_success) {
-            elv_err("Stop video transcoding, err=%d, url=%s", err, params->url);
+            if (err != eav_skip_frame_late)
+                elv_err("Stop video transcoding, err=%d, url=%s", err, params->url);
             break;
         }
     }
 
     av_frame_free(&frame);
     av_frame_free(&filt_frame);
-    if (!xctx->err)
+    if (!xctx->err && err != eav_skip_frame_late)
         xctx->err = err;
 
     elv_channel_close(xctx->vc, 0);
@@ -3063,7 +3045,8 @@ transcode_audio_func(
         free(xc_frame);
 
         if (err != eav_success) {
-            elv_err("Stop audio transcoding, err=%d, url=%s", err, params->url);
+            if (err != eav_skip_frame_late)
+                elv_err("Stop audio transcoding, err=%d, url=%s", err, params->url);
             break;
         }
 
@@ -3071,7 +3054,7 @@ transcode_audio_func(
 
     av_frame_free(&frame);
     av_frame_free(&filt_frame);
-    if (!xctx->err)
+    if (!xctx->err && err != eav_skip_frame_late)
         xctx->err = err;
     
     elv_channel_close(xctx->ac, 0);
@@ -3149,7 +3132,7 @@ flush_decoder(
 
                 ret = encode_frame(decoder_context, encoder_context, filt_frame, stream_index, p, debug_frame_level);
                 av_frame_unref(filt_frame);
-                if (ret == eav_write_frame) {
+                if (ret == eav_write_frame || ret == eav_skip_frame_late) {
                     av_frame_free(&filt_frame);
                     av_frame_free(&frame);
                     return ret;
@@ -3188,7 +3171,10 @@ should_stop_decoding(
     if (stream_index == decoder_context->video_stream_index &&
         (params->xc_type & xc_video)) {
         if (decoder_context->video_input_start_pts == AV_NOPTS_VALUE) {
-            decoder_context->video_input_start_pts = input_packet->pts;
+            if (params->seek_time_ts <= 0)
+                decoder_context->video_input_start_pts = input_packet->pts;
+            else
+                decoder_context->video_input_start_pts = 0;
             elv_log("video_input_start_pts=%"PRId64" flags=%d dts=%"PRId64,
                 decoder_context->video_input_start_pts, input_packet->flags, input_packet->dts);
         }
@@ -3206,14 +3192,14 @@ should_stop_decoding(
     }
 
     /* PENDING (RM) for some of the live feeds (like RTMP) we need to scale input_packet_rel_pts */
-    if (params->duration_ts != -1 &&
+    if (params->decoding_duration_ts != -1 &&
         input_packet->pts != AV_NOPTS_VALUE &&
-        input_packet_rel_pts >= params->start_time_ts + params->duration_ts) {
+        input_packet_rel_pts >= params->decoding_start_ts + params->decoding_duration_ts) {
 
         (*frames_read_past_duration) ++;
-        elv_dbg("DURATION OVER param start_time=%"PRId64" duration=%"PRId64" pkt pts=%"PRId64" rel_pts=%"PRId64" "
+        elv_dbg("DURATION OVER param start_time=%"PRId64" decoding_duration_ts=%"PRId64" pkt pts=%"PRId64" rel_pts=%"PRId64" "
                 "audio_frames_read=%"PRId64", video_frames_read=%"PRId64", past_duration=%d",
-                params->start_time_ts, params->duration_ts, input_packet->pts, input_packet_rel_pts,
+                params->decoding_start_ts, params->decoding_duration_ts, input_packet->pts, input_packet_rel_pts,
                 audio_frames_read, video_frames_read, *frames_read_past_duration);
 
         /* If it is a bypass simply return since there is no decoding/encoding involved */
@@ -3240,15 +3226,13 @@ should_stop_decoding(
 }
 
 static int
-skip_until_start_time_pts(
+skip_until_decoding_start_ts(
     coderctx_t *decoder_context,
     AVPacket *input_packet,
     xcparams_t *params)
 {
-    /* If start_time_ts > 0 and it is a bypass skip here
-     * Also if start_time_ts > 0 and skip_decoding is set then skip here
-     */
-    if (params->start_time_ts <= 0 || (!params->skip_decoding && !params->bypass_transcoding))
+    /* If decoding_start_ts > 0 skip here. */
+    if (params->decoding_start_ts <= 0)
         return 0;
 
     /* If the format is not dash/hls then return.
@@ -3267,11 +3251,11 @@ skip_until_start_time_pts(
 
     const int64_t packet_in_pts_offset = input_packet->pts - input_start_pts;
     /* Drop frames before the desired 'start_time' */
-    if (packet_in_pts_offset < params->start_time_ts) {
-        elv_dbg("PREDECODE SKIP frame early stream_index=%d, pts=%" PRId64 ", start_time_ts=%" PRId64
+    if (packet_in_pts_offset < params->decoding_start_ts) {
+        elv_dbg("PREDECODE SKIP frame early stream_index=%d, pts=%" PRId64 ", decodsing_start_ts=%" PRId64
             ", input_start_pts=%" PRId64 ", packet_in_pts_offset=%" PRId64,
             input_packet->stream_index,
-            input_packet->pts, params->start_time_ts,
+            input_packet->pts, params->decoding_start_ts,
             input_start_pts, packet_in_pts_offset);
         return 1;
     }
@@ -3678,25 +3662,26 @@ avpipe_xc(
 
 #if INPUT_IS_SEEKABLE
     /* Seek to start position */
-    if (params->start_time_ts > 0) {
+    if (params->seek_time_ts > 0) {
         if (av_seek_frame(decoder_context->format_context,
-                decoder_context->video_stream_index, params->start_time_ts, SEEK_SET) < 0) {
-            elv_err("Failed seeking to desired start frame, url=%s", params->url);
-            rc = eav_seek;
-            goto xc_done;
+                decoder_context->video_stream_index, params->seek_time_ts, SEEK_SET) < 0) {
+            elv_err("Failed seeking to desired start frame=%"PRId64", url=%s, continue without seeking", params->seek_time_ts, params->url);
+            /* Continue after reporting error */
         }
     }
 #endif
 
-    if (params->start_time_ts != -1) {
+#if 1
+    if (params->encoding_start_ts > 0) {
         if (params->xc_type == xc_video)
-            encoder_context->format_context->start_time = params->start_time_ts;
+            encoder_context->format_context->start_time = params->encoding_start_ts;
         if (params->xc_type & xc_audio) {
             for (int i=0; i<encoder_context->n_audio_output; i++)
-               encoder_context->format_context2[i]->start_time = params->start_time_ts;
+               encoder_context->format_context2[i]->start_time = params->encoding_start_ts;
         }
-        /* PENDING (RM) add new start_time_ts for audio */
+        /* PENDING (RM) add new encoding_start_ts for audio */
     }
+#endif
 
     decoder_context->video_input_start_pts = AV_NOPTS_VALUE;
     decoder_context->video_duration = -1;
@@ -3807,7 +3792,7 @@ avpipe_xc(
             }
 
             /*
-             * Skip the input packet if the packet timestamp is smaller than start_time_ts.
+             * Skip the input packet if the packet timestamp is smaller than decoding_start_ts.
              * The fact that avpipe mezzanine generated files don't have B-frames let us to skip before decoding.
              * The assumption here is that the input stream does not have any B-frames, otherwise we can not skip
              * the input packets without decoding.
@@ -3815,9 +3800,9 @@ avpipe_xc(
              * PENDING(RM) - add a validation to check input stream doesn't have any B-frames.
              */
             if (input_packet &&
-                params->start_time_ts > 0 &&
+                params->decoding_start_ts > 0 &&
                 (params->xc_type == xc_video || params->xc_type == xc_audio) &&
-                skip_until_start_time_pts(decoder_context, input_packet, params)) {
+                skip_until_decoding_start_ts(decoder_context, input_packet, params)) {
                     av_packet_unref(input_packet);
                     av_packet_free(&input_packet);
                     continue;
@@ -4583,13 +4568,15 @@ log_params(
         "url=%s "
         "version=%s "
         "bypass=%d "
-        "skip_decoding=%d "
         "xc_type=%s "
         "format=%s "
         "seekable=%d "
-        "start_time_ts=%"PRId64" "
+        "decoding_start_ts=%"PRId64" "
+        "encoding_start_ts=%"PRId64" "
+        "seek_time_ts=%"PRId64" "
         "start_pts=%"PRId64" "
-        "duration_ts=%"PRId64" "
+        "decoding_duration_ts=%"PRId64" "
+        "encoding_duration_ts=%"PRId64" "
         "start_segment_str=%s "
         "video_bitrate=%d "
         "audio_bitrate=%d "
@@ -4636,10 +4623,11 @@ log_params(
         "level=%d",
         params->stream_id, params->url,
         avpipe_version(),
-        params->bypass_transcoding, params->skip_decoding,
+        params->bypass_transcoding,
         get_xc_type_name(params->xc_type),
-        params->format, params->seekable, params->start_time_ts,
-        params->start_pts, params->duration_ts, params->start_segment_str,
+        params->format, params->seekable, params->decoding_start_ts, params->encoding_start_ts,
+        params->seek_time_ts, params->start_pts,
+        params->decoding_duration_ts, params->encoding_duration_ts, params->start_segment_str,
         params->video_bitrate, params->audio_bitrate, params->sample_rate,
         params->crf_str, params->preset, params->rc_max_rate, params->rc_buffer_size,
         params->video_seg_duration_ts, params->audio_seg_duration_ts, params->seg_duration,

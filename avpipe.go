@@ -244,9 +244,12 @@ type XcParams struct {
 	Url                    string      `json:"url"`
 	BypassTranscoding      bool        `json:"bypass,omitempty"`
 	Format                 string      `json:"format,omitempty"`
-	StartTimeTs            int64       `json:"start_time_ts,omitempty"`
+	DecodingStartTs        int64       `json:"decoding_start_ts,omitempty"`
+	EncodingStartTs        int64       `json:"encoding_start_ts,omitempty"`
 	StartPts               int64       `json:"start_pts,omitempty"` // Start PTS for output
-	DurationTs             int64       `json:"duration_ts,omitempty"`
+	DecodingDurationTs     int64       `json:"decoding_duration_ts,omitempty"`
+	EncodingDurationTs     int64       `json:"encoding_duration_ts,omitempty"`
+	SeekTimeTs             int64       `json:"seek_time_ts"`
 	StartSegmentStr        string      `json:"start_segment_str,omitempty"`
 	VideoBitrate           int32       `json:"video_bitrate,omitempty"`
 	AudioBitrate           int32       `json:"audio_bitrate,omitempty"`
@@ -298,7 +301,6 @@ type XcParams struct {
 	Listen                 bool        `json:"listen"`
 	ConnectionTimeout      int         `json:"connection_timeout"`
 	FilterDescriptor       string      `json:"filter_descriptor"`
-	SkipDecoding           bool        `json:"skip_decoding"`
 	DebugFrameLevel        bool        `json:"debug_frame_level"`
 	ExtractImageIntervalTs int64       `json:"extract_image_interval_ts,omitempty"`
 	ExtractImagesTs        []int64     `json:"extract_images_ts,omitempty"`
@@ -316,7 +318,9 @@ func NewXcParams() *XcParams {
 		AudioSegDurationTs:     -1,
 		BitDepth:               8,
 		CrfStr:                 "23",
-		DurationTs:             -1,
+		DecodingDurationTs:     -1,
+		EncodingDurationTs:     -1,
+		SeekTimeTs:             -1,
 		Ecodec:                 "libx264",
 		Ecodec2:                "aac",
 		EncHeight:              -1,
@@ -1340,9 +1344,12 @@ func getCParams(params *XcParams) (*C.xcparams_t, error) {
 	cparams := &C.xcparams_t{
 		url:                       C.CString(params.Url),
 		format:                    C.CString(params.Format),
-		start_time_ts:             C.int64_t(params.StartTimeTs),
+		decoding_start_ts:         C.int64_t(params.DecodingStartTs),
+		encoding_start_ts:         C.int64_t(params.EncodingStartTs),
 		start_pts:                 C.int64_t(params.StartPts),
-		duration_ts:               C.int64_t(params.DurationTs),
+		decoding_duration_ts:      C.int64_t(params.DecodingDurationTs),
+		encoding_duration_ts:      C.int64_t(params.EncodingDurationTs),
+		seek_time_ts:              C.int64_t(params.SeekTimeTs),
 		start_segment_str:         C.CString(params.StartSegmentStr),
 		video_bitrate:             C.int(params.VideoBitrate),
 		audio_bitrate:             C.int(params.AudioBitrate),
@@ -1394,7 +1401,6 @@ func getCParams(params *XcParams) (*C.xcparams_t, error) {
 		listen:                    C.int(0),
 		connection_timeout:        C.int(params.ConnectionTimeout),
 		filter_descriptor:         C.CString(params.FilterDescriptor),
-		skip_decoding:             C.int(0),
 		extract_image_interval_ts: C.int64_t(params.ExtractImageIntervalTs),
 		extract_images_sz:         C.int(extractImagesSize),
 		video_time_base:           C.int(params.VideoTimeBase),
@@ -1420,10 +1426,6 @@ func getCParams(params *XcParams) (*C.xcparams_t, error) {
 
 	if params.ForceEqualFDuration {
 		cparams.force_equal_fduration = C.int(1)
-	}
-
-	if params.SkipDecoding {
-		cparams.skip_decoding = C.int(1)
 	}
 
 	if params.Listen {

@@ -1028,10 +1028,13 @@ usage(
         "\t-d :                     (optional) Decoder name. For video default is \"h264\", can be: \"h264\", \"h264_cuvid\", \"jpeg2000\", \"hevc\"\n"
         "\t                                    For audio default is \"aac\", but for ts files should be set to \"ac3\"\n"
         "\t-debug-frame-level :     (optional) Enable/disable debug frame level. Default is 0, must be 0 or 1.\n"
-        "\t-duration-ts :           (optional) Default: -1 (entire stream)\n"
+        "\t-decoding-start-ts :     (optional) Don't decode the input until input PTS is bigger than decoding start ts. Default: 0 (start decoding from the beginning)\n"
+        "\t-decoding-duration-ts :  (optional) Decoding duration in ts, -1 means decode the entire input stream.\n"
         "\t-e :                     (optional) Video encoder name. Default is \"libx264\", can be: \"libx264\", \"libx265\", \"h264_nvenc\", \"hevc_nvenc\", \"h264_videotoolbox\", or \"mjpeg\"\n"
         "\t-enc-height :            (optional) Default: -1 (use source height)\n"
         "\t-enc-width :             (optional) Default: -1 (use source width)\n"
+        "\t-encoding-duration-ts :  (optional) Encoding duration in ts, -1 means encode the entire stream.\n"
+        "\t-encoding-start-ts :     (optional) Don't encode the output frames until output PTS is bigger than encoding start ts. Default: 0 (encode all the frames)\n"
         "\t-equal-fduration :       (optional) Force equal frame duration. Must be 0 or 1 and only valid for \"fmp4-segment\" format.\n"
         "\t-extract-image-interval-ts : (optional) Write frames at this interval. Default: -1 (10 seconds)\n"
         "\t-extract-images-ts :     (optional) Write frames at these timestamps (comma separated). Mutually exclusive with extract-image-interval-ts\n"
@@ -1064,12 +1067,12 @@ usage(
         "\t-rotate :                (optional) Rotate the input video. Default is 0 with no rotation, other values 90, 180, 270.\n"
         "\t-sample-rate :           (optional) Default: -1. For aac output sample rate is set to input sample rate and this parameter is ignored.\n"
         "\t-seekable :              (optional) Seekable stream. Default is 0, must be 0 or 1\n"
+        "\t-seek-time-ts :          (optional) Seek to the specific offset in input stream.\n"
         "\t-seg-duration :          (mandatory if format is \"segment\") segment duration secs (positive integer). It is used for making mp4 segments.\n"
         "\t-skip-decoding :         (optional) If start-time-ts is set and skip-decoding enabled, then will skip until start-time-ts without decoding.\n"
         "\t-start-pts :             (optional) Starting PTS for output. Default is 0\n"
         "\t-start-frag-index :      (optional) Start fragment index of first segment. Default is 0\n"
         "\t-start-segment :         (optional) Start segment number >= 1, Default is 1\n"
-        "\t-start-time-ts :         (optional) Default: 0\n"
         "\t-stream-id :             (optional) Default: -1, if it is valid it will be used to transcode elementary stream with that stream-id.\n"
         "\t-sync-audio-to-stream-id:(optional) Default: -1, sync audio to video iframe of specific stream-id when input stream is mpegts.\n"
         "\t-t :                     (optional) Transcoding threads. Default is 1 thread, must be bigger than 1\n"
@@ -1136,7 +1139,8 @@ main(
         .crypt_scheme = crypt_none,
         .dcodec = strdup(""),
         .dcodec2 = strdup(""),
-        .duration_ts = -1,                  /* -1 means entire input stream, same units as input stream */
+        .decoding_duration_ts = -1,         /* -1 means entire input stream, same units as input stream */
+        .encoding_duration_ts = -1,         /* -1 means entire output stream */
         .ecodec = strdup("libx264"),
         .ecodec2 = strdup("aac"),
         .enc_height = -1,                   /* -1 means use source height, other values 2160, 1080, 720 */
@@ -1160,10 +1164,11 @@ main(
         .seekable = 0,
         .video_seg_duration_ts = -1,        /* input argument, same units as input stream PTS */
         .audio_seg_duration_ts = -1,        /* input argument, same units as input stream PTS */
-        .skip_decoding = 0,
         .start_pts = 0,
         .start_segment_str = strdup("1"),   /* 1-based */
-        .start_time_ts = 0,                 /* same units as input stream PTS */
+        .decoding_start_ts = 0,             /* same units as input stream PTS */
+        .encoding_start_ts = 0,             /* same units as output stream PTS */
+        .seek_time_ts = 0,                  /* same units as input stream PTS */
         .start_fragment_index = 0,          /* Default is zero */
         .sync_audio_to_stream_id = -1,      /* Default -1 (no sync to a video stream) */
         .rotate = 0,                        /* Default 0 (means no transpose/rotation) */
@@ -1273,8 +1278,12 @@ main(
             }
             break;
         case 'd':
-            if (!strcmp(argv[i], "-duration-ts")) {
-                if (sscanf(argv[i+1], "%"PRId64, &p.duration_ts) != 1) {
+            if (!strcmp(argv[i], "-decoding-duration-ts")) {
+                if (sscanf(argv[i+1], "%"PRId64, &p.decoding_duration_ts) != 1) {
+                    usage(argv[0], argv[i], EXIT_FAILURE);
+                }
+            } else if (!strcmp(argv[i], "-decoding-start-ts")) {
+                if (sscanf(argv[i+1], "%"PRId64, &p.decoding_start_ts) != 1) {
                     usage(argv[0], argv[i], EXIT_FAILURE);
                 }
             } else if (!strcmp(argv[i], "-debug-frame-level")) {
@@ -1291,12 +1300,20 @@ main(
             }
             break;
         case 'e':
-            if (!strcmp(argv[i], "-enc-height")) {
+            if (!strcmp(argv[i], "-encoding-duration-ts")) {
+                if (sscanf(argv[i+1], "%"PRId64, &p.encoding_duration_ts) != 1) {
+                    usage(argv[0], argv[i], EXIT_FAILURE);
+                }
+            } else if (!strcmp(argv[i], "-enc-height")) {
                 if (sscanf(argv[i+1], "%d", &p.enc_height) != 1) {
                     usage(argv[0], argv[i], EXIT_FAILURE);
                 }
             } else if (!strcmp(argv[i], "-enc-width")) {
                 if (sscanf(argv[i+1], "%d", &p.enc_width) != 1) {
+                    usage(argv[0], argv[i], EXIT_FAILURE);
+                }
+            } else if (!strcmp(argv[i], "-encoding-start-ts")) {
+                if (sscanf(argv[i+1], "%"PRId64, &p.encoding_start_ts) != 1) {
                     usage(argv[0], argv[i], EXIT_FAILURE);
                 }
             } else if (!strcmp(argv[i], "-equal-fduration")) {
@@ -1433,15 +1450,15 @@ main(
                 if (p.stream_id < 0) {
                     usage(argv[0], argv[i], EXIT_FAILURE);
                 }
-            } else if (!strcmp(argv[i], "-skip-decoding")) {
-                if (sscanf(argv[i+1], "%d", &p.skip_decoding) != 1) {
-                    usage(argv[0], argv[i], EXIT_FAILURE);
-                }
             } else if (!strcmp(argv[i], "-seekable")) {
                 if (sscanf(argv[i+1], "%d", &p.seekable) != 1) {
                     usage(argv[0], argv[i], EXIT_FAILURE);
                 }
                 if (p.seekable != 0 && p.seekable != 1) {
+                    usage(argv[0], argv[i], EXIT_FAILURE);
+                }
+            } else if (!strcmp(argv[i], "-seek-time-ts")) {
+                if (sscanf(argv[i+1], "%"PRId64, &p.seek_time_ts) != 1) {
                     usage(argv[0], argv[i], EXIT_FAILURE);
                 }
             } else if (!strcmp(argv[i], "-sample-rate")) {
@@ -1462,10 +1479,6 @@ main(
                 p.start_segment_str = strdup(argv[i+1]);
             } else if (!strcmp(argv[i], "-start-frag-index")) {
                 if (sscanf(argv[i+1], "%d", &p.start_fragment_index) != 1) {
-                    usage(argv[0], argv[i], EXIT_FAILURE);
-                }
-            } else if (!strcmp(argv[i], "-start-time-ts")) {
-                if (sscanf(argv[i+1], "%"PRId64, &p.start_time_ts) != 1) {
                     usage(argv[0], argv[i], EXIT_FAILURE);
                 }
             } else if (!strcmp(argv[i], "-sync-audio-to-stream-id")) {

@@ -55,3 +55,6 @@ $FFMPEG_BIN/ffmpeg -listen 1 -i rtmp://192.168.90.202:1935/rtmp/XQjNir3S -c copy
 
 # Extract all frames
 ./bin/exc -f media/bbb_1080p_30fps_60sec.mp4 -xc-type extract-all-images -format image2 -e mjpeg
+
+# Split trascoding using seek_time_ts
+./bin/exc -f O/O1-bbb-mez/vfsegment0-00014.mp4 -xc-type video -encoding-start-ts 1082000 -start-pts 35100000 -encoding-duration-ts 28000 -start-segment 200 -video-seg-duration-ts 180000 -start-frag-index 23883 -seek-time-ts 1080000 -seekable 1
