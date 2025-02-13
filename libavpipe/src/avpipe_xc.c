@@ -892,6 +892,34 @@ set_h264_params(
                                                 encoder_codec_context->width,
                                                 encoder_codec_context->height);
     }
+
+#if 0
+    if (!strcmp(params->format, "dash") || !strcmp(params->format, "hls")) {
+        encoder_codec_context->max_b_frames = 3;
+        /*if (av_opt_set(encoder_codec_context->priv_data, "bf", "3", 0) < 0) {
+            elv_err("Failed to set bframe bf for h264");
+            return -1;
+        }*/
+        //encoder_codec_context->b_frame_strategy = 1;
+        encoder_codec_context->flags &= !AV_CODEC_FLAG_CLOSED_GOP; // Enable b_open_gop
+
+        if (av_opt_set(encoder_codec_context->priv_data, "b-pyramid", "normal", AV_OPT_SEARCH_CHILDREN) < 0) {
+            elv_err("Failed to set bframe pyramid for h264");
+            return;
+        }
+        if (av_opt_set(encoder_codec_context->priv_data, "b_strategy", "1", AV_OPT_SEARCH_CHILDREN) < 0) {
+            elv_err("Failed to set bframe strategy for h264");
+            return;
+        }
+    }
+#endif
+
+    /* Set the rate control if the parameter is set */
+    if (params->rc && strlen(params->rc) > 0) {
+        if (av_opt_set(encoder_codec_context->priv_data, "nal-hrd", params->rc, AV_OPT_SEARCH_CHILDREN) < 0) {
+            elv_err("Failed to set rate control to %s", params->rc);
+        }
+    }
 }
 
 static void
@@ -1008,22 +1036,6 @@ set_netint_h265_params(
     av_opt_set(encoder_codec_context->priv_data, "xcoder-params", enc_params, 0);
 }
 
-/* Borrowed from libavcodec/nvenc.h since it is not exposed */
-enum {
-    PRESET_DEFAULT = 0,
-    PRESET_SLOW,
-    PRESET_MEDIUM,
-    PRESET_FAST,
-    PRESET_HP,
-    PRESET_HQ,
-    PRESET_BD ,
-    PRESET_LOW_LATENCY_DEFAULT ,
-    PRESET_LOW_LATENCY_HQ ,
-    PRESET_LOW_LATENCY_HP,
-    PRESET_LOSSLESS_DEFAULT, // lossless presets must be the last ones
-    PRESET_LOSSLESS_HP,
-};
-
 static void
 set_nvidia_params(
     coderctx_t *encoder_context,
@@ -1054,29 +1066,6 @@ set_nvidia_params(
         encoder_codec_context->profile = FF_PROFILE_H264_HIGH;
     }
 
-/*
-    For nvidia let the encoder to pick the level, in some cases level is different from h264 encoder and
-    avpipe_h264_guess_level() function would not pick the right level for nvidia.
-
-    if (encoder_codec_context->framerate.den != 0)
-        framerate = encoder_codec_context->framerate.num/encoder_codec_context->framerate.den;
-
-    encoder_codec_context->level = avpipe_h264_guess_level(
-                                                encoder_codec_context->profile,
-                                                encoder_codec_context->bit_rate,
-                                                framerate,
-                                                encoder_codec_context->width,
-                                                encoder_codec_context->height);
-    av_opt_set_int(encoder_codec_context->priv_data, "level", encoder_codec_context->level, 0);
-*/
-
-    /*
-     * According to https://superuser.com/questions/1296374/best-settings-for-ffmpeg-with-nvenc
-     * the best setting can be PRESET_LOW_LATENCY_HQ or PRESET_LOW_LATENCY_HP.
-     * (in my experiment PRESET_LOW_LATENCY_HQ is better than PRESET_LOW_LATENCY_HP)
-     */
-    av_opt_set_int(encoder_codec_context->priv_data, "preset", PRESET_LOW_LATENCY_HQ, 0);
-
     /*
      * We might want to set one of the following options in future:
      *
@@ -1096,6 +1085,19 @@ set_nvidia_params(
      * sprintf(level, "%d.", 15);
      * av_opt_set(encoder_codec_context->priv_data, "cq", level, 0);
      */
+
+    /* Set the rate control if the parameter is set */
+    if (params->rc && strlen(params->rc) > 0) {
+        if (av_opt_set(encoder_codec_context->priv_data, "rc", params->rc, AV_OPT_SEARCH_CHILDREN) < 0) {
+            elv_err("Failed to set rate control to %s", params->rc);
+        }
+    }
+
+    if (params->tune && strlen(params->tune) > 0) {
+        if (av_opt_set(encoder_codec_context->priv_data, "tune", params->tune, AV_OPT_SEARCH_CHILDREN) < 0) {
+            elv_err("Failed to set rate control tune to %s", params->tune);
+        }
+    }
 }
 
 static int
@@ -1211,14 +1213,15 @@ prepare_video_encoder(
         // av_opt_set(encoder_codec_context->priv_data, "crf_max", params->crf_str, AV_OPT_FLAG_ENCODING_PARAM | AV_OPT_SEARCH_CHILDREN);
     }
 
-    if (params->preset && strlen(params->preset) > 0 &&
-        (!strcmp(params->format, "fmp4-segment") || !strcmp(params->format, "fmp4"))) {
-        av_opt_set(encoder_codec_context->priv_data, "preset", params->preset, AV_OPT_FLAG_ENCODING_PARAM | AV_OPT_SEARCH_CHILDREN);
+    if (params->preset && strlen(params->preset) > 0) {
+        if (av_opt_set(encoder_codec_context->priv_data, "preset", params->preset, AV_OPT_FLAG_ENCODING_PARAM | AV_OPT_SEARCH_CHILDREN) < 0) {
+            elv_err("Failed to set preset=%s, url=%s", params->preset, params->url, params->url);
+        }
     }
 
     if (!strcmp(params->format, "fmp4-segment") || !strcmp(params->format, "fmp4")) {
         encoder_codec_context->max_b_frames = 0;
-    }
+    } 
 
     if (params->force_keyint > 0) {
         encoder_codec_context->gop_size = params->force_keyint;
@@ -4465,7 +4468,7 @@ check_params(
         if (params->video_bitrate > params->rc_buffer_size) {
             elv_log("Replacing rc_buffer_size %d with video_bitrate %d, url=%s",
                 params->rc_buffer_size, params->video_bitrate, params->url);
-            params->rc_buffer_size = params->video_bitrate;
+            params->rc_buffer_size = 2*params->video_bitrate;
         }
     }
 
@@ -4558,6 +4561,35 @@ check_params(
         return eav_param;
     }
 
+    if (!strcmp(params->ecodec, "libx264") && params->rc) {
+        if (!strcmp(params->rc, "none") &&
+            !strcmp(params->rc, "cbr") &&
+            !strcmp(params->rc, "vbr")) {
+            elv_err("Invalid rate control %s, encoder=%s, url=%s", params->rc, params->ecodec, params->url);
+            return eav_param;
+        }
+    }
+
+    if (!strcmp(params->ecodec, "h264_nvenc") && params->rc) {
+        if (!strcmp(params->rc, "constqp") &&
+            !strcmp(params->rc, "cbr") &&
+            !strcmp(params->rc, "vbr") &&
+            !strcmp(params->rc, "cbr_ld")) {
+            elv_err("Invalid rate control %s, encoder=%s, url=%s", params->rc, params->ecodec, params->url);
+            return eav_param;
+        }
+    }
+
+    if (!strcmp(params->ecodec, "libx264") && !params->preset) {
+        params->preset = strdup("medium");
+        elv_log("Setting preset to medium, url=%s", params->url);
+    }
+
+    if (!strcmp(params->ecodec, "h264_nvenc") && !params->preset) {
+        params->preset = strdup("p1");
+        elv_log("Setting preset to p1, url=%s", params->url);
+    }
+
     return eav_success;
 }
 
@@ -4633,7 +4665,9 @@ log_params(
         "video_frame_duration_ts=%d "
         "rotate=%d "
         "profile=%s "
-        "level=%d",
+        "level=%d "
+        "rate_control=%s "
+        "tune=%s",
         params->stream_id, params->url,
         avpipe_version(),
         params->bypass_transcoding, params->skip_decoding,
@@ -4657,7 +4691,9 @@ log_params(
         params->filter_descriptor,
         params->extract_image_interval_ts, params->extract_images_sz,
         1, params->video_time_base, params->video_frame_duration_ts, params->rotate,
-        params->profile ? params->profile : "", params->level);
+        params->profile ? params->profile : "", params->level,
+        params->rc ? params->rc : "",
+        params->tune ? params->tune : "");
     elv_log("AVPIPE XCPARAMS %s", buf);
 }
 
