@@ -336,6 +336,7 @@ func InitTranscode(cmdRoot *cobra.Command) error {
 	cmdTranscode.PersistentFlags().Int32("rotate", 0, "Rotate the output video frame (valid values 0, 90, 180, 270).")
 	cmdTranscode.PersistentFlags().StringP("profile", "", "", "Encoding profile for video. If it is not determined, it will be set automatically.")
 	cmdTranscode.PersistentFlags().Int32("level", 0, "Encoding level for video. If it is not determined, it will be set automatically.")
+	cmdTranscode.PersistentFlags().Int32("deinterlace", 0, "Deinterlace filter (values 0 - none, 1 - bwdif_field, 2 - bwdif_frame send_frame).")
 
 	return nil
 }
@@ -621,6 +622,11 @@ func doTranscode(cmd *cobra.Command, args []string) error {
 
 	profile := cmd.Flag("profile").Value.String()
 
+	deinterlace, err := cmd.Flags().GetInt32("deinterlace")
+	if err != nil {
+		return fmt.Errorf("Invalid deinterlace value")
+	}
+
 	cryptScheme := avpipe.CryptNone
 	val := cmd.Flag("crypt-scheme").Value.String()
 	if len(val) > 0 {
@@ -719,6 +725,7 @@ func doTranscode(cmd *cobra.Command, args []string) error {
 		Rotate:                 int(rotate),
 		Profile:                profile,
 		Level:                  int(level),
+		Deinterlace:            int(deinterlace),
 	}
 
 	err = getAudioIndexes(params, audioIndex)
