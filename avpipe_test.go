@@ -25,7 +25,7 @@ import (
 )
 
 const baseOutPath = "test_out"
-const debugFrameLevel = true
+const debugFrameLevel = false
 const h264Codec = "libx264"
 const videoBigBuckBunnyPath = "media/bbb_1080p_30fps_60sec.mp4"
 const videoBigBuckBunny3AudioPath = "media/BBB_3x_audio_streams_music_2min_48kHz.mp4"
