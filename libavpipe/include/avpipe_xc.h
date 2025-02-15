@@ -94,14 +94,16 @@ typedef enum avpipe_buftype_t {
 typedef enum avp_stat_t {
     in_stat_bytes_read = 1,                 // # of bytes read from input stream
     in_stat_audio_frame_read = 2,           // # of audio frames read from the input stream
-    in_stat_video_frame_read = 4,           // # of video frames read from the input stream
-    in_stat_decoding_audio_start_pts = 8,   // PTS of first audio packet went to the decoder
-    in_stat_decoding_video_start_pts = 16,  // PTS of first video packet went to the decoder
-    out_stat_bytes_written = 32,            // # of bytes written to the output stream
-    out_stat_frame_written = 64,            // # of frames written to the output stream
-    in_stat_first_keyframe_pts = 128,       // First keyframe in the input stream
-    out_stat_encoding_end_pts = 256,        // 
-    in_stat_data_scte35 = 512               // SCTE data arrived
+    in_stat_video_frame_read = 3,           // # of video frames read from the input stream
+    in_stat_decoding_audio_start_pts = 4,   // PTS of first audio packet went to the decoder
+    in_stat_decoding_video_start_pts = 5,   // PTS of first video packet went to the decoder
+    out_stat_bytes_written = 6,             // # of bytes written to the output stream
+    out_stat_frame_written = 7,             // # of frames written to the output stream
+    in_stat_first_keyframe_pts = 8,         // First keyframe in the input stream
+    out_stat_encoding_end_pts = 9,          // The last PTS encoded. This stat is recorded when a file is closed
+    out_stat_start_file = 10,               // Sent when a new file is opened and reports the segment index
+    out_stat_end_file = 11,                 // Sent when a file is closed and reports the segment index
+    in_stat_data_scte35 = 12               // SCTE data arrived
 } avp_stat_t;
 
 struct coderctx_t;
@@ -556,6 +558,15 @@ typedef struct xc_frame_t {
     int         stream_index;
 } xc_frame_t;
 
+/**
+ * out_tracker_t is used to keep information useful for providing stat
+ * information about a stream.
+ *
+ * It is kept within the `avpipe_opaque` field of the AVFormatContext. One
+ * out_tracker_t is created for each output stream. The `out_tracker_t`'s
+ * lifecycle is associated with the format context, and it will be freed in
+ * `avpipe_fini`.
+ */
 typedef struct out_tracker_t {
     struct avpipe_io_handler_t  *out_handlers;
     coderctx_t                  *encoder_ctx;   /* Needed to get access for stats */
@@ -567,6 +578,8 @@ typedef struct out_tracker_t {
     /** Needed to detect type of encoding frame */
     int video_stream_index;
     int audio_stream_index;
+
+    int output_stream_index;
 } out_tracker_t;
 
 typedef struct encoding_frame_stats_t {

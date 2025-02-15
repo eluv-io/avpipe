@@ -583,17 +583,27 @@ func (o *outputCtx) Close() error {
 }
 
 func (o *outputCtx) Stat(streamIndex int, avType avpipe.AVType, statType avpipe.AVStatType, statArgs interface{}) error {
+	doLog := func(args ...interface{}) {
+		if debugFrameLevel {
+			logArgs := []interface{}{"stat", statType.Name(), "avType", avType.Name(), "streamIndex", streamIndex}
+			logArgs = append(logArgs, args...)
+			log.Debug("STAT", logArgs...)
+		}
+	}
+
 	switch statType {
 	case avpipe.AV_OUT_STAT_BYTES_WRITTEN:
 		writeOffset := statArgs.(*uint64)
-		if debugFrameLevel {
-			log.Debug("STAT, write offset", *writeOffset, "streamIndex", streamIndex, "avType", avType)
-		}
+		doLog("write offset", *writeOffset)
 	case avpipe.AV_OUT_STAT_ENCODING_END_PTS:
 		endPTS := statArgs.(*uint64)
-		if debugFrameLevel {
-			log.Debug("STAT, endPTS", *endPTS, "streamIndex", streamIndex, "avType", avType)
-		}
+		doLog("endPTS", *endPTS)
+	case avpipe.AV_OUT_STAT_START_FILE:
+		segIdx := statArgs.(*int)
+		doLog("segIdx", *segIdx)
+	case avpipe.AV_OUT_STAT_END_FILE:
+		segIdx := statArgs.(*int)
+		doLog("segIdx", *segIdx)
 	}
 	return nil
 }
