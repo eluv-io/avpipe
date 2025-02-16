@@ -371,6 +371,13 @@ typedef enum image_type {
     gif_image
 } image_type;
 
+// deinterlacing filter types
+typedef enum dif_type {
+    dif_none        = 0, // No deinterlacing
+    dif_bwdif       = 1, // Use filter bwdif mode 'send_field' (two frames per input frame)
+    dif_bwdif_frame = 2  // Use filter bwdif mode 'send_frame' (one frame per input frame)
+} dif_type;
+
 #define DRAW_TEXT_SHADOW_OFFSET     0.075
 #define MAX_EXTRACT_IMAGES_SZ       100
 
@@ -454,6 +461,7 @@ typedef struct xcparams_t {
     int         rotate;                     // For video transpose or rotation
     char        *profile;
     int         level;
+    dif_type    deinterlace;                // Deinterlacing filter
 } xcparams_t;
 
 #define MAX_CODEC_NAME  256

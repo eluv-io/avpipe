@@ -307,6 +307,7 @@ type XcParams struct {
 	Rotate                 int         `json:"rotate"`
 	Profile                string      `json:"profile"`
 	Level                  int         `json:"level"`
+        Deinterlace            int         `json:"deinterlace"`
 }
 
 // NewXcParams initializes a XcParams struct with unset/default values
@@ -1402,6 +1403,7 @@ func getCParams(params *XcParams) (*C.xcparams_t, error) {
 		rotate:                    C.int(params.Rotate),
 		profile:                   C.CString(params.Profile),
 		level:                     C.int(params.Level),
+                deinterlace:               C.dif_type(params.Deinterlace),
 
 		// All boolean params are handled below
 	}
