@@ -37,14 +37,17 @@ package avpipe
 // #include "elv_log.h"
 import "C"
 import (
+	"crypto/rand"
 	"encoding/json"
 	"fmt"
 	"io"
+	"math"
 	"math/big"
 	"sync"
 	"unsafe"
 
 	elog "github.com/eluv-io/log-go"
+	"github.com/modern-go/gls"
 )
 
 var log = elog.Get("/eluvio/avpipe")
@@ -307,7 +310,7 @@ type XcParams struct {
 	Rotate                 int         `json:"rotate"`
 	Profile                string      `json:"profile"`
 	Level                  int         `json:"level"`
-        Deinterlace            int         `json:"deinterlace"`
+	Deinterlace            int         `json:"deinterlace"`
 }
 
 // NewXcParams initializes a XcParams struct with unset/default values
@@ -1290,38 +1293,68 @@ func (h *ioHandler) OutStat(fd C.int64_t,
 	return err
 }
 
+// TODO(Nate): DO this
+// If multiple simultaneous XCs, can we just have a map[gid]handle and set that when we start a
+// transcode job?
+
+var gidHandleMap sync.Map = sync.Map{}
+
+func AssociateGIDWithHandle(handle int32) {
+	gidHandleMap.Store(gls.GoID(), handle)
+}
+
+func DissociateGIDWithHandle() {
+	gidHandleMap.Delete(gls.GoID())
+}
+
+func GIDHandle() (int32, bool) {
+	gid := gls.GoID()
+	handle, ok := gidHandleMap.Load(gid)
+	if !ok {
+		return 0, false
+	}
+	return handle.(int32), true
+}
+
+func LogHandleIfKnown() []interface{} {
+	if handle, ok := GIDHandle(); ok {
+		return []interface{}{"av_handle", handle}
+	}
+	return nil
+}
+
 //export CLog
 func CLog(msg *C.char) C.int {
 	m := C.GoString((*C.char)(unsafe.Pointer(msg)))
-	log.Info(m)
+	log.Info(m, LogHandleIfKnown()...)
 	return C.int(0)
 }
 
 //export CDebug
 func CDebug(msg *C.char) C.int {
 	m := C.GoString((*C.char)(unsafe.Pointer(msg)))
-	log.Debug(m)
+	log.Debug(m, LogHandleIfKnown()...)
 	return C.int(len(m))
 }
 
 //export CInfo
 func CInfo(msg *C.char) C.int {
 	m := C.GoString((*C.char)(unsafe.Pointer(msg)))
-	log.Info(m)
+	log.Info(m, LogHandleIfKnown()...)
 	return C.int(len(m))
 }
 
 //export CWarn
 func CWarn(msg *C.char) C.int {
 	m := C.GoString((*C.char)(unsafe.Pointer(msg)))
-	log.Warn(m)
+	log.Warn(m, LogHandleIfKnown()...)
 	return C.int(len(m))
 }
 
 //export CError
 func CError(msg *C.char) C.int {
 	m := C.GoString((*C.char)(unsafe.Pointer(msg)))
-	log.Error(m)
+	log.Error(m, LogHandleIfKnown()...)
 	return C.int(len(m))
 }
 
@@ -1403,7 +1436,7 @@ func getCParams(params *XcParams) (*C.xcparams_t, error) {
 		rotate:                    C.int(params.Rotate),
 		profile:                   C.CString(params.Profile),
 		level:                     C.int(params.Level),
-                deinterlace:               C.dif_type(params.Deinterlace),
+		deinterlace:               C.dif_type(params.Deinterlace),
 
 		// All boolean params are handled below
 	}
@@ -1456,6 +1489,15 @@ func getCParams(params *XcParams) (*C.xcparams_t, error) {
 	return cparams, nil
 }
 
+func generateI32Handle() int32 {
+	handle64, err := rand.Int(rand.Reader, big.NewInt(math.MaxInt32))
+	if err != nil {
+		log.Error("Unexpected error generating handle randomness", err)
+		return 0
+	}
+	return int32(handle64.Int64())
+}
+
 // params: transcoding parameters
 func Xc(params *XcParams) error {
 
@@ -1470,7 +1512,13 @@ func Xc(params *XcParams) error {
 		log.Error("Transcoding failed", err, "url", params.Url)
 	}
 
+	handle := generateI32Handle()
+	log.Info("Associating handle with one shot XC", "av_handle", handle, "url", params.Url)
+	AssociateGIDWithHandle(handle)
+
 	rc := C.xc((*C.xcparams_t)(unsafe.Pointer(cparams)))
+
+	DissociateGIDWithHandle()
 
 	gMutex.Lock()
 	defer gMutex.Unlock()
@@ -1492,7 +1540,13 @@ func Mux(params *XcParams) error {
 		log.Error("Muxing failed", err, "url", params.Url)
 	}
 
+	handle := generateI32Handle()
+	log.Info("Associating handle with one shot mux", "av_handle", handle, "url", params.Url)
+	AssociateGIDWithHandle(handle)
+
 	rc := C.mux((*C.xcparams_t)(unsafe.Pointer(cparams)))
+
+	DissociateGIDWithHandle()
 
 	gMutex.Lock()
 	defer gMutex.Unlock()
@@ -1674,7 +1728,9 @@ func XcRun(handle int32) error {
 	if handle < 0 {
 		return EAV_BAD_HANDLE
 	}
+	AssociateGIDWithHandle(handle)
 	rc := C.xc_run(C.int32_t(handle))
+	DissociateGIDWithHandle()
 	if rc == 0 {
 		return nil
 	}
