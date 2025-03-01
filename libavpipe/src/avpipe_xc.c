@@ -2914,6 +2914,8 @@ transcode_video_func(
     xc_frame_t *xc_frame;
     int err = 0;
 
+    AssociateCThreadWithHandle(xctx->handle);
+
     AVFrame *frame = av_frame_alloc();
     AVFrame *filt_frame = av_frame_alloc();
 
@@ -2997,6 +2999,8 @@ transcode_audio_func(
     xcparams_t *params = xctx->params;
     xc_frame_t *xc_frame;
     int err = 0;
+
+    AssociateCThreadWithHandle(xctx->handle);
 
     AVFrame *frame = av_frame_alloc();
     AVFrame *filt_frame = av_frame_alloc();

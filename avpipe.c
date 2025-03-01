@@ -67,6 +67,8 @@ int     AVPipeCloseOutput(int64_t, int64_t);
 int     AVPipeCloseMuxOutput(int64_t);
 int     AVPipeStatOutput(int64_t, int64_t, int, avpipe_buftype_t, avp_stat_t, void *);
 int     AVPipeStatMuxOutput(int64_t, int, avp_stat_t, void *);
+int32_t GenerateAndRegisterHandle();
+int     AssociateCThreadWithHandle(int32_t);
 int     CLog(char *);
 int     CDebug(char *);
 int     CInfo(char *);
@@ -380,6 +382,7 @@ udp_in_opener(
     params->udp_channel = inctx->udp_channel;
     params->inctx = inctx;
 
+    // TODO(Nate): How to get the handle all the way into here??
     pthread_create(&inctx->utid, NULL, udp_thread_func, params);
     elv_dbg("IN OPEN UDP fd=%d, sockfd=%d, url=%s, tid=%"PRId64, fd, sockfd, url, inctx->utid);
     return 0;
@@ -1043,6 +1046,8 @@ xc(
         goto end_tx;
     }
 
+    xctx->handle = GenerateAndRegisterHandle();
+
     if ((rc = avpipe_xc(xctx, 0)) != eav_success) {
         elv_err("Transcoding failed url=%s, rc=%d", params->url, rc);
         goto end_tx;
@@ -1346,6 +1351,8 @@ mux(
         elv_err("Initializing muxer failed, url=%s", params->url);
         goto end_mux;
     }
+
+    xctx->handle = GenerateAndRegisterHandle();
 
     if ((rc = avpipe_mux(xctx)) != eav_success) {
         elv_err("Muxing failed");

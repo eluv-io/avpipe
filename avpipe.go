@@ -1288,6 +1288,22 @@ func (h *ioHandler) OutStat(fd C.int64_t,
 	return err
 }
 
+//export GenerateAndRegisterHandle
+func GenerateAndRegisterHandle() C.int32_t {
+	handle := generateI32Handle()
+	AssociateGIDWithHandle(handle)
+	return C.int32_t(handle)
+}
+
+//export AssociateCThreadWithHandle
+func AssociateCThreadWithHandle(handle C.int32_t) C.int {
+	if int32(handle) == 0 {
+		return C.int(0)
+	}
+	AssociateGIDWithHandle(int32(handle))
+	return C.int(0)
+}
+
 //export CLog
 func CLog(msg *C.char) C.int {
 	m := C.GoString((*C.char)(unsafe.Pointer(msg)))
@@ -1477,12 +1493,7 @@ func Xc(params *XcParams) error {
 		log.Error("Transcoding failed", err, "url", params.Url)
 	}
 
-	handle := generateI32Handle()
-	log.Info("Associating handle with one shot XC", "av_handle", handle, "url", params.Url)
-	AssociateGIDWithHandle(handle)
-
 	rc := C.xc((*C.xcparams_t)(unsafe.Pointer(cparams)))
-
 	DissociateGIDWithHandle()
 
 	gMutex.Lock()
@@ -1504,10 +1515,6 @@ func Mux(params *XcParams) error {
 	if err != nil {
 		log.Error("Muxing failed", err, "url", params.Url)
 	}
-
-	handle := generateI32Handle()
-	log.Info("Associating handle with one shot mux", "av_handle", handle, "url", params.Url)
-	AssociateGIDWithHandle(handle)
 
 	rc := C.mux((*C.xcparams_t)(unsafe.Pointer(cparams)))
 
