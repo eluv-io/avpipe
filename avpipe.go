@@ -45,12 +45,7 @@ import (
 	"math/big"
 	"sync"
 	"unsafe"
-
-	elog "github.com/eluv-io/log-go"
-	"github.com/modern-go/gls"
 )
-
-var log = elog.Get("/eluvio/avpipe")
 
 const traceIo bool = false
 
@@ -1293,68 +1288,38 @@ func (h *ioHandler) OutStat(fd C.int64_t,
 	return err
 }
 
-// TODO(Nate): DO this
-// If multiple simultaneous XCs, can we just have a map[gid]handle and set that when we start a
-// transcode job?
-
-var gidHandleMap sync.Map = sync.Map{}
-
-func AssociateGIDWithHandle(handle int32) {
-	gidHandleMap.Store(gls.GoID(), handle)
-}
-
-func DissociateGIDWithHandle() {
-	gidHandleMap.Delete(gls.GoID())
-}
-
-func GIDHandle() (int32, bool) {
-	gid := gls.GoID()
-	handle, ok := gidHandleMap.Load(gid)
-	if !ok {
-		return 0, false
-	}
-	return handle.(int32), true
-}
-
-func LogHandleIfKnown() []interface{} {
-	if handle, ok := GIDHandle(); ok {
-		return []interface{}{"av_handle", handle}
-	}
-	return nil
-}
-
 //export CLog
 func CLog(msg *C.char) C.int {
 	m := C.GoString((*C.char)(unsafe.Pointer(msg)))
-	log.Info(m, LogHandleIfKnown()...)
+	log.Info(m)
 	return C.int(0)
 }
 
 //export CDebug
 func CDebug(msg *C.char) C.int {
 	m := C.GoString((*C.char)(unsafe.Pointer(msg)))
-	log.Debug(m, LogHandleIfKnown()...)
+	log.Debug(m)
 	return C.int(len(m))
 }
 
 //export CInfo
 func CInfo(msg *C.char) C.int {
 	m := C.GoString((*C.char)(unsafe.Pointer(msg)))
-	log.Info(m, LogHandleIfKnown()...)
+	log.Info(m)
 	return C.int(len(m))
 }
 
 //export CWarn
 func CWarn(msg *C.char) C.int {
 	m := C.GoString((*C.char)(unsafe.Pointer(msg)))
-	log.Warn(m, LogHandleIfKnown()...)
+	log.Warn(m)
 	return C.int(len(m))
 }
 
 //export CError
 func CError(msg *C.char) C.int {
 	m := C.GoString((*C.char)(unsafe.Pointer(msg)))
-	log.Error(m, LogHandleIfKnown()...)
+	log.Error(m)
 	return C.int(len(m))
 }
 
