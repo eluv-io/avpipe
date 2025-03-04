@@ -41,13 +41,10 @@ import (
 	"fmt"
 	"io"
 	"math/big"
+	"math/rand"
 	"sync"
 	"unsafe"
-
-	elog "github.com/eluv-io/log-go"
 )
-
-var log = elog.Get("/eluvio/avpipe")
 
 const traceIo bool = false
 
@@ -307,7 +304,7 @@ type XcParams struct {
 	Rotate                 int         `json:"rotate"`
 	Profile                string      `json:"profile"`
 	Level                  int         `json:"level"`
-        Deinterlace            int         `json:"deinterlace"`
+	Deinterlace            int         `json:"deinterlace"`
 }
 
 // NewXcParams initializes a XcParams struct with unset/default values
@@ -1290,6 +1287,22 @@ func (h *ioHandler) OutStat(fd C.int64_t,
 	return err
 }
 
+//export GenerateAndRegisterHandle
+func GenerateAndRegisterHandle() C.int32_t {
+	handle := generateI32Handle()
+	AssociateGIDWithHandle(handle)
+	return C.int32_t(handle)
+}
+
+//export AssociateCThreadWithHandle
+func AssociateCThreadWithHandle(handle C.int32_t) C.int {
+	if int32(handle) == 0 {
+		return C.int(0)
+	}
+	AssociateGIDWithHandle(int32(handle))
+	return C.int(0)
+}
+
 //export CLog
 func CLog(msg *C.char) C.int {
 	m := C.GoString((*C.char)(unsafe.Pointer(msg)))
@@ -1403,7 +1416,7 @@ func getCParams(params *XcParams) (*C.xcparams_t, error) {
 		rotate:                    C.int(params.Rotate),
 		profile:                   C.CString(params.Profile),
 		level:                     C.int(params.Level),
-                deinterlace:               C.dif_type(params.Deinterlace),
+		deinterlace:               C.dif_type(params.Deinterlace),
 
 		// All boolean params are handled below
 	}
@@ -1456,6 +1469,11 @@ func getCParams(params *XcParams) (*C.xcparams_t, error) {
 	return cparams, nil
 }
 
+func generateI32Handle() int32 {
+	// avpipe treats negative handles as evidence of an error, so we generate a non-negative handle
+	return rand.Int31()
+}
+
 // params: transcoding parameters
 func Xc(params *XcParams) error {
 
@@ -1471,6 +1489,7 @@ func Xc(params *XcParams) error {
 	}
 
 	rc := C.xc((*C.xcparams_t)(unsafe.Pointer(cparams)))
+	DissociateGIDWithHandle()
 
 	gMutex.Lock()
 	defer gMutex.Unlock()
@@ -1493,6 +1512,8 @@ func Mux(params *XcParams) error {
 	}
 
 	rc := C.mux((*C.xcparams_t)(unsafe.Pointer(cparams)))
+
+	DissociateGIDWithHandle()
 
 	gMutex.Lock()
 	defer gMutex.Unlock()
@@ -1674,7 +1695,9 @@ func XcRun(handle int32) error {
 	if handle < 0 {
 		return EAV_BAD_HANDLE
 	}
+	AssociateGIDWithHandle(handle)
 	rc := C.xc_run(C.int32_t(handle))
+	DissociateGIDWithHandle()
 	if rc == 0 {
 		return nil
 	}
