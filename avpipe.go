@@ -37,12 +37,11 @@ package avpipe
 // #include "elv_log.h"
 import "C"
 import (
-	"crypto/rand"
 	"encoding/json"
 	"fmt"
 	"io"
-	"math"
 	"math/big"
+	"math/rand"
 	"sync"
 	"unsafe"
 )
@@ -1471,12 +1470,8 @@ func getCParams(params *XcParams) (*C.xcparams_t, error) {
 }
 
 func generateI32Handle() int32 {
-	handle64, err := rand.Int(rand.Reader, big.NewInt(math.MaxInt32))
-	if err != nil {
-		log.Error("Unexpected error generating handle randomness", err)
-		return 0
-	}
-	return int32(handle64.Int64())
+	// avpipe treats negative handles as evidence of an error, so we generate a non-negative handle
+	return rand.Int31()
 }
 
 // params: transcoding parameters

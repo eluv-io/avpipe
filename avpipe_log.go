@@ -1,6 +1,9 @@
 package avpipe
 
 import (
+	"bytes"
+	"encoding/binary"
+	"encoding/hex"
 	"sync"
 
 	"github.com/modern-go/gls"
@@ -44,7 +47,7 @@ func (l *logWrapper) Fatal(msg string, fields ...interface{}) {
 	l.log.Fatal(msg, fields...)
 }
 
-var log = logWrapper{log: elog.Get("/eluvio/avpipe")}
+var log = logWrapper{log: elog.Get("/avpipe")}
 
 var gidHandleMap sync.Map = sync.Map{}
 
@@ -67,7 +70,9 @@ func GIDHandle() (int32, bool) {
 
 func logHandleIfKnown() []interface{} {
 	if handle, ok := GIDHandle(); ok {
-		return []interface{}{"av_handle", handle}
+		buf := &bytes.Buffer{}
+		binary.Write(buf, binary.BigEndian, handle)
+		return []interface{}{"avp", hex.EncodeToString(buf.Bytes())}
 	}
 	return nil
 }
