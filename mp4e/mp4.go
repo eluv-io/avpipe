@@ -27,7 +27,9 @@ type Mp4Info struct {
 	Timescale         uint32        //
 }
 
-func (s *Mp4Info) AddError(err string, seg, frag int, pts int64) {
+// AddError saves errors for handling at the end of validation. The seg, frag,
+// and pts fields provide a way to conveniently add some context.
+func (s *Mp4Info) AddError(err string, seg, frag int, pts *uint64) {
 	seg++
 	frag++
 
@@ -37,8 +39,8 @@ func (s *Mp4Info) AddError(err string, seg, frag int, pts int64) {
 	if frag > 0 {
 		err += fmt.Sprintf(", fragment %d", frag)
 	}
-	if pts >= 0 {
-		err += fmt.Sprintf(", pts %d", pts)
+	if pts != nil {
+		err += fmt.Sprintf(", pts %d", *pts)
 	}
 
 	s.Errors = append(s.Errors, err)
@@ -104,18 +106,18 @@ func ValidateFmp4(reader io.Reader) (file *mp4.File, info *Mp4Info, err error) {
 		//       minf - media information container
 		//         stbl - sample table box, container for the time/space map
 		//           stsd - sample descriptions (codec types, initialization etc.); codec info
-		// file.Moov.Trak.Mdia.Minf.Stbl.Stsd.AvcX.AvcC
+		// We may want to check file.Moov.Trak.Mdia.Minf.Stbl.Stsd.AvcX.AvcC (and HEVC)
 		info.InitInfo = &InitInfo{}
 	}
 	if len(file.Segments) == 0 {
 		if file.Init == nil {
-			info.AddError("No segments", -1, -1, -1)
+			info.AddError("No segments", -1, -1, nil)
 		}
 		return
 	}
 
 	if !file.IsFragmented() {
-		info.AddError("Not fragmented", -1, -1, -1)
+		info.AddError("Not fragmented", -1, -1, nil)
 	}
 	if file.Segments[0].Sidx != nil {
 		info.Timescale = file.Segments[0].Sidx.Timescale
@@ -126,14 +128,14 @@ func ValidateFmp4(reader io.Reader) (file *mp4.File, info *Mp4Info, err error) {
 	sampleCountPrev := uint64(0)
 	sampleCountPrevPrev := uint64(0)
 	seqPrev := uint32(0)
-	for i, seg := range file.Segments {
+	for segIdx, seg := range file.Segments {
 		info.FragmentCount += uint64(len(seg.Fragments))
 		segInfo := SegmentInfo{
 			FragmentCount: uint64(len(seg.Fragments)),
 		}
 
 		if seg.Fragments == nil {
-			info.AddError("No fragments", i, -1, -1)
+			info.AddError("No fragments", segIdx, -1, nil)
 		}
 
 		// moof - movie fragment
@@ -141,61 +143,62 @@ func ValidateFmp4(reader io.Reader) (file *mp4.File, info *Mp4Info, err error) {
 		//   traf - track fragment
 		//     tfhd - track fragment header; track ID, default sample duration
 		//     tfdt - track fragment decode time
-		for j, frag := range seg.Fragments {
+		for fragIdx, frag := range seg.Fragments {
 			seq := uint32(0)
 
 			if frag.Moof == nil {
-				info.AddError("No moof", i, j, -1)
+				info.AddError("No moof", segIdx, fragIdx, nil)
 			} else {
 				if frag.Moof.Mfhd == nil {
-					info.AddError("No mfhd", i, j, -1)
+					info.AddError("No mfhd", segIdx, fragIdx, nil)
 				} else {
 					seq = frag.Moof.Mfhd.SequenceNumber
 				}
 
 				//if frag.Moof.Traf == nil {
-				//	info.AddError("No traf", i, j)
+				//	info.AddError("No traf", segIdx, fragIdx)
 				//} else {
 				//	if frag.Moof.Traf.Tfhd == nil {
-				//		info.AddError("No tfhd", i, j)
+				//		info.AddError("No tfhd", segIdx, fragIdx)
 				//	} else {
 				//		dur = uint64(frag.Moof.Traf.Tfhd.DefaultSampleDuration)
 				//		if dur == 0 {
-				//			info.AddError("default_sample_duration is 0", i, j)
+				//			info.AddError("default_sample_duration is 0", segIdx, fragIdx)
 				//		}
 				//	}
 				//	if frag.Moof.Traf.Tfdt == nil {
-				//		info.AddError("No tfdt", i, j)
+				//		info.AddError("No tfdt", segIdx, fragIdx)
 				//	} else {
 				//		dts = frag.Moof.Traf.Tfdt.BaseMediaDecodeTime()
 				//	}
 				//}
 			}
-			//if len(seg.Sidxs) > j {
-			//	sidx := seg.Sidxs[j]
+			//if len(seg.Sidxs) > fragIdx {
+			//	sidx := seg.Sidxs[fragIdx]
 			//	pts = sidx.EarliestPresentationTime
 			//}
 
-			if j == 0 {
+			if fragIdx == 0 {
 				segInfo.SeqStart = seq
-			} else if j == len(seg.Fragments)-1 {
+			} else if fragIdx == len(seg.Fragments)-1 {
 				segInfo.SeqEnd = seq
 			}
 
-			if seq != seqPrev+1 && j > 0 {
-				info.AddError(fmt.Sprintf("Sequence number gap %d - %d", seqPrev, seq), i, j, -1)
+			// Check for gaps in sequence number
+			if seq != seqPrev+1 && fragIdx > 0 {
+				info.AddError(fmt.Sprintf("Sequence number gap %d - %d", seqPrev, seq), segIdx, fragIdx, nil)
 			}
 			seqPrev = seq
 
 			var samples []mp4.FullSample
 			samples, err = frag.GetFullSamples(nil)
 			if err != nil {
-				info.AddError(fmt.Sprintf("failed to read samples: %v", err), i, j, -1)
+				info.AddError(fmt.Sprintf("failed to read samples: %v", err), segIdx, fragIdx, nil)
 				continue
 			}
 			sampleCount := uint64(len(samples))
 			segInfo.SampleCount += sampleCount
-			for k, sample := range samples {
+			for sampleIdx, sample := range samples {
 				dur := uint64(sample.Dur)
 				if dur < info.SampleDurationMin || info.SampleDurationMin == 0 {
 					info.SampleDurationMin = dur
@@ -205,39 +208,48 @@ func ValidateFmp4(reader io.Reader) (file *mp4.File, info *Mp4Info, err error) {
 				}
 				dts := sample.DecodeTime
 				pts := sample.PresentationTime()
-				segInfo.Samples = append(segInfo.Samples, &SampleInfo{dur, j, pts})
-				if j == 0 && k == 0 {
+
+				// Build list of samples
+				segInfo.Samples = append(segInfo.Samples, &SampleInfo{dur, fragIdx, pts})
+
+				// Check for IDR frames (video only)
+				if fragIdx == 0 && sampleIdx == 0 {
 					segInfo.DtsStart = dts
 					segInfo.PtsStart = pts
 					if err = ensureIDRFrame(sample); err != nil {
-						info.AddError(err.Error(), i, j, int64(pts))
+						info.AddError(err.Error(), segIdx, fragIdx, &pts)
 					}
-				} else if j == len(seg.Fragments)-1 && k == len(samples)-1 {
+				} else if fragIdx == len(seg.Fragments)-1 && sampleIdx == len(samples)-1 {
 					segInfo.DtsEnd = dts + dur
 					segInfo.PtsEnd = pts + dur
 				}
-				if dtsPrev != 0 && absDiff(dts-dtsPrev, dur) > 1 {
-					info.AddError(fmt.Sprintf("DTS gap %d - %d, sample duration %d", dtsPrev, dts, dur), i, j, int64(pts))
+
+				// Check for gaps in DTS. DTS should come in order
+				if dtsPrev != 0 && absDiff(dts-dtsPrev, dur) > 0 {
+					info.AddError(fmt.Sprintf("DTS gap %d - %d, sample duration %d", dtsPrev, dts, dur), segIdx, fragIdx, &pts)
 				}
 				dtsPrev = dts
 			}
 		}
 
-		// PTS may not be in order
+		// Sort because PTS may not be in order
 		sort.Slice(segInfo.Samples, func(a, b int) bool {
 			return segInfo.Samples[a].Pts < segInfo.Samples[b].Pts
 		})
+
+		// Check for gaps in PTS
 		for _, s := range segInfo.Samples {
-			if ptsPrev != 0 && absDiff(s.Pts-ptsPrev, s.Duration) > 1 {
-				info.AddError(fmt.Sprintf("PTS gap %d - %d, sample duration %d", ptsPrev, s.Pts, s.Duration), i, s.Fragment, 0)
+			if ptsPrev != 0 && absDiff(s.Pts-ptsPrev, s.Duration) > 0 {
+				info.AddError(fmt.Sprintf("PTS gap %d - %d, sample duration %d", ptsPrev, s.Pts, s.Duration), segIdx, s.Fragment, nil)
 			}
 			ptsPrev = s.Pts
 		}
 
+		// Check sample counts per segment
 		info.SampleCount += segInfo.SampleCount
 		if isSampleCountSequenceBad(sampleCountPrevPrev, sampleCountPrev, segInfo.SampleCount) &&
-			i < len(file.Segments)-1 { // ignore last segment
-			info.AddError(fmt.Sprintf("Sample count mismatch %d - %d", sampleCountPrev, segInfo.SampleCount), i, -1, 0)
+			segIdx < len(file.Segments)-1 { // ignore last segment
+			info.AddError(fmt.Sprintf("Sample count mismatch %d - %d", sampleCountPrev, segInfo.SampleCount), segIdx, -1, nil)
 		}
 		sampleCountPrevPrev = sampleCountPrev
 		sampleCountPrev = segInfo.SampleCount
@@ -265,11 +277,12 @@ func absDiff(x, y uint64) uint64 {
 func ensureIDRFrame(sample mp4.FullSample) (err error) {
 	nalus, err := avc.GetNalusFromSample(sample.Data)
 	if err != nil {
-		if strings.Index(err.Error(), "video") != -1 {
+		if strings.Index(err.Error(), "Not video?") != -1 {
 			err = nil
 		}
 		return
 	}
+
 	err = fmt.Errorf("IDR random access slice NAL unit not found")
 	for _, nalu := range nalus {
 		naluType := avc.GetNaluType(nalu[0])
