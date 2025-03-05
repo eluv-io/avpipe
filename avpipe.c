@@ -1048,7 +1048,7 @@ xc(
     }
 
     xctx->handle = GenerateAndRegisterHandle();
-    xctx->associate_thread = GenerateAndRegisterHandle();
+    xctx->associate_thread = AssociateCThreadWithHandle;
 
     if ((rc = avpipe_xc(xctx, 0)) != eav_success) {
         elv_err("Transcoding failed url=%s, rc=%d", params->url, rc);
