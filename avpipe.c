@@ -974,6 +974,7 @@ xc_init(
 
     xctx->in_handlers = in_handlers;
     xctx->out_handlers = out_handlers;
+    xctx->associate_thread = AssociateCThreadWithHandle;
 
     *handle = h;
     return eav_success;
@@ -1047,6 +1048,7 @@ xc(
     }
 
     xctx->handle = GenerateAndRegisterHandle();
+    xctx->associate_thread = GenerateAndRegisterHandle();
 
     if ((rc = avpipe_xc(xctx, 0)) != eav_success) {
         elv_err("Transcoding failed url=%s, rc=%d", params->url, rc);
@@ -1353,6 +1355,7 @@ mux(
     }
 
     xctx->handle = GenerateAndRegisterHandle();
+    xctx->associate_thread = AssociateCThreadWithHandle;
 
     if ((rc = avpipe_mux(xctx)) != eav_success) {
         elv_err("Muxing failed");
