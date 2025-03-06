@@ -69,8 +69,16 @@ func AssociateGIDWithHandle(handle int32) {
 	}
 }
 
-func DissociateGIDWithHandle() {
-	gidHandleMap.Delete(gls.GoID())
+// XCEnded releases resources associated with the handle
+func XCEnded() {
+	handleUntyped, ok := gidHandleMap.LoadAndDelete(gls.GoID())
+	if !ok {
+		return
+	}
+	handle := handleUntyped.(int32)
+	handleChanMapMu.Lock()
+	delete(handleChanMap, handle)
+	handleChanMapMu.Unlock()
 }
 
 // RegisterWarnErrChanForHandle registers a channel to send error logs to for a given handle.

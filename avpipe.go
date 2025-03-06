@@ -1507,7 +1507,7 @@ func Xc(params *XcParams) error {
 	}
 
 	rc := C.xc((*C.xcparams_t)(unsafe.Pointer(cparams)))
-	DissociateGIDWithHandle()
+	XCEnded()
 
 	gMutex.Lock()
 	defer gMutex.Unlock()
@@ -1531,7 +1531,7 @@ func Mux(params *XcParams) error {
 
 	rc := C.mux((*C.xcparams_t)(unsafe.Pointer(cparams)))
 
-	DissociateGIDWithHandle()
+	XCEnded()
 
 	gMutex.Lock()
 	defer gMutex.Unlock()
@@ -1715,7 +1715,7 @@ func XcRun(handle int32) error {
 	}
 	AssociateGIDWithHandle(handle)
 	rc := C.xc_run(C.int32_t(handle))
-	DissociateGIDWithHandle()
+	XCEnded()
 	if rc == 0 {
 		return nil
 	}
