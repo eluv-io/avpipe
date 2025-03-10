@@ -5,12 +5,13 @@ require (
 	github.com/eluv-io/errors-go v1.0.0
 	github.com/eluv-io/log-go v1.0.1
 	github.com/grafov/m3u8 v0.11.1
-	github.com/modern-go/gls v0.0.0-20250215024828-78308f6bb19d // indirect
+	github.com/modern-go/gls v0.0.0-20250215024828-78308f6bb19d
 	github.com/spf13/cobra v0.0.5
 	github.com/stretchr/testify v1.7.0
 )
 
 replace (
+	github.com/modern-go/gls => github.com/eluv-io/gls v1.0.0-elv1
 	github.com/prometheus/prometheus => github.com/prometheus/prometheus v1.7.1-0.20170814170113-3101606756c5
 	gopkg.in/urfave/cli.v1 => github.com/urfave/cli v1.22.0
 )

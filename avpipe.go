@@ -127,20 +127,38 @@ func (a AVType) Name() string {
 	}
 }
 
-func (a AVType) AVClass() string {
+type AVClass = string
+
+var AVClassE = struct {
+	Mez      AVClass
+	Abr      AVClass
+	Manifest AVClass
+	Mux      AVClass
+	Frame    AVClass
+	Unknown  AVClass
+}{
+	Mez:      "mez",
+	Abr:      "abr",
+	Manifest: "manifest",
+	Mux:      "mux",
+	Frame:    "frame",
+	Unknown:  "unknown",
+}
+
+func (a AVType) AVClass() AVClass {
 	switch a {
-	case FMP4AudioSegment, FMP4VideoSegment:
-		return "mez_creation"
+	case FMP4AudioSegment, FMP4VideoSegment, MP4Segment:
+		return AVClassE.Mez
 	case DASHAudioInit, DASHAudioSegment, DASHVideoInit, DASHVideoSegment:
-		return "abr"
+		return AVClassE.Abr
 	case HLSAudioM3U, HLSMasterM3U, HLSVideoM3U, DASHManifest:
-		return "manifest"
+		return AVClassE.Manifest
 	case FrameImage:
-		return "frame_extraction"
-	case MuxSegment, MP4Segment, MP4Stream, FMP4Stream:
-		return "mux"
+		return AVClassE.Frame
+	case MuxSegment, MP4Stream, FMP4Stream:
+		return AVClassE.Mux
 	default:
-		return "unknown"
+		return AVClassE.Unknown
 	}
 }
 
@@ -1489,7 +1507,7 @@ func Xc(params *XcParams) error {
 	}
 
 	rc := C.xc((*C.xcparams_t)(unsafe.Pointer(cparams)))
-	DissociateGIDWithHandle()
+	XCEnded()
 
 	gMutex.Lock()
 	defer gMutex.Unlock()
@@ -1513,7 +1531,7 @@ func Mux(params *XcParams) error {
 
 	rc := C.mux((*C.xcparams_t)(unsafe.Pointer(cparams)))
 
-	DissociateGIDWithHandle()
+	XCEnded()
 
 	gMutex.Lock()
 	defer gMutex.Unlock()
@@ -1697,7 +1715,7 @@ func XcRun(handle int32) error {
 	}
 	AssociateGIDWithHandle(handle)
 	rc := C.xc_run(C.int32_t(handle))
-	DissociateGIDWithHandle()
+	XCEnded()
 	if rc == 0 {
 		return nil
 	}
