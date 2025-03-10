@@ -90,6 +90,8 @@ func RegisterWarnErrChanForHandle(handle *int32, errChan chan string) {
 		return
 	}
 
+	gid := gls.GoID()
+	gidHandleMap.Store(gid, *handle)
 	handleChanMapMu.Lock()
 	if _, ok := handleChanMap[*handle]; ok {
 		log.Warn("RegisterErrorChanForHandle: handle already registered with channel", "handle", *handle)
