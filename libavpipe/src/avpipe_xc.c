@@ -16,6 +16,7 @@
 
 #include "avpipe_xc.h"
 #include "avpipe_utils.h"
+#include "avpipe_format.h"
 #include "elv_log.h"
 #include "elv_time.h"
 #include "url_parser.h"
@@ -43,6 +44,17 @@
 #define DEFAULT_FRAME_INTERVAL_S    10
 
 #define DEFAULT_ACC_SAMPLE_RATE     48000
+
+// Temp global
+static int copy_ts = 1;
+extern int copy_mpegts_init(xctx_t *);
+extern void *copy_mpegts_func(void *p);
+extern int copy_mpegts_prepare_encoder(
+    coderctx_t *encoder_context,
+    coderctx_t *decoder_context,
+    avpipe_io_handler_t *out_handlers,
+    ioctx_t *inctx,
+    xcparams_t *params);
 
 extern int
 init_video_filters(
@@ -358,22 +370,6 @@ selected_audio_index(
 
     for (int i=0; i<params->n_audio; i++) {
         if (params->audio_index[i] == index)
-            return i;
-    }
-
-    return -1;
-}
-
-static int
-selected_decoded_audio(
-    coderctx_t *decoder_context,
-    int stream_index)
-{
-    if (decoder_context->n_audio <= 0)
-        return -1;
-
-    for (int i=0; i<decoder_context->n_audio; i++) {
-        if (decoder_context->audio_stream_index[i] == stream_index)
             return i;
     }
 
@@ -811,7 +807,7 @@ set_encoder_options(
         av_opt_set(encoder_context->format_context->priv_data, "start_segment", params->start_segment_str, 0);
     }
 
-    if (!strcmp(params->format, "fmp4-segment") || !strcmp(params->format, "segment")) {
+    if (!strcmp(params->format, "fmp4-segment") || !strcmp(params->format, "segment") || !strcmp(params->format, "ts-segment")) {
         int64_t seg_duration_ts = 0;
         float seg_duration = 0;
         /* Precalculate seg_duration_ts based on seg_duration if seg_duration is set */
@@ -1146,6 +1142,8 @@ prepare_video_encoder(
     int rc = 0;
     int index = decoder_context->video_stream_index;
 
+    printf("DBG prepare_video_encoder");
+
     if (index < 0) {
         elv_dbg("No video stream detected by decoder.");
         return eav_stream_index;
@@ -1475,7 +1473,7 @@ prepare_audio_encoder(
              * when input sample rate is different from output sample rate. (--RM)
              */
             encoder_context->codec_context[output_stream_index]->sample_rate = sample_rate;
-    
+
             /* Update timebase for the new sample rate */
             encoder_context->codec_context[output_stream_index]->time_base = (AVRational){1, sample_rate};
             encoder_context->stream[output_stream_index]->time_base = (AVRational){1, sample_rate};
@@ -1609,6 +1607,10 @@ prepare_encoder(
             filename = "fsegment-video-%05d.mp4";
         if (params->xc_type & xc_audio)
             filename2 = "fsegment-audio-%05d.mp4";
+    } else if (!strcmp(params->format, "ts-segment")) {
+            /* MPEG-TS segment */
+        format = "segment";
+        filename = "ts-segment-%05d.ts";
     } else if (!strcmp(params->format, "image2")) {
         filename = "%d.jpeg";
     }
@@ -2391,8 +2393,9 @@ do_bypass(
             packet->pos, packet->size, packet->stream_index,
             packet->flags, packet->data);
     } else {
-        if (av_interleaved_write_frame(format_context, packet) < 0) {
-            elv_err("Failure in copying bypass packet xc_type=%d, url=%s", p->xc_type, p->url);
+        int rc = av_interleaved_write_frame(format_context, packet);
+        if (rc < 0) {
+            elv_err("Failure in copying bypass packet xc_type=%d rc=%d url=%s", p->xc_type, rc, p->url);
             return eav_write_frame;
         }
 
@@ -2921,7 +2924,7 @@ transcode_video_func(
 
         xc_frame = elv_channel_receive(xctx->vc);
         if (!xc_frame) {
-            elv_dbg("trancode_video_func, there is no frame, url=%s", params->url);
+            elv_dbg("transcode_video_func, there is no frame, url=%s", params->url);
             continue;
         }
 
@@ -3625,6 +3628,41 @@ avpipe_xc(
         return rc;
     }
 
+    // Set up "bypass encoder" for MPEGTS
+    if (copy_ts) {
+        cp_ctx_t *cp_ctx = &xctx->cp_ctx;
+        // Save original parameters - they will be changed temporarily
+        char *format = params->format; // Save original format
+        xc_type_t xc_type = params->xc_type;
+
+        params->format = strdup("ts-segment");
+        params->xc_type = xc_all;
+
+#if 1
+        rc = prepare_encoder(&xctx->cp_ctx.encoder_ctx,
+            &xctx->decoder_ctx, out_handlers, inctx, params);
+#else
+
+        rc = copy_mpegts_prepare_encoder(&xctx->cp_ctx.encoder_ctx,
+            &xctx->decoder_ctx, out_handlers, inctx, params);
+#endif
+
+        // Restore original parameters
+        free(params->format);
+        params->format = format;
+        params->xc_type = xc_type;
+
+        if (rc != eav_success) {
+            elv_err("Failure in preparing copy encoder, url=%s, rc=%d", params->url, rc);
+            return rc;
+        }
+
+        elv_channel_init(&cp_ctx->ch, 10000, (free_elem_f) av_packet_free);
+
+        /* Create threads for the MPEGTS bypass encoder */
+        pthread_create(&cp_ctx->thread_id, NULL, copy_mpegts_func, xctx);
+    }
+
     if ((rc = prepare_encoder(&xctx->encoder_ctx,
         &xctx->decoder_ctx, out_handlers, inctx, params)) != eav_success) {
         elv_err("Failure in preparing encoder, url=%s, rc=%d", params->url, rc);
@@ -3698,6 +3736,16 @@ avpipe_xc(
                 goto xc_done;
             }
         }
+    }
+
+    if (copy_ts) {
+        cp_ctx_t *cp_ctx = &xctx->cp_ctx;
+        rc = avformat_write_header(cp_ctx->encoder_ctx.format_context, NULL);
+        if (rc != eav_success) {
+            rc = eav_write_header;
+            goto xc_done;
+        }
+
     }
 
     int video_stream_index = decoder_context->video_stream_index;
@@ -3863,6 +3911,14 @@ avpipe_xc(
             }
         }
 
+        // Copy MPEGTS first
+        if (copy_ts) {
+            xc_frame_t *xc_frame_cp = (xc_frame_t *) calloc(1, sizeof(xc_frame_t));
+            (void)packet_clone(input_packet, &xc_frame_cp->packet);
+            xc_frame_cp->stream_index = input_packet->stream_index;
+            elv_channel_send(xctx->cp_ctx.ch, xc_frame_cp);
+        }
+
         if (input_packet->stream_index == decoder_context->video_stream_index &&
             (params->xc_type & xc_video)) {
             // Video packet
@@ -3887,7 +3943,7 @@ avpipe_xc(
                 video_last_dts != 0 && input_packet->duration > 0) {
                 elv_log("Expected dts == last_dts + duration - video_last_dts=%" PRId64 " duration=%" PRId64 " dts=%" PRId64 " url=%s",
                     video_last_dts, input_packet->duration, input_packet->dts, params->url);
-            }
+            }]
             video_last_dts = input_packet->dts;
 
             xc_frame_t *xc_frame = (xc_frame_t *) calloc(1, sizeof(xc_frame_t));
@@ -3910,7 +3966,6 @@ avpipe_xc(
             xc_frame->packet = input_packet;
             xc_frame->stream_index = input_packet->stream_index;
             elv_channel_send(xctx->ac, xc_frame);
-
         } else {
             if (stream_index == decoder_context->data_scte35_stream_index) {
                 uint8_t scte35_command_type;
@@ -3940,8 +3995,8 @@ avpipe_xc(
                 }
             } else {
                 if (debug_frame_level)
-                    elv_dbg("Skip stream - packet index=%d, pts=%"PRId64", url=%s",
-                        input_packet->stream_index, input_packet->pts, params->url);
+                    elv_dbg("Skip stream - packet index=%d, pts=%"PRId64" dts=%"PRId64" url=%s",
+                        input_packet->stream_index, input_packet->pts, input_packet->dts, params->url);
             }
             av_packet_free(&input_packet);
         }
@@ -4766,14 +4821,12 @@ avpipe_init(
 
     if (!p) {
         elv_err("Parameters are not set");
-        free(inctx);
         rc = eav_param;
         goto avpipe_init_failed;
     }
 
     if (!xctx) {
         elv_err("Trancoding context is NULL, url=%s", p->url);
-        free(inctx);
         rc = eav_param;
         goto avpipe_init_failed;
     }
@@ -4796,6 +4849,12 @@ avpipe_init(
         goto avpipe_init_failed;
     }
 
+    if (copy_ts) {
+        rc = copy_mpegts_init(p_xctx);
+        if (rc != eav_success) {
+            goto avpipe_init_failed;
+        }
+    }
     *xctx = p_xctx;
 
     return eav_success;
@@ -4924,6 +4983,7 @@ avpipe_fini(
     }
 #endif
 
+    // PENDING(SS) These are not allocated by avpipe_init
     free((*xctx)->in_handlers);
     free((*xctx)->out_handlers);
 

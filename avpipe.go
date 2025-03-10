@@ -302,12 +302,12 @@ type XcParams struct {
 	DebugFrameLevel        bool        `json:"debug_frame_level"`
 	ExtractImageIntervalTs int64       `json:"extract_image_interval_ts,omitempty"`
 	ExtractImagesTs        []int64     `json:"extract_images_ts,omitempty"`
-	VideoTimeBase          int         `json:"video_time_base"`
-	VideoFrameDurationTs   int         `json:"video_frame_duration_ts"`
-	Rotate                 int         `json:"rotate"`
-	Profile                string      `json:"profile"`
-	Level                  int         `json:"level"`
-        Deinterlace            int         `json:"deinterlace"`
+	VideoTimeBase          int         `json:"video_time_base,omitempty"`
+	VideoFrameDurationTs   int         `json:"video_frame_duration_ts,omitempty"`
+	Rotate                 int         `json:"rotate,omitempty"`
+	Profile                string      `json:"profile,omitempty"`
+	Level                  int         `json:"level,omitempty"`
+	Deinterlace            int         `json:"deinterlace,omitempty"`
 }
 
 // NewXcParams initializes a XcParams struct with unset/default values
@@ -1403,7 +1403,7 @@ func getCParams(params *XcParams) (*C.xcparams_t, error) {
 		rotate:                    C.int(params.Rotate),
 		profile:                   C.CString(params.Profile),
 		level:                     C.int(params.Level),
-                deinterlace:               C.dif_type(params.Deinterlace),
+		deinterlace:               C.dif_type(params.Deinterlace),
 
 		// All boolean params are handled below
 	}

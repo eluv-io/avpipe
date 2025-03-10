@@ -149,6 +149,11 @@ elv_io_open(
                 outctx->seg_index = out_tracker->seg_index;
                 out_tracker->seg_index++;
                 outctx->inctx = out_tracker->inctx;
+            } else if (strstr(url, "ts-segment")) {
+                outctx->type = avpipe_mpegts_segment;
+                outctx->seg_index = out_tracker->seg_index;
+                out_tracker->seg_index++;
+                outctx->inctx = out_tracker->inctx;
             } else if (!strncmp(url, "fmp4", 4)) {
                 outctx->type = avpipe_fmp4_stream;
             } else if (strstr(url, "segment")) {
@@ -163,7 +168,8 @@ elv_io_open(
             outctx->type == avpipe_fmp4_stream ||
             outctx->type == avpipe_mp4_stream ||
             outctx->type == avpipe_video_fmp4_segment ||
-            outctx->type == avpipe_audio_fmp4_segment)
+            outctx->type == avpipe_audio_fmp4_segment ||
+            outctx->type == avpipe_mpegts_segment)
             // not set for outctx->type == avpipe_image because elv_io_close will free outctx for each frame extracted
             out_tracker->last_outctx = outctx;
         /* Manifest or init segments */

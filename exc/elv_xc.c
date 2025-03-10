@@ -142,7 +142,7 @@ in_opener(
         *((int *)(inctx->opaque)+1) = opened_inputs;
         pthread_mutex_unlock(&lock);
 
-        elv_dbg("IN OPEN RTMP url=%s", url);
+        elv_dbg("IN OPEN RTMP/SRT url=%s", url);
         return 0;
     }
 
@@ -467,6 +467,15 @@ out_opener(
 
             sprintf(segname, "./%s/%s%d-%05d.mp4",
                 dir, segbase, outctx->stream_index, outctx->seg_index);
+        }
+        break;
+
+    case avpipe_mpegts_segment:
+        {
+            const char *segbase = "ts-segment";
+
+            sprintf(segname, "./%s/%s-%05d.ts",
+                dir, segbase, outctx->seg_index);
         }
         break;
 
