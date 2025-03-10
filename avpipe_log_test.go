@@ -68,6 +68,8 @@ func TestErrorCapturingTwoStep(t *testing.T) {
 		require.Equal(t, fmt.Sprintf("WARN Warn %d", warnUniq1), <-errChan)
 		require.Equal(t, fmt.Sprintf("WARN Warn %d", warnUniq2), <-errChan)
 		require.Len(t, errChan, 0)
+		_, ok := <-errChan
+		require.False(t, ok)
 	}
 
 	// Test oneshot APIs
@@ -93,4 +95,24 @@ func TestErrorCapturingTwoStep(t *testing.T) {
 		}()
 	}
 	wg2.Wait()
+}
+
+func TestCorrectChanClosure(t *testing.T) {
+	wg := sync.WaitGroup{}
+	wg.Add(1)
+	go func() {
+		errCh := make(chan string, 5)
+		RegisterWarnErrChanForHandle(nil, errCh)
+
+		// Pretend an error happened, and we never get the assocaiteGIDWithHandle
+		XCEnded()
+
+		// Check that the channel is closed
+		_, ok := <-errCh
+		require.False(t, ok)
+
+		wg.Done()
+	}()
+
+	wg.Wait()
 }

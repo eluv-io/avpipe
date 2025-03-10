@@ -1494,7 +1494,7 @@ func generateI32Handle() int32 {
 
 // params: transcoding parameters
 func Xc(params *XcParams) error {
-
+	defer XCEnded()
 	if params == nil {
 		log.Error("Failed transcoding, params are not set.")
 		return EAV_PARAM
@@ -1507,7 +1507,6 @@ func Xc(params *XcParams) error {
 	}
 
 	rc := C.xc((*C.xcparams_t)(unsafe.Pointer(cparams)))
-	XCEnded()
 
 	gMutex.Lock()
 	defer gMutex.Unlock()
@@ -1518,6 +1517,7 @@ func Xc(params *XcParams) error {
 }
 
 func Mux(params *XcParams) error {
+	defer XCEnded()
 	if params == nil {
 		log.Error("Failed muxing, params are not set")
 		return EAV_PARAM
@@ -1530,8 +1530,6 @@ func Mux(params *XcParams) error {
 	}
 
 	rc := C.mux((*C.xcparams_t)(unsafe.Pointer(cparams)))
-
-	XCEnded()
 
 	gMutex.Lock()
 	defer gMutex.Unlock()
@@ -1710,12 +1708,12 @@ func XcInit(params *XcParams) (int32, error) {
 }
 
 func XcRun(handle int32) error {
+	defer XCEnded()
 	if handle < 0 {
 		return EAV_BAD_HANDLE
 	}
 	AssociateGIDWithHandle(handle)
 	rc := C.xc_run(C.int32_t(handle))
-	XCEnded()
 	if rc == 0 {
 		return nil
 	}

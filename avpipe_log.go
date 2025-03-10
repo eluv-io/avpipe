@@ -73,17 +73,26 @@ func AssociateGIDWithHandle(handle int32) {
 func XCEnded() {
 	handleUntyped, ok := gidHandleMap.LoadAndDelete(gls.GoID())
 	if !ok {
+		ch, ok := gidChanMap.LoadAndDelete(gls.GoID())
+		if ok {
+			close(ch.(chan string))
+		}
 		return
 	}
 	handle := handleUntyped.(int32)
 	handleChanMapMu.Lock()
+	ch, ok := handleChanMap[handle]
 	delete(handleChanMap, handle)
+	if ok {
+		close(ch)
+	}
 	handleChanMapMu.Unlock()
 }
 
 // RegisterWarnErrChanForHandle registers a channel to send error logs to for a given handle.
-// If handle is nil, then channel will be registered with a handle that is created on this
-// goroutine.
+// Ownership of the channel is taken by avpipe, and the channel will be closed once the transcode
+// completes.  If handle is nil, then channel will be registered with a handle that is created on
+// this goroutine.
 func RegisterWarnErrChanForHandle(handle *int32, errChan chan string) {
 	if handle == nil {
 		gidChanMap.Store(gls.GoID(), errChan)
@@ -120,6 +129,8 @@ func logHandleIfKnown() []interface{} {
 
 func dispatchToChannelIfPresent(level string, msg string, fields ...interface{}) {
 	if handle, ok := GIDHandle(); ok {
+		handleChanMapMu.Lock()
+		defer handleChanMapMu.Unlock()
 		if ch, ok := handleChanMap[handle]; ok {
 			//space-combine fields
 			strs := []string{level, msg}
