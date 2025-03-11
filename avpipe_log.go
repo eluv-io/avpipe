@@ -53,13 +53,41 @@ func (l *logWrapper) Fatal(msg string, fields ...interface{}) {
 
 var log = logWrapper{log: elog.Get("/avpipe")}
 
+// gidHandleMap associates go routine ID with a handle
 var gidHandleMap sync.Map = sync.Map{}
+
+// gidChanMap associates go routine ID with a warn channel. It is used as a temporary place to store
+// a channel that will be later associated with a handle if the handle is not known by the caller
+// before invoking the single-shot APIs
 var gidChanMap sync.Map = sync.Map{}
 
+// handleChanMap associates a handle with a channel to capture warn/error logs
 var handleChanMap map[int32]chan string = make(map[int32]chan string)
 var handleChanMapMu sync.Mutex
 
+func AllMapsAreEmpty() bool {
+	gidHandleMapLen := 0
+	gidHandleMap.Range(func(_, _ interface{}) bool {
+		gidHandleMapLen++
+		return true
+	})
+	gidChanMapLen := 0
+	gidChanMap.Range(func(_, _ interface{}) bool {
+		gidChanMapLen++
+		return true
+	})
+	handleChanMapMu.Lock()
+	defer handleChanMapMu.Unlock()
+	return gidHandleMapLen == 0 && gidChanMapLen == 0 && len(handleChanMap) == 0
+}
+
+// AssociateGIDWithHandle associates the current go-routine ID (GID) with the given handle
+// In case the goroutine had a channel associated with it, it will be associated with the handle
 func AssociateGIDWithHandle(handle int32) {
+	// Non-positive handles are invalid
+	if handle <= 0 {
+		return
+	}
 	gid := gls.GoID()
 	gidHandleMap.Store(gid, handle)
 	if ch, ok := gidChanMap.LoadAndDelete(gid); ok {

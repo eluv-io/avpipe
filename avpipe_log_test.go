@@ -13,7 +13,7 @@ import (
 func TestGIDAssociation(t *testing.T) {
 	wg := sync.WaitGroup{}
 
-	for i := 0; i < 100; i++ {
+	for i := 1; i < 100; i++ {
 		handle := int32(i)
 		wg.Add(1)
 		go func() {
@@ -30,8 +30,8 @@ func TestGIDAssociation(t *testing.T) {
 	wg.Wait()
 }
 
-// TestErrorCapturingTwoStep tests the error capturing mechanism when handle is known via XcInit
-func TestErrorCapturingTwoStep(t *testing.T) {
+// TestErrorCapturing tests the error capturing mechanism
+func TestErrorCapturing(t *testing.T) {
 	doOperation := func(handle int32, oneShot bool) {
 		errChan := make(chan string, 5)
 		// Oneshot API does not know the handle at this point
@@ -74,7 +74,7 @@ func TestErrorCapturingTwoStep(t *testing.T) {
 
 	// Test oneshot APIs
 	wg := sync.WaitGroup{}
-	for i := 0; i < 100; i++ {
+	for i := 1; i < 100; i++ {
 		handle := int32(i)
 		wg.Add(1)
 		go func() {
@@ -95,6 +95,8 @@ func TestErrorCapturingTwoStep(t *testing.T) {
 		}()
 	}
 	wg2.Wait()
+
+	require.True(t, AllMapsAreEmpty())
 }
 
 func TestCorrectChanClosure(t *testing.T) {
@@ -104,7 +106,7 @@ func TestCorrectChanClosure(t *testing.T) {
 		errCh := make(chan string, 5)
 		RegisterWarnErrChanForHandle(nil, errCh)
 
-		// Pretend an error happened, and we never get the assocaiteGIDWithHandle
+		// Pretend an error happened, and we never get the AssociateGIDWithHandle
 		XCEnded()
 
 		// Check that the channel is closed
@@ -115,4 +117,5 @@ func TestCorrectChanClosure(t *testing.T) {
 	}()
 
 	wg.Wait()
+	require.True(t, AllMapsAreEmpty())
 }
