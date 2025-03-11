@@ -96,7 +96,7 @@ func TestErrorCapturing(t *testing.T) {
 	}
 	wg2.Wait()
 
-	require.True(t, AllMapsAreEmpty())
+	require.True(t, AllLogMapsEmpty())
 }
 
 func TestCorrectChanClosure(t *testing.T) {
@@ -117,5 +117,5 @@ func TestCorrectChanClosure(t *testing.T) {
 	}()
 
 	wg.Wait()
-	require.True(t, AllMapsAreEmpty())
+	require.True(t, AllLogMapsEmpty())
 }

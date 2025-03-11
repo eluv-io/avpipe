@@ -65,7 +65,9 @@ var gidChanMap sync.Map = sync.Map{}
 var handleChanMap map[int32]chan string = make(map[int32]chan string)
 var handleChanMapMu sync.Mutex
 
-func AllMapsAreEmpty() bool {
+// AllLogMapsEmpty returns true if all log maps are empty
+// It should be used for testing purposes only
+func AllLogMapsEmpty() bool {
 	gidHandleMapLen := 0
 	gidHandleMap.Range(func(_, _ interface{}) bool {
 		gidHandleMapLen++
