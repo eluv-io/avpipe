@@ -518,9 +518,10 @@ typedef struct xcprobe_t {
     stream_info_t *stream_info;    // An array of stream_info_t (usually 2)
 } xcprobe_t;
 
+
 /* Context for the source copy operations
  * - specific to MPEGTS copy curretly
-*/
+ */
 typedef struct cp_ctx_t {
     coderctx_t          encoder_ctx;
     pthread_t           thread_id;
@@ -528,12 +529,15 @@ typedef struct cp_ctx_t {
 
 } cp_ctx_t;
 
+typedef int (*associate_thread_f)(int32_t handle);
+
 typedef struct xctx_t {
     coderctx_t          decoder_ctx;
     coderctx_t          encoder_ctx;
     xcparams_t          *params;
     int32_t             index;  // index in xc table
     int32_t             handle; // handle for V2 API
+    associate_thread_f  associate_thread;
     ioctx_t             *inctx;
     avpipe_io_handler_t *in_handlers;
     avpipe_io_handler_t *out_handlers;
