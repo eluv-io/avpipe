@@ -23,6 +23,8 @@ github.com/eluv-io/apexlog-go v1.9.1-elv3/go.mod h1:pZhIuRbWTsOm5WEOxke9B2dczjQu
 github.com/eluv-io/errors-go v0.0.0-20220118153923-f9ef09c8c7f2/go.mod h1:bSd8y2sXPla5W9piijQn/RT00T2bC0Dce5ofvQ8vWws=
 github.com/eluv-io/errors-go v1.0.0 h1:CsGhBoMWyXY1j4a4v4JiOPQrbNA7x/mm8PZCIyJJ40M=
 github.com/eluv-io/errors-go v1.0.0/go.mod h1:bSd8y2sXPla5W9piijQn/RT00T2bC0Dce5ofvQ8vWws=
+github.com/eluv-io/gls v1.0.0-elv1 h1:fV9z/aLSs5KH8wWMkamoS/Xxl8wmXF76WMx8/N5XEr8=
+github.com/eluv-io/gls v1.0.0-elv1/go.mod h1:4rPCrom1ZvL5sqFMGiNbCr/QfDq3oljqXEBdstdge0o=
 github.com/eluv-io/log-go v1.0.1 h1:j+/vNR7IwPxzgiwOWOKffWevEGeMhTXZVK7448FUuQg=
 github.com/eluv-io/log-go v1.0.1/go.mod h1:zXLeleJ9LQRHdEOvm7xh1dBQ/t5MJurj7vgfdUmL4jc=
 github.com/eluv-io/stack v1.8.2 h1:yocCvAcPy9vW5iBdNnig5Tem8LgOTT8JrOLvDcacnEQ=
@@ -76,9 +78,6 @@ github.com/mattn/go-isatty v0.0.8/go.mod h1:Iq45c/XA43vh69/j3iqttzPXn0bhXyGjM0Hd
 github.com/mgutz/ansi v0.0.0-20170206155736-9520e82c474b/go.mod h1:01TrycV0kFyexm33Z7vhZRXopbI8J3TDReVlkTgMUxE=
 github.com/mitchellh/go-homedir v1.1.0/go.mod h1:SfyaCUpYCn1Vlf4IUYiD9fPX4A5wJrkLzIz1N1q0pr0=
 github.com/mitchellh/mapstructure v1.1.2/go.mod h1:FVVH3fgwuzCH5S8UJGiWEs2h04kUh9fWfEaFds41c1Y=
-github.com/modern-go/gls v0.0.0-20220109145502-612d0167dce5/go.mod h1:I8AX+yW//L8Hshx6+a1m3bYkwXkpsVjA2795vP4f4oQ=
-github.com/modern-go/gls v0.0.0-20250215024828-78308f6bb19d h1:e3xdlObtriVu9HlrOfYB8Nmy51+DuJy5Hcgsg+x7ixg=
-github.com/modern-go/gls v0.0.0-20250215024828-78308f6bb19d/go.mod h1:I8AX+yW//L8Hshx6+a1m3bYkwXkpsVjA2795vP4f4oQ=
 github.com/modern-go/reflect2 v1.0.2 h1:xBagoLtFs94CBntxluKeaWgTMpvLxC4ur3nMaC9Gz0M=
 github.com/modern-go/reflect2 v1.0.2/go.mod h1:yWuevngMOJpCy52FWWMvUC8ws7m/LJsjYzDa0/r8luk=
 github.com/nxadm/tail v1.4.4/go.mod h1:kenIhsEOeOJmVchQTgglprH7qJGnHDVpk1VPCcaMI8A=
