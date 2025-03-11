@@ -108,10 +108,6 @@ static const char*
 get_channel_name(
     int channel_layout);
 
-static int
-get_channel_layout_for_encoder(
-    int);
-
 const char*
 avpipe_channel_layout_name(
     int channel_layout);
@@ -333,31 +329,6 @@ prepare_input(
     avioctx->buffer_size = inctx->sz < bufin_sz ? inctx->sz : bufin_sz; // avoid seeks - avio_seek() seeks internal buffer */
     decoder_context->format_context->pb = avioctx;
     return 0;
-}
-
-#define TIMEBASE_THRESHOLD  10000
-
-/* Calculate final output timebase based on the codec timebase by replicating
- * the logic in the ffmpeg muxer: multiply by 2 until greater than 10,000
- */
-static int
-calc_timebase(
-    xcparams_t *params,
-    int is_video,
-    int timebase)
-{
-    if (timebase <= 0) {
-        elv_err("calc_timebase invalid timebase=%d", timebase);
-        return timebase;
-    }
-
-    if (is_video && params->video_time_base > 0)
-        timebase = params->video_time_base;
-
-    while (timebase < TIMEBASE_THRESHOLD)
-        timebase *= 2;
-
-    return timebase;
 }
 
 static int
@@ -1549,21 +1520,6 @@ prepare_audio_encoder(
 }
 
 static int
-num_audio_output(
-    coderctx_t *decoder_context,
-    xcparams_t *params)
-{
-    int n_decoder_auido = decoder_context ? decoder_context->n_audio : 0;
-    if (!params)
-        return 0;
-
-    if (params->xc_type == xc_audio_merge || params->xc_type == xc_audio_join || params->xc_type == xc_audio_pan)
-        return 1;
-
-    return params->n_audio > 0 ? params->n_audio : n_decoder_auido;
-}
-
-static int
 prepare_encoder(
     coderctx_t *encoder_context,
     coderctx_t *decoder_context,
@@ -1607,7 +1563,7 @@ prepare_encoder(
             filename = "fsegment-video-%05d.mp4";
         if (params->xc_type & xc_audio)
             filename2 = "fsegment-audio-%05d.mp4";
-    } else if (!strcmp(params->format, "ts-segment")) {
+    } else if (!strcmp(params->format, "ts-segment")) {  // PENDING(SS) remove once copy_mpegts_prepare_encoder()
             /* MPEG-TS segment */
         format = "segment";
         filename = "ts-segment-%05d.ts";
@@ -3631,26 +3587,9 @@ avpipe_xc(
     // Set up "bypass encoder" for MPEGTS
     if (copy_ts) {
         cp_ctx_t *cp_ctx = &xctx->cp_ctx;
-        // Save original parameters - they will be changed temporarily
-        char *format = params->format; // Save original format
-        xc_type_t xc_type = params->xc_type;
-
-        params->format = strdup("ts-segment");
-        params->xc_type = xc_all;
-
-#if 1
-        rc = prepare_encoder(&xctx->cp_ctx.encoder_ctx,
-            &xctx->decoder_ctx, out_handlers, inctx, params);
-#else
 
         rc = copy_mpegts_prepare_encoder(&xctx->cp_ctx.encoder_ctx,
             &xctx->decoder_ctx, out_handlers, inctx, params);
-#endif
-
-        // Restore original parameters
-        free(params->format);
-        params->format = format;
-        params->xc_type = xc_type;
 
         if (rc != eav_success) {
             elv_err("Failure in preparing copy encoder, url=%s, rc=%d", params->url, rc);
@@ -3943,7 +3882,7 @@ avpipe_xc(
                 video_last_dts != 0 && input_packet->duration > 0) {
                 elv_log("Expected dts == last_dts + duration - video_last_dts=%" PRId64 " duration=%" PRId64 " dts=%" PRId64 " url=%s",
                     video_last_dts, input_packet->duration, input_packet->dts, params->url);
-            }]
+            }
             video_last_dts = input_packet->dts;
 
             xc_frame_t *xc_frame = (xc_frame_t *) calloc(1, sizeof(xc_frame_t));
@@ -4220,45 +4159,6 @@ avpipe_channel_layout_name(
     }
 
     return "";
-}
-
-static int
-get_channel_layout_for_encoder(int channel_layout)
-{
-    switch (channel_layout) {
-    case AV_CH_LAYOUT_2_1:
-        channel_layout = AV_CH_LAYOUT_SURROUND;
-        break;
-    case AV_CH_LAYOUT_2_2:
-        channel_layout = AV_CH_LAYOUT_QUAD;
-        break;
-    case AV_CH_LAYOUT_5POINT0:
-        channel_layout = AV_CH_LAYOUT_5POINT0_BACK;
-        break;
-    case AV_CH_LAYOUT_5POINT1:
-        channel_layout = AV_CH_LAYOUT_5POINT1_BACK;
-        break;
-    case AV_CH_LAYOUT_6POINT0_FRONT:
-        channel_layout = AV_CH_LAYOUT_6POINT0;
-        break;
-    case AV_CH_LAYOUT_6POINT1_BACK:
-    case AV_CH_LAYOUT_6POINT1_FRONT:
-        channel_layout = AV_CH_LAYOUT_6POINT1;
-        break;
-    case AV_CH_LAYOUT_7POINT0_FRONT:
-        channel_layout = AV_CH_LAYOUT_7POINT0;
-        break;
-    case AV_CH_LAYOUT_7POINT1_WIDE_BACK:
-    case AV_CH_LAYOUT_7POINT1_WIDE:
-        channel_layout = AV_CH_LAYOUT_7POINT1;
-        break;
-    }
-
-    /* If there is no input channel layout, set the default encoder channel layout to stereo */
-    if (channel_layout == 0)
-        channel_layout = AV_CH_LAYOUT_STEREO;
-
-    return channel_layout;
 }
 
 const char*
