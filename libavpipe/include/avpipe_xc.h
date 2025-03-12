@@ -520,9 +520,7 @@ typedef struct xcprobe_t {
 } xcprobe_t;
 
 
-/* Context for the source copy operations
- * - specific to MPEGTS copy curretly
- */
+/* Context for the source copy operations (MPEGTS) */
 typedef struct cp_ctx_t {
     coderctx_t          encoder_ctx;
     pthread_t           thread_id;

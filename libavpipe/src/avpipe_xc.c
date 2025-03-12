@@ -17,6 +17,7 @@
 #include "avpipe_xc.h"
 #include "avpipe_utils.h"
 #include "avpipe_format.h"
+#include "avpipe_io.h"
 #include "avpipe_copy_mpegts.h"
 #include "elv_log.h"
 #include "elv_time.h"
@@ -76,19 +77,6 @@ init_audio_join_filters(
     coderctx_t *decoder_context,
     coderctx_t *encoder_context,
     xcparams_t *params);
-
-extern int
-elv_io_open(
-    struct AVFormatContext *s,
-    AVIOContext **pb,
-    const char *url,
-    int flags,
-    AVDictionary **options);
-
-extern void
-elv_io_close(
-    struct AVFormatContext *s,
-    AVIOContext *pb);
 
 extern const char *
 av_get_pix_fmt_name(
@@ -1103,8 +1091,6 @@ prepare_video_encoder(
     int rc = 0;
     int index = decoder_context->video_stream_index;
 
-    printf("DBG prepare_video_encoder");
-
     if (index < 0) {
         elv_dbg("No video stream detected by decoder.");
         return eav_stream_index;
@@ -1434,7 +1420,6 @@ prepare_audio_encoder(
              * when input sample rate is different from output sample rate. (--RM)
              */
             encoder_context->codec_context[output_stream_index]->sample_rate = sample_rate;
-
             /* Update timebase for the new sample rate */
             encoder_context->codec_context[output_stream_index]->time_base = (AVRational){1, sample_rate};
             encoder_context->stream[output_stream_index]->time_base = (AVRational){1, sample_rate};
@@ -3899,6 +3884,7 @@ avpipe_xc(
             xc_frame->packet = input_packet;
             xc_frame->stream_index = input_packet->stream_index;
             elv_channel_send(xctx->ac, xc_frame);
+
         } else {
             if (stream_index == decoder_context->data_scte35_stream_index) {
                 uint8_t scte35_command_type;
@@ -4721,12 +4707,14 @@ avpipe_init(
 
     if (!p) {
         elv_err("Parameters are not set");
+        free(inctx);
         rc = eav_param;
         goto avpipe_init_failed;
     }
 
     if (!xctx) {
-        elv_err("Trancoding context is NULL, url=%s", p->url);
+        elv_err("Transcoding context is NULL, url=%s", p->url);
+        free(inctx);
         rc = eav_param;
         goto avpipe_init_failed;
     }

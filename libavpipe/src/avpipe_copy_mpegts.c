@@ -1,10 +1,10 @@
 /*
- * Copy TS
+ * Copy MPEGTS bypass encoder.
  *
- * Special code path to copy the source media to output parts.
+ * Special code path to copy MPEGTS source media (MPEGTS or SRT input) to an alternate output.
  *
  * This could be generalized to copy any source encoding. MPEGTS is special in that
- * all streams are mux'd so there is only one output part (no separate video/audio)
+ * all streams are muxed so there is only one output part (no separate video/audio)
  */
 
 #include <libavutil/log.h>
@@ -16,6 +16,7 @@
 #include "avpipe_xc.h"
 #include "avpipe_utils.h"
 #include "avpipe_format.h"
+#include "avpipe_io.h"
 #include "avpipe_copy_mpegts.h"
 #include "elv_log.h"
 #include "elv_time.h"
@@ -32,22 +33,12 @@
 #include <stdlib.h>
 #include <pthread.h>
 
-// PENDING(SS) Move elv_io to avpipe_io.h
-extern int
-elv_io_open(
-    struct AVFormatContext *s,
-    AVIOContext **pb,
-    const char *url,
-    int flags,
-    AVDictionary **options);
 
-extern void
-elv_io_close(
-    struct AVFormatContext *s,
-    AVIOContext *pb);
-
-int copy_mpegts_init(xctx_t *xctx){
-
+int
+copy_mpegts_init(
+    xctx_t *xctx)
+{
+    // Nothing to do
     return eav_success;
 }
 
@@ -317,9 +308,7 @@ copy_mpegts(
             packet->pos, packet->size, packet->stream_index,
             packet->flags, packet->data);
 
-        // PENDING(SS) count invalid packets for stats
-
-        return eav_success; // PENDING(SS) probably best to return an error
+        return eav_success; // Respect the logic in regular bypass encoder
     }
 
     int rc = av_interleaved_write_frame(format_context, packet);
