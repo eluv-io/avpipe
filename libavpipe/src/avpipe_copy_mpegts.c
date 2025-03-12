@@ -16,6 +16,7 @@
 #include "avpipe_xc.h"
 #include "avpipe_utils.h"
 #include "avpipe_format.h"
+#include "avpipe_copy_mpegts.h"
 #include "elv_log.h"
 #include "elv_time.h"
 #include "url_parser.h"
@@ -300,9 +301,6 @@ copy_mpegts(
     int do_instrument,
     int debug_frame_level)
 {
-
-    dump_packet(0, "COPY ", packet, debug_frame_level);
-
     AVFormatContext *format_context;
 
     format_context = encoder_context->format_context;
@@ -313,7 +311,7 @@ copy_mpegts(
         char *url = "";
         if (decoder_context->inctx && decoder_context->inctx->url)
             url = decoder_context->inctx->url;
-        elv_warn("INVALID %s PACKET (BYPASS) url=%s pts=%"PRId64" dts=%"PRId64" duration=%"PRId64" pos=%"PRId64" size=%d stream_index=%d flags=%x data=%p\n",
+        elv_warn("INVALID %s PACKET (COPY) url=%s pts=%"PRId64" dts=%"PRId64" duration=%"PRId64" pos=%"PRId64" size=%d stream_index=%d flags=%x data=%p\n",
             "AUDIO/VIDEO", url,
             packet->pts, packet->dts, packet->duration,
             packet->pos, packet->size, packet->stream_index,
@@ -365,8 +363,6 @@ copy_mpegts_func(
             free(xc_frame);
             continue;
         }
-
-        dump_packet(0, "COPY IN THREAD", packet, 1);
 
         err = copy_mpegts(
             decoder_context,

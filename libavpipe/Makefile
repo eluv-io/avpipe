@@ -7,7 +7,7 @@ SRCS=avpipe_xc.c \
     avpipe_mux.c \
     avpipe_level.c \
     avpipe_udp_thread.c \
-    avpipe_copy_ts.c \
+    avpipe_copy_mpegts.c \
     scte35.c
 
 BINDIR=bin

@@ -5,7 +5,7 @@
 #include "libavpipe/src/avpipe_udp_thread.c"
 #include "libavpipe/src/avpipe_utils.c"
 #include "libavpipe/src/avpipe_format.c"
-#include "libavpipe/src/avpipe_copy_ts.c"
+#include "libavpipe/src/avpipe_copy_mpegts.c"
 #include "libavpipe/src/avpipe_xc.c"
 #include "libavpipe/src/scte35.c"
 

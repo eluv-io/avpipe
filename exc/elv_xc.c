@@ -1089,6 +1089,7 @@ usage(
         "\t-t :                     (optional) Transcoding threads. Default is 1 thread, must be bigger than 1\n"
         "\t-xc-type :               (optional) Transcoding type. Default is \"all\", can be \"video\", \"audio\", \"audio-merge\", \"audio-join\", \"audio-pan\", \"all\", \"extract-images\"\n"
         "\t                                    or \"extract-all-images\". \"all\" means transcoding video and audio together.\n"
+        "\t-copy-mpegts :           (optional) Default 0. Create a copy of the MPEGTS input (only MPEGTS and SRT)\n"
         "\t-video-bitrate :         (optional) Mutually exclusive with crf. Default: -1 (unused)\n"
         "\t-video-frame-duration-ts :  (optional) Frame duration of the output video in time base.\n"
         "\t-video-seg-duration-ts : (mandatory If format is not \"segment\" and transcoding video) video segment duration time base (positive integer).\n"
@@ -1249,6 +1250,10 @@ main(
             if (!strcmp(argv[i], "-command")) {
                 command = argv[i+1];
                 if (strcmp(command, "transcode") && strcmp(command, "probe") && strcmp(command, "mux")) {
+                    usage(argv[0], argv[i], EXIT_FAILURE);
+                }
+            } else if (!strcmp(argv[i], "-copy-mpegts")) {
+                if (sscanf(argv[i+1], "%d", &p.copy_mpegts) != 1) {
                     usage(argv[0], argv[i], EXIT_FAILURE);
                 }
             } else if (!strcmp(argv[i], "-crf")) {

@@ -17,6 +17,7 @@
 #include "avpipe_xc.h"
 #include "avpipe_utils.h"
 #include "avpipe_format.h"
+#include "avpipe_copy_mpegts.h"
 #include "elv_log.h"
 #include "elv_time.h"
 #include "url_parser.h"
@@ -44,17 +45,6 @@
 #define DEFAULT_FRAME_INTERVAL_S    10
 
 #define DEFAULT_ACC_SAMPLE_RATE     48000
-
-// Temp global
-static int copy_ts = 1;
-extern int copy_mpegts_init(xctx_t *);
-extern void *copy_mpegts_func(void *p);
-extern int copy_mpegts_prepare_encoder(
-    coderctx_t *encoder_context,
-    coderctx_t *decoder_context,
-    avpipe_io_handler_t *out_handlers,
-    ioctx_t *inctx,
-    xcparams_t *params);
 
 extern int
 init_video_filters(
@@ -778,7 +768,7 @@ set_encoder_options(
         av_opt_set(encoder_context->format_context->priv_data, "start_segment", params->start_segment_str, 0);
     }
 
-    if (!strcmp(params->format, "fmp4-segment") || !strcmp(params->format, "segment") || !strcmp(params->format, "ts-segment")) {
+    if (!strcmp(params->format, "fmp4-segment") || !strcmp(params->format, "segment")) {
         int64_t seg_duration_ts = 0;
         float seg_duration = 0;
         /* Precalculate seg_duration_ts based on seg_duration if seg_duration is set */
@@ -1563,10 +1553,6 @@ prepare_encoder(
             filename = "fsegment-video-%05d.mp4";
         if (params->xc_type & xc_audio)
             filename2 = "fsegment-audio-%05d.mp4";
-    } else if (!strcmp(params->format, "ts-segment")) {  // PENDING(SS) remove once copy_mpegts_prepare_encoder()
-            /* MPEG-TS segment */
-        format = "segment";
-        filename = "ts-segment-%05d.ts";
     } else if (!strcmp(params->format, "image2")) {
         filename = "%d.jpeg";
     }
@@ -3592,8 +3578,8 @@ avpipe_xc(
         return rc;
     }
 
-    // Set up "bypass encoder" for MPEGTS
-    if (copy_ts) {
+    // Set up "copy" (bypass) encoder for MPEGTS
+    if (params->copy_mpegts) {
         cp_ctx_t *cp_ctx = &xctx->cp_ctx;
 
         rc = copy_mpegts_prepare_encoder(&xctx->cp_ctx.encoder_ctx,
@@ -3685,7 +3671,7 @@ avpipe_xc(
         }
     }
 
-    if (copy_ts) {
+    if (params->copy_mpegts) {
         cp_ctx_t *cp_ctx = &xctx->cp_ctx;
         rc = avformat_write_header(cp_ctx->encoder_ctx.format_context, NULL);
         if (rc != eav_success) {
@@ -3859,7 +3845,7 @@ avpipe_xc(
         }
 
         // Copy MPEGTS first
-        if (copy_ts) {
+        if (params->copy_mpegts) {
             xc_frame_t *xc_frame_cp = (xc_frame_t *) calloc(1, sizeof(xc_frame_t));
             (void)packet_clone(input_packet, &xc_frame_cp->packet);
             xc_frame_cp->stream_index = input_packet->stream_index;
@@ -4560,6 +4546,12 @@ check_params(
         return eav_param;
     }
 
+    if (params->copy_mpegts) {
+        if (strcmp(params->format, "fmp4-segment")) {
+            elv_err("Invalid copy MPEGTS - only valid for fmp4 mez segment");
+            return eav_param;
+        }
+    }
     return eav_success;
 }
 
@@ -4757,7 +4749,7 @@ avpipe_init(
         goto avpipe_init_failed;
     }
 
-    if (copy_ts) {
+    if (params->copy_mpegts) {
         rc = copy_mpegts_init(p_xctx);
         if (rc != eav_success) {
             goto avpipe_init_failed;
