@@ -125,7 +125,7 @@ func (a AVType) Name() string {
 	case FrameImage:
 		return "FrameImage"
 	case MpegtsSegment:
-		return "FrameImage"
+		return "MpegtsSegment"
 	default:
 		return fmt.Sprintf("Unknown(%d)", a)
 	}
