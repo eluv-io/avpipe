@@ -86,6 +86,8 @@ const (
 	MuxSegment
 	// FrameImage 16
 	FrameImage
+	// MpegtsSegment 16
+	MpegtsSegment
 )
 
 func (a AVType) Name() string {
@@ -122,6 +124,8 @@ func (a AVType) Name() string {
 		return "MuxSegment"
 	case FrameImage:
 		return "FrameImage"
+	case MpegtsSegment:
+		return "MpegtsSegment"
 	default:
 		return fmt.Sprintf("Unknown(%d)", a)
 	}
@@ -956,6 +960,8 @@ func getAVType(av_type C.int) AVType {
 		return MuxSegment
 	case C.avpipe_image:
 		return FrameImage
+	case C.avpipe_mpegts_segment:
+		return MpegtsSegment
 	default:
 		return Unknown
 	}
