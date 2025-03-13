@@ -972,7 +972,7 @@ xc_init(
         goto end_tx_init;
     }
 
-    xctx->in_handlers = in_handlers;
+    xctx->in_handlers = in_handlers; // PENDING(SS) already done in avpipe_init
     xctx->out_handlers = out_handlers;
     xctx->associate_thread = AssociateCThreadWithHandle;
 

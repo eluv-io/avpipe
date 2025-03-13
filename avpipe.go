@@ -86,6 +86,8 @@ const (
 	MuxSegment
 	// FrameImage 16
 	FrameImage
+	// MpegtsSegment 17
+	MpegtsSegment
 )
 
 func (a AVType) Name() string {
@@ -122,6 +124,8 @@ func (a AVType) Name() string {
 		return "MuxSegment"
 	case FrameImage:
 		return "FrameImage"
+	case MpegtsSegment:
+		return "MpegtsSegment"
 	default:
 		return fmt.Sprintf("Unknown(%d)", a)
 	}
@@ -288,6 +292,7 @@ type XcParams struct {
 	CryptKeyURL            string      `json:"crypt_key_url,omitempty"`
 	CryptScheme            CryptScheme `json:"crypt_scheme,omitempty"`
 	XcType                 XcType      `json:"xc_type,omitempty"`
+	CopyMpegts             bool        `json:"copy_mpegts,omitempty"`
 	Seekable               bool        `json:"seekable,omitempty"`
 	WatermarkText          string      `json:"watermark_text,omitempty"`
 	WatermarkTimecode      string      `json:"watermark_timecode,omitempty"`
@@ -317,12 +322,12 @@ type XcParams struct {
 	DebugFrameLevel        bool        `json:"debug_frame_level"`
 	ExtractImageIntervalTs int64       `json:"extract_image_interval_ts,omitempty"`
 	ExtractImagesTs        []int64     `json:"extract_images_ts,omitempty"`
-	VideoTimeBase          int         `json:"video_time_base"`
-	VideoFrameDurationTs   int         `json:"video_frame_duration_ts"`
-	Rotate                 int         `json:"rotate"`
-	Profile                string      `json:"profile"`
-	Level                  int         `json:"level"`
-	Deinterlace            int         `json:"deinterlace"`
+	VideoTimeBase          int         `json:"video_time_base,omitempty"`
+	VideoFrameDurationTs   int         `json:"video_frame_duration_ts,omitempty"`
+	Rotate                 int         `json:"rotate,omitempty"`
+	Profile                string      `json:"profile,omitempty"`
+	Level                  int         `json:"level,omitempty"`
+	Deinterlace            int         `json:"deinterlace,omitempty"`
 }
 
 // NewXcParams initializes a XcParams struct with unset/default values
@@ -974,6 +979,8 @@ func getAVType(av_type C.int) AVType {
 		return MuxSegment
 	case C.avpipe_image:
 		return FrameImage
+	case C.avpipe_mpegts_segment:
+		return MpegtsSegment
 	default:
 		return Unknown
 	}
@@ -1453,6 +1460,10 @@ func getCParams(params *XcParams) (*C.xcparams_t, error) {
 
 	if params.ForceEqualFDuration {
 		cparams.force_equal_fduration = C.int(1)
+	}
+
+	if params.CopyMpegts {
+		cparams.copy_mpegts = C.int(1)
 	}
 
 	if params.SkipDecoding {

@@ -22,6 +22,14 @@
 
 - output files: `./O/O1/`
 
+### SRT mez ingest
+
+```
+ffmpeg -re -i test.mp4 -map 0 -c copy -f mpegts srt://127.0.0.1:9000
+
+./bin/exc -f srt://127.0.0.1:9000?mode=listener -xc-type all -format fmp4-segment -seg-duration 30
+```
+
 
 ## Special Use Cases
 

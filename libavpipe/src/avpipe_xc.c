@@ -16,6 +16,9 @@
 
 #include "avpipe_xc.h"
 #include "avpipe_utils.h"
+#include "avpipe_format.h"
+#include "avpipe_io.h"
+#include "avpipe_copy_mpegts.h"
 #include "elv_log.h"
 #include "elv_time.h"
 #include "url_parser.h"
@@ -75,19 +78,6 @@ init_audio_join_filters(
     coderctx_t *encoder_context,
     xcparams_t *params);
 
-extern int
-elv_io_open(
-    struct AVFormatContext *s,
-    AVIOContext **pb,
-    const char *url,
-    int flags,
-    AVDictionary **options);
-
-extern void
-elv_io_close(
-    struct AVFormatContext *s,
-    AVIOContext *pb);
-
 extern const char *
 av_get_pix_fmt_name(
     enum AVPixelFormat pix_fmt);
@@ -95,10 +85,6 @@ av_get_pix_fmt_name(
 static const char*
 get_channel_name(
     int channel_layout);
-
-static int
-get_channel_layout_for_encoder(
-    int);
 
 const char*
 avpipe_channel_layout_name(
@@ -323,31 +309,6 @@ prepare_input(
     return 0;
 }
 
-#define TIMEBASE_THRESHOLD  10000
-
-/* Calculate final output timebase based on the codec timebase by replicating
- * the logic in the ffmpeg muxer: multiply by 2 until greater than 10,000
- */
-static int
-calc_timebase(
-    xcparams_t *params,
-    int is_video,
-    int timebase)
-{
-    if (timebase <= 0) {
-        elv_err("calc_timebase invalid timebase=%d", timebase);
-        return timebase;
-    }
-
-    if (is_video && params->video_time_base > 0)
-        timebase = params->video_time_base;
-
-    while (timebase < TIMEBASE_THRESHOLD)
-        timebase *= 2;
-
-    return timebase;
-}
-
 static int
 selected_audio_index(
     xcparams_t *params,
@@ -358,22 +319,6 @@ selected_audio_index(
 
     for (int i=0; i<params->n_audio; i++) {
         if (params->audio_index[i] == index)
-            return i;
-    }
-
-    return -1;
-}
-
-static int
-selected_decoded_audio(
-    coderctx_t *decoder_context,
-    int stream_index)
-{
-    if (decoder_context->n_audio <= 0)
-        return -1;
-
-    for (int i=0; i<decoder_context->n_audio; i++) {
-        if (decoder_context->audio_stream_index[i] == stream_index)
             return i;
     }
 
@@ -1475,7 +1420,6 @@ prepare_audio_encoder(
              * when input sample rate is different from output sample rate. (--RM)
              */
             encoder_context->codec_context[output_stream_index]->sample_rate = sample_rate;
-    
             /* Update timebase for the new sample rate */
             encoder_context->codec_context[output_stream_index]->time_base = (AVRational){1, sample_rate};
             encoder_context->stream[output_stream_index]->time_base = (AVRational){1, sample_rate};
@@ -1548,21 +1492,6 @@ prepare_audio_encoder(
     }
 
     return 0;
-}
-
-static int
-num_audio_output(
-    coderctx_t *decoder_context,
-    xcparams_t *params)
-{
-    int n_decoder_auido = decoder_context ? decoder_context->n_audio : 0;
-    if (!params)
-        return 0;
-
-    if (params->xc_type == xc_audio_merge || params->xc_type == xc_audio_join || params->xc_type == xc_audio_pan)
-        return 1;
-
-    return params->n_audio > 0 ? params->n_audio : n_decoder_auido;
 }
 
 static int
@@ -2391,8 +2320,9 @@ do_bypass(
             packet->pos, packet->size, packet->stream_index,
             packet->flags, packet->data);
     } else {
-        if (av_interleaved_write_frame(format_context, packet) < 0) {
-            elv_err("Failure in copying bypass packet xc_type=%d, url=%s", p->xc_type, p->url);
+        int rc = av_interleaved_write_frame(format_context, packet);
+        if (rc < 0) {
+            elv_err("Failure in copying bypass packet xc_type=%d error=%s (%d) url=%s", p->xc_type, av_err2str(rc), rc, p->url);
             return eav_write_frame;
         }
 
@@ -2925,7 +2855,7 @@ transcode_video_func(
 
         xc_frame = elv_channel_receive(xctx->vc);
         if (!xc_frame) {
-            elv_dbg("trancode_video_func, there is no frame, url=%s", params->url);
+            elv_dbg("transcode_video_func, there is no frame, url=%s", params->url);
             continue;
         }
 
@@ -3633,6 +3563,24 @@ avpipe_xc(
         return rc;
     }
 
+    // Set up "copy" (bypass) encoder for MPEGTS
+    if (params->copy_mpegts) {
+        cp_ctx_t *cp_ctx = &xctx->cp_ctx;
+
+        rc = copy_mpegts_prepare_encoder(&xctx->cp_ctx.encoder_ctx,
+            &xctx->decoder_ctx, out_handlers, inctx, params);
+
+        if (rc != eav_success) {
+            elv_err("Failure in preparing copy encoder, url=%s, rc=%d", params->url, rc);
+            return rc;
+        }
+
+        elv_channel_init(&cp_ctx->ch, 10000, (free_elem_f) av_packet_free);
+
+        /* Create threads for the MPEGTS bypass encoder */
+        pthread_create(&cp_ctx->thread_id, NULL, copy_mpegts_func, xctx);
+    }
+
     if ((rc = prepare_encoder(&xctx->encoder_ctx,
         &xctx->decoder_ctx, out_handlers, inctx, params)) != eav_success) {
         elv_err("Failure in preparing encoder, url=%s, rc=%d", params->url, rc);
@@ -3706,6 +3654,16 @@ avpipe_xc(
                 goto xc_done;
             }
         }
+    }
+
+    if (params->copy_mpegts) {
+        cp_ctx_t *cp_ctx = &xctx->cp_ctx;
+        rc = avformat_write_header(cp_ctx->encoder_ctx.format_context, NULL);
+        if (rc != eav_success) {
+            rc = eav_write_header;
+            goto xc_done;
+        }
+
     }
 
     int video_stream_index = decoder_context->video_stream_index;
@@ -3871,6 +3829,14 @@ avpipe_xc(
             }
         }
 
+        // Copy MPEGTS first
+        if (params->copy_mpegts) {
+            xc_frame_t *xc_frame_cp = (xc_frame_t *) calloc(1, sizeof(xc_frame_t));
+            (void)packet_clone(input_packet, &xc_frame_cp->packet);
+            xc_frame_cp->stream_index = input_packet->stream_index;
+            elv_channel_send(xctx->cp_ctx.ch, xc_frame_cp);
+        }
+
         if (input_packet->stream_index == decoder_context->video_stream_index &&
             (params->xc_type & xc_video)) {
             // Video packet
@@ -3948,8 +3914,8 @@ avpipe_xc(
                 }
             } else {
                 if (debug_frame_level)
-                    elv_dbg("Skip stream - packet index=%d, pts=%"PRId64", url=%s",
-                        input_packet->stream_index, input_packet->pts, params->url);
+                    elv_dbg("Skip stream - packet index=%d, pts=%"PRId64" dts=%"PRId64" url=%s",
+                        input_packet->stream_index, input_packet->pts, input_packet->dts, params->url);
             }
             av_packet_free(&input_packet);
         }
@@ -4173,45 +4139,6 @@ avpipe_channel_layout_name(
     }
 
     return "";
-}
-
-static int
-get_channel_layout_for_encoder(int channel_layout)
-{
-    switch (channel_layout) {
-    case AV_CH_LAYOUT_2_1:
-        channel_layout = AV_CH_LAYOUT_SURROUND;
-        break;
-    case AV_CH_LAYOUT_2_2:
-        channel_layout = AV_CH_LAYOUT_QUAD;
-        break;
-    case AV_CH_LAYOUT_5POINT0:
-        channel_layout = AV_CH_LAYOUT_5POINT0_BACK;
-        break;
-    case AV_CH_LAYOUT_5POINT1:
-        channel_layout = AV_CH_LAYOUT_5POINT1_BACK;
-        break;
-    case AV_CH_LAYOUT_6POINT0_FRONT:
-        channel_layout = AV_CH_LAYOUT_6POINT0;
-        break;
-    case AV_CH_LAYOUT_6POINT1_BACK:
-    case AV_CH_LAYOUT_6POINT1_FRONT:
-        channel_layout = AV_CH_LAYOUT_6POINT1;
-        break;
-    case AV_CH_LAYOUT_7POINT0_FRONT:
-        channel_layout = AV_CH_LAYOUT_7POINT0;
-        break;
-    case AV_CH_LAYOUT_7POINT1_WIDE_BACK:
-    case AV_CH_LAYOUT_7POINT1_WIDE:
-        channel_layout = AV_CH_LAYOUT_7POINT1;
-        break;
-    }
-
-    /* If there is no input channel layout, set the default encoder channel layout to stereo */
-    if (channel_layout == 0)
-        channel_layout = AV_CH_LAYOUT_STEREO;
-
-    return channel_layout;
 }
 
 const char*
@@ -4605,6 +4532,12 @@ check_params(
         return eav_param;
     }
 
+    if (params->copy_mpegts) {
+        if (strcmp(params->format, "fmp4-segment")) {
+            elv_err("Invalid copy MPEGTS - only valid for fmp4 mez segment");
+            return eav_param;
+        }
+    }
     return eav_success;
 }
 
@@ -4780,7 +4713,7 @@ avpipe_init(
     }
 
     if (!xctx) {
-        elv_err("Trancoding context is NULL, url=%s", p->url);
+        elv_err("Transcoding context is NULL, url=%s", p->url);
         free(inctx);
         rc = eav_param;
         goto avpipe_init_failed;
@@ -4932,6 +4865,7 @@ avpipe_fini(
     }
 #endif
 
+    // PENDING(SS) These are not allocated by avpipe_init
     free((*xctx)->in_handlers);
     free((*xctx)->out_handlers);
 

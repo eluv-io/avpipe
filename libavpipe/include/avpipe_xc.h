@@ -84,7 +84,8 @@ typedef enum avpipe_buftype_t {
     avpipe_video_fmp4_segment = 13,     // segmented fmp4 video stream
     avpipe_audio_fmp4_segment = 14,     // segmented fmp4 audio stream
     avpipe_mux_segment = 15,            // Muxed audio/video segment
-    avpipe_image = 16                   // extracted images
+    avpipe_image = 16,                  // extracted images
+    avpipe_mpegts_segment = 17          // MPEGTS (muxed audio and video)
 } avpipe_buftype_t;
 
 #define BYTES_READ_REPORT               (10*1024*1024)
@@ -422,6 +423,7 @@ typedef struct xcparams_t {
 
     crypt_scheme_t  crypt_scheme;   // Content protection / DRM / encryption [Optional, Default: crypt_none]
     xc_type_t       xc_type;        // Default: 0 means transcode 'everything'
+    int             copy_mpegts;    // Create a copy of the input stream (only MPEGTS and SRT)
 
     int         seekable;                   // Default: 0 means not seekable. A non seekable stream with moov box in
                                             //          the end causes a lot of reads up to moov atom.
@@ -517,6 +519,15 @@ typedef struct xcprobe_t {
     stream_info_t *stream_info;    // An array of stream_info_t (usually 2)
 } xcprobe_t;
 
+
+/* Context for the source copy operations (MPEGTS) */
+typedef struct cp_ctx_t {
+    coderctx_t          encoder_ctx;
+    pthread_t           thread_id;
+    elv_channel_t       *ch;
+
+} cp_ctx_t;
+
 typedef int (*associate_thread_f)(int32_t handle);
 
 typedef struct xctx_t {
@@ -542,6 +553,8 @@ typedef struct xctx_t {
     ioctx_t             *inctx_muxer[MAX_STREAMS];      // Video, audio, captions io muxer context (one video, multiple audio/caption)
     coderctx_t          out_muxer_ctx;                  // Output muxer
 
+    cp_ctx_t            cp_ctx; // Context for source copy operation
+
     AVPacket            pkt_array[MAX_STREAMS];
     int                 is_pkt_valid[MAX_STREAMS];
 
@@ -551,6 +564,7 @@ typedef struct xctx_t {
     pthread_t           athread_id;
     volatile int        stop;
     volatile int        err;        // Return code of transcoding
+
 } xctx_t;
 
 /* Params that are needed to decode/encode a frame in a thread */

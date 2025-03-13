@@ -1,11 +1,13 @@
 TOP_DIR ?= $(shell pwd)
 SRCS=avpipe_xc.c \
     avpipe_utils.c \
+    avpipe_format.c \
     avpipe_filters.c \
     avpipe_io.c \
     avpipe_mux.c \
     avpipe_level.c \
     avpipe_udp_thread.c \
+    avpipe_copy_mpegts.c \
     scte35.c
 
 BINDIR=bin

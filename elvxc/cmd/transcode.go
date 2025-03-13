@@ -23,7 +23,7 @@ func (io *elvxcInputOpener) Open(fd int64, url string) (avpipe.InputHandler, err
 	if (len(url) >= 4 && url[0:4] == "rtmp") ||
 		(len(url) >= 3 && url[0:3] == "udp") ||
 		(len(url) >= 3 && url[0:3] == "srt") {
-		return &elvxcInput{url: url}, nil
+		return &noopElvxcInput{}, nil
 	}
 
 	f, err := os.OpenFile(url, os.O_RDONLY, 0755)
@@ -38,6 +38,36 @@ func (io *elvxcInputOpener) Open(fd int64, url string) (avpipe.InputHandler, err
 	}
 
 	return excInput, nil
+}
+
+type noopElvxcInput struct{}
+
+func (io *noopElvxcInput) Read(buf []byte) (int, error)                 { return 0, nil }
+func (io *noopElvxcInput) Seek(offset int64, whence int) (int64, error) { return 0, nil }
+func (io *noopElvxcInput) Close() error                                 { return nil }
+func (io *noopElvxcInput) Size() int64                                  { return 0 }
+func (i *noopElvxcInput) Stat(streamIndex int, statType avpipe.AVStatType, statArgs interface{}) error {
+	switch statType {
+	case avpipe.AV_IN_STAT_BYTES_READ:
+		readOffset := statArgs.(*uint64)
+		log.Info("AVCMD InputHandler.Stat", "read offset", *readOffset, "streamIndex", streamIndex)
+	case avpipe.AV_IN_STAT_AUDIO_FRAME_READ:
+		audioFrameRead := statArgs.(*uint64)
+		log.Info("AVCMD InputHandler.Stat", "audioFrameRead", *audioFrameRead, "streamIndex", streamIndex)
+	case avpipe.AV_IN_STAT_VIDEO_FRAME_READ:
+		videoFrameRead := statArgs.(*uint64)
+		log.Info("AVCMD InputHandler.Stat", "videoFrameRead", *videoFrameRead, "streamIndex", streamIndex)
+	case avpipe.AV_IN_STAT_DECODING_AUDIO_START_PTS:
+		startPTS := statArgs.(*uint64)
+		log.Info("AVCMD InputHandler.Stat", "audio start PTS", *startPTS, "streamIndex", streamIndex)
+	case avpipe.AV_IN_STAT_DECODING_VIDEO_START_PTS:
+		startPTS := statArgs.(*uint64)
+		log.Info("AVCMD InputHandler.Stat", "video start PTS", *startPTS, "streamIndex", streamIndex)
+	case avpipe.AV_IN_STAT_DATA_SCTE35:
+		log.Info("AVCMD InputHandler.Stat", "scte35", statArgs, "streamIndex", streamIndex)
+	}
+
+	return nil
 }
 
 // elvxcInput implements avpipe.InputHandler
@@ -158,6 +188,8 @@ func (oo *elvxcOutputOpener) Open(h, fd int64, stream_index, seg_index int,
 		filename = fmt.Sprintf("%s/fmp4-asegment%d-%05d.mp4", dir, stream_index, seg_index)
 	case avpipe.FrameImage:
 		filename = fmt.Sprintf("%s/%d.jpeg", dir, pts)
+	case avpipe.MpegtsSegment:
+		filename = fmt.Sprintf("%s/ts-segment-%05d.ts", dir, seg_index)
 	}
 
 	f, err := os.OpenFile(filename, os.O_RDWR|os.O_CREATE|os.O_TRUNC, 0644)
