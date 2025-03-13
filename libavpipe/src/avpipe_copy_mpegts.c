@@ -334,7 +334,6 @@ copy_mpegts_func(
 
         av_packet_unref(packet);
         av_packet_free(&packet);
-        free(xc_frame);
 
         if (err != eav_success) {
             elv_err("Stop video transcoding, err=%d, url=%s", err, params->url);
