@@ -2322,7 +2322,7 @@ do_bypass(
     } else {
         int rc = av_interleaved_write_frame(format_context, packet);
         if (rc < 0) {
-            elv_err("Failure in copying bypass packet xc_type=%d rc=%d url=%s", p->xc_type, rc, p->url);
+            elv_err("Failure in copying bypass packet xc_type=%d error=%s (%d) url=%s", p->xc_type, av_err2str(rc), rc, p->url);
             return eav_write_frame;
         }
 
@@ -4737,12 +4737,6 @@ avpipe_init(
         goto avpipe_init_failed;
     }
 
-    if (params->copy_mpegts) {
-        rc = copy_mpegts_init(p_xctx);
-        if (rc != eav_success) {
-            goto avpipe_init_failed;
-        }
-    }
     *xctx = p_xctx;
 
     return eav_success;

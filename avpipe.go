@@ -86,7 +86,7 @@ const (
 	MuxSegment
 	// FrameImage 16
 	FrameImage
-	// MpegtsSegment 16
+	// MpegtsSegment 17
 	MpegtsSegment
 )
 

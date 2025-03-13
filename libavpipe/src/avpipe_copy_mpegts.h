@@ -1,9 +1,5 @@
 #include "avpipe_xc.h"
 
-int copy_mpegts_init(
-    xctx_t *
-);
-
 void *copy_mpegts_func(
     void *p
 );

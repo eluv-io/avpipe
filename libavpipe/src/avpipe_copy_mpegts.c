@@ -7,40 +7,12 @@
  * all streams are muxed so there is only one output part (no separate video/audio)
  */
 
-#include <libavutil/log.h>
-#include "libavutil/audio_fifo.h"
-#include <libswscale/swscale.h>
-#include <libavutil/imgutils.h>
-#include <libavutil/display.h>
-
 #include "avpipe_xc.h"
 #include "avpipe_utils.h"
 #include "avpipe_format.h"
 #include "avpipe_io.h"
 #include "avpipe_copy_mpegts.h"
 #include "elv_log.h"
-#include "elv_time.h"
-#include "url_parser.h"
-#include "avpipe_version.h"
-
-#include <stdio.h>
-#include <fcntl.h>
-#include <assert.h>
-#include <sys/types.h>
-#include <sys/stat.h>
-#include <sys/uio.h>
-#include <unistd.h>
-#include <stdlib.h>
-#include <pthread.h>
-
-
-int
-copy_mpegts_init(
-    xctx_t *xctx)
-{
-    // Nothing to do
-    return eav_success;
-}
 
 static int
 copy_mpegts_set_encoder_options(
@@ -225,6 +197,12 @@ copy_mpegts_prepare_audio_encoder(
     return 0;
 }
 
+/*
+ * Prepare the MPEGTS copy (bypass) encoder.
+ * This is largely similar to the bypass section of the main 'prepare_encoder()' and must
+ * be run after 'prepare_decoder()' (there is nothing special needed
+ * in 'prepare_decoder()' for the MPEGTS copy operation - just the regular code path).
+ */
 int
 copy_mpegts_prepare_encoder(
     coderctx_t *encoder_context,
@@ -264,8 +242,7 @@ copy_mpegts_prepare_encoder(
     }
 
     /*
-     * Allocate an array of MAX_STREAMS out_handler_t (a single one for video and audio).
-     * Needs to allocate up to number of streams when transcoding multiple streams at the same time.
+     * Allocate a single out_tracker (and out_handler) for all video and a audio streams.
      */
     out_tracker = (out_tracker_t *) calloc(1, sizeof(out_tracker_t));
     out_tracker->out_handlers = out_handlers;
@@ -285,12 +262,7 @@ copy_mpegts(
     coderctx_t *decoder_context,
     coderctx_t *encoder_context,
     AVPacket *packet,
-    AVFrame *frame,
-    AVFrame *filt_frame,
-    int stream_index,
-    xcparams_t *p,
-    int do_instrument,
-    int debug_frame_level)
+    xcparams_t *p)
 {
     AVFormatContext *format_context;
 
@@ -335,18 +307,18 @@ copy_mpegts_func(
     xc_frame_t *xc_frame;
     int err = 0;
 
-    AVFrame *frame = av_frame_alloc();
-    AVFrame *filt_frame = av_frame_alloc();
-
     while (!xctx->stop || elv_channel_size(cp_ctx->ch) > 0) {
 
+        // Retrieve MPEGTS packets from the dedicated "copy mpegts" channel
+        // Note xc_frame only contains a packet in this case (no frame)
         xc_frame = elv_channel_receive(cp_ctx->ch);
         if (!xc_frame) {
             elv_dbg("copy_mpegts_func, there is no frame, url=%s", params->url);
             continue;
         }
-
         AVPacket *packet = xc_frame->packet;
+        free(xc_frame);
+
         if (!packet) {
             elv_err("copy_mpegts_func, packet is NULL, url=%s", params->url);
             free(xc_frame);
@@ -357,16 +329,9 @@ copy_mpegts_func(
             decoder_context,
             encoder_context,
             packet,
-            frame,
-            filt_frame,
-            packet->stream_index,
-            params,
-            xctx->do_instrument,
-            xctx->debug_frame_level
+            params
         );
 
-        av_frame_unref(frame);
-        av_frame_unref(filt_frame);
         av_packet_unref(packet);
         av_packet_free(&packet);
         free(xc_frame);
@@ -377,13 +342,11 @@ copy_mpegts_func(
         }
     }
 
-    av_frame_free(&frame);
-    av_frame_free(&filt_frame);
     if (!xctx->err)
         xctx->err = err;
 
-    elv_channel_close(xctx->vc, 0);
-    elv_dbg("transcode_video_func err=%d, stop=%d, url=%s", err, xctx->stop, params->url);
+    elv_channel_close(xctx->cp_ctx.ch, 0);
+    elv_dbg("copy_mpegts_func err=%d, stop=%d, url=%s", err, xctx->stop, params->url);
 
     return NULL;
 }
