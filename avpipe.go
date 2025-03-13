@@ -274,6 +274,7 @@ type XcParams struct {
 	CryptKeyURL            string      `json:"crypt_key_url,omitempty"`
 	CryptScheme            CryptScheme `json:"crypt_scheme,omitempty"`
 	XcType                 XcType      `json:"xc_type,omitempty"`
+	CopyMpegts             bool        `json:"copy_mpegts,omitempty"`
 	Seekable               bool        `json:"seekable,omitempty"`
 	WatermarkText          string      `json:"watermark_text,omitempty"`
 	WatermarkTimecode      string      `json:"watermark_timecode,omitempty"`
@@ -1441,6 +1442,10 @@ func getCParams(params *XcParams) (*C.xcparams_t, error) {
 
 	if params.ForceEqualFDuration {
 		cparams.force_equal_fduration = C.int(1)
+	}
+
+	if params.CopyMpegts {
+		cparams.copy_mpegts = C.int(1)
 	}
 
 	if params.SkipDecoding {
