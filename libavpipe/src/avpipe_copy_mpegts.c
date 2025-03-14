@@ -181,7 +181,17 @@ copy_mpegts_prepare_audio_encoder(
 
         /* Open audio encoder codec */
         if (avcodec_open2(encoder_context->codec_context[output_stream_index], encoder_context->codec[output_stream_index], NULL) < 0) {
+            char *codec_str = NULL;
+            char *ctx_str = NULL;
+            av_opt_serialize(encoder_context->codec_context[output_stream_index]->av_class, 0, 0, &codec_str, "=", ":");
+            av_opt_serialize(encoder_context->codec_context[output_stream_index]->av_class, AV_OPT_FLAG_ENCODING_PARAM, 0, &ctx_str, "=", ":");
+
             elv_dbg("Could not open encoder for audio, stream_index=%d", stream_index);
+            elv_dbg("codec=%s,\n\n ctx=%s", codec_str, ctx_str);
+            if (codec_str)
+                free(codec_str);
+            if (ctx_str)
+                free(ctx_str);
             return eav_open_codec;
         }
 
@@ -232,12 +242,12 @@ copy_mpegts_prepare_encoder(
     encoder_context->n_audio_output = num_audio_output(decoder_context, params);
 
     if ((rc = copy_mpegts_prepare_video_encoder(encoder_context, decoder_context, params)) != eav_success) {
-        elv_err("Failure in preparing video encoder, rc=%d, url=%s", rc, params->url);
+        elv_err("Failure in preparing mpegts copy video encoder, rc=%d, url=%s", rc, params->url);
         return rc;
     }
 
     if ((rc = copy_mpegts_prepare_audio_encoder(encoder_context, decoder_context, params)) != eav_success) {
-        elv_err("Failure in preparing audio encoder, rc=%d, url=%s", rc, params->url);
+        elv_err("Failure in preparing mpegts copy audio encoder, rc=%d, url=%s", rc, params->url);
         return rc;
     }
 
