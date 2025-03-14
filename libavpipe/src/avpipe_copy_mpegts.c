@@ -183,8 +183,8 @@ copy_mpegts_prepare_audio_encoder(
         if (avcodec_open2(encoder_context->codec_context[output_stream_index], encoder_context->codec[output_stream_index], NULL) < 0) {
             char *codec_str;
             char *ctx_str;
-            av_opt_serialize(encoder_context->codec_context[output_stream_index], AV_OPT_FLAG_ENCODING_PARAM | AV_OPT_FLAG_AUDIO_PARAM, 0, &codec_str, '=', ':');
-            av_opt_serialize(encoder_context->codec_context[output_stream_index], AV_OPT_FLAG_ENCODING_PARAM | AV_OPT_FLAG_AUDIO_PARAM, 0, &ctx_str, '=', ':');
+            av_opt_serialize(encoder_context->codec_context[output_stream_index], 0, 0, &codec_str, '=', ':');
+            av_opt_serialize(encoder_context->codec_context[output_stream_index], 0, 0, &ctx_str, '=', ':');
 
             elv_dbg("Could not open encoder for audio, stream_index=%d, codec=%s", stream_index, encoder_context->codec[output_stream_index]->long_name);
             elv_dbg("codec=%s,\n\n ctx=%s\n", codec_str, ctx_str);

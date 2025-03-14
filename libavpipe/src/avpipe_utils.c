@@ -89,7 +89,7 @@ dump_decoder(
         const char *channel_name = avpipe_channel_name(codec_context->channels, codec_context->channel_layout);
 
         char *ctx_str;
-        av_opt_serialize(codec_context, AV_OPT_FLAG_DECODING_PARAM | AV_OPT_FLAG_AUDIO_PARAM | AV_OPT_FLAG_VIDEO_PARAM, 0, &ctx_str, '=', ':');
+        av_opt_serialize(codec_context, 0, 0, &ctx_str, '=', ':');
         elv_dbg("DECODER[%d]: ff_log -- %s", i, ctx_str);
         av_free(ctx_str);
 
