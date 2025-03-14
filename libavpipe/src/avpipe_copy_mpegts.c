@@ -169,6 +169,19 @@ copy_mpegts_prepare_audio_encoder(
 
         encoder_context->codec_context[output_stream_index]->bit_rate = params->audio_bitrate;
 
+        // mpeg2 audio decoder supports planar and non-planar 16-bit signed samples (S16 and S16P), preferring S16P
+        // However, the mp2 audio encoder only supports non-planar.
+        // The encoder will automatically swap over to the supported one _if_ there is only one channel.
+        // If there are multiple channels, we need to do this conversion ourselves.
+        // Sources: `libavcodec/{encode.c:ff_encode_preinit, mpegaudioenc.c, mpegaudioenc_fixed.c}`
+        
+        if ((encoder_context->codec_context[output_stream_index]->channels > 1)
+            && (encoder_context->codec_context[output_stream_index]->sample_fmt == AV_SAMPLE_FMT_S16P)
+            && ((encoder_context->codec[output_stream_index]->id == AV_CODEC_ID_MP2) || (encoder_context->codec[output_stream_index]->id == AV_CODEC_ID_MP3))) {
+            elv_dbg("Converting MP2/MP3 audio encoder to non-planar format, stream_index=%d", stream_index);
+            encoder_context->codec_context[output_stream_index]->sample_fmt = AV_SAMPLE_FMT_S16;
+        }
+
         /* Allow the use of the experimental AAC encoder. */
         encoder_context->codec_context[output_stream_index]->strict_std_compliance = FF_COMPLIANCE_EXPERIMENTAL;
 
