@@ -156,7 +156,7 @@ copy_mpegts_prepare_audio_encoder(
         encoder_context->codec_context[output_stream_index]->time_base = (AVRational){1, encoder_context->codec_context[output_stream_index]->sample_rate};
         encoder_context->stream[output_stream_index]->time_base = encoder_context->codec_context[output_stream_index]->time_base;
 
-        encoder_context->codec_context[output_stream_index]->sample_fmt = decoder_context->codec[stream_index]->sample_fmts[0];
+        encoder_context->codec_context[output_stream_index]->sample_fmt = decoder_context->codec_context[stream_index]->sample_fmt;
 
         if (params->channel_layout > 0)
             encoder_context->codec_context[output_stream_index]->channel_layout = params->channel_layout;
