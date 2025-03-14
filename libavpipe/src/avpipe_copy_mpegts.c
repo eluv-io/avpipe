@@ -16,6 +16,7 @@
 
 static int
 copy_mpegts_set_encoder_options(
+    cp_ctx_t *cp_ctx,
     coderctx_t *encoder_context,
     coderctx_t *decoder_context,
     xcparams_t *params,
@@ -41,15 +42,17 @@ copy_mpegts_set_encoder_options(
     if (params->video_seg_duration_ts > 0)
         seg_duration_ts = params->video_seg_duration_ts;
 
-    /* If audio_seg_duration_ts is not set, set it now */
-    if (params->audio_seg_duration_ts <= 0)
-        params->audio_seg_duration_ts = seg_duration_ts;
-
     av_opt_set_int(encoder_context->format_context->priv_data, "segment_duration_ts", seg_duration_ts, 0);
-
-    /* If video_seg_duration_ts is not set, set it now */
-    if (params->video_seg_duration_ts <= 0)
-        params->video_seg_duration_ts = seg_duration_ts;
+    elv_log("Seeing initial stream time of %"PRId64"", decoder_context->stream[stream_index]->start_time);
+    
+    int64_t stream_start_time = decoder_context->stream[stream_index]->start_time;
+    cp_ctx->stream_start_pts = stream_start_time;
+    if (stream_start_time != AV_NOPTS_VALUE) {
+        // Initial offset needs to be in microseconds
+        int64_t offset_microseconds = av_rescale_q(stream_start_time, (AVRational){1, timebase}, AV_TIME_BASE_Q);
+        av_opt_set_int(encoder_context->format_context->priv_data, "initial_offset", offset_microseconds, 0);
+        elv_log("Set initial segment offset to %"PRId64" microseconds", offset_microseconds);
+    }
 
     elv_dbg("setting \"fmp4-segment\" video segment_time to %s, seg_duration_ts=%"PRId64", url=%s",
     params->seg_duration, seg_duration_ts, params->url);
@@ -59,53 +62,43 @@ copy_mpegts_set_encoder_options(
 
 static int
 copy_mpegts_prepare_video_encoder(
+    cp_ctx_t *cp_ctx,
     coderctx_t *encoder_context,
     coderctx_t *decoder_context,
-    xcparams_t *params)
+    xcparams_t *params,
+    int stream_index)
 {
     int rc = 0;
-    int index = decoder_context->video_stream_index;
+    AVStream *in_stream = decoder_context->stream[stream_index];
+    AVStream *out_stream = encoder_context->stream[stream_index];
+    AVCodecParameters *in_codecpar = in_stream->codecpar;
 
-    if (index < 0) {
-        elv_dbg("No video stream detected by decoder.");
-        return eav_stream_index;
-    }
+    encoder_context->codec[stream_index] = avcodec_find_encoder(in_stream->codec->codec_id);
 
-    encoder_context->video_stream_index = index;
-    encoder_context->video_last_dts = AV_NOPTS_VALUE;
-    encoder_context->stream[index] = avformat_new_stream(encoder_context->format_context, NULL);
-    encoder_context->codec[index] = avcodec_find_encoder_by_name(params->ecodec);
-
-    /* Custom output buffer */
-    encoder_context->format_context->io_open = elv_io_open;
-    encoder_context->format_context->io_close = elv_io_close;
-
-    if (!encoder_context->codec[index]) {
+    if (!encoder_context->codec[stream_index]) {
         elv_dbg("could not find the proper codec");
         return eav_codec_context;
     }
-    elv_log("Found encoder index=%d, %s", index, params->ecodec);
 
-    AVStream *in_stream = decoder_context->stream[index];
-    AVStream *out_stream = encoder_context->stream[index];
-    AVCodecParameters *in_codecpar = in_stream->codecpar;
 
     rc = avcodec_parameters_copy(out_stream->codecpar, in_codecpar);
     if (rc < 0) {
-        elv_err("BYPASS failed to copy codec parameters, url=%s", params->url);
+        elv_err("copy_ts failed to copy codec parameters, url=%s", params->url);
         return eav_codec_param;
     }
 
     out_stream->time_base = in_stream->time_base;
     out_stream->avg_frame_rate = decoder_context->format_context->streams[decoder_context->video_stream_index]->avg_frame_rate;
-    out_stream->codecpar->codec_tag = 0;
+    out_stream->codecpar->codec_tag = 0; // TODO(Nate) -- Why 0? What does that mean??
 
-    rc = copy_mpegts_set_encoder_options(encoder_context, decoder_context, params, decoder_context->video_stream_index,
+    rc = copy_mpegts_set_encoder_options(cp_ctx, encoder_context, decoder_context, params, stream_index,
         out_stream->time_base.den);
     if (rc < 0) {
-        elv_err("Failed to set video encoder options with bypass, url=%s", params->url);
+        elv_err("Failed to set video encoder options with copy_ts, url=%s", params->url);
         return rc;
     }
+
+    elv_log("Prepared video encoder for stream index %d", stream_index);
 
     return 0;
 }
@@ -114,88 +107,108 @@ static int
 copy_mpegts_prepare_audio_encoder(
     coderctx_t *encoder_context,
     coderctx_t *decoder_context,
-    xcparams_t *params)
+    xcparams_t *params,
+    int stream_index)
 {
     int n_audio = encoder_context->n_audio_output;
     AVFormatContext *format_context = encoder_context->format_context;
     int rc;
 
-    for (int i=0; i<n_audio; i++) {
-        int stream_index = decoder_context->audio_stream_index[i];
-        int output_stream_index = stream_index;
+    // This assignment helps to keep some of the code below more understandable
+    // output stream index always equals input stream index for mpegts capture
+    int output_stream_index = stream_index;
 
-        if (stream_index < 0) {
-            elv_dbg("No audio stream detected by decoder.");
-            return eav_stream_index;
-        }
+    if (stream_index < 0) {
+        elv_dbg("No audio stream detected by decoder.");
+        return eav_stream_index;
+    }
 
-        if (!decoder_context->codec_context[stream_index]) {
-            elv_err("Decoder codec context is NULL! stream_index=%d, url=%s", stream_index, params->url);
-            return eav_codec_context;
-        }
+    if (!decoder_context->codec_context[stream_index]) {
+        elv_err("Decoder codec context is NULL! stream_index=%d, url=%s", stream_index, params->url);
+        return eav_codec_context;
+    }
 
-        encoder_context->audio_last_dts[i] = AV_NOPTS_VALUE;
+    encoder_context->audio_stream_index[output_stream_index] = output_stream_index;
 
-        encoder_context->audio_stream_index[output_stream_index] = output_stream_index;
-        encoder_context->n_audio = 1; // PENDING(SS) copied from prepare_audio_encoder but why 1?
+    encoder_context->codec[output_stream_index] = avcodec_find_encoder(decoder_context->codec_context[stream_index]->codec_id);
+    if (!encoder_context->codec[output_stream_index]) {
+        elv_err("Audio codec not found, codec_id=%s, url=%s",
+            avcodec_get_name(decoder_context->codec_context[stream_index]->codec_id), params->url);
+        return eav_codec_context;
+    }
 
-        encoder_context->stream[output_stream_index] = avformat_new_stream(format_context, NULL);
-        encoder_context->codec[output_stream_index] = avcodec_find_encoder(decoder_context->codec_context[stream_index]->codec_id);
-        if (!encoder_context->codec[output_stream_index]) {
-            elv_err("Codec not found, codec_id=%s, url=%s",
-                avcodec_get_name(decoder_context->codec_context[stream_index]->codec_id), params->url);
-            return eav_codec_context;
-        }
+    encoder_context->codec_context[output_stream_index] = avcodec_alloc_context3(encoder_context->codec[output_stream_index]);
 
-        encoder_context->codec_context[output_stream_index] = avcodec_alloc_context3(encoder_context->codec[output_stream_index]);
+    /* By default use decoder parameters */
+    encoder_context->codec_context[output_stream_index]->sample_rate = decoder_context->codec_context[stream_index]->sample_rate;
 
-        /* By default use decoder parameters */
-        encoder_context->codec_context[output_stream_index]->sample_rate = decoder_context->codec_context[stream_index]->sample_rate;
+    /* Set the default time_base based on input sample_rate */
+    encoder_context->codec_context[output_stream_index]->time_base = (AVRational){1, encoder_context->codec_context[output_stream_index]->sample_rate};
+    encoder_context->stream[output_stream_index]->time_base = encoder_context->codec_context[output_stream_index]->time_base;
 
-        /* Set the default time_base based on input sample_rate */
-        encoder_context->codec_context[output_stream_index]->time_base = (AVRational){1, encoder_context->codec_context[output_stream_index]->sample_rate};
-        encoder_context->stream[output_stream_index]->time_base = encoder_context->codec_context[output_stream_index]->time_base;
+    encoder_context->codec_context[output_stream_index]->sample_fmt = decoder_context->codec_context[stream_index]->sample_fmt;
 
-        encoder_context->codec_context[output_stream_index]->sample_fmt = decoder_context->codec[stream_index]->sample_fmts[0];
+    if (params->channel_layout > 0)
+        encoder_context->codec_context[output_stream_index]->channel_layout = params->channel_layout;
+    else
+        /* If the input stream is stereo the decoder_context->codec_context[index]->channel_layout is AV_CH_LAYOUT_STEREO */
+        encoder_context->codec_context[output_stream_index]->channel_layout =
+            get_channel_layout_for_encoder(decoder_context->codec_context[stream_index]->channel_layout);
 
-        if (params->channel_layout > 0)
-            encoder_context->codec_context[output_stream_index]->channel_layout = params->channel_layout;
-        else
-            /* If the input stream is stereo the decoder_context->codec_context[index]->channel_layout is AV_CH_LAYOUT_STEREO */
-            encoder_context->codec_context[output_stream_index]->channel_layout =
-                get_channel_layout_for_encoder(decoder_context->codec_context[stream_index]->channel_layout);
+    encoder_context->codec_context[output_stream_index]->channels = av_get_channel_layout_nb_channels(encoder_context->codec_context[output_stream_index]->channel_layout);
 
-        encoder_context->codec_context[output_stream_index]->channels = av_get_channel_layout_nb_channels(encoder_context->codec_context[output_stream_index]->channel_layout);
+    encoder_context->codec_context[output_stream_index]->bit_rate = params->audio_bitrate;
 
-        encoder_context->codec_context[output_stream_index]->bit_rate = params->audio_bitrate;
+    // mpeg2 audio decoder supports planar and non-planar 16-bit signed samples (S16 and S16P), preferring S16P
+    // However, the mp2 audio encoder only supports non-planar.
+    // The encoder will automatically swap over to the supported one _if_ there is only one channel.
+    // If there are multiple channels, we need to do this conversion ourselves.
+    // Sources: `libavcodec/{encode.c:ff_encode_preinit, mpegaudioenc.c, mpegaudioenc_fixed.c}`
+    
+    if ((encoder_context->codec_context[output_stream_index]->channels > 1)
+        && (encoder_context->codec_context[output_stream_index]->sample_fmt == AV_SAMPLE_FMT_S16P)
+        && ((encoder_context->codec[output_stream_index]->id == AV_CODEC_ID_MP2) || (encoder_context->codec[output_stream_index]->id == AV_CODEC_ID_MP3))) {
+        elv_dbg("Converting MP2/MP3 audio encoder to non-planar format, stream_index=%d", stream_index);
+        encoder_context->codec_context[output_stream_index]->sample_fmt = AV_SAMPLE_FMT_S16;
+    }
 
-        /* Allow the use of the experimental AAC encoder. */
-        encoder_context->codec_context[output_stream_index]->strict_std_compliance = FF_COMPLIANCE_EXPERIMENTAL;
+    /* Allow the use of the experimental AAC encoder. */
+    encoder_context->codec_context[output_stream_index]->strict_std_compliance = FF_COMPLIANCE_EXPERIMENTAL;
 
-        rc = copy_mpegts_set_encoder_options(encoder_context, decoder_context, params, decoder_context->audio_stream_index[i],
-            encoder_context->stream[output_stream_index]->time_base.den);
-        if (rc < 0) {
-            elv_err("Failed to set audio encoder options, url=%s", params->url);
-            return rc;
-        }
+    // rc = copy_mpegts_set_encoder_options(encoder_context, decoder_context, params, decoder_context->audio_stream_index[stream_index],
+    //     encoder_context->stream[output_stream_index]->time_base.den);
+    // if (rc < 0) {
+    //     elv_err("Failed to set audio encoder options, url=%s", params->url);
+    //     return rc;
+    // }
 
-        /* Open audio encoder codec */
-        if (avcodec_open2(encoder_context->codec_context[output_stream_index], encoder_context->codec[output_stream_index], NULL) < 0) {
-            elv_dbg("Could not open encoder for audio, stream_index=%d", stream_index);
-            return eav_open_codec;
-        }
+    /* Open audio encoder codec */
+    if (avcodec_open2(encoder_context->codec_context[output_stream_index], encoder_context->codec[output_stream_index], NULL) < 0) {
+        char *codec_str;
+        char *ctx_str;
+        av_opt_serialize(encoder_context->codec_context[output_stream_index], 0, 0, &codec_str, '=', ':');
+        av_opt_serialize(encoder_context->codec_context[output_stream_index], 0, 0, &ctx_str, '=', ':');
 
-        if (avcodec_parameters_from_context(
-            encoder_context->stream[output_stream_index]->codecpar,
-            encoder_context->codec_context[output_stream_index]) < 0) {
-            elv_err("Failed to copy encoder parameters to output stream, url=%s", params->url);
-            return eav_codec_param;
+        elv_dbg("Could not open encoder for audio, stream_index=%d, codec=%s", stream_index, encoder_context->codec[output_stream_index]->long_name);
+        elv_dbg("codec=%s,\n\n ctx=%s\n", codec_str, ctx_str);
+        if (codec_str)
+            free(codec_str);
+        if (ctx_str)
+            free(ctx_str);
+        return eav_open_codec;
+    }
 
-        }
+    if (avcodec_parameters_from_context(
+        encoder_context->stream[output_stream_index]->codecpar,
+        encoder_context->codec_context[output_stream_index]) < 0) {
+        elv_err("Failed to copy encoder parameters to output stream, url=%s", params->url);
+        return eav_codec_param;
     }
 
     return 0;
 }
+
+// If this doesn't work properly, we can always sit ffmpeg in front of avpipe to duplicate
 
 /*
  * Prepare the MPEGTS copy (bypass) encoder.
@@ -205,7 +218,7 @@ copy_mpegts_prepare_audio_encoder(
  */
 int
 copy_mpegts_prepare_encoder(
-    coderctx_t *encoder_context,
+    cp_ctx_t *cp_ctx,
     coderctx_t *decoder_context,
     avpipe_io_handler_t *out_handlers,
     ioctx_t *inctx,
@@ -215,6 +228,8 @@ copy_mpegts_prepare_encoder(
     char *filename = "";
     char *format = params->format;
     int rc = 0;
+
+    coderctx_t *encoder_context = &cp_ctx->encoder_ctx;
 
     encoder_context->is_mpegts = decoder_context->is_mpegts;
     encoder_context->out_handlers = out_handlers;
@@ -229,16 +244,62 @@ copy_mpegts_prepare_encoder(
         return eav_codec_context;
     }
 
+    /* Custom output buffer */
+    encoder_context->format_context->io_open = elv_io_open;
+    encoder_context->format_context->io_close = elv_io_close;
+
     encoder_context->n_audio_output = num_audio_output(decoder_context, params);
 
-    if ((rc = copy_mpegts_prepare_video_encoder(encoder_context, decoder_context, params)) != eav_success) {
-        elv_err("Failure in preparing video encoder, rc=%d, url=%s", rc, params->url);
-        return rc;
-    }
+    for (int i = 0; i < decoder_context->format_context->nb_streams; i++) {
+        AVStream *in_stream = decoder_context->format_context->streams[i];
 
-    if ((rc = copy_mpegts_prepare_audio_encoder(encoder_context, decoder_context, params)) != eav_success) {
-        elv_err("Failure in preparing audio encoder, rc=%d, url=%s", rc, params->url);
-        return rc;
+        elv_log("Stream %d start PTS: %"PRId64"", i, in_stream->start_time);
+
+        AVStream *out_stream = avformat_new_stream(encoder_context->format_context, NULL);
+        if (!out_stream) {
+            elv_err("Failed allocating output stream, url=%s", params->url);
+            return eav_mem_alloc;
+        }
+        encoder_context->stream[i] = out_stream;
+
+        // Copy metadata into output stream. Inspired by fftools/ffmpeg_opt.c:2671 in open_output_file
+        av_dict_copy(&out_stream->metadata, in_stream->metadata, AV_DICT_DONT_OVERWRITE);
+
+
+        // if (avformat_transfer_internal_stream_timing_info(encoder_context->format_context->oformat, out_stream, in_stream, -1) < 0) {
+        //     elv_err("Failed to transfer internal stream timing info, url=%s", params->url);
+        //     return eav_codec_context;
+        // }
+
+        // out_stream->disposition = in_stream->disposition;
+
+        if (in_stream->nb_side_data) {
+            for (int i = 0; i < in_stream->nb_side_data; i++) {
+                const AVPacketSideData *sd_src = &in_stream->side_data[i];
+                uint8_t *out_data;
+
+                out_data = av_stream_new_side_data(out_stream, sd_src->type, sd_src->size);
+                if (!out_data) {
+                    elv_err("Failed to allocate side data, url=%s", params->url);
+                    return eav_mem_alloc;
+                }
+                memcpy(out_data, sd_src->data, sd_src->size);
+            }
+        }
+
+        // For audio/video, do more specific things. For subtitles/data/etc, just copy the stream
+        switch (in_stream->codecpar->codec_type) {
+            case AVMEDIA_TYPE_AUDIO:
+                rc = copy_mpegts_prepare_audio_encoder(encoder_context, decoder_context, params, i);
+                break;
+            case AVMEDIA_TYPE_VIDEO:
+                rc = copy_mpegts_prepare_video_encoder(cp_ctx, encoder_context, decoder_context, params, i);
+                break;
+            default:
+                elv_log("Copying stream %d of type %s", i, av_get_media_type_string(in_stream->codecpar->codec_type));
+                avcodec_parameters_copy(out_stream->codecpar, in_stream->codecpar);
+                continue;
+        }
     }
 
     /*
@@ -259,29 +320,29 @@ copy_mpegts_prepare_encoder(
 
 static int
 copy_mpegts(
-    coderctx_t *decoder_context,
-    coderctx_t *encoder_context,
+    cp_ctx_t *cp_ctx,
     AVPacket *packet,
     xcparams_t *p)
 {
     AVFormatContext *format_context;
+    coderctx_t *encoder_context = &cp_ctx->encoder_ctx;
 
     format_context = encoder_context->format_context;
 
     if (packet->pts == AV_NOPTS_VALUE ||
         packet->dts == AV_NOPTS_VALUE ||
         packet->data == NULL) {
-        char *url = "";
-        if (decoder_context->inctx && decoder_context->inctx->url)
-            url = decoder_context->inctx->url;
-        elv_warn("INVALID %s PACKET (COPY) url=%s pts=%"PRId64" dts=%"PRId64" duration=%"PRId64" pos=%"PRId64" size=%d stream_index=%d flags=%x data=%p\n",
-            "AUDIO/VIDEO", url,
+        elv_warn("INVALID %s PACKET (COPY) pts=%"PRId64" dts=%"PRId64" duration=%"PRId64" pos=%"PRId64" size=%d stream_index=%d flags=%x data=%p\n",
+            "AUDIO/VIDEO",
             packet->pts, packet->dts, packet->duration,
             packet->pos, packet->size, packet->stream_index,
             packet->flags, packet->data);
 
         return eav_success; // Respect the logic in regular bypass encoder
     }
+
+    packet->pts -= cp_ctx->stream_start_pts;
+    packet->dts -= cp_ctx->stream_start_pts;
 
     int rc = av_interleaved_write_frame(format_context, packet);
     if (rc < 0) {
@@ -326,8 +387,7 @@ copy_mpegts_func(
         }
 
         err = copy_mpegts(
-            decoder_context,
-            encoder_context,
+            cp_ctx,
             packet,
             params
         );

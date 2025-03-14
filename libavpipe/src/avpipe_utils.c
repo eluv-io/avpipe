@@ -88,6 +88,11 @@ dump_decoder(
 
         const char *channel_name = avpipe_channel_name(codec_context->channels, codec_context->channel_layout);
 
+        char *ctx_str;
+        av_opt_serialize(codec_context, 0, 0, &ctx_str, '=', ':');
+        elv_dbg("DECODER[%d]: ff_log -- %s", i, ctx_str);
+        av_free(ctx_str);
+
         elv_dbg("DECODER[%d] url=%s codec_type=%d profile=%d level=%d start_time=%d duration=%d nb_frames=%d"
             " time_base=%d/%d frame_rate=%d/%d avg_frame_rate=%d/%d, sample_aspect_ratio=%d/%d"
             " bit_rate=%d width=%d height=%d pix_fmt=%s channels=%d channel_layout=%s\n",
