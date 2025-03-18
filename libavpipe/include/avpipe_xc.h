@@ -526,6 +526,9 @@ typedef struct cp_ctx_t {
     pthread_t           thread_id;
     elv_channel_t       *ch;
 
+    // stream_mapping is a mapping of input stream index to output stream index
+    // -1 indicates that the input stream should be discarded
+    int stream_mapping[MAX_STREAMS];
 } cp_ctx_t;
 
 typedef int (*associate_thread_f)(int32_t handle);

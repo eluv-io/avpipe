@@ -3567,7 +3567,7 @@ avpipe_xc(
     if (params->copy_mpegts) {
         cp_ctx_t *cp_ctx = &xctx->cp_ctx;
 
-        rc = copy_mpegts_prepare_encoder(&xctx->cp_ctx.encoder_ctx,
+        rc = copy_mpegts_prepare_encoder(&xctx->cp_ctx,
             &xctx->decoder_ctx, out_handlers, inctx, params);
 
         if (rc != eav_success) {

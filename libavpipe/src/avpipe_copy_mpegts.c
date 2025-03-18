@@ -59,12 +59,16 @@ copy_mpegts_set_encoder_options(
 
 static int
 copy_mpegts_prepare_video_encoder(
+    cp_ctx_t *cp_ctx,
     coderctx_t *encoder_context,
     coderctx_t *decoder_context,
     xcparams_t *params)
 {
+    AVStream *out_stream;
+    AVCodec *codec;
     int rc = 0;
     int index = decoder_context->video_stream_index;
+    int out_index;
 
     if (index < 0) {
         elv_dbg("No video stream detected by decoder.");
@@ -73,31 +77,39 @@ copy_mpegts_prepare_video_encoder(
 
     encoder_context->video_stream_index = index;
     encoder_context->video_last_dts = AV_NOPTS_VALUE;
-    encoder_context->stream[index] = avformat_new_stream(encoder_context->format_context, NULL);
-    encoder_context->codec[index] = avcodec_find_encoder_by_name(params->ecodec);
+
+    codec = avcodec_find_encoder(decoder_context->stream[index]->codecpar->codec_id);
+    if (!codec) {
+        elv_err("Codec not found, codec_id=%s, url=%s",
+            avcodec_get_name(decoder_context->stream[index]->codecpar->codec_id), params->url);
+        return eav_codec_context;
+    }
+    elv_log("Found encoder index=%d, %s", index, avcodec_get_name(codec->id));
+
+    out_stream = avformat_new_stream(encoder_context->format_context, codec);
+    out_index = out_stream->index;
+
+    cp_ctx->stream_mapping[index] = out_index;
+
+    encoder_context->stream[index] = out_stream;
+    encoder_context->codec[index] = out_stream->codec;
+
 
     /* Custom output buffer */
     encoder_context->format_context->io_open = elv_io_open;
     encoder_context->format_context->io_close = elv_io_close;
 
-    if (!encoder_context->codec[index]) {
-        elv_dbg("could not find the proper codec");
-        return eav_codec_context;
-    }
-    elv_log("Found encoder index=%d, %s", index, params->ecodec);
-
     AVStream *in_stream = decoder_context->stream[index];
-    AVStream *out_stream = encoder_context->stream[index];
     AVCodecParameters *in_codecpar = in_stream->codecpar;
 
     rc = avcodec_parameters_copy(out_stream->codecpar, in_codecpar);
     if (rc < 0) {
-        elv_err("BYPASS failed to copy codec parameters, url=%s", params->url);
+        elv_err("COPY failed to copy codec parameters, url=%s", params->url);
         return eav_codec_param;
     }
 
     out_stream->time_base = in_stream->time_base;
-    out_stream->avg_frame_rate = decoder_context->format_context->streams[decoder_context->video_stream_index]->avg_frame_rate;
+    out_stream->avg_frame_rate = in_stream->avg_frame_rate;
     out_stream->codecpar->codec_tag = 0;
 
     rc = copy_mpegts_set_encoder_options(encoder_context, decoder_context, params, decoder_context->video_stream_index,
@@ -110,6 +122,8 @@ copy_mpegts_prepare_video_encoder(
     return 0;
 }
 
+
+// TODO(Nate): These functions might break if the order of streams in the input does not strictly follow: VIDEO -> AUDIO+ -> DATA
 static int
 copy_mpegts_prepare_audio_encoder(
     coderctx_t *encoder_context,
@@ -122,7 +136,9 @@ copy_mpegts_prepare_audio_encoder(
 
     for (int i=0; i<n_audio; i++) {
         int stream_index = decoder_context->audio_stream_index[i];
-        int output_stream_index = stream_index;
+        int output_stream_index;
+        AVStream *out_stream;
+        AVCodec *codec;
 
         if (stream_index < 0) {
             elv_dbg("No audio stream detected by decoder.");
@@ -134,18 +150,27 @@ copy_mpegts_prepare_audio_encoder(
             return eav_codec_context;
         }
 
-        encoder_context->audio_last_dts[i] = AV_NOPTS_VALUE;
-
-        encoder_context->audio_stream_index[output_stream_index] = output_stream_index;
-        encoder_context->n_audio = 1; // PENDING(SS) copied from prepare_audio_encoder but why 1?
-
-        encoder_context->stream[output_stream_index] = avformat_new_stream(format_context, NULL);
-        encoder_context->codec[output_stream_index] = avcodec_find_encoder(decoder_context->codec_context[stream_index]->codec_id);
-        if (!encoder_context->codec[output_stream_index]) {
-            elv_err("Codec not found, codec_id=%s, url=%s",
-                avcodec_get_name(decoder_context->codec_context[stream_index]->codec_id), params->url);
+        codec = avcodec_find_encoder(decoder_context->codec_context[stream_index]->codec_id);
+        if (!codec) {
+            elv_err("Codec not found, codec_id=%s, stream_id=%d, url=%s",
+                avcodec_get_name(decoder_context->codec_context[stream_index]->codec_id), stream_index, params->url);
             return eav_codec_context;
         }
+        out_stream = avformat_new_stream(format_context, codec);
+        if (!out_stream) {
+            elv_err("Could not allocate output stream codec_id=%s, stream_id=%d, url=%s",
+                avcodec_get_name(decoder_context->codec_context[stream_index]->codec_id), stream_index, params->url);
+            return eav_mem_alloc;
+        }
+        output_stream_index = out_stream->index;
+
+        encoder_context->audio_last_dts[i] = AV_NOPTS_VALUE;
+        // CODEREVIEW: Did I get this mapping correct?
+        encoder_context->audio_stream_index[output_stream_index] = stream_index;
+        encoder_context->n_audio += 1;
+
+        encoder_context->stream[output_stream_index] = out_stream;
+        encoder_context->codec[output_stream_index] = codec;
 
         encoder_context->codec_context[output_stream_index] = avcodec_alloc_context3(encoder_context->codec[output_stream_index]);
 
@@ -220,6 +245,59 @@ copy_mpegts_prepare_audio_encoder(
     return 0;
 }
 
+static int
+copy_mpegts_prepare_other_streams(
+    coderctx_t *encoder_context,
+    coderctx_t *decoder_context,
+    xcparams_t *params) {
+    int rc;
+    int *handled_streams = calloc(decoder_context->format_context->nb_streams, sizeof(int));
+    int output_stream_index = 0;
+    
+    handled_streams[decoder_context->video_stream_index] = 1;
+    for (int i=0; i<encoder_context->n_audio_output; i++)
+        handled_streams[decoder_context->audio_stream_index[i]] = 1;
+    
+    while (output_stream_index < MAX_STREAMS && encoder_context->stream[output_stream_index] != NULL) {
+        output_stream_index++;
+    }
+
+    for (int input_stream_idx = 0; input_stream_idx < decoder_context->format_context->nb_streams; input_stream_idx++) {
+        if (handled_streams[input_stream_idx])
+            continue;
+
+        /* Heavily inspired by ffmpeg/doc/examples/remuxing.c */
+
+        AVStream *in_stream = decoder_context->format_context->streams[input_stream_idx];
+        AVStream *out_stream = avformat_new_stream(encoder_context->format_context, NULL);
+        AVCodecParameters *in_codecpar = in_stream->codecpar;
+
+        if (!out_stream) {
+            elv_err("Failed allocating output stream, url=%s", params->url);
+            return eav_mem_alloc;
+        }
+
+        rc = avcodec_parameters_copy(out_stream->codecpar, in_codecpar);
+        if (rc < 0) {
+            elv_err("Failed to copy codec parameters, url=%s, rc=%s, stream_index=%d", params->url, av_err2str(rc), input_stream_idx);
+            return eav_codec_param;
+        }
+
+        out_stream->time_base = in_stream->time_base;
+        out_stream->avg_frame_rate = in_stream->avg_frame_rate;
+        out_stream->codecpar->codec_tag = 0;
+    }
+
+
+    // avcodec_parameters_copy(out_stream->codecpar, in_codecpar);
+    // avformat_new_stream
+    // 
+
+    free(handled_streams);
+
+    return 0;
+}
+
 /*
  * Prepare the MPEGTS copy (bypass) encoder.
  * This is largely similar to the bypass section of the main 'prepare_encoder()' and must
@@ -228,7 +306,7 @@ copy_mpegts_prepare_audio_encoder(
  */
 int
 copy_mpegts_prepare_encoder(
-    coderctx_t *encoder_context,
+    cp_ctx_t *cp_ctx,
     coderctx_t *decoder_context,
     avpipe_io_handler_t *out_handlers,
     ioctx_t *inctx,
@@ -237,6 +315,7 @@ copy_mpegts_prepare_encoder(
     out_tracker_t *out_tracker;
     char *filename = "";
     char *format = params->format;
+    coderctx_t *encoder_context = &cp_ctx->encoder_ctx;
     int rc = 0;
 
     encoder_context->is_mpegts = decoder_context->is_mpegts;
@@ -254,13 +333,22 @@ copy_mpegts_prepare_encoder(
 
     encoder_context->n_audio_output = num_audio_output(decoder_context, params);
 
-    if ((rc = copy_mpegts_prepare_video_encoder(encoder_context, decoder_context, params)) != eav_success) {
+    for (int i=0; i<MAX_STREAMS; i++) {
+        cp_ctx->stream_mapping[i] = -1;
+    }
+
+    if ((rc = copy_mpegts_prepare_video_encoder(cp_ctx, encoder_context, decoder_context, params)) != eav_success) {
         elv_err("Failure in preparing mpegts copy video encoder, rc=%d, url=%s", rc, params->url);
         return rc;
     }
 
     if ((rc = copy_mpegts_prepare_audio_encoder(encoder_context, decoder_context, params)) != eav_success) {
         elv_err("Failure in preparing mpegts copy audio encoder, rc=%d, url=%s", rc, params->url);
+        return rc;
+    }
+
+    if ((rc = copy_mpegts_prepare_other_streams(encoder_context, decoder_context, params)) != eav_success) {
+        elv_err("Failure in preparing mpegts scte35 passthrough, rc=%d, url=%s", rc, params->url);
         return rc;
     }
 
@@ -317,6 +405,20 @@ copy_mpegts(
     return eav_success;
 }
 
+static int
+should_discard_packet(
+    AVPacket *packet,
+    cp_ctx_t *cp_ctx)
+{
+    int stream_index = packet->stream_index;
+    if (stream_index > MAX_STREAMS) {
+        elv_warn("should_discard_packet, stream_index=%d, MAX_STREAMS=%d", stream_index, MAX_STREAMS);
+        return 1;
+    }
+
+    return cp_ctx->stream_mapping[stream_index] < 0;
+}
+
 void *
 copy_mpegts_func(
     void *p)
@@ -331,7 +433,6 @@ copy_mpegts_func(
     int err = 0;
 
     while (!xctx->stop || elv_channel_size(cp_ctx->ch) > 0) {
-
         // Retrieve MPEGTS packets from the dedicated "copy mpegts" channel
         // Note xc_frame only contains a packet in this case (no frame)
         xc_frame = elv_channel_receive(cp_ctx->ch);
@@ -345,6 +446,11 @@ copy_mpegts_func(
         if (!packet) {
             elv_err("copy_mpegts_func, packet is NULL, url=%s", params->url);
             free(xc_frame);
+            continue;
+        } else if (should_discard_packet(packet, cp_ctx)) {
+            elv_dbg("copy_mpegts_func, discard packet, url=%s, stream_idx=%d", params->url);
+            av_packet_unref(packet);
+            av_packet_free(&packet);
             continue;
         }
 
