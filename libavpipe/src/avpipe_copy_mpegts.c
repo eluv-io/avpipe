@@ -88,7 +88,8 @@ copy_mpegts_prepare_video_encoder(
 
     out_stream->time_base = in_stream->time_base;
     out_stream->avg_frame_rate = decoder_context->format_context->streams[decoder_context->video_stream_index]->avg_frame_rate;
-    out_stream->codecpar->codec_tag = 0; // TODO(Nate) -- Why 0? What does that mean??
+    // The codec tag is a hint for decoding the stream
+    out_stream->codecpar->codec_tag = in_stream->codecpar->codec_tag;
 
     rc = copy_mpegts_set_encoder_options(cp_ctx, encoder_context, decoder_context, params, stream_index,
         out_stream->time_base.den);
