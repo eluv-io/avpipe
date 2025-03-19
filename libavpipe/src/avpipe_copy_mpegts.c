@@ -43,7 +43,6 @@ copy_mpegts_set_encoder_options(
         seg_duration_ts = params->video_seg_duration_ts;
 
     av_opt_set_int(encoder_context->format_context->priv_data, "segment_duration_ts", seg_duration_ts, 0);
-    elv_log("Seeing initial stream time of %"PRId64"", decoder_context->stream[stream_index]->start_time);
     
     int64_t stream_start_time = decoder_context->stream[stream_index]->start_time;
     cp_ctx->stream_start_pts = stream_start_time;
@@ -51,7 +50,7 @@ copy_mpegts_set_encoder_options(
         // Initial offset needs to be in microseconds
         int64_t offset_microseconds = av_rescale_q(stream_start_time, (AVRational){1, timebase}, AV_TIME_BASE_Q);
         av_opt_set_int(encoder_context->format_context->priv_data, "initial_offset", offset_microseconds, 0);
-        elv_log("Set initial segment offset to %"PRId64" microseconds", offset_microseconds);
+        elv_log("Set initial segment offset to %"PRId64" microseconds, based on stream start time of %"PRId64" and timebase %d", offset_microseconds, stream_start_time, timebase);
     }
 
     elv_dbg("setting \"fmp4-segment\" video segment_time to %s, seg_duration_ts=%"PRId64", url=%s",
@@ -175,13 +174,6 @@ copy_mpegts_prepare_audio_encoder(
     /* Allow the use of the experimental AAC encoder. */
     encoder_context->codec_context[output_stream_index]->strict_std_compliance = FF_COMPLIANCE_EXPERIMENTAL;
 
-    // rc = copy_mpegts_set_encoder_options(encoder_context, decoder_context, params, decoder_context->audio_stream_index[stream_index],
-    //     encoder_context->stream[output_stream_index]->time_base.den);
-    // if (rc < 0) {
-    //     elv_err("Failed to set audio encoder options, url=%s", params->url);
-    //     return rc;
-    // }
-
     /* Open audio encoder codec */
     if (avcodec_open2(encoder_context->codec_context[output_stream_index], encoder_context->codec[output_stream_index], NULL) < 0) {
         char *codec_str;
@@ -207,8 +199,6 @@ copy_mpegts_prepare_audio_encoder(
 
     return 0;
 }
-
-// If this doesn't work properly, we can always sit ffmpeg in front of avpipe to duplicate
 
 /*
  * Prepare the MPEGTS copy (bypass) encoder.
@@ -265,6 +255,8 @@ copy_mpegts_prepare_encoder(
         // Copy metadata into output stream. Inspired by fftools/ffmpeg_opt.c:2671 in open_output_file
         av_dict_copy(&out_stream->metadata, in_stream->metadata, AV_DICT_DONT_OVERWRITE);
 
+
+        // TODO - Evaluate if the commented out code below helps in some circumstances.
 
         // if (avformat_transfer_internal_stream_timing_info(encoder_context->format_context->oformat, out_stream, in_stream, -1) < 0) {
         //     elv_err("Failed to transfer internal stream timing info, url=%s", params->url);
