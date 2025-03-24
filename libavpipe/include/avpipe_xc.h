@@ -526,6 +526,13 @@ typedef struct cp_ctx_t {
     pthread_t           thread_id;
     elv_channel_t       *ch;
 
+    // stream_start_pts is necessary information for getting segment splitting to work correctly. We
+    // want to preserve the PTS of the output packets when they are written, but segment.c does the
+    // splitting assuming that the PTS of the packets starts at 0. By setting the "initial_offset"
+    // option, the packets will be offset by that value, but we need to then reduce the PTS of every
+    // packet seen by the same amount.
+    int64_t stream_start_pts;
+
 } cp_ctx_t;
 
 typedef int (*associate_thread_f)(int32_t handle);
