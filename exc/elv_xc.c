@@ -134,7 +134,7 @@ in_opener(
         return 0;
     }
 
-    if (!strcmp(url_parser.protocol, "rtmp") || !strcmp(url_parser.protocol, "srt")) {
+    if (!strcmp(url_parser.protocol, "rtmp") || !strcmp(url_parser.protocol, "srt") || !strcmp(url_parser.protocol, "rtp")) {
         inctx->opaque = (int *) calloc(2, sizeof(int));
         inctx->url = strdup(url);
         pthread_mutex_lock(&lock);
@@ -142,7 +142,7 @@ in_opener(
         *((int *)(inctx->opaque)+1) = opened_inputs;
         pthread_mutex_unlock(&lock);
 
-        elv_dbg("IN OPEN RTMP/SRT url=%s", url);
+        elv_dbg("IN OPEN RTMP/SRT/RTP url=%s", url);
         return 0;
     }
 
@@ -152,7 +152,7 @@ in_opener(
         inctx->opaque = NULL;
         return -1;
     }
-    
+
     fd = open(url, O_RDONLY);
     if (fd < 0) {
         elv_err("Failed to open input url=%s error=%d", url, errno);

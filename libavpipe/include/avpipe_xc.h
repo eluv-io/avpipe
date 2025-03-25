@@ -331,6 +331,7 @@ typedef struct coderctx_t {
     int     pts_residue;                /* Residue of pts lost in output */
 
     int     is_rtmp;
+    int     is_rtp;
     int     is_srt;
     int     is_mpegts;                  /* Set to 1 if input format name is "mpegts" */
     int     is_av_synced;               /* will be set to 1 if audio and video are synced */

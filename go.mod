@@ -10,10 +10,24 @@ require (
 	github.com/stretchr/testify v1.7.0
 )
 
+require (
+	github.com/davecgh/go-spew v1.1.1 // indirect
+	github.com/eluv-io/apexlog-go v1.9.1-elv3 // indirect
+	github.com/eluv-io/stack v1.8.2 // indirect
+	github.com/eluv-io/utc-go v1.0.0 // indirect
+	github.com/inconshreveable/mousetrap v1.0.0 // indirect
+	github.com/modern-go/reflect2 v1.0.2 // indirect
+	github.com/pkg/errors v0.9.1 // indirect
+	github.com/pmezard/go-difflib v1.0.0 // indirect
+	github.com/spf13/pflag v1.0.3 // indirect
+	gopkg.in/natefinch/lumberjack.v2 v2.0.0 // indirect
+	gopkg.in/yaml.v3 v3.0.0-20200605160147-a5ece683394c // indirect
+)
+
 replace (
 	github.com/modern-go/gls => github.com/eluv-io/gls v1.0.0-elv1
 	github.com/prometheus/prometheus => github.com/prometheus/prometheus v1.7.1-0.20170814170113-3101606756c5
 	gopkg.in/urfave/cli.v1 => github.com/urfave/cli v1.22.0
 )
 
-go 1.13
+go 1.22

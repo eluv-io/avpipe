@@ -267,7 +267,7 @@ static int
 is_protocol(
     coderctx_t *decoder_context)
 {
-    if (decoder_context->is_mpegts || decoder_context->is_rtmp || decoder_context->is_srt)
+    if (decoder_context->is_mpegts || decoder_context->is_rtmp || decoder_context->is_srt || decoder_context->is_rtp)
         return 1;
 
     return 0;
@@ -285,8 +285,6 @@ prepare_input(
     int bufin_sz = AVIO_IN_BUF_SIZE;
 
     /* For RTMP or SRT protocol don't create input callbacks */
-    decoder_context->is_rtmp = 0;
-    decoder_context->is_srt = 0;
     if (inctx->url && !strncmp(inctx->url, "rtmp://", 7)) {
         decoder_context->is_rtmp = 1;
         return 0;
@@ -294,6 +292,11 @@ prepare_input(
 
     if (inctx->url && !strncmp(inctx->url, "srt://", 6)) {
         decoder_context->is_srt = 1;
+        return 0;
+    }
+
+    if (inctx->url && !strncmp(inctx->url, "rtp://", 6)) {
+        decoder_context->is_rtp = 1;
         return 0;
     }
 
@@ -387,7 +390,7 @@ prepare_decoder(
     prepare_input(in_handlers, inctx, decoder_context, seekable);
 
     AVDictionary *opts = NULL;
-    if (params && params->listen && (decoder_context->is_rtmp || decoder_context->is_srt))
+    if (params && params->listen && (decoder_context->is_rtmp || decoder_context->is_srt || decoder_context->is_rtp))
         av_dict_set(&opts, "listen", "1" , 0);
 
     if (decoder_context->is_rtmp &&
@@ -402,6 +405,8 @@ prepare_decoder(
         sprintf(timeout, "%"PRId64, connection_timeout_micros);
         /* SRT timeout is in microseconds */
         av_dict_set(&opts, "listen_timeout", timeout, 0);
+    } else if (decoder_context->is_rtp) {
+        // PENDING(SS) set timeout option for RTP
     }
 
     /* Allocate AVFormatContext in format_context and find input file format */
@@ -417,6 +422,8 @@ prepare_decoder(
         return eav_stream_info;
     }
 
+    // PEDING(SS) We should validate and fail if stream info doesn't match parameters
+    // - no reason to just set is_mpegts to 0 if wrong
     decoder_context->is_mpegts = 0;
     if (decoder_context->format_context->iformat &&
         decoder_context->format_context->iformat->name &&
@@ -441,17 +448,17 @@ prepare_decoder(
             elv_dbg("VIDEO STREAM %d, codec_id=%s, stream_id=%d, timebase=%d, xc_type=%d, url=%s",
                 i, avcodec_get_name(decoder_context->codec_parameters[i]->codec_id), decoder_context->stream[i]->id,
                 decoder_context->stream[i]->time_base.den, params ? params->xc_type : xc_none, url);
-            
+
             if (decoder_context->video_stream_index == i && decoder_context->format_context->streams[i]->codecpar->width == 0) {
                 /* This can sometimes happen when ffmpeg fails to decode any frames from the input
                  * within the default probe size. Default parameters are written, but this is a sign
                  * that the codec parameters have not been set. Downstream filter operations will
                  * fail in this case, as it assumes that height/width/pixel info is set accurately.
-                 * 
+                 *
                  * In particular, this case can sometimes be triggered by the content-fabric
                  * integration test that tests live restarts. In that case, it's been observed that
                  * retrying the probe entirely fixes the issue.
-                 * 
+                 *
                  * See libavformat/utils.c:has_codec_parameters for the checks in ffmpeg internals. */
                 elv_err("avformat_find_stream_info failed to get input stream info");
                 return eav_stream_info;
@@ -479,7 +486,7 @@ prepare_decoder(
              */
             {
                 AVIOContext *avioctx = (AVIOContext *)decoder_context->format_context->pb;
-                if (avioctx->buffer_size > AUDIO_BUF_SIZE)
+                if (avioctx && avioctx->buffer_size > AUDIO_BUF_SIZE)
                     avioctx->buffer_size = AUDIO_BUF_SIZE;
             }
             break;
@@ -587,7 +594,7 @@ prepare_decoder(
          * furher thread_count is 1 which forces 1 thread.
          */
         decoder_context->codec_context[i]->active_thread_type = 1;
-        if (decoder_context->is_mpegts || decoder_context->is_rtmp)
+        if (is_protocol(decoder_context))
             decoder_context->codec_context[i]->thread_count = MPEGTS_THREAD_COUNT;
         else
             decoder_context->codec_context[i]->thread_count = DEFAULT_THREAD_COUNT;
@@ -1510,6 +1517,8 @@ prepare_encoder(
 
     encoder_context->is_mpegts = decoder_context->is_mpegts;
     encoder_context->is_rtmp = decoder_context->is_rtmp;
+    encoder_context->is_rtp = decoder_context->is_rtp;
+    encoder_context->is_srt = decoder_context->is_srt;
     encoder_context->out_handlers = out_handlers;
     /*
      * TODO: passing "hls" format needs some development in FF to produce stream index for audio/video.
@@ -2162,7 +2171,7 @@ encode_frame(
         output_packet->pts += params->start_pts;
         output_packet->dts += params->start_pts;
 
-        if ((decoder_context->is_mpegts || decoder_context->is_srt) &&
+        if ((decoder_context->is_mpegts || decoder_context->is_srt || decoder_context->is_rtp) &&
             encoder_context->video_encoder_prev_pts > 0 &&
             stream_index == decoder_context->video_stream_index &&
             encoder_context->calculated_frame_duration > 0 &&
