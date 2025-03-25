@@ -50,6 +50,7 @@ The following repositories can be checked out in any directory, but for better o
   - `cd avpipe`
   - `mkdir ./media`
   - `cd ./media`
+  - `gcloud auth login`
   - `gsutil -m cp 'gs://eluvio-test-assets/*' .`
 - Inside `<avpipe-path>` run
   - `go test -timeout 2000s`
