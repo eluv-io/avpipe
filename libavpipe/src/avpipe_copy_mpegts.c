@@ -72,7 +72,7 @@ copy_mpegts_prepare_video_encoder(
     AVStream *out_stream = encoder_context->stream[stream_index];
     AVCodecParameters *in_codecpar = in_stream->codecpar;
 
-    encoder_context->codec[stream_index] = avcodec_find_encoder(in_stream->codec->codec_id);
+    encoder_context->codec[stream_index] = avcodec_find_encoder(decoder_context->codec_context[stream_index]->codec_id);
 
     if (!encoder_context->codec[stream_index]) {
         elv_dbg("could not find the proper codec");
@@ -110,10 +110,6 @@ copy_mpegts_prepare_audio_encoder(
     xcparams_t *params,
     int stream_index)
 {
-    int n_audio = encoder_context->n_audio_output;
-    AVFormatContext *format_context = encoder_context->format_context;
-    int rc;
-
     // This assignment helps to keep some of the code below more understandable
     // output stream index always equals input stream index for mpegts capture
     int output_stream_index = stream_index;
@@ -222,7 +218,8 @@ copy_mpegts_prepare_encoder(
 
     coderctx_t *encoder_context = &cp_ctx->encoder_ctx;
 
-    encoder_context->is_mpegts = decoder_context->is_mpegts;
+    encoder_context->live_proto = decoder_context->live_proto;
+    encoder_context->live_container = decoder_context->live_container;
     encoder_context->out_handlers = out_handlers;
 
     format = "segment";
@@ -294,6 +291,9 @@ copy_mpegts_prepare_encoder(
                 continue;
         }
     }
+    if (rc != eav_success) {
+        return rc;
+    }
 
     /*
      * Allocate a single out_tracker (and out_handler) for all video and a audio streams.
@@ -308,7 +308,7 @@ copy_mpegts_prepare_encoder(
     out_tracker->xc_type = xc_all;
     encoder_context->format_context->avpipe_opaque = out_tracker;
 
-    return 0;
+    return eav_success;
 }
 
 static int
@@ -355,8 +355,6 @@ copy_mpegts_func(
     xctx_t *xctx = (xctx_t *) p;
     cp_ctx_t *cp_ctx = &xctx->cp_ctx;
 
-    coderctx_t *decoder_context = &xctx->decoder_ctx;
-    coderctx_t *encoder_context = &cp_ctx->encoder_ctx;
     xcparams_t *params = xctx->params;
     xc_frame_t *xc_frame;
     int err = 0;
