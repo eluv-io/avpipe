@@ -347,11 +347,6 @@ typedef struct coderctx_t {
     avp_live_proto_t live_proto;        /* Live source protocol: MPEGTS, RTMP, SRT, RTP */
     avp_container_t  live_container;    /* Supported live source containers MPEGTS and FLV */
 
-    int     is_rtmp;
-    int     is_rtp;
-    int     is_srt;
-    int     is_mpegts;                  /* Set to 1 if input format name is "mpegts" */
-
     int     is_av_synced;               /* will be set to 1 if audio and video are synced */
     int     frame_duration;             /* Will be > 0 if parameter set_equal_fduration is set and doing mez making */
     int     calculated_frame_duration;  /* Approximate/real frame duration of video stream, will be used to fill video frames */
