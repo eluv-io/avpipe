@@ -477,8 +477,9 @@ prepare_decoder(
         return rc;
     }
 
-    // Note here we used to set 'is_mpegts' if the codec_id name was "mpegts"
-    // This was true for MPEGTS and SRT but not for RTP, even when RTP container is MPEGTS
+    // Here we used to set 'is_mpegts' if the codec name was "mpegts", so effectively from here on 'is_mpegts'
+    // was set for both MPEGTS and SRT.
+    // The live_container will be MPEGTS for all the protocols that encapsulate MPEGTS
     decoder_context->live_container = find_live_container(decoder_context);
 
     for (int i = 0; i < decoder_context->format_context->nb_streams && i < MAX_STREAMS; i++) {
@@ -1859,8 +1860,8 @@ set_idr_frame_key_flag(
         if (frame->pts >= encoder_context->last_key_frame + params->video_seg_duration_ts) {
             int64_t diff = frame->pts - (encoder_context->last_key_frame + params->video_seg_duration_ts);
             int missing_frames = 0;
-            /* We can have some missing_frames only when transcoding a live source */
-            if (is_live_source(encoder_context) && encoder_context->calculated_frame_duration > 0)
+            /* We can have some missing_frames only when transcoding a UDP live source */
+            if (is_live_source_udp(encoder_context) && encoder_context->calculated_frame_duration > 0)
                 missing_frames = diff / encoder_context->calculated_frame_duration;
             if (debug_frame_level) {
                 elv_dbg("FRAME SET KEY flag, seg_duration_ts=%d pts=%"PRId64", missing_frames=%d, last_key_frame_pts=%"PRId64,
@@ -2219,6 +2220,7 @@ encode_frame(
         output_packet->pts += params->start_pts;
         output_packet->dts += params->start_pts;
 
+        // Detect missing frames for UDP-based live sources
         if ((is_live_source_udp(decoder_context)) &&
             encoder_context->video_encoder_prev_pts > 0 &&
             stream_index == decoder_context->video_stream_index &&
