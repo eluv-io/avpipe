@@ -2,6 +2,7 @@
 # rules.make
 # contains all the common parts of the build system
 #
+# delete xcoder to build on Mac
 
 BINDIR=bin
 LIBDIR=lib
