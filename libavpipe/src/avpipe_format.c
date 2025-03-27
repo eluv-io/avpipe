@@ -19,6 +19,10 @@ avp_live_proto_t
 find_live_proto(
     ioctx_t *inctx)
 {
+    if (!inctx || !inctx->url) {
+        elv_err("find_live_proto: invalid input context - no URL");
+        return avp_proto_none;
+    }
     if (inctx->url && !strncmp(inctx->url, "rtmp://", 7))
         return avp_proto_rtmp;
 

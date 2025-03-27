@@ -1089,7 +1089,7 @@ usage(
         "\t-t :                     (optional) Transcoding threads. Default is 1 thread, must be bigger than 1\n"
         "\t-xc-type :               (optional) Transcoding type. Default is \"all\", can be \"video\", \"audio\", \"audio-merge\", \"audio-join\", \"audio-pan\", \"all\", \"extract-images\"\n"
         "\t                                    or \"extract-all-images\". \"all\" means transcoding video and audio together.\n"
-        "\t-copy-mpegts :           (optional) Default 0. Create a copy of the MPEGTS input (only MPEGTS and SRT)\n"
+        "\t-copy-mpegts :           (optional) Default 0. Create a copy of the MPEGTS input (for MPEGTS, SRT, RTP)\n"
         "\t-video-bitrate :         (optional) Mutually exclusive with crf. Default: -1 (unused)\n"
         "\t-video-frame-duration-ts :  (optional) Frame duration of the output video in time base.\n"
         "\t-video-seg-duration-ts : (mandatory If format is not \"segment\" and transcoding video) video segment duration time base (positive integer).\n"

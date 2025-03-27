@@ -43,7 +43,7 @@ copy_mpegts_set_encoder_options(
         seg_duration_ts = params->video_seg_duration_ts;
 
     av_opt_set_int(encoder_context->format_context->priv_data, "segment_duration_ts", seg_duration_ts, 0);
-    
+
     int64_t stream_start_time = decoder_context->stream[stream_index]->start_time;
     cp_ctx->stream_start_pts = stream_start_time;
     if (stream_start_time != AV_NOPTS_VALUE) {
@@ -218,8 +218,6 @@ copy_mpegts_prepare_encoder(
 
     coderctx_t *encoder_context = &cp_ctx->encoder_ctx;
 
-    encoder_context->live_proto = decoder_context->live_proto;
-    encoder_context->live_container = decoder_context->live_container;
     encoder_context->out_handlers = out_handlers;
 
     format = "segment";

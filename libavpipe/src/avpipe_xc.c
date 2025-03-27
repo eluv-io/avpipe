@@ -349,7 +349,7 @@ check_input_stream(
 
     int rc;
 
-    if (!decoder_context->format_context->iformat &&
+    if (!decoder_context->format_context->iformat ||
         !decoder_context->format_context->iformat->name) {
         elv_err("Failed to open input stream properly - no format name");
         return eav_open_input;
@@ -359,14 +359,14 @@ check_input_stream(
         case avp_proto_mpegts:
         case avp_proto_srt:
             if (strcmp(decoder_context->format_context->iformat->name, "mpegts")) {
-                elv_err("Unsupported live source proto=%d container=%s",
+                elv_err("Unsupported live source: proto=%d container=%s",
                     decoder_context->live_proto, decoder_context->format_context->iformat->name);
                 return eav_open_codec;
             }
             break;
         case avp_proto_rtmp:
             if (strcmp(decoder_context->format_context->iformat->name, "flv")) {
-                elv_err("Unsupported live source proto=%d container=%s",
+                elv_err("Unsupported live source: proto=%d container=%s",
                     decoder_context->live_proto, decoder_context->format_context->iformat->name);
                 return eav_open_codec;
             }
@@ -376,11 +376,14 @@ check_input_stream(
                 int64_t payload_type;
                 rc = av_opt_get_int(decoder_context->format_context->priv_data, "payload_type", 0, &payload_type);
                 if (rc == 0) {
-                    if (payload_type != 33) { // RTP PT for MPEGTS is 33
+                    const int rtp_payload_type_mpegts = 33;
+                    if (payload_type != rtp_payload_type_mpegts) {
                         elv_err("Unsupported RTP container %d", payload_type);
                         return eav_open_codec;
                     }
                 } else {
+                    // In the current version of libavformat the "payload_type" is not set by the decoder - log and proceed.
+                    // However if the payload_type is not MPEGTS the decoder errors out early (so we don't get here).
                     elv_log("Unable to retrieve RTP payload type rc=%d", rc);
                 }
             }
@@ -4433,7 +4436,7 @@ int avpipe_probe_free(xcprobe_t *probe, int n_streams) {
 }
 
 /*
- * Simple parameter validation (without knowldedge of source stream info)
+ * Simple parameter validation (without knowledge of source stream info)
  */
 static int
 check_params(
