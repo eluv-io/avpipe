@@ -465,7 +465,7 @@ prepare_decoder(
     /* Allocate AVFormatContext in format_context and find input file format */
     rc = avformat_open_input(&decoder_context->format_context, inctx->url, NULL, &opts);
     if (rc != 0) {
-        elv_err("Could not open input file, err=%d, url=%s", rc, url);
+        elv_err("Could not open input file, err=%s (%d), url=%s", av_err2str(rc), rc, url);
         return eav_open_input;
     }
 

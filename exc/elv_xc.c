@@ -148,7 +148,7 @@ in_opener(
 
     /* If input is not file */
     if (strcmp(url_parser.protocol, "file")) {
-        elv_err("Invalid input url=%s, can be udp, rtmp, srt or file", url);
+        elv_err("Invalid input url=%s, can be udp, rtmp, srt, rtp or file", url);
         inctx->opaque = NULL;
         return -1;
     }
