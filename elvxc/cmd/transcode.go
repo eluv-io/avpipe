@@ -20,9 +20,8 @@ type elvxcInputOpener struct {
 func (io *elvxcInputOpener) Open(fd int64, url string) (avpipe.InputHandler, error) {
 	log.Debug("AVCMD InputOpener.Open", "fd", fd, "url", url)
 
-	if (len(url) >= 4 && url[0:4] == "rtmp") ||
-		(len(url) >= 3 && url[0:3] == "udp") ||
-		(len(url) >= 3 && url[0:3] == "srt") {
+	switch {
+	case strings.HasPrefix(url, "rtmp://"), strings.HasPrefix(url, "udp://"), strings.HasPrefix(url, "srt://"), strings.HasPrefix(url, "rtp://"):
 		return &noopElvxcInput{}, nil
 	}
 
@@ -369,6 +368,7 @@ func InitTranscode(cmdRoot *cobra.Command) error {
 	cmdTranscode.PersistentFlags().StringP("profile", "", "", "Encoding profile for video. If it is not determined, it will be set automatically.")
 	cmdTranscode.PersistentFlags().Int32("level", 0, "Encoding level for video. If it is not determined, it will be set automatically.")
 	cmdTranscode.PersistentFlags().Int32("deinterlace", 0, "Deinterlace filter (values 0 - none, 1 - bwdif_field, 2 - bwdif_frame send_frame).")
+	cmdTranscode.PersistentFlags().Bool("copy-mpegts", false, "Create a copy of the MPEGTS input (for MPEGTS, SRT, RTP)")
 
 	return nil
 }
@@ -659,6 +659,11 @@ func doTranscode(cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("Invalid deinterlace value")
 	}
 
+	copyMpegts, err := cmd.Flags().GetBool("copy-mpegts")
+	if err != nil {
+		return fmt.Errorf("Invalid copy-mpegts value")
+	}
+
 	cryptScheme := avpipe.CryptNone
 	val := cmd.Flag("crypt-scheme").Value.String()
 	if len(val) > 0 {
@@ -723,6 +728,7 @@ func doTranscode(cmd *cobra.Command, args []string) error {
 		CryptKeyURL:            cryptKeyURL,
 		CryptScheme:            cryptScheme,
 		XcType:                 xcType,
+		CopyMpegts:             copyMpegts,
 		WatermarkTimecode:      watermarkTimecode,
 		WatermarkTimecodeRate:  watermarkTimecodeRate,
 		WatermarkText:          watermarkText,

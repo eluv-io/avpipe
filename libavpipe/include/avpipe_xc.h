@@ -107,6 +107,20 @@ typedef enum avp_stat_t {
     in_stat_data_scte35 = 12               // SCTE data arrived
 } avp_stat_t;
 
+typedef enum avp_live_proto_t {
+    avp_proto_none   = 0,
+    avp_proto_mpegts = 1,
+    avp_proto_rtmp   = 2,
+    avp_proto_srt    = 3,
+    avp_proto_rtp    = 4
+} avp_live_proto_t;
+
+typedef enum avp_container_t {
+    avp_container_none   = 0,
+    avp_container_mpegts = 1, // MPEGTS container - can be encapsulated in MPEGTS, SRT, RTP
+    avp_container_flv    = 2  // FLV container - can be encapsluated in RTMP
+} avp_container_t;
+
 struct coderctx_t;
 
 #define MAX_UDP_PKT_LEN         2048            /* Max UDP length */
@@ -330,9 +344,9 @@ typedef struct coderctx_t {
     int64_t first_key_frame_pts;        /* First video key frame pts, used to synchronize audio and video in UDP live streams */
     int     pts_residue;                /* Residue of pts lost in output */
 
-    int     is_rtmp;
-    int     is_srt;
-    int     is_mpegts;                  /* Set to 1 if input format name is "mpegts" */
+    avp_live_proto_t live_proto;        /* Live source protocol: MPEGTS, RTMP, SRT, RTP */
+    avp_container_t  live_container;    /* Supported live source containers MPEGTS and FLV */
+
     int     is_av_synced;               /* will be set to 1 if audio and video are synced */
     int     frame_duration;             /* Will be > 0 if parameter set_equal_fduration is set and doing mez making */
     int     calculated_frame_duration;  /* Approximate/real frame duration of video stream, will be used to fill video frames */

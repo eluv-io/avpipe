@@ -4,7 +4,9 @@
 
 ## HOW TO
 
-### Transcode a "content part" into ABR segments
+### Transcode Mez Parts into ABR segments
+
+#### Transcode a "mez part" into ABR segments
 
 ```
 ./bin/exc -f hqp_3VQ52.mp4 -format dash -xc-type video -video-seg-duration-ts 120120
@@ -13,7 +15,7 @@
 - output files: `./O/O1/`
 
 
-### Transcode a "content part" into encrypted ABR segments
+#### Transcode a "mez part" into encrypted ABR segments
 
 
 ```
@@ -22,12 +24,40 @@
 
 - output files: `./O/O1/`
 
-### SRT mez ingest
+### Live Stream Ingest
+
+#### MPEGTS (aka UDP)
+
+```
+ffmpeg -re -i test.mp4 -map 0 -c copy -f mpegts udp://127.0.0.1:9000
+
+./bin/exc -f udp://127.0.0.1:9000 -xc-type all -format fmp4-segment -seg-duration 30
+```
+
+#### SRT
 
 ```
 ffmpeg -re -i test.mp4 -map 0 -c copy -f mpegts srt://127.0.0.1:9000
 
 ./bin/exc -f srt://127.0.0.1:9000?mode=listener -xc-type all -format fmp4-segment -seg-duration 30
+```
+
+#### RTP
+
+```
+ffmpeg -re -i test.mp4 -map 0 -c copy -f rtp_mpegts rtp://127.0.0.1:9000
+
+./bin/exc -f rtp://127.0.0.1:9000 -xc-type all -format fmp4-segment -seg-duration 30
+
+```
+
+#### RTMP
+
+```
+ffmpeg -re -i test.mp4 -map 0 -c copy -f flv rtmp://127.0.0.1:9000
+
+./bin/exc -f rtmp://127.0.0.1:9000 -xc-type all -format fmp4-segment -seg-duration 30
+
 ```
 
 

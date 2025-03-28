@@ -14,6 +14,90 @@
 
 #include <sys/time.h>
 
+
+avp_live_proto_t
+find_live_proto(
+    ioctx_t *inctx)
+{
+    if (!inctx || !inctx->url) {
+        elv_err("find_live_proto: invalid input context - no URL");
+        return avp_proto_none;
+    }
+    if (inctx->url && !strncmp(inctx->url, "rtmp://", 7))
+        return avp_proto_rtmp;
+
+    if (inctx->url && !strncmp(inctx->url, "srt://", 6))
+        return avp_proto_srt;
+
+    if (inctx->url && !strncmp(inctx->url, "rtp://", 6))
+        return avp_proto_rtp;
+
+    return avp_proto_none;
+}
+
+/*
+ * Return the live stream container type
+ */
+avp_container_t
+find_live_container(
+    coderctx_t *decoder_context)
+{
+    switch (decoder_context->live_proto) {
+        case avp_proto_mpegts:
+        case avp_proto_srt:
+        case avp_proto_rtp:
+            return avp_container_mpegts;
+        case avp_proto_rtmp:
+            return avp_container_flv;
+        default:
+            return avp_container_none;
+    }
+}
+
+/*
+ * True if the decoder is for a live stream source.
+ */
+int
+is_live_source(
+    coderctx_t *ctx)
+{
+    switch(ctx->live_proto) {
+        case avp_proto_mpegts:
+        case avp_proto_rtmp:
+        case avp_proto_srt:
+        case avp_proto_rtp:
+            return 1;
+        default:
+            return 0;
+    }
+}
+
+/*
+ * True if the decoder is for a UDP-based live stream source.
+ */
+int
+is_live_source_udp(
+    coderctx_t *ctx)
+{
+    switch(ctx->live_proto) {
+        case avp_proto_mpegts:
+        case avp_proto_srt:
+        case avp_proto_rtp:
+            return 1;
+        default:
+            return 0;
+    }
+}
+
+int
+is_live_container_mpegts(
+    coderctx_t *ctx)
+{
+    if (ctx->live_container == avp_container_mpegts)
+        return 1;
+    return 0;
+}
+
 int
 num_audio_output(
     coderctx_t *decoder_context,
@@ -124,3 +208,4 @@ packet_clone(
     }
     return 0;
 }
+

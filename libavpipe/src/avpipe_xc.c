@@ -263,16 +263,6 @@ static int init_output_frame(AVFrame **frame,
 
 #endif
 
-static int
-is_protocol(
-    coderctx_t *decoder_context)
-{
-    if (decoder_context->is_mpegts || decoder_context->is_rtmp || decoder_context->is_srt)
-        return 1;
-
-    return 0;
-}
-
 int
 prepare_input(
     avpipe_io_handler_t *in_handlers,
@@ -284,17 +274,15 @@ prepare_input(
     AVIOContext *avioctx;
     int bufin_sz = AVIO_IN_BUF_SIZE;
 
-    /* For RTMP or SRT protocol don't create input callbacks */
-    decoder_context->is_rtmp = 0;
-    decoder_context->is_srt = 0;
-    if (inctx->url && !strncmp(inctx->url, "rtmp://", 7)) {
-        decoder_context->is_rtmp = 1;
-        return 0;
-    }
-
-    if (inctx->url && !strncmp(inctx->url, "srt://", 6)) {
-        decoder_context->is_srt = 1;
-        return 0;
+    /* For the live sources we don't use a custom input don't create input callbacks (RTMP, SRT, RTP) */
+    switch (decoder_context->live_proto) {
+        case avp_proto_rtmp:
+        case avp_proto_srt:
+        case avp_proto_rtp:
+            return 0;
+        default:
+            // Proceed
+            break;
     }
 
     bufin = (unsigned char *) av_malloc(bufin_sz);  /* Must be malloc'd - will be realloc'd by avformat */
@@ -350,6 +338,63 @@ check_stream_index(
     return eav_success;
 }
 
+/*
+ * Validate input stream against XC parameters.
+ * Called after avformat_find_stream_info
+ */
+static int
+check_input_stream(
+    xcparams_t *params,
+    coderctx_t *decoder_context) {
+
+    int rc;
+
+    if (!decoder_context->format_context->iformat ||
+        !decoder_context->format_context->iformat->name) {
+        elv_err("Failed to open input stream properly - no format name");
+        return eav_open_input;
+    }
+
+    switch(decoder_context->live_proto) {
+        case avp_proto_mpegts:
+        case avp_proto_srt:
+            if (strcmp(decoder_context->format_context->iformat->name, "mpegts")) {
+                elv_err("Unsupported live source: proto=%d container=%s",
+                    decoder_context->live_proto, decoder_context->format_context->iformat->name);
+                return eav_open_codec;
+            }
+            break;
+        case avp_proto_rtmp:
+            if (strcmp(decoder_context->format_context->iformat->name, "flv")) {
+                elv_err("Unsupported live source: proto=%d container=%s",
+                    decoder_context->live_proto, decoder_context->format_context->iformat->name);
+                return eav_open_codec;
+            }
+            break;
+        case avp_proto_rtp:
+            if (decoder_context->format_context->priv_data) {
+                int64_t payload_type;
+                rc = av_opt_get_int(decoder_context->format_context->priv_data, "payload_type", 0, &payload_type);
+                if (rc == 0) {
+                    const int rtp_payload_type_mpegts = 33;
+                    if (payload_type != rtp_payload_type_mpegts) {
+                        elv_err("Unsupported RTP container %d", payload_type);
+                        return eav_open_codec;
+                    }
+                } else {
+                    // In the current version of libavformat the "payload_type" is not set by the decoder - log and proceed.
+                    // However if the payload_type is not MPEGTS the decoder errors out early (so we don't get here).
+                    elv_log("Unable to retrieve RTP payload type rc=%d", rc);
+                }
+            }
+            break;
+        default:
+            // Nothing to check
+            break;
+    }
+    return eav_success;
+}
+
 static int
 prepare_decoder(
     coderctx_t *decoder_context,
@@ -383,31 +428,44 @@ prepare_decoder(
     const AVIOInterruptCB int_cb = { decode_interrupt_cb, (void*)decoder_context};
     decoder_context->format_context->interrupt_callback = int_cb;
 
+    decoder_context->live_proto = find_live_proto(inctx);
+
     /* Set our custom reader */
     prepare_input(in_handlers, inctx, decoder_context, seekable);
 
     AVDictionary *opts = NULL;
-    if (params && params->listen && (decoder_context->is_rtmp || decoder_context->is_srt))
+    if (params && params->listen && is_live_source(decoder_context))
         av_dict_set(&opts, "listen", "1" , 0);
 
-    if (decoder_context->is_rtmp &&
-        params->listen &&
-        params->connection_timeout > 0) {
-        char timeout[32];
-        sprintf(timeout, "%d", params->connection_timeout);
-        av_dict_set(&opts, "timeout", timeout, 0);
-    } else if (decoder_context->is_srt && params->listen && params->connection_timeout > 0) {
+    if (params->listen && params->connection_timeout > 0) {
         char timeout[32];
         int64_t connection_timeout_micros = MICRO_IN_SEC * (int64_t)params->connection_timeout;
-        sprintf(timeout, "%"PRId64, connection_timeout_micros);
-        /* SRT timeout is in microseconds */
-        av_dict_set(&opts, "listen_timeout", timeout, 0);
+
+        switch(decoder_context->live_proto) {
+        case avp_proto_rtmp:
+            sprintf(timeout, "%d", params->connection_timeout);
+            av_dict_set(&opts, "timeout", timeout, 0);
+            break;
+        case avp_proto_srt:
+            /* SRT timeout is in microseconds */
+            sprintf(timeout, "%"PRId64, connection_timeout_micros);
+            av_dict_set(&opts, "listen_timeout", timeout, 0);
+            break;
+        case avp_proto_rtp:
+            // RTP timeout is in microseconds
+            sprintf(timeout, "%"PRId64, connection_timeout_micros);
+            av_dict_set(&opts, "timeout", timeout, 0);
+            break;
+        default:
+            // No special timeout options
+            break;
+        }
     }
 
     /* Allocate AVFormatContext in format_context and find input file format */
     rc = avformat_open_input(&decoder_context->format_context, inctx->url, NULL, &opts);
     if (rc != 0) {
-        elv_err("Could not open input file, err=%d, url=%s", rc, url);
+        elv_err("Could not open input file, err=%s (%d), url=%s", av_err2str(rc), rc, url);
         return eav_open_input;
     }
 
@@ -417,12 +475,15 @@ prepare_decoder(
         return eav_stream_info;
     }
 
-    decoder_context->is_mpegts = 0;
-    if (decoder_context->format_context->iformat &&
-        decoder_context->format_context->iformat->name &&
-        !strcmp(decoder_context->format_context->iformat->name, "mpegts")) {
-        decoder_context->is_mpegts = 1;
+    rc = check_input_stream(params, decoder_context);
+    if (rc != eav_success) {
+        return rc;
     }
+
+    // Here we used to set 'is_mpegts' if the codec name was "mpegts", so effectively from here on 'is_mpegts'
+    // was set for both MPEGTS and SRT.
+    // The live_container will be MPEGTS for all the protocols that encapsulate MPEGTS
+    decoder_context->live_container = find_live_container(decoder_context);
 
     for (int i = 0; i < decoder_context->format_context->nb_streams && i < MAX_STREAMS; i++) {
 
@@ -441,17 +502,17 @@ prepare_decoder(
             elv_dbg("VIDEO STREAM %d, codec_id=%s, stream_id=%d, timebase=%d, xc_type=%d, url=%s",
                 i, avcodec_get_name(decoder_context->codec_parameters[i]->codec_id), decoder_context->stream[i]->id,
                 decoder_context->stream[i]->time_base.den, params ? params->xc_type : xc_none, url);
-            
+
             if (decoder_context->video_stream_index == i && decoder_context->format_context->streams[i]->codecpar->width == 0) {
                 /* This can sometimes happen when ffmpeg fails to decode any frames from the input
                  * within the default probe size. Default parameters are written, but this is a sign
                  * that the codec parameters have not been set. Downstream filter operations will
                  * fail in this case, as it assumes that height/width/pixel info is set accurately.
-                 * 
+                 *
                  * In particular, this case can sometimes be triggered by the content-fabric
                  * integration test that tests live restarts. In that case, it's been observed that
                  * retrying the probe entirely fixes the issue.
-                 * 
+                 *
                  * See libavformat/utils.c:has_codec_parameters for the checks in ffmpeg internals. */
                 elv_err("avformat_find_stream_info failed to get input stream info");
                 return eav_stream_info;
@@ -479,7 +540,7 @@ prepare_decoder(
              */
             {
                 AVIOContext *avioctx = (AVIOContext *)decoder_context->format_context->pb;
-                if (avioctx->buffer_size > AUDIO_BUF_SIZE)
+                if (avioctx && avioctx->buffer_size > AUDIO_BUF_SIZE)
                     avioctx->buffer_size = AUDIO_BUF_SIZE;
             }
             break;
@@ -519,7 +580,7 @@ prepare_decoder(
 
         /* Is this the stream selected for transcoding? */
         int selected_stream = 0;
-        int this_stream_id =  decoder_context->is_rtmp ? i : decoder_context->stream[i]->id;
+        int this_stream_id =  decoder_context->live_proto == avp_proto_rtmp ? i : decoder_context->stream[i]->id;
         if (params && this_stream_id == params->stream_id) {
             elv_log("STREAM MATCH stream_id=%d, stream_index=%d, xc_type=%d, url=%s",
                 params->stream_id, i, params->xc_type, url);
@@ -587,7 +648,7 @@ prepare_decoder(
          * furher thread_count is 1 which forces 1 thread.
          */
         decoder_context->codec_context[i]->active_thread_type = 1;
-        if (decoder_context->is_mpegts || decoder_context->is_rtmp)
+        if (is_live_source(decoder_context))
             decoder_context->codec_context[i]->thread_count = MPEGTS_THREAD_COUNT;
         else
             decoder_context->codec_context[i]->thread_count = DEFAULT_THREAD_COUNT;
@@ -1508,8 +1569,8 @@ prepare_encoder(
     char *format = params->format;
     int rc = 0;
 
-    encoder_context->is_mpegts = decoder_context->is_mpegts;
-    encoder_context->is_rtmp = decoder_context->is_rtmp;
+    encoder_context->live_proto = decoder_context->live_proto;
+    encoder_context->live_container = decoder_context->live_container;
     encoder_context->out_handlers = out_handlers;
     /*
      * TODO: passing "hls" format needs some development in FF to produce stream index for audio/video.
@@ -1802,8 +1863,8 @@ set_idr_frame_key_flag(
         if (frame->pts >= encoder_context->last_key_frame + params->video_seg_duration_ts) {
             int64_t diff = frame->pts - (encoder_context->last_key_frame + params->video_seg_duration_ts);
             int missing_frames = 0;
-            /* We can have some missing_frames only when transcoding UDP MPEG-TS */
-            if (encoder_context->is_mpegts && encoder_context->calculated_frame_duration > 0)
+            /* We can have some missing_frames only when transcoding a UDP live source */
+            if (is_live_source_udp(encoder_context) && encoder_context->calculated_frame_duration > 0)
                 missing_frames = diff / encoder_context->calculated_frame_duration;
             if (debug_frame_level) {
                 elv_dbg("FRAME SET KEY flag, seg_duration_ts=%d pts=%"PRId64", missing_frames=%d, last_key_frame_pts=%"PRId64,
@@ -2017,7 +2078,7 @@ encode_frame(
         const char *st = stream_type_str(decoder_context, stream_index);
 
         // Adjust PTS if input stream starts at an arbitrary value (i.e mostly for MPEG-TS/RTMP)
-        if ( is_protocol(decoder_context) && (!strcmp(params->format, "fmp4-segment"))) {
+        if ( is_live_source(decoder_context) && (!strcmp(params->format, "fmp4-segment"))) {
             if (stream_index == decoder_context->video_stream_index) {
                 if (encoder_context->first_encoding_video_pts == -1) {
                     /* Remember the first video PTS to use as an offset later */
@@ -2162,7 +2223,8 @@ encode_frame(
         output_packet->pts += params->start_pts;
         output_packet->dts += params->start_pts;
 
-        if ((decoder_context->is_mpegts || decoder_context->is_srt) &&
+        // Detect missing frames for UDP-based live sources
+        if ((is_live_source_udp(decoder_context)) &&
             encoder_context->video_encoder_prev_pts > 0 &&
             stream_index == decoder_context->video_stream_index &&
             encoder_context->calculated_frame_duration > 0 &&
@@ -3230,11 +3292,11 @@ skip_for_sync(
         return 0;
 
     /* No need to sync if:
-     * - it is not mpegts and not rtmp and not srt
+     * - it is not a live source (mpegts, rtmp, srt, rtp)
      * - or it is already synced
      * - or format is not fmp4-segment.
      */
-    if (!is_protocol(decoder_context) ||
+    if (!is_live_source(decoder_context) ||
         decoder_context->is_av_synced ||
         strcmp(params->format, "fmp4-segment"))
         return 0;
@@ -3530,7 +3592,6 @@ get_filter_str(
 
     return 0;
 }
-
 
 int
 avpipe_xc(
@@ -4374,6 +4435,9 @@ int avpipe_probe_free(xcprobe_t *probe, int n_streams) {
     return 0;
 }
 
+/*
+ * Simple parameter validation (without knowledge of source stream info)
+ */
 static int
 check_params(
     xcparams_t *params)
