@@ -23,13 +23,16 @@ find_live_proto(
         elv_err("find_live_proto: invalid input context - no URL");
         return avp_proto_none;
     }
-    if (inctx->url && !strncmp(inctx->url, "rtmp://", 7))
+    if (!strncmp(inctx->url, "udp://", 6))
+        return avp_proto_mpegts;
+
+    if (!strncmp(inctx->url, "rtmp://", 7))
         return avp_proto_rtmp;
 
-    if (inctx->url && !strncmp(inctx->url, "srt://", 6))
+    if (!strncmp(inctx->url, "srt://", 6))
         return avp_proto_srt;
 
-    if (inctx->url && !strncmp(inctx->url, "rtp://", 6))
+    if (!strncmp(inctx->url, "rtp://", 6))
         return avp_proto_rtp;
 
     return avp_proto_none;
