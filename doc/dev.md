@@ -34,6 +34,12 @@ ffmpeg -re -i test.mp4 -map 0 -c copy -f mpegts udp://127.0.0.1:9000
 ./bin/exc -f udp://127.0.0.1:9000 -xc-type all -format fmp4-segment -seg-duration 30
 ```
 
+A more complex example - as called by the content fabric (source 50 fps):
+
+```
+./bin/exc -f udp://127.0.0.1:9000 -xc-type all -format fmp4-segment -video-bitrate 9500000 -audio-bitrate 192000 -sample-rate 48000  -video-seg-duration-ts 2700000  -audio-seg-duration-ts 1428480   -force-keyint 100 -enc-height 1080 -enc-width 1920 -sync-audio-to-stream-id 512   -audio-index 1,2  -copy-mpegts 1
+```
+
 #### SRT
 
 ```
