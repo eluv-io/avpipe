@@ -398,7 +398,6 @@ udp_in_closer(
     int fd = *((int64_t *)inctx->opaque);
     int sockfd = *((int *)((int64_t *)inctx->opaque+1));
     elv_dbg("IN CLOSE UDP fd=%d, sockfd=%d, url=%s\n", fd, sockfd, inctx->url ? inctx->url : "bogus.mp4");
-    // free(inctx->opaque);
     close(sockfd);
     return 0;
 }

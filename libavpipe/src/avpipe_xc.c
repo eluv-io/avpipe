@@ -4972,6 +4972,10 @@ avpipe_fini(
     }
 #endif
 
+    if ((*xctx)->in_handlers && (*xctx)->inctx && (*xctx)->inctx->opaque) {
+        // inctx->opaque is allocated by either in_opener or udp_in_opener
+        free((*xctx)->inctx->opaque);
+    }
     // PENDING(SS) These are not allocated by avpipe_init
     free((*xctx)->in_handlers);
     free((*xctx)->out_handlers);
