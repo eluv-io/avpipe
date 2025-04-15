@@ -44,6 +44,9 @@ copy_mpegts_set_encoder_options(
 
     av_opt_set_int(encoder_context->format_context->priv_data, "segment_duration_ts", seg_duration_ts, 0);
 
+    // For MPEGTS we want the continuity count to not reset at beginning of each segment (https://trac.ffmpeg.org/ticket/2828)
+    av_opt_set_int(encoder_context->format_context->priv_data, "individual_header_trailer", 0, 0);
+
     int64_t stream_start_time = decoder_context->stream[stream_index]->start_time;
     cp_ctx->stream_start_pts = stream_start_time;
     if (stream_start_time != AV_NOPTS_VALUE) {
