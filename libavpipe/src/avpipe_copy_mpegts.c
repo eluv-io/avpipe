@@ -360,6 +360,11 @@ copy_mpegts_func(
     xc_frame_t *xc_frame;
     int err = 0;
 
+    AVFormatContext *format_context;
+    coderctx_t *encoder_context = &cp_ctx->encoder_ctx;
+
+    format_context = encoder_context->format_context;
+
     while (!xctx->stop || elv_channel_size(cp_ctx->ch) > 0) {
 
         // Retrieve MPEGTS packets from the dedicated "copy mpegts" channel
@@ -392,6 +397,7 @@ copy_mpegts_func(
             break;
         }
     }
+    av_interleaved_write_frame(format_context, NULL);
 
     if (!xctx->err)
         xctx->err = err;
