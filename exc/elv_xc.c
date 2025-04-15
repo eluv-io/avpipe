@@ -1194,6 +1194,8 @@ main(
         .watermark_overlay_len = 0,
         .watermark_overlay_type = unknown_image,
         .watermark_shadow_color = strdup("white"),  /* Default shadow color */
+        .png_sequence_path = NULL,          /* MEDIA FELIZ */
+        .mov_overlay_path = NULL,           /* MEDIA FELIZ */
         .gpu_index = -1,
         .seg_duration = NULL,
         .debug_frame_level = 0,
