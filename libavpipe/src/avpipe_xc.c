@@ -3994,6 +3994,12 @@ xc_done:
     pthread_join(xctx->vthread_id, NULL);
     pthread_join(xctx->athread_id, NULL);
 
+    if (params->copy_mpegts) {
+        cp_ctx_t *cp_ctx = &xctx->cp_ctx;
+        elv_channel_close(cp_ctx->ch, 0);
+        pthread_join(cp_ctx->thread_id, NULL);
+    }
+
     /*
      * Flush all frames, first flush decoder buffers, then encoder buffers by passing NULL frame.
      */
@@ -4945,6 +4951,20 @@ avpipe_fini(
         }
     }
 
+    if ((*xctx)->params->copy_mpegts) {
+        cp_ctx_t *cp_ctx = &(*xctx)->cp_ctx;
+        coderctx_t *mpegts_encoder_ctx = &cp_ctx->encoder_ctx;
+        elv_warn("Freeing mpegts encoder context, closing io");
+        avio_close(mpegts_encoder_ctx->format_context->pb);
+        avformat_free_context(mpegts_encoder_ctx->format_context);
+        for (int i=0; i<MAX_STREAMS; i++) {
+            if (mpegts_encoder_ctx->codec_context[i]) {
+                /* Corresponds to avcodec_open2() */
+                avcodec_close(mpegts_encoder_ctx->codec_context[i]);
+                avcodec_free_context(&mpegts_encoder_ctx->codec_context[i]);
+            }
+        }
+    }
 #ifdef USE_RESAMPLE_AAC
     if ((*xctx)->params && !strcmp((*xctx)->params->ecodec2, "aac")) {
         av_audio_fifo_free(decoder_context->fifo);
