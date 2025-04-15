@@ -4895,8 +4895,10 @@ avpipe_fini(
         elv_dbg("Releasing all the resources, url=%s", (*xctx)->inctx->url);
 
     /* Close input handler resources if it is not a muxing command */
-    if (!(*xctx)->in_mux_ctx && (*xctx)->in_handlers)
-        (*xctx)->in_handlers->avpipe_closer((*xctx)->inctx);
+    if (!(*xctx)->in_mux_ctx && (*xctx)->in_handlers) {
+        if ((*xctx)->in_handlers->avpipe_closer((*xctx)->inctx) < 0)
+            elv_err("Encountered error closing input, url=%s", (*xctx)->inctx->url);
+    }
 
     decoder_context = &(*xctx)->decoder_ctx;
     encoder_context = &(*xctx)->encoder_ctx;
