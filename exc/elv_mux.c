@@ -102,17 +102,17 @@ read_next_input:
                 return AVERROR_EOF;
             filepath = in_mux_ctx->video.parts[in_mux_ctx->video.index];
             in_mux_ctx->video.index++;
-        } else if (index <= in_mux_ctx->last_audio_index) {
+        } else if (index <= in_mux_ctx->audio_count) {
             if (in_mux_ctx->audios[index-1].index >= in_mux_ctx->audios[index-1].n_parts)
                 return AVERROR_EOF;
             filepath = in_mux_ctx->audios[index-1].parts[in_mux_ctx->audios[index-1].index];
             in_mux_ctx->audios[index-1].index++;
-        } else if (index <= in_mux_ctx->last_audio_index+in_mux_ctx->last_caption_index) {
-            if (in_mux_ctx->captions[index - in_mux_ctx->last_audio_index - 1].index >=
-                in_mux_ctx->captions[index - in_mux_ctx->last_audio_index - 1].n_parts)
+        } else if (index <= in_mux_ctx->audio_count+in_mux_ctx->caption_count) {
+            if (in_mux_ctx->captions[index - in_mux_ctx->audio_count - 1].index >=
+                in_mux_ctx->captions[index - in_mux_ctx->audio_count - 1].n_parts)
                 return AVERROR_EOF;
-            filepath = in_mux_ctx->captions[index - in_mux_ctx->last_audio_index - 1].parts[in_mux_ctx->captions[index - in_mux_ctx->last_audio_index - 1].index];
-            in_mux_ctx->captions[index - in_mux_ctx->last_audio_index - 1].index++;
+            filepath = in_mux_ctx->captions[index - in_mux_ctx->audio_count - 1].parts[in_mux_ctx->captions[index - in_mux_ctx->audio_count - 1].index];
+            in_mux_ctx->captions[index - in_mux_ctx->audio_count - 1].index++;
         } else {
             elv_err("in_mux_read_packet invalid mux index=%d", index);
             return -1;

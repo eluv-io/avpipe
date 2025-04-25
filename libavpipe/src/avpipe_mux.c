@@ -79,10 +79,10 @@ prepare_input_muxer(
 
     if (in_mux_index == 0) {
         inctx->url = in_mux_ctx->video.parts[0];
-    } else if (in_mux_index <= in_mux_ctx->last_audio_index) {
+    } else if (in_mux_index <= in_mux_ctx->audio_count) {
         inctx->url = in_mux_ctx->audios[in_mux_index-1].parts[0];
-    } else if (in_mux_index <= in_mux_ctx->last_audio_index + in_mux_ctx->last_caption_index) {
-        inctx->url = in_mux_ctx->captions[in_mux_index-in_mux_ctx->last_audio_index-1].parts[0];
+    } else if (in_mux_index <= in_mux_ctx->audio_count + in_mux_ctx->caption_count) {
+        inctx->url = in_mux_ctx->captions[in_mux_index-in_mux_ctx->audio_count-1].parts[0];
     } else {
         elv_err("prepare_input_muxer() invalid in_mux_index=%d", in_mux_index);
         return eav_stream_index;
@@ -170,11 +170,11 @@ init_mux_ctx(
             elv_err("init_mux_ctx invalid video stream_index=%d", stream_index);
             return eav_param;
         }
-        if (!strcmp(stream_type, "audio") && (stream_index > MAX_STREAMS || stream_index > in_mux_ctx->last_audio_index+1)) {
+        if (!strcmp(stream_type, "audio") && (stream_index > MAX_STREAMS || stream_index > in_mux_ctx->audio_count+1)) {
             elv_err("init_mux_ctx invalid audio stream_index=%d", stream_index);
             return eav_param;
         }
-        if (!strcmp(stream_type, "caption") && (stream_index > MAX_STREAMS || stream_index > in_mux_ctx->last_caption_index+1)) {
+        if (!strcmp(stream_type, "caption") && (stream_index > MAX_STREAMS || stream_index > in_mux_ctx->caption_count+1)) {
             elv_err("init_mux_ctx invalid caption stream_index=%d", stream_index);
             return eav_param;
         }
@@ -192,16 +192,16 @@ init_mux_ctx(
         if (!strcmp(stream_type, "audio") && in_mux_ctx->audios[stream_index-1].n_parts < MAX_MUX_IN_STREAM) {
             in_mux_ctx->audios[stream_index-1].parts[in_mux_ctx->audios[stream_index-1].n_parts] = stream_url;
             in_mux_ctx->audios[stream_index-1].n_parts++;
-            if (stream_index > in_mux_ctx->last_audio_index)
-                in_mux_ctx->last_audio_index = stream_index;
+            if (stream_index > in_mux_ctx->audio_count)
+                in_mux_ctx->audio_count = stream_index;
         } else if (!strcmp(stream_type, "video") && in_mux_ctx->video.n_parts < MAX_MUX_IN_STREAM) {
             in_mux_ctx->video.parts[in_mux_ctx->video.n_parts] = stream_url;
             in_mux_ctx->video.n_parts++;
         } else if (!strcmp(stream_type, "caption") && in_mux_ctx->captions[stream_index-1].n_parts < MAX_MUX_IN_STREAM) {
             in_mux_ctx->captions[stream_index-1].parts[in_mux_ctx->captions[stream_index-1].n_parts] = stream_url;
             in_mux_ctx->captions[stream_index-1].n_parts++;
-            if (stream_index > in_mux_ctx->last_caption_index)
-                in_mux_ctx->last_caption_index = stream_index;
+            if (stream_index > in_mux_ctx->caption_count)
+                in_mux_ctx->caption_count = stream_index;
         }
     }
 
@@ -211,7 +211,7 @@ init_mux_ctx(
     in_mux_ctx->out_filename = strdup(out_filename);
 
     elv_dbg("init_mux_ctx video_stream=%d, audio_streams=%d, captions=%d",
-        in_mux_ctx->video.n_parts > 0 ? 1 : 0, in_mux_ctx->last_audio_index, in_mux_ctx->last_caption_index);
+        in_mux_ctx->video.n_parts > 0 ? 1 : 0, in_mux_ctx->audio_count, in_mux_ctx->caption_count);
 
     return eav_success;
 }
@@ -254,10 +254,11 @@ avpipe_init_muxer(
     coderctx_t *out_muxer_ctx = &p_xctx->out_muxer_ctx;
 
     /* Prepare video, audio, captions input muxer */
-    for (int i=0; i<in_mux_ctx->last_audio_index+in_mux_ctx->last_caption_index+1; i++) {
+    for (int i=0; i<in_mux_ctx->audio_count+in_mux_ctx->caption_count+1; i++) {
         ioctx_t *inctx = (ioctx_t *)calloc(1, sizeof(ioctx_t));
         inctx->in_mux_index = i;
         inctx->in_mux_ctx = in_mux_ctx;
+        inctx->params = p;
         prepare_input_muxer(&p_xctx->in_muxer_ctx[i], in_handlers, inctx, p);
         p_xctx->inctx_muxer[i] = inctx;
     }
@@ -285,7 +286,7 @@ avpipe_init_muxer(
     out_muxer_ctx->format_context->io_open = elv_mux_open;
     out_muxer_ctx->format_context->io_close = elv_mux_close;
 
-    for (int i=0; i<in_mux_ctx->last_audio_index+in_mux_ctx->last_caption_index+1; i++) {
+    for (int i=0; i<in_mux_ctx->audio_count+in_mux_ctx->caption_count+1; i++) {
         /* Add a new stream to output format for each input in muxer context (source) */
         out_muxer_ctx->stream[i] = avformat_new_stream(out_muxer_ctx->format_context, NULL);
 
@@ -332,6 +333,8 @@ avpipe_init_muxer(
     return eav_success;
 }
 
+/* get_next_packet retrieves the muxed packet with the smallest pts value of all streams with packets
+ * remaining and fills pkt, returning the index of the stream or an error if the return value is negative. */
 static int
 get_next_packet(
     xctx_t *xctx,
@@ -343,21 +346,20 @@ get_next_packet(
     int ret = 0;
     int i;
 
-    for (i=0; i<in_mux_ctx->last_audio_index + in_mux_ctx->last_caption_index + 1; i++) {
+    for (i=0; i<in_mux_ctx->audio_count + in_mux_ctx->caption_count + 1; i++) {
         if (xctx->is_pkt_valid[i]) {
             index = i;
             break;
         }
     }
 
-    for (i=index+1; i<in_mux_ctx->last_audio_index + in_mux_ctx->last_caption_index + 1; i++) {
+    for (i=index+1; i<in_mux_ctx->audio_count + in_mux_ctx->caption_count + 1; i++) {
         if (!xctx->is_pkt_valid[i])
             continue;
         AVStream *stream1 = xctx->in_muxer_ctx[i].format_context->streams[0];
         AVStream *stream2 = xctx->in_muxer_ctx[index].format_context->streams[0];
         if (av_compare_ts(pkts[i].pts, stream1->time_base, pkts[index].pts, stream2->time_base) <= 0) {
             index = i;
-            break;
         }
     }
 
@@ -387,7 +389,7 @@ read_frame_again:
                     pkt->pts += in_mux_ctx->last_video_pts;
                     pkt->dts += in_mux_ctx->last_video_pts;
                 }
-            } else if (index <= in_mux_ctx->last_audio_index) {
+            } else if (index <= in_mux_ctx->audio_count) {
                 if (pkt->pts > in_mux_ctx->last_audio_pts)
                     in_mux_ctx->last_audio_pts = pkt->pts;
                 else {
@@ -410,11 +412,19 @@ avpipe_mux(
     xctx_t *xctx)
 {
     int ret = 0;
+    int stream_index;
     AVPacket pkt;
     AVPacket *pkts;
     int *valid_pkts;
     io_mux_ctx_t *in_mux_ctx;
-    int64_t first_pts_array[MAX_STREAMS];
+    // last_pts_array is used to store the last pts of each stream in order to detect surprising
+    // gaps between successive frames
+    int64_t last_pts_array[MAX_STREAMS];
+    // pts_per_frame is used to store the pts delta between successive frames used to stamp the
+    // packets of the mux output
+    int64_t pts_per_frame[MAX_STREAMS];
+    // next_pts_array holds the pts to be used for the next packet written in each stream
+    int64_t next_pts_array[MAX_STREAMS];
     int found_keyframe = 0;
 
 
@@ -424,18 +434,34 @@ avpipe_mux(
     }
 
     for (int i=0; i<MAX_STREAMS; i++) {
-        first_pts_array[i] = AV_NOPTS_VALUE;
+        last_pts_array[i] = AV_NOPTS_VALUE;
+        pts_per_frame[i] = AV_NOPTS_VALUE;
+        next_pts_array[i] = 0;
     }
 
     pkts = xctx->pkt_array;
     valid_pkts = xctx->is_pkt_valid;
     in_mux_ctx = xctx->in_mux_ctx;
+    int stream_count = in_mux_ctx->audio_count + in_mux_ctx->caption_count + 1;
 
-    for (int i=0; i<in_mux_ctx->last_caption_index + in_mux_ctx->last_audio_index + 1; i++) {
+    // Set pts_per_frame for streams that have frame rate info
+    for (int i=0; i < stream_count; i++) {
+        AVRational avg_frame_rate = xctx->in_muxer_ctx[i].format_context->streams[0]->avg_frame_rate;
+        AVRational time_base = xctx->in_muxer_ctx[i].format_context->streams[0]->time_base;
+        if (avg_frame_rate.num == 0 || time_base.num == 0) {
+            elv_dbg("avpipe_mux stream %d avg_frame_rate or time_base is 0", i);
+            continue;
+        }
+        pts_per_frame[i] = av_rescale_q(1, av_inv_q(time_base), avg_frame_rate);
+        elv_warn("avpipe_mux stream %d avg_frame_rate %d/%d tb %d/%d, pts per frame: %d", i, avg_frame_rate.num, avg_frame_rate.den, time_base.num, time_base.den, pts_per_frame[i]);
+    }
+
+    for (int i=0; i < stream_count; i++) {
+
         ret = av_read_frame(xctx->in_muxer_ctx[i].format_context, &pkts[i]);
         if (ret >= 0) {
             valid_pkts[i] = 1;
-            first_pts_array[i] = pkts[i].pts;
+            last_pts_array[i] = pkts[i].pts;
         }
     }
 
@@ -443,8 +469,24 @@ avpipe_mux(
         ret = get_next_packet(xctx, &pkt);
         if (ret < 0)
             break;
+        stream_index = ret;
 
-        if (ret == 0 && pkt.flags == AV_PKT_FLAG_KEY)
+        if (last_pts_array[stream_index] != AV_NOPTS_VALUE && found_keyframe) {
+            if (pts_per_frame[stream_index] == AV_NOPTS_VALUE) {
+                // set pts per frame, because this is the second packet we have seen for this stream
+                pts_per_frame[stream_index] = pkt.pts - last_pts_array[stream_index];
+            } else {
+                int64_t pts_delta = pkt.pts - last_pts_array[stream_index];
+                // Check if the pts delta is more than 20% away from what we expected
+                if (labs(pts_delta - pts_per_frame[stream_index]) > (pts_per_frame[stream_index] / 5)) {
+                    elv_dbg("avpipe_mux stream %d pts_delta=%"PRId64", expected=%"PRId64", pts=%"PRId64", last_pts=%"PRId64"",
+                        stream_index, pts_delta, pts_per_frame[stream_index], pkt.pts, last_pts_array[stream_index]);
+                }
+            }
+        }
+        last_pts_array[stream_index] = pkt.pts;
+
+        if (stream_index == 0 && pkt.flags & AV_PKT_FLAG_KEY)
             found_keyframe = 1;
 
         if (!found_keyframe) {
@@ -452,13 +494,23 @@ avpipe_mux(
             continue;
         }
 
-        if (first_pts_array[ret] == AV_NOPTS_VALUE) {
-            first_pts_array[ret] = pkt.pts;
+        if (next_pts_array[stream_index] == AV_NOPTS_VALUE) {
+            // We didn't know the PTS per frame when we wrote the first packet at 0, so we set
+            // next_pts_array to the pts of the second packet, which should be exactly the PTS per
+            // frame because the first packet is at 0
+            next_pts_array[stream_index] = pts_per_frame[stream_index];
         }
 
         /* Adjust PTS and DTS and start always from 0 */
-        pkt.pts -= first_pts_array[ret];
+        pkt.pts = next_pts_array[stream_index];
         pkt.dts = pkt.pts;
+
+        if (pts_per_frame[stream_index] != AV_NOPTS_VALUE) {
+            next_pts_array[stream_index] += pts_per_frame[stream_index];
+        } else {
+            // We don't yet know the pts per frame, so we set the next_pts_array to a sentinel value
+            next_pts_array[stream_index] = AV_NOPTS_VALUE;
+        }
 
         dump_packet(pkt.stream_index, "MUX OUT ", &pkt, xctx->debug_frame_level);
 
@@ -494,7 +546,7 @@ avpipe_mux_fini(
     p_xctx = *xctx;
     in_mux_ctx = p_xctx->in_mux_ctx;
 
-    for (int i=0; i<in_mux_ctx->last_audio_index+in_mux_ctx->last_caption_index+1; i++) {
+    for (int i=0; i<in_mux_ctx->audio_count+in_mux_ctx->caption_count+1; i++) {
         avcodec_close(p_xctx->in_muxer_ctx[i].codec_context[0]);
         avcodec_free_context(&p_xctx->in_muxer_ctx[i].codec_context[0]);
 

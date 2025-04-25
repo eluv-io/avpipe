@@ -141,15 +141,20 @@ typedef struct mux_input_ctx_t {
     int     header_size;
 } mux_input_ctx_t;
 
+/*
+io_mux_ctx_t is used for handling input streams for muxing. It assumes that all input streams, as
+ordered by the muxing spec, have the ordering video -> audio(s) -> caption(s). It stores an input
+context for each of the input streams, as well as the number of each.
+*/
 typedef struct io_mux_ctx_t {
     char            *out_filename;              /* Output filename/url for this muxing */
     char            *mux_type;                  /* "mux-mez" or "mux-abr" */
     mux_input_ctx_t video;
     int64_t         last_video_pts;
-    int             last_audio_index;
+    int             audio_count;
     mux_input_ctx_t audios[MAX_STREAMS];
     int64_t         last_audio_pts;
-    int             last_caption_index;
+    int             caption_count;
     mux_input_ctx_t captions[MAX_STREAMS];
 } io_mux_ctx_t;
 
