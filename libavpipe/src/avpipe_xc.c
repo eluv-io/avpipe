@@ -1223,7 +1223,9 @@ prepare_video_encoder(
         av_opt_set(encoder_codec_context->priv_data, "preset", params->preset, AV_OPT_FLAG_ENCODING_PARAM | AV_OPT_SEARCH_CHILDREN);
     }
 
-    if (!strcmp(params->format, "fmp4-segment") || !strcmp(params->format, "fmp4")) {
+    // TODO: Add a parameter for b-frames instead of using format
+    if (!strcmp(params->format, "fmp4-segment") || !strcmp(params->format, "fmp4") ||
+        !strcmp(params->format, "dash") || !strcmp(params->format, "hls")) {
         encoder_codec_context->max_b_frames = 0;
     }
 
