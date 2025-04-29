@@ -459,7 +459,7 @@ avpipe_mux(
             elv_dbg("avpipe_mux stream %d avg_frame_rate or time_base is 0", i);
             continue;
         }
-        set_pts_per_frame_from_streaminfo(pts_estimator, i, av_rescale_q(1, avg_frame_rate, time_base));
+        set_pts_per_frame_from_streaminfo(pts_estimator, i, av_rescale_q(1, av_inv_q(time_base), avg_frame_rate));
     }
 
     for (int i=0; i < stream_count; i++) {
@@ -672,7 +672,7 @@ static int adjust_pts(pts_estimator_t *estimator, int stream_index, AVPacket *pk
                     stream_index, pts_delta, expected_delta, pkt->pts, estimator->last_pts[stream_index]);
                 estimator->major_discrepancies_logged++;
             } else if (estimator->major_discrepancies_logged == 100) {
-                elv_warn("avpipe_mux done reporting major PTS discrepancies, too many logs");
+                elv_err("avpipe_mux done reporting major PTS discrepancies, too many logs");
                 estimator->major_discrepancies_logged++;
             }
         } else if (diff_from_expected > 0) {
