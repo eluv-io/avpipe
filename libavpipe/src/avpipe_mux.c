@@ -1,6 +1,29 @@
 #include "avpipe_xc.h"
 #include "avpipe_utils.h"
 #include "elv_log.h"
+#include <stdbool.h>
+
+typedef struct pts_estimator_t {
+    int64_t pts_per_frame[MAX_STREAMS];
+    int64_t frames_written[MAX_STREAMS];
+    /* PTS of the last packet read from the input stream, used to detect discrepancies. */
+    int64_t last_pts[MAX_STREAMS];
+
+    int major_discrepancies_logged;
+    int minor_discrepancies_logged;
+} pts_estimator_t;
+
+/* Allocate and initialize a PTS estimator. */
+static int init_pts_estimator(pts_estimator_t **estimator);
+/* Set the PTS per stream based on ffmpeg's stream info. This must be called _before_ any packets have their PTS adjusted. */
+static int set_pts_per_frame_from_streaminfo(pts_estimator_t *estimator, int stream_index, int64_t pts_per_frame);
+static bool is_pts_per_frame_known(pts_estimator_t *estimator, int stream_index);
+/* Report two successive packets for PTS estimation. This should be called at the end of retrieving
+ * the second packet of the stream in order to estimate the PTS delta. */
+static int report_successive_packets_for_pts_estimation(pts_estimator_t *estimator, int stream_index, AVPacket *pkt1, AVPacket *pkt2);
+/* Adjust the PTS of a packet just before writing it out to the output. If anything has not been
+ * initialized properly, this function will error. */
+static int adjust_pts(pts_estimator_t *estimator, int stream_index, AVPacket *pkt);
 
 void
 log_params(
@@ -338,7 +361,8 @@ avpipe_init_muxer(
 static int
 get_next_packet(
     xctx_t *xctx,
-    AVPacket *pkt)
+    AVPacket *pkt,
+    pts_estimator_t *pts_estimator)
 {
     io_mux_ctx_t *in_mux_ctx = xctx->in_mux_ctx;
     AVPacket *pkts = xctx->pkt_array;
@@ -381,27 +405,18 @@ read_frame_again:
         if (pkts[index].pts == pkt->pts)
             goto read_frame_again;
         xctx->is_pkt_valid[index] = 1;
-        if (pkt->pts >= 0) {
-            if (index == 0) {
-                if (pkt->pts > in_mux_ctx->last_video_pts)
-                    in_mux_ctx->last_video_pts = pkt->pts;
-                else {
-                    pkt->pts += in_mux_ctx->last_video_pts;
-                    pkt->dts += in_mux_ctx->last_video_pts;
-                }
-            } else if (index <= in_mux_ctx->audio_count) {
-                if (pkt->pts > in_mux_ctx->last_audio_pts)
-                    in_mux_ctx->last_audio_pts = pkt->pts;
-                else {
-                    pkt->pts += in_mux_ctx->last_audio_pts;
-                    pkt->dts += in_mux_ctx->last_audio_pts;
-                }
-            }
-        }
     } else {
         if (ret != AVERROR_EOF)
             elv_err("Failed to read frame index=%d, ret=%d", index, ret);
         return ret;
+    }
+
+    if (!is_pts_per_frame_known(pts_estimator, index)) {
+        ret = report_successive_packets_for_pts_estimation(pts_estimator, index, pkt, &pkts[index]);
+        if (ret < 0) {
+            elv_err("Failed to report successive packets for pts estimation, ret=%d", ret);
+            return ret;
+        }
     }
 
     return index;
@@ -415,28 +430,20 @@ avpipe_mux(
     int stream_index;
     AVPacket pkt;
     AVPacket *pkts;
+    pts_estimator_t *pts_estimator;
     int *valid_pkts;
     io_mux_ctx_t *in_mux_ctx;
-    // last_pts_array is used to store the last pts of each stream in order to detect surprising
-    // gaps between successive frames
-    int64_t last_pts_array[MAX_STREAMS];
-    // pts_per_frame is used to store the pts delta between successive frames used to stamp the
-    // packets of the mux output
-    int64_t pts_per_frame[MAX_STREAMS];
-    // next_pts_array holds the pts to be used for the next packet written in each stream
-    int64_t next_pts_array[MAX_STREAMS];
     int found_keyframe = 0;
 
+    ret = init_pts_estimator(&pts_estimator);
+    if (ret < 0) {
+        elv_err("Failed to initialize pts estimator, ret=%d", ret);
+        return ret;
+    }
 
     if (!xctx) {
         elv_err("Invalid transcoding context for muxing");
         return eav_param;
-    }
-
-    for (int i=0; i<MAX_STREAMS; i++) {
-        last_pts_array[i] = AV_NOPTS_VALUE;
-        pts_per_frame[i] = AV_NOPTS_VALUE;
-        next_pts_array[i] = 0;
     }
 
     pkts = xctx->pkt_array;
@@ -452,64 +459,35 @@ avpipe_mux(
             elv_dbg("avpipe_mux stream %d avg_frame_rate or time_base is 0", i);
             continue;
         }
-        pts_per_frame[i] = av_rescale_q(1, av_inv_q(time_base), avg_frame_rate);
-        elv_warn("avpipe_mux stream %d avg_frame_rate %d/%d tb %d/%d, pts per frame: "PRId64"", i, avg_frame_rate.num, avg_frame_rate.den, time_base.num, time_base.den, pts_per_frame[i]);
+        set_pts_per_frame_from_streaminfo(pts_estimator, i, av_rescale_q(1, avg_frame_rate, time_base));
     }
 
     for (int i=0; i < stream_count; i++) {
-
         ret = av_read_frame(xctx->in_muxer_ctx[i].format_context, &pkts[i]);
         if (ret >= 0) {
             valid_pkts[i] = 1;
-            last_pts_array[i] = pkts[i].pts;
         }
     }
 
     while (1) {
-        ret = get_next_packet(xctx, &pkt);
+        ret = get_next_packet(xctx, &pkt, pts_estimator);
         if (ret < 0)
             break;
         stream_index = ret;
 
-        if (last_pts_array[stream_index] != AV_NOPTS_VALUE && found_keyframe) {
-            if (pts_per_frame[stream_index] == AV_NOPTS_VALUE) {
-                // set pts per frame, because this is the second packet we have seen for this stream
-                pts_per_frame[stream_index] = pkt.pts - last_pts_array[stream_index];
+        if (!found_keyframe) {
+            if (stream_index == 0 && pkt.flags & AV_PKT_FLAG_KEY) {
+                found_keyframe = 1;
             } else {
-                int64_t pts_delta = pkt.pts - last_pts_array[stream_index];
-                // Check if the pts delta is more than 20% away from what we expected
-                if (labs(pts_delta - pts_per_frame[stream_index]) > (pts_per_frame[stream_index] / 5)) {
-                    elv_dbg("avpipe_mux stream %d pts_delta=%"PRId64", expected=%"PRId64", pts=%"PRId64", last_pts=%"PRId64"",
-                        stream_index, pts_delta, pts_per_frame[stream_index], pkt.pts, last_pts_array[stream_index]);
-                }
+                av_packet_unref(&pkt);
+                continue;
             }
         }
-        last_pts_array[stream_index] = pkt.pts;
 
-        if (stream_index == 0 && pkt.flags & AV_PKT_FLAG_KEY)
-            found_keyframe = 1;
-
-        if (!found_keyframe) {
-            av_packet_unref(&pkt);
-            continue;
-        }
-
-        if (next_pts_array[stream_index] == AV_NOPTS_VALUE) {
-            // We didn't know the PTS per frame when we wrote the first packet at 0, so we set
-            // next_pts_array to the pts of the second packet, which should be exactly the PTS per
-            // frame because the first packet is at 0
-            next_pts_array[stream_index] = pts_per_frame[stream_index];
-        }
-
-        /* Adjust PTS and DTS and start always from 0 */
-        pkt.pts = next_pts_array[stream_index];
-        pkt.dts = pkt.pts;
-
-        if (pts_per_frame[stream_index] != AV_NOPTS_VALUE) {
-            next_pts_array[stream_index] += pts_per_frame[stream_index];
-        } else {
-            // We don't yet know the pts per frame, so we set the next_pts_array to a sentinel value
-            next_pts_array[stream_index] = AV_NOPTS_VALUE;
+        ret = adjust_pts(pts_estimator, stream_index, &pkt);
+        if (ret < 0) {
+            elv_err("Failed to adjust pts for stream %d, ret=%d", stream_index, ret);
+            break;
         }
 
         dump_packet(pkt.stream_index, "MUX OUT ", &pkt, xctx->debug_frame_level);
@@ -583,3 +561,138 @@ avpipe_mux_fini(
     return avpipe_fini(xctx);
 }
 
+static int init_pts_estimator(pts_estimator_t **estimator) {
+    *estimator = (pts_estimator_t *)calloc(1, sizeof(pts_estimator_t));
+    if (!*estimator) {
+        elv_err("Failed to allocate memory for pts estimator");
+        return eav_mem_alloc;
+    }
+
+    for (int i=0; i<MAX_STREAMS; i++) {
+        (*estimator)->last_pts[i] = AV_NOPTS_VALUE;
+        (*estimator)->pts_per_frame[i] = AV_NOPTS_VALUE;
+    }
+
+    return eav_success;
+}
+
+static int set_pts_per_frame_from_streaminfo(pts_estimator_t *estimator, int stream_index, int64_t pts_per_frame) {
+    if (stream_index < 0 || stream_index >= MAX_STREAMS) {
+        elv_err("Invalid stream index %d", stream_index);
+        return eav_param;
+    }
+
+    for (int i=0; i<MAX_STREAMS; i++) {
+        if (estimator->frames_written[i] != 0) {
+            elv_err("Frames already written to stream %d before setting pts per frame", i);
+            return eav_param;
+        }
+    }
+
+    if (estimator->pts_per_frame[stream_index] != AV_NOPTS_VALUE) {
+        elv_err("PTS per frame already set for stream %d", stream_index);
+        return eav_param;
+    }
+
+    if (pts_per_frame <= 0) {
+        elv_err("PTS per frame must be positive, got %"PRId64"", pts_per_frame);
+        return eav_param;
+    }
+
+    elv_warn("Setting PTS per frame for stream %d to %"PRId64"", stream_index, pts_per_frame);
+
+    estimator->pts_per_frame[stream_index] = pts_per_frame;
+    return eav_success;
+}
+
+static bool is_pts_per_frame_known(pts_estimator_t *estimator, int stream_index) {
+    if (stream_index < 0 || stream_index >= MAX_STREAMS) {
+        elv_err("Invalid stream index %d", stream_index);
+        return false;
+    }
+    return estimator->pts_per_frame[stream_index] != AV_NOPTS_VALUE;
+}
+
+/* Report two successive packets for PTS estimation. This should be called at the end of retrieving
+ * the second packet of the stream in order to estimate the PTS delta. */
+static int report_successive_packets_for_pts_estimation(pts_estimator_t *estimator, int stream_index, AVPacket *pkt1, AVPacket *pkt2) {
+    if (stream_index < 0 || stream_index >= MAX_STREAMS) {
+        elv_err("Invalid stream index %d", stream_index);
+        return eav_param;
+    }
+
+    if (!pkt1 || !pkt2 || pkt1->pts == AV_NOPTS_VALUE || pkt2->pts == AV_NOPTS_VALUE) {
+        elv_err("Invalid packets, either missing or NOPTS");
+        return eav_param;
+    }
+
+    if (pkt2->pts <= pkt1->pts) {
+        elv_err("Invalid packet order, pkt1 pts=%"PRId64", pkt2 pts=%"PRId64"", pkt1->pts, pkt2->pts);
+        return eav_param;
+    }
+
+    estimator->pts_per_frame[stream_index] = pkt2->pts - pkt1->pts;
+
+    return eav_success;
+}
+
+/* Adjust the PTS of a packet just before writing it out to the output. If anything has not been
+ * initialized properly, this function will error. */
+static int adjust_pts(pts_estimator_t *estimator, int stream_index, AVPacket *pkt) {
+    if (stream_index < 0 || stream_index >= MAX_STREAMS) {
+        elv_err("Invalid stream index %d", stream_index);
+        return eav_param;
+    }
+
+    if (!pkt) {
+        elv_err("Invalid missing packet");
+        return eav_param;
+    }
+
+    if (estimator->pts_per_frame[stream_index] == AV_NOPTS_VALUE) {
+        elv_err("PTS per frame not set for stream %d. Mux initialization was incorrect", stream_index);
+        return eav_param;
+    } else if (estimator->pts_per_frame[stream_index] <= 0) {
+        elv_err("PTS per frame must be positive, got %"PRId64"", estimator->pts_per_frame[stream_index]);
+        return eav_param;
+    }
+
+    if (estimator->last_pts[stream_index] != AV_NOPTS_VALUE) {
+        if (pkt->pts <= estimator->last_pts[stream_index]) {
+            elv_warn("Out of order packets, last_pts=%"PRId64", pkt pts=%"PRId64"", estimator->last_pts[stream_index], pkt->pts);
+        }
+
+        int64_t pts_delta = pkt->pts - estimator->last_pts[stream_index];
+        int64_t expected_delta = estimator->pts_per_frame[stream_index];
+        int64_t diff_from_expected = labs(pts_delta - estimator->pts_per_frame[stream_index]);
+
+        if (diff_from_expected > (expected_delta / 5)) {
+            if (estimator->major_discrepancies_logged < 100) {
+                elv_warn("avpipe_mux stream %d pts_delta=%"PRId64", expected=%"PRId64", pts=%"PRId64", last_pts=%"PRId64"",
+                    stream_index, pts_delta, expected_delta, pkt->pts, estimator->last_pts[stream_index]);
+                estimator->major_discrepancies_logged++;
+            } else if (estimator->major_discrepancies_logged == 100) {
+                elv_warn("avpipe_mux done reporting major PTS discrepancies, too many logs");
+                estimator->major_discrepancies_logged++;
+            }
+        } else if (diff_from_expected > 0) {
+            if (estimator->minor_discrepancies_logged < 100) {
+                elv_dbg("avpipe_mux stream %d pts_delta=%"PRId64", expected=%"PRId64", pts=%"PRId64", last_pts=%"PRId64"",
+                    stream_index, pts_delta, expected_delta, pkt->pts, estimator->last_pts[stream_index]);
+                estimator->minor_discrepancies_logged++;
+            } else if (estimator->minor_discrepancies_logged == 100) {
+                elv_dbg("avpipe_mux done reporting minor PTS discrepancies, too many logs");
+                estimator->minor_discrepancies_logged++;
+            }
+        }
+    }
+
+    estimator->last_pts[stream_index] = pkt->pts;
+
+    pkt->pts = estimator->frames_written[stream_index] * estimator->pts_per_frame[stream_index];
+    pkt->dts = pkt->pts;
+
+    estimator->frames_written[stream_index]++;
+
+    return eav_success;
+}
