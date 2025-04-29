@@ -453,7 +453,7 @@ avpipe_mux(
             continue;
         }
         pts_per_frame[i] = av_rescale_q(1, av_inv_q(time_base), avg_frame_rate);
-        elv_warn("avpipe_mux stream %d avg_frame_rate %d/%d tb %d/%d, pts per frame: %d", i, avg_frame_rate.num, avg_frame_rate.den, time_base.num, time_base.den, pts_per_frame[i]);
+        elv_warn("avpipe_mux stream %d avg_frame_rate %d/%d tb %d/%d, pts per frame: "PRId64"", i, avg_frame_rate.num, avg_frame_rate.den, time_base.num, time_base.den, pts_per_frame[i]);
     }
 
     for (int i=0; i < stream_count; i++) {
