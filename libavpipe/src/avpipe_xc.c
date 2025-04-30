@@ -898,6 +898,8 @@ set_h264_params(
                                                 encoder_codec_context->width,
                                                 encoder_codec_context->height);
     }
+
+    av_opt_set(encoder_codec_context->priv_data, "x264-params", "stitchable=1", 0);
 }
 
 static void
@@ -1223,7 +1225,9 @@ prepare_video_encoder(
         av_opt_set(encoder_codec_context->priv_data, "preset", params->preset, AV_OPT_FLAG_ENCODING_PARAM | AV_OPT_SEARCH_CHILDREN);
     }
 
-    if (!strcmp(params->format, "fmp4-segment") || !strcmp(params->format, "fmp4")) {
+    // TODO: Add a parameter for b-frames instead of using format
+    if (!strcmp(params->format, "fmp4-segment") || !strcmp(params->format, "fmp4") ||
+        !strcmp(params->format, "dash") || !strcmp(params->format, "hls")) {
         encoder_codec_context->max_b_frames = 0;
     }
 

@@ -2,7 +2,6 @@
 # rules.make
 # contains all the common parts of the build system
 #
-# delete xcoder to build on Mac
 
 BINDIR=bin
 LIBDIR=lib
@@ -12,8 +11,8 @@ OSNAME := $(shell uname -s)
 LDFLAGS := \
 		-lavpipe \
 		-lutils \
-		$(shell pkg-config --libs libavfilter libavcodec libavformat libavdevice libswresample libavresample libswscale libavutil libpostproc xcoder srt)
-CFLAGS := $(shell pkg-config --cflags libavfilter libavcodec libavformat libavdevice libswresample libavresample libswscale libavutil libpostproc xcoder srt)
+		$(shell pkg-config --libs libavfilter libavcodec libavformat libavdevice libswresample libavresample libswscale libavutil libpostproc srt)
+CFLAGS := $(shell pkg-config --cflags libavfilter libavcodec libavformat libavdevice libswresample libavresample libswscale libavutil libpostproc srt)
 
 ifeq ($(OSNAME), Darwin)
 	LDFLAGS := ${LDFLAGS} \
@@ -38,5 +37,6 @@ ifeq ($(OSNAME), Linux)
 		-lva-drm \
 		-lva-x11 \
 		-lpthread \
-		-lsrt
+		$(shell pkg-config --libs xcoder)
+	CFLAGS := ${CFLAGS} $(shell pkg-config --cflags xcoder)
 endif
