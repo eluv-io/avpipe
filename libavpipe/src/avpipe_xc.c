@@ -898,6 +898,8 @@ set_h264_params(
                                                 encoder_codec_context->width,
                                                 encoder_codec_context->height);
     }
+
+    av_opt_set(encoder_codec_context->priv_data, "x264-params", "stitchable=1", 0);
 }
 
 static void
