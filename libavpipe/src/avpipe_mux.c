@@ -10,6 +10,7 @@ typedef struct pts_estimator_t {
     int64_t frames_written[MAX_STREAMS];
     /* PTS of the last packet read from the input stream, used to detect discrepancies. */
     int64_t last_pts[MAX_STREAMS];
+    AVRational time_base[MAX_STREAMS];
 
     
     int major_discrepancies_logged;
@@ -29,6 +30,7 @@ typedef struct pts_estimator_t {
 static int init_pts_estimator(pts_estimator_t **estimator);
 /* Set the PTS per stream based on ffmpeg's stream info. This must be called _before_ any packets have their PTS adjusted. */
 static int set_pts_per_frame_from_streaminfo(pts_estimator_t *estimator, int stream_index, int64_t pts_per_frame);
+static int set_stream_time_base(pts_estimator_t *estimator, int stream_index, AVRational time_base);
 static bool is_pts_per_frame_known(pts_estimator_t *estimator, int stream_index);
 /* Report two successive packets for PTS estimation. This should be called at the end of retrieving
  * the second packet of the stream in order to estimate the PTS delta. */
@@ -468,6 +470,7 @@ avpipe_mux(
     for (int i=0; i < stream_count; i++) {
         AVRational avg_frame_rate = xctx->in_muxer_ctx[i].format_context->streams[0]->avg_frame_rate;
         AVRational time_base = xctx->in_muxer_ctx[i].format_context->streams[0]->time_base;
+        set_stream_time_base(pts_estimator, i, time_base);
         if (avg_frame_rate.num == 0 || time_base.num == 0) {
             elv_dbg("avpipe_mux stream %d avg_frame_rate or time_base is 0", i);
             continue;
@@ -622,6 +625,21 @@ static int set_pts_per_frame_from_streaminfo(pts_estimator_t *estimator, int str
     return eav_success;
 }
 
+static int set_stream_time_base(pts_estimator_t *estimator, int stream_index, AVRational time_base) {
+    if (stream_index < 0 || stream_index >= MAX_STREAMS) {
+        elv_err("Invalid stream index %d", stream_index);
+        return eav_param;
+    }
+
+    if (estimator->time_base[stream_index].num != 0) {
+        elv_err("Time base already set for stream %d", stream_index);
+        return eav_param;
+    }
+
+    estimator->time_base[stream_index] = time_base;
+    return eav_success;
+}
+
 static bool is_pts_per_frame_known(pts_estimator_t *estimator, int stream_index) {
     if (stream_index < 0 || stream_index >= MAX_STREAMS) {
         elv_err("Invalid stream index %d", stream_index);
@@ -737,11 +755,13 @@ static int log_conclusion(pts_estimator_t *estimator) {
     for (int i=0; i<MAX_STREAMS; i++) {
         if (estimator->frames_written[i] > 0) {
             sprintf(buf + strlen(buf), "  Stream %d:\n    Frames written: %"PRId64"\n    PTS Delta: %"PRId64"\n", i, estimator->frames_written[i], estimator->pts_per_frame[i]);
+            sprintf(buf + strlen(buf), "    Time base: %d/%d\n", estimator->time_base[i].num, estimator->time_base[i].den);
             sprintf(buf + strlen(buf), "    Correct diffs: %d\n", estimator->correct_pts_count[i]);
-            strcat(buf, "   Common PTS diffs:\n");
+            strcat(buf, "    Common PTS diffs:\n");
             for (int j=0; j<PTS_TRACK_COUNT; j++) {
                 if (estimator->common_pts_diffs[i][j] != AV_NOPTS_VALUE) {
-                    sprintf(buf + strlen(buf), "      %"PRId64": %d\n", estimator->common_pts_diffs[i][j], estimator->common_pts_diff_counts[i][j]);
+                    double gap_len = av_q2d(av_div_q((AVRational){estimator->common_pts_diffs[i][j], 1}, av_inv_q(estimator->time_base[i])));
+                    sprintf(buf + strlen(buf), "      %"PRId64" (%.6f s): %d\n", estimator->common_pts_diffs[i][j], gap_len, estimator->common_pts_diff_counts[i][j]);
                 }
             }
         }
