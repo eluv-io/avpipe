@@ -3,14 +3,26 @@
 #include "elv_log.h"
 #include <stdbool.h>
 
+#define PTS_TRACK_COUNT	        5
+
 typedef struct pts_estimator_t {
     int64_t pts_per_frame[MAX_STREAMS];
     int64_t frames_written[MAX_STREAMS];
     /* PTS of the last packet read from the input stream, used to detect discrepancies. */
     int64_t last_pts[MAX_STREAMS];
 
+    
     int major_discrepancies_logged;
     int minor_discrepancies_logged;
+    // NOTE: This isn't a particularly efficient way to handle this, but its overhead on the order
+    // of a few kb
+
+    // These arrays are used to track the PTS differences from expected for each stream.
+    // It is filled by successive differences, so it may not contain common differences if they are
+    // not in the first PTS_TRACK_COUNT packets checked.
+    int64_t common_pts_diffs[MAX_STREAMS][PTS_TRACK_COUNT];
+    int common_pts_diff_counts[MAX_STREAMS][PTS_TRACK_COUNT];
+    int correct_pts_count[MAX_STREAMS];
 } pts_estimator_t;
 
 /* Allocate and initialize a PTS estimator. */
@@ -24,6 +36,7 @@ static int report_successive_packets_for_pts_estimation(pts_estimator_t *estimat
 /* Adjust the PTS of a packet just before writing it out to the output. If anything has not been
  * initialized properly, this function will error. */
 static int adjust_pts(pts_estimator_t *estimator, int stream_index, AVPacket *pkt);
+static int log_conclusion(pts_estimator_t *estimator);
 
 void
 log_params(
@@ -501,6 +514,7 @@ avpipe_mux(
     }
 
     av_write_trailer(xctx->out_muxer_ctx.format_context);
+    log_conclusion(pts_estimator);
 
     if (ret == AVERROR_EOF)
         ret = 0;
@@ -571,6 +585,9 @@ static int init_pts_estimator(pts_estimator_t **estimator) {
     for (int i=0; i<MAX_STREAMS; i++) {
         (*estimator)->last_pts[i] = AV_NOPTS_VALUE;
         (*estimator)->pts_per_frame[i] = AV_NOPTS_VALUE;
+        for (int j=0; j<PTS_TRACK_COUNT; j++) {
+            (*estimator)->common_pts_diffs[i][j] = AV_NOPTS_VALUE;
+        }
     }
 
     return eav_success;
@@ -685,6 +702,22 @@ static int adjust_pts(pts_estimator_t *estimator, int stream_index, AVPacket *pk
                 estimator->minor_discrepancies_logged++;
             }
         }
+
+        // Track the PTS delta for a report when muxing is done.
+        if (diff_from_expected == 0) {
+            estimator->correct_pts_count[stream_index]++;
+        } else {
+            for (int i=0; i<PTS_TRACK_COUNT; i++) {
+                if (estimator->common_pts_diffs[stream_index][i] == AV_NOPTS_VALUE) {
+                    estimator->common_pts_diffs[stream_index][i] = diff_from_expected;
+                    estimator->common_pts_diff_counts[stream_index][i] = 1;
+                    break;
+                } else if (estimator->common_pts_diffs[stream_index][i] == diff_from_expected) {
+                    estimator->common_pts_diff_counts[stream_index][i]++;
+                    break;
+                }
+            }
+        }
     }
 
     estimator->last_pts[stream_index] = pkt->pts;
@@ -693,6 +726,29 @@ static int adjust_pts(pts_estimator_t *estimator, int stream_index, AVPacket *pk
     pkt->dts = pkt->pts;
 
     estimator->frames_written[stream_index]++;
+
+    return eav_success;
+}
+
+static int log_conclusion(pts_estimator_t *estimator) {
+    char *buf = (char *)calloc(1, 8 * 1024);
+
+    strcat(buf, "avpipe_mux PTS estimation results:\n");
+    for (int i=0; i<MAX_STREAMS; i++) {
+        if (estimator->frames_written[i] > 0) {
+            sprintf(buf + strlen(buf), "  Stream %d:\n    Frames written: %"PRId64"\n    PTS Delta: %"PRId64"\n", i, estimator->frames_written[i], estimator->pts_per_frame[i]);
+            sprintf(buf + strlen(buf), "    Correct diffs: %d\n", estimator->correct_pts_count[i]);
+            strcat(buf, "   Common PTS diffs:\n");
+            for (int j=0; j<PTS_TRACK_COUNT; j++) {
+                if (estimator->common_pts_diffs[i][j] != AV_NOPTS_VALUE) {
+                    sprintf(buf + strlen(buf), "      %"PRId64": %d\n", estimator->common_pts_diffs[i][j], estimator->common_pts_diff_counts[i][j]);
+                }
+            }
+        }
+    }
+
+    elv_log("%s", buf);
+    free(buf);
 
     return eav_success;
 }
