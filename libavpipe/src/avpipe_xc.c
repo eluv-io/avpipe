@@ -4348,6 +4348,11 @@ avpipe_probe(
             }
         }
 
+        // Start time is optional - set to 0 if not explicitly specified
+        if (s->start_time == AV_NOPTS_VALUE) {
+            s->start_time = 0;
+        }
+
         stream_probes_ptr->duration_ts = s->duration;
         stream_probes_ptr->time_base = s->time_base;
         stream_probes_ptr->nb_frames = s->nb_frames;
