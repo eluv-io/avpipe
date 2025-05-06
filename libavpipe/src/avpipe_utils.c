@@ -332,3 +332,23 @@ hex_encode(byte *buf, int sz, char *str)
         sprintf(str + 2 * i, "%02x", buf[i]);
     }
 }
+
+// Parse a duration string of format "HH:MM:SS.SUB" into duration ts
+int64_t
+parse_duration(const char *duration_str, AVRational time_base) {
+    int hours = 0, minutes = 0;
+    double seconds = 0.0;
+
+    if (sscanf(duration_str, "%d:%d:%lf", &hours, &minutes, &seconds) != 3) {
+        elv_dbg("Failed to parse duration string: %s", duration_str);
+        return -1;
+    }
+
+    double secs = hours * 3600 + minutes * 60 + seconds;
+    int64_t usecs = (int64_t)(secs * 1000000.0);
+
+    // Rescale to timebase
+    int64_t duration_ts = av_rescale_q(usecs, AV_TIME_BASE_Q, time_base);
+
+    return duration_ts;
+}

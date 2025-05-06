@@ -80,3 +80,8 @@ hex_encode(
     byte *buf,
     int sz,
     char *str);
+
+int64_t
+parse_duration(
+    const char *duration_str,
+    AVRational time_base);
