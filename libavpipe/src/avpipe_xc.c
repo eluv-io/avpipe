@@ -4333,6 +4333,21 @@ avpipe_probe(
             stream_probes_ptr->codec_type = decoder_ctx.format_context->streams[i]->codecpar->codec_type;
         }
         stream_probes_ptr->codec_name[MAX_CODEC_NAME] = '\0';
+
+        // Estimate duration if not provided by the stream format
+        if (s->duration <= 0) {
+            // Check for tag 'duration' of format "HH:MM:SS.SUB"
+            AVDictionaryEntry *d = NULL;
+            d = av_dict_get(s->metadata, "duration", NULL, 0);
+            if (d) {
+                int64_t duration_ts = parse_duration(d->value, s->time_base);
+                if (duration_ts > 0) {
+                    s->duration = duration_ts;
+                    av_dict_set(&s->metadata,"avpipe", "duration estimated from tag", 0);
+                }
+            }
+        }
+
         stream_probes_ptr->duration_ts = s->duration;
         stream_probes_ptr->time_base = s->time_base;
         stream_probes_ptr->nb_frames = s->nb_frames;
@@ -4369,6 +4384,7 @@ avpipe_probe(
         stream_probes_ptr->profile = codec_context->profile;
         stream_probes_ptr->level = codec_context->level;
 
+        // Set container duration if necessary
         if (probe->container_info.duration <
             ((float)stream_probes_ptr->duration_ts)/stream_probes_ptr->time_base.den)
             probe->container_info.duration =
