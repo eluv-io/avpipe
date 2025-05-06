@@ -1116,13 +1116,13 @@ read_next_input:
                 return AVERROR_EOF;
             filepath = in_mux_ctx->video.parts[in_mux_ctx->video.index];
             in_mux_ctx->video.index++;
-        } else if (index <= in_mux_ctx->last_audio_index) {
+        } else if (index <= in_mux_ctx->audio_count) {
             if (in_mux_ctx->audios[index-1].index >= in_mux_ctx->audios[index-1].n_parts)
                 return AVERROR_EOF;
             filepath = in_mux_ctx->audios[index-1].parts[in_mux_ctx->audios[index-1].index];
             in_mux_ctx->audios[index-1].index++;
-        } else if (index <= in_mux_ctx->last_audio_index+in_mux_ctx->last_caption_index) {
-            i = index - in_mux_ctx->last_audio_index - 1;
+        } else if (index <= in_mux_ctx->audio_count+in_mux_ctx->caption_count) {
+            i = index - in_mux_ctx->audio_count - 1;
             if (in_mux_ctx->captions[i].index >= in_mux_ctx->captions[i].n_parts)
                 return AVERROR_EOF;
             filepath = in_mux_ctx->captions[i].parts[in_mux_ctx->captions[i].index];
@@ -1147,8 +1147,13 @@ read_next_input:
             in_mux_ctx->audios[index-1].header_size = read_header(fd, in_mux_ctx->mux_type);
 #endif
 
-        if (debug_frame_level)
+        if (debug_frame_level) {
             elv_dbg("IN MUX READ opened new file filepath=%s, fd=%d", filepath, fd);
+            if (strstr(filepath, "init")) {
+                // The read in which this log happens only contains data from new continuity
+                elv_dbg("IN MUX READ INIT open filepath=%s, pos=%d", filepath, c->read_bytes);
+            }
+        }
     }
 
     fd = *((int64_t *)(c->opaque));
