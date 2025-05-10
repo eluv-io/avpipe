@@ -40,7 +40,7 @@
 #define INPUT_IS_SEEKABLE           0
 
 #define MPEGTS_THREAD_COUNT         16
-#define DEFAULT_THREAD_COUNT        8
+#define DEFAULT_THREAD_COUNT        16 // Temporary - partial seg match mez encoding
 #define WATERMARK_STRING_SZ         (64*1024)   /* Max length of watermark text */
 #define FILTER_STRING_SZ            (1024 + WATERMARK_STRING_SZ)
 #define DEFAULT_FRAME_INTERVAL_S    10
