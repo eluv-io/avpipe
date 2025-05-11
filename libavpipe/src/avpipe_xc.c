@@ -40,7 +40,7 @@
 #define INPUT_IS_SEEKABLE           0
 
 #define MPEGTS_THREAD_COUNT         16
-#define DEFAULT_THREAD_COUNT        16 // Temporary - partial seg match mez encoding
+#define DEFAULT_THREAD_COUNT        8
 #define WATERMARK_STRING_SZ         (64*1024)   /* Max length of watermark text */
 #define FILTER_STRING_SZ            (1024 + WATERMARK_STRING_SZ)
 #define DEFAULT_FRAME_INTERVAL_S    10
@@ -899,8 +899,7 @@ set_h264_params(
                                                 encoder_codec_context->height);
     }
 
-    //av_opt_set(encoder_codec_context->priv_data, "preset", "faster", 0);
-    //av_opt_set(encoder_codec_context->priv_data, "x264-params", "ref=2:bframes=0:chroma-qp-offset=0", 0);
+    av_opt_set(encoder_codec_context->priv_data, "x264-params", "stitchable=1", 0);
 }
 
 static void
