@@ -899,7 +899,7 @@ set_h264_params(
                                                 encoder_codec_context->height);
     }
 
-    av_opt_set(encoder_codec_context->priv_data, "preset", "faster", 0);
+    //av_opt_set(encoder_codec_context->priv_data, "preset", "faster", 0);
     //av_opt_set(encoder_codec_context->priv_data, "x264-params", "ref=2:bframes=0:chroma-qp-offset=0", 0);
 }
 
@@ -1221,8 +1221,7 @@ prepare_video_encoder(
         // av_opt_set(encoder_codec_context->priv_data, "crf_max", params->crf_str, AV_OPT_FLAG_ENCODING_PARAM | AV_OPT_SEARCH_CHILDREN);
     }
 
-    if (params->preset && strlen(params->preset) > 0 &&
-        (!strcmp(params->format, "fmp4-segment") || !strcmp(params->format, "fmp4"))) {
+    if (params->preset && strlen(params->preset) > 0) {
         av_opt_set(encoder_codec_context->priv_data, "preset", params->preset, AV_OPT_FLAG_ENCODING_PARAM | AV_OPT_SEARCH_CHILDREN);
     }
 
