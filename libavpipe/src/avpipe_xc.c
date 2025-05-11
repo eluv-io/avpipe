@@ -900,7 +900,7 @@ set_h264_params(
     }
 
     av_opt_set(encoder_codec_context->priv_data, "preset", "faster", 0);
-    av_opt_set(encoder_codec_context->priv_data, "x264-params", "ref=2:bframes=0:chroma-qp-offset=0", 0);
+    //av_opt_set(encoder_codec_context->priv_data, "x264-params", "ref=2:bframes=0:chroma-qp-offset=0", 0);
 }
 
 static void
