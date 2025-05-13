@@ -4958,6 +4958,11 @@ avpipe_fini(
         coderctx_t *mpegts_encoder_ctx = &cp_ctx->encoder_ctx;
         elv_warn("Freeing mpegts encoder context, closing io");
         avio_close(mpegts_encoder_ctx->format_context->pb);
+        if (mpegts_encoder_ctx->format_context->avpipe_opaque) {
+            // This is an out_tracker_t allocated near the end of copy_mpegts_prepare_encoder
+            free(mpegts_encoder_ctx->format_context->avpipe_opaque);
+            mpegts_encoder_ctx->format_context->avpipe_opaque = NULL;
+        }
         avformat_free_context(mpegts_encoder_ctx->format_context);
         for (int i=0; i<MAX_STREAMS; i++) {
             if (mpegts_encoder_ctx->codec_context[i]) {
@@ -4977,6 +4982,7 @@ avpipe_fini(
     if ((*xctx)->in_handlers && (*xctx)->inctx && (*xctx)->inctx->opaque) {
         // inctx->opaque is allocated by either in_opener or udp_in_opener
         free((*xctx)->inctx->opaque);
+        (*xctx)->inctx->opaque = NULL;
     }
     // PENDING(SS) These are not allocated by avpipe_init
     free((*xctx)->in_handlers);
