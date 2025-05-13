@@ -9,6 +9,7 @@ import (
 	"github.com/stretchr/testify/assert"
 
 	"github.com/eluv-io/avpipe"
+	"github.com/eluv-io/avpipe/goavpipe"
 )
 
 func TestRtmpToMp4_1(t *testing.T) {
@@ -22,7 +23,7 @@ func TestRtmpToMp4_1(t *testing.T) {
 	done := make(chan bool, 1)
 	testComplete := make(chan bool, 1)
 
-	xcParams := &avpipe.XcParams{
+	xcParams := &goavpipe.XcParams{
 		Format:              "fmp4-segment",
 		Seekable:            false,
 		DurationTs:          -1,
@@ -36,7 +37,7 @@ func TestRtmpToMp4_1(t *testing.T) {
 		Ecodec:              "libx264", // libx264 software / h264_videotoolbox mac hardware
 		EncHeight:           720,       // 1080
 		EncWidth:            1280,      // 1920
-		XcType:              avpipe.XcAll,
+		XcType:              goavpipe.XcAll,
 		StreamId:            -1,
 		Url:                 url,
 		SyncAudioToStreamId: -1,
@@ -76,7 +77,7 @@ func TestRtmpToMp4_1(t *testing.T) {
 	xcParams.Dcodec2 = "aac"
 	xcParams.AudioIndex = nil
 	xcParams.AudioSegDurationTs = 96000 // almost 2 * 48000
-	xcParams.XcType = avpipe.XcAudio
+	xcParams.XcType = goavpipe.XcAudio
 	audioMezFiles := [2]string{"audio-mez-segment0-1.mp4", "audio-mez-segment0-2.mp4"}
 
 	// Now create audio dash segments out of audio mezzanines
@@ -102,7 +103,7 @@ func TestRtmpToMp4_1(t *testing.T) {
 
 	xcParams.Format = "dash"
 	xcParams.VideoSegDurationTs = 32000 // almost 2 * 16000
-	xcParams.XcType = avpipe.XcVideo
+	xcParams.XcType = goavpipe.XcVideo
 	videoMezFiles := [2]string{"video-mez-segment-1.mp4", "video-mez-segment-2.mp4"}
 
 	// Now create video dash segments out of audio mezzanines
@@ -142,7 +143,7 @@ func TestRtmpToMp4WithCancelling0(t *testing.T) {
 	liveSource := NewLiveSource()
 	url := fmt.Sprintf(RTMP_SOURCE, liveSource.Port)
 
-	xcParams := &avpipe.XcParams{
+	xcParams := &goavpipe.XcParams{
 		Format:              "fmp4-segment",
 		Seekable:            false,
 		DurationTs:          -1,
@@ -156,7 +157,7 @@ func TestRtmpToMp4WithCancelling0(t *testing.T) {
 		Ecodec:              "libx264", // libx264 software / h264_videotoolbox mac hardware
 		EncHeight:           720,       // 1080
 		EncWidth:            1280,      // 1920
-		XcType:              avpipe.XcAll,
+		XcType:              goavpipe.XcAll,
 		StreamId:            -1,
 		Url:                 url,
 		SyncAudioToStreamId: -1,
@@ -212,7 +213,7 @@ func TestRtmpToMp4WithCancelling1(t *testing.T) {
 	liveSource := NewLiveSource()
 	url := fmt.Sprintf(RTMP_SOURCE, liveSource.Port)
 
-	xcParams := &avpipe.XcParams{
+	xcParams := &goavpipe.XcParams{
 		Format:              "fmp4-segment",
 		Seekable:            false,
 		DurationTs:          -1,
@@ -226,7 +227,7 @@ func TestRtmpToMp4WithCancelling1(t *testing.T) {
 		Ecodec:              "libx264", // libx264 software / h264_videotoolbox mac hardware
 		EncHeight:           720,       // 1080
 		EncWidth:            1280,      // 1920
-		XcType:              avpipe.XcAll,
+		XcType:              goavpipe.XcAll,
 		StreamId:            -1,
 		Url:                 url,
 		SyncAudioToStreamId: -1,
@@ -282,7 +283,7 @@ func TestRtmpToMp4WithCancelling2(t *testing.T) {
 	url := fmt.Sprintf(RTMP_SOURCE, liveSource.Port)
 	done := make(chan bool, 1)
 
-	xcParams := &avpipe.XcParams{
+	xcParams := &goavpipe.XcParams{
 		Format:              "fmp4-segment",
 		Seekable:            false,
 		DurationTs:          -1,
@@ -296,7 +297,7 @@ func TestRtmpToMp4WithCancelling2(t *testing.T) {
 		Ecodec:              "libx264", // libx264 software / h264_videotoolbox mac hardware
 		EncHeight:           720,       // 1080
 		EncWidth:            1280,      // 1920
-		XcType:              avpipe.XcAll,
+		XcType:              goavpipe.XcAll,
 		StreamId:            -1,
 		Url:                 url,
 		SyncAudioToStreamId: -1,
@@ -362,7 +363,7 @@ func TestRtmpToMp4WithCancelling3(t *testing.T) {
 	url := fmt.Sprintf(RTMP_SOURCE, liveSource.Port)
 	done := make(chan bool, 1)
 
-	xcParams := &avpipe.XcParams{
+	xcParams := &goavpipe.XcParams{
 		Format:              "fmp4-segment",
 		Seekable:            false,
 		DurationTs:          -1,
@@ -376,7 +377,7 @@ func TestRtmpToMp4WithCancelling3(t *testing.T) {
 		Ecodec:              "libx264", // libx264 software / h264_videotoolbox mac hardware
 		EncHeight:           720,       // 1080
 		EncWidth:            1280,      // 1920
-		XcType:              avpipe.XcAll,
+		XcType:              goavpipe.XcAll,
 		StreamId:            -1,
 		Url:                 url,
 		SyncAudioToStreamId: -1,
@@ -445,7 +446,7 @@ func TestRtmpToMp4WithCancelling4(t *testing.T) {
 	url := fmt.Sprintf(RTMP_SOURCE, liveSource.Port)
 	done := make(chan bool, 1)
 
-	xcParams := &avpipe.XcParams{
+	xcParams := &goavpipe.XcParams{
 		Format:              "fmp4-segment",
 		Seekable:            false,
 		DurationTs:          -1,
@@ -459,7 +460,7 @@ func TestRtmpToMp4WithCancelling4(t *testing.T) {
 		Ecodec:              "libx264", // libx264 software / h264_videotoolbox mac hardware
 		EncHeight:           720,       // 1080
 		EncWidth:            1280,      // 1920
-		XcType:              avpipe.XcAll,
+		XcType:              goavpipe.XcAll,
 		StreamId:            -1,
 		Url:                 url,
 		SyncAudioToStreamId: -1,
