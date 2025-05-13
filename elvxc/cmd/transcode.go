@@ -9,6 +9,7 @@ import (
 	"strings"
 
 	"github.com/eluv-io/avpipe"
+	"github.com/eluv-io/avpipe/goavpipe"
 	"github.com/spf13/cobra"
 )
 
@@ -142,7 +143,7 @@ type elvxcOutputOpener struct {
 }
 
 func (oo *elvxcOutputOpener) Open(h, fd int64, stream_index, seg_index int,
-	pts int64, out_type avpipe.AVType) (avpipe.OutputHandler, error) {
+	pts int64, out_type goavpipe.AVType) (avpipe.OutputHandler, error) {
 
 	log.Debug("AVCMD OutputOpener.Open", "h", h, "fd", fd,
 		"stream_index", stream_index, "seg_index", seg_index, "pts", pts, "out_type", out_type)
@@ -157,37 +158,37 @@ func (oo *elvxcOutputOpener) Open(h, fd int64, stream_index, seg_index int,
 	}
 
 	switch out_type {
-	case avpipe.DASHVideoInit:
+	case goavpipe.DASHVideoInit:
 		fallthrough
-	case avpipe.DASHAudioInit:
+	case goavpipe.DASHAudioInit:
 		filename = fmt.Sprintf("./%s/init-stream%d.m4s", dir, stream_index)
-	case avpipe.DASHManifest:
+	case goavpipe.DASHManifest:
 		filename = fmt.Sprintf("./%s/dash.mpd", dir)
-	case avpipe.DASHVideoSegment:
+	case goavpipe.DASHVideoSegment:
 		fallthrough
-	case avpipe.DASHAudioSegment:
+	case goavpipe.DASHAudioSegment:
 		filename = fmt.Sprintf("./%s/chunk-stream%d-%05d.m4s", dir, stream_index, seg_index)
-	case avpipe.HLSMasterM3U:
+	case goavpipe.HLSMasterM3U:
 		filename = fmt.Sprintf("./%s/master.m3u8", dir)
-	case avpipe.HLSVideoM3U:
+	case goavpipe.HLSVideoM3U:
 		fallthrough
-	case avpipe.HLSAudioM3U:
+	case goavpipe.HLSAudioM3U:
 		filename = fmt.Sprintf("./%s/media_%d.m3u8", dir, stream_index)
-	case avpipe.AES128Key:
+	case goavpipe.AES128Key:
 		filename = fmt.Sprintf("./%s/key.bin", dir)
-	case avpipe.MP4Stream:
+	case goavpipe.MP4Stream:
 		filename = fmt.Sprintf("%s/mp4-stream.mp4", dir)
-	case avpipe.FMP4Stream:
+	case goavpipe.FMP4Stream:
 		filename = fmt.Sprintf("%s/fmp4-stream.mp4", dir)
-	case avpipe.MP4Segment:
+	case goavpipe.MP4Segment:
 		filename = fmt.Sprintf("%s/segment%d-%05d.mp4", dir, stream_index, seg_index)
-	case avpipe.FMP4VideoSegment:
+	case goavpipe.FMP4VideoSegment:
 		filename = fmt.Sprintf("%s/fmp4-vsegment%d-%05d.mp4", dir, stream_index, seg_index)
-	case avpipe.FMP4AudioSegment:
+	case goavpipe.FMP4AudioSegment:
 		filename = fmt.Sprintf("%s/fmp4-asegment%d-%05d.mp4", dir, stream_index, seg_index)
-	case avpipe.FrameImage:
+	case goavpipe.FrameImage:
 		filename = fmt.Sprintf("%s/%d.jpeg", dir, pts)
-	case avpipe.MpegtsSegment:
+	case goavpipe.MpegtsSegment:
 		filename = fmt.Sprintf("%s/ts-segment-%05d.ts", dir, seg_index)
 	}
 
@@ -228,7 +229,7 @@ func (o *elvxcOutput) Close() error {
 	return err
 }
 
-func (o *elvxcOutput) Stat(streamIndex int, avType avpipe.AVType, statType avpipe.AVStatType, statArgs interface{}) error {
+func (o *elvxcOutput) Stat(streamIndex int, avType goavpipe.AVType, statType avpipe.AVStatType, statArgs interface{}) error {
 	doLog := func(args ...interface{}) {
 		logArgs := []interface{}{"stat", statType.Name(), "avType", avType.Name(), "streamIndex", streamIndex}
 		logArgs = append(logArgs, args...)
@@ -255,7 +256,7 @@ func (o *elvxcOutput) Stat(streamIndex int, avType avpipe.AVType, statType avpip
 	return nil
 }
 
-func getAudioIndexes(params *avpipe.XcParams, audioIndexes string) (err error) {
+func getAudioIndexes(params *goavpipe.XcParams, audioIndexes string) (err error) {
 	if len(audioIndexes) == 0 {
 		return
 	}
@@ -273,8 +274,8 @@ func getAudioIndexes(params *avpipe.XcParams, audioIndexes string) (err error) {
 }
 
 // parseExtractImagesTs converts the extract-images-ts string parameter, e.g.
-// "0,64000,128000,1152000", to an int64 array in avpipe.XcParams
-func parseExtractImagesTs(params *avpipe.XcParams, s string) (err error) {
+// "0,64000,128000,1152000", to an int64 array in goavpipe.XcParams
+func parseExtractImagesTs(params *goavpipe.XcParams, s string) (err error) {
 	if len(s) == 0 {
 		return
 	}
@@ -475,25 +476,25 @@ func doTranscode(cmd *cobra.Command, args []string) error {
 	watermarkShadowColor := cmd.Flag("wm-shadow-color").Value.String()
 	watermarkOverlay := cmd.Flag("wm-overlay").Value.String()
 
-	var watermarkOverlayType avpipe.ImageType
+	var watermarkOverlayType goavpipe.ImageType
 	watermarkOverlayTypeStr := cmd.Flag("wm-overlay-type").Value.String()
 	switch watermarkOverlayTypeStr {
 	case "png":
 		fallthrough
 	case "PNG":
-		watermarkOverlayType = avpipe.PngImage
+		watermarkOverlayType = goavpipe.PngImage
 	case "jpg":
 		fallthrough
 	case "JPG":
-		watermarkOverlayType = avpipe.JpgImage
+		watermarkOverlayType = goavpipe.JpgImage
 	case "gif":
 		fallthrough
 	case "GIF":
-		watermarkOverlayType = avpipe.GifImage
+		watermarkOverlayType = goavpipe.GifImage
 	default:
-		watermarkOverlayType = avpipe.UnknownImage
+		watermarkOverlayType = goavpipe.UnknownImage
 	}
-	if len(watermarkOverlay) > 0 && watermarkOverlayType == avpipe.UnknownImage {
+	if len(watermarkOverlay) > 0 && watermarkOverlayType == goavpipe.UnknownImage {
 		return fmt.Errorf("Watermark overlay type is not valid, can be 'png', 'jpg', 'gif'")
 	}
 
@@ -521,8 +522,8 @@ func doTranscode(cmd *cobra.Command, args []string) error {
 		xcTypeStr != "extract-all-images" {
 		return fmt.Errorf("Transcoding type is not valid, with no stream-id can be 'all', 'video', 'audio', 'audio-join', 'audio-pan', 'audio-merge', or 'extract-images'")
 	}
-	xcType := avpipe.XcTypeFromString(xcTypeStr)
-	if xcType == avpipe.XcAudio && len(encoder) == 0 {
+	xcType := goavpipe.XcTypeFromString(xcTypeStr)
+	if xcType == goavpipe.XcAudio && len(encoder) == 0 {
 		encoder = "aac"
 	}
 
@@ -623,14 +624,14 @@ func doTranscode(cmd *cobra.Command, args []string) error {
 	if err != nil ||
 		(format != "segment" && format != "fmp4-segment" &&
 			audioSegDurationTs == 0 &&
-			(xcType == avpipe.XcAll || xcType == avpipe.XcAudio ||
-				xcType == avpipe.XcAudioJoin || xcType == avpipe.XcAudioMerge)) {
+			(xcType == goavpipe.XcAll || xcType == goavpipe.XcAudio ||
+				xcType == goavpipe.XcAudioJoin || xcType == goavpipe.XcAudioMerge)) {
 		return fmt.Errorf("Audio seg duration ts is not valid")
 	}
 
 	videoSegDurationTs, err := cmd.Flags().GetInt64("video-seg-duration-ts")
 	if err != nil || (format != "segment" && format != "fmp4-segment" && format != "mp4" &&
-		videoSegDurationTs == 0 && (xcType == avpipe.XcAll || xcType == avpipe.XcVideo)) {
+		videoSegDurationTs == 0 && (xcType == goavpipe.XcAll || xcType == goavpipe.XcVideo)) {
 		return fmt.Errorf("Video seg duration ts is not valid")
 	}
 
@@ -664,20 +665,20 @@ func doTranscode(cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("Invalid copy-mpegts value")
 	}
 
-	cryptScheme := avpipe.CryptNone
+	cryptScheme := goavpipe.CryptNone
 	val := cmd.Flag("crypt-scheme").Value.String()
 	if len(val) > 0 {
 		switch val {
 		case "aes-128":
-			cryptScheme = avpipe.CryptAES128
+			cryptScheme = goavpipe.CryptAES128
 		case "cenc":
-			cryptScheme = avpipe.CryptCENC
+			cryptScheme = goavpipe.CryptCENC
 		case "cbc1":
-			cryptScheme = avpipe.CryptCBC1
+			cryptScheme = goavpipe.CryptCBC1
 		case "cens":
-			cryptScheme = avpipe.CryptCENS
+			cryptScheme = goavpipe.CryptCENS
 		case "cbcs":
-			cryptScheme = avpipe.CryptCBCS
+			cryptScheme = goavpipe.CryptCBCS
 		case "none":
 			break
 		default:
@@ -699,7 +700,7 @@ func doTranscode(cmd *cobra.Command, args []string) error {
 		os.Mkdir(dir, 0755)
 	}
 
-	params := &avpipe.XcParams{
+	params := &goavpipe.XcParams{
 		Url:                    filename,
 		BypassTranscoding:      bypass,
 		Format:                 format,
@@ -783,7 +784,7 @@ func doTranscode(cmd *cobra.Command, args []string) error {
 	done := make(chan interface{})
 
 	for i := 0; i < int(nThreads); i++ {
-		go func(params *avpipe.XcParams, filename string) {
+		go func(params *goavpipe.XcParams, filename string) {
 
 			err := avpipe.Xc(params)
 			if err != nil {

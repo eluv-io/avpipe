@@ -3,12 +3,14 @@ package cmd
 import "C"
 import (
 	"fmt"
-	"github.com/eluv-io/avpipe"
-	"github.com/spf13/cobra"
 	"io"
 	"io/ioutil"
 	"net/http"
 	"os"
+
+	"github.com/eluv-io/avpipe"
+	"github.com/eluv-io/avpipe/goavpipe"
+	"github.com/spf13/cobra"
 )
 
 type AVCmdMuxInputOpener struct {
@@ -121,11 +123,11 @@ func (muxInput *elvxcMuxInput) Stat(streamIndex int, statType avpipe.AVStatType,
 type AVCmdMuxOutputOpener struct {
 }
 
-func (outputOpener *AVCmdMuxOutputOpener) Open(filename string, fd int64, outType avpipe.AVType) (avpipe.OutputHandler, error) {
+func (outputOpener *AVCmdMuxOutputOpener) Open(filename string, fd int64, outType goavpipe.AVType) (avpipe.OutputHandler, error) {
 
-	if outType != avpipe.MP4Segment &&
-		outType != avpipe.FMP4AudioSegment &&
-		outType != avpipe.FMP4VideoSegment {
+	if outType != goavpipe.MP4Segment &&
+		outType != goavpipe.FMP4AudioSegment &&
+		outType != goavpipe.FMP4VideoSegment {
 		return nil, fmt.Errorf("Invalid outType=%d", outType)
 	}
 
@@ -165,7 +167,7 @@ func (muxOutput *elvxcMuxOutput) Close() error {
 	return err
 }
 
-func (muxOutput *elvxcMuxOutput) Stat(streamIndex int, avType avpipe.AVType, statType avpipe.AVStatType, statArgs interface{}) error {
+func (muxOutput *elvxcMuxOutput) Stat(streamIndex int, avType goavpipe.AVType, statType avpipe.AVStatType, statArgs interface{}) error {
 	switch statType {
 	case avpipe.AV_OUT_STAT_BYTES_WRITTEN:
 		writeOffset := statArgs.(*uint64)
@@ -219,7 +221,7 @@ func doMux(cmd *cobra.Command, args []string) error {
 	}
 	log.Debug("doMux", "mux_spec", string(muxSpec))
 
-	params := &avpipe.XcParams{
+	params := &goavpipe.XcParams{
 		MuxingSpec:      string(muxSpec),
 		Url:             filename,
 		DebugFrameLevel: true,

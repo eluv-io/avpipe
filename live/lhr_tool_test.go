@@ -18,6 +18,7 @@ import (
 	"testing"
 
 	"github.com/eluv-io/avpipe"
+	"github.com/eluv-io/avpipe/goavpipe"
 	"github.com/eluv-io/errors-go"
 	elog "github.com/eluv-io/log-go"
 	"github.com/stretchr/testify/assert"
@@ -118,7 +119,7 @@ func putReqCtxByFD(fd int64, reqCtx *testCtx) {
 }
 
 func TestHLSVideoOnly(t *testing.T) {
-	params := &avpipe.XcParams{
+	params := &goavpipe.XcParams{
 		Format:          "fmp4-segment",
 		DurationTs:      3 * 2700000,
 		StartSegmentStr: "1",
@@ -128,7 +129,7 @@ func TestHLSVideoOnly(t *testing.T) {
 		Ecodec:          defaultVideoEncoder(),
 		EncHeight:       720,
 		EncWidth:        1280,
-		XcType:          avpipe.XcVideo,
+		XcType:          goavpipe.XcVideo,
 		DebugFrameLevel: debugFrameLevel,
 		StreamId:        -1,
 	}
@@ -141,7 +142,7 @@ func TestHLSVideoOnly(t *testing.T) {
 	if err != nil {
 		t.Error(err)
 	}
-	readers, err := NewHLSReaders(manifestURL, avpipe.XcVideo) //readers, err := NewHLSReaders(manifestURL, STVideoOnly)
+	readers, err := NewHLSReaders(manifestURL, goavpipe.XcVideo) //readers, err := NewHLSReaders(manifestURL, STVideoOnly)
 	if err != nil {
 		t.Error(err)
 	}
@@ -170,7 +171,7 @@ func TestHLSVideoOnly(t *testing.T) {
 }
 
 func TestHLSAudioOnly(t *testing.T) {
-	params := &avpipe.XcParams{
+	params := &goavpipe.XcParams{
 		Format:          "fmp4-segment",
 		DurationTs:      3 * 2700000,
 		StartSegmentStr: "1",
@@ -178,7 +179,7 @@ func TestHLSAudioOnly(t *testing.T) {
 		SampleRate:      48000,
 		SegDuration:     "30",
 		Ecodec2:         "aac", // "ac3", "aac"
-		XcType:          avpipe.XcAudio,
+		XcType:          goavpipe.XcAudio,
 		DebugFrameLevel: debugFrameLevel,
 		StreamId:        -1,
 	}
@@ -193,7 +194,7 @@ func TestHLSAudioOnly(t *testing.T) {
 	if err != nil {
 		t.Error(err)
 	}
-	readers, err := NewHLSReaders(manifestURL, avpipe.XcAudio)
+	readers, err := NewHLSReaders(manifestURL, goavpipe.XcAudio)
 	if err != nil {
 		t.Error(err)
 	}
@@ -233,7 +234,7 @@ func TestHLSAudioVideoLive(t *testing.T) {
 	if err != nil {
 		t.Error(err)
 	}
-	readers, err := NewHLSReaders(manifestURL, avpipe.XcNone)
+	readers, err := NewHLSReaders(manifestURL, goavpipe.XcNone)
 	if err != nil {
 		t.Error(err)
 	}
@@ -246,7 +247,7 @@ func TestHLSAudioVideoLive(t *testing.T) {
 	done := make(chan bool, 2)
 	avpipe.InitIOHandler(&inputOpener{}, &outputOpener{dir: outputDir})
 
-	audioParams := &avpipe.XcParams{
+	audioParams := &goavpipe.XcParams{
 		Format:          "fmp4-segment",
 		DurationTs:      3 * 2700000,
 		StartSegmentStr: "1",
@@ -254,7 +255,7 @@ func TestHLSAudioVideoLive(t *testing.T) {
 		SampleRate:      48000,
 		SegDuration:     "30",
 		Ecodec2:         "aac",
-		XcType:          avpipe.XcAudio,
+		XcType:          goavpipe.XcAudio,
 		DebugFrameLevel: debugFrameLevel,
 		StreamId:        -1,
 	}
@@ -275,7 +276,7 @@ func TestHLSAudioVideoLive(t *testing.T) {
 		done <- true
 	}(audioReader)
 
-	videoParams := &avpipe.XcParams{
+	videoParams := &goavpipe.XcParams{
 		Format:          "fmp4-segment",
 		DurationTs:      3 * 2700000,
 		StartSegmentStr: "1",
@@ -285,7 +286,7 @@ func TestHLSAudioVideoLive(t *testing.T) {
 		Ecodec:          defaultVideoEncoder(),
 		EncHeight:       720,
 		EncWidth:        1280,
-		XcType:          avpipe.XcVideo,
+		XcType:          goavpipe.XcVideo,
 		Url:             "video_mez_hls",
 		DebugFrameLevel: debugFrameLevel,
 		StreamId:        -1,
@@ -495,7 +496,7 @@ func (i *inputCtx) Stat(streamIndex int, statType avpipe.AVStatType, statArgs in
 }
 
 func (oo *outputOpener) Open(h, fd int64, streamIndex, segIndex int, _ int64,
-	outType avpipe.AVType) (avpipe.OutputHandler, error) {
+	outType goavpipe.AVType) (avpipe.OutputHandler, error) {
 
 	tc, err := getReqCtxByFD(h)
 	if err != nil {
@@ -510,29 +511,29 @@ func (oo *outputOpener) Open(h, fd int64, streamIndex, segIndex int, _ int64,
 	var filename string
 
 	switch outType {
-	case avpipe.DASHVideoInit:
+	case goavpipe.DASHVideoInit:
 		fallthrough
-	case avpipe.DASHAudioInit:
+	case goavpipe.DASHAudioInit:
 		filename = fmt.Sprintf("./%s/video-init-stream%d.mp4", oo.dir, streamIndex)
-	case avpipe.DASHManifest:
+	case goavpipe.DASHManifest:
 		filename = fmt.Sprintf("./%s/dash.mpd", oo.dir)
-	case avpipe.DASHVideoSegment:
+	case goavpipe.DASHVideoSegment:
 		filename = fmt.Sprintf("./%s/video-chunk-stream%d-%05d.mp4", oo.dir, streamIndex, segIndex)
-	case avpipe.DASHAudioSegment:
+	case goavpipe.DASHAudioSegment:
 		filename = fmt.Sprintf("./%s/audio-chunk-stream%d-%05d.mp4", oo.dir, streamIndex, segIndex)
-	case avpipe.HLSMasterM3U:
+	case goavpipe.HLSMasterM3U:
 		filename = fmt.Sprintf("./%s/master.m3u8", oo.dir)
-	case avpipe.HLSVideoM3U:
+	case goavpipe.HLSVideoM3U:
 		filename = fmt.Sprintf("./%s/video-media_%d.m3u8", oo.dir, streamIndex)
-	case avpipe.HLSAudioM3U:
+	case goavpipe.HLSAudioM3U:
 		filename = fmt.Sprintf("./%s/audio-media_%d.m3u8", oo.dir, streamIndex)
-	case avpipe.AES128Key:
+	case goavpipe.AES128Key:
 		filename = fmt.Sprintf("./%s/%s-key.bin", oo.dir, url)
-	case avpipe.MP4Segment:
+	case goavpipe.MP4Segment:
 		filename = fmt.Sprintf("./%s/segment-%d.mp4", oo.dir, segIndex)
-	case avpipe.FMP4AudioSegment:
+	case goavpipe.FMP4AudioSegment:
 		filename = fmt.Sprintf("./%s/audio-mez-segment%d-%d.mp4", oo.dir, streamIndex, segIndex)
-	case avpipe.FMP4VideoSegment:
+	case goavpipe.FMP4VideoSegment:
 		filename = fmt.Sprintf("./%s/video-mez-segment-%d.mp4", oo.dir, segIndex)
 	}
 
@@ -582,7 +583,7 @@ func (o *outputCtx) Close() error {
 	return nil
 }
 
-func (o *outputCtx) Stat(streamIndex int, avType avpipe.AVType, statType avpipe.AVStatType, statArgs interface{}) error {
+func (o *outputCtx) Stat(streamIndex int, avType goavpipe.AVType, statType avpipe.AVStatType, statArgs interface{}) error {
 	doLog := func(args ...interface{}) {
 		if debugFrameLevel {
 			logArgs := []interface{}{"stat", statType.Name(), "avType", avType.Name(), "streamIndex", streamIndex}

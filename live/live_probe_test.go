@@ -2,10 +2,12 @@ package live
 
 import (
 	"fmt"
-	"github.com/eluv-io/avpipe"
-	"github.com/stretchr/testify/assert"
 	"testing"
 	"time"
+
+	"github.com/eluv-io/avpipe"
+	"github.com/eluv-io/avpipe/goavpipe"
+	"github.com/stretchr/testify/assert"
 )
 
 // 1) Starts ffmpeg for streaming RTMP in listen mode
@@ -24,9 +26,9 @@ func TestProbeRTMPConnect(t *testing.T) {
 
 	time.Sleep(2 * time.Second)
 
-	XCParams := &avpipe.XcParams{
+	XCParams := &goavpipe.XcParams{
 		Seekable:        false,
-		XcType:          avpipe.Xcprobe,
+		XcType:          goavpipe.Xcprobe,
 		StreamId:        -1,
 		Url:             url,
 		DebugFrameLevel: debugFrameLevel,
@@ -64,9 +66,9 @@ func TestProbeRTMPListen(t *testing.T) {
 	liveSource := NewLiveSource()
 	url := fmt.Sprintf("rtmp://localhost:%d/rtmp/Doj1Nr3S", liveSource.Port)
 
-	XCParams := &avpipe.XcParams{
+	XCParams := &goavpipe.XcParams{
 		Seekable:          false,
-		XcType:            avpipe.Xcprobe,
+		XcType:            goavpipe.Xcprobe,
 		StreamId:          -1,
 		Url:               url,
 		DebugFrameLevel:   debugFrameLevel,
@@ -117,9 +119,9 @@ func TestProbeRTMPNoStream(t *testing.T) {
 	liveSource := NewLiveSource()
 	url := fmt.Sprintf("rtmp://localhost:%d/rtmp/Doj1Nr3S", liveSource.Port)
 
-	XCParams := &avpipe.XcParams{
+	XCParams := &goavpipe.XcParams{
 		Seekable:          false,
-		XcType:            avpipe.Xcprobe,
+		XcType:            goavpipe.Xcprobe,
 		StreamId:          -1,
 		Url:               url,
 		DebugFrameLevel:   debugFrameLevel,
@@ -154,9 +156,9 @@ func TestProbeUDPConnect(t *testing.T) {
 
 	time.Sleep(2 * time.Second)
 
-	XCParams := &avpipe.XcParams{
+	XCParams := &goavpipe.XcParams{
 		Seekable:          false,
-		XcType:            avpipe.Xcprobe,
+		XcType:            goavpipe.Xcprobe,
 		StreamId:          -1,
 		Url:               url,
 		DebugFrameLevel:   debugFrameLevel,
@@ -196,9 +198,9 @@ func TestProbeUDPListen(t *testing.T) {
 	liveSource := NewLiveSource()
 	url := fmt.Sprintf("udp://localhost:%d", liveSource.Port)
 
-	XCParams := &avpipe.XcParams{
+	XCParams := &goavpipe.XcParams{
 		Seekable:        false,
-		XcType:          avpipe.Xcprobe,
+		XcType:          goavpipe.Xcprobe,
 		StreamId:        -1,
 		Url:             url,
 		DebugFrameLevel: debugFrameLevel,
@@ -248,9 +250,9 @@ func TestProbeUDPNoStream(t *testing.T) {
 	liveSource := NewLiveSource()
 	url := fmt.Sprintf("udp://localhost:%d", liveSource.Port)
 
-	XCParams := &avpipe.XcParams{
+	XCParams := &goavpipe.XcParams{
 		Seekable:          false,
-		XcType:            avpipe.Xcprobe,
+		XcType:            goavpipe.Xcprobe,
 		StreamId:          -1,
 		Url:               url,
 		DebugFrameLevel:   debugFrameLevel,
