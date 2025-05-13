@@ -3994,6 +3994,12 @@ xc_done:
     pthread_join(xctx->vthread_id, NULL);
     pthread_join(xctx->athread_id, NULL);
 
+    if (params->copy_mpegts) {
+        cp_ctx_t *cp_ctx = &xctx->cp_ctx;
+        elv_channel_close(cp_ctx->ch, 0);
+        pthread_join(cp_ctx->thread_id, NULL);
+    }
+
     /*
      * Flush all frames, first flush decoder buffers, then encoder buffers by passing NULL frame.
      */
@@ -4880,6 +4886,7 @@ avpipe_fini(
     xctx_t **xctx)
 {
     coderctx_t *decoder_context;
+    int rc;
     coderctx_t *encoder_context;
 
     if (!xctx || !(*xctx))
@@ -4889,8 +4896,10 @@ avpipe_fini(
         elv_dbg("Releasing all the resources, url=%s", (*xctx)->inctx->url);
 
     /* Close input handler resources if it is not a muxing command */
-    if (!(*xctx)->in_mux_ctx && (*xctx)->in_handlers)
-        (*xctx)->in_handlers->avpipe_closer((*xctx)->inctx);
+    if (!(*xctx)->in_mux_ctx && (*xctx)->in_handlers) {
+        if ((rc = (*xctx)->in_handlers->avpipe_closer((*xctx)->inctx)) < 0)
+            elv_err("Encountered error closing input, url=%s, rc=%d", (*xctx)->inctx->url, rc);
+    }
 
     decoder_context = &(*xctx)->decoder_ctx;
     encoder_context = &(*xctx)->encoder_ctx;
@@ -4945,6 +4954,25 @@ avpipe_fini(
         }
     }
 
+    if ((*xctx)->params->copy_mpegts) {
+        cp_ctx_t *cp_ctx = &(*xctx)->cp_ctx;
+        coderctx_t *mpegts_encoder_ctx = &cp_ctx->encoder_ctx;
+        if ((rc = avio_close(mpegts_encoder_ctx->format_context->pb)) < 0)
+            elv_warn("Encountered error closing input, url=%s, rc=%d, rc_str=%s", mpegts_encoder_ctx->format_context->url, rc, av_err2str(rc));
+        if (mpegts_encoder_ctx->format_context->avpipe_opaque) {
+            // This is an out_tracker_t allocated near the end of copy_mpegts_prepare_encoder
+            free(mpegts_encoder_ctx->format_context->avpipe_opaque);
+            mpegts_encoder_ctx->format_context->avpipe_opaque = NULL;
+        }
+        avformat_free_context(mpegts_encoder_ctx->format_context);
+        for (int i=0; i<MAX_STREAMS; i++) {
+            if (mpegts_encoder_ctx->codec_context[i]) {
+                /* Corresponds to avcodec_open2() */
+                avcodec_close(mpegts_encoder_ctx->codec_context[i]);
+                avcodec_free_context(&mpegts_encoder_ctx->codec_context[i]);
+            }
+        }
+    }
 #ifdef USE_RESAMPLE_AAC
     if ((*xctx)->params && !strcmp((*xctx)->params->ecodec2, "aac")) {
         av_audio_fifo_free(decoder_context->fifo);
@@ -4952,7 +4980,13 @@ avpipe_fini(
     }
 #endif
 
-    // PENDING(SS) These are not allocated by avpipe_init
+    if ((*xctx)->in_handlers && (*xctx)->inctx && (*xctx)->inctx->opaque) {
+        // inctx->opaque is allocated by either in_opener or udp_in_opener
+        free((*xctx)->inctx->opaque);
+        (*xctx)->inctx->opaque = NULL;
+    }
+    
+    // These are allocated in set_handlers, which is called before avpipe_init in xc_init
     free((*xctx)->in_handlers);
     free((*xctx)->out_handlers);
 
