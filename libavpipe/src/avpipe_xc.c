@@ -4983,8 +4983,8 @@ avpipe_fini(
         // inctx->opaque is allocated by either in_opener or udp_in_opener
         free((*xctx)->inctx->opaque);
         (*xctx)->inctx->opaque = NULL;
-    }
-    // PENDING(SS) These are not allocated by avpipe_init
+    
+    // These are allocated in set_handlers, which is called before avpipe_init in xc_init
     free((*xctx)->in_handlers);
     free((*xctx)->out_handlers);
 
