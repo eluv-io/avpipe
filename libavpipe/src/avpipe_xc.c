@@ -4886,6 +4886,7 @@ avpipe_fini(
     xctx_t **xctx)
 {
     coderctx_t *decoder_context;
+    int rc;
     coderctx_t *encoder_context;
 
     if (!xctx || !(*xctx))
@@ -4896,8 +4897,8 @@ avpipe_fini(
 
     /* Close input handler resources if it is not a muxing command */
     if (!(*xctx)->in_mux_ctx && (*xctx)->in_handlers) {
-        if ((*xctx)->in_handlers->avpipe_closer((*xctx)->inctx) < 0)
-            elv_err("Encountered error closing input, url=%s", (*xctx)->inctx->url);
+        if ((rc = (*xctx)->in_handlers->avpipe_closer((*xctx)->inctx)) < 0)
+            elv_err("Encountered error closing input, url=%s, rc=%d", (*xctx)->inctx->url, rc);
     }
 
     decoder_context = &(*xctx)->decoder_ctx;
@@ -4956,8 +4957,8 @@ avpipe_fini(
     if ((*xctx)->params->copy_mpegts) {
         cp_ctx_t *cp_ctx = &(*xctx)->cp_ctx;
         coderctx_t *mpegts_encoder_ctx = &cp_ctx->encoder_ctx;
-        elv_warn("Freeing mpegts encoder context, closing io");
-        avio_close(mpegts_encoder_ctx->format_context->pb);
+        if ((rc = avio_close(mpegts_encoder_ctx->format_context->pb)) < 0)
+            elv_warn("Encountered error closing input, url=%s, rc=%d, rc_str=%s", mpegts_encoder_ctx->format_context->url, rc, av_err2str(rc));
         if (mpegts_encoder_ctx->format_context->avpipe_opaque) {
             // This is an out_tracker_t allocated near the end of copy_mpegts_prepare_encoder
             free(mpegts_encoder_ctx->format_context->avpipe_opaque);
