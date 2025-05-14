@@ -4955,16 +4955,11 @@ avpipe_fini(
     }
 
     if ((*xctx)->params->copy_mpegts) {
+        void *avpipe_opaque;
         cp_ctx_t *cp_ctx = &(*xctx)->cp_ctx;
         coderctx_t *mpegts_encoder_ctx = &cp_ctx->encoder_ctx;
         if ((rc = avio_close(mpegts_encoder_ctx->format_context->pb)) < 0)
             elv_warn("Encountered error closing input, url=%s, rc=%d, rc_str=%s", mpegts_encoder_ctx->format_context->url, rc, av_err2str(rc));
-        if (mpegts_encoder_ctx->format_context->avpipe_opaque) {
-            // This is an out_tracker_t allocated near the end of copy_mpegts_prepare_encoder
-            free(mpegts_encoder_ctx->format_context->avpipe_opaque);
-            mpegts_encoder_ctx->format_context->avpipe_opaque = NULL;
-        }
-        avformat_free_context(mpegts_encoder_ctx->format_context);
         for (int i=0; i<MAX_STREAMS; i++) {
             if (mpegts_encoder_ctx->codec_context[i]) {
                 /* Corresponds to avcodec_open2() */
@@ -4972,6 +4967,12 @@ avpipe_fini(
                 avcodec_free_context(&mpegts_encoder_ctx->codec_context[i]);
             }
         }
+        // avpipe_opaque is used by elv_io_close in order to properly close the output parts
+        // We hold a reference to it and free it after, as it is not freed there.
+        avpipe_opaque = mpegts_encoder_ctx->format_context->avpipe_opaque;
+        avformat_free_context(mpegts_encoder_ctx->format_context);
+        if (avpipe_opaque)
+            free(avpipe_opaque);
     }
 #ifdef USE_RESAMPLE_AAC
     if ((*xctx)->params && !strcmp((*xctx)->params->ecodec2, "aac")) {
