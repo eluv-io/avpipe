@@ -193,6 +193,7 @@ in_closer(
     int fd = *((int *)(inctx->opaque));
     elv_dbg("IN io_close custom writer fd=%d\n", fd);
     free(inctx->opaque);
+    inctx->opaque = NULL;
     close(fd);
     return 0;
 }
