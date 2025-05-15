@@ -2046,7 +2046,7 @@ encode_frame(
     int debug_frame_level)
 {
     int ret;
-    int index = stream_index; 
+    int index = stream_index;
     int rc = eav_success;
     AVFormatContext *format_context = encoder_context->format_context;
     AVCodecContext *codec_context = encoder_context->codec_context[stream_index];
@@ -2179,7 +2179,7 @@ encode_frame(
         }
 
         /*
-         * Sometimes the first audio frame comes out from encoder with a negarive pts (i.e replay rtmp with ffmpeg),
+         * Sometimes the first audio frame comes out from encoder with a negative pts (i.e replay rtmp with ffmpeg),
          * and after rescaling it becomes pretty big number which causes audio sync problem.
          * The only solution that I could come up for this was skipping this frame. (-RM)
          */
@@ -2247,18 +2247,15 @@ encode_frame(
             encoder_context->video_encoder_prev_pts = output_packet->pts;
 
         /*
-         * Rescale using the stream time_base (not the codec context):
-         *   - if the stream is a video or
-         *   - if it is audio then the decoding stream and encoding stream has the same codec id.
+         * Rescale using the stream time_base (not the codec context)
          */
         if ((stream_index == decoder_context->video_stream_index ||
-            (selected_decoded_audio(decoder_context, stream_index) >= 0 &&
-             params->ecodec2 != NULL &&
-             !strcmp(avcodec_get_name(decoder_context->codec_parameters[stream_index]->codec_id), params->ecodec2))) &&
+            (selected_decoded_audio(decoder_context, stream_index) >= 0)) &&
             (decoder_context->stream[stream_index]->time_base.den !=
             encoder_context->stream[index]->time_base.den ||
             decoder_context->stream[stream_index]->time_base.num !=
             encoder_context->stream[index]->time_base.num)) {
+
             av_packet_rescale_ts(output_packet,
                 decoder_context->stream[stream_index]->time_base,
                 encoder_context->stream[index]->time_base
