@@ -93,13 +93,13 @@ dump_decoder(
         elv_dbg("DECODER[%d]: ff_log -- %s", i, ctx_str);
         av_free(ctx_str);
 
-        elv_dbg("DECODER[%d] url=%s codec_type=%d profile=%d level=%d start_time=%d duration=%d nb_frames=%d"
+        elv_dbg("DECODER[%d] url=%s codec_type=%d profile=%d level=%d start_time=%d duration=%d nb_frames=%d delay=%d"
             " time_base=%d/%d frame_rate=%d/%d avg_frame_rate=%d/%d, sample_aspect_ratio=%d/%d"
             " bit_rate=%d width=%d height=%d pix_fmt=%s channels=%d channel_layout=%s\n",
             i, url ? url : "",
             s->codecpar->codec_type, codec_context->profile, codec_context->level,
             (int)s->start_time, (int)s->duration,
-            (int)s->nb_frames,
+            (int)s->nb_frames, codec_context->delay,
             s->time_base.num, s->time_base.den,
             s->r_frame_rate.num, s->r_frame_rate.den,
             s->avg_frame_rate.num, s->avg_frame_rate.den,
