@@ -214,7 +214,7 @@ packet_clone(
 
 /*
  * Update an audio frame by skipping the necessary number of samples.
- * Return the remaining samples in the frame (which may be 0 if the frame is to be skipped entirely)
+ * Update frame nb_samples to the remaining samples in the frame (which may be 0 if the frame is to be skipped entirely)
  * Many audio decoders use the concept of 'priming' and require skipping of a number of samples.
  * Opus specifically sets codec_context->delay to the number of samples to be skipped.
  * In most cases the audio frames to be skipped might have a negative PTS but that is not a rule/standard.
@@ -229,19 +229,19 @@ audio_skip_samples(
 
     // Only skipping for Opus inputs currently
     if (codec_ctx->codec_id != AV_CODEC_ID_OPUS) {
-        return frame->nb_samples;
+        return eav_success;
     }
 
     int samples_to_skip = codec_ctx->delay; // Defined by the Opus format
     if (samples_to_skip <= 0) {
-        return frame->nb_samples;
+        return eav_success;
     }
 
     if (samples_to_skip > frame->nb_samples) {
         // Unexpected - we need to skip more than one frame
         elv_warn("Unexpected audio stream delay nb_frames=%d skip_now=%d", frame->nb_samples, samples_to_skip);
         frame->nb_samples = 0;
-        return 0; // Entire frame needs to be skipped
+        return eav_success;
     }
 
     int sample_size = av_get_bytes_per_sample(codec_ctx->sample_fmt);
@@ -260,5 +260,5 @@ audio_skip_samples(
     }
 
     frame->nb_samples -= samples_to_skip;
-    return frame->nb_samples;
+    return eav_success;
 }
