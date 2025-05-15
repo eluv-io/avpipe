@@ -369,7 +369,6 @@ get_next_packet(
     pkt->stream_index = index;
     xctx->is_pkt_valid[index] = 0;
 
-    pkt->dts = pkt->pts;
     dump_packet(pkt->stream_index, "MUX IN ", pkt, xctx->debug_frame_level);
 
 read_frame_again:
@@ -379,20 +378,20 @@ read_frame_again:
         if (pkts[index].pts == pkt->pts)
             goto read_frame_again;
         xctx->is_pkt_valid[index] = 1;
-        if (pkt->pts >= 0) {
+        if (pkt->dts >= 0) {
             if (index == 0) {
-                if (pkt->pts > in_mux_ctx->last_video_pts)
-                    in_mux_ctx->last_video_pts = pkt->pts;
+                if (pkt->dts > in_mux_ctx->last_video_dts)
+                    in_mux_ctx->last_video_dts = pkt->dts;
                 else {
-                    pkt->pts += in_mux_ctx->last_video_pts;
-                    pkt->dts += in_mux_ctx->last_video_pts;
+                    pkt->pts += in_mux_ctx->last_video_dts;
+                    pkt->dts += in_mux_ctx->last_video_dts;
                 }
             } else if (index <= in_mux_ctx->last_audio_index) {
-                if (pkt->pts > in_mux_ctx->last_audio_pts)
-                    in_mux_ctx->last_audio_pts = pkt->pts;
+                if (pkt->dts > in_mux_ctx->last_audio_dts)
+                    in_mux_ctx->last_audio_dts = pkt->dts;
                 else {
-                    pkt->pts += in_mux_ctx->last_audio_pts;
-                    pkt->dts += in_mux_ctx->last_audio_pts;
+                    pkt->pts += in_mux_ctx->last_audio_dts;
+                    pkt->dts += in_mux_ctx->last_audio_dts;
                 }
             }
         }
@@ -414,7 +413,8 @@ avpipe_mux(
     AVPacket *pkts;
     int *valid_pkts;
     io_mux_ctx_t *in_mux_ctx;
-    int64_t first_pts_array[MAX_STREAMS];
+    int64_t first_dts_array[MAX_STREAMS];
+    int64_t dts_diff;
     int found_keyframe = 0;
 
 
@@ -424,7 +424,7 @@ avpipe_mux(
     }
 
     for (int i=0; i<MAX_STREAMS; i++) {
-        first_pts_array[i] = AV_NOPTS_VALUE;
+        first_dts_array[i] = AV_NOPTS_VALUE;
     }
 
     pkts = xctx->pkt_array;
@@ -435,7 +435,7 @@ avpipe_mux(
         ret = av_read_frame(xctx->in_muxer_ctx[i].format_context, &pkts[i]);
         if (ret >= 0) {
             valid_pkts[i] = 1;
-            first_pts_array[i] = pkts[i].pts;
+            first_dts_array[i] = pkts[i].dts;
         }
     }
 
@@ -452,13 +452,14 @@ avpipe_mux(
             continue;
         }
 
-        if (first_pts_array[ret] == AV_NOPTS_VALUE) {
-            first_pts_array[ret] = pkt.pts;
+        if (first_dts_array[ret] == AV_NOPTS_VALUE) {
+            first_dts_array[ret] = pkt.dts;
         }
 
         /* Adjust PTS and DTS and start always from 0 */
-        pkt.pts -= first_pts_array[ret];
-        pkt.dts = pkt.pts;
+        dts_diff = pkt.dts - first_dts_array[ret];
+        pkt.pts -= dts_diff;
+        pkt.dts -= dts_diff;
 
         dump_packet(pkt.stream_index, "MUX OUT ", &pkt, xctx->debug_frame_level);
 
