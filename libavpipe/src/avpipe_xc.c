@@ -2183,6 +2183,10 @@ encode_frame(
          * and after rescaling it becomes pretty big number which causes audio sync problem.
          * The only solution that I could come up for this was skipping this frame. (-RM)
          */
+        /*
+         * PENDING(SS): must discard the samples that the codec requires be skipped using audio_skip_samples()
+         * and forward this frame to the muxer (don't skip here - the negative PTS will work correctly),
+         */
         if (selected_decoded_audio(decoder_context, stream_index) >= 0 && output_packet->pts < 0) {
             elv_log("Skipping encoded packet with negative pts %"PRId64, output_packet->pts);
             goto end_encode_frame;
