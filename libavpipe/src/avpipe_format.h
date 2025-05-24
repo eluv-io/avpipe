@@ -64,3 +64,8 @@ packet_clone(
     AVPacket *src,
     AVPacket **dst
 );
+
+void frame_rescale(
+    AVFrame *frame,
+    AVRational src_tb,
+    AVRational dst_tb);

@@ -262,3 +262,20 @@ audio_skip_samples(
     frame->nb_samples -= samples_to_skip;
     return eav_success;
 }
+
+/*
+ * Rescale an AVFrame before sending to the filter or encoder.
+ * When rescaling a decoded frame before sending it to the filter or encoder, use the
+ * decoder codec_context timebase as source and the encoder codec timebase as target
+ */
+void frame_rescale(
+    AVFrame *frame, AVRational src, AVRational dst) {
+    if (frame->pts != AV_NOPTS_VALUE)
+        frame->pts = av_rescale_q(frame->pts, src, dst);
+
+    if (frame->pkt_dts != AV_NOPTS_VALUE)
+        frame->pkt_dts = av_rescale_q(frame->pkt_dts, src, dst);
+
+    if (frame->pkt_duration > 0)
+        frame->pkt_duration = av_rescale_q(frame->pkt_duration, src, dst);
+}
