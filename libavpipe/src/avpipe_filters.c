@@ -116,30 +116,39 @@ end:
     return ret;
 }
 
+/*
+ * Generate filter arguments for the audio 'buffer source' filter.
+ * For audio transcoding, the 'bufffer source' filter args need to specify the timebase of the encoder,
+ * so that the filters can work correctly and output frames in the expected timebase.
+ * The frame timebase must be rescaled before sending it to the filter.
+ */
 static void
-get_avfilter_args(
+get_audio_avfilter_args(
     coderctx_t *decoder_context,
+    AVCodecContext *enc_codec_ctx,
     int index,
     char *args,
     int len)
 {
     AVCodecContext *dec_codec_ctx = decoder_context->codec_context[index];
-    AVStream *s = decoder_context->format_context->streams[index];
 
     if (!dec_codec_ctx->channel_layout)
         dec_codec_ctx->channel_layout = av_get_default_channel_layout(dec_codec_ctx->channels);
 
+    // Use the timebase of the audio encoder
+    AVRational time_base = enc_codec_ctx->time_base;
+
     if (dec_codec_ctx->channel_layout == 0)
         snprintf(args, len,
             "time_base=%d/%d:sample_rate=%d:sample_fmt=%s:channels=%d",
-            s->time_base.num, s->time_base.den,
+            time_base.num, time_base.den,
             dec_codec_ctx->sample_rate,
             av_get_sample_fmt_name(dec_codec_ctx->sample_fmt),
             dec_codec_ctx->channels);
     else
         snprintf(args, len,
             "time_base=%d/%d:sample_rate=%d:sample_fmt=%s:channel_layout=0x%"PRIx64,
-            s->time_base.num, s->time_base.den,
+            time_base.num, time_base.den,
             dec_codec_ctx->sample_rate,
             av_get_sample_fmt_name(dec_codec_ctx->sample_fmt),
             dec_codec_ctx->channel_layout);
@@ -148,7 +157,7 @@ get_avfilter_args(
 /*
  * @brief   Used to initialize audio filter.
  * @return  Returns 0 if successful.
- *          If number of audio streams are not correct returns eav_num_streams, 
+ *          If number of audio streams are not correct returns eav_num_streams,
  *          otherwise eav_filter_init if there is other errors.
  */
 int
@@ -190,7 +199,7 @@ init_audio_filters(
             goto end;
         }
 
-        get_avfilter_args(decoder_context, audio_stream_index, args, sizeof(args));
+        get_audio_avfilter_args(decoder_context, enc_codec_ctx, audio_stream_index, args, sizeof(args));
         elv_dbg("init_audio_filters, audio srcfilter args=%s", args);
 
         abuffersrc_ctx = decoder_context->audio_buffersrc_ctx;
@@ -324,7 +333,7 @@ init_audio_pan_filters(
         goto end;
     }
 
-    get_avfilter_args(decoder_context, decoder_context->audio_stream_index[0], args, sizeof(args));
+    get_audio_avfilter_args(decoder_context, enc_codec_ctx, decoder_context->audio_stream_index[0], args, sizeof(args));
     elv_dbg("init_audio_pan_filters srcfilter args=%s", args);
 
     /* decoder_context->n_audio is 1 */
@@ -507,7 +516,7 @@ init_audio_merge_pan_filters(
             goto end;
         }
 
-        get_avfilter_args(decoder_context, decoder_context->audio_stream_index[i], args, sizeof(args));
+        get_audio_avfilter_args(decoder_context, enc_codec_ctx, decoder_context->audio_stream_index[i], args, sizeof(args));
         elv_dbg("init_audio_merge_pan_filters, audio srcfilter args=%s", args);
 
         ret = avfilter_graph_create_filter(&abuffersrc_ctx[i], buffersrc, source_names[i], args, NULL, filter_graph);
@@ -606,7 +615,7 @@ init_audio_join_filters(
             goto end;
         }
 
-        get_avfilter_args(decoder_context, audio_stream_index, args, sizeof(args));
+        get_audio_avfilter_args(decoder_context, enc_codec_ctx, audio_stream_index, args, sizeof(args));
 
         sprintf(filt_name, "in_%d", i);
         elv_dbg("init_audio_join_filters, audio srcfilter=%s args=%s", filt_name, args);
