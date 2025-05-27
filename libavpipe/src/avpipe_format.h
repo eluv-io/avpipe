@@ -48,6 +48,13 @@ selected_decoded_audio(
 );
 
 int
+audio_output_stream_index(
+    coderctx_t *decoder_context,
+    xcparams_t* params,
+    int audio_stream_index
+);
+
+int
 get_channel_layout_for_encoder(
     int channel_layout
 );

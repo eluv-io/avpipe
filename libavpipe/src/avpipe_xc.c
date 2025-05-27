@@ -1397,7 +1397,7 @@ prepare_audio_encoder(
             return eav_codec_context;
         }
 
-        /* If there are more than 1 audio stream do encode, we can't do bypass */
+        /* If there are more than 1 audio streams to encode, we can't do bypass */
         if (params && params->bypass_transcoding && decoder_context->n_audio > 1) {
             elv_err("Can not bypass multiple audio streams, n_audio=%d, url=%s", decoder_context->n_audio, params->url);
             return eav_num_streams;
@@ -1407,7 +1407,7 @@ prepare_audio_encoder(
         ecodec = params->ecodec2;
         encoder_context->audio_last_dts[i] = AV_NOPTS_VALUE;
 
-        encoder_context->audio_stream_index[i] = output_stream_index;
+        encoder_context->audio_stream_index[output_stream_index] = output_stream_index;
         encoder_context->n_audio = 1;
 
         encoder_context->stream[output_stream_index] = avformat_new_stream(format_context, NULL);
@@ -1822,10 +1822,13 @@ prepare_encoder(
     dump_encoder(inctx->url, encoder_context->format_context, params);
     dump_codec_context(encoder_context->codec_context[encoder_context->video_stream_index]);
     dump_stream(encoder_context->stream[encoder_context->video_stream_index]);
-    for (int i=0; i<encoder_context->n_audio_output; i++) {
-        dump_encoder(inctx->url, encoder_context->format_context2[i], params);
-        dump_codec_context(encoder_context->codec_context[encoder_context->audio_stream_index[i]]);
-        dump_stream(encoder_context->stream[encoder_context->audio_stream_index[i]]);
+
+    if (encoder_context->n_audio_output > 1) {
+        elv_err("Unsupported audio output n=%d", encoder_context->n_audio_output);
+    } else {
+        dump_encoder(inctx->url, encoder_context->format_context2[0], params);
+        dump_codec_context(encoder_context->codec_context[encoder_context->audio_stream_index[0]]);
+        dump_stream(encoder_context->stream[encoder_context->audio_stream_index[0]]);
     }
 
     return 0;
@@ -2457,23 +2460,24 @@ transcode_audio(
 {
     int ret;
     AVCodecContext *codec_context = decoder_context->codec_context[stream_index];
-    AVCodecContext *enc_codec_context = encoder_context->codec_context[stream_index];
-    int audio_enc_stream_index = stream_index;
+    int i = selected_decoded_audio(decoder_context, stream_index);
+    int output_stream_index = audio_output_stream_index(decoder_context, params, i);
     int response;
 
+    if (i < 0) {
+        /* audio index was already checked before sending the frame to the audio transcoder */
+        elv_err("Assertion failure - unexpected bad audio stream index %d url=%d", stream_index, params->url);
+        return eav_stream_index;
+    }
 
-    if (params->xc_type == xc_audio_merge ||
-        params->xc_type == xc_audio_join ||
-        params->xc_type == xc_audio_pan)
-        // PENDING(SS) This variable is not used. I think what we need to do here is assert
-        // that stream_index is 0, meaning that we are creating only one output stream.
-        audio_enc_stream_index = 0;
+    AVCodecContext *enc_codec_context = encoder_context->codec_context[output_stream_index];
+
 
     if (debug_frame_level)
         elv_dbg("DECODE stream_index=%d send_packet pts=%"PRId64" dts=%"PRId64
             " duration=%d, input frame_size=%d, output frame_size=%d, audio_output_pts=%"PRId64,
             stream_index, packet->pts, packet->dts, packet->duration, codec_context->frame_size,
-            encoder_context->codec_context[audio_enc_stream_index]->frame_size, decoder_context->audio_output_pts);
+            enc_codec_context->frame_size, decoder_context->audio_output_pts);
 
     if (params->bypass_transcoding) {
         return do_bypass(1, decoder_context, encoder_context, packet, params, debug_frame_level);
@@ -2523,18 +2527,10 @@ transcode_audio(
 
         decoder_context->audio_pts[stream_index] = packet->pts;
 
-        /* push the decoded frame into the filtergraph */
-        int i = selected_decoded_audio(decoder_context, stream_index);
-        if (i < 0) {
-            /* audio index was already checked before sending the frame to the audio transcoder */
-            elv_err("Assertion failure - unexpected bad audio stream index %d url=%d", stream_index, params->url);
-            av_frame_unref(frame);
-            return eav_stream_index;
-        }
-
         /* Rescale frame before sending to the filter (filter is initialized with the encoder timebase) */
         frame_rescale(frame, codec_context->time_base, enc_codec_context->time_base);
 
+        /* push the decoded frame into the filtergraph */
         if (av_buffersrc_add_frame_flags(decoder_context->audio_buffersrc_ctx[i], frame, AV_BUFFERSRC_FLAG_KEEP_REF) < 0) {
             elv_err("Failure in feeding into audio filtergraph source %d, url=%s", i, params->url);
             break;
@@ -3114,12 +3110,11 @@ flush_decoder(
     int debug_frame_level)
 {
     int ret;
-    int i;
+    int i = selected_decoded_audio(decoder_context, stream_index);
     AVFrame *frame, *filt_frame;
     AVFilterContext *buffersink_ctx = decoder_context->video_buffersink_ctx;
     AVFilterContext *buffersrc_ctx = decoder_context->video_buffersrc_ctx;
     AVCodecContext *codec_context = decoder_context->codec_context[stream_index];
-    AVCodecContext *enc_codec_context = encoder_context->codec_context[stream_index];
 
     int response = 0;
 
@@ -3130,8 +3125,7 @@ flush_decoder(
     frame = av_frame_alloc();
     filt_frame = av_frame_alloc();
 
-    if (!p->bypass_transcoding &&
-        (i = selected_decoded_audio(decoder_context, stream_index)) >= 0) {
+    if (!p->bypass_transcoding && (i >= 0)) {
         buffersrc_ctx = decoder_context->audio_buffersrc_ctx[i];
         buffersink_ctx = decoder_context->audio_buffersink_ctx[i];
     }
@@ -3147,7 +3141,7 @@ flush_decoder(
             continue; // PENDING(SSS) why continue and not break?
         }
 
-        dump_frame(selected_decoded_audio(decoder_context, stream_index) >= 0, stream_index,
+        dump_frame(i >= 0, stream_index,
             "IN FLUSH", codec_context->frame_number, frame, debug_frame_level);
 
         if (codec_context->codec_type == AVMEDIA_TYPE_VIDEO ||
@@ -3155,7 +3149,10 @@ flush_decoder(
 
             /* Rescale audio before sending to the filter (filter is initialized with the encoder timebase */
             /* PENDING(SS) video should also be rescaled here */
-            if (selected_decoded_audio(decoder_context, stream_index) >= 0) {
+            if (i >= 0) {
+                int output_stream_index = audio_output_stream_index(decoder_context, p, i);
+                AVCodecContext *enc_codec_context = encoder_context->codec_context[output_stream_index];
+                elv_log("SSDBG flush audio stream_index=%d output_stream_index=%d", stream_index, output_stream_index);
                 frame_rescale(frame, codec_context->time_base, enc_codec_context->time_base);
             }
 
@@ -3177,7 +3174,7 @@ flush_decoder(
                     break;
                 }
 
-                dump_frame(selected_decoded_audio(decoder_context, stream_index) >= 0, stream_index,
+                dump_frame(i >= 0, stream_index,
                     "FILT ", codec_context->frame_number, filt_frame, debug_frame_level);
 
                 ret = encode_frame(decoder_context, encoder_context, filt_frame, stream_index, p, debug_frame_level);

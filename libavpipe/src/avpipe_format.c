@@ -106,16 +106,20 @@ num_audio_output(
     coderctx_t *decoder_context,
     xcparams_t *params)
 {
-    int n_decoder_auido = decoder_context ? decoder_context->n_audio : 0;
+    int n_decoder_audio = decoder_context ? decoder_context->n_audio : 0;
     if (!params)
         return 0;
 
     if (params->xc_type == xc_audio_merge || params->xc_type == xc_audio_join || params->xc_type == xc_audio_pan)
         return 1;
 
-    return params->n_audio > 0 ? params->n_audio : n_decoder_auido;
+    return params->n_audio > 0 ? params->n_audio : n_decoder_audio;
 }
 
+/*
+ * Given a source audio stream index, return the index in the xc_params audio_index array, if selected.
+ * Return -1 if this stream index is not selected (not part of the xc_params audio_index array)
+ */
 int
 selected_decoded_audio(
     coderctx_t *decoder_context,
@@ -130,6 +134,46 @@ selected_decoded_audio(
     }
 
     return -1;
+}
+
+/*
+ * Return the output stream index for a given audio xc_param audio_index.
+ * The source has one or multiple audio streams - they each have a 'stream_index'
+ * The xc_params audio_index specifies which of these audio streams are selected for encoding. This is a
+ * contiguous array with each element specifying the source stream_index, eg:
+ *   audio_index[0] = 1;
+ *   audio_index[1] = 3;
+ *   audio_index[2] = 4;
+ * This function takes the index into the audio_index params (eg. 0, 1, 2 above). This is often the output of selected_decoded_audio()
+ * The convention for the encoder (output) audio_stream_index[] storage is different than the input:
+ * - for audio join/merge/pan always store the audio at index 0
+ * - for VOD ad live ingest:
+ *   audio_stream_index[0] = unset
+ *   audio_stream_index[1] = 1
+ *   audio_stream_index[2] = unset
+ *   audio_stream_index[3] = 3
+ *   audio_stream_index[4] = 4
+ */
+int
+audio_output_stream_index(
+    coderctx_t *decoder_context,
+    xcparams_t *params,
+    int audio_stream_index)
+{
+    int output_stream_index;
+
+    if (audio_stream_index < 0)
+        return -1;
+
+    output_stream_index = decoder_context->audio_stream_index[audio_stream_index];
+
+    if (params->xc_type == xc_audio_merge ||
+        params->xc_type == xc_audio_join ||
+        params->xc_type == xc_audio_pan) {
+        // Only one audio output
+        output_stream_index = 0;
+    }
+    return output_stream_index;
 }
 
 int
