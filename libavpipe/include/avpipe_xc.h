@@ -145,10 +145,10 @@ typedef struct io_mux_ctx_t {
     char            *out_filename;              /* Output filename/url for this muxing */
     char            *mux_type;                  /* "mux-mez" or "mux-abr" */
     mux_input_ctx_t video;
-    int64_t         last_video_pts;
+    int64_t         last_video_dts;
     int             last_audio_index;
     mux_input_ctx_t audios[MAX_STREAMS];
-    int64_t         last_audio_pts;
+    int64_t         last_audio_dts;
     int             last_caption_index;
     mux_input_ctx_t captions[MAX_STREAMS];
 } io_mux_ctx_t;
