@@ -276,7 +276,7 @@ typedef struct avpipe_io_handler_t {
  *
  * This structure supports:
  *   - one video stream (at most) - video_stream_index
- *   - one ore more audio streams - audio_stream_index[]
+ *   - one or more audio streams - audio_stream_index[]
  *   - one SCTE-35 data stream    - data_scte35_stream_index
  *   - one arbitrary data stream  - data_stream_index (not used currently)
  *
