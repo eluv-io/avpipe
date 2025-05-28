@@ -3152,7 +3152,6 @@ flush_decoder(
             if (i >= 0) {
                 int output_stream_index = audio_output_stream_index(decoder_context, p, i);
                 AVCodecContext *enc_codec_context = encoder_context->codec_context[output_stream_index];
-                elv_log("SSDBG flush audio stream_index=%d output_stream_index=%d", stream_index, output_stream_index);
                 frame_rescale(frame, codec_context->time_base, enc_codec_context->time_base);
             }
 
