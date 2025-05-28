@@ -4,6 +4,14 @@
 
 ## HOW TO
 
+### Ingest source file into mez parts
+
+
+Example: audio 2 mono to 1 stereo
+```
+./bin/exc -f sample.mxf -xc-type audio-join   -format fmp4-segment -seg-duration 30.080 -audio-index 1,2 -channel-layout 3 -audio-bitrate 128000
+```
+
 ### Transcode Mez Parts into ABR segments
 
 #### Transcode a "mez part" into ABR segments

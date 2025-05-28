@@ -106,16 +106,21 @@ num_audio_output(
     coderctx_t *decoder_context,
     xcparams_t *params)
 {
-    int n_decoder_auido = decoder_context ? decoder_context->n_audio : 0;
+    int n_decoder_audio = decoder_context ? decoder_context->n_audio : 0;
     if (!params)
         return 0;
 
     if (params->xc_type == xc_audio_merge || params->xc_type == xc_audio_join || params->xc_type == xc_audio_pan)
         return 1;
 
-    return params->n_audio > 0 ? params->n_audio : n_decoder_auido;
+    return params->n_audio > 0 ? params->n_audio : n_decoder_audio;
 }
 
+/*
+ * Given a source audio stream index, return the array index in the decoder 'audio_stream_index' array, if selected.
+ * This is used to index the 'format_context2' array.
+ * Return -1 if this stream index is not selected (was not part of the xc_params audio_index array)
+ */
 int
 selected_decoded_audio(
     coderctx_t *decoder_context,
@@ -130,6 +135,32 @@ selected_decoded_audio(
     }
 
     return -1;
+}
+
+/*
+ * Return the array index into the encoder 'audio_stream_index' array (which is also used by the encoder 'codec_context' array),
+ * from the array index into the decoder 'audio_stream_index' array (as returned by selected_decoded_audio)
+ */
+int
+audio_output_stream_index(
+    coderctx_t *decoder_context,
+    xcparams_t *params,
+    int audio_stream_index)
+{
+    int output_stream_index;
+
+    if (audio_stream_index < 0)
+        return -1;
+
+    output_stream_index = decoder_context->audio_stream_index[audio_stream_index];
+
+    if (params->xc_type == xc_audio_merge ||
+        params->xc_type == xc_audio_join ||
+        params->xc_type == xc_audio_pan) {
+        // Only one audio output
+        output_stream_index = 0;
+    }
+    return output_stream_index;
 }
 
 int
@@ -261,4 +292,21 @@ audio_skip_samples(
 
     frame->nb_samples -= samples_to_skip;
     return eav_success;
+}
+
+/*
+ * Rescale an AVFrame before sending to the filter or encoder.
+ * When rescaling a decoded frame before sending it to the filter or encoder, use the
+ * decoder codec_context timebase as source and the encoder codec timebase as target
+ */
+void frame_rescale_time_base(
+    AVFrame *frame, AVRational src_time_base, AVRational dst_time_base) {
+    if (frame->pts != AV_NOPTS_VALUE)
+        frame->pts = av_rescale_q(frame->pts, src_time_base, dst_time_base);
+
+    if (frame->pkt_dts != AV_NOPTS_VALUE)
+        frame->pkt_dts = av_rescale_q(frame->pkt_dts, src_time_base, dst_time_base);
+
+    if (frame->pkt_duration > 0)
+        frame->pkt_duration = av_rescale_q(frame->pkt_duration, src_time_base, dst_time_base);
 }

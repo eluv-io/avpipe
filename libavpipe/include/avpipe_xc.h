@@ -271,7 +271,67 @@ typedef struct avpipe_io_handler_t {
 #define MAX_WRAP_PTS        ((int64_t)8589000000)
 #define MAX_AVFILENAME_LEN  128
 
-/* Decoder/encoder context, keeps both video and audio stream ffmpeg contexts */
+/*
+ * Decoder/encoder context, keeps both video and audio stream ffmpeg contexts
+ *
+ * This structure supports:
+ *   - one video stream (at most) - video_stream_index
+ *   - one or more audio streams - audio_stream_index[]
+ *   - one SCTE-35 data stream    - data_scte35_stream_index
+ *   - one arbitrary data stream  - data_stream_index (not used currently)
+ *
+ * The caller specifies which source media audio streams to encode, using xc_params->audio_index, eg.
+ *   - audio_index[0] = 1;
+ *   - audio_index[1] = 3;
+ *   - audio_index[2] = 4;
+ *   (and xc->params->n_audio is 3)
+ *
+ * Audio stream index mapping is stored as follows:
+ *
+ * - decoder
+ *   - the audio_stream_index array stores the selected stream index values the same way as xc_params
+ *     - audio_stream_index[0] = 1;
+ *     - audio_stream_index[1] = 3;
+ *     - audio_stream_index[2] = 4;
+ *     (and the number of streams is stored in 'n_audio')
+ *
+ * - encoder
+ *   - if the encoding operation is audio join, merge or pan (which effectively takes multiple input steams and makes one output stream)
+ *      - audio_stream_index[0] = 0; (output stream index is considered 0 and nb_audio_output is 1)
+ *   - otherwise it uses a strange convention (needs fixed - this is impossible to traverse)
+ *      - audio_stream_index[0] unset
+ *      - audio_stream_index[1] = 1
+ *      - audio_stream_index[2] unset
+ *      - audio_stream_index[3] = 3
+ *      - audio_stream_index[4] = 4
+ *
+ * The video format context is stored in 'format_context'
+ * Audio format contexts for each audio output is stored in 'format_context2[]'
+ *   - this array is contiguous and has 'n_audio' elements eg. for the xc_params above
+ *     - format_context2[0] is the context for audio stream index 1
+ *     - format_context2[1] is the context for audio stream index 3
+ *     - format_context2[2] is the context for audio stream index 4
+ *
+ * Codec contexts (AVCodecContext) are stored in 'codec_context[]' as follows:
+ *
+ * - decoder
+ *   - the codec_context array is indexed using the source media stream index values, eg. for the xc_params above
+ *     - codec_context[0]  video  (if the source has video on stream_index 0, for example)
+ *     - codec_context[1]  audio stream index 1
+ *     - codec_context[2]  audio stream index 2 (not selected, per xc_params->audio_index)
+ *     - codec_context[3]  audio stream index 3
+ *     - codec_context[4]  audio stream index 4
+ *
+ * - encoder
+ *   - if the encoding operation is audio join, merge or pan
+ *     - codec_context[0]  is the codec context for the one output audio stream
+ *   - otherwise the array is indexed the same way as the encoder 'audio_stream_index' array, eg.
+ *      - codec_context[0] codec context for the video stream
+ *      - codec_context[1] codec context for audio stream index 1
+ *      - codec_context[2] unset
+ *      - codec_context[3] codec context for audio stream index 3
+ *      - codec_context[4] codec context for audio stream index 4
+ */
 typedef struct coderctx_t {
     AVFormatContext     *format_context;                                /* Input format context or video output format context */
     AVFormatContext     *format_context2[MAX_STREAMS];                  /* Audio output format context, indexed by audio index */
