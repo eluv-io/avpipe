@@ -1909,6 +1909,25 @@ encode_frame(
                 if (frame->best_effort_timestamp != AV_NOPTS_VALUE)
                     frame->best_effort_timestamp -= encoder_context->first_encoding_video_pts;
             }
+            else if (selected_decoded_audio(decoder_context, stream_index) >= 0) {
+                if (encoder_context->first_encoding_audio_pts[stream_index] == AV_NOPTS_VALUE) {
+                    /* Remember the first audio PTS to use as an offset later */
+                    encoder_context->first_encoding_audio_pts[stream_index] = frame->pts;
+                    elv_log("PTS stream_index=%d first_encoding_audio_pts=%"PRId64" dec=%"PRId64" first_read_packet_pts=%"PRId64" stream=%d:%s",
+                        stream_index,
+                        encoder_context->first_encoding_audio_pts[stream_index],
+                        decoder_context->first_decoding_audio_pts[stream_index],
+                        encoder_context->first_read_packet_pts[stream_index], stream_index, st);
+                }
+
+                // Adjust audio frame pts such that first frame sent to the encoder has PTS 0
+                if (frame->pts != AV_NOPTS_VALUE) {
+                    frame->pts -= encoder_context->first_encoding_audio_pts[stream_index];
+                    frame->pkt_dts = frame->pts;
+                }
+                if (frame->best_effort_timestamp != AV_NOPTS_VALUE)
+                    frame->best_effort_timestamp -= encoder_context->first_encoding_audio_pts[stream_index];
+            }
         }
 
         // Signal if we need IDR frames
@@ -2665,7 +2684,6 @@ transcode_audio_func(
             packet->stream_index,
             params,
             xctx->debug_frame_level);
-
         av_frame_unref(filt_frame);
         av_frame_unref(frame);
         av_packet_free(&packet);
