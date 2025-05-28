@@ -1821,15 +1821,10 @@ prepare_encoder(
 
     dump_encoder(inctx->url, encoder_context->format_context, params);
     dump_codec_context(encoder_context->codec_context[encoder_context->video_stream_index]);
-    dump_stream(encoder_context->stream[encoder_context->video_stream_index]);
-
-    if (encoder_context->n_audio_output > 1) {
-        elv_err("Unsupported audio output n=%d", encoder_context->n_audio_output);
-    } else {
+    for (int i=0; i < encoder_context->n_audio_output; i ++) {
         dump_encoder(inctx->url, encoder_context->format_context2[0], params);
-        dump_codec_context(encoder_context->codec_context[encoder_context->audio_stream_index[0]]);
-        dump_stream(encoder_context->stream[encoder_context->audio_stream_index[0]]);
     }
+    dump_codec_context(encoder_context->codec_context[encoder_context->audio_stream_index[0]]);
 
     return 0;
 }
@@ -2528,7 +2523,7 @@ transcode_audio(
         decoder_context->audio_pts[stream_index] = packet->pts;
 
         /* Rescale frame before sending to the filter (filter is initialized with the encoder timebase) */
-        frame_rescale(frame, codec_context->time_base, enc_codec_context->time_base);
+        frame_rescale_time_base(frame, codec_context->time_base, enc_codec_context->time_base);
 
         /* push the decoded frame into the filtergraph */
         if (av_buffersrc_add_frame_flags(decoder_context->audio_buffersrc_ctx[i], frame, AV_BUFFERSRC_FLAG_KEEP_REF) < 0) {
@@ -3152,7 +3147,7 @@ flush_decoder(
             if (i >= 0) {
                 int output_stream_index = audio_output_stream_index(decoder_context, p, i);
                 AVCodecContext *enc_codec_context = encoder_context->codec_context[output_stream_index];
-                frame_rescale(frame, codec_context->time_base, enc_codec_context->time_base);
+                frame_rescale_time_base(frame, codec_context->time_base, enc_codec_context->time_base);
             }
 
             /* push the decoded frame into the filtergraph */
@@ -4972,7 +4967,7 @@ avpipe_fini(
         free(avpipe_opaque);
     }
     if (encoder_context) {
-        for (int i=0; i<encoder_context->n_audio_output; i++) { 
+        for (int i=0; i<encoder_context->n_audio_output; i++) {
             void *avpipe_opaque = encoder_context->format_context2[i]->avpipe_opaque;
             avformat_free_context(encoder_context->format_context2[i]);
             free(avpipe_opaque);

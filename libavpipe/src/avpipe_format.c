@@ -312,14 +312,14 @@ audio_skip_samples(
  * When rescaling a decoded frame before sending it to the filter or encoder, use the
  * decoder codec_context timebase as source and the encoder codec timebase as target
  */
-void frame_rescale(
-    AVFrame *frame, AVRational src, AVRational dst) {
+void frame_rescale_time_base(
+    AVFrame *frame, AVRational src_time_base, AVRational dst_time_base) {
     if (frame->pts != AV_NOPTS_VALUE)
-        frame->pts = av_rescale_q(frame->pts, src, dst);
+        frame->pts = av_rescale_q(frame->pts, src_time_base, dst_time_base);
 
     if (frame->pkt_dts != AV_NOPTS_VALUE)
-        frame->pkt_dts = av_rescale_q(frame->pkt_dts, src, dst);
+        frame->pkt_dts = av_rescale_q(frame->pkt_dts, src_time_base, dst_time_base);
 
     if (frame->pkt_duration > 0)
-        frame->pkt_duration = av_rescale_q(frame->pkt_duration, src, dst);
+        frame->pkt_duration = av_rescale_q(frame->pkt_duration, src_time_base, dst_time_base);
 }
