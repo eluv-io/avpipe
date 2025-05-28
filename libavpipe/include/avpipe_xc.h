@@ -325,7 +325,12 @@ typedef struct avpipe_io_handler_t {
  * - encoder
  *   - if the encoding operation is audio join, merge or pan
  *     - codec_context[0]  is the codec context for the one output audio stream
- *   - otherwise the array is indexed the same way as the decoder (example above)
+ *   - otherwise the array is indexed the same way as the encoder 'audio_stream_index' array, eg.
+ *      - codec_context[0] codec context for the video stream
+ *      - codec_context[1] codec context for audio stream index 1
+ *      - codec_context[2] unset
+ *      - codec_context[3] codec context for audio stream index 3
+ *      - codec_context[4] codec context for audio stream index 4
  */
 typedef struct coderctx_t {
     AVFormatContext     *format_context;                                /* Input format context or video output format context */

@@ -117,8 +117,9 @@ num_audio_output(
 }
 
 /*
- * Given a source audio stream index, return the index in the xc_params audio_index array, if selected.
- * Return -1 if this stream index is not selected (not part of the xc_params audio_index array)
+ * Given a source audio stream index, return the array index in the decoder 'audio_stream_index' array, if selected.
+ * This is used to index the 'format_context2' array.
+ * Return -1 if this stream index is not selected (was not part of the xc_params audio_index array)
  */
 int
 selected_decoded_audio(
@@ -137,22 +138,8 @@ selected_decoded_audio(
 }
 
 /*
- * Return the output stream index for a given audio xc_param audio_index.
- * The source has one or multiple audio streams - they each have a 'stream_index'
- * The xc_params audio_index specifies which of these audio streams are selected for encoding. This is a
- * contiguous array with each element specifying the source stream_index, eg:
- *   audio_index[0] = 1;
- *   audio_index[1] = 3;
- *   audio_index[2] = 4;
- * This function takes the index into the audio_index params (eg. 0, 1, 2 above). This is often the output of selected_decoded_audio()
- * The convention for the encoder (output) audio_stream_index[] storage is different than the input:
- * - for audio join/merge/pan always store the audio at index 0
- * - for VOD ad live ingest:
- *   audio_stream_index[0] = unset
- *   audio_stream_index[1] = 1
- *   audio_stream_index[2] = unset
- *   audio_stream_index[3] = 3
- *   audio_stream_index[4] = 4
+ * Return the array index into the encoder 'audio_stream_index' array (which is also used by the encoder 'codec_context' array),
+ * from the array index into the decoder 'audio_stream_index' array (as returned by selected_decoded_audio)
  */
 int
 audio_output_stream_index(
