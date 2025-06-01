@@ -3289,7 +3289,13 @@ skip_until_start_time_pts(
     else
         input_start_pts = decoder_context->audio_input_start_pts[input_packet->stream_index];
 
-    const int64_t packet_in_pts_offset = input_packet->pts - input_start_pts;
+    int64_t packet_in_pts_offset = input_packet->pts - input_start_pts;
+
+    // PENDING(SS) For audio ABR, the mez source has imperfect frame durations (occasional 1023)
+    // This causes probelms when skipping - we might skip over the correct frame because it is a few ts units short
+    if (selected_decoded_audio(decoder_context, input_packet->stream_index) >= 0)
+        packet_in_pts_offset += 15;
+
     /* Drop frames before the desired 'start_time' */
     if (packet_in_pts_offset < params->start_time_ts) {
         elv_dbg("PREDECODE SKIP frame early stream_index=%d, pts=%" PRId64 ", start_time_ts=%" PRId64
