@@ -3291,7 +3291,7 @@ skip_until_start_time_pts(
     else
         input_start_pts = decoder_context->audio_input_start_pts[input_packet->stream_index];
 
-    int64_t packet_in_pts_offset = input_packet->pts - input_start_pts;
+    const int64_t packet_in_pts_offset = input_packet->pts - input_start_pts;
 
     int tolerance = segmentation_tolerance(decoder_context, input_packet->stream_index);
 
