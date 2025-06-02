@@ -244,6 +244,30 @@ packet_clone(
 }
 
 /*
+ * For both mez part and ABR segment jobs, PTS-based segmentation or cutting is subject to small
+ * imperfections in source PTS (for example if source PTS is one or two units shorts, it will be skipped
+ * incorrectly, or for segmentation in segment.c we miss the iframe and cut on the following iframe creating a longer segment).
+ *
+ * Calculate a minimal tolerance specifically for each type of source media to fix concrete problems.
+ * If the tolerance is to large we risk to match too early or too late.
+ */
+int
+segmentation_tolerance(
+    coderctx_t *decoder_context,
+    int stream_index
+) {
+    int i;
+    int tolerance = 0;
+
+    if ((i = selected_decoded_audio(decoder_context, stream_index)) >= 0) {
+        if (decoder_context->format_context->streams[i]->codecpar->codec_id == AV_CODEC_ID_AAC) {
+            tolerance = 15; /* 1 ts unit per ABR segment to compensate for frame duration 1023 */
+        }
+    }
+    return tolerance;
+}
+
+/*
  * Update an audio frame by skipping the necessary number of samples.
  * Update frame nb_samples to the remaining samples in the frame (which may be 0 if the frame is to be skipped entirely)
  * Many audio decoders use the concept of 'priming' and require skipping of a number of samples.
