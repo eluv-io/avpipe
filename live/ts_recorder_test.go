@@ -9,6 +9,7 @@ import (
 	"github.com/stretchr/testify/assert"
 
 	"github.com/eluv-io/avpipe"
+	"github.com/eluv-io/avpipe/goavpipe"
 )
 
 func TestUdpToMp4(t *testing.T) {
@@ -27,7 +28,7 @@ func TestUdpToMp4(t *testing.T) {
 		t.Error(err)
 	}
 
-	xcParams := &avpipe.XcParams{
+	xcParams := &goavpipe.XcParams{
 		Format:              "fmp4-segment",
 		Seekable:            false,
 		DurationTs:          -1,
@@ -41,7 +42,7 @@ func TestUdpToMp4(t *testing.T) {
 		Ecodec:              "libx264", // libx264 software / h264_videotoolbox mac hardware
 		EncHeight:           720,       // 1080
 		EncWidth:            1280,      // 1920
-		XcType:              avpipe.XcAll,
+		XcType:              goavpipe.XcAll,
 		StreamId:            -1,
 		Url:                 url,
 		SyncAudioToStreamId: -1,
@@ -64,7 +65,7 @@ func TestUdpToMp4(t *testing.T) {
 	xcParams.Format = "dash"
 	xcParams.Dcodec2 = "aac"
 	xcParams.AudioSegDurationTs = 96106 // almost 2 * 48000
-	xcParams.XcType = avpipe.XcAudio
+	xcParams.XcType = goavpipe.XcAudio
 	audioMezFiles := [3]string{"audio-mez-segment0-1.mp4", "audio-mez-segment0-2.mp4", "audio-mez-segment0-3.mp4"}
 
 	// Now create audio dash segments out of audio mezzanines
@@ -90,7 +91,7 @@ func TestUdpToMp4(t *testing.T) {
 
 	xcParams.Format = "dash"
 	xcParams.VideoSegDurationTs = 180000 // almost 2 * 90000
-	xcParams.XcType = avpipe.XcVideo
+	xcParams.XcType = goavpipe.XcVideo
 	videoMezFiles := [3]string{"video-mez-segment-1.mp4", "video-mez-segment-2.mp4", "video-mez-segment-3.mp4"}
 
 	// Now create video dash segments out of audio mezzanines
@@ -130,7 +131,7 @@ func TestMultiAudioUdpToMp4(t *testing.T) {
 		t.Error(err)
 	}
 
-	xcParams := &avpipe.XcParams{
+	xcParams := &goavpipe.XcParams{
 		Format:              "fmp4-segment",
 		Seekable:            false,
 		DurationTs:          -1,
@@ -144,7 +145,7 @@ func TestMultiAudioUdpToMp4(t *testing.T) {
 		Ecodec:              "libx264", // libx264 software / h264_videotoolbox mac hardware
 		EncHeight:           720,       // 1080
 		EncWidth:            1280,      // 1920
-		XcType:              avpipe.XcAll,
+		XcType:              goavpipe.XcAll,
 		StreamId:            -1,
 		Url:                 url,
 		SyncAudioToStreamId: -1,
@@ -172,7 +173,7 @@ func TestMultiAudioUdpToMp4(t *testing.T) {
 	xcParams.Format = "dash"
 	xcParams.Dcodec2 = "aac"
 	xcParams.AudioSegDurationTs = 96106 // almost 2 * 48000
-	xcParams.XcType = avpipe.XcAudio
+	xcParams.XcType = goavpipe.XcAudio
 	audioMezFiles := [3]string{"audio-mez-segment1-1.mp4", "audio-mez-segment1-2.mp4", "audio-mez-segment1-3.mp4"}
 
 	// Now create audio dash segments out of audio mezzanines
@@ -213,7 +214,7 @@ func TestUdpToMp4WithCancelling1(t *testing.T) {
 		t.Error(err)
 	}
 
-	xcParams := &avpipe.XcParams{
+	xcParams := &goavpipe.XcParams{
 		Format:              "fmp4-segment",
 		Seekable:            false,
 		DurationTs:          -1,
@@ -227,7 +228,7 @@ func TestUdpToMp4WithCancelling1(t *testing.T) {
 		Ecodec:              "libx264", // libx264 software / h264_videotoolbox mac hardware
 		EncHeight:           720,       // 1080
 		EncWidth:            1280,      // 1920
-		XcType:              avpipe.XcAll,
+		XcType:              goavpipe.XcAll,
 		StreamId:            -1,
 		Url:                 url,
 		SyncAudioToStreamId: -1,
@@ -272,7 +273,7 @@ func TestUdpToMp4WithCancelling2(t *testing.T) {
 		t.Error(err)
 	}
 
-	xcParams := &avpipe.XcParams{
+	xcParams := &goavpipe.XcParams{
 		Format:              "fmp4-segment",
 		Seekable:            false,
 		DurationTs:          -1,
@@ -286,7 +287,7 @@ func TestUdpToMp4WithCancelling2(t *testing.T) {
 		Ecodec:              "libx264", // libx264 software / h264_videotoolbox mac hardware
 		EncHeight:           720,       // 1080
 		EncWidth:            1280,      // 1920
-		XcType:              avpipe.XcAll,
+		XcType:              goavpipe.XcAll,
 		StreamId:            -1,
 		Url:                 url,
 		SyncAudioToStreamId: -1,
@@ -344,7 +345,7 @@ func TestUdpToMp4WithCancelling3(t *testing.T) {
 		t.Error(err)
 	}
 
-	xcParams := &avpipe.XcParams{
+	xcParams := &goavpipe.XcParams{
 		Format:              "fmp4-segment",
 		Seekable:            false,
 		DurationTs:          -1,
@@ -358,7 +359,7 @@ func TestUdpToMp4WithCancelling3(t *testing.T) {
 		Ecodec:              "libx264", // libx264 software / h264_videotoolbox mac hardware
 		EncHeight:           720,       // 1080
 		EncWidth:            1280,      // 1920
-		XcType:              avpipe.XcAll,
+		XcType:              goavpipe.XcAll,
 		StreamId:            -1,
 		Url:                 url,
 		SyncAudioToStreamId: -1,
@@ -416,7 +417,7 @@ func TestUdpToMp4WithCancelling4(t *testing.T) {
 		t.Error(err)
 	}
 
-	xcParams := &avpipe.XcParams{
+	xcParams := &goavpipe.XcParams{
 		Format:              "fmp4-segment",
 		Seekable:            false,
 		DurationTs:          -1,
@@ -430,7 +431,7 @@ func TestUdpToMp4WithCancelling4(t *testing.T) {
 		Ecodec:              "libx264", // libx264 software / h264_videotoolbox mac hardware
 		EncHeight:           720,       // 1080
 		EncWidth:            1280,      // 1920
-		XcType:              avpipe.XcAll,
+		XcType:              goavpipe.XcAll,
 		StreamId:            -1,
 		Url:                 url,
 		SyncAudioToStreamId: -1,

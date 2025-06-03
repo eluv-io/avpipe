@@ -93,13 +93,13 @@ dump_decoder(
         elv_dbg("DECODER[%d]: ff_log -- %s", i, ctx_str);
         av_free(ctx_str);
 
-        elv_dbg("DECODER[%d] url=%s codec_type=%d profile=%d level=%d start_time=%d duration=%d nb_frames=%d"
+        elv_dbg("DECODER[%d] url=%s codec_type=%d profile=%d level=%d start_time=%d duration=%d nb_frames=%d delay=%d"
             " time_base=%d/%d frame_rate=%d/%d avg_frame_rate=%d/%d, sample_aspect_ratio=%d/%d"
             " bit_rate=%d width=%d height=%d pix_fmt=%s channels=%d channel_layout=%s\n",
             i, url ? url : "",
             s->codecpar->codec_type, codec_context->profile, codec_context->level,
             (int)s->start_time, (int)s->duration,
-            (int)s->nb_frames,
+            (int)s->nb_frames, codec_context->delay,
             s->time_base.num, s->time_base.den,
             s->r_frame_rate.num, s->r_frame_rate.den,
             s->avg_frame_rate.num, s->avg_frame_rate.den,
@@ -331,4 +331,24 @@ hex_encode(byte *buf, int sz, char *str)
     for (int i = 0; i < sz; i ++) {
         sprintf(str + 2 * i, "%02x", buf[i]);
     }
+}
+
+// Parse a duration string of format "HH:MM:SS.SUB" into duration ts
+int64_t
+parse_duration(const char *duration_str, AVRational time_base) {
+    int hours = 0, minutes = 0;
+    double seconds = 0.0;
+
+    if (sscanf(duration_str, "%d:%d:%lf", &hours, &minutes, &seconds) != 3) {
+        elv_dbg("Failed to parse duration string: %s", duration_str);
+        return -1;
+    }
+
+    double secs = hours * 3600 + minutes * 60 + seconds;
+    int64_t usecs = (int64_t)(secs * 1000000.0);
+
+    // Rescale to timebase
+    int64_t duration_ts = av_rescale_q(usecs, AV_TIME_BASE_Q, time_base);
+
+    return duration_ts;
 }

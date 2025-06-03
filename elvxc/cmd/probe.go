@@ -4,6 +4,7 @@ import (
 	"fmt"
 
 	"github.com/eluv-io/avpipe"
+	"github.com/eluv-io/avpipe/goavpipe"
 	"github.com/spf13/cobra"
 )
 
@@ -47,7 +48,7 @@ func doProbe(cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("Invalid listen flag")
 	}
 
-	params := &avpipe.XcParams{
+	params := &goavpipe.XcParams{
 		Url:               filename,
 		Seekable:          seekable,
 		Listen:            listen,
@@ -74,7 +75,7 @@ func doProbe(cmd *cobra.Command, args []string) error {
 		fmt.Printf("\tcodec_name: %s\n", info.CodecName)
 		fmt.Printf("\tprofile: %s\n", avpipe.GetProfileName(info.CodecID, info.Profile))
 		fmt.Printf("\tlevel: %d\n", info.Level)
-		if uint64(info.DurationTs) != avpipe.AvNoPtsValue {
+		if uint64(info.DurationTs) != goavpipe.AvNoPtsValue {
 			fmt.Printf("\tduration_ts: %d\n", info.DurationTs)
 		}
 		fmt.Printf("\ttime_base: %d/%d\n", info.TimeBase.Num(), info.TimeBase.Denom())

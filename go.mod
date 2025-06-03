@@ -22,12 +22,12 @@ require (
 	github.com/pmezard/go-difflib v1.0.0 // indirect
 	github.com/spf13/pflag v1.0.3 // indirect
 	gopkg.in/natefinch/lumberjack.v2 v2.0.0 // indirect
-	gopkg.in/yaml.v3 v3.0.0-20200605160147-a5ece683394c // indirect
+	gopkg.in/yaml.v3 v3.0.0 // indirect
 )
 
 replace (
-	github.com/modern-go/gls => github.com/eluv-io/gls v1.0.0-elv1
 	github.com/Eyevinn/mp4ff => github.com/eluv-io/mp4ff v0.0.0-20250210223832-af1d81403ca3
+	github.com/modern-go/gls => github.com/eluv-io/gls v1.0.0-elv1
 	github.com/prometheus/prometheus => github.com/prometheus/prometheus v1.7.1-0.20170814170113-3101606756c5
 	gopkg.in/urfave/cli.v1 => github.com/urfave/cli v1.22.0
 )

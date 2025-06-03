@@ -898,6 +898,8 @@ set_h264_params(
                                                 encoder_codec_context->width,
                                                 encoder_codec_context->height);
     }
+
+    av_opt_set(encoder_codec_context->priv_data, "x264-params", "stitchable=1", 0);
 }
 
 static void
@@ -1218,12 +1220,13 @@ prepare_video_encoder(
         // av_opt_set(encoder_codec_context->priv_data, "crf_max", params->crf_str, AV_OPT_FLAG_ENCODING_PARAM | AV_OPT_SEARCH_CHILDREN);
     }
 
-    if (params->preset && strlen(params->preset) > 0 &&
-        (!strcmp(params->format, "fmp4-segment") || !strcmp(params->format, "fmp4"))) {
+    if (params->preset && strlen(params->preset) > 0) {
         av_opt_set(encoder_codec_context->priv_data, "preset", params->preset, AV_OPT_FLAG_ENCODING_PARAM | AV_OPT_SEARCH_CHILDREN);
     }
 
-    if (!strcmp(params->format, "fmp4-segment") || !strcmp(params->format, "fmp4")) {
+    // TODO: Add a parameter for b-frames instead of using format
+    if (!strcmp(params->format, "fmp4-segment") || !strcmp(params->format, "fmp4") ||
+        !strcmp(params->format, "dash") || !strcmp(params->format, "hls")) {
         encoder_codec_context->max_b_frames = 0;
     }
 
@@ -1394,7 +1397,7 @@ prepare_audio_encoder(
             return eav_codec_context;
         }
 
-        /* If there are more than 1 audio stream do encode, we can't do bypass */
+        /* If there are more than 1 audio streams to encode, we can't do bypass */
         if (params && params->bypass_transcoding && decoder_context->n_audio > 1) {
             elv_err("Can not bypass multiple audio streams, n_audio=%d, url=%s", decoder_context->n_audio, params->url);
             return eav_num_streams;
@@ -1818,8 +1821,8 @@ prepare_encoder(
 
     dump_encoder(inctx->url, encoder_context->format_context, params);
     dump_codec_context(encoder_context->codec_context[encoder_context->video_stream_index]);
-    for (int i=0; i<encoder_context->n_audio_output; i++) {
-        dump_encoder(inctx->url, encoder_context->format_context2[i], params);
+    for (int i=0; i < encoder_context->n_audio_output; i ++) {
+        dump_encoder(inctx->url, encoder_context->format_context2[0], params);
     }
     dump_codec_context(encoder_context->codec_context[encoder_context->audio_stream_index[0]]);
 
@@ -2043,7 +2046,7 @@ encode_frame(
     int debug_frame_level)
 {
     int ret;
-    int index = stream_index; 
+    int index = stream_index;
     int rc = eav_success;
     AVFormatContext *format_context = encoder_context->format_context;
     AVCodecContext *codec_context = encoder_context->codec_context[stream_index];
@@ -2176,9 +2179,13 @@ encode_frame(
         }
 
         /*
-         * Sometimes the first audio frame comes out from encoder with a negarive pts (i.e replay rtmp with ffmpeg),
+         * Sometimes the first audio frame comes out from encoder with a negative pts (i.e replay rtmp with ffmpeg),
          * and after rescaling it becomes pretty big number which causes audio sync problem.
          * The only solution that I could come up for this was skipping this frame. (-RM)
+         */
+        /*
+         * PENDING(SS): must discard the samples that the codec requires be skipped using audio_skip_samples()
+         * and forward this frame to the muxer (don't skip here - the negative PTS will work correctly),
          */
         if (selected_decoded_audio(decoder_context, stream_index) >= 0 && output_packet->pts < 0) {
             elv_log("Skipping encoded packet with negative pts %"PRId64, output_packet->pts);
@@ -2244,18 +2251,20 @@ encode_frame(
             encoder_context->video_encoder_prev_pts = output_packet->pts;
 
         /*
-         * Rescale using the stream time_base (not the codec context):
-         *   - if the stream is a video or
-         *   - if it is audio then the decoding stream and encoding stream has the same codec id.
+         * Rescale video using the stream time_base (not the codec context)
+         * Audio has already been rescaled before the filter.
+         * PENDING(SS) Video should also be rescaled before sending to the filter so this
+         * code will not longer benecessary. When rescaling before sending to the filter and encoder,
+         * we use the codect context time base (which is what the encoder will use). We would
+         * only want to filter here, after encoding, if the packager requires a specific timebase,
+         * different than the encoder (eg. MPEGTS requires timebase 1/90000)
          */
-        if ((stream_index == decoder_context->video_stream_index ||
-            (selected_decoded_audio(decoder_context, stream_index) >= 0 &&
-             params->ecodec2 != NULL &&
-             !strcmp(avcodec_get_name(decoder_context->codec_parameters[stream_index]->codec_id), params->ecodec2))) &&
+        if ((stream_index == decoder_context->video_stream_index) &&
             (decoder_context->stream[stream_index]->time_base.den !=
             encoder_context->stream[index]->time_base.den ||
             decoder_context->stream[stream_index]->time_base.num !=
             encoder_context->stream[index]->time_base.num)) {
+
             av_packet_rescale_ts(output_packet,
                 decoder_context->stream[stream_index]->time_base,
                 encoder_context->stream[index]->time_base
@@ -2446,20 +2455,24 @@ transcode_audio(
 {
     int ret;
     AVCodecContext *codec_context = decoder_context->codec_context[stream_index];
-    int audio_enc_stream_index = stream_index;
+    int i = selected_decoded_audio(decoder_context, stream_index);
+    int output_stream_index = audio_output_stream_index(decoder_context, params, i);
     int response;
 
+    if (i < 0) {
+        /* audio index was already checked before sending the frame to the audio transcoder */
+        elv_err("Assertion failure - unexpected bad audio stream index %d url=%d", stream_index, params->url);
+        return eav_stream_index;
+    }
 
-    if (params->xc_type == xc_audio_merge ||
-        params->xc_type == xc_audio_join ||
-        params->xc_type == xc_audio_pan)
-        audio_enc_stream_index = 0;
+    AVCodecContext *enc_codec_context = encoder_context->codec_context[output_stream_index];
+
 
     if (debug_frame_level)
         elv_dbg("DECODE stream_index=%d send_packet pts=%"PRId64" dts=%"PRId64
             " duration=%d, input frame_size=%d, output frame_size=%d, audio_output_pts=%"PRId64,
             stream_index, packet->pts, packet->dts, packet->duration, codec_context->frame_size,
-            encoder_context->codec_context[audio_enc_stream_index]->frame_size, decoder_context->audio_output_pts);
+            enc_codec_context->frame_size, decoder_context->audio_output_pts);
 
     if (params->bypass_transcoding) {
         return do_bypass(1, decoder_context, encoder_context, packet, params, debug_frame_level);
@@ -2509,13 +2522,13 @@ transcode_audio(
 
         decoder_context->audio_pts[stream_index] = packet->pts;
 
+        /* Rescale frame before sending to the filter (filter is initialized with the encoder timebase) */
+        frame_rescale_time_base(frame, codec_context->time_base, enc_codec_context->time_base);
+
         /* push the decoded frame into the filtergraph */
-        int i = selected_decoded_audio(decoder_context, stream_index);
-        if (i >= 0) {
-            if (av_buffersrc_add_frame_flags(decoder_context->audio_buffersrc_ctx[i], frame, AV_BUFFERSRC_FLAG_KEEP_REF) < 0) {
-                elv_err("Failure in feeding into audio filtergraph source %d, url=%s", i, params->url);
-                break;
-            }
+        if (av_buffersrc_add_frame_flags(decoder_context->audio_buffersrc_ctx[i], frame, AV_BUFFERSRC_FLAG_KEEP_REF) < 0) {
+            elv_err("Failure in feeding into audio filtergraph source %d, url=%s", i, params->url);
+            break;
         }
 
         /* pull filtered frames from the filtergraph */
@@ -3076,7 +3089,7 @@ transcode_audio_func(
     av_frame_free(&filt_frame);
     if (!xctx->err)
         xctx->err = err;
-    
+
     elv_channel_close(xctx->ac, 0);
     elv_dbg("transcode_audio_func err=%d, xctx->err=%d, stop=%d", err, xctx->err, xctx->stop);
 
@@ -3092,11 +3105,12 @@ flush_decoder(
     int debug_frame_level)
 {
     int ret;
-    int i;
+    int i = selected_decoded_audio(decoder_context, stream_index);
     AVFrame *frame, *filt_frame;
     AVFilterContext *buffersink_ctx = decoder_context->video_buffersink_ctx;
     AVFilterContext *buffersrc_ctx = decoder_context->video_buffersrc_ctx;
     AVCodecContext *codec_context = decoder_context->codec_context[stream_index];
+
     int response = 0;
 
     if (codec_context == NULL)
@@ -3106,8 +3120,7 @@ flush_decoder(
     frame = av_frame_alloc();
     filt_frame = av_frame_alloc();
 
-    if (!p->bypass_transcoding &&
-        (i = selected_decoded_audio(decoder_context, stream_index)) >= 0) {
+    if (!p->bypass_transcoding && (i >= 0)) {
         buffersrc_ctx = decoder_context->audio_buffersrc_ctx[i];
         buffersink_ctx = decoder_context->audio_buffersink_ctx[i];
     }
@@ -3123,11 +3136,19 @@ flush_decoder(
             continue; // PENDING(SSS) why continue and not break?
         }
 
-        dump_frame(selected_decoded_audio(decoder_context, stream_index) >= 0, stream_index,
+        dump_frame(i >= 0, stream_index,
             "IN FLUSH", codec_context->frame_number, frame, debug_frame_level);
 
         if (codec_context->codec_type == AVMEDIA_TYPE_VIDEO ||
             codec_context->codec_type == AVMEDIA_TYPE_AUDIO) {
+
+            /* Rescale audio before sending to the filter (filter is initialized with the encoder timebase */
+            /* PENDING(SS) video should also be rescaled here */
+            if (i >= 0) {
+                int output_stream_index = audio_output_stream_index(decoder_context, p, i);
+                AVCodecContext *enc_codec_context = encoder_context->codec_context[output_stream_index];
+                frame_rescale_time_base(frame, codec_context->time_base, enc_codec_context->time_base);
+            }
 
             /* push the decoded frame into the filtergraph */
             if (av_buffersrc_add_frame_flags(buffersrc_ctx, frame, AV_BUFFERSRC_FLAG_KEEP_REF) < 0) {
@@ -3147,7 +3168,7 @@ flush_decoder(
                     break;
                 }
 
-                dump_frame(selected_decoded_audio(decoder_context, stream_index) >= 0, stream_index,
+                dump_frame(i >= 0, stream_index,
                     "FILT ", codec_context->frame_number, filt_frame, debug_frame_level);
 
                 ret = encode_frame(decoder_context, encoder_context, filt_frame, stream_index, p, debug_frame_level);
@@ -3599,6 +3620,22 @@ get_filter_str(
     return 0;
 }
 
+/*
+ * The general flow of transcoding:
+ *
+ * - read a packet from the input - the packet PTS/DTS is in the timebase of the source
+ * - decode the packet into a frame - the frame PTS is in the timebase of the source (some decoders will preserve
+ *   the DTS of the original packet in frame->packet_dts, also in the timebase of the source)
+ * - rescale it to the desired timebase of the encoder using the decoder codec_context timebase as a source
+ *   and the encoder codec_context timebase as a target
+ * - send the frame to the filter (if applicable) - the filter will interpret the frame in the
+ *   timebase specified in filter args (so filter args timebase must specify the timebase of the encoder)
+ *   and will return the filtered frame in the timebase of the encoder
+ * - send the frame to the encoder - the encoder will output the frame in its timebase
+ * - in special cases where the output package format requires a specific timebase (for example MPEGTS
+ *   requires 1/90000) so the frame can be rescaled before sending to the packager using the encoder
+ *   codec context timebase as source and the output stream timebase as target
+ */
 int
 avpipe_xc(
     xctx_t *xctx,
@@ -3997,6 +4034,12 @@ xc_done:
     pthread_join(xctx->vthread_id, NULL);
     pthread_join(xctx->athread_id, NULL);
 
+    if (params->copy_mpegts) {
+        cp_ctx_t *cp_ctx = &xctx->cp_ctx;
+        elv_channel_close(cp_ctx->ch, 0);
+        pthread_join(cp_ctx->thread_id, NULL);
+    }
+
     /*
      * Flush all frames, first flush decoder buffers, then encoder buffers by passing NULL frame.
      */
@@ -4335,6 +4378,26 @@ avpipe_probe(
             stream_probes_ptr->codec_type = decoder_ctx.format_context->streams[i]->codecpar->codec_type;
         }
         stream_probes_ptr->codec_name[MAX_CODEC_NAME] = '\0';
+
+        // Estimate duration if not provided by the stream format
+        if (s->duration <= 0) {
+            // Check for tag 'duration' of format "HH:MM:SS.SUB"
+            AVDictionaryEntry *d = NULL;
+            d = av_dict_get(s->metadata, "duration", NULL, 0);
+            if (d) {
+                int64_t duration_ts = parse_duration(d->value, s->time_base);
+                if (duration_ts > 0) {
+                    s->duration = duration_ts;
+                    av_dict_set(&s->metadata,"avpipe", "duration estimated from tag", 0);
+                }
+            }
+        }
+
+        // Start time is optional - set to 0 if not explicitly specified
+        if (s->start_time == AV_NOPTS_VALUE) {
+            s->start_time = 0;
+        }
+
         stream_probes_ptr->duration_ts = s->duration;
         stream_probes_ptr->time_base = s->time_base;
         stream_probes_ptr->nb_frames = s->nb_frames;
@@ -4371,6 +4434,7 @@ avpipe_probe(
         stream_probes_ptr->profile = codec_context->profile;
         stream_probes_ptr->level = codec_context->level;
 
+        // Set container duration if necessary
         if (probe->container_info.duration <
             ((float)stream_probes_ptr->duration_ts)/stream_probes_ptr->time_base.den)
             probe->container_info.duration =
@@ -4862,6 +4926,7 @@ avpipe_fini(
     xctx_t **xctx)
 {
     coderctx_t *decoder_context;
+    int rc;
     coderctx_t *encoder_context;
 
     if (!xctx || !(*xctx))
@@ -4871,8 +4936,10 @@ avpipe_fini(
         elv_dbg("Releasing all the resources, url=%s", (*xctx)->inctx->url);
 
     /* Close input handler resources if it is not a muxing command */
-    if (!(*xctx)->in_mux_ctx && (*xctx)->in_handlers)
-        (*xctx)->in_handlers->avpipe_closer((*xctx)->inctx);
+    if (!(*xctx)->in_mux_ctx && (*xctx)->in_handlers) {
+        if ((rc = (*xctx)->in_handlers->avpipe_closer((*xctx)->inctx)) < 0)
+            elv_err("Encountered error closing input, url=%s, rc=%d", (*xctx)->inctx->url, rc);
+    }
 
     decoder_context = &(*xctx)->decoder_ctx;
     encoder_context = &(*xctx)->encoder_ctx;
@@ -4906,7 +4973,7 @@ avpipe_fini(
         free(avpipe_opaque);
     }
     if (encoder_context) {
-        for (int i=0; i<encoder_context->n_audio_output; i++) { 
+        for (int i=0; i<encoder_context->n_audio_output; i++) {
             void *avpipe_opaque = encoder_context->format_context2[i]->avpipe_opaque;
             avformat_free_context(encoder_context->format_context2[i]);
             free(avpipe_opaque);
@@ -4927,6 +4994,33 @@ avpipe_fini(
         }
     }
 
+    if ((*xctx)->params->copy_mpegts) {
+        void *avpipe_opaque;
+        cp_ctx_t *cp_ctx = &(*xctx)->cp_ctx;
+        coderctx_t *mpegts_encoder_ctx = &cp_ctx->encoder_ctx;
+        // format context may be NULL if the input is never opened, because the decoder never picks
+        // a codec
+        if (mpegts_encoder_ctx->format_context && mpegts_encoder_ctx->format_context->pb) {
+            if ((rc = avio_close(mpegts_encoder_ctx->format_context->pb)) < 0) {
+                elv_warn("Encountered error closing input, url=%s, rc=%d, rc_str=%s", mpegts_encoder_ctx->format_context->url, rc, av_err2str(rc));
+            }
+        }
+        for (int i=0; i<MAX_STREAMS; i++) {
+            if (mpegts_encoder_ctx->codec_context[i]) {
+                /* Corresponds to avcodec_open2() */
+                avcodec_close(mpegts_encoder_ctx->codec_context[i]);
+                avcodec_free_context(&mpegts_encoder_ctx->codec_context[i]);
+            }
+        }
+        if (mpegts_encoder_ctx->format_context) {
+            // avpipe_opaque is used by elv_io_close in order to properly close the output parts
+            // We hold a reference to it and free it after, as it is not freed there.
+            avpipe_opaque = mpegts_encoder_ctx->format_context->avpipe_opaque;
+            avformat_free_context(mpegts_encoder_ctx->format_context);
+            if (avpipe_opaque)
+                free(avpipe_opaque);
+        }
+    }
 #ifdef USE_RESAMPLE_AAC
     if ((*xctx)->params && !strcmp((*xctx)->params->ecodec2, "aac")) {
         av_audio_fifo_free(decoder_context->fifo);
@@ -4934,7 +5028,13 @@ avpipe_fini(
     }
 #endif
 
-    // PENDING(SS) These are not allocated by avpipe_init
+    if ((*xctx)->in_handlers && (*xctx)->inctx && (*xctx)->inctx->opaque) {
+        // inctx->opaque is allocated by either in_opener or udp_in_opener
+        free((*xctx)->inctx->opaque);
+        (*xctx)->inctx->opaque = NULL;
+    }
+    
+    // These are allocated in set_handlers, which is called before avpipe_init in xc_init
     free((*xctx)->in_handlers);
     free((*xctx)->out_handlers);
 

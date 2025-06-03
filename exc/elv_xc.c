@@ -193,6 +193,7 @@ in_closer(
     int fd = *((int *)(inctx->opaque));
     elv_dbg("IN io_close custom writer fd=%d\n", fd);
     free(inctx->opaque);
+    inctx->opaque = NULL;
     close(fd);
     return 0;
 }
@@ -947,7 +948,7 @@ get_image_type(
 
     if (strncmp(image_type_str, "jpg", 3) == 0 || strncmp(image_type_str, "JPG", 3) == 0)
         return jpg_image;
-    
+
     if (strncmp(image_type_str, "gif", 3) == 0 || strncmp(image_type_str, "GIF", 3) == 0)
         return gif_image;
 
@@ -1305,8 +1306,11 @@ main(
                     usage(argv[0], argv[i], EXIT_FAILURE);
                 }
             } else if (!strcmp(argv[i], "-deinterlace")) {
-                if (sscanf(argv[i+1], "%d", &p.deinterlace) != 1) {
+                int deinterlace;
+                if (sscanf(argv[i+1], "%d", &deinterlace) != 1) {
                     usage(argv[0], argv[i], EXIT_FAILURE);
+                } else {
+                    p.deinterlace = deinterlace;
                 }
             }
             else if (strlen(argv[i]) > 2) {

@@ -106,16 +106,21 @@ num_audio_output(
     coderctx_t *decoder_context,
     xcparams_t *params)
 {
-    int n_decoder_auido = decoder_context ? decoder_context->n_audio : 0;
+    int n_decoder_audio = decoder_context ? decoder_context->n_audio : 0;
     if (!params)
         return 0;
 
     if (params->xc_type == xc_audio_merge || params->xc_type == xc_audio_join || params->xc_type == xc_audio_pan)
         return 1;
 
-    return params->n_audio > 0 ? params->n_audio : n_decoder_auido;
+    return params->n_audio > 0 ? params->n_audio : n_decoder_audio;
 }
 
+/*
+ * Given a source audio stream index, return the array index in the decoder 'audio_stream_index' array, if selected.
+ * This is used to index the 'format_context2' array.
+ * Return -1 if this stream index is not selected (was not part of the xc_params audio_index array)
+ */
 int
 selected_decoded_audio(
     coderctx_t *decoder_context,
@@ -130,6 +135,32 @@ selected_decoded_audio(
     }
 
     return -1;
+}
+
+/*
+ * Return the array index into the encoder 'audio_stream_index' array (which is also used by the encoder 'codec_context' array),
+ * from the array index into the decoder 'audio_stream_index' array (as returned by selected_decoded_audio)
+ */
+int
+audio_output_stream_index(
+    coderctx_t *decoder_context,
+    xcparams_t *params,
+    int audio_stream_index)
+{
+    int output_stream_index;
+
+    if (audio_stream_index < 0)
+        return -1;
+
+    output_stream_index = decoder_context->audio_stream_index[audio_stream_index];
+
+    if (params->xc_type == xc_audio_merge ||
+        params->xc_type == xc_audio_join ||
+        params->xc_type == xc_audio_pan) {
+        // Only one audio output
+        output_stream_index = 0;
+    }
+    return output_stream_index;
 }
 
 int
@@ -212,3 +243,70 @@ packet_clone(
     return 0;
 }
 
+/*
+ * Update an audio frame by skipping the necessary number of samples.
+ * Update frame nb_samples to the remaining samples in the frame (which may be 0 if the frame is to be skipped entirely)
+ * Many audio decoders use the concept of 'priming' and require skipping of a number of samples.
+ * Opus specifically sets codec_context->delay to the number of samples to be skipped.
+ * In most cases the audio frames to be skipped might have a negative PTS but that is not a rule/standard.
+ * Limitation: we expect we only skip samples in the first frame (log warning if not true)
+ *
+ * PENDING(SS) Currently unused but will be used in encode_frame()
+ */
+int
+audio_skip_samples(
+    AVCodecContext *codec_ctx,
+    AVFrame *frame) {
+
+    // Only skipping for Opus inputs currently
+    if (codec_ctx->codec_id != AV_CODEC_ID_OPUS) {
+        return eav_success;
+    }
+
+    int samples_to_skip = codec_ctx->delay; // Defined by the Opus format
+    if (samples_to_skip <= 0) {
+        return eav_success;
+    }
+
+    if (samples_to_skip > frame->nb_samples) {
+        // Unexpected - we need to skip more than one frame
+        elv_warn("Unexpected audio stream delay nb_frames=%d skip_now=%d", frame->nb_samples, samples_to_skip);
+        frame->nb_samples = 0;
+        return eav_success;
+    }
+
+    int sample_size = av_get_bytes_per_sample(codec_ctx->sample_fmt);
+    if (sample_size <= 0) {
+        // Unknown sample format - this frame is not good
+        return eav_receive_frame;
+    }
+
+    // Skip samples in either packed (one channel, interleaved) or planar data (multiple channels)
+    int channels = codec_ctx->channels;
+    int skip_bytes = samples_to_skip * sample_size;
+    for (int ch = 0; ch < channels; ch++) {
+        if (frame->data[ch]) {
+            frame->data[ch] += skip_bytes;
+        }
+    }
+
+    frame->nb_samples -= samples_to_skip;
+    return eav_success;
+}
+
+/*
+ * Rescale an AVFrame before sending to the filter or encoder.
+ * When rescaling a decoded frame before sending it to the filter or encoder, use the
+ * decoder codec_context timebase as source and the encoder codec timebase as target
+ */
+void frame_rescale_time_base(
+    AVFrame *frame, AVRational src_time_base, AVRational dst_time_base) {
+    if (frame->pts != AV_NOPTS_VALUE)
+        frame->pts = av_rescale_q(frame->pts, src_time_base, dst_time_base);
+
+    if (frame->pkt_dts != AV_NOPTS_VALUE)
+        frame->pkt_dts = av_rescale_q(frame->pkt_dts, src_time_base, dst_time_base);
+
+    if (frame->pkt_duration > 0)
+        frame->pkt_duration = av_rescale_q(frame->pkt_duration, src_time_base, dst_time_base);
+}
