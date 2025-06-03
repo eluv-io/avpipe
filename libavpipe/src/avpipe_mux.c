@@ -453,13 +453,27 @@ avpipe_mux(
 
     // Set pts_per_frame for streams that have frame rate info
     for (int i=0; i < stream_count; i++) {
+
         AVRational avg_frame_rate = xctx->in_muxer_ctx[i].format_context->streams[0]->avg_frame_rate;
         AVRational time_base = xctx->in_muxer_ctx[i].format_context->streams[0]->time_base;
-        if (avg_frame_rate.num == 0 || time_base.num == 0) {
-            elv_dbg("avpipe_mux stream %d avg_frame_rate or time_base is 0", i);
-            continue;
+
+        int codec_type = xctx->in_muxer_ctx[i].format_context->streams[0]->codecpar->codec_type;
+
+        switch(codec_type) {
+        case AVMEDIA_TYPE_VIDEO:
+            if (avg_frame_rate.num == 0 || time_base.num == 0) {
+                elv_warn("avpipe_mux stream %d avg_frame_rate or time_base is 0", i);
+                continue;
+            }
+            set_pts_per_frame_from_streaminfo(pts_estimator, i, av_rescale_q(1, av_inv_q(time_base), avg_frame_rate));
+            break;
+        case AVMEDIA_TYPE_AUDIO:
+            if (xctx->in_muxer_ctx[i].format_context->streams[0]->codecpar->codec_id == AV_CODEC_ID_AAC) {
+                const int64_t aac_frame_duration = 1024;
+                set_pts_per_frame_from_streaminfo(pts_estimator, i, aac_frame_duration);
+            }
+            break;
         }
-        set_pts_per_frame_from_streaminfo(pts_estimator, i, av_rescale_q(1, av_inv_q(time_base), avg_frame_rate));
     }
 
     for (int i=0; i < stream_count; i++) {
