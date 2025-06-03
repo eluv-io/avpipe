@@ -249,7 +249,7 @@ packet_clone(
  * incorrectly, or for segmentation in segment.c we miss the iframe and cut on the following iframe creating a longer segment).
  *
  * Calculate a minimal tolerance specifically for each type of source media to fix concrete problems.
- * If the tolerance is to large we risk to match too early or too late.
+ * If the tolerance is too large we risk to match too early or too late.
  */
 int
 segmentation_tolerance(
