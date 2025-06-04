@@ -1993,20 +1993,22 @@ should_skip_encoding(
     else
         frame_in_pts_offset = frame->pts - decoder_context->video_input_start_pts;
 
+    int tolerance = segmentation_tolerance(decoder_context, stream_index);
+
     /* Drop frames before the desired 'start_time'
      * If the format is dash or hls, we skip the frames in skip_until_start_time_pts()
      * without decoding the frame.
      */
     if (p->skip_decoding) {
         if (p->start_time_ts > 0 &&
-            frame_in_pts_offset < p->start_time_ts &&
+            frame_in_pts_offset + tolerance < p->start_time_ts &&
             strcmp(p->format, "dash") &&
             strcmp(p->format, "hls")) {
             elv_dbg("ENCODE SKIP frame early pts=%" PRId64 ", frame_in_pts_offset=%" PRId64 ", start_time_ts=%" PRId64,
                 frame->pts, frame_in_pts_offset, p->start_time_ts);
             return 1;
         }
-    } else if (p->start_time_ts > 0 && frame_in_pts_offset < p->start_time_ts) {
+    } else if (p->start_time_ts > 0 && frame_in_pts_offset + tolerance < p->start_time_ts) {
         elv_dbg("ENCODE SKIP frame early pts=%" PRId64 ", frame_in_pts_offset=%" PRId64 ", start_time_ts=%" PRId64,
             frame->pts, frame_in_pts_offset, p->start_time_ts);
         return 1;
@@ -3289,15 +3291,12 @@ skip_until_start_time_pts(
     else
         input_start_pts = decoder_context->audio_input_start_pts[input_packet->stream_index];
 
-    int64_t packet_in_pts_offset = input_packet->pts - input_start_pts;
+    const int64_t packet_in_pts_offset = input_packet->pts - input_start_pts;
 
-    // PENDING(SS) For audio ABR, the mez source has imperfect frame durations (occasional 1023)
-    // This causes probelms when skipping - we might skip over the correct frame because it is a few ts units short
-    if (selected_decoded_audio(decoder_context, input_packet->stream_index) >= 0)
-        packet_in_pts_offset += 15;
+    int tolerance = segmentation_tolerance(decoder_context, input_packet->stream_index);
 
     /* Drop frames before the desired 'start_time' */
-    if (packet_in_pts_offset < params->start_time_ts) {
+    if (packet_in_pts_offset + tolerance < params->start_time_ts) {
         elv_dbg("PREDECODE SKIP frame early stream_index=%d, pts=%" PRId64 ", start_time_ts=%" PRId64
             ", input_start_pts=%" PRId64 ", packet_in_pts_offset=%" PRId64,
             input_packet->stream_index,
@@ -5033,7 +5032,7 @@ avpipe_fini(
         free((*xctx)->inctx->opaque);
         (*xctx)->inctx->opaque = NULL;
     }
-    
+
     // These are allocated in set_handlers, which is called before avpipe_init in xc_init
     free((*xctx)->in_handlers);
     free((*xctx)->out_handlers);

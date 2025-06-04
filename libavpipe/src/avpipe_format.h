@@ -72,6 +72,10 @@ packet_clone(
     AVPacket **dst
 );
 
+int segmentation_tolerance(
+    coderctx_t *decoder_context,
+    int stream_index);
+
 void frame_rescale_time_base(
     AVFrame *frame,
     AVRational src_time_base,
