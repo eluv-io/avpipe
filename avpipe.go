@@ -47,6 +47,14 @@ import (
 	"github.com/eluv-io/avpipe/goavpipe"
 )
 
+func init() {
+	goavpipe.SetXcFn(Xc)
+	goavpipe.SetMuxFn(Mux)
+	goavpipe.SetXcInitFn(XcInit)
+	goavpipe.SetXcRunFn(XcRun)
+	goavpipe.SetXcCancelFn(XcCancel)
+}
+
 const traceIo bool = false
 
 type SeekReadWriteCloser interface {
