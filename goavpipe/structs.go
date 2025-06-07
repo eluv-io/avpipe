@@ -130,16 +130,16 @@ type XcType int
 
 const (
 	XcNone             XcType = iota
-	XcVideo                   = 1
-	XcAudio                   = 2
-	XcAll                     = 3  // XcAudio | XcVideo
-	XcAudioMerge              = 6  // XcAudio | 0x04
-	XcAudioJoin               = 10 // XcAudio | 0x08
-	XcAudioPan                = 18 // XcAudio | 0x10
-	XcMux                     = 32
-	XcExtractImages           = 65  // XcVideo | 2^6
-	XcExtractAllImages        = 129 // XcVideo | 2^7
-	Xcprobe                   = 256
+	XcVideo            XcType = 1
+	XcAudio            XcType = 2
+	XcAll              XcType = 3  // XcAudio | XcVideo
+	XcAudioMerge       XcType = 6  // XcAudio | 0x04
+	XcAudioJoin        XcType = 10 // XcAudio | 0x08
+	XcAudioPan         XcType = 18 // XcAudio | 0x10
+	XcMux              XcType = 32
+	XcExtractImages    XcType = 65  // XcVideo | 2^6
+	XcExtractAllImages XcType = 129 // XcVideo | 2^7
+	Xcprobe            XcType = 256
 )
 
 type XcProfile int

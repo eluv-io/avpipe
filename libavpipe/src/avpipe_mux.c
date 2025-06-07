@@ -1,6 +1,29 @@
 #include "avpipe_xc.h"
 #include "avpipe_utils.h"
 #include "elv_log.h"
+#include <stdbool.h>
+
+typedef struct pts_estimator_t {
+    int64_t pts_per_frame[MAX_STREAMS];
+    int64_t frames_written[MAX_STREAMS];
+    /* PTS of the last packet read from the input stream, used to detect discrepancies. */
+    int64_t last_pts[MAX_STREAMS];
+
+    int major_discrepancies_logged;
+    int minor_discrepancies_logged;
+} pts_estimator_t;
+
+/* Allocate and initialize a PTS estimator. */
+static int init_pts_estimator(pts_estimator_t **estimator);
+/* Set the PTS per stream based on ffmpeg's stream info. This must be called _before_ any packets have their PTS adjusted. */
+static int set_pts_per_frame_from_streaminfo(pts_estimator_t *estimator, int stream_index, int64_t pts_per_frame);
+static bool is_pts_per_frame_known(pts_estimator_t *estimator, int stream_index);
+/* Report two successive packets for PTS estimation. This should be called at the end of retrieving
+ * the second packet of the stream in order to estimate the PTS delta. */
+static int report_successive_packets_for_pts_estimation(pts_estimator_t *estimator, int stream_index, AVPacket *pkt1, AVPacket *pkt2);
+/* Adjust the PTS of a packet just before writing it out to the output. If anything has not been
+ * initialized properly, this function will error. */
+static int adjust_pts(pts_estimator_t *estimator, int stream_index, AVPacket *pkt);
 
 void
 log_params(
@@ -79,10 +102,10 @@ prepare_input_muxer(
 
     if (in_mux_index == 0) {
         inctx->url = in_mux_ctx->video.parts[0];
-    } else if (in_mux_index <= in_mux_ctx->last_audio_index) {
+    } else if (in_mux_index <= in_mux_ctx->audio_count) {
         inctx->url = in_mux_ctx->audios[in_mux_index-1].parts[0];
-    } else if (in_mux_index <= in_mux_ctx->last_audio_index + in_mux_ctx->last_caption_index) {
-        inctx->url = in_mux_ctx->captions[in_mux_index-in_mux_ctx->last_audio_index-1].parts[0];
+    } else if (in_mux_index <= in_mux_ctx->audio_count + in_mux_ctx->caption_count) {
+        inctx->url = in_mux_ctx->captions[in_mux_index-in_mux_ctx->audio_count-1].parts[0];
     } else {
         elv_err("prepare_input_muxer() invalid in_mux_index=%d", in_mux_index);
         return eav_stream_index;
@@ -170,11 +193,11 @@ init_mux_ctx(
             elv_err("init_mux_ctx invalid video stream_index=%d", stream_index);
             return eav_param;
         }
-        if (!strcmp(stream_type, "audio") && (stream_index > MAX_STREAMS || stream_index > in_mux_ctx->last_audio_index+1)) {
+        if (!strcmp(stream_type, "audio") && (stream_index > MAX_STREAMS || stream_index > in_mux_ctx->audio_count+1)) {
             elv_err("init_mux_ctx invalid audio stream_index=%d", stream_index);
             return eav_param;
         }
-        if (!strcmp(stream_type, "caption") && (stream_index > MAX_STREAMS || stream_index > in_mux_ctx->last_caption_index+1)) {
+        if (!strcmp(stream_type, "caption") && (stream_index > MAX_STREAMS || stream_index > in_mux_ctx->caption_count+1)) {
             elv_err("init_mux_ctx invalid caption stream_index=%d", stream_index);
             return eav_param;
         }
@@ -192,16 +215,16 @@ init_mux_ctx(
         if (!strcmp(stream_type, "audio") && in_mux_ctx->audios[stream_index-1].n_parts < MAX_MUX_IN_STREAM) {
             in_mux_ctx->audios[stream_index-1].parts[in_mux_ctx->audios[stream_index-1].n_parts] = stream_url;
             in_mux_ctx->audios[stream_index-1].n_parts++;
-            if (stream_index > in_mux_ctx->last_audio_index)
-                in_mux_ctx->last_audio_index = stream_index;
+            if (stream_index > in_mux_ctx->audio_count)
+                in_mux_ctx->audio_count = stream_index;
         } else if (!strcmp(stream_type, "video") && in_mux_ctx->video.n_parts < MAX_MUX_IN_STREAM) {
             in_mux_ctx->video.parts[in_mux_ctx->video.n_parts] = stream_url;
             in_mux_ctx->video.n_parts++;
         } else if (!strcmp(stream_type, "caption") && in_mux_ctx->captions[stream_index-1].n_parts < MAX_MUX_IN_STREAM) {
             in_mux_ctx->captions[stream_index-1].parts[in_mux_ctx->captions[stream_index-1].n_parts] = stream_url;
             in_mux_ctx->captions[stream_index-1].n_parts++;
-            if (stream_index > in_mux_ctx->last_caption_index)
-                in_mux_ctx->last_caption_index = stream_index;
+            if (stream_index > in_mux_ctx->caption_count)
+                in_mux_ctx->caption_count = stream_index;
         }
     }
 
@@ -211,7 +234,7 @@ init_mux_ctx(
     in_mux_ctx->out_filename = strdup(out_filename);
 
     elv_dbg("init_mux_ctx video_stream=%d, audio_streams=%d, captions=%d",
-        in_mux_ctx->video.n_parts > 0 ? 1 : 0, in_mux_ctx->last_audio_index, in_mux_ctx->last_caption_index);
+        in_mux_ctx->video.n_parts > 0 ? 1 : 0, in_mux_ctx->audio_count, in_mux_ctx->caption_count);
 
     return eav_success;
 }
@@ -254,10 +277,11 @@ avpipe_init_muxer(
     coderctx_t *out_muxer_ctx = &p_xctx->out_muxer_ctx;
 
     /* Prepare video, audio, captions input muxer */
-    for (int i=0; i<in_mux_ctx->last_audio_index+in_mux_ctx->last_caption_index+1; i++) {
+    for (int i=0; i<in_mux_ctx->audio_count+in_mux_ctx->caption_count+1; i++) {
         ioctx_t *inctx = (ioctx_t *)calloc(1, sizeof(ioctx_t));
         inctx->in_mux_index = i;
         inctx->in_mux_ctx = in_mux_ctx;
+        inctx->params = p;
         prepare_input_muxer(&p_xctx->in_muxer_ctx[i], in_handlers, inctx, p);
         p_xctx->inctx_muxer[i] = inctx;
     }
@@ -285,7 +309,7 @@ avpipe_init_muxer(
     out_muxer_ctx->format_context->io_open = elv_mux_open;
     out_muxer_ctx->format_context->io_close = elv_mux_close;
 
-    for (int i=0; i<in_mux_ctx->last_audio_index+in_mux_ctx->last_caption_index+1; i++) {
+    for (int i=0; i<in_mux_ctx->audio_count+in_mux_ctx->caption_count+1; i++) {
         /* Add a new stream to output format for each input in muxer context (source) */
         out_muxer_ctx->stream[i] = avformat_new_stream(out_muxer_ctx->format_context, NULL);
 
@@ -332,10 +356,13 @@ avpipe_init_muxer(
     return eav_success;
 }
 
+/* get_next_packet retrieves the muxed packet with the smallest pts value of all streams with packets
+ * remaining and fills pkt, returning the index of the stream or an error if the return value is negative. */
 static int
 get_next_packet(
     xctx_t *xctx,
-    AVPacket *pkt)
+    AVPacket *pkt,
+    pts_estimator_t *pts_estimator)
 {
     io_mux_ctx_t *in_mux_ctx = xctx->in_mux_ctx;
     AVPacket *pkts = xctx->pkt_array;
@@ -343,21 +370,20 @@ get_next_packet(
     int ret = 0;
     int i;
 
-    for (i=0; i<in_mux_ctx->last_audio_index + in_mux_ctx->last_caption_index + 1; i++) {
+    for (i=0; i<in_mux_ctx->audio_count + in_mux_ctx->caption_count + 1; i++) {
         if (xctx->is_pkt_valid[i]) {
             index = i;
             break;
         }
     }
 
-    for (i=index+1; i<in_mux_ctx->last_audio_index + in_mux_ctx->last_caption_index + 1; i++) {
+    for (i=index+1; i<in_mux_ctx->audio_count + in_mux_ctx->caption_count + 1; i++) {
         if (!xctx->is_pkt_valid[i])
             continue;
         AVStream *stream1 = xctx->in_muxer_ctx[i].format_context->streams[0];
         AVStream *stream2 = xctx->in_muxer_ctx[index].format_context->streams[0];
         if (av_compare_ts(pkts[i].pts, stream1->time_base, pkts[index].pts, stream2->time_base) <= 0) {
             index = i;
-            break;
         }
     }
 
@@ -379,27 +405,18 @@ read_frame_again:
         if (pkts[index].pts == pkt->pts)
             goto read_frame_again;
         xctx->is_pkt_valid[index] = 1;
-        if (pkt->pts >= 0) {
-            if (index == 0) {
-                if (pkt->pts > in_mux_ctx->last_video_pts)
-                    in_mux_ctx->last_video_pts = pkt->pts;
-                else {
-                    pkt->pts += in_mux_ctx->last_video_pts;
-                    pkt->dts += in_mux_ctx->last_video_pts;
-                }
-            } else if (index <= in_mux_ctx->last_audio_index) {
-                if (pkt->pts > in_mux_ctx->last_audio_pts)
-                    in_mux_ctx->last_audio_pts = pkt->pts;
-                else {
-                    pkt->pts += in_mux_ctx->last_audio_pts;
-                    pkt->dts += in_mux_ctx->last_audio_pts;
-                }
-            }
-        }
     } else {
         if (ret != AVERROR_EOF)
             elv_err("Failed to read frame index=%d, ret=%d", index, ret);
         return ret;
+    }
+
+    if (!is_pts_per_frame_known(pts_estimator, index)) {
+        ret = report_successive_packets_for_pts_estimation(pts_estimator, index, pkt, &pkts[index]);
+        if (ret < 0) {
+            elv_err("Failed to report successive packets for pts estimation, ret=%d", ret);
+            return ret;
+        }
     }
 
     return index;
@@ -410,55 +427,82 @@ avpipe_mux(
     xctx_t *xctx)
 {
     int ret = 0;
+    int stream_index;
     AVPacket pkt;
     AVPacket *pkts;
+    pts_estimator_t *pts_estimator;
     int *valid_pkts;
     io_mux_ctx_t *in_mux_ctx;
-    int64_t first_pts_array[MAX_STREAMS];
     int found_keyframe = 0;
 
+    ret = init_pts_estimator(&pts_estimator);
+    if (ret < 0) {
+        elv_err("Failed to initialize pts estimator, ret=%d", ret);
+        return ret;
+    }
 
     if (!xctx) {
         elv_err("Invalid transcoding context for muxing");
         return eav_param;
     }
 
-    for (int i=0; i<MAX_STREAMS; i++) {
-        first_pts_array[i] = AV_NOPTS_VALUE;
-    }
-
     pkts = xctx->pkt_array;
     valid_pkts = xctx->is_pkt_valid;
     in_mux_ctx = xctx->in_mux_ctx;
+    int stream_count = in_mux_ctx->audio_count + in_mux_ctx->caption_count + 1;
 
-    for (int i=0; i<in_mux_ctx->last_caption_index + in_mux_ctx->last_audio_index + 1; i++) {
+    // Set pts_per_frame for streams that have frame rate info
+    for (int i=0; i < stream_count; i++) {
+
+        AVRational avg_frame_rate = xctx->in_muxer_ctx[i].format_context->streams[0]->avg_frame_rate;
+        AVRational time_base = xctx->in_muxer_ctx[i].format_context->streams[0]->time_base;
+
+        int codec_type = xctx->in_muxer_ctx[i].format_context->streams[0]->codecpar->codec_type;
+
+        switch(codec_type) {
+        case AVMEDIA_TYPE_VIDEO:
+            if (avg_frame_rate.num == 0 || time_base.num == 0) {
+                elv_warn("avpipe_mux stream %d avg_frame_rate or time_base is 0", i);
+                continue;
+            }
+            set_pts_per_frame_from_streaminfo(pts_estimator, i, av_rescale_q(1, av_inv_q(time_base), avg_frame_rate));
+            break;
+        case AVMEDIA_TYPE_AUDIO:
+            if (xctx->in_muxer_ctx[i].format_context->streams[0]->codecpar->codec_id == AV_CODEC_ID_AAC) {
+                const int64_t aac_frame_duration = 1024;
+                set_pts_per_frame_from_streaminfo(pts_estimator, i, aac_frame_duration);
+            }
+            break;
+        }
+    }
+
+    for (int i=0; i < stream_count; i++) {
         ret = av_read_frame(xctx->in_muxer_ctx[i].format_context, &pkts[i]);
         if (ret >= 0) {
             valid_pkts[i] = 1;
-            first_pts_array[i] = pkts[i].pts;
         }
     }
 
     while (1) {
-        ret = get_next_packet(xctx, &pkt);
+        ret = get_next_packet(xctx, &pkt, pts_estimator);
         if (ret < 0)
             break;
-
-        if (ret == 0 && pkt.flags == AV_PKT_FLAG_KEY)
-            found_keyframe = 1;
+        stream_index = ret;
 
         if (!found_keyframe) {
-            av_packet_unref(&pkt);
-            continue;
+            if (stream_index == 0 && pkt.flags & AV_PKT_FLAG_KEY) {
+                found_keyframe = 1;
+            } else {
+                av_packet_unref(&pkt);
+                continue;
+            }
         }
 
-        if (first_pts_array[ret] == AV_NOPTS_VALUE) {
-            first_pts_array[ret] = pkt.pts;
+        ret = adjust_pts(pts_estimator, stream_index, &pkt);
+        if (ret < 0) {
+            elv_err("Failed to adjust pts for stream %d, ret=%d", stream_index, ret);
+            break;
         }
-
-        /* Adjust PTS and DTS and start always from 0 */
-        pkt.pts -= first_pts_array[ret];
-        pkt.dts = pkt.pts;
 
         dump_packet(pkt.stream_index, "MUX OUT ", &pkt, xctx->debug_frame_level);
 
@@ -494,7 +538,7 @@ avpipe_mux_fini(
     p_xctx = *xctx;
     in_mux_ctx = p_xctx->in_mux_ctx;
 
-    for (int i=0; i<in_mux_ctx->last_audio_index+in_mux_ctx->last_caption_index+1; i++) {
+    for (int i=0; i<in_mux_ctx->audio_count+in_mux_ctx->caption_count+1; i++) {
         avcodec_close(p_xctx->in_muxer_ctx[i].codec_context[0]);
         avcodec_free_context(&p_xctx->in_muxer_ctx[i].codec_context[0]);
 
@@ -531,3 +575,138 @@ avpipe_mux_fini(
     return avpipe_fini(xctx);
 }
 
+static int init_pts_estimator(pts_estimator_t **estimator) {
+    *estimator = (pts_estimator_t *)calloc(1, sizeof(pts_estimator_t));
+    if (!*estimator) {
+        elv_err("Failed to allocate memory for pts estimator");
+        return eav_mem_alloc;
+    }
+
+    for (int i=0; i<MAX_STREAMS; i++) {
+        (*estimator)->last_pts[i] = AV_NOPTS_VALUE;
+        (*estimator)->pts_per_frame[i] = AV_NOPTS_VALUE;
+    }
+
+    return eav_success;
+}
+
+static int set_pts_per_frame_from_streaminfo(pts_estimator_t *estimator, int stream_index, int64_t pts_per_frame) {
+    if (stream_index < 0 || stream_index >= MAX_STREAMS) {
+        elv_err("Invalid stream index %d", stream_index);
+        return eav_param;
+    }
+
+    for (int i=0; i<MAX_STREAMS; i++) {
+        if (estimator->frames_written[i] != 0) {
+            elv_err("Frames already written to stream %d before setting pts per frame", i);
+            return eav_param;
+        }
+    }
+
+    if (estimator->pts_per_frame[stream_index] != AV_NOPTS_VALUE) {
+        elv_err("PTS per frame already set for stream %d", stream_index);
+        return eav_param;
+    }
+
+    if (pts_per_frame <= 0) {
+        elv_err("PTS per frame must be positive, got %"PRId64"", pts_per_frame);
+        return eav_param;
+    }
+
+    elv_warn("Setting PTS per frame for stream %d to %"PRId64"", stream_index, pts_per_frame);
+
+    estimator->pts_per_frame[stream_index] = pts_per_frame;
+    return eav_success;
+}
+
+static bool is_pts_per_frame_known(pts_estimator_t *estimator, int stream_index) {
+    if (stream_index < 0 || stream_index >= MAX_STREAMS) {
+        elv_err("Invalid stream index %d", stream_index);
+        return false;
+    }
+    return estimator->pts_per_frame[stream_index] != AV_NOPTS_VALUE;
+}
+
+/* Report two successive packets for PTS estimation. This should be called at the end of retrieving
+ * the second packet of the stream in order to estimate the PTS delta. */
+static int report_successive_packets_for_pts_estimation(pts_estimator_t *estimator, int stream_index, AVPacket *pkt1, AVPacket *pkt2) {
+    if (stream_index < 0 || stream_index >= MAX_STREAMS) {
+        elv_err("Invalid stream index %d", stream_index);
+        return eav_param;
+    }
+
+    if (!pkt1 || !pkt2 || pkt1->pts == AV_NOPTS_VALUE || pkt2->pts == AV_NOPTS_VALUE) {
+        elv_err("Invalid packets, either missing or NOPTS");
+        return eav_param;
+    }
+
+    if (pkt2->pts <= pkt1->pts) {
+        elv_err("Invalid packet order, pkt1 pts=%"PRId64", pkt2 pts=%"PRId64"", pkt1->pts, pkt2->pts);
+        return eav_param;
+    }
+
+    estimator->pts_per_frame[stream_index] = pkt2->pts - pkt1->pts;
+
+    return eav_success;
+}
+
+/* Adjust the PTS of a packet just before writing it out to the output. If anything has not been
+ * initialized properly, this function will error. */
+static int adjust_pts(pts_estimator_t *estimator, int stream_index, AVPacket *pkt) {
+    if (stream_index < 0 || stream_index >= MAX_STREAMS) {
+        elv_err("Invalid stream index %d", stream_index);
+        return eav_param;
+    }
+
+    if (!pkt) {
+        elv_err("Invalid missing packet");
+        return eav_param;
+    }
+
+    if (estimator->pts_per_frame[stream_index] == AV_NOPTS_VALUE) {
+        elv_err("PTS per frame not set for stream %d. Mux initialization was incorrect", stream_index);
+        return eav_param;
+    } else if (estimator->pts_per_frame[stream_index] <= 0) {
+        elv_err("PTS per frame must be positive, got %"PRId64"", estimator->pts_per_frame[stream_index]);
+        return eav_param;
+    }
+
+    if (estimator->last_pts[stream_index] != AV_NOPTS_VALUE) {
+        if (pkt->pts <= estimator->last_pts[stream_index]) {
+            elv_warn("Out of order packets, last_pts=%"PRId64", pkt pts=%"PRId64"", estimator->last_pts[stream_index], pkt->pts);
+        }
+
+        int64_t pts_delta = pkt->pts - estimator->last_pts[stream_index];
+        int64_t expected_delta = estimator->pts_per_frame[stream_index];
+        int64_t diff_from_expected = labs(pts_delta - estimator->pts_per_frame[stream_index]);
+
+        if (diff_from_expected > (expected_delta / 5)) {
+            if (estimator->major_discrepancies_logged < 100) {
+                elv_warn("avpipe_mux stream %d pts_delta=%"PRId64", expected=%"PRId64", pts=%"PRId64", last_pts=%"PRId64"",
+                    stream_index, pts_delta, expected_delta, pkt->pts, estimator->last_pts[stream_index]);
+                estimator->major_discrepancies_logged++;
+            } else if (estimator->major_discrepancies_logged == 100) {
+                elv_err("avpipe_mux done reporting major PTS discrepancies, too many logs");
+                estimator->major_discrepancies_logged++;
+            }
+        } else if (diff_from_expected > 0) {
+            if (estimator->minor_discrepancies_logged < 100) {
+                elv_dbg("avpipe_mux stream %d pts_delta=%"PRId64", expected=%"PRId64", pts=%"PRId64", last_pts=%"PRId64"",
+                    stream_index, pts_delta, expected_delta, pkt->pts, estimator->last_pts[stream_index]);
+                estimator->minor_discrepancies_logged++;
+            } else if (estimator->minor_discrepancies_logged == 100) {
+                elv_dbg("avpipe_mux done reporting minor PTS discrepancies, too many logs");
+                estimator->minor_discrepancies_logged++;
+            }
+        }
+    }
+
+    estimator->last_pts[stream_index] = pkt->pts;
+
+    pkt->pts = estimator->frames_written[stream_index] * estimator->pts_per_frame[stream_index];
+    pkt->dts = pkt->pts;
+
+    estimator->frames_written[stream_index]++;
+
+    return eav_success;
+}
