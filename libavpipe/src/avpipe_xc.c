@@ -603,9 +603,11 @@ set_encoder_options(
     }
 
     /*
-     * - frag_every_frame - neccessary for LL-HLS (could use frag_keyframe for regular HLS/DASH)
+     * - frag_every_frame - necessary for low-latency playout (eg. LL-HLS) (could use frag_keyframe for regular HLS/DASH)
      * - empty_moov - moov atom at beginning for progressive playback (needed for fMP4 init segment)
      * - default_base_moof: omit base-data-offset in moof (simplifies segment parsing, CMAF-friendly)
+     *
+     * Note 'faststart' is not needed for segmented playout (HLS/DASH). Only used for progessive playout of mp4/mov files.
      */
     #define FRAG_OPTS "frag_every_frame,empty_moov,default_base_moof"
 
