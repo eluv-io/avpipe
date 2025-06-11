@@ -910,7 +910,8 @@ set_nvidia_params(
      * the best setting can be PRESET_LOW_LATENCY_HQ or PRESET_LOW_LATENCY_HP.
      * (in my experiment PRESET_LOW_LATENCY_HQ is better than PRESET_LOW_LATENCY_HP)
      */
-    av_opt_set_int(encoder_codec_context->priv_data, "preset", PRESET_LOW_LATENCY_HQ, 0);
+    av_opt_set_int(encoder_codec_context->priv_data, "preset", "p2", 0);
+    av_opt_set_int(encoder_codec_context->priv_data, "tune", "hq", 0);
 
     /*
      * We might want to set one of the following options in future:
