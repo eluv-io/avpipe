@@ -609,7 +609,7 @@ set_encoder_options(
      *
      * Note 'faststart' is not needed for segmented playout (HLS/DASH). Only used for progessive playout of mp4/mov files.
      */
-    #define FRAG_OPTS "frag_every_frame,empty_moov,default_base_moof"
+    #define FRAG_OPTS "+frag_every_frame+empty_moov+default_base_moof"
 
     if (!strcmp(params->format, "fmp4")) {
         if (stream_index == decoder_context->video_stream_index)
