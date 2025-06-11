@@ -910,8 +910,8 @@ set_nvidia_params(
      * the best setting can be PRESET_LOW_LATENCY_HQ or PRESET_LOW_LATENCY_HP.
      * (in my experiment PRESET_LOW_LATENCY_HQ is better than PRESET_LOW_LATENCY_HP)
      */
-    av_opt_set_int(encoder_codec_context->priv_data, "preset", "p2", 0);
-    av_opt_set_int(encoder_codec_context->priv_data, "tune", "hq", 0);
+    av_opt_set(encoder_codec_context->priv_data, "preset", "p2", 0); // Valid: p1–p7
+    av_opt_set(encoder_codec_context->priv_data, "tune", "hq", 0);   // Valid: hq, ll, ull, lossless, losslesshp
 
     /*
      * We might want to set one of the following options in future:
@@ -1151,6 +1151,8 @@ prepare_video_encoder(
         elv_err("Failed to set video encoder options, url=%s", params->url);
         return rc;
     }
+
+    av_opt_show2(encoder_codec_context->priv_data, NULL, 0, 0);
 
     /* Open video encoder (initialize the encoder codec_context[i] using given codec[i]). */
     if ((rc = avcodec_open2(encoder_context->codec_context[index], encoder_context->codec[index], NULL)) < 0) {
