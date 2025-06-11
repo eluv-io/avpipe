@@ -602,11 +602,18 @@ set_encoder_options(
         return eav_timebase;
     }
 
+    /*
+     * - frag_every_frame - neccessary for LL-HLS (could use frag_keyframe for regular HLS/DASH)
+     * - empty_moov - moov atom at beginning for progressive playback (needed for fMP4 init segment)
+     * - default_base_moof: omit base-data-offset in moof (simplifies segment parsing, CMAF-friendly)
+     */
+    #define FRAG_OPTS "frag_every_frame,empty_moov,default_base_moof"
+
     if (!strcmp(params->format, "fmp4")) {
         if (stream_index == decoder_context->video_stream_index)
-            av_opt_set(encoder_context->format_context->priv_data, "movflags", "frag_every_frame", 0);
+            av_opt_set(encoder_context->format_context->priv_data, "movflags", FRAG_OPTS, 0);
         if ((i = selected_decoded_audio(decoder_context, stream_index)) >= 0)
-            av_opt_set(encoder_context->format_context2[i]->priv_data, "movflags", "frag_every_frame", 0);
+            av_opt_set(encoder_context->format_context2[i]->priv_data, "movflags", FRAG_OPTS, 0);
     }
 
     // Segment duration (in ts) - notice it is set on the format context not codec
@@ -676,14 +683,12 @@ set_encoder_options(
                 params->seg_duration, seg_duration_ts, params->url);
             av_opt_set(encoder_context->format_context->priv_data, "reset_timestamps", "on", 0);
         }
-        // If I set faststart in the flags then ffmpeg generates some zero size files, which I need to dig into it more (RM).
-        // av_opt_set(encoder_context->format_context->priv_data, "segment_format_options", "movflags=faststart", 0);
-        // So lets use flag_every_frame option instead.
+
         if (!strcmp(params->format, "fmp4-segment")) {
             if ((i = selected_decoded_audio(decoder_context, stream_index)) >= 0)
-                av_opt_set(encoder_context->format_context2[i]->priv_data, "segment_format_options", "movflags=frag_every_frame", 0);
+                av_opt_set(encoder_context->format_context2[i]->priv_data, "segment_format_options", "movflags="FRAG_OPTS, 0);
             if (stream_index == decoder_context->video_stream_index)
-                av_opt_set(encoder_context->format_context->priv_data, "segment_format_options", "movflags=frag_every_frame", 0);
+                av_opt_set(encoder_context->format_context->priv_data, "segment_format_options", "movflags="FRAG_OPTS, 0);
         }
     }
 
