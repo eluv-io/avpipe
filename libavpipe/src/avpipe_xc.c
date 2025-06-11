@@ -911,9 +911,7 @@ set_nvidia_params(
 */
 
     /*
-     * According to https://superuser.com/questions/1296374/best-settings-for-ffmpeg-with-nvenc
-     * the best setting can be PRESET_LOW_LATENCY_HQ or PRESET_LOW_LATENCY_HP.
-     * (in my experiment PRESET_LOW_LATENCY_HQ is better than PRESET_LOW_LATENCY_HP)
+     * Default preset - fast and good quality (previously "PRESET_LOW_LATENCY_HQ")
      */
     av_opt_set(encoder_codec_context->priv_data, "preset", "p2", 0); // Valid: p1–p7
     av_opt_set(encoder_codec_context->priv_data, "tune", "hq", 0);   // Valid: hq, ll, ull, lossless, losslesshp
