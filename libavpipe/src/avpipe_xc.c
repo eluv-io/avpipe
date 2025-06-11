@@ -602,11 +602,20 @@ set_encoder_options(
         return eav_timebase;
     }
 
+    /*
+     * - frag_every_frame - necessary for low-latency playout (eg. LL-HLS) (could use frag_keyframe for regular HLS/DASH)
+     * - empty_moov - moov atom at beginning for progressive playback (needed for fMP4 init segment)
+     * - default_base_moof: omit base-data-offset in moof (simplifies segment parsing, CMAF-friendly)
+     *
+     * Note 'faststart' is not needed for segmented playout (HLS/DASH). Only used for progessive playout of mp4/mov files.
+     */
+    #define FRAG_OPTS "+frag_every_frame+empty_moov+default_base_moof"
+
     if (!strcmp(params->format, "fmp4")) {
         if (stream_index == decoder_context->video_stream_index)
-            av_opt_set(encoder_context->format_context->priv_data, "movflags", "frag_every_frame", 0);
+            av_opt_set(encoder_context->format_context->priv_data, "movflags", FRAG_OPTS, 0);
         if ((i = selected_decoded_audio(decoder_context, stream_index)) >= 0)
-            av_opt_set(encoder_context->format_context2[i]->priv_data, "movflags", "frag_every_frame", 0);
+            av_opt_set(encoder_context->format_context2[i]->priv_data, "movflags", FRAG_OPTS, 0);
     }
 
     // Segment duration (in ts) - notice it is set on the format context not codec
@@ -676,14 +685,12 @@ set_encoder_options(
                 params->seg_duration, seg_duration_ts, params->url);
             av_opt_set(encoder_context->format_context->priv_data, "reset_timestamps", "on", 0);
         }
-        // If I set faststart in the flags then ffmpeg generates some zero size files, which I need to dig into it more (RM).
-        // av_opt_set(encoder_context->format_context->priv_data, "segment_format_options", "movflags=faststart", 0);
-        // So lets use flag_every_frame option instead.
+
         if (!strcmp(params->format, "fmp4-segment")) {
             if ((i = selected_decoded_audio(decoder_context, stream_index)) >= 0)
-                av_opt_set(encoder_context->format_context2[i]->priv_data, "segment_format_options", "movflags=frag_every_frame", 0);
+                av_opt_set(encoder_context->format_context2[i]->priv_data, "segment_format_options", "movflags="FRAG_OPTS, 0);
             if (stream_index == decoder_context->video_stream_index)
-                av_opt_set(encoder_context->format_context->priv_data, "segment_format_options", "movflags=frag_every_frame", 0);
+                av_opt_set(encoder_context->format_context->priv_data, "segment_format_options", "movflags="FRAG_OPTS, 0);
         }
     }
 
@@ -906,11 +913,10 @@ set_nvidia_params(
 */
 
     /*
-     * According to https://superuser.com/questions/1296374/best-settings-for-ffmpeg-with-nvenc
-     * the best setting can be PRESET_LOW_LATENCY_HQ or PRESET_LOW_LATENCY_HP.
-     * (in my experiment PRESET_LOW_LATENCY_HQ is better than PRESET_LOW_LATENCY_HP)
+     * Default preset - fast and good quality (previously "PRESET_LOW_LATENCY_HQ")
      */
-    av_opt_set_int(encoder_codec_context->priv_data, "preset", PRESET_LOW_LATENCY_HQ, 0);
+    av_opt_set(encoder_codec_context->priv_data, "preset", "p2", 0); // Valid: p1–p7
+    av_opt_set(encoder_codec_context->priv_data, "tune", "hq", 0);   // Valid: hq, ll, ull, lossless, losslesshp
 
     /*
      * We might want to set one of the following options in future:
