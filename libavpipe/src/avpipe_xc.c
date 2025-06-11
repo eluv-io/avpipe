@@ -1155,8 +1155,6 @@ prepare_video_encoder(
         return rc;
     }
 
-    av_opt_show2(encoder_codec_context->priv_data, NULL, AV_OPT_FLAG_ENCODING_PARAM, 0);
-
     /* Open video encoder (initialize the encoder codec_context[i] using given codec[i]). */
     if ((rc = avcodec_open2(encoder_context->codec_context[index], encoder_context->codec[index], NULL)) < 0) {
         elv_dbg("Could not open encoder for video, err=%d", rc);
