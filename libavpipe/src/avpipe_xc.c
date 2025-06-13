@@ -3188,14 +3188,11 @@ get_filter_str(
         int filt_str_len;
 
         /*
-         * Create an overlay filter that expects the image be sized for the source video so we apply the
+         * Create an overlay filter that expects the image be sized for the source video - apply the
          * overlay first and then scale the result.
          *
-         *  [in]: source video
-         *  movie='%s': overlay image, assumed same size as input
-         *  overlay=0:0: aligned at top-left
-         *  alpha=0.1: transparency
-         *  scale=%d:%d: output resolution
+         * - movie='%s': overlay image, assumed same size as input
+         * - scale=%d:%d: output resolution
          *
          * Previous filter:
          * "[in] scale=%d:%d [in-1]; movie='%s', setpts=PTS [over]; [in-1] setpts=PTS [in-1a]; [in-1a][over]  overlay='%s:%s:alpha=0.1' [out]";
