@@ -3186,8 +3186,22 @@ get_filter_str(
         char *filt_buf = NULL;
         int filt_buf_size;
         int filt_str_len;
-        const char* filt_template =
-            "[in] scale=%d:%d [in-1]; movie='%s', setpts=PTS [over]; [in-1] setpts=PTS [in-1a]; [in-1a][over]  overlay='%s:%s:alpha=0.1' [out]";
+
+        /*
+         * Create an overlay filter that expects the image be sized for the source video so we apply the
+         * overlay first and then scale the result.
+         *
+         *  [in]: source video
+         *  movie='%s': overlay image, assumed same size as input
+         *  overlay=0:0: aligned at top-left
+         *  alpha=0.1: transparency
+         *  scale=%d:%d: output resolution
+         *
+         * Previous filter:
+         * "[in] scale=%d:%d [in-1]; movie='%s', setpts=PTS [over]; [in-1] setpts=PTS [in-1a]; [in-1a][over]  overlay='%s:%s:alpha=0.1' [out]";
+         */
+        const char * filt_template =
+            "[in] movie='%s', setpts=PTS [overlay]; [in][overlay] overlay=0:0:format=auto:alpha=0.1 [combined]; [combined] scale=%d:%d [out]";
 
         /* Return an error if one of the watermark params is not set properly */
         if ((!params->watermark_xloc || *params->watermark_xloc == '\0') ||
