@@ -3186,8 +3186,19 @@ get_filter_str(
         char *filt_buf = NULL;
         int filt_buf_size;
         int filt_str_len;
-        const char* filt_template =
-            "[in] scale=%d:%d [in-1]; movie='%s', setpts=PTS [over]; [in-1] setpts=PTS [in-1a]; [in-1a][over]  overlay='%s:%s:alpha=0.1' [out]";
+
+        /*
+         * Create an overlay filter that expects the image be sized for the source video - apply the
+         * overlay first and then scale the result.
+         *
+         * - movie='%s': overlay image, assumed same size as input
+         * - scale=%d:%d: output resolution
+         *
+         * Previous filter:
+         * "[in] scale=%d:%d [in-1]; movie='%s', setpts=PTS [over]; [in-1] setpts=PTS [in-1a]; [in-1a][over]  overlay='%s:%s:alpha=0.1' [out]";
+         */
+        const char * filt_template =
+            "movie='%s', setpts=PTS[ov]; [in][ov] overlay=%s:%s:format=auto:alpha=0.1, scale=%d:%d [out]";
 
         /* Return an error if one of the watermark params is not set properly */
         if ((!params->watermark_xloc || *params->watermark_xloc == '\0') ||
@@ -3208,10 +3219,10 @@ get_filter_str(
         filt_str_len = filt_buf_size+FILTER_STRING_SZ;
         *filter_str = (char *) calloc(filt_str_len, 1);
         int ret = snprintf(*filter_str, filt_str_len, filt_template,
-                        encoder_context->codec_context[encoder_context->video_stream_index]->width,
-                        encoder_context->codec_context[encoder_context->video_stream_index]->height,
                         filt_buf,
-                        params->watermark_xloc, params->watermark_yloc);
+                        params->watermark_xloc, params->watermark_yloc,
+                        encoder_context->codec_context[encoder_context->video_stream_index]->width,
+                        encoder_context->codec_context[encoder_context->video_stream_index]->height);
         free(filt_buf);
         if (ret < 0) {
             free(*filter_str);
