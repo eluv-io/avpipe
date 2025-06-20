@@ -34,15 +34,38 @@ The following repositories can be checked out in any directory, but for better o
 
 ### Build FFmpeg and avpipe
 
-- Build eluv-io/FFmpeg: in FFmpeg directory `<ffmpeg-path>` run
-  - `./build.sh`
-- Build SRT: checkout SRT code `https://github.com/Haivision/srt` and build SRT
-- Set environment variables: in avpipe directory run
-  - `source init-env.sh <ffmpeg-path> <srt_path>`
-- Build avpipe: in avpipe directory run
-  - `make`
-- This installs the binaries under `<avpipe-path>/bin`
-- Note: avpipe has to be built and linked with eluv-io/FFmpeg to be functional.
+**Important: Build components in this exact order: FFmpeg → SRT → avpipe**
+
+1. **Build eluv-io/FFmpeg**: in FFmpeg directory run
+   ```bash
+   ./build.sh
+   ```
+
+2. **Build SRT library**: 
+   ```bash
+   git clone https://github.com/Haivision/srt
+   cd srt && mkdir build && cd build
+   cmake .. -DCMAKE_INSTALL_PREFIX=$(pwd)/../dist
+   make && make install
+   ```
+
+3. **Set environment variables**: in avpipe directory run
+   ```bash
+   source init-env.sh <ffmpeg-path> <srt-dist-path>
+   # Example: source init-env.sh ../FFmpeg ../srt/dist
+   ```
+
+4. **Build avpipe**: in avpipe directory run
+   ```bash
+   make
+   ```
+
+5. This installs the binaries under `<avpipe-path>/bin`
+
+**Notes:**
+- avpipe must be built and linked with eluv-io/FFmpeg to be functional
+- SRT must be built with a local install prefix (not system-wide) for pkg-config to work correctly
+- Always run `source init-env.sh` before building or running tests
 
 ### Test avpipe
 
