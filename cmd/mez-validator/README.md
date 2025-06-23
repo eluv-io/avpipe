@@ -9,6 +9,7 @@ The MEZ validator checks fMP4 (fragmented MP4) mezzanine files for compliance wi
 - **Uniform Sample Durations**: All samples within each track have consistent duration
 - **Sequential MFHD Sequence Numbers**: Movie Fragment Header sequence numbers start from 1 and increment sequentially
 - **TFDT Base Media Decode Time**: First fragment starts at time zero, subsequent fragments follow cumulative sample duration pattern
+- **Bitrate Validation**: Validates that the calculated average bitrate falls within specified minimum and maximum limits
 - **Average Bitrate Calculation**: Automatically calculates and reports average bitrate based on file size and duration
 
 ## Installation
@@ -22,16 +23,39 @@ go build -o bin/mez-validator ./cmd/mez-validator
 
 ## Usage
 
-### Validate a Single File
+### Basic Usage
 
 ```bash
+# Validate a single file
 ./bin/mez-validator video-mez-segment-1.mp4
+
+# Validate all MP4 files in a directory
+./bin/mez-validator ./mez_output/
+
+# Display help and options
+./bin/mez-validator -h
 ```
 
-### Validate All MP4 Files in a Directory
+### Command-Line Options
 
 ```bash
-./bin/mez-validator ./mez_output/
+mez-validator [options] <mp4file_or_directory>
+
+Options:
+  -min-bitrate int
+        minimum bitrate in kbps (default 10)
+  -max-bitrate int
+        maximum bitrate in kbps (default 100000)
+```
+
+### Examples with Bitrate Validation
+
+```bash
+# Validate with specific bitrate range
+./bin/mez-validator -min-bitrate 500 -max-bitrate 2000 video-segment.mp4
+
+# Validate directory with strict bitrate limits
+./bin/mez-validator -min-bitrate 1000 -max-bitrate 5000 ./segments/
 ```
 
 ## Output Format
@@ -49,7 +73,7 @@ The validator outputs JSON reports for each validated file:
   "total_duration": 3024000,
   "total_duration_seconds": 33.6,
   "file_size": 506271,
-  "average_bitrate_bps": 120540
+  "average_bitrate_kbps": 121
 }
 ```
 
@@ -64,7 +88,7 @@ The validator outputs JSON reports for each validated file:
 - **total_duration**: Total media duration in timescale units
 - **total_duration_seconds**: Total media duration in seconds
 - **file_size**: File size in bytes
-- **average_bitrate_bps**: Average bitrate in bits per second, calculated as `(file_size × 8) ÷ duration_seconds`
+- **average_bitrate_kbps**: Average bitrate in kilobits per second, calculated as `(file_size × 8) ÷ duration_seconds ÷ 1000`
 
 ### Validation Errors
 
@@ -122,16 +146,34 @@ The validator uses a concise JSON format:
 - Subsequent fragments must start at cumulative duration of previous samples
 - Ensures proper timeline continuity
 
-## Integration
+### Bitrate Validation
+- Calculates average bitrate based on file size and duration
+- Validates bitrate falls within specified minimum and maximum limits (configurable via command-line options)
+- Default range: 10 kbps to 100,000 kbps
 
-The validator can be integrated into automated workflows:
+## Exit Codes and Integration
+
+The validator returns different exit codes based on validation results:
+
+- **Exit code 0**: All files passed validation
+- **Exit code 1**: One or more files failed validation or other errors occurred
+
+### Integration Examples
 
 ```bash
-# Exit code 0 = all files valid, non-zero = validation failed
+# Exit code 0 = all files valid, non-zero = validation failed  
 ./bin/mez-validator ./output/ && echo "All files valid"
 
 # Parse JSON output for programmatic processing
 ./bin/mez-validator file.mp4 | jq '.pass'
+
+# Check exit code in scripts
+if ./bin/mez-validator -min-bitrate 500 -max-bitrate 2000 ./segments/; then
+    echo "All segments valid"
+else
+    echo "Validation failed - check output for details"
+    exit 1
+fi
 ```
 
 ## Testing
