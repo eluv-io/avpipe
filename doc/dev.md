@@ -34,6 +34,12 @@ Example: audio 2 mono to 1 stereo
 
 ### Live Stream Ingest
 
+#### Generate timecoded live stream source
+
+```
+ffmpeg  -re   -f lavfi -i testsrc=size=1920x1080:rate=50   -f lavfi -i anullsrc=channel_layout=stereo:sample_rate=48000   -vf "drawtext=fontfile=/Library/Fonts/Arial.ttf:fontsize=32:fontcolor=white:x=20:y=20:box=1:boxcolor=0x000000AA:text='%{pts\:hms}.%{eif\:n\:d}'"   -c:v libx264 -preset veryfast -tune zerolatency -g 100 -keyint_min 100   -c:a aac -b:a 128k   -f mpegts udp://127.0.0.1:9000
+```
+
 #### MPEGTS (aka UDP)
 
 ```
@@ -56,6 +62,27 @@ ffmpeg -re -i test.mp4 -map 0 -c copy -f mpegts srt://127.0.0.1:9000
 ./bin/exc -f srt://127.0.0.1:9000?mode=listener -xc-type all -format fmp4-segment -seg-duration 30
 ```
 
+#### SRT Disconnections
+
+Use two terminals
+
+1. Live stream source
+
+```
+ffmpeg  -re   -f lavfi -i testsrc=size=1920x1080:rate=50   -f lavfi -i anullsrc=channel_layout=stereo:sample_rate=48000   -vf "drawtext=fontfile=/Library/Fonts/Arial.ttf:fontsize=32:fontcolor=white:x=20:y=20:box=1:boxcolor=0x000000AA:text='%{pts\:hms}.%{eif\:n\:d}'"   -c:v libx264 -preset veryfast -tune zerolatency -g 100 -keyint_min 100   -c:a aac -b:a 128k   -f mpegts udp://127.0.0.1:7000
+```
+
+2. SRT transmitter
+
+Sart / stop / restart this command to simulate SRT disconnections.
+
+```
+ffmpeg -i udp://127.0.0.1:9000 -c copy -map 0 -f mpegts  srt://127.0.0.1:9001?linger=600000&latency=250
+```
+
+
+
+
 #### RTP
 
 ```
@@ -73,6 +100,8 @@ ffmpeg -re -i test.mp4 -map 0 -c copy -f flv rtmp://127.0.0.1:9000
 ./bin/exc -f rtmp://127.0.0.1:9000 -xc-type all -format fmp4-segment -seg-duration 30
 
 ```
+
+
 
 
 ## Special Use Cases
