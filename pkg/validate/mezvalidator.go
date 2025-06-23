@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"math"
 	"os"
 
 	"github.com/Eyevinn/mp4ff/mp4"
@@ -11,22 +12,23 @@ import (
 
 // MezValidationResult holds the results of MP4 validation
 type MezValidationResult struct {
-	Valid                    bool
-	SampleCount              int
-	UniformSampleDuration    bool
-	ExpectedSampleDuration   uint32
-	ActualSampleDurations    []uint32
-	MFHDSequenceNumbers      []uint32
-	TFDTBaseTimes            []uint64
-	ExpectedBaseTime         uint64
-	TotalDuration            uint64
-	Timescale                uint32
-	FileSize                 int64
-	Issues                   []string
+	Valid                  bool
+	SampleCount            int
+	UniformSampleDuration  bool
+	ExpectedSampleDuration uint32
+	ActualSampleDurations  []uint32
+	MFHDSequenceNumbers    []uint32
+	TFDTBaseTimes          []uint64
+	ExpectedBaseTime       uint64
+	TotalDuration          uint64
+	Timescale              uint32
+	FileSize               int64
+	BitRateKbps            int
+	Issues                 []string
 }
 
 // ValidateMez validates an fMP4 mezzanine segment file using mp4ff library
-func ValidateMez(filename string) (*MezValidationResult, error) {
+func ValidateMez(filename string, minBitrateKbps, maxBitrateKbps int) (*MezValidationResult, error) {
 	file, err := os.Open(filename)
 	if err != nil {
 		return nil, fmt.Errorf("failed to open file: %v", err)
@@ -62,22 +64,20 @@ func ValidateMez(filename string) (*MezValidationResult, error) {
 	// Extract timescale from moov if present
 	if parsedMP4.Moov != nil && len(parsedMP4.Moov.Traks) > 0 {
 		result.Timescale = parsedMP4.Moov.Traks[0].Mdia.Mdhd.Timescale
+	} else {
+		return nil, fmt.Errorf("no valid moov box and Traks found in MP4 file")
 	}
 
-	// Analyze fragments
-	err = analyzeFragments(parsedMP4, result)
-	if err != nil {
-		return nil, fmt.Errorf("failed to analyze fragments: %v", err)
-	}
+	analyzeFragments(parsedMP4, result)
 
 	// Validate the extracted information
-	validateResults(result)
+	validateResults(result, minBitrateKbps, maxBitrateKbps)
 
 	return result, nil
 }
 
 // analyzeFragments extracts information from movie fragments
-func analyzeFragments(parsedMP4 *mp4.File, result *MezValidationResult) error {
+func analyzeFragments(parsedMP4 *mp4.File, result *MezValidationResult) {
 	// Get default sample duration from TREX box in MOOV
 	var trexDefaultDuration uint32 = 0
 	if parsedMP4.Moov != nil && parsedMP4.Moov.Mvex != nil && len(parsedMP4.Moov.Mvex.Trexs) > 0 {
@@ -100,16 +100,16 @@ func analyzeFragments(parsedMP4 *mp4.File, result *MezValidationResult) error {
 
 				// Get default sample duration from TFHD box (overrides TREX)
 				tfhdDefaultDuration := trexDefaultDuration
-				if traf.Tfhd != nil && (traf.Tfhd.Flags&0x000008) != 0 { // default-sample-duration-present
+				if traf.Tfhd != nil && traf.Tfhd.HasDefaultSampleDuration() {
 					tfhdDefaultDuration = traf.Tfhd.DefaultSampleDuration
 				}
 
 				// Extract sample durations from TRUN boxes
 				for _, trun := range traf.Truns {
 					result.SampleCount += int(trun.SampleCount())
-					
+
 					// Check if sample durations are present in the trun
-					if (trun.Flags & 0x100) != 0 { // sample duration present flag
+					if trun.HasSampleDuration() { // sample duration present flag
 						for i := uint32(0); i < trun.SampleCount(); i++ {
 							if i < uint32(len(trun.Samples)) {
 								result.ActualSampleDurations = append(result.ActualSampleDurations, trun.Samples[i].Dur)
@@ -125,43 +125,43 @@ func analyzeFragments(parsedMP4 *mp4.File, result *MezValidationResult) error {
 			}
 		}
 	}
-	return nil
+	return
 }
 
 // validateResults performs the actual validation logic
-func validateResults(result *MezValidationResult) {
+func validateResults(result *MezValidationResult, minBitrateKbps, maxBitrateKbps int) {
 	// Check if all sample durations are the same
 	if len(result.ActualSampleDurations) > 0 {
 		result.ExpectedSampleDuration = result.ActualSampleDurations[0]
 		result.UniformSampleDuration = true
-		
+
 		for i, duration := range result.ActualSampleDurations {
 			if duration != result.ExpectedSampleDuration {
 				result.UniformSampleDuration = false
 				result.Valid = false
-				result.Issues = append(result.Issues, 
-					fmt.Sprintf("Sample %d has duration %d, expected %d", 
+				result.Issues = append(result.Issues,
+					fmt.Sprintf("Sample %d has duration %d, expected %d",
 						i, duration, result.ExpectedSampleDuration))
 			}
 		}
-		
+
 		// Calculate total duration
 		for _, duration := range result.ActualSampleDurations {
 			result.TotalDuration += uint64(duration)
 		}
 	}
-	
+
 	// Check MFHD sequence numbers start from 1 and increment by 1
 	for i, seqNum := range result.MFHDSequenceNumbers {
 		expected := uint32(i + 1)
 		if seqNum != expected {
 			result.Valid = false
-			result.Issues = append(result.Issues, 
-				fmt.Sprintf("MFHD sequence number at fragment %d is %d, expected %d", 
+			result.Issues = append(result.Issues,
+				fmt.Sprintf("MFHD sequence number at fragment %d is %d, expected %d",
 					i, seqNum, expected))
 		}
 	}
-	
+
 	// Check TFDT base times are consistent with cumulative sample durations
 	var cumulativeDuration uint64 = 0
 	for i, baseTime := range result.TFDTBaseTimes {
@@ -169,7 +169,7 @@ func validateResults(result *MezValidationResult) {
 			// First fragment should start at base time zero
 			if baseTime != 0 {
 				result.Valid = false
-				result.Issues = append(result.Issues, 
+				result.Issues = append(result.Issues,
 					fmt.Sprintf("First TFDT base time is %d, expected 0", baseTime))
 			}
 			cumulativeDuration = baseTime
@@ -177,44 +177,52 @@ func validateResults(result *MezValidationResult) {
 			expectedBaseTime := cumulativeDuration
 			if baseTime != expectedBaseTime {
 				result.Valid = false
-				result.Issues = append(result.Issues, 
-					fmt.Sprintf("TFDT base time at fragment %d is %d, expected %d (cumulative duration)", 
+				result.Issues = append(result.Issues,
+					fmt.Sprintf("TFDT base time at fragment %d is %d, expected %d (cumulative duration)",
 						i, baseTime, expectedBaseTime))
 			}
 		}
-		
+
 		// Add this fragment's duration to cumulative total
-		// This assumes all samples in a fragment belong to the same track
 		if result.UniformSampleDuration && len(result.ActualSampleDurations) > 0 {
-			// Calculate samples in this fragment (simplified assumption)
+			// Calculate samples in this fragment
+			// Assuming tha the number of samples per fragment is constant.
+			// This is simplification, but valid in our case where we
+			// have one sample pre fragment.
 			samplesPerFragment := len(result.ActualSampleDurations) / len(result.TFDTBaseTimes)
-			if samplesPerFragment > 0 {
-				fragmentDuration := uint64(samplesPerFragment) * uint64(result.ExpectedSampleDuration)
-				cumulativeDuration += fragmentDuration
-			}
+			fragmentDuration := uint64(samplesPerFragment) * uint64(result.ExpectedSampleDuration)
+			cumulativeDuration += fragmentDuration
 		}
 	}
-	
+
 	result.ExpectedBaseTime = cumulativeDuration
+	durationS := float64(result.TotalDuration) / float64(result.Timescale)
+	result.BitRateKbps = int(math.Round(float64(result.FileSize) * 8 / durationS / 1000))
+	if result.BitRateKbps < minBitrateKbps || result.BitRateKbps > maxBitrateKbps {
+		result.Valid = false
+		result.Issues = append(result.Issues,
+			fmt.Sprintf("Bitrate %d kbps is outside the range [%d, %d] kbps",
+				result.BitRateKbps, minBitrateKbps, maxBitrateKbps))
+	}
 }
 
 // MezValidationReport represents the JSON validation report
 type MezValidationReport struct {
-	Pass                     bool     `json:"pass"`
-	Filename                 string   `json:"filename"`
-	SampleCount              int      `json:"sample_count"`
-	CommonSampleDuration     uint32   `json:"common_sample_duration"`
-	CommonDurationSeconds    float64  `json:"common_duration_seconds,omitempty"`
-	Timescale                uint32   `json:"timescale,omitempty"`
-	TotalDuration            uint64   `json:"total_duration"`
-	TotalDurationSeconds     float64  `json:"total_duration_seconds,omitempty"`
-	FileSize                 int64    `json:"file_size,omitempty"`
-	AverageBitrateBps        int64    `json:"average_bitrate_bps,omitempty"`
-	MFHDSequenceNumbers      []uint32 `json:"mfhd_sequence_numbers,omitempty"`
-	TFDTBaseTimes            []uint64 `json:"tfdt_base_times,omitempty"`
-	DurationVariations       []DurationVariation `json:"duration_variations,omitempty"`
-	SequenceNumberErrors     []SequenceError     `json:"sequence_number_errors,omitempty"`
-	TFDTTimeErrors           []TFDTError         `json:"tfdt_time_errors,omitempty"`
+	Pass                  bool                `json:"pass"`
+	Filename              string              `json:"filename"`
+	SampleCount           int                 `json:"sample_count"`
+	CommonSampleDuration  uint32              `json:"common_sample_duration"`
+	CommonDurationSeconds float64             `json:"common_duration_seconds"`
+	Timescale             uint32              `json:"timescale,omitempty"`
+	TotalDuration         uint64              `json:"total_duration"`
+	TotalDurationSeconds  float64             `json:"total_duration_seconds"`
+	FileSize              int64               `json:"file_size"`
+	AverageBitrateKBps    int64               `json:"average_bitrate_kbps"`
+	MFHDSequenceNumbers   []uint32            `json:"mfhd_sequence_numbers,omitempty"`
+	TFDTBaseTimes         []uint64            `json:"tfdt_base_times,omitempty"`
+	DurationVariations    []DurationVariation `json:"duration_variations,omitempty"`
+	SequenceNumberErrors  []SequenceError     `json:"sequence_number_errors,omitempty"`
+	TFDTTimeErrors        []TFDTError         `json:"tfdt_time_errors,omitempty"`
 }
 
 type DurationVariation struct {
@@ -237,13 +245,13 @@ type TFDTError struct {
 // PrintMezValidationResult prints a concise JSON validation report to the specified writer
 func PrintMezValidationResult(w io.Writer, filename string, result *MezValidationResult) {
 	report := createValidationReport(filename, result)
-	
+
 	jsonBytes, err := json.MarshalIndent(report, "", "  ")
 	if err != nil {
 		_, _ = fmt.Fprintf(w, "Error creating JSON report: %v\n", err)
 		return
 	}
-	
+
 	_, _ = fmt.Fprintln(w, string(jsonBytes))
 }
 
@@ -255,7 +263,7 @@ func createValidationReport(filename string, result *MezValidationResult) *MezVa
 		SampleCount: result.SampleCount,
 		FileSize:    result.FileSize,
 	}
-	
+
 	// Set common duration and timescale info
 	if len(result.ActualSampleDurations) > 0 {
 		report.CommonSampleDuration = result.ExpectedSampleDuration
@@ -264,15 +272,10 @@ func createValidationReport(filename string, result *MezValidationResult) *MezVa
 			report.Timescale = result.Timescale
 			report.CommonDurationSeconds = float64(report.CommonSampleDuration) / float64(result.Timescale)
 			report.TotalDurationSeconds = float64(report.TotalDuration) / float64(result.Timescale)
-			
-			// Calculate average bitrate if we have duration and file size
-			if report.TotalDurationSeconds > 0 && result.FileSize > 0 {
-				// Average bitrate = (file_size_bytes * 8) / duration_seconds
-				report.AverageBitrateBps = int64(float64(result.FileSize*8) / report.TotalDurationSeconds)
-			}
 		}
+		report.AverageBitrateKBps = int64(result.BitRateKbps)
 	}
-	
+
 	// Only include variations from the common duration
 	for i, duration := range result.ActualSampleDurations {
 		if duration != result.ExpectedSampleDuration {
@@ -282,7 +285,7 @@ func createValidationReport(filename string, result *MezValidationResult) *MezVa
 			})
 		}
 	}
-	
+
 	// Check if sequence numbers are regular (1, 2, 3, ...)
 	sequenceIsRegular := true
 	for i, seqNum := range result.MFHDSequenceNumbers {
@@ -296,12 +299,12 @@ func createValidationReport(filename string, result *MezValidationResult) *MezVa
 			})
 		}
 	}
-	
+
 	// Only include sequence numbers if they're not regular
 	if !sequenceIsRegular {
 		report.MFHDSequenceNumbers = result.MFHDSequenceNumbers
 	}
-	
+
 	// Check if TFDT times are regular (following cumulative sample duration)
 	var cumulativeDuration uint64 = 0
 	tfdtIsRegular := true
@@ -328,7 +331,7 @@ func createValidationReport(filename string, result *MezValidationResult) *MezVa
 				})
 			}
 		}
-		
+
 		// Update cumulative duration for next fragment
 		if result.UniformSampleDuration && len(result.ActualSampleDurations) > 0 {
 			samplesPerFragment := len(result.ActualSampleDurations) / len(result.TFDTBaseTimes)
@@ -338,22 +341,25 @@ func createValidationReport(filename string, result *MezValidationResult) *MezVa
 			}
 		}
 	}
-	
+
 	// Only include TFDT times if they're not regular
 	if !tfdtIsRegular {
 		report.TFDTBaseTimes = result.TFDTBaseTimes
 	}
-	
+
 	return report
 }
 
 // ValidateMezFile is a convenience function that validates a file and prints results to stdout
-func ValidateMezFile(filename string) error {
-	result, err := ValidateMez(filename)
+func ValidateMezFile(filename string, minBitrateKbps, maxBitrateKbps int) error {
+	result, err := ValidateMez(filename, minBitrateKbps, maxBitrateKbps)
 	if err != nil {
 		return err
 	}
-	
+
 	PrintMezValidationResult(os.Stdout, filename, result)
+	if !result.Valid {
+		return fmt.Errorf("validation failed for file %s", filename)
+	}
 	return nil
 }

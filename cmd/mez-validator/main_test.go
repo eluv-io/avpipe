@@ -5,11 +5,11 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
-	"strings"
 	"testing"
 
 	"github.com/Eyevinn/mp4ff/mp4"
 	"github.com/eluv-io/avpipe/pkg/validate"
+	"github.com/stretchr/testify/require"
 )
 
 func TestValidateVideoMezSegment1(t *testing.T) {
@@ -17,7 +17,9 @@ func TestValidateVideoMezSegment1(t *testing.T) {
 	testFile := filepath.Join("testdata", "video-mez-segment-1.mp4")
 
 	// Run the validation
-	result, err := validate.ValidateMez(testFile)
+	minBitrateKbps := 100 // Minimum bitrate in kbps
+	maxBitrateKbps := 200 // Maximum bitrate in kbps
+	result, err := validate.ValidateMez(testFile, minBitrateKbps, maxBitrateKbps)
 	if err != nil {
 		t.Fatalf("ValidateMez failed: %v", err)
 	}
@@ -34,8 +36,10 @@ func TestValidateVideoMezSegment1(t *testing.T) {
 	}
 
 	// Expected output based on the known characteristics of video-mez-segment-1.mp4
+	// No errors expected, uniform sample durations, and correct segment structure
 	expectedReport := validate.MezValidationReport{
 		Pass:                  true,
+		Filename:              testFile,
 		SampleCount:           840,
 		CommonSampleDuration:  3600,
 		CommonDurationSeconds: 0.04,
@@ -43,64 +47,10 @@ func TestValidateVideoMezSegment1(t *testing.T) {
 		TotalDuration:         3024000,
 		TotalDurationSeconds:  33.6,
 		FileSize:              506271,
-		AverageBitrateBps:     120540,
+		AverageBitrateKBps:    121,
 	}
 
-	// Compare the results
-	if actualReport.Pass != expectedReport.Pass {
-		t.Errorf("Pass mismatch: got %v, want %v", actualReport.Pass, expectedReport.Pass)
-	}
-
-	if actualReport.SampleCount != expectedReport.SampleCount {
-		t.Errorf("SampleCount mismatch: got %d, want %d", actualReport.SampleCount, expectedReport.SampleCount)
-	}
-
-	if actualReport.CommonSampleDuration != expectedReport.CommonSampleDuration {
-		t.Errorf("CommonSampleDuration mismatch: got %d, want %d", actualReport.CommonSampleDuration, expectedReport.CommonSampleDuration)
-	}
-
-	if actualReport.CommonDurationSeconds != expectedReport.CommonDurationSeconds {
-		t.Errorf("CommonDurationSeconds mismatch: got %f, want %f", actualReport.CommonDurationSeconds, expectedReport.CommonDurationSeconds)
-	}
-
-	if actualReport.Timescale != expectedReport.Timescale {
-		t.Errorf("Timescale mismatch: got %d, want %d", actualReport.Timescale, expectedReport.Timescale)
-	}
-
-	if actualReport.TotalDuration != expectedReport.TotalDuration {
-		t.Errorf("TotalDuration mismatch: got %d, want %d", actualReport.TotalDuration, expectedReport.TotalDuration)
-	}
-
-	if actualReport.TotalDurationSeconds != expectedReport.TotalDurationSeconds {
-		t.Errorf("TotalDurationSeconds mismatch: got %f, want %f", actualReport.TotalDurationSeconds, expectedReport.TotalDurationSeconds)
-	}
-
-	if actualReport.FileSize != expectedReport.FileSize {
-		t.Errorf("FileSize mismatch: got %d, want %d", actualReport.FileSize, expectedReport.FileSize)
-	}
-
-	if actualReport.AverageBitrateBps != expectedReport.AverageBitrateBps {
-		t.Errorf("AverageBitrateBps mismatch: got %d, want %d", actualReport.AverageBitrateBps, expectedReport.AverageBitrateBps)
-	}
-
-	// Verify the filename ends with the expected path (since the full path may vary)
-	expectedSuffix := filepath.Join("testdata", "video-mez-segment-1.mp4")
-	if !strings.HasSuffix(actualReport.Filename, expectedSuffix) {
-		t.Errorf("Filename doesn't end with expected suffix '%s': got %s", expectedSuffix, actualReport.Filename)
-	}
-
-	// Ensure no errors are present for this valid file
-	if len(actualReport.DurationVariations) > 0 {
-		t.Errorf("Expected no duration variations, but got %d", len(actualReport.DurationVariations))
-	}
-
-	if len(actualReport.SequenceNumberErrors) > 0 {
-		t.Errorf("Expected no sequence number errors, but got %d", len(actualReport.SequenceNumberErrors))
-	}
-
-	if len(actualReport.TFDTTimeErrors) > 0 {
-		t.Errorf("Expected no TFDT time errors, but got %d", len(actualReport.TFDTTimeErrors))
-	}
+	require.Equal(t, expectedReport, actualReport, "Expected and actual reports do not match")
 }
 
 // createModifiedMP4 creates a modified version of the input MP4 file with altered sample duration
@@ -163,7 +113,9 @@ func TestValidateModifiedVideoMezSegment(t *testing.T) {
 	}()
 
 	// Run validation on the modified file
-	result, err := validate.ValidateMez(modifiedFile)
+	minBitrateKbps := 100 // Minimum bitrate in kbps
+	maxBitrateKbps := 200 // Maximum bitrate in kbps
+	result, err := validate.ValidateMez(modifiedFile, minBitrateKbps, maxBitrateKbps)
 	if err != nil {
 		t.Fatalf("ValidateMez failed: %v", err)
 	}
