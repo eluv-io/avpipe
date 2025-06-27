@@ -3,6 +3,8 @@ github.com/BurntSushi/toml v1.0.0 h1:dtDWrepsVPfW9H/4y7dDgFc2MBUSeJhlaDtK13CxFlU
 github.com/BurntSushi/toml v1.0.0/go.mod h1:CxXYINrC8qIiEnFrOxCa7Jy5BFHlXnUU2pbicEuybxQ=
 github.com/Comcast/gots v0.0.0-20200213175321-9799558ed3e2 h1:zMuszK7xNca8fNxQ4nPPY6CwvLaq60QCoev3O+judS4=
 github.com/Comcast/gots v0.0.0-20200213175321-9799558ed3e2/go.mod h1:Mk3QwecRoaG2Qh+uiS8t8IOd7QlKl7Xp1ujNRn/zJxw=
+github.com/Eyevinn/mp4ff v0.49.0 h1:00eRg5/KwcLGWUbv+hlifldf74qg46G1IxoWXHrgDvw=
+github.com/Eyevinn/mp4ff v0.49.0/go.mod h1:hJNUUqOBryLAzUW9wpCJyw2HaI+TCd2rUPhafoS5lgg=
 github.com/apex/log v1.9.0/go.mod h1:m82fZlWIuiWzWP04XCTXmnX0xRkYYbCdYn8jbJeLBEA=
 github.com/apex/logs v1.0.0/go.mod h1:XzxuLZ5myVHDy9SAmYpamKKRNApGj54PfYLcFrXqDwo=
 github.com/aphistic/golf v0.0.0-20180712155816-02c07f170c5a/go.mod h1:3NqKYiepwy8kCu4PNA+aP7WUV72eXWJeP9/r3/K9aLE=
