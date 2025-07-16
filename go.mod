@@ -2,6 +2,7 @@ module github.com/eluv-io/avpipe
 
 require (
 	github.com/Comcast/gots v0.0.0-20200213175321-9799558ed3e2
+	github.com/Comcast/gots/v2 v2.2.1
 	github.com/Eyevinn/mp4ff v0.49.0
 	github.com/eluv-io/errors-go v1.0.0
 	github.com/eluv-io/log-go v1.0.1
