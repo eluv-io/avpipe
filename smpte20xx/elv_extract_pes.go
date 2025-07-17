@@ -138,7 +138,10 @@ func extractPayload(pesData []byte, outConn net.Conn) {
 	}
 
 	// Write to unix socket
-	SendJXSFrame(outConn, jxsCodeStream)
+	err = SendJXSFrame(outConn, jxsCodeStream)
+	if err != nil {
+		fmt.Println("WARN: failed to send JXS frame", err)
+	}
 
 }
 
@@ -174,6 +177,14 @@ func ConnectUnixSocket(socketPath string) (net.Conn, error) {
 
 // SendJXSFrame sends a single JPEG XS frame to the connected Unix socket.
 func SendJXSFrame(conn net.Conn, frame []byte) error {
+
+	// We can only write frames of correct size since they are just concatenated
+	// and any deviation breaks the parser
+	const expectedSize = 458792
+	if len(frame) != expectedSize {
+		return fmt.Errorf("bad frame size: %d", len(frame))
+	}
+
 	n, err := conn.Write(frame)
 	if err != nil {
 		return fmt.Errorf("failed to write frame to socket: %w", err)
