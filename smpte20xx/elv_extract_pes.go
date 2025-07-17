@@ -22,6 +22,7 @@ func main() {
 	outConn, err := ConnectUnixSocket(outSock)
 	if err != nil {
 		fmt.Println("ERROR: failed to connect to output unix socket", err)
+		os.Exit(-1)
 	}
 
 	udpReader(outConn)
@@ -174,8 +175,11 @@ func extractPayload(pesData []byte, outConn net.Conn) {
 	_ = jxsCodeStream
 
 	// Save to file
-	if err := os.WriteFile(outputFile, jxsCodeStream, 0644); err != nil {
-		panic(err)
+	const saveFrameFiles = false
+	if saveFrameFiles {
+		if err := os.WriteFile(outputFile, jxsCodeStream, 0644); err != nil {
+			panic(err)
+		}
 	}
 
 	// Write to unix socket
