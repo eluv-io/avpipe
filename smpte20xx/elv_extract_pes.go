@@ -2,6 +2,7 @@ package main
 
 import (
 	"bufio"
+	"flag"
 	"fmt"
 	"io"
 	"net"
@@ -9,6 +10,13 @@ import (
 
 	"github.com/Comcast/gots/v2/packet"
 )
+
+type Config struct {
+	url            *string
+	saveFrameFiles *bool
+}
+
+var cfg Config
 
 const (
 	PacketSize = 188
@@ -18,6 +26,12 @@ const (
 )
 
 func main() {
+
+	cfg.url = flag.String("url", "239.255.255.11:1234", "input url eg. udp://239.1.1.1")
+	cfg.saveFrameFiles = flag.Bool("frames", false, "save frame files")
+
+	flag.Parse()
+	cfg.Print()
 
 	outConn, err := ConnectUnixSocket(outSock)
 	if err != nil {
@@ -175,8 +189,7 @@ func extractPayload(pesData []byte, outConn net.Conn) {
 	_ = jxsCodeStream
 
 	// Save to file
-	const saveFrameFiles = false
-	if saveFrameFiles {
+	if *cfg.saveFrameFiles {
 		if err := os.WriteFile(outputFile, jxsCodeStream, 0644); err != nil {
 			panic(err)
 		}
@@ -228,4 +241,19 @@ func SendJXSFrame(conn net.Conn, frame []byte) error {
 		return fmt.Errorf("partial write: wrote %d of %d bytes", n, len(frame))
 	}
 	return nil
+}
+
+func (c *Config) Print() {
+	fmt.Println("Config:")
+	if c.url != nil {
+		fmt.Printf("  url: %s\n", *c.url)
+	} else {
+		fmt.Println("  url: <nil>")
+	}
+
+	if c.saveFrameFiles != nil {
+		fmt.Printf("  saveFrameFiles: %t\n", *c.saveFrameFiles)
+	} else {
+		fmt.Println("  saveFrameFiles: <nil>")
+	}
 }
