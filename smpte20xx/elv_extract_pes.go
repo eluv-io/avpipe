@@ -14,7 +14,7 @@ const (
 	PacketSize = 188
 	SyncByte   = 0x47
 	TargetPID  = 0x0066 // Change as needed
-	outSock    = "/tmp/elv_sock_jsx"
+	outSock    = "/tmp/elv_sock_jxs"
 )
 
 func main() {
