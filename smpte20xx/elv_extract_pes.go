@@ -1,14 +1,13 @@
 package main
 
 import (
-	"bufio"
 	"flag"
 	"fmt"
-	"io"
 	"net"
 	"os"
 
 	"github.com/Comcast/gots/v2/packet"
+	"github.com/Comcast/gots/v2/pes"
 )
 
 type Config struct {
@@ -40,76 +39,6 @@ func main() {
 	}
 
 	udpReader(outConn)
-}
-
-func main2() {
-	input, err := os.Open("input.ts")
-	if err != nil {
-		panic(err)
-	}
-	defer input.Close()
-
-	reader := bufio.NewReader(input)
-
-	var pesBuffer []byte
-	var collecting bool
-
-	for {
-		packet := make([]byte, PacketSize)
-		_, err := io.ReadFull(reader, packet)
-		if err == io.EOF {
-			break
-		}
-		if err != nil {
-			panic(err)
-		}
-
-		if packet[0] != SyncByte {
-			fmt.Println("Sync byte not found, skipping packet")
-			continue
-		}
-		//fmt.Println("SYNC BYTE", packet[0])
-
-		pid := int((int(packet[1]&0x1F)<<8 | int(packet[2])))
-		payloadUnitStart := packet[1]&0x40 != 0
-		adaptationFieldControl := (packet[3] >> 4) & 0x03
-		payloadOffset := 4
-
-		// Handle adaptation field
-		if adaptationFieldControl == 2 || adaptationFieldControl == 0 {
-			continue // No payload
-		} else if adaptationFieldControl == 3 {
-			adaptLen := int(packet[4])
-			payloadOffset += 1 + adaptLen
-		}
-
-		if pid != TargetPID || payloadOffset >= PacketSize {
-			continue
-		}
-
-		payload := packet[payloadOffset:]
-
-		if payloadUnitStart {
-			if collecting && len(pesBuffer) > 0 {
-				// Save the last PES packet
-				fmt.Println("sve pes", len(pesBuffer))
-				savePayload(pesBuffer, nil)
-			}
-			pesBuffer = make([]byte, 0)
-			collecting = true
-		}
-
-		if collecting {
-			pesBuffer = append(pesBuffer, payload...)
-		}
-	}
-
-	// Save final packet
-	if collecting && len(pesBuffer) > 0 {
-		fmt.Println("save pes - last")
-		savePayload(pesBuffer, nil)
-	}
-	fmt.Println("Done writing output.jxs")
 }
 
 var pesBuffer []byte
@@ -160,6 +89,16 @@ func extractPayload(pesData []byte, outConn net.Conn) {
 	outputFile := fmt.Sprintf("frame_%04d.jxs", nFrames)
 	nFrames++
 
+	ph, err := pes.NewPESHeader(pesData)
+	if err != nil {
+		fmt.Println("WARN: bad PES header", err)
+	}
+
+	s := ph.StreamId()
+	a := ph.HasPTS()
+	p := ph.PTS()
+	t := ph.PacketStartCodePrefix()
+
 	headerLength := int(pesData[8])
 	if len(pesData) <= headerLength {
 		panic("PES payload not found (file too small)")
@@ -188,17 +127,19 @@ func extractPayload(pesData []byte, outConn net.Conn) {
 	}
 	_ = jxsCodeStream
 
+	fmt.Println("PES stream", s, "haspts", a, "pts", p, "pfx", t, "len", len(payload), "len es", len(jxsData), "len cs", len(jxsCodeStream))
+
 	// Save to file
 	if *cfg.saveFrameFiles {
 		if err := os.WriteFile(outputFile, jxsCodeStream, 0644); err != nil {
 			panic(err)
 		}
+		fmt.Printf("Wrote %d bytes of JXS codestream to %s\n", len(jxsCodeStream), outputFile)
 	}
 
 	// Write to unix socket
 	SendJXSFrame(outConn, jxsCodeStream)
 
-	fmt.Printf("Wrote %d bytes of JXS codestream to %s\n", len(jxsData), outputFile)
 }
 
 // Basic search for a byte pattern
