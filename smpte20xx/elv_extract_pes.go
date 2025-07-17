@@ -20,7 +20,6 @@ var cfg Config
 const (
 	PacketSize = 188
 	SyncByte   = 0x47
-	TargetPID  = 0x0066 // Change as needed
 	outSock    = "/tmp/elv_sock_jxs"
 )
 
@@ -39,6 +38,8 @@ func main() {
 	}
 
 	udpReader(outConn)
+
+	fmt.Print("UDP reader done")
 }
 
 var pesBuffer []byte
@@ -55,7 +56,7 @@ func processPacket(pkt *packet.Packet, outConn net.Conn) error {
 	if pkt.PayloadUnitStartIndicator() {
 		if collecting && len(pesBuffer) > 0 {
 			// Save the last PES packet
-			fmt.Println("save pes", len(pesBuffer))
+			//fmt.Println("save pes", len(pesBuffer))
 			savePayload(pesBuffer, outConn)
 		}
 		pesBuffer = make([]byte, 0)
@@ -127,7 +128,7 @@ func extractPayload(pesData []byte, outConn net.Conn) {
 	}
 	_ = jxsCodeStream
 
-	fmt.Println("PES stream", s, "haspts", a, "pts", p, "pfx", t, "len", len(payload), "len es", len(jxsData), "len cs", len(jxsCodeStream))
+	fmt.Println("PES ", nFrames, "stream", s, "haspts", a, "pts", p, "pfx", t, "len", len(payload), "len es", len(jxsData), "len cs", len(jxsCodeStream))
 
 	// Save to file
 	if *cfg.saveFrameFiles {

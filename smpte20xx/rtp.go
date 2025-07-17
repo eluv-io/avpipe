@@ -20,7 +20,7 @@ func joinMulticast(multicastAddr string) (*net.UDPConn, error) {
 		return nil, err
 	}
 	// Set buffer size if needed
-	conn.SetReadBuffer(4 * 188 * 1024)
+	conn.SetReadBuffer(10 * 1024 * 1024)
 	return conn, nil
 }
 
@@ -117,7 +117,6 @@ func handleTSPacket(ts [packet.PacketSize]byte, outConn net.Conn) {
 
 func udpReader(outConn net.Conn) {
 
-	var maxPackets = 1000000
 	var nPackets = 0
 
 	conn, err := joinMulticast("239.255.255.11:1234")
@@ -128,9 +127,6 @@ func udpReader(outConn net.Conn) {
 
 	buf := make([]byte, 2048)
 	for {
-		if nPackets > maxPackets {
-			break
-		}
 		nPackets++
 		n, _, err := conn.ReadFromUDP(buf)
 		if err != nil {
