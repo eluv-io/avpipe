@@ -1,15 +1,14 @@
-package main
+package video
 
 import (
 	"bytes"
 	"encoding/binary"
 	"errors"
 	"fmt"
+	"net"
 )
 
 // Part of ISO/IEC 13818-1 Amendment for JPEG XS - encapsulation of JPEG XS in MPEGTS
-
-const StreamTypeJpegXS = 0x32
 
 // JXESHeader represents the parsed JPEG XS elementary stream header (jxes)
 type JXESHeader struct {
@@ -93,4 +92,24 @@ func StripJXESHeader(data []byte) ([]byte, error) {
 	}
 
 	return data[index:], nil
+}
+
+// SendJXSFrame sends a single JPEG XS frame to the connected Unix socket.
+func SendJXSFrame(conn net.Conn, frame []byte) error {
+
+	// We can only write frames of correct size since they are just concatenated
+	// and any deviation breaks the parser
+	const expectedSize = 458792
+	if len(frame) != expectedSize {
+		return fmt.Errorf("bad frame size: %d", len(frame))
+	}
+
+	n, err := conn.Write(frame)
+	if err != nil {
+		return fmt.Errorf("failed to write frame to socket: %w", err)
+	}
+	if n != len(frame) {
+		return fmt.Errorf("partial write: wrote %d of %d bytes", n, len(frame))
+	}
+	return nil
 }

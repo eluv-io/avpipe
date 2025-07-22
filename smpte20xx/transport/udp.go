@@ -1,4 +1,4 @@
-package main
+package transport
 
 // This handles UDP (unicast and multicast), RTP decapsulation, MPEGTS basic processing
 import (
@@ -21,18 +21,11 @@ func joinMulticast(multicastAddr string) (*net.UDPConn, error) {
 	return conn, nil
 }
 
-func stripRTP(data []byte) ([]byte, error) {
-	if len(data) < 12+188 {
-		return nil, fmt.Errorf("packet too short for RTP and TS")
-	}
-	return data[12:], nil
-}
-
-func udpReader(outConn net.Conn) {
+func UdpReader(ts *Ts, outConn net.Conn) {
 
 	var nPackets = 0
 
-	conn, err := joinMulticast(*cfg.url)
+	conn, err := joinMulticast(ts.Cfg.Url)
 	if err != nil {
 		log.Fatal(err)
 	}
@@ -46,17 +39,25 @@ func udpReader(outConn net.Conn) {
 			log.Println("read error:", err)
 			continue
 		}
-		tsData, err := stripRTP(buf[:n])
+
+		// PENDING(SS) must configure based on input
+		tsData, err := StripRTP(buf[:n])
 		if err != nil {
 			continue
 		}
+
 		// Process all TS packets in this payload
 		for offset := 0; offset+188 <= len(tsData); offset += 188 {
 			p, err := toTSPacket(tsData[offset : offset+188])
 			if err != nil {
 				continue
 			}
-			handleTSPacket(p, outConn)
+			ts.handleTSPacket(p, outConn)
+		}
+
+		if ts.Cfg.MaxPackets > 0 && nPackets > int(ts.Cfg.MaxPackets) {
+			fmt.Println("Max packets - exit")
+			break
 		}
 	}
 }
