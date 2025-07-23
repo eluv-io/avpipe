@@ -16,8 +16,14 @@ import (
 	"github.com/eluv-io/avpipe/smpte20xx/video"
 )
 
-const StreamTypeJpegXS = 0x32
-const StreamTypeSt2038 = 0x06
+const PcrTs uint64 = 27_000_000
+
+// Specail TS stream and descriptor types (not defined in 'gots')
+const TsStreamTypeJpegXS = 0x32
+const TsDescriptorSt2038 = 0xc4 // Commonly ST 2038 or ST 291 (Evertz, Imagine, Harmonic)
+
+// Locally defined stream types
+const TsStreamTypeLocalSt2038 = 0xe4 // Locally defined type
 
 type TsConfig struct {
 	Url            string
@@ -29,11 +35,14 @@ type TsConfig struct {
 }
 
 type TsStats struct {
-	nPackets      uint64
-	nPacketsVideo uint64
-	nPacketsData  uint64
-	errorsCC      uint64
-	errorsMisc    uint64
+	nTsPackets        uint64
+	nTsPacketsWritten uint64
+	tsBytesReceived   uint64
+	tsBytesWritten    uint64
+	nPacketsVideo     uint64
+	nPacketsData      uint64
+	errorsCC          uint64
+	errorsMisc        uint64
 }
 
 type Ts struct {
@@ -48,12 +57,12 @@ type Ts struct {
 	videoType uint8
 	dataType  uint8
 
-	startPcr      uint64
-	currentPcr    uint64
-	pesData       packet.Accumulator
-	pesBuffer     []byte
-	collecting    bool
-	continuityMap map[int]uint8
+	startPcr             uint64
+	currentPcr           uint64
+	pesData              packet.Accumulator
+	pesBuffer            []byte
+	pesAccumulatingVideo bool // PENDING(SS) Replace with packet.Accumulator
+	continuityMap        map[int]uint8
 
 	segmenter *Segmenter
 }
@@ -126,6 +135,7 @@ func (ts *Ts) handleTSPacket(data [packet.PacketSize]byte, outConn net.Conn) {
 	}
 
 	// Parse PAT to find my PMT PID
+	// PENDING(SS) - we want to discard packets before PAT (received every 100ms)
 	if ts.pmtPid == -1 && pid == 0x0000 && pkt.PayloadUnitStartIndicator() {
 
 		payload, err := pkt.Payload()
@@ -152,7 +162,7 @@ func (ts *Ts) handleTSPacket(data [packet.PacketSize]byte, outConn net.Conn) {
 
 	// Parse PMT to find video PID
 	if ts.videoPid == -1 && pid == ts.pmtPid && pkt.PayloadUnitStartIndicator() {
-
+		// PENDING(SS) We should accumulate the entire PES potentially across multiple TS packets
 		payload, err := pkt.Payload()
 		if err != nil {
 			fmt.Println("ERROR: failed to retrieve packet payload", "cc=", cc, err)
@@ -162,29 +172,37 @@ func (ts *Ts) handleTSPacket(data [packet.PacketSize]byte, outConn net.Conn) {
 		pmt, err := psi.NewPMT(payload)
 		if err == nil {
 			for _, es := range pmt.ElementaryStreams() {
-				fmt.Printf("PMT: stream type 0x%x on PID 0x%x\n", es.StreamType(), es.ElementaryPid())
-				if es.StreamType() == StreamTypeJpegXS || es.IsVideoContent() {
+				fmt.Printf("PMT: stream type 0x%x on PID 0x%x %v\n", es.StreamType(), es.ElementaryPid(), es.StreamTypeDescription())
+				for _, desc := range es.Descriptors() {
+					fmt.Printf("  %s\n", desc.Format())
+				}
+				if es.StreamType() == TsStreamTypeJpegXS || es.IsVideoContent() {
 					ts.videoPid = es.ElementaryPid()
 					ts.videoType = es.StreamType()
-					fmt.Println("VIDEO STREAM", ts.videoPid)
 				}
-				if es.IsPrivateContent() && es.StreamType() == StreamTypeSt2038 {
-					ts.dataPid = es.ElementaryPid()
-					ts.dataType = StreamTypeSt2038
+				if es.IsPrivateContent() {
+					for _, desc := range es.Descriptors() {
+						if desc.Tag() == TsDescriptorSt2038 {
+							ts.dataPid = es.ElementaryPid()
+							ts.dataType = TsStreamTypeLocalSt2038
+						}
+					}
 				}
 			}
+			fmt.Printf("VIDEO PID 0x%0x\n", ts.videoPid)
+			fmt.Printf("DATA PID  0x%0x\n", ts.dataPid)
 		}
 		return
 	}
 
 	// Process video PID
-	if ts.Cfg.ProcessVideo && pid == ts.videoPid && ts.videoType == StreamTypeJpegXS {
+	if ts.Cfg.ProcessVideo && pid == ts.videoPid && ts.videoType == TsStreamTypeJpegXS {
 		//fmt.Printf("Video PID 0x%x packet received\n", pid)
-		ts.processPacket(&pkt, outConn)
+		ts.processVideoPacket(&pkt, outConn)
 	}
 
 	// Process data PID
-	if ts.Cfg.ProcessData && pid == ts.dataPid && ts.dataType == StreamTypeSt2038 {
+	if ts.Cfg.ProcessData && pid == ts.dataPid && ts.dataType == TsStreamTypeLocalSt2038 {
 		verbose := false
 		if verbose {
 			var payload []byte
@@ -200,16 +218,21 @@ func (ts *Ts) handleTSPacket(data [packet.PacketSize]byte, outConn net.Conn) {
 	}
 
 	// Write output
-	err := ts.segmenter.WritePacket(pkt, ts.currentPcr)
+	bytesWritten, err := ts.segmenter.WritePacket(pkt, ts.currentPcr)
+	ts.Stats.tsBytesWritten += uint64(bytesWritten)
 	if err != nil {
 		fmt.Println("ERROR: failed to write packet", err)
+	} else {
+		ts.Stats.nTsPacketsWritten++
 	}
 
-	ts.Stats.nPackets++
+	ts.Stats.nTsPackets++
+	ts.Stats.tsBytesReceived += uint64(len(pkt[:]))
 
-	if ts.Stats.nPackets%100_000 == 1 {
+	if ts.Stats.nTsPackets%100_000 == 1 {
 		pcrTime := time.Duration(ts.currentPcr) * time.Second / 27000000
-		fmt.Println("STATS", "n", ts.Stats.nPackets, "pcr", ts.currentPcr, pcrTime, "cc errors", ts.Stats.errorsCC)
+		fmt.Println("STATS", "n", ts.Stats.nTsPackets, ts.Stats.nTsPacketsWritten, "pcr", ts.currentPcr, pcrTime, "cc errors", ts.Stats.errorsCC,
+			"bytes", ts.Stats.tsBytesReceived, ts.Stats.tsBytesReceived)
 	}
 }
 
@@ -263,7 +286,7 @@ func (ts *Ts) processDataPacket(pkt *packet.Packet) error {
 	return nil
 }
 
-func (ts *Ts) processPacket(pkt *packet.Packet, outConn net.Conn) error {
+func (ts *Ts) processVideoPacket(pkt *packet.Packet, outConn net.Conn) error {
 
 	payload, err := pkt.Payload()
 	if err != nil {
@@ -272,16 +295,16 @@ func (ts *Ts) processPacket(pkt *packet.Packet, outConn net.Conn) error {
 	}
 
 	if pkt.PayloadUnitStartIndicator() {
-		if ts.collecting && len(ts.pesBuffer) > 0 {
+		if ts.pesAccumulatingVideo && len(ts.pesBuffer) > 0 {
 			// Save the last PES packet
 			//fmt.Println("save pes", len(pesBuffer))
 			ts.savePayload(ts.pesBuffer, outConn)
 		}
 		ts.pesBuffer = make([]byte, 0)
-		ts.collecting = true
+		ts.pesAccumulatingVideo = true
 	}
 
-	if ts.collecting {
+	if ts.pesAccumulatingVideo {
 		ts.pesBuffer = append(ts.pesBuffer, payload...)
 	}
 
@@ -303,6 +326,8 @@ func (ts *Ts) savePayload(pes []byte, outConn net.Conn) {
 
 var nFrames = int(0)
 
+// extractPayload assumes the PES contains a JXS frame (one or more "codestreams")
+// and extracts the raw JXS codestream (trims the JXS header)
 func (ts *Ts) extractPayload(pesData []byte, outConn net.Conn) {
 
 	outputFile := fmt.Sprintf("frame_%04d.jxs", nFrames)
@@ -361,7 +386,6 @@ func (ts *Ts) extractPayload(pesData []byte, outConn net.Conn) {
 	if err != nil {
 		fmt.Println("WARN: failed to send JXS frame", err)
 	}
-
 }
 
 // Basic search for a byte pattern

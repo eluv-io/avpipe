@@ -22,8 +22,8 @@ type Output struct {
 }
 
 type SegmenterConfig struct {
-	DurationTs uint64
-	Output     Output
+	DurationSec uint64
+	Output      Output
 }
 
 type Segmenter struct {
@@ -39,9 +39,7 @@ type Segmenter struct {
 
 func NewSegmenter(segCfg SegmenterConfig) *Segmenter {
 
-	s := Segmenter{
-		numSegs: 1,
-	}
+	s := Segmenter{}
 	s.Cfg = segCfg
 
 	if s.Cfg.Output.Kind == OutputFile {
@@ -59,9 +57,10 @@ func NewSegmenter(segCfg SegmenterConfig) *Segmenter {
 	return &s
 }
 
-func (s *Segmenter) WritePacket(pkt packet.Packet, pcr uint64) error {
+func (s *Segmenter) WritePacket(pkt packet.Packet, pcr uint64) (bytesWritten int, err error) {
 	if s.currentFile == nil {
-		return fmt.Errorf("ERROR: no segment to write to")
+		err = fmt.Errorf("ERROR: no segment to write to")
+		return
 	}
 	if s.startPcr == 0 {
 		s.startPcr = pcr
@@ -71,20 +70,22 @@ func (s *Segmenter) WritePacket(pkt packet.Packet, pcr uint64) error {
 	}
 	s.currentPcr = pcr
 
-	if pcr-s.segStartPcr > s.Cfg.DurationTs {
-		err := s.openSegment()
+	if pcr > s.segStartPcr && pcr-s.segStartPcr > s.Cfg.DurationSec*PcrTs {
+		fmt.Println("SEG END", "pcr", pcr, "start pcr", s.segStartPcr, "diff", pcr-s.segStartPcr)
+		err = s.openSegment()
 		if err != nil {
-			return err
+			return
 		}
 		s.segStartPcr = pcr
 	}
-	s.currentWriter.Write(pkt[:])
-	return nil
+	bytesWritten, err = s.currentWriter.Write(pkt[:])
+	return
 }
 
 func (s *Segmenter) openSegment() error {
 	var err error
 	s.closeSegment()
+	s.numSegs++
 	fileName := fmt.Sprintf("%s/outseg_%04d.ts", s.Cfg.Output.Locator, s.numSegs)
 	s.currentFile, err = os.Create(fileName)
 	if err != nil {

@@ -35,7 +35,7 @@ func main() {
 	cfg.Print()
 
 	segCfg := transport.SegmenterConfig{
-		DurationTs: 30 * 90000,
+		DurationSec: 5,
 		Output: transport.Output{
 			Kind:    transport.OutputFile,
 			Locator: "OUT",
