@@ -8,10 +8,14 @@ import (
 )
 
 func StripRTP(data []byte) ([]byte, error) {
-	if len(data) < 12+188 {
+	hdr, err := ParseRTPHeader(data)
+	if err != nil {
+		return nil, err
+	}
+	if len(data) < hdr.ByteLength()+188 {
 		return nil, fmt.Errorf("packet too short for RTP and TS")
 	}
-	return data[12:], nil
+	return data[hdr.ByteLength():], nil
 }
 
 var ErrShortRTP = errors.New("RTP packet too short")
@@ -27,10 +31,23 @@ type RTPHeader struct {
 	Timestamp      uint32
 	SSRC           uint32
 	// PENDING(SS) CSRCs and extension not included
+	ExtensionByteCount int // Number of bytes in the extension (header + payload), if present
+}
+
+func (h *RTPHeader) ByteLength() int {
+	length := 12 // Base RTP header length
+	if h.CSRCCount > 0 {
+		length += int(h.CSRCCount) * 4
+	}
+	if h.Extension {
+		length += h.ExtensionByteCount
+	}
+	return length
 }
 
 func ParseRTPHeader(data []byte) (*RTPHeader, error) {
-	if len(data) < 12 {
+	baseHeaderSize := 12 // Minimum size of RTP header
+	if len(data) < baseHeaderSize {
 		return nil, ErrShortRTP
 	}
 
@@ -47,6 +64,17 @@ func ParseRTPHeader(data []byte) (*RTPHeader, error) {
 		SequenceNumber: binary.BigEndian.Uint16(data[2:4]),
 		Timestamp:      binary.BigEndian.Uint32(data[4:8]),
 		SSRC:           binary.BigEndian.Uint32(data[8:12]),
+	}
+	lenCSRC := 4 * int(header.CSRCCount)
+	if len(data) < baseHeaderSize+lenCSRC {
+		return nil, fmt.Errorf("RTP packet too short for CSRCs: expected at least %d bytes, got %d", baseHeaderSize+lenCSRC, len(data))
+	}
+	if header.Extension {
+		extLen := binary.BigEndian.Uint16(data[baseHeaderSize+lenCSRC+2 : baseHeaderSize+lenCSRC+4]) // Read extension length
+		header.ExtensionByteCount = (int(extLen) * 4) + 4                                            // 4 bytes for the extension header
+		if len(data) < baseHeaderSize+lenCSRC+header.ExtensionByteCount {
+			return nil, fmt.Errorf("RTP packet too short for extension: expected at least %d bytes, got %d", baseHeaderSize+lenCSRC+header.ExtensionByteCount, len(data))
+		}
 	}
 
 	return header, nil
