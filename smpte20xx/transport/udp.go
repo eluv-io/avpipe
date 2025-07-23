@@ -40,7 +40,7 @@ func UdpReader(ts *Ts, outConn net.Conn) {
 			continue
 		}
 
-		// PENDING(SS) must configure based on input
+		// PENDING(SS) must configure RTP processing based on input
 		tsData, err := StripRTP(buf[:n])
 		if err != nil {
 			continue

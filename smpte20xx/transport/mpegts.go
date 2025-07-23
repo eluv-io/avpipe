@@ -2,7 +2,6 @@ package transport
 
 import (
 	"fmt"
-	"io"
 	"net"
 	"os"
 	"time"
@@ -24,13 +23,17 @@ type TsConfig struct {
 	Url            string
 	SaveFrameFiles bool
 	ProcessVideo   bool
+	ProcessData    bool
 	MaxPackets     int64
+	SegCfg         SegmenterConfig
 }
 
 type TsStats struct {
-	nPackets   uint64
-	errorsCC   uint64
-	errorsMisc uint64
+	nPackets      uint64
+	nPacketsVideo uint64
+	nPacketsData  uint64
+	errorsCC      uint64
+	errorsMisc    uint64
 }
 
 type Ts struct {
@@ -45,20 +48,26 @@ type Ts struct {
 	videoType uint8
 	dataType  uint8
 
+	startPcr      uint64
+	currentPcr    uint64
 	pesData       packet.Accumulator
 	pesBuffer     []byte
 	collecting    bool
 	continuityMap map[int]uint8
+
+	segmenter *Segmenter
 }
 
-func NewTs() *Ts {
+func NewTs(tsCfg TsConfig) *Ts {
 	ts := Ts{
+		Cfg:           tsCfg,
 		program:       -1,
 		pmtPid:        -1,
 		videoPid:      -1,
 		dataPid:       -1,
 		pesData:       nil,
 		continuityMap: make(map[int]uint8),
+		segmenter:     NewSegmenter(tsCfg.SegCfg),
 	}
 	return &ts
 }
@@ -92,27 +101,28 @@ func (ts *Ts) handleTSPacket(data [packet.PacketSize]byte, outConn net.Conn) {
 		}
 		if has {
 			pcr, _ := a.PCR()
-			pcrTime := time.Duration(pcr) * time.Second / 27000000
-			fmt.Println("PCR", pcr, pcrTime)
+
+			if ts.startPcr == 0 {
+				ts.startPcr = pcr
+			}
+			ts.currentPcr = pcr
+			//pcrTime := time.Duration(pcr) * time.Second / 27000000
+			//fmt.Println("PCR", ts.startPcr, pcr, pcrTime)
 		}
 	}
 
 	// Read EBP
 	readEBP := true
-	for readEBP {
-
+	if readEBP {
 		ebpBytes, err := adaptationfield.EncoderBoundaryPoint(&pkt)
-		if err != nil {
-			// Not an EBP
-			break
+		if err == nil {
+			boundaryPoint, err := ebp.ReadEncoderBoundaryPoint(ebpBytes)
+			if err == nil {
+				fmt.Printf("EBP %+v\n", boundaryPoint)
+			} else {
+				fmt.Printf("EBP construction error %v", err)
+			}
 		}
-		boundaryPoint, err := ebp.ReadEncoderBoundaryPoint(ebpBytes)
-		if err != nil {
-			fmt.Printf("EBP construction error %v", err)
-			break
-		}
-		fmt.Printf("EBP %+v\n", boundaryPoint)
-		break
 	}
 
 	// Parse PAT to find my PMT PID
@@ -174,7 +184,7 @@ func (ts *Ts) handleTSPacket(data [packet.PacketSize]byte, outConn net.Conn) {
 	}
 
 	// Process data PID
-	if pid == ts.dataPid && ts.dataType == StreamTypeSt2038 {
+	if ts.Cfg.ProcessData && pid == ts.dataPid && ts.dataType == StreamTypeSt2038 {
 		verbose := false
 		if verbose {
 			var payload []byte
@@ -187,6 +197,19 @@ func (ts *Ts) handleTSPacket(data [packet.PacketSize]byte, outConn net.Conn) {
 			fmt.Printf("DATA PID start=%v haspayload=%v err=%v bytes=% x\n", pkt.PayloadUnitStartIndicator(), pkt.HasPayload(), err, payload)
 		}
 		ts.processDataPacket(&pkt)
+	}
+
+	// Write output
+	err := ts.segmenter.WritePacket(pkt, ts.currentPcr)
+	if err != nil {
+		fmt.Println("ERROR: failed to write packet", err)
+	}
+
+	ts.Stats.nPackets++
+
+	if ts.Stats.nPackets%100_000 == 1 {
+		pcrTime := time.Duration(ts.currentPcr) * time.Second / 27000000
+		fmt.Println("STATS", "n", ts.Stats.nPackets, "pcr", ts.currentPcr, pcrTime, "cc errors", ts.Stats.errorsCC)
 	}
 }
 
@@ -238,12 +261,6 @@ func (ts *Ts) processDataPacket(pkt *packet.Packet) error {
 	}
 
 	return nil
-}
-
-// WritePacket writes a gots packet.Packet to an io.Writer (e.g., file).
-func WritePacket(w io.Writer, pkt packet.Packet) error {
-	_, err := w.Write(pkt[:])
-	return err
 }
 
 func (ts *Ts) processPacket(pkt *packet.Packet, outConn net.Conn) error {

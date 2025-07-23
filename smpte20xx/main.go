@@ -34,13 +34,22 @@ func main() {
 	flag.Parse()
 	cfg.Print()
 
-	ts := transport.NewTs()
-	ts.Cfg = transport.TsConfig{
+	segCfg := transport.SegmenterConfig{
+		DurationTs: 30 * 90000,
+		Output: transport.Output{
+			Kind:    transport.OutputFile,
+			Locator: "OUT",
+		},
+	}
+	tsCfg := transport.TsConfig{
 		Url:            *cfg.url,
 		SaveFrameFiles: *cfg.saveFrameFiles,
 		ProcessVideo:   *cfg.processVideo,
 		MaxPackets:     *cfg.maxPackets,
+		SegCfg:         segCfg,
 	}
+
+	ts := transport.NewTs(tsCfg)
 
 	var outConn net.Conn
 	var err error
