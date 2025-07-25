@@ -26,7 +26,7 @@ is_live_source_udp(
 );
 
 int
-is_live_source_custom_reader(
+is_custom_input(
     coderctx_t *ctx
 );
 
