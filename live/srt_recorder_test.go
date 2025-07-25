@@ -48,7 +48,7 @@ func TestSrtToMp4(t *testing.T) {
 	reqCtx := &testCtx{url: url}
 	putReqCtxByURL(url, reqCtx)
 
-	avpipe.InitIOHandler(&inputOpener{dir: outputDir}, &outputOpener{dir: outputDir})
+	goavpipe.InitIOHandler(&inputOpener{dir: outputDir}, &outputOpener{dir: outputDir})
 
 	go func() {
 		tlog.Info("Transcoding SRT stream start", "params", fmt.Sprintf("%+v", *xcParams))
@@ -162,7 +162,7 @@ func TestSrtToMp4WithCancelling0(t *testing.T) {
 	reqCtx := &testCtx{url: url}
 	putReqCtxByURL(url, reqCtx)
 
-	avpipe.InitIOHandler(&inputOpener{dir: outputDir}, &outputOpener{dir: outputDir})
+	goavpipe.InitIOHandler(&inputOpener{dir: outputDir}, &outputOpener{dir: outputDir})
 
 	var handle int32
 	var err error
@@ -225,7 +225,7 @@ func TestSrtToMp4WithCancelling1(t *testing.T) {
 	reqCtx := &testCtx{url: url}
 	putReqCtxByURL(url, reqCtx)
 
-	avpipe.InitIOHandler(&inputOpener{dir: outputDir}, &outputOpener{dir: outputDir})
+	goavpipe.InitIOHandler(&inputOpener{dir: outputDir}, &outputOpener{dir: outputDir})
 
 	var handle int32
 	var err error
@@ -293,7 +293,7 @@ func TestSrtToMp4WithCancelling2(t *testing.T) {
 	reqCtx := &testCtx{url: url}
 	putReqCtxByURL(url, reqCtx)
 
-	avpipe.InitIOHandler(&inputOpener{dir: outputDir}, &outputOpener{dir: outputDir})
+	goavpipe.InitIOHandler(&inputOpener{dir: outputDir}, &outputOpener{dir: outputDir})
 
 	var handle int32
 	var err error
@@ -367,7 +367,7 @@ func TestSrtToMp4WithCancelling3(t *testing.T) {
 	reqCtx := &testCtx{url: url}
 	putReqCtxByURL(url, reqCtx)
 
-	avpipe.InitIOHandler(&inputOpener{dir: outputDir}, &outputOpener{dir: outputDir})
+	goavpipe.InitIOHandler(&inputOpener{dir: outputDir}, &outputOpener{dir: outputDir})
 
 	var handle int32
 	var err error
@@ -448,7 +448,7 @@ func TestSrtToMp4WithCancelling4(t *testing.T) {
 	reqCtx := &testCtx{url: url}
 	putReqCtxByURL(url, reqCtx)
 
-	avpipe.InitIOHandler(&inputOpener{dir: outputDir}, &outputOpener{dir: outputDir})
+	goavpipe.InitIOHandler(&inputOpener{dir: outputDir}, &outputOpener{dir: outputDir})
 
 	var handle int32
 	var err error

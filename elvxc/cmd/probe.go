@@ -55,7 +55,7 @@ func doProbe(cmd *cobra.Command, args []string) error {
 		ConnectionTimeout: int(connectionTimeout),
 	}
 
-	avpipe.InitIOHandler(&elvxcInputOpener{url: filename}, &elvxcOutputOpener{dir: ""})
+	goavpipe.InitIOHandler(&elvxcInputOpener{url: filename}, &elvxcOutputOpener{dir: ""})
 
 	probe, err := avpipe.Probe(params)
 	if err != nil {
