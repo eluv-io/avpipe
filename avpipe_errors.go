@@ -23,7 +23,11 @@ package avpipe
 // #include "avpipe.h"
 import "C"
 
-import "errors"
+import (
+	"errors"
+
+	"github.com/eluv-io/avpipe/goavpipe"
+)
 
 // EAV_FILTER_STRING_INIT is the error returned when avpipe fails to obtain filter string.
 var EAV_FILTER_STRING_INIT = errors.New("EAV_FILTER_STRING_INIT")
@@ -165,7 +169,7 @@ func avpipeError(code C.int) error {
 
 	err, ok := avpipeErrors[int(code)]
 	if !ok {
-		log.Debug("avpipeError unknown", "code", int(code))
+		goavpipe.Log.Debug("avpipeError unknown", "code", int(code))
 		return EAV_UNKNOWN
 	}
 

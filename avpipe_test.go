@@ -51,7 +51,7 @@ type testStatsInfo struct {
 
 var statsInfo testStatsInfo
 
-// Implements avpipe.InputOpener
+// Implements goavpipe.InputOpener
 type fileInputOpener struct {
 	t                *testing.T
 	url              string
@@ -60,7 +60,7 @@ type fileInputOpener struct {
 }
 
 func (fio *fileInputOpener) Open(_ int64, url string) (
-	handler avpipe.InputHandler, err error) {
+	handler goavpipe.InputHandler, err error) {
 
 	if fio.errorOnOpenInput {
 		return nil, fs.ErrPermission
@@ -81,7 +81,7 @@ func (fio *fileInputOpener) Open(_ int64, url string) (
 	return
 }
 
-// Implements avpipe.InputHandler
+// Implements goavpipe.InputHandler
 type fileInput struct {
 	t                *testing.T
 	file             *os.File // Input file
@@ -128,36 +128,36 @@ func (i *fileInput) Size() int64 {
 	return fi.Size()
 }
 
-func (i *fileInput) Stat(streamIndex int, statType avpipe.AVStatType, statArgs interface{}) error {
+func (i *fileInput) Stat(streamIndex int, statType goavpipe.AVStatType, statArgs interface{}) error {
 	switch statType {
-	case avpipe.AV_IN_STAT_BYTES_READ:
+	case goavpipe.AV_IN_STAT_BYTES_READ:
 		readOffset := statArgs.(*uint64)
 		if debugFrameLevel {
 			log.Debug("AVP TEST IN STAT", "STAT read offset", *readOffset, "streamIndex", streamIndex)
 		}
-	case avpipe.AV_IN_STAT_AUDIO_FRAME_READ:
+	case goavpipe.AV_IN_STAT_AUDIO_FRAME_READ:
 		audioFramesRead := statArgs.(*uint64)
 		if debugFrameLevel {
 			log.Debug("AVP TEST IN STAT", "audioFramesRead", *audioFramesRead, "streamIndex", streamIndex)
 		}
 		statsInfo.audioFramesRead = *audioFramesRead
-	case avpipe.AV_IN_STAT_VIDEO_FRAME_READ:
+	case goavpipe.AV_IN_STAT_VIDEO_FRAME_READ:
 		videoFramesRead := statArgs.(*uint64)
 		if debugFrameLevel {
 			log.Debug("AVP TEST IN STAT", "videoFramesRead", *videoFramesRead, "streamIndex", streamIndex)
 		}
 		statsInfo.videoFramesRead = *videoFramesRead
-	case avpipe.AV_IN_STAT_DECODING_AUDIO_START_PTS:
+	case goavpipe.AV_IN_STAT_DECODING_AUDIO_START_PTS:
 		startPTS := statArgs.(*uint64)
 		if debugFrameLevel {
 			log.Debug("AVP TEST IN STAT", "audio start PTS", *startPTS, "streamIndex", streamIndex)
 		}
-	case avpipe.AV_IN_STAT_DECODING_VIDEO_START_PTS:
+	case goavpipe.AV_IN_STAT_DECODING_VIDEO_START_PTS:
 		startPTS := statArgs.(*uint64)
 		if debugFrameLevel {
 			log.Debug("AVP TEST IN STAT", "video start PTS", *startPTS, "streamIndex", streamIndex)
 		}
-	case avpipe.AV_IN_STAT_FIRST_KEYFRAME_PTS:
+	case goavpipe.AV_IN_STAT_FIRST_KEYFRAME_PTS:
 		keyFramePTS := statArgs.(*uint64)
 		if debugFrameLevel {
 			log.Debug("AVP TEST IN STAT", "video first keyframe PTS", *keyFramePTS, "streamIndex", streamIndex)
@@ -174,7 +174,7 @@ type fileOutputOpener struct {
 }
 
 func (oo *fileOutputOpener) Open(_, _ int64, streamIndex, segIndex int,
-	pts int64, outType goavpipe.AVType) (avpipe.OutputHandler, error) {
+	pts int64, outType goavpipe.AVType) (goavpipe.OutputHandler, error) {
 
 	var filename string
 
@@ -229,7 +229,7 @@ type concurrentOutputOpener struct {
 }
 
 func (coo *concurrentOutputOpener) Open(h, _ int64, streamIndex, segIndex int,
-	pts int64, outType goavpipe.AVType) (oh avpipe.OutputHandler, err error) {
+	pts int64, outType goavpipe.AVType) (oh goavpipe.OutputHandler, err error) {
 
 	var filename string
 	dir := fmt.Sprintf("%s/O%d", coo.dir, h)
@@ -310,7 +310,7 @@ func (o *fileOutput) Close() error {
 	return err
 }
 
-func (o *fileOutput) Stat(streamIndex int, avType goavpipe.AVType, statType avpipe.AVStatType, statArgs interface{}) error {
+func (o *fileOutput) Stat(streamIndex int, avType goavpipe.AVType, statType goavpipe.AVStatType, statArgs interface{}) error {
 	doLog := func(args ...interface{}) {
 		if debugFrameLevel {
 			logArgs := []interface{}{"stat", statType.Name(), "avType", avType.Name(), "streamIndex", streamIndex}
@@ -319,19 +319,19 @@ func (o *fileOutput) Stat(streamIndex int, avType goavpipe.AVType, statType avpi
 		}
 	}
 	switch statType {
-	case avpipe.AV_OUT_STAT_BYTES_WRITTEN:
+	case goavpipe.AV_OUT_STAT_BYTES_WRITTEN:
 		writeOffset := statArgs.(*uint64)
 		doLog("write offset", *writeOffset)
-	case avpipe.AV_OUT_STAT_ENCODING_END_PTS:
+	case goavpipe.AV_OUT_STAT_ENCODING_END_PTS:
 		endPTS := statArgs.(*uint64)
 		doLog("endPTS", *endPTS)
-	case avpipe.AV_OUT_STAT_START_FILE:
+	case goavpipe.AV_OUT_STAT_START_FILE:
 		segIdx := statArgs.(*int)
 		doLog("segIdx", *segIdx)
-	case avpipe.AV_OUT_STAT_END_FILE:
+	case goavpipe.AV_OUT_STAT_END_FILE:
 		segIdx := statArgs.(*int)
 		doLog("segIdx", *segIdx)
-	case avpipe.AV_OUT_STAT_FRAME_WRITTEN:
+	case goavpipe.AV_OUT_STAT_FRAME_WRITTEN:
 		encodingStats := statArgs.(*avpipe.EncodingFrameStats)
 		doLog("encodingStats", encodingStats)
 		if avType == goavpipe.FMP4AudioSegment {
@@ -767,7 +767,7 @@ func doTranscode(t *testing.T,
 	nThreads int,
 	outputDir, filename string) {
 
-	avpipe.InitIOHandler(&fileInputOpener{url: filename},
+	goavpipe.InitIOHandler(&fileInputOpener{url: filename},
 		&concurrentOutputOpener{dir: outputDir})
 
 	done := make(chan struct{})
@@ -963,7 +963,7 @@ func TestStartTimeTsWithSkipDecoding(t *testing.T) {
 		DebugFrameLevel:     debugFrameLevel,
 	}
 
-	avpipe.InitUrlIOHandler(url, &fileInputOpener{url: url}, &fileOutputOpener{dir: outputDir})
+	goavpipe.InitUrlIOHandler(url, &fileInputOpener{url: url}, &fileOutputOpener{dir: outputDir})
 	boilerXc(t, params)
 
 	files, err := ioutil.ReadDir(outputDir)
@@ -1011,7 +1011,7 @@ func TestStartTimeTsWithoutSkipDecoding(t *testing.T) {
 		DebugFrameLevel:     debugFrameLevel,
 	}
 
-	avpipe.InitUrlIOHandler(url, &fileInputOpener{url: url}, &fileOutputOpener{dir: outputDir})
+	goavpipe.InitUrlIOHandler(url, &fileInputOpener{url: url}, &fileOutputOpener{dir: outputDir})
 	boilerXc(t, params)
 
 	files, err := ioutil.ReadDir(outputDir)
@@ -1930,7 +1930,7 @@ func TestMezMakerWithOpenInputError(t *testing.T) {
 
 	fio := &fileInputOpener{t: t, url: url, errorOnOpenInput: true}
 	foo := &fileOutputOpener{t: t, dir: outputDir}
-	avpipe.InitIOHandler(fio, foo)
+	goavpipe.InitIOHandler(fio, foo)
 
 	setFastEncodeParams(params, false)
 	params.EncHeight = 360 // slow down a bit to allow for the cancel
@@ -1975,7 +1975,7 @@ func TestMezMakerWithReadInputError(t *testing.T) {
 
 	fio := &fileInputOpener{t: t, url: url, errorOnReadInput: true}
 	foo := &fileOutputOpener{t: t, dir: outputDir}
-	avpipe.InitIOHandler(fio, foo)
+	goavpipe.InitIOHandler(fio, foo)
 
 	setFastEncodeParams(params, false)
 	params.EncHeight = 360 // slow down a bit to allow for the cancel
@@ -2003,7 +2003,7 @@ func TestProbeWithReadInputError(t *testing.T) {
 
 	fio := &fileInputOpener{t: t, url: url, errorOnReadInput: true}
 	foo := &fileOutputOpener{t: t, dir: outputDir}
-	avpipe.InitIOHandler(fio, foo)
+	goavpipe.InitIOHandler(fio, foo)
 
 	params := &goavpipe.XcParams{
 		Url:      url,
@@ -2056,7 +2056,7 @@ func TestHEVC_H265ABRTranscode(t *testing.T) {
 	params.Format = "dash"
 	params.VideoSegDurationTs = 48000
 	params.Url = url
-	avpipe.InitUrlIOHandler(url, &fileInputOpener{url: url}, &fileOutputOpener{dir: videoABRDir})
+	goavpipe.InitUrlIOHandler(url, &fileInputOpener{url: url}, &fileOutputOpener{dir: videoABRDir})
 	boilerXc(t, params)
 
 }
@@ -2155,7 +2155,7 @@ func TestABRMuxing(t *testing.T) {
 		ForceKeyInt:        48,
 	}
 	setFastEncodeParams(params, false)
-	avpipe.InitUrlIOHandler(url, &fileInputOpener{url: url}, &fileOutputOpener{dir: videoMezDir})
+	goavpipe.InitUrlIOHandler(url, &fileInputOpener{url: url}, &fileOutputOpener{dir: videoMezDir})
 	boilerXc(t, params)
 
 	log.Debug("STARTING audio mez for muxing", "file", url)
@@ -2164,7 +2164,7 @@ func TestABRMuxing(t *testing.T) {
 	params.XcType = goavpipe.XcAudio
 	params.Ecodec2 = "aac"
 	params.ChannelLayout = avpipe.ChannelLayout("stereo")
-	avpipe.InitUrlIOHandler(url, &fileInputOpener{url: url}, &fileOutputOpener{dir: audioMezDir})
+	goavpipe.InitUrlIOHandler(url, &fileInputOpener{url: url}, &fileOutputOpener{dir: audioMezDir})
 	boilerXc(t, params)
 
 	// Create video ABR files for the first mez segment
@@ -2175,7 +2175,7 @@ func TestABRMuxing(t *testing.T) {
 	params.Format = "dash"
 	params.VideoSegDurationTs = 48000
 	params.Url = url
-	avpipe.InitUrlIOHandler(url, &fileInputOpener{url: url}, &fileOutputOpener{dir: videoABRDir})
+	goavpipe.InitUrlIOHandler(url, &fileInputOpener{url: url}, &fileOutputOpener{dir: videoABRDir})
 	boilerXc(t, params)
 
 	// Create video ABR files for the second mez segment
@@ -2188,7 +2188,7 @@ func TestABRMuxing(t *testing.T) {
 	params.Url = url
 	params.StartSegmentStr = "16"
 	params.StartPts = 721720
-	avpipe.InitUrlIOHandler(url, &fileInputOpener{url: url}, &fileOutputOpener{dir: videoABRDir2})
+	goavpipe.InitUrlIOHandler(url, &fileInputOpener{url: url}, &fileOutputOpener{dir: videoABRDir2})
 	boilerXc(t, params)
 
 	// Create audio ABR files for the first mez segment
@@ -2202,7 +2202,7 @@ func TestABRMuxing(t *testing.T) {
 	params.Url = url
 	params.StartSegmentStr = "1"
 	params.StartPts = 0
-	avpipe.InitUrlIOHandler(url, &fileInputOpener{url: url}, &fileOutputOpener{dir: audioABRDir})
+	goavpipe.InitUrlIOHandler(url, &fileInputOpener{url: url}, &fileOutputOpener{dir: audioABRDir})
 	boilerXc(t, params)
 
 	// Create audio ABR files for the second mez segment
@@ -2216,7 +2216,7 @@ func TestABRMuxing(t *testing.T) {
 	params.Url = url
 	params.StartPts = 1441792
 	params.StartSegmentStr = "16"
-	avpipe.InitUrlIOHandler(url, &fileInputOpener{url: url}, &fileOutputOpener{dir: audioABRDir2})
+	goavpipe.InitUrlIOHandler(url, &fileInputOpener{url: url}, &fileOutputOpener{dir: audioABRDir2})
 	boilerXc(t, params)
 
 	// Create playable file by muxing audio/video segments
@@ -2241,7 +2241,7 @@ func TestABRMuxing(t *testing.T) {
 	params.MuxingSpec = muxSpec
 	log.Debug(f, "muxSpec", string(muxSpec))
 
-	avpipe.InitUrlMuxIOHandler(url, &cmd.AVCmdMuxInputOpener{URL: url}, &cmd.AVCmdMuxOutputOpener{})
+	goavpipe.InitUrlMuxIOHandler(url, &cmd.AVCmdMuxInputOpener{URL: url}, &cmd.AVCmdMuxOutputOpener{})
 	params.Url = url
 	err := avpipe.Mux(params)
 	failNowOnError(t, err)
@@ -2253,7 +2253,7 @@ func TestABRMuxing(t *testing.T) {
 		pixelFmt:  "yuv420p",
 	}
 	// Now probe mez video and output file and become sure both have the same duration
-	avpipe.InitIOHandler(&fileInputOpener{url: xcTestResult.mezFile[0]}, &fileOutputOpener{dir: videoMezDir})
+	goavpipe.InitIOHandler(&fileInputOpener{url: xcTestResult.mezFile[0]}, &fileOutputOpener{dir: videoMezDir})
 	// Now probe the generated files
 	videoMezProbeInfo := boilerProbe(t, xcTestResult)
 
@@ -2264,7 +2264,7 @@ func TestABRMuxing(t *testing.T) {
 		pixelFmt:  "yuv420p",
 	}
 	// Now probe mez video and output file and become sure both have the same duration
-	avpipe.InitIOHandler(&fileInputOpener{url: xcTestResult.mezFile[0]}, &fileOutputOpener{dir: videoMezDir})
+	goavpipe.InitIOHandler(&fileInputOpener{url: xcTestResult.mezFile[0]}, &fileOutputOpener{dir: videoMezDir})
 	// Now probe the generated files
 	videoMezProbeInfo2 := boilerProbe(t, xcTestResult2)
 
@@ -2275,7 +2275,7 @@ func TestABRMuxing(t *testing.T) {
 		pixelFmt:  "yuv420p",
 	}
 
-	avpipe.InitIOHandler(&fileInputOpener{url: xcTestResult.mezFile[0]}, &fileOutputOpener{dir: muxOutDir})
+	goavpipe.InitIOHandler(&fileInputOpener{url: xcTestResult.mezFile[0]}, &fileOutputOpener{dir: muxOutDir})
 	muxOutProbeInfo := boilerProbe(t, xcTestResult)
 
 	assert.Equal(t, true,
@@ -2324,7 +2324,7 @@ func TestProbe(t *testing.T) {
 		return
 	}
 
-	avpipe.InitIOHandler(&fileInputOpener{url: url}, &concurrentOutputOpener{dir: "O"})
+	goavpipe.InitIOHandler(&fileInputOpener{url: url}, &concurrentOutputOpener{dir: "O"})
 	xcparams := &goavpipe.XcParams{
 		Url:      url,
 		Seekable: true,
@@ -2381,7 +2381,7 @@ func TestProbeWithData(t *testing.T) {
 		return
 	}
 
-	avpipe.InitIOHandler(&fileInputOpener{url: url}, &concurrentOutputOpener{dir: "O"})
+	goavpipe.InitIOHandler(&fileInputOpener{url: url}, &concurrentOutputOpener{dir: "O"})
 	xcparams := &goavpipe.XcParams{
 		Url:      url,
 		Seekable: true,
@@ -2702,7 +2702,7 @@ func boilerplate(t *testing.T, outPath, inURL string) {
 	if len(inURL) > 0 {
 		fio := &fileInputOpener{t: t, url: inURL}
 		foo := &fileOutputOpener{t: t, dir: outPath}
-		avpipe.InitIOHandler(fio, foo)
+		goavpipe.InitIOHandler(fio, foo)
 	}
 }
 

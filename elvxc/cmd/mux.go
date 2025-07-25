@@ -17,7 +17,7 @@ type AVCmdMuxInputOpener struct {
 	URL string
 }
 
-func (inputOpener *AVCmdMuxInputOpener) Open(fd int64, url string) (avpipe.InputHandler, error) {
+func (inputOpener *AVCmdMuxInputOpener) Open(fd int64, url string) (goavpipe.InputHandler, error) {
 	log.Debug("elvxcMuxInputOpener", "url", url)
 	if url[:7] == "http://" || url[:8] == "https://" {
 		resp, err := http.Get(url)
@@ -103,15 +103,15 @@ func (muxInput *elvxcMuxInput) Size() int64 {
 	return fi.Size()
 }
 
-func (muxInput *elvxcMuxInput) Stat(streamIndex int, statType avpipe.AVStatType, statArgs interface{}) error {
+func (muxInput *elvxcMuxInput) Stat(streamIndex int, statType goavpipe.AVStatType, statArgs interface{}) error {
 	switch statType {
-	case avpipe.AV_IN_STAT_BYTES_READ:
+	case goavpipe.AV_IN_STAT_BYTES_READ:
 		readOffset := statArgs.(*uint64)
 		log.Info("elvxcMuxInput", "stat read offset", *readOffset, "streamIndex", streamIndex)
-	case avpipe.AV_IN_STAT_DECODING_AUDIO_START_PTS:
+	case goavpipe.AV_IN_STAT_DECODING_AUDIO_START_PTS:
 		startPTS := statArgs.(*uint64)
 		log.Info("elvxcMuxInput", "audio start PTS", *startPTS, "streamIndex", streamIndex)
-	case avpipe.AV_IN_STAT_DECODING_VIDEO_START_PTS:
+	case goavpipe.AV_IN_STAT_DECODING_VIDEO_START_PTS:
 		startPTS := statArgs.(*uint64)
 		log.Info("elvxcMuxInput", "video start PTS", *startPTS, "streamIndex", streamIndex)
 	}
@@ -123,7 +123,7 @@ func (muxInput *elvxcMuxInput) Stat(streamIndex int, statType avpipe.AVStatType,
 type AVCmdMuxOutputOpener struct {
 }
 
-func (outputOpener *AVCmdMuxOutputOpener) Open(filename string, fd int64, outType goavpipe.AVType) (avpipe.OutputHandler, error) {
+func (outputOpener *AVCmdMuxOutputOpener) Open(filename string, fd int64, outType goavpipe.AVType) (goavpipe.OutputHandler, error) {
 
 	if outType != goavpipe.MP4Segment &&
 		outType != goavpipe.FMP4AudioSegment &&
@@ -167,12 +167,12 @@ func (muxOutput *elvxcMuxOutput) Close() error {
 	return err
 }
 
-func (muxOutput *elvxcMuxOutput) Stat(streamIndex int, avType goavpipe.AVType, statType avpipe.AVStatType, statArgs interface{}) error {
+func (muxOutput *elvxcMuxOutput) Stat(streamIndex int, avType goavpipe.AVType, statType goavpipe.AVStatType, statArgs interface{}) error {
 	switch statType {
-	case avpipe.AV_OUT_STAT_BYTES_WRITTEN:
+	case goavpipe.AV_OUT_STAT_BYTES_WRITTEN:
 		writeOffset := statArgs.(*uint64)
 		log.Info("elvxcMuxOutput", "STAT, write offset", *writeOffset, "streamIndex", streamIndex)
-	case avpipe.AV_OUT_STAT_ENCODING_END_PTS:
+	case goavpipe.AV_OUT_STAT_ENCODING_END_PTS:
 		endPTS := statArgs.(*uint64)
 		log.Info("elvxcMuxOutput", "STAT, endPTS", *endPTS, "streamIndex", streamIndex)
 
@@ -228,7 +228,7 @@ func doMux(cmd *cobra.Command, args []string) error {
 		Format:          format,
 	}
 
-	avpipe.InitUrlMuxIOHandler(filename, &AVCmdMuxInputOpener{URL: filename}, &AVCmdMuxOutputOpener{})
+	goavpipe.InitUrlMuxIOHandler(filename, &AVCmdMuxInputOpener{URL: filename}, &AVCmdMuxOutputOpener{})
 
 	return avpipe.Mux(params)
 }
