@@ -5,19 +5,16 @@ import (
 	"io"
 
 	"github.com/eluv-io/avpipe/broadcastproto/transport"
+	"github.com/eluv-io/avpipe/goavpipe"
 )
 
-func NewMpegtsInput() *MpegtsInputOpener {
-	return &MpegtsInputOpener{
-		transport: nil,
-	}
-}
+var _ goavpipe.InputOpener = (*mpegtsInputOpener)(nil)
 
-type MpegtsInputOpener struct {
+type mpegtsInputOpener struct {
 	transport transport.Transport
 }
 
-func (mio *MpegtsInputOpener) Open(fd int64, url string) (*mpegtsInputHandler, error) {
+func (mio *mpegtsInputOpener) Open(fd int64, url string) (goavpipe.InputHandler, error) {
 	rc, err := mio.transport.Open()
 	if err != nil {
 		return nil, err
@@ -34,6 +31,7 @@ type mpegtsInputHandler struct {
 }
 
 func (mih *mpegtsInputHandler) Read(buf []byte) (int, error) {
+	// Processing step + splitting some out
 	return mih.rc.Read(buf)
 }
 
@@ -42,13 +40,13 @@ func (mih *mpegtsInputHandler) Close() error {
 }
 
 func (mih *mpegtsInputHandler) Seek(_ int64, _ int) (int64, error) {
-	return 0, errors.New("not implemented")
+	return 0, errors.New("not supported")
 }
 
 func (mih *mpegtsInputHandler) Size() int64 {
 	return -1
 }
 
-func (mih *mpegtsInputHandler) Stat(streamIndex int, statType int, statArgs any) error {
+func (mih *mpegtsInputHandler) Stat(streamIndex int, statType goavpipe.AVStatType, statArgs any) error {
 	return nil
 }
