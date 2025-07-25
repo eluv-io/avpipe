@@ -62,8 +62,8 @@ var gURLInputOpeners map[string]InputOpener = make(map[string]InputOpener)      
 var gURLOutputOpeners map[string]OutputOpener = make(map[string]OutputOpener)          // Keeps OutputOpener for specific URL
 var gURLMuxOutputOpeners map[string]MuxOutputOpener = make(map[string]MuxOutputOpener) // Keeps MuxOutputOpener for specific URL
 var gURLOutputOpenersByHandler map[int64]OutputOpener = make(map[int64]OutputOpener)   // Keeps OutputOpener for specific URL
+// gHandleNum is used for both FDs and handles so that they will not collide if misused.
 var gHandleNum int64
-var gFd int64
 var gMutex sync.Mutex
 var gInputOpener InputOpener
 var gOutputOpener OutputOpener
