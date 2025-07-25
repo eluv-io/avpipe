@@ -102,14 +102,8 @@ prepare_input(
     int bufin_sz = AVIO_IN_BUF_SIZE;
 
     /* For the live sources we don't use a custom input don't create input callbacks (RTMP, SRT, RTP) */
-    switch (decoder_context->live_proto) {
-        case avp_proto_rtmp:
-        case avp_proto_srt:
-        case avp_proto_rtp:
-            return 0;
-        default:
-            // Proceed
-            break;
+    if (!is_custom_input(decoder_context)) {
+        return 0;
     }
 
     bufin = (unsigned char *) av_malloc(bufin_sz);  /* Must be malloc'd - will be realloc'd by avformat */

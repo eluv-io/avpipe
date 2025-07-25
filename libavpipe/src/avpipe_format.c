@@ -101,6 +101,27 @@ is_live_container_mpegts(
     return 0;
 }
 
+/*
+ * True if the avpipe job uses custom input handlers
+ * (as opposed to using the built-in input readers of libavformat such as rtp://, srt://, ...)
+ */
+int
+is_custom_input(
+    coderctx_t *ctx)
+{
+    switch (ctx->live_proto) {
+        case avp_proto_rtmp:
+        case avp_proto_srt:
+        case avp_proto_rtp:
+            return 0;
+        default:
+            // Proceed
+            break;
+    }
+    return 1;
+}
+
+
 int
 num_audio_output(
     coderctx_t *decoder_context,
