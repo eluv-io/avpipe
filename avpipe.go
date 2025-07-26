@@ -44,6 +44,7 @@ import (
 	"sync"
 	"unsafe"
 
+	"github.com/eluv-io/avpipe/broadcastproto/mpegts"
 	"github.com/eluv-io/avpipe/goavpipe"
 )
 
@@ -1063,6 +1064,25 @@ func XcInit(params *goavpipe.XcParams) (int32, error) {
 	if params == nil {
 		goavpipe.Log.Error("Failed transcoding, params are not set.")
 		return -1, EAV_PARAM
+	}
+
+	// Here we should setup the input opener if specified by the params
+	if params.UseCustomLiveReader {
+		var opener goavpipe.InputOpener
+		var err error
+		if params.CopyMpegtsFromInput {
+			opener, err = mpegts.NewAutoInputOpener(params.Url, true)
+			if params.CopyMpegts {
+				goavpipe.Log.Warn("XcInit() CopyMpegts is set, but CopyMpegtsFromInput is also set", "url", params.Url)
+				params.CopyMpegts = false
+			}
+		} else {
+			opener, err = mpegts.NewAutoInputOpener(params.Url, false)
+		}
+		if err != nil {
+			return -1, EAV_PARAM
+		}
+		goavpipe.InitUrlIOHandlerIfNotPresent(params.Url, opener, nil)
 	}
 
 	cparams, err := getCParams(params)

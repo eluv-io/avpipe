@@ -294,7 +294,14 @@ type XcParams struct {
 	// caller should either have already provided a custom live reader via `InitUrlIOHandler`. If it
 	// has not been set by the time `XcInit` or `Xc` is called, the default input reader will be
 	// used.
-	UseCustomLiveReader    bool      `json:"use_custom_live_reader,omitempty"`
+	UseCustomLiveReader bool `json:"use_custom_live_reader,omitempty"`
+	// If true, the input MPEGTS stream will be copied to the output without any processing
+	// TODO(Nate): Remove this to have better semantics, but for now adding a field is one of the
+	// easiest ways to implement this. Likely change this before merging, or have the `CopyMpegts` field have values:
+	// - "": no copy
+	// - "raw": copy the input MPEGTS stream unedited
+	// - "parsed": copy the MPEGTS stream as we do now from ffmpeg outputs
+	CopyMpegtsFromInput    bool      `json:"copy_mpegts_from_input,omitempty"`
 	CopyMpegts             bool      `json:"copy_mpegts,omitempty"`
 	Seekable               bool      `json:"seekable,omitempty"`
 	WatermarkText          string    `json:"watermark_text,omitempty"`

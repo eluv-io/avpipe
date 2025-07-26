@@ -9,6 +9,10 @@ type srtProto struct {
 	Url string
 }
 
+func NewSRTTransport(url string) Transport {
+	return &srtProto{Url: url}
+}
+
 func (s *srtProto) URL() string {
 	return s.Url
 }

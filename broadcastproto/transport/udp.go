@@ -19,6 +19,10 @@ type udpProto struct {
 	Url string
 }
 
+func NewUDPTransport(url string) Transport {
+	return &udpProto{Url: url}
+}
+
 func (u *udpProto) URL() string {
 	return u.Url
 }
