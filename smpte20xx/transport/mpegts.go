@@ -121,7 +121,7 @@ func (ts *Ts) handleTSPacket(data [packet.PacketSize]byte, outConn net.Conn) {
 	}
 
 	// Read EBP
-	readEBP := true
+	readEBP := false
 	if readEBP {
 		ebpBytes, err := adaptationfield.EncoderBoundaryPoint(&pkt)
 		if err == nil {
@@ -174,7 +174,7 @@ func (ts *Ts) handleTSPacket(data [packet.PacketSize]byte, outConn net.Conn) {
 			for _, es := range pmt.ElementaryStreams() {
 				fmt.Printf("PMT: stream type 0x%x on PID 0x%x %v\n", es.StreamType(), es.ElementaryPid(), es.StreamTypeDescription())
 				for _, desc := range es.Descriptors() {
-					fmt.Printf("  %s\n", desc.Format())
+					fmt.Printf("  %s", desc.Format()) // Format() includes newline
 				}
 				if es.StreamType() == TsStreamTypeJpegXS || es.IsVideoContent() {
 					ts.videoPid = es.ElementaryPid()
@@ -256,7 +256,12 @@ func (ts *Ts) processDataPacket(pkt *packet.Packet) error {
 		if ts.pesData != nil {
 			//fmt.Println("DATA PES START INDICATOR")
 			payload := ts.pesData.Bytes()
-			anc.ParseSMPTE2038PES(payload)
+			h, err := anc.ParseAncPes(payload)
+			if err != nil {
+				return err
+			}
+			fmt.Println("VANC", h.String())
+
 			ts.pesData.Reset()
 		} else {
 			// Initialize accumulator and write the first data
@@ -403,4 +408,25 @@ func indexOf(data, pattern []byte) int {
 		}
 	}
 	return -1
+}
+
+func StripPESHeader(pes []byte) ([]byte, error) {
+	if len(pes) < 9 {
+		return nil, fmt.Errorf("PES too short")
+	}
+	// Check start code
+	if pes[0] != 0x00 || pes[1] != 0x00 || pes[2] != 0x01 {
+		return nil, fmt.Errorf("invalid PES start code")
+	}
+	streamID := pes[3]
+	if streamID != 0xBD {
+		return nil, fmt.Errorf("expected private_stream_1 (0xBD), got 0x%02X", streamID)
+	}
+
+	pesHeaderLen := int(pes[8]) // header_data_length
+	skip := 9 + pesHeaderLen
+	if len(pes) < skip {
+		return nil, fmt.Errorf("PES header length invalid")
+	}
+	return pes[skip:], nil
 }

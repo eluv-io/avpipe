@@ -45,6 +45,7 @@ func main() {
 		Url:            *cfg.url,
 		SaveFrameFiles: *cfg.saveFrameFiles,
 		ProcessVideo:   *cfg.processVideo,
+		ProcessData:    true,
 		MaxPackets:     *cfg.maxPackets,
 		SegCfg:         segCfg,
 	}
