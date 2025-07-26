@@ -37,8 +37,8 @@ type SequentialOpener interface {
 	OpenNext() (io.WriteCloser, error)
 }
 
-func NewAVPipeSequentialOutWriter(inFd int64, streamIndex int, streamType goavpipe.AVType, firstSegIdx int) SequentialOpener {
-	return &avpipeSequentialOutHandler{
+func NewAVPipeSequentialOutWriter(inFd int64, streamIndex int, streamType goavpipe.AVType, firstSegIdx int) *AVPipeSequentialOutHandler {
+	return &AVPipeSequentialOutHandler{
 		inFd:         inFd,
 		streamIndex:  streamIndex,
 		streamType:   streamType,
@@ -46,7 +46,7 @@ func NewAVPipeSequentialOutWriter(inFd int64, streamIndex int, streamType goavpi
 	}
 }
 
-type avpipeSequentialOutHandler struct {
+type AVPipeSequentialOutHandler struct {
 	mu sync.Mutex
 
 	//inFd is the identifier assigned to the input when it was opened. In some places this is called
@@ -60,7 +60,7 @@ type avpipeSequentialOutHandler struct {
 	outFd *int64
 }
 
-func (h *avpipeSequentialOutHandler) OpenNext() (io.WriteCloser, error) {
+func (h *AVPipeSequentialOutHandler) OpenNext() (io.WriteCloser, error) {
 	h.mu.Lock()
 	defer h.mu.Unlock()
 
@@ -80,7 +80,7 @@ func (h *avpipeSequentialOutHandler) OpenNext() (io.WriteCloser, error) {
 	return h, nil
 }
 
-func (h *avpipeSequentialOutHandler) Write(p []byte) (n int, err error) {
+func (h *AVPipeSequentialOutHandler) Write(p []byte) (n int, err error) {
 	h.mu.Lock()
 	defer h.mu.Unlock()
 
@@ -96,7 +96,7 @@ func (h *avpipeSequentialOutHandler) Write(p []byte) (n int, err error) {
 	return n, nil
 }
 
-func (h *avpipeSequentialOutHandler) Close() error {
+func (h *AVPipeSequentialOutHandler) Close() error {
 	h.mu.Lock()
 	defer h.mu.Unlock()
 

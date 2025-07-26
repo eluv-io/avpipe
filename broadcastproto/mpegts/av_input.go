@@ -30,9 +30,15 @@ var transportMap = map[string]func(string) transport.Transport{
 	"rtp": transport.NewRTPTransport,
 }
 
+type SequentialOpener interface {
+	OpenNext() (io.WriteCloser, error)
+}
+
+type SequentialOpenerFactory = func(inFd int64, streamIndex int, streamType goavpipe.AVType, firstSegIdx int) SequentialOpener
+
 // NewAutoInputOpener creates an InputOpener that automatically selects the transport based on the
 // URL scheme.
-func NewAutoInputOpener(url string, copyStream bool) (goavpipe.InputOpener, error) {
+func NewAutoInputOpener(url string, copyStream bool, sequentialOpenerFactory SequentialOpenerFactory) (goavpipe.InputOpener, error) {
 	var transport transport.Transport
 	for protoName, f := range transportMap {
 		if strings.HasPrefix(url, protoName+"://") {
