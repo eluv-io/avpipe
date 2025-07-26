@@ -168,6 +168,26 @@ func InitUrlIOHandler(url string, inputOpener InputOpener, outputOpener OutputOp
 	}
 }
 
+func InitUrlIOHandlerIfNotPresent(url string, inputOpener InputOpener, outputOpener OutputOpener) (inSet bool, outSet bool) {
+	gMutex.Lock()
+	defer gMutex.Unlock()
+	if inputOpener != nil {
+		if _, ok := gURLInputOpeners[url]; !ok {
+			gURLInputOpeners[url] = inputOpener
+			inSet = true
+		}
+	}
+
+	if outputOpener != nil {
+		if _, ok := gURLOutputOpeners[url]; !ok {
+			gURLOutputOpeners[url] = outputOpener
+			outSet = true
+		}
+	}
+
+	return
+}
+
 // Sets specific IO handler for muxing a url/file (similar to InitUrlIOHandler)
 func InitUrlMuxIOHandler(url string, inputOpener InputOpener, muxOutputOpener MuxOutputOpener) {
 	if inputOpener != nil {
