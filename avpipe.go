@@ -388,35 +388,42 @@ func getAVType(av_type C.int) goavpipe.AVType {
 	}
 }
 
+// TODO(Nate): Standardize all of these handler functions to be a type conversion wrapper around a
+// Go function to have as thin a surface as possible of C functions. This lets these be called
+// easily from other code.
+
 //export AVPipeOpenOutput
 func AVPipeOpenOutput(handler C.int64_t, stream_index, seg_index C.int, pts C.int64_t, stream_type C.int) C.int64_t {
+	return C.int64_t(AVPipeOpenOutputGo(int64(handler), int(stream_index), int(seg_index), int64(pts), getAVType(stream_type)))
+}
 
-	h := getCIOHandler(int64(handler))
+func AVPipeOpenOutputGo(handler int64, stream_index, seg_index int, pts int64, stream_type goavpipe.AVType) int64 {
+	h := getCIOHandler(handler)
 	if h == nil {
-		return C.int64_t(-1)
+		goavpipe.Log.Error("AVPipeOpenOutput()", "reason", "handler not found", "handler", handler)
+		return -1
 	}
 	fd := goavpipe.Globals.GetNextFD()
-	out_type := getAVType(stream_type)
-	if out_type == goavpipe.Unknown {
+	if stream_type == goavpipe.Unknown {
 		goavpipe.Log.Error("AVPipeOpenOutput()", "invalid stream type", stream_type)
-		return C.int64_t(-1)
+		return -1
 	}
 
 	outputOpener := goavpipe.GetOutputOpenerByHandler(int64(handler))
 	if outputOpener == nil {
 		goavpipe.Log.Error("AVPipeOpenOutput() nil outputOpener", "handler", handler)
-		return C.int64_t(-1)
+		return -1
 	}
-	outHandler, err := outputOpener.Open(int64(handler), fd, int(stream_index), int(seg_index), int64(pts), out_type)
+	outHandler, err := outputOpener.Open(int64(handler), fd, int(stream_index), int(seg_index), int64(pts), stream_type)
 	if err != nil {
-		goavpipe.Log.Error("AVPipeOpenOutput()", "out_type", out_type, "error", err)
-		return C.int64_t(-1)
+		goavpipe.Log.Error("AVPipeOpenOutput()", "out_type", stream_type, "error", err)
+		return -1
 	}
 
-	goavpipe.Log.Debug("AVPipeOpenOutput()", "fd", fd, "stream_index", stream_index, "seg_index", seg_index, "pts", pts, "out_type", out_type)
+	goavpipe.Log.Debug("AVPipeOpenOutput()", "fd", fd, "stream_index", stream_index, "seg_index", seg_index, "pts", pts, "out_type", stream_type)
 	h.putOutTable(fd, outHandler)
 
-	return C.int64_t(fd)
+	return fd
 }
 
 //export AVPipeOpenMuxOutput
@@ -460,31 +467,41 @@ func AVPipeWriteOutput(handler C.int64_t, fd C.int64_t, buf *C.uint8_t, sz C.int
 		return C.int(0)
 	}
 
-	h := getCIOHandler(int64(handler))
-	if h == nil {
-		return C.int(-1)
-	}
-	if traceIo {
-		goavpipe.Log.Debug("AVPipeWriteOutput", "fd", fd, "sz", sz)
-	}
-
-	if h.getOutTable(int64(fd)) == nil {
-		msg := fmt.Sprintf("OutWriterX outTable entry is NULL, fd=%d", fd)
-		panic(msg)
-	}
-
 	//gobuf := C.GoBytes(unsafe.Pointer(buf), sz)
 	// This should be the equivalent of using GoBytes() but safer if the
 	// Go implementation uses C pointer to wrap a slice.
 	gobuf := make([]byte, sz)
 	C.memcpy(unsafe.Pointer(&gobuf[0]), unsafe.Pointer(buf), C.size_t(sz))
 
-	n, err := h.OutWriter(fd, gobuf)
-	if err != nil {
-		return C.int(-1)
+	return C.int(AVPipeWriteOutputGo(int64(handler), int64(fd), gobuf))
+}
+
+func AVPipeWriteOutputGo(handler int64, fd int64, buf []byte) int {
+	if len(buf) == 0 {
+		return 0
 	}
 
-	return C.int(n)
+	h := getCIOHandler(handler)
+	if h == nil {
+		goavpipe.Log.Error("AVPipeWriteOutputGo()", "handler not found", "handler", handler)
+		return -1
+	}
+
+	if traceIo {
+		goavpipe.Log.Debug("AVPipeWriteOutputGo", "fd", fd, "buf_size", len(buf))
+	}
+
+	if h.getOutTable(fd) == nil {
+		msg := fmt.Sprintf("OutWriterX outTable entry is NULL, fd=%d", fd)
+		goavpipe.Log.Error(msg)
+		return -1
+	}
+
+	n, err := h.OutWriter(C.int64_t(fd), buf)
+	if err != nil {
+		return -1
+	}
+	return n
 }
 
 //export AVPipeWriteMuxOutput
@@ -552,19 +569,23 @@ func (h *ioHandler) OutSeeker(fd C.int64_t, offset C.int64_t, whence C.int) (int
 
 //export AVPipeCloseOutput
 func AVPipeCloseOutput(handler C.int64_t, fd C.int64_t) C.int {
-	h := getCIOHandler(int64(handler))
+	return C.int(AVPipeCloseOutputGo(int64(handler), int64(fd)))
+}
+
+func AVPipeCloseOutputGo(handler int64, fd int64) int {
+	h := getCIOHandler(handler)
 	if h == nil {
-		return C.int(-1)
+		return -1
 	}
-	defer h.putOutTable(int64(fd), nil)
-	err := h.OutCloser(fd)
+	defer h.putOutTable(fd, nil)
+	err := h.OutCloser(C.int64_t(fd))
 	if err != nil {
-		return C.int(-1)
+		return -1
 	}
 
 	goavpipe.Log.Debug("AVPipeCloseOutput()", "fd", fd)
 
-	return C.int(0)
+	return 0
 }
 
 //export AVPipeCloseMuxOutput
