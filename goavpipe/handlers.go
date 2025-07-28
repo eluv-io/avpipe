@@ -185,6 +185,8 @@ func InitUrlIOHandlerIfNotPresent(url string, inputOpener InputOpener, outputOpe
 		}
 	}
 
+	Log.Debug("InitUrlIOHandlerIfNotPresent", "url", url, "urlInputOpener", inSet, "urlOutputOpener", outSet)
+
 	return
 }
 
@@ -208,8 +210,11 @@ func GetInputOpener(url string) InputOpener {
 	gMutex.Lock()
 	defer gMutex.Unlock()
 	if inputOpener, ok := gURLInputOpeners[url]; ok {
+		Log.Debug("GetInputOpener getting custom opener", "url", url)
 		return inputOpener
 	}
+
+	Log.Debug("GetInputOpener falling back to global opener", "url", url)
 
 	return gInputOpener
 }
