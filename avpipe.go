@@ -1087,18 +1087,21 @@ func XcInit(params *goavpipe.XcParams) (int32, error) {
 		return -1, EAV_PARAM
 	}
 
+	// SSDBG the inFd is not known - set to 1 here.  Not sure about streamId (99)
+	seqOpener := NewAVPipeSequentialOutWriter(1, 99, goavpipe.MpegtsSegment, 1)
+
 	// Here we should setup the input opener if specified by the params
 	if params.UseCustomLiveReader {
 		var opener goavpipe.InputOpener
 		var err error
 		if params.CopyMpegtsFromInput {
-			opener, err = mpegts.NewAutoInputOpener(params.Url, true)
+			opener, err = mpegts.NewAutoInputOpener(params.Url, true, seqOpener)
 			if params.CopyMpegts {
 				goavpipe.Log.Warn("XcInit() CopyMpegts is set, but CopyMpegtsFromInput is also set", "url", params.Url)
 				params.CopyMpegts = false
 			}
 		} else {
-			opener, err = mpegts.NewAutoInputOpener(params.Url, false)
+			opener, err = mpegts.NewAutoInputOpener(params.Url, false, seqOpener)
 		}
 		if err != nil {
 			return -1, EAV_PARAM

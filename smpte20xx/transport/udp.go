@@ -48,11 +48,11 @@ func UdpReader(ts *Ts, outConn net.Conn) {
 
 		// Process all TS packets in this payload
 		for offset := 0; offset+188 <= len(tsData); offset += 188 {
-			p, err := toTSPacket(tsData[offset : offset+188])
+			p, err := ToTSPacket(tsData[offset : offset+188])
 			if err != nil {
 				continue
 			}
-			ts.handleTSPacket(p, outConn)
+			ts.HandleTSPacket(p, outConn)
 		}
 
 		if ts.Cfg.MaxPackets > 0 && nPackets > int(ts.Cfg.MaxPackets) {

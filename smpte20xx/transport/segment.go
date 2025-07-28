@@ -3,10 +3,16 @@ package transport
 import (
 	"bufio"
 	"fmt"
+	"io"
 	"os"
 
 	"github.com/Comcast/gots/v2/packet"
+	"github.com/eluv-io/avpipe/goavpipe"
 )
+
+type SequentialOpener interface {
+	OpenNext(fd int64) (io.WriteCloser, error)
+}
 
 type OutputKind int
 
@@ -29,6 +35,10 @@ type SegmenterConfig struct {
 type Segmenter struct {
 	Cfg SegmenterConfig
 
+	seqOpener        SequentialOpener
+	inFd             int64 // Corresponding input "fd"
+	currentSeqWriter io.WriteCloser
+
 	numSegs       int64
 	startPcr      uint64
 	segStartPcr   uint64
@@ -37,10 +47,13 @@ type Segmenter struct {
 	currentWriter *bufio.Writer
 }
 
-func NewSegmenter(segCfg SegmenterConfig) *Segmenter {
+func NewSegmenter(segCfg SegmenterConfig, seqOpener SequentialOpener, inFd int64) *Segmenter {
 
-	s := Segmenter{}
-	s.Cfg = segCfg
+	s := Segmenter{
+		Cfg:       segCfg,
+		seqOpener: seqOpener,
+		inFd:      inFd,
+	}
 
 	if s.Cfg.Output.Kind == OutputFile {
 		if s.Cfg.Output.Locator == "" {
@@ -78,7 +91,16 @@ func (s *Segmenter) WritePacket(pkt packet.Packet, pcr uint64) (bytesWritten int
 		}
 		s.segStartPcr = pcr
 	}
-	bytesWritten, err = s.currentWriter.Write(pkt[:])
+
+	// Write test file
+	_, err = s.currentWriter.Write(pkt[:])
+	if err != nil {
+		fmt.Println("ERROR: failed to write test output", err)
+	}
+
+	// Write output callback
+	bytesWritten, err = s.currentSeqWriter.Write(pkt[:])
+
 	return
 }
 
@@ -86,6 +108,8 @@ func (s *Segmenter) openSegment() error {
 	var err error
 	s.closeSegment()
 	s.numSegs++
+
+	// Open test file writer
 	fileName := fmt.Sprintf("%s/outseg_%04d.ts", s.Cfg.Output.Locator, s.numSegs)
 	s.currentFile, err = os.Create(fileName)
 	if err != nil {
@@ -93,6 +117,14 @@ func (s *Segmenter) openSegment() error {
 		return err
 	}
 	s.currentWriter = bufio.NewWriter(s.currentFile)
+
+	// Open seq writer
+	if s.seqOpener != nil {
+		s.currentSeqWriter, err = s.seqOpener.OpenNext(s.inFd)
+		if err != nil {
+			goavpipe.Log.Error("ERROR: failed to open next MPEGTS writer", err)
+		}
+	}
 	return err
 }
 
@@ -101,5 +133,10 @@ func (s *Segmenter) closeSegment() {
 		s.currentWriter.Flush()
 		s.currentFile.Close()
 		s.currentFile = nil
+	}
+
+	if s.currentSeqWriter != nil {
+		s.currentSeqWriter.Close()
+		s.currentSeqWriter = nil
 	}
 }

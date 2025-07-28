@@ -895,11 +895,12 @@ set_handlers(
         return eav_param;
     }
 
+    const int use_custom_input_handler = 1;
     /*
      * If input url is a UDP set/overwrite the default UDP input handlers.
      * No need for the client code to set/specify the input handlers when the input is UDP.
      */
-    if (!strcmp(url_parser.protocol, "udp") && p_in_handlers) {
+    if (!use_custom_input_handler && !strcmp(url_parser.protocol, "udp") && p_in_handlers) {
         avpipe_io_handler_t *in_handlers = (avpipe_io_handler_t *)calloc(1, sizeof(avpipe_io_handler_t));
         in_handlers->avpipe_opener = udp_in_opener;
         in_handlers->avpipe_closer = udp_in_closer;
@@ -908,6 +909,8 @@ set_handlers(
         in_handlers->avpipe_seeker = udp_in_seek;
         in_handlers->avpipe_stater = udp_in_stat;
         *p_in_handlers = in_handlers;
+        elv_log("SSDBG xc_init udp in handlers");
+
     } else if (p_in_handlers) {
         avpipe_io_handler_t *in_handlers = (avpipe_io_handler_t *)calloc(1, sizeof(avpipe_io_handler_t));
         in_handlers->avpipe_opener = in_opener;
@@ -917,6 +920,7 @@ set_handlers(
         in_handlers->avpipe_seeker = in_seek;
         in_handlers->avpipe_stater = in_stat;
         *p_in_handlers = in_handlers;
+        elv_log("SSDBG xc_init custom in handlers");
     }
 
     if (p_out_handlers) {
@@ -928,6 +932,7 @@ set_handlers(
         out_handlers->avpipe_seeker = out_seek;
         out_handlers->avpipe_stater = out_stat;
         *p_out_handlers = out_handlers;
+        elv_log("SSDBG xc_init custom out handlers");
     }
 
     free_parsed_url(&url_parser);

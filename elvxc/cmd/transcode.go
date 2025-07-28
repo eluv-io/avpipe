@@ -369,7 +369,8 @@ func InitTranscode(cmdRoot *cobra.Command) error {
 	cmdTranscode.PersistentFlags().StringP("profile", "", "", "Encoding profile for video. If it is not determined, it will be set automatically.")
 	cmdTranscode.PersistentFlags().Int32("level", 0, "Encoding level for video. If it is not determined, it will be set automatically.")
 	cmdTranscode.PersistentFlags().Int32("deinterlace", 0, "Deinterlace filter (values 0 - none, 1 - bwdif_field, 2 - bwdif_frame send_frame).")
-	cmdTranscode.PersistentFlags().Bool("copy-mpegts", false, "Create a copy of the MPEGTS input (for MPEGTS, SRT, RTP)")
+	cmdTranscode.PersistentFlags().Bool("copy-mpegts", false, "Create an MPEGTS output (for MPEGTS, SRT, RTP)")
+	cmdTranscode.PersistentFlags().Bool("copy-mpegts-from-input", false, "Create a copy of the MPEGTS input (for MPEGTS, SRT, RTP)")
 
 	return nil
 }
@@ -665,6 +666,11 @@ func doTranscode(cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("Invalid copy-mpegts value")
 	}
 
+	copyMpegtsFromInput, err := cmd.Flags().GetBool("copy-mpegts-from-input")
+	if err != nil {
+		return fmt.Errorf("Invalid copy-mpegts value")
+	}
+
 	cryptScheme := goavpipe.CryptNone
 	val := cmd.Flag("crypt-scheme").Value.String()
 	if len(val) > 0 {
@@ -729,7 +735,9 @@ func doTranscode(cmd *cobra.Command, args []string) error {
 		CryptKeyURL:            cryptKeyURL,
 		CryptScheme:            cryptScheme,
 		XcType:                 xcType,
+		UseCustomLiveReader:    true, //
 		CopyMpegts:             copyMpegts,
+		CopyMpegtsFromInput:    copyMpegtsFromInput,
 		WatermarkTimecode:      watermarkTimecode,
 		WatermarkTimecodeRate:  watermarkTimecodeRate,
 		WatermarkText:          watermarkText,
@@ -779,16 +787,23 @@ func doTranscode(cmd *cobra.Command, args []string) error {
 		return err
 	}
 
-	goavpipe.InitIOHandler(&elvxcInputOpener{url: filename}, &elvxcOutputOpener{dir: dir})
+	// SSDBG
+	//goavpipe.InitIOHandler(&elvxcInputOpener{url: filename}, &elvxcOutputOpener{dir: dir})
+	outOpener := &elvxcOutputOpener{dir: dir}
 
 	done := make(chan interface{})
 
 	for i := 0; i < int(nThreads); i++ {
 		go func(params *goavpipe.XcParams, filename string) {
 
-			err := avpipe.Xc(params)
+			goavpipe.InitUrlIOHandlerIfNotPresent(filename, nil, outOpener)
+
+			handle, err := avpipe.XcInit(params)
+			log.Info("SSDBG XcInit", "handle", handle, "err", err)
+
+			err = avpipe.Xc(params)
 			if err != nil {
-				done <- fmt.Errorf("Failed transcoding %s, err=%v", filename, err)
+				done <- fmt.Errorf("failed transcoding %s, err=%v", filename, err)
 			} else {
 				done <- nil
 			}
