@@ -29,6 +29,8 @@ Then split the output out to a segmenter if configured on
 
 var _ goavpipe.InputOpener = (*mpegtsInputOpener)(nil)
 
+type SequentialOpenerFactory func(inFd int64) smpte.SequentialOpener
+
 var transportMap = map[string]func(string) transport.Transport{
 	"udp": transport.NewUDPTransport,
 	"srt": transport.NewSRTTransport,
@@ -37,7 +39,7 @@ var transportMap = map[string]func(string) transport.Transport{
 
 // NewAutoInputOpener creates an InputOpener that automatically selects the transport based on the
 // URL scheme.
-func NewAutoInputOpener(url string, copyStream bool, seqOpener smpte.SequentialOpener) (goavpipe.InputOpener, error) {
+func NewAutoInputOpener(url string, copyStream bool, seqOpener SequentialOpenerFactory) (goavpipe.InputOpener, error) {
 	var transport transport.Transport
 	for protoName, f := range transportMap {
 		if strings.HasPrefix(url, protoName+"://") {
@@ -58,7 +60,7 @@ func NewAutoInputOpener(url string, copyStream bool, seqOpener smpte.SequentialO
 type mpegtsInputOpener struct {
 	transport transport.Transport
 
-	seqOpener  smpte.SequentialOpener
+	seqOpener  SequentialOpenerFactory
 	copyStream bool
 }
 
@@ -69,7 +71,7 @@ func (mio *mpegtsInputOpener) Open(fd int64, url string) (goavpipe.InputHandler,
 	if gio == nil {
 		return nil, errors.New("global input opener is not set")
 	}
-	_, err := gio.Open(fd, url)
+	gih, err := gio.Open(fd, url)
 	if err != nil {
 		return nil, fmt.Errorf("failed to open global input opener: %w", err)
 	}
@@ -91,10 +93,11 @@ func (mio *mpegtsInputOpener) Open(fd int64, url string) (goavpipe.InputHandler,
 	mih := &mpegtsInputHandler{
 		rc:          rc,
 		transport:   mio.transport,
-		seqOpener:   mio.seqOpener,
+		seqOpener:   mio.seqOpener(fd),
 		copyStream:  mio.copyStream,
 		outputSplit: ch,
 		inFd:        fd,
+		gih:         gih,
 	}
 
 	if mio.copyStream {
@@ -119,6 +122,9 @@ type mpegtsInputHandler struct {
 	copyStream  bool
 	outputSplit chan<- []byte
 	inFd        int64
+
+	// gih is the global input handler, used to pass input stats through to the normal live
+	gih goavpipe.InputHandler
 }
 
 func (mih *mpegtsInputHandler) Read(buf []byte) (int, error) {
@@ -159,7 +165,7 @@ func (mih *mpegtsInputHandler) Size() int64 {
 }
 
 func (mih *mpegtsInputHandler) Stat(streamIndex int, statType goavpipe.AVStatType, statArgs any) error {
-	return nil
+	return mih.gih.Stat(streamIndex, statType, statArgs)
 }
 
 func (mih *mpegtsInputHandler) ReaderLoop(ch chan []byte) {
@@ -198,6 +204,10 @@ func (mih *mpegtsInputHandler) ReaderLoop(ch chan []byte) {
 
 	for buf := range ch {
 		nPackets++
+
+		if nPackets%1000 == 0 {
+			goavpipe.Log.Debug("Processed packets", "count", nPackets, "chan size", len(ch), "chan cap", cap(ch))
+		}
 
 		// PENDING(SS) must configure RTP processing based on input
 		tsData, err := transport.StripRTP(buf)
