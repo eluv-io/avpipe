@@ -219,6 +219,12 @@ func GetInputOpener(url string) InputOpener {
 	return gInputOpener
 }
 
+func GetGlobalInputOpener() InputOpener {
+	gMutex.Lock()
+	defer gMutex.Unlock()
+	return gInputOpener
+}
+
 func GetOutputOpener(url string) OutputOpener {
 	gMutex.Lock()
 	defer gMutex.Unlock()
