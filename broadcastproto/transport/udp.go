@@ -1,6 +1,7 @@
 package transport
 
 import (
+	"fmt"
 	"io"
 	"net"
 	"strings"
@@ -10,6 +11,12 @@ import (
 
 const UDP_READ_BUFFER_SIZE = 10 * 1024 * 1024
 
+const (
+	PacketSize = 188
+	SyncByte   = 0x47
+	outSock    = "/tmp/elv_sock_jxs"
+)
+
 var log = elog.Get("avpipe/broadcastproto/transport")
 
 var _ Transport = (*udpProto)(nil)
@@ -17,6 +24,8 @@ var _ Transport = (*udpProto)(nil)
 // udpProto implements the Transport interface for UDP connections.
 type udpProto struct {
 	Url string
+
+	Conn *net.UDPConn
 }
 
 func NewUDPTransport(url string) Transport {
@@ -44,14 +53,18 @@ func (u *udpProto) Open() (io.ReadCloser, error) {
 			return nil, err
 		}
 		log.Debug("Listening on UDP multicast address", "addr", addr)
+		fmt.Println("Listening on UDP multicast address", "addr", addr)
+
 	} else {
 		conn, err = net.ListenUDP("udp", addr)
 		if err != nil {
 			return nil, err
 		}
 		log.Debug("Listening on UDP address", "addr", addr)
+		fmt.Println("Listening on UDP address", "addr", addr)
 	}
 
+	u.Conn = conn
 	return conn, nil
 }
 

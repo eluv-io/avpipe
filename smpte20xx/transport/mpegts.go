@@ -67,7 +67,7 @@ type Ts struct {
 	segmenter *Segmenter
 }
 
-func NewTs(tsCfg TsConfig) *Ts {
+func NewTs(tsCfg TsConfig, seqOpener SequentialOpener, inFd int64) *Ts {
 	ts := Ts{
 		Cfg:           tsCfg,
 		program:       -1,
@@ -76,12 +76,12 @@ func NewTs(tsCfg TsConfig) *Ts {
 		dataPid:       -1,
 		pesData:       nil,
 		continuityMap: make(map[int]uint8),
-		segmenter:     NewSegmenter(tsCfg.SegCfg),
+		segmenter:     NewSegmenter(tsCfg.SegCfg, seqOpener, inFd),
 	}
 	return &ts
 }
 
-func (ts *Ts) handleTSPacket(data [packet.PacketSize]byte, outConn net.Conn) {
+func (ts *Ts) HandleTSPacket(data [packet.PacketSize]byte, outConn net.Conn) {
 	pkt := packet.Packet(data)
 	pid := pkt.PID()
 
@@ -236,7 +236,7 @@ func (ts *Ts) handleTSPacket(data [packet.PacketSize]byte, outConn net.Conn) {
 	}
 }
 
-func toTSPacket(data []byte) (packet.Packet, error) {
+func ToTSPacket(data []byte) (packet.Packet, error) {
 	if len(data) < packet.PacketSize {
 		return packet.Packet{}, fmt.Errorf("not enough data for TS packet")
 	}

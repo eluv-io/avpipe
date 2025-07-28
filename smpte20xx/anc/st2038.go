@@ -128,7 +128,7 @@ func (h *AncHeader) String() string {
 		}
 		ancs = ancs + fmt.Sprintf(" Errors: %d ", len(h.Anc[i].Errors))
 	}
-	return fmt.Sprintf("Stream=%d Len=%d PTS=%d Num ANCs=%d ANCs=%s",
+	return fmt.Sprintf("Stream=0x%x Len=%d PTS=%d Num ANCs=%d ANCs=%s",
 		h.StreamID, h.PESPacketLength, h.PTS, len(h.Anc), ancs)
 }
 
@@ -312,7 +312,7 @@ func ParseAncPes(pes []byte) (*AncHeader, error) {
 	for br.pos+72 <= len(pes)*8 { // enough for at least one ANC block header
 		zeroBits, _ := br.ReadBits(6)
 		if zeroBits != 0 {
-			fmt.Printf("Block %d: expected 6 zero bits, got %d\n", index, zeroBits)
+			fmt.Printf("Block %d: expected 6 zero bits, got 0x%x\n", index, zeroBits)
 			break
 		}
 		cFlag, _ := br.ReadBits(1)
@@ -350,7 +350,7 @@ func ParseAncPes(pes []byte) (*AncHeader, error) {
 		vPrintf("  data_count: %d\n", dc)
 		vPrintf("  user_data_words: ...\n")
 
-		w10s := make([]uint16, 100) // Array of 10bit words
+		w10s := make([]uint16, 1024) // Array of 10bit words - fix sizing
 		for j := 0; j < int(dc); j++ {
 			if br.pos+10 > len(pes)*8 {
 				anc.Errors = append(anc.Errors, "ERROR: truncated checksum_word")
