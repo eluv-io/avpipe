@@ -87,7 +87,7 @@ func (mio *mpegtsInputOpener) Open(fd int64, url string) (goavpipe.InputHandler,
 	var ch chan []byte
 
 	if mio.copyStream {
-		ch = make(chan []byte, 1024) // SSDBG to size
+		ch = make(chan []byte, 1024*1024) // SSDBG to size
 	}
 
 	mih := &mpegtsInputHandler{
