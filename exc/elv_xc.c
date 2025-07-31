@@ -294,7 +294,7 @@ read_channel_again:
 int
 in_write_packet(
     void *opaque,
-    uint8_t *buf,
+    const uint8_t *buf,
     int buf_size)
 {
     elv_dbg("IN WRITE");
@@ -531,7 +531,7 @@ out_read_packet(
 int
 out_write_packet(
     void *opaque,
-    uint8_t *buf,
+    const uint8_t *buf,
     int buf_size)
 {
     ioctx_t *outctx = (ioctx_t *)opaque;
@@ -1137,6 +1137,7 @@ main(
     url_parser_t url_parser;
     u_int64_t log_size = 100;
     int rc = 0;
+    AVChannelLayout channel_layout;
 
     /* Parameters */
     xcparams_t p = {
@@ -1263,10 +1264,13 @@ main(
                 if (sscanf(argv[i+1], "%d", &p.connection_timeout) != 1) {
                     usage(argv[0], argv[i], EXIT_FAILURE);
                 }
-            } else if (!strcmp(argv[i], "-channel-layout")) {
-                p.channel_layout = av_get_channel_layout(argv[i+1]);
-                if (p.channel_layout == 0)
+            } else if (!strcmp(argv[i], "-channel-layout")) {              
+                rc = av_channel_layout_from_string(&channel_layout, argv[i+1]);
+                if (rc < 0) {
                     usage(argv[0], argv[i], EXIT_FAILURE);
+                } else {
+                    p.channel_layout = channel_layout.u.mask;
+                }
             } else if (strcmp(argv[i], "-crypt-iv") == 0) {
                 p.crypt_iv = strdup(argv[i+1]);
             } else if (strcmp(argv[i], "-crypt-key") == 0) {
