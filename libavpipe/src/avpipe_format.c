@@ -327,9 +327,8 @@ audio_skip_samples(
     }
 
     // Skip samples in either packed (one channel, interleaved) or planar data (multiple channels)
-    int channels = codec_ctx->channels;
     int skip_bytes = samples_to_skip * sample_size;
-    for (int ch = 0; ch < channels; ch++) {
+    for (int ch = 0; ch < codec_ctx->ch_layout.nb_channels; ch++) {
         if (frame->data[ch]) {
             frame->data[ch] += skip_bytes;
         }
@@ -352,6 +351,6 @@ void frame_rescale_time_base(
     if (frame->pkt_dts != AV_NOPTS_VALUE)
         frame->pkt_dts = av_rescale_q(frame->pkt_dts, src_time_base, dst_time_base);
 
-    if (frame->pkt_duration > 0)
-        frame->pkt_duration = av_rescale_q(frame->pkt_duration, src_time_base, dst_time_base);
+    if (frame->duration > 0)
+        frame->duration = av_rescale_q(frame->duration, src_time_base, dst_time_base);
 }

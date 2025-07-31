@@ -249,7 +249,7 @@ typedef int
 typedef int
 (*avpipe_writer_f)(
     void *opaque,
-    uint8_t *buf,
+    const uint8_t *buf,
     int buf_size);
 
 typedef int64_t
@@ -343,7 +343,7 @@ typedef struct coderctx_t {
     char                filename2[MAX_STREAMS][MAX_AVFILENAME_LEN];     /* Audio filename formats */
     int                 n_audio_output;                                 /* Number of audio output streams, it is set for encoder */
 
-    AVCodec             *codec[MAX_STREAMS];
+    const AVCodec       *codec[MAX_STREAMS];
     AVStream            *stream[MAX_STREAMS];
     AVCodecParameters   *codec_parameters[MAX_STREAMS];
     AVCodecContext      *codec_context[MAX_STREAMS];    /* Audio/video AVCodecContext, indexed by stream_index */

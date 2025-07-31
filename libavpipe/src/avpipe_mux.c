@@ -59,7 +59,7 @@ elv_mux_open(
     return ret;
 }
 
-void
+int
 elv_mux_close(
     struct AVFormatContext *format_ctx,
     AVIOContext *pb)
@@ -77,8 +77,7 @@ elv_mux_close(
     }
     free(outctx);
     free(pb);
-    return;
-
+    return 0;
 }
 
 extern int
@@ -307,7 +306,7 @@ avpipe_init_muxer(
 
     /* Custom output buffer */
     out_muxer_ctx->format_context->io_open = elv_mux_open;
-    out_muxer_ctx->format_context->io_close = elv_mux_close;
+    out_muxer_ctx->format_context->io_close2 = elv_mux_close;
 
     for (int i=0; i<in_mux_ctx->audio_count+in_mux_ctx->caption_count+1; i++) {
         /* Add a new stream to output format for each input in muxer context (source) */
@@ -539,7 +538,6 @@ avpipe_mux_fini(
     in_mux_ctx = p_xctx->in_mux_ctx;
 
     for (int i=0; i<in_mux_ctx->audio_count+in_mux_ctx->caption_count+1; i++) {
-        avcodec_close(p_xctx->in_muxer_ctx[i].codec_context[0]);
         avcodec_free_context(&p_xctx->in_muxer_ctx[i].codec_context[0]);
 
         AVIOContext *avioctx = (AVIOContext *) p_xctx->in_muxer_ctx[i].format_context->pb;

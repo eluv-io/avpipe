@@ -132,26 +132,27 @@ get_audio_avfilter_args(
 {
     AVCodecContext *dec_codec_ctx = decoder_context->codec_context[index];
 
-    if (!dec_codec_ctx->channel_layout)
-        dec_codec_ctx->channel_layout = av_get_default_channel_layout(dec_codec_ctx->channels);
+    if (dec_codec_ctx->ch_layout.u.mask == AV_CHANNEL_ORDER_UNSPEC) {
+        av_channel_layout_default(&dec_codec_ctx->ch_layout, dec_codec_ctx->ch_layout.nb_channels);
+    }
 
     // Use the timebase of the audio encoder
     AVRational time_base = enc_codec_ctx->time_base;
 
-    if (dec_codec_ctx->channel_layout == 0)
+    if (dec_codec_ctx->ch_layout.u.mask == AV_CHANNEL_ORDER_UNSPEC)
         snprintf(args, len,
             "time_base=%d/%d:sample_rate=%d:sample_fmt=%s:channels=%d",
             time_base.num, time_base.den,
             dec_codec_ctx->sample_rate,
             av_get_sample_fmt_name(dec_codec_ctx->sample_fmt),
-            dec_codec_ctx->channels);
+            dec_codec_ctx->ch_layout.nb_channels);
     else
         snprintf(args, len,
             "time_base=%d/%d:sample_rate=%d:sample_fmt=%s:channel_layout=0x%"PRIx64,
             time_base.num, time_base.den,
             dec_codec_ctx->sample_rate,
             av_get_sample_fmt_name(dec_codec_ctx->sample_fmt),
-            dec_codec_ctx->channel_layout);
+            dec_codec_ctx->ch_layout.u.mask);
 }
 
 /*
@@ -233,8 +234,8 @@ init_audio_filters(
         }
 
         ret = av_opt_set_bin(buffersink_ctx, "channel_layouts",
-            (uint8_t*)&enc_codec_ctx->channel_layout,
-            sizeof(enc_codec_ctx->channel_layout), AV_OPT_SEARCH_CHILDREN);
+            (uint8_t*)&enc_codec_ctx->ch_layout.u.mask,
+            sizeof(enc_codec_ctx->ch_layout.u.mask), AV_OPT_SEARCH_CHILDREN);
         if (ret < 0) {
             elv_err("init_audio_filters, cannot set output channel layout");
             goto end;
@@ -243,7 +244,7 @@ init_audio_filters(
         snprintf(args, sizeof(args),
              "sample_fmts=%s:sample_rates=%d:channel_layouts=0x%"PRIx64,
              av_get_sample_fmt_name(enc_codec_ctx->sample_fmt), enc_codec_ctx->sample_rate,
-             (uint64_t)enc_codec_ctx->channel_layout);
+             (uint64_t)enc_codec_ctx->ch_layout.u.mask);
         elv_dbg("init_audio_filters, audio format_filter args=%s", args);
 
         ret = avfilter_graph_create_filter(&format_ctx, aformat, "format_out_0_0", args, NULL, filter_graph);
@@ -374,8 +375,8 @@ init_audio_pan_filters(
     }
 
     ret = av_opt_set_bin(buffersink_ctx, "channel_layouts",
-        (uint8_t*)&enc_codec_ctx->channel_layout,
-        sizeof(enc_codec_ctx->channel_layout), AV_OPT_SEARCH_CHILDREN);
+        (uint8_t*)&enc_codec_ctx->ch_layout.u.mask,
+        sizeof(enc_codec_ctx->ch_layout.u.mask), AV_OPT_SEARCH_CHILDREN);
     if (ret < 0) {
         elv_err("init_audio_pan_filters, cannot set output channel layout");
         goto end;
@@ -493,8 +494,8 @@ init_audio_merge_pan_filters(
     }
 
     ret = av_opt_set_bin(buffersink_ctx, "channel_layouts",
-        (uint8_t*)&enc_codec_ctx->channel_layout,
-        sizeof(enc_codec_ctx->channel_layout), AV_OPT_SEARCH_CHILDREN);
+        (uint8_t*)&enc_codec_ctx->ch_layout.u.mask,
+        sizeof(enc_codec_ctx->ch_layout.u.mask), AV_OPT_SEARCH_CHILDREN);
     if (ret < 0) {
         elv_err("init_audio_merge_pan_filters, cannot set output channel layout");
         goto end;
@@ -656,8 +657,8 @@ init_audio_join_filters(
     }
 
     ret = av_opt_set_bin(buffersink_ctx, "channel_layouts",
-        (uint8_t*)&enc_codec_ctx->channel_layout,
-        sizeof(enc_codec_ctx->channel_layout), AV_OPT_SEARCH_CHILDREN);
+        (uint8_t*)&enc_codec_ctx->ch_layout.u.mask,
+        sizeof(enc_codec_ctx->ch_layout.u.mask), AV_OPT_SEARCH_CHILDREN);
     if (ret < 0) {
         elv_err("init_audio_join_filters, cannot set output channel layout");
         goto end;
@@ -666,7 +667,7 @@ init_audio_join_filters(
     snprintf(format_args, sizeof(format_args),
              "sample_fmts=%s:sample_rates=%d:channel_layouts=0x%"PRIx64,
              av_get_sample_fmt_name(enc_codec_ctx->sample_fmt), enc_codec_ctx->sample_rate,
-             (uint64_t)enc_codec_ctx->channel_layout);
+             (uint64_t)enc_codec_ctx->ch_layout.u.mask);
     elv_dbg("init_audio_join_filters, audio format_filter args=%s", format_args);
 
     ret = avfilter_graph_create_filter(&format_ctx, aformat, "format_out_0_0", format_args, NULL, decoder_context->audio_filter_graph[0]);
