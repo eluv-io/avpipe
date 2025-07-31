@@ -10,6 +10,8 @@ Package avpipe has four main interfaces that has to be implemented by the client
 
  4. OutputHandler: is the output handler with Write/Seek/Close methods. An implementation of this
     interface is needed by ffmpeg to write encoded streams properly.
+
+TODO: Call C.free for every C.CString to not leak memory.
 */
 package avpipe
 
@@ -18,7 +20,6 @@ package avpipe
 // #cgo pkg-config: libavformat
 // #cgo pkg-config: libavutil
 // #cgo pkg-config: libswresample
-// #cgo pkg-config: libavresample
 // #cgo pkg-config: libavdevice
 // #cgo pkg-config: libswscale
 // #cgo pkg-config: libavutil
@@ -30,11 +31,20 @@ package avpipe
 // #cgo LDFLAGS: -L${SRCDIR}
 // #cgo linux LDFLAGS: -Wl,-rpath,$ORIGIN/../lib
 
-// #include <string.h>
-// #include <stdlib.h>
-// #include "avpipe_xc.h"
-// #include "avpipe.h"
-// #include "elv_log.h"
+/*
+#include <string.h>
+#include <stdlib.h>
+#include "avpipe_xc.h"
+#include "avpipe.h"
+#include "elv_log.h"
+#include <libavutil/channel_layout.h>
+
+// Helper function to safely access the union member. When cgo encounters a
+// C union, it cannot map it to a specific Go type.
+static inline uint64_t get_channel_layout_mask(const AVChannelLayout *layout) {
+    return layout->u.mask;
+}
+*/
 import "C"
 import (
 	"fmt"
@@ -952,9 +962,17 @@ func ChannelLayoutName(nbChannels, channelLayout int) string {
 	return ""
 }
 
-func ChannelLayout(name string) int {
-	channelLayout := C.av_get_channel_layout(C.CString(name))
-	return int(channelLayout)
+func ChannelLayout(name string) (mask int) {
+	var channelLayout C.AVChannelLayout
+	cName := C.CString(name)
+	defer C.free(unsafe.Pointer(cName))
+
+	if rc := C.av_channel_layout_from_string(&channelLayout, cName); rc != 0 {
+		log.Error("ChannelLayout()", "reason", "av_channel_layout_from_string failed", "rc", rc, "name", name)
+	} else {
+		mask = int(C.get_channel_layout_mask(&channelLayout))
+	}
+	return
 }
 
 func GetPixelFormatName(pixFmt int) string {

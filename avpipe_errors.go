@@ -8,7 +8,6 @@ package avpipe
 // #cgo pkg-config: libavformat
 // #cgo pkg-config: libavutil
 // #cgo pkg-config: libswresample
-// #cgo pkg-config: libavresample
 // #cgo pkg-config: libavdevice
 // #cgo pkg-config: libswscale
 // #cgo pkg-config: libavutil

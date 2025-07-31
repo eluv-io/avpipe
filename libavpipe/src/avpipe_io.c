@@ -205,7 +205,7 @@ elv_io_open(
     return ret;
 }
 
-void
+int
 elv_io_close(
     struct AVFormatContext *format_ctx,
     AVIOContext *pb)
@@ -240,5 +240,5 @@ elv_io_close(
         out_tracker->last_outctx = NULL;
     av_freep(&avioctx->buffer);
     avio_context_free(&avioctx);
-    return;
+    return 0;
 }
