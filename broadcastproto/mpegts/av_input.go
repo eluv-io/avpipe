@@ -66,14 +66,16 @@ type mpegtsInputOpener struct {
 
 func (mio *mpegtsInputOpener) Open(fd int64, url string) (goavpipe.InputHandler, error) {
 
-	log.Debug("Calling global input opener to associated fd with recCtx", "fd", fd, "url", url)
+	var err error
+	var gih goavpipe.InputHandler
+
 	gio := goavpipe.GetGlobalInputOpener()
-	if gio == nil {
-		return nil, errors.New("global input opener is not set")
-	}
-	gih, err := gio.Open(fd, url)
-	if err != nil {
-		return nil, fmt.Errorf("failed to open global input opener: %w", err)
+	if gio != nil {
+		log.Debug("Calling global input opener to associated fd with recCtx", "fd", fd, "url", url)
+		gih, err = gio.Open(fd, url)
+		if err != nil {
+			return nil, fmt.Errorf("failed to open global input opener: %w", err)
+		}
 	}
 
 	rc, err := mio.transport.Open()
@@ -165,6 +167,9 @@ func (mih *mpegtsInputHandler) Size() int64 {
 }
 
 func (mih *mpegtsInputHandler) Stat(streamIndex int, statType goavpipe.AVStatType, statArgs any) error {
+	if mih.gih == nil {
+		return nil
+	}
 	return mih.gih.Stat(streamIndex, statType, statArgs)
 }
 
@@ -174,7 +179,7 @@ func (mih *mpegtsInputHandler) ReaderLoop(ch chan []byte) {
 	segCfg := smpte.SegmenterConfig{
 		DurationSec: 30, // SSDBG needs to be xcparams seg duration
 		Output: smpte.Output{
-			Kind:    smpte.OutputFile,
+			Kind:    smpte.OutputNone, // Set to OutputFile to write ts test files
 			Locator: "OUT",
 		},
 	}

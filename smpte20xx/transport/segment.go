@@ -8,6 +8,7 @@ import (
 
 	"github.com/Comcast/gots/v2/packet"
 	"github.com/eluv-io/avpipe/goavpipe"
+	"github.com/eluv-io/log-go"
 )
 
 type SequentialOpener interface {
@@ -71,7 +72,7 @@ func NewSegmenter(segCfg SegmenterConfig, seqOpener SequentialOpener, inFd int64
 }
 
 func (s *Segmenter) WritePacket(pkt packet.Packet, pcr uint64) (bytesWritten int, err error) {
-	if s.currentFile == nil {
+	if s.Cfg.Output.Kind == OutputFile && s.currentFile == nil {
 		err = fmt.Errorf("ERROR: no segment to write to")
 		return
 	}
@@ -84,7 +85,7 @@ func (s *Segmenter) WritePacket(pkt packet.Packet, pcr uint64) (bytesWritten int
 	s.currentPcr = pcr
 
 	if pcr > s.segStartPcr && pcr-s.segStartPcr > s.Cfg.DurationSec*PcrTs {
-		fmt.Println("SEG END", "pcr", pcr, "start pcr", s.segStartPcr, "diff", pcr-s.segStartPcr)
+		log.Info("MPEGTS SEG END", "pcr", pcr, "start pcr", s.segStartPcr, "diff", pcr-s.segStartPcr)
 		err = s.openSegment()
 		if err != nil {
 			return
@@ -93,13 +94,17 @@ func (s *Segmenter) WritePacket(pkt packet.Packet, pcr uint64) (bytesWritten int
 	}
 
 	// Write test file
-	_, err = s.currentWriter.Write(pkt[:])
-	if err != nil {
-		fmt.Println("ERROR: failed to write test output", err)
+	if s.Cfg.Output.Kind == OutputFile {
+		_, err = s.currentWriter.Write(pkt[:])
+		if err != nil {
+			fmt.Println("ERROR: failed to write test output", err)
+		}
 	}
 
 	// Write output callback
-	bytesWritten, err = s.currentSeqWriter.Write(pkt[:])
+	if s.currentSeqWriter != nil {
+		bytesWritten, err = s.currentSeqWriter.Write(pkt[:])
+	}
 
 	return
 }
@@ -110,13 +115,15 @@ func (s *Segmenter) openSegment() error {
 	s.numSegs++
 
 	// Open test file writer
-	fileName := fmt.Sprintf("%s/outseg_%04d.ts", s.Cfg.Output.Locator, s.numSegs)
-	s.currentFile, err = os.Create(fileName)
-	if err != nil {
-		fmt.Println("ERROR: failed to open segment file", err)
-		return err
+	if s.Cfg.Output.Kind == OutputFile {
+		fileName := fmt.Sprintf("%s/outseg_%04d.ts", s.Cfg.Output.Locator, s.numSegs)
+		s.currentFile, err = os.Create(fileName)
+		if err != nil {
+			fmt.Println("ERROR: failed to open segment file", err)
+			return err
+		}
+		s.currentWriter = bufio.NewWriter(s.currentFile)
 	}
-	s.currentWriter = bufio.NewWriter(s.currentFile)
 
 	// Open seq writer
 	if s.seqOpener != nil {

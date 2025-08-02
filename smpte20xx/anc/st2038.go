@@ -312,7 +312,11 @@ func ParseAncPes(pes []byte) (*AncHeader, error) {
 	for br.pos+72 <= len(pes)*8 { // enough for at least one ANC block header
 		zeroBits, _ := br.ReadBits(6)
 		if zeroBits != 0 {
-			fmt.Printf("Block %d: expected 6 zero bits, got 0x%x\n", index, zeroBits)
+			if zeroBits == 0x3f {
+				// Reached padding - all 1s
+			} else {
+				fmt.Printf("Block %d: expected 6 zero bits, got %d\n", index, zeroBits)
+			}
 			break
 		}
 		cFlag, _ := br.ReadBits(1)

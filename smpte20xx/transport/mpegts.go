@@ -14,6 +14,7 @@ import (
 	"github.com/Comcast/gots/v2/psi"
 	"github.com/eluv-io/avpipe/smpte20xx/anc"
 	"github.com/eluv-io/avpipe/smpte20xx/video"
+	"github.com/eluv-io/log-go"
 )
 
 const PcrTs uint64 = 27_000_000
@@ -102,11 +103,12 @@ func (ts *Ts) HandleTSPacket(data [packet.PacketSize]byte, outConn net.Conn) {
 	if pkt.HasAdaptationField() {
 		a, err := pkt.AdaptationField()
 		if err != nil {
-			fmt.Println("ERROR: failed to extract adaptation field")
+			log.Warn("MPEGTS failed to extract adaptation field")
 		}
 		has, err := a.HasPCR()
 		if err != nil {
-			fmt.Println("ERROR: failed to check PCR")
+			// PENDING(SS) this happens every few thousand packets - need to look into why!
+			log.Warn("MPEGTS failed to check PCR")
 		}
 		if has {
 			pcr, _ := a.PCR()
@@ -231,7 +233,7 @@ func (ts *Ts) HandleTSPacket(data [packet.PacketSize]byte, outConn net.Conn) {
 
 	if ts.Stats.nTsPackets%100_000 == 1 {
 		pcrTime := time.Duration(ts.currentPcr) * time.Second / 27000000
-		fmt.Println("STATS", "n", ts.Stats.nTsPackets, ts.Stats.nTsPacketsWritten, "pcr", ts.currentPcr, pcrTime, "cc errors", ts.Stats.errorsCC,
+		log.Info("MPEGTS STATS", "n", ts.Stats.nTsPackets, ts.Stats.nTsPacketsWritten, "pcr", ts.currentPcr, pcrTime, "cc errors", ts.Stats.errorsCC,
 			"bytes", ts.Stats.tsBytesReceived, ts.Stats.tsBytesReceived)
 	}
 }
@@ -260,7 +262,11 @@ func (ts *Ts) processDataPacket(pkt *packet.Packet) error {
 			if err != nil {
 				return err
 			}
-			fmt.Println("VANC", h.String())
+
+			const printVanc = false
+			if printVanc {
+				fmt.Println("VANC", h.String())
+			}
 
 			ts.pesData.Reset()
 		} else {
