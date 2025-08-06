@@ -2153,6 +2153,8 @@ func TestABRMuxing(t *testing.T) {
 		Url:                url,
 		DebugFrameLevel:    debugFrameLevel,
 		ForceKeyInt:        48,
+		Profile:            "high",
+		Level:              31,
 	}
 	setFastEncodeParams(params, false)
 	goavpipe.InitUrlIOHandler(url, &fileInputOpener{url: url}, &fileOutputOpener{dir: videoMezDir})

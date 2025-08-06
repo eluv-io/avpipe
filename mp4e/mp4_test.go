@@ -9,7 +9,8 @@ import (
 )
 
 func TestParseSegment(t *testing.T) {
-	f := "testdata/vfsegment.mp4"
+	//f := "testdata/vfsegment.mp4" // something wrong with this file
+	f := "../cmd/mez-validator/testdata/video-mez-segment-1.mp4"
 	rd, err := os.Open(f)
 	require.NoError(t, err)
 
@@ -21,7 +22,7 @@ func TestParseSegment(t *testing.T) {
 // TestCheckSegments validates all the fMP4 segments in a directory
 // TODO validate the segments together as one file
 func TestCheckSegments(t *testing.T) {
-	directory := "testdata"
+	directory := "../cmd/mez-validator/testdata"
 
 	// Iterate over all files in the directory
 	files, err := os.ReadDir(directory)
