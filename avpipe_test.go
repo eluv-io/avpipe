@@ -2302,6 +2302,7 @@ func TestUnmarshalParams(t *testing.T) {
 	err := json.Unmarshal(bytes, &params)
 	assert.NoError(t, err)
 	assert.Equal(t, int(goavpipe.XcVideo), int(params.XcType), "XcVideo type expected")
+
 	// TODO: More checks
 }
 

@@ -607,16 +607,20 @@ set_encoder_options(
      * - frag_every_frame - necessary for low-latency playout (eg. LL-HLS) (could use frag_keyframe for regular HLS/DASH)
      * - empty_moov - moov atom at beginning for progressive playback (needed for fMP4 init segment)
      * - default_base_moof: omit base-data-offset in moof (simplifies segment parsing, CMAF-friendly)
+     * - delay_moov: process the initial packets from all streams before writing the moov atom, avoiding errors like "Cannot write moov atom before AC3 packets", which are most likely to occur for streaming (MPEG-TS) inputs
      *
      * Note 'faststart' is not needed for segmented playout (HLS/DASH). Only used for progessive playout of mp4/mov files.
      */
-    #define FRAG_OPTS "+frag_every_frame+empty_moov+default_base_moof"
+    #define FRAG_OPTS "+frag_every_frame+empty_moov+default_base_moof+delay_moov"
 
     if (!strcmp(params->format, "fmp4")) {
-        if (stream_index == decoder_context->video_stream_index)
+        if (stream_index == decoder_context->video_stream_index) {
+            elv_dbg("set_encoder_options, fmp4 video encoder, stream_index=%d, movflags="FRAG_OPTS, stream_index);
             av_opt_set(encoder_context->format_context->priv_data, "movflags", FRAG_OPTS, 0);
-        if ((i = selected_decoded_audio(decoder_context, stream_index)) >= 0)
+        } else if ((i = selected_decoded_audio(decoder_context, stream_index)) >= 0) {
+            elv_dbg("set_encoder_options, fmp4 audio encoder, stream_index=%d, movflags="FRAG_OPTS, stream_index);   
             av_opt_set(encoder_context->format_context2[i]->priv_data, "movflags", FRAG_OPTS, 0);
+        }
     }
 
     // Segment duration (in ts) - notice it is set on the format context not codec
@@ -690,13 +694,17 @@ set_encoder_options(
         if (!strcmp(params->format, "fmp4-segment")) {
             if ((i = selected_decoded_audio(decoder_context, stream_index)) >= 0) {
                 // AC3 codec requires delay_moov flag to write packets before moov atom
-                if (params->ecodec2 && !strcmp(params->ecodec2, "ac3"))
+                if (params->ecodec2 && !strcmp(params->ecodec2, "ac3")) {
+                    elv_dbg("set_encoder_options, fmp4-segment audio encoder, ac3, stream_index=%d, movflags="FRAG_OPTS"+delay_moov", stream_index);
                     av_opt_set(encoder_context->format_context2[i]->priv_data, "segment_format_options", "movflags="FRAG_OPTS"+delay_moov", 0);
-                else
+                } else {
+                    elv_dbg("set_encoder_options, fmp4-segment audio encoder, stream_index=%d, movflags="FRAG_OPTS, stream_index);
                     av_opt_set(encoder_context->format_context2[i]->priv_data, "segment_format_options", "movflags="FRAG_OPTS, 0);
-            }
-            if (stream_index == decoder_context->video_stream_index)
+                }
+            } else if (stream_index == decoder_context->video_stream_index) {
+                elv_dbg("set_encoder_options, fmp4-segment video encoder, stream_index=%d, movflags="FRAG_OPTS, stream_index);
                 av_opt_set(encoder_context->format_context->priv_data, "segment_format_options", "movflags="FRAG_OPTS, 0);
+            }
         }
     }
 
@@ -1008,7 +1016,7 @@ prepare_video_encoder(
     encoder_context->format_context->io_close2 = elv_io_close;
 
     if (!encoder_context->codec[index]) {
-        elv_dbg("could not find the proper codec");
+        elv_err("could not find the proper codec");
         return eav_codec_context;
     }
     elv_log("Found encoder index=%d, %s", index, params->ecodec);
@@ -1044,7 +1052,7 @@ prepare_video_encoder(
 
     encoder_context->codec_context[index] = avcodec_alloc_context3(encoder_context->codec[index]);
     if (!encoder_context->codec_context[index]) {
-        elv_dbg("could not allocated memory for codec context");
+        elv_err("could not allocated memory for codec context");
         return eav_codec_context;
     }
 
@@ -1165,7 +1173,7 @@ prepare_video_encoder(
 
     /* Open video encoder (initialize the encoder codec_context[i] using given codec[i]). */
     if ((rc = avcodec_open2(encoder_context->codec_context[index], encoder_context->codec[index], NULL)) < 0) {
-        elv_dbg("Could not open encoder for video, err=%d", rc);
+        elv_err("Could not open encoder for video, err=%d", rc);
         return eav_open_codec;
     }
 
@@ -1173,7 +1181,7 @@ prepare_video_encoder(
     if (avcodec_parameters_from_context(
             encoder_context->stream[index]->codecpar,
             encoder_context->codec_context[index]) < 0) {
-        elv_dbg("could not copy encoder parameters to output stream");
+        elv_err("could not copy encoder parameters to output stream");
         return eav_codec_param;
     }
 
@@ -1360,7 +1368,7 @@ prepare_audio_encoder(
 
         /* Open audio encoder codec */
         if (avcodec_open2(encoder_context->codec_context[output_stream_index], encoder_context->codec[output_stream_index], NULL) < 0) {
-            elv_dbg("Could not open encoder for audio, stream_index=%d", stream_index);
+            elv_err("Could not open encoder for audio, stream_index=%d", stream_index);
             return eav_open_codec;
         }
 

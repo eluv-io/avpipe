@@ -99,19 +99,25 @@ init_video_filters(
     inputs->pad_idx    = 0;
     inputs->next       = NULL;
 
-    if ((ret = avfilter_graph_parse_ptr(decoder_context->video_filter_graph, filters_descr,
-                                    &inputs, &outputs, NULL)) < 0)
+    if ((ret = avfilter_graph_parse_ptr(decoder_context->video_filter_graph,
+        filters_descr, &inputs, &outputs, NULL)) < 0) {
+        elv_err("init_video_filters, avfilter_graph_parse_ptr failed, filters_descr=%s", filters_descr);
         goto end;
+    }
 
-    if ((ret = avfilter_graph_config(decoder_context->video_filter_graph, NULL)) < 0)
+    if ((ret = avfilter_graph_config(decoder_context->video_filter_graph, NULL)) < 0) {
+        elv_err("init_video_filters, avfilter_graph_config failed");
         goto end;
+    }
 
 end:
     avfilter_inout_free(&inputs);
     avfilter_inout_free(&outputs);
 
-    if (ret < 0)
+    if (ret < 0) {
+        elv_err("init_video_filters failed: %s", av_err2str(ret));
         return eav_filter_init;
+    }
 
     return ret;
 }
@@ -172,6 +178,7 @@ init_audio_filters(
     }
 
     char args[512];
+    char buf[64];
     int ret = 0;
     AVFilterContext **abuffersrc_ctx = NULL;
     AVFilterContext *buffersink_ctx = NULL;
@@ -233,9 +240,8 @@ init_audio_filters(
             goto end;
         }
 
-        ret = av_opt_set_bin(buffersink_ctx, "channel_layouts",
-            (uint8_t*)&enc_codec_ctx->ch_layout.u.mask,
-            sizeof(enc_codec_ctx->ch_layout.u.mask), AV_OPT_SEARCH_CHILDREN);
+        av_channel_layout_describe(&enc_codec_ctx->ch_layout, buf, sizeof(buf));
+        ret = av_opt_set(buffersink_ctx, "ch_layouts", buf, AV_OPT_SEARCH_CHILDREN);
         if (ret < 0) {
             elv_err("init_audio_filters, cannot set output channel layout");
             goto end;
@@ -276,11 +282,12 @@ init_audio_filters(
     }
 
 end:
-    if (ret < 0)
+    if (ret < 0) {
+        elv_err("init_audio_filters failed: %s", av_err2str(ret));
         return eav_filter_init;
+    }
 
     return ret;
-
 }
 
 /*
@@ -312,6 +319,7 @@ init_audio_pan_filters(
     AVCodecContext *dec_codec_ctx = decoder_context->codec_context[decoder_context->audio_stream_index[0]];
     AVCodecContext *enc_codec_ctx = encoder_context->codec_context[encoder_context->audio_stream_index[0]];
     char args[512];
+    char buf[64];
     int ret = 0;
     AVFilterContext **abuffersrc_ctx = NULL;
     AVFilterContext *buffersink_ctx = NULL;
@@ -374,9 +382,8 @@ init_audio_pan_filters(
         goto end;
     }
 
-    ret = av_opt_set_bin(buffersink_ctx, "channel_layouts",
-        (uint8_t*)&enc_codec_ctx->ch_layout.u.mask,
-        sizeof(enc_codec_ctx->ch_layout.u.mask), AV_OPT_SEARCH_CHILDREN);
+    av_channel_layout_describe(&enc_codec_ctx->ch_layout, buf, sizeof(buf));
+    ret = av_opt_set(buffersink_ctx, "ch_layouts", buf, AV_OPT_SEARCH_CHILDREN);
     if (ret < 0) {
         elv_err("init_audio_pan_filters, cannot set output channel layout");
         goto end;
@@ -457,6 +464,7 @@ init_audio_merge_pan_filters(
     }
     AVCodecContext *enc_codec_ctx = encoder_context->codec_context[encoder_context->audio_stream_index[0]];
     char args[512];
+    char buf[64];
     int ret = 0;
     AVFilterContext **abuffersrc_ctx = NULL;
     AVFilterContext *buffersink_ctx = NULL;
@@ -493,9 +501,8 @@ init_audio_merge_pan_filters(
         goto end;
     }
 
-    ret = av_opt_set_bin(buffersink_ctx, "channel_layouts",
-        (uint8_t*)&enc_codec_ctx->ch_layout.u.mask,
-        sizeof(enc_codec_ctx->ch_layout.u.mask), AV_OPT_SEARCH_CHILDREN);
+    av_channel_layout_describe(&enc_codec_ctx->ch_layout, buf, sizeof(buf));
+    ret = av_opt_set(buffersink_ctx, "ch_layouts", buf, AV_OPT_SEARCH_CHILDREN);
     if (ret < 0) {
         elv_err("init_audio_merge_pan_filters, cannot set output channel layout");
         goto end;
@@ -577,6 +584,7 @@ init_audio_join_filters(
     AVCodecContext *enc_codec_ctx = encoder_context->codec_context[encoder_context->audio_stream_index[0]];
     char args[512];
     char format_args[512];
+    char buf[64];
     int ret = 0;
     AVFilterContext **abuffersrc_ctx = NULL;
     AVFilterContext *buffersink_ctx = NULL;
@@ -656,9 +664,8 @@ init_audio_join_filters(
         goto end;
     }
 
-    ret = av_opt_set_bin(buffersink_ctx, "channel_layouts",
-        (uint8_t*)&enc_codec_ctx->ch_layout.u.mask,
-        sizeof(enc_codec_ctx->ch_layout.u.mask), AV_OPT_SEARCH_CHILDREN);
+    av_channel_layout_describe(&enc_codec_ctx->ch_layout, buf, sizeof(buf));
+    ret = av_opt_set(buffersink_ctx, "ch_layouts", buf, AV_OPT_SEARCH_CHILDREN);
     if (ret < 0) {
         elv_err("init_audio_join_filters, cannot set output channel layout");
         goto end;
