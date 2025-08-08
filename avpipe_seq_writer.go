@@ -31,13 +31,13 @@ import (
 	smpte "github.com/eluv-io/avpipe/smpte20xx/transport"
 )
 
-var outputStillOpenErr = errors.New("cannot open new sequential output, previous still open")
-var outputClosedErr = errors.New("output is closed, cannot write to it")
-var alreadyClosedErr = errors.New("output already closed")
+var errOutputStillOpen = errors.New("cannot open new sequential output, previous still open")
+var errOutputClosed = errors.New("output is closed, cannot write to it")
+var errAlreadyClosed = errors.New("output already closed")
 
 func NewAVPipeSequentialOutWriter(inFd int64, streamIndex int, streamType goavpipe.AVType, firstSegIdx int) smpte.SequentialOpener {
 	return &avpipeSequentialOutHandler{
-		inFd:         inFd, // SSDBG not available at construction
+		inFd:         inFd,
 		streamIndex:  streamIndex,
 		streamType:   streamType,
 		nextSegIndex: firstSegIdx,
@@ -65,7 +65,7 @@ func (h *avpipeSequentialOutHandler) OpenNext(inFd int64) (io.WriteCloser, error
 	h.inFd = inFd // SSDBG to clean up
 
 	if h.outFd != nil {
-		return nil, outputStillOpenErr
+		return nil, errOutputStillOpen
 	}
 
 	outFd := AVPipeOpenOutputGo(h.inFd, h.streamIndex, h.nextSegIndex, 0, h.streamType)
@@ -85,7 +85,7 @@ func (h *avpipeSequentialOutHandler) Write(p []byte) (n int, err error) {
 	defer h.mu.Unlock()
 
 	if h.outFd == nil {
-		return 0, outputClosedErr
+		return 0, errOutputClosed
 	}
 
 	n = AVPipeWriteOutputGo(h.inFd, *h.outFd, p)
@@ -101,7 +101,7 @@ func (h *avpipeSequentialOutHandler) Close() error {
 	defer h.mu.Unlock()
 
 	if h.outFd == nil {
-		return outputClosedErr
+		return errOutputClosed
 	}
 
 	rv := AVPipeCloseOutputGo(h.inFd, *h.outFd)
