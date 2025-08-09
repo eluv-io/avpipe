@@ -44,7 +44,7 @@ type Segmenter struct {
 	currentWriter *bufio.Writer
 }
 
-func NewSegmenter(segCfg SegmenterConfig) *Segmenter {
+func NewSegmenter(segCfg SegmenterConfig, seqOpener SequentialOpener, inFd int64) *Segmenter {
 
 	s := Segmenter{}
 	s.Cfg = segCfg

@@ -4,8 +4,6 @@ import (
 	"errors"
 	"fmt"
 	"io"
-	"net"
-	"os"
 	"strings"
 
 	"github.com/Comcast/gots/packet"
@@ -81,7 +79,7 @@ func (mio *mpegtsInputOpener) Open(fd int64, url string) (goavpipe.InputHandler,
 		return nil, err
 	}
 
-	fmt.Println("SSDBG MPEGTS OPEN")
+	goavpipe.Log.Trace("MPEGTS custom input opener opened", "fd", fd, "url", url, "transport", mio.transport.Handler())
 	mio.copyStream = true
 
 	var ch chan []byte
@@ -101,17 +99,12 @@ func (mio *mpegtsInputOpener) Open(fd int64, url string) (goavpipe.InputHandler,
 	}
 
 	if mio.copyStream {
-
-		// TODO(Nate): Create channel, spin up goroutine to read from rc and write to segmenter until completed.
-		// The segmenter will then call AVPipeOpenOutput etc using fd in this call
-
 		go func() {
-			fmt.Printf("SSDBG MPEGTS LOOP")
+			goavpipe.Log.Trace("MPEGTS copy loop initiated")
 			mih.ReaderLoop(ch)
 		}()
 	}
 
-	fmt.Println("SSDBG OPEN", "mih", mih)
 	return mih, nil
 }
 
@@ -170,79 +163,28 @@ func (mih *mpegtsInputHandler) Stat(streamIndex int, statType goavpipe.AVStatTyp
 
 func (mih *mpegtsInputHandler) ReaderLoop(ch chan []byte) {
 
-	// SSDBG copy from main.go
-	segCfg := smpte.SegmenterConfig{
-		DurationSec: 30, // SSDBG needs to be xcparams seg duration
-		Output: smpte.Output{
-			Kind:    smpte.OutputFile,
-			Locator: "OUT",
-		},
-	}
-	tsCfg := smpte.TsConfig{
-		Url:            mih.transport.URL(),
-		SaveFrameFiles: false,
-		ProcessVideo:   false,
-		ProcessData:    true,
-		MaxPackets:     0,
-		SegCfg:         segCfg,
+	tsCfg := TsConfig{
+		SegmentLengthSec: 30,
 	}
 
-	ts := smpte.NewTs(tsCfg, mih.seqOpener, mih.inFd)
+	ts := NewMpegtsPacketProcessor(
+		tsCfg,
+		mih.seqOpener,
+		mih.inFd,
+	)
 
-	var outConn net.Conn
-	var err error
-	if tsCfg.ProcessVideo {
-
-		outConn, err = ConnectUnixSocket("UNSET")
-		if err != nil {
-			fmt.Println("ERROR: failed to connect to output unix socket", err)
-			os.Exit(-1)
-		}
-	}
-
-	var nPackets = 0
-
+	nPackets := 0
 	for buf := range ch {
 		nPackets++
 
 		if nPackets%1000 == 0 {
-			goavpipe.Log.Debug("Processed packets", "count", nPackets, "chan size", len(ch), "chan cap", cap(ch))
+			goavpipe.Log.Trace("Processed packets", "count", nPackets, "chan size", len(ch), "chan cap", cap(ch))
 		}
 
-		// PENDING(SS) must configure RTP processing based on input
-		tsData, err := transport.StripRTP(buf)
-		if err != nil {
-			continue
-		}
+		// TODO(Nate): Automatically handle RTP over UDP
 
-		// Process all TS packets in this payload
-		for offset := 0; offset+188 <= len(tsData); offset += 188 {
-			p, err := ToTSPacket(tsData[offset : offset+188])
-			if err != nil {
-				continue
-			}
-			ts.HandleTSPacket(p, outConn)
-		}
-
-		if ts.Cfg.MaxPackets > 0 && nPackets > int(ts.Cfg.MaxPackets) {
-			fmt.Println("Max packets - exit")
-			break
-		}
+		ts.ProcessPackets(buf)
 	}
-}
-
-// SSDBG copied from smpte / main.go
-// ConnectUnixSocket connects to a Unix domain socket at the given path.
-func ConnectUnixSocket(socketPath string) (net.Conn, error) {
-	addr := net.UnixAddr{
-		Name: socketPath,
-		Net:  "unix",
-	}
-	conn, err := net.DialUnix("unix", nil, &addr)
-	if err != nil {
-		return nil, fmt.Errorf("failed to connect to unix socket: %w", err)
-	}
-	return conn, nil
 }
 
 func ToTSPacket(data []byte) (packet.Packet, error) {
