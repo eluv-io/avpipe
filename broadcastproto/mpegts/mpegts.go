@@ -7,6 +7,8 @@ import (
 	elog "github.com/eluv-io/log-go"
 )
 
+const PcrTs uint64 = 27_000_000
+
 var mpegtslog = elog.Get("avpipe/broadcastproto/mpegts")
 
 type SequentialOpener interface {

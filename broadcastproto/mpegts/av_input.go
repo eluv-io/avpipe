@@ -64,7 +64,7 @@ type mpegtsInputOpener struct {
 
 func (mio *mpegtsInputOpener) Open(fd int64, url string) (goavpipe.InputHandler, error) {
 
-	log.Debug("Calling global input opener to associated fd with recCtx", "fd", fd, "url", url)
+	goavpipe.Log.Debug("Calling global input opener to associated fd with recCtx", "fd", fd, "url", url)
 	gio := goavpipe.GetGlobalInputOpener()
 	if gio == nil {
 		return nil, errors.New("global input opener is not set")
@@ -124,7 +124,7 @@ func (mih *mpegtsInputHandler) Read(buf []byte) (int, error) {
 	if mih.outputSplit != nil {
 		n, err := mih.rc.Read(buf)
 		if err != nil {
-			log.Error("SSDBG MPEGTS Read", err)
+			goavpipe.Log.Error("SSDBG MPEGTS Read", err)
 			return n, err
 		}
 		if n > 0 {

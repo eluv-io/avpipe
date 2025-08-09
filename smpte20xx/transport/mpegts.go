@@ -67,7 +67,7 @@ type Ts struct {
 	segmenter *Segmenter
 }
 
-func NewTs(tsCfg TsConfig, seqOpener SequentialOpener, inFd int64) *Ts {
+func NewTs(tsCfg TsConfig) *Ts {
 	ts := Ts{
 		Cfg:           tsCfg,
 		program:       -1,
@@ -76,7 +76,7 @@ func NewTs(tsCfg TsConfig, seqOpener SequentialOpener, inFd int64) *Ts {
 		dataPid:       -1,
 		pesData:       nil,
 		continuityMap: make(map[int]uint8),
-		segmenter:     NewSegmenter(tsCfg.SegCfg, seqOpener, inFd),
+		segmenter:     NewSegmenter(tsCfg.SegCfg),
 	}
 	return &ts
 }

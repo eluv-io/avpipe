@@ -47,12 +47,10 @@ type Segmenter struct {
 	currentWriter *bufio.Writer
 }
 
-func NewSegmenter(segCfg SegmenterConfig, seqOpener SequentialOpener, inFd int64) *Segmenter {
+func NewSegmenter(segCfg SegmenterConfig) *Segmenter {
 
 	s := Segmenter{
-		Cfg:       segCfg,
-		seqOpener: seqOpener,
-		inFd:      inFd,
+		Cfg: segCfg,
 	}
 
 	if s.Cfg.Output.Kind == OutputFile {
