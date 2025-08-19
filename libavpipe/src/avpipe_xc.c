@@ -46,6 +46,7 @@
 #define DEFAULT_FRAME_INTERVAL_S    10
 
 #define DEFAULT_ACC_SAMPLE_RATE     48000
+#define MAX_FRAME_READ_RETRIES      300
 
 extern int
 init_video_filters(
@@ -3273,6 +3274,7 @@ avpipe_xc(
     ioctx_t *inctx = xctx->inctx;
     int rc = 0;
     int av_read_frame_rc = 0;
+    int nretries = 0;
     AVPacket *input_packet = NULL;
 
     if (!params->url || params->url[0] == '\0' ||
@@ -3461,8 +3463,12 @@ avpipe_xc(
         }
 
         rc = av_read_frame(decoder_context->format_context, input_packet);
-        if (rc == AVERROR(EAGAIN) || rc == AVERROR(EIO) || rc == AVERROR_INVALIDDATA) {
-            elv_warn("packet unreadable or corrupt - %s (%d)", av_err2str(rc), rc);
+
+        if ((rc == AVERROR(EAGAIN) || rc == AVERROR(EIO) || rc == AVERROR_INVALIDDATA) && nretries < MAX_FRAME_READ_RETRIES) {
+            if (nretries % 10 == 0) {
+                elv_warn("packet unreadable or corrupt - %s (%d) retries=%d", av_err2str(rc), rc, nretries);
+            }
+            nretries ++;
             continue;
         }
         if (rc < 0) {
@@ -3480,6 +3486,7 @@ avpipe_xc(
             }
             break;
         }
+        nretries = 0;
 
         if (input_packet->flags & AV_PKT_FLAG_CORRUPT) {
             elv_warn("packet corrupt pts=%"PRId64, input_packet->pts);
