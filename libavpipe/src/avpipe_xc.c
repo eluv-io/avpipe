@@ -3461,6 +3461,10 @@ avpipe_xc(
         }
 
         rc = av_read_frame(decoder_context->format_context, input_packet);
+        if (rc == AVERROR(EAGAIN) || rc == AVERROR(EIO) || rc == AVERROR_INVALIDDATA) {
+            elv_warn("packet unreadable or corrupt - %s (%d)", av_err2str(rc), rc);
+            continue;
+        }
         if (rc < 0) {
             av_packet_free(&input_packet);
             av_read_frame_rc = rc;
