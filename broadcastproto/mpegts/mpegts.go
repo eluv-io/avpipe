@@ -8,6 +8,7 @@ import (
 )
 
 const PcrTs uint64 = 27_000_000
+const PcrMax uint64 = ((1 << 33) * 300) + (1 << 9)
 
 var mpegtslog = elog.Get("avpipe/broadcastproto/mpegts")
 
@@ -177,7 +178,11 @@ func (mpp *MpegtsPacketProcessor) writePacket(pkt packet.Packet) {
 		}
 	}
 
-	if mpp.pcr > mpp.segStartPcr && mpp.pcr-mpp.segStartPcr > mpp.cfg.SegmentLengthSec*PcrTs {
+	curCloseToZero := PcrTs*30 > mpp.pcr
+	prevCloseToMax := PcrMax-(PcrTs*60) < mpp.segStartPcr
+	pcrWrapped := prevCloseToMax && curCloseToZero
+	pcrPastSegmentBounds := mpp.pcr > mpp.segStartPcr && mpp.pcr-mpp.segStartPcr > mpp.cfg.SegmentLengthSec*PcrTs
+	if pcrWrapped || pcrPastSegmentBounds {
 		err := mpp.openNextOutput()
 		if err != nil {
 			return
