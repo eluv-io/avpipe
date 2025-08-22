@@ -11,7 +11,7 @@ import (
 )
 
 type SequentialOpener interface {
-	OpenNext(fd int64) (io.WriteCloser, error)
+	OpenNext() (io.WriteCloser, error)
 }
 
 type OutputKind int
@@ -118,7 +118,7 @@ func (s *Segmenter) openSegment() error {
 
 	// Open seq writer
 	if s.seqOpener != nil {
-		s.currentSeqWriter, err = s.seqOpener.OpenNext(s.inFd)
+		s.currentSeqWriter, err = s.seqOpener.OpenNext()
 		if err != nil {
 			goavpipe.Log.Error("ERROR: failed to open next MPEGTS writer", err)
 		}

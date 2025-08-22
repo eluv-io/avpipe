@@ -26,21 +26,20 @@ import (
 	"io"
 	"sync"
 
+	"github.com/eluv-io/avpipe/broadcastproto/mpegts"
 	"github.com/eluv-io/avpipe/goavpipe"
-
-	smpte "github.com/eluv-io/avpipe/smpte20xx/transport"
 )
 
 var errOutputStillOpen = errors.New("cannot open new sequential output, previous still open")
 var errOutputClosed = errors.New("output is closed, cannot write to it")
 var errAlreadyClosed = errors.New("output already closed")
 
-func NewAVPipeSequentialOutWriter(inFd int64, streamIndex int, streamType goavpipe.AVType, firstSegIdx int) smpte.SequentialOpener {
+func NewAVPipeSequentialOutWriter(inFd int64, streamIndex int, streamType goavpipe.AVType) mpegts.SequentialOpener {
 	return &avpipeSequentialOutHandler{
 		inFd:         inFd,
 		streamIndex:  streamIndex,
 		streamType:   streamType,
-		nextSegIndex: firstSegIdx,
+		nextSegIndex: 1,
 	}
 }
 
@@ -58,11 +57,9 @@ type avpipeSequentialOutHandler struct {
 	outFd *int64
 }
 
-func (h *avpipeSequentialOutHandler) OpenNext(inFd int64) (io.WriteCloser, error) {
+func (h *avpipeSequentialOutHandler) OpenNext() (io.WriteCloser, error) {
 	h.mu.Lock()
 	defer h.mu.Unlock()
-
-	h.inFd = inFd // SSDBG to clean up
 
 	if h.outFd != nil {
 		return nil, errOutputStillOpen

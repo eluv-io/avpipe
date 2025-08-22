@@ -9,8 +9,6 @@ import (
 	"github.com/Comcast/gots/packet"
 	"github.com/eluv-io/avpipe/broadcastproto/transport"
 	"github.com/eluv-io/avpipe/goavpipe"
-
-	smpte "github.com/eluv-io/avpipe/smpte20xx/transport"
 )
 
 /*
@@ -27,7 +25,7 @@ Then split the output out to a segmenter if configured on
 
 var _ goavpipe.InputOpener = (*mpegtsInputOpener)(nil)
 
-type SequentialOpenerFactory func(inFd int64) smpte.SequentialOpener
+type SequentialOpenerFactory func(inFd int64) SequentialOpener
 
 var transportMap = map[string]func(string) transport.Transport{
 	"udp": transport.NewUDPTransport,
@@ -85,7 +83,7 @@ func (mio *mpegtsInputOpener) Open(fd int64, url string) (goavpipe.InputHandler,
 	var ch chan []byte
 
 	if mio.copyStream {
-		ch = make(chan []byte, 1024) // SSDBG to size
+		ch = make(chan []byte, 1024)
 	}
 
 	mih := &mpegtsInputHandler{
@@ -111,7 +109,7 @@ func (mio *mpegtsInputOpener) Open(fd int64, url string) (goavpipe.InputHandler,
 type mpegtsInputHandler struct {
 	rc          io.ReadCloser
 	transport   transport.Transport
-	seqOpener   smpte.SequentialOpener
+	seqOpener   SequentialOpener
 	copyStream  bool
 	outputSplit chan<- []byte
 	inFd        int64
@@ -124,7 +122,7 @@ func (mih *mpegtsInputHandler) Read(buf []byte) (int, error) {
 	if mih.outputSplit != nil {
 		n, err := mih.rc.Read(buf)
 		if err != nil {
-			goavpipe.Log.Error("SSDBG MPEGTS Read", err)
+			goavpipe.Log.Error("MPEGTS Read", err)
 			return n, err
 		}
 		if n > 0 {

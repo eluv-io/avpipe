@@ -12,7 +12,7 @@ const PcrTs uint64 = 27_000_000
 var mpegtslog = elog.Get("avpipe/broadcastproto/mpegts")
 
 type SequentialOpener interface {
-	OpenNext(fd int64) (io.WriteCloser, error)
+	OpenNext() (io.WriteCloser, error)
 }
 
 // Special TS stream and descriptor types (not defined in 'gots')
@@ -202,7 +202,7 @@ func (mpp *MpegtsPacketProcessor) openNextOutput() error {
 		mpp.currentWc = nil
 	}
 
-	wc, err := mpp.opener.OpenNext(mpp.inFd)
+	wc, err := mpp.opener.OpenNext()
 	if err != nil {
 		mpegtslog.Error("Failed to open next segment", "err", err)
 		mpp.stats.ErrorsOpeningOutput++

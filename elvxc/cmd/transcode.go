@@ -787,7 +787,6 @@ func doTranscode(cmd *cobra.Command, args []string) error {
 		return err
 	}
 
-	// SSDBG
 	//goavpipe.InitIOHandler(&elvxcInputOpener{url: filename}, &elvxcOutputOpener{dir: dir})
 	outOpener := &elvxcOutputOpener{dir: dir}
 
@@ -799,7 +798,7 @@ func doTranscode(cmd *cobra.Command, args []string) error {
 			goavpipe.InitUrlIOHandlerIfNotPresent(filename, nil, outOpener)
 
 			handle, err := avpipe.XcInit(params)
-			log.Info("SSDBG XcInit", "handle", handle, "err", err)
+			log.Info("XcInit", "handle", handle, "err", err)
 
 			err = avpipe.Xc(params)
 			if err != nil {

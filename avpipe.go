@@ -47,7 +47,6 @@ import (
 
 	"github.com/eluv-io/avpipe/broadcastproto/mpegts"
 	"github.com/eluv-io/avpipe/goavpipe"
-	smpte "github.com/eluv-io/avpipe/smpte20xx/transport"
 )
 
 func init() {
@@ -1094,9 +1093,11 @@ func XcInit(params *goavpipe.XcParams) (int32, error) {
 		return -1, EAV_PARAM
 	}
 
-	// SSDBG the inFd is not known - set to 1 here.  Not sure about streamId (99)
-	seqOpenerF := func(inFd int64) smpte.SequentialOpener {
-		return NewAVPipeSequentialOutWriter(inFd, 99, goavpipe.MpegtsSegment, 1)
+	seqOpenerF := func(inFd int64) mpegts.SequentialOpener {
+		// We use 99 as the streamID for mpegts output to avoid collisions with other streams
+		// In theory, this writer should not need a streamID, as the mpegts segments are actually a
+		// mux of all streams, but the Writing interface requires a streamID.
+		return NewAVPipeSequentialOutWriter(inFd, 99, goavpipe.MpegtsSegment)
 	}
 
 	// Here we should setup the input opener if specified by the params
