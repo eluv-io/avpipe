@@ -183,6 +183,7 @@ func (mpp *MpegtsPacketProcessor) writePacket(pkt packet.Packet) {
 	pcrWrapped := prevCloseToMax && curCloseToZero
 	pcrPastSegmentBounds := mpp.pcr > mpp.segStartPcr && mpp.pcr-mpp.segStartPcr > mpp.cfg.SegmentLengthSec*PcrTs
 	if pcrWrapped || pcrPastSegmentBounds {
+		mpegtslog.Debug("opening next output", "pcrWrapped", pcrWrapped, "pcrPastSegmentBounds", pcrPastSegmentBounds, "pcr", mpp.pcr, "segStartPcr", mpp.segStartPcr)
 		err := mpp.openNextOutput()
 		if err != nil {
 			return
