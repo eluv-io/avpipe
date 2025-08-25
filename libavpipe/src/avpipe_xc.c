@@ -1691,8 +1691,8 @@ set_idr_frame_key_flag(
     if (params->force_keyint > 0) {
         if (encoder_context->forced_keyint_countdown <= 0) {
             if (debug_frame_level) {
-                elv_dbg("FRAME SET KEY flag, forced_keyint=%d pts=%"PRId64", forced_keyint_countdown=%d",
-                    params->force_keyint, frame->pts, encoder_context->forced_keyint_countdown);
+                elv_log("FRAME SET KEY flag, forced_keyint=%d lastkeyframe=%"PRId64" pts=%"PRId64", forced_keyint_countdown=%d",
+                    params->force_keyint, encoder_context->last_key_frame, frame->pts, encoder_context->forced_keyint_countdown);
             }
             if (encoder_context->forced_keyint_countdown < 0)
                 elv_log("force_keyint_countdown=%d", encoder_context->forced_keyint_countdown);
@@ -2049,10 +2049,12 @@ encode_frame(
                 2*encoder_context->calculated_frame_duration &&
             params->xc_type != xc_extract_images &&
             params->xc_type != xc_extract_all_images) {
-            elv_log("GAP detected, packet->pts=%"PRId64", video_encoder_prev_pts=%"PRId64", url=%s",
-                output_packet->pts, encoder_context->video_encoder_prev_pts, params->url);
-            encoder_context->forced_keyint_countdown -=
-                (output_packet->pts - encoder_context->video_encoder_prev_pts)/encoder_context->calculated_frame_duration - 1;
+
+            int fc = (output_packet->pts - encoder_context->video_encoder_prev_pts)/encoder_context->calculated_frame_duration - 1;
+            encoder_context->forced_keyint_countdown -= fc;
+
+            elv_log("GAP detected packet->pts=%"PRId64" video_encoder_prev_pts=%"PRId64" count=%d keying_count=%d url=%s",
+                output_packet->pts, encoder_context->video_encoder_prev_pts, fc, encoder_context->forced_keyint_countdown, params->url);
         }
 
         if (stream_index == decoder_context->video_stream_index &&
@@ -3394,14 +3396,30 @@ avpipe_xc(
 
     int video_stream_index = decoder_context->video_stream_index;
     if (params->xc_type & xc_video) {
+
+        if (av_cmp_q(decoder_context->format_context->streams[video_stream_index]->r_frame_rate, decoder_context->format_context->streams[video_stream_index]->avg_frame_rate)) {
+            elv_log("frame rate discrepancy r=%d/%d avg=%d/%d",
+                decoder_context->format_context->streams[video_stream_index]->r_frame_rate.num, decoder_context->format_context->streams[0]->r_frame_rate.den,
+                decoder_context->format_context->streams[video_stream_index]->avg_frame_rate.num, decoder_context->format_context->streams[0]->avg_frame_rate.den);
+        }
+
+        int enc_calc_frame_duration = 0;
         if (encoder_context->format_context->streams[0]->avg_frame_rate.num != 0 &&
             decoder_context->stream[video_stream_index]->time_base.num != 0) {
-            encoder_context->calculated_frame_duration =
+
+            encoder_context->calculated_frame_duration = enc_calc_frame_duration =
                 /* In very rare cases this might overflow, so type cast to 64bit int to avoid overflow */
-                ((int64_t)decoder_context->stream[video_stream_index]->time_base.den * (int64_t)encoder_context->format_context->streams[0]->avg_frame_rate.den) /
-                    ((int64_t)encoder_context->format_context->streams[0]->avg_frame_rate.num * (int64_t) decoder_context->stream[video_stream_index]->time_base.num);
+                ((int64_t)encoder_context->stream[0]->time_base.den * (int64_t)encoder_context->format_context->streams[0]->avg_frame_rate.den) /
+                    ((int64_t)encoder_context->format_context->streams[0]->avg_frame_rate.num * (int64_t) encoder_context->stream[0]->time_base.num);
+            decoder_context->calculated_frame_duration =
+                ((int64_t)decoder_context->stream[video_stream_index]->time_base.den * (int64_t)decoder_context->format_context->streams[video_stream_index]->avg_frame_rate.den) /
+                    ((int64_t)decoder_context->format_context->streams[video_stream_index]->avg_frame_rate.num * (int64_t) decoder_context->stream[video_stream_index]->time_base.num);
         }
-        elv_log("calculated_frame_duration=%d", encoder_context->calculated_frame_duration);
+
+        if (params->video_frame_duration_ts > 0) {
+            encoder_context->calculated_frame_duration = params->video_frame_duration_ts;
+        }
+        elv_log("calculated_frame_duration enc=%d (%d) dec=%d", encoder_context->calculated_frame_duration, enc_calc_frame_duration, decoder_context->calculated_frame_duration);
     }
 
     xctx->do_instrument = do_instrument;
