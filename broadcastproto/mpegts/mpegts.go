@@ -1,7 +1,9 @@
 package mpegts
 
 import (
+	"encoding/json"
 	"io"
+	"time"
 
 	"github.com/Comcast/gots/v2/packet"
 	elog "github.com/eluv-io/log-go"
@@ -34,6 +36,8 @@ type MpegtsPacketProcessor struct {
 	stats         *TSStats
 	continuityMap map[int]uint8 // Map of PID to last continuity counter
 	pcr           uint64        // Last seen PCR value
+
+	closeCh chan struct{}
 }
 
 func NewMpegtsPacketProcessor(cfg TsConfig, seqOpener SequentialOpener, inFd int64) *MpegtsPacketProcessor {
@@ -43,6 +47,7 @@ func NewMpegtsPacketProcessor(cfg TsConfig, seqOpener SequentialOpener, inFd int
 		inFd:          inFd,
 		continuityMap: make(map[int]uint8),
 		stats:         NewTSStats(),
+		closeCh:       make(chan struct{}),
 	}
 }
 
@@ -112,6 +117,30 @@ func (mpp *MpegtsPacketProcessor) HandlePacket(pkt packet.Packet) {
 
 	mpp.writePacket(pkt)
 
+}
+
+// Kick off a job that periodically logs the stats of this job
+func (mpp *MpegtsPacketProcessor) StartReportingStats() {
+	go func() {
+		ticker := time.NewTicker(5 * time.Second)
+		defer ticker.Stop()
+		for {
+			select {
+			case <-ticker.C:
+				v, _ := json.MarshalIndent(mpp.stats, "", " ")
+				mpegtslog.Debug("mpegts stats", "stats", string(v))
+			case <-mpp.closeCh:
+				return
+			}
+		}
+	}()
+}
+
+func (mpp *MpegtsPacketProcessor) Stop() {
+	if mpp.closeCh != nil {
+		close(mpp.closeCh)
+		mpp.closeCh = nil
+	}
 }
 
 func (mpp *MpegtsPacketProcessor) checkContinuityCounter(pkt packet.Packet) {

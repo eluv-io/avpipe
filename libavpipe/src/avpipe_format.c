@@ -109,6 +109,10 @@ int
 is_custom_input(
     coderctx_t *ctx)
 {
+    if (ctx->inctx->params->use_preprocessed_input) {
+        return 1;
+    }
+
     switch (ctx->live_proto) {
         case avp_proto_rtmp:
         case avp_proto_srt:

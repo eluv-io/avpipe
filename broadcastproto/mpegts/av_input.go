@@ -172,6 +172,8 @@ func (mih *mpegtsInputHandler) ReaderLoop(ch chan []byte) {
 	)
 
 	nPackets := 0
+	ts.StartReportingStats()
+	defer ts.Stop()
 	for buf := range ch {
 		nPackets++
 

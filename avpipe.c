@@ -959,7 +959,7 @@ xc_init(
     init_tx_module();
 
     connect_ffmpeg_log();
-    if ((rc = set_handlers(params->url, params->use_custom_udp_handler, &in_handlers, &out_handlers)) != eav_success) {
+    if ((rc = set_handlers(params->url, params->use_preprocessed_input, &in_handlers, &out_handlers)) != eav_success) {
         goto end_tx_init;
     }
 
@@ -1042,7 +1042,7 @@ xc(
     connect_ffmpeg_log();
     //elv_set_log_level(elv_log_debug);
 
-    set_handlers(params->url, params->use_custom_udp_handler, &in_handlers, &out_handlers);
+    set_handlers(params->url, params->use_preprocessed_input, &in_handlers, &out_handlers);
 
     if ((rc = avpipe_init(&xctx, in_handlers, out_handlers, params)) != eav_success) {
         goto end_tx;
@@ -1404,7 +1404,7 @@ probe(
     if (!params || !params->url || params->url[0] == '\0' )
         return eav_param;
 
-    rc = set_handlers(params->url, params->use_custom_udp_handler, &in_handlers, NULL);
+    rc = set_handlers(params->url, params->use_preprocessed_input, &in_handlers, NULL);
     if (rc != eav_success)
         goto end_probe;
 

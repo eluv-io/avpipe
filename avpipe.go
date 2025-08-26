@@ -827,7 +827,7 @@ func getCParams(params *goavpipe.XcParams) (*C.xcparams_t, error) {
 		connection_timeout:        C.int(params.ConnectionTimeout),
 		filter_descriptor:         C.CString(params.FilterDescriptor),
 		skip_decoding:             C.int(0),
-		use_custom_udp_handler:    C.int(0),
+		use_preprocessed_input:    C.int(0),
 		extract_image_interval_ts: C.int64_t(params.ExtractImageIntervalTs),
 		extract_images_sz:         C.int(extractImagesSize),
 		video_time_base:           C.int(params.VideoTimeBase),
@@ -861,7 +861,7 @@ func getCParams(params *goavpipe.XcParams) (*C.xcparams_t, error) {
 	}
 
 	if params.UseCustomLiveReader && strings.HasPrefix(params.Url, "udp") {
-		cparams.use_custom_udp_handler = C.int(1)
+		cparams.use_preprocessed_input = C.int(1)
 	}
 
 	if params.SkipDecoding {
