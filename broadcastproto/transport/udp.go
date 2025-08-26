@@ -29,6 +29,7 @@ type udpProto struct {
 }
 
 func NewUDPTransport(url string) Transport {
+	log.Debug("Creating new UDP transport", "url", url)
 	return &udpProto{Url: url}
 }
 

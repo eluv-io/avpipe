@@ -12,6 +12,7 @@ type rtpProto struct {
 }
 
 func NewRTPTransport(url string) Transport {
+	log.Debug("Creating new RTP transport", "url", url)
 	return &rtpProto{Url: url}
 }
 
@@ -57,8 +58,9 @@ func (h *rtpHandler) expandBufferIfNecessary(n int) {
 }
 
 func (h *rtpHandler) Read(p []byte) (n int, err error) {
+	// TODO(Nate): Figure out how to adapt this to handle packets correctly
 	h.expandBufferIfNecessary(len(p))
-	n, err = h.rc.Read(h.buf)
+	n, err = h.rc.Read(h.buf[:len(p)])
 	if err != nil {
 		return n, err
 	}
