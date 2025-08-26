@@ -41,7 +41,6 @@ import (
 	"io"
 	"math/big"
 	"math/rand"
-	"strings"
 	"sync"
 	"unsafe"
 
@@ -860,7 +859,7 @@ func getCParams(params *goavpipe.XcParams) (*C.xcparams_t, error) {
 		cparams.copy_mpegts = C.int(1)
 	}
 
-	if params.UseCustomLiveReader && strings.HasPrefix(params.Url, "udp") {
+	if params.UseCustomLiveReader {
 		cparams.use_preprocessed_input = C.int(1)
 	}
 
