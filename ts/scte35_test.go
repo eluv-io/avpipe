@@ -6,7 +6,7 @@ import (
 	"io/ioutil"
 	"testing"
 
-	"github.com/Comcast/gots/scte35"
+	"github.com/Comcast/gots/v2/scte35"
 	"github.com/stretchr/testify/assert"
 )
 

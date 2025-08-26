@@ -2,7 +2,8 @@ package ts
 
 import (
 	"fmt"
-	"github.com/Comcast/gots/scte35"
+
+	"github.com/Comcast/gots/v2/scte35"
 )
 
 // The purpose of this struct is for JSON marshaling with minimal complexity

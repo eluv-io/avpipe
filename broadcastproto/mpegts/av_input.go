@@ -6,7 +6,7 @@ import (
 	"io"
 	"strings"
 
-	"github.com/Comcast/gots/packet"
+	"github.com/Comcast/gots/v2/packet"
 	"github.com/eluv-io/avpipe/broadcastproto/transport"
 	"github.com/eluv-io/avpipe/goavpipe"
 )

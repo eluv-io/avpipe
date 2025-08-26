@@ -3,7 +3,7 @@ package mpegts
 import (
 	"io"
 
-	"github.com/Comcast/gots/packet"
+	"github.com/Comcast/gots/v2/packet"
 	elog "github.com/eluv-io/log-go"
 )
 

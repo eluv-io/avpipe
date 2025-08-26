@@ -6,11 +6,11 @@ import (
 	"os"
 	"time"
 
-	"github.com/Comcast/gots/ebp"
-	"github.com/Comcast/gots/pes"
 	"github.com/Comcast/gots/v2"
+	"github.com/Comcast/gots/v2/ebp"
 	"github.com/Comcast/gots/v2/packet"
 	"github.com/Comcast/gots/v2/packet/adaptationfield"
+	"github.com/Comcast/gots/v2/pes"
 	"github.com/Comcast/gots/v2/psi"
 	"github.com/eluv-io/avpipe/smpte20xx/anc"
 	"github.com/eluv-io/avpipe/smpte20xx/video"
