@@ -3,6 +3,7 @@ package mpegts
 import (
 	"encoding/json"
 	"io"
+	"sync"
 	"time"
 
 	"github.com/Comcast/gots/v2/packet"
@@ -32,6 +33,8 @@ type MpegtsPacketProcessor struct {
 	opener      SequentialOpener
 	segStartPcr uint64 // PCR at the start of the current segment
 	currentWc   io.WriteCloser
+
+	statsMu sync.Mutex
 
 	stats         *TSStats
 	continuityMap map[int]uint8 // Map of PID to last continuity counter
@@ -95,13 +98,17 @@ func (mpp *MpegtsPacketProcessor) ProcessPackets(packets []byte) {
 		mpp.HandlePacket(p)
 	}
 	if len(packets)%188 != 0 {
+		mpp.statsMu.Lock()
 		mpp.stats.ErrorsIncompletePackets++
+		mpp.statsMu.Unlock()
 	}
 }
 
 func (mpp *MpegtsPacketProcessor) HandlePacket(pkt packet.Packet) {
+	mpp.statsMu.Lock()
 	mpp.stats.PacketsReceived++
 	mpp.stats.BytesReceived += uint64(len(pkt))
+	mpp.statsMu.Unlock()
 
 	mpp.checkContinuityCounter(pkt)
 	mpp.updatePCR(pkt)
@@ -127,8 +134,10 @@ func (mpp *MpegtsPacketProcessor) StartReportingStats() {
 		for {
 			select {
 			case <-ticker.C:
+				mpp.statsMu.Lock()
 				v, _ := json.MarshalIndent(mpp.stats, "", " ")
 				mpegtslog.Debug("mpegts stats", "stats", string(v))
+				mpp.statsMu.Unlock()
 			case <-mpp.closeCh:
 				return
 			}
@@ -157,12 +166,14 @@ func (mpp *MpegtsPacketProcessor) checkContinuityCounter(pkt packet.Packet) {
 	mpp.continuityMap[pid] = cc
 
 	if exists && cc != (lastCC+1)%16 {
+		mpp.statsMu.Lock()
 		mpp.stats.ErrorsCC++
 		if _, ok := mpp.stats.ErrorsCCByPid[pid]; !ok {
 			mpp.stats.ErrorsCCByPid[pid] = 1
 		} else {
 			mpp.stats.ErrorsCCByPid[pid]++
 		}
+		mpp.statsMu.Unlock()
 	}
 }
 
@@ -170,6 +181,9 @@ func (mpp *MpegtsPacketProcessor) updatePCR(pkt packet.Packet) {
 	if !pkt.HasAdaptationField() {
 		return
 	}
+
+	mpp.statsMu.Lock()
+	defer mpp.statsMu.Unlock()
 
 	// Cannot fail as we already checked for adaptation field
 	a, _ := pkt.AdaptationField()
@@ -220,6 +234,8 @@ func (mpp *MpegtsPacketProcessor) writePacket(pkt packet.Packet) {
 	}
 
 	n, err := mpp.currentWc.Write(pkt[:])
+	mpp.statsMu.Lock()
+	defer mpp.statsMu.Unlock()
 	if err != nil {
 		mpp.stats.ErrorsWriting++
 		return
@@ -238,6 +254,8 @@ func (mpp *MpegtsPacketProcessor) openNextOutput() error {
 	}
 
 	wc, err := mpp.opener.OpenNext()
+	mpp.statsMu.Lock()
+	defer mpp.statsMu.Unlock()
 	if err != nil {
 		mpegtslog.Error("Failed to open next segment", "err", err)
 		mpp.stats.ErrorsOpeningOutput++
