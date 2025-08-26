@@ -5,9 +5,9 @@ import (
 	"io"
 	"os"
 
-	"github.com/Comcast/gots/v2/packet"
-	"github.com/Comcast/gots/v2/psi"
-	"github.com/Comcast/gots/v2/scte35"
+	"github.com/Comcast/gots/packet"
+	"github.com/Comcast/gots/psi"
+	"github.com/Comcast/gots/scte35"
 	elog "github.com/eluv-io/log-go"
 )
 
