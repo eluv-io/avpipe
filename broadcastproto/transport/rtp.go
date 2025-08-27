@@ -5,7 +5,10 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"net"
 )
+
+const maxUDPPacketSize = 1<<16 - 1
 
 type rtpProto struct {
 	Url string
@@ -31,59 +34,77 @@ func (r *rtpProto) Open() (io.ReadCloser, error) {
 	if err != nil {
 		return nil, fmt.Errorf("failed to open UDP transport for RTP: %w", err)
 	}
+	udpConn, ok := rc.(*net.UDPConn)
+	if !ok {
+		return nil, errors.New("underlying connection is not a UDP connection")
+	}
+
 	return &rtpHandler{
-		buf: make([]byte, 0, 10*1024*1024),
-		rc:  rc,
+		buf:     make([]byte, maxUDPPacketSize),
+		udpConn: udpConn,
 	}, nil
 }
 
 type rtpHandler struct {
-	buf []byte
-	rc  io.ReadCloser
+	buf      []byte
+	bufStart int
+	bufEnd   int
+
+	udpConn *net.UDPConn
 }
 
 func (h *rtpHandler) Close() error {
-	if h.rc != nil {
-		return h.rc.Close()
+	if h.udpConn != nil {
+		return h.udpConn.Close()
 	}
 	return nil
 }
 
-func (h *rtpHandler) expandBufferIfNecessary(n int) {
-	if len(h.buf) < n {
-		newBuf := make([]byte, n)
-		copy(newBuf, h.buf)
-		h.buf = newBuf
+func (h *rtpHandler) Read(p []byte) (int, error) {
+	if h.bufStart >= h.bufEnd {
+		err := h.readNewPacket()
+		if err != nil {
+			return 0, err
+		}
 	}
+
+	n := min(len(p), h.bufLen())
+	copy(p, h.buf[h.bufStart:h.bufStart+n])
+	h.bufStart += n
+
+	return n, nil
 }
 
-func (h *rtpHandler) Read(p []byte) (n int, err error) {
-	// TODO(Nate): Figure out how to adapt this to handle packets correctly
-	h.expandBufferIfNecessary(len(p))
-	n, err = h.rc.Read(h.buf[:len(p)])
+func (h *rtpHandler) readNewPacket() error {
+	n, _, err := h.udpConn.ReadFrom(h.buf)
+	h.bufStart = 0
+	h.bufEnd = n
 	if err != nil {
-		return n, err
+		return err
 	}
-
-	stripped, err := StripRTP(h.buf[:n])
+	headerEnd, err := StripRTP(h.buf[:h.bufEnd])
 	if err != nil {
-		return n, err
+		// TODO(Nate): Is this the best resolution here? Should we just try again at this layer? Or rely on caller to do so?
+		log.Warn("Failed to strip RTP header", "err", err)
+		return err
 	}
-
-	copy(p, stripped)
-
-	return len(stripped), nil
+	h.bufStart = headerEnd
+	return nil
 }
 
-func StripRTP(data []byte) ([]byte, error) {
+func (h *rtpHandler) bufLen() int {
+	return h.bufEnd - h.bufStart
+}
+
+func StripRTP(data []byte) (int, error) {
 	hdr, err := ParseRTPHeader(data)
 	if err != nil {
-		return nil, err
+		return 0, err
 	}
 	if len(data) < hdr.ByteLength()+188 {
-		return nil, fmt.Errorf("packet too short for RTP and TS")
+		return 0, fmt.Errorf("packet too short for RTP and TS")
 	}
-	return data[hdr.ByteLength():], nil
+	return hdr.ByteLength(), nil
 }
 
 var ErrShortRTP = errors.New("RTP packet too short")
