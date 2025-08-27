@@ -4413,7 +4413,9 @@ log_params(
         "rotate=%d "
         "profile=%s "
         "level=%d "
-        "deinterlace=%d",
+        "deinterlace=%d "
+        "use_preprocessed_input=%d "
+        "copy_mpegts=%d",
         params->stream_id, params->url,
         avpipe_version(),
         params->bypass_transcoding, params->skip_decoding,
@@ -4437,7 +4439,8 @@ log_params(
         params->filter_descriptor,
         params->extract_image_interval_ts, params->extract_images_sz,
         1, params->video_time_base, params->video_frame_duration_ts, params->rotate,
-        params->profile ? params->profile : "", params->level,  params->deinterlace);
+        params->profile ? params->profile : "", params->level,  params->deinterlace,
+        params->use_preprocessed_input, params->copy_mpegts);
     elv_log("AVPIPE XCPARAMS %s", buf);
 }
 
