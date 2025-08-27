@@ -46,6 +46,7 @@
 #define DEFAULT_FRAME_INTERVAL_S    10
 
 #define DEFAULT_ACC_SAMPLE_RATE     48000
+#define MAX_FRAME_READ_RETRIES      300
 
 extern int
 init_video_filters(
@@ -1690,8 +1691,8 @@ set_idr_frame_key_flag(
     if (params->force_keyint > 0) {
         if (encoder_context->forced_keyint_countdown <= 0) {
             if (debug_frame_level) {
-                elv_dbg("FRAME SET KEY flag, forced_keyint=%d pts=%"PRId64", forced_keyint_countdown=%d",
-                    params->force_keyint, frame->pts, encoder_context->forced_keyint_countdown);
+                elv_log("FRAME SET KEY flag, forced_keyint=%d lastkeyframe=%"PRId64" pts=%"PRId64", forced_keyint_countdown=%d",
+                    params->force_keyint, encoder_context->last_key_frame, frame->pts, encoder_context->forced_keyint_countdown);
             }
             if (encoder_context->forced_keyint_countdown < 0)
                 elv_log("force_keyint_countdown=%d", encoder_context->forced_keyint_countdown);
@@ -2048,10 +2049,12 @@ encode_frame(
                 2*encoder_context->calculated_frame_duration &&
             params->xc_type != xc_extract_images &&
             params->xc_type != xc_extract_all_images) {
-            elv_log("GAP detected, packet->pts=%"PRId64", video_encoder_prev_pts=%"PRId64", url=%s",
-                output_packet->pts, encoder_context->video_encoder_prev_pts, params->url);
-            encoder_context->forced_keyint_countdown -=
-                (output_packet->pts - encoder_context->video_encoder_prev_pts)/encoder_context->calculated_frame_duration - 1;
+
+            int fc = (output_packet->pts - encoder_context->video_encoder_prev_pts)/encoder_context->calculated_frame_duration - 1;
+            encoder_context->forced_keyint_countdown -= fc;
+
+            elv_log("GAP detected packet->pts=%"PRId64" video_encoder_prev_pts=%"PRId64" count=%d keying_count=%d url=%s",
+                output_packet->pts, encoder_context->video_encoder_prev_pts, fc, encoder_context->forced_keyint_countdown, params->url);
         }
 
         if (stream_index == decoder_context->video_stream_index &&
@@ -3273,6 +3276,7 @@ avpipe_xc(
     ioctx_t *inctx = xctx->inctx;
     int rc = 0;
     int av_read_frame_rc = 0;
+    int nretries = 0;
     AVPacket *input_packet = NULL;
 
     if (!params->url || params->url[0] == '\0' ||
@@ -3392,14 +3396,46 @@ avpipe_xc(
 
     int video_stream_index = decoder_context->video_stream_index;
     if (params->xc_type & xc_video) {
-        if (encoder_context->format_context->streams[0]->avg_frame_rate.num != 0 &&
-            decoder_context->stream[video_stream_index]->time_base.num != 0) {
-            encoder_context->calculated_frame_duration =
-                /* In very rare cases this might overflow, so type cast to 64bit int to avoid overflow */
-                ((int64_t)decoder_context->stream[video_stream_index]->time_base.den * (int64_t)encoder_context->format_context->streams[0]->avg_frame_rate.den) /
-                    ((int64_t)encoder_context->format_context->streams[0]->avg_frame_rate.num * (int64_t) decoder_context->stream[video_stream_index]->time_base.num);
+
+        if (av_cmp_q(decoder_context->format_context->streams[video_stream_index]->r_frame_rate, decoder_context->format_context->streams[video_stream_index]->avg_frame_rate)) {
+            elv_warn("frame rate discrepancy r=%d/%d avg=%d/%d url=%s",
+                decoder_context->format_context->streams[video_stream_index]->r_frame_rate.num, decoder_context->format_context->streams[video_stream_index]->r_frame_rate.den,
+                decoder_context->format_context->streams[video_stream_index]->avg_frame_rate.num, decoder_context->format_context->streams[video_stream_index]->avg_frame_rate.den, params->url);
         }
-        elv_log("calculated_frame_duration=%d", encoder_context->calculated_frame_duration);
+
+        int enc_calc_frame_duration = 0;
+        if (decoder_context->format_context->streams[video_stream_index]->avg_frame_rate.num != 0 &&
+            encoder_context->format_context->streams[0]->avg_frame_rate.num != 0 &&  // Note encoder_context->format_context uses stream 0 for video
+            decoder_context->stream[video_stream_index]->time_base.num != 0 &&
+            encoder_context->stream[video_stream_index]->time_base.num != 0) {       // Note encoder_context->stream uses same index as decoder
+
+            AVRational enc_frame_duration_rat = av_mul_q(av_inv_q(encoder_context->stream[video_stream_index]->time_base), av_inv_q(encoder_context->format_context->streams[0]->avg_frame_rate));
+            if (enc_frame_duration_rat.den != 1) {
+                elv_warn("frame duration (encoder) not integer %d/%d", enc_frame_duration_rat.num, enc_frame_duration_rat.den);
+            }
+
+            AVRational dec_frame_duration_rat = av_mul_q(av_inv_q(decoder_context->stream[video_stream_index]->time_base), av_inv_q(decoder_context->format_context->streams[video_stream_index]->avg_frame_rate));
+            if (dec_frame_duration_rat.den != 1) {
+                elv_warn("frame duration (decoder) not integer %d/%d", dec_frame_duration_rat.num, dec_frame_duration_rat.den);
+            }
+
+            encoder_context->calculated_frame_duration = enc_calc_frame_duration = enc_frame_duration_rat.num / enc_frame_duration_rat.den; // Possibly imprecise but warned above
+            decoder_context->calculated_frame_duration = dec_frame_duration_rat.num / dec_frame_duration_rat.den; // Possibly imprecise but warned above
+
+        } else {
+            elv_err("frame rate and timebase not properly set dec timebase=%d/%d avg_frame_rate=%d/%d enc timebase=%d/%d avg_frame_rate=%d/%d",
+                decoder_context->stream[video_stream_index]->time_base.num, decoder_context->stream[video_stream_index]->time_base.den,
+                decoder_context->format_context->streams[video_stream_index]->avg_frame_rate.num, decoder_context->format_context->streams[video_stream_index]->avg_frame_rate.den,
+                encoder_context->stream[video_stream_index]->time_base.num, encoder_context->stream[video_stream_index]->time_base.den,
+                encoder_context->format_context->streams[0]->avg_frame_rate.num, encoder_context->format_context->streams[0]->avg_frame_rate.den);
+            rc = eav_codec_context;
+            goto xc_done;
+        }
+
+        if (params->video_frame_duration_ts > 0) {
+            encoder_context->calculated_frame_duration = params->video_frame_duration_ts;
+        }
+        elv_log("calculated_frame_duration enc=%d (%d) dec=%d", encoder_context->calculated_frame_duration, enc_calc_frame_duration, decoder_context->calculated_frame_duration);
     }
 
     xctx->do_instrument = do_instrument;
@@ -3461,6 +3497,14 @@ avpipe_xc(
         }
 
         rc = av_read_frame(decoder_context->format_context, input_packet);
+
+        if ((rc == AVERROR(EAGAIN) || rc == AVERROR(EIO) || rc == AVERROR_INVALIDDATA) && nretries < MAX_FRAME_READ_RETRIES) {
+            if (nretries % 10 == 0) {
+                elv_warn("packet unreadable or corrupt - %s (%d) retries=%d", av_err2str(rc), rc, nretries);
+            }
+            nretries ++;
+            continue;
+        }
         if (rc < 0) {
             av_packet_free(&input_packet);
             av_read_frame_rc = rc;
@@ -3476,6 +3520,7 @@ avpipe_xc(
             }
             break;
         }
+        nretries = 0;
 
         if (input_packet->flags & AV_PKT_FLAG_CORRUPT) {
             elv_warn("packet corrupt pts=%"PRId64, input_packet->pts);

@@ -355,11 +355,17 @@ udp_in_opener(
         elv_warn("Failed to set UDP socket buf size to=%"PRId64", url=%s, errno=%d", bufsz, url, errno);
     }
 
+    socklen_t optlen = sizeof(bufsz);
+    if (getsockopt(sockfd, SOL_SOCKET, SO_RCVBUF, &bufsz, &optlen) < 0) {
+        elv_warn("Failed to get UDP socket buf size to=%"PRId64", url=%s, errno=%d", bufsz, url, errno);
+    } else if (bufsz < UDP_PIPE_BUFSIZE) {
+        elv_warn("Failed to set desired UDP socket buf size expect=%"PRId64" actual=%"PRId64, UDP_PIPE_BUFSIZE, bufsz);
+    }
+
     if (set_sock_nonblocking(sockfd) < 0) {
         elv_err("Failed to make UDP socket nonblocking, errno=%d", errno);
         return -1;
     }
-
 
     elv_channel_init(&inctx->udp_channel, MAX_UDP_CHANNEL, NULL);
     inctx->opaque = (int *) calloc(1, sizeof(int)+sizeof(int64_t));
