@@ -21,7 +21,7 @@ copy_mpegts_set_encoder_options(
     coderctx_t *decoder_context,
     xcparams_t *params,
     int stream_index,
-    int timebase)
+    int timebase /* PENDING(SS) should rename timescale */)
 {
     if (timebase <= 0) {
         elv_err("Setting mpegts encoder options failed, invalid timebase=%d (check encoding params), url=%s",
@@ -34,12 +34,11 @@ copy_mpegts_set_encoder_options(
 
     /* Precalculate seg_duration_ts based on seg_duration if seg_duration is set */
     seg_duration = atof(params->seg_duration);
-    seg_duration_ts = seg_duration * timebase;
-
     if (seg_duration <= 0) {
-        elv_err("Setting mpegts encoder options failed, invalid seg_duration=%d, url=%s", seg_duration, params->url);
+        elv_err("Setting mpegts encoder options failed, invalid seg_duration=%f, url=%s", seg_duration, params->url);
         return eav_param;
     }
+    seg_duration_ts = seg_duration * timebase;
 
     av_opt_set_int(encoder_context->format_context->priv_data, "segment_duration_ts", seg_duration_ts, 0);
 
@@ -52,6 +51,8 @@ copy_mpegts_set_encoder_options(
         // Initial offset needs to be in microseconds
         int64_t offset_microseconds = av_rescale_q(stream_start_time, (AVRational){1, timebase}, AV_TIME_BASE_Q);
         av_opt_set_int(encoder_context->format_context->priv_data, "initial_offset", offset_microseconds, 0);
+        // PENDING(SS) Should replace "initial_offset" (deprecated) with "output_ts_offset"
+        //av_opt_set_int(encoder_context->format_context->priv_data, "output_ts_offset", offset_microseconds, 0);
         elv_log("Set initial segment offset to %"PRId64" microseconds, based on stream start time of %"PRId64" and timebase %d", offset_microseconds, stream_start_time, timebase);
     }
 
