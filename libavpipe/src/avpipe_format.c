@@ -109,7 +109,10 @@ int
 is_custom_input(
     coderctx_t *ctx)
 {
-    if (ctx->inctx->params->use_preprocessed_input) {
+    // For filemaking / mux input this may be null
+    if (ctx->inctx
+        && ctx->inctx->params
+        && ctx->inctx->params->use_preprocessed_input) {
         return 1;
     }
 
