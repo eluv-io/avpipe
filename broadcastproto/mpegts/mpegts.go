@@ -135,7 +135,7 @@ func (mpp *MpegtsPacketProcessor) StartReportingStats() {
 			select {
 			case <-ticker.C:
 				mpp.statsMu.Lock()
-				v, _ := json.MarshalIndent(mpp.stats, "", " ")
+				v, _ := json.Marshal(mpp.stats)
 				mpegtslog.Debug("mpegts stats", "stats", string(v))
 				mpp.statsMu.Unlock()
 			case <-mpp.closeCh:
