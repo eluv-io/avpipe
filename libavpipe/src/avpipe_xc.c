@@ -194,6 +194,7 @@ check_input_stream(
             }
             break;
         case avp_proto_rtp:
+            // PENDING(SS) The custom live reader will strip RTP and this fails
             if (decoder_context->format_context->priv_data) {
                 int64_t payload_type;
                 rc = av_opt_get_int(decoder_context->format_context->priv_data, "payload_type", 0, &payload_type);
@@ -282,6 +283,11 @@ prepare_decoder(
             // No special timeout options
             break;
         }
+    }
+
+    if (is_live_source(decoder_context)) {
+        av_dict_set(&opts, "probesize", "100M", 0);  // bytes
+        av_dict_set(&opts, "analyzeduration", "10000000", 0);  // microseconds
     }
 
     /* Allocate AVFormatContext in format_context and find input file format */
