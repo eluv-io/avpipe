@@ -83,7 +83,7 @@ func (mio *mpegtsInputOpener) Open(fd int64, url string) (goavpipe.InputHandler,
 	var ch chan []byte
 
 	if mio.copyStream {
-		ch = make(chan []byte, 1024)
+		ch = make(chan []byte, 20*1024)
 	}
 
 	mih := &mpegtsInputHandler{
@@ -119,6 +119,9 @@ type mpegtsInputHandler struct {
 }
 
 func (mih *mpegtsInputHandler) Read(buf []byte) (int, error) {
+	if len(buf) < 7*188 {
+		mpegtslog.Warn("buffer size smaller than 7 TS packets", "size", len(buf))
+	}
 	if mih.outputSplit != nil {
 		n, err := mih.rc.Read(buf)
 		if err != nil {
