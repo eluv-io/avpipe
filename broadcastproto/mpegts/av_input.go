@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"io"
 	"strings"
+	"time"
 
 	"github.com/Comcast/gots/v2/packet"
 	"github.com/eluv-io/avpipe/broadcastproto/transport"
@@ -184,9 +185,12 @@ func (mih *mpegtsInputHandler) ReaderLoop(ch chan []byte) {
 			goavpipe.Log.Trace("Processed packets", "count", nPackets, "chan size", len(ch), "chan cap", cap(ch))
 		}
 
-		// TODO(Nate): Automatically handle RTP over UDP
-
+		startProcessing := time.Now()
 		ts.ProcessPackets(buf)
+		processingDur := time.Since(startProcessing)
+		if processingDur > 50*time.Millisecond {
+			goavpipe.Log.Warn("MPEGTS processing took too long", "duration", processingDur, "bufsize", len(buf))
+		}
 	}
 }
 

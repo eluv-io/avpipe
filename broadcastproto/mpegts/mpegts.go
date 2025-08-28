@@ -245,6 +245,15 @@ func (mpp *MpegtsPacketProcessor) writePacket(pkt packet.Packet) {
 }
 
 func (mpp *MpegtsPacketProcessor) openNextOutput() error {
+	startTime := time.Now()
+	var closeDone time.Time
+	defer func() {
+		doneTime := time.Now()
+		duration := doneTime.Sub(startTime)
+		if duration > 50*time.Millisecond {
+			mpegtslog.Warn("slow openNextOutput", "duration", duration, "startToClose", closeDone.Sub(startTime), "closeToDone", doneTime.Sub(closeDone))
+		}
+	}()
 	if mpp.currentWc != nil {
 		err := mpp.currentWc.Close()
 		if err != nil {
@@ -252,6 +261,7 @@ func (mpp *MpegtsPacketProcessor) openNextOutput() error {
 		}
 		mpp.currentWc = nil
 	}
+	closeDone = time.Now()
 
 	wc, err := mpp.opener.OpenNext()
 	mpp.statsMu.Lock()
