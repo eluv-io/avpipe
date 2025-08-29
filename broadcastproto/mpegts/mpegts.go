@@ -242,6 +242,9 @@ func (mpp *MpegtsPacketProcessor) writePacket(pkt packet.Packet) {
 	s2 := time.Now()
 
 	n, err := mpp.currentWc.Write(pkt[:])
+
+	s3 := time.Now()
+
 	mpp.statsMu.Lock()
 	defer mpp.statsMu.Unlock()
 	if err != nil {
@@ -251,9 +254,9 @@ func (mpp *MpegtsPacketProcessor) writePacket(pkt packet.Packet) {
 	mpp.stats.PacketsWritten++
 	mpp.stats.BytesWritten += uint64(n)
 
-	s3 := time.Now()
-	if s3.Sub(s1) > 50*time.Millisecond {
-		mpegtslog.Warn("MPEGTS writePacket took too long", s3.Sub(s1), s3.Sub(s2))
+	s4 := time.Now()
+	if s4.Sub(s1) > 50*time.Millisecond {
+		mpegtslog.Warn("MPEGTS writePacket took too long", s4.Sub(s1), s4.Sub(s2), s4.Sub(s3))
 	}
 }
 
