@@ -256,7 +256,7 @@ func (mpp *MpegtsPacketProcessor) writePacket(pkt packet.Packet) {
 
 	s4 := time.Now()
 	if s4.Sub(s1) > 50*time.Millisecond {
-		mpegtslog.Warn("MPEGTS writePacket took too long", s4.Sub(s1), s4.Sub(s2), s4.Sub(s3))
+		mpegtslog.Warn("MPEGTS writePacket took too long", "s1", s4.Sub(s1), "s2", s4.Sub(s2), "s3", s4.Sub(s3))
 	}
 }
 

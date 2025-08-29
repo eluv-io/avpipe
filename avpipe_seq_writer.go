@@ -25,6 +25,7 @@ import (
 	"fmt"
 	"io"
 	"sync"
+	"time"
 
 	"github.com/eluv-io/avpipe/broadcastproto/mpegts"
 	"github.com/eluv-io/avpipe/goavpipe"
@@ -85,7 +86,12 @@ func (h *avpipeSequentialOutHandler) Write(p []byte) (n int, err error) {
 		return 0, errOutputClosed
 	}
 
+	s := time.Now()
 	n = AVPipeWriteOutputGo(h.inFd, *h.outFd, p)
+	dur := time.Since(s)
+	if dur > 50*time.Millisecond {
+		goavpipe.Log.Warn("AVPipeWriteOutputGo took too long", "duration", dur)
+	}
 	if n < 0 {
 		return 0, fmt.Errorf("failed to write to output fd %d", *h.outFd)
 	}
