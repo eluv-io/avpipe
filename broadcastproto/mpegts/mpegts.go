@@ -30,10 +30,11 @@ const TsStreamTypeLocalSt2038 = 0xe4 // Locally defined type
 type MpegtsPacketProcessor struct {
 	cfg TsConfig
 
-	inFd        int64
-	opener      SequentialOpener
-	segStartPcr uint64 // PCR at the start of the current segment
-	currentWc   io.WriteCloser
+	inFd         int64
+	opener       SequentialOpener
+	segStartPcr  uint64 // PCR at the start of the current segment
+	segStartTime time.Time
+	currentWc    io.WriteCloser
 
 	// statsMu is _only_ used for updating cc errors by PID
 	statsMu sync.Mutex
@@ -79,9 +80,11 @@ type TSStats struct {
 	AudioPacketCount atomic.Uint64
 	DataPacketCount  atomic.Uint64
 
-	FirstPCR    atomic.Uint64 // First seen PCR value
-	LastPCR     atomic.Uint64 // Last seen PCR value
-	NumSegments atomic.Int64
+	FirstPCR       atomic.Uint64 // First seen PCR value
+	LastPCR        atomic.Uint64 // Last seen PCR value
+	NumSegments    atomic.Int64
+	NumWraps       atomic.Int64
+	NumTimedRotate atomic.Int64
 
 	// Errors in the continuity counter
 	ErrorsCC                atomic.Uint64
@@ -258,8 +261,15 @@ func (mpp *MpegtsPacketProcessor) writePacket(pkt packet.Packet) {
 	prevCloseToMax := PcrMax-(PcrTs*60) < mpp.segStartPcr
 	pcrWrapped := prevCloseToMax && curCloseToZero
 	pcrPastSegmentBounds := mpp.pcr > mpp.segStartPcr && mpp.pcr-mpp.segStartPcr > mpp.cfg.SegmentLengthSec*PcrTs
-	if pcrWrapped || pcrPastSegmentBounds {
+	segTimeFarTooLong := time.Since(mpp.segStartTime) > time.Duration(mpp.cfg.SegmentLengthSec)*time.Second*2
+	if pcrWrapped || pcrPastSegmentBounds || segTimeFarTooLong {
 		mpegtslog.Debug("opening next output", "pcrWrapped", pcrWrapped, "pcrPastSegmentBounds", pcrPastSegmentBounds, "pcr", mpp.pcr, "segStartPcr", mpp.segStartPcr)
+		if pcrWrapped {
+			mpp.stats.NumWraps.Inc()
+		}
+		if segTimeFarTooLong {
+			mpp.stats.NumTimedRotate.Inc()
+		}
 		err := mpp.openNextOutput()
 		if err != nil {
 			return
@@ -316,6 +326,7 @@ func (mpp *MpegtsPacketProcessor) openNextOutput() error {
 	mpp.stats.NumSegments.Inc()
 	mpp.currentWc = wc
 	mpp.segStartPcr = mpp.pcr
+	mpp.segStartTime = time.Now()
 	return nil
 }
 
