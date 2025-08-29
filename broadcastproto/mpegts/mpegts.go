@@ -66,9 +66,14 @@ type TsConfig struct {
 type TSStats struct {
 	PacketsReceived atomic.Uint64
 	PacketsWritten  atomic.Uint64
-	BadPackets      atomic.Uint64
-	BytesReceived   atomic.Uint64
-	BytesWritten    atomic.Uint64
+	// PacketsDropped is updated by the sender to the channel, which is why it is a pointer
+	PacketsDropped *atomic.Uint64
+	BadPackets     atomic.Uint64
+	BytesReceived  atomic.Uint64
+	BytesWritten   atomic.Uint64
+
+	MaxBufInPeriod atomic.Uint64
+	MinBufInPeriod atomic.Uint64
 
 	VideoPacketCount atomic.Uint64
 	AudioPacketCount atomic.Uint64
@@ -146,6 +151,7 @@ func (mpp *MpegtsPacketProcessor) StartReportingStats() {
 				v, _ := json.Marshal(mpp.stats)
 				mpegtslog.Debug("mpegts stats", "stats", string(v))
 				mpp.statsMu.Unlock()
+				mpp.resetChannelSizeStats()
 			case <-mpp.closeCh:
 				return
 			}
@@ -158,6 +164,29 @@ func (mpp *MpegtsPacketProcessor) Stop() {
 		close(mpp.closeCh)
 		mpp.closeCh = nil
 	}
+}
+
+func (mpp *MpegtsPacketProcessor) RegisterPacketsDropped(packetsDropped *atomic.Uint64) {
+	mpp.stats.PacketsDropped = packetsDropped
+}
+
+func (mpp *MpegtsPacketProcessor) UpdateChannelSizeStats(size int) {
+	max := mpp.stats.MaxBufInPeriod.Load()
+	min := mpp.stats.MinBufInPeriod.Load()
+
+	if uint64(size) > max {
+		mpp.stats.MaxBufInPeriod.CompareAndSwap(max, uint64(size))
+	}
+
+	if uint64(size) < min {
+		mpp.stats.MinBufInPeriod.CompareAndSwap(min, uint64(size))
+	}
+}
+
+func (mpp *MpegtsPacketProcessor) resetChannelSizeStats() {
+	maxU64 := ^uint64(0)
+	mpp.stats.MaxBufInPeriod.Store(0)
+	mpp.stats.MinBufInPeriod.Store(maxU64)
 }
 
 func (mpp *MpegtsPacketProcessor) checkContinuityCounter(pkt packet.Packet) {

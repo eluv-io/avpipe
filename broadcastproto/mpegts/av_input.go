@@ -10,6 +10,7 @@ import (
 	"github.com/Comcast/gots/v2/packet"
 	"github.com/eluv-io/avpipe/broadcastproto/transport"
 	"github.com/eluv-io/avpipe/goavpipe"
+	"go.uber.org/atomic"
 )
 
 /*
@@ -104,7 +105,7 @@ func (mio *mpegtsInputOpener) Open(fd int64, url string) (goavpipe.InputHandler,
 				goavpipe.AssociateGIDWithHandle(handle)
 			}
 			goavpipe.Log.Debug("MPEGTS copy loop initiated")
-			mih.ReaderLoop(ch)
+			mih.ReaderLoop(ch, &mih.packetsDropped)
 			close(mih.readerLoopDoneCh)
 		}()
 	} else {
@@ -115,13 +116,14 @@ func (mio *mpegtsInputOpener) Open(fd int64, url string) (goavpipe.InputHandler,
 }
 
 type mpegtsInputHandler struct {
-	rc          io.ReadCloser
-	transport   transport.Transport
-	seqOpener   SequentialOpener
-	copyStream  bool
-	outputSplit chan<- []byte
-	inFd        int64
+	rc        io.ReadCloser
+	transport transport.Transport
+	seqOpener SequentialOpener
+	inFd      int64
 
+	copyStream       bool
+	outputSplit      chan<- []byte
+	packetsDropped   atomic.Uint64
 	readerLoopDoneCh chan struct{}
 
 	// gih is the global input handler, used to pass input stats through to the normal live
@@ -142,6 +144,7 @@ func (mih *mpegtsInputHandler) Read(buf []byte) (int, error) {
 			select {
 			case mih.outputSplit <- buf[:n]:
 			default:
+				mih.packetsDropped.Inc()
 				goavpipe.Log.Warn("Output split channel is full, dropping data", "size", n)
 			}
 		}
@@ -184,7 +187,7 @@ func (mih *mpegtsInputHandler) Stat(streamIndex int, statType goavpipe.AVStatTyp
 	return mih.gih.Stat(streamIndex, statType, statArgs)
 }
 
-func (mih *mpegtsInputHandler) ReaderLoop(ch chan []byte) {
+func (mih *mpegtsInputHandler) ReaderLoop(ch chan []byte, packetsDropped *atomic.Uint64) {
 
 	tsCfg := TsConfig{
 		SegmentLengthSec: 30,
@@ -195,6 +198,7 @@ func (mih *mpegtsInputHandler) ReaderLoop(ch chan []byte) {
 		mih.seqOpener,
 		mih.inFd,
 	)
+	ts.RegisterPacketsDropped(packetsDropped)
 
 	nPackets := 0
 	ts.StartReportingStats()
@@ -203,6 +207,7 @@ func (mih *mpegtsInputHandler) ReaderLoop(ch chan []byte) {
 		nPackets++
 
 		if nPackets%1000 == 0 {
+			ts.UpdateChannelSizeStats(len(ch))
 			goavpipe.Log.Trace("Processed packets", "count", nPackets, "chan size", len(ch), "chan cap", cap(ch))
 		}
 
