@@ -78,8 +78,7 @@ func (mio *mpegtsInputOpener) Open(fd int64, url string) (goavpipe.InputHandler,
 		return nil, err
 	}
 
-	goavpipe.Log.Trace("MPEGTS custom input opener opened", "fd", fd, "url", url, "transport", mio.transport.Handler())
-	mio.copyStream = true
+	goavpipe.Log.Debug("MPEGTS custom input opener opened", "fd", fd, "url", url, "transport", mio.transport.Handler())
 
 	var ch chan []byte
 
@@ -88,20 +87,28 @@ func (mio *mpegtsInputOpener) Open(fd int64, url string) (goavpipe.InputHandler,
 	}
 
 	mih := &mpegtsInputHandler{
-		rc:          rc,
-		transport:   mio.transport,
-		seqOpener:   mio.seqOpener(fd),
-		copyStream:  mio.copyStream,
-		outputSplit: ch,
-		inFd:        fd,
-		gih:         gih,
+		rc:               rc,
+		transport:        mio.transport,
+		seqOpener:        mio.seqOpener(fd),
+		copyStream:       mio.copyStream,
+		outputSplit:      ch,
+		readerLoopDoneCh: make(chan struct{}),
+		inFd:             fd,
+		gih:              gih,
 	}
 
 	if mio.copyStream {
 		go func() {
-			goavpipe.Log.Trace("MPEGTS copy loop initiated")
+			handle, ok := goavpipe.GIDHandle()
+			if ok {
+				goavpipe.AssociateGIDWithHandle(handle)
+			}
+			goavpipe.Log.Debug("MPEGTS copy loop initiated")
 			mih.ReaderLoop(ch)
+			close(mih.readerLoopDoneCh)
 		}()
+	} else {
+		close(mih.readerLoopDoneCh)
 	}
 
 	return mih, nil
@@ -114,6 +121,8 @@ type mpegtsInputHandler struct {
 	copyStream  bool
 	outputSplit chan<- []byte
 	inFd        int64
+
+	readerLoopDoneCh chan struct{}
 
 	// gih is the global input handler, used to pass input stats through to the normal live
 	gih goavpipe.InputHandler
@@ -144,11 +153,23 @@ func (mih *mpegtsInputHandler) Read(buf []byte) (int, error) {
 }
 
 func (mih *mpegtsInputHandler) Close() error {
+	err := mih.rc.Close()
+
 	if mih.outputSplit != nil {
-		close(mih.outputSplit)
+		ch := mih.outputSplit
 		mih.outputSplit = nil
+		initLen := len(ch)
+		close(ch)
+
+		fiveSecond := time.After(5 * time.Second)
+		select {
+		case <-fiveSecond:
+			goavpipe.Log.Warn("mpegts read loop still running 5 seconds after channel closure", "initLen", initLen, "curLen", len(ch))
+		case <-mih.readerLoopDoneCh:
+		}
 	}
-	return mih.rc.Close()
+
+	return err
 }
 
 func (mih *mpegtsInputHandler) Seek(_ int64, _ int) (int64, error) {
