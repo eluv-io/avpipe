@@ -108,6 +108,11 @@ func (mpp *MpegtsPacketProcessor) HandlePacket(pkt packet.Packet) {
 	mpp.stats.PacketsReceived.Inc()
 	mpp.stats.BytesReceived.Add(uint64(len(pkt)))
 
+	if pkt.CheckErrors() != nil {
+		mpp.stats.BadPackets.Inc()
+		return
+	}
+
 	mpp.checkContinuityCounter(pkt)
 	mpp.updatePCR(pkt)
 
