@@ -8,6 +8,7 @@ import (
 
 	"github.com/Comcast/gots/v2/packet"
 	elog "github.com/eluv-io/log-go"
+	"go.uber.org/atomic"
 )
 
 const PcrTs uint64 = 27_000_000
@@ -34,6 +35,7 @@ type MpegtsPacketProcessor struct {
 	segStartPcr uint64 // PCR at the start of the current segment
 	currentWc   io.WriteCloser
 
+	// statsMu is _only_ used for updating cc errors by PID
 	statsMu sync.Mutex
 
 	stats         *TSStats
@@ -62,28 +64,28 @@ type TsConfig struct {
 }
 
 type TSStats struct {
-	PacketsReceived uint64
-	PacketsWritten  uint64
-	BadPackets      uint64
-	BytesReceived   uint64
-	BytesWritten    uint64
+	PacketsReceived atomic.Uint64
+	PacketsWritten  atomic.Uint64
+	BadPackets      atomic.Uint64
+	BytesReceived   atomic.Uint64
+	BytesWritten    atomic.Uint64
 
-	VideoPacketCount uint64
-	AudioPacketCount uint64
-	DataPacketCount  uint64
+	VideoPacketCount atomic.Uint64
+	AudioPacketCount atomic.Uint64
+	DataPacketCount  atomic.Uint64
 
-	FirstPCR    uint64 // First seen PCR value
-	LastPCR     uint64 // Last seen PCR value
-	NumSegments int64
+	FirstPCR    atomic.Uint64 // First seen PCR value
+	LastPCR     atomic.Uint64 // Last seen PCR value
+	NumSegments atomic.Int64
 
 	// Errors in the continuity counter
-	ErrorsCC                uint64
+	ErrorsCC                atomic.Uint64
+	ErrorsAdapationField    atomic.Uint64
+	ErrorsOther             atomic.Uint64
+	ErrorsIncompletePackets atomic.Uint64
+	ErrorsOpeningOutput     atomic.Uint64
+	ErrorsWriting           atomic.Uint64
 	ErrorsCCByPid           map[int]uint64
-	ErrorsAdapationField    uint64
-	ErrorsOther             uint64
-	ErrorsIncompletePackets uint64
-	ErrorsOpeningOutput     uint64
-	ErrorsWriting           uint64
 }
 
 func NewTSStats() *TSStats {
@@ -98,17 +100,13 @@ func (mpp *MpegtsPacketProcessor) ProcessPackets(packets []byte) {
 		mpp.HandlePacket(p)
 	}
 	if len(packets)%188 != 0 {
-		mpp.statsMu.Lock()
-		mpp.stats.ErrorsIncompletePackets++
-		mpp.statsMu.Unlock()
+		mpp.stats.ErrorsIncompletePackets.Inc()
 	}
 }
 
 func (mpp *MpegtsPacketProcessor) HandlePacket(pkt packet.Packet) {
-	mpp.statsMu.Lock()
-	mpp.stats.PacketsReceived++
-	mpp.stats.BytesReceived += uint64(len(pkt))
-	mpp.statsMu.Unlock()
+	mpp.stats.PacketsReceived.Inc()
+	mpp.stats.BytesReceived.Add(uint64(len(pkt)))
 
 	mpp.checkContinuityCounter(pkt)
 	mpp.updatePCR(pkt)
@@ -172,7 +170,7 @@ func (mpp *MpegtsPacketProcessor) checkContinuityCounter(pkt packet.Packet) {
 
 	if exists && cc != (lastCC+1)%16 {
 		mpp.statsMu.Lock()
-		mpp.stats.ErrorsCC++
+		mpp.stats.ErrorsCC.Inc()
 		if _, ok := mpp.stats.ErrorsCCByPid[pid]; !ok {
 			mpp.stats.ErrorsCCByPid[pid] = 1
 		} else {
@@ -187,15 +185,12 @@ func (mpp *MpegtsPacketProcessor) updatePCR(pkt packet.Packet) {
 		return
 	}
 
-	mpp.statsMu.Lock()
-	defer mpp.statsMu.Unlock()
-
 	// Cannot fail as we already checked for adaptation field
 	a, _ := pkt.AdaptationField()
 
 	hasPcr, err := a.HasPCR()
 	if err != nil {
-		mpp.stats.ErrorsAdapationField++
+		mpp.stats.ErrorsAdapationField.Inc()
 		return
 	} else if !hasPcr {
 		return
@@ -203,20 +198,18 @@ func (mpp *MpegtsPacketProcessor) updatePCR(pkt packet.Packet) {
 
 	pcr, err := a.PCR()
 	if err != nil {
-		mpp.stats.ErrorsAdapationField++
+		mpp.stats.ErrorsAdapationField.Inc()
 		return
 	}
 	mpp.pcr = pcr
 
-	if mpp.stats.FirstPCR == 0 {
-		mpp.stats.FirstPCR = mpp.pcr
-	}
-	mpp.stats.LastPCR = mpp.pcr
+	mpp.stats.FirstPCR.CompareAndSwap(0, mpp.pcr)
+	mpp.stats.LastPCR.Store(mpp.pcr)
 }
 
 func (mpp *MpegtsPacketProcessor) writePacket(pkt packet.Packet) {
 	if mpp.currentWc == nil {
-		if mpp.stats.ErrorsOpeningOutput > 50 {
+		if mpp.stats.ErrorsOpeningOutput.Load() > 50 {
 			return
 		}
 
@@ -245,14 +238,12 @@ func (mpp *MpegtsPacketProcessor) writePacket(pkt packet.Packet) {
 
 	s3 := time.Now()
 
-	mpp.statsMu.Lock()
-	defer mpp.statsMu.Unlock()
 	if err != nil {
-		mpp.stats.ErrorsWriting++
+		mpp.stats.ErrorsWriting.Inc()
 		return
 	}
-	mpp.stats.PacketsWritten++
-	mpp.stats.BytesWritten += uint64(n)
+	mpp.stats.PacketsWritten.Inc()
+	mpp.stats.BytesWritten.Add(uint64(n))
 
 	s4 := time.Now()
 	if s4.Sub(s1) > 50*time.Millisecond {
@@ -280,17 +271,15 @@ func (mpp *MpegtsPacketProcessor) openNextOutput() error {
 	closeDone = time.Now()
 
 	wc, err := mpp.opener.OpenNext()
-	mpp.statsMu.Lock()
-	defer mpp.statsMu.Unlock()
 	if err != nil {
 		mpegtslog.Error("Failed to open next segment", "err", err)
-		mpp.stats.ErrorsOpeningOutput++
-		if mpp.stats.ErrorsOpeningOutput > 50 {
+		mpp.stats.ErrorsOpeningOutput.Inc()
+		if mpp.stats.ErrorsOpeningOutput.Load() > 50 {
 			mpegtslog.Fatal("Too many errors opening output segments, giving up attempts")
 		}
 		return err
 	}
-	mpp.stats.NumSegments++
+	mpp.stats.NumSegments.Inc()
 	mpp.currentWc = wc
 	mpp.segStartPcr = mpp.pcr
 	return nil
