@@ -9,7 +9,7 @@ import (
 	"io"
 	"os"
 
-	"github.com/Comcast/gots/v2/packet"
+	"github.com/Comcast/gots/packet"
 	"github.com/eluv-io/avpipe/live"
 	"github.com/eluv-io/avpipe/ts"
 	"github.com/eluv-io/log-go"
