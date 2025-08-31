@@ -256,7 +256,6 @@ func (mpp *MpegtsPacketProcessor) writePacket(pkt packet.Packet) {
 		}
 	}
 
-	s1 := time.Now()
 	curCloseToZero := PcrTs*30 > mpp.pcr
 	prevCloseToMax := PcrMax-(PcrTs*60) < mpp.segStartPcr
 	pcrWrapped := prevCloseToMax && curCloseToZero
@@ -276,11 +275,7 @@ func (mpp *MpegtsPacketProcessor) writePacket(pkt packet.Packet) {
 		}
 	}
 
-	s2 := time.Now()
-
 	n, err := mpp.currentWc.Write(pkt[:])
-
-	s3 := time.Now()
 
 	if err != nil {
 		mpp.stats.ErrorsWriting.Inc()
@@ -288,11 +283,6 @@ func (mpp *MpegtsPacketProcessor) writePacket(pkt packet.Packet) {
 	}
 	mpp.stats.PacketsWritten.Inc()
 	mpp.stats.BytesWritten.Add(uint64(n))
-
-	s4 := time.Now()
-	if s4.Sub(s1) > 50*time.Millisecond {
-		mpegtslog.Warn("MPEGTS writePacket took too long", "s1", s4.Sub(s1), "s2", s4.Sub(s2), "s3", s4.Sub(s3))
-	}
 }
 
 func (mpp *MpegtsPacketProcessor) openNextOutput() error {

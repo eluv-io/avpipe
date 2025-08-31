@@ -211,12 +211,7 @@ func (mih *mpegtsInputHandler) ReaderLoop(ch chan []byte, packetsDropped *atomic
 			goavpipe.Log.Trace("Processed packets", "count", nPackets, "chan size", len(ch), "chan cap", cap(ch))
 		}
 
-		startProcessing := time.Now()
 		ts.ProcessPackets(buf)
-		processingDur := time.Since(startProcessing)
-		if processingDur > 50*time.Millisecond {
-			goavpipe.Log.Warn("MPEGTS processing took too long", "duration", processingDur, "bufsize", len(buf))
-		}
 	}
 }
 
