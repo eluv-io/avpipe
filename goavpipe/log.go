@@ -1,4 +1,4 @@
-package avpipe
+package goavpipe
 
 import (
 	"bytes"
@@ -51,7 +51,7 @@ func (l *logWrapper) Fatal(msg string, fields ...interface{}) {
 	l.log.Fatal(msg, fields...)
 }
 
-var log = logWrapper{log: elog.Get("/avpipe")}
+var Log = logWrapper{log: elog.Get("/avpipe")}
 
 // gidHandleMap associates go routine ID with a handle
 var gidHandleMap sync.Map = sync.Map{}
@@ -133,7 +133,7 @@ func RegisterWarnErrChanForHandle(handle *int32, errChan chan string) {
 	gidHandleMap.Store(gid, *handle)
 	handleChanMapMu.Lock()
 	if _, ok := handleChanMap[*handle]; ok {
-		log.Warn("RegisterErrorChanForHandle: handle already registered with channel", "handle", *handle)
+		Log.Warn("RegisterErrorChanForHandle: handle already registered with channel", "handle", *handle)
 	}
 	handleChanMap[*handle] = errChan
 	handleChanMapMu.Unlock()

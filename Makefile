@@ -18,6 +18,9 @@ all install: check-env
 
 dynamic: all
 
+goclean: clean
+	@go clean -modcache -cache -testcache -i -r
+
 clean: lclean
 	@for dir in $(SUBDIRS); do \
 	echo "Making $@ in $$dir..."; \

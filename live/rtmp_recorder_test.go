@@ -50,7 +50,7 @@ func TestRtmpToMp4_1(t *testing.T) {
 	reqCtx := &testCtx{url: url}
 	putReqCtxByURL(url, reqCtx)
 
-	avpipe.InitIOHandler(&inputOpener{dir: outputDir}, &outputOpener{dir: outputDir})
+	goavpipe.InitIOHandler(&inputOpener{dir: outputDir}, &outputOpener{dir: outputDir})
 
 	go func() {
 		tlog.Info("Transcoding RTMP stream start", "params", fmt.Sprintf("%+v", *xcParams))
@@ -170,7 +170,7 @@ func TestRtmpToMp4WithCancelling0(t *testing.T) {
 	reqCtx := &testCtx{url: url}
 	putReqCtxByURL(url, reqCtx)
 
-	avpipe.InitIOHandler(&inputOpener{dir: outputDir}, &outputOpener{dir: outputDir})
+	goavpipe.InitIOHandler(&inputOpener{dir: outputDir}, &outputOpener{dir: outputDir})
 
 	var handle int32
 	var err error
@@ -240,7 +240,7 @@ func TestRtmpToMp4WithCancelling1(t *testing.T) {
 	reqCtx := &testCtx{url: url}
 	putReqCtxByURL(url, reqCtx)
 
-	avpipe.InitIOHandler(&inputOpener{dir: outputDir}, &outputOpener{dir: outputDir})
+	goavpipe.InitIOHandler(&inputOpener{dir: outputDir}, &outputOpener{dir: outputDir})
 
 	var handle int32
 	var err error
@@ -310,7 +310,7 @@ func TestRtmpToMp4WithCancelling2(t *testing.T) {
 	reqCtx := &testCtx{url: url}
 	putReqCtxByURL(url, reqCtx)
 
-	avpipe.InitIOHandler(&inputOpener{dir: outputDir}, &outputOpener{dir: outputDir})
+	goavpipe.InitIOHandler(&inputOpener{dir: outputDir}, &outputOpener{dir: outputDir})
 
 	var handle int32
 	var err error
@@ -389,7 +389,7 @@ func TestRtmpToMp4WithCancelling3(t *testing.T) {
 	reqCtx := &testCtx{url: url}
 	putReqCtxByURL(url, reqCtx)
 
-	avpipe.InitIOHandler(&inputOpener{dir: outputDir}, &outputOpener{dir: outputDir})
+	goavpipe.InitIOHandler(&inputOpener{dir: outputDir}, &outputOpener{dir: outputDir})
 
 	var handle int32
 	var err error
@@ -471,7 +471,7 @@ func TestRtmpToMp4WithCancelling4(t *testing.T) {
 	reqCtx := &testCtx{url: url}
 	putReqCtxByURL(url, reqCtx)
 
-	avpipe.InitIOHandler(&inputOpener{dir: outputDir}, &outputOpener{dir: outputDir})
+	goavpipe.InitIOHandler(&inputOpener{dir: outputDir}, &outputOpener{dir: outputDir})
 
 	var handle int32
 	var err error

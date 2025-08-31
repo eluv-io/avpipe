@@ -194,6 +194,7 @@ check_input_stream(
             }
             break;
         case avp_proto_rtp:
+            // PENDING(SS) The custom live reader will strip RTP and this fails
             if (decoder_context->format_context->priv_data) {
                 int64_t payload_type;
                 rc = av_opt_get_int(decoder_context->format_context->priv_data, "payload_type", 0, &payload_type);
@@ -282,6 +283,11 @@ prepare_decoder(
             // No special timeout options
             break;
         }
+    }
+
+    if (is_live_source(decoder_context)) {
+        av_dict_set(&opts, "probesize", "100M", 0);  // bytes
+        av_dict_set(&opts, "analyzeduration", "10000000", 0);  // microseconds
     }
 
     /* Allocate AVFormatContext in format_context and find input file format */
@@ -4413,7 +4419,9 @@ log_params(
         "rotate=%d "
         "profile=%s "
         "level=%d "
-        "deinterlace=%d",
+        "deinterlace=%d "
+        "use_preprocessed_input=%d "
+        "copy_mpegts=%d",
         params->stream_id, params->url,
         avpipe_version(),
         params->bypass_transcoding, params->skip_decoding,
@@ -4437,7 +4445,8 @@ log_params(
         params->filter_descriptor,
         params->extract_image_interval_ts, params->extract_images_sz,
         1, params->video_time_base, params->video_frame_duration_ts, params->rotate,
-        params->profile ? params->profile : "", params->level,  params->deinterlace);
+        params->profile ? params->profile : "", params->level,  params->deinterlace,
+        params->use_preprocessed_input, params->copy_mpegts);
     elv_log("AVPIPE XCPARAMS %s", buf);
 }
 

@@ -37,7 +37,7 @@ func TestProbeRTMPConnect(t *testing.T) {
 	reqCtx := &testCtx{url: url}
 	putReqCtxByURL(url, reqCtx)
 
-	avpipe.InitIOHandler(&inputOpener{}, &outputOpener{})
+	goavpipe.InitIOHandler(&inputOpener{}, &outputOpener{})
 
 	tlog.Info("Probing RTMP stream start", "params", fmt.Sprintf("%+v", *XCParams))
 	probeInfo, err := avpipe.Probe(XCParams)
@@ -79,7 +79,7 @@ func TestProbeRTMPListen(t *testing.T) {
 	reqCtx := &testCtx{url: url}
 	putReqCtxByURL(url, reqCtx)
 
-	avpipe.InitIOHandler(&inputOpener{}, &outputOpener{})
+	goavpipe.InitIOHandler(&inputOpener{}, &outputOpener{})
 
 	done := make(chan bool, 1)
 	var probeInfo *avpipe.ProbeInfo
@@ -131,7 +131,7 @@ func TestProbeRTMPNoStream(t *testing.T) {
 	reqCtx := &testCtx{url: url}
 	putReqCtxByURL(url, reqCtx)
 
-	avpipe.InitIOHandler(&inputOpener{}, &outputOpener{})
+	goavpipe.InitIOHandler(&inputOpener{}, &outputOpener{})
 
 	tlog.Info("Probing RTMP stream start", "params", fmt.Sprintf("%+v", *XCParams))
 	probeInfo, err := avpipe.Probe(XCParams)
@@ -168,7 +168,7 @@ func TestProbeUDPConnect(t *testing.T) {
 	reqCtx := &testCtx{url: url}
 	putReqCtxByURL(url, reqCtx)
 
-	avpipe.InitIOHandler(&inputOpener{}, &outputOpener{})
+	goavpipe.InitIOHandler(&inputOpener{}, &outputOpener{})
 
 	tlog.Info("Probing MPEGTS stream start", "params", fmt.Sprintf("%+v", *XCParams))
 	probeInfo, err := avpipe.Probe(XCParams)
@@ -209,7 +209,7 @@ func TestProbeUDPListen(t *testing.T) {
 	reqCtx := &testCtx{url: url}
 	putReqCtxByURL(url, reqCtx)
 
-	avpipe.InitIOHandler(&inputOpener{}, &outputOpener{})
+	goavpipe.InitIOHandler(&inputOpener{}, &outputOpener{})
 
 	done := make(chan bool, 1)
 	var probeInfo *avpipe.ProbeInfo
@@ -262,7 +262,7 @@ func TestProbeUDPNoStream(t *testing.T) {
 	reqCtx := &testCtx{url: url}
 	putReqCtxByURL(url, reqCtx)
 
-	avpipe.InitIOHandler(&inputOpener{}, &outputOpener{})
+	goavpipe.InitIOHandler(&inputOpener{}, &outputOpener{})
 
 	tlog.Info("Probing MPEGTS stream start", "params", fmt.Sprintf("%+v", *XCParams))
 	probeInfo, err := avpipe.Probe(XCParams)

@@ -13,12 +13,12 @@ import (
 	"github.com/spf13/cobra"
 )
 
-// elvxcInputOpener implements avpipe.InputOpener
+// elvxcInputOpener implements goavpipe.InputOpener
 type elvxcInputOpener struct {
 	url string
 }
 
-func (io *elvxcInputOpener) Open(fd int64, url string) (avpipe.InputHandler, error) {
+func (io *elvxcInputOpener) Open(fd int64, url string) (goavpipe.InputHandler, error) {
 	log.Debug("AVCMD InputOpener.Open", "fd", fd, "url", url)
 
 	switch {
@@ -46,31 +46,31 @@ func (io *noopElvxcInput) Read(buf []byte) (int, error)                 { return
 func (io *noopElvxcInput) Seek(offset int64, whence int) (int64, error) { return 0, nil }
 func (io *noopElvxcInput) Close() error                                 { return nil }
 func (io *noopElvxcInput) Size() int64                                  { return 0 }
-func (i *noopElvxcInput) Stat(streamIndex int, statType avpipe.AVStatType, statArgs interface{}) error {
+func (i *noopElvxcInput) Stat(streamIndex int, statType goavpipe.AVStatType, statArgs interface{}) error {
 	switch statType {
-	case avpipe.AV_IN_STAT_BYTES_READ:
+	case goavpipe.AV_IN_STAT_BYTES_READ:
 		readOffset := statArgs.(*uint64)
 		log.Info("AVCMD InputHandler.Stat", "read offset", *readOffset, "streamIndex", streamIndex)
-	case avpipe.AV_IN_STAT_AUDIO_FRAME_READ:
+	case goavpipe.AV_IN_STAT_AUDIO_FRAME_READ:
 		audioFrameRead := statArgs.(*uint64)
 		log.Info("AVCMD InputHandler.Stat", "audioFrameRead", *audioFrameRead, "streamIndex", streamIndex)
-	case avpipe.AV_IN_STAT_VIDEO_FRAME_READ:
+	case goavpipe.AV_IN_STAT_VIDEO_FRAME_READ:
 		videoFrameRead := statArgs.(*uint64)
 		log.Info("AVCMD InputHandler.Stat", "videoFrameRead", *videoFrameRead, "streamIndex", streamIndex)
-	case avpipe.AV_IN_STAT_DECODING_AUDIO_START_PTS:
+	case goavpipe.AV_IN_STAT_DECODING_AUDIO_START_PTS:
 		startPTS := statArgs.(*uint64)
 		log.Info("AVCMD InputHandler.Stat", "audio start PTS", *startPTS, "streamIndex", streamIndex)
-	case avpipe.AV_IN_STAT_DECODING_VIDEO_START_PTS:
+	case goavpipe.AV_IN_STAT_DECODING_VIDEO_START_PTS:
 		startPTS := statArgs.(*uint64)
 		log.Info("AVCMD InputHandler.Stat", "video start PTS", *startPTS, "streamIndex", streamIndex)
-	case avpipe.AV_IN_STAT_DATA_SCTE35:
+	case goavpipe.AV_IN_STAT_DATA_SCTE35:
 		log.Info("AVCMD InputHandler.Stat", "scte35", statArgs, "streamIndex", streamIndex)
 	}
 
 	return nil
 }
 
-// elvxcInput implements avpipe.InputHandler
+// elvxcInput implements goavpipe.InputHandler
 type elvxcInput struct {
 	url  string
 	file *os.File // Input file
@@ -113,24 +113,24 @@ func (i *elvxcInput) Size() int64 {
 	return fi.Size()
 }
 
-func (i *elvxcInput) Stat(streamIndex int, statType avpipe.AVStatType, statArgs interface{}) error {
+func (i *elvxcInput) Stat(streamIndex int, statType goavpipe.AVStatType, statArgs interface{}) error {
 	switch statType {
-	case avpipe.AV_IN_STAT_BYTES_READ:
+	case goavpipe.AV_IN_STAT_BYTES_READ:
 		readOffset := statArgs.(*uint64)
 		log.Info("AVCMD InputHandler.Stat", "read offset", *readOffset, "streamIndex", streamIndex)
-	case avpipe.AV_IN_STAT_AUDIO_FRAME_READ:
+	case goavpipe.AV_IN_STAT_AUDIO_FRAME_READ:
 		audioFrameRead := statArgs.(*uint64)
 		log.Info("AVCMD InputHandler.Stat", "audioFrameRead", *audioFrameRead, "streamIndex", streamIndex)
-	case avpipe.AV_IN_STAT_VIDEO_FRAME_READ:
+	case goavpipe.AV_IN_STAT_VIDEO_FRAME_READ:
 		videoFrameRead := statArgs.(*uint64)
 		log.Info("AVCMD InputHandler.Stat", "videoFrameRead", *videoFrameRead, "streamIndex", streamIndex)
-	case avpipe.AV_IN_STAT_DECODING_AUDIO_START_PTS:
+	case goavpipe.AV_IN_STAT_DECODING_AUDIO_START_PTS:
 		startPTS := statArgs.(*uint64)
 		log.Info("AVCMD InputHandler.Stat", "audio start PTS", *startPTS, "streamIndex", streamIndex)
-	case avpipe.AV_IN_STAT_DECODING_VIDEO_START_PTS:
+	case goavpipe.AV_IN_STAT_DECODING_VIDEO_START_PTS:
 		startPTS := statArgs.(*uint64)
 		log.Info("AVCMD InputHandler.Stat", "video start PTS", *startPTS, "streamIndex", streamIndex)
-	case avpipe.AV_IN_STAT_DATA_SCTE35:
+	case goavpipe.AV_IN_STAT_DATA_SCTE35:
 		log.Info("AVCMD InputHandler.Stat", "scte35", statArgs, "streamIndex", streamIndex)
 	}
 
@@ -143,7 +143,7 @@ type elvxcOutputOpener struct {
 }
 
 func (oo *elvxcOutputOpener) Open(h, fd int64, stream_index, seg_index int,
-	pts int64, out_type goavpipe.AVType) (avpipe.OutputHandler, error) {
+	pts int64, out_type goavpipe.AVType) (goavpipe.OutputHandler, error) {
 
 	log.Debug("AVCMD OutputOpener.Open", "h", h, "fd", fd,
 		"stream_index", stream_index, "seg_index", seg_index, "pts", pts, "out_type", out_type)
@@ -229,7 +229,7 @@ func (o *elvxcOutput) Close() error {
 	return err
 }
 
-func (o *elvxcOutput) Stat(streamIndex int, avType goavpipe.AVType, statType avpipe.AVStatType, statArgs interface{}) error {
+func (o *elvxcOutput) Stat(streamIndex int, avType goavpipe.AVType, statType goavpipe.AVStatType, statArgs interface{}) error {
 	doLog := func(args ...interface{}) {
 		logArgs := []interface{}{"stat", statType.Name(), "avType", avType.Name(), "streamIndex", streamIndex}
 		logArgs = append(logArgs, args...)
@@ -237,19 +237,19 @@ func (o *elvxcOutput) Stat(streamIndex int, avType goavpipe.AVType, statType avp
 	}
 
 	switch statType {
-	case avpipe.AV_OUT_STAT_BYTES_WRITTEN:
+	case goavpipe.AV_OUT_STAT_BYTES_WRITTEN:
 		writeOffset := statArgs.(*uint64)
 		doLog("write offset", *writeOffset)
-	case avpipe.AV_OUT_STAT_ENCODING_END_PTS:
+	case goavpipe.AV_OUT_STAT_ENCODING_END_PTS:
 		endPTS := statArgs.(*uint64)
 		doLog("endPTS", *endPTS)
-	case avpipe.AV_OUT_STAT_START_FILE:
+	case goavpipe.AV_OUT_STAT_START_FILE:
 		segIdx := statArgs.(*int)
 		doLog("segIdx", *segIdx)
-	case avpipe.AV_OUT_STAT_END_FILE:
+	case goavpipe.AV_OUT_STAT_END_FILE:
 		segIdx := statArgs.(*int)
 		doLog("segIdx", *segIdx)
-	case avpipe.AV_OUT_STAT_FRAME_WRITTEN:
+	case goavpipe.AV_OUT_STAT_FRAME_WRITTEN:
 		encodingStats := statArgs.(*avpipe.EncodingFrameStats)
 		doLog("encodingStats", encodingStats)
 	}
@@ -369,7 +369,9 @@ func InitTranscode(cmdRoot *cobra.Command) error {
 	cmdTranscode.PersistentFlags().StringP("profile", "", "", "Encoding profile for video. If it is not determined, it will be set automatically.")
 	cmdTranscode.PersistentFlags().Int32("level", 0, "Encoding level for video. If it is not determined, it will be set automatically.")
 	cmdTranscode.PersistentFlags().Int32("deinterlace", 0, "Deinterlace filter (values 0 - none, 1 - bwdif_field, 2 - bwdif_frame send_frame).")
-	cmdTranscode.PersistentFlags().Bool("copy-mpegts", false, "Create a copy of the MPEGTS input (for MPEGTS, SRT, RTP)")
+	cmdTranscode.PersistentFlags().Bool("use-custom-live-reader", false, "Read live media via a custom reader instead of using libavformat")
+	cmdTranscode.PersistentFlags().Bool("copy-mpegts", false, "Create an MPEGTS output (for MPEGTS, SRT, RTP)")
+	cmdTranscode.PersistentFlags().Bool("copy-mpegts-from-input", false, "Create a copy of the MPEGTS input (for MPEGTS, SRT, RTP)")
 
 	return nil
 }
@@ -660,7 +662,17 @@ func doTranscode(cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("Invalid deinterlace value")
 	}
 
+	useCustomLiveReader, err := cmd.Flags().GetBool("use-custom-live-reader")
+	if err != nil {
+		return fmt.Errorf("Invalid copy-mpegts value")
+	}
+
 	copyMpegts, err := cmd.Flags().GetBool("copy-mpegts")
+	if err != nil {
+		return fmt.Errorf("Invalid copy-mpegts value")
+	}
+
+	copyMpegtsFromInput, err := cmd.Flags().GetBool("copy-mpegts-from-input")
 	if err != nil {
 		return fmt.Errorf("Invalid copy-mpegts value")
 	}
@@ -729,7 +741,9 @@ func doTranscode(cmd *cobra.Command, args []string) error {
 		CryptKeyURL:            cryptKeyURL,
 		CryptScheme:            cryptScheme,
 		XcType:                 xcType,
+		UseCustomLiveReader:    useCustomLiveReader,
 		CopyMpegts:             copyMpegts,
+		CopyMpegtsFromInput:    copyMpegtsFromInput,
 		WatermarkTimecode:      watermarkTimecode,
 		WatermarkTimecodeRate:  watermarkTimecodeRate,
 		WatermarkText:          watermarkText,
@@ -779,16 +793,23 @@ func doTranscode(cmd *cobra.Command, args []string) error {
 		return err
 	}
 
-	avpipe.InitIOHandler(&elvxcInputOpener{url: filename}, &elvxcOutputOpener{dir: dir})
+	// The global input opener is used for stats - if not set, some handlers will fail (eg. mpegts Open)
+	goavpipe.InitIOHandler(&elvxcInputOpener{url: filename}, nil)
 
+	outOpener := &elvxcOutputOpener{dir: dir}
 	done := make(chan interface{})
 
 	for i := 0; i < int(nThreads); i++ {
 		go func(params *goavpipe.XcParams, filename string) {
 
-			err := avpipe.Xc(params)
+			goavpipe.InitUrlIOHandlerIfNotPresent(filename, nil, outOpener)
+
+			handle, err := avpipe.XcInit(params)
+			log.Info("XcInit", "handle", handle, "err", err)
+
+			err = avpipe.Xc(params)
 			if err != nil {
-				done <- fmt.Errorf("Failed transcoding %s, err=%v", filename, err)
+				done <- fmt.Errorf("failed transcoding %s, err=%v", filename, err)
 			} else {
 				done <- nil
 			}

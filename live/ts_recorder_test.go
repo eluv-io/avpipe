@@ -53,7 +53,7 @@ func TestUdpToMp4(t *testing.T) {
 	reqCtx := &testCtx{url: url}
 	putReqCtxByURL(url, reqCtx)
 
-	avpipe.InitIOHandler(&inputOpener{dir: outputDir}, &outputOpener{dir: outputDir})
+	goavpipe.InitIOHandler(&inputOpener{dir: outputDir}, &outputOpener{dir: outputDir})
 
 	tlog.Info("Transcoding UDP stream start", "params", fmt.Sprintf("%+v", *xcParams))
 	err = avpipe.Xc(xcParams)
@@ -158,7 +158,7 @@ func TestMultiAudioUdpToMp4(t *testing.T) {
 	reqCtx := &testCtx{url: url}
 	putReqCtxByURL(url, reqCtx)
 
-	avpipe.InitIOHandler(&inputOpener{dir: outputDir}, &outputOpener{dir: outputDir})
+	goavpipe.InitIOHandler(&inputOpener{dir: outputDir}, &outputOpener{dir: outputDir})
 
 	tlog.Info("Transcoding UDP stream multi audio start", "params", fmt.Sprintf("%+v", *xcParams))
 	err = avpipe.Xc(xcParams)
@@ -239,7 +239,7 @@ func TestUdpToMp4WithCancelling1(t *testing.T) {
 	reqCtx := &testCtx{url: url}
 	putReqCtxByURL(url, reqCtx)
 
-	avpipe.InitIOHandler(&inputOpener{dir: outputDir}, &outputOpener{dir: outputDir})
+	goavpipe.InitIOHandler(&inputOpener{dir: outputDir}, &outputOpener{dir: outputDir})
 
 	tlog.Info("Transcoding UDP stream start", "params", fmt.Sprintf("%+v", *xcParams))
 	handle, err := avpipe.XcInit(xcParams)
@@ -298,7 +298,7 @@ func TestUdpToMp4WithCancelling2(t *testing.T) {
 	reqCtx := &testCtx{url: url}
 	putReqCtxByURL(url, reqCtx)
 
-	avpipe.InitIOHandler(&inputOpener{dir: outputDir}, &outputOpener{dir: outputDir})
+	goavpipe.InitIOHandler(&inputOpener{dir: outputDir}, &outputOpener{dir: outputDir})
 
 	tlog.Info("Transcoding UDP stream start", "params", fmt.Sprintf("%+v", *xcParams))
 	handle, err := avpipe.XcInit(xcParams)
@@ -370,7 +370,7 @@ func TestUdpToMp4WithCancelling3(t *testing.T) {
 	reqCtx := &testCtx{url: url}
 	putReqCtxByURL(url, reqCtx)
 
-	avpipe.InitIOHandler(&inputOpener{dir: outputDir}, &outputOpener{dir: outputDir})
+	goavpipe.InitIOHandler(&inputOpener{dir: outputDir}, &outputOpener{dir: outputDir})
 
 	tlog.Info("Transcoding UDP stream start", "params", fmt.Sprintf("%+v", *xcParams))
 	handle, err := avpipe.XcInit(xcParams)
@@ -441,7 +441,7 @@ func TestUdpToMp4WithCancelling4(t *testing.T) {
 	reqCtx := &testCtx{url: url}
 	putReqCtxByURL(url, reqCtx)
 
-	avpipe.InitIOHandler(&inputOpener{dir: outputDir}, &outputOpener{dir: outputDir})
+	goavpipe.InitIOHandler(&inputOpener{dir: outputDir}, &outputOpener{dir: outputDir})
 	tlog.Info("Transcoding UDP stream start", "params", fmt.Sprintf("%+v", *xcParams))
 
 	handle, err := avpipe.XcInit(xcParams)
