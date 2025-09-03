@@ -7,7 +7,6 @@ import (
 	"strings"
 	"time"
 
-	"github.com/Comcast/gots/v2/packet"
 	"github.com/eluv-io/avpipe/broadcastproto/transport"
 	"github.com/eluv-io/avpipe/goavpipe"
 	"go.uber.org/atomic"
@@ -211,15 +210,12 @@ func (mih *mpegtsInputHandler) ReaderLoop(ch chan []byte, packetsDropped *atomic
 			goavpipe.Log.Trace("Processed packets", "count", nPackets, "chan size", len(ch), "chan cap", cap(ch))
 		}
 
-		ts.ProcessPackets(buf)
-	}
-}
+		switch transport.PackagingMode {
+		case transport.RawTs:
+			ts.ProcessPackets(buf)
+		case transport.RtpTs:
+			ts.ProcessRtpDatagram(buf)
+		}
 
-func ToTSPacket(data []byte) (packet.Packet, error) {
-	if len(data) < packet.PacketSize {
-		return packet.Packet{}, fmt.Errorf("not enough data for TS packet")
 	}
-	var pkt packet.Packet
-	copy(pkt[:], data[:packet.PacketSize])
-	return pkt, nil
 }

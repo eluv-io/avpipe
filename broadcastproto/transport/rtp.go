@@ -60,6 +60,10 @@ func (h *rtpHandler) Close() error {
 	return nil
 }
 
+// Read reads precisely one datagram and returns it fully if it fits in the requesting buffer,
+// or else partially, and returns the remainder in the next Read() call(s).  It only reads a new
+// datagram from the network once it has fully return the previous datagram.
+// SS thinking we might discard the rest of the datagram instead which is the standard OS behavior for datagrams
 func (h *rtpHandler) Read(p []byte) (int, error) {
 	if h.bufStart >= h.bufEnd {
 		err := h.readNewPacket()
@@ -82,13 +86,17 @@ func (h *rtpHandler) readNewPacket() error {
 	if err != nil {
 		return err
 	}
-	headerEnd, err := StripRTP(h.buf[:h.bufEnd])
-	if err != nil {
-		// TODO(Nate): Is this the best resolution here? Should we just try again at this layer? Or rely on caller to do so?
-		log.Warn("Failed to strip RTP header", "err", err)
-		return err
+
+	if PackagingMode == RawTs {
+		headerEnd, err := StripRTP(h.buf[:h.bufEnd])
+		if err != nil {
+			// TODO(Nate): Is this the best resolution here? Should we just try again at this layer? Or rely on caller to do so?
+			log.Warn("Failed to strip RTP header", "err", err)
+			return err
+		}
+		h.bufStart = headerEnd
 	}
-	h.bufStart = headerEnd
+
 	return nil
 }
 
@@ -167,4 +175,12 @@ func ParseRTPHeader(data []byte) (*RTPHeader, error) {
 	}
 
 	return header, nil
+}
+
+func ValidateRTPHeader(h *RTPHeader, flag int /* make enum */) (bool, error) {
+	if h.Version != 2 {
+		return false, fmt.Errorf("bad version (%d)", h.Version)
+	}
+
+	return true, nil
 }
