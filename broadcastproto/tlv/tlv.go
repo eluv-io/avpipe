@@ -1,4 +1,4 @@
-package pdu
+package tlv
 
 import (
 	"encoding/binary"
