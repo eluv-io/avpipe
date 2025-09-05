@@ -19,6 +19,7 @@ const U16MAX = 0xFFFF
 const (
 	TlvTypeUnknown TlvType = iota
 	TlvTypeRtpTs
+	// Currently, RawTS is NOT produced with a TLV header, as mpegts packets already have sync bytes.
 	TlvTypeRawTs
 )
 

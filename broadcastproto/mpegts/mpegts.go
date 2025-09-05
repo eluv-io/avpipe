@@ -358,10 +358,15 @@ func (mpp *MpegtsPacketProcessor) writeDatagram(datagram []byte) {
 		return
 	}
 
+	dataToWrite := datagram
+	if tlvType == tlv.TlvTypeRtpTs {
+		dataToWrite = append(tlvHeader, dataToWrite...)
+	}
+
 	startTime := time.Now()
 	// TODO: Decide if it is better to do 2 writes (header then data) or construct new slice
 	// Not sure if this is slow. I assume it compiles nicely
-	n, err := mpp.currentWc.Write(append(tlvHeader, datagram...))
+	n, err := mpp.currentWc.Write(dataToWrite)
 	dur := time.Since(startTime)
 	if dur > 50*time.Millisecond {
 		goavpipe.Log.Warn("mpegts write too slow", "dur", dur)
