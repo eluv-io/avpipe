@@ -1103,7 +1103,7 @@ func XcInit(params *goavpipe.XcParams) (int32, error) {
 	if params.InputCfg.BypassLibavReader {
 		var opener goavpipe.InputOpener
 		var err error
-		opener, err = mpegts.NewAutoInputOpener(params.Url, params.InputCfg, seqOpenerF)
+		opener, err = mpegts.NewAutoInputOpener(params.Url, &params.InputCfg, seqOpenerF)
 		if err != nil {
 			return -1, EAV_PARAM
 		}

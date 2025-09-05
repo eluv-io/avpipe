@@ -735,7 +735,7 @@ func doTranscode(cmd *cobra.Command, args []string) error {
 
 	params := &goavpipe.XcParams{
 		Url: filename,
-		InputCfg: &goavpipe.InputConfig{
+		InputCfg: goavpipe.InputConfig{
 			CopyMode:          copyMode,
 			CopyPackaging:     copyPackaging,
 			BypassLibavReader: bypassLibavReader,
