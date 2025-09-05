@@ -176,7 +176,9 @@ func (mpp *MpegtsPacketProcessor) ProcessDatagram(datagram []byte) {
 
 	if float64(badPackets)/float64(packetCount) > 0.5 {
 		// TODO: Should we put this in the rtp stats?
-		mpp.rtpStats.BadPacketCount.Inc()
+		if mpp.cfg.Packaging == transport.RtpTs {
+			mpp.rtpStats.BadPacketCount.Inc()
+		}
 		return
 	}
 
