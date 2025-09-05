@@ -127,6 +127,10 @@ func (mpp *MpegtsPacketProcessor) ProcessRtpDatagram(datagram []byte) {
 		mpp.updatePCR(pkt)
 	}
 
+	// Have a decision point about how many bad mpegts packets in order for entire packet to be bad
+	// if below threshold, send whole thing
+	// if above, drop whole thing
+
 	if mpp.pcr == 0 {
 		// Wait for at least one packet with PCR before writing
 		return

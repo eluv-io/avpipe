@@ -4,7 +4,6 @@ import (
 	"errors"
 	"fmt"
 	"io"
-	"strings"
 	"time"
 
 	"github.com/eluv-io/avpipe/broadcastproto/transport"
@@ -28,37 +27,39 @@ var _ goavpipe.InputOpener = (*mpegtsInputOpener)(nil)
 
 type SequentialOpenerFactory func(inFd int64) SequentialOpener
 
-var transportMap = map[string]func(string) transport.Transport{
-	"udp": transport.NewUDPTransport,
-	"srt": transport.NewSRTTransport,
-	"rtp": transport.NewRTPTransport,
-}
-
 // NewAutoInputOpener creates an InputOpener that automatically selects the transport based on the
 // URL scheme.
-func NewAutoInputOpener(url string, copyStream bool, seqOpener SequentialOpenerFactory) (goavpipe.InputOpener, error) {
-	var transport transport.Transport
-	for protoName, f := range transportMap {
-		if strings.HasPrefix(url, protoName+"://") {
-			transport = f(url)
-		}
+func NewAutoInputOpener(url string, cfg *goavpipe.InputConfig, seqOpener SequentialOpenerFactory) (goavpipe.InputOpener, error) {
+	var tp transport.Transport
+	if len(url) < 6 {
+		return nil, fmt.Errorf("url too short: %s", url)
 	}
-	if transport == nil {
+
+	switch url[:6] {
+	case "rtp://":
+		tp = transport.NewRTPTransport(url, cfg.CopyPackaging != transport.RtpTs)
+	case "udp://":
+		tp = transport.NewUDPTransport(url)
+	case "srt://":
+		tp = transport.NewSRTTransport(url)
+	}
+
+	if tp == nil {
 		return nil, fmt.Errorf("unsupported transport protocol: %s", url)
 	}
 
 	return &mpegtsInputOpener{
-		transport:  transport,
-		seqOpener:  seqOpener,
-		copyStream: copyStream,
+		transport: tp,
+		seqOpener: seqOpener,
+		cfg:       cfg,
 	}, nil
 }
 
 type mpegtsInputOpener struct {
 	transport transport.Transport
 
-	seqOpener  SequentialOpenerFactory
-	copyStream bool
+	seqOpener SequentialOpenerFactory
+	cfg       *goavpipe.InputConfig
 }
 
 func (mio *mpegtsInputOpener) Open(fd int64, url string) (goavpipe.InputHandler, error) {
@@ -82,7 +83,8 @@ func (mio *mpegtsInputOpener) Open(fd int64, url string) (goavpipe.InputHandler,
 
 	var ch chan []byte
 
-	if mio.copyStream {
+	copyStream := mio.cfg.CopyMode == goavpipe.CopyModeRaw
+	if copyStream {
 		ch = make(chan []byte, 20*1024)
 	}
 
@@ -90,14 +92,14 @@ func (mio *mpegtsInputOpener) Open(fd int64, url string) (goavpipe.InputHandler,
 		rc:               rc,
 		transport:        mio.transport,
 		seqOpener:        mio.seqOpener(fd),
-		copyStream:       mio.copyStream,
+		copyStream:       copyStream,
 		outputSplit:      ch,
 		readerLoopDoneCh: make(chan struct{}),
 		inFd:             fd,
 		gih:              gih,
 	}
 
-	if mio.copyStream {
+	if copyStream {
 		go func() {
 			handle, ok := goavpipe.GIDHandle()
 			if ok {

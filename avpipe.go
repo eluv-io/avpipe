@@ -1104,13 +1104,13 @@ func XcInit(params *goavpipe.XcParams) (int32, error) {
 		var opener goavpipe.InputOpener
 		var err error
 		if params.CopyMpegtsFromInput {
-			opener, err = mpegts.NewAutoInputOpener(params.Url, true, seqOpenerF)
+			opener, err = mpegts.NewAutoInputOpener(params.Url, params.InputCfg, seqOpenerF)
 			if params.CopyMpegts {
 				goavpipe.Log.Warn("XcInit() CopyMpegts is set, but CopyMpegtsFromInput is also set", "url", params.Url)
 				params.CopyMpegts = false
 			}
 		} else {
-			opener, err = mpegts.NewAutoInputOpener(params.Url, false, seqOpenerF)
+			opener, err = mpegts.NewAutoInputOpener(params.Url, params.InputCfg, seqOpenerF)
 		}
 		if err != nil {
 			return -1, EAV_PARAM

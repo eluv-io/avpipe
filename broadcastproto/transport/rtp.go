@@ -11,12 +11,19 @@ import (
 const maxUDPPacketSize = 1<<16 - 1
 
 type rtpProto struct {
-	Url string
+	Url  string
+	Mode TsPackagingMode
 }
 
-func NewRTPTransport(url string) Transport {
+func NewRTPTransport(url string, stripHeader bool) Transport {
 	log.Debug("Creating new RTP transport", "url", url)
-	return &rtpProto{Url: url}
+	var packagingMode TsPackagingMode
+	if stripHeader {
+		packagingMode = RawTs
+	} else {
+		packagingMode = RtpTs
+	}
+	return &rtpProto{Url: url, Mode: packagingMode}
 }
 
 func (r *rtpProto) URL() string {
@@ -25,6 +32,10 @@ func (r *rtpProto) URL() string {
 
 func (r *rtpProto) Handler() string {
 	return "rtp"
+}
+
+func (r *rtpProto) PackagingMode() TsPackagingMode {
+	return r.Mode
 }
 
 func (r *rtpProto) Open() (io.ReadCloser, error) {
@@ -41,6 +52,7 @@ func (r *rtpProto) Open() (io.ReadCloser, error) {
 
 	return &rtpHandler{
 		buf:     make([]byte, maxUDPPacketSize),
+		Mode:    r.Mode,
 		udpConn: udpConn,
 	}, nil
 }
@@ -49,6 +61,8 @@ type rtpHandler struct {
 	buf      []byte
 	bufStart int
 	bufEnd   int
+
+	Mode TsPackagingMode
 
 	udpConn *net.UDPConn
 }
@@ -87,7 +101,7 @@ func (h *rtpHandler) readNewPacket() error {
 		return err
 	}
 
-	if PackagingMode == RawTs {
+	if h.Mode == RawTs {
 		headerEnd, err := StripRTP(h.buf[:h.bufEnd])
 		if err != nil {
 			// TODO(Nate): Is this the best resolution here? Should we just try again at this layer? Or rely on caller to do so?
@@ -166,6 +180,9 @@ func ParseRTPHeader(data []byte) (*RTPHeader, error) {
 	if len(data) < baseHeaderSize+lenCSRC {
 		return nil, fmt.Errorf("RTP packet too short for CSRCs: expected at least %d bytes, got %d", baseHeaderSize+lenCSRC, len(data))
 	}
+	if header.Version != 2 {
+		return nil, fmt.Errorf("unsupported RTP version: %d", header.Version)
+	}
 	if header.Extension {
 		extLen := binary.BigEndian.Uint16(data[baseHeaderSize+lenCSRC+2 : baseHeaderSize+lenCSRC+4]) // Read extension length
 		header.ExtensionByteCount = (int(extLen) * 4) + 4                                            // 4 bytes for the extension header
@@ -175,12 +192,4 @@ func ParseRTPHeader(data []byte) (*RTPHeader, error) {
 	}
 
 	return header, nil
-}
-
-func ValidateRTPHeader(h *RTPHeader, flag int /* make enum */) (bool, error) {
-	if h.Version != 2 {
-		return false, fmt.Errorf("bad version (%d)", h.Version)
-	}
-
-	return true, nil
 }
