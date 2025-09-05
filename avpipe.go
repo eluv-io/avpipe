@@ -855,11 +855,11 @@ func getCParams(params *goavpipe.XcParams) (*C.xcparams_t, error) {
 		cparams.force_equal_fduration = C.int(1)
 	}
 
-	if params.CopyMpegts {
+	if params.InputCfg.CopyMode == goavpipe.CopyModeRemuxed {
 		cparams.copy_mpegts = C.int(1)
 	}
 
-	if params.UseCustomLiveReader {
+	if params.InputCfg.BypassLibavReader {
 		cparams.use_preprocessed_input = C.int(1)
 	}
 
@@ -1100,18 +1100,10 @@ func XcInit(params *goavpipe.XcParams) (int32, error) {
 	}
 
 	// Here we should setup the input opener if specified by the params
-	if params.UseCustomLiveReader {
+	if params.InputCfg.BypassLibavReader {
 		var opener goavpipe.InputOpener
 		var err error
-		if params.CopyMpegtsFromInput {
-			opener, err = mpegts.NewAutoInputOpener(params.Url, params.InputCfg, seqOpenerF)
-			if params.CopyMpegts {
-				goavpipe.Log.Warn("XcInit() CopyMpegts is set, but CopyMpegtsFromInput is also set", "url", params.Url)
-				params.CopyMpegts = false
-			}
-		} else {
-			opener, err = mpegts.NewAutoInputOpener(params.Url, params.InputCfg, seqOpenerF)
-		}
+		opener, err = mpegts.NewAutoInputOpener(params.Url, params.InputCfg, seqOpenerF)
 		if err != nil {
 			return -1, EAV_PARAM
 		}
