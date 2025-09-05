@@ -9,6 +9,7 @@ import (
 	"strings"
 
 	"github.com/eluv-io/avpipe"
+	"github.com/eluv-io/avpipe/broadcastproto/transport"
 	"github.com/eluv-io/avpipe/goavpipe"
 	"github.com/spf13/cobra"
 )
@@ -369,9 +370,9 @@ func InitTranscode(cmdRoot *cobra.Command) error {
 	cmdTranscode.PersistentFlags().StringP("profile", "", "", "Encoding profile for video. If it is not determined, it will be set automatically.")
 	cmdTranscode.PersistentFlags().Int32("level", 0, "Encoding level for video. If it is not determined, it will be set automatically.")
 	cmdTranscode.PersistentFlags().Int32("deinterlace", 0, "Deinterlace filter (values 0 - none, 1 - bwdif_field, 2 - bwdif_frame send_frame).")
-	cmdTranscode.PersistentFlags().Bool("use-custom-live-reader", false, "Read live media via a custom reader instead of using libavformat")
-	cmdTranscode.PersistentFlags().Bool("copy-mpegts", false, "Create an MPEGTS output (for MPEGTS, SRT, RTP)")
-	cmdTranscode.PersistentFlags().Bool("copy-mpegts-from-input", false, "Create a copy of the MPEGTS input (for MPEGTS, SRT, RTP)")
+	cmdTranscode.PersistentFlags().Bool("bypass-libav-reader", false, "Read live media input directly instead of using libavformat")
+	cmdTranscode.PersistentFlags().String("copy-mode", "none", "Create a copy of the input: 'none' 'raw' 'remuxed'")
+	cmdTranscode.PersistentFlags().String("copy-packaging", "", "Format of the copy of the input: 'raw_ts' 'rtp_ts'")
 
 	return nil
 }
@@ -662,19 +663,39 @@ func doTranscode(cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("Invalid deinterlace value")
 	}
 
-	useCustomLiveReader, err := cmd.Flags().GetBool("use-custom-live-reader")
+	bypassLibavReader, err := cmd.Flags().GetBool("bypass-libav-reader")
 	if err != nil {
-		return fmt.Errorf("Invalid copy-mpegts value")
+		return fmt.Errorf("Invalid bypass-libav-reader value")
 	}
 
-	copyMpegts, err := cmd.Flags().GetBool("copy-mpegts")
+	copyModeStr, err := cmd.Flags().GetString("copy-mode")
 	if err != nil {
-		return fmt.Errorf("Invalid copy-mpegts value")
+		return fmt.Errorf("Invalid copy-mode value")
+	}
+	copyMode := goavpipe.CopyModeUnknown
+	switch copyModeStr {
+	case "", "none":
+		copyMode = goavpipe.CopyModeNone
+	case "raw":
+		copyMode = goavpipe.CopyModeRaw
+	case "remuxed":
+		copyMode = goavpipe.CopyModeRemuxed
+	default:
+		return fmt.Errorf("Unsupported copy-mode value")
 	}
 
-	copyMpegtsFromInput, err := cmd.Flags().GetBool("copy-mpegts-from-input")
+	copyPackagingStr, err := cmd.Flags().GetString("copy-packaging")
 	if err != nil {
-		return fmt.Errorf("Invalid copy-mpegts value")
+		return fmt.Errorf("Invalid copy-packaging value")
+	}
+	copyPackaging := transport.UnknownPackagingMode
+	switch copyPackagingStr {
+	case "raw_ts":
+		copyPackaging = transport.RawTs
+	case "rtp_ts":
+		copyPackaging = transport.RtpTs
+	default:
+		return fmt.Errorf("Unsupported copy-packaging value")
 	}
 
 	cryptScheme := goavpipe.CryptNone
@@ -713,7 +734,12 @@ func doTranscode(cmd *cobra.Command, args []string) error {
 	}
 
 	params := &goavpipe.XcParams{
-		Url:                    filename,
+		Url: filename,
+		InputCfg: &goavpipe.InputConfig{
+			CopyMode:          copyMode,
+			CopyPackaging:     copyPackaging,
+			BypassLibavReader: bypassLibavReader,
+		},
 		BypassTranscoding:      bypass,
 		Format:                 format,
 		StartTimeTs:            startTimeTs,
@@ -741,9 +767,6 @@ func doTranscode(cmd *cobra.Command, args []string) error {
 		CryptKeyURL:            cryptKeyURL,
 		CryptScheme:            cryptScheme,
 		XcType:                 xcType,
-		UseCustomLiveReader:    useCustomLiveReader,
-		CopyMpegts:             copyMpegts,
-		CopyMpegtsFromInput:    copyMpegtsFromInput,
 		WatermarkTimecode:      watermarkTimecode,
 		WatermarkTimecodeRate:  watermarkTimecodeRate,
 		WatermarkText:          watermarkText,
