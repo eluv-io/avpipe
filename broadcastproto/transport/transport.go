@@ -18,6 +18,3 @@ const (
 	RawTs                TsPackagingMode = "raw_ts" // Used in SMPTE ST2022
 	RtpTs                TsPackagingMode = "rtp_ts"
 )
-
-// SS TODO configuration
-const PackagingMode = RtpTs

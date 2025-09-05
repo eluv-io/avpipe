@@ -14,6 +14,8 @@ type TlvType byte
 
 const TLV_HEADER_LEN = 3
 
+const U16MAX = 0xFFFF
+
 const (
 	TlvTypeUnknown TlvType = iota
 	TlvTypeRtpTs
@@ -31,6 +33,17 @@ func (pt TlvType) String() string {
 	default:
 		return "Unknown"
 	}
+}
+
+func TlvHeader(length int, tlvType TlvType) ([]byte, error) {
+	if length > U16MAX || length < 0 {
+		// TODO: Truncate this to a more reasonable length, 64k is probably still way too big
+		return nil, fmt.Errorf("bad length for TLV: %d", length)
+	}
+	var header [TLV_HEADER_LEN]byte
+	header[0] = byte(tlvType)
+	binary.BigEndian.PutUint16(header[1:3], uint16(length))
+	return header[:], nil
 }
 
 func ByteToTLVType(b byte) (TlvType, error) {

@@ -3,6 +3,7 @@ package mpegts
 import (
 	"encoding/binary"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"math"
@@ -10,6 +11,9 @@ import (
 	"time"
 
 	"github.com/Comcast/gots/v2/packet"
+	"github.com/eluv-io/avpipe/broadcastproto/tlv"
+	"github.com/eluv-io/avpipe/broadcastproto/transport"
+	"github.com/eluv-io/avpipe/goavpipe"
 	elog "github.com/eluv-io/log-go"
 	"go.uber.org/atomic"
 )
@@ -42,7 +46,11 @@ type MpegtsPacketProcessor struct {
 	// statsMu is _only_ used for updating cc errors by PID
 	statsMu sync.Mutex
 
-	stats         *TSStats
+	stats *TSStats
+	// rtpStats is used to keep track of RTP-specific information in the case that the packaging is
+	// RTP-MPEGTS. It is _nil_ iff cfg.Packaging is not RTP-TS.
+	rtpStats *RTPStats
+
 	continuityMap map[int]uint8 // Map of PID to last continuity counter
 	pcr           uint64        // Last seen PCR value
 
@@ -50,18 +58,24 @@ type MpegtsPacketProcessor struct {
 }
 
 func NewMpegtsPacketProcessor(cfg TsConfig, seqOpener SequentialOpener, inFd int64) *MpegtsPacketProcessor {
+	var rtpStats *RTPStats
+	if cfg.Packaging == transport.RtpTs {
+		rtpStats = &RTPStats{}
+	}
 	return &MpegtsPacketProcessor{
 		cfg:           cfg,
 		opener:        seqOpener,
 		inFd:          inFd,
 		continuityMap: make(map[int]uint8),
 		stats:         NewTSStats(),
+		rtpStats:      rtpStats,
 		closeCh:       make(chan struct{}),
 	}
 }
 
 type TsConfig struct {
 	SegmentLengthSec uint64
+	Packaging        transport.TsPackagingMode
 
 	AnalyzeVideo bool
 	AnalyzeData  bool
@@ -99,6 +113,21 @@ type TSStats struct {
 	ErrorsCCByPid           map[int]uint64
 }
 
+type RTPStats struct {
+	FirstSeqNum     atomic.Uint32
+	LastSeqNum      atomic.Uint32
+	SeqNumSkipTot   atomic.Uint32
+	SeqNumSkipCount atomic.Uint64
+
+	// RTP timestamp interpretation is different by application
+	FirstTimestamp atomic.Uint32
+	LastTimestamp  atomic.Uint32
+
+	BadPacketCount atomic.Uint64
+	// LongHeaderCount keeps track of RTP headers longer than 12 bytes
+	LongHeaderCount atomic.Uint64
+}
+
 func NewTSStats() *TSStats {
 	return &TSStats{
 		ErrorsCCByPid: make(map[int]uint64),
@@ -108,71 +137,74 @@ func NewTSStats() *TSStats {
 func (mpp *MpegtsPacketProcessor) ProcessPackets(packets []byte) {
 	for offset := 0; offset+188 <= len(packets); offset += 188 {
 		p := toTSPacket(packets[offset : offset+188])
-		mpp.HandlePacket(p)
+		mpp.HandleMpegtsPacket(p)
 	}
 	if len(packets)%188 != 0 {
 		mpp.stats.ErrorsIncompletePackets.Inc()
 	}
 }
 
-func (mpp *MpegtsPacketProcessor) ProcessRtpDatagram(datagram []byte) {
+func (mpp *MpegtsPacketProcessor) ProcessDatagram(datagram []byte) {
+	mpegtsOffset := 0
+	if mpp.cfg.Packaging == transport.RtpTs {
+		dgHeader, err := transport.ParseRTPHeader(datagram)
+		if err != nil {
+			mpp.rtpStats.BadPacketCount.Inc()
+			return
+		}
+		mpegtsOffset = dgHeader.ByteLength()
+		if mpegtsOffset != 12 {
+			mpp.rtpStats.LongHeaderCount.Inc()
+		}
+		mpp.rtpStats.FirstTimestamp.CompareAndSwap(0, dgHeader.Timestamp)
+		mpp.rtpStats.LastTimestamp.Store(dgHeader.Timestamp)
 
-	// Validate RTP
-	// SS TODO
-
-	// Extract PCR
-	packets := datagram[12:] // SS TODO proper
-	for offset := 0; offset+188 <= len(packets); offset += 188 {
-		pkt := toTSPacket(packets[offset : offset+188])
-		mpp.updatePCR(pkt)
+		// TODO: Sequence number / discontinuity processing
 	}
 
-	// Have a decision point about how many bad mpegts packets in order for entire packet to be bad
-	// if below threshold, send whole thing
-	// if above, drop whole thing
+	// Extract PCR
+	packets := datagram[mpegtsOffset:]
+	badPackets := 0
+	packetCount := int(math.Trunc(float64(len(packets)) / 188))
+	for offset := 0; offset+188 <= len(packets); offset += 188 {
+		pkt := toTSPacket(packets[offset : offset+188])
+		err := mpp.HandleMpegtsPacket(pkt)
+		if err != nil {
+			badPackets++
+		}
+	}
+
+	if float64(badPackets)/float64(packetCount) > 0.5 {
+		// TODO: Should we put this in the rtp stats?
+		mpp.rtpStats.BadPacketCount.Inc()
+		return
+	}
 
 	if mpp.pcr == 0 {
 		// Wait for at least one packet with PCR before writing
 		return
 	}
 
-	pdu, err := toRtpTsPdu(datagram)
-	if err != nil {
-		mpp.stats.ErrorsOther.Inc()
-		return
-	}
-
-	mpp.writePdu(pdu)
+	mpp.writeDatagram(datagram)
 }
 
-func (mpp *MpegtsPacketProcessor) HandlePacket(pkt packet.Packet) {
+func (mpp *MpegtsPacketProcessor) HandleMpegtsPacket(pkt packet.Packet) error {
 	mpp.stats.PacketsReceived.Inc()
 	mpp.stats.BytesReceived.Add(uint64(len(pkt)))
 
 	if pkt.CheckErrors() != nil {
 		mpp.stats.BadPackets.Inc()
-		return
+		return errors.New("bad mpegts packet")
 	}
 
 	mpp.checkContinuityCounter(pkt)
 	mpp.updatePCR(pkt)
 
-	if mpp.pcr == 0 {
-		// Wait for at least one packet with PCR before writing
-		return
-	}
-
 	if mpp.cfg.AnalyzeData || mpp.cfg.AnalyzeVideo {
 		// TODO(Nate): Copy over some of the logic analyzing this stuff
 	}
 
-	s := time.Now()
-	mpp.writePacket(pkt)
-	dur := time.Since(s)
-	if dur > 50*time.Millisecond {
-		mpegtslog.Warn("MPEGTS writePacket took too long", "duration", dur)
-	}
-
+	return nil
 }
 
 // Kick off a job that periodically logs the stats of this job
@@ -277,11 +309,7 @@ func (mpp *MpegtsPacketProcessor) updatePCR(pkt packet.Packet) {
 	mpp.stats.LastPCR.Store(mpp.pcr)
 }
 
-func (mpp *MpegtsPacketProcessor) writePacket(pkt packet.Packet) {
-	mpp.writePdu(pkt[:])
-}
-
-func (mpp *MpegtsPacketProcessor) writePdu(pdu []byte) {
+func (mpp *MpegtsPacketProcessor) writeDatagram(datagram []byte) {
 	if mpp.currentWc == nil {
 		if mpp.stats.ErrorsOpeningOutput.Load() > 50 {
 			return
@@ -312,7 +340,32 @@ func (mpp *MpegtsPacketProcessor) writePdu(pdu []byte) {
 		}
 	}
 
-	n, err := mpp.currentWc.Write(pdu)
+	var tlvType tlv.TlvType
+	switch mpp.cfg.Packaging {
+	case transport.RawTs:
+		tlvType = tlv.TlvTypeRawTs
+	case transport.RtpTs:
+		tlvType = tlv.TlvTypeRtpTs
+	case transport.UnknownPackagingMode:
+		fallthrough
+	default:
+		goavpipe.Log.Error("packaging mode unknown. Bailing out on writing datagram")
+		return
+	}
+	tlvHeader, err := tlv.TlvHeader(len(datagram), tlvType)
+	if err != nil {
+		mpp.stats.ErrorsOther.Inc()
+		return
+	}
+
+	startTime := time.Now()
+	// TODO: Decide if it is better to do 2 writes (header then data) or construct new slice
+	// Not sure if this is slow. I assume it compiles nicely
+	n, err := mpp.currentWc.Write(append(tlvHeader, datagram...))
+	dur := time.Since(startTime)
+	if dur > 50*time.Millisecond {
+		goavpipe.Log.Warn("mpegts write too slow", "dur", dur)
+	}
 
 	if err != nil {
 		mpp.stats.ErrorsWriting.Inc()

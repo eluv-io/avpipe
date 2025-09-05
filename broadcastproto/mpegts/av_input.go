@@ -192,6 +192,10 @@ func (mih *mpegtsInputHandler) ReaderLoop(ch chan []byte, packetsDropped *atomic
 
 	tsCfg := TsConfig{
 		SegmentLengthSec: 30,
+		// Note: This isn't fully correct for future applications, because really the
+		// 'PackagingMode' of the config is about how the _output_ is packaged. When the CopyMode of
+		// 'repackage' is used, that will need to be handled
+		Packaging: mih.transport.PackagingMode(),
 	}
 
 	ts := NewMpegtsPacketProcessor(
@@ -212,12 +216,6 @@ func (mih *mpegtsInputHandler) ReaderLoop(ch chan []byte, packetsDropped *atomic
 			goavpipe.Log.Trace("Processed packets", "count", nPackets, "chan size", len(ch), "chan cap", cap(ch))
 		}
 
-		switch transport.PackagingMode {
-		case transport.RawTs:
-			ts.ProcessPackets(buf)
-		case transport.RtpTs:
-			ts.ProcessRtpDatagram(buf)
-		}
-
+		ts.ProcessDatagram(buf)
 	}
 }
