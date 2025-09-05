@@ -8,67 +8,66 @@ import (
 	"github.com/eluv-io/avpipe/broadcastproto/transport"
 )
 
-// PDU (Protocol Data Unit) definitions for MPEGTS over various transports.
-// PDU encapsulation should only be used for serialization/deserialization of packetized data.
+// TLV (Type Length Value) definitions for MPEGTS over various transports.
 
-type PduType byte
+type TlvType byte
 
-const PDU_HEADER_LEN = 3
+const TLV_HEADER_LEN = 3
 
 const (
-	PduTypeUnknown PduType = iota
-	PduTypeRtpTs
-	PduTypeRawTs
+	TlvTypeUnknown TlvType = iota
+	TlvTypeRtpTs
+	TlvTypeRawTs
 )
 
-var ErrUnknownPduType = fmt.Errorf("unknown PDU type")
+var ErrUnknownTlvType = fmt.Errorf("unknown TLV type")
 
-func (pt PduType) String() string {
+func (pt TlvType) String() string {
 	switch pt {
-	case PduTypeRtpTs:
+	case TlvTypeRtpTs:
 		return "RTP-TS"
-	case PduTypeRawTs:
+	case TlvTypeRawTs:
 		return "Raw-TS"
 	default:
 		return "Unknown"
 	}
 }
 
-func ByteToPDUType(b byte) (PduType, error) {
+func ByteToTLVType(b byte) (TlvType, error) {
 	switch b {
 	case 0x01:
-		return PduTypeRtpTs, nil
+		return TlvTypeRtpTs, nil
 	case 0x02:
-		return PduTypeRawTs, nil
+		return TlvTypeRawTs, nil
 	}
-	return PduTypeUnknown, ErrUnknownPduType
+	return TlvTypeUnknown, ErrUnknownTlvType
 }
 
-// ValidatePDU checks if the provided data is a valid PDU and returns its type.
-// If the PDU type is not valid, the data is too short, or any other error occurs,
-// it returns an error. It also validates the RTP header or raw TS packets based on the PDU type.
-func ValidatePDU(data []byte) (PduType, error) {
-	if len(data) < PDU_HEADER_LEN {
-		return PduTypeUnknown, fmt.Errorf("data too short to contain PDU header")
+// ValidateTLV checks if the provided data is a valid TLV and returns its type.
+// If the TLV type is not valid, the data is too short, or any other error occurs,
+// it returns an error. It also validates the RTP header or raw TS packets based on the TLV type.
+func ValidateTLV(data []byte) (TlvType, error) {
+	if len(data) < TLV_HEADER_LEN {
+		return TlvTypeUnknown, fmt.Errorf("data too short to contain TLV header")
 	}
-	pduType, err := ByteToPDUType(data[0])
+	tlvType, err := ByteToTLVType(data[0])
 	if err != nil {
-		return PduTypeUnknown, fmt.Errorf("invalid PDU type: %w", err)
+		return TlvTypeUnknown, fmt.Errorf("invalid TLV type: %w", err)
 	}
 
 	dataLen := binary.BigEndian.Uint16(data[1:3])
-	if len(data)-PDU_HEADER_LEN < int(dataLen) {
-		return PduTypeUnknown, fmt.Errorf("data length mismatch: expected %d, got %d", dataLen, len(data)-PDU_HEADER_LEN)
+	if len(data)-TLV_HEADER_LEN < int(dataLen) {
+		return TlvTypeUnknown, fmt.Errorf("data length mismatch: expected %d, got %d", dataLen, len(data)-TLV_HEADER_LEN)
 	}
 
-	switch pduType {
-	case PduTypeRtpTs:
-		err = validateRtpTS(data[PDU_HEADER_LEN : PDU_HEADER_LEN+dataLen])
-	case PduTypeRawTs:
-		err = validateRawTS(data[PDU_HEADER_LEN : PDU_HEADER_LEN+dataLen])
+	switch tlvType {
+	case TlvTypeRtpTs:
+		err = validateRtpTS(data[TLV_HEADER_LEN : TLV_HEADER_LEN+dataLen])
+	case TlvTypeRawTs:
+		err = validateRawTS(data[TLV_HEADER_LEN : TLV_HEADER_LEN+dataLen])
 	}
 
-	return pduType, err
+	return tlvType, err
 }
 
 func validateRtpTS(data []byte) error {
@@ -97,41 +96,3 @@ func validateRawTS(data []byte) error {
 
 	return nil
 }
-
-/*
-
-
-## case 1
-
-params:
-  input:
-    copy_mode: raw
-	copy_packaging: rtp
-    // contains encapsulation details for mpegts stream
-sources:
-  mpegts:
-    a
-	...
-  video:
-    b
-	...
-  ...
-
-
-## case 2
-
-params:
-  input:
-    // contains encapsulation details for mpegts stream
-sources:
-  tlv-rtp-mpegts:
-    a
-	...
-  video:
-    b
-	...
-  ...
-
-
-
-*/
