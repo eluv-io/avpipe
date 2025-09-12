@@ -1,10 +1,8 @@
 package mpegts
 
 import (
-	"encoding/binary"
 	"encoding/json"
 	"errors"
-	"fmt"
 	"io"
 	"math"
 	"sync"
@@ -53,8 +51,8 @@ type MpegtsPacketProcessor struct {
 
 	continuityMap map[int]uint8 // Map of PID to last continuity counter
 	pcr           uint64        // Last seen PCR value
-
-	closeCh chan struct{}
+	outBuf        []byte        // Preallocated byte buffer
+	closeCh       chan struct{}
 }
 
 func NewMpegtsPacketProcessor(cfg TsConfig, seqOpener SequentialOpener, inFd int64) *MpegtsPacketProcessor {
@@ -69,6 +67,7 @@ func NewMpegtsPacketProcessor(cfg TsConfig, seqOpener SequentialOpener, inFd int
 		continuityMap: make(map[int]uint8),
 		stats:         NewTSStats(),
 		rtpStats:      rtpStats,
+		outBuf:        make([]byte, 64*1024), // Max datagram size
 		closeCh:       make(chan struct{}),
 	}
 }
@@ -362,12 +361,12 @@ func (mpp *MpegtsPacketProcessor) writeDatagram(datagram []byte) {
 
 	dataToWrite := datagram
 	if tlvType == tlv.TlvTypeRtpTs {
-		dataToWrite = append(tlvHeader, dataToWrite...)
+		copy(mpp.outBuf, tlvHeader)
+		copy(mpp.outBuf[len(tlvHeader):], datagram)
+		dataToWrite = mpp.outBuf[:len(tlvHeader)+len(datagram)]
 	}
 
 	startTime := time.Now()
-	// TODO: Decide if it is better to do 2 writes (header then data) or construct new slice
-	// Not sure if this is slow. I assume it compiles nicely
 	n, err := mpp.currentWc.Write(dataToWrite)
 	dur := time.Since(startTime)
 	if dur > 50*time.Millisecond {
@@ -427,25 +426,4 @@ func toTSPacket(data []byte) packet.Packet {
 	var pkt packet.Packet
 	copy(pkt[:], data[:packet.PacketSize])
 	return pkt
-}
-
-// toRtpTsPdu creates a serialized 'protocol data unit' given a datagram
-// Serialization:
-// - 1 byte - type
-// - 2 bytes - length (network byte order)
-// - datagram bytes
-func toRtpTsPdu(data []byte) ([]byte, error) {
-	const pduHdrLen = 3
-	const pduTypeRtpTs = 1 // RTP incapsulating MPEGTS
-
-	if len(data) > math.MaxInt16 {
-		return nil, fmt.Errorf("datagram too big (%d bytes)", len(data))
-	}
-	dataLen := uint16(len(data))
-	pdu := make([]byte, pduHdrLen+dataLen) // SS store this in context (we only need one 64K buffer)
-	pdu[0] = pduTypeRtpTs
-	binary.BigEndian.PutUint16(pdu[1:3], dataLen)
-	copy(pdu[3:], data)
-
-	return pdu, nil
 }
