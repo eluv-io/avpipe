@@ -121,6 +121,7 @@ type RTPStats struct {
 	// RTP timestamp interpretation is different by application
 	FirstTimestamp atomic.Uint32
 	LastTimestamp  atomic.Uint32
+	RefTime        time.Time // System time when first timestamp is set
 
 	BadPacketCount atomic.Uint64
 	// LongHeaderCount keeps track of RTP headers longer than 12 bytes
@@ -155,7 +156,10 @@ func (mpp *MpegtsPacketProcessor) ProcessDatagram(datagram []byte) {
 		if mpegtsOffset != 12 {
 			mpp.rtpStats.LongHeaderCount.Inc()
 		}
-		mpp.rtpStats.FirstTimestamp.CompareAndSwap(0, dgHeader.Timestamp)
+		swapped := mpp.rtpStats.FirstTimestamp.CompareAndSwap(0, dgHeader.Timestamp)
+		if swapped {
+			mpp.rtpStats.RefTime = time.Now()
+		}
 		mpp.rtpStats.LastTimestamp.Store(dgHeader.Timestamp)
 
 		// TODO: Sequence number / discontinuity processing
@@ -173,7 +177,7 @@ func (mpp *MpegtsPacketProcessor) ProcessDatagram(datagram []byte) {
 		}
 	}
 
-	if float64(badPackets) > 0.5 * float64(packetCount) {
+	if float64(badPackets) > 0.5*float64(packetCount) {
 		// TODO: Should we put this in the rtp stats?
 		if mpp.cfg.Packaging == transport.RtpTs {
 			mpp.rtpStats.BadPacketCount.Inc()
@@ -210,8 +214,9 @@ func (mpp *MpegtsPacketProcessor) HandleMpegtsPacket(pkt packet.Packet) error {
 
 // Kick off a job that periodically logs the stats of this job
 func (mpp *MpegtsPacketProcessor) StartReportingStats() {
+	reportingInterval := 30 * time.Second
 	go func() {
-		ticker := time.NewTicker(5 * time.Second)
+		ticker := time.NewTicker(reportingInterval)
 		defer ticker.Stop()
 		for {
 			select {
@@ -219,6 +224,8 @@ func (mpp *MpegtsPacketProcessor) StartReportingStats() {
 				mpp.statsMu.Lock()
 				v, _ := json.Marshal(mpp.stats)
 				mpegtslog.Debug("mpegts stats", "stats", string(v))
+				v, _ = json.Marshal(mpp.rtpStats)
+				mpegtslog.Debug("rtp/mpegts stats", "stats", string(v))
 				mpp.statsMu.Unlock()
 				mpp.resetChannelSizeStats()
 			case <-mpp.closeCh:
