@@ -419,18 +419,15 @@ func (p *XcParams) Validate() error {
 type CopyMode string
 
 const (
-	// CODEREVIEW: Should we have the zero value be the empty string? I'm unsure where this should
-	// sit in the balance of zero-as-sane-default-value and making sure that the metadata config is
-	// human-readable.
-	CopyModeUnknown CopyMode = ""
-	CopyModeNone    CopyMode = "none"
-	CopyModeRaw     CopyMode = "raw"
-	CopyModeRemuxed CopyMode = "remuxed"
+	CopyModeUnknown CopyMode = ""        // Default - no copy of the input
+	CopyModeNone    CopyMode = "none"    // Don't create a copy of the input
+	CopyModeRaw     CopyMode = "raw"     // Create a verbatim copy of the input
+	CopyModeRemuxed CopyMode = "remuxed" // Demux and remux the input
 	// CopyModeRepackage can be used to repackage RTMP to MPEGTS in combination
-	// with raw_ts packaging and a URL starting with RTMP
+	// with raw_ts packaging and a URL starting with RTMP (example for future use)
 	CopyModeRepackage CopyMode = "repackage"
 	// CopyModeRetranscode can be used to replace an elementary stream in the MPEGTS
-	// such as converting jpegxs to h264, then remuxing
+	// such as converting jpegxs to h264, then remuxing (example for future use)
 	CopyModeRetranscode CopyMode = "retranscode_stream"
 )
 
