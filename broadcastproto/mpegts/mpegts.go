@@ -23,6 +23,7 @@ var mpegtslog = elog.Get("avpipe/broadcastproto/mpegts")
 
 type SequentialOpener interface {
 	OpenNext() (io.WriteCloser, error)
+	Stat(args string) error
 }
 
 // Special TS stream and descriptor types (not defined in 'gots')
@@ -159,6 +160,7 @@ func (mpp *MpegtsPacketProcessor) ProcessDatagram(datagram []byte) {
 		swapped := mpp.rtpStats.FirstTimestamp.CompareAndSwap(0, dgHeader.Timestamp)
 		if swapped {
 			mpp.rtpStats.RefTime = time.Now()
+			mpp.PushStats()
 		}
 		mpp.rtpStats.LastTimestamp.Store(dgHeader.Timestamp)
 
@@ -221,18 +223,24 @@ func (mpp *MpegtsPacketProcessor) StartReportingStats() {
 		for {
 			select {
 			case <-ticker.C:
-				mpp.statsMu.Lock()
-				v, _ := json.Marshal(mpp.stats)
-				mpegtslog.Debug("mpegts stats", "stats", string(v))
-				v, _ = json.Marshal(mpp.rtpStats)
-				mpegtslog.Debug("rtp/mpegts stats", "stats", string(v))
-				mpp.statsMu.Unlock()
-				mpp.resetChannelSizeStats()
+				mpp.PushStats()
 			case <-mpp.closeCh:
 				return
 			}
 		}
 	}()
+}
+
+func (mpp *MpegtsPacketProcessor) PushStats() {
+	mpp.statsMu.Lock()
+	v, _ := json.Marshal(mpp.stats)
+	mpegtslog.Debug("mpegts stats", "stats", string(v))
+	v, _ = json.Marshal(mpp.rtpStats)
+	mpegtslog.Debug("rtp/mpegts stats", "stats", string(v))
+	mpp.statsMu.Unlock()
+	mpp.resetChannelSizeStats()
+	// PENDING(SS) - create a combined JSON mpegts and rtp
+	mpp.opener.Stat(string(v))
 }
 
 func (mpp *MpegtsPacketProcessor) Stop() {

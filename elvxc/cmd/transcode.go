@@ -66,6 +66,8 @@ func (i *noopElvxcInput) Stat(streamIndex int, statType goavpipe.AVStatType, sta
 		log.Info("AVCMD InputHandler.Stat", "video start PTS", *startPTS, "streamIndex", streamIndex)
 	case goavpipe.AV_IN_STAT_DATA_SCTE35:
 		log.Info("AVCMD InputHandler.Stat", "scte35", statArgs, "streamIndex", streamIndex)
+	case goavpipe.AV_IN_STAT_MPEGTS:
+		log.Info("AVCMD InputHandler.Stat", "mpegts", statArgs, "streamIndex", streamIndex)
 	}
 
 	return nil
@@ -133,6 +135,8 @@ func (i *elvxcInput) Stat(streamIndex int, statType goavpipe.AVStatType, statArg
 		log.Info("AVCMD InputHandler.Stat", "video start PTS", *startPTS, "streamIndex", streamIndex)
 	case goavpipe.AV_IN_STAT_DATA_SCTE35:
 		log.Info("AVCMD InputHandler.Stat", "scte35", statArgs, "streamIndex", streamIndex)
+	case goavpipe.AV_IN_STAT_MPEGTS:
+		log.Info("AVCMD InputHandler.Stat", "mpegts", statArgs, "streamIndex", streamIndex)
 	}
 
 	return nil

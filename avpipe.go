@@ -298,6 +298,18 @@ func AVPipeStatInput(fd C.int64_t, stream_index C.int, avp_stat C.avp_stat_t, st
 	return C.int(0)
 }
 
+func AVPipeStatInputGo(fd int64, streamIndex int, t goavpipe.AVStatType, args string) (err error) {
+	h := getCIOHandler(int64(fd))
+	if h == nil {
+		return fmt.Errorf("input stats - failed to find input handler (fd=%d)", fd)
+	}
+	err = h.input.Stat(streamIndex, t, args)
+	if err != nil {
+		err = fmt.Errorf("input stats - failed to forward (%v)", err)
+	}
+	return err
+}
+
 func (h *ioHandler) InStat(stream_index C.int, avp_stat C.avp_stat_t, stat_args unsafe.Pointer) error {
 	var err error
 
@@ -324,6 +336,9 @@ func (h *ioHandler) InStat(stream_index C.int, avp_stat C.avp_stat_t, stat_args 
 	case C.in_stat_data_scte35:
 		statArgs := C.GoString((*C.char)(stat_args))
 		err = h.input.Stat(streamIndex, goavpipe.AV_IN_STAT_DATA_SCTE35, statArgs)
+	case C.in_stat_mpegts:
+		statArgs := C.GoString((*C.char)(stat_args))
+		err = h.input.Stat(streamIndex, goavpipe.AV_IN_STAT_MPEGTS, statArgs)
 	}
 
 	return err
