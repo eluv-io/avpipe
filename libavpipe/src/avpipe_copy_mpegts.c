@@ -115,6 +115,10 @@ copy_mpegts_prepare_audio_encoder(
     xcparams_t *params,
     int stream_index)
 {
+    int rc;
+    AVCodecContext *dec_codec_ctx, *enc_codec_ctx;
+    uint64_t channel_layout_mask;
+
     // This assignment helps to keep some of the code below more understandable
     // output stream index always equals input stream index for mpegts capture
     int output_stream_index = stream_index;
@@ -128,6 +132,7 @@ copy_mpegts_prepare_audio_encoder(
         elv_err("Decoder codec context is NULL! stream_index=%d, url=%s", stream_index, params->url);
         return eav_codec_context;
     }
+    dec_codec_ctx = decoder_context->codec_context[stream_index];
 
     encoder_context->audio_stream_index[output_stream_index] = output_stream_index;
 
@@ -138,7 +143,8 @@ copy_mpegts_prepare_audio_encoder(
         return eav_codec_context;
     }
 
-    encoder_context->codec_context[output_stream_index] = avcodec_alloc_context3(encoder_context->codec[output_stream_index]);
+    enc_codec_ctx = avcodec_alloc_context3(encoder_context->codec[output_stream_index]);
+    encoder_context->codec_context[output_stream_index] = enc_codec_ctx;
 
     /* By default use decoder parameters */
     encoder_context->codec_context[output_stream_index]->sample_rate = decoder_context->codec_context[stream_index]->sample_rate;
@@ -149,14 +155,17 @@ copy_mpegts_prepare_audio_encoder(
 
     encoder_context->codec_context[output_stream_index]->sample_fmt = decoder_context->codec_context[stream_index]->sample_fmt;
 
-    if (params->channel_layout > 0)
-        encoder_context->codec_context[output_stream_index]->channel_layout = params->channel_layout;
-    else
-        /* If the input stream is stereo the decoder_context->codec_context[index]->channel_layout is AV_CH_LAYOUT_STEREO */
-        encoder_context->codec_context[output_stream_index]->channel_layout =
-            get_channel_layout_for_encoder(decoder_context->codec_context[stream_index]->channel_layout);
-
-    encoder_context->codec_context[output_stream_index]->channels = av_get_channel_layout_nb_channels(encoder_context->codec_context[output_stream_index]->channel_layout);
+    if (params->channel_layout > 0) {
+        channel_layout_mask = params->channel_layout;
+    } else {
+        channel_layout_mask = get_channel_layout_for_encoder(dec_codec_ctx->ch_layout.u.mask);
+    }
+    rc = av_channel_layout_from_mask(&enc_codec_ctx->ch_layout, channel_layout_mask);
+    if (rc) {
+        elv_err("Invalid channel_layout, rc=%d, channel_layout=%d, url=%s",
+            rc, channel_layout_mask, params->url);
+        return eav_param;
+    }
 
     encoder_context->codec_context[output_stream_index]->bit_rate = params->audio_bitrate;
 
@@ -165,8 +174,8 @@ copy_mpegts_prepare_audio_encoder(
     // The encoder will automatically swap over to the supported one _if_ there is only one channel.
     // If there are multiple channels, we need to do this conversion ourselves.
     // Sources: `libavcodec/{encode.c:ff_encode_preinit, mpegaudioenc.c, mpegaudioenc_fixed.c}`
-
-    if ((encoder_context->codec_context[output_stream_index]->channels > 1)
+    
+    if ((encoder_context->codec_context[output_stream_index]->ch_layout.nb_channels > 1)
         && (encoder_context->codec_context[output_stream_index]->sample_fmt == AV_SAMPLE_FMT_S16P)
         && ((encoder_context->codec[output_stream_index]->id == AV_CODEC_ID_MP2) || (encoder_context->codec[output_stream_index]->id == AV_CODEC_ID_MP3))) {
         elv_dbg("Converting MP2/MP3 audio encoder to non-planar format, stream_index=%d", stream_index);
@@ -237,7 +246,7 @@ copy_mpegts_prepare_encoder(
 
     /* Custom output buffer */
     encoder_context->format_context->io_open = elv_io_open;
-    encoder_context->format_context->io_close = elv_io_close;
+    encoder_context->format_context->io_close2 = elv_io_close;
 
     encoder_context->n_audio_output = num_audio_output(decoder_context, params);
 
@@ -266,7 +275,7 @@ copy_mpegts_prepare_encoder(
 
         // out_stream->disposition = in_stream->disposition;
 
-        if (in_stream->nb_side_data) {
+        if (in_stream->nb_side_data) { // TODO: side_data, nb_side_data, and av_stream_new_side_data are deprecated
             for (int i = 0; i < in_stream->nb_side_data; i++) {
                 const AVPacketSideData *sd_src = &in_stream->side_data[i];
                 uint8_t *out_data;
