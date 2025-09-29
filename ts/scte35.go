@@ -2,6 +2,7 @@ package ts
 
 import (
 	"fmt"
+
 	"github.com/Comcast/gots/scte35"
 )
 

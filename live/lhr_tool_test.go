@@ -152,7 +152,7 @@ func DisabledTestHLSVideoOnly(t *testing.T) {
 	reader.Start(endChan)
 
 	tlog.Info("Xc start", "params", fmt.Sprintf("%+v", *params))
-	avpipe.InitIOHandler(&inputOpener{}, &outputOpener{dir: outputDir})
+	goavpipe.InitIOHandler(&inputOpener{}, &outputOpener{dir: outputDir})
 	url := "video_hls"
 	params.Url = url
 	reqCtx := &testCtx{url: url, r: reader.Pipe}
@@ -205,7 +205,7 @@ func DisabledTestHLSAudioOnly(t *testing.T) {
 	reader.Start(endChan)
 
 	tlog.Info("Xc start", "params", fmt.Sprintf("%+v", *params))
-	avpipe.InitIOHandler(&inputOpener{}, &outputOpener{dir: outputDir})
+	goavpipe.InitIOHandler(&inputOpener{}, &outputOpener{dir: outputDir})
 	url := "audio_hls"
 	params.Url = url
 	reqCtx := &testCtx{url: url, r: reader.Pipe}
@@ -248,7 +248,7 @@ func DisabledTestHLSAudioVideoLive(t *testing.T) {
 	videoReader := io.TeeReader(reader.Pipe, audioReader)
 
 	done := make(chan bool, 2)
-	avpipe.InitIOHandler(&inputOpener{}, &outputOpener{dir: outputDir})
+	goavpipe.InitIOHandler(&inputOpener{}, &outputOpener{dir: outputDir})
 
 	audioParams := &goavpipe.XcParams{
 		Format:          "fmp4-segment",
@@ -364,7 +364,7 @@ func DisabledTestHLSAudioVideoLive(t *testing.T) {
 	}
 }
 
-func (io *inputOpener) Open(fd int64, url string) (avpipe.InputHandler, error) {
+func (io *inputOpener) Open(fd int64, url string) (goavpipe.InputHandler, error) {
 	tlog.Debug("IN_OPEN", "fd", fd, "url", url)
 
 	io.url = url
@@ -487,9 +487,9 @@ func (i *inputCtx) Size() int64 {
 	return -1
 }
 
-func (i *inputCtx) Stat(streamIndex int, statType avpipe.AVStatType, statArgs interface{}) error {
+func (i *inputCtx) Stat(streamIndex int, statType goavpipe.AVStatType, statArgs interface{}) error {
 	switch statType {
-	case avpipe.AV_IN_STAT_BYTES_READ:
+	case goavpipe.AV_IN_STAT_BYTES_READ:
 		readOffset := statArgs.(*uint64)
 		if debugFrameLevel {
 			log.Debug("STAT read offset", *readOffset, "streamIndex", streamIndex)
@@ -499,7 +499,7 @@ func (i *inputCtx) Stat(streamIndex int, statType avpipe.AVStatType, statArgs in
 }
 
 func (oo *outputOpener) Open(h, fd int64, streamIndex, segIndex int, _ int64,
-	outType goavpipe.AVType) (avpipe.OutputHandler, error) {
+	outType goavpipe.AVType) (goavpipe.OutputHandler, error) {
 
 	tc, err := getReqCtxByFD(h)
 	if err != nil {
@@ -586,7 +586,7 @@ func (o *outputCtx) Close() error {
 	return nil
 }
 
-func (o *outputCtx) Stat(streamIndex int, avType goavpipe.AVType, statType avpipe.AVStatType, statArgs interface{}) error {
+func (o *outputCtx) Stat(streamIndex int, avType goavpipe.AVType, statType goavpipe.AVStatType, statArgs interface{}) error {
 	doLog := func(args ...interface{}) {
 		if debugFrameLevel {
 			logArgs := []interface{}{"stat", statType.Name(), "avType", avType.Name(), "streamIndex", streamIndex}
@@ -596,16 +596,16 @@ func (o *outputCtx) Stat(streamIndex int, avType goavpipe.AVType, statType avpip
 	}
 
 	switch statType {
-	case avpipe.AV_OUT_STAT_BYTES_WRITTEN:
+	case goavpipe.AV_OUT_STAT_BYTES_WRITTEN:
 		writeOffset := statArgs.(*uint64)
 		doLog("write offset", *writeOffset)
-	case avpipe.AV_OUT_STAT_ENCODING_END_PTS:
+	case goavpipe.AV_OUT_STAT_ENCODING_END_PTS:
 		endPTS := statArgs.(*uint64)
 		doLog("endPTS", *endPTS)
-	case avpipe.AV_OUT_STAT_START_FILE:
+	case goavpipe.AV_OUT_STAT_START_FILE:
 		segIdx := statArgs.(*int)
 		doLog("segIdx", *segIdx)
-	case avpipe.AV_OUT_STAT_END_FILE:
+	case goavpipe.AV_OUT_STAT_END_FILE:
 		segIdx := statArgs.(*int)
 		doLog("segIdx", *segIdx)
 	}

@@ -1,4 +1,4 @@
-package avpipe
+package goavpipe
 
 import (
 	"fmt"
@@ -54,10 +54,10 @@ func TestErrorCapturing(t *testing.T) {
 			AssociateGIDWithHandle(handle)
 		}
 
-		log.Error(fmt.Sprintf("Error %d", errUniq1))
-		log.Error(fmt.Sprintf("Error %d", errUniq2))
-		log.Warn(fmt.Sprintf("Warn %d", warnUniq1))
-		log.Warn(fmt.Sprintf("Warn %d", warnUniq2))
+		Log.Error(fmt.Sprintf("Error %d", errUniq1))
+		Log.Error(fmt.Sprintf("Error %d", errUniq2))
+		Log.Warn(fmt.Sprintf("Warn %d", warnUniq1))
+		Log.Warn(fmt.Sprintf("Warn %d", warnUniq2))
 		///// EXIT C CODE /////
 
 		XCEnded()

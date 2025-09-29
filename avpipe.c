@@ -355,11 +355,17 @@ udp_in_opener(
         elv_warn("Failed to set UDP socket buf size to=%"PRId64", url=%s, errno=%d", bufsz, url, errno);
     }
 
+    socklen_t optlen = sizeof(bufsz);
+    if (getsockopt(sockfd, SOL_SOCKET, SO_RCVBUF, &bufsz, &optlen) < 0) {
+        elv_warn("Failed to get UDP socket buf size to=%"PRId64", url=%s, errno=%d", bufsz, url, errno);
+    } else if (bufsz < UDP_PIPE_BUFSIZE) {
+        elv_warn("Failed to set desired UDP socket buf size expect=%"PRId64" actual=%"PRId64, UDP_PIPE_BUFSIZE, bufsz);
+    }
+
     if (set_sock_nonblocking(sockfd) < 0) {
         elv_err("Failed to make UDP socket nonblocking, errno=%d", errno);
         return -1;
     }
-
 
     elv_channel_init(&inctx->udp_channel, MAX_UDP_CHANNEL, NULL);
     inctx->opaque = (int *) calloc(1, sizeof(int)+sizeof(int64_t));
@@ -885,6 +891,7 @@ xc_table_cancel(
 static int
 set_handlers(
     char *url,
+    int32_t use_custom_input_handler,
     avpipe_io_handler_t **p_in_handlers,
     avpipe_io_handler_t **p_out_handlers)
 {
@@ -899,7 +906,7 @@ set_handlers(
      * If input url is a UDP set/overwrite the default UDP input handlers.
      * No need for the client code to set/specify the input handlers when the input is UDP.
      */
-    if (!strcmp(url_parser.protocol, "udp") && p_in_handlers) {
+    if (!use_custom_input_handler && !strcmp(url_parser.protocol, "udp") && p_in_handlers) {
         avpipe_io_handler_t *in_handlers = (avpipe_io_handler_t *)calloc(1, sizeof(avpipe_io_handler_t));
         in_handlers->avpipe_opener = udp_in_opener;
         in_handlers->avpipe_closer = udp_in_closer;
@@ -908,6 +915,7 @@ set_handlers(
         in_handlers->avpipe_seeker = udp_in_seek;
         in_handlers->avpipe_stater = udp_in_stat;
         *p_in_handlers = in_handlers;
+
     } else if (p_in_handlers) {
         avpipe_io_handler_t *in_handlers = (avpipe_io_handler_t *)calloc(1, sizeof(avpipe_io_handler_t));
         in_handlers->avpipe_opener = in_opener;
@@ -957,7 +965,7 @@ xc_init(
     init_tx_module();
 
     connect_ffmpeg_log();
-    if ((rc = set_handlers(params->url, &in_handlers, &out_handlers)) != eav_success) {
+    if ((rc = set_handlers(params->url, params->use_preprocessed_input, &in_handlers, &out_handlers)) != eav_success) {
         goto end_tx_init;
     }
 
@@ -1040,7 +1048,7 @@ xc(
     connect_ffmpeg_log();
     //elv_set_log_level(elv_log_debug);
 
-    set_handlers(params->url, &in_handlers, &out_handlers);
+    set_handlers(params->url, params->use_preprocessed_input, &in_handlers, &out_handlers);
 
     if ((rc = avpipe_init(&xctx, in_handlers, out_handlers, params)) != eav_success) {
         goto end_tx;
@@ -1402,7 +1410,7 @@ probe(
     if (!params || !params->url || params->url[0] == '\0' )
         return eav_param;
 
-    rc = set_handlers(params->url, &in_handlers, NULL);
+    rc = set_handlers(params->url, params->use_preprocessed_input, &in_handlers, NULL);
     if (rc != eav_success)
         goto end_probe;
 

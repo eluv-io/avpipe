@@ -503,7 +503,7 @@ typedef struct xcparams_t {
     crypt_scheme_t  crypt_scheme;   // Content protection / DRM / encryption [Optional, Default: crypt_none]
     xc_type_t       xc_type;        // Default: 0 means transcode 'everything'
     int             copy_mpegts;    // Create a copy of the input stream (only MPEGTS and SRT)
-
+    int         use_preprocessed_input;     // Use custom UDP handler
     int         seekable;                   // Default: 0 means not seekable. A non seekable stream with moov box in
                                             //          the end causes a lot of reads up to moov atom.
     int         listen;                     // Default is 1, listen mode for RTMP

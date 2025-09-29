@@ -58,6 +58,7 @@ elv_channel_send(
 
     pthread_mutex_lock(&channel->_mutex);
     while (channel->_count >= channel->_capacity && channel->_closed == 0) {
+        elv_log("elv_channel_send: full so wait");
         pthread_cond_wait(&channel->_cond_recv, &channel->_mutex);
     }
 
