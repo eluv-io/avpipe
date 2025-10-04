@@ -9,15 +9,27 @@ import (
 	"time"
 
 	"github.com/Comcast/gots/v2/packet"
+	"go.uber.org/atomic"
+
 	"github.com/eluv-io/avpipe/broadcastproto/tlv"
 	"github.com/eluv-io/avpipe/broadcastproto/transport"
 	"github.com/eluv-io/avpipe/goavpipe"
 	elog "github.com/eluv-io/log-go"
-	"go.uber.org/atomic"
 )
 
-const PcrTs uint64 = 27_000_000
-const PcrMax uint64 = ((1 << 33) * 300) + (1 << 9)
+const (
+	// StripTsPadding indicates whether the payload of TS padding packets in RTP-TS streams should be stripped. For now
+	// this is not configurable per stream, since it has low performance impact and potentially saves bandwidth.
+	StripTsPadding        = true
+	PcrTs          uint64 = 27_000_000
+	PcrMax         uint64 = ((1 << 33) * 300) + (1 << 9)
+
+	// Special TS stream and descriptor types (not defined in 'gots')
+	TsStreamTypeJpegXS = 0x32
+	TsDescriptorSt2038 = 0xc4 // Commonly ST 2038 or ST 291 (Evertz, Imagine, Harmonic)
+	// Locally defined stream types
+	TsStreamTypeLocalSt2038 = 0xe4 // Locally defined type
+)
 
 var mpegtslog = elog.Get("avpipe/broadcastproto/mpegts")
 
@@ -25,13 +37,6 @@ type SequentialOpener interface {
 	OpenNext() (io.WriteCloser, error)
 	Stat(args string) error
 }
-
-// Special TS stream and descriptor types (not defined in 'gots')
-const TsStreamTypeJpegXS = 0x32
-const TsDescriptorSt2038 = 0xc4 // Commonly ST 2038 or ST 291 (Evertz, Imagine, Harmonic)
-
-// Locally defined stream types
-const TsStreamTypeLocalSt2038 = 0xe4 // Locally defined type
 
 type MpegtsPacketProcessor struct {
 	cfg TsConfig
@@ -176,6 +181,14 @@ func (mpp *MpegtsPacketProcessor) ProcessDatagram(datagram []byte) {
 		err := mpp.HandleMpegtsPacket(pkt)
 		if err != nil {
 			badPackets++
+		} else if mpp.cfg.Packaging == transport.RtpTs && StripTsPadding {
+			if pkt.IsNull() {
+				// a padding packet: strip the payload.
+				// TS header: 4 bytes, payload: 184 bytes
+				copy(datagram[offset+4:], datagram[offset+188:]) // preserve padding packet header
+				datagram = datagram[:len(datagram)-184]          // adjust datagram size...
+				offset -= 184                                    // ... and offset to account for the removed payload
+			}
 		}
 	}
 
@@ -356,26 +369,25 @@ func (mpp *MpegtsPacketProcessor) writeDatagram(datagram []byte) {
 		}
 	}
 
-	var tlvType tlv.TlvType
 	switch mpp.cfg.Packaging {
-	case transport.RawTs:
-		tlvType = tlv.TlvTypeRawTs
-	case transport.RtpTs:
-		tlvType = tlv.TlvTypeRtpTs
-	case transport.UnknownPackagingMode:
-		fallthrough
+	case transport.RawTs, transport.RtpTs:
 	default:
-		goavpipe.Log.Error("packaging mode unknown. Bailing out on writing datagram")
-		return
-	}
-	tlvHeader, err := tlv.TlvHeader(len(datagram), tlvType)
-	if err != nil {
-		mpp.stats.ErrorsOther.Inc()
+		goavpipe.Log.Error("packaging mode unknown. Bailing out on writing datagram", "packaging_mode", mpp.cfg.Packaging)
 		return
 	}
 
 	dataToWrite := datagram
-	if tlvType == tlv.TlvTypeRtpTs {
+
+	if mpp.cfg.Packaging == transport.RtpTs {
+		var tlvType = tlv.TlvTypeRtpTs
+		if StripTsPadding {
+			tlvType = tlv.TlvTypeRtpTsNoPad
+		}
+		tlvHeader, err := tlv.TlvHeader(len(datagram), tlvType)
+		if err != nil {
+			mpp.stats.ErrorsOther.Inc()
+			return
+		}
 		copy(mpp.outBuf, tlvHeader)
 		copy(mpp.outBuf[len(tlvHeader):], datagram)
 		dataToWrite = mpp.outBuf[:len(tlvHeader)+len(datagram)]
@@ -434,11 +446,7 @@ func (mpp *MpegtsPacketProcessor) openNextOutput() error {
 // toTSPacket converts a byte slice to a TS packet.
 // If the byte slice is not exactly 188 bytes, it panics.
 func toTSPacket(data []byte) packet.Packet {
-	if len(data) != packet.PacketSize {
-		// Should never occur if called correctly
-		panic("invalid TS packet size")
-	}
-	var pkt packet.Packet
-	copy(pkt[:], data[:packet.PacketSize])
-	return pkt
+	// simply perform a type conversion, which does not copy any data, but references the same underlying data. Panics
+	// if the data is not 188 bytes.
+	return packet.Packet(data)
 }

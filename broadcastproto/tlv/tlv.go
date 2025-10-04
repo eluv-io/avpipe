@@ -5,6 +5,7 @@ import (
 	"fmt"
 
 	"github.com/Comcast/gots/v2/packet"
+
 	"github.com/eluv-io/avpipe/broadcastproto/transport"
 )
 
@@ -19,8 +20,11 @@ const U16MAX = 0xFFFF
 const (
 	TlvTypeUnknown TlvType = iota
 	TlvTypeRtpTs
-	// Currently, RawTS is NOT produced with a TLV header, as mpegts packets already have sync bytes.
+	// TlvTypeRawTs is a raw MPEG2 transport stream, which is currently NOT produced with a TLV header, as mpegts
+	// packets already have sync bytes.
 	TlvTypeRawTs
+	// TlvTypeRtpTsNoPad is RTP-TS with padding stripped.
+	TlvTypeRtpTsNoPad
 )
 
 var ErrUnknownTlvType = fmt.Errorf("unknown TLV type")
@@ -31,6 +35,8 @@ func (pt TlvType) String() string {
 		return "RTP-TS"
 	case TlvTypeRawTs:
 		return "Raw-TS"
+	case TlvTypeRtpTsNoPad:
+		return "RTP-TS-NoPad"
 	default:
 		return "Unknown"
 	}
@@ -53,6 +59,8 @@ func ByteToTLVType(b byte) (TlvType, error) {
 		return TlvTypeRtpTs, nil
 	case 0x02:
 		return TlvTypeRawTs, nil
+	case 0x03:
+		return TlvTypeRtpTsNoPad, nil
 	}
 	return TlvTypeUnknown, ErrUnknownTlvType
 }
@@ -75,7 +83,7 @@ func ValidateTLV(data []byte) (TlvType, error) {
 	}
 
 	switch tlvType {
-	case TlvTypeRtpTs:
+	case TlvTypeRtpTs, TlvTypeRtpTsNoPad:
 		err = validateRtpTS(data[TLV_HEADER_LEN : TLV_HEADER_LEN+dataLen])
 	case TlvTypeRawTs:
 		err = validateRawTS(data[TLV_HEADER_LEN : TLV_HEADER_LEN+dataLen])
