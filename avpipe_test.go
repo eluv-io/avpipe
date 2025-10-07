@@ -2301,7 +2301,7 @@ func TestUnmarshalParams(t *testing.T) {
 	bytes := []byte(`{"video_bitrate":8000000,"seg_duration_ts":180000,"seg_duration_fr":50,"enc_height":720,"enc_width":1280,"xc_type":1}`)
 	err := json.Unmarshal(bytes, &params)
 	assert.NoError(t, err)
-	assert.Equal(t, goavpipe.XcVideo, int(params.XcType))
+	assert.Equal(t, int(goavpipe.XcVideo), int(params.XcType), "XcVideo type expected")
 	// TODO: More checks
 }
 
