@@ -173,11 +173,10 @@ func (mpp *MpegtsPacketProcessor) ProcessDatagram(datagram []byte) {
 	}
 
 	// Extract PCR
-	packets := datagram[mpegtsOffset:]
 	badPackets := 0
-	packetCount := int(math.Trunc(float64(len(packets)) / 188))
-	for offset := 0; offset+188 <= len(packets); offset += 188 {
-		pkt := toTSPacket(packets[offset : offset+188])
+	packetCount := int(math.Trunc(float64(len(datagram)-mpegtsOffset) / 188))
+	for offset := mpegtsOffset; offset+188 <= len(datagram); offset += 188 {
+		pkt := toTSPacket(datagram[offset : offset+188])
 		err := mpp.HandleMpegtsPacket(pkt)
 		if err != nil {
 			badPackets++
