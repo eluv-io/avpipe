@@ -20,7 +20,7 @@ import (
 const (
 	// StripTsPadding indicates whether the payload of TS padding packets in RTP-TS streams should be stripped. For now
 	// this is not configurable per stream, since it has low performance impact and potentially saves bandwidth.
-	StripTsPadding        = true
+	StripTsPadding        = false // Temporary build
 	PcrTs          uint64 = 27_000_000
 	PcrMax         uint64 = ((1 << 33) * 300) + (1 << 9)
 
