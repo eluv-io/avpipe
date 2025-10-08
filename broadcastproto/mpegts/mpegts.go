@@ -4,7 +4,6 @@ import (
 	"encoding/json"
 	"errors"
 	"io"
-	"math"
 	"sync"
 	"time"
 
@@ -94,6 +93,7 @@ type TSStats struct {
 	BadPackets     atomic.Uint64
 	BytesReceived  atomic.Uint64
 	BytesWritten   atomic.Uint64
+	PaddingPackets atomic.Uint64
 
 	MaxBufInPeriod atomic.Uint64
 	MinBufInPeriod atomic.Uint64
@@ -174,7 +174,7 @@ func (mpp *MpegtsPacketProcessor) ProcessDatagram(datagram []byte) {
 
 	// Extract PCR
 	badPackets := 0
-	packetCount := int(math.Trunc(float64(len(datagram)-mpegtsOffset) / 188))
+	hasPadding := false
 	for offset := mpegtsOffset; offset+188 <= len(datagram); offset += 188 {
 		pkt := toTSPacket(datagram[offset : offset+188])
 		err := mpp.HandleMpegtsPacket(pkt)
@@ -182,21 +182,17 @@ func (mpp *MpegtsPacketProcessor) ProcessDatagram(datagram []byte) {
 			badPackets++
 		} else if mpp.cfg.Packaging == transport.RtpTs && StripTsPadding {
 			if pkt.IsNull() {
-				// a padding packet: strip the payload.
-				// TS header: 4 bytes, payload: 184 bytes
-				copy(datagram[offset+4:], datagram[offset+188:]) // preserve padding packet header
-				datagram = datagram[:len(datagram)-184]          // adjust datagram size...
-				offset -= 184                                    // ... and offset to account for the removed payload
+				// do not remove padding here, just flag it. We will remove it later if and only if none of the packets
+				// in the datagram are bad.
+				hasPadding = true
 			}
 		}
 	}
 
-	if float64(badPackets) > 0.5*float64(packetCount) {
-		// TODO: Should we put this in the rtp stats?
+	if badPackets > 0 {
 		if mpp.cfg.Packaging == transport.RtpTs {
-			mpp.rtpStats.BadPacketCount.Inc()
+			mpp.rtpStats.BadPacketCount.Add(uint64(badPackets))
 		}
-		return
 	}
 
 	if mpp.pcr == 0 {
@@ -204,7 +200,7 @@ func (mpp *MpegtsPacketProcessor) ProcessDatagram(datagram []byte) {
 		return
 	}
 
-	mpp.writeDatagram(datagram)
+	mpp.writeDatagram(datagram, badPackets == 0 && hasPadding, mpegtsOffset)
 }
 
 func (mpp *MpegtsPacketProcessor) HandleMpegtsPacket(pkt packet.Packet) error {
@@ -337,7 +333,7 @@ func (mpp *MpegtsPacketProcessor) updatePCR(pkt packet.Packet) {
 	mpp.stats.LastPCR.Store(mpp.pcr)
 }
 
-func (mpp *MpegtsPacketProcessor) writeDatagram(datagram []byte) {
+func (mpp *MpegtsPacketProcessor) writeDatagram(datagram []byte, removePadding bool, rtpPayloadOffset int) {
 	if mpp.currentWc == nil {
 		if mpp.stats.ErrorsOpeningOutput.Load() > 50 {
 			return
@@ -379,8 +375,11 @@ func (mpp *MpegtsPacketProcessor) writeDatagram(datagram []byte) {
 
 	if mpp.cfg.Packaging == transport.RtpTs {
 		var tlvType = tlv.TlvTypeRtpTs
-		if StripTsPadding {
+		if StripTsPadding && removePadding {
 			tlvType = tlv.TlvTypeRtpTsNoPad
+			var stripped int
+			datagram, stripped = RemoveTsPadding(datagram, rtpPayloadOffset)
+			mpp.stats.PaddingPackets.Add(uint64(stripped))
 		}
 		tlvHeader, err := tlv.TlvHeader(len(datagram), tlvType)
 		if err != nil {
@@ -448,4 +447,24 @@ func toTSPacket(data []byte) packet.Packet {
 	// simply perform a type conversion, which does not copy any data, but references the same underlying data. Panics
 	// if the data is not 188 bytes.
 	return packet.Packet(data)
+}
+
+// RemoveTsPadding removes the padding payload of TS padding packets within the given RTP packet. The removal is
+// performed in-place. The TS header of padding packets is preserved. Returns the RTP packet with the stripped TS
+// packets and the number of stripped packets.
+//
+// PENDING(LUK): move this function to common-go
+func RemoveTsPadding(pkt []byte, rtpHdrLen int) (res []byte, count int) {
+	for offset := rtpHdrLen; offset+188 <= len(pkt); offset += 188 {
+		tsPkt := toTSPacket(pkt[offset : offset+188])
+		if tsPkt.IsNull() {
+			// a padding packet: strip the payload.
+			// TS header: 4 bytes, payload: 184 bytes
+			copy(pkt[offset+4:], pkt[offset+188:]) // preserve padding packet header
+			pkt = pkt[:len(pkt)-184]               // adjust datagram size...
+			offset -= 184                          // ... and offset to account for the removed payload
+			count++
+		}
+	}
+	return pkt, count
 }
