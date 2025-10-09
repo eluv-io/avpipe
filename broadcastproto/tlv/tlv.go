@@ -38,7 +38,7 @@ func (pt TlvType) String() string {
 	case TlvTypeRtpTsNoPad:
 		return "RTP-TS-NoPad"
 	default:
-		return "Unknown"
+		return fmt.Sprintf("Unknown:%d", pt)
 	}
 }
 

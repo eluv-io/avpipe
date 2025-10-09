@@ -6,9 +6,10 @@ import (
 	"io"
 	"time"
 
+	"go.uber.org/atomic"
+
 	"github.com/eluv-io/avpipe/broadcastproto/transport"
 	"github.com/eluv-io/avpipe/goavpipe"
-	"go.uber.org/atomic"
 )
 
 /*

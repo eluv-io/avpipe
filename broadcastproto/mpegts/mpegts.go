@@ -17,11 +17,8 @@ import (
 )
 
 const (
-	// StripTsPadding indicates whether the payload of TS padding packets in RTP-TS streams should be stripped. For now
-	// this is not configurable per stream, since it has low performance impact and potentially saves bandwidth.
-	StripTsPadding        = true
-	PcrTs          uint64 = 27_000_000
-	PcrMax         uint64 = ((1 << 33) * 300) + (1 << 9)
+	PcrTs  uint64 = 27_000_000
+	PcrMax uint64 = ((1 << 33) * 300) + (1 << 9)
 
 	// Special TS stream and descriptor types (not defined in 'gots')
 	TsStreamTypeJpegXS = 0x32
@@ -29,6 +26,10 @@ const (
 	// Locally defined stream types
 	TsStreamTypeLocalSt2038 = 0xe4 // Locally defined type
 )
+
+// StripTsPadding indicates whether the payload of TS padding packets in RTP-TS streams should be stripped. For now
+// this is not configurable per stream, since it has low performance impact and potentially saves bandwidth.
+var StripTsPadding = atomic.NewBool(false)
 
 var mpegtslog = elog.Get("avpipe/broadcastproto/mpegts")
 
@@ -180,7 +181,7 @@ func (mpp *MpegtsPacketProcessor) ProcessDatagram(datagram []byte) {
 		err := mpp.HandleMpegtsPacket(pkt)
 		if err != nil {
 			badPackets++
-		} else if mpp.cfg.Packaging == transport.RtpTs && StripTsPadding {
+		} else if mpp.cfg.Packaging == transport.RtpTs && StripTsPadding.Load() {
 			if pkt.IsNull() {
 				// do not remove padding here, just flag it. We will remove it later if and only if none of the packets
 				// in the datagram are bad.
@@ -375,7 +376,7 @@ func (mpp *MpegtsPacketProcessor) writeDatagram(datagram []byte, removePadding b
 
 	if mpp.cfg.Packaging == transport.RtpTs {
 		var tlvType = tlv.TlvTypeRtpTs
-		if StripTsPadding && removePadding {
+		if StripTsPadding.Load() && removePadding {
 			tlvType = tlv.TlvTypeRtpTsNoPad
 			var stripped int
 			datagram, stripped = RemoveTsPadding(datagram, rtpPayloadOffset)
