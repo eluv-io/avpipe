@@ -90,11 +90,13 @@ type TSStats struct {
 	PacketsReceived atomic.Uint64
 	PacketsWritten  atomic.Uint64
 	// PacketsDropped is updated by the sender to the channel, which is why it is a pointer
-	PacketsDropped *atomic.Uint64
-	BadPackets     atomic.Uint64
-	BytesReceived  atomic.Uint64
-	BytesWritten   atomic.Uint64
-	PaddingPackets atomic.Uint64
+	PacketsDropped         *atomic.Uint64
+	BadPackets             atomic.Uint64
+	BytesReceived          atomic.Uint64
+	BytesWritten           atomic.Uint64
+	PaddingPackets         atomic.Uint64
+	FaultyPaddingPackets   atomic.Uint64
+	StrippedPaddingPackets atomic.Uint64
 
 	MaxBufInPeriod atomic.Uint64
 	MinBufInPeriod atomic.Uint64
@@ -130,9 +132,8 @@ type RTPStats struct {
 	LastTimestamp  atomic.Uint32
 	RefTime        time.Time // System time when first timestamp is set
 
-	BadPacketCount atomic.Uint64
-	// LongHeaderCount keeps track of RTP headers longer than 12 bytes
-	LongHeaderCount atomic.Uint64
+	BadPackets  atomic.Uint64 // Invalid RTP packets
+	LongHeaders atomic.Uint64 // LongHeaders keeps track of RTP headers longer than 12 bytes
 }
 
 func NewTSStats() *TSStats {
@@ -156,12 +157,12 @@ func (mpp *MpegtsPacketProcessor) ProcessDatagram(datagram []byte) {
 	if mpp.cfg.Packaging == transport.RtpTs {
 		dgHeader, err := transport.ParseRTPHeader(datagram)
 		if err != nil {
-			mpp.rtpStats.BadPacketCount.Inc()
+			mpp.rtpStats.BadPackets.Inc()
 			return
 		}
 		mpegtsOffset = dgHeader.ByteLength()
 		if mpegtsOffset != 12 {
-			mpp.rtpStats.LongHeaderCount.Inc()
+			mpp.rtpStats.LongHeaders.Inc()
 		}
 		swapped := mpp.rtpStats.FirstTimestamp.CompareAndSwap(0, dgHeader.Timestamp)
 		if swapped {
@@ -181,8 +182,9 @@ func (mpp *MpegtsPacketProcessor) ProcessDatagram(datagram []byte) {
 		err := mpp.HandleMpegtsPacket(pkt)
 		if err != nil {
 			badPackets++
-		} else if mpp.cfg.Packaging == transport.RtpTs && StripTsPadding.Load() {
+		} else if mpp.cfg.Packaging == transport.RtpTs {
 			if pkt.IsNull() {
+				mpp.stats.PaddingPackets.Inc()
 				// do not remove padding here, just flag it. We will remove it later if and only if none of the packets
 				// in the datagram are bad.
 				hasPadding = true
@@ -192,7 +194,7 @@ func (mpp *MpegtsPacketProcessor) ProcessDatagram(datagram []byte) {
 
 	if badPackets > 0 {
 		if mpp.cfg.Packaging == transport.RtpTs {
-			mpp.rtpStats.BadPacketCount.Add(uint64(badPackets))
+			mpp.rtpStats.BadPackets.Inc()
 		}
 	}
 
@@ -201,7 +203,7 @@ func (mpp *MpegtsPacketProcessor) ProcessDatagram(datagram []byte) {
 		return
 	}
 
-	mpp.writeDatagram(datagram, badPackets == 0 && hasPadding, mpegtsOffset)
+	mpp.writeDatagram(datagram, badPackets == 0 && hasPadding && StripTsPadding.Load(), mpegtsOffset)
 }
 
 func (mpp *MpegtsPacketProcessor) HandleMpegtsPacket(pkt packet.Packet) error {
@@ -376,11 +378,12 @@ func (mpp *MpegtsPacketProcessor) writeDatagram(datagram []byte, removePadding b
 
 	if mpp.cfg.Packaging == transport.RtpTs {
 		var tlvType = tlv.TlvTypeRtpTs
-		if StripTsPadding.Load() && removePadding {
+		if removePadding && StripTsPadding.Load() {
 			tlvType = tlv.TlvTypeRtpTsNoPad
-			var stripped int
-			datagram, stripped = RemoveTsPadding(datagram, rtpPayloadOffset)
-			mpp.stats.PaddingPackets.Add(uint64(stripped))
+			var stripped, faulty int
+			datagram, stripped, faulty = RemoveTsPadding(datagram, rtpPayloadOffset)
+			mpp.stats.StrippedPaddingPackets.Add(uint64(stripped))
+			mpp.stats.FaultyPaddingPackets.Add(uint64(faulty))
 		}
 		tlvHeader, err := tlv.TlvHeader(len(datagram), tlvType)
 		if err != nil {
@@ -452,20 +455,27 @@ func toTSPacket(data []byte) packet.Packet {
 
 // RemoveTsPadding removes the padding payload of TS padding packets within the given RTP packet. The removal is
 // performed in-place. The TS header of padding packets is preserved. Returns the RTP packet with the stripped TS
-// packets and the number of stripped packets.
-//
-// PENDING(LUK): move this function to common-go
-func RemoveTsPadding(pkt []byte, rtpHdrLen int) (res []byte, count int) {
+// packets and the number of stripped and faulty padding packets.
+func RemoveTsPadding(pkt []byte, rtpHdrLen int) (res []byte, stripped, faulty int) {
+outer:
 	for offset := rtpHdrLen; offset+188 <= len(pkt); offset += 188 {
 		tsPkt := toTSPacket(pkt[offset : offset+188])
-		if tsPkt.IsNull() {
+		if tsPkt.CheckErrors() != nil && tsPkt.IsNull() {
+			for i := 4; i < 188; i++ {
+				// make sure the payload is really just padding
+				if pkt[offset+i] != 0xFF {
+					faulty++
+					continue outer
+				}
+			}
+
 			// a padding packet: strip the payload.
 			// TS header: 4 bytes, payload: 184 bytes
 			copy(pkt[offset+4:], pkt[offset+188:]) // preserve padding packet header
 			pkt = pkt[:len(pkt)-184]               // adjust datagram size...
 			offset -= 184                          // ... and offset to account for the removed payload
-			count++
+			stripped++
 		}
 	}
-	return pkt, count
+	return pkt, stripped, faulty
 }
