@@ -298,6 +298,18 @@ func AVPipeStatInput(fd C.int64_t, stream_index C.int, avp_stat C.avp_stat_t, st
 	return C.int(0)
 }
 
+func AVPipeStatInputGo(fd int64, streamIndex int, t goavpipe.AVStatType, args string) (err error) {
+	h := getCIOHandler(int64(fd))
+	if h == nil {
+		return fmt.Errorf("input stats - failed to find input handler (fd=%d)", fd)
+	}
+	err = h.input.Stat(streamIndex, t, args)
+	if err != nil {
+		err = fmt.Errorf("input stats - failed to forward (%v)", err)
+	}
+	return err
+}
+
 func (h *ioHandler) InStat(stream_index C.int, avp_stat C.avp_stat_t, stat_args unsafe.Pointer) error {
 	var err error
 
@@ -324,6 +336,9 @@ func (h *ioHandler) InStat(stream_index C.int, avp_stat C.avp_stat_t, stat_args 
 	case C.in_stat_data_scte35:
 		statArgs := C.GoString((*C.char)(stat_args))
 		err = h.input.Stat(streamIndex, goavpipe.AV_IN_STAT_DATA_SCTE35, statArgs)
+	case C.in_stat_mpegts:
+		statArgs := C.GoString((*C.char)(stat_args))
+		err = h.input.Stat(streamIndex, goavpipe.AV_IN_STAT_MPEGTS, statArgs)
 	}
 
 	return err
@@ -855,11 +870,11 @@ func getCParams(params *goavpipe.XcParams) (*C.xcparams_t, error) {
 		cparams.force_equal_fduration = C.int(1)
 	}
 
-	if params.CopyMpegts {
+	if params.InputCfg.CopyMode == goavpipe.CopyModeRemuxed {
 		cparams.copy_mpegts = C.int(1)
 	}
 
-	if params.UseCustomLiveReader {
+	if params.InputCfg.BypassLibavReader {
 		cparams.use_preprocessed_input = C.int(1)
 	}
 
@@ -1100,18 +1115,10 @@ func XcInit(params *goavpipe.XcParams) (int32, error) {
 	}
 
 	// Here we should setup the input opener if specified by the params
-	if params.UseCustomLiveReader {
+	if params.InputCfg.BypassLibavReader {
 		var opener goavpipe.InputOpener
 		var err error
-		if params.CopyMpegtsFromInput {
-			opener, err = mpegts.NewAutoInputOpener(params.Url, true, seqOpenerF)
-			if params.CopyMpegts {
-				goavpipe.Log.Warn("XcInit() CopyMpegts is set, but CopyMpegtsFromInput is also set", "url", params.Url)
-				params.CopyMpegts = false
-			}
-		} else {
-			opener, err = mpegts.NewAutoInputOpener(params.Url, false, seqOpenerF)
-		}
+		opener, err = mpegts.NewAutoInputOpener(params.Url, &params.InputCfg, seqOpenerF)
 		if err != nil {
 			return -1, EAV_PARAM
 		}
