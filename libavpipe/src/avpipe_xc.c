@@ -25,6 +25,7 @@
 #include "avpipe_version.h"
 #include "base64.h"
 #include "scte35.h"
+#include <cbor.h>
 
 #include <stdio.h>
 #include <fcntl.h>
@@ -137,7 +138,7 @@ selected_audio_index(
 
 static int
 decode_interrupt_cb(
-    void *ctx) 
+    void *ctx)
 {
     coderctx_t *decoder_ctx = (coderctx_t *)ctx;
     if (decoder_ctx->cancelled)
@@ -439,7 +440,7 @@ prepare_decoder(
          * Find decoder and initialize decoder context.
          * Pick params->dcodec if this is the selected stream (stream_id or audio_index)
          */
-        if (params != NULL && params->dcodec != NULL && params->dcodec[0] != '\0' && 
+        if (params != NULL && params->dcodec != NULL && params->dcodec[0] != '\0' &&
             decoder_context->format_context->streams[i]->codecpar->codec_type == AVMEDIA_TYPE_VIDEO) {
             elv_log("STREAM SELECTED this_stream_id=%d, id=%d idx=%d xc_type=%d dcodec=%s, url=%s",
                 this_stream_id, decoder_context->stream[i]->id, i, params->xc_type, params->dcodec, url);
@@ -674,7 +675,7 @@ set_encoder_options(
             elv_dbg("setting \"fmp4-segment\" audio segment_time to %s, seg_duration_ts=%"PRId64", url=%s",
                 params->seg_duration, seg_duration_ts, params->url);
             av_opt_set(encoder_context->format_context2[i]->priv_data, "reset_timestamps", "on", 0);
-        } 
+        }
         if (stream_index == decoder_context->video_stream_index) {
             if (params->video_seg_duration_ts > 0)
                 seg_duration_ts = params->video_seg_duration_ts;
@@ -1267,7 +1268,7 @@ prepare_audio_encoder(
         encoder_context->codec_context[output_stream_index]->time_base = (AVRational){1, encoder_context->codec_context[output_stream_index]->sample_rate};
         encoder_context->stream[output_stream_index]->time_base = encoder_context->codec_context[output_stream_index]->time_base;
 
-        if (decoder_context->codec[stream_index] && 
+        if (decoder_context->codec[stream_index] &&
             decoder_context->codec[stream_index]->sample_fmts && params->bypass_transcoding)
             encoder_context->codec_context[output_stream_index]->sample_fmt = decoder_context->codec[stream_index]->sample_fmts[0];
         else if (encoder_context->codec[output_stream_index]->sample_fmts && encoder_context->codec[output_stream_index]->sample_fmts[0])
@@ -3266,6 +3267,173 @@ get_filter_str(
  *   requires 1/90000) so the frame can be rescaled before sending to the packager using the encoder
  *   codec context timebase as source and the output stream timebase as target
  */
+
+/**
+ * @brief   Packs stream_probes into a CBOR blob using libcbor.
+ *
+ * @param   stream_probes       Array of stream_info_t structures
+ * @param   nb_streams          Number of streams in the array
+ * @param   cbor_data          Pointer to receive the allocated CBOR data buffer
+ * @param   cbor_size          Pointer to receive the size of the CBOR data
+ *
+ * @return  Returns 0 on success, -1 on error.
+ */
+static int
+pack_stream_probes_to_cbor(
+    stream_info_t *stream_probes,
+    int nb_streams,
+    unsigned char **cbor_data,
+    size_t *cbor_size)
+{
+    if (!stream_probes || nb_streams <= 0 || !cbor_data || !cbor_size) {
+        elv_err("Invalid parameters for CBOR packing");
+        return -1;
+    }
+
+    // Create a CBOR array to hold all streams
+    cbor_item_t *root = cbor_new_definite_array(nb_streams);
+    if (!root) {
+        elv_err("Failed to create CBOR root array");
+        return -1;
+    }
+
+    for (int i = 0; i < nb_streams; i++) {
+        stream_info_t *stream = &stream_probes[i];
+        
+        // Create a CBOR map for this stream (start with a reasonable size)
+        cbor_item_t *stream_map = cbor_new_definite_map(25);
+        if (!stream_map) {
+            elv_err("Failed to create CBOR stream map for stream %d", i);
+            cbor_decref(&root);
+            return -1;
+        }
+
+        // Helper macro to add items and check for errors
+        #define ADD_CBOR_ITEM(map, key_str, value_item) \
+            do { \
+                if (!cbor_map_add(map, (struct cbor_pair) { \
+                    .key = cbor_move(cbor_build_string(key_str)), \
+                    .value = cbor_move(value_item) \
+                })) { \
+                    elv_err("Failed to add %s to CBOR map", key_str); \
+                    cbor_decref(&stream_map); \
+                    cbor_decref(&root); \
+                    return -1; \
+                } \
+            } while(0)
+
+        // Pack all the stream information
+        ADD_CBOR_ITEM(stream_map, "stream_index", cbor_build_uint32(stream->stream_index));
+        ADD_CBOR_ITEM(stream_map, "stream_id", cbor_build_uint32(stream->stream_id));
+        ADD_CBOR_ITEM(stream_map, "codec_type", cbor_build_uint32(stream->codec_type));
+        ADD_CBOR_ITEM(stream_map, "codec_id", cbor_build_uint32(stream->codec_id));
+        ADD_CBOR_ITEM(stream_map, "codec_name", cbor_build_string(stream->codec_name));
+        ADD_CBOR_ITEM(stream_map, "duration_ts", cbor_build_uint64(stream->duration_ts));
+        
+        // Pack time_base as a nested map
+        cbor_item_t *time_base_map = cbor_new_definite_map(2);
+        if (time_base_map) {
+            ADD_CBOR_ITEM(time_base_map, "num", cbor_build_uint32(stream->time_base.num));
+            ADD_CBOR_ITEM(time_base_map, "den", cbor_build_uint32(stream->time_base.den));
+            ADD_CBOR_ITEM(stream_map, "time_base", time_base_map);
+        }
+
+        ADD_CBOR_ITEM(stream_map, "nb_frames", cbor_build_uint64(stream->nb_frames));
+        ADD_CBOR_ITEM(stream_map, "start_time", cbor_build_uint64(stream->start_time));
+
+        // Pack avg_frame_rate as a nested map
+        cbor_item_t *avg_rate_map = cbor_new_definite_map(2);
+        if (avg_rate_map) {
+            ADD_CBOR_ITEM(avg_rate_map, "num", cbor_build_uint32(stream->avg_frame_rate.num));
+            ADD_CBOR_ITEM(avg_rate_map, "den", cbor_build_uint32(stream->avg_frame_rate.den));
+            ADD_CBOR_ITEM(stream_map, "avg_frame_rate", avg_rate_map);
+        }
+
+        // Pack frame_rate as a nested map
+        cbor_item_t *frame_rate_map = cbor_new_definite_map(2);
+        if (frame_rate_map) {
+            ADD_CBOR_ITEM(frame_rate_map, "num", cbor_build_uint32(stream->frame_rate.num));
+            ADD_CBOR_ITEM(frame_rate_map, "den", cbor_build_uint32(stream->frame_rate.den));
+            ADD_CBOR_ITEM(stream_map, "frame_rate", frame_rate_map);
+        }
+
+        // Audio-specific fields
+        ADD_CBOR_ITEM(stream_map, "sample_rate", cbor_build_uint32(stream->sample_rate));
+        ADD_CBOR_ITEM(stream_map, "channels", cbor_build_uint32(stream->channels));
+        ADD_CBOR_ITEM(stream_map, "channel_layout", cbor_build_uint32(stream->channel_layout));
+        ADD_CBOR_ITEM(stream_map, "ticks_per_frame", cbor_build_uint32(stream->ticks_per_frame));
+        ADD_CBOR_ITEM(stream_map, "bit_rate", cbor_build_uint64(stream->bit_rate));
+        ADD_CBOR_ITEM(stream_map, "has_b_frames", cbor_build_uint32(stream->has_b_frames));
+
+        // Video-specific fields
+        ADD_CBOR_ITEM(stream_map, "width", cbor_build_uint32(stream->width));
+        ADD_CBOR_ITEM(stream_map, "height", cbor_build_uint32(stream->height));
+        ADD_CBOR_ITEM(stream_map, "pix_fmt", cbor_build_uint32(stream->pix_fmt));
+
+        // Pack sample_aspect_ratio as a nested map
+        cbor_item_t *sar_map = cbor_new_definite_map(2);
+        if (sar_map) {
+            ADD_CBOR_ITEM(sar_map, "num", cbor_build_uint32(stream->sample_aspect_ratio.num));
+            ADD_CBOR_ITEM(sar_map, "den", cbor_build_uint32(stream->sample_aspect_ratio.den));
+            ADD_CBOR_ITEM(stream_map, "sample_aspect_ratio", sar_map);
+        }
+
+        // Pack display_aspect_ratio as a nested map
+        cbor_item_t *dar_map = cbor_new_definite_map(2);
+        if (dar_map) {
+            ADD_CBOR_ITEM(dar_map, "num", cbor_build_uint32(stream->display_aspect_ratio.num));
+            ADD_CBOR_ITEM(dar_map, "den", cbor_build_uint32(stream->display_aspect_ratio.den));
+            ADD_CBOR_ITEM(stream_map, "display_aspect_ratio", dar_map);
+        }
+
+        ADD_CBOR_ITEM(stream_map, "field_order", cbor_build_uint32(stream->field_order));
+        ADD_CBOR_ITEM(stream_map, "profile", cbor_build_uint32(stream->profile));
+        ADD_CBOR_ITEM(stream_map, "level", cbor_build_uint32(stream->level));
+
+        // Pack side_data (display matrix)
+        cbor_item_t *side_data_map = cbor_new_definite_map(1);
+        if (side_data_map) {
+            cbor_item_t *display_matrix_map = cbor_new_definite_map(2);
+            if (display_matrix_map) {
+                ADD_CBOR_ITEM(display_matrix_map, "rotation", cbor_build_float8(stream->side_data.display_matrix.rotation));
+                ADD_CBOR_ITEM(display_matrix_map, "rotation_cw", cbor_build_float8(stream->side_data.display_matrix.rotation_cw));
+                ADD_CBOR_ITEM(side_data_map, "display_matrix", display_matrix_map);
+            }
+            ADD_CBOR_ITEM(stream_map, "side_data", side_data_map);
+        }
+
+        #undef ADD_CBOR_ITEM
+
+        // Add the stream map to the root array
+        if (!cbor_array_push(root, stream_map)) {
+            elv_err("Failed to add stream %d to CBOR array", i);
+            cbor_decref(&stream_map);
+            cbor_decref(&root);
+            return -1;
+        }
+    }
+
+    // Serialize the CBOR data
+    size_t buffer_size = 0;
+    unsigned char *buffer = NULL;
+    size_t length = cbor_serialize_alloc(root, &buffer, &buffer_size);
+    
+    if (length == 0 || !buffer) {
+        elv_err("Failed to serialize CBOR data");
+        cbor_decref(&root);
+        return -1;
+    }
+
+    *cbor_data = buffer;
+    *cbor_size = length;
+
+    // Clean up
+    cbor_decref(&root);
+
+    elv_dbg("Successfully packed %d streams into CBOR blob of %zu bytes", nb_streams, length);
+    return 0;
+}
+
 int
 avpipe_xc(
     xctx_t *xctx,
@@ -3296,6 +3464,29 @@ avpipe_xc(
             in_handlers, inctx, params, params->seekable)) != eav_success) {
         elv_err("Failure in preparing decoder, url=%s, rc=%d", params->url, rc);
         return rc;
+    }
+
+    int nb_streams = xctx->decoder_ctx.format_context->nb_streams;
+    if (nb_streams <= 0) {
+        rc = eav_num_streams;
+        goto avpipe_probe_end;
+    }
+
+    stream_info_t*  stream_probes = make_stream_info(&xctx->decoder_ctx);
+    if (!stream_probes) {
+        rc = eav_nomem;
+        goto avpipe_probe_end;
+    }
+
+    // Pack stream_probes into CBOR blob
+    unsigned char *cbor_data = NULL;
+    size_t cbor_size = 0;
+    if (pack_stream_probes_to_cbor(stream_probes, nb_streams, &cbor_data, &cbor_size) == 0) {
+        elv_log("Stream probes packed into CBOR blob: %zu bytes", cbor_size);
+        // TODO: Use the cbor_data as needed, then free it
+        free(cbor_data);
+    } else {
+        elv_err("Failed to pack stream probes into CBOR");
     }
 
     // Set up "copy" (bypass) encoder for MPEGTS
@@ -3682,6 +3873,8 @@ avpipe_xc(
 
                         if (in_handlers->avpipe_stater) {
                             inctx->data = (uint8_t *)hex_str;
+                            // This is my callback
+                            // MUST PACK as BLOB
                             in_handlers->avpipe_stater(inctx, input_packet->stream_index, in_stat_data_scte35);
                         }
                         break;
@@ -3777,7 +3970,7 @@ xc_done:
         strncat(audio_last_pts_sent_encode_buf, buf, (MAX_STREAMS + 1) * 20 - strlen(audio_last_pts_sent_encode_buf));
         sprintf(buf, "%"PRId64, encoder_context->audio_last_pts_encoded[audio_index]);
         strncat(audio_last_pts_encoded_buf, buf, (MAX_STREAMS + 1) * 20 - strlen(audio_last_pts_encoded_buf));
-    } 
+    }
 
     elv_log("avpipe_xc done url=%s, rc=%d, xctx->err=%d, xc-type=%d, "
         "last video_pts=%"PRId64" audio_pts=%"PRId64
@@ -3975,57 +4168,8 @@ get_xc_type_name(
     return "none";
 }
 
-int
-avpipe_probe(
-    avpipe_io_handler_t *in_handlers,
-    xcparams_t *params,
-    xcprobe_t **xcprobe,
-    int *n_streams)
+stream_info_t *make_stream_info()
 {
-    ioctx_t inctx;
-    coderctx_t decoder_ctx;
-    stream_info_t *stream_probes, *stream_probes_ptr;
-    xcprobe_t *probe;
-    int rc = 0;
-    char *url;
-
-    memset(&inctx, 0, sizeof(ioctx_t));
-    memset(&decoder_ctx, 0, sizeof(coderctx_t));
-
-    if (!params) {
-        elv_err("avpipe_probe parameters are not set");
-        rc = eav_param;
-        goto avpipe_probe_end;
-    }
-
-    url = params->url;
-    // Disable sync audio to stream id when probing
-    params->sync_audio_to_stream_id = -1;
-    params->stream_id = -1;
-
-    if (!in_handlers) {
-        elv_err("avpipe_probe NULL handlers, url=%s", url);
-        rc = eav_param;
-        goto avpipe_probe_end;
-    }
-
-    inctx.params = params;
-    if (in_handlers->avpipe_opener(url, &inctx) < 0) {
-        rc = eav_open_input;
-        goto avpipe_probe_end;
-    }
-
-    if ((rc = prepare_decoder(&decoder_ctx, in_handlers, &inctx, params, params->seekable)) != eav_success) {
-        elv_err("avpipe_probe failed to prepare decoder, url=%s", url);
-        goto avpipe_probe_end;
-    }
-
-    int nb_streams = decoder_ctx.format_context->nb_streams;
-    if (nb_streams <= 0) {
-        rc = eav_num_streams;
-        goto avpipe_probe_end;
-    }
-
     int nb_skipped_streams = 0;
     probe = (xcprobe_t *)calloc(1, sizeof(xcprobe_t));
     stream_probes = (stream_info_t *)calloc(1, sizeof(stream_info_t)*nb_streams);
@@ -4130,6 +4274,64 @@ avpipe_probe(
                     break;
             }
         }
+    }
+}
+
+int
+avpipe_probe(
+    avpipe_io_handler_t *in_handlers,
+    xcparams_t *params,
+    xcprobe_t **xcprobe,
+    int *n_streams)
+{
+    ioctx_t inctx;
+    coderctx_t decoder_ctx;
+    stream_info_t *stream_probes, *stream_probes_ptr;
+    xcprobe_t *probe;
+    int rc = 0;
+    char *url;
+
+    memset(&inctx, 0, sizeof(ioctx_t));
+    memset(&decoder_ctx, 0, sizeof(coderctx_t));
+
+    if (!params) {
+        elv_err("avpipe_probe parameters are not set");
+        rc = eav_param;
+        goto avpipe_probe_end;
+    }
+
+    url = params->url;
+    // Disable sync audio to stream id when probing
+    params->sync_audio_to_stream_id = -1;
+    params->stream_id = -1;
+
+    if (!in_handlers) {
+        elv_err("avpipe_probe NULL handlers, url=%s", url);
+        rc = eav_param;
+        goto avpipe_probe_end;
+    }
+
+    inctx.params = params;
+    if (in_handlers->avpipe_opener(url, &inctx) < 0) {
+        rc = eav_open_input;
+        goto avpipe_probe_end;
+    }
+
+    if ((rc = prepare_decoder(&decoder_ctx, in_handlers, &inctx, params, params->seekable)) != eav_success) {
+        elv_err("avpipe_probe failed to prepare decoder, url=%s", url);
+        goto avpipe_probe_end;
+    }
+
+    int nb_streams = decoder_ctx.format_context->nb_streams;
+    if (nb_streams <= 0) {
+        rc = eav_num_streams;
+        goto avpipe_probe_end;
+    }
+
+    stream_info_t*  stream_probes = make_stream_info(&decoder_ctx);
+    if (!stream_probes) {
+        rc = eav_nomem;
+        goto avpipe_probe_end;
     }
 
     inctx.closed = 1;
