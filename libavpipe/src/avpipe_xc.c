@@ -49,7 +49,7 @@
 #define DEFAULT_ACC_SAMPLE_RATE     48000
 #define MAX_FRAME_READ_RETRIES      300
 
-stream_info_t **make_stream_info(coderctx_t decoder_ctx, int nb_streams, int* p_nb_skipped_streams);
+stream_info_t **make_stream_info(coderctx_t decoder_ctx, int nb_streams, int* p_nb_skipped_streams, xcprobe_t *probe);
 
 extern int
 init_video_filters(
@@ -3476,7 +3476,14 @@ avpipe_xc(
     }
     int nb_skipped_streams = 0;
 
-    stream_info_t**  stream_probes = make_stream_info(xctx->decoder_ctx, nb_streams, &nb_skipped_streams);
+    xcprobe_t *probe = (xcprobe_t *)calloc(1, sizeof(xcprobe_t));
+    if (!probe) {
+        elv_err("Failed to allocate memory for probe");
+        return NULL;
+    }
+
+
+    stream_info_t**  stream_probes = make_stream_info(xctx->decoder_ctx, nb_streams, &nb_skipped_streams, probe);
     if (!stream_probes) {
         elv_err("Failure making stream probes");
         rc = eav_mem_alloc;
@@ -3488,7 +3495,13 @@ avpipe_xc(
     size_t cbor_size = 0;
     if (pack_stream_probes_to_cbor(*stream_probes, nb_streams - nb_skipped_streams, &cbor_data, &cbor_size) == 0) {
         elv_log("Stream probes packed into CBOR blob: %zu bytes", cbor_size);
-        // TODO: Use the cbor_data as needed, then free it
+        if (in_handlers->avpipe_stater) {
+           inctx->data = cbor_data;
+           inctx->data_size = cbor_size;
+           rc = in_handlers->avpipe_stater(inctx, input_packet->stream_index, in_stat_data_stream_info);
+        }else{
+              elv_warn("No stater callback to send stream info");
+        }
         free(cbor_data);
     } else {
         elv_err("Failed to pack stream probes into CBOR");
@@ -4173,19 +4186,15 @@ get_xc_type_name(
     return "none";
 }
 
-stream_info_t **make_stream_info(coderctx_t decoder_ctx, int nb_streams, int* p_nb_skipped_streams)
+stream_info_t **make_stream_info(coderctx_t decoder_ctx, int nb_streams, int* p_nb_skipped_streams, xcprobe_t *probe)
 {
 
     if (p_nb_skipped_streams == NULL){
         elv_err("nb_skipped_streams is NULL");
         return NULL;
     }
-    xcprobe_t* probe = (xcprobe_t *)calloc(1, sizeof(xcprobe_t));
-    if (!probe) {
-        elv_err("Failed to allocate memory for probe");
-        return NULL;
-    }
-    stream_info_t** stream_probes = (stream_info_t **)calloc(nb_streams, sizeof(stream_info_t*));
+
+    stream_info_t* stream_probes = (stream_info_t *)calloc(nb_streams, sizeof(stream_info_t));
     for (int i=0; i<nb_streams; i++) {
         AVStream *s = decoder_ctx.format_context->streams[i];
         AVCodecContext *codec_context = decoder_ctx.codec_context[i];
@@ -4196,8 +4205,7 @@ stream_info_t **make_stream_info(coderctx_t decoder_ctx, int nb_streams, int* p_
             (*p_nb_skipped_streams)++;
             continue;
         }
-        stream_info_t *stream_probes_ptr = (stream_info_t *)calloc(1, sizeof(stream_info_t));
-        stream_probes[i - *p_nb_skipped_streams] = stream_probes_ptr;
+        stream_info_t *stream_probes_ptr = &stream_probes[i - *p_nb_skipped_streams];
         stream_probes_ptr->stream_index = i;
         stream_probes_ptr->stream_id = s->id;
         if (codec) {
@@ -4289,6 +4297,14 @@ stream_info_t **make_stream_info(coderctx_t decoder_ctx, int nb_streams, int* p_
             }
         }
     }
+    // Create a pointer to the array to return as stream_info_t**
+    stream_info_t **result = malloc(sizeof(stream_info_t*));
+    if (!result) {
+        free(stream_probes);
+        return NULL;
+    }
+    *result = stream_probes;
+    return result;
 }
 
 int
@@ -4343,14 +4359,20 @@ avpipe_probe(
     }
     int nb_skipped_streams=0;
 
-    stream_info_t**  stream_probes = make_stream_info(decoder_ctx, nb_streams, &nb_skipped_streams);
+    probe = (xcprobe_t *)calloc(1, sizeof(xcprobe_t));
+    if (!probe) {
+        elv_err("Failed to allocate memory for probe");
+        return NULL;
+    }
+
+    stream_info_t**  stream_probes = make_stream_info(decoder_ctx, nb_streams, &nb_skipped_streams, probe);
     if (!stream_probes) {
         rc = eav_mem_alloc;
         goto avpipe_probe_end;
     }
 
     inctx.closed = 1;
-    probe->stream_info = stream_probes;
+    probe->stream_info = *stream_probes;
     probe->container_info.format_name = strdup(decoder_ctx.format_context->iformat->name);
     *xcprobe = probe;
     *n_streams = nb_streams - nb_skipped_streams;
