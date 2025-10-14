@@ -49,6 +49,8 @@
 #define DEFAULT_ACC_SAMPLE_RATE     48000
 #define MAX_FRAME_READ_RETRIES      300
 
+stream_info_t **make_stream_info(coderctx_t decoder_ctx, int nb_streams, int* p_nb_skipped_streams);
+
 extern int
 init_video_filters(
     const char *filters_descr,
@@ -3299,7 +3301,7 @@ pack_stream_probes_to_cbor(
 
     for (int i = 0; i < nb_streams; i++) {
         stream_info_t *stream = &stream_probes[i];
-        
+
         // Create a CBOR map for this stream (start with a reasonable size)
         cbor_item_t *stream_map = cbor_new_definite_map(25);
         if (!stream_map) {
@@ -3329,7 +3331,7 @@ pack_stream_probes_to_cbor(
         ADD_CBOR_ITEM(stream_map, "codec_id", cbor_build_uint32(stream->codec_id));
         ADD_CBOR_ITEM(stream_map, "codec_name", cbor_build_string(stream->codec_name));
         ADD_CBOR_ITEM(stream_map, "duration_ts", cbor_build_uint64(stream->duration_ts));
-        
+
         // Pack time_base as a nested map
         cbor_item_t *time_base_map = cbor_new_definite_map(2);
         if (time_base_map) {
@@ -3417,7 +3419,7 @@ pack_stream_probes_to_cbor(
     size_t buffer_size = 0;
     unsigned char *buffer = NULL;
     size_t length = cbor_serialize_alloc(root, &buffer, &buffer_size);
-    
+
     if (length == 0 || !buffer) {
         elv_err("Failed to serialize CBOR data");
         cbor_decref(&root);
@@ -3468,20 +3470,23 @@ avpipe_xc(
 
     int nb_streams = xctx->decoder_ctx.format_context->nb_streams;
     if (nb_streams <= 0) {
+        elv_err("Failure calculating number of streams num=%d", nb_streams);
         rc = eav_num_streams;
-        goto avpipe_probe_end;
+        return rc;
     }
+    int nb_skipped_streams = 0;
 
-    stream_info_t*  stream_probes = make_stream_info(&xctx->decoder_ctx);
+    stream_info_t**  stream_probes = make_stream_info(xctx->decoder_ctx, nb_streams, &nb_skipped_streams);
     if (!stream_probes) {
-        rc = eav_nomem;
-        goto avpipe_probe_end;
+        elv_err("Failure making stream probes");
+        rc = eav_mem_alloc;
+        return rc;
     }
 
     // Pack stream_probes into CBOR blob
     unsigned char *cbor_data = NULL;
     size_t cbor_size = 0;
-    if (pack_stream_probes_to_cbor(stream_probes, nb_streams, &cbor_data, &cbor_size) == 0) {
+    if (pack_stream_probes_to_cbor(*stream_probes, nb_streams - nb_skipped_streams, &cbor_data, &cbor_size) == 0) {
         elv_log("Stream probes packed into CBOR blob: %zu bytes", cbor_size);
         // TODO: Use the cbor_data as needed, then free it
         free(cbor_data);
@@ -4168,11 +4173,19 @@ get_xc_type_name(
     return "none";
 }
 
-stream_info_t *make_stream_info()
+stream_info_t **make_stream_info(coderctx_t decoder_ctx, int nb_streams, int* p_nb_skipped_streams)
 {
-    int nb_skipped_streams = 0;
-    probe = (xcprobe_t *)calloc(1, sizeof(xcprobe_t));
-    stream_probes = (stream_info_t *)calloc(1, sizeof(stream_info_t)*nb_streams);
+
+    if (p_nb_skipped_streams == NULL){
+        elv_err("nb_skipped_streams is NULL");
+        return NULL;
+    }
+    xcprobe_t* probe = (xcprobe_t *)calloc(1, sizeof(xcprobe_t));
+    if (!probe) {
+        elv_err("Failed to allocate memory for probe");
+        return NULL;
+    }
+    stream_info_t** stream_probes = (stream_info_t **)calloc(nb_streams, sizeof(stream_info_t*));
     for (int i=0; i<nb_streams; i++) {
         AVStream *s = decoder_ctx.format_context->streams[i];
         AVCodecContext *codec_context = decoder_ctx.codec_context[i];
@@ -4180,10 +4193,11 @@ stream_info_t *make_stream_info()
         AVRational sar, dar;
 
         if (!codec_context) {
-            nb_skipped_streams++;
+            (*p_nb_skipped_streams)++;
             continue;
         }
-        stream_probes_ptr = &stream_probes[i-nb_skipped_streams];
+        stream_info_t *stream_probes_ptr = (stream_info_t *)calloc(1, sizeof(stream_info_t));
+        stream_probes[i - *p_nb_skipped_streams] = stream_probes_ptr;
         stream_probes_ptr->stream_index = i;
         stream_probes_ptr->stream_id = s->id;
         if (codec) {
@@ -4286,7 +4300,7 @@ avpipe_probe(
 {
     ioctx_t inctx;
     coderctx_t decoder_ctx;
-    stream_info_t *stream_probes, *stream_probes_ptr;
+    stream_info_t *stream_probes_ptr;
     xcprobe_t *probe;
     int rc = 0;
     char *url;
@@ -4327,10 +4341,11 @@ avpipe_probe(
         rc = eav_num_streams;
         goto avpipe_probe_end;
     }
+    int nb_skipped_streams=0;
 
-    stream_info_t*  stream_probes = make_stream_info(&decoder_ctx);
+    stream_info_t**  stream_probes = make_stream_info(decoder_ctx, nb_streams, &nb_skipped_streams);
     if (!stream_probes) {
-        rc = eav_nomem;
+        rc = eav_mem_alloc;
         goto avpipe_probe_end;
     }
 

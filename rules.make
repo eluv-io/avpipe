@@ -11,8 +11,8 @@ OSNAME := $(shell uname -s)
 LDFLAGS := \
 		-lavpipe \
 		-lutils \
-		$(shell pkg-config --libs libavfilter libavcodec libavformat libavdevice libswresample libavresample libswscale libavutil libpostproc srt)
-CFLAGS := $(shell pkg-config --cflags libavfilter libavcodec libavformat libavdevice libswresample libavresample libswscale libavutil libpostproc srt)
+		$(shell pkg-config --libs libavfilter libavcodec libavformat libavdevice libswresample libavresample libswscale libavutil libpostproc srt libcbor)
+CFLAGS := $(shell pkg-config --cflags libavfilter libavcodec libavformat libavdevice libswresample libavresample libswscale libavutil libpostproc srt libcbor)
 
 ifeq ($(OSNAME), Darwin)
 	LDFLAGS := ${LDFLAGS} \
@@ -40,3 +40,6 @@ ifeq ($(OSNAME), Linux)
 		$(shell pkg-config --libs xcoder)
 	CFLAGS := ${CFLAGS} $(shell pkg-config --cflags xcoder)
 endif
+
+# Alias for compatibility with different makefiles
+LIBS := ${LDFLAGS}
