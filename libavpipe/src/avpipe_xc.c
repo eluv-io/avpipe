@@ -3253,6 +3253,8 @@ get_filter_str(
     return 0;
 }
 
+
+
 /*
  * The general flow of transcoding:
  *
@@ -3303,7 +3305,7 @@ pack_stream_probes_to_cbor(
         stream_info_t *stream = &stream_probes[i];
 
         // Create a CBOR map for this stream (start with a reasonable size)
-        cbor_item_t *stream_map = cbor_new_definite_map(25);
+        cbor_item_t *stream_map = cbor_new_definite_map(35);
         if (!stream_map) {
             elv_err("Failed to create CBOR stream map for stream %d", i);
             cbor_decref(&root);
@@ -3404,8 +3406,6 @@ pack_stream_probes_to_cbor(
             ADD_CBOR_ITEM(stream_map, "side_data", side_data_map);
         }
 
-        #undef ADD_CBOR_ITEM
-
         // Add the stream map to the root array
         if (!cbor_array_push(root, stream_map)) {
             elv_err("Failed to add stream %d to CBOR array", i);
@@ -3498,7 +3498,7 @@ avpipe_xc(
         if (in_handlers->avpipe_stater) {
            inctx->data = cbor_data;
            inctx->data_size = cbor_size;
-           rc = in_handlers->avpipe_stater(inctx, input_packet->stream_index, in_stat_data_stream_info);
+           rc = in_handlers->avpipe_stater(inctx, 0, in_stat_data_stream_info);
         }else{
               elv_warn("No stater callback to send stream info");
         }
