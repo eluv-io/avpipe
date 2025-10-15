@@ -3479,7 +3479,7 @@ avpipe_xc(
     xcprobe_t *probe = (xcprobe_t *)calloc(1, sizeof(xcprobe_t));
     if (!probe) {
         elv_err("Failed to allocate memory for probe");
-        return NULL;
+        return eav_mem_alloc;
     }
 
 
@@ -4360,9 +4360,10 @@ avpipe_probe(
     int nb_skipped_streams=0;
 
     probe = (xcprobe_t *)calloc(1, sizeof(xcprobe_t));
-    if (!probe) {
+    if (probe == NULL) {
         elv_err("Failed to allocate memory for probe");
-        return NULL;
+        rc = eav_mem_alloc;
+        goto avpipe_probe_end;
     }
 
     stream_info_t**  stream_probes = make_stream_info(decoder_ctx, nb_streams, &nb_skipped_streams, probe);
