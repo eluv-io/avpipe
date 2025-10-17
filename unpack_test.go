@@ -8,7 +8,6 @@ import (
 
 func TestUnpackStreamProbesFromCBOR(t *testing.T) {
 	// This is a simple test to verify the functionality works
-	// You would replace this with actual CBOR data from your C function
 
 	// Create test data that matches the expected structure
 	testData := []StreamInfoCBOR{
