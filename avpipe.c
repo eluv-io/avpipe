@@ -300,6 +300,15 @@ in_stat(
     case in_stat_data_scte35:
         rc = AVPipeStatInput(fd, stream_index, stat_type, c->data);
         break;
+    case in_stat_data_stream_info:
+        struct cbor_buf_data_t {
+            uint8_t *data;
+            size_t   size;
+        } cbor_data_t;
+        cbor_data_t.data = c->data;
+        cbor_data_t.size = c->data_size;
+        rc = AVPipeStatInput(fd, stream_index, stat_type, &cbor_data_t);
+        break;
 
     default:
         rc = -1;

@@ -104,7 +104,8 @@ typedef enum avp_stat_t {
     out_stat_encoding_end_pts = 9,          // The last PTS encoded. This stat is recorded when a file is closed
     out_stat_start_file = 10,               // Sent when a new file is opened and reports the segment index
     out_stat_end_file = 11,                 // Sent when a file is closed and reports the segment index
-    in_stat_data_scte35 = 12               // SCTE data arrived
+    in_stat_data_scte35 = 12,               // SCTE data arrived
+    in_stat_data_stream_info = 13           // Stream info in CBOR format
 } avp_stat_t;
 
 typedef enum avp_live_proto_t {
@@ -202,6 +203,7 @@ typedef struct ioctx_t {
     int     seg_index;          /* segment index if this ioctx is a segment */
 
     uint8_t *data;  /* Data stream buffer (e.g. SCTE-35) */
+    size_t   data_size; /* Size of data stream buffer */
 
     io_mux_ctx_t    *in_mux_ctx;   /* Input muxer context */
     int             in_mux_index;
