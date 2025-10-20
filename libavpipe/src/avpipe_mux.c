@@ -309,6 +309,7 @@ avpipe_init_muxer(
     out_muxer_ctx->format_context->io_open = elv_mux_open;
     out_muxer_ctx->format_context->io_close = elv_mux_close;
 
+    int has_ac3 = 0;
     for (int i=0; i<in_mux_ctx->audio_count+in_mux_ctx->caption_count+1; i++) {
         /* Add a new stream to output format for each input in muxer context (source) */
         out_muxer_ctx->stream[i] = avformat_new_stream(out_muxer_ctx->format_context, NULL);
@@ -329,6 +330,16 @@ avpipe_init_muxer(
         out_muxer_ctx->stream[i]->avg_frame_rate = in_stream->avg_frame_rate;
         out_muxer_ctx->stream[i]->r_frame_rate = in_stream->r_frame_rate;
 
+        /* Check if stream contains AC3 audio */
+        if (out_muxer_ctx->stream[i]->codecpar->codec_type == AVMEDIA_TYPE_AUDIO &&
+            out_muxer_ctx->stream[i]->codecpar->codec_id == AV_CODEC_ID_AC3) {
+            has_ac3 = 1;
+        }
+    }
+
+    /* AC3 codec requires delay_moov flag for fmp4-segment format */
+    if (p->format && !strcmp(p->format, "fmp4-segment") && has_ac3) {
+        av_opt_set(out_muxer_ctx->format_context->priv_data, "movflags", "delay_moov", 0);
     }
 
     av_dump_format(out_muxer_ctx->format_context, 0, out_filename, 1);

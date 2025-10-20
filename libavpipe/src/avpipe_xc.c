@@ -691,8 +691,13 @@ set_encoder_options(
         }
 
         if (!strcmp(params->format, "fmp4-segment")) {
-            if ((i = selected_decoded_audio(decoder_context, stream_index)) >= 0)
-                av_opt_set(encoder_context->format_context2[i]->priv_data, "segment_format_options", "movflags="FRAG_OPTS, 0);
+            if ((i = selected_decoded_audio(decoder_context, stream_index)) >= 0) {
+                // AC3 codec requires delay_moov flag to write packets before moov atom
+                if (params->ecodec2 && !strcmp(params->ecodec2, "ac3"))
+                    av_opt_set(encoder_context->format_context2[i]->priv_data, "segment_format_options", "movflags="FRAG_OPTS"+delay_moov", 0);
+                else
+                    av_opt_set(encoder_context->format_context2[i]->priv_data, "segment_format_options", "movflags="FRAG_OPTS, 0);
+            }
             if (stream_index == decoder_context->video_stream_index)
                 av_opt_set(encoder_context->format_context->priv_data, "segment_format_options", "movflags="FRAG_OPTS, 0);
         }
