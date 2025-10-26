@@ -24,3 +24,7 @@ func (s *srtProto) Handler() string {
 func (s *srtProto) Open() (io.ReadCloser, error) {
 	panic("SRT Protocol not implemented yet")
 }
+
+func (s *srtProto) PackagingMode() TsPackagingMode {
+	return RawTs
+}

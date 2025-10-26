@@ -2,7 +2,11 @@ package goavpipe
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
+	"strings"
+
+	"github.com/eluv-io/avpipe/broadcastproto/transport"
 )
 
 type AVStatType int
@@ -20,6 +24,7 @@ const (
 	AV_OUT_STAT_START_FILE              = 10
 	AV_OUT_STAT_END_FILE                = 11
 	AV_IN_STAT_DATA_SCTE35              = 12
+	AV_IN_STAT_MPEGTS                   = 13
 )
 
 func (a AVStatType) Name() string {
@@ -48,6 +53,8 @@ func (a AVStatType) Name() string {
 		return "AV_OUT_STAT_END_FILE"
 	case AV_IN_STAT_DATA_SCTE35:
 		return "AV_IN_STAT_DATA_SCTE35"
+	case AV_IN_STAT_MPEGTS:
+		return "AV_IN_STAT_MPEGTS"
 	default:
 		return fmt.Sprintf("Unknown(%d)", a)
 	}
@@ -257,87 +264,74 @@ const (
 
 // XcParams should match with txparams_t in avpipe_xc.h
 type XcParams struct {
-	Url                string      `json:"url"`
-	BypassTranscoding  bool        `json:"bypass,omitempty"`
-	Format             string      `json:"format,omitempty"`
-	StartTimeTs        int64       `json:"start_time_ts,omitempty"`
-	StartPts           int64       `json:"start_pts,omitempty"` // Start PTS for output
-	DurationTs         int64       `json:"duration_ts,omitempty"`
-	StartSegmentStr    string      `json:"start_segment_str,omitempty"`
-	VideoBitrate       int32       `json:"video_bitrate,omitempty"`
-	AudioBitrate       int32       `json:"audio_bitrate,omitempty"`
-	SampleRate         int32       `json:"sample_rate,omitempty"` // Audio sampling rate
-	RcMaxRate          int32       `json:"rc_max_rate,omitempty"`
-	RcBufferSize       int32       `json:"rc_buffer_size,omitempty"`
-	CrfStr             string      `json:"crf_str,omitempty"`
-	Preset             string      `json:"preset,omitempty"`
-	AudioSegDurationTs int64       `json:"audio_seg_duration_ts,omitempty"`
-	VideoSegDurationTs int64       `json:"video_seg_duration_ts,omitempty"`
-	SegDuration        string      `json:"seg_duration,omitempty"`
-	StartFragmentIndex int32       `json:"start_fragment_index,omitempty"`
-	ForceKeyInt        int32       `json:"force_keyint,omitempty"`
-	Ecodec             string      `json:"ecodec,omitempty"`    // Video encoder
-	Ecodec2            string      `json:"ecodec2,omitempty"`   // Audio encoder
-	Dcodec             string      `json:"dcodec,omitempty"`    // Video decoder
-	Dcodec2            string      `json:"dcodec2,omitempty"`   // Audio decoder
-	GPUIndex           int32       `json:"gpu_index,omitempty"` // GPU index if encoder/decoder is GPU (nvidia)
-	EncHeight          int32       `json:"enc_height,omitempty"`
-	EncWidth           int32       `json:"enc_width,omitempty"`
-	CryptIV            string      `json:"crypt_iv,omitempty"`
-	CryptKey           string      `json:"crypt_key,omitempty"`
-	CryptKID           string      `json:"crypt_kid,omitempty"`
-	CryptKeyURL        string      `json:"crypt_key_url,omitempty"`
-	CryptScheme        CryptScheme `json:"crypt_scheme,omitempty"`
-	XcType             XcType      `json:"xc_type,omitempty"`
-	// UseCustomLiveReader is used to indicate that the custom live reader should be used
-	// for reading the input stream, and possibly preprocessing it. If this is set to true, the
-	// caller should either have already provided a custom live reader via `InitUrlIOHandler`. If it
-	// has not been set by the time `XcInit` or `Xc` is called, the default input reader will be
-	// used.
-	UseCustomLiveReader bool `json:"use_custom_live_reader,omitempty"`
-	// If true, the input MPEGTS stream will be copied to the output without any processing
-	// TODO(Nate): Remove this to have better semantics, but for now adding a field is one of the
-	// easiest ways to implement this. Likely change this before merging, or have the `CopyMpegts` field have values:
-	// - "": no copy
-	// - "raw": copy the input MPEGTS stream unedited
-	// - "parsed": copy the MPEGTS stream as we do now from ffmpeg outputs
-	CopyMpegtsFromInput    bool      `json:"copy_mpegts_from_input,omitempty"`
-	CopyMpegts             bool      `json:"copy_mpegts,omitempty"`
-	Seekable               bool      `json:"seekable,omitempty"`
-	WatermarkText          string    `json:"watermark_text,omitempty"`
-	WatermarkTimecode      string    `json:"watermark_timecode,omitempty"`
-	WatermarkTimecodeRate  float32   `json:"watermark_timecode_rate,omitempty"`
-	WatermarkXLoc          string    `json:"watermark_xloc,omitempty"`
-	WatermarkYLoc          string    `json:"watermark_yloc,omitempty"`
-	WatermarkRelativeSize  float32   `json:"watermark_relative_size,omitempty"`
-	WatermarkFontColor     string    `json:"watermark_font_color,omitempty"`
-	WatermarkShadow        bool      `json:"watermark_shadow,omitempty"`
-	WatermarkShadowColor   string    `json:"watermark_shadow_color,omitempty"`
-	WatermarkOverlay       string    `json:"watermark_overlay,omitempty"`      // Buffer containing overlay image
-	WatermarkOverlayLen    int       `json:"watermark_overlay_len,omitempty"`  // Length of overlay image
-	WatermarkOverlayType   ImageType `json:"watermark_overlay_type,omitempty"` // Type of overlay image (i.e PngImage, ...)
-	StreamId               int32     `json:"stream_id"`                        // Specify stream by ID (instead of index)
-	AudioIndex             []int32   `json:"audio_index"`                      // the length of this is equal to the number of audios
-	ChannelLayout          int       `json:"channel_layout"`                   // Audio channel layout
-	MaxCLL                 string    `json:"max_cll,omitempty"`
-	MasterDisplay          string    `json:"master_display,omitempty"`
-	BitDepth               int32     `json:"bitdepth,omitempty"`
-	SyncAudioToStreamId    int       `json:"sync_audio_to_stream_id"`
-	ForceEqualFDuration    bool      `json:"force_equal_frame_duration,omitempty"`
-	MuxingSpec             string    `json:"muxing_spec,omitempty"`
-	Listen                 bool      `json:"listen"`
-	ConnectionTimeout      int       `json:"connection_timeout"`
-	FilterDescriptor       string    `json:"filter_descriptor"`
-	SkipDecoding           bool      `json:"skip_decoding"`
-	DebugFrameLevel        bool      `json:"debug_frame_level"`
-	ExtractImageIntervalTs int64     `json:"extract_image_interval_ts,omitempty"`
-	ExtractImagesTs        []int64   `json:"extract_images_ts,omitempty"`
-	VideoTimeBase          int       `json:"video_time_base,omitempty"`
-	VideoFrameDurationTs   int       `json:"video_frame_duration_ts,omitempty"`
-	Rotate                 int       `json:"rotate,omitempty"`
-	Profile                string    `json:"profile,omitempty"`
-	Level                  int       `json:"level,omitempty"`
-	Deinterlace            int       `json:"deinterlace,omitempty"`
+	Url                    string      `json:"url"`
+	InputCfg               InputConfig `json:"input_cfg"`
+	BypassTranscoding      bool        `json:"bypass,omitempty"`
+	Format                 string      `json:"format,omitempty"`
+	StartTimeTs            int64       `json:"start_time_ts,omitempty"`
+	StartPts               int64       `json:"start_pts,omitempty"` // Start PTS for output
+	DurationTs             int64       `json:"duration_ts,omitempty"`
+	StartSegmentStr        string      `json:"start_segment_str,omitempty"`
+	VideoBitrate           int32       `json:"video_bitrate,omitempty"`
+	AudioBitrate           int32       `json:"audio_bitrate,omitempty"`
+	SampleRate             int32       `json:"sample_rate,omitempty"` // Audio sampling rate
+	RcMaxRate              int32       `json:"rc_max_rate,omitempty"`
+	RcBufferSize           int32       `json:"rc_buffer_size,omitempty"`
+	CrfStr                 string      `json:"crf_str,omitempty"`
+	Preset                 string      `json:"preset,omitempty"`
+	AudioSegDurationTs     int64       `json:"audio_seg_duration_ts,omitempty"`
+	VideoSegDurationTs     int64       `json:"video_seg_duration_ts,omitempty"`
+	SegDuration            string      `json:"seg_duration,omitempty"`
+	StartFragmentIndex     int32       `json:"start_fragment_index,omitempty"`
+	ForceKeyInt            int32       `json:"force_keyint,omitempty"`
+	Ecodec                 string      `json:"ecodec,omitempty"`    // Video encoder
+	Ecodec2                string      `json:"ecodec2,omitempty"`   // Audio encoder
+	Dcodec                 string      `json:"dcodec,omitempty"`    // Video decoder
+	Dcodec2                string      `json:"dcodec2,omitempty"`   // Audio decoder
+	GPUIndex               int32       `json:"gpu_index,omitempty"` // GPU index if encoder/decoder is GPU (nvidia)
+	EncHeight              int32       `json:"enc_height,omitempty"`
+	EncWidth               int32       `json:"enc_width,omitempty"`
+	CryptIV                string      `json:"crypt_iv,omitempty"`
+	CryptKey               string      `json:"crypt_key,omitempty"`
+	CryptKID               string      `json:"crypt_kid,omitempty"`
+	CryptKeyURL            string      `json:"crypt_key_url,omitempty"`
+	CryptScheme            CryptScheme `json:"crypt_scheme,omitempty"`
+	XcType                 XcType      `json:"xc_type,omitempty"`
+	Seekable               bool        `json:"seekable,omitempty"`
+	WatermarkText          string      `json:"watermark_text,omitempty"`
+	WatermarkTimecode      string      `json:"watermark_timecode,omitempty"`
+	WatermarkTimecodeRate  float32     `json:"watermark_timecode_rate,omitempty"`
+	WatermarkXLoc          string      `json:"watermark_xloc,omitempty"`
+	WatermarkYLoc          string      `json:"watermark_yloc,omitempty"`
+	WatermarkRelativeSize  float32     `json:"watermark_relative_size,omitempty"`
+	WatermarkFontColor     string      `json:"watermark_font_color,omitempty"`
+	WatermarkShadow        bool        `json:"watermark_shadow,omitempty"`
+	WatermarkShadowColor   string      `json:"watermark_shadow_color,omitempty"`
+	WatermarkOverlay       string      `json:"watermark_overlay,omitempty"`      // Buffer containing overlay image
+	WatermarkOverlayLen    int         `json:"watermark_overlay_len,omitempty"`  // Length of overlay image
+	WatermarkOverlayType   ImageType   `json:"watermark_overlay_type,omitempty"` // Type of overlay image (i.e PngImage, ...)
+	StreamId               int32       `json:"stream_id"`                        // Specify stream by ID (instead of index)
+	AudioIndex             []int32     `json:"audio_index"`                      // the length of this is equal to the number of audios
+	ChannelLayout          int         `json:"channel_layout"`                   // Audio channel layout
+	MaxCLL                 string      `json:"max_cll,omitempty"`
+	MasterDisplay          string      `json:"master_display,omitempty"`
+	BitDepth               int32       `json:"bitdepth,omitempty"`
+	SyncAudioToStreamId    int         `json:"sync_audio_to_stream_id"`
+	ForceEqualFDuration    bool        `json:"force_equal_frame_duration,omitempty"`
+	MuxingSpec             string      `json:"muxing_spec,omitempty"`
+	Listen                 bool        `json:"listen"`
+	ConnectionTimeout      int         `json:"connection_timeout"`
+	FilterDescriptor       string      `json:"filter_descriptor"`
+	SkipDecoding           bool        `json:"skip_decoding"`
+	DebugFrameLevel        bool        `json:"debug_frame_level"`
+	ExtractImageIntervalTs int64       `json:"extract_image_interval_ts,omitempty"`
+	ExtractImagesTs        []int64     `json:"extract_images_ts,omitempty"`
+	VideoTimeBase          int         `json:"video_time_base,omitempty"`
+	VideoFrameDurationTs   int         `json:"video_frame_duration_ts,omitempty"`
+	Rotate                 int         `json:"rotate,omitempty"`
+	Profile                string      `json:"profile,omitempty"`
+	Level                  int         `json:"level,omitempty"`
+	Deinterlace            int         `json:"deinterlace,omitempty"`
 }
 
 // NewXcParams initializes a XcParams struct with unset/default values
@@ -410,6 +404,94 @@ func (p *XcParams) UnmarshalMap(m map[string]interface{}) error {
 		return err
 	}
 	return p.UnmarshalJSON(b)
+}
+
+func (p *XcParams) Validate() error {
+	// TODO: Fill this out more completely
+	// For frontend visibility, if there are multiple independent config sections that
+	// have errors, we should probably concatenate them into an error list
+
+	inputErr := p.InputCfg.Validate(p.Url)
+	if inputErr != nil {
+		return inputErr
+	}
+
+	return nil
+}
+
+type CopyMode string
+
+const (
+	CopyModeUnknown CopyMode = ""        // Default - no copy of the input
+	CopyModeNone    CopyMode = "none"    // Don't create a copy of the input
+	CopyModeRaw     CopyMode = "raw"     // Create a verbatim copy of the input
+	CopyModeRemuxed CopyMode = "remuxed" // Demux and remux the input
+	// CopyModeRepackage can be used to repackage RTMP to MPEGTS in combination
+	// with raw_ts packaging and a URL starting with RTMP (example for future use)
+	CopyModeRepackage CopyMode = "repackage"
+	// CopyModeRetranscode can be used to replace an elementary stream in the MPEGTS
+	// such as converting jpegxs to h264, then remuxing (example for future use)
+	CopyModeRetranscode CopyMode = "retranscode_stream"
+)
+
+type InputConfig struct {
+	CopyMode      CopyMode                  `json:"copy_mode"`
+	CopyPackaging transport.TsPackagingMode `json:"copy_packaging"`
+	// NOTE: Even if not bypassing libav reader, UDP will bypass the libav reader
+	BypassLibavReader bool `json:"bypass_libav_reader"`
+}
+
+func (ic *InputConfig) Validate(url string) error {
+	// For backwards compatibility reasons, the zero input config is valid
+	zeroInputConfig := InputConfig{}
+	if *ic == zeroInputConfig {
+		return nil
+	}
+
+	isRTP := strings.HasPrefix(url, "rtp://")
+	isSRT := strings.HasPrefix(url, "srt://")
+	isUDP := strings.HasPrefix(url, "udp://")
+
+	useLibavReader := !ic.BypassLibavReader
+
+	if useLibavReader && !(isRTP || isSRT || isUDP) {
+		return errors.New("FFMPEG reader can only be used with RTP, SRT, or UDP URLs")
+	}
+
+	switch ic.CopyMode {
+	case CopyModeUnknown:
+		return errors.New("copy mode must be set to a valid value")
+	case CopyModeNone, CopyModeRaw, CopyModeRemuxed:
+	case CopyModeRepackage, CopyModeRetranscode:
+		return fmt.Errorf("copy mode not implemented: %s", ic.CopyMode)
+	default:
+		return fmt.Errorf("invalid copy mode: %s", ic.CopyMode)
+	}
+
+	switch ic.CopyMode {
+	case CopyModeNone:
+		if ic.CopyPackaging != transport.UnknownPackagingMode {
+			return errors.New("copy packaging cannot be set if copy mode is 'none'")
+		}
+		return nil
+	case CopyModeRaw:
+		if useLibavReader {
+			return errors.New("libav reader cannot be used with raw copy mode")
+		} else if ic.CopyPackaging == transport.UnknownPackagingMode {
+			return errors.New("copy packaging must be set if copy mode is set")
+		} else if ic.CopyPackaging == transport.RtpTs && !isRTP {
+			// TODO: We should be able to handle RTP over UDP as well
+			return errors.New("RTP packaging can only be used with RTP URLs")
+		}
+		return nil
+	case CopyModeRemuxed:
+		if ic.CopyPackaging != transport.RawTs {
+			return errors.New("remuxed copying only supports raw ts packaging")
+		}
+		return nil
+	}
+
+	return nil
 }
 
 type AVMediaType int
