@@ -15,6 +15,13 @@ package avpipe
 // #cgo pkg-config: libpostproc
 // #cgo pkg-config: libcbor
 // #cgo LDFLAGS: -lcbor
+// #cgo netint pkg-config: xcoder
+// #cgo pkg-config: srt
+// #cgo CFLAGS: -I${SRCDIR}/include
+// #cgo CFLAGS: -I${SRCDIR}/libavpipe/include
+// #cgo CFLAGS: -I${SRCDIR}/utils/include
+// #cgo LDFLAGS: -L${SRCDIR}
+// #cgo linux LDFLAGS: -Wl,-rpath,$ORIGIN/../lib
 // #include "avpipe.h"
 import "C"
 
