@@ -18,6 +18,7 @@ func TestGIDAssociation(t *testing.T) {
 		wg.Add(1)
 		go func() {
 			AssociateGIDWithHandle(handle)
+			defer DissociateGIDFromHandle()
 			// Randomize scheduling a bit
 			time.Sleep(time.Millisecond*20 + time.Millisecond*time.Duration(rand.IntN(10)))
 			rHandle, ok := GIDHandle()
