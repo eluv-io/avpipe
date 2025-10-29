@@ -23,10 +23,13 @@ package avpipe
 // #cgo pkg-config: libswscale
 // #cgo pkg-config: libavutil
 // #cgo pkg-config: libpostproc
+// #cgo pkg-config: libcbor
+// #cgo LDFLAGS: -lcbor
 // #cgo netint pkg-config: xcoder
 // #cgo pkg-config: srt
 // #cgo CFLAGS: -I${SRCDIR}/libavpipe/include
 // #cgo CFLAGS: -I${SRCDIR}/utils/include
+// #cgo CFLAGS: -g
 // #cgo LDFLAGS: -L${SRCDIR}
 // #cgo linux LDFLAGS: -Wl,-rpath,$ORIGIN/../lib
 
@@ -324,6 +327,32 @@ func (h *ioHandler) InStat(stream_index C.int, avp_stat C.avp_stat_t, stat_args 
 	case C.in_stat_data_scte35:
 		statArgs := C.GoString((*C.char)(stat_args))
 		err = h.input.Stat(streamIndex, goavpipe.AV_IN_STAT_DATA_SCTE35, statArgs)
+	case C.in_stat_data_stream_info:
+		if stat_args != nil {
+			// stat_args points to a CBOR-encoded buffer.
+			// Assume stat_args is a pointer to a struct:
+			// typedef struct {
+			//     uint8_t* data;
+			//     size_t len;
+			// } cbor_buf_t;
+			type cborBuf struct {
+				data uintptr
+				len  uint64
+			}
+			cbuf := (*cborBuf)(stat_args)
+			cborBytes := unsafe.Slice((*byte)(unsafe.Pointer(cbuf.data)), cbuf.len)
+
+			streams, uerr := UnpackStreamProbesFromCBOR(cborBytes)
+			if uerr != nil {
+				err = fmt.Errorf("failed to unpack stream info from CBOR: %w", uerr)
+				break
+			}
+
+			err = h.input.Stat(streamIndex, goavpipe.AV_IN_STAT_DATA_STREAM_INFO, streams)
+
+		} else {
+			err = fmt.Errorf("stat_args is nil for in_stat_data_stream_info")
+		}
 	}
 
 	return err

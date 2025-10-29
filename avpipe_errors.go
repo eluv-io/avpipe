@@ -13,6 +13,8 @@ package avpipe
 // #cgo pkg-config: libswscale
 // #cgo pkg-config: libavutil
 // #cgo pkg-config: libpostproc
+// #cgo pkg-config: libcbor
+// #cgo LDFLAGS: -lcbor
 // #cgo netint pkg-config: xcoder
 // #cgo pkg-config: srt
 // #cgo CFLAGS: -I${SRCDIR}/include
