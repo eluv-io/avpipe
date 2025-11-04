@@ -99,6 +99,12 @@ func AssociateGIDWithHandle(handle int32) {
 	}
 }
 
+// DissociateGIDFromHandle removes the association between the current goroutine ID and its handle
+func DissociateGIDFromHandle() {
+	gid := gls.GoID()
+	gidHandleMap.Delete(gid)
+}
+
 // XCEnded releases resources associated with the handle
 func XCEnded() {
 	handleUntyped, ok := gidHandleMap.LoadAndDelete(gls.GoID())
