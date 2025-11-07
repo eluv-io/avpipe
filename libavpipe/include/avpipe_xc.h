@@ -543,6 +543,7 @@ typedef struct xcparams_t {
     char        *profile;
     int         level;
     dif_type    deinterlace;                // Deinterlacing filter
+    char        *timecode;                  // Original timecode string
 } xcparams_t;
 
 #define MAX_CODEC_NAME  256

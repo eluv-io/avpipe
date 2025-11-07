@@ -6,6 +6,7 @@
 #include <stdlib.h>
 #include <errno.h>
 #include <sys/time.h>
+#include <inttypes.h>
 
 #include "elv_channel.h"
 #include "elv_log.h"
@@ -22,6 +23,11 @@ struct elv_channel_t
     pthread_mutex_t _mutex;
     pthread_cond_t  _cond_send;  /* Signaled when an item has been sent */
     pthread_cond_t  _cond_recv;  /* Signaled when an item has been received */
+
+    /* Channel stats */
+    int64_t msgs_in;   /* Number of messages sent to the channel */
+    int64_t msgs_out;  /* Number of messages retrieved from the channel */
+    int64_t waits;     /* Number of sends with channel full */
 };
 
 int
@@ -58,7 +64,10 @@ elv_channel_send(
 
     pthread_mutex_lock(&channel->_mutex);
     while (channel->_count >= channel->_capacity && channel->_closed == 0) {
-        elv_log("elv_channel_send: full so wait");
+        channel->waits ++;
+        if (channel->waits % 1000 == 1) {
+            elv_log("elv_channel_send: full so wait in=%"PRId64" out=%"PRId64" waits=%"PRId64, channel->msgs_in, channel->msgs_out, channel->waits);
+         }
         pthread_cond_wait(&channel->_cond_recv, &channel->_mutex);
     }
 
@@ -70,6 +79,7 @@ elv_channel_send(
     channel->_count++;
     channel->_rear = (channel->_rear+1) % channel->_capacity;
     channel->_items[channel->_rear] = msg;
+    channel->msgs_in ++;
     pthread_cond_signal(&channel->_cond_send);
     pthread_mutex_unlock(&channel->_mutex);
 
@@ -97,6 +107,7 @@ elv_channel_receive(
     channel->_count--;
     msg = channel->_items[channel->_front];
     channel->_front = (channel->_front+1) % channel->_capacity;
+    channel->msgs_out ++;
     pthread_cond_signal(&channel->_cond_recv);
     pthread_mutex_unlock(&channel->_mutex);
 
