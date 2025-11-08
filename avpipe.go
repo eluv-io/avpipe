@@ -968,7 +968,7 @@ func ChannelLayout(name string) (mask int) {
 	defer C.free(unsafe.Pointer(cName))
 
 	if rc := C.av_channel_layout_from_string(&channelLayout, cName); rc != 0 {
-		log.Error("ChannelLayout()", "reason", "av_channel_layout_from_string failed", "rc", rc, "name", name)
+		goavpipe.Log.Error("ChannelLayout()", "reason", "av_channel_layout_from_string failed", "rc", rc, "name", name)
 	} else {
 		mask = int(C.get_channel_layout_mask(&channelLayout))
 	}
