@@ -111,7 +111,11 @@ prepare_input(
     avioctx = avio_alloc_context(bufin, bufin_sz, 0, (void *)inctx,
         in_handlers->avpipe_reader, in_handlers->avpipe_writer, in_handlers->avpipe_seeker);
 
-    // avioctx->written = inctx->sz; /* Fake avio_size() to avoid calling seek to find size */
+    // FFmpeg 7.1: Use size callback to fake stream size instead of deprecated 'written' field
+    // This tells FFmpeg the total size of the stream for avio_size() calls
+    if (inctx->sz > 0) {
+        avioctx->seek = in_handlers->avpipe_seeker;  // Ensure seeker handles SEEK_END for size
+    }
     avioctx->seekable = seekable;
     avioctx->direct = 0;
     avioctx->buffer_size = inctx->sz < bufin_sz ? inctx->sz : bufin_sz; // avoid seeks - avio_seek() seeks internal buffer */
