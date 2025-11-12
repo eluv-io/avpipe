@@ -611,19 +611,26 @@ set_encoder_options(
      * - frag_every_frame - necessary for low-latency playout (eg. LL-HLS) (could use frag_keyframe for regular HLS/DASH)
      * - empty_moov - moov atom at beginning for progressive playback (needed for fMP4 init segment)
      * - default_base_moof: omit base-data-offset in moof (simplifies segment parsing, CMAF-friendly)
-     * - delay_moov: process the initial packets from all streams before writing the moov atom, avoiding errors like "Cannot write moov atom before AC3 packets", which are most likely to occur for streaming (MPEG-TS) inputs
+     * - delay_moov: process the initial packets from all streams before writing the moov atom; required by the AC3 codec
      *
      * Note 'faststart' is not needed for segmented playout (HLS/DASH). Only used for progessive playout of mp4/mov files.
      */
-    #define FRAG_OPTS "+frag_every_frame+empty_moov+default_base_moof+delay_moov"
+    #define FRAG_OPTS "+frag_every_frame+empty_moov+default_base_moof"
+    #define FRAG_OPTS_DELAY "+frag_every_frame+empty_moov+default_base_moof+delay_moov"
 
     if (!strcmp(params->format, "fmp4")) {
         if (stream_index == decoder_context->video_stream_index) {
-            elv_dbg("set_encoder_options, fmp4 video encoder, stream_index=%d, movflags="FRAG_OPTS, stream_index);
+            elv_dbg("set_encoder_options, fmp4 video, stream_index=%d, movflags="FRAG_OPTS, stream_index);
             av_opt_set(encoder_context->format_context->priv_data, "movflags", FRAG_OPTS, 0);
-        } else if ((i = selected_decoded_audio(decoder_context, stream_index)) >= 0) {
-            elv_dbg("set_encoder_options, fmp4 audio encoder, stream_index=%d, movflags="FRAG_OPTS, stream_index);   
-            av_opt_set(encoder_context->format_context2[i]->priv_data, "movflags", FRAG_OPTS, 0);
+        }
+        if ((i = selected_decoded_audio(decoder_context, stream_index)) >= 0) {
+            if (params->ecodec2 && !strcmp(params->ecodec2, "ac3")) {
+                elv_dbg("set_encoder_options, fmp4 audio, ac3, stream_index=%d, movflags="FRAG_OPTS_DELAY, stream_index);
+                av_opt_set(encoder_context->format_context2[i]->priv_data, "movflags", FRAG_OPTS_DELAY, 0);
+            } else {
+                elv_dbg("set_encoder_options, fmp4 audio, stream_index=%d, movflags="FRAG_OPTS, stream_index);
+                av_opt_set(encoder_context->format_context2[i]->priv_data, "movflags", FRAG_OPTS, 0);
+            }
         }
     }
 
@@ -697,16 +704,16 @@ set_encoder_options(
 
         if (!strcmp(params->format, "fmp4-segment")) {
             if ((i = selected_decoded_audio(decoder_context, stream_index)) >= 0) {
-                // AC3 codec requires delay_moov flag to write packets before moov atom
                 if (params->ecodec2 && !strcmp(params->ecodec2, "ac3")) {
-                    elv_dbg("set_encoder_options, fmp4-segment audio encoder, ac3, stream_index=%d, movflags="FRAG_OPTS"+delay_moov", stream_index);
-                    av_opt_set(encoder_context->format_context2[i]->priv_data, "segment_format_options", "movflags="FRAG_OPTS"+delay_moov", 0);
+                    elv_dbg("set_encoder_options, fmp4-segment audio, ac3, stream_index=%d, movflags="FRAG_OPTS_DELAY, stream_index);
+                    av_opt_set(encoder_context->format_context2[i]->priv_data, "segment_format_options", "movflags="FRAG_OPTS_DELAY, 0);
                 } else {
-                    elv_dbg("set_encoder_options, fmp4-segment audio encoder, stream_index=%d, movflags="FRAG_OPTS, stream_index);
+                    elv_dbg("set_encoder_options, fmp4-segment audio, stream_index=%d, movflags="FRAG_OPTS, stream_index);
                     av_opt_set(encoder_context->format_context2[i]->priv_data, "segment_format_options", "movflags="FRAG_OPTS, 0);
                 }
-            } else if (stream_index == decoder_context->video_stream_index) {
-                elv_dbg("set_encoder_options, fmp4-segment video encoder, stream_index=%d, movflags="FRAG_OPTS, stream_index);
+            }
+            if (stream_index == decoder_context->video_stream_index) {
+                elv_dbg("set_encoder_options, fmp4-segment video, stream_index=%d, movflags="FRAG_OPTS, stream_index);
                 av_opt_set(encoder_context->format_context->priv_data, "segment_format_options", "movflags="FRAG_OPTS, 0);
             }
         }
@@ -1304,7 +1311,7 @@ prepare_audio_encoder(
         }
         rc = av_channel_layout_from_mask(&enc_codec_ctx->ch_layout, channel_layout_mask);
         if (rc) {
-            elv_err("Invalid channel_layout, rc=%d, channel_layout=%d, url=%s",
+            elv_err("Invalid channel_layout, rc=%d, channel_layout=%llu, url=%s",
                 rc, channel_layout_mask, params->url);
             return eav_param;
         }

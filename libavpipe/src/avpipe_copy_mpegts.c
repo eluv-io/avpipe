@@ -162,7 +162,7 @@ copy_mpegts_prepare_audio_encoder(
     }
     rc = av_channel_layout_from_mask(&enc_codec_ctx->ch_layout, channel_layout_mask);
     if (rc) {
-        elv_err("Invalid channel_layout, rc=%d, channel_layout=%d, url=%s",
+        elv_err("Invalid channel_layout, rc=%d, channel_layout=%llu, url=%s",
             rc, channel_layout_mask, params->url);
         return eav_param;
     }

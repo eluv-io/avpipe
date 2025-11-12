@@ -208,7 +208,7 @@ dump_stream(
 }
 
 void
-save_gray_frame(    
+save_gray_frame(
     unsigned char *buf,
     int wrap,
     int xsize,
