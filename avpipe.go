@@ -266,19 +266,19 @@ func AVPipeSeekInput(fd C.int64_t, offset C.int64_t, whence C.int) C.int64_t {
 func (h *ioHandler) InSeeker(offset C.int64_t, whence C.int) (int64, error) {
 	// Enhanced debugging for FFmpeg 7.1 SEEK_END issue
 	if int(whence) == 2 { // io.SeekEnd
-		goavpipe.Log.Error("InSeeker SEEK_END", "offset", offset, "whence", whence, "input_size", h.input.Size(), "about_to_call_seek", true)
+		goavpipe.Log.Debug("InSeeker SEEK_END", "offset", offset, "whence", whence, "input_size", h.input.Size(), "about_to_call_seek", true)
 	}
 
 	// FFmpeg 7.1: Handle AVSEEK_SIZE (0x10000 = 65536) - return file size directly
 	if int(whence) == 65536 { // AVSEEK_SIZE
 		size := h.input.Size()
-		goavpipe.Log.Error("InSeeker AVSEEK_SIZE", "offset", offset, "whence", whence, "returning_size", size)
+		goavpipe.Log.Debug("InSeeker AVSEEK_SIZE", "offset", offset, "whence", whence, "returning_size", size)
 		return size, nil
 	}
 
 	n, err := h.input.Seek(int64(offset), int(whence))
 	if int(whence) == 2 { // io.SeekEnd
-		goavpipe.Log.Error("InSeeker SEEK_END result", "offset", offset, "whence", whence, "returned_pos", n, "error", err)
+		goavpipe.Log.Debug("InSeeker SEEK_END result", "offset", offset, "whence", whence, "returned_pos", n, "error", err)
 	}
 	goavpipe.Log.Debug("InSeeker()", "offset", offset, "whence", whence, "n", n)
 	return n, err
