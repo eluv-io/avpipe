@@ -435,8 +435,9 @@ const (
 )
 
 type InputConfig struct {
-	CopyMode      CopyMode                  `json:"copy_mode"`
-	CopyPackaging transport.TsPackagingMode `json:"copy_packaging"`
+	CopyMode       CopyMode                  `json:"copy_mode"`
+	CopyPackaging  transport.TsPackagingMode `json:"copy_packaging"`
+	InputPackaging transport.TsPackagingMode `json:"input_packaging"` // packaging mode of the source stream
 	// NOTE: Even if not bypassing libav reader, UDP will bypass the libav reader
 	BypassLibavReader bool `json:"bypass_libav_reader"`
 }
@@ -500,9 +501,9 @@ const (
 	AVMEDIA_TYPE_UNKNOWN    = -1
 	AVMEDIA_TYPE_VIDEO      = 0
 	AVMEDIA_TYPE_AUDIO      = 1
-	AVMEDIA_TYPE_DATA       = 2 ///< Opaque data information usually continuous
+	AVMEDIA_TYPE_DATA       = 2 // < Opaque data information usually continuous
 	AVMEDIA_TYPE_SUBTITLE   = 3
-	AVMEDIA_TYPE_ATTACHMENT = 4 ///< Opaque data information usually sparse
+	AVMEDIA_TYPE_ATTACHMENT = 4 // < Opaque data information usually sparse
 	AVMEDIA_TYPE_NB         = 5
 )
 
@@ -521,10 +522,10 @@ type AVFieldOrder int
 const (
 	AV_FIELD_UNKNOWN     = 0
 	AV_FIELD_PROGRESSIVE = 1
-	AV_FIELD_TT          = 2 //< Top coded_first, top displayed first
-	AV_FIELD_BB          = 3 //< Bottom coded first, bottom displayed first
-	AV_FIELD_TB          = 4 //< Top coded first, bottom displayed first
-	AV_FIELD_BT          = 5 //< Bottom coded first, top displayed first
+	AV_FIELD_TT          = 2 // < Top coded_first, top displayed first
+	AV_FIELD_BB          = 3 // < Bottom coded first, bottom displayed first
+	AV_FIELD_TB          = 4 // < Top coded first, bottom displayed first
+	AV_FIELD_BT          = 5 // < Bottom coded first, top displayed first
 )
 
 var AVFieldOrderNames = map[AVFieldOrder]string{

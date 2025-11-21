@@ -4,6 +4,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"strings"
 	"time"
 
 	"go.uber.org/atomic"
@@ -32,17 +33,22 @@ type SequentialOpenerFactory func(inFd int64) SequentialOpener
 // URL scheme.
 func NewAutoInputOpener(url string, cfg *goavpipe.InputConfig, seqOpener SequentialOpenerFactory) (goavpipe.InputOpener, error) {
 	var tp transport.Transport
-	if len(url) < 6 {
-		return nil, fmt.Errorf("url too short: %s", url)
+
+	scheme := strings.SplitN(url, "://", 2)[0]
+	if len(scheme) == 0 {
+		return nil, fmt.Errorf("invalid url: %s", url)
 	}
 
-	switch url[:6] {
-	case "rtp://":
+	switch scheme {
+	case "rtp":
 		tp = transport.NewRTPTransport(url, cfg.CopyPackaging != transport.RtpTs)
-	case "udp://":
+	case "udp":
 		tp = transport.NewUDPTransport(url)
-	case "srt://":
-		tp = transport.NewSRTTransport(url)
+	case "srt+rtp": // same as srt:// with RTP TS input packaging
+		cfg.InputPackaging = transport.RtpTs
+		fallthrough
+	case "srt":
+		tp = transport.NewSRTTransport(url, cfg.InputPackaging, cfg.CopyPackaging)
 	}
 
 	if tp == nil {
