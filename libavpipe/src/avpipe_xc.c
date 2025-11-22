@@ -756,8 +756,7 @@ set_h265_params(
      * which is the most common type of video used with consumer devices
      * For HDR10 we need MAIN 10 that supports 10 bit profile.
      */
-    int profile = avpipe_h265_profile(params->profile);
-    if (profile > 0) {
+    if (params->profile != NULL && strlen(params->profile) > 0) {
         /* Can be only main or main10 profiles */
         av_opt_set(encoder_codec_context->priv_data, "profile", params->profile, 0);
     } else if (params->bitdepth == 8) {
@@ -776,7 +775,7 @@ set_h265_params(
             "hdr10=1:hdr10-opt=1:repeat-headers=1:colorprim=bt2020:transfer=smpte2084:colormatrix=bt2020nc", 0);
         av_opt_set(encoder_codec_context->priv_data, "master-display", params->master_display, 0);
 
-        if (params->bitdepth ==0 ) {
+        if ((params->profile == NULL || strlen(params->profile) == 0) && params->bitdepth == 0) {
             // If not specified, assume 10 bits
             av_opt_set(encoder_codec_context->priv_data, "profile", "main10", 0);
         }
@@ -872,7 +871,7 @@ enum {
 };
 
 static void
-set_nvidia_params(
+set_nvidia_h264_params(
     coderctx_t *encoder_context,
     coderctx_t *decoder_context,
     xcparams_t *params)
@@ -885,20 +884,8 @@ set_nvidia_params(
     if (params->gpu_index >= 0)
         av_opt_set_int(encoder_codec_context->priv_data, "gpu", params->gpu_index, 0);
 
-    /*
-     * The encoder_codec_context->profile is set just for proper log message, otherwise it has no impact
-     * when the encoder is nvidia.
-     */
-    int profile = avpipe_nvh264_profile(params->profile);
-    if (profile > 0) {
-        av_opt_set_int(encoder_codec_context->priv_data, "profile", profile, 0);
-        encoder_codec_context->profile = profile;
-    } else if (encoder_codec_context->height <= 480) {
-        av_opt_set_int(encoder_codec_context->priv_data, "profile", NV_ENC_H264_PROFILE_BASELINE, 0);
-        encoder_codec_context->profile = FF_PROFILE_H264_BASELINE;
-    } else {
-        av_opt_set_int(encoder_codec_context->priv_data, "profile", NV_ENC_H264_PROFILE_HIGH, 0);
-        encoder_codec_context->profile = FF_PROFILE_H264_HIGH;
+    if (params->profile != NULL && strlen(params->profile) > 0) {
+        av_opt_set(encoder_codec_context->priv_data, "profile", params->profile, 0);
     }
 
 /*
@@ -942,6 +929,54 @@ set_nvidia_params(
      * sprintf(level, "%d.", 15);
      * av_opt_set(encoder_codec_context->priv_data, "cq", level, 0);
      */
+}
+
+static void
+set_nvidia_hevc_params(
+    coderctx_t *encoder_context,
+    coderctx_t *decoder_context,
+    xcparams_t *params)
+{
+    int index = decoder_context->video_stream_index;
+    AVCodecContext *encoder_codec_context = encoder_context->codec_context[index];
+
+    av_opt_set(encoder_codec_context->priv_data, "forced-idr", "on", 0);
+
+    if (params->gpu_index >= 0)
+        av_opt_set_int(encoder_codec_context->priv_data, "gpu", params->gpu_index, 0);
+
+    if (params->profile != NULL && strlen(params->profile) > 0) {
+        av_opt_set(encoder_codec_context->priv_data, "profile", params->profile, 0);
+    } else if (params->bitdepth == 8) {
+        av_opt_set(encoder_codec_context->priv_data, "profile", "main", 0);
+        av_opt_set(encoder_codec_context->priv_data, "tier", "high", 0);
+    } else if (params->bitdepth >= 10) {
+        av_opt_set(encoder_codec_context->priv_data, "profile", "main10", 0);
+        av_opt_set(encoder_codec_context->priv_data, "tier", "high", 0);
+    }
+
+    /*
+     * Default preset - fast and good quality (previously "PRESET_LOW_LATENCY_HQ")
+     */
+    av_opt_set(encoder_codec_context->priv_data, "preset", "p2", 0); // Valid: p1–p7
+    av_opt_set(encoder_codec_context->priv_data, "tune", "hq", 0);   // Valid: hq, ll, ull, lossless, losslesshp
+
+    /* HDR - set max_cll and master_display meta data for HDR content */
+    if (params->max_cll && params->max_cll[0] != '\0')
+        av_opt_set(encoder_codec_context->priv_data, "max_cll", params->max_cll, 0);
+    if (params->master_display && params->master_display[0] != '\0') {
+        encoder_codec_context->pix_fmt        = AV_PIX_FMT_P010;                 // 10-bit
+        encoder_codec_context->color_range    = AVCOL_RANGE_MPEG;                // "tv"
+        encoder_codec_context->color_primaries= AVCOL_PRI_BT2020;
+        encoder_codec_context->color_trc      = AVCOL_TRC_SMPTE2084;             // PQ (ST 2084)
+        encoder_codec_context->colorspace     = AVCOL_SPC_BT2020_NCL;            // bt2020nc
+        av_opt_set(encoder_codec_context->priv_data, "master_display", params->master_display, 0);
+
+        if ((params->profile == NULL || strlen(params->profile) == 0) && params->bitdepth == 0) {
+            // If not specified, assume 10 bits
+            av_opt_set(encoder_codec_context->priv_data, "profile", "main10", 0);
+        }
+    }
 }
 
 static int
@@ -1134,19 +1169,16 @@ prepare_video_encoder(
         return rc;
 
     if (!strcmp(params->ecodec, "h264_nvenc"))
-        /* Set NVIDIA specific params if the encoder is NVIDIA */
-        set_nvidia_params(encoder_context, decoder_context, params);
+        set_nvidia_h264_params(encoder_context, decoder_context, params);
+    else if (!strcmp(params->ecodec, "hevc_nvenc"))
+        set_nvidia_hevc_params(encoder_context, decoder_context, params);
     else if (!strcmp(params->ecodec, "libx265"))
-        /* Set H265 specific params (profile and level) */
         set_h265_params(encoder_context, decoder_context, params);
     else if (!strcmp(params->ecodec, "h264_ni_enc") || !strcmp(params->ecodec, "h264_ni_quadra_enc"))
-        /* Set netint H264 codensity params */
         set_netint_h264_params(encoder_context, decoder_context, params);
     else if (!strcmp(params->ecodec, "h265_ni_enc"))
-        /* Set netint H265 codensity params */
         set_netint_h265_params(encoder_context, decoder_context, params);
     else
-        /* Set H264 specific params (profile and level) */
         set_h264_params(encoder_context, decoder_context, params);
 
     elv_log("Output pixel_format=%s, profile=%d, level=%d",

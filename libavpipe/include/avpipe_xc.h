@@ -25,14 +25,6 @@
 
 //#define DEBUG_UDP_PACKET  // Uncomment for development, debugging and testing
 
-/* Borrowed from libavcodec/nvenc.h since it is not exposed */
-enum {
-    NV_ENC_H264_PROFILE_BASELINE,
-    NV_ENC_H264_PROFILE_MAIN,
-    NV_ENC_H264_PROFILE_HIGH,
-    NV_ENC_H264_PROFILE_HIGH_444P,
-};
-
 /*
  * Adding/deleting an error code needs adding/deleting corresponding GO
  * error in avpipe_errors.go
