@@ -760,28 +760,27 @@ set_h265_params(
     if (profile > 0) {
         /* Can be only main or main10 profiles */
         av_opt_set(encoder_codec_context->priv_data, "profile", params->profile, 0);
-        if (params->bitdepth == 10) {
-            av_opt_set(encoder_codec_context->priv_data, "x265-params",
-                "hdr-opt=1:repeat-headers=1:colorprim=bt2020:transfer=smpte2084:colormatrix=bt2020nc", 0);
-        }
     } else if (params->bitdepth == 8) {
         av_opt_set(encoder_codec_context->priv_data, "profile", "main", 0);
     } else if (params->bitdepth == 10) {
         av_opt_set(encoder_codec_context->priv_data, "profile", "main10", 0);
-        av_opt_set(encoder_codec_context->priv_data, "x265-params",
-            "hdr-opt=1:repeat-headers=1:colorprim=bt2020:transfer=smpte2084:colormatrix=bt2020nc", 0);
-    } else {
-        /* bitdepth == 12 */
+    } else if (params->bitdepth == 12 {
         av_opt_set(encoder_codec_context->priv_data, "profile", "main12", 0);
-        av_opt_set(encoder_codec_context->priv_data, "x265-params",
-            "hdr-opt=1:repeat-headers=1:colorprim=bt2020:transfer=smpte2084:colormatrix=bt2020nc", 0);
     }
 
     /* Set max_cll and master_display meta data for HDR content */
     if (params->max_cll && params->max_cll[0] != '\0')
         av_opt_set(encoder_codec_context->priv_data, "max-cll", params->max_cll, 0);
-    if (params->master_display && params->master_display[0] != '\0')
+    if (params->master_display && params->master_display[0] != '\0') {
+        av_opt_set(encoder_codec_context->priv_data, "x265-params",
+            "hdr10=1:hdr10-opt=1:repeat-headers=1:colorprim=bt2020:transfer=smpte2084:colormatrix=bt2020nc", 0);
         av_opt_set(encoder_codec_context->priv_data, "master-display", params->master_display, 0);
+
+        if (params->bitdepth ==0 ) {
+            // If not specified, assume 10 bits
+            av_opt_set(encoder_codec_context->priv_data, "profile", "main10", 0);
+        }
+    }
 
     /* Set the number of bframes to 0 and avoid having bframes */
     av_opt_set_int(encoder_codec_context->priv_data, "bframes", 0, 0);
