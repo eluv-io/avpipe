@@ -764,7 +764,7 @@ set_h265_params(
         av_opt_set(encoder_codec_context->priv_data, "profile", "main", 0);
     } else if (params->bitdepth == 10) {
         av_opt_set(encoder_codec_context->priv_data, "profile", "main10", 0);
-    } else if (params->bitdepth == 12 {
+    } else if (params->bitdepth == 12) {
         av_opt_set(encoder_codec_context->priv_data, "profile", "main12", 0);
     }
 
