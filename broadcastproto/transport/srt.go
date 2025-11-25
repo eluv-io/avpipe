@@ -4,8 +4,7 @@ import (
 	"io"
 	"strings"
 
-	"github.com/datarhei/gosrt"
-
+	mio "github.com/eluv-io/common-go/media/io"
 	"github.com/eluv-io/errors-go"
 )
 
@@ -13,6 +12,7 @@ var _ Transport = (*srtProto)(nil)
 
 // srtProto implements the Transport interface for SRT connections.
 type srtProto struct {
+	Source   mio.PacketSource
 	Url      string
 	In       TsPackagingMode
 	Out      TsPackagingMode
@@ -20,7 +20,15 @@ type srtProto struct {
 }
 
 func NewSRTTransport(url string, in TsPackagingMode, out TsPackagingMode) Transport {
+	if in == RtpTs && strings.HasPrefix(url, "srt://") {
+		url = "srt+rtp" + url[3:] // not strictly need, but easier to read in log files...
+	}
+	source, err := mio.CreatePacketSource(url)
+	if err != nil {
+		log.Warn("failed to create SRT packet source", "url", url, "err", err)
+	}
 	return &srtProto{
+		Source:   source,
 		Url:      url,
 		In:       in,
 		Out:      out,
@@ -33,74 +41,23 @@ func (s *srtProto) URL() string {
 }
 
 func (s *srtProto) Handler() string {
-	return "srt"
+	return s.Source.URL().Scheme
 }
 
 func (s *srtProto) Open() (reader io.ReadCloser, err error) {
 	e := errors.Template("srtProto.Open", errors.K.IO, "url", s.Url)
 
-	srtConfig := srt.DefaultConfig()
-	hostPort, err := srtConfig.UnmarshalURL(s.Url)
+	reader, err = s.Source.Open()
 	if err != nil {
 		return nil, e(err)
-	}
-
-	// force `message` transmission method: https://github.com/Haivision/srt/blob/master/docs/API/API.md#transmission-method-message
-	// ensures message boundaries of the sender are preserved
-	srtConfig.MessageAPI = true
-
-	if !strings.Contains(s.Url, "listen") {
-		// connect mode: connect to SRT server and pull the stream
-		conn, err := srt.Dial("srt", hostPort, srtConfig)
-		if err != nil {
-			return nil, e(err)
-		}
-		return conn, nil
-	}
-
-	// listen mode: act as SRT server and accept incoming connections
-	listener, err := srt.Listen("srt", hostPort, srtConfig)
-	if err != nil {
-		return nil, e(err)
-	}
-	defer listener.Close()
-
-	req, err := listener.Accept2()
-	if err != nil {
-		return nil, e(err)
-	}
-
-	streamId := req.StreamId()
-	log.Debug("new connection", "remote", req.RemoteAddr(), "srt_version", req.Version(), "stream_id", streamId)
-
-	if req.Version() > 4 && strings.Contains(streamId, "subscribe") {
-		req.Reject(srt.REJX_BAD_MODE)
-		return nil, e("reason", "accepting only publish (push) connections",
-			"remote", req.RemoteAddr(),
-			"srt_version", req.Version(),
-			"stream_id", streamId)
-	}
-
-	if srtConfig.Passphrase == "" {
-		err = req.SetPassphrase(srtConfig.Passphrase)
-		if err != nil {
-			req.Reject(srt.REJX_UNAUTHORIZED)
-			return nil, e(err, "reason", "invalid passphrase")
-		}
-	}
-
-	// accept the connection
-	conn, err := req.Accept()
-	if err != nil {
-		return nil, e(err, "reason", "invalid passphrase")
 	}
 
 	if s.StripRtp {
 		// strip RTP headers if the source actually contains them
-		return &RtpDecapsulator{conn: conn}, nil
+		return &RtpDecapsulator{reader: reader}, nil
 	}
 
-	return conn, nil
+	return reader, nil
 }
 
 func (s *srtProto) PackagingMode() TsPackagingMode {
@@ -110,11 +67,11 @@ func (s *srtProto) PackagingMode() TsPackagingMode {
 // ---------------------------------------------------------------------------------------------------------------------
 
 type RtpDecapsulator struct {
-	conn srt.Conn
+	reader io.ReadCloser
 }
 
 func (r *RtpDecapsulator) Read(p []byte) (n int, err error) {
-	n, err = r.conn.Read(p)
+	n, err = r.reader.Read(p)
 	if n > 0 {
 		hdr, err := ParseRTPHeader(p[:n])
 		if err != nil {
@@ -128,5 +85,5 @@ func (r *RtpDecapsulator) Read(p []byte) (n int, err error) {
 }
 
 func (r *RtpDecapsulator) Close() error {
-	return r.conn.Close()
+	return r.reader.Close()
 }

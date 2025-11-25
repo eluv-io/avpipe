@@ -161,6 +161,7 @@ func AVPipeOpenInput(url *C.char, size *C.int64_t) C.int64_t {
 
 	input, err := urlInputOpener.Open(fd, filename)
 	if err != nil {
+		goavpipe.Log.Debug("AVPipeOpenInput()", err, "url", filename)
 		return C.int64_t(-1)
 	}
 
@@ -212,7 +213,7 @@ func AVPipeReadInput(fd C.int64_t, buf *C.uint8_t, sz C.int) C.int {
 		goavpipe.Log.Debug("AVPipeReadInput()", "fd", fd, "buf", buf, "sz", sz)
 	}
 
-	//gobuf := C.GoBytes(unsafe.Pointer(buf), sz)
+	// gobuf := C.GoBytes(unsafe.Pointer(buf), sz)
 	gobuf := make([]byte, sz)
 
 	n, err := h.InReader(gobuf)
@@ -482,7 +483,7 @@ func AVPipeWriteOutput(handler C.int64_t, fd C.int64_t, buf *C.uint8_t, sz C.int
 		return C.int(0)
 	}
 
-	//gobuf := C.GoBytes(unsafe.Pointer(buf), sz)
+	// gobuf := C.GoBytes(unsafe.Pointer(buf), sz)
 	// This should be the equivalent of using GoBytes() but safer if the
 	// Go implementation uses C pointer to wrap a slice.
 	gobuf := make([]byte, sz)
