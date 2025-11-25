@@ -254,55 +254,6 @@ avpipe_h264_profile(
     return -1;
 }
 
-
-/*
- * Returns corresponding h265 FFmpeg profile constant if it does exist.
- * Returns 0 if profile name is not set.
- * Returns -1 if the profile name is set but not supported.
- */
-int
-avpipe_h265_profile(
-    char *profile_name)
-{
-    if (!profile_name || strlen(profile_name) == 0)
-        return 0;
-
-    if (!strcmp(profile_name, "main"))
-        return FF_PROFILE_HEVC_MAIN;
-
-    if (!strcmp(profile_name, "main10"))
-        return FF_PROFILE_HEVC_MAIN_10;
-
-    return -1;
-}
-
-/*
- * Returns corresponding nvidia h264 FFmpeg profile constant if it does exist.
- * Returns 0 if profile name is not set.
- * Returns -1 if the profile name is set but not supported.
- */
-int
-avpipe_nvh264_profile(
-    char *profile_name)
-{
-    if (!profile_name || strlen(profile_name) == 0)
-        return 0;
-
-    if (!strcmp(profile_name, "baseline"))
-        return NV_ENC_H264_PROFILE_BASELINE;
-
-    if (!strcmp(profile_name, "main"))
-        return NV_ENC_H264_PROFILE_MAIN;
-
-    if (!strcmp(profile_name, "high"))
-        return NV_ENC_H264_PROFILE_HIGH;
-
-    if (!strcmp(profile_name, "high444p"))
-        return NV_ENC_H264_PROFILE_HIGH_444P;
-
-    return -1;
-}
-
 int
 avpipe_check_level(
     int level)
