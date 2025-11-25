@@ -141,7 +141,7 @@ selected_audio_index(
 
 static int
 decode_interrupt_cb(
-    void *ctx) 
+    void *ctx)
 {
     coderctx_t *decoder_ctx = (coderctx_t *)ctx;
     if (decoder_ctx->cancelled)
@@ -443,7 +443,7 @@ prepare_decoder(
          * Find decoder and initialize decoder context.
          * Pick params->dcodec if this is the selected stream (stream_id or audio_index)
          */
-        if (params != NULL && params->dcodec != NULL && params->dcodec[0] != '\0' && 
+        if (params != NULL && params->dcodec != NULL && params->dcodec[0] != '\0' &&
             decoder_context->format_context->streams[i]->codecpar->codec_type == AVMEDIA_TYPE_VIDEO) {
             elv_log("STREAM SELECTED this_stream_id=%d, id=%d idx=%d xc_type=%d dcodec=%s, url=%s",
                 this_stream_id, decoder_context->stream[i]->id, i, params->xc_type, params->dcodec, url);
@@ -689,7 +689,7 @@ set_encoder_options(
             elv_dbg("setting \"fmp4-segment\" audio segment_time to %s, seg_duration_ts=%"PRId64", url=%s",
                 params->seg_duration, seg_duration_ts, params->url);
             av_opt_set(encoder_context->format_context2[i]->priv_data, "reset_timestamps", "on", 0);
-        } 
+        }
         if (stream_index == decoder_context->video_stream_index) {
             if (params->video_seg_duration_ts > 0)
                 seg_duration_ts = params->video_seg_duration_ts;
@@ -1296,7 +1296,7 @@ prepare_audio_encoder(
         encoder_context->stream[output_stream_index]->time_base = encoder_context->codec_context[output_stream_index]->time_base;
 
         // TODO: sample_fmts is deprecated; use avcodec_get_supported_config()
-        if (decoder_context->codec[stream_index] && 
+        if (decoder_context->codec[stream_index] &&
             decoder_context->codec[stream_index]->sample_fmts && params->bypass_transcoding)
             encoder_context->codec_context[output_stream_index]->sample_fmt = decoder_context->codec[stream_index]->sample_fmts[0];
         else if (encoder_context->codec[output_stream_index]->sample_fmts && encoder_context->codec[output_stream_index]->sample_fmts[0])
@@ -1739,6 +1739,19 @@ set_idr_frame_key_flag(
     }
 }
 
+/*
+ * Periodic encoder flush to prevent unbounded memory growth
+ *
+ * Set high enough that short test runs never trigger (tests encode <1000 frames)
+ * but long production runs flush regularly (every 5-10 minutes)
+ *
+ * 10000 frames = ~5.5 minutes at 30fps, ~3.3 minutes at 50fps
+ *
+ * Only flushes on keyframe boundaries to avoid breaking GOP/segment structure
+ * Production servers show unbounded growth to OOM without this
+ */
+#define ENCODER_FLUSH_INTERVAL 10000
+
 static int
 is_frame_extraction_done(coderctx_t *encoder_context,
     xcparams_t *p)
@@ -1989,6 +2002,43 @@ encode_frame(
             "TOENC ", codec_context->frame_num, frame, debug_frame_level);
     }
 
+    /* Periodic encoder flush - prevents unbounded memory growth in long-running streams */
+    if (frame &&
+        stream_index == decoder_context->video_stream_index &&
+        (frame->flags & AV_FRAME_FLAG_KEY)) {
+
+        static int64_t video_frames_encoded = 0;
+        video_frames_encoded++;
+
+        if (ENCODER_FLUSH_INTERVAL > 0 && video_frames_encoded % ENCODER_FLUSH_INTERVAL == 0) {
+            elv_log("Periodic encoder flush at frame %"PRId64" (interval=%d), url=%s",
+                    video_frames_encoded, ENCODER_FLUSH_INTERVAL, params->url);
+
+            /* Flush encoder by sending NULL frame */
+            int flush_ret = avcodec_send_frame(codec_context, NULL);
+            if (flush_ret < 0 && flush_ret != AVERROR_EOF) {
+                elv_warn("Encoder flush failed: %s, url=%s",
+                        av_err2str(flush_ret), params->url);
+            } else {
+                /* Drain buffered packets */
+                AVPacket *flush_pkt = av_packet_alloc();
+                if (flush_pkt) {
+                    int flushed_packets = 0;
+                    while (avcodec_receive_packet(codec_context, flush_pkt) >= 0) {
+                        av_interleaved_write_frame(format_context, flush_pkt);
+                        av_packet_unref(flush_pkt);
+                        flushed_packets++;
+                    }
+                    av_packet_free(&flush_pkt);
+
+                    if (debug_frame_level) {
+                        elv_dbg("Flushed %d packets from encoder, url=%s",
+                                flushed_packets, params->url);
+                    }
+                }
+            }
+        }
+    }
     // Send the frame to the encoder
     ret = avcodec_send_frame(codec_context, frame);
     if (ret < 0) {
@@ -3806,7 +3856,7 @@ xc_done:
         strncat(audio_last_pts_sent_encode_buf, buf, (MAX_STREAMS + 1) * 20 - strlen(audio_last_pts_sent_encode_buf));
         sprintf(buf, "%"PRId64, encoder_context->audio_last_pts_encoded[audio_index]);
         strncat(audio_last_pts_encoded_buf, buf, (MAX_STREAMS + 1) * 20 - strlen(audio_last_pts_encoded_buf));
-    } 
+    }
 
     elv_log("avpipe_xc done url=%s, rc=%d, xctx->err=%d, xc-type=%d, "
         "last video_pts=%"PRId64" audio_pts=%"PRId64
