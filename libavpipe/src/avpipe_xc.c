@@ -775,8 +775,8 @@ set_h265_params(
             "hdr10=1:hdr10-opt=1:repeat-headers=1:colorprim=bt2020:transfer=smpte2084:colormatrix=bt2020nc", 0);
         av_opt_set(encoder_codec_context->priv_data, "master-display", params->master_display, 0);
 
-        if ((params->profile == NULL || strlen(params->profile) == 0) && params->bitdepth == 0) {
-            // If not specified, assume 10 bits
+        if ((params->profile == NULL || strlen(params->profile) == 0) && params->bitdepth < 10) {
+            /* If not specified or if bitdepth is specified but <10, assume 10 bits */
             av_opt_set(encoder_codec_context->priv_data, "profile", "main10", 0);
         }
     }
@@ -972,8 +972,8 @@ set_nvidia_hevc_params(
         encoder_codec_context->colorspace     = AVCOL_SPC_BT2020_NCL;            // bt2020nc
         av_opt_set(encoder_codec_context->priv_data, "master_display", params->master_display, 0);
 
-        if ((params->profile == NULL || strlen(params->profile) == 0) && params->bitdepth == 0) {
-            // If not specified, assume 10 bits
+        if ((params->profile == NULL || strlen(params->profile) == 0) && params->bitdepth < 10) {
+            /* If not specified or if bitdepth is specified but <10, assume 10 bits */
             av_opt_set(encoder_codec_context->priv_data, "profile", "main10", 0);
         }
     }
