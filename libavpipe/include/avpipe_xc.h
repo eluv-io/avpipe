@@ -96,7 +96,8 @@ typedef enum avp_stat_t {
     out_stat_encoding_end_pts = 9,          // The last PTS encoded. This stat is recorded when a file is closed
     out_stat_start_file = 10,               // Sent when a new file is opened and reports the segment index
     out_stat_end_file = 11,                 // Sent when a file is closed and reports the segment index
-    in_stat_data_scte35 = 12               // SCTE data arrived
+    in_stat_data_scte35 = 12,               // SCTE data arrived
+    in_stat_mpegts = 13                     // MPEGTS input stats (including RTP if applicable)
 } avp_stat_t;
 
 typedef enum avp_live_proto_t {

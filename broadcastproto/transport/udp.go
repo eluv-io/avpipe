@@ -41,6 +41,10 @@ func (u *udpProto) Handler() string {
 	return "udp"
 }
 
+func (u *udpProto) PackagingMode() TsPackagingMode {
+	return RawTs
+}
+
 func (u *udpProto) Open() (io.ReadCloser, error) {
 	addr, err := net.ResolveUDPAddr("udp", u.stripLeadingProto(u.Url))
 	if err != nil {

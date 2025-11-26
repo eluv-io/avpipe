@@ -91,3 +91,8 @@ func (h *avpipeSequentialOutHandler) Close() error {
 	h.outFd = nil
 	return nil
 }
+
+func (h *avpipeSequentialOutHandler) Stat(args string) error {
+	err := AVPipeStatInputGo(h.inFd, h.streamIndex, goavpipe.AV_IN_STAT_MPEGTS, args)
+	return err
+}
