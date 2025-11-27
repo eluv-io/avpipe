@@ -111,7 +111,11 @@ prepare_input(
     avioctx = avio_alloc_context(bufin, bufin_sz, 0, (void *)inctx,
         in_handlers->avpipe_reader, in_handlers->avpipe_writer, in_handlers->avpipe_seeker);
 
-    avioctx->written = inctx->sz; /* Fake avio_size() to avoid calling seek to find size */
+    // FFmpeg 7.1: Use size callback to fake stream size instead of deprecated 'written' field
+    // This tells FFmpeg the total size of the stream for avio_size() calls
+    if (inctx->sz > 0) {
+        avioctx->seek = in_handlers->avpipe_seeker;  // Ensure seeker handles SEEK_END for size
+    }
     avioctx->seekable = seekable;
     avioctx->direct = 0;
     avioctx->buffer_size = inctx->sz < bufin_sz ? inctx->sz : bufin_sz; // avoid seeks - avio_seek() seeks internal buffer */
@@ -361,7 +365,7 @@ prepare_decoder(
             elv_dbg("AUDIO STREAM %d, codec_id=%s, stream_id=%d, timebase=%d, xc_type=%d, channels=%d, url=%s",
                 i, avcodec_get_name(decoder_context->codec_parameters[i]->codec_id), decoder_context->stream[i]->id,
                 decoder_context->stream[i]->time_base.den, params ? params->xc_type : xc_none,
-                decoder_context->codec_parameters[i]->channels, url);
+                decoder_context->codec_parameters[i]->ch_layout.nb_channels, url);
 
             /* If the buffer size is too big, ffmpeg might assert in aviobuf.c:581
              * To avoid this assertion, reset the buffer size to something smaller.
@@ -607,16 +611,27 @@ set_encoder_options(
      * - frag_every_frame - necessary for low-latency playout (eg. LL-HLS) (could use frag_keyframe for regular HLS/DASH)
      * - empty_moov - moov atom at beginning for progressive playback (needed for fMP4 init segment)
      * - default_base_moof: omit base-data-offset in moof (simplifies segment parsing, CMAF-friendly)
+     * - delay_moov: process the initial packets from all streams before writing the moov atom; required by the AC3 codec
      *
      * Note 'faststart' is not needed for segmented playout (HLS/DASH). Only used for progessive playout of mp4/mov files.
      */
     #define FRAG_OPTS "+frag_every_frame+empty_moov+default_base_moof"
+    #define FRAG_OPTS_DELAY "+frag_every_frame+empty_moov+default_base_moof+delay_moov"
 
     if (!strcmp(params->format, "fmp4")) {
-        if (stream_index == decoder_context->video_stream_index)
+        if (stream_index == decoder_context->video_stream_index) {
+            elv_dbg("set_encoder_options, fmp4 video, stream_index=%d, movflags="FRAG_OPTS, stream_index);
             av_opt_set(encoder_context->format_context->priv_data, "movflags", FRAG_OPTS, 0);
-        if ((i = selected_decoded_audio(decoder_context, stream_index)) >= 0)
-            av_opt_set(encoder_context->format_context2[i]->priv_data, "movflags", FRAG_OPTS, 0);
+        }
+        if ((i = selected_decoded_audio(decoder_context, stream_index)) >= 0) {
+            if (params->ecodec2 && !strcmp(params->ecodec2, "ac3")) {
+                elv_dbg("set_encoder_options, fmp4 audio, ac3, stream_index=%d, movflags="FRAG_OPTS_DELAY, stream_index);
+                av_opt_set(encoder_context->format_context2[i]->priv_data, "movflags", FRAG_OPTS_DELAY, 0);
+            } else {
+                elv_dbg("set_encoder_options, fmp4 audio, stream_index=%d, movflags="FRAG_OPTS, stream_index);
+                av_opt_set(encoder_context->format_context2[i]->priv_data, "movflags", FRAG_OPTS, 0);
+            }
+        }
     }
 
     // Segment duration (in ts) - notice it is set on the format context not codec
@@ -689,14 +704,18 @@ set_encoder_options(
 
         if (!strcmp(params->format, "fmp4-segment")) {
             if ((i = selected_decoded_audio(decoder_context, stream_index)) >= 0) {
-                // AC3 codec requires delay_moov flag to write packets before moov atom
-                if (params->ecodec2 && !strcmp(params->ecodec2, "ac3"))
-                    av_opt_set(encoder_context->format_context2[i]->priv_data, "segment_format_options", "movflags="FRAG_OPTS"+delay_moov", 0);
-                else
+                if (params->ecodec2 && !strcmp(params->ecodec2, "ac3")) {
+                    elv_dbg("set_encoder_options, fmp4-segment audio, ac3, stream_index=%d, movflags="FRAG_OPTS_DELAY, stream_index);
+                    av_opt_set(encoder_context->format_context2[i]->priv_data, "segment_format_options", "movflags="FRAG_OPTS_DELAY, 0);
+                } else {
+                    elv_dbg("set_encoder_options, fmp4-segment audio, stream_index=%d, movflags="FRAG_OPTS, stream_index);
                     av_opt_set(encoder_context->format_context2[i]->priv_data, "segment_format_options", "movflags="FRAG_OPTS, 0);
+                }
             }
-            if (stream_index == decoder_context->video_stream_index)
+            if (stream_index == decoder_context->video_stream_index) {
+                elv_dbg("set_encoder_options, fmp4-segment video, stream_index=%d, movflags="FRAG_OPTS, stream_index);
                 av_opt_set(encoder_context->format_context->priv_data, "segment_format_options", "movflags="FRAG_OPTS, 0);
+            }
         }
     }
 
@@ -1039,10 +1058,10 @@ prepare_video_encoder(
 
     /* Custom output buffer */
     encoder_context->format_context->io_open = elv_io_open;
-    encoder_context->format_context->io_close = elv_io_close;
+    encoder_context->format_context->io_close2 = elv_io_close;
 
     if (!encoder_context->codec[index]) {
-        elv_dbg("could not find the proper codec");
+        elv_err("could not find the proper codec");
         return eav_codec_context;
     }
     elv_log("Found encoder index=%d, %s", index, params->ecodec);
@@ -1078,7 +1097,7 @@ prepare_video_encoder(
 
     encoder_context->codec_context[index] = avcodec_alloc_context3(encoder_context->codec[index]);
     if (!encoder_context->codec_context[index]) {
-        elv_dbg("could not allocated memory for codec context");
+        elv_err("could not allocated memory for codec context");
         return eav_codec_context;
     }
 
@@ -1196,7 +1215,7 @@ prepare_video_encoder(
 
     /* Open video encoder (initialize the encoder codec_context[i] using given codec[i]). */
     if ((rc = avcodec_open2(encoder_context->codec_context[index], encoder_context->codec[index], NULL)) < 0) {
-        elv_dbg("Could not open encoder for video, err=%d", rc);
+        elv_err("Could not open encoder for video, err=%d", rc);
         return eav_open_codec;
     }
 
@@ -1204,7 +1223,7 @@ prepare_video_encoder(
     if (avcodec_parameters_from_context(
             encoder_context->stream[index]->codecpar,
             encoder_context->codec_context[index]) < 0) {
-        elv_dbg("could not copy encoder parameters to output stream");
+        elv_err("could not copy encoder parameters to output stream");
         return eav_codec_param;
     }
 
@@ -1238,6 +1257,8 @@ prepare_audio_encoder(
     char *ecodec;
     AVFormatContext *format_context;
     int rc;
+    AVCodecContext *dec_codec_ctx, *enc_codec_ctx;
+    uint64_t channel_layout_mask;
 
     if (params->xc_type == xc_audio_merge ||
         params->xc_type == xc_audio_join ||
@@ -1266,6 +1287,7 @@ prepare_audio_encoder(
             elv_err("Decoder codec context is NULL! stream_index=%d, url=%s", stream_index, params->url);
             return eav_codec_context;
         }
+        dec_codec_ctx = decoder_context->codec_context[stream_index];
 
         /* If there are more than 1 audio streams to encode, we can't do bypass */
         if (params && params->bypass_transcoding && decoder_context->n_audio > 1) {
@@ -1292,9 +1314,10 @@ prepare_audio_encoder(
         }
 
         format_context->io_open = elv_io_open;
-        format_context->io_close = elv_io_close;
+        format_context->io_close2 = elv_io_close;
 
-        encoder_context->codec_context[output_stream_index] = avcodec_alloc_context3(encoder_context->codec[output_stream_index]);
+        enc_codec_ctx = avcodec_alloc_context3(encoder_context->codec[output_stream_index]);
+        encoder_context->codec_context[output_stream_index] = enc_codec_ctx;
 
         /* By default use decoder parameters */
         encoder_context->codec_context[output_stream_index]->sample_rate = decoder_context->codec_context[stream_index]->sample_rate;
@@ -1303,6 +1326,7 @@ prepare_audio_encoder(
         encoder_context->codec_context[output_stream_index]->time_base = (AVRational){1, encoder_context->codec_context[output_stream_index]->sample_rate};
         encoder_context->stream[output_stream_index]->time_base = encoder_context->codec_context[output_stream_index]->time_base;
 
+        // TODO: sample_fmts is deprecated; use avcodec_get_supported_config()
         if (decoder_context->codec[stream_index] && 
             decoder_context->codec[stream_index]->sample_fmts && params->bypass_transcoding)
             encoder_context->codec_context[output_stream_index]->sample_fmt = decoder_context->codec[stream_index]->sample_fmts[0];
@@ -1311,27 +1335,28 @@ prepare_audio_encoder(
         else
             encoder_context->codec_context[output_stream_index]->sample_fmt = AV_SAMPLE_FMT_FLTP;
 
-        if (params->channel_layout > 0)
-            encoder_context->codec_context[output_stream_index]->channel_layout = params->channel_layout;
-        else
-            /* If the input stream is stereo the decoder_context->codec_context[index]->channel_layout is AV_CH_LAYOUT_STEREO */
-            encoder_context->codec_context[output_stream_index]->channel_layout =
-                get_channel_layout_for_encoder(decoder_context->codec_context[stream_index]->channel_layout);
-        encoder_context->codec_context[output_stream_index]->channels = av_get_channel_layout_nb_channels(encoder_context->codec_context[output_stream_index]->channel_layout);
-
+        if (params->channel_layout > 0) {
+            channel_layout_mask = params->channel_layout;
+        } else {
+            channel_layout_mask = get_channel_layout_for_encoder(dec_codec_ctx->ch_layout.u.mask);
+        }
+        rc = av_channel_layout_from_mask(&enc_codec_ctx->ch_layout, channel_layout_mask);
+        if (rc) {
+            elv_err("Invalid channel_layout, rc=%d, channel_layout=%llu, url=%s",
+                rc, channel_layout_mask, params->url);
+            return eav_param;
+        }
         const char *channel_name = avpipe_channel_name(
-                                av_get_channel_layout_nb_channels(encoder_context->codec_context[output_stream_index]->channel_layout),
-                                decoder_context->codec_context[stream_index]->channel_layout);
+            enc_codec_ctx->ch_layout.nb_channels, enc_codec_ctx->ch_layout.u.mask);
 
         /* If decoder channel layout is DOWNMIX and params->ecodec == "aac" and channel_layout is not set
          * then set the channel layout to STEREO. Preserve the channel layout otherwise.
          */
-        if (decoder_context->codec_context[stream_index]->channel_layout == AV_CH_LAYOUT_STEREO_DOWNMIX &&
+        if (dec_codec_ctx->ch_layout.u.mask == AV_CH_LAYOUT_STEREO_DOWNMIX &&
             !strcmp(ecodec, "aac") &&
             !params->channel_layout) {
             /* This encoder is prepared specifically for AAC, therefore set the channel layout to AV_CH_LAYOUT_STEREO */
-            encoder_context->codec_context[output_stream_index]->channels = av_get_channel_layout_nb_channels(AV_CH_LAYOUT_STEREO);
-            encoder_context->codec_context[output_stream_index]->channel_layout = AV_CH_LAYOUT_STEREO;    // AV_CH_LAYOUT_STEREO is av_get_default_channel_layout(encoder_context->codec_context[index]->channels)
+            av_channel_layout_copy(&enc_codec_ctx->ch_layout, &(AVChannelLayout)AV_CHANNEL_LAYOUT_STEREO);
         }
 
         int sample_rate = params->sample_rate;
@@ -1360,9 +1385,9 @@ prepare_audio_encoder(
         }
 
         elv_dbg("ENCODER channels=%d, channel_layout=%d (%s), sample_fmt=%s, sample_rate=%d",
-            encoder_context->codec_context[output_stream_index]->channels,
-            encoder_context->codec_context[output_stream_index]->channel_layout,
-            avpipe_channel_layout_name(encoder_context->codec_context[output_stream_index]->channel_layout),
+            enc_codec_ctx->ch_layout.nb_channels,
+            enc_codec_ctx->ch_layout.u.mask,
+            avpipe_channel_layout_name(enc_codec_ctx->ch_layout.u.mask),
             av_get_sample_fmt_name(encoder_context->codec_context[output_stream_index]->sample_fmt),
             encoder_context->codec_context[output_stream_index]->sample_rate);
 
@@ -1378,15 +1403,14 @@ prepare_audio_encoder(
             return rc;
         }
 
-        AVCodecContext *encoder_codec_context = encoder_context->codec_context[output_stream_index];
         /* Some container formats (like MP4) require global headers to be present.
          * Mark the encoder so that it behaves accordingly. */
         if (format_context->oformat->flags & AVFMT_GLOBALHEADER)
-            encoder_codec_context->flags |= AV_CODEC_FLAG_GLOBAL_HEADER;
+            enc_codec_ctx->flags |= AV_CODEC_FLAG_GLOBAL_HEADER;
 
         /* Open audio encoder codec */
         if (avcodec_open2(encoder_context->codec_context[output_stream_index], encoder_context->codec[output_stream_index], NULL) < 0) {
-            elv_dbg("Could not open encoder for audio, stream_index=%d", stream_index);
+            elv_err("Could not open encoder for audio, stream_index=%d", stream_index);
             return eav_open_codec;
         }
 
@@ -1990,10 +2014,10 @@ encode_frame(
 
         if (params->xc_type & xc_audio &&
             selected_decoded_audio(decoder_context, stream_index) >= 0)
-            frame->pkt_duration = 0;
+            frame->duration = 0;
 
         dump_frame(selected_decoded_audio(decoder_context, stream_index) >= 0, stream_index,
-            "TOENC ", codec_context->frame_number, frame, debug_frame_level);
+            "TOENC ", codec_context->frame_num, frame, debug_frame_level);
     }
 
     // Send the frame to the encoder
@@ -2365,7 +2389,7 @@ transcode_audio(
                 in_handlers->avpipe_stater(decoder_context->inctx, stream_index, in_stat_decoding_audio_start_pts);
         }
 
-        dump_frame(1, stream_index, "IN ", codec_context->frame_number, frame, debug_frame_level);
+        dump_frame(1, stream_index, "IN ", codec_context->frame_num, frame, debug_frame_level);
 
         ret = check_pts_wrapped(&decoder_context->audio_last_input_pts[stream_index], frame, stream_index);
         if (ret == eav_pts_wrapped) {
@@ -2402,7 +2426,7 @@ transcode_audio(
                 return eav_receive_filter_frame;
             }
 
-            dump_frame(1, stream_index, "FILT ", codec_context->frame_number, filt_frame, debug_frame_level);
+            dump_frame(1, stream_index, "FILT ", codec_context->frame_num, filt_frame, debug_frame_level);
             ret = encode_frame(decoder_context, encoder_context, filt_frame, packet->stream_index, params, debug_frame_level);
             av_frame_unref(filt_frame);
             if (ret == eav_write_frame) {
@@ -2507,18 +2531,18 @@ transcode_video(
         /* If force_equal_fduration is set then frame_duration > 0 is true */
         if (decoder_context->frame_duration > 0) {
             elv_dbg("SET VIDEO PTS frame_num=%d, old_pts=%"PRId64", new_pts=%"PRId64", diff=%"PRId64", dts=%"PRId64,
-                codec_context->frame_number,
+                codec_context->frame_num,
                 frame->pts,
-                decoder_context->first_decoding_video_pts + decoder_context->frame_duration * (codec_context->frame_number - 1),
-                decoder_context->first_decoding_video_pts + decoder_context->frame_duration * (codec_context->frame_number - 1) - frame->pts,
+                decoder_context->first_decoding_video_pts + decoder_context->frame_duration * (codec_context->frame_num - 1),
+                decoder_context->first_decoding_video_pts + decoder_context->frame_duration * (codec_context->frame_num - 1) - frame->pts,
                 frame->pkt_dts);
             /* Set the PTS and DTS of the frame to equalize frame durations */
             frame->pts = decoder_context->first_decoding_video_pts +
-                decoder_context->frame_duration * (codec_context->frame_number - 1);
+                decoder_context->frame_duration * (codec_context->frame_num - 1);
             frame->pkt_dts = frame->pts;
         }
 
-        dump_frame(0, stream_index, "IN ", codec_context->frame_number, frame, debug_frame_level);
+        dump_frame(0, stream_index, "IN ", codec_context->frame_num, frame, debug_frame_level);
 
         ret = check_pts_wrapped(&decoder_context->audio_last_input_pts[stream_index], frame, stream_index);
         if (ret == eav_pts_wrapped) {
@@ -2567,10 +2591,10 @@ transcode_video(
 #if 0
             // TEST ONLY - save gray scale frame
             save_gray_frame(filt_frame->data[0], filt_frame->linesize[0], filt_frame->width, filt_frame->height,
-            "frame-filt", codec_context->frame_number);
+            "frame-filt", codec_context->frame_num);
 #endif
 
-            dump_frame(0, stream_index, "FILT ", codec_context->frame_number, filt_frame, debug_frame_level);
+            dump_frame(0, stream_index, "FILT ", codec_context->frame_num, filt_frame, debug_frame_level);
             filt_frame->pkt_dts = filt_frame->pts;
 
             elv_get_time(&tv);
@@ -2795,7 +2819,7 @@ flush_decoder(
         }
 
         dump_frame(i >= 0, stream_index,
-            "IN FLUSH", codec_context->frame_number, frame, debug_frame_level);
+            "IN FLUSH", codec_context->frame_num, frame, debug_frame_level);
 
         if (codec_context->codec_type == AVMEDIA_TYPE_VIDEO ||
             codec_context->codec_type == AVMEDIA_TYPE_AUDIO) {
@@ -2827,7 +2851,7 @@ flush_decoder(
                 }
 
                 dump_frame(i >= 0, stream_index,
-                    "FILT ", codec_context->frame_number, filt_frame, debug_frame_level);
+                    "FILT ", codec_context->frame_num, filt_frame, debug_frame_level);
 
                 ret = encode_frame(decoder_context, encoder_context, filt_frame, stream_index, p, debug_frame_level);
                 av_frame_unref(filt_frame);
@@ -4068,7 +4092,7 @@ avpipe_probe(
     for (int i=0; i<nb_streams; i++) {
         AVStream *s = decoder_ctx.format_context->streams[i];
         AVCodecContext *codec_context = decoder_ctx.codec_context[i];
-        AVCodec *codec = decoder_ctx.codec[i];
+        const AVCodec *codec = decoder_ctx.codec[i];
         AVRational sar, dar;
 
         if (!codec_context) {
@@ -4126,13 +4150,13 @@ avpipe_probe(
         }
 
         stream_probes_ptr->frame_rate = s->r_frame_rate;
-        stream_probes_ptr->ticks_per_frame = codec_context->ticks_per_frame;
+        stream_probes_ptr->ticks_per_frame = codec_context->ticks_per_frame; // TODO: ticks_per_frame is deprecated
         stream_probes_ptr->bit_rate = codec_context->bit_rate;
         stream_probes_ptr->has_b_frames = codec_context->has_b_frames;
         stream_probes_ptr->sample_rate = codec_context->sample_rate;
-        stream_probes_ptr->channels = codec_context->channels;
+        stream_probes_ptr->channels = codec_context->ch_layout.nb_channels;
         if (codec && codec->type == AVMEDIA_TYPE_AUDIO)
-            stream_probes_ptr->channel_layout = codec_context->channel_layout;
+            stream_probes_ptr->channel_layout = codec_context->ch_layout.u.mask;
         else
             stream_probes_ptr->channel_layout = -1;
         stream_probes_ptr->width = codec_context->width;
@@ -4150,7 +4174,7 @@ avpipe_probe(
 
         av_dict_copy(&stream_probes_ptr->tags, s->metadata, 0);
 
-        for (int i = 0; i < s->nb_side_data; i++) {
+        for (int i = 0; i < s->nb_side_data; i++) { // TODO: side_data and nb_side_data are deprecated
             const AVPacketSideData *sd = &s->side_data[i];
             switch (sd->type) {
                 case AV_PKT_DATA_DISPLAYMATRIX:
@@ -4189,7 +4213,6 @@ avpipe_probe_end:
     for (int i=0; i<MAX_STREAMS; i++) {
         if (decoder_ctx.codec_context[i]) {
             /* Corresponds to avcodec_open2() */
-            avcodec_close(decoder_ctx.codec_context[i]);
             avcodec_free_context(&decoder_ctx.codec_context[i]);
         }
     }
@@ -4694,13 +4717,11 @@ avpipe_fini(
     for (int i=0; i<MAX_STREAMS; i++) {
         if (decoder_context->codec_context[i]) {
             /* Corresponds to avcodec_open2() */
-            avcodec_close(decoder_context->codec_context[i]);
             avcodec_free_context(&decoder_context->codec_context[i]);
         }
 
         if (encoder_context->codec_context[i]) {
             /* Corresponds to avcodec_open2() */
-            avcodec_close(encoder_context->codec_context[i]);
             avcodec_free_context(&encoder_context->codec_context[i]);
         }
     }
@@ -4719,7 +4740,6 @@ avpipe_fini(
         for (int i=0; i<MAX_STREAMS; i++) {
             if (mpegts_encoder_ctx->codec_context[i]) {
                 /* Corresponds to avcodec_open2() */
-                avcodec_close(mpegts_encoder_ctx->codec_context[i]);
                 avcodec_free_context(&mpegts_encoder_ctx->codec_context[i]);
             }
         }
