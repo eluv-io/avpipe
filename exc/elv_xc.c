@@ -1195,6 +1195,8 @@ main(
         .watermark_overlay_len = 0,
         .watermark_overlay_type = unknown_image,
         .watermark_shadow_color = strdup("white"),  /* Default shadow color */
+        .png_sequence_path = NULL,          /* MEDIA FELIZ */
+        .mov_overlay_path = NULL,           /* MEDIA FELIZ */
         .gpu_index = -1,
         .seg_duration = NULL,
         .debug_frame_level = 0,
@@ -1577,6 +1579,12 @@ main(
                 }
             } else if (!strcmp(argv[i], "-wm-shadow-color")) {
                 p.watermark_shadow_color = strdup(argv[i+1]);
+            } else if (!strcmp(argv[i], "-wm-sequence-path")) {
+                // MEDIA FELIZ
+                p.png_sequence_path = strdup(argv[i + 1]);
+            } else if (!strcmp(argv[i], "-wm-overlay-mov")) {
+                // MEDIA FELIZ
+                p.mov_overlay_path = strdup(argv[i + 1]);
             } else {
                 usage(argv[0], argv[i], EXIT_FAILURE);
             }

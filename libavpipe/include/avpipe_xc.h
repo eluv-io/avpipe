@@ -506,6 +506,8 @@ typedef struct xcparams_t {
     char        *watermark_font_color;      // black
     int         watermark_shadow;           // Default 1, means shadow exist 
     char        *overlay_filename;          // Overlay file name
+    char        *mov_overlay_path;          // MEDIA FELIZ: Path to overlay ProRes 4444 with alpha
+    char        *png_sequence_path;         // MEDIA FELIZ: Path template for PNG sequence (ex. /frames/frame_%06d.png)
     char        *watermark_overlay;         // Overlay image buffer, default is NULL
     image_type  watermark_overlay_type;     // Overlay image type, default is png
     int         watermark_overlay_len;      // Length of watermark_overlay if there is any

@@ -3221,7 +3221,76 @@ get_filter_str(
         }
         *filter_str = (char *) calloc(strlen(local_filter_str)+1, 1);
         strcpy(*filter_str, local_filter_str);
-    } else if (params->watermark_overlay && params->watermark_overlay[0] != '\0') {
+    } else if (params->png_sequence_path && *params->png_sequence_path != '\0') {
+        // MEDIA FELIZ - PNG Sequence Overlay
+        const char *filt_template =
+            "[in] scale=%d:%d [in_scaled]; "
+            "movie='%s', setpts=N/FRAME_RATE/TB [overlay_seq]; "
+            "[in_scaled][overlay_seq] overlay=%s:%s:alpha=1.0 [out]";
+
+        if (!params->watermark_xloc || *params->watermark_xloc == '\0' ||
+            !params->watermark_yloc || *params->watermark_yloc == '\0') {
+            elv_err("PNG sequence overlay requires xloc and yloc. xloc=\"%s\" "
+                    "yloc=\"%s\" path=%s",
+                    params->watermark_xloc ? params->watermark_xloc : "NULL",
+                    params->watermark_yloc ? params->watermark_yloc : "NULL",
+                    params->png_sequence_path);
+            return eav_filter_string_init;
+        }
+
+        int filt_str_len = strlen(params->png_sequence_path) + FILTER_STRING_SZ;
+        *filter_str = (char *)calloc(filt_str_len, 1);
+
+        int ret = snprintf(
+            *filter_str, filt_str_len, filt_template,
+            encoder_context->codec_context[encoder_context->video_stream_index]->width,
+            encoder_context->codec_context[encoder_context->video_stream_index]->height,
+            params->png_sequence_path, params->watermark_xloc,
+            params->watermark_yloc);
+        if (ret < 0) {
+            free(*filter_str);
+            return eav_filter_string_init;
+        } else if (ret >= filt_str_len) {
+            free(*filter_str);
+            elv_dbg("Not enough memory for PNG sequence overlay filter");
+            return eav_filter_string_init;
+        }
+    } else if (params->mov_overlay_path && *params->mov_overlay_path != '\0') {
+        // MEDIA FELIZ
+        const char *filt_template =
+            "[in] scale=%d:%d [in_scaled]; "
+            "movie='%s', setpts=PTS [mov_overlay]; "
+            "[in_scaled][mov_overlay] overlay=%s:%s [out]";
+
+        if (!params->watermark_xloc || *params->watermark_xloc == '\0' ||
+            !params->watermark_yloc || *params->watermark_yloc == '\0') {
+            elv_err("MOV overlay requires xloc and yloc. xloc=\"%s\" "
+                    "yloc=\"%s\" path=%s",
+                    params->watermark_xloc ? params->watermark_xloc : "NULL",
+                    params->watermark_yloc ? params->watermark_yloc : "NULL",
+                    params->mov_overlay_path);
+            return eav_filter_string_init;
+        }
+
+        int filt_str_len = strlen(params->mov_overlay_path) + FILTER_STRING_SZ;
+        *filter_str = (char *)calloc(filt_str_len, 1);
+
+        int ret = snprintf(
+            *filter_str, filt_str_len, filt_template,
+            encoder_context->codec_context[encoder_context->video_stream_index]->width,
+            encoder_context->codec_context[encoder_context->video_stream_index]->height,
+            params->mov_overlay_path, params->watermark_xloc,
+            params->watermark_yloc);
+        if (ret < 0) {
+            free(*filter_str);
+            return eav_filter_string_init;
+        } else if (ret >= filt_str_len) {
+            free(*filter_str);
+            elv_dbg("Not enough memory for MOV overlay filter");
+            return eav_filter_string_init;
+        }
+    } else if (params->watermark_overlay &&
+               params->watermark_overlay[0] != '\0') {
         char *filt_buf = NULL;
         int filt_buf_size;
         int filt_str_len;
