@@ -53,8 +53,10 @@ elv_channel_send(
     elv_channel_t *channel,
     void *msg)
 {
-    if (!channel || channel->_closed)
+    if (!channel || channel->_closed) {
+        elv_channel_free_elem(channel, msg);
         return -1;
+    }
 
     pthread_mutex_lock(&channel->_mutex);
     while (channel->_count >= channel->_capacity && channel->_closed == 0) {
@@ -188,10 +190,7 @@ elv_channel_close(
         channel->_count--;
         void *msg = channel->_items[channel->_front];
         channel->_front = (channel->_front+1) % channel->_capacity;
-        if (channel->_free_elem)
-            channel->_free_elem(msg);
-        else
-            free(msg);
+        elv_channel_free_elem(channel, msg);
     }
 
     pthread_mutex_unlock(&channel->_mutex);
@@ -225,3 +224,14 @@ elv_channel_fini(
     return 0;
 }
 
+static elv_channel_free_elem(
+    elv_channel_t *channel,
+    void *elem)
+{
+    if (!elem) return;
+
+    if (channel->_free_elem)
+        channel->_free_elem(elem);
+    else
+        free(elem);
+}
