@@ -1825,7 +1825,7 @@ func TestMXF_H265MezMaker(t *testing.T) {
 		// Test takes ~2 minutes with HD MPEG-2 source
 		t.Skip("SKIPPING " + f)
 	}
-	url := "./media/BBB0_HD_8_XDCAM_120s_CCBYblendercloud.mxf"
+	url := "./media/SIN5_4K_MOS_J2K_60s_CCBYblendercloud.mxf"
 	if fileMissing(url, fn()) {
 		return
 	}
@@ -1840,20 +1840,21 @@ func TestMXF_H265MezMaker(t *testing.T) {
 		StartSegmentStr:   "1",
 		SegDuration:       "30.03",
 		Ecodec:            "libx265",
-		Dcodec:            "", // Auto-detect MPEG-2 decoder
-		EncHeight:         -1, // Keep original 720p resolution
+		Dcodec:            "",
+		EncHeight:         -1,
 		EncWidth:          -1,
 		XcType:            goavpipe.XcVideo,
 		StreamId:          -1,
 		Url:               url,
 		DebugFrameLevel:   debugFrameLevel,
-		ForceKeyInt:       120, // ~2 seconds at 59.94fps
+		ForceKeyInt:       48,
+		BitDepth:          8,
 	}
 
 	xcTestResult := &XcTestResult{
 		mezFile:   []string{fmt.Sprintf("%s/vsegment-1.mp4", outputDir)},
-		timeScale: 60000, // Matches input timebase (60000/1001)
-		level:     120,   // H.265 Level 4.0 for 720p60 (encoded as 120)
+		timeScale: 24000,
+		level:     150,
 		pixelFmt:  "yuv420p",
 	}
 
