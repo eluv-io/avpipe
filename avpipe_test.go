@@ -1822,10 +1822,10 @@ func TestIrregularTsMezMaker_1_10000(t *testing.T) {
 func TestMXF_H265MezMaker(t *testing.T) {
 	f := fn()
 	if testing.Short() {
-		// 558.20s on 2018 MacBook Pro (2.9 GHz 6-Core i9, 32 GB RAM, Radeon Pro 560X 4 GB)
+		// Test takes ~2 minutes with HD MPEG-2 source
 		t.Skip("SKIPPING " + f)
 	}
-	url := "./media/SIN5_4K_MOS_J2K_60s_CCBYblendercloud.mxf"
+	url := "./media/BBB0_HD_8_XDCAM_120s_CCBYblendercloud.mxf"
 	if fileMissing(url, fn()) {
 		return
 	}
@@ -1840,20 +1840,20 @@ func TestMXF_H265MezMaker(t *testing.T) {
 		StartSegmentStr:   "1",
 		SegDuration:       "30.03",
 		Ecodec:            "libx265",
-		Dcodec:            "jpeg2000",
-		EncHeight:         -1,
+		Dcodec:            "", // Auto-detect MPEG-2 decoder
+		EncHeight:         -1, // Keep original 720p resolution
 		EncWidth:          -1,
 		XcType:            goavpipe.XcVideo,
 		StreamId:          -1,
 		Url:               url,
 		DebugFrameLevel:   debugFrameLevel,
-		ForceKeyInt:       48,
+		ForceKeyInt:       120, // ~2 seconds at 59.94fps
 	}
 
 	xcTestResult := &XcTestResult{
 		mezFile:   []string{fmt.Sprintf("%s/vsegment-1.mp4", outputDir)},
-		timeScale: 24000,
-		level:     150,
+		timeScale: 60000, // Matches input timebase (60000/1001)
+		level:     120,   // H.265 Level 4.0 for 720p60 (encoded as 120)
 		pixelFmt:  "yuv420p",
 	}
 

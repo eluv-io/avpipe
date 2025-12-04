@@ -7,12 +7,24 @@ BINDIR=bin
 LIBDIR=lib
 INCDIR=include
 
+# Debug build support
+DEBUG ?= 0
+ifeq ($(DEBUG), 1)
+	CFLAGS_DEBUG := -g -O0 -DDEBUG
+	LDFLAGS_DEBUG := -g
+else
+	CFLAGS_DEBUG :=
+	LDFLAGS_DEBUG :=
+endif
+
 OSNAME := $(shell uname -s)
 LDFLAGS := \
 		-lavpipe \
 		-lutils \
-		$(shell pkg-config --libs libavfilter libavcodec libavformat libavdevice libswresample libavresample libswscale libavutil libpostproc srt)
-CFLAGS := $(shell pkg-config --cflags libavfilter libavcodec libavformat libavdevice libswresample libavresample libswscale libavutil libpostproc srt)
+		$(shell pkg-config --libs libavfilter libavcodec libavformat libavdevice libswresample libavresample libswscale libavutil libpostproc srt) \
+		$(LDFLAGS_DEBUG)
+CFLAGS := $(shell pkg-config --cflags libavfilter libavcodec libavformat libavdevice libswresample libavresample libswscale libavutil libpostproc srt) \
+		$(CFLAGS_DEBUG)
 
 ifeq ($(OSNAME), Darwin)
 	LDFLAGS := ${LDFLAGS} \
