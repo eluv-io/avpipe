@@ -10,24 +10,55 @@
 #   ./run_tests_leak_check.sh TestMXF_H265MezMaker  # Run specific test
 #
 
-set -e
+    set -e
 
 # Important: We need to build the test binary FIRST without LD_PRELOAD,
 # otherwise tcmalloc will check the compiler itself for leaks!
 
-# Find tcmalloc library
+# Find tcmalloc library (Linux and macOS support)
 TCMALLOC_LIB=""
-for lib in libtcmalloc.so.4 libtcmalloc.so libtcmalloc_minimal.so.4 libtcmalloc_minimal.so; do
-    LIB_PATH=$(ldconfig -p | grep "$lib" | awk '{print $NF}' | head -1)
-    if [ -n "$LIB_PATH" ] && [ -f "$LIB_PATH" ]; then
-        TCMALLOC_LIB="$LIB_PATH"
-        break
+OS_TYPE=$(uname)
+if [ "$OS_TYPE" = "Darwin" ]; then
+    # macOS: check Homebrew locations for tcmalloc
+    for lib in libtcmalloc.dylib libtcmalloc_minimal.dylib; do
+        # Try /usr/local/lib (Intel) and /opt/homebrew/lib (Apple Silicon)
+        for prefix in /usr/local /opt/homebrew; do
+            LIB_PATH="$prefix/lib/$lib"
+            if [ -f "$LIB_PATH" ]; then
+                TCMALLOC_LIB="$LIB_PATH"
+                break 2
+            fi
+        done
+    done
+    # Try Homebrew prefix if not found
+    if [ -z "$TCMALLOC_LIB" ] && command -v brew >/dev/null 2>&1; then
+        BREW_PREFIX=$(brew --prefix)
+        for lib in libtcmalloc.dylib libtcmalloc_minimal.dylib; do
+            LIB_PATH="$BREW_PREFIX/lib/$lib"
+            if [ -f "$LIB_PATH" ]; then
+                TCMALLOC_LIB="$LIB_PATH"
+                break
+            fi
+        done
     fi
-done
-
+fi
+if [ -z "$TCMALLOC_LIB" ]; then
+    # Linux: use ldconfig
+    for lib in libtcmalloc.so.4 libtcmalloc.so libtcmalloc_minimal.so.4 libtcmalloc_minimal.so; do
+        LIB_PATH=$(ldconfig -p 2>/dev/null | grep "$lib" | awk '{print $NF}' | head -1)
+        if [ -n "$LIB_PATH" ] && [ -f "$LIB_PATH" ]; then
+            TCMALLOC_LIB="$LIB_PATH"
+            break
+        fi
+    done
+fi
 if [ -z "$TCMALLOC_LIB" ]; then
     echo "ERROR: tcmalloc library not found!"
-    echo "Please install: sudo apt-get install libtcmalloc-minimal4"
+    if [ "$OS_TYPE" = "Darwin" ]; then
+        echo "Please install: brew install tcmalloc"
+    else
+        echo "Please install: sudo apt-get install libtcmalloc-minimal4"
+    fi
     exit 1
 fi
 
@@ -51,11 +82,7 @@ echo ""
 
 # Step 1: Build the test binary WITHOUT tcmalloc to avoid checking the compiler
 echo "Building test binary with debug symbols..."
-if [ -z "$1" ]; then
-    go test -c -gcflags="all=-N -l" -o avpipe.test
-else
-    go test -c -gcflags="all=-N -l" -o avpipe.test
-fi
+go test -c -gcflags="all=-N -l" -o avpipe.test
 
 if [ $? -ne 0 ]; then
     echo "ERROR: Failed to build test binary"

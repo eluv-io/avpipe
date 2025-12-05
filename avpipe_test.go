@@ -1822,7 +1822,7 @@ func TestIrregularTsMezMaker_1_10000(t *testing.T) {
 func TestMXF_H265MezMaker(t *testing.T) {
 	f := fn()
 	if testing.Short() {
-		// Test takes ~2 minutes with HD MPEG-2 source
+		// Test takes ~2 minutes with 4K JPEG2000 MXF source
 		t.Skip("SKIPPING " + f)
 	}
 	url := "./media/SIN5_4K_MOS_J2K_60s_CCBYblendercloud.mxf"

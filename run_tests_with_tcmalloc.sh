@@ -12,19 +12,48 @@
 
 set -e
 
-# Find tcmalloc library
+# Find tcmalloc library (Linux and macOS support)
 TCMALLOC_LIB=""
-for lib in libtcmalloc.so.4 libtcmalloc.so libtcmalloc_minimal.so.4 libtcmalloc_minimal.so; do
-    LIB_PATH=$(ldconfig -p | grep "$lib" | awk '{print $NF}' | head -1)
-    if [ -n "$LIB_PATH" ] && [ -f "$LIB_PATH" ]; then
-        TCMALLOC_LIB="$LIB_PATH"
-        break
-    fi
-done
-
+OS_TYPE=$(uname)
+if [ "$OS_TYPE" = "Darwin" ]; then
+    # macOS: check Homebrew and common lib locations
+    for lib in libtcmalloc.dylib libtcmalloc_minimal.dylib; do
+        # Check /usr/local/lib (Intel Homebrew)
+        if [ -f "/usr/local/lib/$lib" ]; then
+            TCMALLOC_LIB="/usr/local/lib/$lib"
+            break
+        fi
+        # Check /opt/homebrew/lib (Apple Silicon Homebrew)
+        if [ -f "/opt/homebrew/lib/$lib" ]; then
+            TCMALLOC_LIB="/opt/homebrew/lib/$lib"
+            break
+        fi
+        # Check Homebrew prefix if available
+        if command -v brew &> /dev/null; then
+            BREW_PREFIX=$(brew --prefix)
+            if [ -f "$BREW_PREFIX/lib/$lib" ]; then
+                TCMALLOC_LIB="$BREW_PREFIX/lib/$lib"
+                break
+            fi
+        fi
+    done
+else
+    # Linux: use ldconfig
+    for lib in libtcmalloc.so.4 libtcmalloc.so libtcmalloc_minimal.so.4 libtcmalloc_minimal.so; do
+        LIB_PATH=$(ldconfig -p 2>/dev/null | grep "$lib" | awk '{print $NF}' | head -1)
+        if [ -n "$LIB_PATH" ] && [ -f "$LIB_PATH" ]; then
+            TCMALLOC_LIB="$LIB_PATH"
+            break
+        fi
+    done
+fi
 if [ -z "$TCMALLOC_LIB" ]; then
     echo "ERROR: tcmalloc library not found!"
-    echo "Please install: sudo apt-get install libtcmalloc-minimal4"
+    if [ "$OS_TYPE" = "Darwin" ]; then
+        echo "Please install: brew install tcmalloc"
+    else
+        echo "Please install: sudo apt-get install libtcmalloc-minimal4"
+    fi
     exit 1
 fi
 
