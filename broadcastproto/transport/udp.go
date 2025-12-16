@@ -72,7 +72,7 @@ func (u *udpProto) Open() (io.ReadCloser, error) {
 		 * specified group.  This causes problem when we have streams on different multicast groups
 		 * but same ports - in this case all sockets will ready packets from all groups on that port.
 		 */
-		conn, err := net.ListenUDP("udp", liveUrl.Group)
+		conn, err = net.ListenUDP("udp", liveUrl.Group)
 		if err != nil {
 			log.Error("SSDBG Open live listen failed", err)
 			return nil, err
