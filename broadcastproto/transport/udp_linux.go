@@ -4,7 +4,8 @@ package transport
 
 import (
 	"net"
-	"syscall"
+
+	"golang.org/x/sys/unix"
 )
 
 func setPlatformOptions(conn *net.UDPConn) error {
@@ -14,7 +15,7 @@ func setPlatformOptions(conn *net.UDPConn) error {
 	}
 	var sockErr error
 	raw.Control(func(fd uintptr) {
-		sockErr = syscall.SetsockoptInt(int(fd), syscall.IPPROTO_IP, syscall.IP_MULTICAST_ALL, 0)
+		sockErr = unix.SetsockoptInt(int(fd), unix.IPPROTO_IP, unix.IP_MULTICAST_ALL, 0)
 	})
 	return sockErr
 }
