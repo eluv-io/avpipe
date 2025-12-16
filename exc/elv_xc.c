@@ -70,9 +70,9 @@ static void *hdr10plus_reader_thread(void *arg)
 
     char line[65536];
     while (fgets(line, sizeof(line), f)) {
-        /* Check if line was too long (no newline and buffer full) */
+        /* Check if line was truncated (buffer full but no newline) */
         size_t len = strlen(line);
-        if (len > 0 && line[len-1] != '\n' && len == sizeof(line)-1) {
+        if (len == sizeof(line)-1 && line[len-1] != '\n') {
             fprintf(stderr, "hdr10plus_reader_thread: line too long, skipping (max %zu bytes)\n", sizeof(line)-1);
             /* Skip rest of line */
             int c;
@@ -1792,7 +1792,7 @@ main(
             if (pthread_create(&hdr_tid, NULL, hdr10plus_reader_thread, (void *)hdr10plus_file) == 0) {
                 pthread_detach(hdr_tid);
             } else {
-                fprintf(stderr, "Failed to start hdr10plus stdin reader thread\n");
+                elv_err("Failed to start hdr10plus stdin reader thread");
             }
         } else if (strncmp(hdr10plus_file, "fifo:", 5) == 0) {
             const char *fifo_path = hdr10plus_file + 5;
@@ -1800,13 +1800,13 @@ main(
             if (pthread_create(&hdr_tid, NULL, hdr10plus_reader_thread, (void *)fifo_path) == 0) {
                 pthread_detach(hdr_tid);
             } else {
-                fprintf(stderr, "Failed to start hdr10plus fifo reader thread for %s\n", fifo_path);
+                elv_err("Failed to start hdr10plus fifo reader thread for %s", fifo_path);
                 free((void *)hdr10plus_file);
             }
         } else {
             FILE *f = fopen(hdr10plus_file, "r");
             if (!f) {
-                fprintf(stderr, "Unable to open hdr10plus file %s\n", hdr10plus_file);
+                elv_err("Unable to open hdr10plus file %s", hdr10plus_file);
             } else {
                 char line[65536];
                 while (fgets(line, sizeof(line), f)) {
