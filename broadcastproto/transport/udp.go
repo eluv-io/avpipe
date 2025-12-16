@@ -9,6 +9,7 @@ import (
 	"strings"
 
 	elog "github.com/eluv-io/log-go"
+	"golang.org/x/net/ipv4"
 )
 
 const UDP_READ_BUFFER_SIZE = 10 * 1024 * 1024
@@ -61,8 +62,20 @@ func (u *udpProto) Open() (io.ReadCloser, error) {
 				return nil, err
 			}
 		}
-		conn, err = net.ListenMulticastUDP("udp", ifi, liveUrl.Group)
+
+		/*
+		 * Commonly ListenMulticastUDP() will bind to all interfaces and join the
+		 * specified group.  This causes problem when we have streams on different multicast groups
+		 * but same ports - in this case all sockets will ready packets from all groups on that port.
+		 */
+		conn, err := net.ListenUDP("udp", liveUrl.Group)
 		if err != nil {
+			return nil, err
+		}
+
+		p := ipv4.NewPacketConn(conn)
+		if err := p.JoinGroup(ifi, &net.UDPAddr{IP: liveUrl.Group.IP}); err != nil {
+			conn.Close()
 			return nil, err
 		}
 		log.Debug("Listening on UDP multicast", "group", liveUrl.Group, "localaddr", liveUrl.LocalAddr, "inteface", ifi)
