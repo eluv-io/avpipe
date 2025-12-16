@@ -53,15 +53,19 @@ func (u *udpProto) Open() (io.ReadCloser, error) {
 		return nil, err
 	}
 
+	log.Debug("SSDBG Open live URL", "group", liveUrl.Group, "localaddr", liveUrl.LocalAddr)
+
 	var conn *net.UDPConn
 	if liveUrl.Multicast {
-		var ifi *net.Interface
+		var iface *net.Interface
 		if liveUrl.LocalAddr != nil {
-			ifi, err = interfaceByIP(liveUrl.LocalAddr)
+			iface, err = interfaceByIP(liveUrl.LocalAddr)
 			if err != nil {
 				return nil, err
 			}
 		}
+
+		log.Debug("SSDBG Open live URL multicast", "group", liveUrl.Group, "localaddr", liveUrl.LocalAddr, "if", iface)
 
 		/*
 		 * Commonly ListenMulticastUDP() will bind to all interfaces and join the
@@ -70,15 +74,17 @@ func (u *udpProto) Open() (io.ReadCloser, error) {
 		 */
 		conn, err := net.ListenUDP("udp", liveUrl.Group)
 		if err != nil {
+			log.Error("SSDBG Open live listen failed", err)
 			return nil, err
 		}
 
 		p := ipv4.NewPacketConn(conn)
-		if err := p.JoinGroup(ifi, &net.UDPAddr{IP: liveUrl.Group.IP}); err != nil {
+		if err := p.JoinGroup(iface, &net.UDPAddr{IP: liveUrl.Group.IP}); err != nil {
 			conn.Close()
+			log.Error("SSDBG Open live join failed", err)
 			return nil, err
 		}
-		log.Debug("Listening on UDP multicast", "group", liveUrl.Group, "localaddr", liveUrl.LocalAddr, "inteface", ifi)
+		log.Debug("Listening on UDP multicast", "group", liveUrl.Group, "localaddr", liveUrl.LocalAddr, "inteface", iface)
 	} else {
 		bindAddr := liveUrl.Addr
 		if liveUrl.LocalAddr != nil {
