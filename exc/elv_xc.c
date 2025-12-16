@@ -1801,7 +1801,7 @@ main(
                 pthread_detach(hdr_tid);
             } else {
                 elv_err("Failed to start hdr10plus fifo reader thread for %s", fifo_path);
-                free((void *)hdr10plus_file);
+                free(hdr10plus_file);
                 hdr10plus_file = NULL;
             }
         } else {
@@ -1859,7 +1859,7 @@ main(
 
     /* Cleanup allocated hdr10plus_file string */
     if (hdr10plus_file) {
-        free((void *)hdr10plus_file);
+        free(hdr10plus_file);
     }
 
     return rc;
