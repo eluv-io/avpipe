@@ -134,6 +134,9 @@ func ParseLiveUrl(urlStr string) (*LiveUrl, error) {
 	if err != nil {
 		return nil, fmt.Errorf("invalid host:port in URL (%s): %w", u.Host, err)
 	}
+	if strings.HasPrefix(host, "@") {
+		return nil, fmt.Errorf("invalid host '%s': '@' prefix is not supported", host)
+	}
 	out.Host = host
 
 	port, err := strconv.Atoi(portStr)

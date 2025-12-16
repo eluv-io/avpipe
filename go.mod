@@ -14,6 +14,7 @@ require (
 	github.com/spf13/cobra v1.8.1
 	github.com/stretchr/testify v1.11.1
 	go.uber.org/atomic v1.11.0
+	golang.org/x/net v0.21.0
 )
 
 require (
