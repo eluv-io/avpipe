@@ -25,14 +25,6 @@
 
 //#define DEBUG_UDP_PACKET  // Uncomment for development, debugging and testing
 
-/* Borrowed from libavcodec/nvenc.h since it is not exposed */
-enum {
-    NV_ENC_H264_PROFILE_BASELINE,
-    NV_ENC_H264_PROFILE_MAIN,
-    NV_ENC_H264_PROFILE_HIGH,
-    NV_ENC_H264_PROFILE_HIGH_444P,
-};
-
 /*
  * Adding/deleting an error code needs adding/deleting corresponding GO
  * error in avpipe_errors.go
@@ -886,29 +878,6 @@ avpipe_h264_guess_profile(
  */
 int
 avpipe_h264_profile(
-    char *profile_name);
-
-
-/**
- * @brief   Helper function to obtain FFmpeg constant for an h265 profile name. 
- * 
- * @param   profile_name  A pointer to the profile name.
- * @return  Returns the FFmpeg constant if profile name is valid.
- *          Returns 0 if profile name is NULL. For invalid profile name return -1.
- */
-int
-avpipe_h265_profile(
-    char *profile_name);
-
-/**
- * @brief   Helper function to obtain FFmpeg constant for an nvidia h264 profile name. 
- * 
- * @param   profile_name  A pointer to the profile name.
- * @return  Returns the FFmpeg constant if profile name is valid.
- *          Returns 0 if profile name is NULL. For invalid profile name return -1.
- */
-int
-avpipe_nvh264_profile(
     char *profile_name);
 
 /**
