@@ -67,14 +67,18 @@ func (u *udpProto) Open() (io.ReadCloser, error) {
 
 		log.Debug("SSDBG Open live URL multicast", "group", liveUrl.Group, "localaddr", liveUrl.LocalAddr, "if", iface)
 
-		/*
-		 * Commonly ListenMulticastUDP() will bind to all interfaces and join the
-		 * specified group.  This causes problem when we have streams on different multicast groups
-		 * but same ports - in this case all sockets will ready packets from all groups on that port.
-		 */
+		// Commonly ListenMulticastUDP() will bind to all interfaces and join the
+		// specified group.  This causes problem when we have streams on different multicast groups
+		// but same ports - in this case all sockets will ready packets from all groups on that port.
 		conn, err = net.ListenUDP("udp", liveUrl.Group)
 		if err != nil {
 			log.Error("SSDBG Open live listen failed", err)
+			return nil, err
+		}
+
+		err = setPlatformOptions(conn)
+		if err != nil {
+			log.Error("SSDBG Open live fail to set platform options", err)
 			return nil, err
 		}
 
