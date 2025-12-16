@@ -79,7 +79,7 @@ static void *hdr10plus_reader_thread(void *arg)
             while ((c = fgetc(f)) != EOF && c != '\n');
             continue;
         }
-        
+
         char *sp = strchr(line, ' ');
         if (!sp) continue;
         *sp = '\0';
