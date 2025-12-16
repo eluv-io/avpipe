@@ -25,6 +25,10 @@
 #include "avpipe_version.h"
 #include "base64.h"
 #include "scte35.h"
+#include "hdr10plus_json.h"
+
+/* HDR10+ hook: declare external getter implemented in avpipe.c to retrieve JSON by PTS */
+extern char *avpipe_get_hdr10plus(int64_t pts);
 
 #include <stdio.h>
 #include <fcntl.h>
@@ -141,7 +145,7 @@ selected_audio_index(
 
 static int
 decode_interrupt_cb(
-    void *ctx) 
+    void *ctx)
 {
     coderctx_t *decoder_ctx = (coderctx_t *)ctx;
     if (decoder_ctx->cancelled)
@@ -443,7 +447,7 @@ prepare_decoder(
          * Find decoder and initialize decoder context.
          * Pick params->dcodec if this is the selected stream (stream_id or audio_index)
          */
-        if (params != NULL && params->dcodec != NULL && params->dcodec[0] != '\0' && 
+        if (params != NULL && params->dcodec != NULL && params->dcodec[0] != '\0' &&
             decoder_context->format_context->streams[i]->codecpar->codec_type == AVMEDIA_TYPE_VIDEO) {
             elv_log("STREAM SELECTED this_stream_id=%d, id=%d idx=%d xc_type=%d dcodec=%s, url=%s",
                 this_stream_id, decoder_context->stream[i]->id, i, params->xc_type, params->dcodec, url);
@@ -689,7 +693,7 @@ set_encoder_options(
             elv_dbg("setting \"fmp4-segment\" audio segment_time to %s, seg_duration_ts=%"PRId64", url=%s",
                 params->seg_duration, seg_duration_ts, params->url);
             av_opt_set(encoder_context->format_context2[i]->priv_data, "reset_timestamps", "on", 0);
-        } 
+        }
         if (stream_index == decoder_context->video_stream_index) {
             if (params->video_seg_duration_ts > 0)
                 seg_duration_ts = params->video_seg_duration_ts;
@@ -1296,7 +1300,7 @@ prepare_audio_encoder(
         encoder_context->stream[output_stream_index]->time_base = encoder_context->codec_context[output_stream_index]->time_base;
 
         // TODO: sample_fmts is deprecated; use avcodec_get_supported_config()
-        if (decoder_context->codec[stream_index] && 
+        if (decoder_context->codec[stream_index] &&
             decoder_context->codec[stream_index]->sample_fmts && params->bypass_transcoding)
             encoder_context->codec_context[output_stream_index]->sample_fmt = decoder_context->codec[stream_index]->sample_fmts[0];
         else if (encoder_context->codec[output_stream_index]->sample_fmts && encoder_context->codec[output_stream_index]->sample_fmts[0])
@@ -1987,6 +1991,38 @@ encode_frame(
 
         dump_frame(selected_decoded_audio(decoder_context, stream_index) >= 0, stream_index,
             "TOENC ", codec_context->frame_num, frame, debug_frame_level);
+    }
+
+    /* If there is HDR10+ JSON available for this frame PTS, convert and attach it. */
+    if (frame && frame->pts != AV_NOPTS_VALUE) {
+        static int frame_count = 0;
+        if (frame_count++ < 10) {
+            fprintf(stderr, "[HDR10+ DEBUG] Frame PTS=%"PRId64" checking for metadata\n", frame->pts);
+        }
+
+        char *hdrjson = avpipe_get_hdr10plus(frame->pts);
+        if (hdrjson) {
+            fprintf(stderr, "[HDR10+ DEBUG] Found metadata for PTS=%"PRId64"\n", frame->pts);
+
+            /* Convert JSON to binary T.35 SEI payload */
+            AVDynamicHDRPlus *hdr_meta = NULL;
+            AVBufferRef *hdr_buf = NULL;
+
+            if (avpipe_hdr10plus_json_to_metadata(hdrjson, &hdr_meta, &hdr_buf) == 0 && hdr_buf) {
+                /* Attach binary SEI payload as frame side data */
+                AVFrameSideData *sd = av_frame_new_side_data_from_buf(frame, AV_FRAME_DATA_DYNAMIC_HDR_PLUS, hdr_buf);
+                if (sd) {
+                    fprintf(stderr, "[HDR10+ DEBUG] Attached to frame PTS=%"PRId64" size=%zu\n", frame->pts, hdr_buf->size);
+                } else {
+                    fprintf(stderr, "[HDR10+ ERROR] Failed to attach side data for PTS=%"PRId64"\n", frame->pts);
+                    av_buffer_unref(&hdr_buf);
+                }
+                av_free(hdr_meta);
+            } else {
+                fprintf(stderr, "[HDR10+ ERROR] Failed to convert JSON to binary for PTS=%"PRId64"\n", frame->pts);
+            }
+            free(hdrjson);
+        }
     }
 
     // Send the frame to the encoder
@@ -3806,7 +3842,7 @@ xc_done:
         strncat(audio_last_pts_sent_encode_buf, buf, (MAX_STREAMS + 1) * 20 - strlen(audio_last_pts_sent_encode_buf));
         sprintf(buf, "%"PRId64, encoder_context->audio_last_pts_encoded[audio_index]);
         strncat(audio_last_pts_encoded_buf, buf, (MAX_STREAMS + 1) * 20 - strlen(audio_last_pts_encoded_buf));
-    } 
+    }
 
     elv_log("avpipe_xc done url=%s, rc=%d, xctx->err=%d, xc-type=%d, "
         "last video_pts=%"PRId64" audio_pts=%"PRId64

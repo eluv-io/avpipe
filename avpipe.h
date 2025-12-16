@@ -118,3 +118,26 @@ probe(
  */
 void
 set_loggers();
+
+/*
+ * HDR10+ dynamic metadata API (simple global store keyed by frame PTS).
+ * These helpers allow external producers to push JSON metadata for a frame
+ * which the encoder pipeline can retrieve when processing that PTS.
+ *
+ * - `avpipe_set_hdr10plus`: copy JSON into internal store for given PTS.
+ * - `avpipe_get_hdr10plus`: retrieve and remove JSON for given PTS; caller must free.
+ */
+int
+avpipe_set_hdr10plus(
+    int64_t pts,
+    const char *json,
+    int json_len);
+
+char *
+avpipe_get_hdr10plus(
+    int64_t pts);
+
+/* Configuration helpers for HDR10+ store */
+int avpipe_hdr10plus_set_tolerance(int64_t tolerance_pts);
+int avpipe_hdr10plus_set_ttl(int ttl_seconds);
+int avpipe_hdr10plus_set_capacity(int max_entries);

@@ -87,6 +87,9 @@ typedef struct xc_entry_t {
 xc_entry_t          *xc_table[MAX_TX];
 static pthread_mutex_t tx_mutex = PTHREAD_MUTEX_INITIALIZER;
 
+/* HDR10+ store: implementation moved to libavpipe/src/hdr10plus.c so the
+ * symbol is available when building libavpipe. */
+
 static int
 in_stat(
     void *opaque,
