@@ -139,12 +139,7 @@ get_audio_avfilter_args(
     AVCodecContext *dec_codec_ctx = decoder_context->codec_context[index];
 
     if (dec_codec_ctx->ch_layout.u.mask == 0) {
-        int ch_ret = av_channel_layout_default(&dec_codec_ctx->ch_layout, dec_codec_ctx->ch_layout.nb_channels);
-        if (ch_ret < 0) {
-            elv_err("av_channel_layout_default failed: %s", av_err2str(ch_ret));
-            args[0] = '\0';
-            return;
-        }
+        av_channel_layout_default(&dec_codec_ctx->ch_layout, dec_codec_ctx->ch_layout.nb_channels);
     }
 
     // Use the timebase of the audio encoder
