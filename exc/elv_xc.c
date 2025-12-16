@@ -1802,6 +1802,7 @@ main(
             } else {
                 elv_err("Failed to start hdr10plus fifo reader thread for %s", fifo_path);
                 free((void *)hdr10plus_file);
+                hdr10plus_file = NULL;
             }
         } else {
             FILE *f = fopen(hdr10plus_file, "r");

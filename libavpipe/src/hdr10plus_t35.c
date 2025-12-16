@@ -121,5 +121,7 @@ int avpipe_hdr10plus_manual_t35_encode(
 overflow:
     elv_err("HDR10+ T.35: buffer overflow at pos=%zu", pos);
     free(buf);
+    *out_data = NULL;
+    *out_size = 0;
     return -1;
 }
