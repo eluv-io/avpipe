@@ -63,6 +63,11 @@ static void *hdr10plus_reader_thread(void *arg)
         }
     }
 
+    if (!f) {
+        fprintf(stderr, "hdr10plus_reader_thread: input stream is NULL\n");
+        return NULL;
+    }
+
     char line[65536];
     while (fgets(line, sizeof(line), f)) {
         char *sp = strchr(line, ' ');
@@ -1316,12 +1321,13 @@ main(
                 if (sscanf(argv[i+1], "%d", &p.connection_timeout) != 1) {
                     usage(argv[0], argv[i], EXIT_FAILURE);
                 }
-            } else if (!strcmp(argv[i], "-channel-layout")) {              
+            } else if (!strcmp(argv[i], "-channel-layout")) {
                 rc = av_channel_layout_from_string(&channel_layout, argv[i+1]);
                 if (rc < 0) {
                     usage(argv[0], argv[i], EXIT_FAILURE);
                 } else {
                     p.channel_layout = channel_layout.u.mask;
+                    av_channel_layout_uninit(&channel_layout);
                 }
             } else if (strcmp(argv[i], "-crypt-iv") == 0) {
                 p.crypt_iv = strdup(argv[i+1]);
@@ -1674,9 +1680,6 @@ main(
         default:
             usage(argv[0], argv[i], EXIT_FAILURE);
         }
-        if (argv[i][1] == 'h' && !strcmp(argv[i], "-hdr10plus-file")) {
-            /* already handled above by explicit -h check - skip */
-        }
         i += 2;
     }
 
@@ -1788,6 +1791,7 @@ main(
                 pthread_detach(hdr_tid);
             } else {
                 fprintf(stderr, "Failed to start hdr10plus fifo reader thread for %s\n", fifo_path);
+                free((void *)hdr10plus_file);
             }
         } else {
             FILE *f = fopen(hdr10plus_file, "r");

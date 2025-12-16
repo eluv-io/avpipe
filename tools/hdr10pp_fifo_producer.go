@@ -20,7 +20,11 @@ func main() {
 		fmt.Fprintf(os.Stderr, "unable to open fifo %s: %v\n", *fifo, err)
 		os.Exit(1)
 	}
-	defer f.Close()
+	defer func() {
+		if err := f.Close(); err != nil {
+			fmt.Fprintf(os.Stderr, "error closing fifo: %v\n", err)
+		}
+	}()
 
 	for i := 0; i < *count; i++ {
 		pts := *start + int64(i)*(*step)

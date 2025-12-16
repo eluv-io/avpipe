@@ -179,6 +179,7 @@ avpipe_get_hdr10plus(
             if (cur->next) cur->next->prev = cur->prev;
             else hdr_lru_tail = cur->prev;
             free(cur->json);
+            hdr_unlink_from_bucket(cur);
             free(cur);
             hdr10plus_count--;
         }
@@ -266,6 +267,7 @@ int avpipe_hdr10plus_set_capacity(int max_entries) {
         hdr_lru_tail = old->prev;
         if (!hdr_lru_tail) hdr_lru_head = NULL;
         free(old->json);
+        hdr_unlink_from_bucket(old);
         free(old);
         hdr10plus_count--;
     }

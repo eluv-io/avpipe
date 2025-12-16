@@ -64,7 +64,7 @@ printf "12345 {\"PayloadVersion\":1,\"Notes\":\"test\"}\n" > /tmp/hdr10p.fifo
 Notes & tips
 
 - Ensure PTS units match the encoder/avpipe timebase. If you send mismatched units, the configured `-hdr10plus-tolerance` may be required to match entries.
-- Entries are consumed once (one-shot) when the encoder reads them.
+- Entries are consumed once (one-shot) when the encoder reads them; the metadata is removed from the store after retrieval (destructive read).
 - Tune `-hdr10plus-ttl` and `-hdr10plus-capacity` to bound memory usage for large or bursty metadata.
 
 Go API alternative

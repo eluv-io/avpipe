@@ -987,6 +987,7 @@ func ChannelLayout(name string) (mask int) {
 	} else {
 		mask = int(C.get_channel_layout_mask(&channelLayout))
 	}
+	C.av_channel_layout_uninit(&channelLayout)
 	return
 }
 

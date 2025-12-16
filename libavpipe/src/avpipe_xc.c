@@ -1360,7 +1360,11 @@ prepare_audio_encoder(
             !strcmp(ecodec, "aac") &&
             !params->channel_layout) {
             /* This encoder is prepared specifically for AAC, therefore set the channel layout to AV_CH_LAYOUT_STEREO */
-            av_channel_layout_copy(&enc_codec_ctx->ch_layout, &(AVChannelLayout)AV_CHANNEL_LAYOUT_STEREO);
+            rc = av_channel_layout_copy(&enc_codec_ctx->ch_layout, &(AVChannelLayout)AV_CHANNEL_LAYOUT_STEREO);
+            if (rc < 0) {
+                elv_err("av_channel_layout_copy failed, rc=%d, url=%s", rc, params->url);
+                return eav_param;
+            }
         }
 
         int sample_rate = params->sample_rate;
@@ -2026,8 +2030,16 @@ encode_frame(
 
     /* If there is HDR10+ JSON available for this frame PTS, convert and attach it. */
     if (frame && frame->pts != AV_NOPTS_VALUE) {
+        static pthread_mutex_t frame_count_mutex = PTHREAD_MUTEX_INITIALIZER;
         static int frame_count = 0;
-        if (frame_count++ < 10) {
+        int print_debug = 0;
+        pthread_mutex_lock(&frame_count_mutex);
+        if (frame_count < 10) {
+            print_debug = 1;
+            frame_count++;
+        }
+        pthread_mutex_unlock(&frame_count_mutex);
+        if (print_debug) {
             fprintf(stderr, "[HDR10+ DEBUG] Frame PTS=%"PRId64" checking for metadata\n", frame->pts);
         }
 

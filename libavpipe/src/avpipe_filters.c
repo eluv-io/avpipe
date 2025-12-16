@@ -139,7 +139,12 @@ get_audio_avfilter_args(
     AVCodecContext *dec_codec_ctx = decoder_context->codec_context[index];
 
     if (dec_codec_ctx->ch_layout.u.mask == 0) {
-        av_channel_layout_default(&dec_codec_ctx->ch_layout, dec_codec_ctx->ch_layout.nb_channels);
+        int ch_ret = av_channel_layout_default(&dec_codec_ctx->ch_layout, dec_codec_ctx->ch_layout.nb_channels);
+        if (ch_ret < 0) {
+            elv_err("av_channel_layout_default failed: %s", av_err2str(ch_ret));
+            args[0] = '\0';
+            return;
+        }
     }
 
     // Use the timebase of the audio encoder
@@ -240,7 +245,11 @@ init_audio_filters(
             goto end;
         }
 
-        av_channel_layout_describe(&enc_codec_ctx->ch_layout, buf, sizeof(buf));
+        ret = av_channel_layout_describe(&enc_codec_ctx->ch_layout, buf, sizeof(buf));
+        if (ret < 0) {
+            elv_err("init_audio_filters, cannot describe output channel layout");
+            goto end;
+        }
         ret = av_opt_set(buffersink_ctx, "ch_layouts", buf, AV_OPT_SEARCH_CHILDREN);
         if (ret < 0) {
             elv_err("init_audio_filters, cannot set output channel layout");
