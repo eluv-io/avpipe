@@ -2040,12 +2040,12 @@ encode_frame(
         }
         pthread_mutex_unlock(&frame_count_mutex);
         if (print_debug) {
-            fprintf(stderr, "[HDR10+ DEBUG] Frame PTS=%"PRId64" checking for metadata\n", frame->pts);
+            elv_dbg("[HDR10+] Frame PTS=%"PRId64" checking for metadata", frame->pts);
         }
 
         char *hdrjson = avpipe_get_hdr10plus(frame->pts);
         if (hdrjson) {
-            fprintf(stderr, "[HDR10+ DEBUG] Found metadata for PTS=%"PRId64"\n", frame->pts);
+            elv_dbg("[HDR10+] Found metadata for PTS=%"PRId64"", frame->pts);
 
             /* Convert JSON to binary T.35 SEI payload */
             AVDynamicHDRPlus *hdr_meta = NULL;
@@ -2055,14 +2055,14 @@ encode_frame(
                 /* Attach binary SEI payload as frame side data */
                 AVFrameSideData *sd = av_frame_new_side_data_from_buf(frame, AV_FRAME_DATA_DYNAMIC_HDR_PLUS, hdr_buf);
                 if (sd) {
-                    fprintf(stderr, "[HDR10+ DEBUG] Attached to frame PTS=%"PRId64" size=%zu\n", frame->pts, hdr_buf->size);
+                    elv_dbg("[HDR10+] Attached to frame PTS=%"PRId64" size=%zu", frame->pts, hdr_buf->size);
                 } else {
-                    fprintf(stderr, "[HDR10+ ERROR] Failed to attach side data for PTS=%"PRId64"\n", frame->pts);
+                    elv_err("[HDR10+] Failed to attach side data for PTS=%"PRId64"", frame->pts);
                     av_buffer_unref(&hdr_buf);
                 }
                 av_free(hdr_meta);
             } else {
-                fprintf(stderr, "[HDR10+ ERROR] Failed to convert JSON to binary for PTS=%"PRId64"\n", frame->pts);
+                elv_err("[HDR10+] Failed to convert JSON to binary for PTS=%"PRId64"", frame->pts);
             }
             free(hdrjson);
         }

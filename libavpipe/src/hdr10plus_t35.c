@@ -39,8 +39,11 @@ int avpipe_hdr10plus_manual_t35_encode(
         return -1;
     }
 
-    /* Allocate buffer (generous size for all fields) */
-    size_t buf_size = 256;
+    /* Allocate buffer with enough space for maximum possible payload
+     * Header: 8 bytes + window params + 15 distribution pairs max
+     * Each distribution pair: ~3 bytes, total ~100 bytes max, use 512 for safety
+     */
+    size_t buf_size = 512;
     uint8_t *buf = malloc(buf_size);
     if (!buf) {
         elv_err("HDR10+ T.35: malloc failed");
@@ -64,6 +67,7 @@ int avpipe_hdr10plus_manual_t35_encode(
     /* Window 0 parameters (full frame) */
     /* Targeted system display maximum luminance (17 bits: 0-10000 * 10) */
     uint32_t tsdml_val = tsdml * 10;  /* Convert nits to 0.1 nit units */
+    if (pos + 3 > buf_size) goto overflow;
     buf[pos++] = (tsdml_val >> 9) & 0xFF;
     buf[pos++] = (tsdml_val >> 1) & 0xFF;
     buf[pos] = (tsdml_val & 0x01) << 7;
@@ -72,6 +76,7 @@ int avpipe_hdr10plus_manual_t35_encode(
     for (int i = 0; i < 3; i++) {
         uint32_t maxscl_val = (i == 0) ? maxscl_r : (i == 1) ? maxscl_g : maxscl_b;
         /* Write 17 bits across bytes */
+        if (pos + 3 > buf_size) goto overflow;
         buf[pos] |= (maxscl_val >> 10) & 0x7F;
         pos++;
         buf[pos++] = (maxscl_val >> 2) & 0xFF;
@@ -80,6 +85,7 @@ int avpipe_hdr10plus_manual_t35_encode(
 
     /* average_maxrgb (17 bits) */
     uint32_t avg_val = avg_rgb;
+    if (pos + 3 > buf_size) goto overflow;
     buf[pos] |= (avg_val >> 11) & 0x3F;
     pos++;
     buf[pos++] = (avg_val >> 3) & 0xFF;
@@ -91,6 +97,7 @@ int avpipe_hdr10plus_manual_t35_encode(
     /* distribution_maxrgb (array of percentile + value pairs) */
     for (int i = 0; i < dist_count && i < 15; i++) {
         /* percentage (7 bits) */
+        if (pos + 4 > buf_size) goto overflow;
         buf[pos] |= (dist_percentages[i] >> 6) & 0x01;
         pos++;
         buf[pos] = (dist_percentages[i] & 0x3F) << 2;
@@ -110,4 +117,9 @@ int avpipe_hdr10plus_manual_t35_encode(
 
     elv_log("HDR10+ manual T.35 encode: %zu bytes", pos);
     return 0;
+
+overflow:
+    elv_err("HDR10+ T.35: buffer overflow at pos=%zu", pos);
+    free(buf);
+    return -1;
 }

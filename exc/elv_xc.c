@@ -70,6 +70,16 @@ static void *hdr10plus_reader_thread(void *arg)
 
     char line[65536];
     while (fgets(line, sizeof(line), f)) {
+        /* Check if line was too long (no newline and buffer full) */
+        size_t len = strlen(line);
+        if (len > 0 && line[len-1] != '\n' && len == sizeof(line)-1) {
+            fprintf(stderr, "hdr10plus_reader_thread: line too long, skipping (max %zu bytes)\n", sizeof(line)-1);
+            /* Skip rest of line */
+            int c;
+            while ((c = fgetc(f)) != EOF && c != '\n');
+            continue;
+        }
+        
         char *sp = strchr(line, ' ');
         if (!sp) continue;
         *sp = '\0';
@@ -1845,6 +1855,11 @@ main(
     }
 
     free(tids);
+
+    /* Cleanup allocated hdr10plus_file string */
+    if (hdr10plus_file) {
+        free((void *)hdr10plus_file);
+    }
 
     return rc;
 }
