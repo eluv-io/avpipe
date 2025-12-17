@@ -39,6 +39,35 @@ int avpipe_hdr10plus_manual_t35_encode(
         return -1;
     }
 
+    /* Basic input validation to avoid invalid bit packing and array access */
+    if (num_windows < 1 || num_windows > 3) {
+        elv_err("HDR10+ T.35: invalid num_windows=%d (expected 1-3)", num_windows);
+        *out_data = NULL;
+        *out_size = 0;
+        return -1;
+    }
+    if (tsdml < 0 || maxscl_r < 0 || maxscl_g < 0 || maxscl_b < 0 || avg_rgb < 0) {
+        elv_err("HDR10+ T.35: negative luminance value detected "
+                "(tsdml=%d, maxscl_r=%d, maxscl_g=%d, maxscl_b=%d, avg_rgb=%d)",
+                tsdml, maxscl_r, maxscl_g, maxscl_b, avg_rgb);
+        *out_data = NULL;
+        *out_size = 0;
+        return -1;
+    }
+    if (dist_count < 0 || dist_count > 15) {
+        elv_err("HDR10+ T.35: invalid dist_count=%d (expected 0-15)", dist_count);
+        *out_data = NULL;
+        *out_size = 0;
+        return -1;
+    }
+    if (dist_count > 0 && (!dist_percentages || !dist_values)) {
+        elv_err("HDR10+ T.35: dist_percentages/dist_values must not be NULL when dist_count=%d",
+                dist_count);
+        *out_data = NULL;
+        *out_size = 0;
+        return -1;
+    }
+
     /* Allocate buffer with enough space for maximum possible payload
      * Header: 8 bytes + window params + 15 distribution pairs max
      * Each distribution pair: ~3 bytes, total ~100 bytes max, use 512 for safety

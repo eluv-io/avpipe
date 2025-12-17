@@ -92,6 +92,10 @@ static void *hdr10plus_reader_thread(void *arg)
     }
 
     if (f && f != stdin) fclose(f);
+
+    /* Free the duplicated path string that was passed to this thread */
+    if (path) free((void *)path);
+
     return NULL;
 }
 
@@ -285,7 +289,7 @@ in_read_packet(
 #ifdef DEBUG_UDP_PACKET
             elv_dbg("IN READ UDP partial read=%d pos=%"PRId64" total=%"PRId64, r, c->read_pos, c->read_bytes);
 #endif
-            return r;        
+            return r;
         }
 
 read_channel_again:
@@ -624,7 +628,7 @@ out_write_packet(
         }
     }
 
-    if ((outctx->type == avpipe_video_fmp4_segment && 
+    if ((outctx->type == avpipe_video_fmp4_segment &&
         outctx->written_bytes - outctx->write_reported > VIDEO_BYTES_WRITE_REPORT) ||
         (outctx->type == avpipe_audio_fmp4_segment &&
         outctx->written_bytes - outctx->write_reported > AUDIO_BYTES_WRITE_REPORT)) {
@@ -1307,7 +1311,7 @@ main(
                 } else {
                     p.bypass_transcoding = bypass_transcoding;
                 }
-            } else if (!strcmp(argv[i], "-bitdepth")) { 
+            } else if (!strcmp(argv[i], "-bitdepth")) {
                 if (sscanf(argv[i+1], "%d", &p.bitdepth) != 1) {
                     usage(argv[0], argv[i], EXIT_FAILURE);
                 }
@@ -1789,18 +1793,26 @@ main(
     if (hdr10plus_file) {
         if (strcmp(hdr10plus_file, "-") == 0) {
             pthread_t hdr_tid;
-            if (pthread_create(&hdr_tid, NULL, hdr10plus_reader_thread, (void *)hdr10plus_file) == 0) {
+            char *path_copy = strdup(hdr10plus_file);
+            if (!path_copy) {
+                elv_err("Failed to allocate memory for hdr10plus path");
+            } else if (pthread_create(&hdr_tid, NULL, hdr10plus_reader_thread, (void *)path_copy) == 0) {
                 pthread_detach(hdr_tid);
             } else {
                 elv_err("Failed to start hdr10plus stdin reader thread");
+                free(path_copy);
             }
         } else if (strncmp(hdr10plus_file, "fifo:", 5) == 0) {
             const char *fifo_path = hdr10plus_file + 5;
             pthread_t hdr_tid;
-            if (pthread_create(&hdr_tid, NULL, hdr10plus_reader_thread, (void *)fifo_path) == 0) {
+            char *path_copy = strdup(fifo_path);
+            if (!path_copy) {
+                elv_err("Failed to allocate memory for hdr10plus fifo path");
+            } else if (pthread_create(&hdr_tid, NULL, hdr10plus_reader_thread, (void *)path_copy) == 0) {
                 pthread_detach(hdr_tid);
             } else {
                 elv_err("Failed to start hdr10plus fifo reader thread for %s", fifo_path);
+                free(path_copy);
                 free(hdr10plus_file);
                 hdr10plus_file = NULL;
             }
