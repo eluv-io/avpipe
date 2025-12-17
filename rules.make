@@ -7,6 +7,16 @@ BINDIR=bin
 LIBDIR=lib
 INCDIR=include
 
+# Debug build support
+DEBUG ?= 0
+ifeq ($(DEBUG), 1)
+	CFLAGS_DEBUG := -g -O0 -DDEBUG
+	LDFLAGS_DEBUG := -g
+else
+	CFLAGS_DEBUG :=
+	LDFLAGS_DEBUG :=
+endif
+
 OSNAME := $(shell uname -s)
 LDFLAGS := \
 		-lavpipe \

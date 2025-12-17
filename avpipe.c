@@ -653,7 +653,7 @@ out_write_packet(
         outctx->write_pos += bwritten;
     }
 
-    if ((outctx->type == avpipe_video_fmp4_segment && 
+    if ((outctx->type == avpipe_video_fmp4_segment &&
         outctx->written_bytes - outctx->write_reported > VIDEO_BYTES_WRITE_REPORT) ||
         (outctx->type == avpipe_audio_fmp4_segment &&
         outctx->written_bytes - outctx->write_reported > AUDIO_BYTES_WRITE_REPORT)) {
@@ -875,7 +875,7 @@ xc_table_cancel(
                     /* Close and purge the channel */
                     elv_channel_close(xctx->inctx->udp_channel, 1);
                     pthread_join(xctx->inctx->utid, NULL);
-                } 
+                }
             } else {
                 elv_err("xc_table_cancel index=%d doesn't match with handle=%d at %d",
                     xc_table[i]->xctx->index, handle, i);
@@ -1024,7 +1024,7 @@ end_tx:
 int
 xc_cancel(
     int32_t handle)
-{ 
+{
     return xc_table_cancel(handle);
 }
 
@@ -1150,7 +1150,7 @@ read_next_input:
         fd = *((int64_t *)(c->opaque));
 
 #if 0
-        /* PENDING(RM) complete this for multiple mez inputs */ 
+        /* PENDING(RM) complete this for multiple mez inputs */
         if (new_video)
             in_mux_ctx->video.header_size = read_header(fd, in_mux_ctx->mux_type);
         else if (new_audio)

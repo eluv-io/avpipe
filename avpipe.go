@@ -30,6 +30,7 @@ package avpipe
 // #cgo CFLAGS: -I${SRCDIR}/utils/include
 // #cgo LDFLAGS: -L${SRCDIR}
 // #cgo linux LDFLAGS: -Wl,-rpath,$ORIGIN/../lib
+// #cgo LDFLAGS: -ltcmalloc
 
 /*
 #include <string.h>

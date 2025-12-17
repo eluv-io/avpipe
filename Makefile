@@ -31,6 +31,18 @@ avpipe:
 	go build -v
 	mkdir -p ./O
 
+avpipe-debug: debug-libs
+	@echo "Building avpipe with debug symbols..."
+	go build -v -gcflags="all=-N -l" -o avpipe.debug
+	mkdir -p ./O
+
+debug-libs:
+	@echo "Building C libraries with debug symbols..."
+	$(MAKE) -C utils DEBUG=1
+	$(MAKE) -C libavpipe DEBUG=1
+	$(MAKE) -C exc DEBUG=1
+	$(MAKE) -C elvxc DEBUG=1
+
 libavpipego: $(OBJS)
 	@(if [ ! -d $(LIBDIR) ]; then mkdir $(LIBDIR); fi)
 	@echo Making libavpipe_handler
@@ -54,3 +66,9 @@ endif
 
 test:
 	@./run_tests.sh
+
+test-tcmalloc:
+	@./run_tests_with_tcmalloc.sh
+
+test-tcmalloc-strict:
+	@HEAPCHECK=strict ./run_tests_with_tcmalloc.sh
