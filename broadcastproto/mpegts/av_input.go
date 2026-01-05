@@ -31,7 +31,32 @@ type SequentialOpenerFactory func(inFd int64) SequentialOpener
 
 // NewAutoInputOpener creates an InputOpener that automatically selects the transport based on the
 // URL scheme.
-func NewAutoInputOpener(url string, cfg *goavpipe.InputConfig, seqOpener SequentialOpenerFactory) (goavpipe.InputOpener, error) {
+func NewAutoInputOpener(cfg *goavpipe.XcParams, seqOpener SequentialOpenerFactory) (goavpipe.InputOpener, error) {
+	tp, err := createTransport(cfg.Url, &cfg.InputCfg)
+	if err != nil {
+		return nil, err
+	}
+
+	// ensure defaults are set
+	cfg.InputCfg.Processor = cfg.InputCfg.Processor.ApplyDefaults()
+
+	if cfg.InputCfg.CustomReadLoopEnabled {
+		return &customInputOpener{
+			transport: tp,
+			seqOpener: seqOpener,
+			cfg:       cfg,
+		}, nil
+	}
+
+	return &mpegtsInputOpener{
+		transport: tp,
+		seqOpener: seqOpener,
+		cfg:       &cfg.InputCfg,
+	}, nil
+}
+
+// createTransport creates an input transport instance based on the URL and input configuration.
+func createTransport(url string, cfg *goavpipe.InputConfig) (transport.Transport, error) {
 	var tp transport.Transport
 
 	scheme := strings.SplitN(url, "://", 2)[0]
@@ -54,12 +79,7 @@ func NewAutoInputOpener(url string, cfg *goavpipe.InputConfig, seqOpener Sequent
 	if tp == nil {
 		return nil, fmt.Errorf("unsupported transport protocol: %s", url)
 	}
-
-	return &mpegtsInputOpener{
-		transport: tp,
-		seqOpener: seqOpener,
-		cfg:       cfg,
-	}, nil
+	return tp, nil
 }
 
 type mpegtsInputOpener struct {
@@ -138,6 +158,7 @@ type mpegtsInputHandler struct {
 	gih goavpipe.InputHandler
 }
 
+// Read is called from ffmpeg. It should read from an internal channel that is fed by our own read loop.
 func (mih *mpegtsInputHandler) Read(buf []byte) (int, error) {
 	if len(buf) < 7*188 {
 		mpegtslog.Warn("buffer size smaller than 7 TS packets", "size", len(buf))

@@ -142,16 +142,6 @@ func NewTSStats() *TSStats {
 	}
 }
 
-func (mpp *MpegtsPacketProcessor) ProcessPackets(packets []byte) {
-	for offset := 0; offset+188 <= len(packets); offset += 188 {
-		p := toTSPacket(packets[offset : offset+188])
-		mpp.HandleMpegtsPacket(p)
-	}
-	if len(packets)%188 != 0 {
-		mpp.stats.ErrorsIncompletePackets.Inc()
-	}
-}
-
 func (mpp *MpegtsPacketProcessor) ProcessDatagram(datagram []byte) {
 	mpegtsOffset := 0
 	if mpp.cfg.Packaging == transport.RtpTs {
@@ -225,7 +215,7 @@ func (mpp *MpegtsPacketProcessor) HandleMpegtsPacket(pkt packet.Packet) error {
 	return nil
 }
 
-// Kick off a job that periodically logs the stats of this job
+// StartReportingStats kicks off a job that periodically logs the stats
 func (mpp *MpegtsPacketProcessor) StartReportingStats() {
 	reportingInterval := 30 * time.Second
 	go func() {

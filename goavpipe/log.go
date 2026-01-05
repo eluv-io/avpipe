@@ -20,30 +20,40 @@ type logWrapper struct {
 }
 
 func (l *logWrapper) Trace(msg string, fields ...interface{}) {
-	fields = append(fields, logHandleIfKnown()...)
-	l.log.Trace(msg, fields...)
+	if l.log.IsTrace() {
+		fields = append(fields, logHandleIfKnown()...)
+		l.log.Trace(msg, fields...)
+	}
 }
 
 func (l *logWrapper) Debug(msg string, fields ...interface{}) {
-	fields = append(fields, logHandleIfKnown()...)
-	l.log.Debug(msg, fields...)
+	if l.log.IsDebug() {
+		fields = append(fields, logHandleIfKnown()...)
+		l.log.Debug(msg, fields...)
+	}
 }
 
 func (l *logWrapper) Info(msg string, fields ...interface{}) {
-	fields = append(fields, logHandleIfKnown()...)
-	l.log.Info(msg, fields...)
+	if l.log.IsInfo() {
+		fields = append(fields, logHandleIfKnown()...)
+		l.log.Info(msg, fields...)
+	}
 }
 
 func (l *logWrapper) Warn(msg string, fields ...interface{}) {
 	dispatchToChannelIfPresent("WARN", msg, fields...)
-	fields = append(fields, logHandleIfKnown()...)
-	l.log.Warn(msg, fields...)
+	if l.log.IsWarn() {
+		fields = append(fields, logHandleIfKnown()...)
+		l.log.Warn(msg, fields...)
+	}
 }
 
 func (l *logWrapper) Error(msg string, fields ...interface{}) {
 	dispatchToChannelIfPresent("ERROR", msg, fields...)
-	fields = append(fields, logHandleIfKnown()...)
-	l.log.Error(msg, fields...)
+	if l.log.IsError() {
+		fields = append(fields, logHandleIfKnown()...)
+		l.log.Error(msg, fields...)
+	}
 }
 
 func (l *logWrapper) Fatal(msg string, fields ...interface{}) {
@@ -168,7 +178,7 @@ func dispatchToChannelIfPresent(level string, msg string, fields ...interface{})
 		handleChanMapMu.Lock()
 		defer handleChanMapMu.Unlock()
 		if ch, ok := handleChanMap[handle]; ok {
-			//space-combine fields
+			// space-combine fields
 			strs := []string{level, msg}
 			for _, field := range fields {
 				strs = append(strs, fmt.Sprint(field))

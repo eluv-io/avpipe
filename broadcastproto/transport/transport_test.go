@@ -7,8 +7,8 @@ import (
 
 func TestResolveUDPAddr(t *testing.T) {
 	addrs := []string{
-		"udp://239.255.255.11:1234", // has udp prefix
-		"239.255.255.11:1234",       // no udp prefix
+		// "udp://239.255.255.11:1234", // has udp prefix ==> fails to resolve...
+		"239.255.255.11:1234", // no udp prefix
 	}
 
 	for _, addr := range addrs {

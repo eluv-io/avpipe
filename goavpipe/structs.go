@@ -7,6 +7,7 @@ import (
 	"strings"
 
 	"github.com/eluv-io/avpipe/broadcastproto/transport"
+	"github.com/eluv-io/common-go/format/duration"
 )
 
 type AVStatType int
@@ -439,7 +440,10 @@ type InputConfig struct {
 	CopyPackaging  transport.TsPackagingMode `json:"copy_packaging"`
 	InputPackaging transport.TsPackagingMode `json:"input_packaging"` // packaging mode of the source stream
 	// NOTE: Even if not bypassing libav reader, UDP will bypass the libav reader
-	BypassLibavReader bool `json:"bypass_libav_reader"`
+	BypassLibavReader bool                 `json:"bypass_libav_reader"`
+	Processor         InputProcessorConfig `json:"processor"` // custom input processor configuration (if enabled below)
+	// if true, read net packets in separate go routine, decoupled from ffmpeg with channel
+	CustomReadLoopEnabled bool `json:"custom_read_loop_enabled"`
 }
 
 func (ic *InputConfig) Validate(url string) error {
@@ -535,4 +539,39 @@ var AVFieldOrderNames = map[AVFieldOrder]string{
 	AV_FIELD_BB:          "bb",
 	AV_FIELD_TB:          "tb",
 	AV_FIELD_BT:          "bt",
+}
+
+// InputProcessorConfig specifies the configuration for the (pure go) input processor.
+type InputProcessorConfig struct {
+	MaxConnectAttempts int           // the maximum number of attempts to connect to the input stream
+	ReconnectDelay     duration.Spec // the wait time between failed connection attempts
+	// RecoverTimeout     duration.Spec // the timeout for stream recovery (across all recovery attempts)
+	MaxRecoverAttempts int           // the number of attempts to recover a life stream after an error to read a packet
+	RecoverDelay       duration.Spec // the wait time between failed recovery attempts
+	MaxPacketSize      int           // the size of the buffer for reading packets
+	ChannelCap         int           // the capacity of channels used for packet forwarding
+	PartDuration       duration.Spec // the duration of each part that is generated from the stream data
+}
+
+// ApplyDefaults applies default values to a copy of this input processor configuration.
+func (i InputProcessorConfig) ApplyDefaults() InputProcessorConfig {
+	if i.MaxConnectAttempts == 0 {
+		i.MaxConnectAttempts = 1000
+	}
+	if i.ReconnectDelay == 0 {
+		i.ReconnectDelay = duration.Second
+	}
+	if i.MaxPacketSize == 0 {
+		i.MaxPacketSize = 2048
+	}
+	if i.ChannelCap == 0 {
+		i.ChannelCap = 1000
+	}
+	if i.PartDuration == 0 {
+		i.PartDuration = 30 * duration.Second
+	}
+	// if i.RecoverTimeout == 0 {
+	// 	i.RecoverTimeout = 30 * duration.Second
+	// }
+	return i
 }
