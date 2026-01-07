@@ -42,7 +42,7 @@ func main() {
 
 	udpConn, ok := rc.(*net.UDPConn)
 	if !ok {
-		log.Fatalf("transport returned %T, not *net.UDPConn", rc)
+		log.Fatalf("bad UDP connection %v", rc)
 	}
 
 	ipConn := ipv4.NewPacketConn(udpConn)
