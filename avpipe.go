@@ -42,10 +42,12 @@ import (
 	"math/big"
 	"math/rand"
 	"sync"
+	"syscall"
 	"unsafe"
 
 	"github.com/eluv-io/avpipe/broadcastproto/mpegts"
 	"github.com/eluv-io/avpipe/goavpipe"
+	"github.com/eluv-io/errors-go"
 )
 
 func init() {
@@ -222,6 +224,9 @@ func AVPipeReadInput(fd C.int64_t, buf *C.uint8_t, sz C.int) C.int {
 	}
 
 	if err != nil {
+		if _, ok := errors.GetField(err, goavpipe.ErrRetryField); ok {
+			return C.int(-int(syscall.EIO))
+		}
 		return C.int(-1)
 	}
 
