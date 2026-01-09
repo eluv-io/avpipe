@@ -1,7 +1,6 @@
 package mpegts
 
 import (
-	"errors"
 	"fmt"
 	"io"
 	"strings"
@@ -11,6 +10,7 @@ import (
 
 	"github.com/eluv-io/avpipe/broadcastproto/transport"
 	"github.com/eluv-io/avpipe/goavpipe"
+	"github.com/eluv-io/errors-go"
 )
 
 /*
@@ -74,7 +74,7 @@ func (mio *mpegtsInputOpener) Open(fd int64, url string) (goavpipe.InputHandler,
 	goavpipe.Log.Debug("Calling global input opener to associated fd with recCtx", "fd", fd, "url", url)
 	gio := goavpipe.GetGlobalInputOpener()
 	if gio == nil {
-		return nil, errors.New("global input opener is not set")
+		return nil, errors.Str("global input opener is not set")
 	}
 	gih, err := gio.Open(fd, url)
 	if err != nil {
@@ -142,25 +142,23 @@ func (mih *mpegtsInputHandler) Read(buf []byte) (int, error) {
 	if len(buf) < 7*188 {
 		mpegtslog.Warn("buffer size smaller than 7 TS packets", "size", len(buf))
 	}
-	if mih.outputSplit != nil {
-		n, err := mih.rc.Read(buf)
-		if err != nil {
-			goavpipe.Log.Error("MPEGTS Read", err)
-			return n, err
-		}
-		if n > 0 {
-			select {
-			case mih.outputSplit <- buf[:n]:
-			default:
-				mih.packetsDropped.Inc()
-				goavpipe.Log.Warn("Output split channel is full, dropping data", "size", n)
-			}
-		}
 
-		return n, nil
+	n, err := mih.rc.Read(buf)
+	if mih.outputSplit != nil && n > 0 {
+		select {
+		case mih.outputSplit <- buf[:n]:
+		default:
+			mih.packetsDropped.Inc()
+			goavpipe.Log.Warn("Output split channel is full, dropping data", "size", n)
+		}
 	}
-	// If we don't have an output split channel, doing it like this is more efficient.
-	return mih.rc.Read(buf)
+	if err != nil {
+		// mark error as retryable to ffmpeg/avpipe
+		err = errors.E("read", errors.K.IO.Default(), err, goavpipe.ErrRetryField, true)
+		goavpipe.Log.Error("MPEGTS Read", err)
+		return n, err
+	}
+	return n, nil
 }
 
 func (mih *mpegtsInputHandler) Close() error {
@@ -184,7 +182,7 @@ func (mih *mpegtsInputHandler) Close() error {
 }
 
 func (mih *mpegtsInputHandler) Seek(_ int64, _ int) (int64, error) {
-	return 0, errors.New("not supported")
+	return 0, errors.Str("not supported")
 }
 
 func (mih *mpegtsInputHandler) Size() int64 {
