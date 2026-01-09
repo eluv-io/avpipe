@@ -224,6 +224,7 @@ func AVPipeReadInput(fd C.int64_t, buf *C.uint8_t, sz C.int) C.int {
 	}
 
 	if err != nil {
+		goavpipe.Log.Warn("AVPipeReadInput()", err, "fd", fd, "buf", buf, "sz", sz)
 		if _, ok := errors.GetField(err, goavpipe.ErrRetryField); ok {
 			return C.int(-int(syscall.EIO))
 		}

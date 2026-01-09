@@ -153,10 +153,10 @@ func (mih *mpegtsInputHandler) Read(buf []byte) (int, error) {
 		}
 	}
 	if err != nil {
-		goavpipe.Log.Error("MPEGTS Read", err)
-
 		// mark error as retryable to ffmpeg/avpipe
-		return n, errors.E("read", errors.K.IO.Default(), err, goavpipe.ErrRetryField, true)
+		err = errors.E("read", errors.K.IO.Default(), err, goavpipe.ErrRetryField, true)
+		goavpipe.Log.Error("MPEGTS Read", err)
+		return n, err
 	}
 	return n, nil
 }
