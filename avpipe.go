@@ -226,6 +226,8 @@ func AVPipeReadInput(fd C.int64_t, buf *C.uint8_t, sz C.int) C.int {
 	if err != nil {
 		goavpipe.Log.Warn("AVPipeReadInput()", err, "fd", fd, "buf", buf, "sz", sz)
 		if _, ok := errors.GetField(err, goavpipe.ErrRetryField); ok {
+			// By convention a return code -1 is considered graceful termination and the avpipe job completes with no error
+			// A return code of -EIO is interpreted as a read failure and the avpipe job exits with eav_read_input
 			return C.int(-int(syscall.EIO))
 		}
 		return C.int(-1)
