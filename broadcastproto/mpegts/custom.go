@@ -91,7 +91,9 @@ func (c *customInputOpener) Open(fd int64, url string) (goavpipe.InputHandler, e
 
 	if copyStream {
 		handle, hasHandle := goavpipe.GIDHandle()
-		handler.wg.Go(func() {
+		handler.wg.Add(1)
+		go func() {
+			defer handler.wg.Done()
 			if hasHandle {
 				goavpipe.AssociateGIDWithHandle(handle)
 				defer goavpipe.DissociateGIDFromHandle()
@@ -99,7 +101,7 @@ func (c *customInputOpener) Open(fd int64, url string) (goavpipe.InputHandler, e
 			goavpipe.Log.Debug("MPEGTS copy loop initiated")
 			handler.mpegTsConsumer.ReaderLoop()
 			goavpipe.Log.Debug("MPEGTS copy loop terminated")
-		})
+		}()
 	} else {
 	}
 

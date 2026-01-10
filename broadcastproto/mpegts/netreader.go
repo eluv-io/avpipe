@@ -90,7 +90,9 @@ func (r *NetReader) start() error {
 		return e("reason", "already started")
 	}
 
-	r.waitGroup.Go(func() {
+	r.waitGroup.Add(1)
+	go func() {
+		defer r.waitGroup.Done()
 		defer func() {
 			for _, consumer := range r.consumers {
 				close(consumer.Chan())
@@ -108,7 +110,7 @@ func (r *NetReader) start() error {
 		} else {
 			r.cancel(nil)
 		}
-	})
+	}()
 
 	return nil
 }
