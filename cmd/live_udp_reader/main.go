@@ -19,7 +19,13 @@ import (
 func main() {
 	url := flag.String("url", "", "UDP URL to read (e.g. udp://232.1.2.3:1234)")
 	bufSize := flag.Int("buf", transport.PacketSize*7, "read buffer size in bytes")
+	sleepPrecision := flag.Bool("sleep-precision", false, "measure 250us sleep precision instead of reading UDP")
 	flag.Parse()
+
+	if *sleepPrecision {
+		runSleepPrecisionTest()
+		return
+	}
 
 	if *url == "" {
 		fmt.Println("Usage: live_udp_reader -url udp://232.1.2.3:1234")
@@ -102,6 +108,79 @@ func main() {
 		}
 	}
 	close(done)
+}
+
+func runSleepPrecisionTest() {
+	const sleepDuration = 250 * time.Microsecond
+	type sleepBuckets struct {
+		b0to1   uint64
+		b1to5   uint64
+		b5to10  uint64
+		b10to20 uint64
+		b20plus uint64
+	}
+
+	var (
+		buckets   sleepBuckets
+		bucketsMu sync.Mutex
+	)
+
+	ticker := time.NewTicker(time.Second)
+	defer ticker.Stop()
+
+	done := make(chan struct{})
+	go func() {
+		for {
+			select {
+			case <-ticker.C:
+				bucketsMu.Lock()
+				log.Printf("sleep oversleep buckets 0-1ms=%d 1-5ms=%d 5-10ms=%d 10-20ms=%d 20ms+=%d",
+					buckets.b0to1, buckets.b1to5, buckets.b5to10, buckets.b10to20, buckets.b20plus)
+				buckets = sleepBuckets{}
+				bucketsMu.Unlock()
+			case <-done:
+				return
+			}
+		}
+	}()
+
+	sigCh := make(chan os.Signal, 1)
+	signal.Notify(sigCh, os.Interrupt)
+
+	log.Printf("Measuring sleep oversleep for %s sleeps", sleepDuration)
+
+	for {
+		start := time.Now()
+		time.Sleep(sleepDuration)
+		elapsed := time.Since(start)
+		oversleep := elapsed - sleepDuration
+		if oversleep < 0 {
+			oversleep = 0
+		}
+
+		bucketsMu.Lock()
+		switch {
+		case oversleep < time.Millisecond:
+			buckets.b0to1++
+		case oversleep < 5*time.Millisecond:
+			buckets.b1to5++
+		case oversleep < 10*time.Millisecond:
+			buckets.b5to10++
+		case oversleep < 20*time.Millisecond:
+			buckets.b10to20++
+		default:
+			buckets.b20plus++
+		}
+		bucketsMu.Unlock()
+
+		select {
+		case <-sigCh:
+			log.Println("Interrupt received, shutting down")
+			close(done)
+			return
+		default:
+		}
+	}
 }
 
 type groupStats struct {
