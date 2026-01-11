@@ -20,10 +20,21 @@ func main() {
 	url := flag.String("url", "", "UDP URL to read (e.g. udp://232.1.2.3:1234)")
 	bufSize := flag.Int("buf", transport.PacketSize*7, "read buffer size in bytes")
 	sleepPrecision := flag.Bool("sleep-precision", false, "measure 250us sleep precision instead of reading UDP")
+	sleepPrecisionSeconds := flag.Float64("sleep-precision-seconds", 0, "sleep duration in seconds for -sleep-precision")
 	flag.Parse()
 
-	if *sleepPrecision {
-		runSleepPrecisionTest()
+	if *sleepPrecision || *sleepPrecisionSeconds > 0 {
+		sleepDuration := 250 * time.Microsecond
+		if *sleepPrecisionSeconds < 0 {
+			log.Fatalf("sleep-precision-seconds must be >= 0")
+		}
+		if *sleepPrecisionSeconds > 0 {
+			sleepDuration = time.Duration(*sleepPrecisionSeconds * float64(time.Second))
+			if sleepDuration <= 0 {
+				log.Fatalf("sleep-precision-seconds value too small")
+			}
+		}
+		runSleepPrecisionTest(sleepDuration)
 		return
 	}
 
@@ -110,8 +121,7 @@ func main() {
 	close(done)
 }
 
-func runSleepPrecisionTest() {
-	const sleepDuration = 250 * time.Microsecond
+func runSleepPrecisionTest(sleepDuration time.Duration) {
 	type sleepBuckets struct {
 		b0to1   uint64
 		b1to5   uint64
