@@ -7,11 +7,11 @@ import (
 	"sync/atomic"
 	"time"
 
-	"github.com/eluv-io/avpipe/broadcastproto/pktpool"
 	"github.com/eluv-io/avpipe/broadcastproto/transport"
 	"github.com/eluv-io/avpipe/goavpipe"
 	"github.com/eluv-io/common-go/format/duration"
 	"github.com/eluv-io/common-go/media"
+	"github.com/eluv-io/common-go/media/pktpool"
 	"github.com/eluv-io/common-go/util/timeutil"
 	"github.com/eluv-io/errors-go"
 	elog "github.com/eluv-io/log-go"

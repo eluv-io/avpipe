@@ -6,7 +6,7 @@ require (
 	github.com/Comcast/gots v0.0.0-20200213175321-9799558ed3e2
 	github.com/Comcast/gots/v2 v2.2.1
 	github.com/Eyevinn/mp4ff v0.49.0
-	github.com/eluv-io/common-go v1.1.12-0.20251203000544-e8939052d1e7
+	github.com/eluv-io/common-go v1.1.12-0.20260111205530-f7a2c64c90ed
 	github.com/eluv-io/errors-go v1.0.4
 	github.com/eluv-io/log-go v1.0.8
 	github.com/grafov/m3u8 v0.11.1

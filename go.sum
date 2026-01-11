@@ -22,8 +22,8 @@ github.com/davecgh/go-spew v1.1.1 h1:vj9j/u1bqnvCEfJOwUhtlOARqs3+rkHYY13jYWTU97c
 github.com/davecgh/go-spew v1.1.1/go.mod h1:J7Y8YcW2NihsgmVo/mv3lAwl/skON4iLHjSsI+c5H38=
 github.com/eluv-io/apexlog-go v1.9.1-elv4 h1:lJE8+Y+GtUhw1BBAlFePuVZg78jCKgeFsdqBtrjbtJc=
 github.com/eluv-io/apexlog-go v1.9.1-elv4/go.mod h1:pZhIuRbWTsOm5WEOxke9B2dczjQuaEGeJXEYd5lCxkk=
-github.com/eluv-io/common-go v1.1.12-0.20251203000544-e8939052d1e7 h1:DEBmF5jl9GpX5SCtC/RUVon37JB3g34+/qXNMrBONug=
-github.com/eluv-io/common-go v1.1.12-0.20251203000544-e8939052d1e7/go.mod h1:g/woqJu4tLEnx4qjVuPHmv/tuMIeV6U059j5x3R2JbU=
+github.com/eluv-io/common-go v1.1.12-0.20260111205530-f7a2c64c90ed h1:6/bqE0PcXkZZSB6GtmFSEs1DF/WkvUmsae4yecxDDpo=
+github.com/eluv-io/common-go v1.1.12-0.20260111205530-f7a2c64c90ed/go.mod h1:g/woqJu4tLEnx4qjVuPHmv/tuMIeV6U059j5x3R2JbU=
 github.com/eluv-io/errors-go v1.0.4 h1:IlSHojkeNgjT4qBO1PpiS8R0XlyvrctiDCBszw/OrrA=
 github.com/eluv-io/errors-go v1.0.4/go.mod h1:SoBNolWeyjrvHosBsIpxlQAq5/jVvqWsw/o0XpGMtKU=
 github.com/eluv-io/gls v1.0.0-elv1 h1:fV9z/aLSs5KH8wWMkamoS/Xxl8wmXF76WMx8/N5XEr8=

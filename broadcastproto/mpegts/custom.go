@@ -7,9 +7,9 @@ import (
 
 	"go.uber.org/atomic"
 
-	"github.com/eluv-io/avpipe/broadcastproto/pktpool"
 	"github.com/eluv-io/avpipe/broadcastproto/transport"
 	"github.com/eluv-io/avpipe/goavpipe"
+	"github.com/eluv-io/common-go/media/pktpool"
 	"github.com/eluv-io/errors-go"
 )
 

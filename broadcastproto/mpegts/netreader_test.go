@@ -10,10 +10,10 @@ import (
 	"go.uber.org/atomic"
 	"go.uber.org/goleak"
 
-	"github.com/eluv-io/avpipe/broadcastproto/pktpool"
 	"github.com/eluv-io/avpipe/broadcastproto/transport"
 	"github.com/eluv-io/avpipe/goavpipe"
 	"github.com/eluv-io/common-go/format/duration"
+	"github.com/eluv-io/common-go/media/pktpool"
 	"github.com/eluv-io/common-go/util/byteutil"
 	"github.com/eluv-io/common-go/util/timeutil"
 	"github.com/eluv-io/log-go"
@@ -32,7 +32,7 @@ func TestNetReader_happyPath(t *testing.T) {
 	watch := timeutil.StartWatch()
 
 	reader := newTestReader(250, 1328, 100) // 250 packets of 1328 bytes at 100 packets per second
-	ctx := createNetReader(t, &transport.Mock{
+	ctx := createNetReader(&transport.Mock{
 		Reader:    reader,
 		Packaging: transport.RtpTs,
 	})
@@ -48,7 +48,7 @@ func TestNetReader_happyPath(t *testing.T) {
 	require.Greater(t, watch.Duration(), 2*time.Second+400*time.Millisecond)
 }
 
-func createNetReader(t *testing.T, tp *transport.Mock) netReaderTestCtx {
+func createNetReader(tp *transport.Mock) netReaderTestCtx {
 	cfg := &goavpipe.XcParams{
 		Url:               tp.URL(),
 		ConnectionTimeout: 400,
