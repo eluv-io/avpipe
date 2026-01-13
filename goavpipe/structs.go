@@ -445,8 +445,9 @@ type InputConfig struct {
 	CopyPackaging  transport.TsPackagingMode `json:"copy_packaging"`
 	InputPackaging transport.TsPackagingMode `json:"input_packaging"` // packaging mode of the source stream
 	// NOTE: Even if not bypassing libav reader, UDP will bypass the libav reader
-	BypassLibavReader bool                 `json:"bypass_libav_reader"`
-	Processor         InputProcessorConfig `json:"processor"` // custom input processor configuration (if enabled below)
+	BypassLibavReader bool `json:"bypass_libav_reader"`
+	// custom input processor configuration if enabled through CustomReadLoopEnabled or CopyMode == raw_only
+	Processor InputProcessorConfig `json:"processor"`
 	// if true, read net packets in separate go routine, decoupled from ffmpeg with channel
 	CustomReadLoopEnabled bool `json:"custom_read_loop_enabled"`
 }
@@ -548,14 +549,14 @@ var AVFieldOrderNames = map[AVFieldOrder]string{
 
 // InputProcessorConfig specifies the configuration for the (pure go) input processor.
 type InputProcessorConfig struct {
-	MaxConnectAttempts int           // the maximum number of attempts to connect to the input stream
-	ReconnectDelay     duration.Spec // the wait time between failed connection attempts
+	MaxConnectAttempts int           `json:"max_connect_attempts"` // the maximum number of attempts to connect to the input stream
+	ReconnectDelay     duration.Spec `json:"reconnect_delay"`      // the wait time between failed connection attempts
 	// RecoverTimeout     duration.Spec // the timeout for stream recovery (across all recovery attempts)
-	MaxRecoverAttempts int           // the number of attempts to recover a life stream after an error to read a packet
-	RecoverDelay       duration.Spec // the wait time between failed recovery attempts
-	MaxPacketSize      int           // the size of the buffer for reading packets
-	ChannelCap         int           // the capacity of channels used for packet forwarding
-	PartDuration       duration.Spec // the duration of each part that is generated from the stream data
+	MaxRecoverAttempts int           `json:"max_recover_attempts"` // the number of attempts to recover a life stream after an error to read a packet
+	RecoverDelay       duration.Spec `json:"recover_delay"`        // the wait time between failed recovery attempts
+	MaxPacketSize      int           `json:"max_packet_size"`      // the size of the buffer for reading packets
+	ChannelCap         int           `json:"channel_cap"`          // the capacity of channels used for packet forwarding
+	PartDuration       duration.Spec `json:"part_duration"`        // the duration of each part that is generated from the stream data
 }
 
 // ApplyDefaults applies default values to a copy of this input processor configuration.
