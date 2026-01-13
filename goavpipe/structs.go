@@ -26,6 +26,7 @@ const (
 	AV_OUT_STAT_END_FILE                = 11
 	AV_IN_STAT_DATA_SCTE35              = 12
 	AV_IN_STAT_MPEGTS                   = 13
+	AV_IN_STAT_MPEGTS_START             = 14
 )
 
 func (a AVStatType) Name() string {
@@ -56,6 +57,8 @@ func (a AVStatType) Name() string {
 		return "AV_IN_STAT_DATA_SCTE35"
 	case AV_IN_STAT_MPEGTS:
 		return "AV_IN_STAT_MPEGTS"
+	case AV_IN_STAT_MPEGTS_START:
+		return "AV_IN_STAT_MPEGTS_START"
 	default:
 		return fmt.Sprintf("Unknown(%d)", a)
 	}
@@ -433,6 +436,8 @@ const (
 	// CopyModeRetranscode can be used to replace an elementary stream in the MPEGTS
 	// such as converting jpegxs to h264, then remuxing (example for future use)
 	CopyModeRetranscode CopyMode = "retranscode_stream"
+	// CopyModeRawOnly is like CopyModeRaw, but also disables transcoding and production of fragmented mp4 parts
+	CopyModeRawOnly CopyMode = "raw_only"
 )
 
 type InputConfig struct {

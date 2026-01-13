@@ -177,6 +177,7 @@ type MpegTsConsumer struct {
 	pktChan        chan *pktpool.Packet
 	packetsDropped atomic.Uint64
 	pp             *MpegtsPacketProcessor
+	onFirstPacket  func()
 }
 
 func (f *MpegTsConsumer) PacketDropped() {
@@ -198,6 +199,11 @@ func (f *MpegTsConsumer) ReaderLoop() {
 	f.pp.StartReportingStats()
 	defer f.pp.Stop()
 	for pkt := range f.pktChan {
+		if nPackets == 0 {
+			if f.onFirstPacket != nil {
+				f.onFirstPacket()
+			}
+		}
 		nPackets++
 
 		if nPackets%1000 == 0 {

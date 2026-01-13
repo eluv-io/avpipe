@@ -149,30 +149,35 @@ func getCIOHandler(fd int64) *ioHandler {
 
 //export AVPipeOpenInput
 func AVPipeOpenInput(url *C.char, size *C.int64_t) C.int64_t {
-	filename := C.GoString((*C.char)(unsafe.Pointer(url)))
-	urlInputOpener := goavpipe.GetInputOpener(filename)
-	urlOutputOpener := goavpipe.GetOutputOpener(filename)
+	fd, s := AVPipeOpenInputGo(C.GoString((*C.char)(unsafe.Pointer(url))))
+	*size = C.int64_t(s)
+	return C.int64_t(fd)
+}
+
+func AVPipeOpenInputGo(url string) (fd, size int64) {
+	urlInputOpener := goavpipe.GetInputOpener(url)
+	urlOutputOpener := goavpipe.GetOutputOpener(url)
 
 	if urlInputOpener == nil || urlOutputOpener == nil {
 		goavpipe.Log.Error("Input or output opener(s) are not set", "urlInputOpener", urlInputOpener, "urlOutputOpener", urlOutputOpener)
-		return C.int64_t(-1)
+		return -1, 0
 	}
-	goavpipe.Log.Debug("AVPipeOpenInput()", "url", filename)
+	goavpipe.Log.Debug("AVPipeOpenInput()", "url", url)
 
-	fd := goavpipe.Globals.AssignOutputOpener(urlOutputOpener)
+	fd = goavpipe.Globals.AssignOutputOpener(urlOutputOpener)
 
-	input, err := urlInputOpener.Open(fd, filename)
+	input, err := urlInputOpener.Open(fd, url)
 	if err != nil {
-		goavpipe.Log.Debug("AVPipeOpenInput()", err, "url", filename)
-		return C.int64_t(-1)
+		goavpipe.Log.Debug("AVPipeOpenInput()", err, "url", url)
+		return -1, 0
 	}
 
-	*size = C.int64_t(input.Size())
+	size = input.Size()
 
 	h := &ioHandler{input: input, outTable: make(map[int64]goavpipe.OutputHandler), mutex: &sync.Mutex{}}
-	goavpipe.Log.Debug("AVPipeOpenInput()", "url", filename, "size", *size, "fd", fd)
+	goavpipe.Log.Debug("AVPipeOpenInput()", "url", url, "size", size, "fd", fd)
 	goavpipe.Globals.PutCIOHandler(fd, h)
-	return C.int64_t(fd)
+	return fd, size
 }
 
 //export AVPipeOpenMuxInput
@@ -307,7 +312,7 @@ func AVPipeStatInput(fd C.int64_t, stream_index C.int, avp_stat C.avp_stat_t, st
 	return C.int(0)
 }
 
-func AVPipeStatInputGo(fd int64, streamIndex int, t goavpipe.AVStatType, args string) (err error) {
+func AVPipeStatInputGo(fd int64, streamIndex int, t goavpipe.AVStatType, args any) (err error) {
 	h := getCIOHandler(int64(fd))
 	if h == nil {
 		return fmt.Errorf("input stats - failed to find input handler (fd=%d)", fd)
@@ -1125,6 +1130,16 @@ func XcInit(params *goavpipe.XcParams) (int32, error) {
 
 	// Here we should setup the input opener if specified by the params
 	if params.InputCfg.BypassLibavReader {
+		if params.InputCfg.CopyMode == goavpipe.CopyModeRawOnly {
+			goavpipe.Log.Info("initializing bypass processor", "copy_mode", params.InputCfg.CopyMode)
+			// Bypass ffmpeg completely and copy the stream verbatim to parts
+			bypassProcessor, err := mpegts.NewBypassProcessor(params, seqOpenerF)
+			if err != nil {
+				return -1, errors.E("XcInit", errors.K.Invalid.Default(), err)
+			}
+			handle := goavpipe.Globals.InitBypassProcessor(bypassProcessor)
+			return handle, nil
+		}
 		var opener goavpipe.InputOpener
 		var err error
 		opener, err = mpegts.NewAutoInputOpener(params, seqOpenerF)
@@ -1149,6 +1164,22 @@ func XcInit(params *goavpipe.XcParams) (int32, error) {
 }
 
 func XcRun(handle int32) error {
+	if handle < -1 {
+		processor, ok := goavpipe.Globals.GetBypassProcessor(handle)
+		if !ok {
+			return EAV_BAD_HANDLE
+		}
+		defer func() {
+			goavpipe.Globals.DeleteBypassProcessor(handle)
+		}()
+		fd, _ := AVPipeOpenInputGo(processor.XcParams().Url)
+		err := processor.Start(fd)
+		if err != nil {
+			return err
+		}
+		processor.Wait()
+	}
+
 	defer goavpipe.XCEnded()
 	if handle < 0 {
 		return EAV_BAD_HANDLE
@@ -1163,6 +1194,15 @@ func XcRun(handle int32) error {
 }
 
 func XcCancel(handle int32) error {
+	if handle < -1 {
+		processor, ok := goavpipe.Globals.GetBypassProcessor(handle)
+		if !ok {
+			return EAV_BAD_HANDLE
+		}
+		processor.Cancel()
+		return nil
+	}
+
 	rc := C.xc_cancel(C.int32_t(handle))
 	if rc == 0 {
 		return nil

@@ -36,6 +36,7 @@ var mpegtslog = elog.Get("avpipe/broadcastproto/mpegts")
 type SequentialOpener interface {
 	OpenNext() (io.WriteCloser, error)
 	Stat(args string) error
+	ReportStart() error
 }
 
 type MpegtsPacketProcessor struct {
@@ -241,7 +242,11 @@ func (mpp *MpegtsPacketProcessor) PushStats() {
 	mpp.statsMu.Unlock()
 	mpp.resetChannelSizeStats()
 	// PENDING(SS) - create a combined JSON mpegts and rtp
-	mpp.opener.Stat(string(v))
+	_ = mpp.opener.Stat(string(v))
+}
+
+func (mpp *MpegtsPacketProcessor) ReportStart() {
+	_ = mpp.opener.ReportStart()
 }
 
 func (mpp *MpegtsPacketProcessor) Stop() {
