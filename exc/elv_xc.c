@@ -1515,7 +1515,7 @@ main(
                     usage(argv[0], argv[i], EXIT_FAILURE);
                 }
                 if ( n_threads < 1 ) usage(argv[0], argv[i], EXIT_FAILURE);
-            } else if (!strcmp(argv[i+1], "--timecode")) {
+            } else if (!strcmp(argv[i], "-timecode")) {
                 p.timecode = strdup(argv[i+1]);
             } else {
                 usage(argv[0], argv[i], EXIT_FAILURE);
