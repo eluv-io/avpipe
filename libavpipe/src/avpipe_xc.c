@@ -4457,7 +4457,8 @@ log_params(
         "level=%d "
         "deinterlace=%d "
         "use_preprocessed_input=%d "
-        "copy_mpegts=%d",
+        "copy_mpegts=%d "
+        "timecode=%s",
         params->stream_id, params->url,
         avpipe_version(),
         params->bypass_transcoding, params->skip_decoding,
@@ -4482,7 +4483,8 @@ log_params(
         params->extract_image_interval_ts, params->extract_images_sz,
         1, params->video_time_base, params->video_frame_duration_ts, params->rotate,
         params->profile ? params->profile : "", params->level,  params->deinterlace,
-        params->use_preprocessed_input, params->copy_mpegts);
+        params->use_preprocessed_input, params->copy_mpegts,
+        params->timecode);
     elv_log("AVPIPE XCPARAMS %s", buf);
 }
 
@@ -4521,6 +4523,7 @@ avpipe_copy_xcparams(
     p2->start_segment_str = safe_strdup(p->start_segment_str);
     p2->watermark_text = safe_strdup(p->watermark_text);
     p2->watermark_timecode = safe_strdup(p->watermark_timecode);
+    p2->timecode = safe_strdup(p->timecode);
     p2->overlay_filename = safe_strdup(p->overlay_filename);
     if (p->watermark_overlay_len > 0) {
         p2->watermark_overlay = (char *) calloc(1, p->watermark_overlay_len);
@@ -4623,6 +4626,7 @@ avpipe_free_params(
     free(params->watermark_overlay);
     free(params->watermark_shadow_color);
     free(params->watermark_timecode);
+    free(params->timecode);
     free(params->max_cll);
     free(params->master_display);
     free(params->filter_descriptor);
