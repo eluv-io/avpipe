@@ -67,7 +67,7 @@ elv_channel_send(
         channel->waits ++;
         if (channel->waits % 1000 == 1) {
             elv_log("elv_channel_send: full so wait in=%"PRId64" out=%"PRId64" waits=%"PRId64, channel->msgs_in, channel->msgs_out, channel->waits);
-         }
+        }
         pthread_cond_wait(&channel->_cond_recv, &channel->_mutex);
     }
 
