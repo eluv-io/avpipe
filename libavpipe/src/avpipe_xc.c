@@ -4492,6 +4492,7 @@ avpipe_copy_xcparams(
     p2->start_segment_str = safe_strdup(p->start_segment_str);
     p2->watermark_text = safe_strdup(p->watermark_text);
     p2->watermark_timecode = safe_strdup(p->watermark_timecode);
+    p2->timecode = safe_strdup(p->timecode);
     p2->overlay_filename = safe_strdup(p->overlay_filename);
     if (p->watermark_overlay_len > 0) {
         p2->watermark_overlay = (char *) calloc(1, p->watermark_overlay_len);
@@ -4594,6 +4595,7 @@ avpipe_free_params(
     free(params->watermark_overlay);
     free(params->watermark_shadow_color);
     free(params->watermark_timecode);
+    free(params->timecode);
     free(params->max_cll);
     free(params->master_display);
     free(params->filter_descriptor);
