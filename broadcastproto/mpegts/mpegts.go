@@ -167,16 +167,14 @@ func (mpp *MpegtsPacketProcessor) ProcessDatagram(datagram []byte) {
 
 		// PENDING(SS) Sequence number / discontinuity processing
 
-		if dgHeader.Timestamp == 0 {
-			// Degenerate RTP case - don't process if timestamps are 0
-			return
+		if dgHeader.Timestamp != 0 {
+			swapped := mpp.rtpStats.FirstTimestamp.CompareAndSwap(0, dgHeader.Timestamp)
+			if swapped {
+				mpp.rtpStats.RefTime = time.Now()
+				mpp.PushStats()
+			}
+			mpp.rtpStats.LastTimestamp.Store(dgHeader.Timestamp)
 		}
-		swapped := mpp.rtpStats.FirstTimestamp.CompareAndSwap(0, dgHeader.Timestamp)
-		if swapped {
-			mpp.rtpStats.RefTime = time.Now()
-			mpp.PushStats()
-		}
-		mpp.rtpStats.LastTimestamp.Store(dgHeader.Timestamp)
 	}
 
 	// Extract PCR
