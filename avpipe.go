@@ -42,10 +42,12 @@ import (
 	"math/big"
 	"math/rand"
 	"sync"
+	"syscall"
 	"unsafe"
 
 	"github.com/eluv-io/avpipe/broadcastproto/mpegts"
 	"github.com/eluv-io/avpipe/goavpipe"
+	"github.com/eluv-io/errors-go"
 )
 
 func init() {
@@ -222,8 +224,13 @@ func AVPipeReadInput(fd C.int64_t, buf *C.uint8_t, sz C.int) C.int {
 	}
 
 	if err != nil {
-		return C.int(-5) // (EIO)
-		//return C.int(-1)
+		goavpipe.Log.Warn("AVPipeReadInput()", err, "fd", fd, "buf", buf, "sz", sz)
+		if _, ok := errors.GetField(err, goavpipe.ErrRetryField); ok {
+			// By convention a return code -1 is considered graceful termination and the avpipe job completes with no error
+			// A return code of -EIO is interpreted as a read failure and the avpipe job exits with eav_read_input
+			return C.int(-int(syscall.EIO))
+		}
+		return C.int(-1)
 	}
 
 	return C.int(n)
@@ -1120,7 +1127,7 @@ func XcInit(params *goavpipe.XcParams) (int32, error) {
 	if params.InputCfg.BypassLibavReader {
 		var opener goavpipe.InputOpener
 		var err error
-		opener, err = mpegts.NewAutoInputOpener(params.Url, &params.InputCfg, seqOpenerF)
+		opener, err = mpegts.NewAutoInputOpener(params, seqOpenerF)
 		if err != nil {
 			return -1, EAV_PARAM
 		}

@@ -1,7 +1,6 @@
 package mpegts
 
 import (
-	"errors"
 	"fmt"
 	"io"
 	"strings"
@@ -11,6 +10,7 @@ import (
 
 	"github.com/eluv-io/avpipe/broadcastproto/transport"
 	"github.com/eluv-io/avpipe/goavpipe"
+	"github.com/eluv-io/errors-go"
 )
 
 /*
@@ -31,7 +31,32 @@ type SequentialOpenerFactory func(inFd int64) SequentialOpener
 
 // NewAutoInputOpener creates an InputOpener that automatically selects the transport based on the
 // URL scheme.
-func NewAutoInputOpener(url string, cfg *goavpipe.InputConfig, seqOpener SequentialOpenerFactory) (goavpipe.InputOpener, error) {
+func NewAutoInputOpener(cfg *goavpipe.XcParams, seqOpener SequentialOpenerFactory) (goavpipe.InputOpener, error) {
+	tp, err := createTransport(cfg.Url, &cfg.InputCfg)
+	if err != nil {
+		return nil, err
+	}
+
+	// ensure defaults are set
+	cfg.InputCfg.Processor = cfg.InputCfg.Processor.ApplyDefaults()
+
+	if cfg.InputCfg.CustomReadLoopEnabled {
+		return &customInputOpener{
+			transport: tp,
+			seqOpener: seqOpener,
+			cfg:       cfg,
+		}, nil
+	}
+
+	return &mpegtsInputOpener{
+		transport: tp,
+		seqOpener: seqOpener,
+		cfg:       &cfg.InputCfg,
+	}, nil
+}
+
+// createTransport creates an input transport instance based on the URL and input configuration.
+func createTransport(url string, cfg *goavpipe.InputConfig) (transport.Transport, error) {
 	var tp transport.Transport
 
 	scheme := strings.SplitN(url, "://", 2)[0]
@@ -54,12 +79,7 @@ func NewAutoInputOpener(url string, cfg *goavpipe.InputConfig, seqOpener Sequent
 	if tp == nil {
 		return nil, fmt.Errorf("unsupported transport protocol: %s", url)
 	}
-
-	return &mpegtsInputOpener{
-		transport: tp,
-		seqOpener: seqOpener,
-		cfg:       cfg,
-	}, nil
+	return tp, nil
 }
 
 type mpegtsInputOpener struct {
@@ -74,7 +94,7 @@ func (mio *mpegtsInputOpener) Open(fd int64, url string) (goavpipe.InputHandler,
 	goavpipe.Log.Debug("Calling global input opener to associated fd with recCtx", "fd", fd, "url", url)
 	gio := goavpipe.GetGlobalInputOpener()
 	if gio == nil {
-		return nil, errors.New("global input opener is not set")
+		return nil, errors.Str("global input opener is not set")
 	}
 	gih, err := gio.Open(fd, url)
 	if err != nil {
@@ -138,29 +158,28 @@ type mpegtsInputHandler struct {
 	gih goavpipe.InputHandler
 }
 
+// Read is called from ffmpeg. It should read from an internal channel that is fed by our own read loop.
 func (mih *mpegtsInputHandler) Read(buf []byte) (int, error) {
 	if len(buf) < 7*188 {
 		mpegtslog.Warn("buffer size smaller than 7 TS packets", "size", len(buf))
 	}
-	if mih.outputSplit != nil {
-		n, err := mih.rc.Read(buf)
-		if err != nil {
-			goavpipe.Log.Error("MPEGTS Read", err)
-			return n, err
-		}
-		if n > 0 {
-			select {
-			case mih.outputSplit <- buf[:n]:
-			default:
-				mih.packetsDropped.Inc()
-				goavpipe.Log.Warn("Output split channel is full, dropping data", "size", n)
-			}
-		}
 
-		return n, nil
+	n, err := mih.rc.Read(buf)
+	if mih.outputSplit != nil && n > 0 {
+		select {
+		case mih.outputSplit <- buf[:n]:
+		default:
+			mih.packetsDropped.Inc()
+			goavpipe.Log.Warn("Output split channel is full, dropping data", "size", n)
+		}
 	}
-	// If we don't have an output split channel, doing it like this is more efficient.
-	return mih.rc.Read(buf)
+	if err != nil {
+		// mark error as retryable to ffmpeg/avpipe
+		err = errors.E("read", errors.K.IO.Default(), err, goavpipe.ErrRetryField, true)
+		goavpipe.Log.Error("MPEGTS Read", err)
+		return n, err
+	}
+	return n, nil
 }
 
 func (mih *mpegtsInputHandler) Close() error {
@@ -184,7 +203,7 @@ func (mih *mpegtsInputHandler) Close() error {
 }
 
 func (mih *mpegtsInputHandler) Seek(_ int64, _ int) (int64, error) {
-	return 0, errors.New("not supported")
+	return 0, errors.Str("not supported")
 }
 
 func (mih *mpegtsInputHandler) Size() int64 {

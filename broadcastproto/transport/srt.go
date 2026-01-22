@@ -2,7 +2,6 @@ package transport
 
 import (
 	"io"
-	"strings"
 
 	mio "github.com/eluv-io/common-go/media/io"
 	"github.com/eluv-io/errors-go"
@@ -20,9 +19,6 @@ type srtProto struct {
 }
 
 func NewSRTTransport(url string, in TsPackagingMode, out TsPackagingMode) Transport {
-	if in == RtpTs && strings.HasPrefix(url, "srt://") {
-		url = "srt+rtp" + url[3:] // not strictly need, but easier to read in log files...
-	}
 	source, err := mio.CreatePacketSource(url)
 	if err != nil {
 		log.Warn("failed to create SRT packet source", "url", url, "err", err)
