@@ -535,6 +535,7 @@ typedef struct xcparams_t {
     char        *profile;
     int         level;
     dif_type    deinterlace;                // Deinterlacing filter
+    int         filter_threads;             // Number of filter threads (1=single-threaded, 0=auto)
 } xcparams_t;
 
 #define MAX_CODEC_NAME  256

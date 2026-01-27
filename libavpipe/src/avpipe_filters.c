@@ -105,6 +105,13 @@ init_video_filters(
         goto end;
     }
 
+    /* Set filter graph thread count if specified (for thread safety with freetype) */
+    if (params->filter_threads > 0) {
+        decoder_context->video_filter_graph->nb_threads = params->filter_threads;
+        elv_dbg("init_video_filters: setting filter_threads=%d for thread safety",
+                params->filter_threads);
+    }
+
     if ((ret = avfilter_graph_config(decoder_context->video_filter_graph, NULL)) < 0) {
         elv_err("init_video_filters, avfilter_graph_config failed");
         goto end;
