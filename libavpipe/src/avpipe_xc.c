@@ -3233,7 +3233,7 @@ get_filter_str(
         int shadow_y = 0;
         int font_size = 0;
         const char* filterTemplate =
-            "drawtext=fontfile=/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf:text='%s':fontcolor=%s:fontsize=%d:x=%s:y=%s:shadowx=%d:shadowy=%d:shadowcolor=%s:alpha=0.65";
+            "scale=%d:%d:force_original_aspect_ratio=decrease,pad=%d:%d:(ow-iw)/2:(oh-ih)/2, drawtext=fontfile=/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf:text='%s':fontcolor=%s:fontsize=%d:x=%s:y=%s:shadowx=%d:shadowy=%d:shadowcolor=%s:alpha=0.65";
         int ret = 0;
 
         /* Return an error if one of the watermark params is not set properly */
@@ -3277,6 +3277,10 @@ get_filter_str(
                 shadow_x, shadow_y, params->watermark_shadow_color);
         } else {
             ret = snprintf(local_filter_str, FILTER_STRING_SZ, filterTemplate,
+                encoder_context->codec_context[encoder_context->video_stream_index]->width,
+                encoder_context->codec_context[encoder_context->video_stream_index]->height,
+                encoder_context->codec_context[encoder_context->video_stream_index]->width,
+                encoder_context->codec_context[encoder_context->video_stream_index]->height,
                 params->watermark_text, params->watermark_font_color, font_size,
                 params->watermark_xloc, params->watermark_yloc,
                 shadow_x, shadow_y, params->watermark_shadow_color);
