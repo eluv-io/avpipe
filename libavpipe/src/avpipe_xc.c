@@ -3260,7 +3260,7 @@ get_filter_str(
 
         /* If timecode params are set then apply them, otherwise apply text watermark params */
         if (params->watermark_timecode && *params->watermark_timecode != '\0') {
-            filterTemplate = "scale=%d:%d, drawtext=fontfile=/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf:timecode='%s':rate=%f:fontcolor=%s:fontsize=%d:x=%s:y=%s:shadowx=%d:shadowy=%d:shadowcolor=%s:alpha=0.65";
+            filterTemplate = "scale=%d:%d:force_original_aspect_ratio=decrease,pad=%d:%d:(ow-iw)/2:(oh-ih)/2, drawtext=fontfile=/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf:timecode='%s':rate=%f:fontcolor=%s:fontsize=%d:x=%s:y=%s:shadowx=%d:shadowy=%d:shadowcolor=%s:alpha=0.65";
 
             if (params->watermark_timecode_rate <= 0) {
                 elv_err("Watermark timecode params are not set correctly, rate=%f, url=%s", params->watermark_timecode_rate, params->url);
@@ -3268,6 +3268,8 @@ get_filter_str(
             }
 
             ret = snprintf(local_filter_str, FILTER_STRING_SZ, filterTemplate,
+                encoder_context->codec_context[encoder_context->video_stream_index]->width,
+                encoder_context->codec_context[encoder_context->video_stream_index]->height,
                 encoder_context->codec_context[encoder_context->video_stream_index]->width,
                 encoder_context->codec_context[encoder_context->video_stream_index]->height,
                 params->watermark_timecode, params->watermark_timecode_rate, params->watermark_font_color, font_size,
@@ -3307,7 +3309,7 @@ get_filter_str(
          * "[in] scale=%d:%d [in-1]; movie='%s', setpts=PTS [over]; [in-1] setpts=PTS [in-1a]; [in-1a][over]  overlay='%s:%s:alpha=0.1' [out]";
          */
         const char * filt_template =
-            "movie='%s', setpts=PTS[ov]; [in][ov] overlay=%s:%s:format=auto:alpha=0.1, scale=%d:%d [out]";
+            "movie='%s', setpts=PTS[ov]; [in][ov] overlay=%s:%s:format=auto:alpha=0.1, scale=%d:%d:force_original_aspect_ratio=decrease,pad=%d:%d:(ow-iw)/2:(oh-ih)/2 [out]";
 
         /* Return an error if one of the watermark params is not set properly */
         if ((!params->watermark_xloc || *params->watermark_xloc == '\0') ||
@@ -3331,6 +3333,8 @@ get_filter_str(
                         filt_buf,
                         params->watermark_xloc, params->watermark_yloc,
                         encoder_context->codec_context[encoder_context->video_stream_index]->width,
+                        encoder_context->codec_context[encoder_context->video_stream_index]->height,
+                        encoder_context->codec_context[encoder_context->video_stream_index]->width,
                         encoder_context->codec_context[encoder_context->video_stream_index]->height);
         free(filt_buf);
         if (ret < 0) {
@@ -3347,7 +3351,9 @@ get_filter_str(
             return eav_filter_string_init;
         }
         *filter_str = (char *) calloc(FILTER_STRING_SZ, 1);
-        sprintf(*filter_str, "scale=%d:%d",
+        sprintf(*filter_str, "scale=%d:%d:force_original_aspect_ratio=decrease,pad=%d:%d:(ow-iw)/2:(oh-ih)/2",
+            encoder_context->codec_context[encoder_context->video_stream_index]->width,
+            encoder_context->codec_context[encoder_context->video_stream_index]->height,
             encoder_context->codec_context[encoder_context->video_stream_index]->width,
             encoder_context->codec_context[encoder_context->video_stream_index]->height);
             elv_dbg("FILTER scale=%s", *filter_str);
