@@ -160,8 +160,8 @@ func (mpp *MpegtsPacketProcessor) ProcessDatagram(datagram []byte) {
 			mpp.PushStats()
 		}
 		mpp.rtpStats.LastTimestamp.Store(dgHeader.Timestamp)
-		// TODO: Sequence number / discontinuity processing
 
+		// TODO: Sequence number / discontinuity processing
 	}
 
 	// Extract PCR
