@@ -536,6 +536,7 @@ typedef struct xcparams_t {
     int         level;
     dif_type    deinterlace;                // Deinterlacing filter
     int         filter_threads;             // Number of filter threads (1=single-threaded, 0=auto)
+    char        *timecode;                  // Original timecode string
 } xcparams_t;
 
 #define MAX_CODEC_NAME  256

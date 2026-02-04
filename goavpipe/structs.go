@@ -339,6 +339,7 @@ type XcParams struct {
 	Level                  int       `json:"level,omitempty"`
 	Deinterlace            int       `json:"deinterlace,omitempty"`
 	FilterThreads          int       `json:"filter_threads,omitempty"`
+	Timecode               string    `json:"timecode,omitempty"`
 }
 
 // NewXcParams initializes a XcParams struct with unset/default values

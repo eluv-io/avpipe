@@ -862,6 +862,7 @@ func getCParams(params *goavpipe.XcParams) (*C.xcparams_t, error) {
 		level:                     C.int(params.Level),
 		deinterlace:               C.dif_type(params.Deinterlace),
 		filter_threads:            C.int(params.FilterThreads),
+		timecode:                  C.CString(params.Timecode),
 
 		// All boolean params are handled below
 	}
