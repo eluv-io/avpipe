@@ -14,8 +14,14 @@ func setPlatformOptions(conn *net.UDPConn) error {
 		return err
 	}
 	var sockErr error
-	raw.Control(func(fd uintptr) {
+	err = raw.Control(func(fd uintptr) {
 		sockErr = unix.SetsockoptInt(int(fd), unix.IPPROTO_IP, unix.IP_MULTICAST_ALL, 0)
 	})
-	return sockErr
+	if sockErr != nil {
+		return sockErr // Return the most specific error
+	}
+	if err != nil {
+		return err
+	}
+	return nil
 }

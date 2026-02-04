@@ -47,13 +47,15 @@ func (u *udpProto) PackagingMode() TsPackagingMode {
 	return RawTs
 }
 
+// Open a live URL
+// Limitations:
+// - IPv4 only
+// - 'sources' and 'reuse' query params not yet implemented
 func (u *udpProto) Open() (io.ReadCloser, error) {
 	liveUrl, err := ParseLiveUrl(u.Url)
 	if err != nil {
 		return nil, err
 	}
-
-	log.Debug("SSDBG Open live URL", "group", liveUrl.Group, "localaddr", liveUrl.LocalAddr)
 
 	var conn *net.UDPConn
 	if liveUrl.Multicast {
@@ -65,30 +67,30 @@ func (u *udpProto) Open() (io.ReadCloser, error) {
 			}
 		}
 
-		log.Debug("SSDBG Open live URL multicast", "group", liveUrl.Group, "localaddr", liveUrl.LocalAddr, "if", iface)
+		log.Debug("Open live URL multicast", "group", liveUrl.Group, "localaddr", liveUrl.LocalAddr, "if", iface)
 
 		// Commonly ListenMulticastUDP() will bind to all interfaces and join the
 		// specified group.  This causes problem when we have streams on different multicast groups
-		// but same ports - in this case all sockets will ready packets from all groups on that port.
+		// but same ports - in this case all sockets will read packets from all groups on that port.
 		conn, err = net.ListenUDP("udp", liveUrl.Group)
 		if err != nil {
-			log.Error("SSDBG Open live listen failed", err)
+			log.Error("Open live listen failed", err)
 			return nil, err
 		}
 
 		err = setPlatformOptions(conn)
 		if err != nil {
-			log.Error("SSDBG Open live fail to set platform options", err)
+			log.Error("Open live fail to set platform options", err)
 			return nil, err
 		}
 
 		p := ipv4.NewPacketConn(conn)
 		if err := p.JoinGroup(iface, &net.UDPAddr{IP: liveUrl.Group.IP}); err != nil {
-			conn.Close()
-			log.Error("SSDBG Open live join failed", err)
+			closeErr := conn.Close()
+			log.Error("Open live join failed", err, "close err", closeErr)
 			return nil, err
 		}
-		log.Debug("Listening on UDP multicast", "group", liveUrl.Group, "localaddr", liveUrl.LocalAddr, "inteface", iface)
+		log.Debug("Listening on UDP multicast", "group", liveUrl.Group, "localaddr", liveUrl.LocalAddr, "interface", iface)
 	} else {
 		bindAddr := liveUrl.Addr
 		if liveUrl.LocalAddr != nil {
@@ -112,13 +114,13 @@ func (u *udpProto) Open() (io.ReadCloser, error) {
 type LiveUrl struct {
 	Scheme    string
 	Host      string       // URL host (may be domain name or IP address)
-	Addr      *net.UDPAddr // URL address ()
+	Addr      *net.UDPAddr // URL address (IP address)
 	Group     *net.UDPAddr
 	Multicast bool
 	Port      int
 	LocalAddr net.IP   // URL bind address if specified via query param 'localaddr'
-	Sources   []net.IP // Optional multicast sources (query param 'sources')
-	Reuse     bool
+	Sources   []net.IP // Optional multicast sources (query param 'sources') (not implemented currently)
+	Reuse     bool     // Allow addr:port reuse (not implemented currently)
 }
 
 // ParseLiveUrl parses live stream URLs into their components and resolves host and interfaces.
