@@ -54,7 +54,7 @@ func (bp *BypassProcessor) Status() (running bool, err error) {
 }
 
 func (bp *BypassProcessor) Start(fd int64) error {
-	e := errors.Template("BypassProcessor.Start", errors.K.Invalid.Default(), "url", bp.xcParams.Url, "handle", fd)
+	e := errors.Template("BypassProcessor.Start", errors.K.Invalid.Default(), "url", bp.xcParams.Url, "fd", fd)
 
 	logNetReader.Debug("starting bypass processor", e.Fields()...)
 

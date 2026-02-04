@@ -571,7 +571,7 @@ func (i InputProcessorConfig) ApplyDefaults() InputProcessorConfig {
 		i.MaxPacketSize = 2048
 	}
 	if i.ChannelCap == 0 {
-		i.ChannelCap = 1000
+		i.ChannelCap = 10000
 	}
 	if i.PartDuration == 0 {
 		i.PartDuration = 30 * duration.Second
