@@ -8,9 +8,6 @@ SRCS=avpipe_xc.c \
     avpipe_level.c \
     avpipe_udp_thread.c \
     avpipe_copy_mpegts.c \
-	hdr10plus.c \
-	hdr10plus_json.c \
-	hdr10plus_t35.c \
     scte35.c
 
 BINDIR=bin

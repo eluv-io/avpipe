@@ -25,10 +25,6 @@
 #include "avpipe_version.h"
 #include "base64.h"
 #include "scte35.h"
-#include "hdr10plus_json.h"
-
-/* HDR10+ hook: declare external getter implemented in avpipe.c to retrieve JSON by PTS */
-extern char *avpipe_get_hdr10plus(int64_t pts);
 
 #include <stdio.h>
 #include <fcntl.h>
@@ -2026,46 +2022,6 @@ encode_frame(
 
         dump_frame(selected_decoded_audio(decoder_context, stream_index) >= 0, stream_index,
             "TOENC ", codec_context->frame_num, frame, debug_frame_level);
-    }
-
-    /* If there is HDR10+ JSON available for this frame PTS, convert and attach it. */
-    if (frame && frame->pts != AV_NOPTS_VALUE) {
-        static pthread_mutex_t frame_count_mutex = PTHREAD_MUTEX_INITIALIZER;
-        static int frame_count = 0;
-        int print_debug = 0;
-        pthread_mutex_lock(&frame_count_mutex);
-        if (frame_count < 10) {
-            print_debug = 1;
-            frame_count++;
-        }
-        pthread_mutex_unlock(&frame_count_mutex);
-        if (print_debug) {
-            elv_dbg("[HDR10+] Frame PTS=%"PRId64" checking for metadata", frame->pts);
-        }
-
-        char *hdrjson = avpipe_get_hdr10plus(frame->pts);
-        if (hdrjson) {
-            elv_dbg("[HDR10+] Found metadata for PTS=%"PRId64"", frame->pts);
-
-            /* Convert JSON to binary T.35 SEI payload */
-            AVDynamicHDRPlus *hdr_meta = NULL;
-            AVBufferRef *hdr_buf = NULL;
-
-            if (avpipe_hdr10plus_json_to_metadata(hdrjson, &hdr_meta, &hdr_buf) == 0 && hdr_buf) {
-                /* Attach binary SEI payload as frame side data */
-                AVFrameSideData *sd = av_frame_new_side_data_from_buf(frame, AV_FRAME_DATA_DYNAMIC_HDR_PLUS, hdr_buf);
-                if (sd) {
-                    elv_dbg("[HDR10+] Attached to frame PTS=%"PRId64" size=%zu", frame->pts, hdr_buf->size);
-                } else {
-                    elv_err("[HDR10+] Failed to attach side data for PTS=%"PRId64"", frame->pts);
-                    av_buffer_unref(&hdr_buf);
-                }
-                av_free(hdr_meta);
-            } else {
-                elv_err("[HDR10+] Failed to convert JSON to binary for PTS=%"PRId64"", frame->pts);
-            }
-            free(hdrjson);
-        }
     }
 
     // Send the frame to the encoder

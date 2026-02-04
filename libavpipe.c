@@ -8,9 +8,6 @@
 #include "libavpipe/src/avpipe_copy_mpegts.c"
 #include "libavpipe/src/avpipe_xc.c"
 #include "libavpipe/src/scte35.c"
-#include "libavpipe/src/hdr10plus.c"
-#include "libavpipe/src/hdr10plus_json.c"
-#include "libavpipe/src/hdr10plus_t35.c"
 
 #include "utils/src/base64.c"
 #include "utils/src/elv_channel.c"

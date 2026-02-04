@@ -23,13 +23,6 @@
 #include "url_parser.h"
 #include "elv_sock.h"
 
-/* Forward-declare minimal HDR10+ setter to avoid pulling heavy headers here. */
-extern int avpipe_set_hdr10plus(int64_t pts, const char *json, int json_len);
-/* Config APIs */
-int avpipe_hdr10plus_set_tolerance(int64_t tolerance_pts);
-int avpipe_hdr10plus_set_ttl(int ttl_seconds);
-int avpipe_hdr10plus_set_capacity(int max_entries);
-
 #define MAX_LOG_SIZE    100000  // 100000 MB = 100 GB
 
 static int opened_inputs = 0;
@@ -44,60 +37,6 @@ do_mux(
 extern void *
 udp_thread_func(
     void *thread_params);
-
-/* Thread that reads HDR10+ lines from a source and pushes them into avpipe store.
- * Argument: const char * path ("-" for stdin, or file path). For FIFOs pass the fifo path.
- */
-static void *hdr10plus_reader_thread(void *arg)
-{
-    const char *path = (const char *)arg;
-    FILE *f = NULL;
-
-    if (!path || strcmp(path, "-") == 0) {
-        f = stdin;
-    } else {
-        f = fopen(path, "r");
-        if (!f) {
-            fprintf(stderr, "Unable to open hdr10plus source %s\n", path);
-            return NULL;
-        }
-    }
-
-    if (!f) {
-        fprintf(stderr, "hdr10plus_reader_thread: input stream is NULL\n");
-        return NULL;
-    }
-
-    char line[65536];
-    while (fgets(line, sizeof(line), f)) {
-        /* Check if line was truncated (buffer full but no newline) */
-        size_t len = strlen(line);
-        if (len == sizeof(line)-1 && line[len-1] != '\n') {
-            fprintf(stderr, "hdr10plus_reader_thread: line too long, skipping (max %zu bytes)\n", sizeof(line)-1);
-            /* Skip rest of line */
-            int c;
-            while ((c = fgetc(f)) != EOF && c != '\n');
-            continue;
-        }
-
-        char *sp = strchr(line, ' ');
-        if (!sp) continue;
-        *sp = '\0';
-        int64_t pts = 0;
-        if (sscanf(line, "%"PRId64, &pts) != 1) continue;
-        char *json = sp + 1;
-        char *nl = strchr(json, '\n');
-        if (nl) *nl = '\0';
-        avpipe_set_hdr10plus(pts, json, (int)strlen(json));
-    }
-
-    if (f && f != stdin) fclose(f);
-
-    /* Free the duplicated path string that was passed to this thread */
-    if (path) free((void *)path);
-
-    return NULL;
-}
 
 int
 in_stat(
@@ -1129,10 +1068,6 @@ usage(
         "\t-master-display :        (optional) Master display, only valid if encoder is libx265.\n"
         "\t-max-cll :               (optional) Maximum Content Light Level and Maximum Frame Average Light Level, only valid if encoder is libx265.\n"
         "\t                                    This parameter is a comma separated of max-cll and max-fall (i.e \"1514,172\").\n"
-        "\t-hdr10plus-file :        (optional) Path or fifo: source of per-frame HDR10+ JSON (lines: pts,json)\n"
-        "\t-hdr10plus-tolerance :   (optional) PTS tolerance for matching metadata (timebase units). Default: 0\n"
-        "\t-hdr10plus-ttl :         (optional) Metadata TTL in seconds. Default: 30\n"
-        "\t-hdr10plus-capacity :    (optional) Maximum number of stored HDR10+ entries. Default: 10000\n"
         "\t-mux-spec :              (optional) Muxing spec file.\n"
         "\t-preset :                (optional) Preset string to determine compression speed. Default is \"medium\". Valid values are: \"ultrafast\", \"superfast\",\n"
         "\t                                    \"veryfast\", \"faster\", \"fast\", \"medium\", \"slow\", \"slower\", \"veryslow\".\n"
@@ -1197,10 +1132,6 @@ main(
     int repeats = 1;
     int n_threads = 1;
     char *filename = NULL;
-    char *hdr10plus_file = NULL;
-    int64_t hdr10plus_tolerance = 0;
-    int hdr10plus_ttl = 30;
-    int hdr10plus_capacity = 10000;
     int bypass_transcoding = 0;
     int start_segment = -1;
     char *command = "transcode";
@@ -1460,25 +1391,6 @@ main(
         case 'g':
             if (!strcmp(argv[i], "-gpu-index")) {
                 if (sscanf(argv[i+1], "%d", &p.gpu_index) != 1) {
-                    usage(argv[0], argv[i], EXIT_FAILURE);
-                }
-            } else {
-                usage(argv[0], argv[i], EXIT_FAILURE);
-            }
-            break;
-        case 'h':
-            if (!strcmp(argv[i], "-hdr10plus-file")) {
-                hdr10plus_file = strdup(argv[i+1]);
-            } else if (!strcmp(argv[i], "-hdr10plus-tolerance")) {
-                if (sscanf(argv[i+1], "%"PRId64, &hdr10plus_tolerance) != 1) {
-                    usage(argv[0], argv[i], EXIT_FAILURE);
-                }
-            } else if (!strcmp(argv[i], "-hdr10plus-ttl")) {
-                if (sscanf(argv[i+1], "%d", &hdr10plus_ttl) != 1) {
-                    usage(argv[0], argv[i], EXIT_FAILURE);
-                }
-            } else if (!strcmp(argv[i], "-hdr10plus-capacity")) {
-                if (sscanf(argv[i+1], "%d", &hdr10plus_capacity) != 1) {
                     usage(argv[0], argv[i], EXIT_FAILURE);
                 }
             } else {
@@ -1780,69 +1692,6 @@ main(
         usage(argv[0], "-f", EXIT_FAILURE);
     }
 
-    /* Apply HDR10+ store configuration from CLI flags, then handle file/input. */
-    if (hdr10plus_tolerance != 0) {
-        avpipe_hdr10plus_set_tolerance(hdr10plus_tolerance);
-    }
-    if (hdr10plus_ttl != 30) {
-        avpipe_hdr10plus_set_ttl(hdr10plus_ttl);
-    }
-    if (hdr10plus_capacity != 10000) {
-        avpipe_hdr10plus_set_capacity(hdr10plus_capacity);
-    }
-
-    /* If a HDR10+ file is provided, either preload static metadata or spawn a
-     * reader thread for live input. Live input is indicated by hdr10plus_file == "-"
-     * (stdin) or by prefix "fifo:/path/to/fifo". Other paths are preloaded.
-     */
-    if (hdr10plus_file) {
-        if (strcmp(hdr10plus_file, "-") == 0) {
-            pthread_t hdr_tid;
-            char *path_copy = strdup(hdr10plus_file);
-            if (!path_copy) {
-                elv_err("Failed to allocate memory for hdr10plus path");
-            } else if (pthread_create(&hdr_tid, NULL, hdr10plus_reader_thread, (void *)path_copy) == 0) {
-                pthread_detach(hdr_tid);
-            } else {
-                elv_err("Failed to start hdr10plus stdin reader thread");
-                free(path_copy);
-            }
-        } else if (strncmp(hdr10plus_file, "fifo:", 5) == 0) {
-            const char *fifo_path = hdr10plus_file + 5;
-            pthread_t hdr_tid;
-            char *path_copy = strdup(fifo_path);
-            if (!path_copy) {
-                elv_err("Failed to allocate memory for hdr10plus fifo path");
-            } else if (pthread_create(&hdr_tid, NULL, hdr10plus_reader_thread, (void *)path_copy) == 0) {
-                pthread_detach(hdr_tid);
-            } else {
-                elv_err("Failed to start hdr10plus fifo reader thread for %s", fifo_path);
-                free(path_copy);
-                free(hdr10plus_file);
-                hdr10plus_file = NULL;
-            }
-        } else {
-            FILE *f = fopen(hdr10plus_file, "r");
-            if (!f) {
-                elv_err("Unable to open hdr10plus file %s", hdr10plus_file);
-            } else {
-                char line[65536];
-                while (fgets(line, sizeof(line), f)) {
-                    char *sp = strchr(line, ' ');
-                    if (!sp) continue;
-                    *sp = '\0';
-                    int64_t pts = 0;
-                    if (sscanf(line, "%"PRId64, &pts) != 1) continue;
-                    char *json = sp + 1;
-                    char *nl = strchr(json, '\n');
-                    if (nl) *nl = '\0';
-                    avpipe_set_hdr10plus(pts, json, (int)strlen(json));
-                }
-                fclose(f);
-            }
-        }
-    }
-
     tids = (pthread_t *) calloc(1, n_threads*sizeof(pthread_t));
 
     /* If it is UDP, only run one thread */
@@ -1873,11 +1722,6 @@ main(
     }
 
     free(tids);
-
-    /* Cleanup allocated hdr10plus_file string */
-    if (hdr10plus_file) {
-        free(hdr10plus_file);
-    }
 
     return rc;
 }
