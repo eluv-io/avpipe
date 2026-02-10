@@ -3,6 +3,7 @@ package mpegts
 import (
 	"bytes"
 	"io"
+	"sync"
 	"testing"
 	"time"
 
@@ -15,6 +16,7 @@ import (
 	"github.com/eluv-io/common-go/format/duration"
 	"github.com/eluv-io/common-go/media/pktpool"
 	"github.com/eluv-io/common-go/util/byteutil"
+	"github.com/eluv-io/common-go/util/syncutil"
 	"github.com/eluv-io/common-go/util/timeutil"
 	"github.com/eluv-io/log-go"
 )
@@ -48,7 +50,27 @@ func TestNetReader_happyPath(t *testing.T) {
 	require.Greater(t, watch.Duration(), 2*time.Second+400*time.Millisecond)
 }
 
-func createNetReader(tp *transport.Mock) netReaderTestCtx {
+// TestNetReader_CancelNoInput tests canceling the NetReader in the case no packets are received.
+func TestNetReader_CancelNoInput(t *testing.T) {
+	ctx := createNetReader(transport.NewUDPTransport("udp://localhost:12345"))
+
+	running, err := ctx.netReader.Status()
+	require.True(t, running)
+	require.NoError(t, err)
+
+	time.Sleep(time.Second)
+
+	wg := &sync.WaitGroup{}
+	wg.Add(1)
+	go func() {
+		ctx.netReader.Cancel()
+		wg.Done()
+	}()
+
+	require.False(t, syncutil.WaitTimeout(wg, time.Second))
+}
+
+func createNetReader(tp transport.Transport) netReaderTestCtx {
 	cfg := &goavpipe.XcParams{
 		Url:               tp.URL(),
 		ConnectionTimeout: 400,

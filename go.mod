@@ -24,6 +24,7 @@ require (
 	github.com/eluv-io/apexlog-go v1.9.1-elv4 // indirect
 	github.com/eluv-io/stack v1.8.2 // indirect
 	github.com/eluv-io/utc-go v1.0.1 // indirect
+	github.com/gammazero/deque v0.1.0 // indirect
 	github.com/inconshreveable/mousetrap v1.1.0 // indirect
 	github.com/kr/pretty v0.3.1 // indirect
 	github.com/modern-go/reflect2 v1.0.2 // indirect

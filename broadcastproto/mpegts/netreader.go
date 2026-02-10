@@ -76,6 +76,7 @@ type NetReader struct {
 
 	running   atomic.Bool
 	waitGroup sync.WaitGroup
+	reader    atomic.Pointer[io.ReadCloser] // the current reader, used for closing when the NetReader is canceled
 }
 
 func (r *NetReader) Status() (running bool, err error) {
@@ -117,6 +118,10 @@ func (r *NetReader) start() error {
 
 func (r *NetReader) Cancel() {
 	r.cancel(errors.E("NetReader.Cancel", errors.K.Warn, "reason", "canceled by user request"))
+	reader := r.reader.Swap(nil)
+	if reader != nil {
+		errors.Log((*reader).Close, logNetReader.Info)
+	}
 	r.waitGroup.Wait()
 }
 
@@ -129,8 +134,9 @@ func (r *NetReader) process() error {
 		if err != nil {
 			return e(err)
 		}
+		r.reader.Store(&reader)
 
-		cont, err := r.readLoop(reader)
+		cont, err := r.readLoop(reader) // readLoop closes reader!
 		if cont {
 			if i < r.config.MaxRecoverAttempts {
 				logNetReader.Info("recoverable processor error, will retry", e(err))
@@ -153,6 +159,10 @@ func (r *NetReader) connect() (io.ReadCloser, error) {
 	logNetReader.Debug("connecting to source", "url", r.transport.URL(), "timeout", r.connectionTimeout)
 
 	for {
+		if r.ctx.Err() != nil {
+			return nil, context.Cause(r.ctx)
+		}
+
 		// PENDING(LUK): add timeout to transport.Open()
 		//               bp.cfg.ConnectionTimeout
 		attempts++
@@ -219,7 +229,7 @@ func (r *NetReader) readLoop(reader io.ReadCloser) (cont bool, err error) {
 	}
 }
 
-func (r *NetReader) isRecoverable(err error) bool {
+func (r *NetReader) isRecoverable(_ error) bool {
 	return true
 }
 

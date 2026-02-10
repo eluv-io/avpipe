@@ -552,7 +552,7 @@ type InputProcessorConfig struct {
 	MaxConnectAttempts int           `json:"max_connect_attempts"` // the maximum number of attempts to connect to the input stream
 	ReconnectDelay     duration.Spec `json:"reconnect_delay"`      // the wait time between failed connection attempts
 	// RecoverTimeout     duration.Spec // the timeout for stream recovery (across all recovery attempts)
-	MaxRecoverAttempts int           `json:"max_recover_attempts"` // the number of attempts to recover a life stream after an error to read a packet
+	MaxRecoverAttempts int           `json:"max_recover_attempts"` // the number of attempts to recover a live stream after an error to read a packet
 	RecoverDelay       duration.Spec `json:"recover_delay"`        // the wait time between failed recovery attempts
 	MaxPacketSize      int           `json:"max_packet_size"`      // the size of the buffer for reading packets
 	ChannelCap         int           `json:"channel_cap"`          // the capacity of channels used for packet forwarding

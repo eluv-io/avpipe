@@ -1128,18 +1128,18 @@ func XcInit(params *goavpipe.XcParams) (int32, error) {
 		return NewAVPipeSequentialOutWriter(inFd, 99, goavpipe.MpegtsSegment)
 	}
 
-	// Here we should setup the input opener if specified by the params
-	if params.InputCfg.BypassLibavReader {
-		if params.InputCfg.CopyMode == goavpipe.CopyModeRawOnly {
-			goavpipe.Log.Info("initializing bypass processor", "copy_mode", params.InputCfg.CopyMode)
-			// Bypass ffmpeg completely and copy the stream verbatim to parts
-			bypassProcessor, err := mpegts.NewBypassProcessor(params, seqOpenerF)
-			if err != nil {
-				return -1, errors.E("XcInit", errors.K.Invalid.Default(), err)
-			}
-			handle := goavpipe.Globals.InitBypassProcessor(bypassProcessor)
-			return handle, nil
+	if params.InputCfg.CopyMode == goavpipe.CopyModeRawOnly {
+		goavpipe.Log.Info("initializing bypass processor", "copy_mode", params.InputCfg.CopyMode)
+		// Bypass ffmpeg completely and copy the stream verbatim to parts
+		bypassProcessor, err := mpegts.NewBypassProcessor(params, seqOpenerF)
+		if err != nil {
+			return -1, errors.E("XcInit", errors.K.Invalid.Default(), err)
 		}
+		handle := goavpipe.Globals.InitBypassProcessor(bypassProcessor)
+		return handle, nil
+	}
+
+	if params.InputCfg.BypassLibavReader {
 		var opener goavpipe.InputOpener
 		var err error
 		opener, err = mpegts.NewAutoInputOpener(params, seqOpenerF)

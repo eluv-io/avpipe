@@ -50,7 +50,11 @@ func (bp *BypassProcessor) XcParams() *goavpipe.XcParams {
 }
 
 func (bp *BypassProcessor) Status() (running bool, err error) {
-	return bp.netReader.Status()
+	netReader := bp.netReader
+	if netReader != nil {
+		return netReader.Status()
+	}
+	return false, nil
 }
 
 func (bp *BypassProcessor) Start(fd int64) error {
@@ -65,7 +69,7 @@ func (bp *BypassProcessor) Start(fd int64) error {
 	bp.fd = fd
 
 	tsCfg := TsConfig{
-		SegmentLengthSec: 30,
+		SegmentLengthSec: uint64(bp.xcParams.InputCfg.Processor.PartDuration.Duration() / time.Second),
 		// Note: This isn't fully correct for future applications, because really the
 		// 'PackagingMode' of the config is about how the _output_ is packaged. When the CopyMode of
 		// 'repackage' is used, that will need to be handled
@@ -104,10 +108,16 @@ func (bp *BypassProcessor) Start(fd int64) error {
 }
 
 func (bp *BypassProcessor) Cancel() {
-	bp.netReader.Cancel()
+	netReader := bp.netReader
+	if netReader != nil {
+		bp.netReader.Cancel()
+	}
 }
 
 func (bp *BypassProcessor) Wait() {
-	bp.netReader.waitGroup.Wait()
+	netReader := bp.netReader
+	if netReader != nil {
+		bp.netReader.waitGroup.Wait()
+	}
 	bp.waitGroup.Wait()
 }
