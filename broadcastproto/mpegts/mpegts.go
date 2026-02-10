@@ -236,9 +236,9 @@ func (mpp *MpegtsPacketProcessor) StartReportingStats() {
 func (mpp *MpegtsPacketProcessor) PushStats() {
 	mpp.statsMu.Lock()
 	v, _ := json.Marshal(mpp.stats)
-	mpegtslog.Debug("mpegts stats", "stats", string(v))
+	mpegtslog.Debug("mpegts stats", "fd", mpp.inFd, "stats", string(v))
 	v, _ = json.Marshal(mpp.rtpStats)
-	mpegtslog.Debug("rtp/mpegts stats", "stats", string(v))
+	mpegtslog.Debug("rtp/mpegts stats", "fd", mpp.inFd, "stats", string(v))
 	mpp.statsMu.Unlock()
 	mpp.resetChannelSizeStats()
 	// PENDING(SS) - create a combined JSON mpegts and rtp
