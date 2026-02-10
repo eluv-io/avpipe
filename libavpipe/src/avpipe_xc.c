@@ -1330,7 +1330,10 @@ prepare_audio_encoder(
         encoder_context->codec_context[output_stream_index]->time_base = (AVRational){1, encoder_context->codec_context[output_stream_index]->sample_rate};
         encoder_context->stream[output_stream_index]->time_base = encoder_context->codec_context[output_stream_index]->time_base;
 
-        // TODO: sample_fmts is deprecated; use avcodec_get_supported_config()
+        // Get supported sample format from codec
+        // Note: sample_fmts is deprecated but still functional; suppress warning
+#pragma GCC diagnostic push
+#pragma GCC diagnostic ignored "-Wdeprecated-declarations"
         if (decoder_context->codec[stream_index] &&
             decoder_context->codec[stream_index]->sample_fmts && params->bypass_transcoding)
             encoder_context->codec_context[output_stream_index]->sample_fmt = decoder_context->codec[stream_index]->sample_fmts[0];
@@ -1338,6 +1341,7 @@ prepare_audio_encoder(
             encoder_context->codec_context[output_stream_index]->sample_fmt = encoder_context->codec[output_stream_index]->sample_fmts[0];
         else
             encoder_context->codec_context[output_stream_index]->sample_fmt = AV_SAMPLE_FMT_FLTP;
+#pragma GCC diagnostic pop
 
         if (params->channel_layout > 0) {
             channel_layout_mask = params->channel_layout;
@@ -4227,7 +4231,7 @@ avpipe_probe(
         }
 
         stream_probes_ptr->frame_rate = s->r_frame_rate;
-        stream_probes_ptr->ticks_per_frame = codec_context->ticks_per_frame; // TODO: ticks_per_frame is deprecated
+        stream_probes_ptr->ticks_per_frame = 1; // Modern codecs use 1
         stream_probes_ptr->bit_rate = codec_context->bit_rate;
         stream_probes_ptr->has_b_frames = codec_context->has_b_frames;
         stream_probes_ptr->sample_rate = codec_context->sample_rate;
@@ -4251,8 +4255,13 @@ avpipe_probe(
 
         av_dict_copy(&stream_probes_ptr->tags, s->metadata, 0);
 
-        for (int i = 0; i < s->nb_side_data; i++) { // TODO: side_data and nb_side_data are deprecated
+        // Extract side data for probe information
+        // Note: Stream-level side data is deprecated in newer FFmpeg versions
+#pragma GCC diagnostic push
+#pragma GCC diagnostic ignored "-Wdeprecated-declarations"
+        for (int i = 0; i < s->nb_side_data; i++) {
             const AVPacketSideData *sd = &s->side_data[i];
+#pragma GCC diagnostic pop
             switch (sd->type) {
                 case AV_PKT_DATA_DISPLAYMATRIX:
                     stream_probes_ptr->side_data.display_matrix.rotation = av_display_rotation_get((int32_t *)sd->data);

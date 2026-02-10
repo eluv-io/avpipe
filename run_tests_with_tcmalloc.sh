@@ -99,14 +99,30 @@ echo "GO_TEST_FLAGS: $GO_TEST_FLAGS"
 echo "======================================"
 echo ""
 
-# Run the tests with symbols and debug info
-# -gcflags="all=-N -l" keeps symbols for better stack traces
+# Build test binary first WITHOUT tcmalloc to avoid GCC false positives
+echo "Building test binary..."
+unset LD_PRELOAD
+if [ -z "$1" ]; then
+    go test -c -gcflags="all=-N -l" -o avpipe.test
+else
+    go test -c -gcflags="all=-N -l" -o avpipe.test
+fi
+
+if [ ! -f avpipe.test ]; then
+    echo "ERROR: Failed to build test binary"
+    exit 1
+fi
+
+echo "Running tests with tcmalloc heap checking..."
+export LD_PRELOAD="$TCMALLOC_LIB${LD_PRELOAD:+:$LD_PRELOAD}"
+
+# Run the pre-built test binary with tcmalloc
 if [ -z "$1" ]; then
     # Run all tests
-    go test $GO_TEST_FLAGS -gcflags="all=-N -l"
+    ./avpipe.test $GO_TEST_FLAGS
 else
     # Run specific test
-    go test $GO_TEST_FLAGS -gcflags="all=-N -l" -run "$1"
+    ./avpipe.test $GO_TEST_FLAGS -test.run "$1"
 fi
 
 EXIT_CODE=$?

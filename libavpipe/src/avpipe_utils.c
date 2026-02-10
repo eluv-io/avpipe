@@ -39,13 +39,13 @@ dump_frame(
         return;
 
     elv_dbg("%s FRAME %s, stream_index=%d, [%d] pts=%"PRId64" pkt_dts=%"PRId64" pkt_duration=%"PRId64" be_time_stamp=%"PRId64" key=%d pict_type=%d "
-        "pkt_size=%d nb_samples=%d "
+        "nb_samples=%d "
         "width=%d height=%d linesize=%d "
         "format=%d flags=%x channels=%d"
         "\n", is_audio ? "AUDIO" : "VIDEO", msg, stream_index, num,
         frame->pts, frame->pkt_dts, frame->duration, frame->best_effort_timestamp,
-        frame->key_frame, frame->pict_type, // TODO: key_frame and pkt_size are deprecated
-        frame->pkt_size, frame->nb_samples,
+        !!(frame->flags & AV_FRAME_FLAG_KEY), frame->pict_type,
+        frame->nb_samples,
         frame->width, frame->height, frame->linesize[0],
         frame->format, frame->flags, frame->ch_layout.nb_channels
     );
@@ -128,15 +128,13 @@ dump_encoder(
     for (int i = 0; i < format_context->nb_streams; i++) {
         AVStream *s = format_context->streams[i];
         AVCodecParameters *params = s->codecpar;
-        AVRational codec_time_base = av_stream_get_codec_timebase(s); // TODO: av_stream_get_codec_timebase is deprecated
         elv_dbg("ENCODER[%d] stream_index=%d url=%s profile=%d level=%d id=%d codec_type=%d start_time=%d duration=%d nb_frames=%d "
-            "time_base=%d/%d codec_time_base=%d/%d frame_rate=%d/%d avg_frame_rate=%d/%d\n",
+            "time_base=%d/%d frame_rate=%d/%d avg_frame_rate=%d/%d\n",
             i, s->index, url,
             params->profile, params->level, s->id,
             params->codec_type,
             (int)s->start_time, (int)s->duration, (int)s->nb_frames,
             s->time_base.num, s->time_base.den,
-            codec_time_base.num, codec_time_base.den,
             s->r_frame_rate.num, s->r_frame_rate.den,
             s->avg_frame_rate.num, s->avg_frame_rate.den
         );
@@ -160,7 +158,7 @@ dump_codec_context(
         "frame_size=%d frame_num=%d"
         "\n",
         cc->codec_type, cc->codec_id,
-        cc->time_base.num, cc->time_base.den, cc->framerate.num, cc->framerate.den, cc->ticks_per_frame, cc->delay,
+        cc->time_base.num, cc->time_base.den, cc->framerate.num, cc->framerate.den, cc->delay,
         (int)cc->bit_rate, cc->bit_rate_tolerance,
         cc->rc_buffer_size, cc->rc_max_rate, cc->rc_min_rate,
         cc->qmin, cc->qmax, cc->max_qdiff,
@@ -193,16 +191,12 @@ dump_stream(
     if (!s)
         return;
 
-    AVRational codec_time_base = av_stream_get_codec_timebase(s); // TODO: av_stream_get_codec_timebase is deprecated
-
     elv_dbg("STREAM idx=%d id=%d "
         "time_base=%d/%d start_time=%d duration=%d nb_frames=%d "
-        "codec_time_base=%d/%d "
         "r_frame_rate=%d/%d avg_frame_rate=%d/%d"
         "\n",
         s->index, s->id,
         s->time_base.num, s->time_base.den, (int)s->start_time, (int)s->duration, (int)s->nb_frames,
-        codec_time_base.num, codec_time_base.den,
         s->r_frame_rate.num, s->r_frame_rate.den, s->avg_frame_rate.num, s->avg_frame_rate.den
     );
 }

@@ -275,19 +275,29 @@ copy_mpegts_prepare_encoder(
 
         // out_stream->disposition = in_stream->disposition;
 
-        if (in_stream->nb_side_data) { // TODO: side_data, nb_side_data, and av_stream_new_side_data are deprecated
+        // Transfer side data from input to output stream
+        // Note: Stream-level side data is deprecated; prefer packet-level side data
+        // For copying MPEGTS streams, we preserve existing side data for compatibility
+#pragma GCC diagnostic push
+#pragma GCC diagnostic ignored "-Wdeprecated-declarations"
+        if (in_stream->nb_side_data) {
             for (int i = 0; i < in_stream->nb_side_data; i++) {
                 const AVPacketSideData *sd_src = &in_stream->side_data[i];
-                uint8_t *out_data;
-
-                out_data = av_stream_new_side_data(out_stream, sd_src->type, sd_src->size);
+                uint8_t *out_data = av_malloc(sd_src->size);
                 if (!out_data) {
                     elv_err("Failed to allocate side data, url=%s", params->url);
                     return eav_mem_alloc;
                 }
                 memcpy(out_data, sd_src->data, sd_src->size);
+                int ret = av_stream_add_side_data(out_stream, sd_src->type, out_data, sd_src->size);
+                if (ret < 0) {
+                    av_free(out_data);
+                    elv_err("Failed to add side data, url=%s", params->url);
+                    return eav_codec_context;
+                }
             }
         }
+#pragma GCC diagnostic pop
 
         // For audio/video, do more specific things. For subtitles/data/etc, just copy the stream
         switch (in_stream->codecpar->codec_type) {
