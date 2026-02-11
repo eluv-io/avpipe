@@ -10,9 +10,10 @@ import (
 
 	elog "github.com/eluv-io/log-go"
 	"golang.org/x/net/ipv4"
+	"golang.org/x/sys/unix"
 )
 
-const UDP_READ_BUFFER_SIZE = 10 * 1024 * 1024
+const UDP_READ_BUFFER_SIZE = 16 * 1024 * 1024
 
 const (
 	PacketSize = 188
@@ -23,11 +24,21 @@ var log = elog.Get("avpipe/broadcastproto/transport")
 
 var _ Transport = (*udpProto)(nil)
 
+// udpStats holds UDP socket/read statistics
+type udpStats struct {
+	pkts      uint64
+	bufSize   int    // Configured receive buffer size in bytes
+	occupancy int    // Current bytes in receive buffer
+	drops     uint64 // Packets dropped due to buffer overflow (Linux only)
+	errs      uint64 // Total read errors
+}
+
 // udpProto implements the Transport interface for UDP connections.
 type udpProto struct {
 	Url string
 
-	Conn *net.UDPConn
+	Conn  *net.UDPConn
+	Stats udpStats
 }
 
 func NewUDPTransport(url string) Transport {
@@ -84,6 +95,12 @@ func (u *udpProto) Open() (io.ReadCloser, error) {
 			return nil, err
 		}
 
+		err = conn.SetReadBuffer(UDP_READ_BUFFER_SIZE)
+		if err != nil {
+			log.Error("Open live fail to set read buffer size", err)
+			return nil, err
+		}
+
 		p := ipv4.NewPacketConn(conn)
 		if err := p.JoinGroup(iface, &net.UDPAddr{IP: liveUrl.Group.IP}); err != nil {
 			closeErr := conn.Close()
@@ -101,6 +118,11 @@ func (u *udpProto) Open() (io.ReadCloser, error) {
 		}
 		conn, err = net.ListenUDP("udp", bindAddr)
 		if err != nil {
+			return nil, err
+		}
+		err = conn.SetReadBuffer(UDP_READ_BUFFER_SIZE)
+		if err != nil {
+			log.Error("Open live fail to set read buffer size", err)
 			return nil, err
 		}
 		log.Debug("Listening on UDP address", "addr", bindAddr)
@@ -239,4 +261,40 @@ func interfaceByIP(ip net.IP) (*net.Interface, error) {
 		}
 	}
 	return nil, fmt.Errorf("no interface found with IP %s", ip)
+}
+
+// getUdpStats retrieves UDP socket statistics
+// Returns buffer size, buffer occupancy, UDP drops (drops always 0 - requires ReadMsgUDP in read loop)
+func getUdpStats(conn *net.UDPConn) (int, int, uint64, error) {
+	rawConn, err := conn.SyscallConn()
+	if err != nil {
+		return 0, 0, 0, err
+	}
+
+	var syscallErr error
+	var bufSize int
+	var occupancy int
+
+	err = rawConn.Control(func(fd uintptr) {
+		var sockErr error
+		bufSize, sockErr = unix.GetsockoptInt(int(fd), unix.SOL_SOCKET, unix.SO_RCVBUF)
+		if sockErr != nil {
+			syscallErr = sockErr
+			return
+		}
+
+		// Get current buffer occupancy (bytes available to read)
+		occupancy, sockErr = unix.IoctlGetInt(int(fd), FIONREAD)
+		if sockErr != nil {
+			syscallErr = sockErr
+			return
+		}
+	})
+
+	if err == nil {
+		err = syscallErr
+	}
+
+	// Drops tracking requires using ReadMsgUDP with SO_RXQ_OVFL control messages (Linux only)
+	return bufSize, occupancy, 0, err
 }

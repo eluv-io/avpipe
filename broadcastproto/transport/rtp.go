@@ -2,13 +2,28 @@ package transport
 
 import (
 	"encoding/binary"
-	"errors"
-	"fmt"
 	"io"
 	"net"
+
+	"github.com/eluv-io/errors-go"
 )
 
 const maxUDPPacketSize = 1<<16 - 1
+
+const diagsRtpRead = true // Diagnostics - RTP reader
+
+// rtpStats holds RTP socket and read statistics
+type rtpStats struct {
+	udpStats
+	seqDisc               int64
+	lastSeq               uint16
+	lastTimestamp         uint32
+	timestampDeltaMinUsec uint32
+	timestampDeltaMaxUsec uint32
+	timestampBackwards    int64
+	bufTooSmall           int64
+	badRtp                int64
+}
 
 type rtpProto struct {
 	Url  string
@@ -43,11 +58,11 @@ func (r *rtpProto) Open() (io.ReadCloser, error) {
 
 	rc, err := udpTransport.Open()
 	if err != nil {
-		return nil, fmt.Errorf("failed to open UDP transport for RTP: %w", err)
+		return nil, errors.NoTrace("failed to open UDP transport for RTP: %w", err)
 	}
 	udpConn, ok := rc.(*net.UDPConn)
 	if !ok {
-		return nil, errors.New("underlying connection is not a UDP connection")
+		return nil, errors.NoTrace("underlying connection is not a UDP connection")
 	}
 
 	return &rtpHandler{
@@ -65,6 +80,8 @@ type rtpHandler struct {
 	Mode TsPackagingMode
 
 	udpConn *net.UDPConn
+
+	stats rtpStats
 }
 
 func (h *rtpHandler) Close() error {
@@ -82,6 +99,7 @@ func (h *rtpHandler) Read(p []byte) (int, error) {
 	if h.bufStart >= h.bufEnd {
 		err := h.readNewPacket()
 		if err != nil {
+			h.stats.errs++
 			return 0, err
 		}
 	}
@@ -89,6 +107,8 @@ func (h *rtpHandler) Read(p []byte) (int, error) {
 	n := min(len(p), h.bufLen())
 	copy(p, h.buf[h.bufStart:h.bufStart+n])
 	h.bufStart += n
+
+	h.updateDiagsRtp(p)
 
 	return n, nil
 }
@@ -118,18 +138,77 @@ func (h *rtpHandler) bufLen() int {
 	return h.bufEnd - h.bufStart
 }
 
+func (h *rtpHandler) updateDiagsRtp(p []byte) {
+	if !diagsRtpRead {
+		return
+	}
+	if h.bufStart != 0 {
+		return // Only process full packets
+	}
+	h.stats.pkts++
+
+	if len(p) < h.bufLen() {
+		h.stats.bufTooSmall++
+	} else {
+		seq, ts, err := parseRtpHeaderMinimal(p)
+		if err != nil {
+			h.stats.badRtp++
+		} else {
+			if seq != h.stats.lastSeq+1 {
+				h.stats.seqDisc++
+			}
+			if ts > h.stats.lastTimestamp {
+				d := ts - h.stats.lastTimestamp
+				if d > h.stats.timestampDeltaMaxUsec {
+					h.stats.timestampDeltaMaxUsec = d
+				}
+				if d < h.stats.timestampDeltaMinUsec {
+					h.stats.timestampDeltaMinUsec = d
+				}
+			} else {
+				h.stats.timestampBackwards++
+			}
+			h.stats.lastSeq = seq
+			h.stats.lastTimestamp = ts
+		}
+	}
+
+	if h.stats.pkts%10_000 == 0 {
+		// Update UDP socket stats before logging
+		bufSize, occupancy, drops, err := getUdpStats(h.udpConn)
+		if err == nil {
+			h.stats.bufSize = bufSize
+			h.stats.occupancy = occupancy
+			h.stats.drops = drops
+		}
+
+		log.Info("rtp/udp stats",
+			"pkts", h.stats.pkts,
+			"errs", h.stats.errs,
+			"bufSize", h.stats.bufSize,
+			"occupancy", h.stats.occupancy,
+			"drops", h.stats.drops,
+			"seqDisc", h.stats.seqDisc,
+			"tsBackwards", h.stats.timestampBackwards,
+			"tsDeltaMin", h.stats.timestampDeltaMinUsec,
+			"tsDeltaMax", h.stats.timestampDeltaMaxUsec,
+			"bufTooSmall", h.stats.bufTooSmall,
+			"badRtp", h.stats.badRtp)
+	}
+}
+
 func StripRTP(data []byte) (int, error) {
 	hdr, err := ParseRTPHeader(data)
 	if err != nil {
 		return 0, err
 	}
 	if len(data) < hdr.ByteLength()+188 {
-		return 0, fmt.Errorf("packet too short for RTP and TS")
+		return 0, errors.NoTrace("packet too short for RTP and TS")
 	}
 	return hdr.ByteLength(), nil
 }
 
-var ErrShortRTP = errors.New("RTP packet too short")
+var ErrShortRTP = errors.NoTrace("RTP packet too short")
 
 type RTPHeader struct {
 	Version        uint8
@@ -178,18 +257,45 @@ func ParseRTPHeader(data []byte) (*RTPHeader, error) {
 	}
 	lenCSRC := 4 * int(header.CSRCCount)
 	if len(data) < baseHeaderSize+lenCSRC {
-		return nil, fmt.Errorf("RTP packet too short for CSRCs: expected at least %d bytes, got %d", baseHeaderSize+lenCSRC, len(data))
+		return nil, errors.NoTrace("RTP packet too short for CSRCs: expected at least %d bytes, got %d", baseHeaderSize+lenCSRC, len(data))
 	}
 	if header.Version != 2 {
-		return nil, fmt.Errorf("unsupported RTP version: %d", header.Version)
+		return nil, errors.NoTrace("unsupported RTP version: %d", header.Version)
 	}
 	if header.Extension {
 		extLen := binary.BigEndian.Uint16(data[baseHeaderSize+lenCSRC+2 : baseHeaderSize+lenCSRC+4]) // Read extension length
 		header.ExtensionByteCount = (int(extLen) * 4) + 4                                            // 4 bytes for the extension header
 		if len(data) < baseHeaderSize+lenCSRC+header.ExtensionByteCount {
-			return nil, fmt.Errorf("RTP packet too short for extension: expected at least %d bytes, got %d", baseHeaderSize+lenCSRC+header.ExtensionByteCount, len(data))
+			return nil, errors.NoTrace("RTP packet too short for extension: expected at least %d bytes, got %d", baseHeaderSize+lenCSRC+header.ExtensionByteCount, len(data))
 		}
 	}
 
 	return header, nil
+}
+
+// ----------------------------------------------------------------------------
+
+// parseRtpHeaderMinimal extracts only sequence number and timestamp from RTP packet
+func parseRtpHeaderMinimal(packet []byte) (uint16, uint32, error) {
+	// RTP header minimum size is 12 bytes
+	if len(packet) < 12 {
+		return 0, 0, errors.NoTrace("parseRtpHeaderMinimal", errors.K.Invalid,
+			"reason", "packet too short", "len", len(packet))
+	}
+
+	// Check RTP version (2 bits, should be 2)
+	version := packet[0] >> 6
+	if version != 2 {
+		return 0, 0, errors.NoTrace("parseRtpHeaderMinimal", errors.K.Invalid,
+			"reason", "invalid RTP version", "version", version)
+	}
+
+	// Sequence number: bytes 2-3 (big-endian)
+	seq := uint16(packet[2])<<8 | uint16(packet[3])
+
+	// Timestamp: bytes 4-7 (big-endian)
+	ts := uint32(packet[4])<<24 | uint32(packet[5])<<16 |
+		uint32(packet[6])<<8 | uint32(packet[7])
+
+	return seq, ts, nil
 }
