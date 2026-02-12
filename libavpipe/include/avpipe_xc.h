@@ -22,6 +22,7 @@
 
 #define AVIO_OUT_BUF_SIZE   (1*1024*1024)   // avio output buffer size
 #define AVIO_IN_BUF_SIZE    (1*1024*1024)   // avio input buffer size
+#define MAX_URL_SIZE        1024            // Maximum URL size
 
 //#define DEBUG_UDP_PACKET  // Uncomment for development, debugging and testing
 
@@ -165,6 +166,7 @@ typedef struct ioctx_t {
 
     /* Input filename or url */
     char                *url;
+    char                *alt_url;   /* Alternate URL for ffmpeg (e.g. rtp:// rewritten as udp://) */
 
     avpipe_buftype_t    type;
     unsigned char*      buf;
@@ -536,6 +538,7 @@ typedef struct xcparams_t {
     char        *profile;
     int         level;
     dif_type    deinterlace;                // Deinterlacing filter
+    char        *timecode;                  // Original timecode string
 } xcparams_t;
 
 #define MAX_CODEC_NAME  256

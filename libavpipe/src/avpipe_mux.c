@@ -303,6 +303,10 @@ avpipe_init_muxer(
         av_opt_set(out_muxer_ctx->format_context->priv_data, "movflags", "cmaf", 0);
     }
 
+    if (p->timecode && strlen(p->timecode) > 0) {
+        av_dict_set(&out_muxer_ctx->format_context->metadata, "timecode", p->timecode, 0);
+    }
+
     out_muxer_ctx->format_context->avpipe_opaque = out_handlers;
 
     /* Custom output buffer */
