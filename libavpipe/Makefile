@@ -20,6 +20,10 @@ OSNAME := $(shell uname -s)
 
 INCDIRS=-I${FFMPEG_DIST}/include -I../utils/include -Iinclude
 
+# Add libcbor support
+LIBCBOR_CFLAGS := $(shell pkg-config --cflags libcbor 2>/dev/null || echo "")
+LIBCBOR_LIBS := $(shell pkg-config --libs libcbor 2>/dev/null || echo "")
+
 OBJS=$(SRCS:%.c=$(BINDIR)/%.o)
 
 ifdef AVP_VERSION
@@ -28,7 +32,7 @@ else
 VERSION := $(GIT_VERSION)
 endif
 
-FLAGS=-O0 -ggdb -Wall -fPIC -DVERSION=\"$(VERSION)\"
+FLAGS=-O0 -ggdb -Wall -fPIC -DVERSION=\"$(VERSION)\" $(LIBCBOR_CFLAGS)
 
 all: avpipelib install
 

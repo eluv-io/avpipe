@@ -47,6 +47,7 @@ type testStatsInfo struct {
 	firstKeyFramePTS        uint64
 	encodingAudioFrameStats avpipe.EncodingFrameStats
 	encodingVideoFrameStats avpipe.EncodingFrameStats
+	streams                 []avpipe.StreamInfo
 }
 
 var statsInfo testStatsInfo
@@ -163,6 +164,12 @@ func (i *fileInput) Stat(streamIndex int, statType goavpipe.AVStatType, statArgs
 			log.Debug("AVP TEST IN STAT", "video first keyframe PTS", *keyFramePTS, "streamIndex", streamIndex)
 		}
 		statsInfo.firstKeyFramePTS = *keyFramePTS
+	case goavpipe.AV_IN_STAT_DATA_STREAM_INFO:
+		streamInfo := statArgs.([]avpipe.StreamInfo)
+		if debugFrameLevel {
+			log.Debug("AVP TEST IN STAT", "data stream info", streamInfo, "streamIndex", streamIndex)
+		}
+		statsInfo.streams = streamInfo
 	}
 	return nil
 }
@@ -2109,6 +2116,11 @@ func TestAVPipeStats(t *testing.T) {
 	//assert.Equal(t, int64(1406), statsInfo.encodingAudioFrameStats.FramesWritten)
 	assert.Equal(t, uint64(5625), statsInfo.audioFramesRead)
 	assert.Equal(t, uint64(2880), statsInfo.videoFramesRead)
+	// add an assert to check duration and height width
+	assert.NotEqual(t, 0, len(statsInfo.streams))
+	assert.Equal(t, int64(2880), statsInfo.streams[0].DurationTs)
+	assert.Equal(t, int(1920), statsInfo.streams[0].Width)
+	assert.Equal(t, int(1080), statsInfo.streams[0].Height)
 }
 
 // This unit test is almost a complete test for mez, abr, muxing and probing. It does:
