@@ -169,8 +169,6 @@ check_input_stream(
     xcparams_t *params,
     coderctx_t *decoder_context) {
 
-    int rc;
-
     if (!decoder_context->format_context->iformat ||
         !decoder_context->format_context->iformat->name) {
         elv_err("Failed to open input stream properly - no format name");
@@ -180,6 +178,7 @@ check_input_stream(
     switch(decoder_context->live_proto) {
         case avp_proto_mpegts:
         case avp_proto_srt:
+        case avp_proto_rtp:     /* RTP URL is rewritten to UDP, so ffmpeg sees MPEGTS */
             if (strcmp(decoder_context->format_context->iformat->name, "mpegts")) {
                 elv_err("Unsupported live source: proto=%d container=%s",
                     decoder_context->live_proto, decoder_context->format_context->iformat->name);
@@ -191,24 +190,6 @@ check_input_stream(
                 elv_err("Unsupported live source: proto=%d container=%s",
                     decoder_context->live_proto, decoder_context->format_context->iformat->name);
                 return eav_open_codec;
-            }
-            break;
-        case avp_proto_rtp:
-            // PENDING(SS) The custom live reader will strip RTP and this fails
-            if (decoder_context->format_context->priv_data) {
-                int64_t payload_type;
-                rc = av_opt_get_int(decoder_context->format_context->priv_data, "payload_type", 0, &payload_type);
-                if (rc == 0) {
-                    const int rtp_payload_type_mpegts = 33;
-                    if (payload_type != rtp_payload_type_mpegts) {
-                        elv_err("Unsupported RTP container %d", payload_type);
-                        return eav_open_codec;
-                    }
-                } else {
-                    // In the current version of libavformat the "payload_type" is not set by the decoder - log and proceed.
-                    // However if the payload_type is not MPEGTS the decoder errors out early (so we don't get here).
-                    elv_log("Unable to retrieve RTP payload type rc=%d", rc);
-                }
             }
             break;
         default:
@@ -253,6 +234,16 @@ prepare_decoder(
 
     decoder_context->live_proto = find_live_proto(inctx);
 
+    /*
+     * Rewrite rtp:// to udp:// so ffmpeg uses the MPEGTS demuxer directly.
+     * This ensures stream IDs and indexes are detected deterministically.
+     * The live_proto remains avp_proto_rtp so all avpipe logic is unchanged.
+     */
+    if (decoder_context->live_proto == avp_proto_rtp && inctx->alt_url) {
+        snprintf(inctx->alt_url, MAX_URL_SIZE, "udp://%s", inctx->url + 6);
+        elv_log("Rewriting RTP URL for ffmpeg: %s -> %s", inctx->url, inctx->alt_url);
+    }
+
     /* Set our custom reader */
     prepare_input(in_handlers, inctx, decoder_context, seekable);
 
@@ -291,7 +282,8 @@ prepare_decoder(
     }
 
     /* Allocate AVFormatContext in format_context and find input file format */
-    rc = avformat_open_input(&decoder_context->format_context, inctx->url, NULL, &opts);
+    const char *open_url = (inctx->alt_url && inctx->alt_url[0]) ? inctx->alt_url : inctx->url;
+    rc = avformat_open_input(&decoder_context->format_context, open_url, NULL, &opts);
     if (rc != 0) {
         elv_err("Could not open input file, err=%s (%d), url=%s", av_err2str(rc), rc, url);
         return eav_open_input;
@@ -302,6 +294,8 @@ prepare_decoder(
         elv_err("Could not get input stream info, url=%s", url);
         return eav_stream_info;
     }
+
+    dump_streams(inctx->url, decoder_context->format_context);
 
     rc = check_input_stream(params, decoder_context);
     if (rc != eav_success) {
@@ -4568,6 +4562,7 @@ avpipe_init(
 
     params = avpipe_copy_xcparams(p);
     inctx->params = params;
+    inctx->alt_url = (char *)calloc(1, MAX_URL_SIZE);
 
     p_xctx = (xctx_t *) calloc(1, sizeof(xctx_t));
     p_xctx->params = params;
@@ -4749,6 +4744,8 @@ avpipe_fini(
 
     if ((*xctx)->inctx && (*xctx)->inctx->udp_channel)
         elv_channel_fini(&((*xctx)->inctx->udp_channel));
+    if ((*xctx)->inctx)
+        free((*xctx)->inctx->alt_url);
     free((*xctx)->inctx);
     elv_channel_fini(&((*xctx)->vc));
     elv_channel_fini(&((*xctx)->ac));
