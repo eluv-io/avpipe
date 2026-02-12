@@ -23,6 +23,11 @@ dump_packet(
     int debug_frame_level);
 
 void
+dump_streams(
+    char *url,
+    AVFormatContext *fmt_ctx);
+
+void
 dump_decoder(
     char *url,
     coderctx_t *d);
