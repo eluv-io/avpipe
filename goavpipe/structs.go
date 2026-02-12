@@ -336,7 +336,7 @@ type XcParams struct {
 	Profile                string      `json:"profile,omitempty"`
 	Level                  int         `json:"level,omitempty"`
 	Deinterlace            int         `json:"deinterlace,omitempty"`
-	Timecode               string    `json:"timecode,omitempty"`
+	Timecode               string      `json:"timecode,omitempty"`
 }
 
 // NewXcParams initializes a XcParams struct with unset/default values
@@ -473,7 +473,7 @@ func (ic *InputConfig) Validate(url string) error {
 	switch ic.CopyMode {
 	case CopyModeUnknown:
 		return errors.New("copy mode must be set to a valid value")
-	case CopyModeNone, CopyModeRaw, CopyModeRemuxed:
+	case CopyModeNone, CopyModeRaw, CopyModeRawOnly, CopyModeRemuxed:
 	case CopyModeRepackage, CopyModeRetranscode:
 		return fmt.Errorf("copy mode not implemented: %s", ic.CopyMode)
 	default:
@@ -486,7 +486,7 @@ func (ic *InputConfig) Validate(url string) error {
 			return errors.New("copy packaging cannot be set if copy mode is 'none'")
 		}
 		return nil
-	case CopyModeRaw:
+	case CopyModeRaw, CopyModeRawOnly:
 		if useLibavReader {
 			return errors.New("libav reader cannot be used with raw copy mode")
 		} else if ic.CopyPackaging == transport.UnknownPackagingMode {
@@ -576,6 +576,8 @@ func (i InputProcessorConfig) ApplyDefaults() InputProcessorConfig {
 	}
 	if i.PartDuration == 0 {
 		i.PartDuration = 30 * duration.Second
+	} else if i.PartDuration < duration.Second {
+		i.PartDuration = duration.Second
 	}
 	// if i.RecoverTimeout == 0 {
 	// 	i.RecoverTimeout = 30 * duration.Second

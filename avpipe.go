@@ -1165,6 +1165,8 @@ func XcInit(params *goavpipe.XcParams) (int32, error) {
 }
 
 func XcRun(handle int32) error {
+	defer goavpipe.XCEnded()
+
 	if handle < -1 {
 		processor, ok := goavpipe.Globals.GetBypassProcessor(handle)
 		if !ok {
@@ -1174,14 +1176,17 @@ func XcRun(handle int32) error {
 			goavpipe.Globals.DeleteBypassProcessor(handle)
 		}()
 		fd, _ := AVPipeOpenInputGo(processor.XcParams().Url)
+		if fd < 0 {
+			return EAV_OPEN_INPUT
+		}
 		err := processor.Start(fd)
 		if err != nil {
 			return err
 		}
 		processor.Wait()
+		return nil
 	}
 
-	defer goavpipe.XCEnded()
 	if handle < 0 {
 		return EAV_BAD_HANDLE
 	}

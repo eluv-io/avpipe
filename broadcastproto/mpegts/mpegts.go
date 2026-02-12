@@ -426,11 +426,8 @@ func (mpp *MpegtsPacketProcessor) openNextOutput() error {
 
 	wc, err := mpp.opener.OpenNext()
 	if err != nil {
-		mpegtslog.Error("Failed to open next segment", "err", err)
-		mpp.stats.ErrorsOpeningOutput.Inc()
-		if mpp.stats.ErrorsOpeningOutput.Load() > 50 {
-			mpegtslog.Fatal("Too many errors opening output segments, giving up attempts")
-		}
+		count := mpp.stats.ErrorsOpeningOutput.Inc()
+		mpegtslog.Error("Failed to open next segment", "count", count, err)
 		return err
 	}
 	mpp.stats.NumSegments.Inc()
