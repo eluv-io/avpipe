@@ -4704,7 +4704,8 @@ avpipe_fini(
 
     if ((*xctx)->inctx && (*xctx)->inctx->udp_channel)
         elv_channel_fini(&((*xctx)->inctx->udp_channel));
-    free((*xctx)->inctx->alt_url);
+    if ((*xctx)->inctx)
+        free((*xctx)->inctx->alt_url);
     free((*xctx)->inctx);
     elv_channel_fini(&((*xctx)->vc));
     elv_channel_fini(&((*xctx)->ac));
