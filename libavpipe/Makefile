@@ -11,6 +11,7 @@ SRCS=avpipe_xc.c \
 	hdr10plus.c \
 	hdr10plus_json.c \
 	hdr10plus_t35.c \
+	hdr10plus_extract.c \
     scte35.c
 
 BINDIR=bin

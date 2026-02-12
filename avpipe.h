@@ -137,7 +137,34 @@ char *
 avpipe_get_hdr10plus(
     int64_t pts);
 
+/* Clear all HDR10+ metadata from the store */
+void
+avpipe_clear_hdr10plus_store(void);
+
 /* Configuration helpers for HDR10+ store */
 int avpipe_hdr10plus_set_tolerance(int64_t tolerance_pts);
 int avpipe_hdr10plus_set_ttl(int ttl_seconds);
 int avpipe_hdr10plus_set_capacity(int max_entries);
+
+/*
+ * Extract HDR10+ dynamic metadata from a video file.
+ * Decodes frames until HDR10+ metadata is found and returns as JSON string.
+ *
+ * - `avpipe_extract_hdr10plus_json`: extract HDR10+ from source file to JSON.
+ */
+int
+avpipe_extract_hdr10plus_json(
+    const char *url,
+    char **out_json,
+    int *out_json_len);
+
+/*
+ * Export all stored HDR10+ metadata to a JSON file in x265 format.
+ * Writes an array of per-frame metadata objects sorted by PTS.
+ * Returns 0 on success, -1 on error.
+ *
+ * - `avpipe_export_hdr10plus_to_file`: export all HDR10+ metadata to file for x265.
+ */
+int
+avpipe_export_hdr10plus_to_file(
+    const char *filepath);

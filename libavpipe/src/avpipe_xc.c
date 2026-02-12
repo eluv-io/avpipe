@@ -30,6 +30,11 @@
 /* HDR10+ hook: declare external getter implemented in avpipe.c to retrieve JSON by PTS */
 extern char *avpipe_get_hdr10plus(int64_t pts);
 
+/* Global HDR10+ JSON file path for x265 dhdr10-info parameter */
+static char *g_hdr10plus_json_file = NULL;
+static int g_hdr10plus_frame_count = 0;
+static int g_hdr10plus_exported = 0;  /* Flag to track if JSON file has been exported */
+
 #include <stdio.h>
 #include <fcntl.h>
 #include <assert.h>
@@ -794,12 +799,29 @@ set_h265_params(
     if (params->max_cll && params->max_cll[0] != '\0')
         av_opt_set(encoder_codec_context->priv_data, "max-cll", params->max_cll, 0);
     if (params->master_display && params->master_display[0] != '\0') {
-        av_opt_set(encoder_codec_context->priv_data, "x265-params",
-            "hdr10=1:hdr10-opt=1:repeat-headers=1:colorprim=bt2020:transfer=smpte2084:colormatrix=bt2020nc", 0);
+        /* Build x265-params with HDR10+ JSON file path if HDR10+ temp file was created */
+        char x265_params[1024];
+        snprintf(x265_params, sizeof(x265_params),
+                "hdr10=1:hdr10-opt=1:repeat-headers=1:colorprim=bt2020:transfer=smpte2084:colormatrix=bt2020nc");
+
+        /* If HDR10+ temp file exists, add dhdr10-info parameter */
+        /* Note: The file will be populated with metadata just before first encode */
+        if (g_hdr10plus_json_file) {
+            char dhdr10_param[1100];
+            snprintf(dhdr10_param, sizeof(dhdr10_param), "%s:dhdr10-info=%s",
+                    x265_params, g_hdr10plus_json_file);
+            av_opt_set(encoder_codec_context->priv_data, "x265-params", dhdr10_param, 0);
+            elv_log("[HDR10+] Configured x265 with dhdr10-info=%s (will be populated before first encode)",
+                    g_hdr10plus_json_file);
+        } else {
+            /* No HDR10+ file, use static HDR10 parameters only */
+            av_opt_set(encoder_codec_context->priv_data, "x265-params", x265_params, 0);
+        }
+
         av_opt_set(encoder_codec_context->priv_data, "master-display", params->master_display, 0);
 
         if ((params->profile == NULL || strlen(params->profile) == 0) && params->bitdepth < 10) {
-            /* If not specified or if bitdepth is specified but <10, assume 10 bits */
+            /* If not specified or ifbitdepth is specified but <10, assume 10 bits */
             av_opt_set(encoder_codec_context->priv_data, "profile", "main10", 0);
         }
     }
@@ -1219,7 +1241,13 @@ prepare_video_encoder(
 
     /* Open video encoder (initialize the encoder codec_context[i] using given codec[i]). */
     if ((rc = avcodec_open2(encoder_context->codec_context[index], encoder_context->codec[index], NULL)) < 0) {
-        elv_err("Could not open encoder for video, err=%d", rc);
+        char errbuf[256];
+        av_strerror(rc, errbuf, sizeof(errbuf));
+        fprintf(stderr, "[CODEC ERROR] Could not open encoder for video, err=%d (%s), codec=%s, bitdepth=%d\n",
+                rc, errbuf, params->ecodec, params->bitdepth);
+        fflush(stderr);
+        elv_err("Could not open encoder for video, err=%d (%s), codec=%s, bitdepth=%d",
+                rc, errbuf, params->ecodec, params->bitdepth);
         return eav_open_codec;
     }
 
@@ -2032,6 +2060,19 @@ encode_frame(
             "TOENC ", codec_context->frame_num, frame, debug_frame_level);
     }
 
+    /* Export HDR10+ JSON file before first video frame encode (lazy export after all extraction) */
+    if (frame && !g_hdr10plus_exported && stream_index == decoder_context->video_stream_index &&
+        g_hdr10plus_json_file && g_hdr10plus_frame_count > 0) {
+        extern int avpipe_export_hdr10plus_to_file(const char *filepath);
+        if (avpipe_export_hdr10plus_to_file(g_hdr10plus_json_file) == 0) {
+            elv_log("[HDR10+] Exported %d frames of metadata to %s for x265 before first encode",
+                    g_hdr10plus_frame_count, g_hdr10plus_json_file);
+            g_hdr10plus_exported = 1;
+        } else {
+            elv_err("[HDR10+] Failed to export metadata to file");
+        }
+    }
+
     /* If there is HDR10+ JSON available for this frame PTS, convert and attach it. */
     if (frame && frame->pts != AV_NOPTS_VALUE) {
         static pthread_mutex_t frame_count_mutex = PTHREAD_MUTEX_INITIALIZER;
@@ -2578,6 +2619,46 @@ transcode_video(
                 decoder_context->first_decoding_video_pts, frame->pkt_dts);
             if (in_handlers->avpipe_stater)
                 in_handlers->avpipe_stater(decoder_context->inctx, stream_index, in_stat_decoding_video_start_pts);
+        }
+
+        /* Auto-extract HDR10+ from input frames (per-frame dynamic metadata) */
+        AVFrameSideData *sd = av_frame_get_side_data(frame, AV_FRAME_DATA_DYNAMIC_HDR_PLUS);
+        if (sd && sd->data && sd->size > 0) {
+            /* Create temp file for x265 on first HDR10+ frame */
+            if (!g_hdr10plus_json_file) {
+                g_hdr10plus_json_file = strdup("/tmp/hdr10plus_avpipe_XXXXXX");
+                int fd = mkstemp(g_hdr10plus_json_file);
+                if (fd >= 0) {
+                    close(fd);
+                    elv_log("[HDR10+ AUTO-EXTRACT] Created temp file for x265: %s", g_hdr10plus_json_file);
+                }
+            }
+
+            g_hdr10plus_frame_count++;
+            if (g_hdr10plus_frame_count <= 5) {
+                elv_dbg("[HDR10+ AUTO-EXTRACT] Found HDR10+ in input frame %d (PTS=%"PRId64", size=%d)",
+                        codec_context->frame_num, frame->pts, sd->size);
+            }
+
+            /* Convert binary HDR10+ to JSON */
+            extern char *avpipe_hdr10plus_metadata_to_json(const AVDynamicHDRPlus *hdr);
+            AVDynamicHDRPlus *hdr_meta = (AVDynamicHDRPlus *)sd->data;
+            char *json = avpipe_hdr10plus_metadata_to_json(hdr_meta);
+
+            if (json) {
+                /* Store with actual frame PTS for encoder to retrieve */
+                extern int avpipe_set_hdr10plus(int64_t pts, const char *json, int json_len);
+                if (avpipe_set_hdr10plus(frame->pts, json, strlen(json)) == 0) {
+                    if (g_hdr10plus_frame_count <= 5) {
+                        elv_dbg("[HDR10+ AUTO-EXTRACT] Stored HDR10+ for PTS=%"PRId64, frame->pts);
+                    }
+                } else {
+                    elv_err("[HDR10+ AUTO-EXTRACT] Failed to store HDR10+ for PTS=%"PRId64"", frame->pts);
+                }
+                free(json);
+            } else {
+                elv_err("[HDR10+ AUTO-EXTRACT] Failed to convert metadata to JSON for PTS=%"PRId64"", frame->pts);
+            }
         }
 
         /* If force_equal_fduration is set then frame_duration > 0 is true */
@@ -3944,6 +4025,20 @@ xc_done:
 
     decoder_context->stopped = 1;
     encoder_context->stopped = 1;
+
+    /* Clean up HDR10+ temporary JSON file if it was created */
+    if (g_hdr10plus_json_file) {
+        unlink(g_hdr10plus_json_file);
+        elv_log("[HDR10+] Cleaned up temp file: %s", g_hdr10plus_json_file);
+        free(g_hdr10plus_json_file);
+        g_hdr10plus_json_file = NULL;
+    }
+    g_hdr10plus_frame_count = 0;
+    g_hdr10plus_exported = 0;
+
+    /* Clear HDR10+ metadata store */
+    extern void avpipe_clear_hdr10plus_store(void);
+    avpipe_clear_hdr10plus_store();
 
     if (decoder_context->cancelled) {
         elv_warn("transcoding session cancelled, handle=%d, url=%s", xctx->handle, params->url);

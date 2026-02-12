@@ -1,6 +1,7 @@
 /* HDR10+ simple store implementation for libavpipe */
 #include <stdlib.h>
 #include <string.h>
+#include <stdio.h>
 #include <pthread.h>
 #include <time.h>
 #include <stdint.h>
@@ -222,17 +223,8 @@ avpipe_get_hdr10plus(
     }
 
     if (best && (hdr10plus_tolerance_pts == 0 ? best->pts == pts : best_diff <= hdr10plus_tolerance_pts)) {
-        /* remove best and return json */
-        char *json = best->json;
-        /* unlink best from LRU */
-        if (best->prev) best->prev->next = best->next;
-        else hdr_lru_head = best->next;
-        if (best->next) best->next->prev = best->prev;
-        else hdr_lru_tail = best->prev;
-        /* unlink from hash */
-        hdr_unlink_from_bucket(best);
-        free(best);
-        hdr10plus_count--;
+        /* Return a COPY of the JSON without removing the entry */
+        char *json = strdup(best->json);
         pthread_mutex_unlock(&hdr_store_mutex);
         return json;
     }
@@ -273,4 +265,106 @@ int avpipe_hdr10plus_set_capacity(int max_entries) {
     }
     pthread_mutex_unlock(&hdr_store_mutex);
     return 0;
+}
+
+/* Export API - writes all stored HDR10+ metadata to a JSON file in x265 array format */
+int avpipe_export_hdr10plus_to_file(const char *filepath) {
+    if (!filepath) return -1;
+
+    pthread_mutex_lock(&hdr_store_mutex);
+
+    /* Collect all entries into an array */
+    int count = hdr10plus_count;
+    if (count == 0) {
+        pthread_mutex_unlock(&hdr_store_mutex);
+        /* Write empty array */
+        FILE *f = fopen(filepath, "w");
+        if (!f) return -1;
+        fprintf(f, "[]\n");
+        fclose(f);
+        return 0;
+    }
+
+    hdr_entry_t **entries = (hdr_entry_t **)malloc(count * sizeof(hdr_entry_t *));
+    if (!entries) {
+        pthread_mutex_unlock(&hdr_store_mutex);
+        return -1;
+    }
+
+    /* Walk LRU list to collect all entries */
+    int idx = 0;
+    hdr_entry_t *cur = hdr_lru_head;
+    while (cur && idx < count) {
+        entries[idx++] = cur;
+        cur = cur->next;
+    }
+    count = idx;
+
+    /* Sort by PTS (bubble sort is fine for small arrays) */
+    for (int i = 0; i < count - 1; i++) {
+        for (int j = 0; j < count - i - 1; j++) {
+            if (entries[j]->pts > entries[j+1]->pts) {
+                hdr_entry_t *tmp = entries[j];
+                entries[j] = entries[j+1];
+                entries[j+1] = tmp;
+            }
+        }
+    }
+
+    /* Write JSON array to file */
+    FILE *f = fopen(filepath, "w");
+    if (!f) {
+        free(entries);
+        pthread_mutex_unlock(&hdr_store_mutex);
+        return -1;
+    }
+
+    fprintf(f, "[\n");
+    for (int i = 0; i < count; i++) {
+        fprintf(f, "%s", entries[i]->json);
+        if (i < count - 1) {
+            fprintf(f, ",\n");
+        } else {
+            fprintf(f, "\n");
+        }
+    }
+    fprintf(f, "]\n");
+
+    fclose(f);
+    free(entries);
+    pthread_mutex_unlock(&hdr_store_mutex);
+
+    return 0;
+}
+
+/* Clear all HDR10+ metadata from the store */
+void avpipe_clear_hdr10plus_store(void) {
+    pthread_mutex_lock(&hdr_store_mutex);
+
+    /* Free all entries */
+    hdr_entry_t *cur = hdr_lru_head;
+    while (cur) {
+        hdr_entry_t *next = cur->next;
+        free(cur->json);
+        free(cur);
+        cur = next;
+    }
+
+    /* Reset all pointers and counters */
+    hdr_lru_head = NULL;
+    hdr_lru_tail = NULL;
+    hdr10plus_count = 0;
+    for (int i = 0; i < HDR_HASH_SIZE; i++) {
+        hdr_buckets[i] = NULL;
+    }
+
+    pthread_mutex_unlock(&hdr_store_mutex);
+}
+
+/* Get count of HDR10+ metadata entries in the store */
+int avpipe_get_hdr10plus_count(void) {
+    pthread_mutex_lock(&hdr_store_mutex);
+    int count = hdr10plus_count;
+    pthread_mutex_unlock(&hdr_store_mutex);
+    return count;
 }

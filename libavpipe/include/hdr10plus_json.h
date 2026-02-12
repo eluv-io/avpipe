@@ -18,4 +18,23 @@
  */
 int avpipe_hdr10plus_json_to_metadata(const char *json, AVDynamicHDRPlus **out_metadata, AVBufferRef **out_buf);
 
+/*
+ * Convert AVDynamicHDRPlus metadata to JSON string.
+ *
+ * @param hdr          Input AVDynamicHDRPlus metadata structure
+ * @return Newly allocated JSON string (caller must free()), or NULL on error
+ */
+char *avpipe_hdr10plus_metadata_to_json(const AVDynamicHDRPlus *hdr);
+
+/*
+ * Extract HDR10+ metadata from a video file and return as JSON string.
+ * Decodes frames until HDR10+ dynamic metadata is found.
+ *
+ * @param url          Input video file path or URL
+ * @param out_json     Output pointer to newly allocated JSON string (caller must free())
+ * @param out_json_len Output pointer to JSON string length
+ * @return 0 on success, -1 on error (no HDR10+ found or decode error)
+ */
+int avpipe_extract_hdr10plus_json(const char *url, char **out_json, int *out_json_len);
+
 #endif /* HDR10PLUS_JSON_H */

@@ -69,7 +69,7 @@ func TestHDR10PlusEndToEnd(t *testing.T) {
 		AudioBitrate:           -1,
 		VideoSegDurationTs:     180000,
 		AudioSegDurationTs:     -1,
-		Ecodec:                 "libx264",
+		Ecodec:                 "libx265",
 		Ecodec2:                "",
 		VideoTimeBase:          90000,
 		Url:                    inputFile,
@@ -81,12 +81,13 @@ func TestHDR10PlusEndToEnd(t *testing.T) {
 		ForceKeyInt:            60,
 		SampleRate:             -1,
 		BypassTranscoding:      false,
-		BitDepth:               8,
 		CrfStr:                 "23",
 		EncHeight:              -1,
 		EncWidth:               -1,
 		ExtractImageIntervalTs: -1,
 		GPUIndex:               -1,
+		MasterDisplay:          "G(13250,34500)B(7500,3000)R(34000,16000)WP(15635,16450)L(10000000,1)",
+		MaxCLL:                 "1000,400",
 	}
 	setFastEncodeParams(params, false)
 

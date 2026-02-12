@@ -180,3 +180,82 @@ int avpipe_hdr10plus_json_to_metadata(const char *json, AVDynamicHDRPlus **out_m
     *out_buf = buf;
     return 0;
 }
+
+/*
+ * Convert AVDynamicHDRPlus metadata to JSON string.
+ * Returns newly allocated JSON string that caller must free(), or NULL on error.
+ */
+char *avpipe_hdr10plus_metadata_to_json(const AVDynamicHDRPlus *hdr)
+{
+    if (!hdr) {
+        elv_err("HDR10+ metadata_to_json: NULL metadata");
+        return NULL;
+    }
+
+    // Allocate buffer for JSON output (4KB should be plenty)
+    size_t buf_size = 4096;
+    char *json = (char *)malloc(buf_size);
+    if (!json) {
+        elv_err("HDR10+ metadata_to_json: malloc failed");
+        return NULL;
+    }
+
+    int pos = 0;
+
+    // Start JSON object - use field names that match the parser expectations
+    pos += snprintf(json + pos, buf_size - pos, "{");
+
+    // NumberOfWindows
+    pos += snprintf(json + pos, buf_size - pos,
+                   "\"NumberOfWindows\":%d,", hdr->num_windows);
+
+    // TargetedSystemDisplayMaximumLuminance
+    int tsdml = hdr->targeted_system_display_maximum_luminance.num /
+                (hdr->targeted_system_display_maximum_luminance.den ?
+                 hdr->targeted_system_display_maximum_luminance.den : 1);
+    pos += snprintf(json + pos, buf_size - pos,
+                   "\"TargetedSystemDisplayMaximumLuminance\":%d,", tsdml);
+
+    // MaxScl values (R, G, B) - single array at top level
+    pos += snprintf(json + pos, buf_size - pos, "\"MaxScl\":[");
+    for (int i = 0; i < 3; i++) {
+        int val = (hdr->params[0].maxscl[i].num * 100000) /
+                  (hdr->params[0].maxscl[i].den ? hdr->params[0].maxscl[i].den : 1);
+        pos += snprintf(json + pos, buf_size - pos, "%d%s", val, (i < 2 ? "," : ""));
+    }
+    pos += snprintf(json + pos, buf_size - pos, "],");
+
+    // AverageRGB
+    int avg_rgb = (hdr->params[0].average_maxrgb.num * 100000) /
+                  (hdr->params[0].average_maxrgb.den ? hdr->params[0].average_maxrgb.den : 1);
+    pos += snprintf(json + pos, buf_size - pos, "\"AverageRGB\":%d", avg_rgb);
+
+    // Distribution percentiles (if present)
+    int num_dist = hdr->params[0].num_distribution_maxrgb_percentiles;
+    if (num_dist > 0) {
+        pos += snprintf(json + pos, buf_size - pos, ",\"DistributionIndex\":[");
+        for (int i = 0; i < num_dist && i < 15; i++) {
+            pos += snprintf(json + pos, buf_size - pos, "%d%s",
+                           hdr->params[0].distribution_maxrgb[i].percentage,
+                           (i < num_dist - 1 ? "," : ""));
+        }
+        pos += snprintf(json + pos, buf_size - pos, "],");
+
+        pos += snprintf(json + pos, buf_size - pos, "\"DistributionValues\":[");
+        for (int i = 0; i < num_dist && i < 15; i++) {
+            int val = (hdr->params[0].distribution_maxrgb[i].percentile.num * 100000) /
+                      (hdr->params[0].distribution_maxrgb[i].percentile.den ?
+                       hdr->params[0].distribution_maxrgb[i].percentile.den : 1);
+            pos += snprintf(json + pos, buf_size - pos, "%d%s", val,
+                           (i < num_dist - 1 ? "," : ""));
+        }
+        pos += snprintf(json + pos, buf_size - pos, "]");
+    }
+
+    // Close main object
+    pos += snprintf(json + pos, buf_size - pos, "}");
+
+    elv_dbg("HDR10+ metadata_to_json: generated %d bytes of JSON", pos);
+
+    return json;
+}
