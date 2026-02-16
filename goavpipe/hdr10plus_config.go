@@ -1,6 +1,9 @@
 package goavpipe
 
-// #cgo LDFLAGS: -L${SRCDIR}/../lib -lavpipe
+// #cgo pkg-config: libavcodec
+// #cgo pkg-config: libavformat
+// #cgo pkg-config: libavutil
+// #cgo LDFLAGS: -L${SRCDIR}/../lib -lavpipe -lutils
 // #include <stdint.h>
 // #include <stdlib.h>
 // int avpipe_hdr10plus_set_tolerance(long long tolerance_pts);

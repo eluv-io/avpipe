@@ -1,6 +1,14 @@
 package goavpipe
 
-// #cgo LDFLAGS: -L${SRCDIR}/../lib -lavpipe
+// #cgo pkg-config: libavcodec
+// #cgo pkg-config: libavfilter
+// #cgo pkg-config: libavformat
+// #cgo pkg-config: libavutil
+// #cgo pkg-config: libswresample
+// #cgo pkg-config: libavdevice
+// #cgo pkg-config: libswscale
+// #cgo pkg-config: libpostproc
+// #cgo LDFLAGS: -L${SRCDIR}/../lib -lavpipe -lutils
 // #include <stdint.h>
 // #include <stdlib.h>
 // /* Forward declare to avoid pulling FFmpeg headers via avpipe.h */

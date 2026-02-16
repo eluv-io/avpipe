@@ -28,7 +28,9 @@ package avpipe
 // #cgo pkg-config: srt
 // #cgo CFLAGS: -I${SRCDIR}/libavpipe/include
 // #cgo CFLAGS: -I${SRCDIR}/utils/include
-// #cgo LDFLAGS: -L${SRCDIR}
+// #cgo LDFLAGS: -L${SRCDIR}/lib
+// #cgo LDFLAGS: -lavpipe -lutils
+// #cgo LDFLAGS: -lavfilter -lavcodec -lavformat -lavdevice -lswresample -lswscale -lavutil -lpostproc
 // #cgo linux LDFLAGS: -Wl,-rpath,$ORIGIN/../lib
 // #cgo LDFLAGS: -ltcmalloc
 
