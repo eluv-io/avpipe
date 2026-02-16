@@ -208,7 +208,7 @@ _set_log_header(
 
     /* Get current time */
     t = time(NULL);
-    lt = localtime(&t);   
+    lt = localtime(&t);
 
     return sprintf(buf, "%04d-%02d-%02d %02d:%02d:%02d.%03d %s ",
         lt->tm_year+1900, lt->tm_mon, lt->tm_mday, lt->tm_hour, lt->tm_min, lt->tm_sec, msec, level_str);
@@ -248,14 +248,14 @@ _flush_log(
 
     /*
      * TODO
-     * 
+     *
      * elv-reza: This locking works and protects the race, but not perfect.
      * Basically, you don't need to wait for closing the log file, which can be
      * slow. You can split the locking in two sections, one before rotating the
      * log file and one inside rotate_log() and reduce the locking time (by
      * avoiding lock around close function) so the other threads can still do
      * logging. It needs some re-arranging the code.
-     * 
+     *
      * elv-peter: Ideally we need to reexamine the entirety of the logging code
      * wrt multithreading and make it more foolproof, document usage and
      * expectations, and add unit/performance tests.
@@ -288,10 +288,10 @@ elv_vlog(int level, const char *prefix, const char *fmt, va_list vl)
     if (_logger.elv_logger[level] == NULL) {
         // Only filter if the handler function is not set
         if (_logger._log_level > level) return 0;
-        
+
         len = _set_log_header(buf, get_level_str(level));
     }
-    
+
     len += snprintf(buf+len, LOG_BUFF_SIZE-len, "%s ", prefix);
     len += vsnprintf(buf+len, LOG_BUFF_SIZE-len, fmt, vl);
 

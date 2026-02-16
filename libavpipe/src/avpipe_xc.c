@@ -826,10 +826,10 @@ prescan_for_hdr10plus(
     }
     close(json_fd);  /* hdr10plus_tool will write to this */
 
-    elv_log("[HDR10+ EXTRACT] Temp files: hevc=%s json=%s", hevc_path, json_path);
+    elv_dbg("[HDR10+ EXTRACT] Temp files: hevc=%s json=%s", hevc_path, json_path);
 
     /* Extract raw HEVC bitstream in Annex B format (with start codes) */
-    elv_log("[HDR10+ EXTRACT] Step 1: Extracting raw HEVC bitstream to Annex B format");
+    elv_dbg("[HDR10+ EXTRACT] Step 1: Extracting raw HEVC bitstream to Annex B format");
 
     /* Initialize bitstream filter to convert MP4 format to Annex B */
     const AVBitStreamFilter *bsf = av_bsf_get_by_name("hevc_mp4toannexb");
@@ -840,7 +840,7 @@ prescan_for_hdr10plus(
         if (bsf_ctx) {
             avcodec_parameters_copy(bsf_ctx->par_in, codecpar);
             av_bsf_init(bsf_ctx);
-            elv_log("[HDR10+ EXTRACT] Using hevc_mp4toannexb bitstream filter");
+            elv_dbg("[HDR10+ EXTRACT] Using hevc_mp4toannexb bitstream filter");
         }
     }
 
@@ -871,7 +871,10 @@ prescan_for_hdr10plus(
             }
 
             /* Write packet data to HEVC file */
-            write(hevc_fd, write_pkt->data, write_pkt->size);
+            ssize_t written = write(hevc_fd, write_pkt->data, write_pkt->size);
+            if (written < 0) {
+                elv_log("[HDR10+ EXTRACT] Failed to write HEVC packet data");
+            }
             frame_count++;
 
             if (filtered_pkt) {
@@ -893,7 +896,7 @@ prescan_for_hdr10plus(
     av_packet_free(&pkt);
     if (bsf_ctx) av_bsf_free(&bsf_ctx);
 
-    elv_log("[HDR10+ EXTRACT] Extracted %d video packets to %s", frame_count, hevc_path);
+    elv_dbg("[HDR10+ EXTRACT] Extracted %d video packets to %s", frame_count, hevc_path);
 
     if (!hdr10plus_detected || frame_count == 0) {
         elv_log("[HDR10+ EXTRACT] No video data extracted");
@@ -906,7 +909,7 @@ prescan_for_hdr10plus(
     }
 
     /* Call hdr10plus_tool to extract metadata */
-    elv_log("[HDR10+ EXTRACT] Step 2: Running hdr10plus_tool extract");
+    elv_dbg("[HDR10+ EXTRACT] Step 2: Running hdr10plus_tool extract");
 
     char cmd[2048];
     snprintf(cmd, sizeof(cmd), "hdr10plus_tool extract \"%s\" -o \"%s\" 2>&1", hevc_path, json_path);
@@ -926,7 +929,7 @@ prescan_for_hdr10plus(
         /* Log tool output for debugging */
         line[strcspn(line, "\n")] = 0;  /* Remove newline */
         if (strlen(line) > 0) {
-            elv_log("[hdr10plus_tool] %s", line);
+            elv_dbg("[hdr10plus_tool] %s", line);
         }
     }
 
@@ -944,7 +947,7 @@ prescan_for_hdr10plus(
                 fwrite(buf, 1, n, hevc_dst);
             }
             fclose(hevc_dst);
-            elv_log("[HDR10+ EXTRACT] Saved diagnostic HEVC copy to %s", hevc_diag_path);
+            elv_dbg("[HDR10+ EXTRACT] Saved diagnostic HEVC copy to %s", hevc_diag_path);
         }
         fclose(hevc_src);
     }
@@ -963,7 +966,7 @@ prescan_for_hdr10plus(
     /* Verify JSON file was created and has content */
     struct stat st;
     if (stat(json_path, &st) != 0 || st.st_size == 0) {
-        elv_log("[HDR10+ EXTRACT] No HDR10+ metadata found in stream");
+        elv_dbg("[HDR10+ EXTRACT] No HDR10+ metadata found in stream");
         unlink(json_path);
         av_seek_frame(decoder_context->format_context, video_index, 0, AVSEEK_FLAG_BACKWARD);
         avcodec_flush_buffers(decoder_context->codec_context[video_index]);
@@ -972,11 +975,11 @@ prescan_for_hdr10plus(
 
     /* Success! Set global path for x265 */
     g_hdr10plus_json_file = strdup(json_path);
-    elv_log("[HDR10+ EXTRACT] Successfully extracted HDR10+ metadata: %s (%ld bytes)",
+    elv_dbg("[HDR10+ EXTRACT] Successfully extracted HDR10+ metadata: %s (%ld bytes)",
             g_hdr10plus_json_file, st.st_size);
 
     /* Seek back to beginning for actual transcoding */
-    elv_log("[HDR10+ EXTRACT] Seeking back to start for transcoding");
+    elv_dbg("[HDR10+ EXTRACT] Seeking back to start for transcoding");
     av_seek_frame(decoder_context->format_context, video_index, 0, AVSEEK_FLAG_BACKWARD);
     avcodec_flush_buffers(decoder_context->codec_context[video_index]);
 
