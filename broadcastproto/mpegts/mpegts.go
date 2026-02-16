@@ -36,6 +36,7 @@ var mpegtslog = elog.Get("avpipe/broadcastproto/mpegts")
 type SequentialOpener interface {
 	OpenNext() (io.WriteCloser, error)
 	Stat(args string) error
+	ReportStart() error
 }
 
 type MpegtsPacketProcessor struct {
@@ -235,13 +236,17 @@ func (mpp *MpegtsPacketProcessor) StartReportingStats() {
 func (mpp *MpegtsPacketProcessor) PushStats() {
 	mpp.statsMu.Lock()
 	v, _ := json.Marshal(mpp.stats)
-	mpegtslog.Debug("mpegts stats", "stats", string(v))
+	mpegtslog.Debug("mpegts stats", "fd", mpp.inFd, "stats", string(v))
 	v, _ = json.Marshal(mpp.rtpStats)
-	mpegtslog.Debug("rtp/mpegts stats", "stats", string(v))
+	mpegtslog.Debug("rtp/mpegts stats", "fd", mpp.inFd, "stats", string(v))
 	mpp.statsMu.Unlock()
 	mpp.resetChannelSizeStats()
 	// PENDING(SS) - create a combined JSON mpegts and rtp
-	mpp.opener.Stat(string(v))
+	_ = mpp.opener.Stat(string(v))
+}
+
+func (mpp *MpegtsPacketProcessor) ReportStart() {
+	_ = mpp.opener.ReportStart()
 }
 
 func (mpp *MpegtsPacketProcessor) Stop() {
@@ -421,11 +426,8 @@ func (mpp *MpegtsPacketProcessor) openNextOutput() error {
 
 	wc, err := mpp.opener.OpenNext()
 	if err != nil {
-		mpegtslog.Error("Failed to open next segment", "err", err)
-		mpp.stats.ErrorsOpeningOutput.Inc()
-		if mpp.stats.ErrorsOpeningOutput.Load() > 50 {
-			mpegtslog.Fatal("Too many errors opening output segments, giving up attempts")
-		}
+		count := mpp.stats.ErrorsOpeningOutput.Inc()
+		mpegtslog.Error("Failed to open next segment", "count", count, err)
 		return err
 	}
 	mpp.stats.NumSegments.Inc()

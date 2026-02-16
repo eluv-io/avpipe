@@ -55,6 +55,14 @@ type OutputHandler interface {
 	Stat(streamIndex int, avType AVType, statType AVStatType, statArgs interface{}) error
 }
 
+type BypassProcessor interface {
+	Start(fd int64) error
+	Cancel()
+	Status() (running bool, err error)
+	Wait()
+	XcParams() *XcParams
+}
+
 // Global table of handlers
 var gHandlers map[int64]any = make(map[int64]any)
 var gMuxHandlers map[int64]OutputHandler = make(map[int64]OutputHandler)
@@ -68,8 +76,9 @@ var gMutex sync.Mutex
 var gInputOpener InputOpener
 var gOutputOpener OutputOpener
 var gMuxOutputOpener MuxOutputOpener
+var gBypassProcessors = make(map[int32]BypassProcessor) // Keeps processors that bypass libavpipe/ffmpeg
 
-// Globals wraps the global variables used in avpipe. It should be gradually replaced in the
+// GlobalsT wraps the global variables used in avpipe. It should be gradually replaced in the
 // future, but for now is a global singleton.
 type GlobalsT struct{}
 
@@ -135,6 +144,39 @@ func (g *GlobalsT) GetMuxOutputHandler(fd int64) OutputHandler {
 	defer gMutex.Unlock()
 
 	return gMuxHandlers[fd]
+}
+
+// InitBypassProcessor initializes a processor that bypasses libavpipe/ffmpeg completely. The returned handle is
+// negative to distinguish it from regular handles.
+func (g *GlobalsT) InitBypassProcessor(processor BypassProcessor) int32 {
+	gMutex.Lock()
+	defer gMutex.Unlock()
+
+	gHandleNum++
+	// generate a negative handle to mark bypass (smaller than -1 which is used for invalid handles)
+	handle := int32(-1 - gHandleNum)
+
+	// processor.SetHandle(handle)
+	gBypassProcessors[handle] = processor
+	return handle
+}
+
+// DeleteBypassProcessor removes the bypass processor for the given handle.
+func (g *GlobalsT) DeleteBypassProcessor(handle int32) {
+	gMutex.Lock()
+	defer gMutex.Unlock()
+
+	delete(gBypassProcessors, handle)
+}
+
+// GetBypassProcessor retrieves the bypass processor for the given handle, returning the processor and a boolean
+// indicating if it exists.
+func (g *GlobalsT) GetBypassProcessor(handle int32) (BypassProcessor, bool) {
+	gMutex.Lock()
+	defer gMutex.Unlock()
+
+	p, ok := gBypassProcessors[handle]
+	return p, ok
 }
 
 // This is used to set global input/output opener for avpipe

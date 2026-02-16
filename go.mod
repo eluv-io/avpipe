@@ -30,6 +30,7 @@ require (
 	github.com/eluv-io/stack v1.8.2 // indirect
 	github.com/eluv-io/utc-go v1.0.1 // indirect
 	github.com/fxamacker/cbor/v2 v2.8.0 // indirect
+	github.com/gammazero/deque v0.1.0 // indirect
 	github.com/ghodss/yaml v1.0.0 // indirect
 	github.com/gin-gonic/gin v1.7.7 // indirect
 	github.com/go-playground/locales v0.13.0 // indirect
@@ -62,6 +63,7 @@ require (
 )
 
 replace (
+	github.com/fxamacker/cbor/v2 => github.com/eluv-io/cbor/v2 v2.8.1-0.20250506081522-e7b11bfa1dad
 	github.com/modern-go/gls => github.com/eluv-io/gls v1.0.0-elv1
 	github.com/prometheus/prometheus => github.com/prometheus/prometheus v1.7.1-0.20170814170113-3101606756c5
 	gopkg.in/urfave/cli.v1 => github.com/urfave/cli v1.22.0

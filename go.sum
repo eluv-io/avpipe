@@ -30,6 +30,8 @@ github.com/davecgh/go-spew v1.1.1 h1:vj9j/u1bqnvCEfJOwUhtlOARqs3+rkHYY13jYWTU97c
 github.com/davecgh/go-spew v1.1.1/go.mod h1:J7Y8YcW2NihsgmVo/mv3lAwl/skON4iLHjSsI+c5H38=
 github.com/eluv-io/apexlog-go v1.9.1-elv4 h1:lJE8+Y+GtUhw1BBAlFePuVZg78jCKgeFsdqBtrjbtJc=
 github.com/eluv-io/apexlog-go v1.9.1-elv4/go.mod h1:pZhIuRbWTsOm5WEOxke9B2dczjQuaEGeJXEYd5lCxkk=
+github.com/eluv-io/cbor/v2 v2.8.1-0.20250506081522-e7b11bfa1dad h1:30fHO0KQJrcDV0uDZ5nWUFwen7FZcBIa13x6S5MsWi4=
+github.com/eluv-io/cbor/v2 v2.8.1-0.20250506081522-e7b11bfa1dad/go.mod h1:koW2XJwOj9cAvE4+oLHCQtCKLfPor83Jbyyy8OwOAzE=
 github.com/eluv-io/common-go v1.1.15-0.20260211215853-0b8c1dd7b2b4 h1:3YDHfix5HxQzWP++ps1RmTIbFCW2YHK7+Rpg2nwBIdI=
 github.com/eluv-io/common-go v1.1.15-0.20260211215853-0b8c1dd7b2b4/go.mod h1:ErfnH6ZQtrvwm6msZVFYTN48CbGQogrEM65m3/RjJVA=
 github.com/eluv-io/errors-go v1.0.4 h1:IlSHojkeNgjT4qBO1PpiS8R0XlyvrctiDCBszw/OrrA=
@@ -47,8 +49,8 @@ github.com/eluv-io/utc-go v1.0.1/go.mod h1:6wHGAqqgqzzjTV6HBXSmFiiQOiakDJOPip8RY
 github.com/fatih/color v1.7.0/go.mod h1:Zm6kSWBoL9eyXnKyktHP6abPY2pDugNf5KwzbycvMj4=
 github.com/fsnotify/fsnotify v1.4.7/go.mod h1:jwhsz4b93w/PPRr/qN1Yymfu8t87LnFCMoQvtojpjFo=
 github.com/fsnotify/fsnotify v1.4.9/go.mod h1:znqG4EE+3YCdAaPaxE2ZRY/06pZUdp0tY4IgpuI1SZQ=
-github.com/fxamacker/cbor/v2 v2.8.0 h1:fFtUGXUzXPHTIUdne5+zzMPTfffl3RD5qYnkY40vtxU=
-github.com/fxamacker/cbor/v2 v2.8.0/go.mod h1:vM4b+DJCtHn+zz7h3FFp/hDAI9WNWCsZj23V5ytsSxQ=
+github.com/gammazero/deque v0.1.0 h1:f9LnNmq66VDeuAlSAapemq/U7hJ2jpIWa4c09q8Dlik=
+github.com/gammazero/deque v0.1.0/go.mod h1:KQw7vFau1hHuM8xmI9RbgKFbAsQFWmBpqQ2KenFLk6M=
 github.com/ghodss/yaml v1.0.0 h1:wQHKEahhL6wmXdzwWG11gIVCkOv05bNOh+Rxn0yngAk=
 github.com/ghodss/yaml v1.0.0/go.mod h1:4dBDuWmgqj2HViK6kFavaiC9ZROes6MMH2rRYeMEF04=
 github.com/gin-contrib/sse v0.1.0/go.mod h1:RHrZQHXnP2xjPF+u1gW/2HnVO7nvIa9PG3Gm+fLHvGI=

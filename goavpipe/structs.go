@@ -26,6 +26,7 @@ const (
 	AV_OUT_STAT_END_FILE                = 11
 	AV_IN_STAT_DATA_SCTE35              = 12
 	AV_IN_STAT_MPEGTS                   = 13
+	AV_IN_STAT_MPEGTS_START             = 14
 )
 
 func (a AVStatType) Name() string {
@@ -56,6 +57,8 @@ func (a AVStatType) Name() string {
 		return "AV_IN_STAT_DATA_SCTE35"
 	case AV_IN_STAT_MPEGTS:
 		return "AV_IN_STAT_MPEGTS"
+	case AV_IN_STAT_MPEGTS_START:
+		return "AV_IN_STAT_MPEGTS_START"
 	default:
 		return fmt.Sprintf("Unknown(%d)", a)
 	}
@@ -333,7 +336,7 @@ type XcParams struct {
 	Profile                string      `json:"profile,omitempty"`
 	Level                  int         `json:"level,omitempty"`
 	Deinterlace            int         `json:"deinterlace,omitempty"`
-	Timecode               string    `json:"timecode,omitempty"`
+	Timecode               string      `json:"timecode,omitempty"`
 }
 
 // NewXcParams initializes a XcParams struct with unset/default values
@@ -434,6 +437,8 @@ const (
 	// CopyModeRetranscode can be used to replace an elementary stream in the MPEGTS
 	// such as converting jpegxs to h264, then remuxing (example for future use)
 	CopyModeRetranscode CopyMode = "retranscode_stream"
+	// CopyModeRawOnly is like CopyModeRaw, but also disables transcoding and production of fragmented mp4 parts
+	CopyModeRawOnly CopyMode = "raw_only"
 )
 
 type InputConfig struct {
@@ -441,8 +446,9 @@ type InputConfig struct {
 	CopyPackaging  transport.TsPackagingMode `json:"copy_packaging"`
 	InputPackaging transport.TsPackagingMode `json:"input_packaging"` // packaging mode of the source stream
 	// NOTE: Even if not bypassing libav reader, UDP will bypass the libav reader
-	BypassLibavReader bool                 `json:"bypass_libav_reader"`
-	Processor         InputProcessorConfig `json:"processor"` // custom input processor configuration (if enabled below)
+	BypassLibavReader bool `json:"bypass_libav_reader"`
+	// custom input processor configuration if enabled through CustomReadLoopEnabled or CopyMode == raw_only
+	Processor InputProcessorConfig `json:"processor"`
 	// if true, read net packets in separate go routine, decoupled from ffmpeg with channel
 	CustomReadLoopEnabled bool `json:"custom_read_loop_enabled"`
 }
@@ -467,7 +473,7 @@ func (ic *InputConfig) Validate(url string) error {
 	switch ic.CopyMode {
 	case CopyModeUnknown:
 		return errors.New("copy mode must be set to a valid value")
-	case CopyModeNone, CopyModeRaw, CopyModeRemuxed:
+	case CopyModeNone, CopyModeRaw, CopyModeRawOnly, CopyModeRemuxed:
 	case CopyModeRepackage, CopyModeRetranscode:
 		return fmt.Errorf("copy mode not implemented: %s", ic.CopyMode)
 	default:
@@ -480,7 +486,7 @@ func (ic *InputConfig) Validate(url string) error {
 			return errors.New("copy packaging cannot be set if copy mode is 'none'")
 		}
 		return nil
-	case CopyModeRaw:
+	case CopyModeRaw, CopyModeRawOnly:
 		if useLibavReader {
 			return errors.New("libav reader cannot be used with raw copy mode")
 		} else if ic.CopyPackaging == transport.UnknownPackagingMode {
@@ -544,14 +550,14 @@ var AVFieldOrderNames = map[AVFieldOrder]string{
 
 // InputProcessorConfig specifies the configuration for the (pure go) input processor.
 type InputProcessorConfig struct {
-	MaxConnectAttempts int           // the maximum number of attempts to connect to the input stream
-	ReconnectDelay     duration.Spec // the wait time between failed connection attempts
+	MaxConnectAttempts int           `json:"max_connect_attempts"` // the maximum number of attempts to connect to the input stream
+	ReconnectDelay     duration.Spec `json:"reconnect_delay"`      // the wait time between failed connection attempts
 	// RecoverTimeout     duration.Spec // the timeout for stream recovery (across all recovery attempts)
-	MaxRecoverAttempts int           // the number of attempts to recover a life stream after an error to read a packet
-	RecoverDelay       duration.Spec // the wait time between failed recovery attempts
-	MaxPacketSize      int           // the size of the buffer for reading packets
-	ChannelCap         int           // the capacity of channels used for packet forwarding
-	PartDuration       duration.Spec // the duration of each part that is generated from the stream data
+	MaxRecoverAttempts int           `json:"max_recover_attempts"` // the number of attempts to recover a live stream after an error to read a packet
+	RecoverDelay       duration.Spec `json:"recover_delay"`        // the wait time between failed recovery attempts
+	MaxPacketSize      int           `json:"max_packet_size"`      // the size of the buffer for reading packets
+	ChannelCap         int           `json:"channel_cap"`          // the capacity of channels used for packet forwarding
+	PartDuration       duration.Spec `json:"part_duration"`        // the duration of each part that is generated from the stream data
 }
 
 // ApplyDefaults applies default values to a copy of this input processor configuration.
@@ -566,10 +572,12 @@ func (i InputProcessorConfig) ApplyDefaults() InputProcessorConfig {
 		i.MaxPacketSize = 2048
 	}
 	if i.ChannelCap == 0 {
-		i.ChannelCap = 1000
+		i.ChannelCap = 10000
 	}
 	if i.PartDuration == 0 {
 		i.PartDuration = 30 * duration.Second
+	} else if i.PartDuration < duration.Second {
+		i.PartDuration = duration.Second
 	}
 	// if i.RecoverTimeout == 0 {
 	// 	i.RecoverTimeout = 30 * duration.Second
