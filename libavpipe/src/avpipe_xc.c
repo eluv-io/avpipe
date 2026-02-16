@@ -13,6 +13,9 @@
 #include <libswscale/swscale.h>
 #include <libavutil/imgutils.h>
 #include <libavutil/display.h>
+#include <libavcodec/bsf.h>
+#include <sys/stat.h>
+#include <unistd.h>
 
 #include "avpipe_xc.h"
 #include "avpipe_utils.h"
@@ -494,6 +497,13 @@ prepare_decoder(
         else
             decoder_context->codec_context[i]->thread_count = DEFAULT_THREAD_COUNT;
 
+        /* Enable export of all side data (including HDR10+ dynamic metadata) */
+        if (decoder_context->codec_parameters[i]->codec_type == AVMEDIA_TYPE_VIDEO &&
+            decoder_context->codec_parameters[i]->codec_id == AV_CODEC_ID_HEVC) {
+            decoder_context->codec_context[i]->export_side_data |= AV_CODEC_EXPORT_DATA_VIDEO_ENC_PARAMS;
+            elv_dbg("Enabled side data export for HEVC video stream, url=%s", url);
+        }
+
         /* Open the decoder (initialize the decoder codec_context[i] using given codec[i]). */
         if (decoder_context->codec_parameters[i]->codec_type != AVMEDIA_TYPE_DATA &&
              (rc = avcodec_open2(decoder_context->codec_context[i], decoder_context->codec[i], NULL)) < 0) {
@@ -770,36 +780,284 @@ set_h264_params(
     av_opt_set(encoder_codec_context->priv_data, "x264-params", "stitchable=1", 0);
 }
 
+/*
+ * Extract HDR10+ metadata using hdr10plus_tool.
+ *
+ * 1. Extracts raw HEVC bitstream to temporary file
+ * 2. Calls hdr10plus_tool to parse metadata into proper JSON format
+ * 3. Sets g_hdr10plus_json_file for x265 dhdr10-info parameter
+ */
+static int
+prescan_for_hdr10plus(
+    coderctx_t *decoder_context,
+    xcparams_t *params)
+{
+    int video_index = decoder_context->video_stream_index;
+    if (video_index < 0)
+        return 0;
+
+    /* Only pre-scan for H.265 encoding where HDR10+ is relevant */
+    if (!params->ecodec || (strcmp(params->ecodec, "libx265") != 0 &&
+                             strcmp(params->ecodec, "hevc_videotoolbox") != 0 &&
+                             strcmp(params->ecodec, "hevc_nvenc") != 0))
+        return 0;
+
+    /* Check if input is HEVC - HDR10+ only exists in HEVC */
+    AVCodecParameters *codecpar = decoder_context->format_context->streams[video_index]->codecpar;
+    if (codecpar->codec_id != AV_CODEC_ID_HEVC) {
+        elv_log("[HDR10+ EXTRACT] Input is not HEVC (codec=%s) - skipping", avcodec_get_name(codecpar->codec_id));
+        return 0;
+    }
+
+    elv_log("[HDR10+ EXTRACT] Extracting HDR10+ metadata using hdr10plus_tool, url=%s", params->url);
+
+    /* Create temporary files for HEVC bitstream and JSON metadata */
+    char hevc_path[] = "/tmp/hdr10plus_avpipe_XXXXXX.hevc";
+    char json_path[] = "/tmp/hdr10plus_avpipe_XXXXXX.json";
+
+    int hevc_fd = mkstemps(hevc_path, 5);
+    int json_fd = mkstemps(json_path, 5);
+
+    if (hevc_fd < 0 || json_fd < 0) {
+        elv_err("[HDR10+ EXTRACT] Failed to create temp files");
+        if (hevc_fd >= 0) close(hevc_fd);
+        if (json_fd >= 0) close(json_fd);
+        return 0;
+    }
+    close(json_fd);  /* hdr10plus_tool will write to this */
+
+    elv_log("[HDR10+ EXTRACT] Temp files: hevc=%s json=%s", hevc_path, json_path);
+
+    /* Extract raw HEVC bitstream in Annex B format (with start codes) */
+    elv_log("[HDR10+ EXTRACT] Step 1: Extracting raw HEVC bitstream to Annex B format");
+
+    /* Initialize bitstream filter to convert MP4 format to Annex B */
+    const AVBitStreamFilter *bsf = av_bsf_get_by_name("hevc_mp4toannexb");
+    AVBSFContext *bsf_ctx = NULL;
+
+    if (bsf) {
+        av_bsf_alloc(bsf, &bsf_ctx);
+        if (bsf_ctx) {
+            avcodec_parameters_copy(bsf_ctx->par_in, codecpar);
+            av_bsf_init(bsf_ctx);
+            elv_log("[HDR10+ EXTRACT] Using hevc_mp4toannexb bitstream filter");
+        }
+    }
+
+    AVPacket *pkt = av_packet_alloc();
+    if (!pkt) {
+        if (bsf_ctx) av_bsf_free(&bsf_ctx);
+        close(hevc_fd);
+        unlink(hevc_path);
+        unlink(json_path);
+        return 0;
+    }
+
+    int frame_count = 0;
+    int hdr10plus_detected = 0;
+    while (av_read_frame(decoder_context->format_context, pkt) >= 0) {
+        if (pkt->stream_index == video_index) {
+            /* Convert to Annex B format if filter is available */
+            AVPacket *write_pkt = pkt;
+            AVPacket *filtered_pkt = NULL;
+
+            if (bsf_ctx) {
+                if (av_bsf_send_packet(bsf_ctx, pkt) == 0) {
+                    filtered_pkt = av_packet_alloc();
+                    if (av_bsf_receive_packet(bsf_ctx, filtered_pkt) == 0) {
+                        write_pkt = filtered_pkt;
+                    }
+                }
+            }
+
+            /* Write packet data to HEVC file */
+            write(hevc_fd, write_pkt->data, write_pkt->size);
+            frame_count++;
+
+            if (filtered_pkt) {
+                av_packet_free(&filtered_pkt);
+            }
+
+            /* Check first frame for HDR10+ to avoid unnecessary processing */
+            if (frame_count == 1) {
+                /* Quick check if this stream has HDR10+ NAL units */
+                /* HDR10+ SEI payload type is 4 (user_data_registered_itu_t_t35) */
+                /* We'll let hdr10plus_tool do the full validation */
+                hdr10plus_detected = 1;  /* Assume present, tool will validate */
+            }
+        }
+        av_packet_unref(pkt);
+    }
+
+    close(hevc_fd);
+    av_packet_free(&pkt);
+    if (bsf_ctx) av_bsf_free(&bsf_ctx);
+
+    elv_log("[HDR10+ EXTRACT] Extracted %d video packets to %s", frame_count, hevc_path);
+
+    if (!hdr10plus_detected || frame_count == 0) {
+        elv_log("[HDR10+ EXTRACT] No video data extracted");
+        unlink(hevc_path);
+        unlink(json_path);
+        /* Seek back to start */
+        av_seek_frame(decoder_context->format_context, video_index, 0, AVSEEK_FLAG_BACKWARD);
+        avcodec_flush_buffers(decoder_context->codec_context[video_index]);
+        return 0;
+    }
+
+    /* Call hdr10plus_tool to extract metadata */
+    elv_log("[HDR10+ EXTRACT] Step 2: Running hdr10plus_tool extract");
+
+    char cmd[2048];
+    snprintf(cmd, sizeof(cmd), "hdr10plus_tool extract \"%s\" -o \"%s\" 2>&1", hevc_path, json_path);
+
+    FILE *tool_output = popen(cmd, "r");
+    if (!tool_output) {
+        elv_err("[HDR10+ EXTRACT] Failed to run hdr10plus_tool - is it installed?");
+        unlink(hevc_path);
+        unlink(json_path);
+        av_seek_frame(decoder_context->format_context, video_index, 0, AVSEEK_FLAG_BACKWARD);
+        avcodec_flush_buffers(decoder_context->codec_context[video_index]);
+        return 0;
+    }
+
+    char line[256];
+    while (fgets(line, sizeof(line), tool_output)) {
+        /* Log tool output for debugging */
+        line[strcspn(line, "\n")] = 0;  /* Remove newline */
+        if (strlen(line) > 0) {
+            elv_log("[hdr10plus_tool] %s", line);
+        }
+    }
+
+    int tool_status = pclose(tool_output);
+
+    /* Save diagnostic copy of HEVC bitstream before cleanup */
+    char hevc_diag_path[] = "/tmp/hdr10plus_bitstream_last.hevc";
+    FILE *hevc_src = fopen(hevc_path, "rb");
+    if (hevc_src) {
+        FILE *hevc_dst = fopen(hevc_diag_path, "wb");
+        if (hevc_dst) {
+            char buf[8192];
+            size_t n;
+            while ((n = fread(buf, 1, sizeof(buf), hevc_src)) > 0) {
+                fwrite(buf, 1, n, hevc_dst);
+            }
+            fclose(hevc_dst);
+            elv_log("[HDR10+ EXTRACT] Saved diagnostic HEVC copy to %s", hevc_diag_path);
+        }
+        fclose(hevc_src);
+    }
+
+    /* Clean up HEVC file */
+    unlink(hevc_path);
+
+    if (tool_status != 0) {
+        elv_err("[HDR10+ EXTRACT] hdr10plus_tool failed with status %d", tool_status);
+        unlink(json_path);
+        av_seek_frame(decoder_context->format_context, video_index, 0, AVSEEK_FLAG_BACKWARD);
+        avcodec_flush_buffers(decoder_context->codec_context[video_index]);
+        return 0;
+    }
+
+    /* Verify JSON file was created and has content */
+    struct stat st;
+    if (stat(json_path, &st) != 0 || st.st_size == 0) {
+        elv_log("[HDR10+ EXTRACT] No HDR10+ metadata found in stream");
+        unlink(json_path);
+        av_seek_frame(decoder_context->format_context, video_index, 0, AVSEEK_FLAG_BACKWARD);
+        avcodec_flush_buffers(decoder_context->codec_context[video_index]);
+        return 0;
+    }
+
+    /* Success! Set global path for x265 */
+    g_hdr10plus_json_file = strdup(json_path);
+    elv_log("[HDR10+ EXTRACT] Successfully extracted HDR10+ metadata: %s (%ld bytes)",
+            g_hdr10plus_json_file, st.st_size);
+
+    /* Seek back to beginning for actual transcoding */
+    elv_log("[HDR10+ EXTRACT] Seeking back to start for transcoding");
+    av_seek_frame(decoder_context->format_context, video_index, 0, AVSEEK_FLAG_BACKWARD);
+    avcodec_flush_buffers(decoder_context->codec_context[video_index]);
+
+    return 0;
+}
+
 static void
 set_h265_params(
     coderctx_t *encoder_context,
     coderctx_t *decoder_context,
     xcparams_t *params)
 {
+    fprintf(stderr, "[H265 DEBUG] === FUNCTION ENTRY ===\n");
+    fflush(stderr);
+
     int index = decoder_context->video_stream_index;
     AVCodecContext *encoder_codec_context = encoder_context->codec_context[index];
+
+    fprintf(stderr, "[H265 DEBUG] set_h265_params: bitdepth=%d, profile=%s, master_display=%s, g_hdr10plus_json_file=%s\n",
+            params->bitdepth,
+            params->profile ? params->profile : "(null)",
+            params->master_display ? params->master_display : "(null)",
+            g_hdr10plus_json_file ? g_hdr10plus_json_file : "(null)");
+    fflush(stderr);
+
+
 
     /*
      * The Main profile allows for a bit depth of 8-bits per sample with 4:2:0 chroma sampling,
      * which is the most common type of video used with consumer devices
      * For HDR10 we need MAIN 10 that supports 10 bit profile.
      */
+    elv_log("[H265 DEBUG] set_h265_params entry: bitdepth=%d, profile=%s, master_display=%s, pix_fmt=%s",
+            params->bitdepth,
+            params->profile ? params->profile : "(null)",
+            params->master_display ? params->master_display : "(null)",
+            av_get_pix_fmt_name(encoder_codec_context->pix_fmt));
+
+    fprintf(stderr, "[H265 DEBUG] CHECKPOINT 2\n");
+    fflush(stderr);
+
+    fprintf(stderr, "[H265 DEBUG] About to check profile, profile ptr=%p, len=%zu, bitdepth=%d\n",
+            (void*)params->profile,
+            params->profile ? strlen(params->profile) : 0,
+            params->bitdepth);
+    fflush(stderr);
+
     if (params->profile != NULL && strlen(params->profile) > 0) {
         /* Can be only main or main10 profiles */
+        fprintf(stderr, "[H265 DEBUG] Branch 1: Using explicit profile=%s\n", params->profile);
+        fflush(stderr);
+        elv_log("[H265 DEBUG] Using explicit profile=%s", params->profile);
         av_opt_set(encoder_codec_context->priv_data, "profile", params->profile, 0);
     } else if (params->bitdepth == 8) {
         av_opt_set(encoder_codec_context->priv_data, "profile", "main", 0);
+        encoder_codec_context->profile = FF_PROFILE_HEVC_MAIN;
     } else if (params->bitdepth == 10) {
         av_opt_set(encoder_codec_context->priv_data, "profile", "main10", 0);
+        encoder_codec_context->profile = 2;  // FF_PROFILE_HEVC_MAIN_10
     } else if (params->bitdepth == 12) {
         av_opt_set(encoder_codec_context->priv_data, "profile", "main12", 0);
+    } else {
+        fprintf(stderr, "[H265 DEBUG] Branch 5: No profile set! bitdepth=%d, profile=%s\n",
+                params->bitdepth, params->profile ? params->profile : "(null)");
+        fflush(stderr);
     }
+
+    fprintf(stderr, "[H265 DEBUG] After profile setting: encoder_codec_context->profile=%d\n", encoder_codec_context->profile);
+    fflush(stderr);
 
     /* Set max_cll and master_display meta data for HDR content */
     if (params->max_cll && params->max_cll[0] != '\0')
         av_opt_set(encoder_codec_context->priv_data, "max-cll", params->max_cll, 0);
+
+    /* Configure x265-params for HDR content (HDR10 static or HDR10+ dynamic) */
+    elv_log("[HDR10+ DEBUG] set_h265_params: master_display=%s, g_hdr10plus_json_file=%s",
+            params->master_display ? params->master_display : "(null)",
+            g_hdr10plus_json_file ? g_hdr10plus_json_file : "(null)");
+
     if (params->master_display && params->master_display[0] != '\0') {
-        /* Build x265-params with HDR10+ JSON file path if HDR10+ temp file was created */
+        /* HDR10 with static master_display metadata */
         char x265_params[1024];
         snprintf(x265_params, sizeof(x265_params),
                 "hdr10=1:hdr10-opt=1:repeat-headers=1:colorprim=bt2020:transfer=smpte2084:colormatrix=bt2020nc");
@@ -819,12 +1077,35 @@ set_h265_params(
         }
 
         av_opt_set(encoder_codec_context->priv_data, "master-display", params->master_display, 0);
+    } else if (g_hdr10plus_json_file) {
+        /* HDR10+ only (no static master_display) - configure dhdr10-info standalone */
+        elv_log("[HDR10+ DEBUG] Taking HDR10+ only branch (else if g_hdr10plus_json_file)");
+        char x265_params[1024];
+        snprintf(x265_params, sizeof(x265_params),
+                "hdr10=1:hdr10-opt=1:repeat-headers=1:colorprim=bt2020:transfer=smpte2084:colormatrix=bt2020nc:dhdr10-info=%s",
+                g_hdr10plus_json_file);
+        av_opt_set(encoder_codec_context->priv_data, "x265-params", x265_params, 0);
+        elv_log("[HDR10+] Configured x265 with dhdr10-info=%s (no master_display, HDR10+ only)",
+                g_hdr10plus_json_file);
+    } else {
+        elv_log("[HDR10+ DEBUG] No HDR metadata configured (no master_display, no g_hdr10plus_json_file)");
+    }
 
-        if ((params->profile == NULL || strlen(params->profile) == 0) && params->bitdepth < 10) {
-            /* If not specified or ifbitdepth is specified but <10, assume 10 bits */
+    /* For static HDR10, force 10-bit if not specified */
+    /* For HDR10+ (with dhdr10-info file), preserve original bitdepth/format since metadata is file-based */
+    if (params->master_display && params->master_display[0] != '\0') {
+        if (!g_hdr10plus_json_file && (params->profile == NULL || strlen(params->profile) == 0) && params->bitdepth < 10) {
+            /* If not specified or if bitdepth is specified but <10, force 10-bit for static HDR10 */
             av_opt_set(encoder_codec_context->priv_data, "profile", "main10", 0);
+            encoder_codec_context->pix_fmt = AV_PIX_FMT_YUV420P10LE;
+            elv_log("[HDR10] Forcing 10-bit profile and pixel format for static HDR10 content (original bitdepth=%d)", params->bitdepth);
+        } else if (g_hdr10plus_json_file && (params->profile == NULL || strlen(params->profile) == 0) && params->bitdepth < 10) {
+            /* For HDR10+ with dhdr10-info, x265 expects 8-bit input with external metadata file */
+            elv_log("[HDR10+] Using bitdepth=%d with dhdr10-info file for HDR10+ content", params->bitdepth);
         }
     }
+
+
 
     /* Set the number of bframes to 0 and avoid having bframes */
     av_opt_set_int(encoder_codec_context->priv_data, "bframes", 0, 0);
@@ -1161,10 +1442,39 @@ prepare_video_encoder(
         encoder_codec_context->height = params->enc_height != -1 ? params->enc_height : decoder_context->codec_context[index]->width;
         encoder_codec_context->width = params->enc_width != -1 ? params->enc_width : decoder_context->codec_context[index]->height;
     }
-    if (params->video_time_base > 0)
+    if (params->video_time_base > 0) {
         encoder_codec_context->time_base = (AVRational) {1, params->video_time_base};
-    else
+    } else if (decoder_context->codec_context[index]->time_base.num > 0 &&
+               decoder_context->codec_context[index]->time_base.den > 0) {
+        /* Use decoder codec context time_base if valid */
         encoder_codec_context->time_base = decoder_context->codec_context[index]->time_base;
+    } else if (decoder_context->stream[index]->time_base.num > 0 &&
+               decoder_context->stream[index]->time_base.den > 0) {
+        /* Try decoder stream time_base */
+        encoder_codec_context->time_base = decoder_context->stream[index]->time_base;
+        elv_log("Using decoder stream time_base=%d/%d, url=%s",
+                encoder_codec_context->time_base.num,
+                encoder_codec_context->time_base.den,
+                params->url);
+    } else {
+        /* Decoder time_base is invalid, use framerate if available */
+        if (decoder_context->codec_context[index]->framerate.num > 0 &&
+            decoder_context->codec_context[index]->framerate.den > 0) {
+            /* Invert framerate to get time_base */
+            encoder_codec_context->time_base = av_inv_q(decoder_context->codec_context[index]->framerate);
+        } else if (decoder_context->format_context->streams[index]->avg_frame_rate.num > 0 &&
+                   decoder_context->format_context->streams[index]->avg_frame_rate.den > 0) {
+            /* Try avg_frame_rate from stream */
+            encoder_codec_context->time_base = av_inv_q(decoder_context->format_context->streams[index]->avg_frame_rate);
+        } else {
+            /* Use 90kHz clock as fallback (common for video containers) */
+            encoder_codec_context->time_base = (AVRational) {1, 90000};
+        }
+        elv_log("Invalid decoder time_base, using encoder time_base=%d/%d, url=%s",
+                encoder_codec_context->time_base.num,
+                encoder_codec_context->time_base.den,
+                params->url);
+    }
 
     encoder_codec_context->sample_aspect_ratio = decoder_context->codec_context[index]->sample_aspect_ratio;
     if (params->video_bitrate > 0)
@@ -1243,9 +1553,6 @@ prepare_video_encoder(
     if ((rc = avcodec_open2(encoder_context->codec_context[index], encoder_context->codec[index], NULL)) < 0) {
         char errbuf[256];
         av_strerror(rc, errbuf, sizeof(errbuf));
-        fprintf(stderr, "[CODEC ERROR] Could not open encoder for video, err=%d (%s), codec=%s, bitdepth=%d\n",
-                rc, errbuf, params->ecodec, params->bitdepth);
-        fflush(stderr);
         elv_err("Could not open encoder for video, err=%d (%s), codec=%s, bitdepth=%d",
                 rc, errbuf, params->ecodec, params->bitdepth);
         return eav_open_codec;
@@ -1688,6 +1995,12 @@ prepare_encoder(
     }
 
     if (params->xc_type & xc_video) {
+        /* Pre-scan for HDR10+ before encoder setup (must happen before prepare_video_encoder) */
+        /* Skip HDR10+ extraction if bypassing transcoding - metadata is already in the stream */
+        if (!params->bypass_transcoding) {
+            prescan_for_hdr10plus(decoder_context, params);
+        }
+
         if ((rc = prepare_video_encoder(encoder_context, decoder_context, params)) != eav_success) {
             elv_err("Failure in preparing video encoder, rc=%d, url=%s", rc, params->url);
             return rc;
@@ -2631,6 +2944,11 @@ transcode_video(
                 if (fd >= 0) {
                     close(fd);
                     elv_log("[HDR10+ AUTO-EXTRACT] Created temp file for x265: %s", g_hdr10plus_json_file);
+                    elv_log("[HDR10+ DEBUG] g_hdr10plus_json_file SET TO: %s", g_hdr10plus_json_file);
+                } else {
+                    elv_err("[HDR10+ AUTO-EXTRACT] Failed to create temp file");
+                    free(g_hdr10plus_json_file);
+                    g_hdr10plus_json_file = NULL;
                 }
             }
 
@@ -4028,6 +4346,25 @@ xc_done:
 
     /* Clean up HDR10+ temporary JSON file if it was created */
     if (g_hdr10plus_json_file) {
+        /* Save a diagnostic copy before cleanup */
+        char diag_path[1024];
+        snprintf(diag_path, sizeof(diag_path), "/tmp/hdr10plus_metadata_last.json");
+
+        FILE *src = fopen(g_hdr10plus_json_file, "rb");
+        if (src) {
+            FILE *dst = fopen(diag_path, "wb");
+            if (dst) {
+                char buf[8192];
+                size_t n;
+                while ((n = fread(buf, 1, sizeof(buf), src)) > 0) {
+                    fwrite(buf, 1, n, dst);
+                }
+                fclose(dst);
+                elv_log("[HDR10+] Saved diagnostic copy to %s", diag_path);
+            }
+            fclose(src);
+        }
+
         unlink(g_hdr10plus_json_file);
         elv_log("[HDR10+] Cleaned up temp file: %s", g_hdr10plus_json_file);
         free(g_hdr10plus_json_file);
