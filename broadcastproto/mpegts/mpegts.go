@@ -92,6 +92,8 @@ type TSStats struct {
 	PacketsWritten  atomic.Uint64
 	// PacketsDropped is updated by the sender to the channel, which is why it is a pointer
 	PacketsDropped         *atomic.Uint64
+	SmallPacketsDropped    atomic.Uint64 // small packets (< 188 bytes) are dropped
+	RtcpPacketsDropped     atomic.Uint64 // small dropped packets with are likely RTCP (included in SmallPacketsDropped)
 	BadPackets             atomic.Uint64
 	BytesReceived          atomic.Uint64
 	BytesWritten           atomic.Uint64
@@ -146,6 +148,14 @@ func NewTSStats() *TSStats {
 func (mpp *MpegtsPacketProcessor) ProcessDatagram(datagram []byte) {
 	mpegtsOffset := 0
 	if mpp.cfg.Packaging == transport.RtpTs {
+		if len(datagram) < 12+188 { // RTP header + at least one TS packet
+			mpp.stats.SmallPacketsDropped.Inc()
+			if isRTCP(datagram) {
+				mpp.stats.RtcpPacketsDropped.Inc()
+			}
+			return
+		}
+
 		dgHeader, err := transport.ParseRTPHeader(datagram)
 		if err != nil {
 			mpp.rtpStats.BadPackets.Inc()
@@ -163,6 +173,9 @@ func (mpp *MpegtsPacketProcessor) ProcessDatagram(datagram []byte) {
 		mpp.rtpStats.LastTimestamp.Store(dgHeader.Timestamp)
 
 		// TODO: Sequence number / discontinuity processing
+	} else if len(datagram) < 188 { // RTPat least one TS packet
+		mpp.stats.SmallPacketsDropped.Inc()
+		return
 	}
 
 	// Extract PCR
@@ -470,4 +483,20 @@ outer:
 		}
 	}
 	return pkt, stripped, faulty
+}
+
+func isRTCP(data []byte) bool {
+	if len(data) < 2 {
+		return false
+	}
+	// The second byte (index 1) contains the Payload Type
+	pt := data[1]
+
+	// RTCP Packet Types:
+	// 200: SR (Sender Report)
+	// 201: RR (Receiver Report)
+	// 202: SDES (Source Description)
+	// 203: BYE (Goodbye)
+	// 204: APP (Application-defined)
+	return pt >= 200 && pt <= 204
 }
