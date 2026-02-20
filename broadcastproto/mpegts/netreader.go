@@ -195,11 +195,10 @@ func (r *NetReader) connect() (io.ReadCloser, error) {
 
 func (r *NetReader) readLoop(reader io.ReadCloser) (cont bool, err error) {
 	defer errors.Log(reader.Close, logNetReader.Info)
-	throttledLog := logNetReader.Throttle("net-reader-packet-read", time.Second)
+	throttledLog := logNetReader.Throttle("net-reader-dropped-packet", 100*time.Millisecond)
 	for {
 		pkt := r.packetPool.GetPacket()
 		n, err := reader.Read(pkt.Data)
-		throttledLog.Debug("readLoop", "n", n, "error", err)
 		if err != nil {
 			return r.isRecoverable(err), errors.E("readLoop", errors.K.IO.Default(), err)
 		}
@@ -219,10 +218,11 @@ func (r *NetReader) readLoop(reader io.ReadCloser) (cont bool, err error) {
 				// consumer busy: drop packet
 				pkt.Release()
 				consumer.PacketDropped()
-				logNetReader.Throttle("dropped_packet", 10*time.Millisecond).
-					Warn("packet dropped", "reason", "consumer channel full", "consumer", consumer.Name(),
-						"channel_size", len(consumer.Chan()),
-						"channel_cap", cap(consumer.Chan()))
+				throttledLog.Warn("packet dropped",
+					"reason", "consumer channel full",
+					"consumer", consumer.Name(),
+					"channel_size", len(consumer.Chan()),
+					"channel_cap", cap(consumer.Chan()))
 			}
 		}
 		pkt.Release()
