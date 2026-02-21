@@ -103,7 +103,7 @@ func (r *NetReader) start() error {
 		if err != nil {
 			err = e(err)
 			if errors.Is(err, io.EOF) {
-				logNetReader.Info("netreader terminated with EOF")
+				logNetReader.Info("netreader terminated with EOF", err)
 			} else {
 				logNetReader.Warn("netreader failed", err)
 			}
@@ -138,7 +138,7 @@ func (r *NetReader) process() error {
 
 		cont, err := r.readLoop(reader) // readLoop closes reader!
 		if cont {
-			if i < r.config.MaxRecoverAttempts {
+			if r.config.MaxRecoverAttempts <= 0 || i < r.config.MaxRecoverAttempts {
 				logNetReader.Info("recoverable processor error, will retry", e(err))
 				continue
 			}
