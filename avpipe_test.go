@@ -2338,7 +2338,7 @@ func TestProbe(t *testing.T) {
 
 	assert.Equal(t, 27, probe.StreamInfo[0].CodecID)
 	assert.Equal(t, "h264", probe.StreamInfo[0].CodecName)
-	assert.Equal(t, 100, probe.StreamInfo[0].Profile) // 77 = FF_PROFILE_H264_MAIN
+	assert.Equal(t, 100, probe.StreamInfo[0].Profile) // 77 = AV_PROFILE_H264_MAIN
 	assert.Equal(t, 41, probe.StreamInfo[0].Level)
 	assert.Equal(t, int64(1800), probe.StreamInfo[0].NBFrames)
 	assert.Equal(t, int64(1980), probe.StreamInfo[0].StartTime)
@@ -2349,7 +2349,7 @@ func TestProbe(t *testing.T) {
 
 	assert.Equal(t, 86017, probe.StreamInfo[1].CodecID)
 	assert.Equal(t, "mp3float", probe.StreamInfo[1].CodecName)
-	assert.Equal(t, -99, probe.StreamInfo[1].Profile) // 1 = FF_PROFILE_AAC_LOW
+	assert.Equal(t, -99, probe.StreamInfo[1].Profile) // 1 = AV_PROFILE_AAC_LOW
 	assert.Equal(t, -99, probe.StreamInfo[1].Level)
 	assert.Equal(t, int64(2500), probe.StreamInfo[1].NBFrames)
 	assert.Equal(t, int64(0), probe.StreamInfo[1].StartTime)
@@ -2360,7 +2360,7 @@ func TestProbe(t *testing.T) {
 
 	assert.Equal(t, 86019, probe.StreamInfo[2].CodecID)
 	assert.Equal(t, "ac3", probe.StreamInfo[2].CodecName)
-	assert.Equal(t, -99, probe.StreamInfo[2].Profile) // 1 = FF_PROFILE_AAC_LOW
+	assert.Equal(t, -99, probe.StreamInfo[2].Profile) // 1 = AV_PROFILE_AAC_LOW
 	assert.Equal(t, -99, probe.StreamInfo[2].Level)
 	assert.Equal(t, int64(1875), probe.StreamInfo[2].NBFrames)
 	assert.Equal(t, int64(0), probe.StreamInfo[2].StartTime)
@@ -2395,7 +2395,7 @@ func TestProbeWithData(t *testing.T) {
 
 	assert.Equal(t, 147, probe.StreamInfo[0].CodecID)
 	assert.Equal(t, "prores", probe.StreamInfo[0].CodecName)
-	assert.Equal(t, 3, probe.StreamInfo[0].Profile) // 3 = FF_PROFILE_MPEG4_MAIN
+	assert.Equal(t, 3, probe.StreamInfo[0].Profile) // 3 = AV_PROFILE_MPEG4_MAIN
 	assert.Equal(t, -99, probe.StreamInfo[0].Level)
 	assert.Equal(t, int64(1439), probe.StreamInfo[0].NBFrames)
 	assert.Equal(t, int64(0), probe.StreamInfo[0].StartTime)
