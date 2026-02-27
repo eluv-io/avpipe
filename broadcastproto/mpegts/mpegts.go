@@ -19,12 +19,6 @@ import (
 const (
 	PcrTs  uint64 = 27_000_000
 	PcrMax uint64 = ((1 << 33) * 300) + (1 << 9)
-
-	// Special TS stream and descriptor types (not defined in 'gots')
-	TsStreamTypeJpegXS = 0x32
-	TsDescriptorSt2038 = 0xc4 // Commonly ST 2038 or ST 291 (Evertz, Imagine, Harmonic)
-	// Locally defined stream types
-	TsStreamTypeLocalSt2038 = 0xe4 // Locally defined type
 )
 
 // StripTsPadding indicates whether the payload of TS padding packets in RTP-TS streams should be stripped. For now
@@ -168,9 +162,11 @@ func (mpp *MpegtsPacketProcessor) ProcessDatagram(datagram []byte) {
 		swapped := mpp.rtpStats.FirstTimestamp.CompareAndSwap(0, dgHeader.Timestamp)
 		if swapped {
 			mpp.rtpStats.RefTime = time.Now()
+			mpp.rtpStats.FirstSeqNum.Store(uint32(dgHeader.SequenceNumber))
 			mpp.PushStats()
 		}
 		mpp.rtpStats.LastTimestamp.Store(dgHeader.Timestamp)
+		mpp.rtpStats.LastSeqNum.Store(uint32(dgHeader.SequenceNumber))
 
 		// TODO: Sequence number / discontinuity processing
 	} else if len(datagram) < 188 { // RTPat least one TS packet
@@ -274,15 +270,15 @@ func (mpp *MpegtsPacketProcessor) RegisterPacketsDropped(packetsDropped *atomic.
 }
 
 func (mpp *MpegtsPacketProcessor) UpdateChannelSizeStats(size int) {
-	max := mpp.stats.MaxBufInPeriod.Load()
-	min := mpp.stats.MinBufInPeriod.Load()
+	maxBuf := mpp.stats.MaxBufInPeriod.Load()
+	minBuf := mpp.stats.MinBufInPeriod.Load()
 
-	if uint64(size) > max {
-		mpp.stats.MaxBufInPeriod.CompareAndSwap(max, uint64(size))
+	if uint64(size) > maxBuf {
+		mpp.stats.MaxBufInPeriod.CompareAndSwap(maxBuf, uint64(size))
 	}
 
-	if uint64(size) < min {
-		mpp.stats.MinBufInPeriod.CompareAndSwap(min, uint64(size))
+	if uint64(size) < minBuf {
+		mpp.stats.MinBufInPeriod.CompareAndSwap(minBuf, uint64(size))
 	}
 }
 
