@@ -571,7 +571,6 @@ typedef struct stream_info_t {
     int         sample_rate;        // Audio only, samples per second
     int         channels;           // Audio only, number of audio channels
     int         channel_layout;     // Audio channel layout
-    int         ticks_per_frame;
     int64_t     bit_rate;
     int         has_b_frames;
     int         width, height;       // Video only

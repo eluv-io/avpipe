@@ -80,3 +80,9 @@ void frame_rescale_time_base(
     AVFrame *frame,
     AVRational src_time_base,
     AVRational dst_time_base);
+
+int
+copy_stream_side_data(
+    AVStream *out_stream,
+    const AVStream *in_stream);
+

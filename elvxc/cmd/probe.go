@@ -86,7 +86,6 @@ func doProbe(cmd *cobra.Command, args []string) error {
 		fmt.Printf("\tSampleRate: %d\n", info.SampleRate)
 		fmt.Printf("\tchannels: %d\n", info.Channels)
 		fmt.Printf("\tchannel_layout: %s\n", channelLayoutName)
-		fmt.Printf("\tticks_per_frame: %d\n", info.TicksPerFrame)
 		fmt.Printf("\tbit_rate: %d\n", info.BitRate)
 		fmt.Printf("\thas_b_frames: %v\n", info.Has_B_Frames)
 		fmt.Printf("\twidth: %d\n", info.Width)

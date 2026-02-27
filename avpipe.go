@@ -98,7 +98,6 @@ type StreamInfo struct {
 	SampleRate         int               `json:"sample_rate,omitempty"`
 	Channels           int               `json:"channels,omitempty"`
 	ChannelLayout      int               `json:"channel_layout,omitempty"`
-	TicksPerFrame      int               `json:"ticks_per_frame,omitempty"`
 	BitRate            int64             `json:"bit_rate,omitempty"`
 	Has_B_Frames       bool              `json:"has_b_frame"`
 	Width              int               `json:"width,omitempty"`  // Video only
@@ -1055,7 +1054,6 @@ func Probe(params *goavpipe.XcParams) (*ProbeInfo, error) {
 		probeInfo.StreamInfo[i].SampleRate = int(probeArray[i].sample_rate)
 		probeInfo.StreamInfo[i].Channels = int(probeArray[i].channels)
 		probeInfo.StreamInfo[i].ChannelLayout = int(probeArray[i].channel_layout)
-		probeInfo.StreamInfo[i].TicksPerFrame = int(probeArray[i].ticks_per_frame)
 		probeInfo.StreamInfo[i].BitRate = int64(probeArray[i].bit_rate)
 		if probeArray[i].has_b_frames > 0 {
 			probeInfo.StreamInfo[i].Has_B_Frames = true

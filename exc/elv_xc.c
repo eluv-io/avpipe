@@ -814,7 +814,6 @@ do_probe(
                 "\tsample_rate: %d\n"
                 "\tchannels: %d\n"
                 "\tchannel_layout: %s\n"
-                "\tticks_per_frame: %d\n"
                 "\tbit_rate: %"PRId64"\n"
                 "\twidth: %d\n"
                 "\theight: %d\n"
@@ -841,7 +840,6 @@ do_probe(
                 probe->stream_info[i].sample_rate,
                 probe->stream_info[i].channels,
                 channel_name != NULL ? channel_name : "-",
-                probe->stream_info[i].ticks_per_frame,
                 probe->stream_info[i].bit_rate,
                 probe->stream_info[i].width,
                 probe->stream_info[i].height,

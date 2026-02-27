@@ -275,18 +275,9 @@ copy_mpegts_prepare_encoder(
 
         // out_stream->disposition = in_stream->disposition;
 
-        if (in_stream->nb_side_data) { // TODO: side_data, nb_side_data, and av_stream_new_side_data are deprecated
-            for (int i = 0; i < in_stream->nb_side_data; i++) {
-                const AVPacketSideData *sd_src = &in_stream->side_data[i];
-                uint8_t *out_data;
-
-                out_data = av_stream_new_side_data(out_stream, sd_src->type, sd_src->size);
-                if (!out_data) {
-                    elv_err("Failed to allocate side data, url=%s", params->url);
-                    return eav_mem_alloc;
-                }
-                memcpy(out_data, sd_src->data, sd_src->size);
-            }
+        if (copy_stream_side_data(out_stream, in_stream) < 0) {
+            elv_err("Failed to copy stream side data, url=%s", params->url);
+            return eav_mem_alloc;
         }
 
         // For audio/video, do more specific things. For subtitles/data/etc, just copy the stream

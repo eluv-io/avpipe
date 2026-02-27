@@ -915,10 +915,10 @@ set_nvidia_params(
         encoder_codec_context->profile = profile;
     } else if (encoder_codec_context->height <= 480) {
         av_opt_set_int(encoder_codec_context->priv_data, "profile", NV_ENC_H264_PROFILE_BASELINE, 0);
-        encoder_codec_context->profile = FF_PROFILE_H264_BASELINE;
+        encoder_codec_context->profile = AV_PROFILE_H264_BASELINE;
     } else {
         av_opt_set_int(encoder_codec_context->priv_data, "profile", NV_ENC_H264_PROFILE_HIGH, 0);
-        encoder_codec_context->profile = FF_PROFILE_H264_HIGH;
+        encoder_codec_context->profile = AV_PROFILE_H264_HIGH;
     }
 
 /*
@@ -1050,7 +1050,6 @@ prepare_video_encoder(
             out_stream->time_base = in_stream->time_base;
 
         out_stream->avg_frame_rate = decoder_context->format_context->streams[decoder_context->video_stream_index]->avg_frame_rate;
-        out_stream->codecpar->codec_tag = 0;
 
         rc = set_encoder_options(encoder_context, decoder_context, params, decoder_context->video_stream_index,
             out_stream->time_base.den);
@@ -2448,7 +2447,6 @@ transcode_video(
          * The following fields are interesting (but not initialized yet properly):
          *  - in_stream->start_time
          *  - in_stream->time_base // it always 1
-         *  - codec_context->ticks_per_frame
          *
          * The following fields are valid at this point:
          *  - in_stream->avg_frame_rate.num
@@ -4119,7 +4117,6 @@ avpipe_probe(
         }
 
         stream_probes_ptr->frame_rate = s->r_frame_rate;
-        stream_probes_ptr->ticks_per_frame = codec_context->ticks_per_frame; // TODO: ticks_per_frame is deprecated
         stream_probes_ptr->bit_rate = codec_context->bit_rate;
         stream_probes_ptr->has_b_frames = codec_context->has_b_frames;
         stream_probes_ptr->sample_rate = codec_context->sample_rate;
@@ -4143,8 +4140,8 @@ avpipe_probe(
 
         av_dict_copy(&stream_probes_ptr->tags, s->metadata, 0);
 
-        for (int i = 0; i < s->nb_side_data; i++) { // TODO: side_data and nb_side_data are deprecated
-            const AVPacketSideData *sd = &s->side_data[i];
+        for (int i = 0; i < s->codecpar->nb_coded_side_data; i++) {
+            const AVPacketSideData *sd = &s->codecpar->coded_side_data[i];
             switch (sd->type) {
                 case AV_PKT_DATA_DISPLAYMATRIX:
                     stream_probes_ptr->side_data.display_matrix.rotation = av_display_rotation_get((int32_t *)sd->data);

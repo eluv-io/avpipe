@@ -39,13 +39,13 @@ dump_frame(
         return;
 
     elv_dbg("%s FRAME %s, stream_index=%d, [%d] pts=%"PRId64" pkt_dts=%"PRId64" pkt_duration=%"PRId64" be_time_stamp=%"PRId64" key=%d pict_type=%d "
-        "pkt_size=%d nb_samples=%d "
+        "nb_samples=%d "
         "width=%d height=%d linesize=%d "
         "format=%d flags=%x channels=%d"
         "\n", is_audio ? "AUDIO" : "VIDEO", msg, stream_index, num,
         frame->pts, frame->pkt_dts, frame->duration, frame->best_effort_timestamp,
-        frame->key_frame, frame->pict_type, // TODO: key_frame and pkt_size are deprecated
-        frame->pkt_size, frame->nb_samples,
+        !!(frame->flags & AV_FRAME_FLAG_KEY), frame->pict_type,
+        frame->nb_samples,
         frame->width, frame->height, frame->linesize[0],
         frame->format, frame->flags, frame->ch_layout.nb_channels
     );
@@ -151,16 +151,15 @@ dump_codec_context(
     if (!cc)
         return;
 
-    // TODO: ticks_per_frame is deprecated
     elv_dbg("CODEC CONTEXT codec type=%d id=%d "
-        "time_base=%d/%d framerate=%d/%d tpf=%d delay=%d "
+        "time_base=%d/%d framerate=%d/%d delay=%d "
         "bit_rate=%d-%d rc=%d-%d-%d q=%d-%d-%d vbv=%f/%f/%d "
         "width=%d height=%d aspect_ratio=%d/%d coded_width=%d coded_height=%d gop=%d "
         "keyint_min=%d refs=%d "
         "frame_size=%d frame_num=%d"
         "\n",
         cc->codec_type, cc->codec_id,
-        cc->time_base.num, cc->time_base.den, cc->framerate.num, cc->framerate.den, cc->ticks_per_frame, cc->delay,
+        cc->time_base.num, cc->time_base.den, cc->framerate.num, cc->framerate.den, cc->delay,
         (int)cc->bit_rate, cc->bit_rate_tolerance,
         cc->rc_buffer_size, cc->rc_max_rate, cc->rc_min_rate,
         cc->qmin, cc->qmax, cc->max_qdiff,

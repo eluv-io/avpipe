@@ -195,9 +195,9 @@ type XcProfile int
 
 const (
 	XcProfileNone         XcProfile = iota
-	XcProfileH264BaseLine           = 66  // C.FF_PROFILE_H264_BASELINE
-	XcProfileH264Heigh              = 100 // C.FF_PROFILE_H264_HIGH
-	XcProfileH264Heigh10            = 110 // C.FF_PROFILE_H264_HIGH_10
+	XcProfileH264BaseLine           = 66  // C.AV_PROFILE_H264_BASELINE
+	XcProfileH264Heigh              = 100 // C.AV_PROFILE_H264_HIGH
+	XcProfileH264Heigh10            = 110 // C.AV_PROFILE_H264_HIGH_10
 )
 
 func XcTypeFromString(xcTypeStr string) XcType {
