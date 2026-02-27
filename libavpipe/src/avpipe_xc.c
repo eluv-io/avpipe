@@ -915,10 +915,10 @@ set_nvidia_params(
         encoder_codec_context->profile = profile;
     } else if (encoder_codec_context->height <= 480) {
         av_opt_set_int(encoder_codec_context->priv_data, "profile", NV_ENC_H264_PROFILE_BASELINE, 0);
-        encoder_codec_context->profile = FF_PROFILE_H264_BASELINE;
+        encoder_codec_context->profile = AV_PROFILE_H264_BASELINE;
     } else {
         av_opt_set_int(encoder_codec_context->priv_data, "profile", NV_ENC_H264_PROFILE_HIGH, 0);
-        encoder_codec_context->profile = FF_PROFILE_H264_HIGH;
+        encoder_codec_context->profile = AV_PROFILE_H264_HIGH;
     }
 
 /*
@@ -1043,6 +1043,29 @@ prepare_video_encoder(
             return eav_codec_param;
         }
 
+        /* Copy any additional stream-level side data (e.g., stereo 3D info for MV-HEVC) */
+        rc = copy_stream_side_data(out_stream, in_stream);
+        if (rc < 0) {
+            elv_err("BYPASS failed to copy stream side data, url=%s", params->url);
+            return eav_codec_param;
+        }
+
+        /* Copy stream disposition flags (includes AV_DISPOSITION_MULTILAYER for MV-HEVC) */
+        out_stream->disposition = in_stream->disposition;
+
+        if (is_mvhevc(in_stream)) {
+            elv_log("BYPASS MV-HEVC detected, profile=%d, url=%s", in_codecpar->profile, params->url);
+
+            /* Ensure the multilayer disposition is set on the output stream so the
+             * MP4 muxer writes the lhvC atom. For x265-style MV-HEVC (Multiview Main
+             * profile) the HEVC parser does not set this flag, so we add it explicitly. */
+            out_stream->disposition |= AV_DISPOSITION_MULTILAYER;
+
+            /* Allow the MP4 muxer to write stereo3d/spherical metadata (st3d, sv3d, vexu, eyes).
+             * These are only written for MODE_MP4 when strict_std_compliance <= UNOFFICIAL. */
+            encoder_context->format_context->strict_std_compliance = FF_COMPLIANCE_UNOFFICIAL;
+        }
+
         /* Set output stream timebase when bypass encoding */
         if (params->video_time_base > 0)
             out_stream->time_base = (AVRational) {1, params->video_time_base};
@@ -1050,7 +1073,12 @@ prepare_video_encoder(
             out_stream->time_base = in_stream->time_base;
 
         out_stream->avg_frame_rate = decoder_context->format_context->streams[decoder_context->video_stream_index]->avg_frame_rate;
-        out_stream->codecpar->codec_tag = 0;
+
+        /* Preserve codec_tag for HEVC to keep hvc1/hev1 tag (needed for MV-HEVC) */
+        if (in_codecpar->codec_id == AV_CODEC_ID_HEVC)
+            out_stream->codecpar->codec_tag = in_codecpar->codec_tag;
+        else
+            out_stream->codecpar->codec_tag = 0;
 
         rc = set_encoder_options(encoder_context, decoder_context, params, decoder_context->video_stream_index,
             out_stream->time_base.den);
@@ -2448,7 +2476,6 @@ transcode_video(
          * The following fields are interesting (but not initialized yet properly):
          *  - in_stream->start_time
          *  - in_stream->time_base // it always 1
-         *  - codec_context->ticks_per_frame
          *
          * The following fields are valid at this point:
          *  - in_stream->avg_frame_rate.num
@@ -4119,7 +4146,6 @@ avpipe_probe(
         }
 
         stream_probes_ptr->frame_rate = s->r_frame_rate;
-        stream_probes_ptr->ticks_per_frame = codec_context->ticks_per_frame; // TODO: ticks_per_frame is deprecated
         stream_probes_ptr->bit_rate = codec_context->bit_rate;
         stream_probes_ptr->has_b_frames = codec_context->has_b_frames;
         stream_probes_ptr->sample_rate = codec_context->sample_rate;
@@ -4143,8 +4169,8 @@ avpipe_probe(
 
         av_dict_copy(&stream_probes_ptr->tags, s->metadata, 0);
 
-        for (int i = 0; i < s->nb_side_data; i++) { // TODO: side_data and nb_side_data are deprecated
-            const AVPacketSideData *sd = &s->side_data[i];
+        for (int i = 0; i < s->codecpar->nb_coded_side_data; i++) {
+            const AVPacketSideData *sd = &s->codecpar->coded_side_data[i];
             switch (sd->type) {
                 case AV_PKT_DATA_DISPLAYMATRIX:
                     stream_probes_ptr->side_data.display_matrix.rotation = av_display_rotation_get((int32_t *)sd->data);
