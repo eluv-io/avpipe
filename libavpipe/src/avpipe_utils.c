@@ -287,8 +287,8 @@ ffmpeg_log_handler(void* ptr, int level, const char* fmt, va_list vl) {
     case AV_LOG_VERBOSE:
     default:
         // TODO map to a trace level or something. AV_LOG_DEBUG is too verbose
-        // elv_level = elv_log_debug;
-        return;
+        elv_level = elv_log_debug;
+        // return;
     }
     elv_vlog(elv_level, "FF", fmt, vl);
 }

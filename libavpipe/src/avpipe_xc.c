@@ -48,6 +48,10 @@
 #define DEFAULT_ACC_SAMPLE_RATE     48000
 #define MAX_FRAME_READ_RETRIES      300
 
+static inline int is_audio_copy(xcparams_t *params) {
+    return params->ecodec2 && !strcmp(params->ecodec2, "copy");
+}
+
 extern int
 init_video_filters(
     const char *filters_descr,
@@ -624,8 +628,8 @@ set_encoder_options(
             av_opt_set(encoder_context->format_context->priv_data, "movflags", FRAG_OPTS, 0);
         }
         if ((i = selected_decoded_audio(decoder_context, stream_index)) >= 0) {
-            if (params->ecodec2 && !strcmp(params->ecodec2, "ac3")) {
-                elv_dbg("set_encoder_options, fmp4 audio, ac3, stream_index=%d, movflags="FRAG_OPTS_DELAY, stream_index);
+            if (params->ecodec2 && (!strcmp(params->ecodec2, "ac3") || is_audio_copy(params))) {
+                elv_dbg("set_encoder_options, fmp4 audio, ac3/copy, stream_index=%d, movflags="FRAG_OPTS_DELAY, stream_index);
                 av_opt_set(encoder_context->format_context2[i]->priv_data, "movflags", FRAG_OPTS_DELAY, 0);
             } else {
                 elv_dbg("set_encoder_options, fmp4 audio, stream_index=%d, movflags="FRAG_OPTS, stream_index);
@@ -704,8 +708,8 @@ set_encoder_options(
 
         if (!strcmp(params->format, "fmp4-segment")) {
             if ((i = selected_decoded_audio(decoder_context, stream_index)) >= 0) {
-                if (params->ecodec2 && !strcmp(params->ecodec2, "ac3")) {
-                    elv_dbg("set_encoder_options, fmp4-segment audio, ac3, stream_index=%d, movflags="FRAG_OPTS_DELAY, stream_index);
+                if (params->ecodec2 && (!strcmp(params->ecodec2, "ac3") || is_audio_copy(params))) {
+                    elv_dbg("set_encoder_options, fmp4-segment audio, ac3/copy, stream_index=%d, movflags="FRAG_OPTS_DELAY, stream_index);
                     av_opt_set(encoder_context->format_context2[i]->priv_data, "segment_format_options", "movflags="FRAG_OPTS_DELAY, 0);
                 } else {
                     elv_dbg("set_encoder_options, fmp4-segment audio, stream_index=%d, movflags="FRAG_OPTS, stream_index);
@@ -1272,7 +1276,7 @@ prepare_audio_encoder(
         encoder_context->n_audio = 1;
 
         encoder_context->stream[output_stream_index] = avformat_new_stream(format_context, NULL);
-        if (params->bypass_transcoding)
+        if (params->bypass_transcoding || is_audio_copy(params))
             encoder_context->codec[output_stream_index] = avcodec_find_encoder(decoder_context->codec_context[stream_index]->codec_id);
         else
             encoder_context->codec[output_stream_index] = avcodec_find_encoder_by_name(ecodec);
@@ -1284,6 +1288,28 @@ prepare_audio_encoder(
 
         format_context->io_open = elv_io_open;
         format_context->io_close2 = elv_io_close;
+
+        if (is_audio_copy(params)) {
+            AVStream *in_stream = decoder_context->stream[stream_index];
+            AVStream *out_stream = encoder_context->stream[output_stream_index];
+
+            rc = avcodec_parameters_copy(out_stream->codecpar, in_stream->codecpar);
+            if (rc < 0) {
+                elv_err("AUDIO COPY failed to copy codec parameters, url=%s", params->url);
+                return eav_codec_param;
+            }
+
+            out_stream->time_base = in_stream->time_base;
+            out_stream->codecpar->codec_tag = 0;
+
+            rc = set_encoder_options(encoder_context, decoder_context, params,
+                decoder_context->audio_stream_index[i], out_stream->time_base.den);
+            if (rc < 0) {
+                elv_err("Failed to set audio encoder options with copy, url=%s", params->url);
+                return rc;
+            }
+            continue;
+        }
 
         enc_codec_ctx = avcodec_alloc_context3(encoder_context->codec[output_stream_index]);
         encoder_context->codec_context[output_stream_index] = enc_codec_ctx;
@@ -2320,7 +2346,7 @@ transcode_audio(
             stream_index, packet->pts, packet->dts, packet->duration, codec_context->frame_size,
             enc_codec_context->frame_size, decoder_context->audio_output_pts);
 
-    if (params->bypass_transcoding) {
+    if (params->bypass_transcoding || is_audio_copy(params)) {
         return do_bypass(1, decoder_context, encoder_context, packet, params, debug_frame_level);
     }
 
@@ -2771,7 +2797,7 @@ flush_decoder(
     frame = av_frame_alloc();
     filt_frame = av_frame_alloc();
 
-    if (!p->bypass_transcoding && (i >= 0)) {
+    if (!p->bypass_transcoding && !is_audio_copy(p) && (i >= 0)) {
         buffersrc_ctx = decoder_context->audio_buffersrc_ctx[i];
         buffersink_ctx = decoder_context->audio_buffersink_ctx[i];
     }
@@ -2892,7 +2918,7 @@ should_stop_decoding(
                 audio_frames_read, video_frames_read, *frames_read_past_duration);
 
         /* If it is a bypass simply return since there is no decoding/encoding involved */
-        if (params->bypass_transcoding)
+        if (params->bypass_transcoding || is_audio_copy(params))
             return 1;
 
         /* Allow decoding past specified duration to accommodate reordered packets */
@@ -2923,7 +2949,7 @@ skip_until_start_time_pts(
     /* If start_time_ts > 0 and it is a bypass skip here
      * Also if start_time_ts > 0 and skip_decoding is set then skip here
      */
-    if (params->start_time_ts <= 0 || (!params->skip_decoding && !params->bypass_transcoding))
+    if (params->start_time_ts <= 0 || (!params->skip_decoding && !params->bypass_transcoding && !is_audio_copy(params)))
         return 0;
 
     /* If the format is not dash/hls then return.
@@ -3371,7 +3397,7 @@ avpipe_xc(
         free(filter_str);
     }
 
-    if (!params->bypass_transcoding &&
+    if (!params->bypass_transcoding && !is_audio_copy(params) &&
         (params->xc_type & xc_audio) &&
         params->xc_type != xc_audio_join &&
         params->xc_type != xc_audio_pan &&
@@ -3381,21 +3407,21 @@ avpipe_xc(
         goto xc_done;
     }
 
-    if (!params->bypass_transcoding &&
+    if (!params->bypass_transcoding && !is_audio_copy(params) &&
         params->xc_type == xc_audio_pan &&
         (rc = init_audio_pan_filters(xctx->params->filter_descriptor, decoder_context, encoder_context)) != eav_success) {
         elv_err("Failed to initialize audio pan filter, url=%s", params->url);
         goto xc_done;
     }
 
-    if (!params->bypass_transcoding &&
+    if (!params->bypass_transcoding && !is_audio_copy(params) &&
         params->xc_type == xc_audio_join &&
         (rc = init_audio_join_filters(decoder_context, encoder_context, xctx->params)) != eav_success) {
         elv_err("Failed to initialize audio join filter, url=%s", params->url);
         goto xc_done;
     }
 
-    if (!params->bypass_transcoding &&
+    if (!params->bypass_transcoding && !is_audio_copy(params) &&
         params->xc_type == xc_audio_merge &&
         (rc = init_audio_merge_pan_filters(xctx->params->filter_descriptor, decoder_context, encoder_context)) != eav_success) {
         elv_err("Failed to initialize audio merge pan filter, url=%s", params->url);
@@ -3758,7 +3784,7 @@ xc_done:
     if (!params->bypass_transcoding && (params->xc_type & xc_video) && xctx->err != eav_write_frame)
         encode_frame(decoder_context, encoder_context, NULL, decoder_context->video_stream_index, params, debug_frame_level);
     /* Loop through and flush all audio frames */
-    if (!params->bypass_transcoding && params->xc_type & xc_audio && xctx->err != eav_write_frame) {
+    if (!params->bypass_transcoding && !is_audio_copy(params) && params->xc_type & xc_audio && xctx->err != eav_write_frame) {
         for (int i=0; i<decoder_context->n_audio; i++)
             encode_frame(decoder_context, encoder_context, NULL, decoder_context->audio_stream_index[i], params, debug_frame_level);
     }

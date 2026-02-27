@@ -314,7 +314,7 @@ func InitTranscode(cmdRoot *cobra.Command) error {
 	cmdTranscode.PersistentFlags().Int32P("gpu-index", "", -1, "Use the GPU with specified index for transcoding (export CUDA_DEVICE_ORDER=PCI_BUS_ID would use smi index).")
 	cmdTranscode.PersistentFlags().Int32P("sync-audio-to-stream-id", "", -1, "sync audio to video iframe of specific stream-id when input stream is mpegts")
 	cmdTranscode.PersistentFlags().StringP("encoder", "e", "libx264", "encoder codec, default is 'libx264', can be: 'libx264', 'libx265', 'h264_nvenc', 'h264_videotoolbox', or 'mjpeg'.")
-	cmdTranscode.PersistentFlags().StringP("audio-encoder", "", "aac", "audio encoder, default is 'aac', can be: 'aac', 'ac3', 'mp2', 'mp3'.")
+	cmdTranscode.PersistentFlags().StringP("audio-encoder", "", "aac", "audio encoder, default is 'aac', can be: 'aac', 'ac3', 'mp2', 'mp3', or 'copy' (copies the input audio codec without re-encoding).")
 	cmdTranscode.PersistentFlags().StringP("decoder", "d", "", "video decoder, default is 'h264', can be: 'h264', 'h264_cuvid', 'jpeg2000', 'hevc'.")
 	cmdTranscode.PersistentFlags().StringP("audio-decoder", "", "", "audio decoder, default is '' and will be automatically chosen.")
 	cmdTranscode.PersistentFlags().StringP("format", "", "dash", "package format, can be 'dash', 'hls', 'mp4', 'fmp4', 'segment', 'fmp4-segment', or 'image2'.")

@@ -1025,7 +1025,7 @@ usage(
         "Usage: %s <params>\n"
         "\t-audio-bitrate :         (optional) Default: 128000\n"
         "\t-audio-decoder :         (optional) Audio decoder name. For audio default is \"aac\", but for ts files should be set to \"ac3\"\n"
-        "\t-audio-encoder :         (optional) Audio encoder name. Default is \"aac\", can be \"ac3\", \"mp2\" or \"mp3\"\n"
+        "\t-audio-encoder :         (optional) Audio encoder name. Default is \"aac\", can be \"ac3\", \"mp2\", \"mp3\", or \"copy\" (to copy the input audio codec without re-encoding)\n"
         "\t-audio-index :           (optional) Default: the indexes of audio stream (comma separated)\n"
         "\t-audio-seg-duration-ts : (mandatory If format is not \"segment\" and transcoding audio) audio segment duration time base (positive integer).\n"
         "\t-bitdepth :              (optional) Bitdepth of color space. Default is 8, can be 8, 10, or 12.\n"
