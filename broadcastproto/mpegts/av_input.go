@@ -170,7 +170,7 @@ func (mih *mpegtsInputHandler) Read(buf []byte) (int, error) {
 		case mih.outputSplit <- buf[:n]:
 		default:
 			mih.packetsDropped.Inc()
-			goavpipe.Log.Warn("Output split channel is full, dropping data", "size", n)
+			goavpipe.Log.Throttle("split-channel-full", time.Second).Warn("Output split channel is full, dropping data", "size", n)
 		}
 	}
 	if err != nil {

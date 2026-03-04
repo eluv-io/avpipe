@@ -8,7 +8,7 @@ require (
 	github.com/Eyevinn/mp4ff v0.49.0
 	github.com/eluv-io/common-go v1.1.15-0.20260211215853-0b8c1dd7b2b4
 	github.com/eluv-io/errors-go v1.0.4
-	github.com/eluv-io/log-go v1.0.8
+	github.com/eluv-io/log-go v1.0.9
 	github.com/grafov/m3u8 v0.11.1
 	github.com/modern-go/gls v0.0.0-20250215024828-78308f6bb19d
 	github.com/spf13/cobra v1.8.1

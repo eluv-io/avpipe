@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"strings"
 	"sync"
+	"time"
 
 	"github.com/modern-go/gls"
 
@@ -16,7 +17,7 @@ import (
 // logWrapper is used to wrap the standard log-go logger to include the handle of the AVPipe job in
 // question, if it is known
 type logWrapper struct {
-	log *elog.Log
+	log elog.Throttled
 }
 
 func (l *logWrapper) Trace(msg string, fields ...interface{}) {
@@ -59,6 +60,12 @@ func (l *logWrapper) Error(msg string, fields ...interface{}) {
 func (l *logWrapper) Fatal(msg string, fields ...interface{}) {
 	fields = append(fields, logHandleIfKnown()...)
 	l.log.Fatal(msg, fields...)
+}
+
+func (l *logWrapper) Throttle(key string, period ...time.Duration) *logWrapper {
+	return &logWrapper{
+		log: l.log.Throttle(key, period...),
+	}
 }
 
 var Log = logWrapper{log: elog.Get("/avpipe")}

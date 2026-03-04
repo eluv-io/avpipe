@@ -1,7 +1,6 @@
 package mpegts
 
 import (
-	"encoding/json"
 	"errors"
 	"io"
 	"sync"
@@ -13,6 +12,7 @@ import (
 	"github.com/eluv-io/avpipe/broadcastproto/tlv"
 	"github.com/eluv-io/avpipe/broadcastproto/transport"
 	"github.com/eluv-io/avpipe/goavpipe"
+	"github.com/eluv-io/common-go/util/timeutil"
 	elog "github.com/eluv-io/log-go"
 )
 
@@ -29,7 +29,7 @@ var mpegtslog = elog.Get("avpipe/broadcastproto/mpegts")
 
 type SequentialOpener interface {
 	OpenNext() (io.WriteCloser, error)
-	Stat(args string) error
+	Stat(args any) error
 	ReportStart() error
 }
 
@@ -49,6 +49,8 @@ type MpegtsPacketProcessor struct {
 	// rtpStats is used to keep track of RTP-specific information in the case that the packaging is
 	// RTP-MPEGTS. It is _nil_ iff cfg.Packaging is not RTP-TS.
 	rtpStats *RTPStats
+	// Periodic for logging stats
+	periodicStatsLog timeutil.Periodic
 
 	continuityMap map[int]uint8 // Map of PID to last continuity counter
 	pcr           uint64        // Last seen PCR value
@@ -62,14 +64,15 @@ func NewMpegtsPacketProcessor(cfg TsConfig, seqOpener SequentialOpener, inFd int
 		rtpStats = &RTPStats{}
 	}
 	return &MpegtsPacketProcessor{
-		cfg:           cfg,
-		opener:        seqOpener,
-		inFd:          inFd,
-		continuityMap: make(map[int]uint8),
-		stats:         NewTSStats(),
-		rtpStats:      rtpStats,
-		outBuf:        make([]byte, 64*1024), // Max datagram size
-		closeCh:       make(chan struct{}),
+		cfg:              cfg,
+		opener:           seqOpener,
+		inFd:             inFd,
+		continuityMap:    make(map[int]uint8),
+		stats:            NewTSStats(),
+		rtpStats:         rtpStats,
+		periodicStatsLog: timeutil.NewPeriodic(30 * time.Second),
+		outBuf:           make([]byte, 64*1024), // Max datagram size
+		closeCh:          make(chan struct{}),
 	}
 }
 
@@ -163,7 +166,7 @@ func (mpp *MpegtsPacketProcessor) ProcessDatagram(datagram []byte) {
 		if swapped {
 			mpp.rtpStats.RefTime = time.Now()
 			mpp.rtpStats.FirstSeqNum.Store(uint32(dgHeader.SequenceNumber))
-			mpp.PushStats()
+			defer mpp.PushStats() // defer so that ts stats are included in the stats
 		}
 		mpp.rtpStats.LastTimestamp.Store(dgHeader.Timestamp)
 		mpp.rtpStats.LastSeqNum.Store(uint32(dgHeader.SequenceNumber))
@@ -227,7 +230,8 @@ func (mpp *MpegtsPacketProcessor) HandleMpegtsPacket(pkt packet.Packet) error {
 
 // StartReportingStats kicks off a job that periodically logs the stats
 func (mpp *MpegtsPacketProcessor) StartReportingStats() {
-	reportingInterval := 30 * time.Second
+	// must be smaller than the 1s interval used by the live-recorder for calculation of "stalls"
+	reportingInterval := 900 * time.Millisecond
 	go func() {
 		ticker := time.NewTicker(reportingInterval)
 		defer ticker.Stop()
@@ -244,14 +248,14 @@ func (mpp *MpegtsPacketProcessor) StartReportingStats() {
 
 func (mpp *MpegtsPacketProcessor) PushStats() {
 	mpp.statsMu.Lock()
-	v, _ := json.Marshal(mpp.stats)
-	mpegtslog.Debug("mpegts stats", "fd", mpp.inFd, "stats", string(v))
-	v, _ = json.Marshal(mpp.rtpStats)
-	mpegtslog.Debug("rtp/mpegts stats", "fd", mpp.inFd, "stats", string(v))
+	exportStats := exportStats(mpp.stats, mpp.rtpStats)
 	mpp.statsMu.Unlock()
 	mpp.resetChannelSizeStats()
-	// PENDING(SS) - create a combined JSON mpegts and rtp
-	_ = mpp.opener.Stat(string(v))
+
+	mpp.periodicStatsLog.Do(func() {
+		mpegtslog.Debug("mpegts stats", "fd", mpp.inFd, "stats", exportStats)
+	})
+	_ = mpp.opener.Stat(exportStats)
 }
 
 func (mpp *MpegtsPacketProcessor) ReportStart() {
