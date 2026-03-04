@@ -1,10 +1,8 @@
 package goavpipe
 
 import (
-	"bytes"
-	"encoding/binary"
-	"encoding/hex"
 	"fmt"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -22,44 +20,38 @@ type logWrapper struct {
 
 func (l *logWrapper) Trace(msg string, fields ...interface{}) {
 	if l.log.IsTrace() {
-		fields = append(fields, logHandleIfKnown()...)
-		l.log.Trace(msg, fields...)
+		l.log.Trace(msg, appendHandle(fields)...)
 	}
 }
 
 func (l *logWrapper) Debug(msg string, fields ...interface{}) {
 	if l.log.IsDebug() {
-		fields = append(fields, logHandleIfKnown()...)
-		l.log.Debug(msg, fields...)
+		l.log.Debug(msg, appendHandle(fields)...)
 	}
 }
 
 func (l *logWrapper) Info(msg string, fields ...interface{}) {
 	if l.log.IsInfo() {
-		fields = append(fields, logHandleIfKnown()...)
-		l.log.Info(msg, fields...)
+		l.log.Info(msg, appendHandle(fields)...)
 	}
 }
 
 func (l *logWrapper) Warn(msg string, fields ...interface{}) {
 	dispatchToChannelIfPresent("WARN", msg, fields...)
 	if l.log.IsWarn() {
-		fields = append(fields, logHandleIfKnown()...)
-		l.log.Warn(msg, fields...)
+		l.log.Warn(msg, appendHandle(fields)...)
 	}
 }
 
 func (l *logWrapper) Error(msg string, fields ...interface{}) {
 	dispatchToChannelIfPresent("ERROR", msg, fields...)
 	if l.log.IsError() {
-		fields = append(fields, logHandleIfKnown()...)
-		l.log.Error(msg, fields...)
+		l.log.Error(msg, appendHandle(fields)...)
 	}
 }
 
 func (l *logWrapper) Fatal(msg string, fields ...interface{}) {
-	fields = append(fields, logHandleIfKnown()...)
-	l.log.Fatal(msg, fields...)
+	l.log.Fatal(msg, appendHandle(fields)...)
 }
 
 func (l *logWrapper) Throttle(key string, period ...time.Duration) *logWrapper {
@@ -171,13 +163,11 @@ func GIDHandle() (int32, bool) {
 	return handle.(int32), true
 }
 
-func logHandleIfKnown() []interface{} {
+func appendHandle(fields []any) []any {
 	if handle, ok := GIDHandle(); ok {
-		buf := &bytes.Buffer{}
-		binary.Write(buf, binary.BigEndian, handle)
-		return []interface{}{"avp", hex.EncodeToString(buf.Bytes())}
+		return append(fields, "avp", strconv.FormatInt(int64(handle), 16))
 	}
-	return nil
+	return fields
 }
 
 func dispatchToChannelIfPresent(level string, msg string, fields ...interface{}) {
