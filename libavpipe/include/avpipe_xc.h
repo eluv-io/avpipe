@@ -22,16 +22,9 @@
 
 #define AVIO_OUT_BUF_SIZE   (1*1024*1024)   // avio output buffer size
 #define AVIO_IN_BUF_SIZE    (1*1024*1024)   // avio input buffer size
+#define MAX_URL_SIZE        1024            // Maximum URL size
 
 //#define DEBUG_UDP_PACKET  // Uncomment for development, debugging and testing
-
-/* Borrowed from libavcodec/nvenc.h since it is not exposed */
-enum {
-    NV_ENC_H264_PROFILE_BASELINE,
-    NV_ENC_H264_PROFILE_MAIN,
-    NV_ENC_H264_PROFILE_HIGH,
-    NV_ENC_H264_PROFILE_HIGH_444P,
-};
 
 /*
  * Adding/deleting an error code needs adding/deleting corresponding GO
@@ -172,6 +165,7 @@ typedef struct ioctx_t {
 
     /* Input filename or url */
     char                *url;
+    char                *alt_url;   /* Alternate URL for ffmpeg (e.g. rtp:// rewritten as udp://) */
 
     avpipe_buftype_t    type;
     unsigned char*      buf;
@@ -543,6 +537,7 @@ typedef struct xcparams_t {
     char        *profile;
     int         level;
     dif_type    deinterlace;                // Deinterlacing filter
+    char        *timecode;                  // Original timecode string
 } xcparams_t;
 
 #define MAX_CODEC_NAME  256
@@ -885,29 +880,6 @@ avpipe_h264_guess_profile(
  */
 int
 avpipe_h264_profile(
-    char *profile_name);
-
-
-/**
- * @brief   Helper function to obtain FFmpeg constant for an h265 profile name. 
- * 
- * @param   profile_name  A pointer to the profile name.
- * @return  Returns the FFmpeg constant if profile name is valid.
- *          Returns 0 if profile name is NULL. For invalid profile name return -1.
- */
-int
-avpipe_h265_profile(
-    char *profile_name);
-
-/**
- * @brief   Helper function to obtain FFmpeg constant for an nvidia h264 profile name. 
- * 
- * @param   profile_name  A pointer to the profile name.
- * @return  Returns the FFmpeg constant if profile name is valid.
- *          Returns 0 if profile name is NULL. For invalid profile name return -1.
- */
-int
-avpipe_nvh264_profile(
     char *profile_name);
 
 /**

@@ -2245,6 +2245,7 @@ func TestABRMuxing(t *testing.T) {
 
 	goavpipe.InitUrlMuxIOHandler(url, &cmd.AVCmdMuxInputOpener{URL: url}, &cmd.AVCmdMuxOutputOpener{})
 	params.Url = url
+	params.Timecode = "01:00:00:00"
 	err := avpipe.Mux(params)
 	failNowOnError(t, err)
 

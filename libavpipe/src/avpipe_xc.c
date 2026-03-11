@@ -173,8 +173,6 @@ check_input_stream(
     xcparams_t *params,
     coderctx_t *decoder_context) {
 
-    int rc;
-
     if (!decoder_context->format_context->iformat ||
         !decoder_context->format_context->iformat->name) {
         elv_err("Failed to open input stream properly - no format name");
@@ -184,6 +182,7 @@ check_input_stream(
     switch(decoder_context->live_proto) {
         case avp_proto_mpegts:
         case avp_proto_srt:
+        case avp_proto_rtp:     /* RTP URL is rewritten to UDP, so ffmpeg sees MPEGTS */
             if (strcmp(decoder_context->format_context->iformat->name, "mpegts")) {
                 elv_err("Unsupported live source: proto=%d container=%s",
                     decoder_context->live_proto, decoder_context->format_context->iformat->name);
@@ -195,24 +194,6 @@ check_input_stream(
                 elv_err("Unsupported live source: proto=%d container=%s",
                     decoder_context->live_proto, decoder_context->format_context->iformat->name);
                 return eav_open_codec;
-            }
-            break;
-        case avp_proto_rtp:
-            // PENDING(SS) The custom live reader will strip RTP and this fails
-            if (decoder_context->format_context->priv_data) {
-                int64_t payload_type;
-                rc = av_opt_get_int(decoder_context->format_context->priv_data, "payload_type", 0, &payload_type);
-                if (rc == 0) {
-                    const int rtp_payload_type_mpegts = 33;
-                    if (payload_type != rtp_payload_type_mpegts) {
-                        elv_err("Unsupported RTP container %d", payload_type);
-                        return eav_open_codec;
-                    }
-                } else {
-                    // In the current version of libavformat the "payload_type" is not set by the decoder - log and proceed.
-                    // However if the payload_type is not MPEGTS the decoder errors out early (so we don't get here).
-                    elv_log("Unable to retrieve RTP payload type rc=%d", rc);
-                }
             }
             break;
         default:
@@ -257,6 +238,16 @@ prepare_decoder(
 
     decoder_context->live_proto = find_live_proto(inctx);
 
+    /*
+     * Rewrite rtp:// to udp:// so ffmpeg uses the MPEGTS demuxer directly.
+     * This ensures stream IDs and indexes are detected deterministically.
+     * The live_proto remains avp_proto_rtp so all avpipe logic is unchanged.
+     */
+    if (decoder_context->live_proto == avp_proto_rtp && inctx->alt_url) {
+        snprintf(inctx->alt_url, MAX_URL_SIZE, "udp://%s", inctx->url + 6);
+        elv_log("Rewriting RTP URL for ffmpeg: %s -> %s", inctx->url, inctx->alt_url);
+    }
+
     /* Set our custom reader */
     prepare_input(in_handlers, inctx, decoder_context, seekable);
 
@@ -295,7 +286,8 @@ prepare_decoder(
     }
 
     /* Allocate AVFormatContext in format_context and find input file format */
-    rc = avformat_open_input(&decoder_context->format_context, inctx->url, NULL, &opts);
+    const char *open_url = (inctx->alt_url && inctx->alt_url[0]) ? inctx->alt_url : inctx->url;
+    rc = avformat_open_input(&decoder_context->format_context, open_url, NULL, &opts);
     if (rc != 0) {
         elv_err("Could not open input file, err=%s (%d), url=%s", av_err2str(rc), rc, url);
         return eav_open_input;
@@ -306,6 +298,8 @@ prepare_decoder(
         elv_err("Could not get input stream info, url=%s", url);
         return eav_stream_info;
     }
+
+    dump_streams(inctx->url, decoder_context->format_context);
 
     rc = check_input_stream(params, decoder_context);
     if (rc != eav_success) {
@@ -775,32 +769,30 @@ set_h265_params(
      * which is the most common type of video used with consumer devices
      * For HDR10 we need MAIN 10 that supports 10 bit profile.
      */
-    int profile = avpipe_h265_profile(params->profile);
-    if (profile > 0) {
+    if (params->profile != NULL && strlen(params->profile) > 0) {
         /* Can be only main or main10 profiles */
         av_opt_set(encoder_codec_context->priv_data, "profile", params->profile, 0);
-        if (params->bitdepth == 10) {
-            av_opt_set(encoder_codec_context->priv_data, "x265-params",
-                "hdr-opt=1:repeat-headers=1:colorprim=bt2020:transfer=smpte2084:colormatrix=bt2020nc", 0);
-        }
     } else if (params->bitdepth == 8) {
         av_opt_set(encoder_codec_context->priv_data, "profile", "main", 0);
     } else if (params->bitdepth == 10) {
         av_opt_set(encoder_codec_context->priv_data, "profile", "main10", 0);
-        av_opt_set(encoder_codec_context->priv_data, "x265-params",
-            "hdr-opt=1:repeat-headers=1:colorprim=bt2020:transfer=smpte2084:colormatrix=bt2020nc", 0);
-    } else {
-        /* bitdepth == 12 */
+    } else if (params->bitdepth == 12) {
         av_opt_set(encoder_codec_context->priv_data, "profile", "main12", 0);
-        av_opt_set(encoder_codec_context->priv_data, "x265-params",
-            "hdr-opt=1:repeat-headers=1:colorprim=bt2020:transfer=smpte2084:colormatrix=bt2020nc", 0);
     }
 
     /* Set max_cll and master_display meta data for HDR content */
     if (params->max_cll && params->max_cll[0] != '\0')
         av_opt_set(encoder_codec_context->priv_data, "max-cll", params->max_cll, 0);
-    if (params->master_display && params->master_display[0] != '\0')
+    if (params->master_display && params->master_display[0] != '\0') {
+        av_opt_set(encoder_codec_context->priv_data, "x265-params",
+            "hdr10=1:hdr10-opt=1:repeat-headers=1:colorprim=bt2020:transfer=smpte2084:colormatrix=bt2020nc", 0);
         av_opt_set(encoder_codec_context->priv_data, "master-display", params->master_display, 0);
+
+        if ((params->profile == NULL || strlen(params->profile) == 0) && params->bitdepth < 10) {
+            /* If not specified or if bitdepth is specified but <10, assume 10 bits */
+            av_opt_set(encoder_codec_context->priv_data, "profile", "main10", 0);
+        }
+    }
 
     /* Set the number of bframes to 0 and avoid having bframes */
     av_opt_set_int(encoder_codec_context->priv_data, "bframes", 0, 0);
@@ -892,7 +884,7 @@ enum {
 };
 
 static void
-set_nvidia_params(
+set_nvidia_h264_params(
     coderctx_t *encoder_context,
     coderctx_t *decoder_context,
     xcparams_t *params)
@@ -905,20 +897,8 @@ set_nvidia_params(
     if (params->gpu_index >= 0)
         av_opt_set_int(encoder_codec_context->priv_data, "gpu", params->gpu_index, 0);
 
-    /*
-     * The encoder_codec_context->profile is set just for proper log message, otherwise it has no impact
-     * when the encoder is nvidia.
-     */
-    int profile = avpipe_nvh264_profile(params->profile);
-    if (profile > 0) {
-        av_opt_set_int(encoder_codec_context->priv_data, "profile", profile, 0);
-        encoder_codec_context->profile = profile;
-    } else if (encoder_codec_context->height <= 480) {
-        av_opt_set_int(encoder_codec_context->priv_data, "profile", NV_ENC_H264_PROFILE_BASELINE, 0);
-        encoder_codec_context->profile = AV_PROFILE_H264_BASELINE;
-    } else {
-        av_opt_set_int(encoder_codec_context->priv_data, "profile", NV_ENC_H264_PROFILE_HIGH, 0);
-        encoder_codec_context->profile = AV_PROFILE_H264_HIGH;
+    if (params->profile != NULL && strlen(params->profile) > 0) {
+        av_opt_set(encoder_codec_context->priv_data, "profile", params->profile, 0);
     }
 
 /*
@@ -962,6 +942,54 @@ set_nvidia_params(
      * sprintf(level, "%d.", 15);
      * av_opt_set(encoder_codec_context->priv_data, "cq", level, 0);
      */
+}
+
+static void
+set_nvidia_hevc_params(
+    coderctx_t *encoder_context,
+    coderctx_t *decoder_context,
+    xcparams_t *params)
+{
+    int index = decoder_context->video_stream_index;
+    AVCodecContext *encoder_codec_context = encoder_context->codec_context[index];
+
+    av_opt_set(encoder_codec_context->priv_data, "forced-idr", "on", 0);
+
+    if (params->gpu_index >= 0)
+        av_opt_set_int(encoder_codec_context->priv_data, "gpu", params->gpu_index, 0);
+
+    if (params->profile != NULL && strlen(params->profile) > 0) {
+        av_opt_set(encoder_codec_context->priv_data, "profile", params->profile, 0);
+    } else if (params->bitdepth == 8) {
+        av_opt_set(encoder_codec_context->priv_data, "profile", "main", 0);
+        av_opt_set(encoder_codec_context->priv_data, "tier", "high", 0);
+    } else if (params->bitdepth >= 10) {
+        av_opt_set(encoder_codec_context->priv_data, "profile", "main10", 0);
+        av_opt_set(encoder_codec_context->priv_data, "tier", "high", 0);
+    }
+
+    /*
+     * Default preset - fast and good quality (previously "PRESET_LOW_LATENCY_HQ")
+     */
+    av_opt_set(encoder_codec_context->priv_data, "preset", "p2", 0); // Valid: p1–p7
+    av_opt_set(encoder_codec_context->priv_data, "tune", "hq", 0);   // Valid: hq, ll, ull, lossless, losslesshp
+
+    /* HDR - set max_cll and master_display meta data for HDR content */
+    if (params->max_cll && params->max_cll[0] != '\0')
+        av_opt_set(encoder_codec_context->priv_data, "max_cll", params->max_cll, 0);
+    if (params->master_display && params->master_display[0] != '\0') {
+        encoder_codec_context->pix_fmt        = AV_PIX_FMT_P010;                 // 10-bit
+        encoder_codec_context->color_range    = AVCOL_RANGE_MPEG;                // "tv"
+        encoder_codec_context->color_primaries= AVCOL_PRI_BT2020;
+        encoder_codec_context->color_trc      = AVCOL_TRC_SMPTE2084;             // PQ (ST 2084)
+        encoder_codec_context->colorspace     = AVCOL_SPC_BT2020_NCL;            // bt2020nc
+        av_opt_set(encoder_codec_context->priv_data, "master_display", params->master_display, 0);
+
+        if ((params->profile == NULL || strlen(params->profile) == 0) && params->bitdepth < 10) {
+            /* If not specified or if bitdepth is specified but <10, assume 10 bits */
+            av_opt_set(encoder_codec_context->priv_data, "profile", "main10", 0);
+        }
+    }
 }
 
 static int
@@ -1182,19 +1210,16 @@ prepare_video_encoder(
         return rc;
 
     if (!strcmp(params->ecodec, "h264_nvenc"))
-        /* Set NVIDIA specific params if the encoder is NVIDIA */
-        set_nvidia_params(encoder_context, decoder_context, params);
+        set_nvidia_h264_params(encoder_context, decoder_context, params);
+    else if (!strcmp(params->ecodec, "hevc_nvenc"))
+        set_nvidia_hevc_params(encoder_context, decoder_context, params);
     else if (!strcmp(params->ecodec, "libx265"))
-        /* Set H265 specific params (profile and level) */
         set_h265_params(encoder_context, decoder_context, params);
     else if (!strcmp(params->ecodec, "h264_ni_enc") || !strcmp(params->ecodec, "h264_ni_quadra_enc"))
-        /* Set netint H264 codensity params */
         set_netint_h264_params(encoder_context, decoder_context, params);
     else if (!strcmp(params->ecodec, "h265_ni_enc"))
-        /* Set netint H265 codensity params */
         set_netint_h265_params(encoder_context, decoder_context, params);
     else
-        /* Set H264 specific params (profile and level) */
         set_h264_params(encoder_context, decoder_context, params);
 
     elv_log("Output pixel_format=%s, profile=%d, level=%d",
@@ -4475,7 +4500,8 @@ log_params(
         "level=%d "
         "deinterlace=%d "
         "use_preprocessed_input=%d "
-        "copy_mpegts=%d",
+        "copy_mpegts=%d "
+        "timecode=%s",
         params->stream_id, params->url,
         avpipe_version(),
         params->bypass_transcoding, params->skip_decoding,
@@ -4500,7 +4526,8 @@ log_params(
         params->extract_image_interval_ts, params->extract_images_sz,
         1, params->video_time_base, params->video_frame_duration_ts, params->rotate,
         params->profile ? params->profile : "", params->level,  params->deinterlace,
-        params->use_preprocessed_input, params->copy_mpegts);
+        params->use_preprocessed_input, params->copy_mpegts,
+        params->timecode);
     elv_log("AVPIPE XCPARAMS %s", buf);
 }
 
@@ -4539,6 +4566,7 @@ avpipe_copy_xcparams(
     p2->start_segment_str = safe_strdup(p->start_segment_str);
     p2->watermark_text = safe_strdup(p->watermark_text);
     p2->watermark_timecode = safe_strdup(p->watermark_timecode);
+    p2->timecode = safe_strdup(p->timecode);
     p2->overlay_filename = safe_strdup(p->overlay_filename);
     if (p->watermark_overlay_len > 0) {
         p2->watermark_overlay = (char *) calloc(1, p->watermark_overlay_len);
@@ -4583,6 +4611,7 @@ avpipe_init(
 
     params = avpipe_copy_xcparams(p);
     inctx->params = params;
+    inctx->alt_url = (char *)calloc(1, MAX_URL_SIZE);
 
     p_xctx = (xctx_t *) calloc(1, sizeof(xctx_t));
     p_xctx->params = params;
@@ -4641,6 +4670,7 @@ avpipe_free_params(
     free(params->watermark_overlay);
     free(params->watermark_shadow_color);
     free(params->watermark_timecode);
+    free(params->timecode);
     free(params->max_cll);
     free(params->master_display);
     free(params->filter_descriptor);
@@ -4760,6 +4790,8 @@ avpipe_fini(
 
     if ((*xctx)->inctx && (*xctx)->inctx->udp_channel)
         elv_channel_fini(&((*xctx)->inctx->udp_channel));
+    if ((*xctx)->inctx)
+        free((*xctx)->inctx->alt_url);
     free((*xctx)->inctx);
     elv_channel_fini(&((*xctx)->vc));
     elv_channel_fini(&((*xctx)->ac));

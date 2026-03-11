@@ -33,7 +33,9 @@ copy_mpegts_set_encoder_options(
     float seg_duration = 0;
 
     /* Precalculate seg_duration_ts based on seg_duration if seg_duration is set */
-    seg_duration = atof(params->seg_duration);
+    if (params->seg_duration) {
+        seg_duration = atof(params->seg_duration);
+    }
     if (seg_duration <= 0) {
         elv_err("Setting mpegts encoder options failed, invalid seg_duration=%f, url=%s", seg_duration, params->url);
         return eav_param;

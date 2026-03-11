@@ -69,6 +69,28 @@ dump_packet(
 }
 
 void
+dump_streams(
+    char *url,
+    AVFormatContext *fmt_ctx)
+{
+    if (!fmt_ctx)
+        return;
+
+    elv_log("STREAMS url=%s, format=%s, nb_streams=%d",
+        url ? url : "",
+        fmt_ctx->iformat ? fmt_ctx->iformat->name : "?",
+        fmt_ctx->nb_streams);
+
+    for (int i = 0; i < fmt_ctx->nb_streams; i++) {
+        AVStream *s = fmt_ctx->streams[i];
+        elv_log("STREAM[%d] id=%d codec_type=%s codec=%s",
+            s->index, s->id,
+            av_get_media_type_string(s->codecpar->codec_type),
+            avcodec_get_name(s->codecpar->codec_id));
+    }
+}
+
+void
 dump_decoder(
     char *url,
     coderctx_t *d)
