@@ -23,7 +23,6 @@ package avpipe
 // #cgo pkg-config: libavdevice
 // #cgo pkg-config: libswscale
 // #cgo pkg-config: libavutil
-// #cgo pkg-config: libpostproc
 // #cgo netint pkg-config: xcoder
 // #cgo pkg-config: srt
 // #cgo CFLAGS: -I${SRCDIR}/libavpipe/include
