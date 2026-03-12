@@ -76,7 +76,7 @@ func (c *customInputOpener) Open(fd int64, url string) (goavpipe.InputHandler, e
 
 	netReader := StartNetReader(
 		c.cfg.Url,
-		time.Millisecond*time.Duration(c.cfg.ConnectionTimeout),
+		time.Second*time.Duration(c.cfg.ConnectionTimeout),
 		c.cfg.InputCfg.Processor,
 		c.transport,
 		consumers,

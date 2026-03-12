@@ -1,6 +1,11 @@
 package mpegts
 
-import "time"
+import (
+	"encoding/json"
+	"time"
+
+	"github.com/eluv-io/common-go/util/jsonutil"
+)
 
 func exportStats(ts *TSStats, rtp *RTPStats) (res ExportedStats) {
 	if ts != nil {
@@ -49,6 +54,14 @@ func exportStats(ts *TSStats, rtp *RTPStats) (res ExportedStats) {
 type ExportedStats struct {
 	TS  ExportedTSStats  `json:"ts,omitzero"`
 	RTP ExportedRTPStats `json:"rtp,omitzero"`
+}
+
+func (e *ExportedStats) String() string {
+	bb, err := json.Marshal(e)
+	if err != nil {
+		return jsonutil.MarshallingError("duration_histogram", err)
+	}
+	return string(bb)
 }
 
 type ExportedTSStats struct {
