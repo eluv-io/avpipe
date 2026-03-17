@@ -1060,6 +1060,11 @@ prepare_video_encoder(
     }
     elv_log("Found encoder index=%d, %s", index, params->ecodec);
 
+    /* PENDING(SS) WIP hack to force bypass transcode for MV-HEVC inputs */
+    if (is_mvhevc(decoder_context->stream[index])) {
+        params->bypass_transcoding = 1;
+    }
+
     if (params->bypass_transcoding) {
         AVStream *in_stream = decoder_context->stream[index];
         AVStream *out_stream = encoder_context->stream[index];
@@ -1089,9 +1094,6 @@ prepare_video_encoder(
 
             /* Tell/allow muxer to write 3d metadata (st3d, sv3d, vexu, eyes) */
              encoder_context->format_context->strict_std_compliance = FF_COMPLIANCE_UNOFFICIAL;
-
-            /* PENDING(SS) Hack to force bypass transcode for MV-HEVC inputs */
-            params->bypass_transcoding = true;
         }
 
         /* Set output stream timebase when bypass encoding */
