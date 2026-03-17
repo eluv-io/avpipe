@@ -1084,14 +1084,14 @@ prepare_video_encoder(
         if (is_mvhevc(in_stream)) {
             elv_log("BYPASS MV-HEVC detected, profile=%d, url=%s", in_codecpar->profile, params->url);
 
-            /* Ensure the multilayer disposition is set on the output stream so the
-             * MP4 muxer writes the lhvC atom. For x265-style MV-HEVC (Multiview Main
-             * profile) the HEVC parser does not set this flag, so we add it explicitly. */
+            /* Ensure the multilayer disposition is set on the output stream (so MP4 muxer writes to lhvC atom) */
             out_stream->disposition |= AV_DISPOSITION_MULTILAYER;
 
-            /* Allow the MP4 muxer to write stereo3d/spherical metadata (st3d, sv3d, vexu, eyes).
-             * These are only written for MODE_MP4 when strict_std_compliance <= UNOFFICIAL. */
-            encoder_context->format_context->strict_std_compliance = FF_COMPLIANCE_UNOFFICIAL;
+            /* Tell/allow muxer to write 3d metadata (st3d, sv3d, vexu, eyes) */
+             encoder_context->format_context->strict_std_compliance = FF_COMPLIANCE_UNOFFICIAL;
+
+            /* PENDING(SS) Hack to force bypass transcode for MV-HEVC inputs */
+            params->bypass_transcoding = true;
         }
 
         /* Set output stream timebase when bypass encoding */
