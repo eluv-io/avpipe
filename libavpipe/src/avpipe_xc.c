@@ -1191,9 +1191,12 @@ prepare_video_encoder(
     int found_pix_fmt = 0;
     int i;
     /* Search for input pixel format in list of encoder pixel formats. */
-    if ( encoder_context->codec[index]->pix_fmts ) {
-        for (i=0; encoder_context->codec[index]->pix_fmts[i] >= 0; i++) {
-            if (encoder_context->codec[index]->pix_fmts[i] == decoder_context->codec_context[index]->pix_fmt)
+    const enum AVPixelFormat *supported_pix_fmts = NULL;
+    if (avcodec_get_supported_config(NULL, encoder_context->codec[index],
+            AV_CODEC_CONFIG_PIX_FORMAT, 0,
+            (const void **)&supported_pix_fmts, NULL) >= 0 && supported_pix_fmts) {
+        for (i = 0; supported_pix_fmts[i] >= 0; i++) {
+            if (supported_pix_fmts[i] == decoder_context->codec_context[index]->pix_fmt)
                 found_pix_fmt = 1;
         }
     }
@@ -1356,12 +1359,17 @@ prepare_audio_encoder(
         encoder_context->codec_context[output_stream_index]->time_base = (AVRational){1, encoder_context->codec_context[output_stream_index]->sample_rate};
         encoder_context->stream[output_stream_index]->time_base = encoder_context->codec_context[output_stream_index]->time_base;
 
-        // TODO: sample_fmts is deprecated; use avcodec_get_supported_config()
-        if (decoder_context->codec[stream_index] && 
-            decoder_context->codec[stream_index]->sample_fmts && params->bypass_transcoding)
-            encoder_context->codec_context[output_stream_index]->sample_fmt = decoder_context->codec[stream_index]->sample_fmts[0];
-        else if (encoder_context->codec[output_stream_index]->sample_fmts && encoder_context->codec[output_stream_index]->sample_fmts[0])
-            encoder_context->codec_context[output_stream_index]->sample_fmt = encoder_context->codec[output_stream_index]->sample_fmts[0];
+        const enum AVSampleFormat *supported_sample_fmts = NULL;
+        if (params->bypass_transcoding && decoder_context->codec[stream_index] &&
+            avcodec_get_supported_config(NULL, decoder_context->codec[stream_index],
+                AV_CODEC_CONFIG_SAMPLE_FORMAT, 0,
+                (const void **)&supported_sample_fmts, NULL) >= 0 && supported_sample_fmts)
+            encoder_context->codec_context[output_stream_index]->sample_fmt = supported_sample_fmts[0];
+        else if (avcodec_get_supported_config(NULL, encoder_context->codec[output_stream_index],
+                AV_CODEC_CONFIG_SAMPLE_FORMAT, 0,
+                (const void **)&supported_sample_fmts, NULL) >= 0 && supported_sample_fmts &&
+                supported_sample_fmts[0] != AV_SAMPLE_FMT_NONE)
+            encoder_context->codec_context[output_stream_index]->sample_fmt = supported_sample_fmts[0];
         else
             encoder_context->codec_context[output_stream_index]->sample_fmt = AV_SAMPLE_FMT_FLTP;
 
