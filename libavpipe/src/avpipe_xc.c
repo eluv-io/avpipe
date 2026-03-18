@@ -618,8 +618,8 @@ set_encoder_options(
             av_opt_set(encoder_context->format_context->priv_data, "movflags", FRAG_OPTS, 0);
         }
         if ((i = selected_decoded_audio(decoder_context, stream_index)) >= 0) {
-            if (params->ecodec2 && !strcmp(params->ecodec2, "ac3")) {
-                elv_dbg("set_encoder_options, fmp4 audio, ac3, stream_index=%d, movflags="FRAG_OPTS_DELAY, stream_index);
+            if ((params->ecodec2 && (!strcmp(params->ecodec2, "ac3") || !strcmp(params->ecodec2, "eac3")))) {
+                elv_dbg("set_encoder_options, fmp4 audio, ac3/eac3, stream_index=%d, movflags="FRAG_OPTS_DELAY, stream_index);
                 av_opt_set(encoder_context->format_context2[i]->priv_data, "movflags", FRAG_OPTS_DELAY, 0);
             } else {
                 elv_dbg("set_encoder_options, fmp4 audio, stream_index=%d, movflags="FRAG_OPTS, stream_index);
@@ -698,8 +698,8 @@ set_encoder_options(
 
         if (!strcmp(params->format, "fmp4-segment")) {
             if ((i = selected_decoded_audio(decoder_context, stream_index)) >= 0) {
-                if (params->ecodec2 && !strcmp(params->ecodec2, "ac3")) {
-                    elv_dbg("set_encoder_options, fmp4-segment audio, ac3, stream_index=%d, movflags="FRAG_OPTS_DELAY, stream_index);
+                if ((params->ecodec2 && (!strcmp(params->ecodec2, "ac3") || !strcmp(params->ecodec2, "eac3")))) {
+                    elv_dbg("set_encoder_options, fmp4-segment audio, ac3/eac3, stream_index=%d, movflags="FRAG_OPTS_DELAY, stream_index);
                     av_opt_set(encoder_context->format_context2[i]->priv_data, "segment_format_options", "movflags="FRAG_OPTS_DELAY, 0);
                 } else {
                     elv_dbg("set_encoder_options, fmp4-segment audio, stream_index=%d, movflags="FRAG_OPTS, stream_index);
@@ -1312,6 +1312,12 @@ prepare_audio_encoder(
             return eav_codec_context;
         }
         dec_codec_ctx = decoder_context->codec_context[stream_index];
+
+        /* PENDING(SS) WIP hack to force bypass transcode for Dolby Atmos inputs */
+        if (is_dolby_atmos(decoder_context->stream[stream_index])) {
+            params->bypass_transcoding = 1;
+            params->ecodec2 = strdup("eac3");
+        }
 
         /* If there are more than 1 audio streams to encode, we can't do bypass */
         if (params && params->bypass_transcoding && decoder_context->n_audio > 1) {
@@ -2279,6 +2285,17 @@ do_bypass(
         format_context = encoder_context->format_context2[i];
     } else
         format_context = encoder_context->format_context;
+
+    /*
+     * Remap packet stream_index for the output format context. Currently nb_straems is always 1 for outputs.
+     */
+    if (format_context->nb_streams == 1) {
+        packet->stream_index = 0;
+    } else if (packet->stream_index >= format_context->nb_streams) {
+        elv_err("Bypass packet stream_index=%d exceeds output nb_streams=%d, url=%s",
+            packet->stream_index, format_context->nb_streams, p->url);
+        return eav_stream_index;
+    }
 
     if (packet->pts == AV_NOPTS_VALUE ||
         packet->dts == AV_NOPTS_VALUE ||

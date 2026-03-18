@@ -89,3 +89,7 @@ copy_stream_side_data(
 int
 is_mvhevc(
     const AVStream *stream);
+
+int
+is_dolby_atmos(
+    const AVStream *stream);

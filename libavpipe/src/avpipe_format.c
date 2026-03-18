@@ -434,3 +434,27 @@ is_mvhevc(
 
     return 0;
 }
+
+/*
+ * Detects Dolby Atmos audio streams.
+ * Dolby Atmos is carried as JOC (Joint Object Coding) metadata on top of E-AC-3 or TrueHD.
+ *
+ * Returns 1 if the stream is Dolby Atmos, 0 otherwise.
+ */
+int
+is_dolby_atmos(
+    const AVStream *stream)
+{
+    if (!stream || !stream->codecpar)
+        return 0;
+
+    if (stream->codecpar->codec_id == AV_CODEC_ID_EAC3 &&
+        stream->codecpar->profile == AV_PROFILE_EAC3_DDP_ATMOS)
+        return 1;
+
+    if (stream->codecpar->codec_id == AV_CODEC_ID_TRUEHD &&
+        stream->codecpar->profile == AV_PROFILE_TRUEHD_ATMOS)
+        return 1;
+
+    return 0;
+}
