@@ -30,7 +30,12 @@ init_video_filters(
     if (decoder_context->video_stream_index < 0)
         return 0;
 
-    time_base = decoder_context->format_context->streams[decoder_context->video_stream_index]->time_base;
+    /*
+     * Use the encoder's timebase for the video filter so that filtered frames are in the
+     * encoder's timebase. Video frames are rescaled from decoder to encoder timebase before
+     * being sent to the filter (same approach as audio).
+     */
+    time_base = encoder_context->codec_context[decoder_context->video_stream_index]->time_base;
 
     decoder_context->video_filter_graph = avfilter_graph_alloc();
     if (!outputs || !inputs || !decoder_context->video_filter_graph) {

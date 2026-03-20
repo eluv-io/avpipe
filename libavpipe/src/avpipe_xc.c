@@ -2166,25 +2166,13 @@ encode_frame(
             encoder_context->video_encoder_prev_pts = output_packet->pts;
 
         /*
-         * Rescale video using the stream time_base (not the codec context)
-         * Audio has already been rescaled before the filter.
-         * PENDING(SS) Video should also be rescaled before sending to the filter so this
-         * code will not longer benecessary. When rescaling before sending to the filter and encoder,
-         * we use the codect context time base (which is what the encoder will use). We would
-         * only want to filter here, after encoding, if the packager requires a specific timebase,
-         * different than the encoder (eg. MPEGTS requires timebase 1/90000)
+         * Video frames are now rescaled to the encoder timebase before the filter,
+         * so the encoder outputs packets already in the correct timebase.
+         * No post-encoding rescale is needed for video.
+         * If the packager requires a specific timebase different from the encoder
+         * (e.g. MPEGTS requires 1/90000), a rescale from encoder stream timebase
+         * to output stream timebase would be done here.
          */
-        if ((stream_index == decoder_context->video_stream_index) &&
-            (decoder_context->stream[stream_index]->time_base.den !=
-            encoder_context->stream[index]->time_base.den ||
-            decoder_context->stream[stream_index]->time_base.num !=
-            encoder_context->stream[index]->time_base.num)) {
-
-            av_packet_rescale_ts(output_packet,
-                decoder_context->stream[stream_index]->time_base,
-                encoder_context->stream[index]->time_base
-            );
-        }
 
         if (selected_decoded_audio(decoder_context, stream_index) >= 0) {
             /* Set the packet duration if it is not the first audio packet */
@@ -2605,6 +2593,13 @@ transcode_video(
 
         decoder_context->video_pts = packet->pts;
 
+        /* Rescale video frame to encoder timebase before sending to the filter
+         * (filter is initialized with the encoder timebase) */
+        {
+            AVCodecContext *enc_codec_context = encoder_context->codec_context[stream_index];
+            frame_rescale_time_base(frame, codec_context->time_base, enc_codec_context->time_base);
+        }
+
         /* push the decoded frame into the filtergraph */
         elv_get_time(&tv);
         if (av_buffersrc_add_frame_flags(decoder_context->video_buffersrc_ctx, frame, AV_BUFFERSRC_FLAG_KEEP_REF) < 0) {
@@ -2872,11 +2867,13 @@ flush_decoder(
         if (codec_context->codec_type == AVMEDIA_TYPE_VIDEO ||
             codec_context->codec_type == AVMEDIA_TYPE_AUDIO) {
 
-            /* Rescale audio before sending to the filter (filter is initialized with the encoder timebase */
-            /* PENDING(SS) video should also be rescaled here */
+            /* Rescale audio/video before sending to the filter (filter is initialized with the encoder timebase) */
             if (i >= 0) {
                 int output_stream_index = audio_output_stream_index(decoder_context, p, i);
                 AVCodecContext *enc_codec_context = encoder_context->codec_context[output_stream_index];
+                frame_rescale_time_base(frame, codec_context->time_base, enc_codec_context->time_base);
+            } else {
+                AVCodecContext *enc_codec_context = encoder_context->codec_context[stream_index];
                 frame_rescale_time_base(frame, codec_context->time_base, enc_codec_context->time_base);
             }
 
