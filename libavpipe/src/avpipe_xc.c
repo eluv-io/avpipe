@@ -3508,24 +3508,34 @@ avpipe_xc(
     int video_stream_index = decoder_context->video_stream_index;
     if (params->xc_type & xc_video) {
 
-        if (av_cmp_q(decoder_context->format_context->streams[video_stream_index]->r_frame_rate, decoder_context->format_context->streams[video_stream_index]->avg_frame_rate)) {
+        /* Use avg_frame_rate if available, otherwise fall back to r_frame_rate (e.g. MXF files) */
+        AVRational dec_frame_rate = decoder_context->format_context->streams[video_stream_index]->avg_frame_rate;
+        if (dec_frame_rate.num == 0)
+            dec_frame_rate = decoder_context->format_context->streams[video_stream_index]->r_frame_rate;
+
+        AVRational enc_frame_rate = encoder_context->format_context->streams[0]->avg_frame_rate;
+        if (enc_frame_rate.num == 0)
+            enc_frame_rate = dec_frame_rate;
+
+        if (decoder_context->format_context->streams[video_stream_index]->avg_frame_rate.num != 0 &&
+            av_cmp_q(decoder_context->format_context->streams[video_stream_index]->r_frame_rate, decoder_context->format_context->streams[video_stream_index]->avg_frame_rate)) {
             elv_warn("frame rate discrepancy r=%d/%d avg=%d/%d url=%s",
                 decoder_context->format_context->streams[video_stream_index]->r_frame_rate.num, decoder_context->format_context->streams[video_stream_index]->r_frame_rate.den,
                 decoder_context->format_context->streams[video_stream_index]->avg_frame_rate.num, decoder_context->format_context->streams[video_stream_index]->avg_frame_rate.den, params->url);
         }
 
         int enc_calc_frame_duration = 0;
-        if (decoder_context->format_context->streams[video_stream_index]->avg_frame_rate.num != 0 &&
-            encoder_context->format_context->streams[0]->avg_frame_rate.num != 0 &&  // Note encoder_context->format_context uses stream 0 for video
+        if (dec_frame_rate.num != 0 &&
+            enc_frame_rate.num != 0 &&
             decoder_context->stream[video_stream_index]->time_base.num != 0 &&
-            encoder_context->stream[video_stream_index]->time_base.num != 0) {       // Note encoder_context->stream uses same index as decoder
+            encoder_context->stream[video_stream_index]->time_base.num != 0) {
 
-            AVRational enc_frame_duration_rat = av_mul_q(av_inv_q(encoder_context->stream[video_stream_index]->time_base), av_inv_q(encoder_context->format_context->streams[0]->avg_frame_rate));
+            AVRational enc_frame_duration_rat = av_mul_q(av_inv_q(encoder_context->stream[video_stream_index]->time_base), av_inv_q(enc_frame_rate));
             if (enc_frame_duration_rat.den != 1) {
                 elv_warn("frame duration (encoder) not integer %d/%d", enc_frame_duration_rat.num, enc_frame_duration_rat.den);
             }
 
-            AVRational dec_frame_duration_rat = av_mul_q(av_inv_q(decoder_context->stream[video_stream_index]->time_base), av_inv_q(decoder_context->format_context->streams[video_stream_index]->avg_frame_rate));
+            AVRational dec_frame_duration_rat = av_mul_q(av_inv_q(decoder_context->stream[video_stream_index]->time_base), av_inv_q(dec_frame_rate));
             if (dec_frame_duration_rat.den != 1) {
                 elv_warn("frame duration (decoder) not integer %d/%d", dec_frame_duration_rat.num, dec_frame_duration_rat.den);
             }
@@ -3534,11 +3544,11 @@ avpipe_xc(
             decoder_context->calculated_frame_duration = dec_frame_duration_rat.num / dec_frame_duration_rat.den; // Possibly imprecise but warned above
 
         } else {
-            elv_err("frame rate and timebase not properly set dec timebase=%d/%d avg_frame_rate=%d/%d enc timebase=%d/%d avg_frame_rate=%d/%d",
+            elv_err("frame rate and timebase not properly set dec timebase=%d/%d frame_rate=%d/%d enc timebase=%d/%d frame_rate=%d/%d",
                 decoder_context->stream[video_stream_index]->time_base.num, decoder_context->stream[video_stream_index]->time_base.den,
-                decoder_context->format_context->streams[video_stream_index]->avg_frame_rate.num, decoder_context->format_context->streams[video_stream_index]->avg_frame_rate.den,
+                dec_frame_rate.num, dec_frame_rate.den,
                 encoder_context->stream[video_stream_index]->time_base.num, encoder_context->stream[video_stream_index]->time_base.den,
-                encoder_context->format_context->streams[0]->avg_frame_rate.num, encoder_context->format_context->streams[0]->avg_frame_rate.den);
+                enc_frame_rate.num, enc_frame_rate.den);
             rc = eav_codec_context;
             goto xc_done;
         }
