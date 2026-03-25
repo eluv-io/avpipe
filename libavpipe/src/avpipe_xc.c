@@ -2594,11 +2594,12 @@ transcode_video(
         decoder_context->video_pts = packet->pts;
 
         /* Rescale video frame to encoder timebase before sending to the filter
-         * (filter is initialized with the encoder timebase) */
-        {
-            AVCodecContext *enc_codec_context = encoder_context->codec_context[stream_index];
-            frame_rescale_time_base(frame, codec_context->time_base, enc_codec_context->time_base);
-        }
+         * (filter is initialized with the encoder timebase).
+         * Use stream time_base (not codec_context time_base) because in ffmpeg 8.x
+         * video decoder codec_context->time_base is not set (remains 0/1). */
+        frame_rescale_time_base(frame,
+            decoder_context->stream[stream_index]->time_base,
+            encoder_context->codec_context[stream_index]->time_base);
 
         /* push the decoded frame into the filtergraph */
         elv_get_time(&tv);
@@ -2867,14 +2868,16 @@ flush_decoder(
         if (codec_context->codec_type == AVMEDIA_TYPE_VIDEO ||
             codec_context->codec_type == AVMEDIA_TYPE_AUDIO) {
 
-            /* Rescale audio/video before sending to the filter (filter is initialized with the encoder timebase) */
+            /* Rescale audio/video before sending to the filter (filter is initialized with the encoder timebase).
+             * For video, use stream time_base because in ffmpeg 8.x decoder codec_context->time_base is 0/1. */
             if (i >= 0) {
                 int output_stream_index = audio_output_stream_index(decoder_context, p, i);
                 AVCodecContext *enc_codec_context = encoder_context->codec_context[output_stream_index];
                 frame_rescale_time_base(frame, codec_context->time_base, enc_codec_context->time_base);
             } else {
-                AVCodecContext *enc_codec_context = encoder_context->codec_context[stream_index];
-                frame_rescale_time_base(frame, codec_context->time_base, enc_codec_context->time_base);
+                AVRational dec_tb = decoder_context->stream[stream_index]->time_base;
+                AVRational enc_tb = encoder_context->codec_context[stream_index]->time_base;
+                frame_rescale_time_base(frame, dec_tb, enc_tb);
             }
 
             /* push the decoded frame into the filtergraph */
