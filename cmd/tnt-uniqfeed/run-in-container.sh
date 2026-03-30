@@ -59,7 +59,13 @@ if [[ -z "${FFMPEG_DIST:-}" ]]; then
     exit 1
 fi
 
-export LD_LIBRARY_PATH="$(build_ffmpeg_library_path):/runtime/lib:/runtime/lib/uf:/runtime/lib/3rdparty:${LD_LIBRARY_PATH:-}"
+ffmpeg_library_path=$(build_ffmpeg_library_path)
+if [[ -z "${ffmpeg_library_path}" ]]; then
+    echo "Could not locate FFmpeg shared libraries under FFMPEG_DIST=${FFMPEG_DIST}" >&2
+    exit 1
+fi
+
+export LD_LIBRARY_PATH="${ffmpeg_library_path}:/runtime/lib:/runtime/lib/uf:/runtime/lib/3rdparty:${LD_LIBRARY_PATH:-}"
 
 check_runtime_dependencies
 

@@ -367,8 +367,10 @@ static int create_frame_from_render_image(const UfImage *image, const AVFrame *s
 
     if (uFGetImageSize(image, &width, &height) != 0 ||
         uFGetImageHostBuffer(image, (void **)&rgb_data) != 0 ||
-        uFGetImageStride(image, &stride) != 0 || !rgb_data)
-        return AVERROR_EXTERNAL;
+        uFGetImageStride(image, &stride) != 0 || !rgb_data) {
+        ret = AVERROR_EXTERNAL;
+        goto end;
+    }
 
     if ((int)width != source_frame->width || (int)height != source_frame->height) {
         ret = AVERROR(EINVAL);
@@ -948,7 +950,7 @@ static int encode_write_frame(AVFrame *filt_frame, unsigned int stream_index, in
         got_frame = &got_frame_local;
     *got_frame = 0;
 
-    av_log(NULL, AV_LOG_INFO, "Encoding frame\n");
+    av_log(NULL, AV_LOG_DEBUG, "Encoding frame\n");
     ret = avcodec_send_frame(stream_ctx[stream_index].enc_ctx, filt_frame);
     av_frame_free(&filt_frame);
     if (ret == AVERROR_EOF)
@@ -1028,7 +1030,7 @@ static int filter_encode_write_frame(AVFrame *frame, unsigned int stream_index)
     int ret;
     AVFrame *filt_frame;
 
-    av_log(NULL, AV_LOG_INFO, "Pushing decoded frame to filters\n");
+    av_log(NULL, AV_LOG_DEBUG, "Pushing decoded frame to filters\n");
     /* push the decoded frame into the filtergraph */
     ret = av_buffersrc_add_frame_flags(filter_ctx[stream_index].buffersrc_ctx,
             frame, 0);
@@ -1044,7 +1046,7 @@ static int filter_encode_write_frame(AVFrame *frame, unsigned int stream_index)
             ret = AVERROR(ENOMEM);
             break;
         }
-        av_log(NULL, AV_LOG_INFO, "Pulling filtered frame from filters\n");
+        av_log(NULL, AV_LOG_DEBUG, "Pulling filtered frame from filters\n");
         ret = av_buffersink_get_frame(filter_ctx[stream_index].buffersink_ctx,
                 filt_frame);
         if (ret < 0) {
