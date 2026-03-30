@@ -84,9 +84,9 @@ add_mount_if_needed() {
 
     [[ -d "${mount_path}" ]] || return 0
 
-    if [[ -z "${seen_ref[${mount_path}]+x}" ]]; then
+    if [[ -z "${seen_ref["$mount_path"]+x}" ]]; then
         mounts_ref+=( -v "${mount_path}:${mount_path}:${mode}" )
-        seen_ref[${mount_path}]=1
+        seen_ref["$mount_path"]=1
     fi
 }
 

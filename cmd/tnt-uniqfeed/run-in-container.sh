@@ -32,14 +32,25 @@ build_ffmpeg_library_path() {
 check_runtime_dependencies() {
     local missing_libs
 
-    missing_libs=$(ldd /workspace/avpipe/bin/tnt-uniqfeed 2>/dev/null | awk '/=> not found/ {print $1}')
+    local ldd_output
+    local ldd_status
+    ldd_output=$(ldd /workspace/avpipe/bin/tnt-uniqfeed 2>&1)
+    ldd_status=$?
+    if (( ldd_status != 0 )); then
+        echo "Failed to run ldd on /workspace/avpipe/bin/tnt-uniqfeed (exit status ${ldd_status})." >&2
+        echo "${ldd_output}" >&2
+        exit 1
+    fi
+    missing_libs=$(awk '/=> not found/ {print $1}' <<< "${ldd_output}")
     if [[ -z "${missing_libs}" ]]; then
         return 0
     fi
 
     echo "tnt-uniqfeed runtime dependency check failed." >&2
     echo "Missing shared libraries:" >&2
-    printf '  %s\n' ${missing_libs} >&2
+    while IFS= read -r lib; do
+        printf '  %s\n' "$lib" >&2
+    done <<< "${missing_libs}"
     echo "The FFmpeg libraries from FFMPEG_DIST are incompatible with the libraries available in this container image." >&2
 
     if grep -q '^libnpp' <<< "${missing_libs}"; then
