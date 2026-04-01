@@ -213,7 +213,7 @@ func ValidateFmp4(reader io.Reader) (file *mp4.File, info *Mp4Info, err error) {
 					info.SampleDurationMax = dur
 				}
 				dts := sample.DecodeTime
-				pts := sample.PresentationTime()
+				pts := uint64(sample.PresentationTime())
 
 				// Build list of samples
 				segInfo.Samples = append(segInfo.Samples, &SampleInfo{dur, fragIdx, pts})
