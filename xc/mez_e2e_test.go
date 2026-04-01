@@ -260,8 +260,8 @@ func buildABRVariants() []abrVariant {
 
 func fileMissing(url string) bool {
 	info, err := os.Stat(url)
-	if os.IsNotExist(err) {
-		log.Warn("Skipping, input file missing", "file", url)
+	if err != nil {
+		log.Warn("Skipping, input file not accessible", "file", url, "err", err)
 		return true
 	}
 	return info.IsDir()
@@ -432,6 +432,7 @@ func TestABRCreate(t *testing.T) {
 						nextFragIdx int32               = 1 // next mfhd sequence number
 						nextPts     int64               = 0 // next starting PTS/DTS
 						refInitInfo *xc.InitSegmentInfo     // init from first part
+						prevResult  *abrPartResult          // result from previous part
 					)
 
 					for partIdx, partFile := range partFiles {
@@ -442,6 +443,14 @@ func TestABRCreate(t *testing.T) {
 						t.Run(partName, func(t *testing.T) {
 							result := generateAndValidateABRPart(t, v, partFile, abrDir, profile,
 								nextSegNum, nextFragIdx, nextPts, isLastPart)
+
+							// Part boundary continuity: verify first segment of this part follows last of previous part
+							if prevResult != nil {
+								assert.Equal(t, uint64(prevResult.NextPts), result.FirstDts,
+									"DTS gap between part %d and part %d", partIdx, partIdx+1)
+								assert.Equal(t, uint32(prevResult.NextFragIdx), result.FirstSeq,
+									"fragment sequence gap between part %d and part %d", partIdx, partIdx+1)
+							}
 
 							// Verify init segments are codec-compatible across parts.
 							// Use decrypted init for encrypted variants.
@@ -465,6 +474,7 @@ func TestABRCreate(t *testing.T) {
 							nextSegNum = result.NextSegNum
 							nextFragIdx = result.NextFragIdx
 							nextPts = result.NextPts
+							prevResult = &result
 						})
 					}
 				})
@@ -502,9 +512,11 @@ func ensureMezParts(t *testing.T, src mezTestSource, profile *mezTestProfile, vi
 
 // abrPartResult carries continuity state from one part to the next.
 type abrPartResult struct {
-	NextSegNum  int   // next chunk file number (for StartSegmentStr)
-	NextFragIdx int32 // next mfhd sequence number (for StartFragmentIndex)
-	NextPts     int64 // next PTS/DTS (for StartPts)
+	NextSegNum  int    // next chunk file number (for StartSegmentStr)
+	NextFragIdx int32  // next mfhd sequence number (for StartFragmentIndex)
+	NextPts     int64  // next PTS/DTS (for StartPts)
+	FirstSeq    uint32 // actual first mfhd sequence number of this part
+	FirstDts    uint64 // actual first DTS of this part
 }
 
 // generateAndValidateABRPart runs a single ABR variant against one mez part,
@@ -734,6 +746,7 @@ func generateAndValidateABRPart(
 	expectedFramesPerChunk := int((num + half) / den)
 
 	// Track the last chunk's result for continuity
+	var firstChunkResult *xc.ABRSegmentResult
 	var lastChunkResult *xc.ABRSegmentResult
 
 	for chunkIdx, chunkFile := range chunkFiles {
@@ -775,19 +788,26 @@ func generateAndValidateABRPart(
 					"fragment sequence gap between chunks %d and %d", chunkIdx, chunkIdx+1)
 			}
 
+			if firstChunkResult == nil {
+				firstChunkResult = result
+			}
 			lastChunkResult = result
 		})
 	}
 
 	// Compute next-part state from the last chunk
-	result := abrPartResult{
+	partResult := abrPartResult{
 		NextSegNum: startSegNum + len(chunkFiles),
 	}
-	if lastChunkResult != nil {
-		result.NextFragIdx = int32(lastChunkResult.SeqLast) + 1
-		result.NextPts = int64(lastChunkResult.DtsEnd)
+	if firstChunkResult != nil {
+		partResult.FirstSeq = firstChunkResult.SeqFirst
+		partResult.FirstDts = firstChunkResult.DtsStart
 	}
-	return result
+	if lastChunkResult != nil {
+		partResult.NextFragIdx = int32(lastChunkResult.SeqLast) + 1
+		partResult.NextPts = int64(lastChunkResult.DtsEnd)
+	}
+	return partResult
 }
 
 // TestEndToEnd runs all phases in sequence, reusing intermediate output.

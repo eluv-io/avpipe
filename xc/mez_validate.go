@@ -79,11 +79,6 @@ func (p *MezPartParams) ExpectedFrameCount() int {
 	return framesPerSeg * p.ABRSegmentsPerPart
 }
 
-// ExpectedFragmentCount returns the total number of fragments expected.
-func (p *MezPartParams) ExpectedFragmentCount() int {
-	return p.ExpectedFrameCount() * int(p.FramesPerFrag)
-}
-
 // framesPerABRSegment returns the number of frames in one ABR segment.
 // Computed as round(frame_rate * abr_segment_duration).
 func (p *MezPartParams) framesPerABRSegment() int {
@@ -144,7 +139,7 @@ func ValidateMezPart(filename string, params *MezPartParams) (*MezPartResult, er
 	seqPrev := uint32(0)
 	fragGlobalIdx := 0
 
-	for _, seg := range parsedMP4.Segments {
+	for segIdx, seg := range parsedMP4.Segments {
 		for fragLocalIdx, frag := range seg.Fragments {
 			result.FragmentCount++
 
@@ -163,7 +158,7 @@ func ValidateMezPart(filename string, params *MezPartParams) (*MezPartResult, er
 			if sErr != nil {
 				result.Errors = append(result.Errors,
 					fmt.Sprintf("failed to read samples at segment %d fragment %d: %v",
-						0, fragLocalIdx, sErr))
+						segIdx, fragLocalIdx, sErr))
 				continue
 			}
 
