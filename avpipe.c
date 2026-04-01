@@ -59,7 +59,7 @@ int     AVPipeCloseInput(int64_t);
 int     AVPipeStatInput(int64_t, int, avp_stat_t, void *);
 int64_t AVPipeOpenOutput(int64_t, int, int, int64_t, int);
 int64_t AVPipeOpenMuxOutput(char *, int);
-int     AVPipeWriteOutput(int64_t, int64_t, uint8_t *, int);
+int     AVPipeWriteOutput(int64_t, int64_t, const uint8_t *, int);
 int     AVPipeWriteMuxOutput(int64_t, const uint8_t *, int);
 int64_t AVPipeSeekOutput(int64_t, int64_t, int64_t, int);
 int64_t AVPipeSeekMuxOutput(int64_t, int64_t, int);
@@ -644,7 +644,7 @@ out_write_packet(
     xcparams_t *xcparams = inctx->params;
     int64_t h = *((int64_t *)(inctx->opaque));
     int64_t fd = *(int64_t *)outctx->opaque;
-    int bwritten = AVPipeWriteOutput(h, fd, (uint8_t *)buf, buf_size);
+    int bwritten = AVPipeWriteOutput(h, fd, buf, buf_size);
     if (bwritten >= 0) {
         outctx->written_bytes += bwritten;
         outctx->write_pos += bwritten;
@@ -1257,7 +1257,7 @@ out_mux_write_packet(
     ioctx_t *inctx = outctx->inctx;
     xcparams_t *xcparams = (inctx != NULL) ? inctx->params : NULL;
     int64_t fd = *(int64_t *)outctx->opaque;
-    int bwritten = AVPipeWriteMuxOutput(fd, (uint8_t *)buf, buf_size);
+    int bwritten = AVPipeWriteMuxOutput(fd, buf, buf_size);
     if (bwritten >= 0) {
         outctx->written_bytes += bwritten;
         outctx->write_pos += bwritten;
