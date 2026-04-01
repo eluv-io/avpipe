@@ -55,6 +55,7 @@ const keepMezOutput = true
 const keepSegsOutput = true
 
 // e2eMode is set to true when tests run inside TestEndToEnd.
+// PENDING(SS) simplify and remove this global so tests can run correctly in parallel
 var e2eMode bool
 
 // mezTestSource defines a source file and its properties for mez testing.
