@@ -1,4 +1,4 @@
-package validate
+package xc
 
 import (
 	"fmt"
@@ -101,7 +101,7 @@ func (p *MezPartParams) framesPerABRSegment() int {
 
 // ValidateMezPart validates a mezzanine part file against expected parameters.
 func ValidateMezPart(filename string, params *MezPartParams) (*MezPartResult, error) {
-	e := errors.Template("validate.ValidateMezPart", "filename", filename)
+	e := errors.Template("xc.ValidateMezPart", "filename", filename)
 
 	file, err := os.Open(filename)
 	if err != nil {
@@ -129,7 +129,6 @@ func ValidateMezPart(filename string, params *MezPartParams) (*MezPartResult, er
 	frDen := params.FrameRate.Denom()
 	result.SampleDuration = uint64(result.Timescale) * uint64(frDen.Int64()) / uint64(frNum.Int64())
 
-	expectedFrames := params.ExpectedFrameCount()
 	framesPerSeg := params.framesPerABRSegment()
 
 	// Collect all samples across all fragments
@@ -184,18 +183,9 @@ func ValidateMezPart(filename string, params *MezPartParams) (*MezPartResult, er
 
 	result.FrameCount = len(allSamples)
 
-	// Check frame count
-	if result.FrameCount != expectedFrames {
-		result.Errors = append(result.Errors,
-			fmt.Sprintf("frame count: expected %d, got %d", expectedFrames, result.FrameCount))
-	}
-
-	// Check fragment count (one frame per fragment)
-	expectedFragments := expectedFrames / int(params.FramesPerFrag)
-	if result.FragmentCount != expectedFragments {
-		result.Errors = append(result.Errors,
-			fmt.Sprintf("fragment count: expected %d, got %d", expectedFragments, result.FragmentCount))
-	}
+	// Frame count and fragment count are reported but not validated here —
+	// the last mez part is expected to be shorter, so the caller decides
+	// whether a mismatch is acceptable.
 
 	// Validate DTS continuity: must be monotonic and exactly sample_duration apart
 	for i, s := range allSamples {
@@ -278,7 +268,7 @@ func (r *MezPartResult) AllErrors() error {
 		return nil
 	}
 
-	e := errors.Template("validate.MezPartResult",
+	e := errors.Template("xc.MezPartResult",
 		"frame_count", r.FrameCount,
 		"fragment_count", r.FragmentCount,
 		"missing_key_frames", r.MissingKeyFrames,
