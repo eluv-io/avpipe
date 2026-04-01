@@ -52,8 +52,8 @@ func TestExtractCodecInfo(t *testing.T) {
 		require.NotEmpty(t, info.CodecParameter)
 		require.True(t, len(info.CodecParameter) > len("avc1."),
 			"codec descriptor must include profile/level: %s", info.CodecParameter)
-		require.Equal(t, info.ProfileIDC, 100)
-		require.Equal(t, info.LevelIDC, 31)
+		require.Equal(t, 100, info.ProfileIDC)
+		require.Equal(t, 31, info.LevelIDC)
 		//t.Logf("AVC codec: %s (profile=%d level=%d → %.1f)",
 		//	info.CodecParameter, info.ProfileIDC, info.LevelIDC, float64(info.LevelIDC)/10)
 	})
@@ -68,8 +68,8 @@ func TestExtractCodecInfo(t *testing.T) {
 		require.NotEmpty(t, info.CodecParameter)
 		require.True(t, len(info.CodecParameter) > len("hvc1."),
 			"codec descriptor must include profile/level: %s", info.CodecParameter)
-		require.Equal(t, info.ProfileIDC, 2)
-		require.Equal(t, info.LevelIDC, 120)
+		require.Equal(t, 2, info.ProfileIDC)
+		require.Equal(t, 120, info.LevelIDC)
 		//t.Logf("HEVC codec: %s (profile=%d level=%d → %.1f)",
 		//	info.CodecParameter, info.ProfileIDC, info.LevelIDC, float64(info.LevelIDC)/30)
 	})
@@ -104,12 +104,12 @@ func TestExtractCodecInfo(t *testing.T) {
 		info := infos[0] // ec-3 is track 0
 		assert.Equal(t, "ec-3", info.CodecID)
 		assert.Equal(t, "ec-3", info.CodecParameter)
-		assert.Equal(t, info.AudioChannels, 6)
+		assert.Equal(t, 6, info.AudioChannels)
 		require.NotNil(t, info.EC3)
 		assert.NotZero(t, info.EC3.ChanMap)
 		assert.Equal(t, "L C R Ls Rs LFE", info.EC3.ChanMapString())
 		assert.Equal(t, "F801", info.EC3.ChanMapHex())
 		assert.True(t, info.EC3.JOC, "expected JOC flag for Dolby Atmos file")
-		assert.Equal(t, info.EC3.ComplexityIndex, 16)
+		assert.Equal(t, 16, info.EC3.ComplexityIndex)
 	})
 }
