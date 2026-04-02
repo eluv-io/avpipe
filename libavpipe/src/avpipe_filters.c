@@ -30,7 +30,12 @@ init_video_filters(
     if (decoder_context->video_stream_index < 0)
         return 0;
 
-    time_base = decoder_context->format_context->streams[decoder_context->video_stream_index]->time_base;
+    /*
+     * Use the encoder's timebase for the video filter so that filtered frames are in the
+     * encoder's timebase. Video frames are rescaled from decoder to encoder timebase before
+     * being sent to the filter (same approach as audio).
+     */
+    time_base = encoder_context->codec_context[decoder_context->video_stream_index]->time_base;
 
     decoder_context->video_filter_graph = avfilter_graph_alloc();
     if (!outputs || !inputs || !decoder_context->video_filter_graph) {
@@ -38,12 +43,16 @@ init_video_filters(
         goto end;
     }
 
-    /* buffer video source: the decoded frames from the decoder will be inserted here. */
+    /* buffer video source: the decoded frames from the decoder will be inserted here.
+     * In ffmpeg 8.x, colorspace and range must be specified to avoid
+     * "Changing video frame properties on the fly" warnings.
+     */
     snprintf(args, sizeof(args),
-        "video_size=%dx%d:pix_fmt=%d:time_base=%d/%d:pixel_aspect=%d/%d",
+        "video_size=%dx%d:pix_fmt=%d:time_base=%d/%d:pixel_aspect=%d/%d:colorspace=%d:range=%d",
         dec_codec_ctx->width, dec_codec_ctx->height, dec_codec_ctx->pix_fmt,
         time_base.num, time_base.den,
-        dec_codec_ctx->sample_aspect_ratio.num, dec_codec_ctx->sample_aspect_ratio.den);
+        dec_codec_ctx->sample_aspect_ratio.num, dec_codec_ctx->sample_aspect_ratio.den,
+        dec_codec_ctx->colorspace, dec_codec_ctx->color_range);
     elv_dbg("init_video_filters, video srcfilter args=%s", args);
 
     /* video_stream_index should be the same in both encoder and decoder context */
@@ -57,15 +66,27 @@ init_video_filters(
     }
 
     /* buffer video sink: to terminate the filter chain.
-     * ffmpeg 8.x: pixel_formats must be set at init time via the args parameter,
-     * not after creation (it is no longer a runtime option).
+     * ffmpeg 8.x: pixel_formats is an array option that cannot be set via the args string
+     * in avfilter_graph_create_filter. Must use alloc + av_opt_set + init pattern.
      */
-    char sink_args[64];
-    snprintf(sink_args, sizeof(sink_args), "pixel_formats=%s", av_get_pix_fmt_name(out_pix_fmt));
-    ret = avfilter_graph_create_filter(&decoder_context->video_buffersink_ctx, buffersink, "out",
-                                       sink_args, NULL, decoder_context->video_filter_graph);
+    decoder_context->video_buffersink_ctx = avfilter_graph_alloc_filter(
+        decoder_context->video_filter_graph, buffersink, "out");
+    if (!decoder_context->video_buffersink_ctx) {
+        elv_err("init_video_filters, cannot allocate buffer sink\n");
+        ret = AVERROR(ENOMEM);
+        goto end;
+    }
+
+    ret = av_opt_set(decoder_context->video_buffersink_ctx, "pixel_formats",
+                     av_get_pix_fmt_name(out_pix_fmt), AV_OPT_SEARCH_CHILDREN);
     if (ret < 0) {
-        elv_err("init_video_filters, cannot create buffer sink\n");
+        elv_err("init_video_filters, cannot set output pixel format err=%d\n", ret);
+        goto end;
+    }
+
+    ret = avfilter_init_dict(decoder_context->video_buffersink_ctx, NULL);
+    if (ret < 0) {
+        elv_err("init_video_filters, cannot initialize buffer sink err=%d\n", ret);
         goto end;
     }
 

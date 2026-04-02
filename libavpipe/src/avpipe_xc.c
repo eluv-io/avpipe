@@ -2166,25 +2166,13 @@ encode_frame(
             encoder_context->video_encoder_prev_pts = output_packet->pts;
 
         /*
-         * Rescale video using the stream time_base (not the codec context)
-         * Audio has already been rescaled before the filter.
-         * PENDING(SS) Video should also be rescaled before sending to the filter so this
-         * code will not longer benecessary. When rescaling before sending to the filter and encoder,
-         * we use the codect context time base (which is what the encoder will use). We would
-         * only want to filter here, after encoding, if the packager requires a specific timebase,
-         * different than the encoder (eg. MPEGTS requires timebase 1/90000)
+         * Video frames are now rescaled to the encoder timebase before the filter,
+         * so the encoder outputs packets already in the correct timebase.
+         * No post-encoding rescale is needed for video.
+         * If the packager requires a specific timebase different from the encoder
+         * (e.g. MPEGTS requires 1/90000), a rescale from encoder stream timebase
+         * to output stream timebase would be done here.
          */
-        if ((stream_index == decoder_context->video_stream_index) &&
-            (decoder_context->stream[stream_index]->time_base.den !=
-            encoder_context->stream[index]->time_base.den ||
-            decoder_context->stream[stream_index]->time_base.num !=
-            encoder_context->stream[index]->time_base.num)) {
-
-            av_packet_rescale_ts(output_packet,
-                decoder_context->stream[stream_index]->time_base,
-                encoder_context->stream[index]->time_base
-            );
-        }
 
         if (selected_decoded_audio(decoder_context, stream_index) >= 0) {
             /* Set the packet duration if it is not the first audio packet */
@@ -2605,6 +2593,14 @@ transcode_video(
 
         decoder_context->video_pts = packet->pts;
 
+        /* Rescale video frame to encoder timebase before sending to the filter
+         * (filter is initialized with the encoder timebase).
+         * Use stream time_base (not codec_context time_base) because in ffmpeg 8.x
+         * video decoder codec_context->time_base is not set (remains 0/1). */
+        frame_rescale_time_base(frame,
+            decoder_context->stream[stream_index]->time_base,
+            encoder_context->codec_context[stream_index]->time_base);
+
         /* push the decoded frame into the filtergraph */
         elv_get_time(&tv);
         if (av_buffersrc_add_frame_flags(decoder_context->video_buffersrc_ctx, frame, AV_BUFFERSRC_FLAG_KEEP_REF) < 0) {
@@ -2872,12 +2868,16 @@ flush_decoder(
         if (codec_context->codec_type == AVMEDIA_TYPE_VIDEO ||
             codec_context->codec_type == AVMEDIA_TYPE_AUDIO) {
 
-            /* Rescale audio before sending to the filter (filter is initialized with the encoder timebase */
-            /* PENDING(SS) video should also be rescaled here */
+            /* Rescale audio/video before sending to the filter (filter is initialized with the encoder timebase).
+             * For video, use stream time_base because in ffmpeg 8.x decoder codec_context->time_base is 0/1. */
             if (i >= 0) {
                 int output_stream_index = audio_output_stream_index(decoder_context, p, i);
                 AVCodecContext *enc_codec_context = encoder_context->codec_context[output_stream_index];
                 frame_rescale_time_base(frame, codec_context->time_base, enc_codec_context->time_base);
+            } else {
+                AVRational dec_tb = decoder_context->stream[stream_index]->time_base;
+                AVRational enc_tb = encoder_context->codec_context[stream_index]->time_base;
+                frame_rescale_time_base(frame, dec_tb, enc_tb);
             }
 
             /* push the decoded frame into the filtergraph */
@@ -3511,24 +3511,34 @@ avpipe_xc(
     int video_stream_index = decoder_context->video_stream_index;
     if (params->xc_type & xc_video) {
 
-        if (av_cmp_q(decoder_context->format_context->streams[video_stream_index]->r_frame_rate, decoder_context->format_context->streams[video_stream_index]->avg_frame_rate)) {
+        /* Use avg_frame_rate if available, otherwise fall back to r_frame_rate (e.g. MXF files) */
+        AVRational dec_frame_rate = decoder_context->format_context->streams[video_stream_index]->avg_frame_rate;
+        if (dec_frame_rate.num == 0)
+            dec_frame_rate = decoder_context->format_context->streams[video_stream_index]->r_frame_rate;
+
+        AVRational enc_frame_rate = encoder_context->format_context->streams[0]->avg_frame_rate;
+        if (enc_frame_rate.num == 0)
+            enc_frame_rate = dec_frame_rate;
+
+        if (decoder_context->format_context->streams[video_stream_index]->avg_frame_rate.num != 0 &&
+            av_cmp_q(decoder_context->format_context->streams[video_stream_index]->r_frame_rate, decoder_context->format_context->streams[video_stream_index]->avg_frame_rate)) {
             elv_warn("frame rate discrepancy r=%d/%d avg=%d/%d url=%s",
                 decoder_context->format_context->streams[video_stream_index]->r_frame_rate.num, decoder_context->format_context->streams[video_stream_index]->r_frame_rate.den,
                 decoder_context->format_context->streams[video_stream_index]->avg_frame_rate.num, decoder_context->format_context->streams[video_stream_index]->avg_frame_rate.den, params->url);
         }
 
         int enc_calc_frame_duration = 0;
-        if (decoder_context->format_context->streams[video_stream_index]->avg_frame_rate.num != 0 &&
-            encoder_context->format_context->streams[0]->avg_frame_rate.num != 0 &&  // Note encoder_context->format_context uses stream 0 for video
+        if (dec_frame_rate.num != 0 &&
+            enc_frame_rate.num != 0 &&
             decoder_context->stream[video_stream_index]->time_base.num != 0 &&
-            encoder_context->stream[video_stream_index]->time_base.num != 0) {       // Note encoder_context->stream uses same index as decoder
+            encoder_context->stream[video_stream_index]->time_base.num != 0) {
 
-            AVRational enc_frame_duration_rat = av_mul_q(av_inv_q(encoder_context->stream[video_stream_index]->time_base), av_inv_q(encoder_context->format_context->streams[0]->avg_frame_rate));
+            AVRational enc_frame_duration_rat = av_mul_q(av_inv_q(encoder_context->stream[video_stream_index]->time_base), av_inv_q(enc_frame_rate));
             if (enc_frame_duration_rat.den != 1) {
                 elv_warn("frame duration (encoder) not integer %d/%d", enc_frame_duration_rat.num, enc_frame_duration_rat.den);
             }
 
-            AVRational dec_frame_duration_rat = av_mul_q(av_inv_q(decoder_context->stream[video_stream_index]->time_base), av_inv_q(decoder_context->format_context->streams[video_stream_index]->avg_frame_rate));
+            AVRational dec_frame_duration_rat = av_mul_q(av_inv_q(decoder_context->stream[video_stream_index]->time_base), av_inv_q(dec_frame_rate));
             if (dec_frame_duration_rat.den != 1) {
                 elv_warn("frame duration (decoder) not integer %d/%d", dec_frame_duration_rat.num, dec_frame_duration_rat.den);
             }
@@ -3537,11 +3547,11 @@ avpipe_xc(
             decoder_context->calculated_frame_duration = dec_frame_duration_rat.num / dec_frame_duration_rat.den; // Possibly imprecise but warned above
 
         } else {
-            elv_err("frame rate and timebase not properly set dec timebase=%d/%d avg_frame_rate=%d/%d enc timebase=%d/%d avg_frame_rate=%d/%d",
+            elv_err("frame rate and timebase not properly set dec timebase=%d/%d frame_rate=%d/%d enc timebase=%d/%d frame_rate=%d/%d",
                 decoder_context->stream[video_stream_index]->time_base.num, decoder_context->stream[video_stream_index]->time_base.den,
-                decoder_context->format_context->streams[video_stream_index]->avg_frame_rate.num, decoder_context->format_context->streams[video_stream_index]->avg_frame_rate.den,
+                dec_frame_rate.num, dec_frame_rate.den,
                 encoder_context->stream[video_stream_index]->time_base.num, encoder_context->stream[video_stream_index]->time_base.den,
-                encoder_context->format_context->streams[0]->avg_frame_rate.num, encoder_context->format_context->streams[0]->avg_frame_rate.den);
+                enc_frame_rate.num, enc_frame_rate.den);
             rc = eav_codec_context;
             goto xc_done;
         }
