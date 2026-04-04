@@ -1159,10 +1159,16 @@ prepare_video_encoder(
         encoder_codec_context->height = params->enc_height != -1 ? params->enc_height : decoder_context->codec_context[index]->width;
         encoder_codec_context->width = params->enc_width != -1 ? params->enc_width : decoder_context->codec_context[index]->height;
     }
-    if (params->video_time_base > 0)
+    if (params->video_time_base > 0) {
         encoder_codec_context->time_base = (AVRational) {1, params->video_time_base};
-    else
+    } else if (decoder_context->codec_context[index]->time_base.num > 0) {
         encoder_codec_context->time_base = decoder_context->codec_context[index]->time_base;
+    } else {
+        elv_err("Decoder video codec_context->time_base is not set (%d/%d), url=%s",
+            decoder_context->codec_context[index]->time_base.num,
+            decoder_context->codec_context[index]->time_base.den, params->url);
+        return eav_codec_context;
+    }
 
     encoder_codec_context->sample_aspect_ratio = decoder_context->codec_context[index]->sample_aspect_ratio;
     if (params->video_bitrate > 0)
@@ -2166,13 +2172,17 @@ encode_frame(
             encoder_context->video_encoder_prev_pts = output_packet->pts;
 
         /*
-         * Video frames are now rescaled to the encoder timebase before the filter,
-         * so the encoder outputs packets already in the correct timebase.
-         * No post-encoding rescale is needed for video.
-         * If the packager requires a specific timebase different from the encoder
-         * (e.g. MPEGTS requires 1/90000), a rescale from encoder stream timebase
-         * to output stream timebase would be done here.
+         * Rescale video packets from encoder codec_context timebase to the output stream timebase.
+         * The muxer may adjust stream timebase during avformat_write_header (e.g. from {1001,60000} to {1,60000}).
+         * Packets must be in the stream timebase for the segment duration_ts comparison
          */
+        if (stream_index == decoder_context->video_stream_index) {
+            AVRational codec_tb = encoder_context->codec_context[index]->time_base;
+            AVRational stream_tb = encoder_context->stream[index]->time_base;
+            if (codec_tb.num != stream_tb.num || codec_tb.den != stream_tb.den) {
+                av_packet_rescale_ts(output_packet, codec_tb, stream_tb);
+            }
+        }
 
         if (selected_decoded_audio(decoder_context, stream_index) >= 0) {
             /* Set the packet duration if it is not the first audio packet */

@@ -1406,44 +1406,72 @@ func TestMultiAudioXc(t *testing.T) {
 	xcTest(t, outputDir, params, xcTestResult, true)
 }
 
-// Timebase of BBB0_HD_8_XDCAM_120s_CCBYblendercloud.mxf is 1001/60000
+// Timebase of BBB0_HD_8_XDCAM_120s_CCBYblendercloud.mxf is 1001/60000 - in this case the mp4 muxer changes timebase to 1/60000
+// Test both with and without explicit video_time_base to verify both pre and post encoding timebase adjustment.
 func TestIrregularTsMezMaker_1001_60000(t *testing.T) {
 	url := "./media/BBB0_HD_8_XDCAM_120s_CCBYblendercloud.mxf"
 	if fileMissing(url, fn()) {
 		return
 	}
+	const expectedSegDurationTs int64 = 1801800
 
-	outputDir := path.Join(baseOutPath, fn())
-
-	params := &goavpipe.XcParams{
-		BypassTranscoding:   false,
-		Format:              "fmp4-segment",
-		StartTimeTs:         0,
-		DurationTs:          -1,
-		StartSegmentStr:     "1",
-		SegDuration:         "30.03",
-		Ecodec:              h264Codec,
-		Dcodec:              "",
-		EncHeight:           720,
-		EncWidth:            1280,
-		XcType:              goavpipe.XcVideo,
-		StreamId:            -1,
-		SyncAudioToStreamId: -1,
-		ForceKeyInt:         120,
-		Url:                 url,
-		DebugFrameLevel:     debugFrameLevel,
-	}
-	setFastEncodeParams(params, false)
-	xcTestResult := &XcTestResult{
-		timeScale: 60000,
-		pixelFmt:  "yuv420p",
+	tests := []struct {
+		name          string
+		videoTimeBase int // 0 = not specified (decoder default 1001/60000)
+	}{
+		{"no_timebase", 0},
+		{"timebase_60000", 60000},
 	}
 
-	for i := 1; i <= 4; i++ {
-		xcTestResult.mezFile = append(xcTestResult.mezFile, fmt.Sprintf("%s/vsegment-%d.mp4", outputDir, i))
-	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			outputDir := path.Join(baseOutPath, fn(), tc.name)
 
-	xcTest(t, outputDir, params, xcTestResult, true)
+			params := &goavpipe.XcParams{
+				BypassTranscoding:   false,
+				Format:              "fmp4-segment",
+				StartTimeTs:         0,
+				DurationTs:          -1,
+				StartSegmentStr:     "1",
+				SegDuration:         "30.03",
+				Ecodec:              h264Codec,
+				Dcodec:              "",
+				EncHeight:           720,
+				EncWidth:            1280,
+				XcType:              goavpipe.XcVideo,
+				StreamId:            -1,
+				SyncAudioToStreamId: -1,
+				ForceKeyInt:         120,
+				Url:                 url,
+				DebugFrameLevel:     debugFrameLevel,
+				VideoTimeBase:       tc.videoTimeBase,
+			}
+			setFastEncodeParams(params, false)
+			xcTestResult := &XcTestResult{
+				timeScale: 60000,
+				pixelFmt:  "yuv420p",
+			}
+
+			for i := 1; i <= 4; i++ {
+				xcTestResult.mezFile = append(xcTestResult.mezFile, fmt.Sprintf("%s/vsegment-%d.mp4", outputDir, i))
+			}
+
+			xcTest(t, outputDir, params, xcTestResult, true)
+
+			// Verify the first 3 segments are exactly 1801800 ts (30.03s) long
+			for i := 0; i < 3; i++ {
+				xcparams := &goavpipe.XcParams{
+					Url:      xcTestResult.mezFile[i],
+					Seekable: true,
+				}
+				probeInfo, err := avpipe.Probe(xcparams)
+				failNowOnError(t, err)
+				si := probeInfo.StreamInfo[0]
+				assert.Equal(t, expectedSegDurationTs, si.DurationTs,
+					"segment %d duration_ts mismatch (timebase=%s)", i+1, si.TimeBase.RatString())
+			}
+		})
+	}
 }
 
 // Timebase of Rigify-2min is 1/24
