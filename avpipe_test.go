@@ -28,7 +28,7 @@ const baseOutPath = "test_out"
 const debugFrameLevel = false
 const h264Codec = "libx264"
 const videoBigBuckBunnyPath = "media/bbb_1080p_30fps_60sec.mp4"
-const videoBigBuckBunny3AudioPath = "media/BBB_3x_audio_streams_music_2min_48kHz.mp4"
+const videoBigBuckBunny3AudioPath = "media/caminandes_llamigos_1080p_4audios.mp4"
 
 type XcTestResult struct {
 	mezFile           []string
@@ -1377,7 +1377,7 @@ func TestMultiAudioXc(t *testing.T) {
 		StartTimeTs:         0,
 		DurationTs:          -1,
 		StartSegmentStr:     "1",
-		VideoSegDurationTs:  460800,
+		VideoSegDurationTs:  294912, // 24 frames * 512 ticks = 1 sec at 24fps/12288 timescale
 		AudioSegDurationTs:  1428480,
 		Ecodec:              h264Codec,
 		Dcodec:              "",
@@ -1387,7 +1387,7 @@ func TestMultiAudioXc(t *testing.T) {
 		XcType:              goavpipe.XcAll,
 		StreamId:            -1,
 		SyncAudioToStreamId: -1,
-		ForceKeyInt:         60,
+		ForceKeyInt:         48,
 		Url:                 url,
 		DebugFrameLevel:     debugFrameLevel,
 	}
@@ -1395,7 +1395,7 @@ func TestMultiAudioXc(t *testing.T) {
 	params.AudioIndex = []int32{1, 2, 3}
 
 	xcTestResult := &XcTestResult{
-		timeScale: 15360,
+		timeScale: 12288,
 		pixelFmt:  "yuv420p",
 	}
 
