@@ -4487,7 +4487,14 @@ log_params(
         "deinterlace=%d "
         "use_preprocessed_input=%d "
         "copy_mpegts=%d "
-        "timecode=%s",
+        "timecode=%s "
+        "vertical=%d "
+        "vertical_data_len=%d "
+        "fade=%s "
+        "fade_start_frame=%d "
+        "fade_end_frame=%d "
+        "fade_level_1=%.3f "
+        "fade_level_2=%.3f",
         params->stream_id, params->url,
         avpipe_version(),
         params->bypass_transcoding, params->skip_decoding,
@@ -4513,7 +4520,11 @@ log_params(
         1, params->video_time_base, params->video_frame_duration_ts, params->rotate,
         params->profile ? params->profile : "", params->level,  params->deinterlace,
         params->use_preprocessed_input, params->copy_mpegts,
-        params->timecode);
+        params->timecode,
+        params->vertical, params->vertical_data_len,
+        params->fade ? params->fade : "(null)",
+        params->fade_start_frame, params->fade_end_frame,
+        params->fade_level_1, params->fade_level_2);
     elv_log("AVPIPE XCPARAMS %s", buf);
 }
 
