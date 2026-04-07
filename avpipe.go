@@ -836,6 +836,12 @@ func getCParams(params *goavpipe.XcParams) (*C.xcparams_t, error) {
 		level:                     C.int(params.Level),
 		deinterlace:               C.dif_type(params.Deinterlace),
 		timecode:                  C.CString(params.Timecode),
+		vertical:                  C.int(params.Vertical),
+		fade:                      C.CString(params.Fade),
+		fade_start_frame:          C.int(params.FadeStartFrame),
+		fade_end_frame:            C.int(params.FadeEndFrame),
+		fade_level_1:              C.double(params.FadeLevel1),
+		fade_level_2:              C.double(params.FadeLevel2),
 
 		// All boolean params are handled below
 	}
@@ -890,6 +896,16 @@ func getCParams(params *goavpipe.XcParams) (*C.xcparams_t, error) {
 		for i := 0; i < extractImagesSize; i++ {
 			C.set_extract_images((*C.xcparams_t)(unsafe.Pointer(cparams)),
 				C.int(i), C.int64_t(params.ExtractImagesTs[i]))
+		}
+	}
+
+	verticalDataSize := len(params.VerticalData)
+	if verticalDataSize > 0 {
+		C.init_vertical_data((*C.xcparams_t)(unsafe.Pointer(cparams)),
+			C.int(verticalDataSize))
+		for i := 0; i < verticalDataSize; i++ {
+			C.set_vertical_data((*C.xcparams_t)(unsafe.Pointer(cparams)),
+				C.int(i), C.uint32_t(params.VerticalData[i]))
 		}
 	}
 

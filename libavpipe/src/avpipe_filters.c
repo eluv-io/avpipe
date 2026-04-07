@@ -3,6 +3,7 @@
  */
 
 #include "avpipe_xc.h"
+#include "avpipe_filters.h"
 #include "elv_log.h"
 
 /*
@@ -700,5 +701,58 @@ end:
         return eav_filter_init;
 
     return ret;
+}
+
+int
+crop_get_context(
+    coderctx_t *decoder_context,
+    xcparams_t *params)
+{
+    for (unsigned int i = 0; i < decoder_context->video_filter_graph->nb_filters; i++) {
+        AVFilterContext *f = decoder_context->video_filter_graph->filters[i];
+        if (strcmp(f->filter->name, "crop") == 0) {
+            decoder_context->video_crop_ctx = f;
+            elv_log("Found crop filter '%s' for vertical video, url=%s", f->name, params->url);
+            return 0;
+        }
+    }
+    elv_err("Failed to find crop filter in graph, url=%s", params->url);
+    return eav_filter_init;
+}
+
+int
+crop_calc_width()
+{
+    return 608;
+}
+
+void
+crop_send_command(
+    coderctx_t *decoder_context,
+    xcparams_t *params,
+    int frame_number,
+    int source_width)
+{
+    if (!decoder_context->video_crop_ctx)
+        return;
+
+    char cmd_res[128];
+    char x_val[16];
+    int crop_x = 200; /* default fallback */
+    if (params->vertical_data && params->vertical_data_len > 0) {
+        int frame_idx = frame_number - 1; /* frame_number is 1-based */
+        if (frame_idx >= params->vertical_data_len)
+            frame_idx = params->vertical_data_len - 1; /* repeat last value */
+        /* vertical_data value represents decimal fraction after 0, e.g. 4321 = 0.4321 */
+        /* x = fraction * (source_width - crop_width) */
+        int crop_width = crop_calc_width();
+        crop_x = (int)((double)params->vertical_data[frame_idx] / 10000.0 * (source_width - crop_width));
+    }
+    snprintf(x_val, sizeof(x_val), "%d", crop_x);
+    int ret = avfilter_graph_send_command(decoder_context->video_filter_graph,
+        decoder_context->video_crop_ctx->name, "x", x_val, cmd_res, sizeof(cmd_res), 0);
+    if (ret < 0) {
+        elv_err("Failed to send crop x command, ret=%d, url=%s", ret, params->url);
+    }
 }
 

@@ -48,36 +48,7 @@
 #define DEFAULT_ACC_SAMPLE_RATE     48000
 #define MAX_FRAME_READ_RETRIES      300
 
-extern int
-init_video_filters(
-    const char *filters_descr,
-    coderctx_t *decoder_context,
-    coderctx_t *encoder_context,
-    xcparams_t *params);
-
-extern int
-init_audio_filters(
-    coderctx_t *decoder_context,
-    coderctx_t *encoder_context,
-    xcparams_t *params);
-
-int
-init_audio_pan_filters(
-    const char *filters_descr,
-    coderctx_t *decoder_context,
-    coderctx_t *encoder_context);
-
-int
-init_audio_merge_pan_filters(
-    const char *filters_descr,
-    coderctx_t *decoder_context,
-    coderctx_t *encoder_context);
-
-extern int
-init_audio_join_filters(
-    coderctx_t *decoder_context,
-    coderctx_t *encoder_context,
-    xcparams_t *params);
+#include "avpipe_filters.h"
 
 extern const char *
 av_get_pix_fmt_name(
@@ -1109,6 +1080,10 @@ prepare_video_encoder(
     if (params->rotate == 90 || params->rotate == 270) {
         encoder_codec_context->height = params->enc_height != -1 ? params->enc_height : decoder_context->codec_context[index]->width;
         encoder_codec_context->width = params->enc_width != -1 ? params->enc_width : decoder_context->codec_context[index]->height;
+    }
+    /* If vertical crop is set, encoder width must match crop output */
+    if (params->vertical) {
+        encoder_codec_context->width = crop_calc_width();
     }
     if (params->video_time_base > 0)
         encoder_codec_context->time_base = (AVRational) {1, params->video_time_base};
@@ -2527,6 +2502,9 @@ transcode_video(
 
         decoder_context->video_pts = packet->pts;
 
+        /* Send crop x command per frame for vertical video */
+        crop_send_command(decoder_context, p, codec_context->frame_number, codec_context->width);
+
         /* push the decoded frame into the filtergraph */
         elv_get_time(&tv);
         if (av_buffersrc_add_frame_flags(decoder_context->video_buffersrc_ctx, frame, AV_BUFFERSRC_FLAG_KEEP_REF) < 0) {
@@ -3271,10 +3249,60 @@ get_filter_str(
             return eav_filter_string_init;
         }
         *filter_str = (char *) calloc(FILTER_STRING_SZ, 1);
-        sprintf(*filter_str, "scale=%d:%d",
-            encoder_context->codec_context[encoder_context->video_stream_index]->width,
-            encoder_context->codec_context[encoder_context->video_stream_index]->height);
-            elv_dbg("FILTER scale=%s", *filter_str);
+        if (params->vertical) {
+            sprintf(*filter_str, "crop=%d:ih:200:0", crop_calc_width());
+        } else {
+            sprintf(*filter_str, "scale=%d:%d",
+                encoder_context->codec_context[encoder_context->video_stream_index]->width,
+                encoder_context->codec_context[encoder_context->video_stream_index]->height);
+        }
+        /*
+         * Append fade filter if specified.
+         *
+         * Blend-based fade (when fade_start_frame, fade_end_frame, fade_level_1, fade_level_2 are set):
+         *
+         *   General formula:
+         *     rate = (level2 - level1) / (end_frame - start_frame)
+         *     blend expr: A * clip(level1 + rate * (N - start_frame), 0, 1)
+         *
+         *   Example 1 (fade out from 1.0 to ~0.5, frames 30-59):
+         *                                                                        start_frame
+         *                                                                        |
+         *     format=gbrp,split[a][b];[a][b]blend=all_expr='A*clip(1.000-0.017*(N-30),0,1)':enable='between(n,30,59)',format=yuv420p
+         *                                                         |    |
+         *                                                     level1   rate = (level2-level1)/(end_frame-start_frame)
+         *
+         *   Example 2 (fade out from ~0.5 to 0.0, frames 0-29):
+         *                                                                       start_frame
+         *                                                                       |
+         *     format=gbrp,split[a][b];[a][b]blend=all_expr='A*clip(0.492-0.017*(N-0),0,1)':enable='between(n,0,29)',format=yuv420p
+         *                                                         |    |
+         *                                                     level1   rate = (level2-level1)/(end_frame-start_frame)
+         */
+        if (params->fade && *params->fade != '\0') {
+            char fade_buf[512];
+            if (params->fade_end_frame > params->fade_start_frame &&
+                (params->fade_level_1 != 0.0 || params->fade_level_2 != 0.0)) {
+                int S = params->fade_start_frame;
+                int E = params->fade_end_frame;
+                double L1 = params->fade_level_1;
+                double L2 = params->fade_level_2;
+                double rate = (L2 - L1) / (double)(E - S);
+                snprintf(fade_buf, sizeof(fade_buf),
+                    ",format=gbrp,split[a][b];[a][b]blend=all_expr='A*clip(%.3f%+.3f*(N-%d)\\,0\\,1)':enable='between(n\\,%d\\,%d)',format=yuv420p",
+                    L1, rate, S, S, E);
+            } else if (!strcmp(params->fade, "in")) {
+                snprintf(fade_buf, sizeof(fade_buf), ",fade=t=in:st=0:d=1");
+            } else if (!strcmp(params->fade, "out")) {
+                snprintf(fade_buf, sizeof(fade_buf), ",fade=t=out:st=0:d=1");
+            } else {
+                elv_err("Invalid fade param '%s', must be 'in' or 'out'", params->fade);
+                free(*filter_str);
+                return eav_param;
+            }
+            strncat(*filter_str, fade_buf, FILTER_STRING_SZ - strlen(*filter_str) - 1);
+        }
+        elv_dbg("FILTER str=%s", *filter_str);
     }
 
     return 0;
@@ -3370,6 +3398,13 @@ avpipe_xc(
             goto xc_done;
         }
         free(filter_str);
+
+        /* Find and store crop filter context for per-frame send_command */
+        if (params->vertical) {
+            if ((rc = crop_get_context(decoder_context, params)) != 0) {
+                goto xc_done;
+            }
+        }
     }
 
     if (!params->bypass_transcoding &&
@@ -4627,6 +4662,8 @@ avpipe_free_params(
     free(params->filter_descriptor);
     free(params->mux_spec);
     free(params->extract_images_ts);
+    free_vertical_data(params);
+    free(params->fade);
     free(params);
     xctx->params = NULL;
 }
@@ -4793,4 +4830,35 @@ set_extract_images(
         return;
     }
     params->extract_images_ts[index] = value;
+}
+
+void
+init_vertical_data(
+    xcparams_t *params,
+    int size)
+{
+    params->vertical_data = calloc(size, sizeof(uint32_t));
+    params->vertical_data_len = size;
+}
+
+void
+set_vertical_data(
+    xcparams_t *params,
+    int index,
+    uint32_t value)
+{
+    if (index >= params->vertical_data_len) {
+        elv_err("set_vertical_data - index out of bounds: %d, url=%s", index, params->url);
+        return;
+    }
+    params->vertical_data[index] = value;
+}
+
+void
+free_vertical_data(
+    xcparams_t *params)
+{
+    free(params->vertical_data);
+    params->vertical_data = NULL;
+    params->vertical_data_len = 0;
 }

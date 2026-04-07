@@ -339,6 +339,13 @@ type XcParams struct {
 	Level                  int       `json:"level,omitempty"`
 	Deinterlace            int       `json:"deinterlace,omitempty"`
 	Timecode               string    `json:"timecode,omitempty"`
+	Vertical               int       `json:"vertical,omitempty"`
+	VerticalData           []uint32  `json:"vertical_data,omitempty"`
+	Fade                   string    `json:"fade,omitempty"`
+	FadeStartFrame         int       `json:"fade_start_frame,omitempty"`
+	FadeEndFrame           int       `json:"fade_end_frame,omitempty"`
+	FadeLevel1             float64   `json:"fade_level_1,omitempty"`
+	FadeLevel2             float64   `json:"fade_level_2,omitempty"`
 }
 
 // NewXcParams initializes a XcParams struct with unset/default values

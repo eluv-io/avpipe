@@ -376,6 +376,7 @@ typedef struct coderctx_t {
     AVFilterContext *video_buffersink_ctx;
     AVFilterContext *video_buffersrc_ctx;
     AVFilterGraph   *video_filter_graph;
+    AVFilterContext *video_crop_ctx;            /* Crop filter context for send_command */
 
     /* Audio filter */
     AVFilterContext *audio_buffersink_ctx[MAX_STREAMS];
@@ -538,6 +539,14 @@ typedef struct xcparams_t {
     int         level;
     dif_type    deinterlace;                // Deinterlacing filter
     char        *timecode;                  // Original timecode string
+    int         vertical;                   // Vertical video crop (9:16)
+    uint32_t    *vertical_data;             // Per-frame crop x position data (4 bytes per frame, decimal after 0, e.g. 4321 = 0.4321)
+    int         vertical_data_len;          // Number of entries in vertical_data
+    char        *fade;                      // Fade filter: "in" or "out"
+    int         fade_start_frame;           // Fade start frame (used with blend filter)
+    int         fade_end_frame;             // Fade end frame (used with blend filter)
+    double      fade_level_1;               // Fade blend start level (e.g. 1.0)
+    double      fade_level_2;               // Fade blend end level (e.g. 0.0)
 } xcparams_t;
 
 #define MAX_CODEC_NAME  256
@@ -837,6 +846,39 @@ set_extract_images(
     xcparams_t *params,
     int index,
     int64_t value);
+
+/**
+ * @brief   Allocate memory for vertical_data
+ *
+ * @param   params  Transcoding parameters
+ * @param   size    Array size (number of uint32_t entries)
+ */
+void
+init_vertical_data(
+    xcparams_t *params,
+    int size);
+
+/**
+ * @brief   Helper function to set vertical_data entries from Go
+ *
+ * @param   params  Transcoding parameters.
+ * @param   index   Array index to set.
+ * @param   value   Array value (decimal digits after 0, e.g. 4321 = 0.4321).
+ */
+void
+set_vertical_data(
+    xcparams_t *params,
+    int index,
+    uint32_t value);
+
+/**
+ * @brief   Free vertical_data memory
+ *
+ * @param   params  Transcoding parameters
+ */
+void
+free_vertical_data(
+    xcparams_t *params);
 
 /**
  * @brief   Returns the level based on the input values
