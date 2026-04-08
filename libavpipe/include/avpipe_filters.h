@@ -54,11 +54,14 @@ crop_get_context(
     xcparams_t *params);
 
 /**
- * @brief   Calculate crop width for vertical video.
- * @return  Crop width in pixels (currently 608).
+ * @brief   Calculate crop width for vertical video (9:16 aspect ratio).
+ *
+ * @param   source_height  Source video height in pixels.
+ * @return  Crop width in pixels (source_height * 9 / 16).
  */
 int
-crop_calc_width();
+crop_calc_width(
+    int source_height);
 
 /**
  * @brief   Send crop x command to the filter graph for vertical video.
@@ -73,6 +76,7 @@ crop_send_command(
     coderctx_t *decoder_context,
     xcparams_t *params,
     int frame_number,
-    int source_width);
+    int source_width,
+    int source_height);
 
 #endif /* AVPIPE_FILTERS_H */

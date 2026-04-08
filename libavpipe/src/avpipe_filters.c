@@ -721,9 +721,11 @@ crop_get_context(
 }
 
 int
-crop_calc_width()
+crop_calc_width(
+    int source_height)
 {
-    return 608;
+    /* 9:16 aspect ratio */
+    return source_height * 9 / 16;
 }
 
 void
@@ -731,23 +733,33 @@ crop_send_command(
     coderctx_t *decoder_context,
     xcparams_t *params,
     int frame_number,
-    int source_width)
+    int source_width,
+    int source_height)
 {
     if (!decoder_context->video_crop_ctx)
         return;
 
     char cmd_res[128];
     char x_val[16];
-    int crop_x = 200; /* default fallback */
+    int crop_width = crop_calc_width(source_height);
+    int max_x = source_width - crop_width;
+    int crop_x = 0;
+
     if (params->vertical_data && params->vertical_data_len > 0) {
         int frame_idx = frame_number - 1; /* frame_number is 1-based */
         if (frame_idx >= params->vertical_data_len)
             frame_idx = params->vertical_data_len - 1; /* repeat last value */
         /* vertical_data value represents decimal fraction after 0, e.g. 4321 = 0.4321 */
         /* x = fraction * (source_width - crop_width) */
-        int crop_width = crop_calc_width();
-        crop_x = (int)((double)params->vertical_data[frame_idx] / 10000.0 * (source_width - crop_width));
+        crop_x = (int)((double)params->vertical_data[frame_idx] / 10000.0 * max_x);
     }
+
+    /* Clamp x to valid range so we always get a full-width crop */
+    if (crop_x < 0)
+        crop_x = 0;
+    if (crop_x > max_x)
+        crop_x = max_x;
+
     snprintf(x_val, sizeof(x_val), "%d", crop_x);
     int ret = avfilter_graph_send_command(decoder_context->video_filter_graph,
         decoder_context->video_crop_ctx->name, "x", x_val, cmd_res, sizeof(cmd_res), 0);

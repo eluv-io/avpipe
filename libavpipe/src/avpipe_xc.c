@@ -1083,7 +1083,7 @@ prepare_video_encoder(
     }
     /* If vertical crop is set, encoder width must match crop output */
     if (params->vertical) {
-        encoder_codec_context->width = crop_calc_width();
+        encoder_codec_context->width = crop_calc_width(encoder_codec_context->height);
     }
     if (params->video_time_base > 0)
         encoder_codec_context->time_base = (AVRational) {1, params->video_time_base};
@@ -2503,7 +2503,7 @@ transcode_video(
         decoder_context->video_pts = packet->pts;
 
         /* Send crop x command per frame for vertical video */
-        crop_send_command(decoder_context, p, codec_context->frame_number, codec_context->width);
+        crop_send_command(decoder_context, p, codec_context->frame_number, codec_context->width, codec_context->height);
 
         /* push the decoded frame into the filtergraph */
         elv_get_time(&tv);
@@ -3250,7 +3250,8 @@ get_filter_str(
         }
         *filter_str = (char *) calloc(FILTER_STRING_SZ, 1);
         if (params->vertical) {
-            sprintf(*filter_str, "crop=%d:ih:200:0", crop_calc_width());
+            sprintf(*filter_str, "crop=%d:ih:200:0",
+                crop_calc_width(encoder_context->codec_context[encoder_context->video_stream_index]->height));
         } else {
             sprintf(*filter_str, "scale=%d:%d",
                 encoder_context->codec_context[encoder_context->video_stream_index]->width,
