@@ -74,9 +74,7 @@ crop_calc_width(
 void
 crop_send_command(
     coderctx_t *decoder_context,
-    xcparams_t *params,
-    int frame_number,
-    int source_width,
-    int source_height);
+    coderctx_t *encoder_context,
+    xcparams_t *params);
 
 #endif /* AVPIPE_FILTERS_H */

@@ -734,26 +734,29 @@ crop_calc_width(
 void
 crop_send_command(
     coderctx_t *decoder_context,
-    xcparams_t *params,
-    int frame_number,
-    int source_width,
-    int source_height)
+    coderctx_t *encoder_context,
+    xcparams_t *params)
 {
     if (!decoder_context->video_crop_ctx)
         return;
 
+    AVCodecContext *dec_ctx = decoder_context->codec_context[decoder_context->video_stream_index];
+    int enc_height = encoder_context->codec_context[encoder_context->video_stream_index]->height;
+
     char cmd_res[128];
     char x_val[16];
-    int crop_width = crop_calc_width(source_height);
-    int max_x = source_width - crop_width;
+    /* After scale filter the frame is at scaled dimensions */
+    int scaled_width = dec_ctx->width * enc_height / dec_ctx->height;
+    int crop_width = crop_calc_width(enc_height);
+    int max_x = scaled_width - crop_width;
     int crop_x = 0;
 
     if (params->vertical_data && params->vertical_data_len > 0) {
-        int frame_idx = frame_number - 1; /* frame_number is 1-based */
+        int frame_idx = dec_ctx->frame_number - 1; /* frame_number is 1-based */
         if (frame_idx >= params->vertical_data_len)
             frame_idx = params->vertical_data_len - 1; /* repeat last value */
         /* vertical_data value represents decimal fraction after 0, e.g. 4321 = 0.4321 */
-        /* x = fraction * (source_width - crop_width) */
+        /* x = fraction * (scaled_width - crop_width) */
         crop_x = (int)((double)params->vertical_data[frame_idx] / 10000.0 * max_x);
     }
 
