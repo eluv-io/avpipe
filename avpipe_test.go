@@ -351,6 +351,77 @@ func TestSingleABRTranscodeWithOverlayWatermark(t *testing.T) {
 	xcTest(t, outputDir, params, nil, true)
 }
 
+// Generate partial segment from 3rd ABR segment with fade variants.
+// 30fps, timebase=30000, 60 frames/segment (VideoSegDurationTs=60000).
+// 3rd segment starts at PTS 120000, StartSegmentStr is 1-based.
+// Each variant runs with and without SkipDecoding.
+func TestSingleABRFade(t *testing.T) {
+	url := videoBigBuckBunnyPath
+	if fileMissing(url, fn()) {
+		return
+	}
+
+	fadeVariants := []struct {
+		name           string
+		fade           string
+		fadeStartFrame int
+		fadeEndFrame   int
+		fadeLevel1     float64
+		fadeLevel2     float64
+	}{
+		{"FadeIn", "in", 0, 0, 0.0, 0.0},
+		{"FadeOut", "out", 0, 0, 0.0, 0.0},
+		{"FadeBlendIn", "in", 0, 39, 0.0, 1.0},
+		{"FadeBlendOut", "out", 20, 59, 1.0, 0.0},
+	}
+
+	skipModes := []struct {
+		name         string
+		skipDecoding bool
+	}{
+		{"Decode", false},
+		{"SkipDecode", true},
+	}
+
+	for _, sv := range fadeVariants {
+		for _, sm := range skipModes {
+			testName := sv.name + "_" + sm.name
+			t.Run(testName, func(t *testing.T) {
+				outputDir := path.Join(baseOutPath, fn(), testName)
+				params := &goavpipe.XcParams{
+					BypassTranscoding:  false,
+					Format:             "hls",
+					StartTimeTs:        120000,
+					StartPts:           120000,
+					DurationTs:         60000,
+					StartSegmentStr:    "3",
+					VideoBitrate:       2560000,
+					AudioBitrate:       64000,
+					SampleRate:         44100,
+					VideoSegDurationTs: 60000,
+					AudioSegDurationTs: 96000,
+					Ecodec:             h264Codec,
+					Ecodec2:            "aac",
+					EncHeight:          720,
+					EncWidth:           1280,
+					XcType:             goavpipe.XcVideo,
+					StreamId:           -1,
+					Url:                url,
+					DebugFrameLevel:    debugFrameLevel,
+					SkipDecoding:       sm.skipDecoding,
+					Fade:               sv.fade,
+					FadeStartFrame:     sv.fadeStartFrame,
+					FadeEndFrame:       sv.fadeEndFrame,
+					FadeLevel1:         sv.fadeLevel1,
+					FadeLevel2:         sv.fadeLevel2,
+				}
+				setFastEncodeParams(params, false)
+				xcTest(t, outputDir, params, nil, true)
+			})
+		}
+	}
+}
+
 func TestV2SingleABRTranscode(t *testing.T) {
 	url := videoBigBuckBunnyPath
 	if fileMissing(url, fn()) {
