@@ -724,8 +724,11 @@ int
 crop_calc_width(
     int source_height)
 {
-    /* 9:16 aspect ratio */
-    return source_height * 9 / 16;
+    /* 9:16 aspect ratio, ensure even width for codec compatibility */
+    int w = source_height * 9 / 16;
+    if (w % 2 != 0)
+        w += 1;
+    return w;
 }
 
 void
