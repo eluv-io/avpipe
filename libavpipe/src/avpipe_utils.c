@@ -374,3 +374,30 @@ parse_duration(const char *duration_str, AVRational time_base) {
 
     return duration_ts;
 }
+
+int
+vertical_data_crop_x(
+    uint32_t *vertical_data,
+    int data_len,
+    int frame_idx,
+    int scaled_width,
+    int crop_width)
+{
+    if (frame_idx >= data_len)
+        frame_idx = data_len - 1;
+    uint32_t v = vertical_data[frame_idx];
+    int center_x = 0;
+    if (v > 0) {
+        uint64_t divisor = 1;
+        while (divisor <= v)
+            divisor *= 10;
+        center_x = (int)((uint64_t)v * scaled_width / divisor);
+    }
+    int crop_x = center_x - crop_width / 2;
+    int max_x = scaled_width - crop_width;
+    if (crop_x < 0)
+        crop_x = 0;
+    if (crop_x > max_x)
+        crop_x = max_x;
+    return crop_x;
+}

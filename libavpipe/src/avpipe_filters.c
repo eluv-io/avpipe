@@ -4,6 +4,7 @@
 
 #include "avpipe_xc.h"
 #include "avpipe_filters.h"
+#include "avpipe_utils.h"
 #include "elv_log.h"
 
 /*
@@ -739,6 +740,9 @@ crop_send_command(
 {
     if (!decoder_context->video_crop_ctx)
         return;
+ 
+    if (!params->vertical_data || params->vertical_data_len <= 0)
+        return;
 
     AVCodecContext *dec_ctx = decoder_context->codec_context[decoder_context->video_stream_index];
     int enc_height = encoder_context->codec_context[encoder_context->video_stream_index]->height;
@@ -748,23 +752,10 @@ crop_send_command(
     /* After scale filter the frame is at scaled dimensions */
     int scaled_width = dec_ctx->width * enc_height / dec_ctx->height;
     int crop_width = crop_calc_width(enc_height);
-    int max_x = scaled_width - crop_width;
     int crop_x = 0;
-
-    if (params->vertical_data && params->vertical_data_len > 0) {
-        int frame_idx = dec_ctx->frame_number - 1; /* frame_number is 1-based */
-        if (frame_idx >= params->vertical_data_len)
-            frame_idx = params->vertical_data_len - 1; /* repeat last value */
-        /* vertical_data value represents decimal fraction after 0, e.g. 4321 = 0.4321 */
-        /* x = fraction * (scaled_width - crop_width) */
-        crop_x = (int)((double)params->vertical_data[frame_idx] / 10000.0 * max_x);
-    }
-
-    /* Clamp x to valid range so we always get a full-width crop */
-    if (crop_x < 0)
-        crop_x = 0;
-    if (crop_x > max_x)
-        crop_x = max_x;
+    int frame_idx = dec_ctx->frame_number - 1; /* frame_number is 1-based */
+    
+    crop_x = vertical_data_crop_x(params->vertical_data, params->vertical_data_len, frame_idx, scaled_width, crop_width);
 
     snprintf(x_val, sizeof(x_val), "%d", crop_x);
     int ret = avfilter_graph_send_command(decoder_context->video_filter_graph,
@@ -773,4 +764,3 @@ crop_send_command(
         elv_err("Failed to send crop x command, ret=%d, url=%s", ret, params->url);
     }
 }
-

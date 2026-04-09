@@ -90,3 +90,24 @@ int64_t
 parse_duration(
     const char *duration_str,
     AVRational time_base);
+
+/**
+ * @brief   Get the crop left edge x from vertical_data for a given frame.
+ *          The vertical_data value represents the center of the crop window.
+ *          If frame_idx is larger than the data set, use the last entry.
+ *          Returns the left edge, clamped left/right.
+ *
+ * @param   vertical_data   binary encoded array, 4 bytes per frame
+ * @param   data_len        number of entries in vertical_data
+ * @param   frame_idx       frame index (0-based)
+ * @param   scaled_width    width in pixels to scale the fraction into
+ * @param   crop_width      crop window width in pixels
+ * @return  Crop left edge x in pixels, clamped to valid range.
+ */
+int
+vertical_data_crop_x(
+    uint32_t *vertical_data,
+    int data_len,
+    int frame_idx,
+    int scaled_width,
+    int crop_width);
