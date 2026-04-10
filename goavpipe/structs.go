@@ -339,8 +339,8 @@ type XcParams struct {
 	Level                  int       `json:"level,omitempty"`
 	Deinterlace            int       `json:"deinterlace,omitempty"`
 	Timecode               string    `json:"timecode,omitempty"`
-	Vertical               int       `json:"vertical,omitempty"`
-	VerticalData           []uint32  `json:"vertical_data,omitempty"`
+	Vertical               int       `json:"vertical,omitempty"` // vertical_type: 0=none, 1=32bpf
+	VerticalData           []byte    `json:"vertical_data,omitempty"`
 	Fade                   string    `json:"fade,omitempty"`
 	FadeStartFrame         int       `json:"fade_start_frame,omitempty"`
 	FadeEndFrame           int       `json:"fade_end_frame,omitempty"`

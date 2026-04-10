@@ -453,6 +453,12 @@ typedef enum dif_type {
     dif_bwdif_frame = 2  // Use filter bwdif mode 'send_frame' (one frame per input frame)
 } dif_type;
 
+// vertical data types
+typedef enum vertical_type {
+    vertical_none   = 0, // No vertical crop
+    vertical_32bpf  = 1  // 32 bits per frame (uint32 LE per frame)
+} vertical_type;
+
 #define DRAW_TEXT_SHADOW_OFFSET     0.075
 #define MAX_EXTRACT_IMAGES_SZ       100
 
@@ -539,9 +545,9 @@ typedef struct xcparams_t {
     int         level;
     dif_type    deinterlace;                // Deinterlacing filter
     char        *timecode;                  // Original timecode string
-    int         vertical;                   // Vertical video crop (9:16)
-    uint32_t    *vertical_data;             // Per-frame crop x position data (4 bytes per frame, decimal after 0, e.g. 4321 = 0.4321)
-    int         vertical_data_len;          // Number of entries in vertical_data
+    vertical_type vertical;                 // Vertical video crop type (9:16)
+    uint8_t     *vertical_data;             // Per-frame crop data (opaque byte array, currently 4 bytes per frame uint32 LE)
+    int         vertical_data_len;          // Length of vertical_data in bytes
     char        *fade;                      // Fade filter: "in" or "out"
     int         fade_start_frame;           // Fade start frame (used with blend filter)
     int         fade_end_frame;             // Fade end frame (used with blend filter)
@@ -848,28 +854,17 @@ set_extract_images(
     int64_t value);
 
 /**
- * @brief   Allocate memory for vertical_data
+ * @brief   Allocate and copy vertical_data from a byte buffer.
  *
  * @param   params  Transcoding parameters
- * @param   size    Array size (number of uint32_t entries)
+ * @param   data    Source byte buffer
+ * @param   len     Length in bytes
  */
 void
 init_vertical_data(
     xcparams_t *params,
-    int size);
-
-/**
- * @brief   Helper function to set vertical_data entries from Go
- *
- * @param   params  Transcoding parameters.
- * @param   index   Array index to set.
- * @param   value   Array value (decimal digits after 0, e.g. 4321 = 0.4321).
- */
-void
-set_vertical_data(
-    xcparams_t *params,
-    int index,
-    uint32_t value);
+    const uint8_t *data,
+    int len);
 
 /**
  * @brief   Free vertical_data memory

@@ -377,15 +377,17 @@ parse_duration(const char *duration_str, AVRational time_base) {
 
 int
 vertical_data_crop_x(
-    uint32_t *vertical_data,
+    uint8_t *vertical_data,
     int data_len,
     int frame_idx,
     int scaled_width,
     int crop_width)
 {
-    if (frame_idx >= data_len)
-        frame_idx = data_len - 1;
-    uint32_t v = vertical_data[frame_idx];
+    /* Currently 4 bytes per frame (uint32 LE) */
+    int n_entries = data_len / 4;
+    if (frame_idx >= n_entries)
+        frame_idx = n_entries - 1;
+    uint32_t v = ((uint32_t *)vertical_data)[frame_idx];
     int center_x = 0;
     if (v > 0) {
         uint64_t divisor = 1;

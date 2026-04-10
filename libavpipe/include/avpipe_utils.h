@@ -106,7 +106,7 @@ parse_duration(
  */
 int
 vertical_data_crop_x(
-    uint32_t *vertical_data,
+    uint8_t *vertical_data,
     int data_len,
     int frame_idx,
     int scaled_width,

@@ -1082,7 +1082,7 @@ usage(
         "\t-fade-end-frame :        (optional) Fade end frame for blend-based fade.\n"
         "\t-fade-level-1 :          (optional) Fade blend start level (e.g. 1.0).\n"
         "\t-fade-level-2 :          (optional) Fade blend end level (e.g. 0.0).\n"
-        "\t-vertical :              (optional) Vertical video crop. Default is 0 (disabled), 1 (enabled).\n"
+        "\t-vertical :              (optional) Vertical video crop type. Default is 0 (none), 1 (32bpf).\n"
         "\t-vertical-data :         (optional) Path to binary file with per-frame crop x data (4 bytes per frame, uint32 LE).\n"
         "\t-sample-rate :           (optional) Default: -1. For aac output sample rate is set to input sample rate and this parameter is ignored.\n"
         "\t-seekable :              (optional) Seekable stream. Default is 0, must be 0 or 1\n"
@@ -1580,14 +1580,14 @@ main(
                 fseek(vd_fp, 0, SEEK_END);
                 long vd_size = ftell(vd_fp);
                 fseek(vd_fp, 0, SEEK_SET);
-                if (vd_size <= 0 || vd_size % 4 != 0) {
-                    fprintf(stderr, "vertical-data file size %ld is not a positive multiple of 4\n", vd_size);
+                if (vd_size <= 0) {
+                    fprintf(stderr, "vertical-data file is empty: %s\n", vd_path);
                     fclose(vd_fp);
                     exit(EXIT_FAILURE);
                 }
-                p.vertical_data_len = (int)(vd_size / 4);
-                p.vertical_data = (uint32_t *)calloc(p.vertical_data_len, sizeof(uint32_t));
-                if (fread(p.vertical_data, sizeof(uint32_t), p.vertical_data_len, vd_fp) != (size_t)p.vertical_data_len) {
+                p.vertical_data_len = (int)vd_size;
+                p.vertical_data = (uint8_t *)malloc(vd_size);
+                if (fread(p.vertical_data, 1, vd_size, vd_fp) != (size_t)vd_size) {
                     fprintf(stderr, "Failed to read vertical-data file: %s\n", vd_path);
                     fclose(vd_fp);
                     exit(EXIT_FAILURE);

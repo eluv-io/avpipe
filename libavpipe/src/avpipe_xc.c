@@ -4878,23 +4878,12 @@ set_extract_images(
 void
 init_vertical_data(
     xcparams_t *params,
-    int size)
+    const uint8_t *data,
+    int len)
 {
-    params->vertical_data = calloc(size, sizeof(uint32_t));
-    params->vertical_data_len = size;
-}
-
-void
-set_vertical_data(
-    xcparams_t *params,
-    int index,
-    uint32_t value)
-{
-    if (index >= params->vertical_data_len) {
-        elv_err("set_vertical_data - index out of bounds: %d, url=%s", index, params->url);
-        return;
-    }
-    params->vertical_data[index] = value;
+    params->vertical_data = malloc(len);
+    memcpy(params->vertical_data, data, len);
+    params->vertical_data_len = len;
 }
 
 void

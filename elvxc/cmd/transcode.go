@@ -1,7 +1,6 @@
 package cmd
 
 import (
-	"encoding/binary"
 	"fmt"
 	"io"
 	"io/ioutil"
@@ -370,7 +369,7 @@ func InitTranscode(cmdRoot *cobra.Command) error {
 	cmdTranscode.PersistentFlags().StringP("profile", "", "", "Encoding profile for video. If it is not determined, it will be set automatically.")
 	cmdTranscode.PersistentFlags().Int32("level", 0, "Encoding level for video. If it is not determined, it will be set automatically.")
 	cmdTranscode.PersistentFlags().Int32("deinterlace", 0, "Deinterlace filter (values 0 - none, 1 - bwdif_field, 2 - bwdif_frame send_frame).")
-	cmdTranscode.PersistentFlags().Int32("vertical", 0, "Vertical video crop (0 - disabled, 1 - enabled).")
+	cmdTranscode.PersistentFlags().Int32("vertical", 0, "Vertical video crop type (0 - none, 1 - 32bpf).")
 	cmdTranscode.PersistentFlags().StringP("vertical-data", "", "", "Path to binary file with per-frame crop x data (4 bytes per frame, uint32).")
 	cmdTranscode.PersistentFlags().StringP("fade", "", "", "Fade filter ('in' or 'out').")
 	cmdTranscode.PersistentFlags().Int32("fade-start-frame", 0, "Fade start frame (used with blend-based fade).")
@@ -676,18 +675,11 @@ func doTranscode(cmd *cobra.Command, args []string) error {
 	}
 
 	verticalDataFile := cmd.Flag("vertical-data").Value.String()
-	var verticalData []uint32
+	var verticalData []byte
 	if verticalDataFile != "" {
-		vdata, err := os.ReadFile(verticalDataFile)
+		verticalData, err = os.ReadFile(verticalDataFile)
 		if err != nil {
 			return fmt.Errorf("Failed to read vertical-data file: %v", err)
-		}
-		if len(vdata)%4 != 0 {
-			return fmt.Errorf("vertical-data file size %d is not a multiple of 4", len(vdata))
-		}
-		verticalData = make([]uint32, len(vdata)/4)
-		for i := range verticalData {
-			verticalData[i] = binary.LittleEndian.Uint32(vdata[i*4 : (i+1)*4])
 		}
 	}
 
