@@ -194,6 +194,7 @@ func InitUrlIOHandlerIfNotPresent(url string, inputOpener InputOpener, outputOpe
 }
 
 // InitUrlMuxIOHandler sets specific IO handler for muxing a url/file (similar to InitUrlIOHandler)
+// To clean up - call RemoveUrlMuxIOHandler.
 func InitUrlMuxIOHandler(url string, inputOpener InputOpener, muxOutputOpener MuxOutputOpener) {
 	if inputOpener != nil {
 		gMutex.Lock()
@@ -259,6 +260,8 @@ func GetMuxOutputOpener(url string) MuxOutputOpener {
 	return gMuxOutputOpener
 }
 
+// PutMuxOutputOpener registers a mux output handler keyed by fd.
+// To clean up - call DeleteMuxOutputHandler.
 func PutMuxOutputOpener(fd int64, muxOutputHandler OutputHandler) {
 	gMutex.Lock()
 	gMuxHandlers[fd] = muxOutputHandler
