@@ -265,6 +265,14 @@ func PutMuxOutputOpener(fd int64, muxOutputHandler OutputHandler) {
 	gMutex.Unlock()
 }
 
+// DeleteMuxOutputHandler removes the mux output handler entry for fd.
+// Called from AVPipeCloseMuxOutput.
+func DeleteMuxOutputHandler(fd int64) {
+	gMutex.Lock()
+	delete(gMuxHandlers, fd)
+	gMutex.Unlock()
+}
+
 func GetOutputOpenerByHandler(h int64) OutputOpener {
 	gMutex.Lock()
 	defer gMutex.Unlock()
