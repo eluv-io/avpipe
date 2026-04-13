@@ -4040,6 +4040,7 @@ avpipe_probe(
     }
 
     inctx.params = params;
+    inctx.alt_url = (char *)calloc(1, MAX_URL_SIZE);
     if (in_handlers->avpipe_opener(url, &inctx) < 0) {
         rc = eav_open_input;
         goto avpipe_probe_end;
@@ -4190,6 +4191,8 @@ avpipe_probe_end:
 
     /* Close input handler resources */
     in_handlers->avpipe_closer(&inctx);
+
+    free(inctx.alt_url);
 
     return rc;
 }
