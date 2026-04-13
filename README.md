@@ -1,16 +1,14 @@
 # avpipe
 
-## Introduction
+## Overview
 
-The avpipe library is basically a C/Go library on top of FFmpeg with very simple transcoding APIs.
-This library helps third party developers to develop server programs or apps for transcoding audio/video in C or Go.
-The avpipe library has the capability to transcode audio/video input files and produce MP4 or M4S (for HLS/DASH playout) segments on the fly.
-The source of input files for transcoding can be a file on disk, a network connection, or some objects on the cloud.
-Depending on the location of the source file, the input of avpipe library can be set via some handlers (callback functions) in both C or Go.
-Similarly the output of avpipe library can be set by some callback functions to send the result to a file on disk, a network connection or some objects on the cloud.
+A Go/CGO library for media transcoding and conditioning 
 
-Usually the media segments are either fragmented MP4 or TS segments.
-So far, the work on avpipe has been focused on generating fragmented MP4 segments (the TS format might be added later).
+The primary purpose is:
+- create conditioned mezzanine "parts" from source files or live streams (FMP4 or TS)
+- create ABR (DASH/HLS) segments from the pre-conditioned mezzanine "parts"
+
+Features include resizing, GPU/CPU encoding parameters, watermarking, splicing.
 
 ## Build
 
@@ -69,17 +67,15 @@ The following repositories can be checked out in any directory, but for better o
 
 ### Test avpipe
 
-- Download media test files from https://console.cloud.google.com/storage/browser/eluvio-test-assets into `media` directory inside `<avpipe-path>`
-  - `cd avpipe`
-  - `mkdir ./media`
-  - `cd ./media`
-  - `gcloud auth login`
-  - `gsutil -m cp 'gs://eluvio-test-assets/*' .`
-- Inside `<avpipe-path>` run
-  - `go test -timeout 2000s`
-- Instead of the above commands, you can run the following scripts:
+By script:
   - `run_tests.sh` to run avpipe core functionality and transcoding tests.
   - `run_live_tests.sh`: to run avipe live-streaming functionality tests.
+
+Manual examples:
+
+  ```
+  go test ./xc/ -run TestEndToEnd
+  ```
 
 ### Run `exc` and `elvxc`
 
