@@ -4443,6 +4443,17 @@ check_params(
             return eav_param;
         }
     }
+
+    if (params->vertical && params->bypass_transcoding) {
+        elv_err("Incompatible params - vertical crop requires transcoding (bypass must be disabled), url=%s", params->url);
+        return eav_param;
+    }
+
+    if (params->fade && *params->fade != '\0' && params->bypass_transcoding) {
+        elv_err("Incompatible params - fade requires transcoding (bypass must be disabled), url=%s", params->url);
+        return eav_param;
+    }
+
     return eav_success;
 }
 
