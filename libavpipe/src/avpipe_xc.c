@@ -446,6 +446,15 @@ prepare_decoder(
         else
             decoder_context->codec_context[i]->thread_count = DEFAULT_THREAD_COUNT;
 
+        /* Set GPU/device index for hardware decoders (e.g. NETINT, NVENC) */
+        if (params && params->gpu_index >= 0 &&
+            decoder_context->codec_parameters[i]->codec_type == AVMEDIA_TYPE_VIDEO &&
+            params->dcodec != NULL && params->dcodec[0] != '\0') {
+            if (av_opt_set_int(decoder_context->codec_context[i]->priv_data, "dev_dec_idx", params->gpu_index, 0) < 0)
+                av_opt_set_int(decoder_context->codec_context[i]->priv_data, "gpu", params->gpu_index, 0);
+            elv_log("Decoder device index set to %d for %s", params->gpu_index, params->dcodec);
+        }
+
         /* Open the decoder (initialize the decoder codec_context[i] using given codec[i]). */
         if (decoder_context->codec_parameters[i]->codec_type != AVMEDIA_TYPE_DATA &&
              (rc = avcodec_open2(decoder_context->codec_context[i], decoder_context->codec[i], NULL)) < 0) {
@@ -790,6 +799,8 @@ set_netint_h264_params(
     }
     elv_dbg("set_netint_h264_params encoding params=%s, url=%s", enc_params, params->url);
     av_opt_set(encoder_codec_context->priv_data, "xcoder-params", enc_params, 0);
+    if (params->gpu_index >= 0)
+        av_opt_set_int(encoder_codec_context->priv_data, "dev_enc_idx", params->gpu_index, 0);
 }
 
 static void
@@ -817,6 +828,8 @@ set_netint_h265_params(
         profile, s->avg_frame_rate.num, s->avg_frame_rate.den);
     elv_dbg("set_netint_h265_params encoding params=%s, url=%s", enc_params, params->url);
     av_opt_set(encoder_codec_context->priv_data, "xcoder-params", enc_params, 0);
+    if (params->gpu_index >= 0)
+        av_opt_set_int(encoder_codec_context->priv_data, "dev_enc_idx", params->gpu_index, 0);
 }
 
 /* Borrowed from libavcodec/nvenc.h since it is not exposed */
