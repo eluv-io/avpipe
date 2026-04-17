@@ -1540,7 +1540,7 @@ func TestIrregularTsMezMaker_1_10000(t *testing.T) {
 func TestMXF_H265MezMaker(t *testing.T) {
 	f := fn()
 	if testing.Short() {
-		// 558.20s on 2018 MacBook Pro (2.9 GHz 6-Core i9, 32 GB RAM, Radeon Pro 560X 4 GB)
+		// Test takes ~2 minutes with 4K JPEG2000 MXF source
 		t.Skip("SKIPPING " + f)
 	}
 	url := "./media/SIN5_4K_MOS_J2K_60s_CCBYblendercloud.mxf"
@@ -1558,7 +1558,7 @@ func TestMXF_H265MezMaker(t *testing.T) {
 		StartSegmentStr:   "1",
 		SegDuration:       "30.03",
 		Ecodec:            "libx265",
-		Dcodec:            "jpeg2000",
+		Dcodec:            "",
 		EncHeight:         -1,
 		EncWidth:          -1,
 		XcType:            goavpipe.XcVideo,
@@ -1566,6 +1566,7 @@ func TestMXF_H265MezMaker(t *testing.T) {
 		Url:               url,
 		DebugFrameLevel:   debugFrameLevel,
 		ForceKeyInt:       48,
+		BitDepth:          8,
 	}
 
 	xcTestResult := &XcTestResult{
