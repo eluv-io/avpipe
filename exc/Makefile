@@ -3,7 +3,7 @@ TOP_DIR ?= $(shell pwd)
 
 SRCS=elv_xc.c elv_mux.c
 LIBDIRS=-L$(TOP_DIR)/../lib -L/usr/local/lib
-INCDIRS=-I$(TOP_DIR)/../include
+INCDIRS=-I$(TOP_DIR)/../include -I$(TOP_DIR)/../utils/include
 FLAGS=-O0 -ggdb -Wall -fPIC
 
 OBJS=$(SRCS:%.c=$(BINDIR)/%.o)

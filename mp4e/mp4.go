@@ -88,14 +88,20 @@ type SampleInfo struct {
 
 func ValidateFmp4(reader io.Reader) (file *mp4.File, info *Mp4Info, err error) {
 	e := errors.Template("mp4e.ValidateFmp4", errors.K.Invalid.Default())
-	if file, err = mp4.DecodeFile(reader); err != nil {
-		err = e(err)
+
+	info = &Mp4Info{}
+
+	file, err = mp4.DecodeFile(reader)
+	if file == nil {
+		err = e("reason", "DecodeFile failed", "error", err)
 		return
 	}
-
-	info = &Mp4Info{
-		Size: file.Size(),
+	if err != nil {
+		info.AddError(fmt.Sprintf("failed to completely parse MP4: %v", err), -1, -1, nil)
+		err = nil
 	}
+
+	info.Size = file.Size()
 
 	if file.Init != nil {
 		// moov - container for all the metadata
