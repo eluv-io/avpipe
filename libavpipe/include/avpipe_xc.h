@@ -584,6 +584,16 @@ typedef struct stream_info_t {
     enum AVFieldOrder   field_order;
     int                 profile;
     int                 level;
+
+    char                color_primaries[16];      // e.g. "bt2020", "bt709"
+    char                color_transfer[24];       // e.g. "smpte2084" (PQ), "arib-std-b67" (HLG)
+    char                color_space[16];          // e.g. "bt2020nc"
+    char                color_range[8];           // "tv" (limited) or "pc" (full)
+
+    char                mastering_display[128];   // AV_PKT_DATA_MASTERING_DISPLAY_METADATA
+    char                max_cll[32];              // AV_PKT_DATA_CONTENT_LIGHT_LEVEL
+    char                stereo3d_type[32];        // AV_PKT_DATA_STEREO3D
+
     side_data_t         side_data;
     AVDictionary        *tags;
 } stream_info_t;

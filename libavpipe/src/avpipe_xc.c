@@ -14,10 +14,12 @@
 #include <libavutil/imgutils.h>
 #include <libavutil/display.h>
 #include <libavutil/stereo3d.h>
+#include <libavutil/mastering_display_metadata.h>
 
 #include "avpipe_xc.h"
 #include "avpipe_utils.h"
 #include "avpipe_format.h"
+#include "avpipe_codec.h"
 #include "avpipe_io.h"
 #include "avpipe_copy_mpegts.h"
 #include "elv_log.h"
@@ -793,12 +795,20 @@ set_h265_params(
     size_t off = 0;
 
     /* Set max_cll and master_display meta data for HDR content (omit if "0,0") */
-    if (params->max_cll && params->max_cll[0] != '\0' && strcmp(params->max_cll, "0,0") != 0)
+    if (params->max_cll && params->max_cll[0] != '\0' && strcmp(params->max_cll, "0,0") != 0) {
         av_opt_set(encoder_codec_context->priv_data, "max-cll", params->max_cll, 0);
+        /* Also attach as side data - mp4 clli box. */
+        if (attach_max_cll(encoder_codec_context, params->max_cll) != eav_success)
+            elv_warn("set_h265_params: failed to attach max_cll side data, url=%s", params->url);
+    }
     if (params->master_display && params->master_display[0] != '\0') {
         off += snprintf(x265_params + off, sizeof(x265_params) - off,
             "hdr10=1:hdr10-opt=1:repeat-headers=1:colorprim=bt2020:transfer=smpte2084:colormatrix=bt2020nc");
         av_opt_set(encoder_codec_context->priv_data, "master-display", params->master_display, 0);
+
+        /* Attach side data - mp4 muxer mdcv box */
+        if (attach_master_display(encoder_codec_context, params->master_display) != eav_success)
+            elv_warn("set_h265_params: failed to attach master_display side data, url=%s", params->url);
 
         /* Add HDR10 color metadata into AVCodecContext (populates the colr box) */
         encoder_codec_context->color_range     = AVCOL_RANGE_MPEG;       // "tv"
@@ -1009,8 +1019,11 @@ set_nvidia_hevc_params(
     av_opt_set(encoder_codec_context->priv_data, "tune", "hq", 0);   // Valid: hq, ll, ull, lossless, losslesshp
 
     /* HDR - set max_cll and master_display meta data for HDR content (skip if "0,0") */
-    if (params->max_cll && params->max_cll[0] != '\0' && strcmp(params->max_cll, "0,0") != 0)
+    if (params->max_cll && params->max_cll[0] != '\0' && strcmp(params->max_cll, "0,0") != 0) {
         av_opt_set(encoder_codec_context->priv_data, "max_cll", params->max_cll, 0);
+        if (attach_max_cll(encoder_codec_context, params->max_cll) != eav_success)
+            elv_warn("set_nvidia_hevc_params: failed to attach max_cll side data, url=%s", params->url);
+    }
     if (params->master_display && params->master_display[0] != '\0') {
         encoder_codec_context->pix_fmt        = AV_PIX_FMT_P010;                 // 10-bit
         encoder_codec_context->color_range    = AVCOL_RANGE_MPEG;                // "tv"
@@ -1018,6 +1031,10 @@ set_nvidia_hevc_params(
         encoder_codec_context->color_trc      = AVCOL_TRC_SMPTE2084;             // PQ (ST 2084)
         encoder_codec_context->colorspace     = AVCOL_SPC_BT2020_NCL;            // bt2020nc
         av_opt_set(encoder_codec_context->priv_data, "master_display", params->master_display, 0);
+
+        /* Attach side data - mp4 mdcv box */
+        if (attach_master_display(encoder_codec_context, params->master_display) != eav_success)
+            elv_warn("set_nvidia_hevc_params: failed to attach master_display side data, url=%s", params->url);
 
         /* HDR10 requires 10bit and main10 - set if not specified */
         if (params->profile == NULL || strlen(params->profile) == 0) {
@@ -4293,6 +4310,24 @@ avpipe_probe(
         stream_probes_ptr->profile = codec_context->profile;
         stream_probes_ptr->level = codec_context->level;
 
+        /* Color metadata store as 'names' */
+        stream_probes_ptr->color_primaries[0] = '\0';
+        stream_probes_ptr->color_transfer[0]  = '\0';
+        stream_probes_ptr->color_space[0]     = '\0';
+        stream_probes_ptr->color_range[0]     = '\0';
+        const char *cp_name = av_color_primaries_name(s->codecpar->color_primaries);
+        const char *ct_name = av_color_transfer_name(s->codecpar->color_trc);
+        const char *cs_name = av_color_space_name(s->codecpar->color_space);
+        const char *cr_name = av_color_range_name(s->codecpar->color_range);
+        if (cp_name) snprintf(stream_probes_ptr->color_primaries, sizeof(stream_probes_ptr->color_primaries), "%s", cp_name);
+        if (ct_name) snprintf(stream_probes_ptr->color_transfer,  sizeof(stream_probes_ptr->color_transfer),  "%s", ct_name);
+        if (cs_name) snprintf(stream_probes_ptr->color_space,     sizeof(stream_probes_ptr->color_space),     "%s", cs_name);
+        if (cr_name) snprintf(stream_probes_ptr->color_range,     sizeof(stream_probes_ptr->color_range),     "%s", cr_name);
+
+        stream_probes_ptr->mastering_display[0] = '\0';
+        stream_probes_ptr->max_cll[0]           = '\0';
+        stream_probes_ptr->stereo3d_type[0]     = '\0';
+
         // Set container duration if necessary
         if (probe->container_info.duration <
             ((float)stream_probes_ptr->duration_ts)/stream_probes_ptr->time_base.den)
@@ -4304,13 +4339,38 @@ avpipe_probe(
         for (int i = 0; i < s->codecpar->nb_coded_side_data; i++) {
             const AVPacketSideData *sd = &s->codecpar->coded_side_data[i];
             switch (sd->type) {
-                case AV_PKT_DATA_DISPLAYMATRIX:
+                case AV_PKT_DATA_DISPLAYMATRIX: {
                     stream_probes_ptr->side_data.display_matrix.rotation = av_display_rotation_get((int32_t *)sd->data);
                     double rot = stream_probes_ptr->side_data.display_matrix.rotation;
                     // Convert from CCW [-180:180] value to straight CW
                     rot = rot >= 0 ? rot : 360.0 + rot;
                     rot = rot > 0 ? 360 - rot : 0;
                     stream_probes_ptr->side_data.display_matrix.rotation_cw = rot;
+                    break;
+                }
+                case AV_PKT_DATA_MASTERING_DISPLAY_METADATA: {
+                    if (sd->size >= (int)sizeof(AVMasteringDisplayMetadata)) {
+                        format_master_display(stream_probes_ptr->mastering_display,
+                            sizeof(stream_probes_ptr->mastering_display),
+                            (const AVMasteringDisplayMetadata *)sd->data);
+                    }
+                    break;
+                }
+                case AV_PKT_DATA_CONTENT_LIGHT_LEVEL:
+                    if (sd->size >= (int)sizeof(AVContentLightMetadata)) {
+                        format_max_cll(stream_probes_ptr->max_cll,
+                            sizeof(stream_probes_ptr->max_cll),
+                            (const AVContentLightMetadata *)sd->data);
+                    }
+                    break;
+                case AV_PKT_DATA_STEREO3D:
+                    if (sd->size >= (int)sizeof(AVStereo3D)) {
+                        const char *s3d_name = av_stereo3d_type_name(
+                            ((const AVStereo3D *)sd->data)->type);
+                        if (s3d_name)
+                            snprintf(stream_probes_ptr->stereo3d_type,
+                                sizeof(stream_probes_ptr->stereo3d_type), "%s", s3d_name);
+                    }
                     break;
                 default:
                     // Not handled

@@ -107,6 +107,13 @@ type StreamInfo struct {
 	FieldOrder         string            `json:"field_order,omitempty"`
 	Profile            int               `json:"profile,omitempty"`
 	Level              int               `json:"level,omitempty"`
+	ColorPrimaries     string            `json:"color_primaries,omitempty"`
+	ColorTransfer      string            `json:"color_transfer,omitempty"`
+	ColorSpace         string            `json:"color_space,omitempty"`
+	ColorRange         string            `json:"color_range,omitempty"`       // "tv" or "pc"
+	MasteringDisplay   string            `json:"mastering_display,omitempty"` // x265 master-display string
+	MaxCLL             string            `json:"max_cll,omitempty"`           // "<MaxCLL>,<MaxFALL>"
+	Stereo3DType       string            `json:"stereo3d_type,omitempty"`     // Description eg. "side by side"
 	SideData           []interface{}     `json:"side_data,omitempty"`
 	Tags               map[string]string `json:"tags,omitempty"`
 }
@@ -1077,6 +1084,14 @@ func Probe(params *goavpipe.XcParams) (*ProbeInfo, error) {
 		probeInfo.StreamInfo[i].FieldOrder = goavpipe.AVFieldOrderNames[goavpipe.AVFieldOrder(probeArray[i].field_order)]
 		probeInfo.StreamInfo[i].Profile = int(probeArray[i].profile)
 		probeInfo.StreamInfo[i].Level = int(probeArray[i].level)
+
+		probeInfo.StreamInfo[i].ColorPrimaries = C.GoString((*C.char)(unsafe.Pointer(&probeArray[i].color_primaries)))
+		probeInfo.StreamInfo[i].ColorTransfer = C.GoString((*C.char)(unsafe.Pointer(&probeArray[i].color_transfer)))
+		probeInfo.StreamInfo[i].ColorSpace = C.GoString((*C.char)(unsafe.Pointer(&probeArray[i].color_space)))
+		probeInfo.StreamInfo[i].ColorRange = C.GoString((*C.char)(unsafe.Pointer(&probeArray[i].color_range)))
+		probeInfo.StreamInfo[i].MasteringDisplay = C.GoString((*C.char)(unsafe.Pointer(&probeArray[i].mastering_display)))
+		probeInfo.StreamInfo[i].MaxCLL = C.GoString((*C.char)(unsafe.Pointer(&probeArray[i].max_cll)))
+		probeInfo.StreamInfo[i].Stereo3DType = C.GoString((*C.char)(unsafe.Pointer(&probeArray[i].stereo3d_type)))
 
 		rot := float64(probeArray[i].side_data.display_matrix.rotation)
 		if rot != 0.0 {
