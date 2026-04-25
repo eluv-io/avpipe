@@ -13,6 +13,7 @@
 #include <libswscale/swscale.h>
 #include <libavutil/imgutils.h>
 #include <libavutil/display.h>
+#include <libavutil/stereo3d.h>
 
 #include "avpipe_xc.h"
 #include "avpipe_utils.h"
@@ -752,10 +753,17 @@ set_h264_params(
                                                 encoder_codec_context->height);
     }
 
-    av_opt_set(encoder_codec_context->priv_data, "x264-params", "stitchable=1", 0);
+    {
+        char x264_params[128] = "stitchable=1";
+        if (params->video_layout == video_layout_sbs) {
+            snprintf(x264_params, sizeof(x264_params),
+                "stitchable=1:frame-packing=%d", video_layout_sbs);
+        }
+        av_opt_set(encoder_codec_context->priv_data, "x264-params", x264_params, 0);
+    }
 }
 
-static void
+static int
 set_h265_params(
     coderctx_t *encoder_context,
     coderctx_t *decoder_context,
@@ -780,19 +788,44 @@ set_h265_params(
         av_opt_set(encoder_codec_context->priv_data, "profile", "main12", 0);
     }
 
-    /* Set max_cll and master_display meta data for HDR content */
-    if (params->max_cll && params->max_cll[0] != '\0')
+    /* Build x265-params as a single colon-separated string */
+    char x265_params[512] = {0};
+    size_t off = 0;
+
+    /* Set max_cll and master_display meta data for HDR content (omit if "0,0") */
+    if (params->max_cll && params->max_cll[0] != '\0' && strcmp(params->max_cll, "0,0") != 0)
         av_opt_set(encoder_codec_context->priv_data, "max-cll", params->max_cll, 0);
     if (params->master_display && params->master_display[0] != '\0') {
-        av_opt_set(encoder_codec_context->priv_data, "x265-params",
-            "hdr10=1:hdr10-opt=1:repeat-headers=1:colorprim=bt2020:transfer=smpte2084:colormatrix=bt2020nc", 0);
+        off += snprintf(x265_params + off, sizeof(x265_params) - off,
+            "hdr10=1:hdr10-opt=1:repeat-headers=1:colorprim=bt2020:transfer=smpte2084:colormatrix=bt2020nc");
         av_opt_set(encoder_codec_context->priv_data, "master-display", params->master_display, 0);
 
-        if ((params->profile == NULL || strlen(params->profile) == 0) && params->bitdepth < 10) {
-            /* If not specified or if bitdepth is specified but <10, assume 10 bits */
+        /* Add HDR10 color metadata into AVCodecContext (populates the colr box) */
+        encoder_codec_context->color_range     = AVCOL_RANGE_MPEG;       // "tv"
+        encoder_codec_context->color_primaries = AVCOL_PRI_BT2020;
+        encoder_codec_context->color_trc       = AVCOL_TRC_SMPTE2084;    // PQ (ST 2084)
+        encoder_codec_context->colorspace      = AVCOL_SPC_BT2020_NCL;   // bt2020nc
+
+        /* HDR10 requires 10bit and main10 - set if not specified */
+        if (params->profile == NULL || strlen(params->profile) == 0) {
             av_opt_set(encoder_codec_context->priv_data, "profile", "main10", 0);
+        } else if (strcmp(params->profile, "main10") != 0) {
+            elv_err("HDR (master_display set) requires profile=main10, got profile=%s, url=%s",
+                params->profile, params->url);
+            return eav_param;
         }
+        /* Always force 10-bit */
+        encoder_codec_context->pix_fmt = AV_PIX_FMT_YUV420P10LE;
     }
+
+    /* Stereoscopic frame packing (HEVC SEI: Frame Packing Arrangement SEI) */
+    if (params->video_layout == video_layout_sbs) {
+        off += snprintf(x265_params + off, sizeof(x265_params) - off,
+            "%sframe-packing=%d", off > 0 ? ":" : "", video_layout_sbs);
+    }
+
+    if (off > 0)
+        av_opt_set(encoder_codec_context->priv_data, "x265-params", x265_params, 0);
 
     /* Set the number of bframes to 0 and avoid having bframes */
     av_opt_set_int(encoder_codec_context->priv_data, "bframes", 0, 0);
@@ -803,6 +836,7 @@ set_h265_params(
      * Let X265 encoder picks the level automatically. Setting the level based on
      * resolution and framerate might pick higher level than what is needed.
      */
+    return 0;
 }
 
 static void
@@ -944,7 +978,7 @@ set_nvidia_h264_params(
      */
 }
 
-static void
+static int
 set_nvidia_hevc_params(
     coderctx_t *encoder_context,
     coderctx_t *decoder_context,
@@ -974,8 +1008,8 @@ set_nvidia_hevc_params(
     av_opt_set(encoder_codec_context->priv_data, "preset", "p2", 0); // Valid: p1–p7
     av_opt_set(encoder_codec_context->priv_data, "tune", "hq", 0);   // Valid: hq, ll, ull, lossless, losslesshp
 
-    /* HDR - set max_cll and master_display meta data for HDR content */
-    if (params->max_cll && params->max_cll[0] != '\0')
+    /* HDR - set max_cll and master_display meta data for HDR content (skip if "0,0") */
+    if (params->max_cll && params->max_cll[0] != '\0' && strcmp(params->max_cll, "0,0") != 0)
         av_opt_set(encoder_codec_context->priv_data, "max_cll", params->max_cll, 0);
     if (params->master_display && params->master_display[0] != '\0') {
         encoder_codec_context->pix_fmt        = AV_PIX_FMT_P010;                 // 10-bit
@@ -985,11 +1019,17 @@ set_nvidia_hevc_params(
         encoder_codec_context->colorspace     = AVCOL_SPC_BT2020_NCL;            // bt2020nc
         av_opt_set(encoder_codec_context->priv_data, "master_display", params->master_display, 0);
 
-        if ((params->profile == NULL || strlen(params->profile) == 0) && params->bitdepth < 10) {
-            /* If not specified or if bitdepth is specified but <10, assume 10 bits */
+        /* HDR10 requires 10bit and main10 - set if not specified */
+        if (params->profile == NULL || strlen(params->profile) == 0) {
             av_opt_set(encoder_codec_context->priv_data, "profile", "main10", 0);
+        } else if (strcmp(params->profile, "main10") != 0) {
+            elv_err("HDR (master_display set) requires profile=main10, got profile=%s, url=%s",
+                params->profile, params->url);
+            return eav_param;
         }
     }
+
+    return 0;
 }
 
 static int
@@ -1222,11 +1262,13 @@ prepare_video_encoder(
 
     if (!strcmp(params->ecodec, "h264_nvenc"))
         set_nvidia_h264_params(encoder_context, decoder_context, params);
-    else if (!strcmp(params->ecodec, "hevc_nvenc"))
-        set_nvidia_hevc_params(encoder_context, decoder_context, params);
-    else if (!strcmp(params->ecodec, "libx265"))
-        set_h265_params(encoder_context, decoder_context, params);
-    else if (!strcmp(params->ecodec, "h264_ni_enc") || !strcmp(params->ecodec, "h264_ni_quadra_enc"))
+    else if (!strcmp(params->ecodec, "hevc_nvenc")) {
+        if ((rc = set_nvidia_hevc_params(encoder_context, decoder_context, params)) != eav_success)
+            return rc;
+    } else if (!strcmp(params->ecodec, "libx265")) {
+        if ((rc = set_h265_params(encoder_context, decoder_context, params)) != eav_success)
+            return rc;
+    } else if (!strcmp(params->ecodec, "h264_ni_enc") || !strcmp(params->ecodec, "h264_ni_quadra_enc"))
         set_netint_h264_params(encoder_context, decoder_context, params);
     else if (!strcmp(params->ecodec, "h265_ni_enc"))
         set_netint_h265_params(encoder_context, decoder_context, params);
@@ -1258,6 +1300,23 @@ prepare_video_encoder(
             encoder_context->codec_context[index]) < 0) {
         elv_err("could not copy encoder parameters to output stream");
         return eav_codec_param;
+    }
+
+    /* For stereoscopic video - add AV_PKT_DATA_STEREO3D (stvi box) */
+    if (params->video_layout == video_layout_sbs) {
+        AVPacketSideData *sd = av_packet_side_data_new(
+            &encoder_context->stream[index]->codecpar->coded_side_data,
+            &encoder_context->stream[index]->codecpar->nb_coded_side_data,
+            AV_PKT_DATA_STEREO3D, sizeof(AVStereo3D), 0);
+        if (sd) {
+            AVStereo3D *s3d = (AVStereo3D *)sd->data;
+            memset(s3d, 0, sizeof(*s3d));
+            s3d->type = AV_STEREO3D_SIDEBYSIDE;
+            /* view=PACKED + no flags: left view in left half, right view in right half */
+            s3d->view = AV_STEREO3D_VIEW_PACKED;
+        } else {
+            elv_warn("Failed to attach stereo3d side data to output stream");
+        }
     }
 
     encoder_context->stream[index]->time_base = encoder_codec_context->time_base;
@@ -4540,6 +4599,7 @@ log_params(
         "listen=%d "
         "max_cll=\"%s\" "
         "master_display=\"%s\" "
+        "video_layout=%d "
         "filter_descriptor=\"%s\" "
         "extract_image_interval_ts=%"PRId64" "
         "extract_images_sz=%d "
@@ -4572,6 +4632,7 @@ log_params(
         params->bitdepth, params->listen,
         params->max_cll ? params->max_cll : "",
         params->master_display ? params->master_display : "",
+        params->video_layout,
         params->filter_descriptor,
         params->extract_image_interval_ts, params->extract_images_sz,
         1, params->video_time_base, params->video_frame_duration_ts, params->rotate,

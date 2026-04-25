@@ -452,6 +452,12 @@ typedef enum dif_type {
     dif_bwdif_frame = 2  // Use filter bwdif mode 'send_frame' (one frame per input frame)
 } dif_type;
 
+// Video layout. Values align with ISO/IEC 23001-8 (CICP)
+typedef enum video_layout_t {
+    video_layout_mono = 0, // Monoscopic
+    video_layout_sbs  = 3  // Stereoscopic side-by-side
+} video_layout_t;
+
 #define DRAW_TEXT_SHADOW_OFFSET     0.075
 #define MAX_EXTRACT_IMAGES_SZ       100
 
@@ -521,6 +527,7 @@ typedef struct xcparams_t {
     int         bitdepth;                   // Can be 8, 10, 12
     char        *max_cll;                   // Maximum Content Light Level (HDR only)
     char        *master_display;            // Master display (HDR only)
+    int         video_layout;               // Video layout (eg. stereoscopic SBS)
     int         stream_id;                  // Stream id to trasncode, should be >= 0
     char        *filter_descriptor;         // Filter descriptor if tx-type == audio-merge
     char        *mux_spec;

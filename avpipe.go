@@ -841,6 +841,7 @@ func getCParams(params *goavpipe.XcParams) (*C.xcparams_t, error) {
 		seekable:                  C.int(0),
 		max_cll:                   C.CString(params.MaxCLL),
 		master_display:            C.CString(params.MasterDisplay),
+		video_layout:              C.int(params.VideoLayout),
 		bitdepth:                  C.int(params.BitDepth),
 		mux_spec:                  C.CString(params.MuxingSpec),
 		sync_audio_to_stream_id:   C.int(params.SyncAudioToStreamId),
