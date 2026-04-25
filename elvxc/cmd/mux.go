@@ -8,9 +8,10 @@ import (
 	"net/http"
 	"os"
 
+	"github.com/spf13/cobra"
+
 	"github.com/eluv-io/avpipe"
 	"github.com/eluv-io/avpipe/goavpipe"
-	"github.com/spf13/cobra"
 )
 
 type AVCmdMuxInputOpener struct {
@@ -229,6 +230,7 @@ func doMux(cmd *cobra.Command, args []string) error {
 	}
 
 	goavpipe.InitUrlMuxIOHandler(filename, &AVCmdMuxInputOpener{URL: filename}, &AVCmdMuxOutputOpener{})
+	defer goavpipe.RemoveUrlMuxIOHandler(filename)
 
 	return avpipe.Mux(params)
 }
