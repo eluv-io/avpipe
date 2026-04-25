@@ -1,5 +1,7 @@
 /*
  * avpipe_format.c
+ *
+ * Container-specific helpers.
  */
 
 #include <libavcodec/avcodec.h>
