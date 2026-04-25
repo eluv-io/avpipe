@@ -16,12 +16,13 @@ import (
 	"testing"
 	"time"
 
+	"github.com/stretchr/testify/assert"
+
 	"github.com/eluv-io/avpipe"
 	"github.com/eluv-io/avpipe/elvxc/cmd"
 	"github.com/eluv-io/avpipe/goavpipe"
 	"github.com/eluv-io/avpipe/xc"
 	"github.com/eluv-io/log-go"
-	"github.com/stretchr/testify/assert"
 )
 
 const baseOutPath = "test_out"
@@ -1989,6 +1990,7 @@ func TestABRMuxing(t *testing.T) {
 	log.Debug(f, "muxSpec", string(muxSpec))
 
 	goavpipe.InitUrlMuxIOHandler(url, &cmd.AVCmdMuxInputOpener{URL: url}, &cmd.AVCmdMuxOutputOpener{})
+	defer goavpipe.RemoveUrlMuxIOHandler(url)
 	params.Url = url
 	params.Timecode = "01:00:00:00"
 	err := avpipe.Mux(params)

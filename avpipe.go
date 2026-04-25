@@ -617,6 +617,7 @@ func AVPipeCloseMuxOutput(fd C.int64_t) C.int {
 	if outHandler == nil {
 		return C.int(-1)
 	}
+	defer goavpipe.DeleteMuxOutputHandler(int64(fd))
 
 	err := outHandler.Close()
 	if err != nil {

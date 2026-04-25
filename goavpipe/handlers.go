@@ -7,61 +7,64 @@ import (
 const traceIo bool = false
 
 type InputOpener interface {
+	// Open returns an InputHandler or an error
 	// fd determines uniquely opening input.
 	// url determines input string for transcoding
 	Open(fd int64, url string) (InputHandler, error)
 }
 
 type InputHandler interface {
-	// Reads from input stream into buf.
+	// Read reads from input stream into buf.
 	// Returns (0, nil) to indicate EOF.
 	Read(buf []byte) (int, error)
 
-	// Seeks to specific offset of the input.
+	// Seek to specific offset of the input.
 	Seek(offset int64, whence int) (int64, error)
 
-	// Closes the input.
+	// Close the input.
 	Close() error
 
-	// Returns the size of input, if the size is not known returns 0 or -1.
+	// Size returns the size of input, if the size is not known returns 0 or -1.
 	Size() int64
 
-	// Reports some stats
+	// Stat reports some stats
 	Stat(streamIndex int, statType AVStatType, statArgs interface{}) error
 }
 
 type OutputOpener interface {
+	// Open returns an OutputHandler or an error
 	// h determines uniquely opening input.
 	// fd determines uniquely opening output.
-	Open(h, fd int64, stream_index, seg_index int, pts int64, out_type AVType) (OutputHandler, error)
+	Open(h, fd int64, streamIndex, segIndex int, pts int64, outType AVType) (OutputHandler, error)
 }
 
 type MuxOutputOpener interface {
+	// Open returns an OutputHandler or an error
 	// url and fd determines uniquely opening output.
-	Open(url string, fd int64, out_type AVType) (OutputHandler, error)
+	Open(url string, fd int64, outType AVType) (OutputHandler, error)
 }
 
 type OutputHandler interface {
-	// Writes encoded stream to the output.
+	// Write writes encoded stream to the output.
 	Write(buf []byte) (int, error)
 
-	// Seeks to specific offset of the output.
+	// Seek to specific offset of the output.
 	Seek(offset int64, whence int) (int64, error)
 
-	// Closes the output.
+	// Close the output.
 	Close() error
 
-	// Reports some stats
+	// Stat reports some stats
 	Stat(streamIndex int, avType AVType, statType AVStatType, statArgs interface{}) error
 }
 
 // Global table of handlers
-var gHandlers map[int64]any = make(map[int64]any)
-var gMuxHandlers map[int64]OutputHandler = make(map[int64]OutputHandler)
-var gURLInputOpeners map[string]InputOpener = make(map[string]InputOpener)             // Keeps InputOpener for specific URL
-var gURLOutputOpeners map[string]OutputOpener = make(map[string]OutputOpener)          // Keeps OutputOpener for specific URL
-var gURLMuxOutputOpeners map[string]MuxOutputOpener = make(map[string]MuxOutputOpener) // Keeps MuxOutputOpener for specific URL
-var gURLOutputOpenersByHandler map[int64]OutputOpener = make(map[int64]OutputOpener)   // Keeps OutputOpener for specific URL
+var gHandlers = make(map[int64]any)
+var gMuxHandlers = make(map[int64]OutputHandler)
+var gURLInputOpeners = make(map[string]InputOpener)           // Keeps InputOpener for specific URL
+var gURLOutputOpeners = make(map[string]OutputOpener)         // Keeps OutputOpener for specific URL
+var gURLMuxOutputOpeners = make(map[string]MuxOutputOpener)   // Keeps MuxOutputOpener for specific URL
+var gURLOutputOpenersByHandler = make(map[int64]OutputOpener) // Keeps OutputOpener for specific URL
 // gHandleNum is used for both FDs and handles so that they will not collide if misused.
 var gHandleNum int64
 var gMutex sync.Mutex
@@ -69,7 +72,7 @@ var gInputOpener InputOpener
 var gOutputOpener OutputOpener
 var gMuxOutputOpener MuxOutputOpener
 
-// Globals wraps the global variables used in avpipe. It should be gradually replaced in the
+// GlobalsT wraps the global variables used in avpipe. It should be gradually replaced in the
 // future, but for now is a global singleton.
 type GlobalsT struct{}
 
@@ -137,7 +140,7 @@ func (g *GlobalsT) GetMuxOutputHandler(fd int64) OutputHandler {
 	return gMuxHandlers[fd]
 }
 
-// This is used to set global input/output opener for avpipe
+// InitIOHandler is used to set global input/output opener for avpipe
 // If there is no specific input/output opener for a URL, the global
 // input/output opener will be used.
 func InitIOHandler(inputOpener InputOpener, outputOpener OutputOpener) {
@@ -145,13 +148,13 @@ func InitIOHandler(inputOpener InputOpener, outputOpener OutputOpener) {
 	gOutputOpener = outputOpener
 }
 
-// Sets the global handlers for muxing (similar to InitIOHandler for transcoding)
+// InitMuxIOHandler sets the global handlers for muxing (similar to InitIOHandler for transcoding)
 func InitMuxIOHandler(inputOpener InputOpener, muxOutputOpener MuxOutputOpener) {
 	gInputOpener = inputOpener
 	gMuxOutputOpener = muxOutputOpener
 }
 
-// This is used to set input/output opener specific to a URL.
+// InitUrlIOHandler is used to set input/output opener specific to a URL.
 // The input/output opener set by this function, is only valid for the URL and will be unset after
 // Xc() or Probe() is complete.
 func InitUrlIOHandler(url string, inputOpener InputOpener, outputOpener OutputOpener) {
@@ -190,7 +193,8 @@ func InitUrlIOHandlerIfNotPresent(url string, inputOpener InputOpener, outputOpe
 	return
 }
 
-// Sets specific IO handler for muxing a url/file (similar to InitUrlIOHandler)
+// InitUrlMuxIOHandler sets specific IO handler for muxing a url/file (similar to InitUrlIOHandler)
+// To clean up - call RemoveUrlMuxIOHandler.
 func InitUrlMuxIOHandler(url string, inputOpener InputOpener, muxOutputOpener MuxOutputOpener) {
 	if inputOpener != nil {
 		gMutex.Lock()
@@ -204,6 +208,16 @@ func InitUrlMuxIOHandler(url string, inputOpener InputOpener, muxOutputOpener Mu
 		gMutex.Unlock()
 	}
 	Log.Debug("InitUrlMuxIOHandler", "url", url, "urlInputOpener", inputOpener == nil, "urlOutputOpener", muxOutputOpener == nil)
+}
+
+// RemoveUrlMuxIOHandler removes IO handlers used for muxing a url/file
+func RemoveUrlMuxIOHandler(url string) {
+	gMutex.Lock()
+	delete(gURLInputOpeners, url)
+	delete(gURLMuxOutputOpeners, url)
+	gMutex.Unlock()
+
+	Log.Debug("RemoveUrlMuxIOHandler", "url", url)
 }
 
 func GetInputOpener(url string) InputOpener {
@@ -246,9 +260,19 @@ func GetMuxOutputOpener(url string) MuxOutputOpener {
 	return gMuxOutputOpener
 }
 
+// PutMuxOutputOpener registers a mux output handler keyed by fd.
+// To clean up - call DeleteMuxOutputHandler.
 func PutMuxOutputOpener(fd int64, muxOutputHandler OutputHandler) {
 	gMutex.Lock()
 	gMuxHandlers[fd] = muxOutputHandler
+	gMutex.Unlock()
+}
+
+// DeleteMuxOutputHandler removes the mux output handler entry for fd.
+// Called from AVPipeCloseMuxOutput.
+func DeleteMuxOutputHandler(fd int64) {
+	gMutex.Lock()
+	delete(gMuxHandlers, fd)
 	gMutex.Unlock()
 }
 
