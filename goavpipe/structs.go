@@ -321,6 +321,7 @@ type XcParams struct {
 	ChannelLayout          int       `json:"channel_layout"`                   // Audio channel layout
 	MaxCLL                 string    `json:"max_cll,omitempty"`
 	MasterDisplay          string    `json:"master_display,omitempty"`
+	VideoLayout            int32     `json:"video_layout,omitempty"`
 	BitDepth               int32     `json:"bitdepth,omitempty"`
 	SyncAudioToStreamId    int       `json:"sync_audio_to_stream_id"`
 	ForceEqualFDuration    bool      `json:"force_equal_frame_duration,omitempty"`

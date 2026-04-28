@@ -1542,6 +1542,15 @@ main(
                 }
                 if (p.video_time_base <= 0)
                     usage(argv[0], argv[i], EXIT_FAILURE);
+            } else if (!strcmp(argv[i], "-video-layout")) {
+                /* Accept both label and numeric CICP */
+                if (!strcmp(argv[i+1], "sbs") || !strcmp(argv[i+1], "3")) {
+                    p.video_layout = video_layout_sbs;
+                } else if (!strcmp(argv[i+1], "mono") || !strcmp(argv[i+1], "0")) {
+                    p.video_layout = video_layout_mono;
+                } else {
+                    usage(argv[0], argv[i], EXIT_FAILURE);
+                }
             } else {
                 usage(argv[0], argv[i], EXIT_FAILURE);
             }
