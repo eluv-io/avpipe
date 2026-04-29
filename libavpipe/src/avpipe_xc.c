@@ -1117,6 +1117,11 @@ prepare_video_encoder(
     }
     elv_log("Found encoder index=%d, %s", index, params->ecodec);
 
+    /* PENDING(SS) WIP hack to force bypass transcode for MV-HEVC inputs */
+    if (is_mvhevc(decoder_context->stream[index])) {
+        params->bypass_transcoding = 1;
+    }
+
     if (params->bypass_transcoding) {
         AVStream *in_stream = decoder_context->stream[index];
         AVStream *out_stream = encoder_context->stream[index];
@@ -1392,6 +1397,12 @@ prepare_audio_encoder(
             return eav_codec_context;
         }
         dec_codec_ctx = decoder_context->codec_context[stream_index];
+
+        /* PENDING(SS) WIP hack to force bypass transcode for Dolby Atmos inputs */
+        if (is_dolby_atmos(decoder_context->stream[stream_index])) {
+            params->bypass_transcoding = 1;
+            params->ecodec2 = strdup("eac3");
+        }
 
         /* If there are more than 1 audio streams to encode, we can't do bypass */
         if (params && params->bypass_transcoding && decoder_context->n_audio > 1) {
@@ -3482,26 +3493,6 @@ avpipe_xc(
             in_handlers, inctx, params, params->seekable)) != eav_success) {
         elv_err("Failure in preparing decoder, url=%s, rc=%d", params->url, rc);
         return rc;
-    }
-
-    /* Detect MV-HEVC: force bypass transcoding so the multilayer bitstream is preserved */
-    if ((params->xc_type & xc_video) &&
-        decoder_context->video_stream_index >= 0 &&
-        is_mvhevc(decoder_context->stream[decoder_context->video_stream_index])) {
-        elv_log("MV-HEVC detected, forcing bypass transcoding, url=%s", params->url);
-        params->bypass_transcoding = 1;
-    }
-
-    /* Detect Dolby Atmos: force bypass transcoding and select the eac3 pass-through codec */
-    if ((params->xc_type & xc_audio) &&
-        decoder_context->n_audio > 0 &&
-        decoder_context->audio_stream_index[0] >= 0 &&
-        is_dolby_atmos(decoder_context->stream[decoder_context->audio_stream_index[0]])) {
-        elv_log("Dolby Atmos detected, forcing bypass transcoding, url=%s", params->url);
-        params->bypass_transcoding = 1;
-        /* xcparams_t is calloc-allocated so ecodec2 is always NULL or a valid heap string */
-        free(params->ecodec2);
-        params->ecodec2 = strdup("eac3");
     }
 
     // Set up "copy" (bypass) encoder for MPEGTS
