@@ -3499,6 +3499,7 @@ avpipe_xc(
         is_dolby_atmos(decoder_context->stream[decoder_context->audio_stream_index[0]])) {
         elv_log("Dolby Atmos detected, forcing bypass transcoding, url=%s", params->url);
         params->bypass_transcoding = 1;
+        /* xcparams_t is calloc-allocated so ecodec2 is always NULL or a valid heap string */
         free(params->ecodec2);
         params->ecodec2 = strdup("eac3");
     }

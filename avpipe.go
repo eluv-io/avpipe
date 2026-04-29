@@ -274,7 +274,7 @@ func (h *ioHandler) InSeeker(offset C.int64_t, whence C.int) (int64, error) {
 		goavpipe.Log.Debug("InSeeker SEEK_END", "offset", offset, "whence", whence, "input_size", h.input.Size(), "about_to_call_seek", true)
 	}
 
-	// FFmpeg 8.0.1: Handle AVSEEK_SIZE (0x10000 = 65536) - return file size directly
+	// FFmpeg 8.0.1: Handle AVSEEK_SIZE - return file size directly without seeking
 	if int(whence) == C.AVSEEK_SIZE { // AVSEEK_SIZE
 		size := h.input.Size()
 		goavpipe.Log.Debug("InSeeker AVSEEK_SIZE", "offset", offset, "whence", whence, "returning_size", size)
