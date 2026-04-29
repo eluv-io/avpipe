@@ -1117,11 +1117,6 @@ prepare_video_encoder(
     }
     elv_log("Found encoder index=%d, %s", index, params->ecodec);
 
-    /* PENDING(SS) WIP hack to force bypass transcode for MV-HEVC inputs */
-    if (is_mvhevc(decoder_context->stream[index])) {
-        params->bypass_transcoding = 1;
-    }
-
     if (params->bypass_transcoding) {
         AVStream *in_stream = decoder_context->stream[index];
         AVStream *out_stream = encoder_context->stream[index];
@@ -1398,12 +1393,6 @@ prepare_audio_encoder(
         }
         dec_codec_ctx = decoder_context->codec_context[stream_index];
 
-        /* PENDING(SS) WIP hack to force bypass transcode for Dolby Atmos inputs */
-        if (is_dolby_atmos(decoder_context->stream[stream_index])) {
-            params->bypass_transcoding = 1;
-            params->ecodec2 = strdup("eac3");
-        }
-
         /* If there are more than 1 audio streams to encode, we can't do bypass */
         if (params && params->bypass_transcoding && decoder_context->n_audio > 1) {
             elv_err("Can not bypass multiple audio streams, n_audio=%d, url=%s", decoder_context->n_audio, params->url);
@@ -1458,7 +1447,9 @@ prepare_audio_encoder(
         if (params->channel_layout > 0) {
             channel_layout_mask = params->channel_layout;
         } else {
-            channel_layout_mask = get_channel_layout_for_encoder(dec_codec_ctx->ch_layout.u.mask);
+            channel_layout_mask = get_channel_layout_for_encoder(
+                dec_codec_ctx->ch_layout.order == AV_CHANNEL_ORDER_NATIVE
+                    ? dec_codec_ctx->ch_layout.u.mask : 0);
         }
         rc = av_channel_layout_from_mask(&enc_codec_ctx->ch_layout, channel_layout_mask);
         if (rc) {
@@ -1472,7 +1463,8 @@ prepare_audio_encoder(
         /* If decoder channel layout is DOWNMIX and params->ecodec == "aac" and channel_layout is not set
          * then set the channel layout to STEREO. Preserve the channel layout otherwise.
          */
-        if (dec_codec_ctx->ch_layout.u.mask == AV_CH_LAYOUT_STEREO_DOWNMIX &&
+        if (dec_codec_ctx->ch_layout.order == AV_CHANNEL_ORDER_NATIVE &&
+            dec_codec_ctx->ch_layout.u.mask == AV_CH_LAYOUT_STEREO_DOWNMIX &&
             !strcmp(ecodec, "aac") &&
             !params->channel_layout) {
             /* This encoder is prepared specifically for AAC, therefore set the channel layout to AV_CH_LAYOUT_STEREO */
@@ -3490,6 +3482,25 @@ avpipe_xc(
             in_handlers, inctx, params, params->seekable)) != eav_success) {
         elv_err("Failure in preparing decoder, url=%s, rc=%d", params->url, rc);
         return rc;
+    }
+
+    /* Detect MV-HEVC: force bypass transcoding so the multilayer bitstream is preserved */
+    if ((params->xc_type & xc_video) &&
+        decoder_context->video_stream_index >= 0 &&
+        is_mvhevc(decoder_context->stream[decoder_context->video_stream_index])) {
+        elv_log("MV-HEVC detected, forcing bypass transcoding, url=%s", params->url);
+        params->bypass_transcoding = 1;
+    }
+
+    /* Detect Dolby Atmos: force bypass transcoding and select the eac3 pass-through codec */
+    if ((params->xc_type & xc_audio) &&
+        decoder_context->n_audio > 0 &&
+        decoder_context->audio_stream_index[0] >= 0 &&
+        is_dolby_atmos(decoder_context->stream[decoder_context->audio_stream_index[0]])) {
+        elv_log("Dolby Atmos detected, forcing bypass transcoding, url=%s", params->url);
+        params->bypass_transcoding = 1;
+        free(params->ecodec2);
+        params->ecodec2 = strdup("eac3");
     }
 
     // Set up "copy" (bypass) encoder for MPEGTS

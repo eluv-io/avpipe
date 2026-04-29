@@ -10,6 +10,8 @@
 #include <libavutil/log.h>
 #include <libavutil/pixdesc.h>
 
+#include <string.h>
+
 #include "avpipe_utils.h"
 #include "avpipe_xc.h"
 #include "elv_log.h"
