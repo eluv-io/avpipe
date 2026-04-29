@@ -13,10 +13,13 @@
 #include <libswscale/swscale.h>
 #include <libavutil/imgutils.h>
 #include <libavutil/display.h>
+#include <libavutil/stereo3d.h>
+#include <libavutil/mastering_display_metadata.h>
 
 #include "avpipe_xc.h"
 #include "avpipe_utils.h"
 #include "avpipe_format.h"
+#include "avpipe_codec.h"
 #include "avpipe_io.h"
 #include "avpipe_copy_mpegts.h"
 #include "elv_log.h"
@@ -111,7 +114,11 @@ prepare_input(
     avioctx = avio_alloc_context(bufin, bufin_sz, 0, (void *)inctx,
         in_handlers->avpipe_reader, in_handlers->avpipe_writer, in_handlers->avpipe_seeker);
 
-    avioctx->written = inctx->sz; /* Fake avio_size() to avoid calling seek to find size */
+    // FFmpeg 7.1: Use size callback to fake stream size instead of deprecated 'written' field
+    // This tells FFmpeg the total size of the stream for avio_size() calls
+    if (inctx->sz > 0) {
+        avioctx->seek = in_handlers->avpipe_seeker;  // Ensure seeker handles SEEK_END for size
+    }
     avioctx->seekable = seekable;
     avioctx->direct = 0;
     avioctx->buffer_size = inctx->sz < bufin_sz ? inctx->sz : bufin_sz; // avoid seeks - avio_seek() seeks internal buffer */
@@ -355,7 +362,7 @@ prepare_decoder(
             elv_dbg("AUDIO STREAM %d, codec_id=%s, stream_id=%d, timebase=%d, xc_type=%d, channels=%d, url=%s",
                 i, avcodec_get_name(decoder_context->codec_parameters[i]->codec_id), decoder_context->stream[i]->id,
                 decoder_context->stream[i]->time_base.den, params ? params->xc_type : xc_none,
-                decoder_context->codec_parameters[i]->channels, url);
+                decoder_context->codec_parameters[i]->ch_layout.nb_channels, url);
 
             /* If the buffer size is too big, ffmpeg might assert in aviobuf.c:581
              * To avoid this assertion, reset the buffer size to something smaller.
@@ -601,16 +608,27 @@ set_encoder_options(
      * - frag_every_frame - necessary for low-latency playout (eg. LL-HLS) (could use frag_keyframe for regular HLS/DASH)
      * - empty_moov - moov atom at beginning for progressive playback (needed for fMP4 init segment)
      * - default_base_moof: omit base-data-offset in moof (simplifies segment parsing, CMAF-friendly)
+     * - delay_moov: process the initial packets from all streams before writing the moov atom; required by the AC3 codec
      *
      * Note 'faststart' is not needed for segmented playout (HLS/DASH). Only used for progessive playout of mp4/mov files.
      */
     #define FRAG_OPTS "+frag_every_frame+empty_moov+default_base_moof"
+    #define FRAG_OPTS_DELAY "+frag_every_frame+empty_moov+default_base_moof+delay_moov"
 
     if (!strcmp(params->format, "fmp4")) {
-        if (stream_index == decoder_context->video_stream_index)
+        if (stream_index == decoder_context->video_stream_index) {
+            elv_dbg("set_encoder_options, fmp4 video, stream_index=%d, movflags="FRAG_OPTS, stream_index);
             av_opt_set(encoder_context->format_context->priv_data, "movflags", FRAG_OPTS, 0);
-        if ((i = selected_decoded_audio(decoder_context, stream_index)) >= 0)
-            av_opt_set(encoder_context->format_context2[i]->priv_data, "movflags", FRAG_OPTS, 0);
+        }
+        if ((i = selected_decoded_audio(decoder_context, stream_index)) >= 0) {
+            if ((params->ecodec2 && (!strcmp(params->ecodec2, "ac3") || !strcmp(params->ecodec2, "eac3")))) {
+                elv_dbg("set_encoder_options, fmp4 audio, ac3/eac3, stream_index=%d, movflags="FRAG_OPTS_DELAY, stream_index);
+                av_opt_set(encoder_context->format_context2[i]->priv_data, "movflags", FRAG_OPTS_DELAY, 0);
+            } else {
+                elv_dbg("set_encoder_options, fmp4 audio, stream_index=%d, movflags="FRAG_OPTS, stream_index);
+                av_opt_set(encoder_context->format_context2[i]->priv_data, "movflags", FRAG_OPTS, 0);
+            }
+        }
     }
 
     // Segment duration (in ts) - notice it is set on the format context not codec
@@ -683,14 +701,18 @@ set_encoder_options(
 
         if (!strcmp(params->format, "fmp4-segment")) {
             if ((i = selected_decoded_audio(decoder_context, stream_index)) >= 0) {
-                // AC3 codec requires delay_moov flag to write packets before moov atom
-                if (params->ecodec2 && !strcmp(params->ecodec2, "ac3"))
-                    av_opt_set(encoder_context->format_context2[i]->priv_data, "segment_format_options", "movflags="FRAG_OPTS"+delay_moov", 0);
-                else
+                if ((params->ecodec2 && (!strcmp(params->ecodec2, "ac3") || !strcmp(params->ecodec2, "eac3")))) {
+                    elv_dbg("set_encoder_options, fmp4-segment audio, ac3/eac3, stream_index=%d, movflags="FRAG_OPTS_DELAY, stream_index);
+                    av_opt_set(encoder_context->format_context2[i]->priv_data, "segment_format_options", "movflags="FRAG_OPTS_DELAY, 0);
+                } else {
+                    elv_dbg("set_encoder_options, fmp4-segment audio, stream_index=%d, movflags="FRAG_OPTS, stream_index);
                     av_opt_set(encoder_context->format_context2[i]->priv_data, "segment_format_options", "movflags="FRAG_OPTS, 0);
+                }
             }
-            if (stream_index == decoder_context->video_stream_index)
+            if (stream_index == decoder_context->video_stream_index) {
+                elv_dbg("set_encoder_options, fmp4-segment video, stream_index=%d, movflags="FRAG_OPTS, stream_index);
                 av_opt_set(encoder_context->format_context->priv_data, "segment_format_options", "movflags="FRAG_OPTS, 0);
+            }
         }
     }
 
@@ -733,10 +755,17 @@ set_h264_params(
                                                 encoder_codec_context->height);
     }
 
-    av_opt_set(encoder_codec_context->priv_data, "x264-params", "stitchable=1", 0);
+    {
+        char x264_params[128] = "stitchable=1";
+        if (params->video_layout == video_layout_sbs) {
+            snprintf(x264_params, sizeof(x264_params),
+                "stitchable=1:frame-packing=%d", video_layout_sbs);
+        }
+        av_opt_set(encoder_codec_context->priv_data, "x264-params", x264_params, 0);
+    }
 }
 
-static void
+static int
 set_h265_params(
     coderctx_t *encoder_context,
     coderctx_t *decoder_context,
@@ -761,19 +790,52 @@ set_h265_params(
         av_opt_set(encoder_codec_context->priv_data, "profile", "main12", 0);
     }
 
-    /* Set max_cll and master_display meta data for HDR content */
-    if (params->max_cll && params->max_cll[0] != '\0')
+    /* Build x265-params as a single colon-separated string */
+    char x265_params[512] = {0};
+    size_t off = 0;
+
+    /* Set max_cll and master_display meta data for HDR content (omit if "0,0") */
+    if (params->max_cll && params->max_cll[0] != '\0' && strcmp(params->max_cll, "0,0") != 0) {
         av_opt_set(encoder_codec_context->priv_data, "max-cll", params->max_cll, 0);
+        /* Also attach as side data - mp4 clli box. */
+        if (attach_max_cll(encoder_codec_context, params->max_cll) != eav_success)
+            elv_warn("set_h265_params: failed to attach max_cll side data, url=%s", params->url);
+    }
     if (params->master_display && params->master_display[0] != '\0') {
-        av_opt_set(encoder_codec_context->priv_data, "x265-params",
-            "hdr10=1:hdr10-opt=1:repeat-headers=1:colorprim=bt2020:transfer=smpte2084:colormatrix=bt2020nc", 0);
+        off += snprintf(x265_params + off, sizeof(x265_params) - off,
+            "hdr10=1:hdr10-opt=1:repeat-headers=1:colorprim=bt2020:transfer=smpte2084:colormatrix=bt2020nc");
         av_opt_set(encoder_codec_context->priv_data, "master-display", params->master_display, 0);
 
-        if ((params->profile == NULL || strlen(params->profile) == 0) && params->bitdepth < 10) {
-            /* If not specified or if bitdepth is specified but <10, assume 10 bits */
+        /* Attach side data - mp4 muxer mdcv box */
+        if (attach_master_display(encoder_codec_context, params->master_display) != eav_success)
+            elv_warn("set_h265_params: failed to attach master_display side data, url=%s", params->url);
+
+        /* Add HDR10 color metadata into AVCodecContext (populates the colr box) */
+        encoder_codec_context->color_range     = AVCOL_RANGE_MPEG;       // "tv"
+        encoder_codec_context->color_primaries = AVCOL_PRI_BT2020;
+        encoder_codec_context->color_trc       = AVCOL_TRC_SMPTE2084;    // PQ (ST 2084)
+        encoder_codec_context->colorspace      = AVCOL_SPC_BT2020_NCL;   // bt2020nc
+
+        /* HDR10 requires 10bit and main10 - set if not specified */
+        if (params->profile == NULL || strlen(params->profile) == 0) {
             av_opt_set(encoder_codec_context->priv_data, "profile", "main10", 0);
+        } else if (strcmp(params->profile, "main10") != 0) {
+            elv_err("HDR (master_display set) requires profile=main10, got profile=%s, url=%s",
+                params->profile, params->url);
+            return eav_param;
         }
+        /* Always force 10-bit */
+        encoder_codec_context->pix_fmt = AV_PIX_FMT_YUV420P10LE;
     }
+
+    /* Stereoscopic frame packing (HEVC SEI: Frame Packing Arrangement SEI) */
+    if (params->video_layout == video_layout_sbs) {
+        off += snprintf(x265_params + off, sizeof(x265_params) - off,
+            "%sframe-packing=%d", off > 0 ? ":" : "", video_layout_sbs);
+    }
+
+    if (off > 0)
+        av_opt_set(encoder_codec_context->priv_data, "x265-params", x265_params, 0);
 
     /* Set the number of bframes to 0 and avoid having bframes */
     av_opt_set_int(encoder_codec_context->priv_data, "bframes", 0, 0);
@@ -784,6 +846,7 @@ set_h265_params(
      * Let X265 encoder picks the level automatically. Setting the level based on
      * resolution and framerate might pick higher level than what is needed.
      */
+    return 0;
 }
 
 static void
@@ -925,7 +988,7 @@ set_nvidia_h264_params(
      */
 }
 
-static void
+static int
 set_nvidia_hevc_params(
     coderctx_t *encoder_context,
     coderctx_t *decoder_context,
@@ -955,9 +1018,12 @@ set_nvidia_hevc_params(
     av_opt_set(encoder_codec_context->priv_data, "preset", "p2", 0); // Valid: p1–p7
     av_opt_set(encoder_codec_context->priv_data, "tune", "hq", 0);   // Valid: hq, ll, ull, lossless, losslesshp
 
-    /* HDR - set max_cll and master_display meta data for HDR content */
-    if (params->max_cll && params->max_cll[0] != '\0')
+    /* HDR - set max_cll and master_display meta data for HDR content (skip if "0,0") */
+    if (params->max_cll && params->max_cll[0] != '\0' && strcmp(params->max_cll, "0,0") != 0) {
         av_opt_set(encoder_codec_context->priv_data, "max_cll", params->max_cll, 0);
+        if (attach_max_cll(encoder_codec_context, params->max_cll) != eav_success)
+            elv_warn("set_nvidia_hevc_params: failed to attach max_cll side data, url=%s", params->url);
+    }
     if (params->master_display && params->master_display[0] != '\0') {
         encoder_codec_context->pix_fmt        = AV_PIX_FMT_P010;                 // 10-bit
         encoder_codec_context->color_range    = AVCOL_RANGE_MPEG;                // "tv"
@@ -966,11 +1032,21 @@ set_nvidia_hevc_params(
         encoder_codec_context->colorspace     = AVCOL_SPC_BT2020_NCL;            // bt2020nc
         av_opt_set(encoder_codec_context->priv_data, "master_display", params->master_display, 0);
 
-        if ((params->profile == NULL || strlen(params->profile) == 0) && params->bitdepth < 10) {
-            /* If not specified or if bitdepth is specified but <10, assume 10 bits */
+        /* Attach side data - mp4 mdcv box */
+        if (attach_master_display(encoder_codec_context, params->master_display) != eav_success)
+            elv_warn("set_nvidia_hevc_params: failed to attach master_display side data, url=%s", params->url);
+
+        /* HDR10 requires 10bit and main10 - set if not specified */
+        if (params->profile == NULL || strlen(params->profile) == 0) {
             av_opt_set(encoder_codec_context->priv_data, "profile", "main10", 0);
+        } else if (strcmp(params->profile, "main10") != 0) {
+            elv_err("HDR (master_display set) requires profile=main10, got profile=%s, url=%s",
+                params->profile, params->url);
+            return eav_param;
         }
     }
+
+    return 0;
 }
 
 static int
@@ -1033,13 +1109,18 @@ prepare_video_encoder(
 
     /* Custom output buffer */
     encoder_context->format_context->io_open = elv_io_open;
-    encoder_context->format_context->io_close = elv_io_close;
+    encoder_context->format_context->io_close2 = elv_io_close;
 
     if (!encoder_context->codec[index]) {
-        elv_dbg("could not find the proper codec");
+        elv_err("could not find the proper codec");
         return eav_codec_context;
     }
     elv_log("Found encoder index=%d, %s", index, params->ecodec);
+
+    /* PENDING(SS) WIP hack to force bypass transcode for MV-HEVC inputs */
+    if (is_mvhevc(decoder_context->stream[index])) {
+        params->bypass_transcoding = 1;
+    }
 
     if (params->bypass_transcoding) {
         AVStream *in_stream = decoder_context->stream[index];
@@ -1052,6 +1133,26 @@ prepare_video_encoder(
             return eav_codec_param;
         }
 
+        /* Copy any additional stream-level side data (e.g., stereo 3D info for MV-HEVC) */
+        rc = copy_stream_side_data(out_stream, in_stream);
+        if (rc < 0) {
+            elv_err("BYPASS failed to copy stream side data, url=%s", params->url);
+            return eav_codec_param;
+        }
+
+        /* Copy stream disposition flags (includes AV_DISPOSITION_MULTILAYER for MV-HEVC) */
+        out_stream->disposition = in_stream->disposition;
+
+        if (is_mvhevc(in_stream)) {
+            elv_log("BYPASS MV-HEVC detected, profile=%d, url=%s", in_codecpar->profile, params->url);
+
+            /* Ensure the multilayer disposition is set on the output stream (so MP4 muxer writes to lhvC atom) */
+            out_stream->disposition |= AV_DISPOSITION_MULTILAYER;
+
+            /* Tell/allow muxer to write 3d metadata (st3d, sv3d, vexu, eyes) */
+             encoder_context->format_context->strict_std_compliance = FF_COMPLIANCE_UNOFFICIAL;
+        }
+
         /* Set output stream timebase when bypass encoding */
         if (params->video_time_base > 0)
             out_stream->time_base = (AVRational) {1, params->video_time_base};
@@ -1059,7 +1160,12 @@ prepare_video_encoder(
             out_stream->time_base = in_stream->time_base;
 
         out_stream->avg_frame_rate = decoder_context->format_context->streams[decoder_context->video_stream_index]->avg_frame_rate;
-        out_stream->codecpar->codec_tag = 0;
+
+        /* Preserve codec_tag for HEVC to keep hvc1/hev1 tag (needed for MV-HEVC) */
+        if (in_codecpar->codec_id == AV_CODEC_ID_HEVC)
+            out_stream->codecpar->codec_tag = in_codecpar->codec_tag;
+        else
+            out_stream->codecpar->codec_tag = 0;
 
         rc = set_encoder_options(encoder_context, decoder_context, params, decoder_context->video_stream_index,
             out_stream->time_base.den);
@@ -1072,7 +1178,7 @@ prepare_video_encoder(
 
     encoder_context->codec_context[index] = avcodec_alloc_context3(encoder_context->codec[index]);
     if (!encoder_context->codec_context[index]) {
-        elv_dbg("could not allocated memory for codec context");
+        elv_err("could not allocated memory for codec context");
         return eav_codec_context;
     }
 
@@ -1110,10 +1216,16 @@ prepare_video_encoder(
         encoder_codec_context->height = params->enc_height != -1 ? params->enc_height : decoder_context->codec_context[index]->width;
         encoder_codec_context->width = params->enc_width != -1 ? params->enc_width : decoder_context->codec_context[index]->height;
     }
-    if (params->video_time_base > 0)
+    if (params->video_time_base > 0) {
         encoder_codec_context->time_base = (AVRational) {1, params->video_time_base};
-    else
+    } else if (decoder_context->codec_context[index]->time_base.num > 0) {
         encoder_codec_context->time_base = decoder_context->codec_context[index]->time_base;
+    } else {
+        elv_err("Decoder video codec_context->time_base is not set (%d/%d), url=%s",
+            decoder_context->codec_context[index]->time_base.num,
+            decoder_context->codec_context[index]->time_base.den, params->url);
+        return eav_codec_context;
+    }
 
     encoder_codec_context->sample_aspect_ratio = decoder_context->codec_context[index]->sample_aspect_ratio;
     if (params->video_bitrate > 0)
@@ -1142,9 +1254,12 @@ prepare_video_encoder(
     int found_pix_fmt = 0;
     int i;
     /* Search for input pixel format in list of encoder pixel formats. */
-    if ( encoder_context->codec[index]->pix_fmts ) {
-        for (i=0; encoder_context->codec[index]->pix_fmts[i] >= 0; i++) {
-            if (encoder_context->codec[index]->pix_fmts[i] == decoder_context->codec_context[index]->pix_fmt)
+    const enum AVPixelFormat *supported_pix_fmts = NULL;
+    if (avcodec_get_supported_config(NULL, encoder_context->codec[index],
+            AV_CODEC_CONFIG_PIX_FORMAT, 0,
+            (const void **)&supported_pix_fmts, NULL) >= 0 && supported_pix_fmts) {
+        for (i = 0; supported_pix_fmts[i] >= 0; i++) {
+            if (supported_pix_fmts[i] == decoder_context->codec_context[index]->pix_fmt)
                 found_pix_fmt = 1;
         }
     }
@@ -1164,11 +1279,13 @@ prepare_video_encoder(
 
     if (!strcmp(params->ecodec, "h264_nvenc"))
         set_nvidia_h264_params(encoder_context, decoder_context, params);
-    else if (!strcmp(params->ecodec, "hevc_nvenc"))
-        set_nvidia_hevc_params(encoder_context, decoder_context, params);
-    else if (!strcmp(params->ecodec, "libx265"))
-        set_h265_params(encoder_context, decoder_context, params);
-    else if (!strcmp(params->ecodec, "h264_ni_enc") || !strcmp(params->ecodec, "h264_ni_quadra_enc"))
+    else if (!strcmp(params->ecodec, "hevc_nvenc")) {
+        if ((rc = set_nvidia_hevc_params(encoder_context, decoder_context, params)) != eav_success)
+            return rc;
+    } else if (!strcmp(params->ecodec, "libx265")) {
+        if ((rc = set_h265_params(encoder_context, decoder_context, params)) != eav_success)
+            return rc;
+    } else if (!strcmp(params->ecodec, "h264_ni_enc") || !strcmp(params->ecodec, "h264_ni_quadra_enc"))
         set_netint_h264_params(encoder_context, decoder_context, params);
     else if (!strcmp(params->ecodec, "h265_ni_enc"))
         set_netint_h265_params(encoder_context, decoder_context, params);
@@ -1190,7 +1307,7 @@ prepare_video_encoder(
 
     /* Open video encoder (initialize the encoder codec_context[i] using given codec[i]). */
     if ((rc = avcodec_open2(encoder_context->codec_context[index], encoder_context->codec[index], NULL)) < 0) {
-        elv_dbg("Could not open encoder for video, err=%d", rc);
+        elv_err("Could not open encoder for video, err=%d", rc);
         return eav_open_codec;
     }
 
@@ -1198,8 +1315,25 @@ prepare_video_encoder(
     if (avcodec_parameters_from_context(
             encoder_context->stream[index]->codecpar,
             encoder_context->codec_context[index]) < 0) {
-        elv_dbg("could not copy encoder parameters to output stream");
+        elv_err("could not copy encoder parameters to output stream");
         return eav_codec_param;
+    }
+
+    /* For stereoscopic video - add AV_PKT_DATA_STEREO3D (stvi box) */
+    if (params->video_layout == video_layout_sbs) {
+        AVPacketSideData *sd = av_packet_side_data_new(
+            &encoder_context->stream[index]->codecpar->coded_side_data,
+            &encoder_context->stream[index]->codecpar->nb_coded_side_data,
+            AV_PKT_DATA_STEREO3D, sizeof(AVStereo3D), 0);
+        if (sd) {
+            AVStereo3D *s3d = (AVStereo3D *)sd->data;
+            memset(s3d, 0, sizeof(*s3d));
+            s3d->type = AV_STEREO3D_SIDEBYSIDE;
+            /* view=PACKED + no flags: left view in left half, right view in right half */
+            s3d->view = AV_STEREO3D_VIEW_PACKED;
+        } else {
+            elv_warn("Failed to attach stereo3d side data to output stream");
+        }
     }
 
     encoder_context->stream[index]->time_base = encoder_codec_context->time_base;
@@ -1232,6 +1366,8 @@ prepare_audio_encoder(
     char *ecodec;
     AVFormatContext *format_context;
     int rc;
+    AVCodecContext *dec_codec_ctx, *enc_codec_ctx;
+    uint64_t channel_layout_mask;
 
     if (params->xc_type == xc_audio_merge ||
         params->xc_type == xc_audio_join ||
@@ -1260,6 +1396,13 @@ prepare_audio_encoder(
             elv_err("Decoder codec context is NULL! stream_index=%d, url=%s", stream_index, params->url);
             return eav_codec_context;
         }
+        dec_codec_ctx = decoder_context->codec_context[stream_index];
+
+        /* PENDING(SS) WIP hack to force bypass transcode for Dolby Atmos inputs */
+        if (is_dolby_atmos(decoder_context->stream[stream_index])) {
+            params->bypass_transcoding = 1;
+            params->ecodec2 = strdup("eac3");
+        }
 
         /* If there are more than 1 audio streams to encode, we can't do bypass */
         if (params && params->bypass_transcoding && decoder_context->n_audio > 1) {
@@ -1286,9 +1429,10 @@ prepare_audio_encoder(
         }
 
         format_context->io_open = elv_io_open;
-        format_context->io_close = elv_io_close;
+        format_context->io_close2 = elv_io_close;
 
-        encoder_context->codec_context[output_stream_index] = avcodec_alloc_context3(encoder_context->codec[output_stream_index]);
+        enc_codec_ctx = avcodec_alloc_context3(encoder_context->codec[output_stream_index]);
+        encoder_context->codec_context[output_stream_index] = enc_codec_ctx;
 
         /* By default use decoder parameters */
         encoder_context->codec_context[output_stream_index]->sample_rate = decoder_context->codec_context[stream_index]->sample_rate;
@@ -1297,35 +1441,45 @@ prepare_audio_encoder(
         encoder_context->codec_context[output_stream_index]->time_base = (AVRational){1, encoder_context->codec_context[output_stream_index]->sample_rate};
         encoder_context->stream[output_stream_index]->time_base = encoder_context->codec_context[output_stream_index]->time_base;
 
-        if (decoder_context->codec[stream_index] && 
-            decoder_context->codec[stream_index]->sample_fmts && params->bypass_transcoding)
-            encoder_context->codec_context[output_stream_index]->sample_fmt = decoder_context->codec[stream_index]->sample_fmts[0];
-        else if (encoder_context->codec[output_stream_index]->sample_fmts && encoder_context->codec[output_stream_index]->sample_fmts[0])
-            encoder_context->codec_context[output_stream_index]->sample_fmt = encoder_context->codec[output_stream_index]->sample_fmts[0];
+        const enum AVSampleFormat *supported_sample_fmts = NULL;
+        if (params->bypass_transcoding && decoder_context->codec[stream_index] &&
+            avcodec_get_supported_config(NULL, decoder_context->codec[stream_index],
+                AV_CODEC_CONFIG_SAMPLE_FORMAT, 0,
+                (const void **)&supported_sample_fmts, NULL) >= 0 && supported_sample_fmts)
+            encoder_context->codec_context[output_stream_index]->sample_fmt = supported_sample_fmts[0];
+        else if (avcodec_get_supported_config(NULL, encoder_context->codec[output_stream_index],
+                AV_CODEC_CONFIG_SAMPLE_FORMAT, 0,
+                (const void **)&supported_sample_fmts, NULL) >= 0 && supported_sample_fmts &&
+                supported_sample_fmts[0] != AV_SAMPLE_FMT_NONE)
+            encoder_context->codec_context[output_stream_index]->sample_fmt = supported_sample_fmts[0];
         else
             encoder_context->codec_context[output_stream_index]->sample_fmt = AV_SAMPLE_FMT_FLTP;
 
-        if (params->channel_layout > 0)
-            encoder_context->codec_context[output_stream_index]->channel_layout = params->channel_layout;
-        else
-            /* If the input stream is stereo the decoder_context->codec_context[index]->channel_layout is AV_CH_LAYOUT_STEREO */
-            encoder_context->codec_context[output_stream_index]->channel_layout =
-                get_channel_layout_for_encoder(decoder_context->codec_context[stream_index]->channel_layout);
-        encoder_context->codec_context[output_stream_index]->channels = av_get_channel_layout_nb_channels(encoder_context->codec_context[output_stream_index]->channel_layout);
-
+        if (params->channel_layout > 0) {
+            channel_layout_mask = params->channel_layout;
+        } else {
+            channel_layout_mask = get_channel_layout_for_encoder(
+                dec_codec_ctx->ch_layout.order == AV_CHANNEL_ORDER_NATIVE
+                    ? dec_codec_ctx->ch_layout.u.mask : 0);
+        }
+        rc = av_channel_layout_from_mask(&enc_codec_ctx->ch_layout, channel_layout_mask);
+        if (rc) {
+            elv_err("Invalid channel_layout, rc=%d, channel_layout=%llu, url=%s",
+                rc, channel_layout_mask, params->url);
+            return eav_param;
+        }
         const char *channel_name = avpipe_channel_name(
-                                av_get_channel_layout_nb_channels(encoder_context->codec_context[output_stream_index]->channel_layout),
-                                decoder_context->codec_context[stream_index]->channel_layout);
+            enc_codec_ctx->ch_layout.nb_channels, enc_codec_ctx->ch_layout.u.mask);
 
         /* If decoder channel layout is DOWNMIX and params->ecodec == "aac" and channel_layout is not set
          * then set the channel layout to STEREO. Preserve the channel layout otherwise.
          */
-        if (decoder_context->codec_context[stream_index]->channel_layout == AV_CH_LAYOUT_STEREO_DOWNMIX &&
+        if (dec_codec_ctx->ch_layout.order == AV_CHANNEL_ORDER_NATIVE &&
+            dec_codec_ctx->ch_layout.u.mask == AV_CH_LAYOUT_STEREO_DOWNMIX &&
             !strcmp(ecodec, "aac") &&
             !params->channel_layout) {
             /* This encoder is prepared specifically for AAC, therefore set the channel layout to AV_CH_LAYOUT_STEREO */
-            encoder_context->codec_context[output_stream_index]->channels = av_get_channel_layout_nb_channels(AV_CH_LAYOUT_STEREO);
-            encoder_context->codec_context[output_stream_index]->channel_layout = AV_CH_LAYOUT_STEREO;    // AV_CH_LAYOUT_STEREO is av_get_default_channel_layout(encoder_context->codec_context[index]->channels)
+            av_channel_layout_copy(&enc_codec_ctx->ch_layout, &(AVChannelLayout)AV_CHANNEL_LAYOUT_STEREO);
         }
 
         int sample_rate = params->sample_rate;
@@ -1354,9 +1508,9 @@ prepare_audio_encoder(
         }
 
         elv_dbg("ENCODER channels=%d, channel_layout=%d (%s), sample_fmt=%s, sample_rate=%d",
-            encoder_context->codec_context[output_stream_index]->channels,
-            encoder_context->codec_context[output_stream_index]->channel_layout,
-            avpipe_channel_layout_name(encoder_context->codec_context[output_stream_index]->channel_layout),
+            enc_codec_ctx->ch_layout.nb_channels,
+            enc_codec_ctx->ch_layout.u.mask,
+            avpipe_channel_layout_name(enc_codec_ctx->ch_layout.u.mask),
             av_get_sample_fmt_name(encoder_context->codec_context[output_stream_index]->sample_fmt),
             encoder_context->codec_context[output_stream_index]->sample_rate);
 
@@ -1372,15 +1526,14 @@ prepare_audio_encoder(
             return rc;
         }
 
-        AVCodecContext *encoder_codec_context = encoder_context->codec_context[output_stream_index];
         /* Some container formats (like MP4) require global headers to be present.
          * Mark the encoder so that it behaves accordingly. */
         if (format_context->oformat->flags & AVFMT_GLOBALHEADER)
-            encoder_codec_context->flags |= AV_CODEC_FLAG_GLOBAL_HEADER;
+            enc_codec_ctx->flags |= AV_CODEC_FLAG_GLOBAL_HEADER;
 
         /* Open audio encoder codec */
         if (avcodec_open2(encoder_context->codec_context[output_stream_index], encoder_context->codec[output_stream_index], NULL) < 0) {
-            elv_dbg("Could not open encoder for audio, stream_index=%d", stream_index);
+            elv_err("Could not open encoder for audio, stream_index=%d", stream_index);
             return eav_open_codec;
         }
 
@@ -1984,10 +2137,10 @@ encode_frame(
 
         if (params->xc_type & xc_audio &&
             selected_decoded_audio(decoder_context, stream_index) >= 0)
-            frame->pkt_duration = 0;
+            frame->duration = 0;
 
         dump_frame(selected_decoded_audio(decoder_context, stream_index) >= 0, stream_index,
-            "TOENC ", codec_context->frame_number, frame, debug_frame_level);
+            "TOENC ", codec_context->frame_num, frame, debug_frame_level);
     }
 
     // Send the frame to the encoder
@@ -2098,24 +2251,16 @@ encode_frame(
             encoder_context->video_encoder_prev_pts = output_packet->pts;
 
         /*
-         * Rescale video using the stream time_base (not the codec context)
-         * Audio has already been rescaled before the filter.
-         * PENDING(SS) Video should also be rescaled before sending to the filter so this
-         * code will not longer benecessary. When rescaling before sending to the filter and encoder,
-         * we use the codect context time base (which is what the encoder will use). We would
-         * only want to filter here, after encoding, if the packager requires a specific timebase,
-         * different than the encoder (eg. MPEGTS requires timebase 1/90000)
+         * Rescale video packets from encoder codec_context timebase to the output stream timebase.
+         * The muxer may adjust stream timebase during avformat_write_header (e.g. from {1001,60000} to {1,60000}).
+         * Packets must be in the stream timebase for the segment duration_ts comparison
          */
-        if ((stream_index == decoder_context->video_stream_index) &&
-            (decoder_context->stream[stream_index]->time_base.den !=
-            encoder_context->stream[index]->time_base.den ||
-            decoder_context->stream[stream_index]->time_base.num !=
-            encoder_context->stream[index]->time_base.num)) {
-
-            av_packet_rescale_ts(output_packet,
-                decoder_context->stream[stream_index]->time_base,
-                encoder_context->stream[index]->time_base
-            );
+        if (stream_index == decoder_context->video_stream_index) {
+            AVRational codec_tb = encoder_context->codec_context[index]->time_base;
+            AVRational stream_tb = encoder_context->stream[index]->time_base;
+            if (codec_tb.num != stream_tb.num || codec_tb.den != stream_tb.den) {
+                av_packet_rescale_ts(output_packet, codec_tb, stream_tb);
+            }
         }
 
         if (selected_decoded_audio(decoder_context, stream_index) >= 0) {
@@ -2225,6 +2370,17 @@ do_bypass(
         format_context = encoder_context->format_context2[i];
     } else
         format_context = encoder_context->format_context;
+
+    /*
+     * Remap packet stream_index for the output format context. Currently nb_straems is always 1 for outputs.
+     */
+    if (format_context->nb_streams == 1) {
+        packet->stream_index = 0;
+    } else if (packet->stream_index >= format_context->nb_streams) {
+        elv_err("Bypass packet stream_index=%d exceeds output nb_streams=%d, url=%s",
+            packet->stream_index, format_context->nb_streams, p->url);
+        return eav_stream_index;
+    }
 
     if (packet->pts == AV_NOPTS_VALUE ||
         packet->dts == AV_NOPTS_VALUE ||
@@ -2359,7 +2515,7 @@ transcode_audio(
                 in_handlers->avpipe_stater(decoder_context->inctx, stream_index, in_stat_decoding_audio_start_pts);
         }
 
-        dump_frame(1, stream_index, "IN ", codec_context->frame_number, frame, debug_frame_level);
+        dump_frame(1, stream_index, "IN ", codec_context->frame_num, frame, debug_frame_level);
 
         ret = check_pts_wrapped(&decoder_context->audio_last_input_pts[stream_index], frame, stream_index);
         if (ret == eav_pts_wrapped) {
@@ -2396,7 +2552,7 @@ transcode_audio(
                 return eav_receive_filter_frame;
             }
 
-            dump_frame(1, stream_index, "FILT ", codec_context->frame_number, filt_frame, debug_frame_level);
+            dump_frame(1, stream_index, "FILT ", codec_context->frame_num, filt_frame, debug_frame_level);
             ret = encode_frame(decoder_context, encoder_context, filt_frame, packet->stream_index, params, debug_frame_level);
             av_frame_unref(filt_frame);
             if (ret == eav_write_frame) {
@@ -2449,7 +2605,6 @@ transcode_video(
          * The following fields are interesting (but not initialized yet properly):
          *  - in_stream->start_time
          *  - in_stream->time_base // it always 1
-         *  - codec_context->ticks_per_frame
          *
          * The following fields are valid at this point:
          *  - in_stream->avg_frame_rate.num
@@ -2501,18 +2656,18 @@ transcode_video(
         /* If force_equal_fduration is set then frame_duration > 0 is true */
         if (decoder_context->frame_duration > 0) {
             elv_dbg("SET VIDEO PTS frame_num=%d, old_pts=%"PRId64", new_pts=%"PRId64", diff=%"PRId64", dts=%"PRId64,
-                codec_context->frame_number,
+                codec_context->frame_num,
                 frame->pts,
-                decoder_context->first_decoding_video_pts + decoder_context->frame_duration * (codec_context->frame_number - 1),
-                decoder_context->first_decoding_video_pts + decoder_context->frame_duration * (codec_context->frame_number - 1) - frame->pts,
+                decoder_context->first_decoding_video_pts + decoder_context->frame_duration * (codec_context->frame_num - 1),
+                decoder_context->first_decoding_video_pts + decoder_context->frame_duration * (codec_context->frame_num - 1) - frame->pts,
                 frame->pkt_dts);
             /* Set the PTS and DTS of the frame to equalize frame durations */
             frame->pts = decoder_context->first_decoding_video_pts +
-                decoder_context->frame_duration * (codec_context->frame_number - 1);
+                decoder_context->frame_duration * (codec_context->frame_num - 1);
             frame->pkt_dts = frame->pts;
         }
 
-        dump_frame(0, stream_index, "IN ", codec_context->frame_number, frame, debug_frame_level);
+        dump_frame(0, stream_index, "IN ", codec_context->frame_num, frame, debug_frame_level);
 
         ret = check_pts_wrapped(&decoder_context->audio_last_input_pts[stream_index], frame, stream_index);
         if (ret == eav_pts_wrapped) {
@@ -2526,6 +2681,14 @@ transcode_video(
         }
 
         decoder_context->video_pts = packet->pts;
+
+        /* Rescale video frame to encoder timebase before sending to the filter
+         * (filter is initialized with the encoder timebase).
+         * Use stream time_base (not codec_context time_base) because in ffmpeg 8.x
+         * video decoder codec_context->time_base is not set (remains 0/1). */
+        frame_rescale_time_base(frame,
+            decoder_context->stream[stream_index]->time_base,
+            encoder_context->codec_context[stream_index]->time_base);
 
         /* push the decoded frame into the filtergraph */
         elv_get_time(&tv);
@@ -2561,10 +2724,10 @@ transcode_video(
 #if 0
             // TEST ONLY - save gray scale frame
             save_gray_frame(filt_frame->data[0], filt_frame->linesize[0], filt_frame->width, filt_frame->height,
-            "frame-filt", codec_context->frame_number);
+            "frame-filt", codec_context->frame_num);
 #endif
 
-            dump_frame(0, stream_index, "FILT ", codec_context->frame_number, filt_frame, debug_frame_level);
+            dump_frame(0, stream_index, "FILT ", codec_context->frame_num, filt_frame, debug_frame_level);
             filt_frame->pkt_dts = filt_frame->pts;
 
             elv_get_time(&tv);
@@ -2789,17 +2952,21 @@ flush_decoder(
         }
 
         dump_frame(i >= 0, stream_index,
-            "IN FLUSH", codec_context->frame_number, frame, debug_frame_level);
+            "IN FLUSH", codec_context->frame_num, frame, debug_frame_level);
 
         if (codec_context->codec_type == AVMEDIA_TYPE_VIDEO ||
             codec_context->codec_type == AVMEDIA_TYPE_AUDIO) {
 
-            /* Rescale audio before sending to the filter (filter is initialized with the encoder timebase */
-            /* PENDING(SS) video should also be rescaled here */
+            /* Rescale audio/video before sending to the filter (filter is initialized with the encoder timebase).
+             * For video, use stream time_base because in ffmpeg 8.x decoder codec_context->time_base is 0/1. */
             if (i >= 0) {
                 int output_stream_index = audio_output_stream_index(decoder_context, p, i);
                 AVCodecContext *enc_codec_context = encoder_context->codec_context[output_stream_index];
                 frame_rescale_time_base(frame, codec_context->time_base, enc_codec_context->time_base);
+            } else {
+                AVRational dec_tb = decoder_context->stream[stream_index]->time_base;
+                AVRational enc_tb = encoder_context->codec_context[stream_index]->time_base;
+                frame_rescale_time_base(frame, dec_tb, enc_tb);
             }
 
             /* push the decoded frame into the filtergraph */
@@ -2821,7 +2988,7 @@ flush_decoder(
                 }
 
                 dump_frame(i >= 0, stream_index,
-                    "FILT ", codec_context->frame_number, filt_frame, debug_frame_level);
+                    "FILT ", codec_context->frame_num, filt_frame, debug_frame_level);
 
                 ret = encode_frame(decoder_context, encoder_context, filt_frame, stream_index, p, debug_frame_level);
                 av_frame_unref(filt_frame);
@@ -3433,24 +3600,34 @@ avpipe_xc(
     int video_stream_index = decoder_context->video_stream_index;
     if (params->xc_type & xc_video) {
 
-        if (av_cmp_q(decoder_context->format_context->streams[video_stream_index]->r_frame_rate, decoder_context->format_context->streams[video_stream_index]->avg_frame_rate)) {
+        /* Use avg_frame_rate if available, otherwise fall back to r_frame_rate (e.g. MXF files) */
+        AVRational dec_frame_rate = decoder_context->format_context->streams[video_stream_index]->avg_frame_rate;
+        if (dec_frame_rate.num == 0)
+            dec_frame_rate = decoder_context->format_context->streams[video_stream_index]->r_frame_rate;
+
+        AVRational enc_frame_rate = encoder_context->format_context->streams[0]->avg_frame_rate;
+        if (enc_frame_rate.num == 0)
+            enc_frame_rate = dec_frame_rate;
+
+        if (decoder_context->format_context->streams[video_stream_index]->avg_frame_rate.num != 0 &&
+            av_cmp_q(decoder_context->format_context->streams[video_stream_index]->r_frame_rate, decoder_context->format_context->streams[video_stream_index]->avg_frame_rate)) {
             elv_warn("frame rate discrepancy r=%d/%d avg=%d/%d url=%s",
                 decoder_context->format_context->streams[video_stream_index]->r_frame_rate.num, decoder_context->format_context->streams[video_stream_index]->r_frame_rate.den,
                 decoder_context->format_context->streams[video_stream_index]->avg_frame_rate.num, decoder_context->format_context->streams[video_stream_index]->avg_frame_rate.den, params->url);
         }
 
         int enc_calc_frame_duration = 0;
-        if (decoder_context->format_context->streams[video_stream_index]->avg_frame_rate.num != 0 &&
-            encoder_context->format_context->streams[0]->avg_frame_rate.num != 0 &&  // Note encoder_context->format_context uses stream 0 for video
+        if (dec_frame_rate.num != 0 &&
+            enc_frame_rate.num != 0 &&
             decoder_context->stream[video_stream_index]->time_base.num != 0 &&
-            encoder_context->stream[video_stream_index]->time_base.num != 0) {       // Note encoder_context->stream uses same index as decoder
+            encoder_context->stream[video_stream_index]->time_base.num != 0) {
 
-            AVRational enc_frame_duration_rat = av_mul_q(av_inv_q(encoder_context->stream[video_stream_index]->time_base), av_inv_q(encoder_context->format_context->streams[0]->avg_frame_rate));
+            AVRational enc_frame_duration_rat = av_mul_q(av_inv_q(encoder_context->stream[video_stream_index]->time_base), av_inv_q(enc_frame_rate));
             if (enc_frame_duration_rat.den != 1) {
                 elv_warn("frame duration (encoder) not integer %d/%d", enc_frame_duration_rat.num, enc_frame_duration_rat.den);
             }
 
-            AVRational dec_frame_duration_rat = av_mul_q(av_inv_q(decoder_context->stream[video_stream_index]->time_base), av_inv_q(decoder_context->format_context->streams[video_stream_index]->avg_frame_rate));
+            AVRational dec_frame_duration_rat = av_mul_q(av_inv_q(decoder_context->stream[video_stream_index]->time_base), av_inv_q(dec_frame_rate));
             if (dec_frame_duration_rat.den != 1) {
                 elv_warn("frame duration (decoder) not integer %d/%d", dec_frame_duration_rat.num, dec_frame_duration_rat.den);
             }
@@ -3459,11 +3636,11 @@ avpipe_xc(
             decoder_context->calculated_frame_duration = dec_frame_duration_rat.num / dec_frame_duration_rat.den; // Possibly imprecise but warned above
 
         } else {
-            elv_err("frame rate and timebase not properly set dec timebase=%d/%d avg_frame_rate=%d/%d enc timebase=%d/%d avg_frame_rate=%d/%d",
+            elv_err("frame rate and timebase not properly set dec timebase=%d/%d frame_rate=%d/%d enc timebase=%d/%d frame_rate=%d/%d",
                 decoder_context->stream[video_stream_index]->time_base.num, decoder_context->stream[video_stream_index]->time_base.den,
-                decoder_context->format_context->streams[video_stream_index]->avg_frame_rate.num, decoder_context->format_context->streams[video_stream_index]->avg_frame_rate.den,
+                dec_frame_rate.num, dec_frame_rate.den,
                 encoder_context->stream[video_stream_index]->time_base.num, encoder_context->stream[video_stream_index]->time_base.den,
-                encoder_context->format_context->streams[0]->avg_frame_rate.num, encoder_context->format_context->streams[0]->avg_frame_rate.den);
+                enc_frame_rate.num, enc_frame_rate.den);
             rc = eav_codec_context;
             goto xc_done;
         }
@@ -4063,7 +4240,7 @@ avpipe_probe(
     for (int i=0; i<nb_streams; i++) {
         AVStream *s = decoder_ctx.format_context->streams[i];
         AVCodecContext *codec_context = decoder_ctx.codec_context[i];
-        AVCodec *codec = decoder_ctx.codec[i];
+        const AVCodec *codec = decoder_ctx.codec[i];
         AVRational sar, dar;
 
         if (!codec_context) {
@@ -4121,13 +4298,12 @@ avpipe_probe(
         }
 
         stream_probes_ptr->frame_rate = s->r_frame_rate;
-        stream_probes_ptr->ticks_per_frame = codec_context->ticks_per_frame;
         stream_probes_ptr->bit_rate = codec_context->bit_rate;
         stream_probes_ptr->has_b_frames = codec_context->has_b_frames;
         stream_probes_ptr->sample_rate = codec_context->sample_rate;
-        stream_probes_ptr->channels = codec_context->channels;
+        stream_probes_ptr->channels = codec_context->ch_layout.nb_channels;
         if (codec && codec->type == AVMEDIA_TYPE_AUDIO)
-            stream_probes_ptr->channel_layout = codec_context->channel_layout;
+            stream_probes_ptr->channel_layout = codec_context->ch_layout.u.mask;
         else
             stream_probes_ptr->channel_layout = -1;
         stream_probes_ptr->width = codec_context->width;
@@ -4137,6 +4313,24 @@ avpipe_probe(
         stream_probes_ptr->profile = codec_context->profile;
         stream_probes_ptr->level = codec_context->level;
 
+        /* Color metadata store as 'names' */
+        stream_probes_ptr->color_primaries[0] = '\0';
+        stream_probes_ptr->color_transfer[0]  = '\0';
+        stream_probes_ptr->color_space[0]     = '\0';
+        stream_probes_ptr->color_range[0]     = '\0';
+        const char *cp_name = av_color_primaries_name(s->codecpar->color_primaries);
+        const char *ct_name = av_color_transfer_name(s->codecpar->color_trc);
+        const char *cs_name = av_color_space_name(s->codecpar->color_space);
+        const char *cr_name = av_color_range_name(s->codecpar->color_range);
+        if (cp_name) snprintf(stream_probes_ptr->color_primaries, sizeof(stream_probes_ptr->color_primaries), "%s", cp_name);
+        if (ct_name) snprintf(stream_probes_ptr->color_transfer,  sizeof(stream_probes_ptr->color_transfer),  "%s", ct_name);
+        if (cs_name) snprintf(stream_probes_ptr->color_space,     sizeof(stream_probes_ptr->color_space),     "%s", cs_name);
+        if (cr_name) snprintf(stream_probes_ptr->color_range,     sizeof(stream_probes_ptr->color_range),     "%s", cr_name);
+
+        stream_probes_ptr->mastering_display[0] = '\0';
+        stream_probes_ptr->max_cll[0]           = '\0';
+        stream_probes_ptr->stereo3d_type[0]     = '\0';
+
         // Set container duration if necessary
         if (probe->container_info.duration <
             ((float)stream_probes_ptr->duration_ts)/stream_probes_ptr->time_base.den)
@@ -4145,16 +4339,41 @@ avpipe_probe(
 
         av_dict_copy(&stream_probes_ptr->tags, s->metadata, 0);
 
-        for (int i = 0; i < s->nb_side_data; i++) {
-            const AVPacketSideData *sd = &s->side_data[i];
+        for (int i = 0; i < s->codecpar->nb_coded_side_data; i++) {
+            const AVPacketSideData *sd = &s->codecpar->coded_side_data[i];
             switch (sd->type) {
-                case AV_PKT_DATA_DISPLAYMATRIX:
+                case AV_PKT_DATA_DISPLAYMATRIX: {
                     stream_probes_ptr->side_data.display_matrix.rotation = av_display_rotation_get((int32_t *)sd->data);
                     double rot = stream_probes_ptr->side_data.display_matrix.rotation;
                     // Convert from CCW [-180:180] value to straight CW
                     rot = rot >= 0 ? rot : 360.0 + rot;
                     rot = rot > 0 ? 360 - rot : 0;
                     stream_probes_ptr->side_data.display_matrix.rotation_cw = rot;
+                    break;
+                }
+                case AV_PKT_DATA_MASTERING_DISPLAY_METADATA: {
+                    if (sd->size >= (int)sizeof(AVMasteringDisplayMetadata)) {
+                        format_master_display(stream_probes_ptr->mastering_display,
+                            sizeof(stream_probes_ptr->mastering_display),
+                            (const AVMasteringDisplayMetadata *)sd->data);
+                    }
+                    break;
+                }
+                case AV_PKT_DATA_CONTENT_LIGHT_LEVEL:
+                    if (sd->size >= (int)sizeof(AVContentLightMetadata)) {
+                        format_max_cll(stream_probes_ptr->max_cll,
+                            sizeof(stream_probes_ptr->max_cll),
+                            (const AVContentLightMetadata *)sd->data);
+                    }
+                    break;
+                case AV_PKT_DATA_STEREO3D:
+                    if (sd->size >= (int)sizeof(AVStereo3D)) {
+                        const char *s3d_name = av_stereo3d_type_name(
+                            ((const AVStereo3D *)sd->data)->type);
+                        if (s3d_name)
+                            snprintf(stream_probes_ptr->stereo3d_type,
+                                sizeof(stream_probes_ptr->stereo3d_type), "%s", s3d_name);
+                    }
                     break;
                 default:
                     // Not handled
@@ -4184,7 +4403,6 @@ avpipe_probe_end:
     for (int i=0; i<MAX_STREAMS; i++) {
         if (decoder_ctx.codec_context[i]) {
             /* Corresponds to avcodec_open2() */
-            avcodec_close(decoder_ctx.codec_context[i]);
             avcodec_free_context(&decoder_ctx.codec_context[i]);
         }
     }
@@ -4444,6 +4662,7 @@ log_params(
         "listen=%d "
         "max_cll=\"%s\" "
         "master_display=\"%s\" "
+        "video_layout=%d "
         "filter_descriptor=\"%s\" "
         "extract_image_interval_ts=%"PRId64" "
         "extract_images_sz=%d "
@@ -4476,6 +4695,7 @@ log_params(
         params->bitdepth, params->listen,
         params->max_cll ? params->max_cll : "",
         params->master_display ? params->master_display : "",
+        params->video_layout,
         params->filter_descriptor,
         params->extract_image_interval_ts, params->extract_images_sz,
         1, params->video_time_base, params->video_frame_duration_ts, params->rotate,
@@ -4696,13 +4916,11 @@ avpipe_fini(
     for (int i=0; i<MAX_STREAMS; i++) {
         if (decoder_context->codec_context[i]) {
             /* Corresponds to avcodec_open2() */
-            avcodec_close(decoder_context->codec_context[i]);
             avcodec_free_context(&decoder_context->codec_context[i]);
         }
 
         if (encoder_context->codec_context[i]) {
             /* Corresponds to avcodec_open2() */
-            avcodec_close(encoder_context->codec_context[i]);
             avcodec_free_context(&encoder_context->codec_context[i]);
         }
     }
@@ -4721,7 +4939,6 @@ avpipe_fini(
         for (int i=0; i<MAX_STREAMS; i++) {
             if (mpegts_encoder_ctx->codec_context[i]) {
                 /* Corresponds to avcodec_open2() */
-                avcodec_close(mpegts_encoder_ctx->codec_context[i]);
                 avcodec_free_context(&mpegts_encoder_ctx->codec_context[i]);
             }
         }

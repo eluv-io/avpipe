@@ -1,5 +1,7 @@
 /*
- * avpipe_format.c
+ * avpipe_format.h
+ *
+ * Container-specific helpers.
  */
 
 #include <libavcodec/avcodec.h>
@@ -80,3 +82,16 @@ void frame_rescale_time_base(
     AVFrame *frame,
     AVRational src_time_base,
     AVRational dst_time_base);
+
+int
+copy_stream_side_data(
+    AVStream *out_stream,
+    const AVStream *in_stream);
+
+int
+is_mvhevc(
+    const AVStream *stream);
+
+int
+is_dolby_atmos(
+    const AVStream *stream);
