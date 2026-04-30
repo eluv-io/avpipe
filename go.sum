@@ -32,8 +32,8 @@ github.com/eluv-io/apexlog-go v1.9.1-elv4 h1:lJE8+Y+GtUhw1BBAlFePuVZg78jCKgeFsdq
 github.com/eluv-io/apexlog-go v1.9.1-elv4/go.mod h1:pZhIuRbWTsOm5WEOxke9B2dczjQuaEGeJXEYd5lCxkk=
 github.com/eluv-io/cbor/v2 v2.8.1-0.20250506081522-e7b11bfa1dad h1:30fHO0KQJrcDV0uDZ5nWUFwen7FZcBIa13x6S5MsWi4=
 github.com/eluv-io/cbor/v2 v2.8.1-0.20250506081522-e7b11bfa1dad/go.mod h1:koW2XJwOj9cAvE4+oLHCQtCKLfPor83Jbyyy8OwOAzE=
-github.com/eluv-io/common-go v1.1.21 h1:T7rIFsGqjbXXFeqLGAdwgZkVWnIL9h3qezBbmnz4XXk=
-github.com/eluv-io/common-go v1.1.21/go.mod h1:qSkcJvu541QXR8VlOuYpgRUQQZGcbtb7PhEzlP0r05E=
+github.com/eluv-io/common-go v1.1.22 h1:xs5M4wuz6O9KEolymr66Rps2Cf+Ej1WqQbgsx3wQwcw=
+github.com/eluv-io/common-go v1.1.22/go.mod h1:R/JMz3mKy1E8aCM/mt6erIS2ix9x6+elarIdAP9Rlgg=
 github.com/eluv-io/errors-go v1.0.5 h1:PBWfjun72cii9aI9aL/5LN0jDI+PYJLzhhkr+ayJ1ms=
 github.com/eluv-io/errors-go v1.0.5/go.mod h1:SoBNolWeyjrvHosBsIpxlQAq5/jVvqWsw/o0XpGMtKU=
 github.com/eluv-io/gls v1.0.0-elv1 h1:fV9z/aLSs5KH8wWMkamoS/Xxl8wmXF76WMx8/N5XEr8=
