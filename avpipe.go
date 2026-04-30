@@ -10,6 +10,8 @@ Package avpipe has four main interfaces that has to be implemented by the client
 
  4. OutputHandler: is the output handler with Write/Seek/Close methods. An implementation of this
     interface is needed by ffmpeg to write encoded streams properly.
+
+TODO: Call C.free for every C.CString to not leak memory.
 */
 package avpipe
 
@@ -18,11 +20,9 @@ package avpipe
 // #cgo pkg-config: libavformat
 // #cgo pkg-config: libavutil
 // #cgo pkg-config: libswresample
-// #cgo pkg-config: libavresample
 // #cgo pkg-config: libavdevice
 // #cgo pkg-config: libswscale
 // #cgo pkg-config: libavutil
-// #cgo pkg-config: libpostproc
 // #cgo netint pkg-config: xcoder
 // #cgo pkg-config: srt
 // #cgo CFLAGS: -I${SRCDIR}/libavpipe/include
@@ -30,11 +30,20 @@ package avpipe
 // #cgo LDFLAGS: -L${SRCDIR}
 // #cgo linux LDFLAGS: -Wl,-rpath,$ORIGIN/../lib
 
-// #include <string.h>
-// #include <stdlib.h>
-// #include "avpipe_xc.h"
-// #include "avpipe.h"
-// #include "elv_log.h"
+/*
+#include <string.h>
+#include <stdlib.h>
+#include "avpipe_xc.h"
+#include "avpipe.h"
+#include "elv_log.h"
+#include <libavutil/channel_layout.h>
+
+// Helper function to safely access the union member. When cgo encounters a
+// C union, it cannot map it to a specific Go type.
+static inline uint64_t get_channel_layout_mask(const AVChannelLayout *layout) {
+    return layout->u.mask;
+}
+*/
 import "C"
 import (
 	"fmt"
@@ -90,7 +99,6 @@ type StreamInfo struct {
 	SampleRate         int               `json:"sample_rate,omitempty"`
 	Channels           int               `json:"channels,omitempty"`
 	ChannelLayout      int               `json:"channel_layout,omitempty"`
-	TicksPerFrame      int               `json:"ticks_per_frame,omitempty"`
 	BitRate            int64             `json:"bit_rate,omitempty"`
 	Has_B_Frames       bool              `json:"has_b_frame"`
 	Width              int               `json:"width,omitempty"`  // Video only
@@ -101,6 +109,13 @@ type StreamInfo struct {
 	FieldOrder         string            `json:"field_order,omitempty"`
 	Profile            int               `json:"profile,omitempty"`
 	Level              int               `json:"level,omitempty"`
+	ColorPrimaries     string            `json:"color_primaries,omitempty"`
+	ColorTransfer      string            `json:"color_transfer,omitempty"`
+	ColorSpace         string            `json:"color_space,omitempty"`
+	ColorRange         string            `json:"color_range,omitempty"`       // "tv" or "pc"
+	MasteringDisplay   string            `json:"mastering_display,omitempty"` // x265 master-display string
+	MaxCLL             string            `json:"max_cll,omitempty"`           // "<MaxCLL>,<MaxFALL>"
+	Stereo3DType       string            `json:"stereo3d_type,omitempty"`     // Description eg. "side by side"
 	SideData           []interface{}     `json:"side_data,omitempty"`
 	Tags               map[string]string `json:"tags,omitempty"`
 }
@@ -268,7 +283,22 @@ func AVPipeSeekInput(fd C.int64_t, offset C.int64_t, whence C.int) C.int64_t {
 }
 
 func (h *ioHandler) InSeeker(offset C.int64_t, whence C.int) (int64, error) {
+	// Enhanced debugging for FFmpeg 7.1 SEEK_END issue
+	if int(whence) == 2 { // io.SeekEnd
+		goavpipe.Log.Debug("InSeeker SEEK_END", "offset", offset, "whence", whence, "input_size", h.input.Size(), "about_to_call_seek", true)
+	}
+
+	// FFmpeg 8.0.1: Handle AVSEEK_SIZE - return file size directly without seeking
+	if int(whence) == C.AVSEEK_SIZE { // AVSEEK_SIZE
+		size := h.input.Size()
+		goavpipe.Log.Debug("InSeeker AVSEEK_SIZE", "offset", offset, "whence", whence, "returning_size", size)
+		return size, nil
+	}
+
 	n, err := h.input.Seek(int64(offset), int(whence))
+	if int(whence) == 2 { // io.SeekEnd
+		goavpipe.Log.Debug("InSeeker SEEK_END result", "offset", offset, "whence", whence, "returned_pos", n, "error", err)
+	}
 	goavpipe.Log.Debug("InSeeker()", "offset", offset, "whence", whence, "n", n)
 	return n, err
 }
@@ -848,6 +878,7 @@ func getCParams(params *goavpipe.XcParams) (*C.xcparams_t, error) {
 		seekable:                  C.int(0),
 		max_cll:                   C.CString(params.MaxCLL),
 		master_display:            C.CString(params.MasterDisplay),
+		video_layout:              C.int(params.VideoLayout),
 		bitdepth:                  C.int(params.BitDepth),
 		mux_spec:                  C.CString(params.MuxingSpec),
 		sync_audio_to_stream_id:   C.int(params.SyncAudioToStreamId),
@@ -983,9 +1014,17 @@ func ChannelLayoutName(nbChannels, channelLayout int) string {
 	return ""
 }
 
-func ChannelLayout(name string) int {
-	channelLayout := C.av_get_channel_layout(C.CString(name))
-	return int(channelLayout)
+func ChannelLayout(name string) (mask int) {
+	var channelLayout C.AVChannelLayout
+	cName := C.CString(name)
+	defer C.free(unsafe.Pointer(cName))
+
+	if rc := C.av_channel_layout_from_string(&channelLayout, cName); rc != 0 {
+		goavpipe.Log.Error("ChannelLayout()", "reason", "av_channel_layout_from_string failed", "rc", rc, "name", name)
+	} else {
+		mask = int(C.get_channel_layout_mask(&channelLayout))
+	}
+	return
 }
 
 func GetPixelFormatName(pixFmt int) string {
@@ -1053,7 +1092,6 @@ func Probe(params *goavpipe.XcParams) (*ProbeInfo, error) {
 		probeInfo.StreamInfo[i].SampleRate = int(probeArray[i].sample_rate)
 		probeInfo.StreamInfo[i].Channels = int(probeArray[i].channels)
 		probeInfo.StreamInfo[i].ChannelLayout = int(probeArray[i].channel_layout)
-		probeInfo.StreamInfo[i].TicksPerFrame = int(probeArray[i].ticks_per_frame)
 		probeInfo.StreamInfo[i].BitRate = int64(probeArray[i].bit_rate)
 		if probeArray[i].has_b_frames > 0 {
 			probeInfo.StreamInfo[i].Has_B_Frames = true
@@ -1076,6 +1114,14 @@ func Probe(params *goavpipe.XcParams) (*ProbeInfo, error) {
 		probeInfo.StreamInfo[i].FieldOrder = goavpipe.AVFieldOrderNames[goavpipe.AVFieldOrder(probeArray[i].field_order)]
 		probeInfo.StreamInfo[i].Profile = int(probeArray[i].profile)
 		probeInfo.StreamInfo[i].Level = int(probeArray[i].level)
+
+		probeInfo.StreamInfo[i].ColorPrimaries = C.GoString((*C.char)(unsafe.Pointer(&probeArray[i].color_primaries)))
+		probeInfo.StreamInfo[i].ColorTransfer = C.GoString((*C.char)(unsafe.Pointer(&probeArray[i].color_transfer)))
+		probeInfo.StreamInfo[i].ColorSpace = C.GoString((*C.char)(unsafe.Pointer(&probeArray[i].color_space)))
+		probeInfo.StreamInfo[i].ColorRange = C.GoString((*C.char)(unsafe.Pointer(&probeArray[i].color_range)))
+		probeInfo.StreamInfo[i].MasteringDisplay = C.GoString((*C.char)(unsafe.Pointer(&probeArray[i].mastering_display)))
+		probeInfo.StreamInfo[i].MaxCLL = C.GoString((*C.char)(unsafe.Pointer(&probeArray[i].max_cll)))
+		probeInfo.StreamInfo[i].Stereo3DType = C.GoString((*C.char)(unsafe.Pointer(&probeArray[i].stereo3d_type)))
 
 		rot := float64(probeArray[i].side_data.display_matrix.rotation)
 		if rot != 0.0 {

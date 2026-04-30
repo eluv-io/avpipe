@@ -206,9 +206,9 @@ type XcProfile int
 
 const (
 	XcProfileNone         XcProfile = iota
-	XcProfileH264BaseLine           = 66  // C.FF_PROFILE_H264_BASELINE
-	XcProfileH264Heigh              = 100 // C.FF_PROFILE_H264_HIGH
-	XcProfileH264Heigh10            = 110 // C.FF_PROFILE_H264_HIGH_10
+	XcProfileH264BaseLine           = 66  // C.AV_PROFILE_H264_BASELINE
+	XcProfileH264Heigh              = 100 // C.AV_PROFILE_H264_HIGH
+	XcProfileH264Heigh10            = 110 // C.AV_PROFILE_H264_HIGH_10
 )
 
 func XcTypeFromString(xcTypeStr string) XcType {
@@ -319,6 +319,7 @@ type XcParams struct {
 	ChannelLayout          int         `json:"channel_layout"`                   // Audio channel layout
 	MaxCLL                 string      `json:"max_cll,omitempty"`
 	MasterDisplay          string      `json:"master_display,omitempty"`
+	VideoLayout            int32       `json:"video_layout,omitempty"`
 	BitDepth               int32       `json:"bitdepth,omitempty"`
 	SyncAudioToStreamId    int         `json:"sync_audio_to_stream_id"`
 	ForceEqualFDuration    bool        `json:"force_equal_frame_duration,omitempty"`

@@ -29,7 +29,15 @@ const baseOutPath = "test_out"
 const debugFrameLevel = false
 const h264Codec = "libx264"
 const videoBigBuckBunnyPath = "media/bbb_1080p_30fps_60sec.mp4"
-const videoBigBuckBunny3AudioPath = "media/BBB_3x_audio_streams_music_2min_48kHz.mp4"
+const videoBigBuckBunny3AudioPath = "media/caminandes_llamigos_1080p_4audios.mp4"
+
+// HDR10 test settings
+const (
+	hdr10TestSource     = "./media/hdr10-plus-injected.mp4"
+	hdr10TestDurationTs = int64(35 * 24000) // 35s @ 1/24000 timebase = 1 full mez seg + fragment
+	hdr10MasterDisplay  = "G(8500,39850)B(6550,2300)R(35400,14600)WP(15635,16450)L(10000000,10)"
+	hdr10MaxCLL         = "1000,400"
+)
 
 type XcTestResult struct {
 	mezFile           []string
@@ -1378,7 +1386,7 @@ func TestMultiAudioXc(t *testing.T) {
 		StartTimeTs:         0,
 		DurationTs:          -1,
 		StartSegmentStr:     "1",
-		VideoSegDurationTs:  460800,
+		VideoSegDurationTs:  294912, // 24 frames * 512 ticks = 1 sec at 24fps/12288 timescale
 		AudioSegDurationTs:  1428480,
 		Ecodec:              h264Codec,
 		Dcodec:              "",
@@ -1388,7 +1396,7 @@ func TestMultiAudioXc(t *testing.T) {
 		XcType:              goavpipe.XcAll,
 		StreamId:            -1,
 		SyncAudioToStreamId: -1,
-		ForceKeyInt:         60,
+		ForceKeyInt:         48,
 		Url:                 url,
 		DebugFrameLevel:     debugFrameLevel,
 	}
@@ -1396,7 +1404,7 @@ func TestMultiAudioXc(t *testing.T) {
 	params.AudioIndex = []int32{1, 2, 3}
 
 	xcTestResult := &XcTestResult{
-		timeScale: 15360,
+		timeScale: 12288,
 		pixelFmt:  "yuv420p",
 	}
 
@@ -1407,44 +1415,72 @@ func TestMultiAudioXc(t *testing.T) {
 	xcTest(t, outputDir, params, xcTestResult, true)
 }
 
-// Timebase of BBB0_HD_8_XDCAM_120s_CCBYblendercloud.mxf is 1001/60000
+// Timebase of BBB0_HD_8_XDCAM_120s_CCBYblendercloud.mxf is 1001/60000 - in this case the mp4 muxer changes timebase to 1/60000
+// Test both with and without explicit video_time_base to verify both pre and post encoding timebase adjustment.
 func TestIrregularTsMezMaker_1001_60000(t *testing.T) {
 	url := "./media/BBB0_HD_8_XDCAM_120s_CCBYblendercloud.mxf"
 	if fileMissing(url, fn()) {
 		return
 	}
+	const expectedSegDurationTs int64 = 1801800
 
-	outputDir := path.Join(baseOutPath, fn())
-
-	params := &goavpipe.XcParams{
-		BypassTranscoding:   false,
-		Format:              "fmp4-segment",
-		StartTimeTs:         0,
-		DurationTs:          -1,
-		StartSegmentStr:     "1",
-		SegDuration:         "30.03",
-		Ecodec:              h264Codec,
-		Dcodec:              "",
-		EncHeight:           720,
-		EncWidth:            1280,
-		XcType:              goavpipe.XcVideo,
-		StreamId:            -1,
-		SyncAudioToStreamId: -1,
-		ForceKeyInt:         120,
-		Url:                 url,
-		DebugFrameLevel:     debugFrameLevel,
-	}
-	setFastEncodeParams(params, false)
-	xcTestResult := &XcTestResult{
-		timeScale: 60000,
-		pixelFmt:  "yuv420p",
+	tests := []struct {
+		name          string
+		videoTimeBase int // 0 = not specified (decoder default 1001/60000)
+	}{
+		{"no_timebase", 0},
+		{"timebase_60000", 60000},
 	}
 
-	for i := 1; i <= 4; i++ {
-		xcTestResult.mezFile = append(xcTestResult.mezFile, fmt.Sprintf("%s/vsegment-%d.mp4", outputDir, i))
-	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			outputDir := path.Join(baseOutPath, fn(), tc.name)
 
-	xcTest(t, outputDir, params, xcTestResult, true)
+			params := &goavpipe.XcParams{
+				BypassTranscoding:   false,
+				Format:              "fmp4-segment",
+				StartTimeTs:         0,
+				DurationTs:          -1,
+				StartSegmentStr:     "1",
+				SegDuration:         "30.03",
+				Ecodec:              h264Codec,
+				Dcodec:              "",
+				EncHeight:           720,
+				EncWidth:            1280,
+				XcType:              goavpipe.XcVideo,
+				StreamId:            -1,
+				SyncAudioToStreamId: -1,
+				ForceKeyInt:         120,
+				Url:                 url,
+				DebugFrameLevel:     debugFrameLevel,
+				VideoTimeBase:       tc.videoTimeBase,
+			}
+			setFastEncodeParams(params, false)
+			xcTestResult := &XcTestResult{
+				timeScale: 60000,
+				pixelFmt:  "yuv420p",
+			}
+
+			for i := 1; i <= 4; i++ {
+				xcTestResult.mezFile = append(xcTestResult.mezFile, fmt.Sprintf("%s/vsegment-%d.mp4", outputDir, i))
+			}
+
+			xcTest(t, outputDir, params, xcTestResult, true)
+
+			// Verify the first 3 segments are exactly 1801800 ts (30.03s) long
+			for i := 0; i < 3; i++ {
+				xcparams := &goavpipe.XcParams{
+					Url:      xcTestResult.mezFile[i],
+					Seekable: true,
+				}
+				probeInfo, err := avpipe.Probe(xcparams)
+				failNowOnError(t, err)
+				si := probeInfo.StreamInfo[0]
+				assert.Equal(t, expectedSegDurationTs, si.DurationTs,
+					"segment %d duration_ts mismatch (timebase=%s)", i+1, si.TimeBase.RatString())
+			}
+		})
+	}
 }
 
 // Timebase of Rigify-2min is 1/24
@@ -1779,6 +1815,104 @@ func TestHEVC_H265ABRTranscode(t *testing.T) {
 
 }
 
+// TestHEVC_HDR10_MezAndABR creates a mez from source and ABR rungs from mez
+// Validates: pix_fmt, profile, and colr/mdcv/clli
+func TestHEVC_HDR10_MezAndABR(t *testing.T) {
+	f := fn()
+	if testing.Short() {
+		t.Skip("SKIPPING " + f + " (fast mode)")
+	}
+	if fileMissing(hdr10TestSource, f) {
+		return
+	}
+
+	mezDir := path.Join(baseOutPath, f, "Mez")
+	bypassDir := path.Join(baseOutPath, f, "ABRBypass")
+	abrDir := path.Join(baseOutPath, f, "ABR720")
+
+	// Stage 1: source → mez (no bitdepth and profile specified)
+	mezParams := &goavpipe.XcParams{
+		Url:               hdr10TestSource,
+		BypassTranscoding: false,
+		Format:            "fmp4-segment",
+		StartTimeTs:       0,
+		StartPts:          0,
+		DurationTs:        hdr10TestDurationTs,
+		StartSegmentStr:   "1",
+		SegDuration:       "30",
+		Ecodec:            "libx265",
+		Dcodec:            "hevc",
+		EncHeight:         -1, // preserve 2160
+		EncWidth:          -1, // preserve 3840
+		XcType:            goavpipe.XcVideo,
+		StreamId:          -1,
+		MasterDisplay:     hdr10MasterDisplay,
+		MaxCLL:            hdr10MaxCLL,
+		DebugFrameLevel:   debugFrameLevel,
+	}
+
+	setupOutDir(t, mezDir)
+	xcTest(t, mezDir, mezParams, nil, true)
+
+	mezExpected := expectedHDR10{
+		PixFmt:           "yuv420p10le",
+		ProfileName:      "Main 10",
+		ColorPrimaries:   "bt2020",
+		ColorTransfer:    "smpte2084",
+		ColorSpace:       "bt2020nc",
+		ColorRange:       "tv",
+		Width:            3840,
+		Height:           2160,
+		MasteringDisplay: hdr10MasterDisplay, // round-trips bit-exact through x265 → mp4 → probe
+		MaxCLL:           hdr10MaxCLL,
+	}
+	assertHDR10(t, path.Join(mezDir, "vsegment-1.mp4"), mezExpected)
+	assertHDR10(t, path.Join(mezDir, "vsegment-2.mp4"), mezExpected)
+
+	mezSeg := path.Join(mezDir, "vsegment-1.mp4")
+
+	// Stage 2a: mez → ABR bypass
+	{
+		bypassParams := *mezParams
+		bypassParams.Url = mezSeg
+		bypassParams.Format = "dash"
+		bypassParams.BypassTranscoding = true
+		bypassParams.VideoSegDurationTs = 48000
+		bypassParams.DurationTs = -1
+
+		setupOutDir(t, bypassDir)
+		goavpipe.InitUrlIOHandler(mezSeg,
+			&xc.FileInputOpener{URL: mezSeg},
+			&xc.FileOutputOpener{Dir: bypassDir})
+		boilerXc(t, &bypassParams)
+
+		assertHDR10(t, dashVideoInit(t, bypassDir), mezExpected)
+	}
+
+	// Stage 2b: mez → ABR
+	{
+		scaledExpected := mezExpected
+		scaledExpected.Width = 0 // computed from aspect ratio (16:9 → 1280)
+		scaledExpected.Height = 720
+
+		abrParams := *mezParams
+		abrParams.Url = mezSeg
+		abrParams.Format = "dash"
+		abrParams.VideoSegDurationTs = 48000
+		abrParams.EncHeight = 720
+		abrParams.EncWidth = -1
+		abrParams.DurationTs = -1
+
+		setupOutDir(t, abrDir)
+		goavpipe.InitUrlIOHandler(mezSeg,
+			&xc.FileInputOpener{URL: mezSeg},
+			&xc.FileOutputOpener{Dir: abrDir})
+		boilerXc(t, &abrParams)
+
+		assertHDR10(t, dashVideoInit(t, abrDir), scaledExpected)
+	}
+}
+
 func TestAVPipeStats(t *testing.T) {
 	url := "./media/Rigify-2min.mp4"
 	if fileMissing(url, fn()) {
@@ -1871,6 +2005,8 @@ func TestABRMuxing(t *testing.T) {
 		Url:                url,
 		DebugFrameLevel:    debugFrameLevel,
 		ForceKeyInt:        48,
+		Profile:            "high",
+		Level:              31,
 	}
 	setFastEncodeParams(params, false)
 	goavpipe.InitUrlIOHandler(url, &xc.FileInputOpener{URL: url}, &xc.FileOutputOpener{Dir: videoMezDir})
@@ -2022,6 +2158,7 @@ func TestUnmarshalParams(t *testing.T) {
 	err := json.Unmarshal(bytes, &params)
 	assert.NoError(t, err)
 	assert.Equal(t, int(goavpipe.XcVideo), int(params.XcType), "XcVideo type expected")
+
 	// TODO: More checks
 }
 
@@ -2055,7 +2192,7 @@ func TestProbe(t *testing.T) {
 
 	assert.Equal(t, 27, probe.StreamInfo[0].CodecID)
 	assert.Equal(t, "h264", probe.StreamInfo[0].CodecName)
-	assert.Equal(t, 100, probe.StreamInfo[0].Profile) // 77 = FF_PROFILE_H264_MAIN
+	assert.Equal(t, 100, probe.StreamInfo[0].Profile) // 77 = AV_PROFILE_H264_MAIN
 	assert.Equal(t, 41, probe.StreamInfo[0].Level)
 	assert.Equal(t, int64(1800), probe.StreamInfo[0].NBFrames)
 	assert.Equal(t, int64(1980), probe.StreamInfo[0].StartTime)
@@ -2066,7 +2203,7 @@ func TestProbe(t *testing.T) {
 
 	assert.Equal(t, 86017, probe.StreamInfo[1].CodecID)
 	assert.Equal(t, "mp3float", probe.StreamInfo[1].CodecName)
-	assert.Equal(t, -99, probe.StreamInfo[1].Profile) // 1 = FF_PROFILE_AAC_LOW
+	assert.Equal(t, -99, probe.StreamInfo[1].Profile) // 1 = AV_PROFILE_AAC_LOW
 	assert.Equal(t, -99, probe.StreamInfo[1].Level)
 	assert.Equal(t, int64(2500), probe.StreamInfo[1].NBFrames)
 	assert.Equal(t, int64(0), probe.StreamInfo[1].StartTime)
@@ -2077,7 +2214,7 @@ func TestProbe(t *testing.T) {
 
 	assert.Equal(t, 86019, probe.StreamInfo[2].CodecID)
 	assert.Equal(t, "ac3", probe.StreamInfo[2].CodecName)
-	assert.Equal(t, -99, probe.StreamInfo[2].Profile) // 1 = FF_PROFILE_AAC_LOW
+	assert.Equal(t, -99, probe.StreamInfo[2].Profile) // 1 = AV_PROFILE_AAC_LOW
 	assert.Equal(t, -99, probe.StreamInfo[2].Level)
 	assert.Equal(t, int64(1875), probe.StreamInfo[2].NBFrames)
 	assert.Equal(t, int64(0), probe.StreamInfo[2].StartTime)
@@ -2112,7 +2249,7 @@ func TestProbeWithData(t *testing.T) {
 
 	assert.Equal(t, 147, probe.StreamInfo[0].CodecID)
 	assert.Equal(t, "prores", probe.StreamInfo[0].CodecName)
-	assert.Equal(t, 3, probe.StreamInfo[0].Profile) // 3 = FF_PROFILE_MPEG4_MAIN
+	assert.Equal(t, 3, probe.StreamInfo[0].Profile) // 3 = AV_PROFILE_MPEG4_MAIN
 	assert.Equal(t, -99, probe.StreamInfo[0].Level)
 	assert.Equal(t, int64(1439), probe.StreamInfo[0].NBFrames)
 	assert.Equal(t, int64(0), probe.StreamInfo[0].StartTime)
@@ -2629,4 +2766,80 @@ func nvidiaExist() bool {
 
 	log.Info("NVIDIA doesn't exist")
 	return false
+}
+
+// expectedHDR10 stores expected HDR10 specific info
+type expectedHDR10 struct {
+	PixFmt           string // e.g. "yuv420p10le"
+	ProfileName      string // e.g. "Main 10"
+	ColorPrimaries   string // e.g. "bt2020"
+	ColorTransfer    string // e.g. "smpte2084"
+	ColorSpace       string // e.g. "bt2020nc"
+	ColorRange       string // e.g. "tv"
+	Width, Height    int    // 0 = don't check
+	MasteringDisplay string // x265 format "G(...)B(...)R(...)WP(...)L(...)"; "*" = require non-empty
+	MaxCLL           string // "<MaxCLL>,<MaxFALL>"; "*" = require non-empty.
+}
+
+// assertHDR10 probes and asserts the mp4 video stream matches the expected.
+func assertHDR10(t *testing.T, mp4 string, want expectedHDR10) {
+	t.Helper()
+	probe, err := avpipe.Probe(&goavpipe.XcParams{Url: mp4, Seekable: true})
+	failNowOnError(t, err)
+
+	var si *avpipe.StreamInfo
+	for i := range probe.StreamInfo {
+		if probe.StreamInfo[i].CodecType == "video" {
+			si = &probe.StreamInfo[i]
+			break
+		}
+	}
+	if !assert.NotNil(t, si, "no video stream in %s", mp4) {
+		return
+	}
+
+	if want.PixFmt != "" {
+		assert.Equal(t, want.PixFmt, avpipe.GetPixelFormatName(si.PixFmt), "pix_fmt in %s", mp4)
+	}
+	if want.ProfileName != "" {
+		assert.Equal(t, want.ProfileName, avpipe.GetProfileName(si.CodecID, si.Profile), "profile in %s", mp4)
+	}
+	if want.ColorPrimaries != "" {
+		assert.Equal(t, want.ColorPrimaries, si.ColorPrimaries, "color_primaries in %s", mp4)
+	}
+	if want.ColorTransfer != "" {
+		assert.Equal(t, want.ColorTransfer, si.ColorTransfer, "color_transfer in %s", mp4)
+	}
+	if want.ColorSpace != "" {
+		assert.Equal(t, want.ColorSpace, si.ColorSpace, "color_space in %s", mp4)
+	}
+	if want.ColorRange != "" {
+		assert.Equal(t, want.ColorRange, si.ColorRange, "color_range in %s", mp4)
+	}
+	if want.Width > 0 {
+		assert.Equal(t, want.Width, si.Width, "width in %s", mp4)
+	}
+	if want.Height > 0 {
+		assert.Equal(t, want.Height, si.Height, "height in %s", mp4)
+	}
+	if want.MasteringDisplay == "*" {
+		assert.NotEmpty(t, si.MasteringDisplay, "Mastering display side data missing in %s", mp4)
+	} else if want.MasteringDisplay != "" {
+		assert.Equal(t, want.MasteringDisplay, si.MasteringDisplay, "mastering_display in %s", mp4)
+	}
+	if want.MaxCLL == "*" {
+		assert.NotEmpty(t, si.MaxCLL, "Content light level side data missing in %s", mp4)
+	} else if want.MaxCLL != "" {
+		assert.Equal(t, want.MaxCLL, si.MaxCLL, "max_cll in %s", mp4)
+	}
+}
+
+// dashVideoInit returns the path to the video init segment in the output directory
+func dashVideoInit(t *testing.T, dashDir string) string {
+	t.Helper()
+	init := path.Join(dashDir, "vinit-stream0.m4s")
+	if !fileExist(init) {
+		t.Fatalf("DASH init segment missing: %s", init)
+	}
+	return init
 }

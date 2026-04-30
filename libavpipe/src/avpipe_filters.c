@@ -4,6 +4,7 @@
 
 #include "avpipe_xc.h"
 #include "elv_log.h"
+#include "libavutil/pixdesc.h"
 
 /*
  * @brief   Used to initialize video filter.
@@ -25,13 +26,16 @@ init_video_filters(
     AVFilterInOut *outputs = avfilter_inout_alloc();
     AVFilterInOut *inputs  = avfilter_inout_alloc();
     AVRational time_base;
-    enum AVPixelFormat pix_fmts[] = { AV_PIX_FMT_YUV422P /* AV_PIX_FMT_GRAY8 */, AV_PIX_FMT_NONE };
-
     /* If there is no video stream, then return */
     if (decoder_context->video_stream_index < 0)
         return 0;
 
-    time_base = decoder_context->format_context->streams[decoder_context->video_stream_index]->time_base;
+    /*
+     * Use the encoder's timebase for the video filter so that filtered frames are in the
+     * encoder's timebase. Video frames are rescaled from decoder to encoder timebase before
+     * being sent to the filter (same approach as audio).
+     */
+    time_base = encoder_context->codec_context[decoder_context->video_stream_index]->time_base;
 
     decoder_context->video_filter_graph = avfilter_graph_alloc();
     if (!outputs || !inputs || !decoder_context->video_filter_graph) {
@@ -39,16 +43,20 @@ init_video_filters(
         goto end;
     }
 
-    /* buffer video source: the decoded frames from the decoder will be inserted here. */
+    /* buffer video source: the decoded frames from the decoder will be inserted here.
+     * In ffmpeg 8.x, colorspace and range must be specified to avoid
+     * "Changing video frame properties on the fly" warnings.
+     */
     snprintf(args, sizeof(args),
-        "video_size=%dx%d:pix_fmt=%d:time_base=%d/%d:pixel_aspect=%d/%d",
+        "video_size=%dx%d:pix_fmt=%d:time_base=%d/%d:pixel_aspect=%d/%d:colorspace=%d:range=%d",
         dec_codec_ctx->width, dec_codec_ctx->height, dec_codec_ctx->pix_fmt,
         time_base.num, time_base.den,
-        dec_codec_ctx->sample_aspect_ratio.num, dec_codec_ctx->sample_aspect_ratio.den);
+        dec_codec_ctx->sample_aspect_ratio.num, dec_codec_ctx->sample_aspect_ratio.den,
+        dec_codec_ctx->colorspace, dec_codec_ctx->color_range);
     elv_dbg("init_video_filters, video srcfilter args=%s", args);
 
     /* video_stream_index should be the same in both encoder and decoder context */
-    pix_fmts[0] = encoder_context->codec_context[decoder_context->video_stream_index]->pix_fmt;
+    enum AVPixelFormat out_pix_fmt = encoder_context->codec_context[decoder_context->video_stream_index]->pix_fmt;
 
     ret = avfilter_graph_create_filter(&decoder_context->video_buffersrc_ctx, buffersrc, "in",
                                        args, NULL, decoder_context->video_filter_graph);
@@ -57,18 +65,28 @@ init_video_filters(
         goto end;
     }
 
-    /* buffer video sink: to terminate the filter chain. */
-    ret = avfilter_graph_create_filter(&decoder_context->video_buffersink_ctx, buffersink, "out",
-                                       NULL, NULL, decoder_context->video_filter_graph);
-    if (ret < 0) {
-        elv_err("init_video_filters, cannot create buffer sink\n");
+    /* buffer video sink: to terminate the filter chain.
+     * ffmpeg 8.x: pixel_formats is an array option that cannot be set via the args string
+     * in avfilter_graph_create_filter. Must use alloc + av_opt_set + init pattern.
+     */
+    decoder_context->video_buffersink_ctx = avfilter_graph_alloc_filter(
+        decoder_context->video_filter_graph, buffersink, "out");
+    if (!decoder_context->video_buffersink_ctx) {
+        elv_err("init_video_filters, cannot allocate buffer sink\n");
+        ret = AVERROR(ENOMEM);
         goto end;
     }
 
-    ret = av_opt_set_int_list(decoder_context->video_buffersink_ctx, "pix_fmts", pix_fmts,
-                              AV_PIX_FMT_NONE, AV_OPT_SEARCH_CHILDREN);
+    ret = av_opt_set(decoder_context->video_buffersink_ctx, "pixel_formats",
+                     av_get_pix_fmt_name(out_pix_fmt), AV_OPT_SEARCH_CHILDREN);
     if (ret < 0) {
-        elv_err("init_video_filters, cannot set output pixel format\n");
+        elv_err("init_video_filters, cannot set output pixel format err=%d\n", ret);
+        goto end;
+    }
+
+    ret = avfilter_init_dict(decoder_context->video_buffersink_ctx, NULL);
+    if (ret < 0) {
+        elv_err("init_video_filters, cannot initialize buffer sink err=%d\n", ret);
         goto end;
     }
 
@@ -99,19 +117,25 @@ init_video_filters(
     inputs->pad_idx    = 0;
     inputs->next       = NULL;
 
-    if ((ret = avfilter_graph_parse_ptr(decoder_context->video_filter_graph, filters_descr,
-                                    &inputs, &outputs, NULL)) < 0)
+    if ((ret = avfilter_graph_parse_ptr(decoder_context->video_filter_graph,
+        filters_descr, &inputs, &outputs, NULL)) < 0) {
+        elv_err("init_video_filters, avfilter_graph_parse_ptr failed, filters_descr=%s", filters_descr);
         goto end;
+    }
 
-    if ((ret = avfilter_graph_config(decoder_context->video_filter_graph, NULL)) < 0)
+    if ((ret = avfilter_graph_config(decoder_context->video_filter_graph, NULL)) < 0) {
+        elv_err("init_video_filters, avfilter_graph_config failed");
         goto end;
+    }
 
 end:
     avfilter_inout_free(&inputs);
     avfilter_inout_free(&outputs);
 
-    if (ret < 0)
+    if (ret < 0) {
+        elv_err("init_video_filters failed: %s", av_err2str(ret));
         return eav_filter_init;
+    }
 
     return ret;
 }
@@ -132,26 +156,29 @@ get_audio_avfilter_args(
 {
     AVCodecContext *dec_codec_ctx = decoder_context->codec_context[index];
 
-    if (!dec_codec_ctx->channel_layout)
-        dec_codec_ctx->channel_layout = av_get_default_channel_layout(dec_codec_ctx->channels);
+    if (dec_codec_ctx->ch_layout.order == AV_CHANNEL_ORDER_NATIVE &&
+        dec_codec_ctx->ch_layout.u.mask == 0) {
+        av_channel_layout_default(&dec_codec_ctx->ch_layout, dec_codec_ctx->ch_layout.nb_channels);
+    }
 
     // Use the timebase of the audio encoder
     AVRational time_base = enc_codec_ctx->time_base;
 
-    if (dec_codec_ctx->channel_layout == 0)
+    if (dec_codec_ctx->ch_layout.order != AV_CHANNEL_ORDER_NATIVE ||
+        dec_codec_ctx->ch_layout.u.mask == 0)
         snprintf(args, len,
             "time_base=%d/%d:sample_rate=%d:sample_fmt=%s:channels=%d",
             time_base.num, time_base.den,
             dec_codec_ctx->sample_rate,
             av_get_sample_fmt_name(dec_codec_ctx->sample_fmt),
-            dec_codec_ctx->channels);
+            dec_codec_ctx->ch_layout.nb_channels);
     else
         snprintf(args, len,
             "time_base=%d/%d:sample_rate=%d:sample_fmt=%s:channel_layout=0x%"PRIx64,
             time_base.num, time_base.den,
             dec_codec_ctx->sample_rate,
             av_get_sample_fmt_name(dec_codec_ctx->sample_fmt),
-            dec_codec_ctx->channel_layout);
+            dec_codec_ctx->ch_layout.u.mask);
 }
 
 /*
@@ -210,40 +237,24 @@ init_audio_filters(
             goto end;
         }
 
-        ret = avfilter_graph_create_filter(&buffersink_ctx, buffersink, "out", NULL, NULL, filter_graph);
+        /* ffmpeg 8.x: buffersink options must be set at init time via args */
+        {
+            char sink_args[256];
+            char ch_buf[64];
+            av_channel_layout_describe(&enc_codec_ctx->ch_layout, ch_buf, sizeof(ch_buf));
+            snprintf(sink_args, sizeof(sink_args), "sample_formats=%s:samplerates=%d:channel_layouts=%s",
+                av_get_sample_fmt_name(enc_codec_ctx->sample_fmt), enc_codec_ctx->sample_rate, ch_buf);
+            ret = avfilter_graph_create_filter(&buffersink_ctx, buffersink, "out", sink_args, NULL, filter_graph);
+        }
         if (ret < 0) {
             elv_err("init_audio_filters, cannot create audio buffer sink");
-            goto end;
-        }
-
-        ret = av_opt_set_bin(buffersink_ctx, "sample_fmts",
-            (uint8_t*)&enc_codec_ctx->sample_fmt, sizeof(enc_codec_ctx->sample_fmt),
-            AV_OPT_SEARCH_CHILDREN);
-        if (ret < 0) {
-            elv_err("init_audio_filters, cannot set output sample format");
-            goto end;
-        }
-
-        ret = av_opt_set_bin(buffersink_ctx, "sample_rates",
-            (uint8_t*)&enc_codec_ctx->sample_rate, sizeof(enc_codec_ctx->sample_rate),
-            AV_OPT_SEARCH_CHILDREN);
-        if (ret < 0) {
-            elv_err("init_audio_filters, cannot set output sample rate");
-            goto end;
-        }
-
-        ret = av_opt_set_bin(buffersink_ctx, "channel_layouts",
-            (uint8_t*)&enc_codec_ctx->channel_layout,
-            sizeof(enc_codec_ctx->channel_layout), AV_OPT_SEARCH_CHILDREN);
-        if (ret < 0) {
-            elv_err("init_audio_filters, cannot set output channel layout");
             goto end;
         }
 
         snprintf(args, sizeof(args),
              "sample_fmts=%s:sample_rates=%d:channel_layouts=0x%"PRIx64,
              av_get_sample_fmt_name(enc_codec_ctx->sample_fmt), enc_codec_ctx->sample_rate,
-             (uint64_t)enc_codec_ctx->channel_layout);
+             (uint64_t)enc_codec_ctx->ch_layout.u.mask);
         elv_dbg("init_audio_filters, audio format_filter args=%s", args);
 
         ret = avfilter_graph_create_filter(&format_ctx, aformat, "format_out_0_0", args, NULL, filter_graph);
@@ -275,11 +286,12 @@ init_audio_filters(
     }
 
 end:
-    if (ret < 0)
+    if (ret < 0) {
+        elv_err("init_audio_filters failed: %s", av_err2str(ret));
         return eav_filter_init;
+    }
 
     return ret;
-
 }
 
 /*
@@ -311,6 +323,7 @@ init_audio_pan_filters(
     AVCodecContext *dec_codec_ctx = decoder_context->codec_context[decoder_context->audio_stream_index[0]];
     AVCodecContext *enc_codec_ctx = encoder_context->codec_context[encoder_context->audio_stream_index[0]];
     char args[512];
+    char buf[64];
     int ret = 0;
     AVFilterContext **abuffersrc_ctx = NULL;
     AVFilterContext *buffersink_ctx = NULL;
@@ -345,7 +358,14 @@ init_audio_pan_filters(
         goto end;
     }
 
-    ret = avfilter_graph_create_filter(&buffersink_ctx, buffersink, "out", NULL, NULL, filter_graph);
+    /* ffmpeg 8.x: buffersink options must be set at init time via args */
+    {
+        char sink_args[256];
+        av_channel_layout_describe(&enc_codec_ctx->ch_layout, buf, sizeof(buf));
+        snprintf(sink_args, sizeof(sink_args), "sample_formats=%s:samplerates=%d:channel_layouts=%s",
+            av_get_sample_fmt_name(enc_codec_ctx->sample_fmt), enc_codec_ctx->sample_rate, buf);
+        ret = avfilter_graph_create_filter(&buffersink_ctx, buffersink, "out", sink_args, NULL, filter_graph);
+    }
     if (ret < 0) {
         elv_err("init_audio_pan_filters, cannot create audio buffer sink");
         goto end;
@@ -354,30 +374,6 @@ init_audio_pan_filters(
     ret = avfilter_graph_create_filter(&format_ctx, bufferformat, "format", "sample_fmts=fltp:sample_rates=96000|88200|64000|48000|44100|32000|24000|22050|16000|12000|11025|8000|7350:", NULL, filter_graph);
     if (ret < 0) {
         elv_err("init_audio_pan_filters, cannot create audio buffer format");
-        goto end;
-    }
-
-    ret = av_opt_set_bin(buffersink_ctx, "sample_fmts",
-        (uint8_t*)&enc_codec_ctx->sample_fmt, sizeof(enc_codec_ctx->sample_fmt),
-        AV_OPT_SEARCH_CHILDREN);
-    if (ret < 0) {
-        elv_err("init_audio_pan_filters, cannot set output sample format");
-        goto end;
-    }
-
-    ret = av_opt_set_bin(buffersink_ctx, "sample_rates",
-        (uint8_t*)&enc_codec_ctx->sample_rate, sizeof(enc_codec_ctx->sample_rate),
-        AV_OPT_SEARCH_CHILDREN);
-    if (ret < 0) {
-        elv_err("init_audio_pan_filters, cannot set output sample rate");
-        goto end;
-    }
-
-    ret = av_opt_set_bin(buffersink_ctx, "channel_layouts",
-        (uint8_t*)&enc_codec_ctx->channel_layout,
-        sizeof(enc_codec_ctx->channel_layout), AV_OPT_SEARCH_CHILDREN);
-    if (ret < 0) {
-        elv_err("init_audio_pan_filters, cannot set output channel layout");
         goto end;
     }
 
@@ -471,32 +467,17 @@ init_audio_merge_pan_filters(
         goto end;
     }
 
-    ret = avfilter_graph_create_filter(&buffersink_ctx, buffersink, "out", NULL, NULL, filter_graph);
+    /* ffmpeg 8.x: buffersink options must be passed at init time */
+    {
+        char sink_args[256];
+        char ch_buf[64];
+        av_channel_layout_describe(&enc_codec_ctx->ch_layout, ch_buf, sizeof(ch_buf));
+        snprintf(sink_args, sizeof(sink_args), "sample_formats=%s:samplerates=%d:channel_layouts=%s",
+            av_get_sample_fmt_name(enc_codec_ctx->sample_fmt), enc_codec_ctx->sample_rate, ch_buf);
+        ret = avfilter_graph_create_filter(&buffersink_ctx, buffersink, "out", sink_args, NULL, filter_graph);
+    }
     if (ret < 0) {
         elv_err("init_audio_merge_pan_filters, cannot create audio buffer sink");
-        goto end;
-    }
-    ret = av_opt_set_bin(buffersink_ctx, "sample_fmts",
-        (uint8_t*)&enc_codec_ctx->sample_fmt, sizeof(enc_codec_ctx->sample_fmt),
-        AV_OPT_SEARCH_CHILDREN);
-    if (ret < 0) {
-        elv_err("init_audio_merge_pan_filters, cannot set output sample format");
-        goto end;
-    }
-
-    ret = av_opt_set_bin(buffersink_ctx, "sample_rates",
-        (uint8_t*)&enc_codec_ctx->sample_rate, sizeof(enc_codec_ctx->sample_rate),
-        AV_OPT_SEARCH_CHILDREN);
-    if (ret < 0) {
-        elv_err("init_audio_merge_pan_filters, cannot set output sample rate");
-        goto end;
-    }
-
-    ret = av_opt_set_bin(buffersink_ctx, "channel_layouts",
-        (uint8_t*)&enc_codec_ctx->channel_layout,
-        sizeof(enc_codec_ctx->channel_layout), AV_OPT_SEARCH_CHILDREN);
-    if (ret < 0) {
-        elv_err("init_audio_merge_pan_filters, cannot set output channel layout");
         goto end;
     }
 
@@ -633,40 +614,24 @@ init_audio_join_filters(
 
     }
 
-    ret = avfilter_graph_create_filter(&buffersink_ctx, buffersink, "out", NULL, NULL, decoder_context->audio_filter_graph[0]);
+    /* ffmpeg 8.x: buffersink options must be passed at init time */
+    {
+        char sink_args[256];
+        char ch_buf[64];
+        av_channel_layout_describe(&enc_codec_ctx->ch_layout, ch_buf, sizeof(ch_buf));
+        snprintf(sink_args, sizeof(sink_args), "sample_formats=%s:samplerates=%d:channel_layouts=%s",
+            av_get_sample_fmt_name(enc_codec_ctx->sample_fmt), enc_codec_ctx->sample_rate, ch_buf);
+        ret = avfilter_graph_create_filter(&buffersink_ctx, buffersink, "out", sink_args, NULL, decoder_context->audio_filter_graph[0]);
+    }
     if (ret < 0) {
         elv_err("init_audio_join_filters, cannot create audio buffer sink");
-        goto end;
-    }
-
-    ret = av_opt_set_bin(buffersink_ctx, "sample_fmts",
-        (uint8_t*)&enc_codec_ctx->sample_fmt, sizeof(enc_codec_ctx->sample_fmt),
-        AV_OPT_SEARCH_CHILDREN);
-    if (ret < 0) {
-        elv_err("init_audio_join_filters, cannot set output sample format");
-        goto end;
-    }
-
-    ret = av_opt_set_bin(buffersink_ctx, "sample_rates",
-        (uint8_t*)&enc_codec_ctx->sample_rate, sizeof(enc_codec_ctx->sample_rate),
-        AV_OPT_SEARCH_CHILDREN);
-    if (ret < 0) {
-        elv_err("init_audio_join_filters, cannot set output sample rate");
-        goto end;
-    }
-
-    ret = av_opt_set_bin(buffersink_ctx, "channel_layouts",
-        (uint8_t*)&enc_codec_ctx->channel_layout,
-        sizeof(enc_codec_ctx->channel_layout), AV_OPT_SEARCH_CHILDREN);
-    if (ret < 0) {
-        elv_err("init_audio_join_filters, cannot set output channel layout");
         goto end;
     }
 
     snprintf(format_args, sizeof(format_args),
              "sample_fmts=%s:sample_rates=%d:channel_layouts=0x%"PRIx64,
              av_get_sample_fmt_name(enc_codec_ctx->sample_fmt), enc_codec_ctx->sample_rate,
-             (uint64_t)enc_codec_ctx->channel_layout);
+             (uint64_t)enc_codec_ctx->ch_layout.u.mask);
     elv_dbg("init_audio_join_filters, audio format_filter args=%s", format_args);
 
     ret = avfilter_graph_create_filter(&format_ctx, aformat, "format_out_0_0", format_args, NULL, decoder_context->audio_filter_graph[0]);

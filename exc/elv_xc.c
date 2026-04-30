@@ -294,7 +294,7 @@ read_channel_again:
 int
 in_write_packet(
     void *opaque,
-    uint8_t *buf,
+    const uint8_t *buf,
     int buf_size)
 {
     elv_dbg("IN WRITE");
@@ -531,7 +531,7 @@ out_read_packet(
 int
 out_write_packet(
     void *opaque,
-    uint8_t *buf,
+    const uint8_t *buf,
     int buf_size)
 {
     ioctx_t *outctx = (ioctx_t *)opaque;
@@ -814,7 +814,6 @@ do_probe(
                 "\tsample_rate: %d\n"
                 "\tchannels: %d\n"
                 "\tchannel_layout: %s\n"
-                "\tticks_per_frame: %d\n"
                 "\tbit_rate: %"PRId64"\n"
                 "\twidth: %d\n"
                 "\theight: %d\n"
@@ -841,7 +840,6 @@ do_probe(
                 probe->stream_info[i].sample_rate,
                 probe->stream_info[i].channels,
                 channel_name != NULL ? channel_name : "-",
-                probe->stream_info[i].ticks_per_frame,
                 probe->stream_info[i].bit_rate,
                 probe->stream_info[i].width,
                 probe->stream_info[i].height,
@@ -1024,8 +1022,8 @@ usage(
         "Invalid parameter: %s\n\n"
         "Usage: %s <params>\n"
         "\t-audio-bitrate :         (optional) Default: 128000\n"
-        "\t-audio-decoder :         (optional) Audio decoder name. For audio default is \"aac\", but for ts files should be set to \"ac3\"\n"
-        "\t-audio-encoder :         (optional) Audio encoder name. Default is \"aac\", can be \"ac3\", \"mp2\" or \"mp3\"\n"
+        "\t-audio-decoder :         (optional) Audio decoder name. For audio default is \"aac\", but for ts files should be set to \"ac3\" or \"eac3\"\n"
+        "\t-audio-encoder :         (optional) Audio encoder name. Default is \"aac\", can be \"ac3\", \"eac3\", \"mp2\" or \"mp3\"\n"
         "\t-audio-index :           (optional) Default: the indexes of audio stream (comma separated)\n"
         "\t-audio-seg-duration-ts : (mandatory If format is not \"segment\" and transcoding audio) audio segment duration time base (positive integer).\n"
         "\t-bitdepth :              (optional) Bitdepth of color space. Default is 8, can be 8, 10, or 12.\n"
@@ -1138,6 +1136,7 @@ main(
     url_parser_t url_parser;
     u_int64_t log_size = 100;
     int rc = 0;
+    AVChannelLayout channel_layout;
 
     /* Parameters */
     xcparams_t p = {
@@ -1264,10 +1263,13 @@ main(
                 if (sscanf(argv[i+1], "%d", &p.connection_timeout) != 1) {
                     usage(argv[0], argv[i], EXIT_FAILURE);
                 }
-            } else if (!strcmp(argv[i], "-channel-layout")) {
-                p.channel_layout = av_get_channel_layout(argv[i+1]);
-                if (p.channel_layout == 0)
+            } else if (!strcmp(argv[i], "-channel-layout")) {              
+                rc = av_channel_layout_from_string(&channel_layout, argv[i+1]);
+                if (rc < 0) {
                     usage(argv[0], argv[i], EXIT_FAILURE);
+                } else {
+                    p.channel_layout = channel_layout.u.mask;
+                }
             } else if (strcmp(argv[i], "-crypt-iv") == 0) {
                 p.crypt_iv = strdup(argv[i+1]);
             } else if (strcmp(argv[i], "-crypt-key") == 0) {
@@ -1540,6 +1542,15 @@ main(
                 }
                 if (p.video_time_base <= 0)
                     usage(argv[0], argv[i], EXIT_FAILURE);
+            } else if (!strcmp(argv[i], "-video-layout")) {
+                /* Accept both label and numeric CICP */
+                if (!strcmp(argv[i+1], "sbs") || !strcmp(argv[i+1], "3")) {
+                    p.video_layout = video_layout_sbs;
+                } else if (!strcmp(argv[i+1], "mono") || !strcmp(argv[i+1], "0")) {
+                    p.video_layout = video_layout_mono;
+                } else {
+                    usage(argv[0], argv[i], EXIT_FAILURE);
+                }
             } else {
                 usage(argv[0], argv[i], EXIT_FAILURE);
             }

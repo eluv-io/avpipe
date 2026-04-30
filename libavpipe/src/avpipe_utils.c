@@ -39,16 +39,15 @@ dump_frame(
         return;
 
     elv_dbg("%s FRAME %s, stream_index=%d, [%d] pts=%"PRId64" pkt_dts=%"PRId64" pkt_duration=%"PRId64" be_time_stamp=%"PRId64" key=%d pict_type=%d "
-        "pkt_size=%d nb_samples=%d "
+        "nb_samples=%d "
         "width=%d height=%d linesize=%d "
-        "format=%d coded_pic_num=%d flags=%x channels=%d"
+        "format=%d flags=%x channels=%d"
         "\n", is_audio ? "AUDIO" : "VIDEO", msg, stream_index, num,
-        frame->pts, frame->pkt_dts, frame->pkt_duration, frame->best_effort_timestamp,
-        frame->key_frame, frame->pict_type,
-        frame->pkt_size, frame->nb_samples,
+        frame->pts, frame->pkt_dts, frame->duration, frame->best_effort_timestamp,
+        !!(frame->flags & AV_FRAME_FLAG_KEY), frame->pict_type,
+        frame->nb_samples,
         frame->width, frame->height, frame->linesize[0],
-        frame->format, frame->coded_picture_number,
-        frame->flags, frame->channels
+        frame->format, frame->flags, frame->ch_layout.nb_channels
     );
 }
 
@@ -108,7 +107,8 @@ dump_decoder(
         if (!codec_context)
             continue;
 
-        const char *channel_name = avpipe_channel_name(codec_context->channels, codec_context->channel_layout);
+        const char *channel_name = avpipe_channel_name(
+            codec_context->ch_layout.nb_channels, codec_context->ch_layout.u.mask);
 
         char *ctx_str;
         av_opt_serialize(codec_context, 0, 0, &ctx_str, '=', ':');
@@ -128,7 +128,7 @@ dump_decoder(
             codec_context ? codec_context->sample_aspect_ratio.num : 0, codec_context ? codec_context->sample_aspect_ratio.den : 0,
             codec_context->bit_rate, codec_context->width, codec_context->height,
             av_get_pix_fmt_name(codec_context->pix_fmt) != NULL ? av_get_pix_fmt_name(codec_context->pix_fmt) : "-",
-            codec_context->channels, channel_name && channel_name[0] != '\0' ? channel_name : "-"
+            codec_context->ch_layout.nb_channels, channel_name && channel_name[0] != '\0' ? channel_name : "-"
         );
     }
 
@@ -150,15 +150,13 @@ dump_encoder(
     for (int i = 0; i < format_context->nb_streams; i++) {
         AVStream *s = format_context->streams[i];
         AVCodecParameters *params = s->codecpar;
-        AVRational codec_time_base = av_stream_get_codec_timebase(s);
         elv_dbg("ENCODER[%d] stream_index=%d url=%s profile=%d level=%d id=%d codec_type=%d start_time=%d duration=%d nb_frames=%d "
-            "time_base=%d/%d codec_time_base=%d/%d frame_rate=%d/%d avg_frame_rate=%d/%d\n",
+            "time_base=%d/%d frame_rate=%d/%d avg_frame_rate=%d/%d\n",
             i, s->index, url,
             params->profile, params->level, s->id,
             params->codec_type,
             (int)s->start_time, (int)s->duration, (int)s->nb_frames,
             s->time_base.num, s->time_base.den,
-            codec_time_base.num, codec_time_base.den,
             s->r_frame_rate.num, s->r_frame_rate.den,
             s->avg_frame_rate.num, s->avg_frame_rate.den
         );
@@ -174,14 +172,14 @@ dump_codec_context(
         return;
 
     elv_dbg("CODEC CONTEXT codec type=%d id=%d "
-        "time_base=%d/%d framerate=%d/%d tpf=%d delay=%d "
+        "time_base=%d/%d framerate=%d/%d delay=%d "
         "bit_rate=%d-%d rc=%d-%d-%d q=%d-%d-%d vbv=%f/%f/%d "
         "width=%d height=%d aspect_ratio=%d/%d coded_width=%d coded_height=%d gop=%d "
         "keyint_min=%d refs=%d "
-        "frame_size=%d frame_number=%d"
+        "frame_size=%d frame_num=%d"
         "\n",
         cc->codec_type, cc->codec_id,
-        cc->time_base.num, cc->time_base.den, cc->framerate.num, cc->framerate.den, cc->ticks_per_frame, cc->delay,
+        cc->time_base.num, cc->time_base.den, cc->framerate.num, cc->framerate.den, cc->delay,
         (int)cc->bit_rate, cc->bit_rate_tolerance,
         cc->rc_buffer_size, cc->rc_max_rate, cc->rc_min_rate,
         cc->qmin, cc->qmax, cc->max_qdiff,
@@ -189,7 +187,7 @@ dump_codec_context(
         cc->width, cc->height, cc->sample_aspect_ratio.num, cc->sample_aspect_ratio.den,
         cc->coded_width, cc->coded_height, cc->gop_size,
         cc->keyint_min, cc->refs,
-        cc->frame_size, cc->frame_number
+        cc->frame_size, cc->frame_num
     );
 }
 
@@ -214,16 +212,12 @@ dump_stream(
     if (!s)
         return;
 
-    AVRational codec_time_base = av_stream_get_codec_timebase(s);
-
     elv_dbg("STREAM idx=%d id=%d "
         "time_base=%d/%d start_time=%d duration=%d nb_frames=%d "
-        "codec_time_base=%d/%d "
         "r_frame_rate=%d/%d avg_frame_rate=%d/%d"
         "\n",
         s->index, s->id,
         s->time_base.num, s->time_base.den, (int)s->start_time, (int)s->duration, (int)s->nb_frames,
-        codec_time_base.num, codec_time_base.den,
         s->r_frame_rate.num, s->r_frame_rate.den, s->avg_frame_rate.num, s->avg_frame_rate.den
     );
 }

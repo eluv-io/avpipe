@@ -166,7 +166,7 @@ read_next_input:
 static int
 in_mux_write_packet(
     void *opaque,
-    uint8_t *buf,
+    const uint8_t *buf,
     int buf_size)
 {
     elv_dbg("IN MUX WRITE");
@@ -240,7 +240,7 @@ out_mux_read_packet(
 static int
 out_mux_write_packet(
     void *opaque,
-    uint8_t *buf,
+    const uint8_t *buf,
     int buf_size)
 {
     ioctx_t *outctx = (ioctx_t *)opaque;

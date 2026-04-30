@@ -1,5 +1,7 @@
 /*
  * avpipe_format.c
+ *
+ * Container-specific helpers.
  */
 
 #include <libavcodec/avcodec.h>
@@ -7,6 +9,8 @@
 #include <libavutil/opt.h>
 #include <libavutil/log.h>
 #include <libavutil/pixdesc.h>
+
+#include <string.h>
 
 #include "avpipe_utils.h"
 #include "avpipe_xc.h"
@@ -334,9 +338,8 @@ audio_skip_samples(
     }
 
     // Skip samples in either packed (one channel, interleaved) or planar data (multiple channels)
-    int channels = codec_ctx->channels;
     int skip_bytes = samples_to_skip * sample_size;
-    for (int ch = 0; ch < channels; ch++) {
+    for (int ch = 0; ch < codec_ctx->ch_layout.nb_channels; ch++) {
         if (frame->data[ch]) {
             frame->data[ch] += skip_bytes;
         }
@@ -359,6 +362,103 @@ void frame_rescale_time_base(
     if (frame->pkt_dts != AV_NOPTS_VALUE)
         frame->pkt_dts = av_rescale_q(frame->pkt_dts, src_time_base, dst_time_base);
 
-    if (frame->pkt_duration > 0)
-        frame->pkt_duration = av_rescale_q(frame->pkt_duration, src_time_base, dst_time_base);
+    if (frame->duration > 0)
+        frame->duration = av_rescale_q(frame->duration, src_time_base, dst_time_base);
+}
+
+/*
+ * Copy coded side data from the input stream's codecpar to the output stream's codecpar.
+ * This is needed in bypass mode to preserve metadata such as stereo 3D info for MV-HEVC.
+ *
+ * Note: avcodec_parameters_copy() copies codecpar->coded_side_data, so this function
+ * only needs to handle any additional side data entries that may not have been copied
+ * (e.g., side data added by the demuxer to the AVStream but not to codecpar).
+ *
+ * Uses the FFmpeg 8.x side data API (av_packet_side_data_new).
+ */
+int
+copy_stream_side_data(
+    AVStream *out_stream,
+    const AVStream *in_stream)
+{
+    const AVCodecParameters *in_cp = in_stream->codecpar;
+    AVCodecParameters *out_cp = out_stream->codecpar;
+
+    for (int i = 0; i < in_cp->nb_coded_side_data; i++) {
+        const AVPacketSideData *sd = &in_cp->coded_side_data[i];
+
+        /* Skip if this type already exists in the output (e.g., copied by avcodec_parameters_copy) */
+        if (av_packet_side_data_get(out_cp->coded_side_data,
+                                    out_cp->nb_coded_side_data,
+                                    sd->type))
+            continue;
+
+        AVPacketSideData *new_sd = av_packet_side_data_new(
+            &out_cp->coded_side_data,
+            &out_cp->nb_coded_side_data,
+            sd->type, sd->size, 0);
+        if (!new_sd) {
+            elv_err("Failed to allocate side data type=%d size=%zu", sd->type, sd->size);
+            return -1;
+        }
+        memcpy(new_sd->data, sd->data, sd->size);
+    }
+
+    return 0;
+}
+
+/*
+ * Detect MV-HEVC (Multiview HEVC) input stream. Two flavors exist:
+ *
+ * - Apple Spatial Video: Main 10 profile with multilayer extensions.
+ *   The MOV demuxer sets AV_DISPOSITION_MULTILAYER when it finds an lhvC box.
+ *   Container metadata includes stereo3d/spherical side data (from vexu/eyes boxes).
+ *
+ * - x265 Multiview: Uses AV_PROFILE_HEVC_MULTIVIEW_MAIN (profile 6) signaled in the VPS.
+ *   The HEVC parser does not set AV_DISPOSITION_MULTILAYER from the bitstream,
+ *   so the caller must set it on the output stream to ensure the MP4 muxer writes the lhvC atom.
+ *
+ * Returns 1 if the stream is MV-HEVC, 0 otherwise.
+ */
+int
+is_mvhevc(
+    const AVStream *stream)
+{
+    if (!stream || !stream->codecpar)
+        return 0;
+
+    if (stream->codecpar->codec_id != AV_CODEC_ID_HEVC)
+        return 0;
+
+    if (stream->disposition & AV_DISPOSITION_MULTILAYER)
+        return 1;
+
+    if (stream->codecpar->profile == AV_PROFILE_HEVC_MULTIVIEW_MAIN)
+        return 1;
+
+    return 0;
+}
+
+/*
+ * Detects Dolby Atmos audio streams.
+ * Dolby Atmos is carried as JOC (Joint Object Coding) metadata on top of E-AC-3 or TrueHD.
+ *
+ * Returns 1 if the stream is Dolby Atmos, 0 otherwise.
+ */
+int
+is_dolby_atmos(
+    const AVStream *stream)
+{
+    if (!stream || !stream->codecpar)
+        return 0;
+
+    if (stream->codecpar->codec_id == AV_CODEC_ID_EAC3 &&
+        stream->codecpar->profile == AV_PROFILE_EAC3_DDP_ATMOS)
+        return 1;
+
+    if (stream->codecpar->codec_id == AV_CODEC_ID_TRUEHD &&
+        stream->codecpar->profile == AV_PROFILE_TRUEHD_ATMOS)
+        return 1;
+
+    return 0;
 }
