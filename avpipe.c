@@ -212,7 +212,11 @@ in_read_packet(
     if (xcparams && xcparams->debug_frame_level)
         elv_dbg("IN READ read=%d pos=%"PRId64" total=%"PRId64", checksum=%u",
             r, inctx->read_pos, inctx->read_bytes, r > 0 ? checksum(buf, r) : 0);
-    return r;
+    /*
+     * AVIO read callback contract requires return >0 (bytes read), or a
+     * negative AVERROR code (0 is invalid).
+     */
+    return r != 0 ? r : AVERROR_EOF;
 }
 
 static int
