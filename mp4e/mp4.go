@@ -8,14 +8,24 @@ import (
 	"strings"
 
 	"github.com/Eyevinn/mp4ff/avc"
+	"github.com/Eyevinn/mp4ff/hevc"
 	"github.com/Eyevinn/mp4ff/mp4"
 
 	"github.com/eluv-io/errors-go"
 )
 
+type videoCodec int
+
+const (
+	videoCodecUnknown videoCodec = iota
+	videoCodecAVC
+	videoCodecHEVC
+)
+
 type Mp4Info struct {
 	Errors            []string      // problems found
 	FragmentCount     uint64        // total number of fragments
+	HDR               *HDRInfo      // optional HDR validation details
 	InitInfo          *InitInfo     // moov
 	SampleCount       uint64        // total number of samples/frames
 	SampleCountMax    uint64        // most number of samples in a segment
@@ -59,6 +69,9 @@ func (s *Mp4Info) String() string {
 		s.SampleDurationMin, s.SampleDurationMax,
 		s.SampleCountMin, s.SampleCountMax,
 	)
+	if s.HDR != nil {
+		_, _ = fmt.Fprintf(&sb, "%s\n", s.HDR.String())
+	}
 	for i, seg := range s.Segments {
 		_, _ = fmt.Fprintf(&sb, "%d: dts: %d - %d, pts %d - %d, seq %d - %d, samples: %d\n",
 			i+1, seg.DtsStart, seg.DtsEnd, seg.PtsStart, seg.PtsEnd, seg.SeqStart, seg.SeqEnd, seg.SampleCount)
@@ -134,6 +147,7 @@ func ValidateFmp4(reader io.Reader) (file *mp4.File, info *Mp4Info, err error) {
 	sampleCountPrev := uint64(0)
 	sampleCountPrevPrev := uint64(0)
 	seqPrev := uint32(0)
+	codec := detectVideoCodec(file)
 	for segIdx, seg := range file.Segments {
 		info.FragmentCount += uint64(len(seg.Fragments))
 		segInfo := SegmentInfo{
@@ -186,7 +200,8 @@ func ValidateFmp4(reader io.Reader) (file *mp4.File, info *Mp4Info, err error) {
 
 			if fragIdx == 0 {
 				segInfo.SeqStart = seq
-			} else if fragIdx == len(seg.Fragments)-1 {
+			}
+			if fragIdx == len(seg.Fragments)-1 {
 				segInfo.SeqEnd = seq
 			}
 
@@ -222,10 +237,11 @@ func ValidateFmp4(reader io.Reader) (file *mp4.File, info *Mp4Info, err error) {
 				if fragIdx == 0 && sampleIdx == 0 {
 					segInfo.DtsStart = dts
 					segInfo.PtsStart = pts
-					if err = ensureIDRFrame(sample); err != nil {
+					if err = ensureRandomAccessFrame(sample, codec); err != nil {
 						info.AddError(err.Error(), segIdx, fragIdx, &pts)
 					}
-				} else if fragIdx == len(seg.Fragments)-1 && sampleIdx == len(samples)-1 {
+				}
+				if fragIdx == len(seg.Fragments)-1 && sampleIdx == len(samples)-1 {
 					segInfo.DtsEnd = dts + dur
 					segInfo.PtsEnd = pts + dur
 				}
@@ -278,9 +294,23 @@ func absDiff(x, y uint64) uint64 {
 	return x - y
 }
 
-// ensureIDRFrame returns nil if the sample contains an IDR frame, or is not
-// a video sample. Assumes AVC encoding
-func ensureIDRFrame(sample mp4.FullSample) (err error) {
+// ensureRandomAccessFrame returns nil if the sample contains a random-access
+// picture, or if the codec cannot be identified.
+func ensureRandomAccessFrame(sample mp4.FullSample, codec videoCodec) (err error) {
+	switch codec {
+	case videoCodecAVC:
+		return ensureAVCIDRFrame(sample)
+	case videoCodecHEVC:
+		if hevc.IsRAPSample(sample.Data) {
+			return nil
+		}
+		return fmt.Errorf("HEVC random access NAL unit not found")
+	default:
+		return nil
+	}
+}
+
+func ensureAVCIDRFrame(sample mp4.FullSample) (err error) {
 	nalus, err := avc.GetNalusFromSample(sample.Data)
 	if err != nil {
 		if strings.Index(err.Error(), "Not video?") != -1 {
@@ -304,6 +334,30 @@ func ensureIDRFrame(sample mp4.FullSample) (err error) {
 		}
 	}
 	return
+}
+
+func detectVideoCodec(file *mp4.File) videoCodec {
+	moov := file.Moov
+	if file.Init != nil && file.Init.Moov != nil {
+		moov = file.Init.Moov
+	}
+	if moov == nil {
+		return videoCodecUnknown
+	}
+	for _, trak := range moov.Traks {
+		if trak == nil || trak.Mdia == nil || trak.Mdia.Hdlr == nil || trak.Mdia.Hdlr.HandlerType != "vide" ||
+			trak.Mdia.Minf == nil || trak.Mdia.Minf.Stbl == nil || trak.Mdia.Minf.Stbl.Stsd == nil {
+			continue
+		}
+		stsd := trak.Mdia.Minf.Stbl.Stsd
+		if stsd.AvcX != nil || stsd.Encv != nil && stsd.Encv.AvcC != nil {
+			return videoCodecAVC
+		}
+		if stsd.HvcX != nil || stsd.Encv != nil && stsd.Encv.HvcC != nil {
+			return videoCodecHEVC
+		}
+	}
+	return videoCodecUnknown
 }
 
 // isSampleCountSequenceBad checks for unexpected variation in sample count

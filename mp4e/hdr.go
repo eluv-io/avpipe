@@ -1,0 +1,903 @@
+package mp4e
+
+import (
+	"errors"
+	"fmt"
+	"strings"
+
+	"github.com/Eyevinn/mp4ff/hevc"
+	"github.com/Eyevinn/mp4ff/mp4"
+	"github.com/Eyevinn/mp4ff/sei"
+)
+
+const (
+	hdr10Primaries = 9
+	hdr10Transfer  = 16
+	hdr10Matrix    = 9
+	hdr10Profile   = 2
+)
+
+type HDRInfo struct {
+	TrackID uint32
+	CodecID string
+
+	HvcC HDRHvcCInfo
+	Colr HDRColrInfo
+	Clli HDRClliInfo
+	Mdcv HDRMdcvInfo
+	SEI  HDRSEIInfo
+
+	Checks []HDRCheck
+	Errors []string
+}
+
+type HDRCheck struct {
+	Name   string
+	OK     bool
+	Detail string
+}
+
+type HDRHvcCInfo struct {
+	Present                 bool
+	ProfileIDC              byte
+	LevelIDC                byte
+	BitDepthLuma            byte
+	BitDepthChroma          byte
+	NALULengthSize          byte
+	SPSPresent              bool
+	SPSProfileIDC           byte
+	SPSLevelIDC             byte
+	SPSBitDepthLuma         byte
+	SPSBitDepthChroma       byte
+	VUIPresent              bool
+	VideoSignalTypePresent  bool
+	ColourDescription       bool
+	VideoFullRangeFlag      bool
+	ColourPrimaries         byte
+	TransferCharacteristics byte
+	MatrixCoefficients      byte
+}
+
+type HDRFieldInfo struct {
+	Codec                   string `json:"codec"`
+	Level                   string `json:"level"`
+	Profile                 string `json:"profile"`
+	BitDepth                string `json:"bit_depth"`
+	ColorPrimaries          string `json:"color_primaries"`
+	TransferCharacteristics string `json:"transfer_characteristics"`
+	MatrixCoefficients      string `json:"matrix_coefficients"`
+	ColorRange              string `json:"color_range"`
+	MasteringDisplay        string `json:"mastering_display"`
+	MaxCLLFALL              string `json:"max_cll_fall"`
+	MaxLuma                 string `json:"max_luma"`
+	MinLuma                 string `json:"min_luma"`
+}
+
+type HDRReport struct {
+	ParseWarning string           `json:"parse_warning,omitempty"`
+	HDR          HDRReportSection `json:"hdr"`
+	Info         *HDRFieldInfo    `json:"info,omitempty"`
+}
+
+type HDRReportSection struct {
+	Track  *HDRTrackInfo    `json:"track,omitempty"`
+	Checks []HDRReportCheck `json:"checks"`
+}
+
+type HDRTrackInfo struct {
+	ID    uint32 `json:"id,omitempty"`
+	Codec string `json:"codec,omitempty"`
+}
+
+type HDRReportCheck struct {
+	Name   string `json:"name"`
+	OK     bool   `json:"ok"`
+	Status string `json:"status"`
+	Detail string `json:"detail"`
+}
+
+type HDRColrInfo struct {
+	Present                 bool
+	ColorType               string
+	ColorPrimaries          uint16
+	TransferCharacteristics uint16
+	MatrixCoefficients      uint16
+	FullRangeFlag           bool
+}
+
+type HDRClliInfo struct {
+	Present                 bool
+	MaxContentLightLevel    uint16
+	MaxPicAverageLightLevel uint16
+}
+
+type HDRMdcvInfo struct {
+	Present                      bool
+	DisplayPrimariesX            [3]uint16
+	DisplayPrimariesY            [3]uint16
+	WhitePointX                  uint16
+	WhitePointY                  uint16
+	MaxDisplayMasteringLuminance uint32
+	MinDisplayMasteringLuminance uint32
+}
+
+type HDRSEIInfo struct {
+	Mastering               *HDRMdcvInfo
+	ContentLightLevel       *HDRClliInfo
+	EncodingSettings        string
+	MinLuma                 string
+	MaxLuma                 string
+	MasteringSources        []string
+	ContentLightSources     []string
+	EncodingSettingsSources []string
+	SamplesScanned          int
+	NALUsScanned            int
+	ParseErrors             []string
+}
+
+func ValidateHDR(file *mp4.File) (*HDRInfo, error) {
+	info := &HDRInfo{}
+	if file == nil {
+		return info, fmt.Errorf("nil MP4 file")
+	}
+
+	moov, trak, vse, ok := findHEVCVideoSampleEntry(file)
+	if !ok {
+		info.addCheck("hvcC/SPS", false, "no HEVC video sample entry found")
+		info.addCheck("colr", false, "no HEVC video sample entry found")
+		info.addCheck("clli", false, "no HEVC video sample entry found")
+		info.addCheck("mdcv", false, "no HEVC video sample entry found")
+		info.addCheck("HEVC SEI", false, "no HEVC video sample entry found")
+		return info, nil
+	}
+
+	if trak.Tkhd != nil {
+		info.TrackID = trak.Tkhd.TrackID
+	}
+	info.CodecID = vse.Type()
+
+	sps := info.validateHvcC(vse)
+	info.validateColr(vse)
+	info.validateClli(vse)
+	info.validateMdcv(vse)
+	info.validateSEI(file, moov, trak, vse, sps)
+	return info, nil
+}
+
+func (h *HDRInfo) String() string {
+	var sb strings.Builder
+	_, _ = fmt.Fprintf(&sb, "hdr:\n")
+	if h.TrackID != 0 || h.CodecID != "" {
+		_, _ = fmt.Fprintf(&sb, "  track: id=%d codec=%s\n", h.TrackID, h.CodecID)
+	}
+	for _, check := range h.Checks {
+		status := "FAIL"
+		if check.OK {
+			status = "OK"
+		}
+		_, _ = fmt.Fprintf(&sb, "  [%s] %s: %s\n", status, check.Name, check.Detail)
+	}
+	return strings.TrimRight(sb.String(), "\n")
+}
+
+func (h *HDRInfo) InfoString() string {
+	info := h.FieldInfo()
+	var sb strings.Builder
+	_, _ = fmt.Fprintf(&sb, "info:\n")
+	_, _ = fmt.Fprintf(&sb, "  codec: %s\n", info.Codec)
+	_, _ = fmt.Fprintf(&sb, "  level: %s\n", info.Level)
+	_, _ = fmt.Fprintf(&sb, "  profile: %s\n", info.Profile)
+	_, _ = fmt.Fprintf(&sb, "  bit_depth: %s\n", info.BitDepth)
+	_, _ = fmt.Fprintf(&sb, "  color_primaries: %s\n", info.ColorPrimaries)
+	_, _ = fmt.Fprintf(&sb, "  transfer_characteristics: %s\n", info.TransferCharacteristics)
+	_, _ = fmt.Fprintf(&sb, "  matrix_coefficients: %s\n", info.MatrixCoefficients)
+	_, _ = fmt.Fprintf(&sb, "  color_range: %s\n", info.ColorRange)
+	_, _ = fmt.Fprintf(&sb, "  mastering_display: %s\n", info.MasteringDisplay)
+	_, _ = fmt.Fprintf(&sb, "  max_cll_fall: %s\n", info.MaxCLLFALL)
+	_, _ = fmt.Fprintf(&sb, "  max_luma: %s\n", info.MaxLuma)
+	_, _ = fmt.Fprintf(&sb, "  min_luma: %s\n", info.MinLuma)
+	return strings.TrimRight(sb.String(), "\n")
+}
+
+func (h *HDRInfo) Report(includeInfo bool) HDRReport {
+	report := HDRReport{
+		HDR: HDRReportSection{
+			Checks: make([]HDRReportCheck, 0, len(h.Checks)),
+		},
+	}
+	if h.TrackID != 0 || h.CodecID != "" {
+		report.HDR.Track = &HDRTrackInfo{
+			ID:    h.TrackID,
+			Codec: h.CodecID,
+		}
+	}
+	for _, check := range h.Checks {
+		status := "FAIL"
+		if check.OK {
+			status = "OK"
+		}
+		report.HDR.Checks = append(report.HDR.Checks, HDRReportCheck{
+			Name:   check.Name,
+			OK:     check.OK,
+			Status: status,
+			Detail: check.Detail,
+		})
+	}
+	if includeInfo {
+		info := h.FieldInfo()
+		report.Info = &info
+	}
+	return report
+}
+
+func (h *HDRInfo) FieldInfo() HDRFieldInfo {
+	const na = "na"
+	info := HDRFieldInfo{
+		Codec:                   na,
+		Level:                   na,
+		Profile:                 na,
+		BitDepth:                na,
+		ColorPrimaries:          na,
+		TransferCharacteristics: na,
+		MatrixCoefficients:      na,
+		ColorRange:              na,
+		MasteringDisplay:        na,
+		MaxCLLFALL:              na,
+		MaxLuma:                 na,
+		MinLuma:                 na,
+	}
+
+	if h.CodecID != "" {
+		info.Codec = h.CodecID
+	}
+	levelIDC := h.HvcC.LevelIDC
+	if h.HvcC.SPSLevelIDC != 0 {
+		levelIDC = h.HvcC.SPSLevelIDC
+	}
+	if levelIDC != 0 {
+		info.Level = levelName(levelIDC)
+	}
+	profileIDC := h.HvcC.ProfileIDC
+	if h.HvcC.SPSProfileIDC != 0 {
+		profileIDC = h.HvcC.SPSProfileIDC
+	}
+	if profileIDC != 0 {
+		info.Profile = profileName(profileIDC)
+	}
+	bitDepthLuma := h.HvcC.BitDepthLuma
+	bitDepthChroma := h.HvcC.BitDepthChroma
+	if h.HvcC.SPSBitDepthLuma != 0 || h.HvcC.SPSBitDepthChroma != 0 {
+		bitDepthLuma = h.HvcC.SPSBitDepthLuma
+		bitDepthChroma = h.HvcC.SPSBitDepthChroma
+	}
+	if bitDepthLuma != 0 || bitDepthChroma != 0 {
+		info.BitDepth = fmt.Sprintf("%d/%d", bitDepthLuma, bitDepthChroma)
+	}
+
+	if h.Colr.Present {
+		info.ColorPrimaries = colourPrimariesName(h.Colr.ColorPrimaries)
+		info.TransferCharacteristics = transferName(h.Colr.TransferCharacteristics)
+		info.MatrixCoefficients = matrixName(h.Colr.MatrixCoefficients)
+		if h.Colr.ColorType == mp4.ColorTypeOnScreenColors {
+			info.ColorRange = rangeName(h.Colr.FullRangeFlag)
+		}
+	} else if h.HvcC.VUIPresent && h.HvcC.ColourDescription {
+		info.ColorPrimaries = colourPrimariesName(uint16(h.HvcC.ColourPrimaries))
+		info.TransferCharacteristics = transferName(uint16(h.HvcC.TransferCharacteristics))
+		info.MatrixCoefficients = matrixName(uint16(h.HvcC.MatrixCoefficients))
+	}
+	if info.ColorRange == na && h.HvcC.VUIPresent && h.HvcC.VideoSignalTypePresent {
+		info.ColorRange = rangeName(h.HvcC.VideoFullRangeFlag)
+	}
+
+	if m := h.masteringDisplay(); m != nil {
+		info.MasteringDisplay = formatMdcv(*m)
+	}
+	if c := h.contentLightLevel(); c != nil {
+		info.MaxCLLFALL = formatClli(*c)
+	}
+	if h.SEI.MaxLuma != "" {
+		info.MaxLuma = h.SEI.MaxLuma
+	}
+	if h.SEI.MinLuma != "" {
+		info.MinLuma = h.SEI.MinLuma
+	}
+	return info
+}
+
+func (h *HDRInfo) addCheck(name string, ok bool, format string, args ...any) {
+	detail := fmt.Sprintf(format, args...)
+	h.Checks = append(h.Checks, HDRCheck{Name: name, OK: ok, Detail: detail})
+	if !ok {
+		h.Errors = append(h.Errors, fmt.Sprintf("%s: %s", name, detail))
+	}
+}
+
+func (h *HDRInfo) addSEIError(format string, args ...any) {
+	h.SEI.ParseErrors = appendLimited(h.SEI.ParseErrors, fmt.Sprintf(format, args...), 5)
+}
+
+func (h *HDRInfo) validateHvcC(vse *mp4.VisualSampleEntryBox) *hevc.SPS {
+	if vse.HvcC == nil {
+		h.addCheck("hvcC/SPS", false, "missing hvcC box")
+		return nil
+	}
+
+	hvcC := vse.HvcC
+	info := HDRHvcCInfo{
+		Present:        true,
+		ProfileIDC:     hvcC.GeneralProfileIDC,
+		LevelIDC:       hvcC.GeneralLevelIDC,
+		BitDepthLuma:   hvcC.BitDepthLumaMinus8 + 8,
+		BitDepthChroma: hvcC.BitDepthChromaMinus8 + 8,
+		NALULengthSize: hvcC.LengthSizeMinusOne + 1,
+	}
+
+	var sps *hevc.SPS
+	spsNalus := hvcC.GetNalusForType(hevc.NALU_SPS)
+	if len(spsNalus) > 0 {
+		info.SPSPresent = true
+		parsedSPS, err := hevc.ParseSPSNALUnit(spsNalus[0])
+		if err != nil {
+			h.HvcC = info
+			h.addCheck("hvcC/SPS", false, "SPS parse error: %v", err)
+			return nil
+		}
+		sps = parsedSPS
+		info.SPSProfileIDC = sps.ProfileTierLevel.GeneralProfileIDC
+		info.SPSLevelIDC = sps.ProfileTierLevel.GeneralLevelIDC
+		info.SPSBitDepthLuma = sps.BitDepthLumaMinus8 + 8
+		info.SPSBitDepthChroma = sps.BitDepthChromaMinus8 + 8
+		if sps.VUI != nil {
+			info.VUIPresent = true
+			info.VideoSignalTypePresent = sps.VUI.VideoSignalTypePresentFlag
+			info.ColourDescription = sps.VUI.ColourDescriptionFlag
+			info.VideoFullRangeFlag = sps.VUI.VideoFullRangeFlag
+			info.ColourPrimaries = sps.VUI.ColourPrimaries
+			info.TransferCharacteristics = sps.VUI.TransferCharacteristics
+			info.MatrixCoefficients = sps.VUI.MatrixCoefficients
+		}
+	}
+	h.HvcC = info
+
+	ok := info.ProfileIDC == hdr10Profile &&
+		info.BitDepthLuma == 10 &&
+		info.BitDepthChroma == 10 &&
+		info.SPSPresent &&
+		info.SPSProfileIDC == hdr10Profile &&
+		info.SPSBitDepthLuma == 10 &&
+		info.SPSBitDepthChroma == 10 &&
+		info.VUIPresent &&
+		info.ColourDescription &&
+		!info.VideoFullRangeFlag &&
+		info.ColourPrimaries == hdr10Primaries &&
+		info.TransferCharacteristics == hdr10Transfer &&
+		info.MatrixCoefficients == hdr10Matrix
+
+	detail := fmt.Sprintf(
+		"hvcC profile=%s bitDepth=%d/%d nalLength=%d; SPS profile=%s bitDepth=%d/%d VUI=%s/%s/%s range=%s",
+		profileName(info.ProfileIDC), info.BitDepthLuma, info.BitDepthChroma, info.NALULengthSize,
+		profileName(info.SPSProfileIDC), info.SPSBitDepthLuma, info.SPSBitDepthChroma,
+		colourPrimariesName(uint16(info.ColourPrimaries)),
+		transferName(uint16(info.TransferCharacteristics)),
+		matrixName(uint16(info.MatrixCoefficients)),
+		rangeName(info.VideoFullRangeFlag),
+	)
+	if !info.SPSPresent {
+		detail = fmt.Sprintf("%s; missing SPS in hvcC", detail)
+	} else if !info.VUIPresent {
+		detail = fmt.Sprintf("%s; missing SPS VUI", detail)
+	} else if !info.ColourDescription {
+		detail = fmt.Sprintf("%s; missing SPS colour_description", detail)
+	}
+	h.addCheck("hvcC/SPS", ok, "%s", detail)
+	return sps
+}
+
+func (h *HDRInfo) validateColr(vse *mp4.VisualSampleEntryBox) {
+	colr := findColr(vse)
+	if colr == nil {
+		h.addCheck("colr", false, "missing colr box")
+		return
+	}
+
+	h.Colr = HDRColrInfo{
+		Present:                 true,
+		ColorType:               colr.ColorType,
+		ColorPrimaries:          colr.ColorPrimaries,
+		TransferCharacteristics: colr.TransferCharacteristics,
+		MatrixCoefficients:      colr.MatrixCoefficients,
+		FullRangeFlag:           colr.FullRangeFlag,
+	}
+	ok := colr.ColorType == mp4.ColorTypeOnScreenColors &&
+		colr.ColorPrimaries == hdr10Primaries &&
+		colr.TransferCharacteristics == hdr10Transfer &&
+		colr.MatrixCoefficients == hdr10Matrix &&
+		!colr.FullRangeFlag
+	h.addCheck("colr", ok, "type=%s primaries=%s transfer=%s matrix=%s range=%s",
+		colr.ColorType,
+		colourPrimariesName(colr.ColorPrimaries),
+		transferName(colr.TransferCharacteristics),
+		matrixName(colr.MatrixCoefficients),
+		rangeName(colr.FullRangeFlag),
+	)
+}
+
+func (h *HDRInfo) validateClli(vse *mp4.VisualSampleEntryBox) {
+	if vse.Clli == nil {
+		h.addCheck("clli", false, "missing clli box")
+		return
+	}
+	h.Clli = clliFromBox(vse.Clli)
+	h.addCheck("clli", true, "maxCLL=%d maxFALL=%d",
+		h.Clli.MaxContentLightLevel, h.Clli.MaxPicAverageLightLevel)
+}
+
+func (h *HDRInfo) validateMdcv(vse *mp4.VisualSampleEntryBox) {
+	if vse.Mdcv == nil {
+		h.addCheck("mdcv", false, "missing mdcv box")
+		return
+	}
+	h.Mdcv = mdcvFromBox(vse.Mdcv)
+	h.addCheck("mdcv", true, "%s", formatMdcv(h.Mdcv))
+}
+
+func (h *HDRInfo) validateSEI(file *mp4.File, moov *mp4.MoovBox, trak *mp4.TrakBox, vse *mp4.VisualSampleEntryBox, sps *hevc.SPS) {
+	if vse.HvcC != nil {
+		h.observeSEINalus("hvcC", sps, vse.HvcC.GetNalusForType(hevc.NALU_SEI_PREFIX))
+		h.observeSEINalus("hvcC", sps, vse.HvcC.GetNalusForType(hevc.NALU_SEI_SUFFIX))
+	}
+
+	lengthSize := 4
+	if vse.HvcC != nil {
+		lengthSize = int(vse.HvcC.LengthSizeMinusOne) + 1
+	}
+	samplesScanned, err := h.scanMediaSamples(file, moov, trak, lengthSize, sps)
+	h.SEI.SamplesScanned = samplesScanned
+	if err != nil {
+		h.addSEIError("sample scan: %v", err)
+	}
+
+	hasMastering := h.SEI.Mastering != nil
+	hasContent := h.SEI.ContentLightLevel != nil
+	mdcvMatches := true
+	clliMatches := true
+	if hasMastering && h.Mdcv.Present {
+		mdcvMatches = mdcvEqual(*h.SEI.Mastering, h.Mdcv)
+	}
+	if hasContent && h.Clli.Present {
+		clliMatches = clliEqual(*h.SEI.ContentLightLevel, h.Clli)
+	}
+
+	ok := hasMastering && hasContent && mdcvMatches && clliMatches && len(h.SEI.ParseErrors) == 0
+	var parts []string
+	if hasMastering {
+		parts = append(parts, fmt.Sprintf("MDCV %s from %s", formatMdcv(*h.SEI.Mastering), strings.Join(h.SEI.MasteringSources, ",")))
+	} else {
+		parts = append(parts, "missing MDCV SEI")
+	}
+	if hasContent {
+		parts = append(parts, fmt.Sprintf("CLLI maxCLL=%d maxFALL=%d from %s",
+			h.SEI.ContentLightLevel.MaxContentLightLevel,
+			h.SEI.ContentLightLevel.MaxPicAverageLightLevel,
+			strings.Join(h.SEI.ContentLightSources, ",")))
+	} else {
+		parts = append(parts, "missing CLLI SEI")
+	}
+	parts = append(parts, fmt.Sprintf("samplesScanned=%d nalusScanned=%d", h.SEI.SamplesScanned, h.SEI.NALUsScanned))
+	if !mdcvMatches {
+		parts = append(parts, "MDCV SEI does not match mdcv box")
+	}
+	if !clliMatches {
+		parts = append(parts, "CLLI SEI does not match clli box")
+	}
+	if len(h.SEI.ParseErrors) > 0 {
+		parts = append(parts, "parseErrors="+strings.Join(h.SEI.ParseErrors, "; "))
+	}
+	h.addCheck("HEVC SEI", ok, "%s", strings.Join(parts, "; "))
+}
+
+func (h *HDRInfo) scanMediaSamples(file *mp4.File, moov *mp4.MoovBox, trak *mp4.TrakBox, lengthSize int, sps *hevc.SPS) (int, error) {
+	if lengthSize < 1 || lengthSize > 4 {
+		return 0, fmt.Errorf("unsupported NALU length size %d", lengthSize)
+	}
+	if file.IsFragmented() {
+		return h.scanFragmentedSamples(file, moov, trak, lengthSize, sps)
+	}
+	return h.scanProgressiveSamples(file, trak, lengthSize, sps)
+}
+
+func (h *HDRInfo) scanFragmentedSamples(file *mp4.File, moov *mp4.MoovBox, trak *mp4.TrakBox, lengthSize int, sps *hevc.SPS) (int, error) {
+	if len(file.Segments) == 0 {
+		return 0, nil
+	}
+
+	var trex *mp4.TrexBox
+	if moov != nil && moov.Mvex != nil && trak.Tkhd != nil {
+		trex, _ = moov.Mvex.GetTrex(trak.Tkhd.TrackID)
+	}
+	if trak.Tkhd != nil && trex == nil {
+		return 0, fmt.Errorf("missing trex for video track %d", trak.Tkhd.TrackID)
+	}
+
+	var samplesScanned int
+	for _, seg := range file.Segments {
+		for _, frag := range seg.Fragments {
+			samples, err := frag.GetFullSamples(trex)
+			if err != nil {
+				return samplesScanned, err
+			}
+			for _, sample := range samples {
+				samplesScanned++
+				h.observeSample("sample", sps, sample.Data, lengthSize)
+			}
+		}
+	}
+	return samplesScanned, nil
+}
+
+func (h *HDRInfo) scanProgressiveSamples(file *mp4.File, trak *mp4.TrakBox, lengthSize int, sps *hevc.SPS) (int, error) {
+	if file.Mdat == nil {
+		return 0, nil
+	}
+	stbl := sampleTable(trak)
+	if stbl == nil || stbl.Stsc == nil || stbl.Stsz == nil {
+		return 0, fmt.Errorf("missing progressive sample table boxes")
+	}
+	nrSamples := stbl.Stsz.SampleNumber
+	mdatPayloadStart := file.Mdat.PayloadAbsoluteOffset()
+
+	var samplesScanned int
+	for sampleNr := 1; sampleNr <= int(nrSamples); sampleNr++ {
+		chunkNr, sampleNrAtChunkStart, err := stbl.Stsc.ChunkNrFromSampleNr(sampleNr)
+		if err != nil {
+			return samplesScanned, err
+		}
+		offset, err := getChunkOffset(stbl, chunkNr)
+		if err != nil {
+			return samplesScanned, err
+		}
+		for sNr := sampleNrAtChunkStart; sNr < sampleNr; sNr++ {
+			offset += uint64(stbl.Stsz.GetSampleSize(sNr))
+		}
+		size := stbl.Stsz.GetSampleSize(sampleNr)
+		if offset < mdatPayloadStart {
+			return samplesScanned, fmt.Errorf("sample %d offset %d is before mdat payload %d", sampleNr, offset, mdatPayloadStart)
+		}
+		offsetInMdatData := offset - mdatPayloadStart
+		end := offsetInMdatData + uint64(size)
+		if end > uint64(len(file.Mdat.Data)) {
+			return samplesScanned, fmt.Errorf("sample %d exceeds mdat payload", sampleNr)
+		}
+
+		samplesScanned++
+		h.observeSample("sample", sps, file.Mdat.Data[offsetInMdatData:end], lengthSize)
+	}
+	return samplesScanned, nil
+}
+
+func (h *HDRInfo) observeSample(source string, sps *hevc.SPS, data []byte, lengthSize int) {
+	nalus, err := nalusFromSample(data, lengthSize)
+	if err != nil {
+		h.addSEIError("%s: %v", source, err)
+		return
+	}
+	h.observeSEINalus(source, sps, nalus)
+}
+
+func (h *HDRInfo) observeSEINalus(source string, sps *hevc.SPS, nalus [][]byte) {
+	for _, nalu := range nalus {
+		if len(nalu) < 2 {
+			continue
+		}
+		h.SEI.NALUsScanned++
+		naluType := hevc.GetNaluType(nalu[0])
+		if naluType != hevc.NALU_SEI_PREFIX && naluType != hevc.NALU_SEI_SUFFIX {
+			continue
+		}
+		msgs, err := hevc.ParseSEINalu(nalu, sps)
+		if err != nil && !errors.Is(err, sei.ErrRbspTrailingBitsMissing) {
+			h.addSEIError("%s: %v", source, err)
+			continue
+		}
+		for _, msg := range msgs {
+			switch m := msg.(type) {
+			case *sei.MasteringDisplayColourVolumeSEI:
+				if h.SEI.Mastering == nil {
+					mdcv := mdcvFromSEI(m)
+					h.SEI.Mastering = &mdcv
+				}
+				h.SEI.MasteringSources = addUnique(h.SEI.MasteringSources, source)
+			case *sei.ContentLightLevelInformationSEI:
+				if h.SEI.ContentLightLevel == nil {
+					clli := clliFromSEI(m)
+					h.SEI.ContentLightLevel = &clli
+				}
+				h.SEI.ContentLightSources = addUnique(h.SEI.ContentLightSources, source)
+			case *sei.UnregisteredSEI:
+				h.observeUnregisteredSEI(source, m)
+			}
+		}
+	}
+}
+
+func (h *HDRInfo) observeUnregisteredSEI(source string, msg *sei.UnregisteredSEI) {
+	payload := msg.Payload()
+	if len(payload) <= 16 {
+		return
+	}
+	settings := strings.TrimRight(string(payload[16:]), "\x00")
+	if !strings.Contains(settings, "x265") || !strings.Contains(settings, "options:") {
+		return
+	}
+	if h.SEI.EncodingSettings == "" {
+		h.SEI.EncodingSettings = settings
+	}
+	h.SEI.EncodingSettingsSources = addUnique(h.SEI.EncodingSettingsSources, source)
+	if h.SEI.MinLuma == "" {
+		if value, ok := x265EncodingSetting(settings, "min-luma"); ok {
+			h.SEI.MinLuma = value
+		}
+	}
+	if h.SEI.MaxLuma == "" {
+		if value, ok := x265EncodingSetting(settings, "max-luma"); ok {
+			h.SEI.MaxLuma = value
+		}
+	}
+}
+
+func findHEVCVideoSampleEntry(file *mp4.File) (*mp4.MoovBox, *mp4.TrakBox, *mp4.VisualSampleEntryBox, bool) {
+	moov := file.Moov
+	if file.Init != nil && file.Init.Moov != nil {
+		moov = file.Init.Moov
+	}
+	if moov == nil {
+		return nil, nil, nil, false
+	}
+	for _, trak := range moov.Traks {
+		stbl := sampleTable(trak)
+		if stbl == nil || stbl.Stsd == nil {
+			continue
+		}
+		if trak.Mdia != nil && trak.Mdia.Hdlr != nil && trak.Mdia.Hdlr.HandlerType != "vide" {
+			continue
+		}
+		if stbl.Stsd.HvcX != nil {
+			return moov, trak, stbl.Stsd.HvcX, true
+		}
+		if stbl.Stsd.Encv != nil && stbl.Stsd.Encv.HvcC != nil {
+			return moov, trak, stbl.Stsd.Encv, true
+		}
+	}
+	return nil, nil, nil, false
+}
+
+func sampleTable(trak *mp4.TrakBox) *mp4.StblBox {
+	if trak == nil || trak.Mdia == nil || trak.Mdia.Minf == nil {
+		return nil
+	}
+	return trak.Mdia.Minf.Stbl
+}
+
+func findColr(vse *mp4.VisualSampleEntryBox) *mp4.ColrBox {
+	for _, child := range vse.Children {
+		if colr, ok := child.(*mp4.ColrBox); ok {
+			return colr
+		}
+	}
+	return nil
+}
+
+func getChunkOffset(stbl *mp4.StblBox, chunkNr int) (uint64, error) {
+	if stbl.Stco != nil {
+		return stbl.Stco.GetOffset(chunkNr)
+	}
+	if stbl.Co64 != nil {
+		return stbl.Co64.GetOffset(chunkNr)
+	}
+	return 0, fmt.Errorf("neither stco nor co64 is present")
+}
+
+func nalusFromSample(sample []byte, lengthSize int) ([][]byte, error) {
+	if len(sample) < lengthSize {
+		return nil, fmt.Errorf("less than %d bytes, no NALUs", lengthSize)
+	}
+	nalus := make([][]byte, 0, 2)
+	pos := 0
+	for pos < len(sample) {
+		if pos+lengthSize > len(sample) {
+			return nil, fmt.Errorf("truncated NALU length field")
+		}
+		naluLength := 0
+		for i := 0; i < lengthSize; i++ {
+			naluLength = (naluLength << 8) | int(sample[pos+i])
+		}
+		pos += lengthSize
+		if naluLength == 0 {
+			return nil, fmt.Errorf("zero-length NALU")
+		}
+		if pos+naluLength > len(sample) {
+			return nil, fmt.Errorf("NALU length fields are bad")
+		}
+		nalus = append(nalus, sample[pos:pos+naluLength])
+		pos += naluLength
+	}
+	return nalus, nil
+}
+
+func clliFromBox(box *mp4.ClliBox) HDRClliInfo {
+	return HDRClliInfo{
+		Present:                 true,
+		MaxContentLightLevel:    box.MaxContentLightLevel,
+		MaxPicAverageLightLevel: box.MaxPicAverageLightLevel,
+	}
+}
+
+func clliFromSEI(msg *sei.ContentLightLevelInformationSEI) HDRClliInfo {
+	return HDRClliInfo{
+		Present:                 true,
+		MaxContentLightLevel:    msg.MaxContentLightLevel,
+		MaxPicAverageLightLevel: msg.MaxPicAverageLightLevel,
+	}
+}
+
+func mdcvFromBox(box *mp4.MdcvBox) HDRMdcvInfo {
+	return HDRMdcvInfo{
+		Present:                      true,
+		DisplayPrimariesX:            box.DisplayPrimariesX,
+		DisplayPrimariesY:            box.DisplayPrimariesY,
+		WhitePointX:                  box.WhitePointX,
+		WhitePointY:                  box.WhitePointY,
+		MaxDisplayMasteringLuminance: box.MaxDisplayMasteringLuminance,
+		MinDisplayMasteringLuminance: box.MinDisplayMasteringLuminance,
+	}
+}
+
+func mdcvFromSEI(msg *sei.MasteringDisplayColourVolumeSEI) HDRMdcvInfo {
+	return HDRMdcvInfo{
+		Present:                      true,
+		DisplayPrimariesX:            msg.DisplayPrimariesX,
+		DisplayPrimariesY:            msg.DisplayPrimariesY,
+		WhitePointX:                  msg.WhitePointX,
+		WhitePointY:                  msg.WhitePointY,
+		MaxDisplayMasteringLuminance: msg.MaxDisplayMasteringLuminance,
+		MinDisplayMasteringLuminance: msg.MinDisplayMasteringLuminance,
+	}
+}
+
+func clliEqual(a, b HDRClliInfo) bool {
+	return a.MaxContentLightLevel == b.MaxContentLightLevel &&
+		a.MaxPicAverageLightLevel == b.MaxPicAverageLightLevel
+}
+
+func mdcvEqual(a, b HDRMdcvInfo) bool {
+	return a.DisplayPrimariesX == b.DisplayPrimariesX &&
+		a.DisplayPrimariesY == b.DisplayPrimariesY &&
+		a.WhitePointX == b.WhitePointX &&
+		a.WhitePointY == b.WhitePointY &&
+		a.MaxDisplayMasteringLuminance == b.MaxDisplayMasteringLuminance &&
+		a.MinDisplayMasteringLuminance == b.MinDisplayMasteringLuminance
+}
+
+func formatMdcv(m HDRMdcvInfo) string {
+	return fmt.Sprintf("G(%d,%d)B(%d,%d)R(%d,%d)WP(%d,%d)L(%d,%d)",
+		m.DisplayPrimariesX[0], m.DisplayPrimariesY[0],
+		m.DisplayPrimariesX[1], m.DisplayPrimariesY[1],
+		m.DisplayPrimariesX[2], m.DisplayPrimariesY[2],
+		m.WhitePointX, m.WhitePointY,
+		m.MaxDisplayMasteringLuminance, m.MinDisplayMasteringLuminance)
+}
+
+func formatClli(c HDRClliInfo) string {
+	return fmt.Sprintf("%d,%d", c.MaxContentLightLevel, c.MaxPicAverageLightLevel)
+}
+
+func x265EncodingSetting(settings, key string) (string, bool) {
+	for _, field := range strings.Fields(settings) {
+		field = strings.Trim(field, "/")
+		if value, ok := strings.CutPrefix(field, key+"="); ok {
+			return value, true
+		}
+	}
+	return "", false
+}
+
+func (h *HDRInfo) masteringDisplay() *HDRMdcvInfo {
+	if h.Mdcv.Present {
+		return &h.Mdcv
+	}
+	return h.SEI.Mastering
+}
+
+func (h *HDRInfo) contentLightLevel() *HDRClliInfo {
+	if h.Clli.Present {
+		return &h.Clli
+	}
+	return h.SEI.ContentLightLevel
+}
+
+func profileName(profile byte) string {
+	switch profile {
+	case 1:
+		return "Main(1)"
+	case hdr10Profile:
+		return "Main10(2)"
+	case 3:
+		return "Main Still Picture(3)"
+	case 4:
+		return "Range Extensions(4)"
+	case 5:
+		return "High Throughput(5)"
+	case 6:
+		return "Multiview Main(6)"
+	case 0:
+		return "unknown(0)"
+	default:
+		return fmt.Sprintf("%d", profile)
+	}
+}
+
+func levelName(levelIDC byte) string {
+	if levelIDC == 0 {
+		return "na"
+	}
+	major := int(levelIDC) / 30
+	minor := (int(levelIDC) % 30) / 3
+	return fmt.Sprintf("%d.%d(%d)", major, minor, levelIDC)
+}
+
+func colourPrimariesName(v uint16) string {
+	switch v {
+	case hdr10Primaries:
+		return "BT.2020(9)"
+	case 1:
+		return "BT.709(1)"
+	default:
+		return fmt.Sprintf("%d", v)
+	}
+}
+
+func transferName(v uint16) string {
+	switch v {
+	case hdr10Transfer:
+		return "PQ/ST2084(16)"
+	case 1:
+		return "BT.709(1)"
+	default:
+		return fmt.Sprintf("%d", v)
+	}
+}
+
+func matrixName(v uint16) string {
+	switch v {
+	case hdr10Matrix:
+		return "BT.2020 non-constant(9)"
+	case 1:
+		return "BT.709(1)"
+	default:
+		return fmt.Sprintf("%d", v)
+	}
+}
+
+func rangeName(fullRange bool) string {
+	if fullRange {
+		return "full"
+	}
+	return "limited"
+}
+
+func addUnique(values []string, value string) []string {
+	for _, existing := range values {
+		if existing == value {
+			return values
+		}
+	}
+	return append(values, value)
+}
+
+func appendLimited(values []string, value string, limit int) []string {
+	if len(values) >= limit {
+		return values
+	}
+	return append(values, value)
+}
