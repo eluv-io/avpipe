@@ -30,7 +30,27 @@ func TestValidateHDRHEVCInit(t *testing.T) {
 
 	info := hdr.FieldInfo()
 	require.Equal(t, "hvc1", info.Codec)
+	require.Equal(t, "1920", info.Width)
+	require.Equal(t, "1080", info.Height)
+	require.Equal(t, "1.777778", info.AspectRatio)
+	require.Equal(t, "1920", info.SampleEntryWidth)
+	require.Equal(t, "1080", info.SampleEntryHeight)
+	require.Equal(t, "1920", info.TrackWidth)
+	require.Equal(t, "1080", info.TrackHeight)
+	require.Equal(t, "1920", info.SPSDisplayWidth)
+	require.Equal(t, "1080", info.SPSDisplayHeight)
+	require.Equal(t, "1920", info.CodedWidth)
+	require.Equal(t, "1080", info.CodedHeight)
+	require.Equal(t, "left=0 right=0 top=0 bottom=0", info.ConformanceWindow)
+	require.Equal(t, "na", info.PixelAspectRatio)
+	require.Equal(t, "Main tier 4.0(120)", info.Level)
 	require.Equal(t, "Main10(2)", info.Profile)
+	require.Equal(t, "4:2:0(1)", info.ChromaFormat)
+	require.Equal(t, "4", info.NALULengthSize)
+	require.Equal(t, "na", info.ColrType)
+	require.Equal(t, "true", info.VUIPresent)
+	require.Equal(t, "true", info.VideoSignalTypePresent)
+	require.Equal(t, "true", info.ColourDescription)
 	require.Equal(t, "10/10", info.BitDepth)
 	require.Equal(t, "BT.2020(9)", info.ColorPrimaries)
 	require.Equal(t, "PQ/ST2084(16)", info.TransferCharacteristics)
@@ -54,6 +74,8 @@ func TestValidateHDRHEVCInit(t *testing.T) {
 	require.NoError(t, err)
 	require.True(t, strings.Contains(string(reportJSON), `"hdr"`))
 	require.True(t, strings.Contains(string(reportJSON), `"info"`))
+	require.True(t, strings.Contains(string(reportJSON), `"aspect_ratio":"1.777778"`))
+	require.True(t, strings.Contains(string(reportJSON), `"chroma_format":"4:2:0(1)"`))
 	require.True(t, strings.Contains(string(reportJSON), `"max_cll_fall":"0,0"`))
 }
 
@@ -81,4 +103,13 @@ func TestHDRFieldInfoUsesX265EncodingSettingsForLuma(t *testing.T) {
 	require.Equal(t, "1023", info.MaxLuma)
 	require.Equal(t, "0", info.MinLuma)
 	require.Equal(t, "G(0,0)B(0,0)R(0,0)WP(0,0)L(10000000,10)", info.MasteringDisplay)
+}
+
+func TestWithinHDRSampleScanLimit(t *testing.T) {
+	const limit = uint64(120 * 12288)
+
+	require.True(t, withinHDRSampleScanLimit(0, 0, limit))
+	require.True(t, withinHDRSampleScanLimit(limit-1, 0, limit))
+	require.False(t, withinHDRSampleScanLimit(limit, 0, limit))
+	require.True(t, withinHDRSampleScanLimit(100, 200, limit))
 }

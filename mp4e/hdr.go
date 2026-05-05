@@ -15,20 +15,43 @@ const (
 	hdr10Transfer  = 16
 	hdr10Matrix    = 9
 	hdr10Profile   = 2
+
+	hdrSEISampleScanLimitSeconds uint64 = 120
 )
 
 type HDRInfo struct {
 	TrackID uint32
 	CodecID string
 
-	HvcC HDRHvcCInfo
-	Colr HDRColrInfo
-	Clli HDRClliInfo
-	Mdcv HDRMdcvInfo
-	SEI  HDRSEIInfo
+	Video HDRVideoInfo
+	HvcC  HDRHvcCInfo
+	Colr  HDRColrInfo
+	Clli  HDRClliInfo
+	Mdcv  HDRMdcvInfo
+	SEI   HDRSEIInfo
 
 	Checks []HDRCheck
 	Errors []string
+}
+
+type HDRVideoInfo struct {
+	Width                    uint32
+	Height                   uint32
+	SampleEntryWidth         uint32
+	SampleEntryHeight        uint32
+	TrackWidth               uint32
+	TrackHeight              uint32
+	PixelAspectH             uint32
+	PixelAspectV             uint32
+	SPSDisplayWidth          uint32
+	SPSDisplayHeight         uint32
+	CodedWidth               uint32
+	CodedHeight              uint32
+	ConformanceWindowPresent bool
+	ConformanceWindowLeft    uint32
+	ConformanceWindowRight   uint32
+	ConformanceWindowTop     uint32
+	ConformanceWindowBottom  uint32
 }
 
 type HDRCheck struct {
@@ -40,16 +63,22 @@ type HDRCheck struct {
 type HDRHvcCInfo struct {
 	Present                 bool
 	ProfileIDC              byte
+	TierFlag                bool
 	LevelIDC                byte
+	ChromaFormatIDC         byte
 	BitDepthLuma            byte
 	BitDepthChroma          byte
 	NALULengthSize          byte
 	SPSPresent              bool
 	SPSProfileIDC           byte
+	SPSTierFlag             bool
 	SPSLevelIDC             byte
+	SPSChromaFormatIDC      byte
 	SPSBitDepthLuma         byte
 	SPSBitDepthChroma       byte
 	VUIPresent              bool
+	SampleAspectRatioWidth  uint
+	SampleAspectRatioHeight uint
 	VideoSignalTypePresent  bool
 	ColourDescription       bool
 	VideoFullRangeFlag      bool
@@ -60,8 +89,27 @@ type HDRHvcCInfo struct {
 
 type HDRFieldInfo struct {
 	Codec                   string `json:"codec"`
+	Width                   string `json:"width"`
+	Height                  string `json:"height"`
+	AspectRatio             string `json:"aspect_ratio"`
+	SampleEntryWidth        string `json:"sample_entry_width"`
+	SampleEntryHeight       string `json:"sample_entry_height"`
+	TrackWidth              string `json:"track_width"`
+	TrackHeight             string `json:"track_height"`
+	SPSDisplayWidth         string `json:"sps_display_width"`
+	SPSDisplayHeight        string `json:"sps_display_height"`
+	CodedWidth              string `json:"coded_width"`
+	CodedHeight             string `json:"coded_height"`
+	ConformanceWindow       string `json:"conformance_window"`
+	PixelAspectRatio        string `json:"pixel_aspect_ratio"`
 	Level                   string `json:"level"`
 	Profile                 string `json:"profile"`
+	ChromaFormat            string `json:"chroma_format"`
+	NALULengthSize          string `json:"nalu_length_size"`
+	ColrType                string `json:"colr_type"`
+	VUIPresent              string `json:"vui_present"`
+	VideoSignalTypePresent  string `json:"video_signal_type_present"`
+	ColourDescription       string `json:"colour_description_present"`
 	BitDepth                string `json:"bit_depth"`
 	ColorPrimaries          string `json:"color_primaries"`
 	TransferCharacteristics string `json:"transfer_characteristics"`
@@ -157,6 +205,7 @@ func ValidateHDR(file *mp4.File) (*HDRInfo, error) {
 	info.CodecID = vse.Type()
 
 	sps := info.validateHvcC(vse)
+	info.setVideoInfo(trak, vse, sps)
 	info.validateColr(vse)
 	info.validateClli(vse)
 	info.validateMdcv(vse)
@@ -185,8 +234,27 @@ func (h *HDRInfo) InfoString() string {
 	var sb strings.Builder
 	_, _ = fmt.Fprintf(&sb, "info:\n")
 	_, _ = fmt.Fprintf(&sb, "  codec: %s\n", info.Codec)
+	_, _ = fmt.Fprintf(&sb, "  width: %s\n", info.Width)
+	_, _ = fmt.Fprintf(&sb, "  height: %s\n", info.Height)
+	_, _ = fmt.Fprintf(&sb, "  aspect_ratio: %s\n", info.AspectRatio)
+	_, _ = fmt.Fprintf(&sb, "  sample_entry_width: %s\n", info.SampleEntryWidth)
+	_, _ = fmt.Fprintf(&sb, "  sample_entry_height: %s\n", info.SampleEntryHeight)
+	_, _ = fmt.Fprintf(&sb, "  track_width: %s\n", info.TrackWidth)
+	_, _ = fmt.Fprintf(&sb, "  track_height: %s\n", info.TrackHeight)
+	_, _ = fmt.Fprintf(&sb, "  sps_display_width: %s\n", info.SPSDisplayWidth)
+	_, _ = fmt.Fprintf(&sb, "  sps_display_height: %s\n", info.SPSDisplayHeight)
+	_, _ = fmt.Fprintf(&sb, "  coded_width: %s\n", info.CodedWidth)
+	_, _ = fmt.Fprintf(&sb, "  coded_height: %s\n", info.CodedHeight)
+	_, _ = fmt.Fprintf(&sb, "  conformance_window: %s\n", info.ConformanceWindow)
+	_, _ = fmt.Fprintf(&sb, "  pixel_aspect_ratio: %s\n", info.PixelAspectRatio)
 	_, _ = fmt.Fprintf(&sb, "  level: %s\n", info.Level)
 	_, _ = fmt.Fprintf(&sb, "  profile: %s\n", info.Profile)
+	_, _ = fmt.Fprintf(&sb, "  chroma_format: %s\n", info.ChromaFormat)
+	_, _ = fmt.Fprintf(&sb, "  nalu_length_size: %s\n", info.NALULengthSize)
+	_, _ = fmt.Fprintf(&sb, "  colr_type: %s\n", info.ColrType)
+	_, _ = fmt.Fprintf(&sb, "  vui_present: %s\n", info.VUIPresent)
+	_, _ = fmt.Fprintf(&sb, "  video_signal_type_present: %s\n", info.VideoSignalTypePresent)
+	_, _ = fmt.Fprintf(&sb, "  colour_description_present: %s\n", info.ColourDescription)
 	_, _ = fmt.Fprintf(&sb, "  bit_depth: %s\n", info.BitDepth)
 	_, _ = fmt.Fprintf(&sb, "  color_primaries: %s\n", info.ColorPrimaries)
 	_, _ = fmt.Fprintf(&sb, "  transfer_characteristics: %s\n", info.TransferCharacteristics)
@@ -234,8 +302,27 @@ func (h *HDRInfo) FieldInfo() HDRFieldInfo {
 	const na = "na"
 	info := HDRFieldInfo{
 		Codec:                   na,
+		Width:                   na,
+		Height:                  na,
+		AspectRatio:             na,
+		SampleEntryWidth:        na,
+		SampleEntryHeight:       na,
+		TrackWidth:              na,
+		TrackHeight:             na,
+		SPSDisplayWidth:         na,
+		SPSDisplayHeight:        na,
+		CodedWidth:              na,
+		CodedHeight:             na,
+		ConformanceWindow:       na,
+		PixelAspectRatio:        na,
 		Level:                   na,
 		Profile:                 na,
+		ChromaFormat:            na,
+		NALULengthSize:          na,
+		ColrType:                na,
+		VUIPresent:              na,
+		VideoSignalTypePresent:  na,
+		ColourDescription:       na,
 		BitDepth:                na,
 		ColorPrimaries:          na,
 		TransferCharacteristics: na,
@@ -250,12 +337,62 @@ func (h *HDRInfo) FieldInfo() HDRFieldInfo {
 	if h.CodecID != "" {
 		info.Codec = h.CodecID
 	}
+	if h.Video.Width != 0 {
+		info.Width = fmt.Sprintf("%d", h.Video.Width)
+	}
+	if h.Video.Height != 0 {
+		info.Height = fmt.Sprintf("%d", h.Video.Height)
+	}
+	if h.Video.SampleEntryWidth != 0 {
+		info.SampleEntryWidth = fmt.Sprintf("%d", h.Video.SampleEntryWidth)
+	}
+	if h.Video.SampleEntryHeight != 0 {
+		info.SampleEntryHeight = fmt.Sprintf("%d", h.Video.SampleEntryHeight)
+	}
+	if h.Video.TrackWidth != 0 {
+		info.TrackWidth = fmt.Sprintf("%d", h.Video.TrackWidth)
+	}
+	if h.Video.TrackHeight != 0 {
+		info.TrackHeight = fmt.Sprintf("%d", h.Video.TrackHeight)
+	}
+	if h.Video.SPSDisplayWidth != 0 {
+		info.SPSDisplayWidth = fmt.Sprintf("%d", h.Video.SPSDisplayWidth)
+	}
+	if h.Video.SPSDisplayHeight != 0 {
+		info.SPSDisplayHeight = fmt.Sprintf("%d", h.Video.SPSDisplayHeight)
+	}
+	if h.Video.Width != 0 && h.Video.Height != 0 {
+		aspectH, aspectV := h.Video.PixelAspectH, h.Video.PixelAspectV
+		if aspectH == 0 || aspectV == 0 {
+			aspectH, aspectV = 1, 1
+		}
+		aspectRatio := float64(h.Video.Width) * float64(aspectH) / (float64(h.Video.Height) * float64(aspectV))
+		info.AspectRatio = fmt.Sprintf("%.6f", aspectRatio)
+	}
+	if h.Video.CodedWidth != 0 {
+		info.CodedWidth = fmt.Sprintf("%d", h.Video.CodedWidth)
+	}
+	if h.Video.CodedHeight != 0 {
+		info.CodedHeight = fmt.Sprintf("%d", h.Video.CodedHeight)
+	}
+	if h.Video.ConformanceWindowPresent {
+		info.ConformanceWindow = fmt.Sprintf("left=%d right=%d top=%d bottom=%d",
+			h.Video.ConformanceWindowLeft,
+			h.Video.ConformanceWindowRight,
+			h.Video.ConformanceWindowTop,
+			h.Video.ConformanceWindowBottom)
+	}
+	if h.Video.PixelAspectH != 0 && h.Video.PixelAspectV != 0 {
+		info.PixelAspectRatio = fmt.Sprintf("%d:%d", h.Video.PixelAspectH, h.Video.PixelAspectV)
+	}
 	levelIDC := h.HvcC.LevelIDC
+	tierFlag := h.HvcC.TierFlag
 	if h.HvcC.SPSLevelIDC != 0 {
 		levelIDC = h.HvcC.SPSLevelIDC
+		tierFlag = h.HvcC.SPSTierFlag
 	}
 	if levelIDC != 0 {
-		info.Level = levelName(levelIDC)
+		info.Level = levelName(levelIDC, tierFlag)
 	}
 	profileIDC := h.HvcC.ProfileIDC
 	if h.HvcC.SPSProfileIDC != 0 {
@@ -263,6 +400,24 @@ func (h *HDRInfo) FieldInfo() HDRFieldInfo {
 	}
 	if profileIDC != 0 {
 		info.Profile = profileName(profileIDC)
+	}
+	chromaFormatIDC := h.HvcC.ChromaFormatIDC
+	if h.HvcC.SPSPresent {
+		chromaFormatIDC = h.HvcC.SPSChromaFormatIDC
+	}
+	if h.HvcC.Present || h.HvcC.SPSPresent {
+		info.ChromaFormat = chromaFormatName(chromaFormatIDC)
+	}
+	if h.HvcC.NALULengthSize != 0 {
+		info.NALULengthSize = fmt.Sprintf("%d", h.HvcC.NALULengthSize)
+	}
+	if h.Colr.Present {
+		info.ColrType = h.Colr.ColorType
+	}
+	if h.HvcC.SPSPresent {
+		info.VUIPresent = fmt.Sprintf("%t", h.HvcC.VUIPresent)
+		info.VideoSignalTypePresent = fmt.Sprintf("%t", h.HvcC.VideoSignalTypePresent)
+		info.ColourDescription = fmt.Sprintf("%t", h.HvcC.ColourDescription)
 	}
 	bitDepthLuma := h.HvcC.BitDepthLuma
 	bitDepthChroma := h.HvcC.BitDepthChroma
@@ -317,6 +472,52 @@ func (h *HDRInfo) addSEIError(format string, args ...any) {
 	h.SEI.ParseErrors = appendLimited(h.SEI.ParseErrors, fmt.Sprintf(format, args...), 5)
 }
 
+func (h *HDRInfo) setVideoInfo(trak *mp4.TrakBox, vse *mp4.VisualSampleEntryBox, sps *hevc.SPS) {
+	if vse != nil {
+		h.Video.SampleEntryWidth = uint32(vse.Width)
+		h.Video.SampleEntryHeight = uint32(vse.Height)
+		h.Video.Width = h.Video.SampleEntryWidth
+		h.Video.Height = h.Video.SampleEntryHeight
+		if vse.Pasp != nil {
+			h.Video.PixelAspectH = vse.Pasp.HSpacing
+			h.Video.PixelAspectV = vse.Pasp.VSpacing
+		}
+	}
+	if trak != nil && trak.Tkhd != nil {
+		h.Video.TrackWidth = uint32(trak.Tkhd.Width) >> 16
+		h.Video.TrackHeight = uint32(trak.Tkhd.Height) >> 16
+		if h.Video.Width == 0 {
+			h.Video.Width = h.Video.TrackWidth
+		}
+		if h.Video.Height == 0 {
+			h.Video.Height = h.Video.TrackHeight
+		}
+	}
+	if sps != nil {
+		h.Video.CodedWidth = sps.PicWidthInLumaSamples
+		h.Video.CodedHeight = sps.PicHeightInLumaSamples
+		displayWidth, displayHeight := sps.ImageSize()
+		h.Video.SPSDisplayWidth = displayWidth
+		h.Video.SPSDisplayHeight = displayHeight
+		h.Video.ConformanceWindowPresent = true
+		h.Video.ConformanceWindowLeft = sps.ConformanceWindow.LeftOffset
+		h.Video.ConformanceWindowRight = sps.ConformanceWindow.RightOffset
+		h.Video.ConformanceWindowTop = sps.ConformanceWindow.TopOffset
+		h.Video.ConformanceWindowBottom = sps.ConformanceWindow.BottomOffset
+		if (h.Video.PixelAspectH == 0 || h.Video.PixelAspectV == 0) && sps.VUI != nil &&
+			sps.VUI.SampleAspectRatioWidth != 0 && sps.VUI.SampleAspectRatioHeight != 0 {
+			h.Video.PixelAspectH = uint32(sps.VUI.SampleAspectRatioWidth)
+			h.Video.PixelAspectV = uint32(sps.VUI.SampleAspectRatioHeight)
+		}
+		if h.Video.Width == 0 {
+			h.Video.Width = displayWidth
+		}
+		if h.Video.Height == 0 {
+			h.Video.Height = displayHeight
+		}
+	}
+}
+
 func (h *HDRInfo) validateHvcC(vse *mp4.VisualSampleEntryBox) *hevc.SPS {
 	if vse.HvcC == nil {
 		h.addCheck("hvcC/SPS", false, "missing hvcC box")
@@ -325,12 +526,14 @@ func (h *HDRInfo) validateHvcC(vse *mp4.VisualSampleEntryBox) *hevc.SPS {
 
 	hvcC := vse.HvcC
 	info := HDRHvcCInfo{
-		Present:        true,
-		ProfileIDC:     hvcC.GeneralProfileIDC,
-		LevelIDC:       hvcC.GeneralLevelIDC,
-		BitDepthLuma:   hvcC.BitDepthLumaMinus8 + 8,
-		BitDepthChroma: hvcC.BitDepthChromaMinus8 + 8,
-		NALULengthSize: hvcC.LengthSizeMinusOne + 1,
+		Present:         true,
+		ProfileIDC:      hvcC.GeneralProfileIDC,
+		TierFlag:        hvcC.GeneralTierFlag,
+		LevelIDC:        hvcC.GeneralLevelIDC,
+		ChromaFormatIDC: hvcC.ChromaFormatIDC,
+		BitDepthLuma:    hvcC.BitDepthLumaMinus8 + 8,
+		BitDepthChroma:  hvcC.BitDepthChromaMinus8 + 8,
+		NALULengthSize:  hvcC.LengthSizeMinusOne + 1,
 	}
 
 	var sps *hevc.SPS
@@ -345,11 +548,15 @@ func (h *HDRInfo) validateHvcC(vse *mp4.VisualSampleEntryBox) *hevc.SPS {
 		}
 		sps = parsedSPS
 		info.SPSProfileIDC = sps.ProfileTierLevel.GeneralProfileIDC
+		info.SPSTierFlag = sps.ProfileTierLevel.GeneralTierFlag
 		info.SPSLevelIDC = sps.ProfileTierLevel.GeneralLevelIDC
+		info.SPSChromaFormatIDC = sps.ChromaFormatIDC
 		info.SPSBitDepthLuma = sps.BitDepthLumaMinus8 + 8
 		info.SPSBitDepthChroma = sps.BitDepthChromaMinus8 + 8
 		if sps.VUI != nil {
 			info.VUIPresent = true
+			info.SampleAspectRatioWidth = sps.VUI.SampleAspectRatioWidth
+			info.SampleAspectRatioHeight = sps.VUI.SampleAspectRatioHeight
 			info.VideoSignalTypePresent = sps.VUI.VideoSignalTypePresentFlag
 			info.ColourDescription = sps.VUI.ColourDescriptionFlag
 			info.VideoFullRangeFlag = sps.VUI.VideoFullRangeFlag
@@ -484,7 +691,8 @@ func (h *HDRInfo) validateSEI(file *mp4.File, moov *mp4.MoovBox, trak *mp4.TrakB
 	} else {
 		parts = append(parts, "missing CLLI SEI")
 	}
-	parts = append(parts, fmt.Sprintf("samplesScanned=%d nalusScanned=%d", h.SEI.SamplesScanned, h.SEI.NALUsScanned))
+	parts = append(parts, fmt.Sprintf("samplesScanned=%d sampleScanLimit=%ds nalusScanned=%d",
+		h.SEI.SamplesScanned, hdrSEISampleScanLimitSeconds, h.SEI.NALUsScanned))
 	if !mdcvMatches {
 		parts = append(parts, "MDCV SEI does not match mdcv box")
 	}
@@ -501,13 +709,14 @@ func (h *HDRInfo) scanMediaSamples(file *mp4.File, moov *mp4.MoovBox, trak *mp4.
 	if lengthSize < 1 || lengthSize > 4 {
 		return 0, fmt.Errorf("unsupported NALU length size %d", lengthSize)
 	}
+	scanLimit, hasScanLimit := hdrSampleScanLimitTicks(trak)
 	if file.IsFragmented() {
-		return h.scanFragmentedSamples(file, moov, trak, lengthSize, sps)
+		return h.scanFragmentedSamples(file, moov, trak, lengthSize, sps, scanLimit, hasScanLimit)
 	}
-	return h.scanProgressiveSamples(file, trak, lengthSize, sps)
+	return h.scanProgressiveSamples(file, trak, lengthSize, sps, scanLimit, hasScanLimit)
 }
 
-func (h *HDRInfo) scanFragmentedSamples(file *mp4.File, moov *mp4.MoovBox, trak *mp4.TrakBox, lengthSize int, sps *hevc.SPS) (int, error) {
+func (h *HDRInfo) scanFragmentedSamples(file *mp4.File, moov *mp4.MoovBox, trak *mp4.TrakBox, lengthSize int, sps *hevc.SPS, scanLimit uint64, hasScanLimit bool) (int, error) {
 	if len(file.Segments) == 0 {
 		return 0, nil
 	}
@@ -521,6 +730,8 @@ func (h *HDRInfo) scanFragmentedSamples(file *mp4.File, moov *mp4.MoovBox, trak 
 	}
 
 	var samplesScanned int
+	var firstDecodeTime uint64
+	var haveFirstDecodeTime bool
 	for _, seg := range file.Segments {
 		for _, frag := range seg.Fragments {
 			samples, err := frag.GetFullSamples(trex)
@@ -528,6 +739,13 @@ func (h *HDRInfo) scanFragmentedSamples(file *mp4.File, moov *mp4.MoovBox, trak 
 				return samplesScanned, err
 			}
 			for _, sample := range samples {
+				if !haveFirstDecodeTime {
+					firstDecodeTime = sample.DecodeTime
+					haveFirstDecodeTime = true
+				}
+				if hasScanLimit && !withinHDRSampleScanLimit(sample.DecodeTime, firstDecodeTime, scanLimit) {
+					return samplesScanned, nil
+				}
 				samplesScanned++
 				h.observeSample("sample", sps, sample.Data, lengthSize)
 			}
@@ -536,7 +754,7 @@ func (h *HDRInfo) scanFragmentedSamples(file *mp4.File, moov *mp4.MoovBox, trak 
 	return samplesScanned, nil
 }
 
-func (h *HDRInfo) scanProgressiveSamples(file *mp4.File, trak *mp4.TrakBox, lengthSize int, sps *hevc.SPS) (int, error) {
+func (h *HDRInfo) scanProgressiveSamples(file *mp4.File, trak *mp4.TrakBox, lengthSize int, sps *hevc.SPS, scanLimit uint64, hasScanLimit bool) (int, error) {
 	if file.Mdat == nil {
 		return 0, nil
 	}
@@ -544,11 +762,26 @@ func (h *HDRInfo) scanProgressiveSamples(file *mp4.File, trak *mp4.TrakBox, leng
 	if stbl == nil || stbl.Stsc == nil || stbl.Stsz == nil {
 		return 0, fmt.Errorf("missing progressive sample table boxes")
 	}
+	if hasScanLimit && stbl.Stts == nil {
+		return 0, fmt.Errorf("missing stts box for timed sample scan")
+	}
 	nrSamples := stbl.Stsz.SampleNumber
 	mdatPayloadStart := file.Mdat.PayloadAbsoluteOffset()
 
 	var samplesScanned int
+	var firstDecodeTime uint64
+	var haveFirstDecodeTime bool
 	for sampleNr := 1; sampleNr <= int(nrSamples); sampleNr++ {
+		if hasScanLimit {
+			decodeTime, _ := stbl.Stts.GetDecodeTime(uint32(sampleNr))
+			if !haveFirstDecodeTime {
+				firstDecodeTime = decodeTime
+				haveFirstDecodeTime = true
+			}
+			if !withinHDRSampleScanLimit(decodeTime, firstDecodeTime, scanLimit) {
+				return samplesScanned, nil
+			}
+		}
 		chunkNr, sampleNrAtChunkStart, err := stbl.Stsc.ChunkNrFromSampleNr(sampleNr)
 		if err != nil {
 			return samplesScanned, err
@@ -574,6 +807,20 @@ func (h *HDRInfo) scanProgressiveSamples(file *mp4.File, trak *mp4.TrakBox, leng
 		h.observeSample("sample", sps, file.Mdat.Data[offsetInMdatData:end], lengthSize)
 	}
 	return samplesScanned, nil
+}
+
+func hdrSampleScanLimitTicks(trak *mp4.TrakBox) (uint64, bool) {
+	if trak == nil || trak.Mdia == nil || trak.Mdia.Mdhd == nil || trak.Mdia.Mdhd.Timescale == 0 {
+		return 0, false
+	}
+	return uint64(trak.Mdia.Mdhd.Timescale) * hdrSEISampleScanLimitSeconds, true
+}
+
+func withinHDRSampleScanLimit(decodeTime, firstDecodeTime, scanLimit uint64) bool {
+	if scanLimit == 0 || decodeTime < firstDecodeTime {
+		return true
+	}
+	return decodeTime-firstDecodeTime < scanLimit
 }
 
 func (h *HDRInfo) observeSample(source string, sps *hevc.SPS, data []byte, lengthSize int) {
@@ -837,13 +1084,32 @@ func profileName(profile byte) string {
 	}
 }
 
-func levelName(levelIDC byte) string {
+func levelName(levelIDC byte, highTier bool) string {
 	if levelIDC == 0 {
 		return "na"
 	}
+	tier := "Main tier"
+	if highTier {
+		tier = "High tier"
+	}
 	major := int(levelIDC) / 30
 	minor := (int(levelIDC) % 30) / 3
-	return fmt.Sprintf("%d.%d(%d)", major, minor, levelIDC)
+	return fmt.Sprintf("%s %d.%d(%d)", tier, major, minor, levelIDC)
+}
+
+func chromaFormatName(v byte) string {
+	switch v {
+	case 0:
+		return "monochrome(0)"
+	case 1:
+		return "4:2:0(1)"
+	case 2:
+		return "4:2:2(2)"
+	case 3:
+		return "4:4:4(3)"
+	default:
+		return fmt.Sprintf("%d", v)
+	}
 }
 
 func colourPrimariesName(v uint16) string {
