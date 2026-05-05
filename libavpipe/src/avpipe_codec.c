@@ -119,11 +119,14 @@ attach_master_display(
     if (rc != eav_success)
         return rc;
 
-    AVPacketSideData *sd = av_packet_side_data_new(
-        &ctx->coded_side_data,
-        &ctx->nb_coded_side_data,
-        AV_PKT_DATA_MASTERING_DISPLAY_METADATA,
-        sizeof(m), 0);
+    /* Set HDR metadata (CLL / MDCV) - applies to both libx265 and nvenc wrapper.
+     * Must be set before the encoder is opened (avcodec_open2). */
+    AVFrameSideData *sd = av_frame_side_data_new(
+        &ctx->decoded_side_data,
+        &ctx->nb_decoded_side_data,
+        AV_FRAME_DATA_MASTERING_DISPLAY_METADATA,
+        sizeof(m),
+        AV_FRAME_SIDE_DATA_FLAG_UNIQUE);
     if (!sd) {
         elv_err("attach_master_display: side data allocation failed");
         return eav_mem_alloc;
@@ -142,11 +145,12 @@ attach_max_cll(
     if (rc != eav_success)
         return rc;
 
-    AVPacketSideData *sd = av_packet_side_data_new(
-        &ctx->coded_side_data,
-        &ctx->nb_coded_side_data,
-        AV_PKT_DATA_CONTENT_LIGHT_LEVEL,
-        sizeof(c), 0);
+    AVFrameSideData *sd = av_frame_side_data_new(
+        &ctx->decoded_side_data,
+        &ctx->nb_decoded_side_data,
+        AV_FRAME_DATA_CONTENT_LIGHT_LEVEL,
+        sizeof(c),
+        AV_FRAME_SIDE_DATA_FLAG_UNIQUE);
     if (!sd) {
         elv_err("attach_max_cll: side data allocation failed");
         return eav_mem_alloc;

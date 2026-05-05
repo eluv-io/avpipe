@@ -98,6 +98,29 @@ func doProbe(cmd *cobra.Command, args []string) error {
 		fmt.Printf("\tsample_aspect_ratio: %d:%d\n", info.SampleAspectRatio.Num(), info.SampleAspectRatio.Denom())
 		fmt.Printf("\tdisplay_aspect_ratio: %d:%d\n", info.DisplayAspectRatio.Num(), info.DisplayAspectRatio.Denom())
 		fmt.Printf("\tfield_order: %s\n", info.FieldOrder)
+		if info.CodecType == "video" {
+			if info.ColorPrimaries != "" {
+				fmt.Printf("\tcolor_primaries: %s\n", info.ColorPrimaries)
+			}
+			if info.ColorTransfer != "" {
+				fmt.Printf("\tcolor_transfer: %s\n", info.ColorTransfer)
+			}
+			if info.ColorSpace != "" {
+				fmt.Printf("\tcolor_space: %s\n", info.ColorSpace)
+			}
+			if info.ColorRange != "" {
+				fmt.Printf("\tcolor_range: %s\n", info.ColorRange)
+			}
+			if info.MasteringDisplay != "" {
+				fmt.Printf("\tmastering_display: %s\n", info.MasteringDisplay)
+			}
+			if info.MaxCLL != "" {
+				fmt.Printf("\tmax_cll: %s\n", info.MaxCLL)
+			}
+			if info.Stereo3DType != "" {
+				fmt.Printf("\tstereo3d_type: %s\n", info.Stereo3DType)
+			}
+		}
 		/* TODO: Make this a switch based on different SideData */
 		if info.SideData != nil && len(info.SideData) > 0 {
 			displayMatrix, ok := info.SideData[0].(avpipe.SideDataDisplayMatrix)

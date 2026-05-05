@@ -268,6 +268,48 @@ func fileMissing(url string) bool {
 	return info.IsDir()
 }
 
+// videoColor groups the mp4 'colr' atom fields for the first video stream of a file.
+type videoColor struct {
+	Primaries string
+	Transfer  string
+	Space     string
+	Range     string
+}
+
+// probeVideoColor returns the color metadata of the first video stream of url.
+// Empty fields are returned for color values that are unspecified in the source.
+func probeVideoColor(t *testing.T, url string) videoColor {
+	t.Helper()
+	goavpipe.InitIOHandler(
+		&xc.FileInputOpener{URL: url},
+		&xc.FileOutputOpener{Dir: filepath.Dir(url)},
+	)
+	probeParams := goavpipe.NewXcParams()
+	probeParams.Url = url
+	info, err := avpipe.Probe(probeParams)
+	require.NoError(t, err, "probe failed for %s", url)
+	for _, si := range info.StreamInfo {
+		if si.CodecType == "video" {
+			return videoColor{
+				Primaries: si.ColorPrimaries,
+				Transfer:  si.ColorTransfer,
+				Space:     si.ColorSpace,
+				Range:     si.ColorRange,
+			}
+		}
+	}
+	return videoColor{}
+}
+
+// assertColorMatches compares two videoColor sets with field-level error messages.
+func assertColorMatches(t *testing.T, want, got videoColor, label, url string) {
+	t.Helper()
+	assert.Equal(t, want.Primaries, got.Primaries, "color_primaries pass-through (%s) in %s", label, url)
+	assert.Equal(t, want.Transfer, got.Transfer, "color_transfer pass-through (%s) in %s", label, url)
+	assert.Equal(t, want.Space, got.Space, "color_space pass-through (%s) in %s", label, url)
+	assert.Equal(t, want.Range, got.Range, "color_range pass-through (%s) in %s", label, url)
+}
+
 // ---------------------------------------------------------------------------
 // Test
 // ---------------------------------------------------------------------------
@@ -291,6 +333,16 @@ func TestMezCreate(t *testing.T) {
 				t.Skipf("source file missing: %s", url)
 				return
 			}
+
+			// Capture source color metadata so we can verify mez parts pass it through
+			// to the mp4 'colr' atom (UNSPECIFIED fields are passed through unchanged).
+			srcColor := probeVideoColor(t, url)
+			log.Info("Source color metadata",
+				"source", url,
+				"primaries", srcColor.Primaries,
+				"transfer", srcColor.Transfer,
+				"space", srcColor.Space,
+				"range", srcColor.Range)
 
 			profile := mezProfileForSource(src)
 
@@ -377,7 +429,19 @@ func TestMezCreate(t *testing.T) {
 								"codec", si.CodecName,
 								"profile", si.Profile,
 								"level", si.Level,
-								"timescale", si.TimeBase)
+								"timescale", si.TimeBase,
+								"primaries", si.ColorPrimaries,
+								"transfer", si.ColorTransfer,
+								"space", si.ColorSpace,
+								"range", si.ColorRange)
+							// Color metadata must round-trip from source to mez 'colr' atom.
+							mezColor := videoColor{
+								Primaries: si.ColorPrimaries,
+								Transfer:  si.ColorTransfer,
+								Space:     si.ColorSpace,
+								Range:     si.ColorRange,
+							}
+							assertColorMatches(t, srcColor, mezColor, "mez", partFile)
 						}
 					}
 				})
@@ -421,6 +485,15 @@ func TestABRCreate(t *testing.T) {
 			partFiles := ensureMezParts(t, src, profile, videoMezDir)
 			require.NotEmpty(t, partFiles, "no mez parts for %s", src.Path)
 
+			// Capture source color metadata so we can verify ABR init segments pass it through.
+			srcColor := probeVideoColor(t, url)
+			log.Info("Source color metadata",
+				"source", url,
+				"primaries", srcColor.Primaries,
+				"transfer", srcColor.Transfer,
+				"space", srcColor.Space,
+				"range", srcColor.Range)
+
 			for _, v := range abrVariants {
 				// Skip watermark variants for sources that don't have watermarking enabled
 				if v.NeedsWM && !src.Watermark {
@@ -462,6 +535,9 @@ func TestABRCreate(t *testing.T) {
 							initFile := filepath.Join(initDir, "vinit-stream0.m4s")
 							initInfo, iErr := xc.ValidateInitSegment(initFile)
 							require.NoError(t, iErr, "ValidateInitSegment failed for %s", initFile)
+
+							// Color metadata must round-trip from source through mez to ABR 'colr' atom.
+							assertColorMatches(t, srcColor, probeVideoColor(t, initFile), "abr-init", initFile)
 
 							if partIdx == 0 {
 								refInitInfo = initInfo
