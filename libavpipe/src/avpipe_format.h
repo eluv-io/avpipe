@@ -96,20 +96,11 @@ int
 is_dolby_atmos(
     const AVStream *stream);
 
-/*
- * Verify the source video color metadata matches expected HDR overrides.
- */
 void
 verify_hdr_source_color(
     coderctx_t *decoder_context,
     xcparams_t *params);
 
-/*
- * Copy source video color metadata (primaries, transfer, matrix, range) from the decoder
- * stream codecpar onto the encoder stream codecpar so the mp4 'colr' atom carries them.
- * Only fields specified in the source are copied; UNSPECIFIED fields are left alone.
- * Must be called AFTER avcodec_parameters_from_context().
- */
 void
 copy_source_color_to_output(
     coderctx_t *encoder_context,

@@ -65,34 +65,51 @@ type mezTestSource struct {
 	FrameRate   string // frame rate as "num/den" (e.g. "30000/1001")
 	ForceKeyInt int32  // key frame interval in frames (e.g. 48)
 	Watermark   bool   // if true, also run watermarked ABR variants
+	Ecodec      string // video encoder name; default "libx264" when empty
 }
 
 // mezTestSources is the list of source files used by TestMezCreate.
-// Format:  file, frame rate, key interval, watermark
+// Format:  file, frame rate, key interval, watermark, ecodec ("" → libx264)
 var mezTestSources = []mezTestSource{
-	{"bbb_1080p_30fps_10sec.mp4", "30/1", 60, false},
-	{"bbb_1080p_30fps_60sec.mp4", "30/1", 60, true},
-	{"bbb_sunflower_2160p_30fps_normal_2min.mp4", "30/1", 60, false},
-	{"bbb_sunflower_2160p_30fps_normal_2min.ts", "30/1", 60, false},
-	{"caminandes_llamigos_1080p_4audios.mp4", "24/1", 48, false},
-	{"03_caminandes_llamigos_1080p.mp4", "24/1", 48, true},
-	{"03_caminandes_llamigos_h265_1080p.mp4", "24/1", 48, false},
-	{"Rigify-2min.mp4", "24/1", 48, false},
-	{"Sintel_30s_5_1_pcm_s24le_60000Hz.mov", "24/1", 48, false},
-	{"ELD2_FHD_4_60s_CCBYblendercloud.mov", "24000/1001", 48, false},
-	{"BBB0_HD_8_XDCAM_120s_CCBYblendercloud.mxf", "60000/1001", 120, false},
-	{"SIN6_4K_MOS_HEVC_60s.mp4", "24000/1001", 48, true},
-	{"video-960.mp4", "30/1", 60, false},
-	{"TOS0_FHD_2_H264_60s_CCBYblendercloud.mp4", "24/1", 48, false},
-	{"TOS8_FHD_51-2_PRHQ_60s_CCBYblendercloud.mov", "24000/1001", 48, false},
+	{"bbb_1080p_30fps_10sec.mp4", "30/1", 60, false, ""},
+	{"bbb_1080p_30fps_60sec.mp4", "30/1", 60, true, ""},
+	{"bbb_sunflower_2160p_30fps_normal_2min.mp4", "30/1", 60, false, ""},
+	{"bbb_sunflower_2160p_30fps_normal_2min.ts", "30/1", 60, false, ""},
+	{"caminandes_llamigos_1080p_4audios.mp4", "24/1", 48, false, ""},
+	{"03_caminandes_llamigos_1080p.mp4", "24/1", 48, true, ""},
+	{"03_caminandes_llamigos_h265_1080p.mp4", "24/1", 48, false, ""},
+	{"Rigify-2min.mp4", "24/1", 48, false, ""},
+	{"Sintel_30s_5_1_pcm_s24le_60000Hz.mov", "24/1", 48, false, ""},
+	{"ELD2_FHD_4_60s_CCBYblendercloud.mov", "24000/1001", 48, false, ""},
+	{"BBB0_HD_8_XDCAM_120s_CCBYblendercloud.mxf", "60000/1001", 120, false, ""},
+	// libx265 variant of BBB0 - locks color-metadata pass-through for the HEVC
+	// encode path. ffmpeg's HEVC decoder unconditionally overrides codecpar with
+	// the SPS VUI on demux, so a colr-only output gets clobbered on the next
+	// roundtrip; this test catches that regression.
+	{"BBB0_HD_8_XDCAM_120s_CCBYblendercloud.mxf", "60000/1001", 120, false, "libx265"},
+	{"SIN6_4K_MOS_HEVC_60s.mp4", "24000/1001", 48, true, ""},
+	{"video-960.mp4", "30/1", 60, false, ""},
+	{"TOS0_FHD_2_H264_60s_CCBYblendercloud.mp4", "24/1", 48, false, ""},
+	{"TOS8_FHD_51-2_PRHQ_60s_CCBYblendercloud.mov", "24000/1001", 48, false, ""},
 
 	// Currently these files don't work
-	//{"bbb_sunflower_1080p_29_97_fps_normal.mp4", "30000/1001", 60, false}, // Broken - file actually 30/1 fps
-	//{"prores_example.mov",                       "30000/1001", 60, false}, // Broken
-	//{"Rigify-2min-10000ts.mp4", "24/1", 48, false},                        // Broken - duration expected 416, got 417
-	//{"BBB4_HD_51_AVC_120s_CCBYblendercloud.ts", "60/1", 120, false},  // Broken - improper key frame int
-	//{"SIN5_4K_MOS_J2K_60s_CCBYblendercloud.mxf", "24000/1001", 48, false},  // Broken - avg_framerate and timebase
+	//{"bbb_sunflower_1080p_29_97_fps_normal.mp4", "30000/1001", 60, false, ""}, // Broken - file actually 30/1 fps
+	//{"prores_example.mov",                       "30000/1001", 60, false, ""}, // Broken
+	//{"Rigify-2min-10000ts.mp4", "24/1", 48, false, ""},                        // Broken - duration expected 416, got 417
+	//{"BBB4_HD_51_AVC_120s_CCBYblendercloud.ts", "60/1", 120, false, ""},  // Broken - improper key frame int
+	//{"SIN5_4K_MOS_J2K_60s_CCBYblendercloud.mxf", "24000/1001", 48, false, ""},  // Broken - avg_framerate and timebase
 
+}
+
+// mezTestSourceID returns a unique identifier for a source entry that disambiguates
+// duplicates with the same Path (e.g. when the same file is encoded with different codecs).
+// Used as the test subtest name and as the output directory name.
+func mezTestSourceID(src mezTestSource) string {
+	id := strings.TrimSuffix(src.Path, path.Ext(src.Path))
+	if src.Ecodec != "" && src.Ecodec != "libx264" {
+		id += "_" + src.Ecodec
+	}
+	return id
 }
 
 // ---------------------------------------------------------------------------
@@ -133,7 +150,10 @@ func mezProfileForSource(src mezTestSource) *mezTestProfile {
 	params := goavpipe.NewXcParams()
 	params.Format = "fmp4-segment"
 	params.Url = path.Join(mezSourceDir, src.Path)
-	params.Ecodec = "libx264"
+	params.Ecodec = src.Ecodec
+	if params.Ecodec == "" {
+		params.Ecodec = "libx264"
+	}
 	params.EncHeight = 720
 	params.EncWidth = 1280
 	params.VideoBitrate = 2560000
@@ -325,7 +345,7 @@ func TestMezCreate(t *testing.T) {
 		t.Skip("Use TestEndToEnd or comment out this skip")
 	}
 	for _, src := range mezTestSources {
-		t.Run(src.Path, func(t *testing.T) {
+		t.Run(mezTestSourceID(src), func(t *testing.T) {
 			url := path.Join(mezSourceDir, src.Path)
 			log.Info("STARTING TestMezCreate", "source", url)
 
@@ -347,7 +367,7 @@ func TestMezCreate(t *testing.T) {
 			profile := mezProfileForSource(src)
 
 			// Output directory per source file.
-			baseName := strings.TrimSuffix(src.Path, path.Ext(src.Path))
+			baseName := mezTestSourceID(src)
 			videoMezDir := path.Join(mezOutputDir, baseName)
 			err := os.MkdirAll(videoMezDir, 0755)
 			require.NoError(t, err)
@@ -470,7 +490,7 @@ func TestABRCreate(t *testing.T) {
 		t.Skip("Use TestEndToEnd or comment out this skip")
 	}
 	for _, src := range mezTestSources {
-		t.Run(src.Path, func(t *testing.T) {
+		t.Run(mezTestSourceID(src), func(t *testing.T) {
 			url := path.Join(mezSourceDir, src.Path)
 			if fileMissing(url) {
 				t.Skipf("source file missing: %s", url)
@@ -478,7 +498,7 @@ func TestABRCreate(t *testing.T) {
 			}
 
 			profile := mezProfileForSource(src)
-			baseName := strings.TrimSuffix(src.Path, path.Ext(src.Path))
+			baseName := mezTestSourceID(src)
 			videoMezDir := path.Join(mezOutputDir, baseName)
 
 			// Ensure mez parts exist (create if needed)

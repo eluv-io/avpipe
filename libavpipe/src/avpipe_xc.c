@@ -1319,6 +1319,11 @@ prepare_video_encoder(
     else
         set_h264_params(encoder_context, decoder_context, params);
 
+    /* Preserve source color metadata for non-HDR */
+    if (!(params->master_display && params->master_display[0] != '\0')) {
+        copy_source_color_to_output(encoder_context, decoder_context);
+    }
+
     elv_log("Output pixel_format=%s, profile=%d, level=%d",
         av_get_pix_fmt_name(encoder_codec_context->pix_fmt),
         encoder_codec_context->profile,
@@ -1344,21 +1349,6 @@ prepare_video_encoder(
             encoder_context->codec_context[index]) < 0) {
         elv_err("could not copy encoder parameters to output stream");
         return eav_codec_param;
-    }
-
-    /*
-     * Preserve source color metadata in the mp4 'colr' atom.
-     *
-     * For non-HDR encodes, encoder_codec_context->color_* are left UNSPECIFIED (the default),
-     * so the elementary stream VUI signals nothing. After avcodec_parameters_from_context()
-     * has copied the (UNSPECIFIED) values to the output codecpar, override them with the
-     * source values so the mp4 muxer writes the source color metadata into the 'colr' atom.
-     *
-     * For HDR (master_display set), the HDR override has already been applied to the encoder
-     * context (BT2020/PQ/BT2020nc/MPEG); skip the source-based override and keep those values.
-     */
-    if (!(params->master_display && params->master_display[0] != '\0')) {
-        copy_source_color_to_output(encoder_context, decoder_context);
     }
 
     log_color_metadata("encode", index,

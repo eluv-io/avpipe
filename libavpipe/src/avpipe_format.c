@@ -500,12 +500,11 @@ verify_hdr_source_color(
 }
 
 /*
- * Copy source color metadata from decoder stream codecpar to encoder stream codecpar.
- * Only fields that are specified in the source are copied; UNSPECIFIED fields are left alone.
- * Caller must invoke this AFTER avcodec_parameters_from_context() so that codecpar values
- * are not overwritten by the encoder context defaults. Because the encoder context fields
- * are left UNSPECIFIED, the elementary stream VUI signals nothing - only the mp4 'colr' atom
- * carries the source values.
+ * Copy source color metadata into encoder codec context if specified
+ * Must be called before avcodec_open2().
+ *
+ * Setting both VUI and colr is required for HEVC (HEVC decoder overrides codecpar->color*
+ * with the SPS VUI values).
  */
 void
 copy_source_color_to_output(
@@ -515,16 +514,16 @@ copy_source_color_to_output(
     int idx = decoder_context->video_stream_index;
     if (idx < 0 || !decoder_context->stream[idx] || !decoder_context->stream[idx]->codecpar)
         return;
-    if (!encoder_context->stream[idx] || !encoder_context->stream[idx]->codecpar)
+    if (!encoder_context->codec_context[idx])
         return;
     AVCodecParameters *src = decoder_context->stream[idx]->codecpar;
-    AVCodecParameters *dst = encoder_context->stream[idx]->codecpar;
+    AVCodecContext    *dst = encoder_context->codec_context[idx];
     if (src->color_primaries != AVCOL_PRI_UNSPECIFIED)
         dst->color_primaries = src->color_primaries;
     if (src->color_trc != AVCOL_TRC_UNSPECIFIED)
         dst->color_trc = src->color_trc;
     if (src->color_space != AVCOL_SPC_UNSPECIFIED)
-        dst->color_space = src->color_space;
+        dst->colorspace = src->color_space;
     if (src->color_range != AVCOL_RANGE_UNSPECIFIED)
         dst->color_range = src->color_range;
 }
