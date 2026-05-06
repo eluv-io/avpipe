@@ -109,6 +109,14 @@ format_max_cll(
     return eav_success;
 }
 
+/*
+ * Emit the MDCV atom - parse x265 master-display string and write to coded_side_data.
+ * Used by both libx265 and nvenc.
+ * Must be called before avcodec_open2().
+ *
+ * Returns eav_success on success, eav_param if the string can't be parsed,
+ * or eav_mem_alloc if side-data allocation fails.
+ */
 int
 attach_master_display(
     AVCodecContext *ctx,
@@ -119,14 +127,11 @@ attach_master_display(
     if (rc != eav_success)
         return rc;
 
-    /* Set HDR metadata (CLL / MDCV) - applies to both libx265 and nvenc wrapper.
-     * Must be set before the encoder is opened (avcodec_open2). */
-    AVFrameSideData *sd = av_frame_side_data_new(
-        &ctx->decoded_side_data,
-        &ctx->nb_decoded_side_data,
-        AV_FRAME_DATA_MASTERING_DISPLAY_METADATA,
-        sizeof(m),
-        AV_FRAME_SIDE_DATA_FLAG_UNIQUE);
+    AVPacketSideData *sd = av_packet_side_data_new(
+        &ctx->coded_side_data,
+        &ctx->nb_coded_side_data,
+        AV_PKT_DATA_MASTERING_DISPLAY_METADATA,
+        sizeof(m), 0);
     if (!sd) {
         elv_err("attach_master_display: side data allocation failed");
         return eav_mem_alloc;
@@ -135,8 +140,69 @@ attach_master_display(
     return eav_success;
 }
 
+/*
+ * Emit CLLI atom - parse "<MaxCLL>,<MaxFALL>" and write to coded_side-data.
+ * Used by both libx265 and nvenc.
+ * Must be called before avcodec_open2().
+ */
 int
 attach_max_cll(
+    AVCodecContext *ctx,
+    const char *s)
+{
+    AVContentLightMetadata c;
+    int rc = parse_max_cll(s, &c);
+    if (rc != eav_success)
+        return rc;
+
+    AVPacketSideData *sd = av_packet_side_data_new(
+        &ctx->coded_side_data,
+        &ctx->nb_coded_side_data,
+        AV_PKT_DATA_CONTENT_LIGHT_LEVEL,
+        sizeof(c), 0);
+    if (!sd) {
+        elv_err("attach_max_cll: side data allocation failed");
+        return eav_mem_alloc;
+    }
+    memcpy(sd->data, &c, sizeof(c));
+    return eav_success;
+}
+
+/*
+ * nvenc-only attach mastering display metadata as AV_FRAME_DATA_MASTERING_DISPLAY_METADATA
+ * on ctx->decoded_side_data so nvenc wrapper enables SEI 137 emission.
+ * Must be called before avcodec_open2().
+ */
+int
+attach_master_display_nvenc(
+    AVCodecContext *ctx,
+    const char *s)
+{
+    AVMasteringDisplayMetadata m;
+    int rc = parse_master_display(s, &m);
+    if (rc != eav_success)
+        return rc;
+
+    AVFrameSideData *sd = av_frame_side_data_new(
+        &ctx->decoded_side_data,
+        &ctx->nb_decoded_side_data,
+        AV_FRAME_DATA_MASTERING_DISPLAY_METADATA,
+        sizeof(m), 0);
+    if (!sd) {
+        elv_err("attach_master_display_nvenc: side data allocation failed");
+        return eav_mem_alloc;
+    }
+    memcpy(sd->data, &m, sizeof(m));
+    return eav_success;
+}
+
+/*
+ * nvenc-only attach max_cll as AV_FRAME_DATA_CONTENT_LIGHT_LEVEL
+ * on decoded_side_data so nvenc wrapper emits the clli SEI.
+ * Must be called before avcodec_open2().
+ */
+int
+attach_max_cll_nvenc(
     AVCodecContext *ctx,
     const char *s)
 {
@@ -149,10 +215,9 @@ attach_max_cll(
         &ctx->decoded_side_data,
         &ctx->nb_decoded_side_data,
         AV_FRAME_DATA_CONTENT_LIGHT_LEVEL,
-        sizeof(c),
-        AV_FRAME_SIDE_DATA_FLAG_UNIQUE);
+        sizeof(c), 0);
     if (!sd) {
-        elv_err("attach_max_cll: side data allocation failed");
+        elv_err("attach_max_cll_nvenc: side data allocation failed");
         return eav_mem_alloc;
     }
     memcpy(sd->data, &c, sizeof(c));

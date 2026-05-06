@@ -55,27 +55,22 @@ format_max_cll(
     size_t buf_size,
     const AVContentLightMetadata *c);
 
-/*
- * Parse x265 master-display string and attach as
- * AV_FRAME_DATA_MASTERING_DISPLAY_METADATA on ctx->decoded_side_data.
- * Applies to both libx265 and nvenc wrapper
- * Must be called before avcodec_open2().
- *
- * Returns eav_success on success, eav_param if the string can't be parsed,
- * or eav_mem_alloc if side-data allocation fails.
- */
 int
 attach_master_display(
     AVCodecContext *ctx,
     const char *s);
 
-/*
- * Parse "<MaxCLL>,<MaxFALL>" and attach as AV_FRAME_DATA_CONTENT_LIGHT_LEVEL
- * on ctx->decoded_side_data.
- * Applies to both libx265 and nvenc wrapper
- * Must be called before avcodec_open2().
- */
 int
 attach_max_cll(
+    AVCodecContext *ctx,
+    const char *s);
+
+int
+attach_master_display_nvenc(
+    AVCodecContext *ctx,
+    const char *s);
+
+int
+attach_max_cll_nvenc(
     AVCodecContext *ctx,
     const char *s);

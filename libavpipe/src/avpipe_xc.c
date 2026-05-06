@@ -802,10 +802,13 @@ set_h265_params(
     char x265_params[512] = {0};
     size_t off = 0;
 
-    /* Set max_cll and master_display meta data for HDR content (omit if "0,0") */
+    /* HDR for libx265:
+     *   - SEI 137/144 emission: handled by libx265's "master-display"/"max-cll" AVOptions.
+     *   - mp4 'mdcv'/'clli' atoms: attach_master_display / attach_max_cll write to
+     *     coded_side_data
+     */
     if (params->max_cll && params->max_cll[0] != '\0' && strcmp(params->max_cll, "0,0") != 0) {
         av_opt_set(encoder_codec_context->priv_data, "max-cll", params->max_cll, 0);
-        /* Also attach as side data - mp4 clli box. */
         if (attach_max_cll(encoder_codec_context, params->max_cll) != eav_success)
             elv_warn("set_h265_params: failed to attach max_cll side data, url=%s", params->url);
     }
@@ -818,7 +821,6 @@ set_h265_params(
             "hdr10=1:hdr10-opt=1:repeat-headers=1:colorprim=bt2020:transfer=smpte2084:colormatrix=bt2020nc");
         av_opt_set(encoder_codec_context->priv_data, "master-display", params->master_display, 0);
 
-        /* Attach side data - mp4 muxer mdcv box */
         if (attach_master_display(encoder_codec_context, params->master_display) != eav_success)
             elv_warn("set_h265_params: failed to attach master_display side data, url=%s", params->url);
 
@@ -1030,12 +1032,17 @@ set_nvidia_hevc_params(
     av_opt_set(encoder_codec_context->priv_data, "preset", "p2", 0); // Valid: p1–p7
     av_opt_set(encoder_codec_context->priv_data, "tune", "hq", 0);   // Valid: hq, ll, ull, lossless, losslesshp
 
-    /* HDR - set max_cll and master_display meta data for HDR content (skip if "0,0").
-     * nvenc has no master_display/max_cll AVOption; the data is delivered via
-     * AVCodecContext::decoded_side_data (see attach_max_cll / attach_master_display). */
+    /* HDR for nvenc requires both side-data paths:
+     *   - coded_side_data: read by the mp4 muxer to emit the 'mdcv'/'clli' atoms
+     *   - decoded_side_data: read by ffmpeg's nvenc wrapper at avcodec_open2() to
+     *     emit the in-stream SEI 137 (mdcv) and SEI 144 (clli) messages
+     * (nvenc has no master_display/max_cll AVOption)
+     */
     if (params->max_cll && params->max_cll[0] != '\0' && strcmp(params->max_cll, "0,0") != 0) {
         if (attach_max_cll(encoder_codec_context, params->max_cll) != eav_success)
-            elv_warn("set_nvidia_hevc_params: failed to attach max_cll side data, url=%s", params->url);
+            elv_warn("set_nvidia_hevc_params: failed to attach max_cll coded side data, url=%s", params->url);
+        if (attach_max_cll_nvenc(encoder_codec_context, params->max_cll) != eav_success)
+            elv_warn("set_nvidia_hevc_params: failed to attach max_cll decoded side data, url=%s", params->url);
     }
     if (params->master_display && params->master_display[0] != '\0') {
         /* HDR override: verify source color matches BT2020/PQ/BT2020nc/MPEG and warn for any mismatch.
@@ -1048,10 +1055,12 @@ set_nvidia_hevc_params(
         encoder_codec_context->color_trc      = AVCOL_TRC_SMPTE2084;             // PQ (ST 2084)
         encoder_codec_context->colorspace     = AVCOL_SPC_BT2020_NCL;            // bt2020nc
 
-        /* Side data on decoded_side_data - nvenc reads it at avcodec_open2(), then
-         * pic_params reference it per frame to emit SEI 137 + mp4 mdcv box. */
+        /* mp4 'mdcv' atom side data */
         if (attach_master_display(encoder_codec_context, params->master_display) != eav_success)
-            elv_warn("set_nvidia_hevc_params: failed to attach master_display side data, url=%s", params->url);
+            elv_warn("set_nvidia_hevc_params: failed to attach master_display coded side data, url=%s", params->url);
+        /* SEI 137 emission (nvenc-specific path) */
+        if (attach_master_display_nvenc(encoder_codec_context, params->master_display) != eav_success)
+            elv_warn("set_nvidia_hevc_params: failed to attach master_display decoded side data, url=%s", params->url);
 
         /* HDR10 requires 10bit and main10 - set if not specified */
         if (params->profile == NULL || strlen(params->profile) == 0) {
