@@ -1344,16 +1344,18 @@ prepare_video_encoder(
      * Do NOT copy source color onto encoder_codec_context for nvenc encoders due to a bug/crash
      * observed with version 595/13.2
      */
-    if (!(params->master_display && params->master_display[0] != '\0') &&
-        strcmp(params->ecodec, "hevc_nvenc") != 0 &&
-        strcmp(params->ecodec, "h264_nvenc") != 0) {
+    int source_color_copied = 0;
+    if (!(params->master_display && params->master_display[0] != '\0')) {
         copy_source_color_to_output(encoder_context, decoder_context);
+        source_color_copied = 1;
     }
 
-    elv_log("Output pixel_format=%s, profile=%d, level=%d",
+    elv_log("Output pixel_format=%s, codec=%s, profile=%d, level=%d, color_copied=%d",
         av_get_pix_fmt_name(encoder_codec_context->pix_fmt),
+        params->ecodec,
         encoder_codec_context->profile,
-        encoder_codec_context->level);
+        encoder_codec_context->level,
+        source_color_copied);
 
     /* Set encoder options after setting all codec context parameters */
     rc = set_encoder_options(encoder_context, decoder_context, params, decoder_context->video_stream_index,

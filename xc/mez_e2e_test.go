@@ -85,10 +85,6 @@ var mezTestSources = []mezTestSource{
 	{"Sintel_30s_5_1_pcm_s24le_60000Hz.mov", "24/1", 48, false, ""},
 	{"ELD2_FHD_4_60s_CCBYblendercloud.mov", "24000/1001", 48, false, ""},
 	{"BBB0_HD_8_XDCAM_120s_CCBYblendercloud.mxf", "60000/1001", 120, false, ""},
-	// libx265 variant of BBB0 - locks color-metadata pass-through for the HEVC
-	// encode path. ffmpeg's HEVC decoder unconditionally overrides codecpar with
-	// the SPS VUI on demux, so a colr-only output gets clobbered on the next
-	// roundtrip; this test catches that regression.
 	{"BBB0_HD_8_XDCAM_120s_CCBYblendercloud.mxf", "60000/1001", 120, false, "libx265"},
 	{"SIN6_4K_MOS_HEVC_60s.mp4", "24000/1001", 48, true, ""},
 	{"video-960.mp4", "30/1", 60, false, ""},
