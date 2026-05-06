@@ -20,8 +20,8 @@ FFMPEG_CFLAGS  := $(shell PKG_CONFIG_PATH=$(PKG_CONFIG_PATH) pkg-config --cflags
 FFMPEG_LDFLAGS := $(shell PKG_CONFIG_PATH=$(PKG_CONFIG_PATH) pkg-config --libs   libavformat libavcodec libavutil libswscale libavfilter libswresample)
 
 # x265 flags - use the multiview-enabled build
-X265_CFLAGS  = -I$(X265_BUILD_DIR) -I$(X265_SRC_DIR)
-X265_LDFLAGS = -L$(X265_BUILD_DIR) -lx265 -Wl,-rpath,$(realpath $(X265_BUILD_DIR))
+X265_CFLAGS  := $(shell PKG_CONFIG_PATH=$(PKG_CONFIG_PATH) pkg-config --cflags x265)
+X265_LDFLAGS := $(shell PKG_CONFIG_PATH=$(PKG_CONFIG_PATH) pkg-config --libs   x265) -Wl,-rpath
 
 CC = clang
 CFLAGS = -Wall -Wextra -g -O2 -I$(AVPIPE_INCLUDE) $(FFMPEG_CFLAGS) $(X265_CFLAGS)
