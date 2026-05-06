@@ -1032,17 +1032,27 @@ set_nvidia_hevc_params(
     av_opt_set(encoder_codec_context->priv_data, "preset", "p2", 0); // Valid: p1–p7
     av_opt_set(encoder_codec_context->priv_data, "tune", "hq", 0);   // Valid: hq, ll, ull, lossless, losslesshp
 
-    /* HDR for nvenc requires both side-data paths:
-     *   - coded_side_data: read by the mp4 muxer to emit the 'mdcv'/'clli' atoms
-     *   - decoded_side_data: read by ffmpeg's nvenc wrapper at avcodec_open2() to
-     *     emit the in-stream SEI 137 (mdcv) and SEI 144 (clli) messages
-     * (nvenc has no master_display/max_cll AVOption)
-     */
+    /* HDR for nvenc:
+     *   - mp4 'mdcv'/'clli' atoms via coded_side_data: safe and necessary so the
+     *     container carries HDR metadata (mediainfo and HDR-aware demuxers read it).
+     *   - in-stream SEI 137/144 emission via decoded_side_data: DISABLED (#if 0).
+     *     Setting pMasteringDisplay/pMaxCll on NV_ENC_PIC_PARAMS triggers an
+     *     invalid-pointer free inside libnvidia-encode.so during nvEncEncodePicture
+     *     (tcmalloc abort, stack: nvenc.c:3244 -> libnvidia-encode -> tcmalloc -> abort).
+     *     Confirmed via core-dump backtrace 2026-05-05; reproducible per frame
+     *     when pMasteringDisplay is non-NULL. Flip NVENC_HDR_SEI to 1 to re-enable
+     *     once the NVENC driver/SDK ships a fix.
+     * nvenc has no master_display/max_cll AVOption; until the NVIDIA bug is
+     * resolved, downstream HDR signaling for nvenc output relies on the mp4
+     * atoms (and the colr/VUI fields set on the encoder context below). */
+#define NVENC_HDR_SEI 0   /* re-enable once NVIDIA fixes libnvidia-encode.so HDR pic_params handling */
     if (params->max_cll && params->max_cll[0] != '\0' && strcmp(params->max_cll, "0,0") != 0) {
         if (attach_max_cll(encoder_codec_context, params->max_cll) != eav_success)
-            elv_warn("set_nvidia_hevc_params: failed to attach max_cll coded side data, url=%s", params->url);
+            elv_warn("set_nvidia_hevc_params: failed to attach max_cll side data, url=%s", params->url);
+#if NVENC_HDR_SEI
         if (attach_max_cll_nvenc(encoder_codec_context, params->max_cll) != eav_success)
             elv_warn("set_nvidia_hevc_params: failed to attach max_cll decoded side data, url=%s", params->url);
+#endif
     }
     if (params->master_display && params->master_display[0] != '\0') {
         /* HDR override: verify source color matches BT2020/PQ/BT2020nc/MPEG and warn for any mismatch.
@@ -1057,10 +1067,12 @@ set_nvidia_hevc_params(
 
         /* mp4 'mdcv' atom side data */
         if (attach_master_display(encoder_codec_context, params->master_display) != eav_success)
-            elv_warn("set_nvidia_hevc_params: failed to attach master_display coded side data, url=%s", params->url);
-        /* SEI 137 emission (nvenc-specific path) */
+            elv_warn("set_nvidia_hevc_params: failed to attach master_display side data, url=%s", params->url);
+#if NVENC_HDR_SEI
+        /* SEI 137 emission (nvenc-specific path) - disabled, see NVENC_HDR_SEI above */
         if (attach_master_display_nvenc(encoder_codec_context, params->master_display) != eav_success)
             elv_warn("set_nvidia_hevc_params: failed to attach master_display decoded side data, url=%s", params->url);
+#endif
 
         /* HDR10 requires 10bit and main10 - set if not specified */
         if (params->profile == NULL || strlen(params->profile) == 0) {
