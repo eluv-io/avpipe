@@ -7,10 +7,9 @@
 # Build: make
 # Clean: make clean
 
-# Toolchain paths
-TOOLCHAIN_BASE = ../../../elv-toolchain-7.1/source
-X265_BUILD_DIR = $(TOOLCHAIN_BASE)/x265_git/_build/8bit
-X265_SRC_DIR   = $(TOOLCHAIN_BASE)/x265_git/source
+TOP_DIR ?= $(shell pwd)
+ROOT_DIR ?= $(TOP_DIR)/../..
+BINDIR ?= bin
 
 # avpipe include path
 AVPIPE_INCLUDE = ../../include
@@ -32,14 +31,19 @@ TARGET = mvhevc_encoder
 SRCS   = mvhevc_encoder.c mvhevc_xc.c
 OBJS   = $(SRCS:.c=.o)
 
-.PHONY: all clean run-test
+.PHONY: all install clean run-test
 
-all: $(TARGET)
+all: $(TARGET) install
 
 $(TARGET): $(OBJS)
 	$(CC) $(CFLAGS) -o $@ $(OBJS) $(LDFLAGS)
 	@echo ""
 	@echo "Build successful: $(TARGET)"
+
+install: $(TARGET)
+	@(if [ ! -d $(ROOT_DIR)/$(BINDIR) ]; then mkdir $(ROOT_DIR)/$(BINDIR); fi)
+	@echo "Installing $(TARGET)"
+	@cp $(TARGET) $(ROOT_DIR)/$(BINDIR)
 
 %.o: %.c mvhevc_xc.h
 	$(CC) $(CFLAGS) -c -o $@ $<
