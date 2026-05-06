@@ -54,6 +54,9 @@ const keepMezOutput = true
 // keepSegsOutput prevents cleanup of ABR segment output
 const keepSegsOutput = true
 
+// enableNvenc enables tests on NVIDIA GPU
+const enableNvenc = false
+
 // e2eMode is set to true when tests run inside TestEndToEnd.
 // PENDING(SS) simplify and remove this global so tests can run correctly in parallel
 var e2eMode bool
@@ -110,6 +113,17 @@ func mezTestSourceID(src mezTestSource) string {
 		id += "_" + src.Ecodec
 	}
 	return id
+}
+
+// Append nvenc-encoded variants when enableNvenc is set
+func init() {
+	if !enableNvenc {
+		return
+	}
+	mezTestSources = append(mezTestSources,
+		// SDR HEVC mez via nvenc - sister to the libx265 BBB0 entry above.
+		mezTestSource{"BBB0_HD_8_XDCAM_120s_CCBYblendercloud.mxf", "60000/1001", 120, false, "hevc_nvenc"},
+	)
 }
 
 // ---------------------------------------------------------------------------

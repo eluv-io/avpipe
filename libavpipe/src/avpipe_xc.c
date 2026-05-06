@@ -1035,7 +1035,7 @@ set_nvidia_hevc_params(
     /* HDR for nvenc:
      *   - mp4 'mdcv'/'clli' atoms via coded_side_data: safe and necessary so the
      *     container carries HDR metadata (mediainfo and HDR-aware demuxers read it).
-     *   - in-stream SEI 137/144 emission via decoded_side_data: DISABLED (#if 0).
+     *   - in-stream SEI 137/144 emission via decoded_side_data: currently disabled (NVENC_HDR_SEI)
      *     Setting pMasteringDisplay/pMaxCll on NV_ENC_PIC_PARAMS triggers an
      *     invalid-pointer free inside libnvidia-encode.so during nvEncEncodePicture
      *     (tcmalloc abort, stack: nvenc.c:3244 -> libnvidia-encode -> tcmalloc -> abort).
@@ -1045,7 +1045,6 @@ set_nvidia_hevc_params(
      * nvenc has no master_display/max_cll AVOption; until the NVIDIA bug is
      * resolved, downstream HDR signaling for nvenc output relies on the mp4
      * atoms (and the colr/VUI fields set on the encoder context below). */
-#define NVENC_HDR_SEI 0   /* re-enable once NVIDIA fixes libnvidia-encode.so HDR pic_params handling */
     if (params->max_cll && params->max_cll[0] != '\0' && strcmp(params->max_cll, "0,0") != 0) {
         if (attach_max_cll(encoder_codec_context, params->max_cll) != eav_success)
             elv_warn("set_nvidia_hevc_params: failed to attach max_cll side data, url=%s", params->url);
@@ -1340,8 +1339,14 @@ prepare_video_encoder(
     else
         set_h264_params(encoder_context, decoder_context, params);
 
-    /* Preserve source color metadata for non-HDR */
-    if (!(params->master_display && params->master_display[0] != '\0')) {
+    /* Preserve source color metadata for non-HDR in SPS VUI.
+     *
+     * Do NOT copy source color onto encoder_codec_context for nvenc encoders due to a bug/crash
+     * observed with version 595/13.2
+     */
+    if (!(params->master_display && params->master_display[0] != '\0') &&
+        strcmp(params->ecodec, "hevc_nvenc") != 0 &&
+        strcmp(params->ecodec, "h264_nvenc") != 0) {
         copy_source_color_to_output(encoder_context, decoder_context);
     }
 
