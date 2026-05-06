@@ -713,7 +713,7 @@ func (h *HDRInfo) scanMediaSamples(file *mp4.File, moov *mp4.MoovBox, trak *mp4.
 	if file.IsFragmented() {
 		return h.scanFragmentedSamples(file, moov, trak, lengthSize, sps, scanLimit, hasScanLimit)
 	}
-	return h.scanProgressiveSamples(file, trak, lengthSize, sps, scanLimit, hasScanLimit)
+	return 0, nil
 }
 
 func (h *HDRInfo) scanFragmentedSamples(file *mp4.File, moov *mp4.MoovBox, trak *mp4.TrakBox, lengthSize int, sps *hevc.SPS, scanLimit uint64, hasScanLimit bool) (int, error) {
@@ -725,8 +725,11 @@ func (h *HDRInfo) scanFragmentedSamples(file *mp4.File, moov *mp4.MoovBox, trak 
 	if moov != nil && moov.Mvex != nil && trak.Tkhd != nil {
 		trex, _ = moov.Mvex.GetTrex(trak.Tkhd.TrackID)
 	}
-	if trak.Tkhd != nil && trex == nil {
-		return 0, fmt.Errorf("missing trex for video track %d", trak.Tkhd.TrackID)
+	if trex == nil {
+		if trak != nil && trak.Tkhd != nil {
+			return 0, fmt.Errorf("missing trex for video track %d", trak.Tkhd.TrackID)
+		}
+		return 0, fmt.Errorf("missing trex for video track")
 	}
 
 	var samplesScanned int
@@ -750,61 +753,6 @@ func (h *HDRInfo) scanFragmentedSamples(file *mp4.File, moov *mp4.MoovBox, trak 
 				h.observeSample("sample", sps, sample.Data, lengthSize)
 			}
 		}
-	}
-	return samplesScanned, nil
-}
-
-func (h *HDRInfo) scanProgressiveSamples(file *mp4.File, trak *mp4.TrakBox, lengthSize int, sps *hevc.SPS, scanLimit uint64, hasScanLimit bool) (int, error) {
-	if file.Mdat == nil {
-		return 0, nil
-	}
-	stbl := sampleTable(trak)
-	if stbl == nil || stbl.Stsc == nil || stbl.Stsz == nil {
-		return 0, fmt.Errorf("missing progressive sample table boxes")
-	}
-	if hasScanLimit && stbl.Stts == nil {
-		return 0, fmt.Errorf("missing stts box for timed sample scan")
-	}
-	nrSamples := stbl.Stsz.SampleNumber
-	mdatPayloadStart := file.Mdat.PayloadAbsoluteOffset()
-
-	var samplesScanned int
-	var firstDecodeTime uint64
-	var haveFirstDecodeTime bool
-	for sampleNr := 1; sampleNr <= int(nrSamples); sampleNr++ {
-		if hasScanLimit {
-			decodeTime, _ := stbl.Stts.GetDecodeTime(uint32(sampleNr))
-			if !haveFirstDecodeTime {
-				firstDecodeTime = decodeTime
-				haveFirstDecodeTime = true
-			}
-			if !withinHDRSampleScanLimit(decodeTime, firstDecodeTime, scanLimit) {
-				return samplesScanned, nil
-			}
-		}
-		chunkNr, sampleNrAtChunkStart, err := stbl.Stsc.ChunkNrFromSampleNr(sampleNr)
-		if err != nil {
-			return samplesScanned, err
-		}
-		offset, err := getChunkOffset(stbl, chunkNr)
-		if err != nil {
-			return samplesScanned, err
-		}
-		for sNr := sampleNrAtChunkStart; sNr < sampleNr; sNr++ {
-			offset += uint64(stbl.Stsz.GetSampleSize(sNr))
-		}
-		size := stbl.Stsz.GetSampleSize(sampleNr)
-		if offset < mdatPayloadStart {
-			return samplesScanned, fmt.Errorf("sample %d offset %d is before mdat payload %d", sampleNr, offset, mdatPayloadStart)
-		}
-		offsetInMdatData := offset - mdatPayloadStart
-		end := offsetInMdatData + uint64(size)
-		if end > uint64(len(file.Mdat.Data)) {
-			return samplesScanned, fmt.Errorf("sample %d exceeds mdat payload", sampleNr)
-		}
-
-		samplesScanned++
-		h.observeSample("sample", sps, file.Mdat.Data[offsetInMdatData:end], lengthSize)
 	}
 	return samplesScanned, nil
 }
@@ -933,16 +881,6 @@ func findColr(vse *mp4.VisualSampleEntryBox) *mp4.ColrBox {
 		}
 	}
 	return nil
-}
-
-func getChunkOffset(stbl *mp4.StblBox, chunkNr int) (uint64, error) {
-	if stbl.Stco != nil {
-		return stbl.Stco.GetOffset(chunkNr)
-	}
-	if stbl.Co64 != nil {
-		return stbl.Co64.GetOffset(chunkNr)
-	}
-	return 0, fmt.Errorf("neither stco nor co64 is present")
 }
 
 func nalusFromSample(sample []byte, lengthSize int) ([][]byte, error) {
