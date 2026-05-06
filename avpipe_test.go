@@ -1870,12 +1870,8 @@ func runHEVCHDR10MezAndABR(t *testing.T, ecodec string) {
 		ColorRange:       "tv",
 		Width:            3840,
 		Height:           2160,
-		MasteringDisplay: hdr10MasterDisplay, // round-trips bit-exact through x265 → mp4 → probe
+		MasteringDisplay: hdr10MasterDisplay,
 		MaxCLL:           hdr10MaxCLL,
-	}
-	if ecodec == "hevc_nvenc" {
-		// nvenc uses P010 (semi-planar 10-bit) instead of YUV420P10LE.
-		mezExpected.PixFmt = "p010le"
 	}
 	assertHDR10(t, path.Join(mezDir, "vsegment-1.mp4"), mezExpected)
 	assertHDR10(t, path.Join(mezDir, "vsegment-2.mp4"), mezExpected)
