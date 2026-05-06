@@ -302,7 +302,8 @@ func fileMissing(url string) bool {
 	return info.IsDir()
 }
 
-// videoColor groups the mp4 'colr' atom fields for the first video stream of a file.
+// videoColor groups general video color metadata for the first video stream of a file,
+// as signaled by the container and/or encoded bitstream.
 type videoColor struct {
 	Primaries string
 	Transfer  string
