@@ -170,7 +170,7 @@ attach_max_cll(
 
 /*
  * nvenc-only attach mastering display metadata as AV_FRAME_DATA_MASTERING_DISPLAY_METADATA
- * on ctx->decoded_side_data so nvenc wrapper enables SEI 137 emission.
+ * on decoded_side_data so nvenc wrapper adds SEI mdcv
  * Must be called before avcodec_open2().
  */
 int
@@ -198,7 +198,7 @@ attach_master_display_nvenc(
 
 /*
  * nvenc-only attach max_cll as AV_FRAME_DATA_CONTENT_LIGHT_LEVEL
- * on decoded_side_data so nvenc wrapper emits the clli SEI.
+ * on decoded_side_data so nvenc wrapper adds SEI clli
  * Must be called before avcodec_open2().
  */
 int

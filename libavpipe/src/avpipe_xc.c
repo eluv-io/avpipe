@@ -1035,16 +1035,11 @@ set_nvidia_hevc_params(
     /* HDR for nvenc:
      *   - mp4 'mdcv'/'clli' atoms via coded_side_data: safe and necessary so the
      *     container carries HDR metadata (mediainfo and HDR-aware demuxers read it).
-     *   - in-stream SEI 137/144 emission via decoded_side_data: currently disabled (NVENC_HDR_SEI)
+     *   - in-stream SEI 137/144 via decoded_side_data currently disabled (ifdef NVENC_HDR_SEI)
      *     Setting pMasteringDisplay/pMaxCll on NV_ENC_PIC_PARAMS triggers an
-     *     invalid-pointer free inside libnvidia-encode.so during nvEncEncodePicture
-     *     (tcmalloc abort, stack: nvenc.c:3244 -> libnvidia-encode -> tcmalloc -> abort).
-     *     Confirmed via core-dump backtrace 2026-05-05; reproducible per frame
-     *     when pMasteringDisplay is non-NULL. Flip NVENC_HDR_SEI to 1 to re-enable
-     *     once the NVENC driver/SDK ships a fix.
-     * nvenc has no master_display/max_cll AVOption; until the NVIDIA bug is
-     * resolved, downstream HDR signaling for nvenc output relies on the mp4
-     * atoms (and the colr/VUI fields set on the encoder context below). */
+     *     invalid-pointer free in nvEncEncodePicture (nvenc.c:3244)
+     * (nvenc has no master_display/max_cll AVOption)
+     */
     if (params->max_cll && params->max_cll[0] != '\0' && strcmp(params->max_cll, "0,0") != 0) {
         if (attach_max_cll(encoder_codec_context, params->max_cll) != eav_success)
             elv_warn("set_nvidia_hevc_params: failed to attach max_cll side data, url=%s", params->url);
