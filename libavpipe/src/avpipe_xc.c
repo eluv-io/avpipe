@@ -1334,11 +1334,7 @@ prepare_video_encoder(
     else
         set_h264_params(encoder_context, decoder_context, params);
 
-    /* Preserve source color metadata for non-HDR in SPS VUI.
-     *
-     * Do NOT copy source color onto encoder_codec_context for nvenc encoders due to a bug/crash
-     * observed with version 595/13.2
-     */
+    /* Preserve source color metadata for non-HDR in SPS VUI */
     int source_color_copied = 0;
     if (!(params->master_display && params->master_display[0] != '\0')) {
         copy_source_color_to_output(encoder_context, decoder_context);
