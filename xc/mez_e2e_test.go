@@ -54,6 +54,9 @@ const keepMezOutput = true
 // keepSegsOutput prevents cleanup of ABR segment output
 const keepSegsOutput = true
 
+// enableNvenc enables tests on NVIDIA GPU
+const enableNvenc = false
+
 // e2eMode is set to true when tests run inside TestEndToEnd.
 // PENDING(SS) simplify and remove this global so tests can run correctly in parallel
 var e2eMode bool
@@ -65,34 +68,58 @@ type mezTestSource struct {
 	FrameRate   string // frame rate as "num/den" (e.g. "30000/1001")
 	ForceKeyInt int32  // key frame interval in frames (e.g. 48)
 	Watermark   bool   // if true, also run watermarked ABR variants
+	Ecodec      string // video encoder name; default "libx264" when empty
 }
 
 // mezTestSources is the list of source files used by TestMezCreate.
-// Format:  file, frame rate, key interval, watermark
+// Format:  file, frame rate, key interval, watermark, ecodec ("" → libx264)
 var mezTestSources = []mezTestSource{
-	{"bbb_1080p_30fps_10sec.mp4", "30/1", 60, false},
-	{"bbb_1080p_30fps_60sec.mp4", "30/1", 60, true},
-	{"bbb_sunflower_2160p_30fps_normal_2min.mp4", "30/1", 60, false},
-	{"bbb_sunflower_2160p_30fps_normal_2min.ts", "30/1", 60, false},
-	{"caminandes_llamigos_1080p_4audios.mp4", "24/1", 48, false},
-	{"03_caminandes_llamigos_1080p.mp4", "24/1", 48, true},
-	{"03_caminandes_llamigos_h265_1080p.mp4", "24/1", 48, false},
-	{"Rigify-2min.mp4", "24/1", 48, false},
-	{"Sintel_30s_5_1_pcm_s24le_60000Hz.mov", "24/1", 48, false},
-	{"ELD2_FHD_4_60s_CCBYblendercloud.mov", "24000/1001", 48, false},
-	{"BBB0_HD_8_XDCAM_120s_CCBYblendercloud.mxf", "60000/1001", 120, false},
-	{"SIN6_4K_MOS_HEVC_60s.mp4", "24000/1001", 48, true},
-	{"video-960.mp4", "30/1", 60, false},
-	{"TOS0_FHD_2_H264_60s_CCBYblendercloud.mp4", "24/1", 48, false},
-	{"TOS8_FHD_51-2_PRHQ_60s_CCBYblendercloud.mov", "24000/1001", 48, false},
+	{"bbb_1080p_30fps_10sec.mp4", "30/1", 60, false, ""},
+	{"bbb_1080p_30fps_60sec.mp4", "30/1", 60, true, ""},
+	{"bbb_sunflower_2160p_30fps_normal_2min.mp4", "30/1", 60, false, ""},
+	{"bbb_sunflower_2160p_30fps_normal_2min.ts", "30/1", 60, false, ""},
+	{"caminandes_llamigos_1080p_4audios.mp4", "24/1", 48, false, ""},
+	{"03_caminandes_llamigos_1080p.mp4", "24/1", 48, true, ""},
+	{"03_caminandes_llamigos_h265_1080p.mp4", "24/1", 48, false, ""},
+	{"Rigify-2min.mp4", "24/1", 48, false, ""},
+	{"Sintel_30s_5_1_pcm_s24le_60000Hz.mov", "24/1", 48, false, ""},
+	{"ELD2_FHD_4_60s_CCBYblendercloud.mov", "24000/1001", 48, false, ""},
+	{"BBB0_HD_8_XDCAM_120s_CCBYblendercloud.mxf", "60000/1001", 120, false, ""},
+	{"BBB0_HD_8_XDCAM_120s_CCBYblendercloud.mxf", "60000/1001", 120, false, "libx265"},
+	{"SIN6_4K_MOS_HEVC_60s.mp4", "24000/1001", 48, true, ""},
+	{"video-960.mp4", "30/1", 60, false, ""},
+	{"TOS0_FHD_2_H264_60s_CCBYblendercloud.mp4", "24/1", 48, false, ""},
+	{"TOS8_FHD_51-2_PRHQ_60s_CCBYblendercloud.mov", "24000/1001", 48, false, ""},
 
 	// Currently these files don't work
-	//{"bbb_sunflower_1080p_29_97_fps_normal.mp4", "30000/1001", 60, false}, // Broken - file actually 30/1 fps
-	//{"prores_example.mov",                       "30000/1001", 60, false}, // Broken
-	//{"Rigify-2min-10000ts.mp4", "24/1", 48, false},                        // Broken - duration expected 416, got 417
-	//{"BBB4_HD_51_AVC_120s_CCBYblendercloud.ts", "60/1", 120, false},  // Broken - improper key frame int
-	//{"SIN5_4K_MOS_J2K_60s_CCBYblendercloud.mxf", "24000/1001", 48, false},  // Broken - avg_framerate and timebase
+	//{"bbb_sunflower_1080p_29_97_fps_normal.mp4", "30000/1001", 60, false, ""}, // Broken - file actually 30/1 fps
+	//{"prores_example.mov",                       "30000/1001", 60, false, ""}, // Broken
+	//{"Rigify-2min-10000ts.mp4", "24/1", 48, false, ""},                        // Broken - duration expected 416, got 417
+	//{"BBB4_HD_51_AVC_120s_CCBYblendercloud.ts", "60/1", 120, false, ""},  // Broken - improper key frame int
+	//{"SIN5_4K_MOS_J2K_60s_CCBYblendercloud.mxf", "24000/1001", 48, false, ""},  // Broken - avg_framerate and timebase
 
+}
+
+// mezTestSourceID returns a unique identifier for a source entry that disambiguates
+// duplicates with the same Path (e.g. when the same file is encoded with different codecs).
+// Used as the test subtest name and as the output directory name.
+func mezTestSourceID(src mezTestSource) string {
+	id := strings.TrimSuffix(src.Path, path.Ext(src.Path))
+	if src.Ecodec != "" && src.Ecodec != "libx264" {
+		id += "_" + src.Ecodec
+	}
+	return id
+}
+
+// Append nvenc-encoded variants when enableNvenc is set
+func init() {
+	if !enableNvenc {
+		return
+	}
+	mezTestSources = append(mezTestSources,
+		// SDR HEVC mez via nvenc - sister to the libx265 BBB0 entry above.
+		mezTestSource{"BBB0_HD_8_XDCAM_120s_CCBYblendercloud.mxf", "60000/1001", 120, false, "hevc_nvenc"},
+	)
 }
 
 // ---------------------------------------------------------------------------
@@ -133,7 +160,10 @@ func mezProfileForSource(src mezTestSource) *mezTestProfile {
 	params := goavpipe.NewXcParams()
 	params.Format = "fmp4-segment"
 	params.Url = path.Join(mezSourceDir, src.Path)
-	params.Ecodec = "libx264"
+	params.Ecodec = src.Ecodec
+	if params.Ecodec == "" {
+		params.Ecodec = "libx264"
+	}
 	params.EncHeight = 720
 	params.EncWidth = 1280
 	params.VideoBitrate = 2560000
@@ -268,6 +298,49 @@ func fileMissing(url string) bool {
 	return info.IsDir()
 }
 
+// videoColor groups general video color metadata for the first video stream of a file,
+// as signaled by the container and/or encoded bitstream.
+type videoColor struct {
+	Primaries string
+	Transfer  string
+	Space     string
+	Range     string
+}
+
+// probeVideoColor returns the color metadata of the first video stream of url.
+// Empty fields are returned for color values that are unspecified in the source.
+func probeVideoColor(t *testing.T, url string) videoColor {
+	t.Helper()
+	goavpipe.InitIOHandler(
+		&xc.FileInputOpener{URL: url},
+		&xc.FileOutputOpener{Dir: filepath.Dir(url)},
+	)
+	probeParams := goavpipe.NewXcParams()
+	probeParams.Url = url
+	info, err := avpipe.Probe(probeParams)
+	require.NoError(t, err, "probe failed for %s", url)
+	for _, si := range info.StreamInfo {
+		if si.CodecType == "video" {
+			return videoColor{
+				Primaries: si.ColorPrimaries,
+				Transfer:  si.ColorTransfer,
+				Space:     si.ColorSpace,
+				Range:     si.ColorRange,
+			}
+		}
+	}
+	return videoColor{}
+}
+
+// assertColorMatches compares two videoColor sets with field-level error messages.
+func assertColorMatches(t *testing.T, want, got videoColor, label, url string) {
+	t.Helper()
+	assert.Equal(t, want.Primaries, got.Primaries, "color_primaries pass-through (%s) in %s", label, url)
+	assert.Equal(t, want.Transfer, got.Transfer, "color_transfer pass-through (%s) in %s", label, url)
+	assert.Equal(t, want.Space, got.Space, "color_space pass-through (%s) in %s", label, url)
+	assert.Equal(t, want.Range, got.Range, "color_range pass-through (%s) in %s", label, url)
+}
+
 // ---------------------------------------------------------------------------
 // Test
 // ---------------------------------------------------------------------------
@@ -283,7 +356,7 @@ func TestMezCreate(t *testing.T) {
 		t.Skip("Use TestEndToEnd or comment out this skip")
 	}
 	for _, src := range mezTestSources {
-		t.Run(src.Path, func(t *testing.T) {
+		t.Run(mezTestSourceID(src), func(t *testing.T) {
 			url := path.Join(mezSourceDir, src.Path)
 			log.Info("STARTING TestMezCreate", "source", url)
 
@@ -292,10 +365,20 @@ func TestMezCreate(t *testing.T) {
 				return
 			}
 
+			// Capture source color metadata so we can verify mez parts pass it through
+			// to the mp4 'colr' atom (UNSPECIFIED fields are passed through unchanged).
+			srcColor := probeVideoColor(t, url)
+			log.Info("Source color metadata",
+				"source", url,
+				"primaries", srcColor.Primaries,
+				"transfer", srcColor.Transfer,
+				"space", srcColor.Space,
+				"range", srcColor.Range)
+
 			profile := mezProfileForSource(src)
 
 			// Output directory per source file.
-			baseName := strings.TrimSuffix(src.Path, path.Ext(src.Path))
+			baseName := mezTestSourceID(src)
 			videoMezDir := path.Join(mezOutputDir, baseName)
 			err := os.MkdirAll(videoMezDir, 0755)
 			require.NoError(t, err)
@@ -377,7 +460,19 @@ func TestMezCreate(t *testing.T) {
 								"codec", si.CodecName,
 								"profile", si.Profile,
 								"level", si.Level,
-								"timescale", si.TimeBase)
+								"timescale", si.TimeBase,
+								"primaries", si.ColorPrimaries,
+								"transfer", si.ColorTransfer,
+								"space", si.ColorSpace,
+								"range", si.ColorRange)
+							// Color metadata must round-trip from source to mez 'colr' atom.
+							mezColor := videoColor{
+								Primaries: si.ColorPrimaries,
+								Transfer:  si.ColorTransfer,
+								Space:     si.ColorSpace,
+								Range:     si.ColorRange,
+							}
+							assertColorMatches(t, srcColor, mezColor, "mez", partFile)
 						}
 					}
 				})
@@ -406,7 +501,7 @@ func TestABRCreate(t *testing.T) {
 		t.Skip("Use TestEndToEnd or comment out this skip")
 	}
 	for _, src := range mezTestSources {
-		t.Run(src.Path, func(t *testing.T) {
+		t.Run(mezTestSourceID(src), func(t *testing.T) {
 			url := path.Join(mezSourceDir, src.Path)
 			if fileMissing(url) {
 				t.Skipf("source file missing: %s", url)
@@ -414,12 +509,21 @@ func TestABRCreate(t *testing.T) {
 			}
 
 			profile := mezProfileForSource(src)
-			baseName := strings.TrimSuffix(src.Path, path.Ext(src.Path))
+			baseName := mezTestSourceID(src)
 			videoMezDir := path.Join(mezOutputDir, baseName)
 
 			// Ensure mez parts exist (create if needed)
 			partFiles := ensureMezParts(t, src, profile, videoMezDir)
 			require.NotEmpty(t, partFiles, "no mez parts for %s", src.Path)
+
+			// Capture source color metadata so we can verify ABR init segments pass it through.
+			srcColor := probeVideoColor(t, url)
+			log.Info("Source color metadata",
+				"source", url,
+				"primaries", srcColor.Primaries,
+				"transfer", srcColor.Transfer,
+				"space", srcColor.Space,
+				"range", srcColor.Range)
 
 			for _, v := range abrVariants {
 				// Skip watermark variants for sources that don't have watermarking enabled
@@ -462,6 +566,9 @@ func TestABRCreate(t *testing.T) {
 							initFile := filepath.Join(initDir, "vinit-stream0.m4s")
 							initInfo, iErr := xc.ValidateInitSegment(initFile)
 							require.NoError(t, iErr, "ValidateInitSegment failed for %s", initFile)
+
+							// Color metadata must round-trip from source through mez to ABR 'colr' atom.
+							assertColorMatches(t, srcColor, probeVideoColor(t, initFile), "abr-init", initFile)
 
 							if partIdx == 0 {
 								refInitInfo = initInfo

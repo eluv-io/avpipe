@@ -515,6 +515,14 @@ prepare_decoder(
         dump_stream(decoder_context->stream[i]);
         dump_codec_parameters(decoder_context->codec_parameters[i]);
         dump_codec_context(decoder_context->codec_context[i]);
+
+        /* Log source color metadata for video streams (taken from the demuxer codecpar
+         * which reflects mp4 'colr' atom or bitstream VUI as applicable). */
+        if (decoder_context->codec_parameters[i]->codec_type == AVMEDIA_TYPE_VIDEO) {
+            AVCodecParameters *cp = decoder_context->codec_parameters[i];
+            log_color_metadata("decode", i,
+                cp->color_primaries, cp->color_trc, cp->color_space, cp->color_range, url);
+        }
     }
 
     /* If it couldn't find identified stream with params->stream_id, then return an error */
@@ -794,23 +802,29 @@ set_h265_params(
     char x265_params[512] = {0};
     size_t off = 0;
 
-    /* Set max_cll and master_display meta data for HDR content (omit if "0,0") */
+    /* HDR for libx265:
+     *   - SEI 137/144 emission: handled by libx265's "master-display"/"max-cll" AVOptions.
+     *   - mp4 'mdcv'/'clli' atoms: attach_master_display / attach_max_cll write to
+     *     coded_side_data
+     */
     if (params->max_cll && params->max_cll[0] != '\0' && strcmp(params->max_cll, "0,0") != 0) {
         av_opt_set(encoder_codec_context->priv_data, "max-cll", params->max_cll, 0);
-        /* Also attach as side data - mp4 clli box. */
         if (attach_max_cll(encoder_codec_context, params->max_cll) != eav_success)
             elv_warn("set_h265_params: failed to attach max_cll side data, url=%s", params->url);
     }
     if (params->master_display && params->master_display[0] != '\0') {
+        /* HDR override: verify source color matches BT2020/PQ/BT2020nc/MPEG and warn for any mismatch.
+         * The HDR override values below are still applied unconditionally. */
+        verify_hdr_source_color(decoder_context, params);
+
         off += snprintf(x265_params + off, sizeof(x265_params) - off,
             "hdr10=1:hdr10-opt=1:repeat-headers=1:colorprim=bt2020:transfer=smpte2084:colormatrix=bt2020nc");
         av_opt_set(encoder_codec_context->priv_data, "master-display", params->master_display, 0);
 
-        /* Attach side data - mp4 muxer mdcv box */
         if (attach_master_display(encoder_codec_context, params->master_display) != eav_success)
             elv_warn("set_h265_params: failed to attach master_display side data, url=%s", params->url);
 
-        /* Add HDR10 color metadata into AVCodecContext (populates the colr box) */
+        /* Add HDR10 color metadata into AVCodecContext (populates the colr box and elementary stream VUI) */
         encoder_codec_context->color_range     = AVCOL_RANGE_MPEG;       // "tv"
         encoder_codec_context->color_primaries = AVCOL_PRI_BT2020;
         encoder_codec_context->color_trc       = AVCOL_TRC_SMPTE2084;    // PQ (ST 2084)
@@ -1018,23 +1032,41 @@ set_nvidia_hevc_params(
     av_opt_set(encoder_codec_context->priv_data, "preset", "p2", 0); // Valid: p1–p7
     av_opt_set(encoder_codec_context->priv_data, "tune", "hq", 0);   // Valid: hq, ll, ull, lossless, losslesshp
 
-    /* HDR - set max_cll and master_display meta data for HDR content (skip if "0,0") */
+    /* HDR for nvenc:
+     *   - mp4 'mdcv'/'clli' atoms via coded_side_data: safe and necessary so the
+     *     container carries HDR metadata (mediainfo and HDR-aware demuxers read it).
+     *   - in-stream SEI 137/144 via decoded_side_data currently disabled (ifdef NVENC_HDR_SEI)
+     *     Setting pMasteringDisplay/pMaxCll on NV_ENC_PIC_PARAMS triggers an
+     *     invalid-pointer free in nvEncEncodePicture (nvenc.c:3244)
+     * (nvenc has no master_display/max_cll AVOption)
+     */
     if (params->max_cll && params->max_cll[0] != '\0' && strcmp(params->max_cll, "0,0") != 0) {
-        av_opt_set(encoder_codec_context->priv_data, "max_cll", params->max_cll, 0);
         if (attach_max_cll(encoder_codec_context, params->max_cll) != eav_success)
             elv_warn("set_nvidia_hevc_params: failed to attach max_cll side data, url=%s", params->url);
+#if NVENC_HDR_SEI
+        if (attach_max_cll_nvenc(encoder_codec_context, params->max_cll) != eav_success)
+            elv_warn("set_nvidia_hevc_params: failed to attach max_cll decoded side data, url=%s", params->url);
+#endif
     }
     if (params->master_display && params->master_display[0] != '\0') {
+        /* HDR override: verify source color matches BT2020/PQ/BT2020nc/MPEG and warn for any mismatch.
+         * The HDR override values below are still applied unconditionally. */
+        verify_hdr_source_color(decoder_context, params);
+
         encoder_codec_context->pix_fmt        = AV_PIX_FMT_P010;                 // 10-bit
         encoder_codec_context->color_range    = AVCOL_RANGE_MPEG;                // "tv"
         encoder_codec_context->color_primaries= AVCOL_PRI_BT2020;
         encoder_codec_context->color_trc      = AVCOL_TRC_SMPTE2084;             // PQ (ST 2084)
         encoder_codec_context->colorspace     = AVCOL_SPC_BT2020_NCL;            // bt2020nc
-        av_opt_set(encoder_codec_context->priv_data, "master_display", params->master_display, 0);
 
-        /* Attach side data - mp4 mdcv box */
+        /* mp4 'mdcv' atom side data */
         if (attach_master_display(encoder_codec_context, params->master_display) != eav_success)
             elv_warn("set_nvidia_hevc_params: failed to attach master_display side data, url=%s", params->url);
+#if NVENC_HDR_SEI
+        /* SEI 137 emission (nvenc-specific path) - disabled, see NVENC_HDR_SEI above */
+        if (attach_master_display_nvenc(encoder_codec_context, params->master_display) != eav_success)
+            elv_warn("set_nvidia_hevc_params: failed to attach master_display decoded side data, url=%s", params->url);
+#endif
 
         /* HDR10 requires 10bit and main10 - set if not specified */
         if (params->profile == NULL || strlen(params->profile) == 0) {
@@ -1173,6 +1205,16 @@ prepare_video_encoder(
             elv_err("Failed to set video encoder options with bypass, url=%s", params->url);
             return rc;
         }
+
+        /* Bypass: codec params (including color metadata) were copied from the source stream
+         * via avcodec_parameters_copy above, so the mp4 'colr' atom and any elementary stream
+         * VUI signaling are passed through unchanged. */
+        log_color_metadata("encode/bypass", index,
+            out_stream->codecpar->color_primaries,
+            out_stream->codecpar->color_trc,
+            out_stream->codecpar->color_space,
+            out_stream->codecpar->color_range,
+            params->url);
         return 0;
     }
 
@@ -1292,10 +1334,23 @@ prepare_video_encoder(
     else
         set_h264_params(encoder_context, decoder_context, params);
 
-    elv_log("Output pixel_format=%s, profile=%d, level=%d",
+    /* Preserve source color metadata for non-HDR in SPS VUI.
+     *
+     * Do NOT copy source color onto encoder_codec_context for nvenc encoders due to a bug/crash
+     * observed with version 595/13.2
+     */
+    int source_color_copied = 0;
+    if (!(params->master_display && params->master_display[0] != '\0')) {
+        copy_source_color_to_output(encoder_context, decoder_context);
+        source_color_copied = 1;
+    }
+
+    elv_log("Output pixel_format=%s, codec=%s, profile=%d, level=%d, color_copied=%d",
         av_get_pix_fmt_name(encoder_codec_context->pix_fmt),
+        params->ecodec,
         encoder_codec_context->profile,
-        encoder_codec_context->level);
+        encoder_codec_context->level,
+        source_color_copied);
 
     /* Set encoder options after setting all codec context parameters */
     rc = set_encoder_options(encoder_context, decoder_context, params, decoder_context->video_stream_index,
@@ -1318,6 +1373,13 @@ prepare_video_encoder(
         elv_err("could not copy encoder parameters to output stream");
         return eav_codec_param;
     }
+
+    log_color_metadata("encode", index,
+        encoder_context->stream[index]->codecpar->color_primaries,
+        encoder_context->stream[index]->codecpar->color_trc,
+        encoder_context->stream[index]->codecpar->color_space,
+        encoder_context->stream[index]->codecpar->color_range,
+        params->url);
 
     /* For stereoscopic video - add AV_PKT_DATA_STEREO3D (stvi box) */
     if (params->video_layout == video_layout_sbs) {
