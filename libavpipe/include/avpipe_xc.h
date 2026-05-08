@@ -243,7 +243,7 @@ typedef int
 typedef int
 (*avpipe_writer_f)(
     void *opaque,
-    uint8_t *buf,
+    const uint8_t *buf,
     int buf_size);
 
 typedef int64_t
@@ -337,7 +337,7 @@ typedef struct coderctx_t {
     char                filename2[MAX_STREAMS][MAX_AVFILENAME_LEN];     /* Audio filename formats */
     int                 n_audio_output;                                 /* Number of audio output streams, it is set for encoder */
 
-    AVCodec             *codec[MAX_STREAMS];
+    const AVCodec       *codec[MAX_STREAMS];
     AVStream            *stream[MAX_STREAMS];
     AVCodecParameters   *codec_parameters[MAX_STREAMS];
     AVCodecContext      *codec_context[MAX_STREAMS];    /* Audio/video AVCodecContext, indexed by stream_index */
@@ -459,6 +459,12 @@ typedef enum vertical_type {
     vertical_32bpf  = 1  // 32 bits per frame (uint32 LE per frame)
 } vertical_type;
 
+// Video layout. Values align with ISO/IEC 23001-8 (CICP)
+typedef enum video_layout_t {
+    video_layout_mono = 0, // Monoscopic
+    video_layout_sbs  = 3  // Stereoscopic side-by-side
+} video_layout_t;
+
 #define DRAW_TEXT_SHADOW_OFFSET     0.075
 #define MAX_EXTRACT_IMAGES_SZ       100
 
@@ -528,6 +534,7 @@ typedef struct xcparams_t {
     int         bitdepth;                   // Can be 8, 10, 12
     char        *max_cll;                   // Maximum Content Light Level (HDR only)
     char        *master_display;            // Master display (HDR only)
+    int         video_layout;               // Video layout (eg. stereoscopic SBS)
     int         stream_id;                  // Stream id to trasncode, should be >= 0
     char        *filter_descriptor;         // Filter descriptor if tx-type == audio-merge
     char        *mux_spec;
@@ -581,7 +588,6 @@ typedef struct stream_info_t {
     int         sample_rate;        // Audio only, samples per second
     int         channels;           // Audio only, number of audio channels
     int         channel_layout;     // Audio channel layout
-    int         ticks_per_frame;
     int64_t     bit_rate;
     int         has_b_frames;
     int         width, height;       // Video only
@@ -593,6 +599,16 @@ typedef struct stream_info_t {
     enum AVFieldOrder   field_order;
     int                 profile;
     int                 level;
+
+    char                color_primaries[16];      // e.g. "bt2020", "bt709"
+    char                color_transfer[24];       // e.g. "smpte2084" (PQ), "arib-std-b67" (HLG)
+    char                color_space[16];          // e.g. "bt2020nc"
+    char                color_range[8];           // "tv" (limited) or "pc" (full)
+
+    char                mastering_display[128];   // AV_PKT_DATA_MASTERING_DISPLAY_METADATA
+    char                max_cll[32];              // AV_PKT_DATA_CONTENT_LIGHT_LEVEL
+    char                stereo3d_type[32];        // AV_PKT_DATA_STEREO3D
+
     side_data_t         side_data;
     AVDictionary        *tags;
 } stream_info_t;

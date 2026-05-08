@@ -59,7 +59,7 @@ elv_mux_open(
     return ret;
 }
 
-void
+int
 elv_mux_close(
     struct AVFormatContext *format_ctx,
     AVIOContext *pb)
@@ -77,8 +77,7 @@ elv_mux_close(
     }
     free(outctx);
     free(pb);
-    return;
-
+    return 0;
 }
 
 extern int
@@ -311,7 +310,7 @@ avpipe_init_muxer(
 
     /* Custom output buffer */
     out_muxer_ctx->format_context->io_open = elv_mux_open;
-    out_muxer_ctx->format_context->io_close = elv_mux_close;
+    out_muxer_ctx->format_context->io_close2 = elv_mux_close;
 
     int has_ac3 = 0;
     for (int i=0; i<in_mux_ctx->audio_count+in_mux_ctx->caption_count+1; i++) {
@@ -334,14 +333,15 @@ avpipe_init_muxer(
         out_muxer_ctx->stream[i]->avg_frame_rate = in_stream->avg_frame_rate;
         out_muxer_ctx->stream[i]->r_frame_rate = in_stream->r_frame_rate;
 
-        /* Check if stream contains AC3 audio */
+        /* Check if stream contains AC3 or EAC3 audio */
         if (out_muxer_ctx->stream[i]->codecpar->codec_type == AVMEDIA_TYPE_AUDIO &&
-            out_muxer_ctx->stream[i]->codecpar->codec_id == AV_CODEC_ID_AC3) {
+            (out_muxer_ctx->stream[i]->codecpar->codec_id == AV_CODEC_ID_AC3 ||
+             out_muxer_ctx->stream[i]->codecpar->codec_id == AV_CODEC_ID_EAC3)) {
             has_ac3 = 1;
         }
     }
 
-    /* AC3 codec requires delay_moov flag for fmp4-segment format */
+    /* AC3/EAC3 codec requires delay_moov flag for fmp4-segment format */
     if (p->format && !strcmp(p->format, "fmp4-segment") && has_ac3) {
         av_opt_set(out_muxer_ctx->format_context->priv_data, "movflags", "delay_moov", 0);
     }
@@ -554,7 +554,6 @@ avpipe_mux_fini(
     in_mux_ctx = p_xctx->in_mux_ctx;
 
     for (int i=0; i<in_mux_ctx->audio_count+in_mux_ctx->caption_count+1; i++) {
-        avcodec_close(p_xctx->in_muxer_ctx[i].codec_context[0]);
         avcodec_free_context(&p_xctx->in_muxer_ctx[i].codec_context[0]);
 
         AVIOContext *avioctx = (AVIOContext *) p_xctx->in_muxer_ctx[i].format_context->pb;

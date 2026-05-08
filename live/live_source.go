@@ -80,11 +80,11 @@ func (l *LiveSource) startMultiAudioUDP() (err error) {
 
 	log.Info("starting multi audio live source", "url", sourceUrl)
 
-	// i.e $FFMPEG_BIN/ffmpeg -re -i media/BBB_3x_audio_streams_music_2min_48kHz.mp4 -map 0 -c:v copy -c:a aac  -f mpegts udp://localhost:22001
+	// i.e $FFMPEG_BIN/ffmpeg -re -i media/caminandes_llamigos_1080p_4audios.mp4 -map 0 -c:v copy -c:a aac  -f mpegts udp://127.0.0.1:22001
 	l.cmd = exec.Command(ffmpeg,
 		"-re",
 		"-i",
-		"../media/BBB_3x_audio_streams_music_2min_48kHz.mp4",
+		"../media/caminandes_llamigos_1080p_4audios.mp4",
 		"-map",
 		"0",
 		"-c:v",

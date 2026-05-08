@@ -146,7 +146,7 @@ func TestProbeUDPConnect(t *testing.T) {
 	setupLogging()
 
 	liveSource := NewLiveSource()
-	url := fmt.Sprintf("udp://localhost:%d", liveSource.Port)
+	url := fmt.Sprintf("udp://127.0.0.1:%d", liveSource.Port)
 
 	// Start ffmpeg UDP MPEGTS
 	err := liveSource.Start("udp")
@@ -196,7 +196,7 @@ func TestProbeUDPListen(t *testing.T) {
 	setupLogging()
 
 	liveSource := NewLiveSource()
-	url := fmt.Sprintf("udp://localhost:%d", liveSource.Port)
+	url := fmt.Sprintf("udp://127.0.0.1:%d", liveSource.Port)
 
 	XCParams := &goavpipe.XcParams{
 		Seekable:        false,
@@ -248,7 +248,7 @@ func TestProbeUDPNoStream(t *testing.T) {
 	setupLogging()
 
 	liveSource := NewLiveSource()
-	url := fmt.Sprintf("udp://localhost:%d", liveSource.Port)
+	url := fmt.Sprintf("udp://127.0.0.1:%d", liveSource.Port)
 
 	XCParams := &goavpipe.XcParams{
 		Seekable:          false,

@@ -3,6 +3,8 @@ package live
 import (
 	"fmt"
 	"path"
+	"path/filepath"
+	"sort"
 	"testing"
 	"time"
 
@@ -10,6 +12,7 @@ import (
 
 	"github.com/eluv-io/avpipe"
 	"github.com/eluv-io/avpipe/goavpipe"
+	"github.com/eluv-io/avpipe/xc"
 )
 
 func TestUdpToMp4(t *testing.T) {
@@ -18,7 +21,7 @@ func TestUdpToMp4(t *testing.T) {
 	setupOutDir(t, outputDir)
 
 	liveSource := NewLiveSource()
-	url := fmt.Sprintf("udp://localhost:%d", liveSource.Port)
+	url := fmt.Sprintf("udp://127.0.0.1:%d", liveSource.Port)
 
 	done := make(chan bool, 1)
 	testComplete := make(chan bool, 1)
@@ -124,12 +127,15 @@ func TestMultiAudioUdpToMp4(t *testing.T) {
 	setupOutDir(t, outputDir)
 
 	liveSource := NewLiveSource()
-	url := fmt.Sprintf("udp://localhost:%d", liveSource.Port)
+	defer liveSource.Stop()
+	url := fmt.Sprintf("udp://127.0.0.1:%d", liveSource.Port)
 
 	err := liveSource.Start("multi_audio_udp")
 	if err != nil {
-		t.Error(err)
+		t.Fatal(err)
 	}
+
+	timeout := time.After(4 * time.Minute)
 
 	xcParams := &goavpipe.XcParams{
 		Format:              "fmp4-segment",
@@ -138,7 +144,7 @@ func TestMultiAudioUdpToMp4(t *testing.T) {
 		StartSegmentStr:     "1",
 		AudioBitrate:        384000,
 		VideoBitrate:        20000000,
-		ForceKeyInt:         60,
+		ForceKeyInt:         48,
 		VideoSegDurationTs:  2700000,
 		AudioSegDurationTs:  1428480,
 		Ecodec2:             "aac",     // "aac"
@@ -160,11 +166,78 @@ func TestMultiAudioUdpToMp4(t *testing.T) {
 
 	goavpipe.InitIOHandler(&inputOpener{dir: outputDir}, &outputOpener{dir: outputDir})
 
-	tlog.Info("Transcoding UDP stream multi audio start", "params", fmt.Sprintf("%+v", *xcParams))
-	err = avpipe.Xc(xcParams)
-	tlog.Info("Transcoding UDP stream multi audio done", "err", err, "last pts", nil)
-	if err != nil {
-		t.Error("Transcoding UDP stream multi audio failed", "err", err)
+	// Run first Xc in a goroutine so we can enforce a timeout
+	xcDone := make(chan error, 1)
+	go func() {
+		tlog.Info("Transcoding UDP stream multi audio start", "params", fmt.Sprintf("%+v", *xcParams))
+		xcDone <- avpipe.Xc(xcParams)
+	}()
+
+	select {
+	case err = <-xcDone:
+		tlog.Info("Transcoding UDP stream multi audio done", "err", err, "last pts", nil)
+		assert.Equal(t, avpipe.EAV_IO_TIMEOUT, err, "expected EAV_IO_TIMEOUT when UDP source ends")
+	case <-timeout:
+		t.Fatal("Transcoding UDP stream multi audio timed out after 4 minutes")
+	}
+
+	// Verify video mez parts
+	videoMezFiles, err := filepath.Glob(filepath.Join(outputDir, "video-mez-segment-*.mp4"))
+	assert.NoError(t, err)
+	sort.Strings(videoMezFiles)
+	assert.NotEmpty(t, videoMezFiles, "no video mez segments produced")
+	tlog.Info("Video mez segments", "count", len(videoMezFiles))
+
+	for i, f := range videoMezFiles {
+		result, vErr := xc.ValidateABRSegment(f)
+		assert.NoError(t, vErr, "ValidateABRSegment failed for %s", f)
+		if vErr != nil {
+			continue
+		}
+		isLast := i == len(videoMezFiles)-1
+		tlog.Info("Video mez validation", "file", filepath.Base(f),
+			"frames", result.FrameCount, "timescale", result.Timescale,
+			"sample_dur", result.SampleDur, "dts_start", result.DtsStart,
+			"dts_end", result.DtsEnd, "last", isLast)
+		assert.Equal(t, 0, result.DtsProblems, "DTS problems in %s", f)
+		assert.Equal(t, 0, result.DurProblems, "duration problems in %s", f)
+		if !isLast {
+			// All non-last parts should have the expected duration
+			expectedDurTs := uint64(xcParams.VideoSegDurationTs)
+			actualDurTs := result.DtsEnd - result.DtsStart
+			assert.Equal(t, expectedDurTs, actualDurTs,
+				"video mez duration mismatch for %s: expected %d got %d", filepath.Base(f), expectedDurTs, actualDurTs)
+		}
+	}
+
+	// Verify audio mez parts for each audio stream (output uses 0-based indices)
+	for _, streamIdx := range []int{0, 1, 2} {
+		audioFiles, err := filepath.Glob(filepath.Join(outputDir, fmt.Sprintf("audio-mez-segment%d-*.mp4", streamIdx)))
+		assert.NoError(t, err)
+		sort.Strings(audioFiles)
+		assert.NotEmpty(t, audioFiles, "no audio mez segments for stream %d", streamIdx)
+		tlog.Info("Audio mez segments", "stream", streamIdx, "count", len(audioFiles))
+
+		for i, f := range audioFiles {
+			result, vErr := xc.ValidateABRSegment(f)
+			assert.NoError(t, vErr, "ValidateABRSegment failed for %s", f)
+			if vErr != nil {
+				continue
+			}
+			isLast := i == len(audioFiles)-1
+			tlog.Info("Audio mez validation", "file", filepath.Base(f),
+				"frames", result.FrameCount, "timescale", result.Timescale,
+				"sample_dur", result.SampleDur, "dts_start", result.DtsStart,
+				"dts_end", result.DtsEnd, "last", isLast)
+			assert.Equal(t, 0, result.DtsProblems, "DTS problems in %s", f)
+			assert.Equal(t, 0, result.DurProblems, "duration problems in %s", f)
+			if !isLast {
+				expectedDurTs := uint64(xcParams.AudioSegDurationTs)
+				actualDurTs := result.DtsEnd - result.DtsStart
+				assert.Equal(t, expectedDurTs, actualDurTs,
+					"audio mez duration mismatch for %s: expected %d got %d", filepath.Base(f), expectedDurTs, actualDurTs)
+			}
+		}
 	}
 
 	done := make(chan bool, 1)
@@ -194,7 +267,11 @@ func TestMultiAudioUdpToMp4(t *testing.T) {
 	}()
 
 	for _ = range audioMezFiles {
-		<-done
+		select {
+		case <-done:
+		case <-timeout:
+			t.Fatal("Transcoding Audio Dash timed out after 4 minutes")
+		}
 	}
 }
 
@@ -207,7 +284,7 @@ func TestUdpToMp4WithCancelling1(t *testing.T) {
 	log.Info("STARTING " + outputDir)
 
 	liveSource := NewLiveSource()
-	url := fmt.Sprintf("udp://localhost:%d", liveSource.Port)
+	url := fmt.Sprintf("udp://127.0.0.1:%d", liveSource.Port)
 
 	err := liveSource.Start("udp")
 	if err != nil {
@@ -265,7 +342,7 @@ func TestUdpToMp4WithCancelling2(t *testing.T) {
 	log.Info("STARTING " + outputDir)
 
 	liveSource := NewLiveSource()
-	url := fmt.Sprintf("udp://localhost:%d", liveSource.Port)
+	url := fmt.Sprintf("udp://127.0.0.1:%d", liveSource.Port)
 	done := make(chan bool, 1)
 
 	err := liveSource.Start("udp")
@@ -337,7 +414,7 @@ func TestUdpToMp4WithCancelling3(t *testing.T) {
 	log.Info("STARTING " + outputDir)
 
 	liveSource := NewLiveSource()
-	url := fmt.Sprintf("udp://localhost:%d", liveSource.Port)
+	url := fmt.Sprintf("udp://127.0.0.1:%d", liveSource.Port)
 	done := make(chan bool, 1)
 
 	err := liveSource.Start("udp")
@@ -409,7 +486,7 @@ func TestUdpToMp4WithCancelling4(t *testing.T) {
 	log.Info("STARTING " + outputDir)
 
 	liveSource := NewLiveSource()
-	url := fmt.Sprintf("udp://localhost:%d", liveSource.Port)
+	url := fmt.Sprintf("udp://127.0.0.1:%d", liveSource.Port)
 	done := make(chan bool, 1)
 
 	err := liveSource.Start("udp")

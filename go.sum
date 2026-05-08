@@ -5,8 +5,8 @@ github.com/Comcast/gots v0.0.0-20200213175321-9799558ed3e2 h1:zMuszK7xNca8fNxQ4n
 github.com/Comcast/gots v0.0.0-20200213175321-9799558ed3e2/go.mod h1:Mk3QwecRoaG2Qh+uiS8t8IOd7QlKl7Xp1ujNRn/zJxw=
 github.com/Comcast/gots/v2 v2.2.1 h1:LU/SRg7p2KQqVkNqInV7I4MOQKAqvWQP/PSSLtygP2s=
 github.com/Comcast/gots/v2 v2.2.1/go.mod h1:firJ11on3eUiGHAhbY5cZNqG0OqhQ1+nSZHfsEEzVVU=
-github.com/Eyevinn/mp4ff v0.49.0 h1:00eRg5/KwcLGWUbv+hlifldf74qg46G1IxoWXHrgDvw=
-github.com/Eyevinn/mp4ff v0.49.0/go.mod h1:hJNUUqOBryLAzUW9wpCJyw2HaI+TCd2rUPhafoS5lgg=
+github.com/Eyevinn/mp4ff v0.51.0 h1:ZYdHFXEcB3kJkCeCHMHl/tbCm64FJsD2XOU0Sj+ME2M=
+github.com/Eyevinn/mp4ff v0.51.0/go.mod h1:hJNUUqOBryLAzUW9wpCJyw2HaI+TCd2rUPhafoS5lgg=
 github.com/apex/log v1.9.0/go.mod h1:m82fZlWIuiWzWP04XCTXmnX0xRkYYbCdYn8jbJeLBEA=
 github.com/apex/logs v1.0.0/go.mod h1:XzxuLZ5myVHDy9SAmYpamKKRNApGj54PfYLcFrXqDwo=
 github.com/aphistic/golf v0.0.0-20180712155816-02c07f170c5a/go.mod h1:3NqKYiepwy8kCu4PNA+aP7WUV72eXWJeP9/r3/K9aLE=

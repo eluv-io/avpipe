@@ -10,5 +10,5 @@ then
     gsutil -m cp 'gs://eluvio-test-assets/*' ./media
 fi
 
-go test --timeout 10000s
+go test --timeout 4h ./...
 

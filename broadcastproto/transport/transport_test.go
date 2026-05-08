@@ -2,6 +2,7 @@ package transport
 
 import (
 	"net"
+	"strings"
 	"testing"
 )
 
@@ -12,7 +13,8 @@ func TestResolveUDPAddr(t *testing.T) {
 	}
 
 	for _, addr := range addrs {
-		_, err := net.ResolveUDPAddr("udp", addr)
+		host := strings.TrimPrefix(addr, "udp://")
+		_, err := net.ResolveUDPAddr("udp", host)
 		if err != nil {
 			t.Errorf("Failed to resolve address %s: %v", addr, err)
 		}

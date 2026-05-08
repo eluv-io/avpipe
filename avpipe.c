@@ -59,8 +59,8 @@ int     AVPipeCloseInput(int64_t);
 int     AVPipeStatInput(int64_t, int, avp_stat_t, void *);
 int64_t AVPipeOpenOutput(int64_t, int, int, int64_t, int);
 int64_t AVPipeOpenMuxOutput(char *, int);
-int     AVPipeWriteOutput(int64_t, int64_t, uint8_t *, int);
-int     AVPipeWriteMuxOutput(int64_t, uint8_t *, int);
+int     AVPipeWriteOutput(int64_t, int64_t, const uint8_t *, int);
+int     AVPipeWriteMuxOutput(int64_t, const uint8_t *, int);
 int64_t AVPipeSeekOutput(int64_t, int64_t, int64_t, int);
 int64_t AVPipeSeekMuxOutput(int64_t, int64_t, int);
 int     AVPipeCloseOutput(int64_t, int64_t);
@@ -218,7 +218,7 @@ in_read_packet(
 static int
 in_write_packet(
     void *opaque,
-    uint8_t *buf,
+    const uint8_t *buf,
     int buf_size)
 {
     elv_err("IN WRITE");
@@ -490,7 +490,7 @@ read_channel_again:
 static int
 udp_in_write_packet(
     void *opaque,
-    uint8_t *buf,
+    const uint8_t *buf,
     int buf_size)
 {
     ioctx_t *inctx = (ioctx_t *)opaque;
@@ -636,7 +636,7 @@ out_read_packet(
 static int
 out_write_packet(
     void *opaque,
-    uint8_t *buf,
+    const uint8_t *buf,
     int buf_size)
 {
     ioctx_t *outctx = (ioctx_t *)opaque;
@@ -1250,7 +1250,7 @@ out_mux_closer(
 static int
 out_mux_write_packet(
     void *opaque,
-    uint8_t *buf,
+    const uint8_t *buf,
     int buf_size)
 {
     ioctx_t *outctx = (ioctx_t *)opaque;

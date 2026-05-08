@@ -165,7 +165,7 @@ func ValidateMezPart(filename string, params *MezPartParams) (*MezPartResult, er
 			for _, sample := range samples {
 				allSamples = append(allSamples, sampleEntry{
 					DTS:         sample.DecodeTime,
-					PTS:         sample.PresentationTime(),
+					PTS:         uint64(sample.PresentationTime()),
 					Duration:    uint64(sample.Dur),
 					IsSync:      sample.IsSync(),
 					FragmentIdx: fragGlobalIdx,
