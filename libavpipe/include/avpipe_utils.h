@@ -50,6 +50,19 @@ void
 dump_stream(
     AVStream *s);
 
+/*
+ * Log color metadata (decode or encode)
+ */
+void
+log_color_metadata(
+    const char *stage,
+    int stream_index,
+    enum AVColorPrimaries pri,
+    enum AVColorTransferCharacteristic trc,
+    enum AVColorSpace spc,
+    enum AVColorRange rng,
+    const char *url);
+
 void
 save_gray_frame(
     unsigned char *buf,

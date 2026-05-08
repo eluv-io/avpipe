@@ -223,6 +223,29 @@ dump_stream(
 }
 
 void
+log_color_metadata(
+    const char *stage,
+    int stream_index,
+    enum AVColorPrimaries pri,
+    enum AVColorTransferCharacteristic trc,
+    enum AVColorSpace spc,
+    enum AVColorRange rng,
+    const char *url)
+{
+    const char *pri_name = av_color_primaries_name(pri);
+    const char *trc_name = av_color_transfer_name(trc);
+    const char *spc_name = av_color_space_name(spc);
+    const char *rng_name = av_color_range_name(rng);
+    elv_log("COLOR %s stream=%d primaries=%s(%d) transfer=%s(%d) matrix=%s(%d) range=%s(%d), url=%s",
+        stage, stream_index,
+        pri_name ? pri_name : "?", (int)pri,
+        trc_name ? trc_name : "?", (int)trc,
+        spc_name ? spc_name : "?", (int)spc,
+        rng_name ? rng_name : "?", (int)rng,
+        url ? url : "");
+}
+
+void
 save_gray_frame(
     unsigned char *buf,
     int wrap,

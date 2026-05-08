@@ -95,3 +95,13 @@ is_mvhevc(
 int
 is_dolby_atmos(
     const AVStream *stream);
+
+void
+verify_hdr_source_color(
+    coderctx_t *decoder_context,
+    xcparams_t *params);
+
+void
+copy_source_color_to_output(
+    coderctx_t *encoder_context,
+    coderctx_t *decoder_context);
