@@ -1,4 +1,4 @@
-# Makefile for mvhevc-tester
+# Makefile for mvhevc
 #
 # Paths assume:
 #   - FFmpeg built and installed to ~/.local (pkg-config available)

@@ -27,6 +27,7 @@ typedef struct mvhevc_params {
     int         scenecut;       /* Scene-cut sensitivity (0 = disable, default 40) */
     int         bframes;        /* Max consecutive B-frames (-1 = use preset default) */
     int         high_tier;      /* 0 = Main tier (default), 1 = High tier */
+    int         hdr;            /* Enable HDR10 x265 settings + BT.2020/PQ VUI */
     const char *tune;           /* x265 tune: psnr, ssim, grain, etc. (NULL = none) */
     int         fps_num;        /* Framerate override (0 = detect from input) */
     int         fps_den;

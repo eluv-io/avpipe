@@ -25,6 +25,11 @@ void mvhevc_params_defaults(mvhevc_params *p)
     p->bframes  = -1;
 }
 
+static enum AVPixelFormat target_pix_fmt(int bitdepth)
+{
+    return bitdepth == 10 ? AV_PIX_FMT_YUV420P10LE : AV_PIX_FMT_YUV420P;
+}
+
 /* ------------------------------------------------------------------ */
 /* Validate xcparams_t for MV-HEVC encoding                           */
 /* ------------------------------------------------------------------ */
@@ -92,7 +97,8 @@ int mvhevc_validate_params(const xcparams_t *xc)
 /* ------------------------------------------------------------------ */
 /* Internal: open and prepare one input file for decoding              */
 /* ------------------------------------------------------------------ */
-static int open_input(mvhevc_input *inp, const char *filename, int out_w, int out_h)
+static int open_input(mvhevc_input *inp, const char *filename, int out_w, int out_h,
+                      int bitdepth)
 {
     int ret;
 
@@ -149,7 +155,8 @@ static int open_input(mvhevc_input *inp, const char *filename, int out_w, int ou
     if (!inp->frame || !inp->frame420 || !inp->pkt)
         return AVERROR(ENOMEM);
 
-    inp->frame420->format = AV_PIX_FMT_YUV420P;
+    enum AVPixelFormat out_fmt = target_pix_fmt(bitdepth);
+    inp->frame420->format = out_fmt;
     inp->frame420->width  = inp->width;
     inp->frame420->height = inp->height;
     ret = av_frame_get_buffer(inp->frame420, 0);
@@ -157,7 +164,7 @@ static int open_input(mvhevc_input *inp, const char *filename, int out_w, int ou
 
     inp->sws_ctx = sws_getContext(
         inp->dec_ctx->width, inp->dec_ctx->height, inp->dec_ctx->pix_fmt,
-        inp->width, inp->height, AV_PIX_FMT_YUV420P,
+        inp->width, inp->height, out_fmt,
         SWS_BICUBIC, NULL, NULL, NULL);
     if (!inp->sws_ctx) {
         fprintf(stderr, "Cannot create sws context\n");
@@ -170,7 +177,8 @@ static int open_input(mvhevc_input *inp, const char *filename, int out_w, int ou
 /* ------------------------------------------------------------------ */
 /* Internal: open a single MV-HEVC file, decoding all views            */
 /* ------------------------------------------------------------------ */
-static int open_input_mvhevc(mvhevc_input *inp, const char *filename, int out_w, int out_h)
+static int open_input_mvhevc(mvhevc_input *inp, const char *filename, int out_w, int out_h,
+                             int bitdepth)
 {
     int ret;
 
@@ -232,7 +240,8 @@ static int open_input_mvhevc(mvhevc_input *inp, const char *filename, int out_w,
     if (!inp->frame || !inp->frame420 || !inp->pkt)
         return AVERROR(ENOMEM);
 
-    inp->frame420->format = AV_PIX_FMT_YUV420P;
+    enum AVPixelFormat out_fmt = target_pix_fmt(bitdepth);
+    inp->frame420->format = out_fmt;
     inp->frame420->width  = inp->width;
     inp->frame420->height = inp->height;
     ret = av_frame_get_buffer(inp->frame420, 0);
@@ -241,7 +250,7 @@ static int open_input_mvhevc(mvhevc_input *inp, const char *filename, int out_w,
     /* sws context will be created on first frame (input pix_fmt may vary) */
     inp->sws_ctx = sws_getContext(
         inp->dec_ctx->width, inp->dec_ctx->height, inp->dec_ctx->pix_fmt,
-        inp->width, inp->height, AV_PIX_FMT_YUV420P,
+        inp->width, inp->height, out_fmt,
         SWS_BICUBIC, NULL, NULL, NULL);
     if (!inp->sws_ctx) {
         fprintf(stderr, "Cannot create sws context\n");
@@ -314,7 +323,7 @@ static void close_input(mvhevc_input *inp)
 /* Internal: fill x265_picture from decoded AVFrame                    */
 /* ------------------------------------------------------------------ */
 static void fill_x265_pic(x265_picture *pic, AVFrame *f, int64_t pts,
-                           int keyint, int force_idr)
+                           int keyint, int force_idr, int bitdepth)
 {
     pic->planes[0] = f->data[0];
     pic->planes[1] = f->data[1];
@@ -323,7 +332,7 @@ static void fill_x265_pic(x265_picture *pic, AVFrame *f, int64_t pts,
     pic->stride[1] = f->linesize[1];
     pic->stride[2] = f->linesize[2];
     pic->pts       = pts;
-    pic->bitDepth  = 8;
+    pic->bitDepth  = bitdepth;
     pic->sliceType = (force_idr || (keyint > 0 && pts % keyint == 0))
                      ? X265_TYPE_IDR : X265_TYPE_AUTO;
 }
@@ -374,6 +383,7 @@ static int setup_encoder(mvhevc_ctx *c)
     param->sourceHeight   = c->left.height;
     param->fpsNum         = c->fps_num;
     param->fpsDenom       = c->fps_den;
+    param->internalBitDepth = bitdepth;
     param->internalCsp    = X265_CSP_I420;
     param->bRepeatHeaders = 1;
 
@@ -426,9 +436,10 @@ static int setup_encoder(mvhevc_ctx *c)
     param->numLayers = param->numViews;
 
     /* Profile */
-    if (xc->profile) {
-        if (api->param_apply_profile(param, xc->profile) < 0) {
-            fprintf(stderr, "Invalid profile: %s\n", xc->profile);
+    {
+        const char *profile = xc->profile ? xc->profile : (bitdepth == 10 ? "main10" : NULL);
+        if (profile && api->param_apply_profile(param, profile) < 0) {
+            fprintf(stderr, "Invalid profile: %s\n", profile);
             return -1;
         }
     }
@@ -451,6 +462,17 @@ static int setup_encoder(mvhevc_ctx *c)
         }
         if (cp->color_range == AVCOL_RANGE_JPEG)
             param->vui.bEnableVideoFullRangeFlag = 1;
+    }
+
+    if (mv->hdr) {
+        if (api->param_parse(param, "hdr10", "1") != 0 ||
+            api->param_parse(param, "hdr10-opt", "1") != 0 ||
+            api->param_parse(param, "colorprim", "bt2020") != 0 ||
+            api->param_parse(param, "transfer", "smpte2084") != 0 ||
+            api->param_parse(param, "colormatrix", "bt2020nc") != 0) {
+            fprintf(stderr, "Error: x265 does not accept HDR10 parameters\n");
+            return -1;
+        }
     }
 
     /* Open encoder */
@@ -492,6 +514,7 @@ int mvhevc_init(mvhevc_ctx **ctx,
     c->params = xc;
     c->mv = *mv;
     c->single_input = (right_file == NULL);
+    int bitdepth = xc->bitdepth ? xc->bitdepth : 8;
 
     /* Auto-compute width from height if only height is specified.
      * Probe input dimensions, preserve aspect ratio, round to even. */
@@ -517,13 +540,13 @@ int mvhevc_init(mvhevc_ctx **ctx,
     if (c->single_input) {
         /* Single MV-HEVC input: decode both views from one file */
         fprintf(stderr, "Opening MV-HEVC input: %s\n", left_file);
-        ret = open_input_mvhevc(&c->left, left_file, xc->enc_width, xc->enc_height);
+        ret = open_input_mvhevc(&c->left, left_file, xc->enc_width, xc->enc_height, bitdepth);
         if (ret < 0) return ret;
 
         /* Allocate a second frame420 for the right eye view */
         c->right_frame420 = av_frame_alloc();
         if (!c->right_frame420) return AVERROR(ENOMEM);
-        c->right_frame420->format = AV_PIX_FMT_YUV420P;
+        c->right_frame420->format = target_pix_fmt(bitdepth);
         c->right_frame420->width  = c->left.width;
         c->right_frame420->height = c->left.height;
         ret = av_frame_get_buffer(c->right_frame420, 0);
@@ -531,11 +554,11 @@ int mvhevc_init(mvhevc_ctx **ctx,
     } else {
         /* Two separate input files */
         fprintf(stderr, "Opening left eye: %s\n", left_file);
-        ret = open_input(&c->left, left_file, xc->enc_width, xc->enc_height);
+        ret = open_input(&c->left, left_file, xc->enc_width, xc->enc_height, bitdepth);
         if (ret < 0) return ret;
 
         fprintf(stderr, "Opening right eye: %s\n", right_file);
-        ret = open_input(&c->right, right_file, xc->enc_width, xc->enc_height);
+        ret = open_input(&c->right, right_file, xc->enc_width, xc->enc_height, bitdepth);
         if (ret < 0) return ret;
 
         if (c->left.width != c->right.width || c->left.height != c->right.height) {
@@ -574,6 +597,7 @@ int mvhevc_init(mvhevc_ctx **ctx,
     fprintf(stderr, "\nx265 multiview encoder configuration:\n");
     fprintf(stderr, "  Resolution:  %dx%d\n", c->left.width, c->left.height);
     fprintf(stderr, "  Framerate:   %d/%d\n", c->fps_num, c->fps_den);
+    fprintf(stderr, "  Bit depth:   %d\n", bitdepth);
     if (xc->video_bitrate > 0)
         fprintf(stderr, "  Bitrate:     %d kbps\n", xc->video_bitrate);
     else
@@ -582,9 +606,13 @@ int mvhevc_init(mvhevc_ctx **ctx,
         fprintf(stderr, "  Keyint:      %d (forced IDR)\n", xc->force_keyint);
     if (xc->profile)
         fprintf(stderr, "  Profile:     %s\n", xc->profile);
+    else if (bitdepth == 10)
+        fprintf(stderr, "  Profile:     main10 (default for 10-bit)\n");
     if (xc->level > 0)
         fprintf(stderr, "  Level:       %.1f %s\n", xc->level / 10.0,
                 mv->high_tier ? "(High tier)" : "(Main tier)");
+    if (mv->hdr)
+        fprintf(stderr, "  HDR10:       enabled (bt2020/smpte2084/bt2020nc)\n");
     fprintf(stderr, "  Views:       2 (MV-HEVC)\n\n");
 
     /* Open output file */
@@ -620,6 +648,7 @@ int mvhevc_xc(mvhevc_ctx *c)
     int ret = 0;
     int encoding = 1;
     int force_keyint = c->params->force_keyint;
+    int bitdepth = c->params->bitdepth ? c->params->bitdepth : 8;
 
     while (encoding) {
         x265_picture pics_in[2];
@@ -665,9 +694,9 @@ int mvhevc_xc(mvhevc_ctx *c)
                  *      right_frame420 = view 0 (left eye)
                  * Encode: view 0 from right_frame420, view 1 from left.frame420 */
                 fill_x265_pic(&pics_in[0], c->right_frame420, c->frame_count,
-                              force_keyint, c->frame_count == 0);
+                              force_keyint, c->frame_count == 0, bitdepth);
                 fill_x265_pic(&pics_in[1], c->left.frame420, c->frame_count,
-                              force_keyint, c->frame_count == 0);
+                              force_keyint, c->frame_count == 0, bitdepth);
             }
         } else {
             int ret_l = decode_next_frame(&c->left);
@@ -687,9 +716,9 @@ int mvhevc_xc(mvhevc_ctx *c)
 
             if (have_frames) {
                 fill_x265_pic(&pics_in[0], c->left.frame420, c->frame_count,
-                              force_keyint, c->frame_count == 0);
+                              force_keyint, c->frame_count == 0, bitdepth);
                 fill_x265_pic(&pics_in[1], c->right.frame420, c->frame_count,
-                              force_keyint, c->frame_count == 0);
+                              force_keyint, c->frame_count == 0, bitdepth);
             }
         }
 

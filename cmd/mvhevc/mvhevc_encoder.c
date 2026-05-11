@@ -44,6 +44,7 @@ static void usage(const char *prog)
         "  -level <val>        Level * 10, e.g. 51 = level 5.1\n"
         "  -hightier           Use High tier (default: Main)\n"
         "  -bitdepth <n>       Bit depth: 8 or 10 (default 8)\n"
+        "  -hdr                Enable HDR10 x265 params + BT.2020/PQ color VUI\n"
         "  -scenecut <n>       Scene-cut sensitivity (default 40, 0 = disable)\n"
         "  -fps <num/den>      Override framerate (e.g. 24000/1001)\n"
         "  -max-cll <val>      HDR MaxCLL (e.g. \"1000,200\")\n"
@@ -121,6 +122,8 @@ int main(int argc, char *argv[])
             xc.master_display = argv[argi++];
         } else if (!strcmp(opt, "-bitdepth") && argi < argc) {
             xc.bitdepth = atoi(argv[argi++]);
+        } else if (!strcmp(opt, "-hdr")) {
+            mv.hdr = 1;
         } else if (!strcmp(opt, "-scenecut") && argi < argc) {
             mv.scenecut = atoi(argv[argi++]);
         } else {
