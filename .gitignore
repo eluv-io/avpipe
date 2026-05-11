@@ -62,6 +62,8 @@ dkms.conf
 
 /bin/
 /include/
+/cmd/mvhevc/.build/
+/cmd/mvhevc/mvhevc_encoder
 /elvxc/elvxc
 /exc/bin/
 O/

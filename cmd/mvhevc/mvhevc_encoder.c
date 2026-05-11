@@ -49,10 +49,7 @@ static void usage(const char *prog)
         "  -fps <num/den>      Override framerate (e.g. 24000/1001)\n"
         "  -max-cll <val>      HDR MaxCLL (e.g. \"1000,200\")\n"
         "  -master-display <v> HDR master display string\n"
-        "\n"
-        "Then inject spatial metadata and mux to MP4:\n"
-        "  MP4Box -add output.hevc:fps=23.976 -new output_muxed.mp4\n"
-        "  inject_spatial output_muxed.mp4 output_spatial.mp4\n",
+        "\n",
         prog, prog);
 }
 

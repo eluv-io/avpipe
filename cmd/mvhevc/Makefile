@@ -27,29 +27,39 @@ CC = clang
 CFLAGS = -Wall -Wextra -g -O2 -I$(AVPIPE_INCLUDE) $(FFMPEG_CFLAGS) $(X265_CFLAGS)
 LDFLAGS = $(FFMPEG_LDFLAGS) $(X265_LDFLAGS) -lc++ -lpthread
 
-TARGET = mvhevc_encoder
-SRCS   = mvhevc_encoder.c mvhevc_xc.c
-OBJS   = $(SRCS:.c=.o)
+TARGET       = mvhevc_encoder
+GO_TARGET    = mvhevc
+GO_BUILD_DIR = .build
+GO_BINARY    = $(GO_BUILD_DIR)/$(GO_TARGET)
+GO_SRCS      = $(shell find mvhevc -name '*.go')
+SRCS         = mvhevc_encoder.c mvhevc_xc.c
+OBJS         = $(SRCS:.c=.o)
 
 .PHONY: all install clean run-test
 
-all: $(TARGET) install
+all: $(TARGET) $(GO_BINARY) install
 
 $(TARGET): $(OBJS)
 	$(CC) $(CFLAGS) -o $@ $(OBJS) $(LDFLAGS)
 	@echo ""
 	@echo "Build successful: $(TARGET)"
 
-install: $(TARGET)
+$(GO_BINARY): $(GO_SRCS) ../../go.mod ../../go.sum
+	@(if [ ! -d $(GO_BUILD_DIR) ]; then mkdir $(GO_BUILD_DIR); fi)
+	go build -v -x -o $(GO_BINARY) ./mvhevc
+
+install: $(TARGET) $(GO_BINARY)
 	@(if [ ! -d $(ROOT_DIR)/$(BINDIR) ]; then mkdir $(ROOT_DIR)/$(BINDIR); fi)
 	@echo "Installing $(TARGET)"
 	@cp $(TARGET) $(ROOT_DIR)/$(BINDIR)
+	@echo "Installing $(GO_TARGET)"
+	@cp $(GO_BINARY) $(ROOT_DIR)/$(BINDIR)/$(GO_TARGET)
 
 %.o: %.c mvhevc_xc.h
 	$(CC) $(CFLAGS) -c -o $@ $<
 
 clean:
-	rm -f $(TARGET) *.o *.hevc
+	rm -rf $(TARGET) $(GO_BUILD_DIR) *.o *.hevc
 
 # Quick test with sample files (update paths as needed)
 run-test: $(TARGET)
