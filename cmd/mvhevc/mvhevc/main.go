@@ -6,6 +6,8 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"strconv"
+	"strings"
 
 	"github.com/eluv-io/avpipe/mp4e/mvhevc"
 	elog "github.com/eluv-io/log-go"
@@ -82,7 +84,8 @@ func runAdd(args []string) error {
 	var opts mvhevc.AddOptions
 	var baseline uint
 	var hfov uint
-	fs.Float64Var(&opts.FPS, "fps", 0, "Frame rate (required for .hevc input, e.g., 23.976, 24, 30, 60)")
+	fps := fpsFlag{value: &opts.FPS}
+	fs.Var(&fps, "fps", "Frame rate (required for .hevc input, e.g., 24000/1001, 23.976, 24, 30, 60)")
 	fs.BoolVar(&opts.Spatial, "spatial", false, "Add Apple spatial video metadata (vexu/hfov)")
 	fs.UintVar(&baseline, "baseline", uint(mvhevc.DefaultBaselineUM), "Camera baseline in micrometers")
 	fs.UintVar(&hfov, "hfov", uint(mvhevc.DefaultHFOV), "Horizontal FOV in 1/1000 degrees")
@@ -111,4 +114,56 @@ func runAdd(args []string) error {
 
 func printUsage() {
 	_, _ = fmt.Fprintf(os.Stderr, usage, appName, appName)
+}
+
+type fpsFlag struct {
+	value *float64
+}
+
+func (f fpsFlag) String() string {
+	if f.value == nil {
+		return ""
+	}
+	return strconv.FormatFloat(*f.value, 'f', -1, 64)
+}
+
+func (f fpsFlag) Set(s string) error {
+	fps, err := parseFPS(s)
+	if err != nil {
+		return err
+	}
+	*f.value = fps
+	return nil
+}
+
+func parseFPS(s string) (float64, error) {
+	s = strings.TrimSpace(s)
+	if s == "" {
+		return 0, fmt.Errorf("fps must not be empty")
+	}
+
+	parts := strings.Split(s, "/")
+	switch len(parts) {
+	case 1:
+		fps, err := strconv.ParseFloat(parts[0], 64)
+		if err != nil {
+			return 0, fmt.Errorf("invalid fps %q: %w", s, err)
+		}
+		return fps, nil
+	case 2:
+		num, err := strconv.ParseFloat(strings.TrimSpace(parts[0]), 64)
+		if err != nil {
+			return 0, fmt.Errorf("invalid fps numerator %q: %w", parts[0], err)
+		}
+		den, err := strconv.ParseFloat(strings.TrimSpace(parts[1]), 64)
+		if err != nil {
+			return 0, fmt.Errorf("invalid fps denominator %q: %w", parts[1], err)
+		}
+		if den == 0 {
+			return 0, fmt.Errorf("invalid fps %q: denominator must not be zero", s)
+		}
+		return num / den, nil
+	default:
+		return 0, fmt.Errorf("invalid fps %q", s)
+	}
 }
