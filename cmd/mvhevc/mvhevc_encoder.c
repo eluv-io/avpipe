@@ -17,6 +17,8 @@
 
 #include "mvhevc_xc.h"
 
+#define MAX_VIDEO_BITRATE_KBPS 400000
+
 static void usage(const char *prog)
 {
     fprintf(stderr,
@@ -31,7 +33,7 @@ static void usage(const char *prog)
         "\n"
         "Options:\n"
         "  -crf <val>          CRF quality (default 23, lower = better)\n"
-        "  -bitrate <kbps>     Target bitrate (0 = use CRF mode)\n"
+        "  -bitrate <kbps>     Target bitrate, max 400000 kbps (0 = use CRF mode)\n"
         "  -maxrate <kbps>     VBV max bitrate (enables VBV)\n"
         "  -bufsize <kbits>    VBV buffer size\n"
         "  -w <pixels>         Output width\n"
@@ -127,6 +129,12 @@ int main(int argc, char *argv[])
             fprintf(stderr, "Unknown option: %s\n", opt);
             return 1;
         }
+    }
+
+    if (xc.video_bitrate > MAX_VIDEO_BITRATE_KBPS) {
+        fprintf(stderr, "Invalid bitrate %d kbps: maximum is %d kbps (400 Mbps)\n",
+                xc.video_bitrate, MAX_VIDEO_BITRATE_KBPS);
+        return 1;
     }
 
     const char *left_file, *right_file, *out_file;

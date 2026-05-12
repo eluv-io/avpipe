@@ -15,6 +15,8 @@
 
 #include "mvhevc_xc.h"
 
+#define MAX_VIDEO_BITRATE_KBPS 400000
+
 /* ------------------------------------------------------------------ */
 /* mvhevc_params defaults                                              */
 /* ------------------------------------------------------------------ */
@@ -54,6 +56,11 @@ int mvhevc_validate_params(const xcparams_t *xc)
     }
     if (xc->audio_bitrate || xc->sample_rate || xc->channel_layout) {
         fprintf(stderr, "validate: audio parameters not supported\n"); ok = 0;
+    }
+    if (xc->video_bitrate > MAX_VIDEO_BITRATE_KBPS) {
+        fprintf(stderr, "validate: bitrate must be <= %d kbps (400 Mbps), got %d kbps\n",
+                MAX_VIDEO_BITRATE_KBPS, xc->video_bitrate);
+        ok = 0;
     }
     if (xc->audio_seg_duration_ts || xc->video_seg_duration_ts || xc->seg_duration) {
         fprintf(stderr, "validate: segment duration not supported\n"); ok = 0;
