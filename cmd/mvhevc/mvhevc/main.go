@@ -8,6 +8,7 @@ import (
 	"os"
 
 	"github.com/eluv-io/avpipe/mp4e/mvhevc"
+	elog "github.com/eluv-io/log-go"
 )
 
 const appName = "mvhevc"
@@ -22,10 +23,18 @@ Usage of %s:
 `
 
 func main() {
+	configureLogging()
 	if err := run(os.Args, os.Stdout); err != nil {
 		_, _ = fmt.Fprintf(os.Stderr, "error: %v\n", err)
 		os.Exit(1)
 	}
+}
+
+func configureLogging() {
+	elog.SetDefault(&elog.Config{
+		Level:   "info",
+		Handler: "console",
+	})
 }
 
 func run(args []string, w io.Writer) error {
@@ -38,7 +47,7 @@ func run(args []string, w io.Writer) error {
 	case "info":
 		return runInfo(args[1:], w)
 	case "add":
-		return runAdd(args[1:], w)
+		return runAdd(args[1:])
 	default:
 		printUsage()
 		return fmt.Errorf("unknown subcommand: %s", args[1])
@@ -68,7 +77,7 @@ func runInfo(args []string, w io.Writer) error {
 	return mvhevc.Info(fs.Arg(0), opts, w)
 }
 
-func runAdd(args []string, w io.Writer) error {
+func runAdd(args []string) error {
 	fs := flag.NewFlagSet("add", flag.ContinueOnError)
 	var opts mvhevc.AddOptions
 	var baseline uint
@@ -97,7 +106,7 @@ func runAdd(args []string, w io.Writer) error {
 
 	opts.BaselineUM = uint32(baseline)
 	opts.HFOV = uint32(hfov)
-	return mvhevc.Add(fs.Arg(0), fs.Arg(1), opts, w)
+	return mvhevc.Add(fs.Arg(0), fs.Arg(1), opts)
 }
 
 func printUsage() {

@@ -47,82 +47,7 @@ func Info(inputPath string, opts InfoOptions, w io.Writer) error {
 			if !ok {
 				continue
 			}
-			fmt.Fprintf(w, "  Sample entry: %s (%dx%d)\n", vse.Type(), vse.Width, vse.Height)
-
-			if vse.HvcC != nil {
-				fmt.Fprintf(w, "  hvcC (base layer config):\n")
-				hdcr := vse.HvcC.DecConfRec
-				fmt.Fprintf(w, "    Profile: space=%d tier=%t idc=%d level=%d\n",
-					hdcr.GeneralProfileSpace, hdcr.GeneralTierFlag,
-					hdcr.GeneralProfileIDC, hdcr.GeneralLevelIDC)
-				fmt.Fprintf(w, "    Chroma: %d  BitDepth: luma=%d chroma=%d\n",
-					hdcr.ChromaFormatIDC,
-					hdcr.BitDepthLumaMinus8+8,
-					hdcr.BitDepthChromaMinus8+8)
-				fmt.Fprintf(w, "    NumTemporalLayers: %d  LengthSize: %d\n",
-					hdcr.NumTemporalLayers, hdcr.LengthSizeMinusOne+1)
-
-				vpsNalus := hdcr.GetNalusForType(hevc.NALU_VPS)
-				if len(vpsNalus) > 0 {
-					vps, err := hevc.ParseVPSNALUnit(vpsNalus[0])
-					if err != nil {
-						fmt.Fprintf(w, "    VPS parse error: %v\n", err)
-					} else {
-						fmt.Fprintf(w, "    VPS: layers=%d views=%d multiLayer=%t\n",
-							vps.GetNumLayers(), vps.GetNumViews(), vps.IsMultiLayer())
-					}
-				}
-
-				for _, array := range hdcr.NaluArrays {
-					fmt.Fprintf(w, "    %s: %d nalus (complete=%d)\n",
-						array.NaluType(), len(array.Nalus), array.Complete())
-				}
-			}
-
-			if vse.LhvC != nil {
-				fmt.Fprintf(w, "  lhvC (enhancement layer config):\n")
-				hdcr := vse.LhvC.DecConfRec
-				fmt.Fprintf(w, "    NumTemporalLayers: %d  LengthSize: %d\n",
-					hdcr.NumTemporalLayers, hdcr.LengthSizeMinusOne+1)
-				for _, array := range hdcr.NaluArrays {
-					fmt.Fprintf(w, "    %s: %d nalus (complete=%d)\n",
-						array.NaluType(), len(array.Nalus), array.Complete())
-					for _, nalu := range array.Nalus {
-						fmt.Fprintf(w, "      %s\n", hex.EncodeToString(nalu))
-					}
-				}
-			}
-
-			if vse.Vexu != nil {
-				fmt.Fprintf(w, "  vexu (Spatial Video):\n")
-				if vse.Vexu.Eyes != nil {
-					eyes := vse.Vexu.Eyes
-					if eyes.Stri != nil {
-						fmt.Fprintf(w, "    stri: left=%t right=%t reversed=%t\n",
-							eyes.Stri.HasLeftEye(),
-							eyes.Stri.HasRightEye(),
-							eyes.Stri.EyeViewsReversed())
-					}
-					if eyes.Hero != nil {
-						fmt.Fprintf(w, "    hero: %s (%d)\n",
-							eyes.Hero.HeroEyeName(), eyes.Hero.HeroEye)
-					}
-					if eyes.Cams != nil && eyes.Cams.Blin != nil {
-						fmt.Fprintf(w, "    baseline: %d um (%.1f mm)\n",
-							eyes.Cams.Blin.Baseline,
-							float64(eyes.Cams.Blin.Baseline)/1000.0)
-					}
-				}
-				if vse.Vexu.Proj != nil && vse.Vexu.Proj.Prji != nil {
-					fmt.Fprintf(w, "    projection: %s\n", vse.Vexu.Proj.Prji.ProjectionType)
-				}
-			}
-
-			if vse.Hfov != nil {
-				fmt.Fprintf(w, "  hfov: %d/1000 degrees (%.1f)\n",
-					vse.Hfov.FieldOfView,
-					float64(vse.Hfov.FieldOfView)/1000.0)
-			}
+			printVisualSampleEntryInfo(vse, w)
 		}
 
 		timeScale := trak.Mdia.Mdhd.Timescale
@@ -131,30 +56,7 @@ func Info(inputPath string, opts InfoOptions, w io.Writer) error {
 		if parsedMP4.IsFragmented() {
 			printFragmentedInfo(parsedMP4, trackID, timeScale, opts.ShowIDR, w)
 		} else {
-			nrSamples := trak.GetNrSamples()
-			var sampleDur uint32
-			if stbl.Stts != nil && len(stbl.Stts.SampleTimeDelta) > 0 {
-				sampleDur = stbl.Stts.SampleTimeDelta[0]
-			}
-			if sampleDur > 0 {
-				fps := float64(timeScale) / float64(sampleDur)
-				fmt.Fprintf(w, "  Samples: %d, Timescale: %d, SampleDur: %d (%.3f fps)\n",
-					nrSamples, timeScale, sampleDur, fps)
-			} else {
-				fmt.Fprintf(w, "  Samples: %d, Timescale: %d\n", nrSamples, timeScale)
-			}
-			if stbl.Stss != nil && opts.ShowIDR {
-				syncNrs := stbl.Stss.SampleNumber
-				fmt.Fprintf(w, "  Sync (IDR) frames (%d):\n", len(syncNrs))
-				for i, sn := range syncNrs {
-					if i == 0 {
-						fmt.Fprintf(w, "    frame %d\n", sn)
-					} else {
-						interval := sn - syncNrs[i-1]
-						fmt.Fprintf(w, "    frame %d (interval=%d)\n", sn, interval)
-					}
-				}
-			}
+			printUnfragmentedSampleInfo(trak, stbl, timeScale, opts.ShowIDR, w)
 		}
 
 		for _, child := range stbl.Children {
@@ -170,17 +72,129 @@ func Info(inputPath string, opts InfoOptions, w io.Writer) error {
 			}
 		}
 
-		if trak.Trgr != nil {
-			fmt.Fprintf(w, "  trgr (Track Group):\n")
-			for _, child := range trak.Trgr.Children {
-				if cstg, ok := child.(*mp4.TrackGroupTypeBox); ok {
-					fmt.Fprintf(w, "    %s: trackGroupID=%d\n", cstg.Type(), cstg.TrackGroupID)
-				}
-			}
-		}
+		printTrackGroupInfo(trak, w)
 	}
 
 	return nil
+}
+
+func printVisualSampleEntryInfo(vse *mp4.VisualSampleEntryBox, w io.Writer) {
+	fmt.Fprintf(w, "  Sample entry: %s (%dx%d)\n", vse.Type(), vse.Width, vse.Height)
+
+	if vse.HvcC != nil {
+		printHvcCInfo(vse.HvcC.DecConfRec, w)
+	}
+
+	if vse.LhvC != nil {
+		printLhvCInfo(vse.LhvC.DecConfRec, w)
+	}
+
+	if vse.Vexu != nil {
+		printVexuInfo(vse.Vexu, w)
+	}
+
+	if vse.Hfov != nil {
+		fmt.Fprintf(w, "  hfov: %d/1000 degrees (%.1f)\n",
+			vse.Hfov.FieldOfView,
+			float64(vse.Hfov.FieldOfView)/1000.0)
+	}
+}
+
+func printHvcCInfo(hdcr hevc.DecConfRec, w io.Writer) {
+	fmt.Fprintf(w, "  hvcC (base layer config):\n")
+	fmt.Fprintf(w, "    Profile: space=%d tier=%t idc=%d level=%d\n",
+		hdcr.GeneralProfileSpace, hdcr.GeneralTierFlag,
+		hdcr.GeneralProfileIDC, hdcr.GeneralLevelIDC)
+	fmt.Fprintf(w, "    Chroma: %d  BitDepth: luma=%d chroma=%d\n",
+		hdcr.ChromaFormatIDC,
+		hdcr.BitDepthLumaMinus8+8,
+		hdcr.BitDepthChromaMinus8+8)
+	fmt.Fprintf(w, "    NumTemporalLayers: %d  LengthSize: %d\n",
+		hdcr.NumTemporalLayers, hdcr.LengthSizeMinusOne+1)
+
+	vpsNalus := hdcr.GetNalusForType(hevc.NALU_VPS)
+	if len(vpsNalus) > 0 {
+		vps, err := hevc.ParseVPSNALUnit(vpsNalus[0])
+		if err != nil {
+			fmt.Fprintf(w, "    VPS parse error: %v\n", err)
+		} else {
+			fmt.Fprintf(w, "    VPS: layers=%d views=%d multiLayer=%t\n",
+				vps.GetNumLayers(), vps.GetNumViews(), vps.IsMultiLayer())
+		}
+	}
+
+	for _, array := range hdcr.NaluArrays {
+		fmt.Fprintf(w, "    %s: %d nalus (complete=%d)\n",
+			array.NaluType(), len(array.Nalus), array.Complete())
+	}
+}
+
+func printLhvCInfo(hdcr hevc.DecConfRec, w io.Writer) {
+	fmt.Fprintf(w, "  lhvC (enhancement layer config):\n")
+	fmt.Fprintf(w, "    NumTemporalLayers: %d  LengthSize: %d\n",
+		hdcr.NumTemporalLayers, hdcr.LengthSizeMinusOne+1)
+	for _, array := range hdcr.NaluArrays {
+		fmt.Fprintf(w, "    %s: %d nalus (complete=%d)\n",
+			array.NaluType(), len(array.Nalus), array.Complete())
+		for _, nalu := range array.Nalus {
+			fmt.Fprintf(w, "      %s\n", hex.EncodeToString(nalu))
+		}
+	}
+}
+
+func printVexuInfo(vexu *mp4.VexuBox, w io.Writer) {
+	fmt.Fprintf(w, "  vexu (Spatial Video):\n")
+	if vexu.Eyes != nil {
+		eyes := vexu.Eyes
+		if eyes.Stri != nil {
+			fmt.Fprintf(w, "    stri: left=%t right=%t reversed=%t\n",
+				eyes.Stri.HasLeftEye(),
+				eyes.Stri.HasRightEye(),
+				eyes.Stri.EyeViewsReversed())
+		}
+		if eyes.Hero != nil {
+			fmt.Fprintf(w, "    hero: %s (%d)\n",
+				eyes.Hero.HeroEyeName(), eyes.Hero.HeroEye)
+		}
+		if eyes.Cams != nil && eyes.Cams.Blin != nil {
+			fmt.Fprintf(w, "    baseline: %d um (%.1f mm)\n",
+				eyes.Cams.Blin.Baseline,
+				float64(eyes.Cams.Blin.Baseline)/1000.0)
+		}
+	}
+	if vexu.Proj != nil && vexu.Proj.Prji != nil {
+		fmt.Fprintf(w, "    projection: %s\n", vexu.Proj.Prji.ProjectionType)
+	}
+}
+
+func printUnfragmentedSampleInfo(trak *mp4.TrakBox, stbl *mp4.StblBox, timeScale uint32, showIDR bool, w io.Writer) {
+	nrSamples := trak.GetNrSamples()
+	var sampleDur uint32
+	if stbl.Stts != nil && len(stbl.Stts.SampleTimeDelta) > 0 {
+		sampleDur = stbl.Stts.SampleTimeDelta[0]
+	}
+	if sampleDur > 0 {
+		fps := float64(timeScale) / float64(sampleDur)
+		fmt.Fprintf(w, "  Samples: %d, Timescale: %d, SampleDur: %d (%.3f fps)\n",
+			nrSamples, timeScale, sampleDur, fps)
+	} else {
+		fmt.Fprintf(w, "  Samples: %d, Timescale: %d\n", nrSamples, timeScale)
+	}
+	if stbl.Stss != nil && showIDR {
+		printSyncFrameInfo(stbl.Stss.SampleNumber, w)
+	}
+}
+
+func printSyncFrameInfo(syncNrs []uint32, w io.Writer) {
+	fmt.Fprintf(w, "  Sync (IDR) frames (%d):\n", len(syncNrs))
+	for i, sn := range syncNrs {
+		if i == 0 {
+			fmt.Fprintf(w, "    frame %d\n", sn)
+		} else {
+			interval := sn - syncNrs[i-1]
+			fmt.Fprintf(w, "    frame %d (interval=%d)\n", sn, interval)
+		}
+	}
 }
 
 func printOinfInfo(sgpd *mp4.SgpdBox, w io.Writer) {
@@ -225,6 +239,18 @@ func printLinfInfo(sgpd *mp4.SgpdBox, w io.Writer) {
 		for j, l := range linf.Layers {
 			fmt.Fprintf(w, "    Layer[%d]: layerId=%d minTid=%d maxTid=%d subFlags=0x%02x\n",
 				j, l.LayerID, l.MinTemporalID, l.MaxTemporalID, l.SubLayerPresenceFlags)
+		}
+	}
+}
+
+func printTrackGroupInfo(trak *mp4.TrakBox, w io.Writer) {
+	if trak.Trgr == nil {
+		return
+	}
+	fmt.Fprintf(w, "  trgr (Track Group):\n")
+	for _, child := range trak.Trgr.Children {
+		if cstg, ok := child.(*mp4.TrackGroupTypeBox); ok {
+			fmt.Fprintf(w, "    %s: trackGroupID=%d\n", cstg.Type(), cstg.TrackGroupID)
 		}
 	}
 }
@@ -286,14 +312,6 @@ func printFragmentedInfo(f *mp4.File, trackID uint32, timeScale uint32, showIDR 
 	}
 
 	if showIDR && len(syncFrames) > 0 {
-		fmt.Fprintf(w, "  Sync (IDR) frames (%d):\n", len(syncFrames))
-		for i, sn := range syncFrames {
-			if i == 0 {
-				fmt.Fprintf(w, "    frame %d\n", sn)
-			} else {
-				interval := sn - syncFrames[i-1]
-				fmt.Fprintf(w, "    frame %d (interval=%d)\n", sn, interval)
-			}
-		}
+		printSyncFrameInfo(syncFrames, w)
 	}
 }

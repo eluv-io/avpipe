@@ -56,12 +56,10 @@ type sample struct {
 	isSync bool
 }
 
-func Add(inputPath, outputPath string, opts AddOptions, log io.Writer) error {
-	if log == nil {
-		log = io.Discard
-	}
+func Add(inputPath, outputPath string, opts AddOptions) error {
+	log.Info("adding MV-HEVC MP4 metadata", "input", inputPath, "output", outputPath)
 
-	inp, err := parseInput(inputPath, opts.FPS, log)
+	inp, err := parseInput(inputPath, opts.FPS)
 	if err != nil {
 		return err
 	}
@@ -72,17 +70,17 @@ func Add(inputPath, outputPath string, opts AddOptions, log io.Writer) error {
 		}
 	}
 
-	return buildAndWriteMP4(inp, outputPath, log)
+	return buildAndWriteMP4(inp, outputPath)
 }
 
-func parseInput(inputPath string, fps float64, log io.Writer) (*input, error) {
+func parseInput(inputPath string, fps float64) (*input, error) {
 	if isMP4Input(inputPath) {
-		return parseMP4Input(inputPath, log)
+		return parseMP4Input(inputPath)
 	}
 	if fps <= 0 {
 		return nil, fmt.Errorf("-fps is required for Annex B input")
 	}
-	return parseAnnexBInput(inputPath, fps, log)
+	return parseAnnexBInput(inputPath, fps)
 }
 
 func applySpatialOptions(inp *input, opts AddOptions) error {
@@ -117,22 +115,35 @@ func applySpatialOptions(inp *input, opts AddOptions) error {
 
 func isMP4Input(path string) bool {
 	ext := strings.ToLower(filepath.Ext(path))
-	return ext == ".mp4" || ext == ".m4v" || ext == ".mov"
+	if ext == ".mp4" || ext == ".m4v" || ext == ".mov" {
+		return true
+	}
+	// Also check ISOBMFF/QuickTime ftyp box
+	f, err := os.Open(path)
+	if err != nil {
+		return false
+	}
+	defer func() { _ = f.Close() }()
+	var hdr [8]byte
+	if _, err := io.ReadFull(f, hdr[:]); err != nil {
+		return false
+	}
+	return string(hdr[4:8]) == "ftyp"
 }
 
-func parseAnnexBInput(inputPath string, fps float64, log io.Writer) (*input, error) {
+func parseAnnexBInput(inputPath string, fps float64) (*input, error) {
 	data, err := os.ReadFile(inputPath)
 	if err != nil {
 		return nil, fmt.Errorf("could not read input: %w", err)
 	}
 
-	fmt.Fprintf(log, "Parsing Annex B bitstream (%d bytes)...\n", len(data))
+	log.Info("parsing Annex B bitstream", "input", inputPath, "bytes", len(data))
 
 	allNalus := avc.ExtractNalusFromByteStream(data)
 	if len(allNalus) == 0 {
 		return nil, fmt.Errorf("no NALUs found in bitstream")
 	}
-	fmt.Fprintf(log, "Found %d NALUs\n", len(allNalus))
+	log.Info("found Annex B NALUs", "count", len(allNalus))
 
 	var baseVPS, baseSPS, basePPS, baseSEI [][]byte
 	var enhSPS, enhPPS [][]byte
@@ -232,23 +243,28 @@ func parseAnnexBInput(inputPath string, fps float64, log io.Writer) (*input, err
 		samples = append(samples, sample{data: curData, size: curSize, isSync: curSync})
 	}
 
-	fmt.Fprintf(log, "Samples: %d\n", len(samples))
+	log.Info("parsed Annex B samples", "samples", len(samples))
 	if len(samples) == 0 {
 		return nil, fmt.Errorf("no video samples found")
 	}
-	fmt.Fprintf(log, "Base VPS: %d, SPS: %d, PPS: %d, SEI: %d\n",
-		len(baseVPS), len(baseSPS), len(basePPS), len(baseSEI))
-	fmt.Fprintf(log, "Enhancement SPS: %d, PPS: %d\n", len(enhSPS), len(enhPPS))
+	log.Info("found base parameter sets",
+		"vps", len(baseVPS),
+		"sps", len(baseSPS),
+		"pps", len(basePPS),
+		"sei", len(baseSEI))
+	log.Info("found enhancement parameter sets", "sps", len(enhSPS), "pps", len(enhPPS))
 
 	if len(baseVPS) == 0 {
-		return nil, fmt.Errorf("no VPS found in bitstream")
+		return nil, fmt.Errorf("no VPS found in bitstream (input may be an MP4/MOV container with .hevc extension, not a raw Annex B stream)")
 	}
 	vps, err := hevc.ParseVPSNALUnit(baseVPS[0])
 	if err != nil {
 		return nil, fmt.Errorf("VPS parse error: %w", err)
 	}
-	fmt.Fprintf(log, "VPS: layers=%d views=%d multiLayer=%t\n",
-		vps.GetNumLayers(), vps.GetNumViews(), vps.IsMultiLayer())
+	log.Info("parsed VPS",
+		"layers", vps.GetNumLayers(),
+		"views", vps.GetNumViews(),
+		"multiLayer", vps.IsMultiLayer())
 
 	if len(baseSPS) == 0 {
 		return nil, fmt.Errorf("no SPS found in bitstream")
@@ -260,7 +276,7 @@ func parseAnnexBInput(inputPath string, fps float64, log io.Writer) (*input, err
 	imgW, imgH := parsedSPS.ImageSize()
 
 	timeScale, sampleDur := fpsToTimescale(fps)
-	fmt.Fprintf(log, "Timescale: %d, SampleDur: %d (%.3f fps)\n", timeScale, sampleDur, fps)
+	log.Info("computed Annex B timing", "timescale", timeScale, "sampleDur", sampleDur, "fps", fps)
 
 	return &input{
 		baseVPS:   baseVPS,
@@ -278,7 +294,7 @@ func parseAnnexBInput(inputPath string, fps float64, log io.Writer) (*input, err
 	}, nil
 }
 
-func parseMP4Input(inputPath string, log io.Writer) (*input, error) {
+func parseMP4Input(inputPath string) (*input, error) {
 	ifd, err := os.Open(inputPath)
 	if err != nil {
 		return nil, fmt.Errorf("could not open input: %w", err)
@@ -321,7 +337,11 @@ func parseMP4Input(inputPath string, log io.Writer) (*input, error) {
 		return nil, fmt.Errorf("no HEVC sample entry found")
 	}
 
-	fmt.Fprintf(log, "Input MP4: %s (%dx%d)\n", vse.Type(), vse.Width, vse.Height)
+	log.Info("found HEVC sample entry",
+		"input", inputPath,
+		"type", vse.Type(),
+		"width", vse.Width,
+		"height", vse.Height)
 
 	hdcr := vse.HvcC.DecConfRec
 	baseVPS := dedupNalus(hdcr.GetNalusForType(hevc.NALU_VPS))
@@ -335,9 +355,12 @@ func parseMP4Input(inputPath string, log io.Writer) (*input, error) {
 		enhPPS = dedupNalus(vse.LhvC.GetNalusForType(hevc.NALU_PPS))
 	}
 
-	fmt.Fprintf(log, "Base VPS: %d, SPS: %d, PPS: %d, SEI: %d\n",
-		len(baseVPS), len(baseSPS), len(basePPS), len(baseSEI))
-	fmt.Fprintf(log, "Enhancement SPS: %d, PPS: %d\n", len(enhSPS), len(enhPPS))
+	log.Info("found base parameter sets",
+		"vps", len(baseVPS),
+		"sps", len(baseSPS),
+		"pps", len(basePPS),
+		"sei", len(baseSEI))
+	log.Info("found enhancement parameter sets", "sps", len(enhSPS), "pps", len(enhPPS))
 
 	if len(baseVPS) == 0 {
 		return nil, fmt.Errorf("no VPS found in hvcC")
@@ -346,8 +369,10 @@ func parseMP4Input(inputPath string, log io.Writer) (*input, error) {
 	if err != nil {
 		return nil, fmt.Errorf("VPS parse error: %w", err)
 	}
-	fmt.Fprintf(log, "VPS: layers=%d views=%d multiLayer=%t\n",
-		vps.GetNumLayers(), vps.GetNumViews(), vps.IsMultiLayer())
+	log.Info("parsed VPS",
+		"layers", vps.GetNumLayers(),
+		"views", vps.GetNumViews(),
+		"multiLayer", vps.IsMultiLayer())
 
 	timeScale := trak.Mdia.Mdhd.Timescale
 	var sampleDur uint32
@@ -357,10 +382,10 @@ func parseMP4Input(inputPath string, log io.Writer) (*input, error) {
 	if sampleDur == 0 {
 		return nil, fmt.Errorf("could not determine sample duration from stts")
 	}
-	fmt.Fprintf(log, "Timescale: %d, SampleDur: %d\n", timeScale, sampleDur)
+	log.Info("read MP4 timing", "timescale", timeScale, "sampleDur", sampleDur)
 
 	nrSamples := trak.GetNrSamples()
-	fmt.Fprintf(log, "Reading %d samples...\n", nrSamples)
+	log.Info("reading MP4 samples", "samples", nrSamples)
 
 	syncMap := make(map[uint32]bool)
 	if stbl.Stss != nil {
@@ -404,7 +429,7 @@ func parseMP4Input(inputPath string, log io.Writer) (*input, error) {
 		}
 	}
 
-	fmt.Fprintf(log, "Parsed %d samples\n", len(samples))
+	log.Info("parsed MP4 samples", "samples", len(samples))
 
 	inp := &input{
 		baseVPS:   baseVPS,
@@ -445,7 +470,7 @@ func parseMP4Input(inputPath string, log io.Writer) (*input, error) {
 	return inp, nil
 }
 
-func buildAndWriteMP4(inp *input, outputPath string, log io.Writer) error {
+func buildAndWriteMP4(inp *input, outputPath string) error {
 	hvcC, err := mp4.CreateHvcC(inp.baseVPS, inp.baseSPS, inp.basePPS, true, true, true, true)
 	if err != nil {
 		return fmt.Errorf("CreateHvcC: %w", err)
@@ -598,13 +623,21 @@ func buildAndWriteMP4(inp *input, outputPath string, log io.Writer) error {
 	mdatBox.SetData(mdatData)
 	outFile.AddChild(mdatBox, 0)
 
+	// Size() resolves mdatBox.LargeSize and therefore HeaderSize() based on the payload length
+	// Must run before computing the chunk offset (or else HeaderSize() returns 8 for large files)
+	_ = mdatBox.Size()
+
 	var sizeBeforeMdat uint64
 	for _, box := range outFile.Children {
 		if box.Type() != "mdat" {
 			sizeBeforeMdat += box.Size()
 		}
 	}
-	stco.ChunkOffset[0] = uint32(sizeBeforeMdat + mdatBox.HeaderSize())
+	chunkOffset := sizeBeforeMdat + mdatBox.HeaderSize()
+	if chunkOffset > uint64(^uint32(0)) {
+		return fmt.Errorf("chunk offset %d exceeds uint32 range; co64 required", chunkOffset)
+	}
+	stco.ChunkOffset[0] = uint32(chunkOffset)
 
 	ofd, err := os.Create(outputPath)
 	if err != nil {
@@ -616,8 +649,12 @@ func buildAndWriteMP4(inp *input, outputPath string, log io.Writer) error {
 		return fmt.Errorf("encode error: %w", err)
 	}
 
-	fmt.Fprintf(log, "Wrote %s (%dx%d, %d samples, %d layers)\n",
-		outputPath, inp.width, inp.height, len(inp.samples), inp.vps.GetNumLayers())
+	log.Info("wrote MV-HEVC MP4",
+		"output", outputPath,
+		"width", inp.width,
+		"height", inp.height,
+		"samples", len(inp.samples),
+		"layers", inp.vps.GetNumLayers())
 	return nil
 }
 
