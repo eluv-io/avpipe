@@ -2,6 +2,7 @@ package mvhevc
 
 import (
 	"encoding/hex"
+	"encoding/json"
 	"fmt"
 	"io"
 	"os"
@@ -12,6 +13,7 @@ import (
 
 type InfoOptions struct {
 	ShowIDR bool
+	Json    bool
 }
 
 func Info(inputPath string, opts InfoOptions, w io.Writer) error {
@@ -32,6 +34,13 @@ func Info(inputPath string, opts InfoOptions, w io.Writer) error {
 
 	if parsedMP4.Moov == nil {
 		return fmt.Errorf("no moov box found")
+	}
+
+	if opts.Json {
+		res := infoInJsonFormat(parsedMP4, opts)
+		enc := json.NewEncoder(w)
+		enc.SetIndent("", "  ")
+		return enc.Encode(res)
 	}
 
 	for i, trak := range parsedMP4.Moov.Traks {
@@ -313,5 +322,212 @@ func printFragmentedInfo(f *mp4.File, trackID uint32, timeScale uint32, showIDR 
 
 	if showIDR && len(syncFrames) > 0 {
 		printSyncFrameInfo(syncFrames, w)
+	}
+}
+
+func infoInJsonFormat(mp4File *mp4.File, opts InfoOptions) map[string]interface{} {
+	result := make(map[string]interface{})
+	tracks := make([]map[string]interface{}, 0)
+
+	for i, trak := range mp4File.Moov.Traks {
+		track := map[string]interface{}{
+			"index":    i + 1,
+			"track_id": trak.Tkhd.TrackID,
+		}
+
+		stbl := trak.Mdia.Minf.Stbl
+		if stbl == nil || stbl.Stsd == nil {
+			tracks = append(tracks, track)
+			continue
+		}
+
+		for _, child := range stbl.Stsd.Children {
+			vse, ok := child.(*mp4.VisualSampleEntryBox)
+			if !ok {
+				continue
+			}
+
+			track["sample_entry"] = map[string]interface{}{
+				"type":   vse.Type(),
+				"width":  vse.Width,
+				"height": vse.Height,
+			}
+
+			if vse.Hfov != nil {
+				track["hfov"] = float64(vse.Hfov.FieldOfView) / 1000.0
+			}
+
+			if vse.HvcC != nil {
+				hdcr := vse.HvcC.DecConfRec
+
+				hvcc := map[string]interface{}{
+					"profile_space":       hdcr.GeneralProfileSpace,
+					"tier_flag":           hdcr.GeneralTierFlag,
+					"profile_idc":         hdcr.GeneralProfileIDC,
+					"level_idc":           hdcr.GeneralLevelIDC,
+					"chroma_format":       hdcr.ChromaFormatIDC,
+					"bit_depth_luma":      hdcr.BitDepthLumaMinus8 + 8,
+					"bit_depth_chroma":    hdcr.BitDepthChromaMinus8 + 8,
+					"num_temporal_layers": hdcr.NumTemporalLayers,
+					"length_size":         hdcr.LengthSizeMinusOne + 1,
+				}
+
+				vpsNalus := hdcr.GetNalusForType(hevc.NALU_VPS)
+				if len(vpsNalus) > 0 {
+					vps, err := hevc.ParseVPSNALUnit(vpsNalus[0])
+					if err == nil {
+						hvcc["num_layers"] = vps.GetNumLayers()
+						hvcc["num_views"] = vps.GetNumViews()
+						hvcc["multi_layer"] = vps.IsMultiLayer()
+					}
+				}
+
+				arrays := make([]map[string]interface{}, 0)
+				for _, array := range hdcr.NaluArrays {
+					arrays = append(arrays, map[string]interface{}{
+						"type":      array.NaluType(),
+						"num_nalus": len(array.Nalus),
+						"complete":  array.Complete(),
+					})
+				}
+
+				hvcc["nalu_arrays"] = arrays
+				track["hvcc"] = hvcc
+
+				if vse.Vexu != nil {
+					vexu := map[string]interface{}{}
+
+					if vse.Vexu.Eyes != nil {
+						eyes := vse.Vexu.Eyes
+
+						if eyes.Stri != nil {
+							vexu["stri"] = map[string]interface{}{
+								"left":     eyes.Stri.HasLeftEye(),
+								"right":    eyes.Stri.HasRightEye(),
+								"reversed": eyes.Stri.EyeViewsReversed(),
+							}
+						}
+
+						if eyes.Hero != nil {
+							vexu["hero"] = map[string]interface{}{
+								"eye": eyes.Hero.HeroEyeName(),
+								"id":  eyes.Hero.HeroEye,
+							}
+						}
+
+						if eyes.Cams != nil && eyes.Cams.Blin != nil {
+							vexu["baseline_mm"] = float64(eyes.Cams.Blin.Baseline) / 1000.0
+							vexu["baseline_um"] = eyes.Cams.Blin.Baseline
+						}
+					}
+
+					if vse.Vexu.Proj != nil && vse.Vexu.Proj.Prji != nil {
+						vexu["projection"] = vse.Vexu.Proj.Prji.ProjectionType
+					}
+
+					track["vexu"] = vexu
+				}
+			}
+		}
+
+		timeScale := trak.Mdia.Mdhd.Timescale
+		track["timescale"] = timeScale
+
+		if mp4File.IsFragmented() {
+			fillFragmentedJSON(track, mp4File, trak.Tkhd.TrackID, timeScale, opts.ShowIDR)
+		} else {
+			fillUnfragmentedJSON(track, trak, stbl, timeScale, opts.ShowIDR)
+		}
+
+		tracks = append(tracks, track)
+	}
+	result["tracks"] = tracks
+	return result
+}
+
+func fillUnfragmentedJSON(track map[string]interface{}, trak *mp4.TrakBox, stbl *mp4.StblBox, timeScale uint32, showIDR bool) {
+	nrSamples := trak.GetNrSamples()
+
+	track["samples"] = nrSamples
+
+	if stbl.Stts != nil && len(stbl.Stts.SampleTimeDelta) > 0 {
+		sampleDur := stbl.Stts.SampleTimeDelta[0]
+
+		track["sample_duration"] = sampleDur
+		track["fps"] = float64(timeScale) / float64(sampleDur)
+	}
+
+	if stbl.Stss != nil && showIDR {
+		track["sync_frames"] = stbl.Stss.SampleNumber
+	}
+}
+
+func fillFragmentedJSON(track map[string]interface{}, f *mp4.File, trackID uint32, timeScale uint32, showIDR bool) {
+	var totalSamples uint32
+	var sampleDur uint32
+	var syncFrames []uint32
+	sampleNr := uint32(0)
+
+	for _, seg := range f.Segments {
+		for _, frag := range seg.Fragments {
+			if frag.Moof == nil {
+				continue
+			}
+
+			for _, traf := range frag.Moof.Trafs {
+				if traf.Tfhd.TrackID != trackID {
+					continue
+				}
+
+				var defaultFlags uint32
+
+				if traf.Tfhd.HasDefaultSampleFlags() {
+					defaultFlags = traf.Tfhd.DefaultSampleFlags
+				}
+
+				if sampleDur == 0 && traf.Tfhd.HasDefaultSampleDuration() {
+					sampleDur = traf.Tfhd.DefaultSampleDuration
+				}
+
+				for _, trun := range traf.Truns {
+					for i, s := range trun.Samples {
+						sampleNr++
+
+						if sampleDur == 0 && s.Dur > 0 {
+							sampleDur = s.Dur
+						}
+
+						flags := s.Flags
+
+						if !trun.HasSampleFlags() {
+							if i == 0 && trun.HasFirstSampleFlags() {
+								fsf, _ := trun.FirstSampleFlags()
+								flags = fsf
+							} else {
+								flags = defaultFlags
+							}
+						}
+
+						if mp4.IsSyncSampleFlags(flags) {
+							syncFrames = append(syncFrames, sampleNr)
+						}
+					}
+
+					totalSamples += trun.SampleCount()
+				}
+			}
+		}
+	}
+
+	track["samples"] = totalSamples
+	track["timescale"] = timeScale
+
+	if sampleDur > 0 {
+		track["sample_duration"] = sampleDur
+		track["fps"] = float64(timeScale) / float64(sampleDur)
+	}
+
+	if showIDR && len(syncFrames) > 0 {
+		track["sync_frames"] = syncFrames
 	}
 }

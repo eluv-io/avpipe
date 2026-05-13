@@ -63,6 +63,7 @@ func runInfo(args []string, w io.Writer) error {
 	fs := flag.NewFlagSet("info", flag.ContinueOnError)
 	var opts mvhevc.InfoOptions
 	fs.BoolVar(&opts.ShowIDR, "idr", false, "Show IDR (sync) frame positions")
+	fs.BoolVar(&opts.Json, "json", false, "Show JSON output")
 	fs.Usage = func() {
 		_, _ = fmt.Fprintf(os.Stderr, "%s info [-idr] <input.mp4>\n\n", appName)
 		fs.PrintDefaults()
