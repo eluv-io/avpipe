@@ -55,6 +55,7 @@ import (
 
 	"github.com/eluv-io/avpipe/broadcastproto/mpegts"
 	"github.com/eluv-io/avpipe/goavpipe"
+	"github.com/eluv-io/avpipe/mp4e/mvhevc"
 )
 
 func init() {
@@ -422,6 +423,21 @@ func getAVType(av_type C.int) goavpipe.AVType {
 // Go function to have as thin a surface as possible of C functions. This lets these be called
 // easily from other code.
 
+// restoreMvhevc enables the in-stream MV-HEVC moov patcher that re-injects
+// oinf/linf/trgr boxes dropped by the ffmpeg muxer in bypass.
+const restoreMvhevc = true // PENDING(SS) hardocded for testing
+
+func isFmp4VideoOutput(t goavpipe.AVType) bool {
+	// FMP4VideoSegment: fmp4-segment format (per-segment files, ftyp+moov+moof+mdat)
+	// FMP4Stream:       fmp4 format (single fragmented file)
+	// DASHVideoInit:    dash format init segment (ftyp+moov, separate file from chunks)
+	switch t {
+	case goavpipe.FMP4VideoSegment, goavpipe.FMP4Stream, goavpipe.DASHVideoInit:
+		return true
+	}
+	return false
+}
+
 //export AVPipeOpenOutput
 func AVPipeOpenOutput(handler C.int64_t, stream_index, seg_index C.int, pts C.int64_t, stream_type C.int) C.int64_t {
 	return C.int64_t(AVPipeOpenOutputGo(int64(handler), int(stream_index), int(seg_index), int64(pts), getAVType(stream_type)))
@@ -448,6 +464,11 @@ func AVPipeOpenOutputGo(handler int64, stream_index, seg_index int, pts int64, s
 	if err != nil {
 		goavpipe.Log.Error("AVPipeOpenOutput()", "out_type", stream_type, "error", err)
 		return -1
+	}
+
+	// MV-HEVC bypass repackaging if necessary
+	if restoreMvhevc && isFmp4VideoOutput(stream_type) {
+		outHandler = mvhevc.WrapOutputHandler(outHandler)
 	}
 
 	goavpipe.Log.Debug("AVPipeOpenOutput()", "fd", fd, "stream_index", stream_index, "seg_index", seg_index, "pts", pts, "out_type", stream_type)

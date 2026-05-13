@@ -20,6 +20,7 @@ var usage = `%s handles MV-HEVC helper operations.
 Subcommands:
   info [-idr] <input.mp4>
   add [-fps <rate>] [-spatial] <input.hevc|mp4> <output.mp4>
+  fix <input.mp4> <output.mp4>
 
 Usage of %s:
 `
@@ -42,7 +43,7 @@ func configureLogging() {
 func run(args []string, w io.Writer) error {
 	if len(args) < 2 {
 		printUsage()
-		return fmt.Errorf("need subcommand: info or add")
+		return fmt.Errorf("need subcommand: info, add, or fix")
 	}
 
 	switch args[1] {
@@ -50,6 +51,8 @@ func run(args []string, w io.Writer) error {
 		return runInfo(args[1:], w)
 	case "add":
 		return runAdd(args[1:])
+	case "fix":
+		return runFix(args[1:])
 	default:
 		printUsage()
 		return fmt.Errorf("unknown subcommand: %s", args[1])
@@ -110,6 +113,27 @@ func runAdd(args []string) error {
 	opts.BaselineUM = uint32(baseline)
 	opts.HFOV = uint32(hfov)
 	return mvhevc.Add(fs.Arg(0), fs.Arg(1), opts)
+}
+
+func runFix(args []string) error {
+	fs := flag.NewFlagSet("fix", flag.ContinueOnError)
+	fs.Usage = func() {
+		_, _ = fmt.Fprintf(os.Stderr, "%s fix <input.mp4> <output.mp4>\n\n", appName)
+		fs.PrintDefaults()
+	}
+
+	if err := fs.Parse(args[1:]); err != nil {
+		if errors.Is(err, flag.ErrHelp) {
+			return nil
+		}
+		return err
+	}
+	if fs.NArg() != 2 {
+		fs.Usage()
+		return fmt.Errorf("need input and output files")
+	}
+
+	return mvhevc.Fix(fs.Arg(0), fs.Arg(1))
 }
 
 func printUsage() {

@@ -21,6 +21,7 @@ import (
 	"github.com/eluv-io/avpipe"
 	"github.com/eluv-io/avpipe/elvxc/cmd"
 	"github.com/eluv-io/avpipe/goavpipe"
+	"github.com/eluv-io/avpipe/mp4e/mvhevc"
 	"github.com/eluv-io/avpipe/xc"
 	"github.com/eluv-io/log-go"
 )
@@ -1910,6 +1911,102 @@ func TestHEVC_HDR10_MezAndABR(t *testing.T) {
 		boilerXc(t, &abrParams)
 
 		assertHDR10(t, dashVideoInit(t, abrDir), scaledExpected)
+	}
+}
+
+// TestMVHEVC_MezAndABRBypass creates a mez from source and ABR rungs from mez.
+// Validates MVHEVC output specifically testing the MVHEVC re-packaging of the
+// ffmpeg output which strips several MV-HEVC boxes.
+func TestMVHEVC_MezAndABRBypass(t *testing.T) {
+	const src = "./media/freeguy_mvhevc_4k.mp4"
+	f := fn()
+	if fileMissing(src, f) {
+		return
+	}
+
+	mezDir := path.Join(baseOutPath, f, "Mez")
+	abrDir := path.Join(baseOutPath, f, "ABRBypass")
+
+	// Sanity-check the source has the boxes we expect repackagers to drop —
+	// if it doesn't, there's nothing useful for this test to verify.
+	srcIns, err := mvhevc.Inspect(src)
+	failNowOnError(t, err)
+	assert.True(t, srcIns.HasMultiLayerVPS, "source not multi-layer MV-HEVC")
+	assert.True(t, srcIns.HasOinfSgpd, "source missing oinf")
+	assert.True(t, srcIns.HasLinfSgpd, "source missing linf")
+	assert.True(t, srcIns.HasTrgrCstg, "source missing trgr/cstg")
+
+	// Stage 1: source → mez (bypass repackage to fmp4-segment).
+	// Ecodec must be a real encoder libavformat can find even in bypass —
+	// avpipe still allocates an encoder context. libx265 is the natural pick
+	// for HEVC input.
+	mezParams := &goavpipe.XcParams{
+		Url:               src,
+		BypassTranscoding: true,
+		Format:            "fmp4-segment",
+		StartTimeTs:       0,
+		StartPts:          0,
+		DurationTs:        -1,
+		StartSegmentStr:   "1",
+		SegDuration:       "30",
+		Ecodec:            "libx265",
+		Dcodec:            "hevc",
+		XcType:            goavpipe.XcVideo,
+		StreamId:          -1,
+		DebugFrameLevel:   debugFrameLevel,
+	}
+	setupOutDir(t, mezDir)
+	xcTest(t, mezDir, mezParams, nil, true)
+
+	mezSeg := path.Join(mezDir, "vsegment-1.mp4")
+	// fmp4-segment output preserves the sample-entry children (lhvC/vexu/hfov)
+	// since the mov muxer copies the visual sample entry opaquely.
+	assertMVHEVCStructure(t, mezSeg, 3840, 2160, true /*expectLhvC*/)
+
+	// Stage 2: mez → ABR (bypass repackage to dash).
+	abrParams := *mezParams
+	abrParams.Url = mezSeg
+	abrParams.Format = "dash"
+	abrParams.VideoSegDurationTs = 48000
+	abrParams.DurationTs = -1
+
+	setupOutDir(t, abrDir)
+	goavpipe.InitUrlIOHandler(mezSeg,
+		&xc.FileInputOpener{URL: mezSeg},
+		&xc.FileOutputOpener{Dir: abrDir})
+	boilerXc(t, &abrParams)
+
+	// DASH init segment: oinf/linf/trgr restored by the patcher are checked
+	// strictly. lhvC is NOT expected here — FFmpeg's DASH muxer drops it from
+	// the hvc1 sample entry (separate gap from the oinf/linf/trgr loss this
+	// patcher addresses; would need a follow-up if lhvC matters downstream).
+	assertMVHEVCStructure(t, dashVideoInit(t, abrDir), 3840, 2160, false /*expectLhvC*/)
+}
+
+// assertMVHEVCStructure asserts that mp4Path carries the MV-HEVC metadata
+// that the in-stream patcher is responsible for restoring: multi-layer VPS,
+// oinf+linf sample groups, and a trgr/cstg track group. lhvC is checked only
+// when expectLhvC is true (see the per-format note in the test body).
+func assertMVHEVCStructure(t *testing.T, mp4Path string, wantW, wantH uint16, expectLhvC bool) {
+	t.Helper()
+	ins, err := mvhevc.Inspect(mp4Path)
+	failNowOnError(t, err)
+	if !assert.True(t, ins.HasVideoTrak, "no video trak in %s", mp4Path) {
+		return
+	}
+	assert.True(t, ins.HasHvcC, "missing hvcC in %s", mp4Path)
+	assert.True(t, ins.HasMultiLayerVPS, "VPS not multi-layer in %s", mp4Path)
+	assert.True(t, ins.HasOinfSgpd, "missing oinf sgpd in %s", mp4Path)
+	assert.True(t, ins.HasLinfSgpd, "missing linf sgpd in %s", mp4Path)
+	assert.True(t, ins.HasTrgrCstg, "missing trgr/cstg in %s", mp4Path)
+	if expectLhvC {
+		assert.True(t, ins.HasLhvC, "missing lhvC in %s", mp4Path)
+	}
+	if wantW > 0 {
+		assert.Equal(t, wantW, ins.Width, "width in %s", mp4Path)
+	}
+	if wantH > 0 {
+		assert.Equal(t, wantH, ins.Height, "height in %s", mp4Path)
 	}
 }
 
