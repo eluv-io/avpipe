@@ -11,6 +11,7 @@
 #import <Foundation/Foundation.h>
 #import <VideoToolbox/VideoToolbox.h>
 
+#include <ctype.h>
 #include <math.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -43,6 +44,7 @@ typedef struct apple_params {
     int fps_num;
     int fps_den;
     int saw_x265_only;
+    double duration_seconds;
 } apple_params;
 
 static void usage(const char *prog)
@@ -75,6 +77,7 @@ static void usage(const char *prog)
         "  -hdr                Enable HDR10 BT.2020/PQ color and metadata\n"
         "  -scenecut <n>       Accepted for CLI compatibility; ignored\n"
         "  -fps <num/den>      Override output framerate timestamps\n"
+        "  -duration <sec>     Encode at most this many seconds\n"
         "  -max-cll <val>      HDR MaxCLL/MaxFALL, e.g. \"1000,200\"\n"
         "  -master-display <v> HDR master display string\n"
         "\n",
@@ -89,6 +92,18 @@ static void set_defaults(apple_params *p)
     p->bitdepth = 8;
     p->bframes = -1;
     p->scenecut = 40;
+}
+
+static int parse_positive_double(const char *s, double *out)
+{
+    char *end = NULL;
+    double v = strtod(s, &end);
+    while (end && *end && isspace((unsigned char)*end))
+        end++;
+    if (end == s || !end || *end != '\0' || !isfinite(v) || v <= 0.0)
+        return -1;
+    *out = v;
+    return 0;
 }
 
 static int parse_args(int argc, char **argv, apple_params *p)
@@ -137,6 +152,12 @@ static int parse_args(int argc, char **argv, apple_params *p)
             if (sscanf(argv[argi], "%d/%d", &p->fps_num, &p->fps_den) != 2 ||
                 p->fps_num <= 0 || p->fps_den <= 0) {
                 fprintf(stderr, "Invalid fps '%s', expected num/den\n", argv[argi]);
+                return -1;
+            }
+            argi++;
+        } else if (!strcmp(opt, "-duration") && argi < argc) {
+            if (parse_positive_double(argv[argi], &p->duration_seconds) < 0) {
+                fprintf(stderr, "Invalid duration '%s', expected positive seconds\n", argv[argi]);
                 return -1;
             }
             argi++;
@@ -565,6 +586,8 @@ static int encode_apple(const apple_params *p)
         fprintf(stderr, "  FPS:         %d/%d\n", p->fps_num, p->fps_den);
     if (p->bitrate_kbps > 0)
         fprintf(stderr, "  Bitrate:     %d kbps\n", p->bitrate_kbps);
+    if (p->duration_seconds > 0.0)
+        fprintf(stderr, "  Duration:    %.3f seconds\n", p->duration_seconds);
     if (p->hdr)
         fprintf(stderr, "  HDR10:       BT.2020/PQ + optional MDCV/CLLI\n");
     if (p->saw_x265_only)
@@ -572,6 +595,9 @@ static int encode_apple(const apple_params *p)
 
     int64_t frame_count = 0;
     CMTime first_pts = kCMTimeInvalid;
+    CMTime duration_limit = p->duration_seconds > 0.0 ?
+        CMTimeMakeWithSeconds(p->duration_seconds, 1000000) :
+        kCMTimeInvalid;
     BOOL ok = YES;
 
     for (;;) {
@@ -615,6 +641,12 @@ static int encode_apple(const apple_params *p)
             if (!CMTIME_IS_VALID(first_pts))
                 first_pts = pts;
             pts = CMTimeSubtract(pts, first_pts);
+        }
+
+        if (CMTIME_IS_VALID(duration_limit) && CMTimeCompare(pts, duration_limit) >= 0) {
+            CFRelease(left_sample);
+            CFRelease(right_sample);
+            break;
         }
 
         CVPixelBufferRef left_dst = NULL;

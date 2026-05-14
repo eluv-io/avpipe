@@ -74,6 +74,7 @@ intermediate and the `mvhevc add` packaging step.
   -keyint 48 \
   -bframes 0 \
   -fps 24/1 \
+  -duration 30.0 \
   left_eye_hdr.mov \
   right_eye_hdr.mov \
   output_spatial_hdr10.mov
@@ -82,6 +83,7 @@ intermediate and the `mvhevc add` packaging step.
 The Apple encoder accepts the same options as `mvhevc_encoder`, but x265-only
 options such as `-crf`, `-preset`, `-tune`, `-level`, `-hightier`, `-bufsize`,
 and `-scenecut` are currently accepted for compatibility and ignored.
+Use `-duration <seconds>` to encode only the first portion of the source.
 
 
 ### 2) Package the raw MV-HEVC stream into MP4
