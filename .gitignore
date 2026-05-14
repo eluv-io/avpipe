@@ -62,6 +62,7 @@ dkms.conf
 
 /bin/
 /include/
+/lib/
 /elvxc/elvxc
 /exc/bin/
 O/

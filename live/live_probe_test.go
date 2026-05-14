@@ -82,7 +82,7 @@ func TestProbeRTMPListen(t *testing.T) {
 	goavpipe.InitIOHandler(&inputOpener{}, &outputOpener{})
 
 	done := make(chan bool, 1)
-	var probeInfo *avpipe.ProbeInfo
+	var probeInfo *goavpipe.ProbeInfo
 	var err error
 
 	go func() {
@@ -137,7 +137,7 @@ func TestProbeRTMPNoStream(t *testing.T) {
 	probeInfo, err := avpipe.Probe(XCParams)
 
 	assert.Error(t, err)
-	assert.Equal(t, (*avpipe.ProbeInfo)(nil), probeInfo)
+	assert.Equal(t, (*goavpipe.ProbeInfo)(nil), probeInfo)
 }
 
 // 1) Starts ffmpeg for streaming UDP MPEGTS
@@ -212,7 +212,7 @@ func TestProbeUDPListen(t *testing.T) {
 	goavpipe.InitIOHandler(&inputOpener{}, &outputOpener{})
 
 	done := make(chan bool, 1)
-	var probeInfo *avpipe.ProbeInfo
+	var probeInfo *goavpipe.ProbeInfo
 	var err error
 
 	go func() {
@@ -268,5 +268,5 @@ func TestProbeUDPNoStream(t *testing.T) {
 	probeInfo, err := avpipe.Probe(XCParams)
 
 	assert.Error(t, err)
-	assert.Equal(t, (*avpipe.ProbeInfo)(nil), probeInfo)
+	assert.Equal(t, (*goavpipe.ProbeInfo)(nil), probeInfo)
 }

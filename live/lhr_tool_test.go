@@ -15,7 +15,9 @@ import (
 	"runtime"
 	"strings"
 	"sync"
+	"syscall"
 	"testing"
+	"time"
 
 	"github.com/eluv-io/avpipe"
 	"github.com/eluv-io/avpipe/goavpipe"
@@ -724,6 +726,20 @@ func setupOutDir(t *testing.T, dir string) {
 		err = removeDirContents(dir)
 	}
 	failNowOnError(t, err)
+}
+
+// startLiveSource starts the live source and fatally fails the test if ffmpeg
+// exits within 200ms (indicating missing protocol support or a bad media file).
+func startLiveSource(t *testing.T, ls *LiveSource, stream string) {
+	t.Helper()
+	if err := ls.Start(stream); err != nil {
+		t.Fatalf("failed to start live source: %v", err)
+	}
+	time.Sleep(200 * time.Millisecond)
+	p, err := os.FindProcess(ls.Pid)
+	if err != nil || p.Signal(syscall.Signal(0)) != nil {
+		t.Fatalf("live source exited immediately — ffmpeg may lack %s support or media file is missing (pid=%d)", stream, ls.Pid)
+	}
 }
 
 func setupLogging() {

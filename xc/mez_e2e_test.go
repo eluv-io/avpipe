@@ -289,13 +289,12 @@ func buildABRVariants() []abrVariant {
 	return variants
 }
 
-func fileMissing(url string) bool {
+func fileMissing(t *testing.T, url string) {
+	t.Helper()
 	info, err := os.Stat(url)
-	if err != nil {
-		log.Warn("Skipping, input file not accessible", "file", url, "err", err)
-		return true
+	if err != nil || info.IsDir() {
+		t.Skipf("input file not accessible: %s", url)
 	}
-	return info.IsDir()
 }
 
 // videoColor groups general video color metadata for the first video stream of a file,
@@ -333,11 +332,20 @@ func probeVideoColor(t *testing.T, url string) videoColor {
 }
 
 // assertColorMatches compares two videoColor sets with field-level error messages.
+// Fields that are "unknown" (AVCOL_*_UNSPECIFIED) in the source are skipped for
+// primaries/trc/space — those may be synthesized to BT.709 in DASH output to force
+// the colr box to be written. color_range is always asserted.
 func assertColorMatches(t *testing.T, want, got videoColor, label, url string) {
 	t.Helper()
-	assert.Equal(t, want.Primaries, got.Primaries, "color_primaries pass-through (%s) in %s", label, url)
-	assert.Equal(t, want.Transfer, got.Transfer, "color_transfer pass-through (%s) in %s", label, url)
-	assert.Equal(t, want.Space, got.Space, "color_space pass-through (%s) in %s", label, url)
+	if want.Primaries != "" && want.Primaries != "unknown" {
+		assert.Equal(t, want.Primaries, got.Primaries, "color_primaries pass-through (%s) in %s", label, url)
+	}
+	if want.Transfer != "" && want.Transfer != "unknown" {
+		assert.Equal(t, want.Transfer, got.Transfer, "color_transfer pass-through (%s) in %s", label, url)
+	}
+	if want.Space != "" && want.Space != "unknown" {
+		assert.Equal(t, want.Space, got.Space, "color_space pass-through (%s) in %s", label, url)
+	}
 	assert.Equal(t, want.Range, got.Range, "color_range pass-through (%s) in %s", label, url)
 }
 
@@ -355,15 +363,15 @@ func TestMezCreate(t *testing.T) {
 	if !e2eMode {
 		t.Skip("Use TestEndToEnd or comment out this skip")
 	}
+	if testing.Short() {
+		t.Skip("skipping slow mez transcoding in short mode")
+	}
 	for _, src := range mezTestSources {
 		t.Run(mezTestSourceID(src), func(t *testing.T) {
 			url := path.Join(mezSourceDir, src.Path)
 			log.Info("STARTING TestMezCreate", "source", url)
 
-			if fileMissing(url) {
-				t.Skipf("source file missing: %s", url)
-				return
-			}
+			fileMissing(t, url)
 
 			// Capture source color metadata so we can verify mez parts pass it through
 			// to the mp4 'colr' atom (UNSPECIFIED fields are passed through unchanged).
@@ -500,13 +508,13 @@ func TestABRCreate(t *testing.T) {
 	if !e2eMode {
 		t.Skip("Use TestEndToEnd or comment out this skip")
 	}
+	if testing.Short() {
+		t.Skip("skipping slow ABR transcoding in short mode")
+	}
 	for _, src := range mezTestSources {
 		t.Run(mezTestSourceID(src), func(t *testing.T) {
 			url := path.Join(mezSourceDir, src.Path)
-			if fileMissing(url) {
-				t.Skipf("source file missing: %s", url)
-				return
-			}
+			fileMissing(t, url)
 
 			profile := mezProfileForSource(src)
 			baseName := mezTestSourceID(src)

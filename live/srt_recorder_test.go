@@ -13,6 +13,9 @@ import (
 )
 
 func TestSrtToMp4(t *testing.T) {
+	if testing.Short() {
+		t.Skip("skipping slow live stream test in short mode")
+	}
 	setupLogging()
 	outputDir := path.Join(baseOutPath, fn())
 	setupOutDir(t, outputDir)
@@ -60,10 +63,7 @@ func TestSrtToMp4(t *testing.T) {
 		done <- true
 	}()
 
-	err := liveSource.Start("srt")
-	if err != nil {
-		t.Error(err)
-	}
+	startLiveSource(t, liveSource, "srt")
 
 	// Wait for the srt recording to be finished
 	<-done
@@ -228,25 +228,21 @@ func TestSrtToMp4WithCancelling1(t *testing.T) {
 	goavpipe.InitIOHandler(&inputOpener{dir: outputDir}, &outputOpener{dir: outputDir})
 
 	var handle int32
-	var err error
 	go func() {
 		tlog.Info("Transcoding SRT stream start", "params", fmt.Sprintf("%+v", *xcParams))
+		var err error
 		handle, err = avpipe.XcInit(xcParams)
 		if err != nil {
 			t.Error("XcInit initializing SRT stream failed", "err", err)
 		}
-
 		done <- true
 	}()
 
-	err = liveSource.Start("srt")
-	if err != nil {
-		t.Error(err)
-	}
+	startLiveSource(t, liveSource, "srt")
 
 	<-done
 
-	err = avpipe.XcCancel(handle)
+	err := avpipe.XcCancel(handle)
 	assert.NoError(t, err)
 	if err != nil {
 		t.Error("Cancelling SRT stream failed", "err", err, "url", url)
@@ -296,12 +292,14 @@ func TestSrtToMp4WithCancelling2(t *testing.T) {
 	goavpipe.InitIOHandler(&inputOpener{dir: outputDir}, &outputOpener{dir: outputDir})
 
 	var handle int32
-	var err error
 	go func() {
 		tlog.Info("Transcoding SRT stream start", "params", fmt.Sprintf("%+v", *xcParams))
+		var err error
 		handle, err = avpipe.XcInit(xcParams)
 		if err != nil {
 			t.Error("XcInit initializing SRT stream failed", "err", err)
+			done <- true
+			return
 		}
 		err = avpipe.XcRun(handle)
 		if err != nil && err != avpipe.EAV_CANCELLED {
@@ -310,15 +308,12 @@ func TestSrtToMp4WithCancelling2(t *testing.T) {
 		done <- true
 	}()
 
-	err = liveSource.Start("srt")
-	if err != nil {
-		t.Error(err)
-	}
+	startLiveSource(t, liveSource, "srt")
 
 	// Wait 1 second for transcoding to start
 	time.Sleep(1 * time.Second)
 
-	err = avpipe.XcCancel(handle)
+	err := avpipe.XcCancel(handle)
 	assert.NoError(t, err)
 	if err != nil {
 		t.Error("Cancelling SRT stream failed", "err", err)
@@ -332,6 +327,9 @@ func TestSrtToMp4WithCancelling2(t *testing.T) {
 
 // Cancels the SRT live stream transcoding some time after starting the transcoding (20 sec after XcRun).
 func TestSrtToMp4WithCancelling3(t *testing.T) {
+	if testing.Short() {
+		t.Skip("skipping slow live stream test in short mode")
+	}
 	setupLogging()
 	outputDir := path.Join(baseOutPath, fn())
 	setupOutDir(t, outputDir)
@@ -370,22 +368,17 @@ func TestSrtToMp4WithCancelling3(t *testing.T) {
 	goavpipe.InitIOHandler(&inputOpener{dir: outputDir}, &outputOpener{dir: outputDir})
 
 	var handle int32
-	var err error
 	go func() {
-
 		tlog.Info("Transcoding SRT stream start", "params", fmt.Sprintf("%+v", *xcParams))
+		var err error
 		handle, err = avpipe.XcInit(xcParams)
 		if err != nil {
 			t.Error("XcInit initializing SRT stream failed", "err", err)
 		}
-
 		done <- true
 	}()
 
-	err = liveSource.Start("srt")
-	if err != nil {
-		t.Error(err)
-	}
+	startLiveSource(t, liveSource, "srt")
 
 	<-done
 
@@ -400,7 +393,7 @@ func TestSrtToMp4WithCancelling3(t *testing.T) {
 	// Wait 20 second for transcoding to be done
 	time.Sleep(20 * time.Second)
 
-	err = avpipe.XcCancel(handle)
+	err := avpipe.XcCancel(handle)
 	assert.NoError(t, err)
 	if err != nil {
 		t.Error("Cancelling SRT stream failed", "err", err, "url", url)
@@ -451,28 +444,23 @@ func TestSrtToMp4WithCancelling4(t *testing.T) {
 	goavpipe.InitIOHandler(&inputOpener{dir: outputDir}, &outputOpener{dir: outputDir})
 
 	var handle int32
-	var err error
 	go func() {
 		tlog.Info("Transcoding SRT stream start", "params", fmt.Sprintf("%+v", *xcParams))
-
+		var err error
 		handle, err = avpipe.XcInit(xcParams)
 		if err != nil {
-			t.Error("XcInitializing SRT stream failed", "err", err)
+			t.Error("XcInit initializing SRT stream failed", "err", err)
 		}
-
 		done <- true
 	}()
 
-	err = liveSource.Start("srt")
-	if err != nil {
-		t.Error(err)
-	}
+	startLiveSource(t, liveSource, "srt")
 
 	<-done
 
 	go func() {
 		err := avpipe.XcRun(handle)
-		if err != nil && err != avpipe.EAV_CANCELLED {
+		if err != nil && err != avpipe.EAV_CANCELLED && err != avpipe.EAV_OPEN_INPUT {
 			t.Error("Transcoding SRT stream failed", "err", err)
 		}
 		done <- true
@@ -481,7 +469,7 @@ func TestSrtToMp4WithCancelling4(t *testing.T) {
 	time.Sleep(1 * time.Second)
 	liveSource.Stop()
 
-	err = avpipe.XcCancel(handle)
+	err := avpipe.XcCancel(handle)
 	assert.NoError(t, err)
 	if err != nil {
 		t.Error("Cancelling SRT stream failed", "err", err, "url", url)

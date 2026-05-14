@@ -76,59 +76,6 @@ type SeekReadWriteCloser interface {
 
 const MaxAudioMux = C.MAX_STREAMS
 
-type SideDataDisplayMatrix struct {
-	Type       string  `json:"side_data_type"`
-	Rotation   float64 `json:"rotation"`
-	RotationCw float64 `json:"rotation_cw"`
-}
-
-type StreamInfo struct {
-	StreamIndex        int               `json:"stream_index"`
-	StreamId           int32             `json:"stream_id"`
-	CodecType          string            `json:"codec_type"`
-	CodecID            int               `json:"codec_id,omitempty"`
-	CodecName          string            `json:"codec_name,omitempty"`
-	DurationTs         int64             `json:"duration_ts,omitempty"`
-	TimeBase           *big.Rat          `json:"time_base,omitempty"`
-	NBFrames           int64             `json:"nb_frames,omitempty"`
-	StartTime          int64             `json:"start_time"` // in TS unit
-	AvgFrameRate       *big.Rat          `json:"avg_frame_rate,omitempty"`
-	FrameRate          *big.Rat          `json:"frame_rate,omitempty"`
-	SampleRate         int               `json:"sample_rate,omitempty"`
-	Channels           int               `json:"channels,omitempty"`
-	ChannelLayout      int               `json:"channel_layout,omitempty"`
-	BitRate            int64             `json:"bit_rate,omitempty"`
-	Has_B_Frames       bool              `json:"has_b_frame"`
-	Width              int               `json:"width,omitempty"`  // Video only
-	Height             int               `json:"height,omitempty"` // Video only
-	PixFmt             int               `json:"pix_fmt"`          // Video only, it matches with enum AVPixelFormat in FFmpeg
-	SampleAspectRatio  *big.Rat          `json:"sample_aspect_ratio,omitempty"`
-	DisplayAspectRatio *big.Rat          `json:"display_aspect_ratio,omitempty"`
-	FieldOrder         string            `json:"field_order,omitempty"`
-	Profile            int               `json:"profile,omitempty"`
-	Level              int               `json:"level,omitempty"`
-	ColorPrimaries     string            `json:"color_primaries,omitempty"`
-	ColorTransfer      string            `json:"color_transfer,omitempty"`
-	ColorSpace         string            `json:"color_space,omitempty"`
-	ColorRange         string            `json:"color_range,omitempty"`       // "tv" or "pc"
-	MasteringDisplay   string            `json:"mastering_display,omitempty"` // x265 master-display string
-	MaxCLL             string            `json:"max_cll,omitempty"`           // "<MaxCLL>,<MaxFALL>"
-	Stereo3DType       string            `json:"stereo3d_type,omitempty"`     // Description eg. "side by side"
-	SideData           []interface{}     `json:"side_data,omitempty"`
-	Tags               map[string]string `json:"tags,omitempty"`
-}
-
-type ContainerInfo struct {
-	Duration   float64 `json:"duration"`
-	FormatName string  `json:"format_name"`
-}
-
-// PENDING: use legacy_imf_dash_extract/media.Probe?
-type ProbeInfo struct {
-	ContainerInfo ContainerInfo `json:"format"`
-	StreamInfo    []StreamInfo  `json:"streams"`
-}
-
 // IOHandler defines handlers that will be called from the C interface functions
 type IOHandler interface {
 	InReader(buf []byte) (int, error)
@@ -1018,7 +965,7 @@ func GetProfileName(codecId int, profile int) string {
 	return ""
 }
 
-func Probe(params *goavpipe.XcParams) (*ProbeInfo, error) {
+func Probe(params *goavpipe.XcParams) (*goavpipe.ProbeInfo, error) {
 	var cprobe *C.xcprobe_t
 	var n_streams C.int
 
@@ -1037,15 +984,16 @@ func Probe(params *goavpipe.XcParams) (*ProbeInfo, error) {
 		return nil, avpipeError(rc)
 	}
 
-	probeInfo := &ProbeInfo{}
-	probeInfo.StreamInfo = make([]StreamInfo, int(n_streams))
+	probeInfo := &goavpipe.ProbeInfo{}
+	probeInfo.StreamInfo = make([]goavpipe.StreamInfo, int(n_streams))
 	probeArray := (*[1 << 10]C.stream_info_t)(unsafe.Pointer(cprobe.stream_info))
 	for i := 0; i < int(n_streams); i++ {
 		probeInfo.StreamInfo[i].StreamIndex = int(probeArray[i].stream_index)
-		probeInfo.StreamInfo[i].StreamId = int32(probeArray[i].stream_id)
+		probeInfo.StreamInfo[i].StreamId = int(probeArray[i].stream_id)
 		probeInfo.StreamInfo[i].CodecType = goavpipe.AVMediaTypeNames[goavpipe.AVMediaType(probeArray[i].codec_type)]
 		probeInfo.StreamInfo[i].CodecID = int(probeArray[i].codec_id)
 		probeInfo.StreamInfo[i].CodecName = C.GoString((*C.char)(unsafe.Pointer(&probeArray[i].codec_name)))
+		probeInfo.StreamInfo[i].CodecTagString = C.GoString((*C.char)(unsafe.Pointer(&probeArray[i].codec_tag_string)))
 		probeInfo.StreamInfo[i].DurationTs = int64(probeArray[i].duration_ts)
 		probeInfo.StreamInfo[i].TimeBase = big.NewRat(int64(probeArray[i].time_base.num), int64(probeArray[i].time_base.den))
 		probeInfo.StreamInfo[i].NBFrames = int64(probeArray[i].nb_frames)
@@ -1062,16 +1010,21 @@ func Probe(params *goavpipe.XcParams) (*ProbeInfo, error) {
 		}
 		probeInfo.StreamInfo[i].SampleRate = int(probeArray[i].sample_rate)
 		probeInfo.StreamInfo[i].Channels = int(probeArray[i].channels)
-		probeInfo.StreamInfo[i].ChannelLayout = int(probeArray[i].channel_layout)
+		if probeInfo.StreamInfo[i].CodecType == "audio" {
+			probeInfo.StreamInfo[i].ChannelLayout = int(probeArray[i].channel_layout)
+			probeInfo.StreamInfo[i].ChannelLayoutName = ChannelLayoutName(probeInfo.StreamInfo[i].Channels, probeInfo.StreamInfo[i].ChannelLayout)
+		}
 		probeInfo.StreamInfo[i].BitRate = int64(probeArray[i].bit_rate)
 		if probeArray[i].has_b_frames > 0 {
-			probeInfo.StreamInfo[i].Has_B_Frames = true
+			probeInfo.StreamInfo[i].HasBFrames = true
 		} else {
-			probeInfo.StreamInfo[i].Has_B_Frames = false
+			probeInfo.StreamInfo[i].HasBFrames = false
 		}
 		probeInfo.StreamInfo[i].Width = int(probeArray[i].width)
 		probeInfo.StreamInfo[i].Height = int(probeArray[i].height)
-		probeInfo.StreamInfo[i].PixFmt = int(probeArray[i].pix_fmt)
+		if probeInfo.StreamInfo[i].CodecType == "video" {
+			probeInfo.StreamInfo[i].PixFmt = int(probeArray[i].pix_fmt)
+		}
 		if int64(probeArray[i].sample_aspect_ratio.den) != 0 {
 			probeInfo.StreamInfo[i].SampleAspectRatio = big.NewRat(int64(probeArray[i].sample_aspect_ratio.num), int64(probeArray[i].sample_aspect_ratio.den))
 		} else {
@@ -1083,8 +1036,17 @@ func Probe(params *goavpipe.XcParams) (*ProbeInfo, error) {
 			probeInfo.StreamInfo[i].DisplayAspectRatio = big.NewRat(int64(probeArray[i].display_aspect_ratio.num), int64(1))
 		}
 		probeInfo.StreamInfo[i].FieldOrder = goavpipe.AVFieldOrderNames[goavpipe.AVFieldOrder(probeArray[i].field_order)]
-		probeInfo.StreamInfo[i].Profile = int(probeArray[i].profile)
-		probeInfo.StreamInfo[i].Level = int(probeArray[i].level)
+		// AV_PROFILE_UNKNOWN = AV_LEVEL_UNKNOWN = -99; normalize to 0 so
+		// the omitempty tag on Profile/Level actually omits unknown values.
+		// Use the raw value for GetProfileName so FFmpeg sees the real sentinel.
+		rawProfile := int(probeArray[i].profile)
+		if rawProfile != -99 {
+			probeInfo.StreamInfo[i].Profile = rawProfile
+		}
+		if l := int(probeArray[i].level); l != -99 {
+			probeInfo.StreamInfo[i].Level = l
+		}
+		probeInfo.StreamInfo[i].ProfileName = GetProfileName(probeInfo.StreamInfo[i].CodecID, rawProfile)
 
 		probeInfo.StreamInfo[i].ColorPrimaries = C.GoString((*C.char)(unsafe.Pointer(&probeArray[i].color_primaries)))
 		probeInfo.StreamInfo[i].ColorTransfer = C.GoString((*C.char)(unsafe.Pointer(&probeArray[i].color_transfer)))
@@ -1097,18 +1059,16 @@ func Probe(params *goavpipe.XcParams) (*ProbeInfo, error) {
 		rot := float64(probeArray[i].side_data.display_matrix.rotation)
 		if rot != 0.0 {
 			probeInfo.StreamInfo[i].SideData = make([]interface{}, 1)
-			displayMatrix := SideDataDisplayMatrix{
+			displayMatrix := goavpipe.SideDataDisplayMatrix{
 				Type:       "Display Matrix",
 				Rotation:   rot,
 				RotationCw: float64(probeArray[i].side_data.display_matrix.rotation_cw),
 			}
 			probeInfo.StreamInfo[i].SideData[0] = displayMatrix
-		} else {
-			probeInfo.StreamInfo[i].SideData = make([]interface{}, 0)
 		}
 
 		// Convert AVDictionary data to Tags of type map[string]string using the built in av_dict_get() iterator
-		dict := (*C.AVDictionary)(unsafe.Pointer((probeArray[i].tags)))
+		dict := (*C.AVDictionary)(unsafe.Pointer(probeArray[i].tags))
 		var tag *C.AVDictionaryEntry = (*C.AVDictionaryEntry)(unsafe.Pointer(C.av_dict_get(dict, (*C.char)(C.CString("")), (*C.AVDictionaryEntry)(nil), C.AV_DICT_IGNORE_SUFFIX)))
 		if tag != nil {
 			probeInfo.StreamInfo[i].Tags = map[string]string{}
@@ -1201,26 +1161,6 @@ func XcCancel(handle int32) error {
 	}
 
 	return EAV_CANCEL_FAILED
-}
-
-// StreamInfoAsArray builds an array where each stream is at its corresponsing index
-// by filling in non-existing index positions with codec type "unknown"
-func StreamInfoAsArray(s []StreamInfo) []StreamInfo {
-	maxIdx := 0
-	for _, v := range s {
-		if v.StreamIndex > maxIdx {
-			maxIdx = v.StreamIndex
-		}
-	}
-	a := make([]StreamInfo, maxIdx+1)
-	for i := range a {
-		a[i].StreamIndex = i
-		a[i].CodecType = goavpipe.AVMediaTypeNames[goavpipe.AVMediaType(goavpipe.AVMEDIA_TYPE_UNKNOWN)]
-	}
-	for _, v := range s {
-		a[v.StreamIndex] = v
-	}
-	return a
 }
 
 func H264GuessLevel(profile int, bitrate int64, framerate, width, height int) int {

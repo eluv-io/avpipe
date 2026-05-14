@@ -527,3 +527,27 @@ copy_source_color_to_output(
     if (src->color_range != AVCOL_RANGE_UNSPECIFIED)
         dst->color_range = src->color_range;
 }
+
+/* For DASH/HLS output, dashenc creates inner MP4 muxer contexts that we cannot
+ * inject write_colr into. movenc's colr-box gate requires at least one of
+ * primaries/trc/space to be non-UNSPECIFIED; when only color_range is set the
+ * box is skipped and the range value is lost. Synthesize BT.709 defaults so the
+ * muxer writes the colr box and preserves the range. BT.709 is the correct
+ * assumption for standard SDR content. */
+void
+dash_synthesize_color_defaults(
+    xcparams_t *params,
+    AVCodecParameters *codecpar)
+{
+    if (strcmp(params->format, "dash") && strcmp(params->format, "hls"))
+        return;
+    if (!codecpar || codecpar->color_range == AVCOL_RANGE_UNSPECIFIED)
+        return;
+    if (codecpar->color_primaries != AVCOL_PRI_UNSPECIFIED ||
+        codecpar->color_trc != AVCOL_TRC_UNSPECIFIED ||
+        codecpar->color_space != AVCOL_SPC_UNSPECIFIED)
+        return;
+    codecpar->color_primaries = AVCOL_PRI_BT709;
+    codecpar->color_trc = AVCOL_TRC_BT709;
+    codecpar->color_space = AVCOL_SPC_BT709;
+}

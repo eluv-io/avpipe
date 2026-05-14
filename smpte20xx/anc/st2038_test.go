@@ -2,7 +2,6 @@ package anc
 
 import (
 	"encoding/hex"
-	"fmt"
 	"testing"
 )
 
@@ -27,7 +26,7 @@ func TestPesParsing(t *testing.T) {
 		if err != nil || h == nil {
 			t.Fail()
 		} else {
-			fmt.Println(h.String())
+			//fmt.Println(h.String())
 		}
 
 	}
@@ -44,7 +43,6 @@ func TestPesParsingProblems(t *testing.T) {
 		if err != nil || h == nil {
 			t.Skip("Problem PES fail")
 		}
-		fmt.Println(h.String())
-
+		//fmt.Println(h.String())
 	}
 }

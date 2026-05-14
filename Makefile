@@ -14,12 +14,17 @@ all install: check-env
 	@for dir in $(SUBDIRS); do \
 	echo "Making $@ in $$dir..."; \
 	(cd $$dir; make $@) || exit 1; \
+	if [ "$$dir" = "libavpipe" ]; then \
+		openssl dgst -md5 lib/libavpipe.a | awk '{print $$NF}' > lib/libavpipe.hash; \
+	fi; \
 	done
 
 dynamic: all
 
+# goclean: nuclear option to reset all caches. Normally not needed — `make`
+# updates lib/libavpipe.hash which triggers automatic Go rebuild via //go:embed.
 goclean: clean
-	@go clean -modcache -cache -testcache -i -r
+	@go clean -cache -testcache -modcache -i -r
 
 clean: lclean
 	@for dir in $(SUBDIRS); do \
