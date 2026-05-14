@@ -63,6 +63,7 @@ dkms.conf
 /bin/
 /include/
 /lib/
+!/lib/libavpipe.hash
 /elvxc/elvxc
 /exc/bin/
 O/
