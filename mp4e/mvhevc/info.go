@@ -125,6 +125,7 @@ func Info(inputPath string, opts InfoOptions, w io.Writer) error {
 		return enc.Encode(results)
 	}
 
+	// yaml (default)
 	enc := yaml.NewEncoder(w)
 	defer enc.Close()
 	return enc.Encode(results)
