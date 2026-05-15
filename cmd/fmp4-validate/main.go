@@ -2,122 +2,156 @@ package main
 
 import (
 	"encoding/json"
-	"errors"
-	"flag"
 	"fmt"
-	"io"
-	"os"
-
 	"github.com/Eyevinn/mp4ff/mp4"
 	"github.com/eluv-io/avpipe/mp4e"
+	"github.com/eluv-io/avpipe/mp4e/mvhevc"
+	"github.com/spf13/cobra"
+	"gopkg.in/yaml.v2"
+	"io"
+	"os"
+	"strings"
 )
 
-const appName = "fmp4-validate"
-
 func main() {
-	if err := run(os.Args, os.Stdout); err != nil {
-		_, _ = fmt.Fprintf(os.Stderr, "error: %v\n", err)
+	execute()
+}
+
+func execute() {
+	if err := rootCmd.Execute(); err != nil {
 		os.Exit(1)
 	}
 }
 
-func run(args []string, w io.Writer) (err error) {
-	fs := flag.NewFlagSet(appName, flag.ContinueOnError)
-	opts, err := parseOptions(fs, args)
+var rootCmd = &cobra.Command{
+	Use:     "fmp4-validate",
+	Short:   "parses and validates the input fmp4 (ISOBMFF) file",
+	Args:    cobra.ExactArgs(1),
+	RunE:    runFmp4Validate,
+	Example: `fmp4-validate`,
+}
 
+func init() {
+	rootCmd.PersistentFlags().Bool("json", false, "output json")
+	rootCmd.PersistentFlags().Bool("info", false, "print detailed HDR fields")
+	rootCmd.PersistentFlags().Bool("idr", false, "Show IDR (sync) frame positions")
+	rootCmd.PersistentFlags().Bool("hdr", false, "validate and print HDR10 HEVC metadata")
+	rootCmd.PersistentFlags().Bool("mvhevc", false, "print mvhevc metadata")
+}
+
+type Output struct {
+	mp4e.HDRReport
+	MVHEVC  any `json:"mvhevc,omitempty"`
+	Default any `json:"default,omitempty"`
+}
+
+func runFmp4Validate(cmd *cobra.Command, args []string) error {
+	path := args[0]
+
+	jsonFlag, _ := cmd.Flags().GetBool("json")
+	hdr, _ := cmd.Flags().GetBool("hdr")
+	mvHevc, _ := cmd.Flags().GetBool("mvhevc")
+	idr, _ := cmd.Flags().GetBool("idr")
+	infoFlag, _ := cmd.Flags().GetBool("info")
+
+	var output Output
+	var textOutput []string
+
+	f, err := os.Open(path)
 	if err != nil {
-		if errors.Is(err, flag.ErrHelp) {
-			return nil
+		return err
+	}
+	defer f.Close()
+
+	ran := false
+
+	// HDR
+	if hdr {
+		ran = true
+
+		_, err = f.Seek(0, io.SeekStart)
+		if err != nil {
+			return err
 		}
-		return
-	}
 
-	if len(fs.Args()) != 1 {
-		fs.Usage()
-		return fmt.Errorf("need input file")
-	}
-	inFilePath := fs.Arg(0)
-
-	fileReader, err := os.Open(inFilePath)
-	if err != nil {
-		return fmt.Errorf("could not open input file: %w", err)
-	}
-	defer func(f *os.File) {
-		_ = f.Close()
-	}(fileReader)
-
-	if opts.json && !opts.hdr && !opts.info {
-		opts.info = true
-	}
-	if opts.info {
-		opts.hdr = true
-	}
-	if opts.json {
-		opts.hdr = true
-	}
-
-	if opts.hdr {
-		file, decodeErr := mp4.DecodeFile(fileReader)
+		file, decodeErr := mp4.DecodeFile(f)
 		if file == nil {
-			return fmt.Errorf("could not parse input file: %w", decodeErr)
+			return fmt.Errorf("parse error: %w", decodeErr)
 		}
+
 		hdrInfo, err := mp4e.ValidateHDR(file)
 		if err != nil {
-			return fmt.Errorf("could not validate HDR: %w", err)
+			return err
 		}
-		if opts.json {
-			report := hdrInfo.Report(opts.info)
+
+		if jsonFlag {
+			report := hdrInfo.Report(infoFlag)
 			if decodeErr != nil {
 				report.ParseWarning = decodeErr.Error()
 			}
-			enc := json.NewEncoder(w)
-			enc.SetIndent("", "  ")
-			return enc.Encode(report)
-		}
-		if decodeErr != nil {
-			_, _ = fmt.Fprintf(w, "parse warning: %v\n", decodeErr)
-		}
-		if opts.info {
-			_, err = fmt.Fprintf(w, "%s\n%s\n", hdrInfo.String(), hdrInfo.InfoString())
+			output.HDRReport = report
 		} else {
-			_, err = fmt.Fprintf(w, "%s\n", hdrInfo.String())
+			if decodeErr != nil {
+				textOutput = append(textOutput, fmt.Sprintf("parse warning: %v\n", decodeErr))
+			}
+			textOutput = append(textOutput, hdrInfo.String())
+
+			if infoFlag {
+				textOutput = append(textOutput, hdrInfo.InfoString())
+			}
 		}
-		return err
 	}
 
-	_, info, err := mp4e.ValidateFmp4(fileReader)
-	if err != nil {
-		return fmt.Errorf("could not parse input file: %w", err)
+	// MVHEVC
+	if mvHevc || idr {
+		ran = true
+
+		var opts mvhevc.InfoOptions
+		opts.ShowIDR = idr
+
+		info, err := mvhevc.Info(path, opts)
+		if err != nil {
+			return err
+		}
+
+		if jsonFlag {
+			output.MVHEVC = info
+		} else {
+			b, err := yaml.Marshal(info)
+			if err != nil {
+				return err
+			}
+			textOutput = append(textOutput, fmt.Sprintf("%s\n", b))
+		}
 	}
 
-	_, err = w.Write([]byte(info.String()))
-	return
-}
+	// default
+	if !ran {
+		_, err = f.Seek(0, io.SeekStart)
+		if err != nil {
+			return err
+		}
 
-type options struct {
-	hdr  bool
-	info bool
-	json bool
-}
+		_, info, err := mp4e.ValidateFmp4(f)
+		if err != nil {
+			return err
+		}
 
-func parseOptions(fs *flag.FlagSet, args []string) (*options, error) {
-	const usg = `%s parses and validates the input fmp4 (ISOBMFF) file.
-
-Usage of %s:
-`
-
-	fs.Usage = func() {
-		_, _ = fmt.Fprintf(os.Stderr, usg, appName, appName)
-		_, _ = fmt.Fprintf(os.Stderr, "\n%s [options] infile\n\noptions:\n", appName)
-		fs.PrintDefaults()
+		if jsonFlag {
+			output.Default = info
+		} else {
+			textOutput = append(textOutput, info.String())
+		}
 	}
 
-	opts := options{}
-	fs.BoolVar(&opts.hdr, "hdr", false, "validate and print HDR10 HEVC metadata")
-	fs.BoolVar(&opts.info, "info", false, "print detailed HDR fields; implies -hdr")
-	fs.BoolVar(&opts.json, "json", false, "print HDR output as JSON; implies -info")
-	//fs.BoolVar(&opts.version, "version", false, "Get fmp4-validate version")
+	// output
+	if jsonFlag {
+		enc := json.NewEncoder(cmd.OutOrStdout())
+		enc.SetIndent("", "  ")
+		return enc.Encode(output)
+	}
 
-	err := fs.Parse(args[1:])
-	return &opts, err
+	_, err = fmt.Fprintln(cmd.OutOrStdout(),
+		strings.Join(textOutput, "\n\n"))
+	return err
 }
