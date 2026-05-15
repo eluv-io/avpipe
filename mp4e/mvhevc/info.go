@@ -2,10 +2,7 @@ package mvhevc
 
 import (
 	"encoding/hex"
-	"encoding/json"
 	"fmt"
-	"gopkg.in/yaml.v3"
-	"io"
 	"os"
 
 	"github.com/Eyevinn/mp4ff/hevc"
@@ -14,27 +11,23 @@ import (
 
 type InfoOptions struct {
 	ShowIDR bool
-	Json    bool
 }
 
-func Info(inputPath string, opts InfoOptions, w io.Writer) error {
-	if w == nil {
-		w = io.Discard
-	}
+func Info(inputPath string, opts InfoOptions) (map[string]any, error) {
 
 	ifd, err := os.Open(inputPath)
 	if err != nil {
-		return fmt.Errorf("could not open input file: %w", err)
+		return nil, fmt.Errorf("could not open input file: %w", err)
 	}
 	defer func() { _ = ifd.Close() }()
 
 	parsedMP4, err := mp4.DecodeFile(ifd, mp4.WithDecodeMode(mp4.DecModeLazyMdat))
 	if err != nil {
-		return fmt.Errorf("could not decode MP4: %w", err)
+		return nil, fmt.Errorf("could not decode MP4: %w", err)
 	}
 
 	if parsedMP4.Moov == nil {
-		return fmt.Errorf("no moov box found")
+		return nil, fmt.Errorf("no moov box found")
 	}
 
 	results := make(map[string]any)
@@ -61,15 +54,15 @@ func Info(inputPath string, opts InfoOptions, w io.Writer) error {
 			track["Sample entry"] = val
 
 			if vse.HvcC != nil {
-				track["hvcC (base layer config)"] = printHvcCInfo(vse.HvcC.DecConfRec, opts, w)
+				track["hvcC (base layer config)"] = printHvcCInfo(vse.HvcC.DecConfRec)
 			}
 
 			if vse.LhvC != nil {
-				track["lhvC (enhancement layer config)"] = printLhvCInfo(vse.LhvC.DecConfRec, opts, w)
+				track["lhvC (enhancement layer config)"] = printLhvCInfo(vse.LhvC.DecConfRec)
 			}
 
 			if vse.Vexu != nil {
-				track["vexu (Spatial Video)"] = printVexuInfo(vse.Vexu, opts, w)
+				track["vexu (Spatial Video)"] = printVexuInfo(vse.Vexu)
 			}
 
 			if vse.Hfov != nil {
@@ -83,9 +76,9 @@ func Info(inputPath string, opts InfoOptions, w io.Writer) error {
 		trackID := trak.Tkhd.TrackID
 
 		if parsedMP4.IsFragmented() {
-			track["Samples Info"] = printFragmentedInfo(parsedMP4, trackID, timeScale, opts, w)
+			track["Samples Info"] = printFragmentedInfo(parsedMP4, trackID, timeScale, opts)
 		} else {
-			track["Samples Info"] = printUnfragmentedSampleInfo(trak, stbl, timeScale, opts, w)
+			track["Samples Info"] = printUnfragmentedSampleInfo(trak, stbl, timeScale, opts)
 		}
 
 		var oinfs []map[string]any
@@ -97,9 +90,9 @@ func Info(inputPath string, opts InfoOptions, w io.Writer) error {
 			}
 			switch sgpd.GroupingType {
 			case "oinf":
-				oinfs = printOinfInfo(sgpd, opts, w)
+				oinfs = printOinfInfo(sgpd)
 			case "linf":
-				linfs = printLinfInfo(sgpd, opts, w)
+				linfs = printLinfInfo(sgpd)
 			}
 		}
 
@@ -113,25 +106,16 @@ func Info(inputPath string, opts InfoOptions, w io.Writer) error {
 
 		var trackGroups map[string]any
 		if trak.Trgr != nil {
-			trackGroups = printTrackGroupInfo(trak, opts, w)
+			trackGroups = printTrackGroupInfo(trak)
 			track["trgr (Track Group)"] = trackGroups
 		}
 		results[key] = track
 	}
 
-	if opts.Json {
-		enc := json.NewEncoder(w)
-		enc.SetIndent("", "  ")
-		return enc.Encode(results)
-	}
-
-	// yaml (default)
-	enc := yaml.NewEncoder(w)
-	defer enc.Close()
-	return enc.Encode(results)
+	return results, nil
 }
 
-func printHvcCInfo(hdcr hevc.DecConfRec, opts InfoOptions, w io.Writer) map[string]any {
+func printHvcCInfo(hdcr hevc.DecConfRec) map[string]any {
 
 	hvCCInfo := make(map[string]any)
 	hvCCInfo["Profile"] = fmt.Sprintf("space=%d tier=%t idc=%d level=%d",
@@ -161,7 +145,7 @@ func printHvcCInfo(hdcr hevc.DecConfRec, opts InfoOptions, w io.Writer) map[stri
 	return hvCCInfo
 }
 
-func printLhvCInfo(hdcr hevc.DecConfRec, opts InfoOptions, w io.Writer) map[string]any {
+func printLhvCInfo(hdcr hevc.DecConfRec) map[string]any {
 
 	lhvcInfo := make(map[string]any)
 	lhvcInfo["NumTemporalLayers"] = hdcr.NumTemporalLayers
@@ -188,7 +172,7 @@ func printLhvCInfo(hdcr hevc.DecConfRec, opts InfoOptions, w io.Writer) map[stri
 	return lhvcInfo
 }
 
-func printVexuInfo(vexu *mp4.VexuBox, opts InfoOptions, w io.Writer) map[string]any {
+func printVexuInfo(vexu *mp4.VexuBox) map[string]any {
 
 	info := map[string]any{}
 	if vexu.Eyes != nil {
@@ -216,7 +200,7 @@ func printVexuInfo(vexu *mp4.VexuBox, opts InfoOptions, w io.Writer) map[string]
 	return info
 }
 
-func printUnfragmentedSampleInfo(trak *mp4.TrakBox, stbl *mp4.StblBox, timeScale uint32, opts InfoOptions, w io.Writer) map[string]any {
+func printUnfragmentedSampleInfo(trak *mp4.TrakBox, stbl *mp4.StblBox, timeScale uint32, opts InfoOptions) map[string]any {
 	nrSamples := trak.GetNrSamples()
 	var sampleDur uint32
 	if stbl.Stts != nil && len(stbl.Stts.SampleTimeDelta) > 0 {
@@ -236,12 +220,12 @@ func printUnfragmentedSampleInfo(trak *mp4.TrakBox, stbl *mp4.StblBox, timeScale
 	}
 
 	if stbl.Stss != nil && opts.ShowIDR {
-		info[fmt.Sprintf("Sync (IDR) frames (%d)", len(stbl.Stss.SampleNumber))] = printSyncFrameInfo(stbl.Stss.SampleNumber, opts, w)
+		info[fmt.Sprintf("Sync (IDR) frames (%d)", len(stbl.Stss.SampleNumber))] = printSyncFrameInfo(stbl.Stss.SampleNumber)
 	}
 	return info
 }
 
-func printSyncFrameInfo(syncNrs []uint32, opts InfoOptions, w io.Writer) []string {
+func printSyncFrameInfo(syncNrs []uint32) []string {
 	var frames []string
 	for i, sn := range syncNrs {
 		if i == 0 {
@@ -254,7 +238,7 @@ func printSyncFrameInfo(syncNrs []uint32, opts InfoOptions, w io.Writer) []strin
 	return frames
 }
 
-func printOinfInfo(sgpd *mp4.SgpdBox, opts InfoOptions, w io.Writer) []map[string]any {
+func printOinfInfo(sgpd *mp4.SgpdBox) []map[string]any {
 	var infoArr []map[string]any
 	for _, entry := range sgpd.SampleGroupEntries {
 		oinf, ok := entry.(*mp4.OinfSampleGroupEntry)
@@ -319,7 +303,7 @@ func printOinfInfo(sgpd *mp4.SgpdBox, opts InfoOptions, w io.Writer) []map[strin
 	return infoArr
 }
 
-func printLinfInfo(sgpd *mp4.SgpdBox, opts InfoOptions, w io.Writer) []map[string]any {
+func printLinfInfo(sgpd *mp4.SgpdBox) []map[string]any {
 	var infoArr []map[string]any
 	for _, entry := range sgpd.SampleGroupEntries {
 		linf, ok := entry.(*mp4.LinfSampleGroupEntry)
@@ -342,7 +326,7 @@ func printLinfInfo(sgpd *mp4.SgpdBox, opts InfoOptions, w io.Writer) []map[strin
 	return infoArr
 }
 
-func printTrackGroupInfo(trak *mp4.TrakBox, opts InfoOptions, w io.Writer) map[string]any {
+func printTrackGroupInfo(trak *mp4.TrakBox) map[string]any {
 	info := make(map[string]any)
 	for _, child := range trak.Trgr.Children {
 		if cstg, ok := child.(*mp4.TrackGroupTypeBox); ok {
@@ -352,7 +336,7 @@ func printTrackGroupInfo(trak *mp4.TrakBox, opts InfoOptions, w io.Writer) map[s
 	return info
 }
 
-func printFragmentedInfo(f *mp4.File, trackID uint32, timeScale uint32, opts InfoOptions, w io.Writer) map[string]any {
+func printFragmentedInfo(f *mp4.File, trackID uint32, timeScale uint32, opts InfoOptions) map[string]any {
 	var totalSamples uint32
 	var sampleDur uint32
 	var syncFrames []uint32
@@ -414,7 +398,7 @@ func printFragmentedInfo(f *mp4.File, trackID uint32, timeScale uint32, opts Inf
 	}
 
 	if opts.ShowIDR && len(syncFrames) > 0 {
-		info[fmt.Sprintf("Sync (IDR) frames (%d)", len(syncFrames))] = printSyncFrameInfo(syncFrames, opts, w)
+		info[fmt.Sprintf("Sync (IDR) frames (%d)", len(syncFrames))] = printSyncFrameInfo(syncFrames)
 	}
 	return info
 }
