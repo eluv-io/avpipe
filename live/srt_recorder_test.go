@@ -292,10 +292,12 @@ func TestSrtToMp4WithCancelling2(t *testing.T) {
 	goavpipe.InitIOHandler(&inputOpener{dir: outputDir}, &outputOpener{dir: outputDir})
 
 	var handle int32
+	handleReady := make(chan struct{})
 	go func() {
 		tlog.Info("Transcoding SRT stream start", "params", fmt.Sprintf("%+v", *xcParams))
 		var err error
 		handle, err = avpipe.XcInit(xcParams)
+		close(handleReady)
 		if err != nil {
 			t.Error("XcInit initializing SRT stream failed", "err", err)
 			done <- true
@@ -310,7 +312,9 @@ func TestSrtToMp4WithCancelling2(t *testing.T) {
 
 	startLiveSource(t, liveSource, "srt")
 
-	// Wait 1 second for transcoding to start
+	// Wait for XcInit to complete and handle to be assigned before cancelling.
+	<-handleReady
+	// Give transcoding 1 second to start before cancelling.
 	time.Sleep(1 * time.Second)
 
 	err := avpipe.XcCancel(handle)

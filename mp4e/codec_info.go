@@ -25,8 +25,8 @@ type CodecInfo struct {
 	// parameters (e.g. "hvc1.2.4.L120.90", "avc1.640028", "mp4a.40.2").
 	MimeCodecString string `json:"mime_codec_string,omitempty"`
 
-	// ProfileIDC is the codec profile IDC. Each codec defines the value separately
-	// ; e.g. 2 = HEVC Main 10, 100 = AVC High
+	// ProfileIDC is the codec profile IDC. Each codec defines the value separately;
+	// e.g. 2 = HEVC Main 10, 100 = AVC High
 	ProfileIDC int `json:"profile_idc,omitempty"`
 
 	// Level is the codec level IDC. Each codec defines the value separately:

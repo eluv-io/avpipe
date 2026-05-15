@@ -1023,7 +1023,8 @@ func Probe(params *goavpipe.XcParams) (*goavpipe.ProbeInfo, error) {
 		probeInfo.StreamInfo[i].Width = int(probeArray[i].width)
 		probeInfo.StreamInfo[i].Height = int(probeArray[i].height)
 		if probeInfo.StreamInfo[i].CodecType == "video" {
-			probeInfo.StreamInfo[i].PixFmt = int(probeArray[i].pix_fmt)
+			pixFmt := int(probeArray[i].pix_fmt)
+			probeInfo.StreamInfo[i].PixFmt = &pixFmt
 		}
 		if int64(probeArray[i].sample_aspect_ratio.den) != 0 {
 			probeInfo.StreamInfo[i].SampleAspectRatio = big.NewRat(int64(probeArray[i].sample_aspect_ratio.num), int64(probeArray[i].sample_aspect_ratio.den))

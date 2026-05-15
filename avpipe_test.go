@@ -2223,7 +2223,7 @@ func TestProbeDolbyAtmos(t *testing.T) {
 	got, err := json.Marshal(probe)
 	failNowOnError(t, err)
 
-	want, err := os.ReadFile("testdata/avprobe_dolby_atmos.json")
+	want, err := os.ReadFile("testdata/avprobe_dolby_atmos.jsonc")
 	failNowOnError(t, err)
 
 	assert.JSONEq(t, string(jsonc.ToJSON(want)), string(got))
@@ -2583,8 +2583,8 @@ func boilerProbe(t *testing.T, result *XcTestResult) (probeInfoArray []*goavpipe
 			assert.Equal(t, result.profile, si.ProfileName)
 		}
 
-		if len(result.pixelFmt) > 0 {
-			assert.Equal(t, result.pixelFmt, avpipe.GetPixelFormatName(si.PixFmt))
+		if len(result.pixelFmt) > 0 && si.PixFmt != nil {
+			assert.Equal(t, result.pixelFmt, avpipe.GetPixelFormatName(*si.PixFmt))
 		}
 
 		if len(result.channelLayoutName) > 0 {
@@ -2782,8 +2782,8 @@ func assertHDR10(t *testing.T, mp4 string, want expectedHDR10) {
 		return
 	}
 
-	if want.PixFmt != "" {
-		assert.Equal(t, want.PixFmt, avpipe.GetPixelFormatName(si.PixFmt), "pix_fmt in %s", mp4)
+	if want.PixFmt != "" && si.PixFmt != nil {
+		assert.Equal(t, want.PixFmt, avpipe.GetPixelFormatName(*si.PixFmt), "pix_fmt in %s", mp4)
 	}
 	if want.ProfileName != "" {
 		assert.Equal(t, want.ProfileName, avpipe.GetProfileName(si.CodecID, si.Profile), "profile in %s", mp4)

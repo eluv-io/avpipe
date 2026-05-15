@@ -289,7 +289,7 @@ func buildABRVariants() []abrVariant {
 	return variants
 }
 
-func fileMissing(t *testing.T, url string) {
+func skipIfFileMissing(t *testing.T, url string) {
 	t.Helper()
 	info, err := os.Stat(url)
 	if err != nil || info.IsDir() {
@@ -371,7 +371,7 @@ func TestMezCreate(t *testing.T) {
 			url := path.Join(mezSourceDir, src.Path)
 			log.Info("STARTING TestMezCreate", "source", url)
 
-			fileMissing(t, url)
+			skipIfFileMissing(t, url)
 
 			// Capture source color metadata so we can verify mez parts pass it through
 			// to the mp4 'colr' atom (UNSPECIFIED fields are passed through unchanged).
@@ -514,7 +514,7 @@ func TestABRCreate(t *testing.T) {
 	for _, src := range mezTestSources {
 		t.Run(mezTestSourceID(src), func(t *testing.T) {
 			url := path.Join(mezSourceDir, src.Path)
-			fileMissing(t, url)
+			skipIfFileMissing(t, url)
 
 			profile := mezProfileForSource(src)
 			baseName := mezTestSourceID(src)

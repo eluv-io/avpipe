@@ -103,8 +103,8 @@ func doProbe(cmd *cobra.Command, args []string) error {
 		fmt.Printf("\thas_b_frames: %v\n", info.HasBFrames)
 		fmt.Printf("\twidth: %d\n", info.Width)
 		fmt.Printf("\theight: %d\n", info.Height)
-		if info.PixFmt != 0 {
-			fmt.Printf("\tpix_fmt: %d\n", info.PixFmt)
+		if info.PixFmt != nil {
+			fmt.Printf("\tpix_fmt: %d\n", *info.PixFmt)
 		} else {
 			fmt.Printf("\tpix_fmt: -\n")
 		}

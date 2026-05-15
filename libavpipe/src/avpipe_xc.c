@@ -880,9 +880,13 @@ set_h265_params(
 
     /* Explicitly signal color range in the SPS VUI for both SDR and HDR.
      * Without this, libx265 doesn't write the range to the VUI even when
-     * AVCodecContext.color_range is set, so probes of the output get UNSPECIFIED. */
+     * AVCodecContext.color_range is set, so probes of the output get UNSPECIFIED.
+     * Prefer the encoder's range (may have been forced above for HDR) over the
+     * source decoder's range. */
     {
-        enum AVColorRange cr = decoder_context->stream[index]->codecpar->color_range;
+        enum AVColorRange cr = encoder_codec_context->color_range != AVCOL_RANGE_UNSPECIFIED
+            ? encoder_codec_context->color_range
+            : decoder_context->stream[index]->codecpar->color_range;
         if (cr != AVCOL_RANGE_UNSPECIFIED) {
             off += snprintf(x265_params + off, sizeof(x265_params) - off,
                 "%srange=%s", off > 0 ? ":" : "",

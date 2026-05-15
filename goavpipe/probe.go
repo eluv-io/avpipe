@@ -72,9 +72,9 @@ type StreamInfo struct {
 	// DisplayAspectRatio is the display aspect ratio.
 	DisplayAspectRatio *big.Rat `json:"display_aspect_ratio,omitempty"`
 
-	// PixFmt is the FFmpeg pixel format (enum AVPixelFormat). Omitted for
-	// non-video streams. Note: 0 (AV_PIX_FMT_YUV420P) is also omitted.
-	PixFmt int `json:"pix_fmt,omitempty"` // ffprobe: string value
+	// PixFmt is the FFmpeg pixel format (enum AVPixelFormat). Nil for
+	// non-video streams. 0 means AV_PIX_FMT_YUV420P.
+	PixFmt *int `json:"pix_fmt,omitempty"` // ffprobe: string value
 
 	// Level is the codec level IDC (e.g. 40 = H.264 level 4.0).
 	// 0 (omitted) when FFmpeg reports AV_LEVEL_UNKNOWN.

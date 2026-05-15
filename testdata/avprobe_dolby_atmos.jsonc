@@ -46,6 +46,7 @@
       "has_b_frames": true,
       "sample_aspect_ratio": "1",
       "display_aspect_ratio": "16/9",
+      "pix_fmt": 0,
       "level": 40,
       "color_range": "unknown",
       "color_space": "unknown",
