@@ -40,6 +40,9 @@ const (
 	hdr10MaxCLL         = "1000,400"
 )
 
+// enableNvenc enables tests on NVIDIA GPU
+const enableNvenc = false
+
 type XcTestResult struct {
 	mezFile           []string
 	timeScale         int
@@ -1816,9 +1819,13 @@ func TestHEVC_H265ABRTranscode(t *testing.T) {
 
 }
 
-// TestHEVC_HDR10_MezAndABR creates a mez from source and ABR rungs from mez
-// Validates: pix_fmt, profile, and colr/mdcv/clli
-func TestHEVC_HDR10_MezAndABR(t *testing.T) {
+// runHEVCHDR10MezAndABR is the test body for HDR10 mez + ABR with configurable encoder
+// Validates: pix_fmt, profile, and colr/mdcv/clli through:
+//
+//	source -> mez (HEVC, full-res)
+//	mez    -> ABR bypass (no re-encode)
+//	mez    -> ABR re-encode (720p)
+func runHEVCHDR10MezAndABR(t *testing.T, ecodec string) {
 	f := fn()
 	if testing.Short() {
 		t.Skip("SKIPPING " + f + " (fast mode)")
@@ -1841,7 +1848,7 @@ func TestHEVC_HDR10_MezAndABR(t *testing.T) {
 		DurationTs:        hdr10TestDurationTs,
 		StartSegmentStr:   "1",
 		SegDuration:       "30",
-		Ecodec:            "libx265",
+		Ecodec:            ecodec,
 		Dcodec:            "hevc",
 		EncHeight:         -1, // preserve 2160
 		EncWidth:          -1, // preserve 3840
@@ -1864,7 +1871,7 @@ func TestHEVC_HDR10_MezAndABR(t *testing.T) {
 		ColorRange:       "tv",
 		Width:            3840,
 		Height:           2160,
-		MasteringDisplay: hdr10MasterDisplay, // round-trips bit-exact through x265 → mp4 → probe
+		MasteringDisplay: hdr10MasterDisplay,
 		MaxCLL:           hdr10MaxCLL,
 	}
 	assertHDR10(t, path.Join(mezDir, "vsegment-1.mp4"), mezExpected)
@@ -2008,6 +2015,22 @@ func assertMVHEVCStructure(t *testing.T, mp4Path string, wantW, wantH uint16, ex
 	if wantH > 0 {
 		assert.Equal(t, wantH, ins.Height, "height in %s", mp4Path)
 	}
+}
+
+// TestHEVC_HDR10_MezAndABR creates a mez from source and ABR rungs from mez,
+// using libx265 (CPU). Validates: pix_fmt, profile, and colr/mdcv/clli.
+func TestHEVC_HDR10_MezAndABR(t *testing.T) {
+	runHEVCHDR10MezAndABR(t, "libx265")
+}
+
+// TestHEVC_HDR10_MezAndABR_Nvenc creates a mez from souce and ABR rungs from mez,
+// sing nvenc (GPU).
+// Requires enableNvenc
+func TestHEVC_HDR10_MezAndABR_Nvenc(t *testing.T) {
+	if !enableNvenc {
+		t.Skip("enableNvenc=false; skipping hevc_nvenc HDR10 test")
+	}
+	runHEVCHDR10MezAndABR(t, "hevc_nvenc")
 }
 
 func TestAVPipeStats(t *testing.T) {

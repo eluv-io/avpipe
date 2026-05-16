@@ -462,3 +462,68 @@ is_dolby_atmos(
 
     return 0;
 }
+
+/*
+ * Verify the source video color metadata matches expected HDR overrides.
+ */
+void
+verify_hdr_source_color(
+    coderctx_t *decoder_context,
+    xcparams_t *params)
+{
+    int idx = decoder_context->video_stream_index;
+    if (idx < 0 || !decoder_context->stream[idx] || !decoder_context->stream[idx]->codecpar)
+        return;
+    AVCodecParameters *src = decoder_context->stream[idx]->codecpar;
+    const char *url = params ? params->url : "";
+
+    if (src->color_primaries != AVCOL_PRI_BT2020) {
+        const char *n = av_color_primaries_name(src->color_primaries);
+        elv_warn("HDR source color_primaries mismatch: expected bt2020(%d), source=%s(%d), url=%s",
+            (int)AVCOL_PRI_BT2020, n ? n : "?", (int)src->color_primaries, url);
+    }
+    if (src->color_trc != AVCOL_TRC_SMPTE2084) {
+        const char *n = av_color_transfer_name(src->color_trc);
+        elv_warn("HDR source transfer mismatch: expected smpte2084(%d), source=%s(%d), url=%s",
+            (int)AVCOL_TRC_SMPTE2084, n ? n : "?", (int)src->color_trc, url);
+    }
+    if (src->color_space != AVCOL_SPC_BT2020_NCL) {
+        const char *n = av_color_space_name(src->color_space);
+        elv_warn("HDR source matrix mismatch: expected bt2020nc(%d), source=%s(%d), url=%s",
+            (int)AVCOL_SPC_BT2020_NCL, n ? n : "?", (int)src->color_space, url);
+    }
+    if (src->color_range != AVCOL_RANGE_MPEG) {
+        const char *n = av_color_range_name(src->color_range);
+        elv_warn("HDR source range mismatch: expected tv/MPEG(%d), source=%s(%d), url=%s",
+            (int)AVCOL_RANGE_MPEG, n ? n : "?", (int)src->color_range, url);
+    }
+}
+
+/*
+ * Copy source color metadata into encoder codec context if specified
+ * Must be called before avcodec_open2().
+ *
+ * Setting both VUI and colr is required for HEVC (HEVC decoder overrides codecpar->color*
+ * with the SPS VUI values).
+ */
+void
+copy_source_color_to_output(
+    coderctx_t *encoder_context,
+    coderctx_t *decoder_context)
+{
+    int idx = decoder_context->video_stream_index;
+    if (idx < 0 || !decoder_context->stream[idx] || !decoder_context->stream[idx]->codecpar)
+        return;
+    if (!encoder_context->codec_context[idx])
+        return;
+    AVCodecParameters *src = decoder_context->stream[idx]->codecpar;
+    AVCodecContext    *dst = encoder_context->codec_context[idx];
+    if (src->color_primaries != AVCOL_PRI_UNSPECIFIED)
+        dst->color_primaries = src->color_primaries;
+    if (src->color_trc != AVCOL_TRC_UNSPECIFIED)
+        dst->color_trc = src->color_trc;
+    if (src->color_space != AVCOL_SPC_UNSPECIFIED)
+        dst->colorspace = src->color_space;
+    if (src->color_range != AVCOL_RANGE_UNSPECIFIED)
+        dst->color_range = src->color_range;
+}

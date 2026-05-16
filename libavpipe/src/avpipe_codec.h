@@ -55,25 +55,22 @@ format_max_cll(
     size_t buf_size,
     const AVContentLightMetadata *c);
 
-/*
- * Parse 265 master-display string and attach as
- * AV_PKT_DATA_MASTERING_DISPLAY_METADATA on ctx->coded_side_data.
- * Instructs mp4 muxer to write the mdcv box
- *
- * Returns eav_success on success, eav_param if the string can't be parsed,
- * or eav_mem_alloc if side-data allocation fails.
- */
 int
 attach_master_display(
     AVCodecContext *ctx,
     const char *s);
 
-/*
- * Parse "<MaxCLL>,<MaxFALL>" and attach as AV_PKT_DATA_CONTENT_LIGHT_LEVEL
- * on ctx->coded_side_data.
- * Instructs mp4 muxer to write the clli box
- */
 int
 attach_max_cll(
+    AVCodecContext *ctx,
+    const char *s);
+
+int
+attach_master_display_nvenc(
+    AVCodecContext *ctx,
+    const char *s);
+
+int
+attach_max_cll_nvenc(
     AVCodecContext *ctx,
     const char *s);
