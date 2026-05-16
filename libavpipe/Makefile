@@ -31,6 +31,8 @@ endif
 
 FLAGS=-O0 -ggdb -Wall -fPIC -DVERSION=\"$(VERSION)\"
 
+.PHONY: all test clean
+
 all: avpipelib install
 
 install:
@@ -53,8 +55,12 @@ $(BINDIR)/%.o: src/%.c
 	@echo "Compiling " $<
 	gcc ${FLAGS} ${INCDIRS} -c $< -o $@
 
+test:
+	@$(MAKE) -C test
+
 clean:
 	@rm -rf $(BINDIR) $(LIBDIR)
+	@$(MAKE) -C test clean
 
 tags:
 	ctags -R . ../../elv-toolchain/FFmpeg/FFmpeg ../utils

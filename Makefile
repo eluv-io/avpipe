@@ -6,7 +6,7 @@ SUBDIRS=utils libavpipe exc elvxc
 SRCS=avpipe_handler.c
 OBJS=$(SRCS:%.c=$(BINDIR)/%.o)
 
-.PHONY: all test clean
+.PHONY: all test gotest ctest clean
 
 .DEFAULT_GOAL := dynamic
 
@@ -57,5 +57,10 @@ ifndef FFMPEG_DIST
   $(error FFMPEG_DIST is undefined)
 endif
 
-test:
+test: ctest gotest
+
+gotest:
 	@./run_tests.sh
+
+ctest:
+	@$(MAKE) -C libavpipe test

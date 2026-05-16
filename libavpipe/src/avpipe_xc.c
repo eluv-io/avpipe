@@ -749,6 +749,9 @@ set_encoder_options(
 
 /*
  * Set H264 specific params profile, and level based on encoding height.
+ * Called only from prepare_video_encoder, which has already validated that
+ * video_stream_index >= 0 and that decoder_context->stream[index] and
+ * encoder_context->codec_context[index] are non-NULL.
  */
 static void
 set_h264_params(
@@ -783,26 +786,27 @@ set_h264_params(
                                                 encoder_codec_context->height);
     }
 
-    {
-        char x264_params[128];
-        int off = snprintf(x264_params, sizeof(x264_params), "stitchable=1");
-        if (params->video_layout == video_layout_sbs)
-            off += snprintf(x264_params + off, sizeof(x264_params) - off,
-                ":frame-packing=%d", video_layout_sbs);
-        /* Explicitly signal color range in the SPS VUI so it round-trips through
-         * the mez encode.  The AVCodecContext.color_range field alone is not
-         * enough to trigger VUI writing without the other color fields set. */
-        int idx = decoder_context->video_stream_index;
-        if (idx >= 0 && decoder_context->stream[idx]) {
-            enum AVColorRange cr = decoder_context->stream[idx]->codecpar->color_range;
-            if (cr != AVCOL_RANGE_UNSPECIFIED)
-                snprintf(x264_params + off, sizeof(x264_params) - off,
-                    ":range=%s", cr == AVCOL_RANGE_JPEG ? "pc" : "tv");
-        }
-        av_opt_set(encoder_codec_context->priv_data, "x264-params", x264_params, 0);
-    }
+    char x264_params[128];
+    int off = snprintf(x264_params, sizeof(x264_params), "stitchable=1");
+    if (params->video_layout == video_layout_sbs)
+        off += snprintf(x264_params + off, sizeof(x264_params) - off,
+            ":frame-packing=%d", video_layout_sbs);
+    /* Explicitly signal color range in the SPS VUI so it round-trips through
+     * the mez encode.  The AVCodecContext.color_range field alone is not
+     * enough to trigger VUI writing without the other color fields set. */
+    enum AVColorRange cr = decoder_context->stream[index]->codecpar->color_range;
+    if (cr != AVCOL_RANGE_UNSPECIFIED)
+        snprintf(x264_params + off, sizeof(x264_params) - off,
+            ":range=%s", cr == AVCOL_RANGE_JPEG ? "pc" : "tv");
+    av_opt_set(encoder_codec_context->priv_data, "x264-params", x264_params, 0);
 }
 
+/*
+ * Set H265 specific params profile, and level based on encoding height.
+ * Called only from prepare_video_encoder, which has already validated that
+ * video_stream_index >= 0 and that decoder_context->stream[index] and
+ * encoder_context->codec_context[index] are non-NULL.
+ */
 static int
 set_h265_params(
     coderctx_t *encoder_context,
@@ -883,15 +887,13 @@ set_h265_params(
      * AVCodecContext.color_range is set, so probes of the output get UNSPECIFIED.
      * Prefer the encoder's range (may have been forced above for HDR) over the
      * source decoder's range. */
-    {
-        enum AVColorRange cr = encoder_codec_context->color_range != AVCOL_RANGE_UNSPECIFIED
-            ? encoder_codec_context->color_range
-            : decoder_context->stream[index]->codecpar->color_range;
-        if (cr != AVCOL_RANGE_UNSPECIFIED) {
-            off += snprintf(x265_params + off, sizeof(x265_params) - off,
-                "%srange=%s", off > 0 ? ":" : "",
-                cr == AVCOL_RANGE_JPEG ? "full" : "limited");
-        }
+    enum AVColorRange cr = encoder_codec_context->color_range != AVCOL_RANGE_UNSPECIFIED
+        ? encoder_codec_context->color_range
+        : decoder_context->stream[index]->codecpar->color_range;
+    if (cr != AVCOL_RANGE_UNSPECIFIED) {
+        off += snprintf(x265_params + off, sizeof(x265_params) - off,
+            "%srange=%s", off > 0 ? ":" : "",
+            cr == AVCOL_RANGE_JPEG ? "full" : "limited");
     }
 
     if (off > 0)

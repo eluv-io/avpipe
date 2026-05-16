@@ -528,12 +528,61 @@ copy_source_color_to_output(
         dst->color_range = src->color_range;
 }
 
+/* Broad category for a primaries value: 0=unknown, 1=BT.709, 2=BT.601, 3=HDR */
+static int
+color_pri_cat(enum AVColorPrimaries p)
+{
+    switch (p) {
+    case AVCOL_PRI_BT709:     return 1;
+    case AVCOL_PRI_SMPTE170M:
+    case AVCOL_PRI_BT470BG:
+    case AVCOL_PRI_BT470M:    return 2;
+    case AVCOL_PRI_BT2020:    return 3;
+    default:                  return 0;
+    }
+}
+
+/* Broad category for a TRC value: 0=unknown, 1=BT.709, 2=BT.601, 3=HDR */
+static int
+color_trc_cat(enum AVColorTransferCharacteristic t)
+{
+    switch (t) {
+    case AVCOL_TRC_BT709:          return 1;
+    case AVCOL_TRC_SMPTE170M:
+    case AVCOL_TRC_GAMMA22:
+    case AVCOL_TRC_GAMMA28:        return 2;
+    case AVCOL_TRC_SMPTE2084:
+    case AVCOL_TRC_ARIB_STD_B67:   return 3;
+    default:                       return 0;
+    }
+}
+
+/* Broad category for a colorspace value: 0=unknown, 1=BT.709, 2=BT.601, 3=HDR */
+static int
+color_spc_cat(enum AVColorSpace s)
+{
+    switch (s) {
+    case AVCOL_SPC_BT709:          return 1;
+    case AVCOL_SPC_SMPTE170M:
+    case AVCOL_SPC_BT470BG:        return 2;
+    case AVCOL_SPC_BT2020_NCL:
+    case AVCOL_SPC_BT2020_CL:      return 3;
+    default:                       return 0;
+    }
+}
+
 /* For DASH/HLS output, dashenc creates inner MP4 muxer contexts that we cannot
  * inject write_colr into. movenc's colr-box gate requires at least one of
  * primaries/trc/space to be non-UNSPECIFIED; when only color_range is set the
- * box is skipped and the range value is lost. Synthesize BT.709 defaults so the
- * muxer writes the colr box and preserves the range. BT.709 is the correct
- * assumption for standard SDR content. */
+ * box is skipped and the range value is lost.
+ *
+ * When color metadata is partially or fully absent, fill in the missing fields
+ * so the colr box is written and range is preserved.  Detection rules:
+ *   - All three UNSPECIFIED → synthesize BT.709 (standard SDR default)
+ *   - Partial metadata → detect color space from set fields; fill only the gaps
+ *   - Inconsistent metadata (e.g. bt2020 primaries + bt709 trc) → log error, no-op
+ *   - HDR without an unambiguous TRC → no-op (can't distinguish HDR10 from HLG)
+ */
 void
 dash_synthesize_color_defaults(
     xcparams_t *params,
@@ -543,11 +592,65 @@ dash_synthesize_color_defaults(
         return;
     if (!codecpar || codecpar->color_range == AVCOL_RANGE_UNSPECIFIED)
         return;
-    if (codecpar->color_primaries != AVCOL_PRI_UNSPECIFIED ||
-        codecpar->color_trc != AVCOL_TRC_UNSPECIFIED ||
-        codecpar->color_space != AVCOL_SPC_UNSPECIFIED)
+
+    enum AVColorPrimaries              pri = codecpar->color_primaries;
+    enum AVColorTransferCharacteristic trc = codecpar->color_trc;
+    enum AVColorSpace                  spc = codecpar->color_space;
+
+    /* All three already set — nothing to do */
+    if (pri != AVCOL_PRI_UNSPECIFIED &&
+        trc != AVCOL_TRC_UNSPECIFIED &&
+        spc != AVCOL_SPC_UNSPECIFIED)
         return;
-    codecpar->color_primaries = AVCOL_PRI_BT709;
-    codecpar->color_trc = AVCOL_TRC_BT709;
-    codecpar->color_space = AVCOL_SPC_BT709;
+
+    /* Detect overall color category from whichever fields are set */
+    int cats[3] = { color_pri_cat(pri), color_trc_cat(trc), color_spc_cat(spc) };
+    int cat = 0;
+    for (int i = 0; i < 3; i++) {
+        if (cats[i] == 0)
+            continue;
+        if (cat != 0 && cat != cats[i]) {
+            elv_err("dash_synthesize_color_defaults: incoherent color metadata "
+                    "(primaries=%d trc=%d space=%d), url=%s", pri, trc, spc, params->url);
+            return;
+        }
+        cat = cats[i];
+    }
+
+    if (cat == 0) {
+        /* All UNSPECIFIED — synthesize BT.709 */
+        codecpar->color_primaries = AVCOL_PRI_BT709;
+        codecpar->color_trc       = AVCOL_TRC_BT709;
+        codecpar->color_space     = AVCOL_SPC_BT709;
+        return;
+    }
+
+    if (cat == 1) {
+        /* BT.709 */
+        if (pri == AVCOL_PRI_UNSPECIFIED) codecpar->color_primaries = AVCOL_PRI_BT709;
+        if (trc == AVCOL_TRC_UNSPECIFIED) codecpar->color_trc       = AVCOL_TRC_BT709;
+        if (spc == AVCOL_SPC_UNSPECIFIED) codecpar->color_space     = AVCOL_SPC_BT709;
+        return;
+    }
+
+    if (cat == 2) {
+        /* BT.601 — PAL (BT470BG/GAMMA28) vs NTSC (SMPTE170M) */
+        int pal = (pri == AVCOL_PRI_BT470BG || pri == AVCOL_PRI_BT470M ||
+                   trc == AVCOL_TRC_GAMMA22  || trc == AVCOL_TRC_GAMMA28 ||
+                   spc == AVCOL_SPC_BT470BG);
+        if (pri == AVCOL_PRI_UNSPECIFIED)
+            codecpar->color_primaries = pal ? AVCOL_PRI_BT470BG  : AVCOL_PRI_SMPTE170M;
+        if (trc == AVCOL_TRC_UNSPECIFIED)
+            codecpar->color_trc       = pal ? AVCOL_TRC_GAMMA28  : AVCOL_TRC_SMPTE170M;
+        if (spc == AVCOL_SPC_UNSPECIFIED)
+            codecpar->color_space     = pal ? AVCOL_SPC_BT470BG  : AVCOL_SPC_SMPTE170M;
+        return;
+    }
+
+    /* cat == 3: HDR — only fill when TRC unambiguously identifies the standard */
+    if (trc == AVCOL_TRC_SMPTE2084 || trc == AVCOL_TRC_ARIB_STD_B67) {
+        if (pri == AVCOL_PRI_UNSPECIFIED) codecpar->color_primaries = AVCOL_PRI_BT2020;
+        if (spc == AVCOL_SPC_UNSPECIFIED) codecpar->color_space     = AVCOL_SPC_BT2020_NCL;
+    }
+    /* Without TRC, can't distinguish HDR10 from HLG — leave as-is */
 }

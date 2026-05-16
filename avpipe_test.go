@@ -2,12 +2,12 @@ package avpipe_test
 
 import (
 	"encoding/json"
+	"flag"
 	"fmt"
 	"io/ioutil"
 	"math"
 	"math/big"
 	"os"
-	"os/exec"
 	"path"
 	"path/filepath"
 	"runtime"
@@ -22,9 +22,28 @@ import (
 	"github.com/eluv-io/avpipe"
 	"github.com/eluv-io/avpipe/elvxc/cmd"
 	"github.com/eluv-io/avpipe/goavpipe"
+	"github.com/eluv-io/avpipe/internal/testutil"
 	"github.com/eluv-io/avpipe/xc"
 	"github.com/eluv-io/log-go"
 )
+
+// fastEncode enables reduced-quality encoding (320x180, ultrafast preset) for speed.
+// Defaults to true when -short is active; use -fast=false to override.
+var fastEncode bool
+
+func init() {
+	flag.BoolVar(&fastEncode, "fast", false, "use reduced-quality encoding for speed (default true under -short)")
+}
+
+func flagExplicitlySet(name string) bool {
+	var found bool
+	flag.Visit(func(f *flag.Flag) {
+		if f.Name == name {
+			found = true
+		}
+	})
+	return found
+}
 
 const baseOutPath = "test_out"
 const debugFrameLevel = false
@@ -502,7 +521,7 @@ func doTranscode(t *testing.T,
 }
 
 func TestNvidiaABRTranscode(t *testing.T) {
-	if !nvidiaExist() {
+	if !testutil.NvidiaExist() {
 		log.Info("Ignoring ", "test", fn())
 		return
 	}
@@ -537,7 +556,7 @@ func TestNvidiaABRTranscode(t *testing.T) {
 
 // Check nvidia transcoding with weird aspect ratio
 func TestNvidiaFmp4SegmentAspectRatio(t *testing.T) {
-	if !nvidiaExist() {
+	if !testutil.NvidiaExist() {
 		log.Info("Ignoring ", "test", fn())
 		return
 	}
@@ -2528,7 +2547,10 @@ func TestProfile(t *testing.T) {
 }
 
 func TestMain(m *testing.M) {
-	// call flag.Parse() here if TestMain uses flags
+	flag.Parse()
+	if !flagExplicitlySet("fast") {
+		fastEncode = testing.Short()
+	}
 	setupLogging()
 	os.Exit(m.Run())
 }
@@ -2620,8 +2642,8 @@ func boilerXc2(t *testing.T, params *goavpipe.XcParams) {
 	failNowOnError(t, err)
 }
 
-func setFastEncodeParams(p *goavpipe.XcParams, force bool) bool {
-	if !force && !testing.Short() {
+func setFastEncodeParams(p *goavpipe.XcParams, always bool) bool {
+	if !always && !fastEncode {
 		return false
 	}
 
@@ -2736,20 +2758,6 @@ func setupOutDir(t *testing.T, dir string) {
 		err = removeDirContents(dir)
 	}
 	failNowOnError(t, err)
-}
-
-func nvidiaExist() bool {
-	cmd := exec.Command("nvidia-smi")
-	cmd.Stdout = nil
-	cmd.Stderr = nil
-
-	err := cmd.Start()
-	if err == nil {
-		return true
-	}
-
-	log.Info("NVIDIA doesn't exist")
-	return false
 }
 
 // expectedHDR10 stores expected HDR10 specific info
