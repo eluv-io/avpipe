@@ -1,16 +1,13 @@
-package xc_test
+package goavpipe
 
 import (
-	"flag"
 	"os"
 	"testing"
 
-	"github.com/eluv-io/avpipe"
-	"github.com/eluv-io/log-go"
+	log "github.com/eluv-io/log-go"
 )
 
 func TestMain(m *testing.M) {
-	flag.Parse()
 	log.SetDefault(&log.Config{
 		Level:   "debug",
 		Handler: "text",
@@ -20,6 +17,5 @@ func TestMain(m *testing.M) {
 			MaxSize:   1000,
 		},
 	})
-	avpipe.SetCLoggers()
 	os.Exit(m.Run())
 }
