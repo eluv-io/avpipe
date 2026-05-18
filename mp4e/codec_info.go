@@ -5,13 +5,17 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"math/bits"
 	"strings"
 
 	"github.com/Eyevinn/mp4ff/aac"
 	"github.com/Eyevinn/mp4ff/avc"
+	mp4bits "github.com/Eyevinn/mp4ff/bits"
 	"github.com/Eyevinn/mp4ff/hevc"
 	"github.com/Eyevinn/mp4ff/mp4"
+	"github.com/Eyevinn/mp4ff/sei"
 
+	"github.com/eluv-io/avpipe/goavpipe"
 	"github.com/eluv-io/errors-go"
 )
 
@@ -40,6 +44,13 @@ type CodecInfo struct {
 
 	// EC3 is set only when the codec is ec-3
 	EC3 *EC3Info `json:"ec3,omitempty"`
+
+	// VideoLayout describes the stereoscopic layout (mono, sbs, mvhevc).
+	VideoLayout goavpipe.VideoLayout `json:"video_layout,omitempty"`
+
+	// EnhancementProfileIDC is the enhancement-layer general_profile_idc
+	// Only meaningful for VideoLayout == VideoLayoutMVHEVC (typically '6')
+	EnhancementProfileIDC int `json:"enhancement_profile_idc,omitempty"`
 }
 
 // MarshalJSON adds additional profile_name and level_name fields alongside the
@@ -237,22 +248,50 @@ func parseVisualSampleEntryBox(se *mp4.VisualSampleEntryBox) (*CodecInfo, error)
 		if se.HvcC == nil {
 			return nil, e("reason", "hvcC box missing")
 		}
+		var sps *hevc.SPS
 		for _, arr := range se.HvcC.NaluArrays {
 			if arr.NaluType() != hevc.NALU_SPS || len(arr.Nalus) == 0 {
 				continue
 			}
-			sps, err := hevc.ParseSPSNALUnit(arr.Nalus[0])
+			parsed, err := hevc.ParseSPSNALUnit(arr.Nalus[0])
 			if err != nil {
 				return nil, e(err, "reason", "failed to parse HEVC SPS")
 			}
-			return &CodecInfo{
-				CodecParameter: hevc.CodecString(codecID, sps),
-				CodecID:        codecID,
-				ProfileIDC:     int(sps.ProfileTierLevel.GeneralProfileIDC),
-				LevelIDC:       int(sps.ProfileTierLevel.GeneralLevelIDC),
-			}, nil
+			sps = parsed
+			break
 		}
-		return nil, e("reason", "no SPS found in hvcC")
+		if sps == nil {
+			return nil, e("reason", "no SPS found in hvcC")
+		}
+
+		info := &CodecInfo{
+			CodecParameter: hevc.CodecString(codecID, sps),
+			CodecID:        codecID,
+			ProfileIDC:     int(sps.ProfileTierLevel.GeneralProfileIDC),
+			LevelIDC:       int(sps.ProfileTierLevel.GeneralLevelIDC),
+			VideoLayout:    goavpipe.VideoLayoutMono,
+		}
+
+		// If VPS declares multiple layers - it's MV-HEVC
+		// Append the enhancement-layer codec descriptor so CodecParameter
+		// matches the Apple format: `hvc1.<base>,hvc1.<enh>`
+		if vps := parseHvcCVPS(se.HvcC); vps != nil && vps.IsMultiLayer() {
+			if enhPTL := mvhevcEnhancementPTL(vps); enhPTL != nil {
+				info.VideoLayout = goavpipe.VideoLayoutMVHEVC
+				info.EnhancementProfileIDC = int(enhPTL.GeneralProfileIDC)
+				info.CodecParameter = info.CodecParameter + "," + hevcCodecStringFromPTL(codecID, *enhPTL)
+				return info, nil
+			}
+		}
+
+		// Check for frame-packed stereo (SBS): st3d or HEVC SEI 45 in hvcC
+		// PENDING(SS) if SEI 45 only in mdat and not hvcC we don't see it from the moov - to test CPU/GPU outputs
+		if layout := detectStereoFromVse(se); layout != goavpipe.VideoLayoutMono {
+			info.VideoLayout = layout
+		} else if layout := detectStereoFromSEI(se.HvcC); layout != goavpipe.VideoLayoutMono {
+			info.VideoLayout = layout
+		}
+		return info, nil
 	case "avc1", "avc3":
 		if se.AvcC == nil {
 			return nil, e("reason", "avcC box missing")
@@ -275,12 +314,179 @@ func parseVisualSampleEntryBox(se *mp4.VisualSampleEntryBox) (*CodecInfo, error)
 	}
 }
 
+// parseHvcCVPS finds and decodes the VPS NALU embedded in an hvcC sample entry.
+// Returns nil if no VPS is present or if it fails to parse.
+func parseHvcCVPS(hvcC *mp4.HvcCBox) *hevc.VPS {
+	for _, arr := range hvcC.NaluArrays {
+		if arr.NaluType() != hevc.NALU_VPS || len(arr.Nalus) == 0 {
+			continue
+		}
+		vps, err := hevc.ParseVPSNALUnit(arr.Nalus[0])
+		if err != nil {
+			return nil
+		}
+		return vps
+	}
+	return nil
+}
+
+// mvhevcEnhancementPTL returns the profile_tier_level of the MV-HEVC enhancement layer
+// (for MV-HEVC this is the Multiview Main profile idc=6)
+func mvhevcEnhancementPTL(vps *hevc.VPS) *hevc.ProfileTierLevel {
+	basePTL := vps.ProfileTierLevel
+	for i := range vps.ExtProfileTierLevels {
+		ptl := vps.ExtProfileTierLevels[i]
+		if ptl.GeneralProfileIDC == 0 {
+			continue // placeholder/copy of base
+		}
+		if ptl.GeneralProfileIDC == basePTL.GeneralProfileIDC &&
+			ptl.GeneralProfileSpace == basePTL.GeneralProfileSpace {
+			continue
+		}
+		return &ptl
+	}
+	return nil
+}
+
+// detectStereoFromVse looks for the `st3d` box
+// Returns VideoLayoutMono when absent or stereo_mode is monoscopic (0).
+//
+//	stereo_mode == 1 → top-bottom
+//	stereo_mode == 2 → left-right (side-by-side)
+//	other values treated as mono
+func detectStereoFromVse(vse *mp4.VisualSampleEntryBox) goavpipe.VideoLayout {
+	for _, child := range vse.Children {
+		if child.Type() != "st3d" {
+			continue
+		}
+		raw, ok := child.(*mp4.UnknownBox)
+		if !ok {
+			return goavpipe.VideoLayoutMono
+		}
+		payload := raw.Payload()
+		// UnknownBox.Payload includes the FullBox version+flags (4 bytes); the
+		// next byte is stereo_mode.
+		if len(payload) < 5 {
+			return goavpipe.VideoLayoutMono
+		}
+		switch payload[4] {
+		case 1:
+			return goavpipe.VideoLayoutTb
+		case 2:
+			return goavpipe.VideoLayoutSbs
+		}
+		return goavpipe.VideoLayoutMono
+	}
+	return goavpipe.VideoLayoutMono
+}
+
+// detectStereoFromSEI scans hvcC for SEI 45 (frame packing)
+// Returns VideoLayoutMono if no usable SEI 45 is present.
+//
+// HEVC SEI 45 payload (D.2.16) starts with:
+//
+//	frame_packing_arrangement_id              ue(v)
+//	frame_packing_arrangement_cancel_flag     u(1)
+//	if !cancel_flag:
+//	  frame_packing_arrangement_type          u(7)   ← what we want
+//
+// frame_packing_arrangement_type values per HEVC D.2.16 Table D.6:
+//
+//	3 = side-by-side, 4 = top-bottom
+func detectStereoFromSEI(hvcC *mp4.HvcCBox) goavpipe.VideoLayout {
+	for _, arr := range hvcC.NaluArrays {
+		if arr.NaluType() != hevc.NALU_SEI_PREFIX {
+			continue
+		}
+		for _, nalu := range arr.Nalus {
+			msgs, err := hevc.ParseSEINalu(nalu, nil)
+			if err != nil {
+				continue
+			}
+			for _, m := range msgs {
+				if m.Type() != sei.SEIFramePackingArrangementType {
+					continue
+				}
+				if t, ok := framePackingArrangementType(m.Payload()); ok {
+					switch t {
+					case 3:
+						return goavpipe.VideoLayoutSbs
+					case 4:
+						return goavpipe.VideoLayoutTb
+					}
+				}
+			}
+		}
+	}
+	return goavpipe.VideoLayoutMono
+}
+
+// framePackingArrangementType extracts frame_packing_arrangement_type fro SEI 45
+// Returns the type and true if cancel_flag is false; false otherwise (no type present, error).
+func framePackingArrangementType(payload []byte) (byte, bool) {
+	if len(payload) == 0 {
+		return 0, false
+	}
+	r := mp4bits.NewEBSPReader(bytes.NewReader(payload))
+	r.ReadExpGolomb() // frame_packing_arrangement_id
+	cancel := r.Read(1)
+	if r.AccError() != nil || cancel == 1 {
+		return 0, false
+	}
+	t := r.Read(7) // frame_packing_arrangement_type
+	if r.AccError() != nil {
+		return 0, false
+	}
+	return byte(t), true
+}
+
+// hevcCodecStringFromPTL formats an RFC 6381 HEVC codec descriptor from a
+// ProfileTierLevel alone. Mirrors hevc.CodecString but accepts a PTL directly
+// — used for the MV-HEVC enhancement layer where the PTL comes from the VPS
+// extension array, not from an SPS.
+func hevcCodecStringFromPTL(sampleEntry string, ptl hevc.ProfileTierLevel) string {
+	var profilePart string
+	switch ptl.GeneralProfileSpace {
+	case 1:
+		profilePart = "A"
+	case 2:
+		profilePart = "B"
+	case 3:
+		profilePart = "C"
+	}
+	profilePart += fmt.Sprintf("%d", ptl.GeneralProfileIDC)
+
+	flagsPart := fmt.Sprintf("%X", bits.Reverse32(ptl.GeneralProfileCompatibilityFlags))
+
+	var levelPart string
+	if ptl.GeneralTierFlag {
+		levelPart = "H"
+	} else {
+		levelPart = "L"
+	}
+	levelPart += fmt.Sprintf("%d", ptl.GeneralLevelIDC)
+
+	cif := ptl.GeneralConstraintIndicatorFlags
+	nrBytes := 6
+	for i := 0; i < 5; i++ { // Remove trailing zero bytes
+		if cif&0xff == 0 {
+			cif = cif >> 8
+			nrBytes--
+		} else {
+			break
+		}
+	}
+	constraintBytes := ""
+	for i := 0; i < nrBytes; i++ {
+		constraintBytes += fmt.Sprintf(".%X", (cif>>((nrBytes-1-i)*8))&0xff)
+	}
+
+	return fmt.Sprintf("%s.%s.%s.%s%s", sampleEntry, profilePart, flagsPart, levelPart, constraintBytes)
+}
+
 // LevelName returns a human-readable level string for the given codec 4CC and
 // level IDC value, e.g. LevelName("avc1", 40) == "4.0".
 // Returns an empty string if the codec has no level IDC or the value is zero.
-//
-// AVC level_idc is defined in ISO/IEC 14496-10 Table A-1: level = level_idc / 10.
-// HEVC general_level_idc is defined in ISO/IEC 23008-2 Table A-1: level = general_level_idc / 30.
 func LevelName(codecID string, levelIDC int) string {
 	if levelIDC == 0 {
 		return ""
@@ -297,10 +503,6 @@ func LevelName(codecID string, levelIDC int) string {
 // ProfileName returns a human-readable profile name for the given codec 4CC
 // and profile IDC value, e.g. ProfileName("avc1", 100) == "High".
 // Returns an empty string if the codec or profile IDC is not recognized.
-//
-// AVC profile IDCs are defined in ISO/IEC 14496-10.
-// HEVC profile IDCs are defined in ISO/IEC 23008-2.
-// AAC profile IDCs are Audio Object Type values from ISO/IEC 14496-3.
 func ProfileName(codecID string, profileIDC int) string {
 	switch codecID {
 	case "avc1", "avc3":
