@@ -1926,9 +1926,7 @@ func TestMVHEVC_MezAndABRBypass(t *testing.T) {
 
 func runMVHEVCMezAndABRBypass(t *testing.T, c mvhevcCase) {
 	f := fn() + "/" + t.Name()
-	if fileMissing(c.src, f) {
-		return
-	}
+	checkFileExists(t, c.src)
 
 	mezDir := path.Join(baseOutPath, f, "Mez")
 	abrDir := path.Join(baseOutPath, f, "ABRBypass")
