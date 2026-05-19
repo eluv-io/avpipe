@@ -1,11 +1,10 @@
 
 # MV-HEVC TOOLS
 
-## Full MV-HEVC process
-
 Produce an MP4 with full spatial information (including Apple specifics) from two
 separate 'left-eye' and 'right-eye' sources (ProRes or MP4).
 
+Supports SDR and HDR.
 
 ### 1) Encode left/right sources to raw MV-HEVC
 
@@ -16,6 +15,7 @@ separate 'left-eye' and 'right-eye' sources (ProRes or MP4).
   -keyint 48 \
   -bframes 0 \
   -fps 24000/1001 \
+  -w 2560 -h 1440  -bitrate 8500 \
   left_eye.mov \
   right_eye.mov \
   output_mvhevc.hevc
@@ -40,6 +40,7 @@ raw MV-HEVC encode step.
   -keyint 48 \
   -bframes 0 \
   -fps 24000/1001 \
+  -w 2560 -h 1440  -bitrate 8500 \
   left_eye_hdr.mov \
   right_eye_hdr.mov \
   output_mvhevc_hdr10.hevc
@@ -68,12 +69,14 @@ intermediate and the `mvhevc add` packaging step.
 ./bin/mvhevc_apple \
   -bitdepth 10 \
   -profile main10 \
+  -level 5.2 \
   -hdr \
   -master-display "G(8500,39850)B(6550,2300)R(35400,14600)WP(15635,16450)L(10000000,10)" \
   -max-cll "0,0" \
   -keyint 48 \
   -bframes 0 \
   -fps 24/1 \
+  -w 2560 -h 1440  -bitrate 8500 \
   -duration 30.0 \
   left_eye_hdr.mov \
   right_eye_hdr.mov \
@@ -84,6 +87,15 @@ The Apple encoder accepts the same options as `mvhevc_encoder`, but x265-only
 options such as `-crf`, `-preset`, `-tune`, `-level`, `-hightier`, `-bufsize`,
 and `-scenecut` are currently accepted for compatibility and ignored.
 Use `-duration <seconds>` to encode only the first portion of the source.
+
+Always 'fix' the output of the Apple encoder:
+
+```
+./bin/mvhevc fix output_spatial_hdr10.mov output_spatial_hdr10.mp4
+```
+
+The 'fix' command ads oinf/linf MV-HEVC signaling and if the input is HDR10, ads the 'colr' box. 
+The Apple toolkig doesn't create these.
 
 
 ### 2) Package the raw MV-HEVC stream into MP4

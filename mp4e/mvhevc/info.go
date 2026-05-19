@@ -98,6 +98,12 @@ func printVisualSampleEntryInfo(vse *mp4.VisualSampleEntryBox, w io.Writer) {
 			vse.Hfov.FieldOfView,
 			float64(vse.Hfov.FieldOfView)/1000.0)
 	}
+
+	for _, child := range vse.Children {
+		if colr, ok := child.(*mp4.ColrBox); ok {
+			printColrInfo(colr, w)
+		}
+	}
 }
 
 func printHvcCInfo(hdcr hevc.DecConfRec, w io.Writer) {
@@ -140,6 +146,24 @@ func printLhvCInfo(hdcr hevc.DecConfRec, w io.Writer) {
 			fmt.Fprintf(w, "      %s\n", hex.EncodeToString(nalu))
 		}
 	}
+}
+
+func printColrInfo(colr *mp4.ColrBox, w io.Writer) {
+	fmt.Fprintf(w, "  colr: type=%s", colr.ColorType)
+	switch colr.ColorType {
+	case mp4.ColorTypeOnScreenColors:
+		fmt.Fprintf(w, " primaries=%d transfer=%d matrix=%d fullRange=%t",
+			colr.ColorPrimaries,
+			colr.TransferCharacteristics,
+			colr.MatrixCoefficients,
+			colr.FullRangeFlag)
+	case mp4.QuickTimeColorParameters:
+		fmt.Fprintf(w, " primaries=%d transfer=%d matrix=%d",
+			colr.ColorPrimaries,
+			colr.TransferCharacteristics,
+			colr.MatrixCoefficients)
+	}
+	fmt.Fprintln(w)
 }
 
 func printVexuInfo(vexu *mp4.VexuBox, w io.Writer) {

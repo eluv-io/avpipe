@@ -95,6 +95,9 @@ func fixVideoTrak(trak *mp4.TrakBox, _ *mp4.File) (bool, error) {
 	}
 
 	changed := false
+	if ensureColrFromSPSVUI(vse, trak.Tkhd.TrackID) {
+		changed = true
+	}
 	if !hasSgpd(stbl, "oinf") {
 		appendStblSgpd(stbl, "oinf", mp4.BuildOinfFromVPS(vps))
 		log.Info("added oinf sgpd", "trackID", trak.Tkhd.TrackID)
@@ -114,6 +117,66 @@ func fixVideoTrak(trak *mp4.TrakBox, _ *mp4.File) (bool, error) {
 		changed = true
 	}
 	return changed, nil
+}
+
+func ensureColrFromSPSVUI(vse *mp4.VisualSampleEntryBox, trackID uint32) bool {
+	spsNalus := vse.HvcC.DecConfRec.GetNalusForType(hevc.NALU_SPS)
+	if len(spsNalus) == 0 {
+		log.Info("not adding colr; hvcC has no SPS", "trackID", trackID)
+		return false
+	}
+
+	sps, err := hevc.ParseSPSNALUnit(spsNalus[0])
+	if err != nil {
+		log.Warn("could not parse SPS for colr repair", "trackID", trackID, "err", err)
+		return false
+	}
+	if sps.VUI == nil || !sps.VUI.ColourDescriptionFlag {
+		log.Info("not adding colr; SPS has no VUI colour description", "trackID", trackID)
+		return false
+	}
+
+	vui := sps.VUI
+	colr := findColr(vse)
+	if colr != nil && colr.ColorType == mp4.ColorTypeOnScreenColors &&
+		colr.ColorPrimaries == uint16(vui.ColourPrimaries) &&
+		colr.TransferCharacteristics == uint16(vui.TransferCharacteristics) &&
+		colr.MatrixCoefficients == uint16(vui.MatrixCoefficients) &&
+		colr.FullRangeFlag == vui.VideoFullRangeFlag {
+		return false
+	}
+
+	action := "updated colr from SPS VUI"
+	if colr == nil {
+		action = "added colr from SPS VUI"
+		colr = &mp4.ColrBox{}
+		vse.AddChild(colr)
+	}
+	colr.ColorType = mp4.ColorTypeOnScreenColors
+	colr.ICCProfile = nil
+	colr.ColorPrimaries = uint16(vui.ColourPrimaries)
+	colr.TransferCharacteristics = uint16(vui.TransferCharacteristics)
+	colr.MatrixCoefficients = uint16(vui.MatrixCoefficients)
+	colr.FullRangeFlag = vui.VideoFullRangeFlag
+	colr.UnknownPayload = nil
+
+	log.Info(action,
+		"trackID", trackID,
+		"type", mp4.ColorTypeOnScreenColors,
+		"primaries", vui.ColourPrimaries,
+		"transfer", vui.TransferCharacteristics,
+		"matrix", vui.MatrixCoefficients,
+		"fullRange", vui.VideoFullRangeFlag)
+	return true
+}
+
+func findColr(vse *mp4.VisualSampleEntryBox) *mp4.ColrBox {
+	for _, c := range vse.Children {
+		if colr, ok := c.(*mp4.ColrBox); ok {
+			return colr
+		}
+	}
+	return nil
 }
 
 func hasSgpd(stbl *mp4.StblBox, groupingType string) bool {

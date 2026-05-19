@@ -37,7 +37,7 @@ GO_TARGET    = mvhevc
 GO_BUILD_DIR = .build
 GO_BINARY    = $(GO_BUILD_DIR)/$(GO_TARGET)
 APPLE_BINARY = $(GO_BUILD_DIR)/$(APPLE_TARGET)
-GO_SRCS      = $(shell find mvhevc -name '*.go')
+GO_SRCS      = $(shell find mvhevc ../../mp4e/mvhevc -name '*.go')
 APPLE_SRCS   = apple/mvhevc_apple.mm
 SRCS         = mvhevc_encoder.c mvhevc_xc.c
 OBJS         = $(SRCS:.c=.o)
