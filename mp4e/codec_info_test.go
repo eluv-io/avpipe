@@ -50,14 +50,14 @@ func TestExtractCodecInfo(t *testing.T) {
 		require.NoError(t, err)
 		require.Len(t, infos, 1)
 		info := infos[0]
-		require.Equal(t, "avc1", info.CodecID)
-		require.NotEmpty(t, info.CodecParameter)
-		require.True(t, len(info.CodecParameter) > len("avc1."),
-			"codec descriptor must include profile/level: %s", info.CodecParameter)
+		require.Equal(t, "avc1", info.CodecTagString)
+		require.NotEmpty(t, info.MimeCodecString)
+		require.True(t, len(info.MimeCodecString) > len("avc1."),
+			"codec descriptor must include profile/level: %s", info.MimeCodecString)
 		require.Equal(t, 100, info.ProfileIDC)
-		require.Equal(t, 31, info.LevelIDC)
+		require.Equal(t, 31, info.Level)
 		//t.Logf("AVC codec: %s (profile=%d level=%d → %.1f)",
-		//	info.CodecParameter, info.ProfileIDC, info.LevelIDC, float64(info.LevelIDC)/10)
+		//	info.MimeCodecString, info.ProfileIDC, info.Level, float64(info.Level)/10)
 	})
 
 	t.Run("HEVC", func(t *testing.T) {
@@ -65,17 +65,17 @@ func TestExtractCodecInfo(t *testing.T) {
 		require.NoError(t, err)
 		require.Len(t, infos, 1)
 		info := infos[0]
-		require.True(t, info.CodecID == "hvc1" || info.CodecID == "hev1",
-			"expected hvc1 or hev1, got %s", info.CodecID)
-		require.NotEmpty(t, info.CodecParameter)
-		require.True(t, len(info.CodecParameter) > len("hvc1."),
-			"codec descriptor must include profile/level: %s", info.CodecParameter)
+		require.True(t, info.CodecTagString == "hvc1" || info.CodecTagString == "hev1",
+			"expected hvc1 or hev1, got %s", info.CodecTagString)
+		require.NotEmpty(t, info.MimeCodecString)
+		require.True(t, len(info.MimeCodecString) > len("hvc1."),
+			"codec descriptor must include profile/level: %s", info.MimeCodecString)
 		require.Equal(t, 2, info.ProfileIDC)
-		require.Equal(t, 120, info.LevelIDC)
+		require.Equal(t, 120, info.Level)
 		require.Equal(t, goavpipe.VideoLayoutMono, info.VideoLayout)
 		require.Zero(t, info.EnhancementProfileIDC)
 		//t.Logf("HEVC codec: %s (profile=%d level=%d → %.1f)",
-		//	info.CodecParameter, info.ProfileIDC, info.LevelIDC, float64(info.LevelIDC)/30)
+		//	info.MimeCodecString, info.ProfileIDC, info.Level, float64(info.Level)/30)
 	})
 
 	t.Run("MP4A", func(t *testing.T) {
@@ -86,16 +86,16 @@ func TestExtractCodecInfo(t *testing.T) {
 		require.Len(t, infos, 2)
 
 		video := infos[0]
-		assert.Equal(t, "avc1", video.CodecID)
-		assert.Equal(t, "avc1.640028", video.CodecParameter)
+		assert.Equal(t, "avc1", video.CodecTagString)
+		assert.Equal(t, "avc1.640028", video.MimeCodecString)
 		assert.Equal(t, 100, video.ProfileIDC)
-		assert.Equal(t, 40, video.LevelIDC)
+		assert.Equal(t, 40, video.Level)
 
 		audio := infos[1]
-		assert.Equal(t, "mp4a", audio.CodecID)
-		assert.Equal(t, "mp4a.40.2", audio.CodecParameter) // AAC-LC
+		assert.Equal(t, "mp4a", audio.CodecTagString)
+		assert.Equal(t, "mp4a.40.2", audio.MimeCodecString) // AAC-LC
 		assert.Equal(t, 2, audio.ProfileIDC)                  // Audio Object Type 2 = AAC-LC
-		assert.Equal(t, 2, audio.AudioChannels)
+		assert.Equal(t, 2, audio.Channels)
 		assert.Nil(t, audio.EC3)
 	})
 
@@ -132,9 +132,9 @@ func TestExtractCodecInfo(t *testing.T) {
 		require.NoError(t, err)
 		require.Len(t, infos, 2)
 		info := infos[0] // ec-3 is track 0
-		assert.Equal(t, "ec-3", info.CodecID)
-		assert.Equal(t, "ec-3", info.CodecParameter)
-		assert.Equal(t, 6, info.AudioChannels)
+		assert.Equal(t, "ec-3", info.CodecTagString)
+		assert.Equal(t, "ec-3", info.MimeCodecString)
+		assert.Equal(t, 6, info.Channels)
 		require.NotNil(t, info.EC3)
 		assert.NotZero(t, info.EC3.ChanMap)
 		assert.Equal(t, "L C R Ls Rs LFE", info.EC3.ChanMapString())

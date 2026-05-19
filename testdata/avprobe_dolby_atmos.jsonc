@@ -1,0 +1,72 @@
+{
+  // bin/elvxc probe -j --seekable -f media/Audio_ID_720p_50fps_h264_6ch_640kbps_ddp_joc.mp4
+  "format": {
+    "format_name": "mov,mp4,m4a,3gp,3g2,mj2",
+    "duration": 32
+  },
+  "streams": [
+    {
+      "stream_index": 0,
+      "codec_name": "eac3",
+      "profile": 30,
+      "profile_name": "Dolby Digital Plus + Dolby Atmos",
+      "codec_type": "audio",
+      "codec_tag_string": "ec-3",
+      "codec_id": 86056,
+      "sample_aspect_ratio": "0",
+      "display_aspect_ratio": "0",
+      "sample_rate": 48000,
+      "channels": 6,
+      "channel_layout": 1551,
+      "channel_layout_name": "5.1(side)",
+      "stream_id": 1,
+      "frame_rate": "0",
+      "avg_frame_rate": "0",
+      "time_base": "1/48000",
+      "start_time": 0,
+      "duration_ts": 1536000,
+      "bit_rate": 640000,
+      "nb_frames": 1000,
+      "tags": {
+        "handler_name": "Bento4 Sound Handler",
+        "language": "eng",
+        "vendor_id": "[0][0][0][0]"
+      }
+    },
+    {
+      "stream_index": 1,
+      "codec_name": "h264",
+      "profile": 77,
+      "profile_name": "Main",
+      "codec_type": "video",
+      "codec_tag_string": "avc1",
+      "codec_id": 27,
+      "width": 1280,
+      "height": 720,
+      "has_b_frames": true,
+      "sample_aspect_ratio": "1",
+      "display_aspect_ratio": "16/9",
+      "pix_fmt": 0,
+      "level": 40,
+      "color_range": "unknown",
+      "color_space": "unknown",
+      "color_transfer": "unknown",
+      "color_primaries": "unknown",
+      "field_order": "progressive",
+      "stream_id": 2,
+      "frame_rate": "50",
+      "avg_frame_rate": "50",
+      "time_base": "1/50000",
+      "start_time": 0,
+      "duration_ts": 1600000,
+      "bit_rate": 302640,
+      "nb_frames": 1600,
+      "tags": {
+        "encoder": "AVC Coding",
+        "handler_name": "Bento4 Video Handler",
+        "language": "und",
+        "vendor_id": "[0][0][0][0]"
+      }
+    }
+  ]
+}

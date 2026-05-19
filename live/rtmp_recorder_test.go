@@ -13,6 +13,9 @@ import (
 )
 
 func TestRtmpToMp4_1(t *testing.T) {
+	if testing.Short() {
+		t.Skip("skipping slow live stream test in short mode")
+	}
 	setupLogging()
 	outputDir := path.Join(baseOutPath, fn())
 	setupOutDir(t, outputDir)
@@ -182,7 +185,7 @@ func TestRtmpToMp4WithCancelling0(t *testing.T) {
 		}
 
 		err = avpipe.XcRun(handle)
-		assert.Equal(t, err, avpipe.EAV_OPEN_INPUT)
+		assert.Equal(t, err, avpipe.EAV_CANCELLED)
 
 		done <- true
 	}()
@@ -353,6 +356,9 @@ func TestRtmpToMp4WithCancelling2(t *testing.T) {
 
 // Cancels the RTMP live stream transcoding some time after starting the transcoding (20 sec after XcRun).
 func TestRtmpToMp4WithCancelling3(t *testing.T) {
+	if testing.Short() {
+		t.Skip("skipping slow live stream test in short mode")
+	}
 	setupLogging()
 	outputDir := path.Join(baseOutPath, fn())
 	setupOutDir(t, outputDir)

@@ -10,6 +10,7 @@ require (
 	github.com/modern-go/gls v0.0.0-20250215024828-78308f6bb19d
 	github.com/spf13/cobra v0.0.5
 	github.com/stretchr/testify v1.7.0
+	github.com/tidwall/jsonc v0.3.3
 	go.uber.org/atomic v1.11.0
 )
 

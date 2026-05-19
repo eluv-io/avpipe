@@ -769,6 +769,7 @@ set_loggers()
     elv_set_log_func(elv_log_debug, CDebug);
     elv_set_log_func(elv_log_warning, CWarn);
     elv_set_log_func(elv_log_error, CError);
+    connect_ffmpeg_log();
 }
 
 static void

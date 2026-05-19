@@ -21,26 +21,25 @@ import (
 
 // CodecInfo contains information about a media stream's codecs
 type CodecInfo struct {
-	// CodecID is the sample description entry 4-character code (in the MP4
-	// "stsd" box) as registered by the MP4RA; e.g. "hvc1", "avc1", "ec-3"
-	CodecID string `json:"codec_id"`
+	// CodecTagString is the sample description entry 4-character code (in the
+	// MP4 "stsd" box) as registered by the MP4RA; e.g. "hvc1", "avc1", "ec-3"
+	CodecTagString string `json:"codec_tag_string"`
 
-	// CodecParameter specifies the decoder requirements for a media stream, as
-	// specified by RFC 6381; e.g. "hvc1.2.4.L120.90" or "avc1.640028"
-	CodecParameter string `json:"codec_parameter,omitempty"`
+	// MimeCodecString is the RFC 6381 codec string for use in MIME type codecs
+	// parameters (e.g. "hvc1.2.4.L120.90", "avc1.640028", "mp4a.40.2").
+	MimeCodecString string `json:"mime_codec_string,omitempty"`
 
-	// ProfileIDC is the codec profile IDC. The value is defined separately by
-	// each codec; e.g. 2 = HEVC Main 10, 100 = AVC High
+	// ProfileIDC is the codec profile IDC. Each codec defines the value separately;
+	// e.g. 2 = HEVC Main 10, 100 = AVC High
 	ProfileIDC int `json:"profile_idc,omitempty"`
 
-	// LevelIDC is the codec level IDC. The value id defined separately by each
-	// codec:
+	// Level is the codec level IDC. Each codec defines the value separately:
 	//  * Divide by 30 for HEVC, e.g. 120 → 4.0
 	//  * Divide by 10 for AVC, e.g. 40  → 4.0
-	LevelIDC int `json:"level_idc,omitempty"`
+	Level int `json:"level,omitempty"`
 
-	// AudioChannels is the number of audio channels
-	AudioChannels int `json:"audio_channels,omitempty"`
+	// Channels is the number of audio channels.
+	Channels int `json:"channels,omitempty"`
 
 	// EC3 is set only when the codec is ec-3
 	EC3 *EC3Info `json:"ec3,omitempty"`
@@ -63,8 +62,8 @@ func (c CodecInfo) MarshalJSON() ([]byte, error) {
 		LevelName   string `json:"level_name,omitempty"`
 	}{
 		alias:       alias(c),
-		ProfileName: ProfileName(c.CodecID, c.ProfileIDC),
-		LevelName:   LevelName(c.CodecID, c.LevelIDC),
+		ProfileName: ProfileName(c.CodecTagString, c.ProfileIDC),
+		LevelName:   LevelName(c.CodecTagString, c.Level),
 	})
 }
 
@@ -159,7 +158,7 @@ func ExtractCodecInfo(r io.Reader) (infos []*CodecInfo, err error) {
 		} else if ase, ok := se.(*mp4.AudioSampleEntryBox); ok {
 			info, err = parseAudioSampleEntryBox(ase)
 		} else {
-			info = &CodecInfo{CodecID: se.Type()}
+			info = &CodecInfo{CodecTagString: se.Type()}
 		}
 
 		if err != nil {
@@ -179,7 +178,7 @@ func parseAudioSampleEntryBox(se *mp4.AudioSampleEntryBox) (*CodecInfo, error) {
 	case "mp4a":
 		return parseMP4ACodecInfo(se)
 	default:
-		return &CodecInfo{CodecID: se.Type()}, nil
+		return &CodecInfo{CodecTagString: se.Type()}, nil
 	}
 }
 
@@ -206,9 +205,9 @@ func parseEC3CodecInfo(se *mp4.AudioSampleEntryBox) (*CodecInfo, error) {
 	}
 
 	return &CodecInfo{
-		CodecParameter: "ec-3",
-		CodecID:        "ec-3",
-		AudioChannels:  nChannels,
+		MimeCodecString: "ec-3",
+		CodecTagString:  "ec-3",
+		Channels:        nChannels,
 		EC3: &EC3Info{
 			ChanMap:         chanMap,
 			JOC:             joc,
@@ -232,18 +231,18 @@ func parseMP4ACodecInfo(se *mp4.AudioSampleEntryBox) (*CodecInfo, error) {
 	}
 	return &CodecInfo{
 		// RFC 6381: mp4a.40.{AOT} where 0x40 = MPEG-4 Audio objectTypeIndication
-		CodecParameter: fmt.Sprintf("mp4a.40.%d", asc.ObjectType),
-		CodecID:        "mp4a",
-		ProfileIDC:     int(asc.ObjectType),
-		AudioChannels:  int(se.ChannelCount),
+		MimeCodecString: fmt.Sprintf("mp4a.40.%d", asc.ObjectType),
+		CodecTagString:  "mp4a",
+		ProfileIDC:      int(asc.ObjectType),
+		Channels:        int(se.ChannelCount),
 	}, nil
 }
 
 func parseVisualSampleEntryBox(se *mp4.VisualSampleEntryBox) (*CodecInfo, error) {
-	codecID := se.Type()
-	e := errors.T("parseVisualSampleEntryBox", errors.K.Invalid, "codecID", codecID)
+	codecTag := se.Type()
+	e := errors.T("parseVisualSampleEntryBox", errors.K.Invalid, "codecTag", codecTag)
 
-	switch codecID {
+	switch codecTag {
 	case "hvc1", "hev1":
 		if se.HvcC == nil {
 			return nil, e("reason", "hvcC box missing")
@@ -263,6 +262,13 @@ func parseVisualSampleEntryBox(se *mp4.VisualSampleEntryBox) (*CodecInfo, error)
 		if sps == nil {
 			return nil, e("reason", "no SPS found in hvcC")
 		}
+
+/*
+                                MimeCodecString: hevc.CodecString(codecTag, sps),
+                                CodecTagString:  codecTag,
+                                ProfileIDC:      int(sps.ProfileTierLevel.GeneralProfileIDC),
+                                Level:           int(sps.ProfileTierLevel.GeneralLevelIDC),
+*/
 
 		info := &CodecInfo{
 			CodecParameter: hevc.CodecString(codecID, sps),
@@ -304,13 +310,13 @@ func parseVisualSampleEntryBox(se *mp4.VisualSampleEntryBox) (*CodecInfo, error)
 			return nil, e(err, "reason", "failed to parse AVC SPS")
 		}
 		return &CodecInfo{
-			CodecParameter: avc.CodecString(codecID, sps),
-			CodecID:        codecID,
-			ProfileIDC:     int(sps.Profile),
-			LevelIDC:       int(sps.Level),
+			MimeCodecString: avc.CodecString(codecTag, sps),
+			CodecTagString:  codecTag,
+			ProfileIDC:      int(sps.Profile),
+			Level:           int(sps.Level),
 		}, nil
 	default:
-		return &CodecInfo{CodecID: codecID}, nil
+		return &CodecInfo{CodecTagString: codecTag}, nil
 	}
 }
 
@@ -487,11 +493,14 @@ func hevcCodecStringFromPTL(sampleEntry string, ptl hevc.ProfileTierLevel) strin
 // LevelName returns a human-readable level string for the given codec 4CC and
 // level IDC value, e.g. LevelName("avc1", 40) == "4.0".
 // Returns an empty string if the codec has no level IDC or the value is zero.
-func LevelName(codecID string, levelIDC int) string {
+//
+// AVC level_idc is defined in ISO/IEC 14496-10 Table A-1: level = level_idc / 10.
+// HEVC general_level_idc is defined in ISO/IEC 23008-2 Table A-1: level = general_level_idc / 30.
+func LevelName(codecTag string, levelIDC int) string {
 	if levelIDC == 0 {
 		return ""
 	}
-	switch codecID {
+	switch codecTag {
 	case "avc1", "avc3":
 		return fmt.Sprintf("%.1f", float64(levelIDC)/10)
 	case "hvc1", "hev1":
@@ -503,8 +512,12 @@ func LevelName(codecID string, levelIDC int) string {
 // ProfileName returns a human-readable profile name for the given codec 4CC
 // and profile IDC value, e.g. ProfileName("avc1", 100) == "High".
 // Returns an empty string if the codec or profile IDC is not recognized.
-func ProfileName(codecID string, profileIDC int) string {
-	switch codecID {
+//
+// AVC profile IDCs are defined in ISO/IEC 14496-10.
+// HEVC profile IDCs are defined in ISO/IEC 23008-2.
+// AAC profile IDCs are Audio Object Type values from ISO/IEC 14496-3.
+func ProfileName(codecTag string, profileIDC int) string {
+	switch codecTag {
 	case "avc1", "avc3":
 		return avcProfileNames[profileIDC]
 	case "hvc1", "hev1":
