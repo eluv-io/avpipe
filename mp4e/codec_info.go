@@ -263,29 +263,22 @@ func parseVisualSampleEntryBox(se *mp4.VisualSampleEntryBox) (*CodecInfo, error)
 			return nil, e("reason", "no SPS found in hvcC")
 		}
 
-/*
-                                MimeCodecString: hevc.CodecString(codecTag, sps),
-                                CodecTagString:  codecTag,
-                                ProfileIDC:      int(sps.ProfileTierLevel.GeneralProfileIDC),
-                                Level:           int(sps.ProfileTierLevel.GeneralLevelIDC),
-*/
-
 		info := &CodecInfo{
-			CodecParameter: hevc.CodecString(codecID, sps),
-			CodecID:        codecID,
-			ProfileIDC:     int(sps.ProfileTierLevel.GeneralProfileIDC),
-			LevelIDC:       int(sps.ProfileTierLevel.GeneralLevelIDC),
-			VideoLayout:    goavpipe.VideoLayoutMono,
+			MimeCodecString: hevc.CodecString(codecTag, sps),
+			CodecTagString:  codecTag,
+			ProfileIDC:      int(sps.ProfileTierLevel.GeneralProfileIDC),
+			Level:           int(sps.ProfileTierLevel.GeneralLevelIDC),
+			VideoLayout:     goavpipe.VideoLayoutMono,
 		}
 
 		// If VPS declares multiple layers - it's MV-HEVC
-		// Append the enhancement-layer codec descriptor so CodecParameter
+		// Append the enhancement-layer codec descriptor so MimeCodecString
 		// matches the Apple format: `hvc1.<base>,hvc1.<enh>`
 		if vps := parseHvcCVPS(se.HvcC); vps != nil && vps.IsMultiLayer() {
 			if enhPTL := mvhevcEnhancementPTL(vps); enhPTL != nil {
 				info.VideoLayout = goavpipe.VideoLayoutMVHEVC
 				info.EnhancementProfileIDC = int(enhPTL.GeneralProfileIDC)
-				info.CodecParameter = info.CodecParameter + "," + hevcCodecStringFromPTL(codecID, *enhPTL)
+				info.MimeCodecString = info.MimeCodecString + "," + hevcCodecStringFromPTL(codecTag, *enhPTL)
 				return info, nil
 			}
 		}

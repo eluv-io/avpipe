@@ -22,9 +22,9 @@ import (
 	"github.com/eluv-io/avpipe"
 	"github.com/eluv-io/avpipe/elvxc/cmd"
 	"github.com/eluv-io/avpipe/goavpipe"
+	"github.com/eluv-io/avpipe/internal/testutil"
 	"github.com/eluv-io/avpipe/mp4e"
 	"github.com/eluv-io/avpipe/mp4e/mvhevc"
-	"github.com/eluv-io/avpipe/internal/testutil"
 	"github.com/eluv-io/avpipe/xc"
 	"github.com/eluv-io/log-go"
 )
@@ -2020,7 +2020,7 @@ func assertMVHEVCStructure(t *testing.T, mp4Path string, c mvhevcCase) {
 		infos, err := mp4e.ExtractCodecInfo(mp4f)
 		if assert.NoError(t, err, "ExtractCodecInfo on %s", mp4Path) && len(infos) > 0 {
 			assert.Equal(t, c.expectBaseProfileIDC, infos[0].ProfileIDC, "base profile_idc in %s", mp4Path)
-			assert.Equal(t, c.expectLevelIDC, infos[0].LevelIDC, "level_idc in %s", mp4Path)
+			assert.Equal(t, c.expectLevelIDC, infos[0].Level, "level_idc in %s", mp4Path)
 		}
 	}
 
