@@ -3,6 +3,8 @@
  */
 
 #include "avpipe_xc.h"
+#include "avpipe_filters.h"
+#include "avpipe_utils.h"
 #include "elv_log.h"
 #include "libavutil/pixdesc.h"
 
@@ -667,3 +669,63 @@ end:
     return ret;
 }
 
+int
+crop_get_context(
+    coderctx_t *decoder_context,
+    xcparams_t *params)
+{
+    for (unsigned int i = 0; i < decoder_context->video_filter_graph->nb_filters; i++) {
+        AVFilterContext *f = decoder_context->video_filter_graph->filters[i];
+        if (strcmp(f->filter->name, "crop") == 0) {
+            decoder_context->video_crop_ctx = f;
+            elv_log("Found crop filter '%s' for vertical video, url=%s", f->name, params->url);
+            return 0;
+        }
+    }
+    elv_err("Failed to find crop filter in graph, url=%s", params->url);
+    return eav_filter_init;
+}
+
+int
+crop_calc_width(
+    int source_height)
+{
+    /* 9:16 aspect ratio, ensure even width for codec compatibility */
+    int w = source_height * 9 / 16;
+    if (w % 2 != 0)
+        w += 1;
+    return w;
+}
+
+void
+crop_send_command(
+    coderctx_t *decoder_context,
+    coderctx_t *encoder_context,
+    xcparams_t *params)
+{
+    if (!decoder_context->video_crop_ctx)
+        return;
+ 
+    if (!params->vertical_data || params->vertical_data_len <= 0)
+        return;
+
+    AVCodecContext *dec_ctx = decoder_context->codec_context[decoder_context->video_stream_index];
+    int enc_height = encoder_context->codec_context[encoder_context->video_stream_index]->height;
+
+    char cmd_res[128];
+    char x_val[16];
+    /* After scale filter the frame is at scaled dimensions */
+    int scaled_width = dec_ctx->width * enc_height / dec_ctx->height;
+    int crop_width = crop_calc_width(enc_height);
+    int crop_x = 0;
+    int frame_idx = dec_ctx->frame_num - 1; /* frame_number is 1-based */
+    
+    crop_x = vertical_data_crop_x(params->vertical_data, params->vertical_data_len, frame_idx, scaled_width, crop_width);
+
+    snprintf(x_val, sizeof(x_val), "%d", crop_x);
+    int ret = avfilter_graph_send_command(decoder_context->video_filter_graph,
+        decoder_context->video_crop_ctx->name, "x", x_val, cmd_res, sizeof(cmd_res), 0);
+    if (ret < 0) {
+        elv_err("Failed to send crop x command, ret=%d, url=%s", ret, params->url);
+    }
+}

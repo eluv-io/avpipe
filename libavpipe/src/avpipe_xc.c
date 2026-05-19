@@ -51,36 +51,7 @@
 #define DEFAULT_ACC_SAMPLE_RATE     48000
 #define MAX_FRAME_READ_RETRIES      300
 
-extern int
-init_video_filters(
-    const char *filters_descr,
-    coderctx_t *decoder_context,
-    coderctx_t *encoder_context,
-    xcparams_t *params);
-
-extern int
-init_audio_filters(
-    coderctx_t *decoder_context,
-    coderctx_t *encoder_context,
-    xcparams_t *params);
-
-int
-init_audio_pan_filters(
-    const char *filters_descr,
-    coderctx_t *decoder_context,
-    coderctx_t *encoder_context);
-
-int
-init_audio_merge_pan_filters(
-    const char *filters_descr,
-    coderctx_t *decoder_context,
-    coderctx_t *encoder_context);
-
-extern int
-init_audio_join_filters(
-    coderctx_t *decoder_context,
-    coderctx_t *encoder_context,
-    xcparams_t *params);
+#include "avpipe_filters.h"
 
 extern const char *
 av_get_pix_fmt_name(
@@ -483,6 +454,15 @@ prepare_decoder(
             decoder_context->codec_context[i]->thread_count = MPEGTS_THREAD_COUNT;
         else
             decoder_context->codec_context[i]->thread_count = DEFAULT_THREAD_COUNT;
+
+        /* Set GPU/device index for hardware decoders (e.g. NETINT, NVENC) */
+        if (params && params->gpu_index >= 0 &&
+            decoder_context->codec_parameters[i]->codec_type == AVMEDIA_TYPE_VIDEO &&
+            params->dcodec != NULL && params->dcodec[0] != '\0') {
+            if (av_opt_set_int(decoder_context->codec_context[i]->priv_data, "dev_dec_idx", params->gpu_index, 0) < 0)
+                av_opt_set_int(decoder_context->codec_context[i]->priv_data, "gpu", params->gpu_index, 0);
+            elv_log("Decoder device index set to %d for %s", params->gpu_index, params->dcodec);
+        }
 
         /* Open the decoder (initialize the decoder codec_context[i] using given codec[i]). */
         if (decoder_context->codec_parameters[i]->codec_type != AVMEDIA_TYPE_DATA &&
@@ -944,6 +924,8 @@ set_netint_h264_params(
     }
     elv_dbg("set_netint_h264_params encoding params=%s, url=%s", enc_params, params->url);
     av_opt_set(encoder_codec_context->priv_data, "xcoder-params", enc_params, 0);
+    if (params->gpu_index >= 0)
+        av_opt_set_int(encoder_codec_context->priv_data, "dev_enc_idx", params->gpu_index, 0);
 }
 
 static void
@@ -971,6 +953,8 @@ set_netint_h265_params(
         profile, s->avg_frame_rate.num, s->avg_frame_rate.den);
     elv_dbg("set_netint_h265_params encoding params=%s, url=%s", enc_params, params->url);
     av_opt_set(encoder_codec_context->priv_data, "xcoder-params", enc_params, 0);
+    if (params->gpu_index >= 0)
+        av_opt_set_int(encoder_codec_context->priv_data, "dev_enc_idx", params->gpu_index, 0);
 }
 
 /* Borrowed from libavcodec/nvenc.h since it is not exposed */
@@ -1309,6 +1293,10 @@ prepare_video_encoder(
     if (params->rotate == 90 || params->rotate == 270) {
         encoder_codec_context->height = params->enc_height != -1 ? params->enc_height : decoder_context->codec_context[index]->width;
         encoder_codec_context->width = params->enc_width != -1 ? params->enc_width : decoder_context->codec_context[index]->height;
+    }
+    /* If vertical crop is set, encoder width must match crop output */
+    if (params->vertical) {
+        encoder_codec_context->width = crop_calc_width(encoder_codec_context->height);
     }
     if (params->video_time_base > 0) {
         encoder_codec_context->time_base = (AVRational) {1, params->video_time_base};
@@ -2796,6 +2784,9 @@ transcode_video(
 
         decoder_context->video_pts = packet->pts;
 
+        /* Send crop x command per frame for vertical video */
+        crop_send_command(decoder_context, encoder_context, p);
+
         /* Rescale video frame to encoder timebase before sending to the filter
          * (filter is initialized with the encoder timebase).
          * Use stream time_base (not codec_context time_base) because in ffmpeg 8.x
@@ -3552,10 +3543,92 @@ get_filter_str(
             return eav_filter_string_init;
         }
         *filter_str = (char *) calloc(FILTER_STRING_SZ, 1);
-        sprintf(*filter_str, "scale=%d:%d",
-            encoder_context->codec_context[encoder_context->video_stream_index]->width,
-            encoder_context->codec_context[encoder_context->video_stream_index]->height);
-            elv_dbg("FILTER scale=%s", *filter_str);
+        if (params->vertical) {
+            int enc_height = encoder_context->codec_context[encoder_context->video_stream_index]->height;
+            sprintf(*filter_str, "scale=-2:%d,crop=%d:ih:200:0",
+                enc_height, crop_calc_width(enc_height));
+        } else {
+            sprintf(*filter_str, "scale=%d:%d",
+                encoder_context->codec_context[encoder_context->video_stream_index]->width,
+                encoder_context->codec_context[encoder_context->video_stream_index]->height);
+        }
+        /*
+         * Append fade filter if specified.
+         *
+         * Blend-based fade (when fade_start_frame, fade_end_frame, fade_level_1, fade_level_2 are set):
+         *
+         *   General formula:
+         *     rate = (level2 - level1) / (end_frame - start_frame)
+         *     blend expr: A * clip(level1 + rate * (N - start_frame), 0, 1)
+         *
+         *   Example 1 (fade out from 1.0 to ~0.5, frames 30-59):
+         *                                                                        start_frame
+         *                                                                        |
+         *     format=gbrp,split[a][b];[a][b]blend=all_expr='A*clip(1.000-0.017*(N-30),0,1)':enable='between(n,30,59)',format=yuv420p
+         *                                                         |    |
+         *                                                     level1   rate = (level2-level1)/(end_frame-start_frame)
+         *
+         *   Example 2 (fade out from ~0.5 to 0.0, frames 0-29):
+         *                                                                       start_frame
+         *                                                                       |
+         *     format=gbrp,split[a][b];[a][b]blend=all_expr='A*clip(0.492-0.017*(N-0),0,1)':enable='between(n,0,29)',format=yuv420p
+         *                                                         |    |
+         *                                                     level1   rate = (level2-level1)/(end_frame-start_frame)
+         */
+        if (params->fade && *params->fade != '\0') {
+            char fade_buf[512];
+            /*
+             * Compute frame offset: fade frame numbers are relative to the output and the filter counts
+             * all frames from the start of the stream (when no skip_decoding).
+             * - frame_offset = start_time_ts / frame_duration_ts.
+             */
+            int frame_offset = 0;
+            if (params->start_time_ts > 0 && !params->skip_decoding) {
+                AVCodecContext *enc_ctx = encoder_context->codec_context[encoder_context->video_stream_index];
+                int frame_dur = enc_ctx->time_base.den / 30; /* fallback 30fps */
+                if (encoder_context->stream[encoder_context->video_stream_index] &&
+                    encoder_context->stream[encoder_context->video_stream_index]->avg_frame_rate.num > 0) {
+                    AVRational fr = encoder_context->stream[encoder_context->video_stream_index]->avg_frame_rate;
+                    frame_dur = enc_ctx->time_base.den * fr.den / fr.num;
+                }
+                if (frame_dur > 0)
+                    frame_offset = (int)(params->start_time_ts / frame_dur);
+                elv_log("FILTER fade frame_offset=%d (start_time_ts=%"PRId64" frame_dur=%d)", frame_offset, params->start_time_ts, frame_dur);
+            }
+            if (params->fade_end_frame > params->fade_start_frame &&
+                (params->fade_level_1 != 0.0 || params->fade_level_2 != 0.0)) {
+                int S = params->fade_start_frame + frame_offset;
+                int E = params->fade_end_frame + frame_offset;
+                double L1 = params->fade_level_1;
+                double L2 = params->fade_level_2;
+                double rate = (L2 - L1) / (double)(E - S);
+                snprintf(fade_buf, sizeof(fade_buf),
+                    ",format=gbrp,split[a][b];[a][b]blend=all_expr='A*clip(%.3f%+.3f*(N-%d),0,1)':enable='between(n,%d,%d)',format=yuv420p",
+                    L1, rate, S, S, E);
+            } else if (!strcmp(params->fade, "in")) {
+                if (params->fade_end_frame > params->fade_start_frame) {
+                    snprintf(fade_buf, sizeof(fade_buf), ",fade=t=in:s=%d:n=%d",
+                        params->fade_start_frame + frame_offset,
+                        params->fade_end_frame - params->fade_start_frame);
+                } else {
+                    snprintf(fade_buf, sizeof(fade_buf), ",fade=t=in:s=%d:n=30", frame_offset);
+                }
+            } else if (!strcmp(params->fade, "out")) {
+                if (params->fade_end_frame > params->fade_start_frame) {
+                    snprintf(fade_buf, sizeof(fade_buf), ",fade=t=out:s=%d:n=%d",
+                        params->fade_start_frame + frame_offset,
+                        params->fade_end_frame - params->fade_start_frame);
+                } else {
+                    snprintf(fade_buf, sizeof(fade_buf), ",fade=t=out:s=%d:n=30", frame_offset);
+                }
+            } else {
+                elv_err("Invalid fade param '%s', must be 'in' or 'out'", params->fade);
+                free(*filter_str);
+                return eav_param;
+            }
+            strncat(*filter_str, fade_buf, FILTER_STRING_SZ - strlen(*filter_str) - 1);
+        }
+        elv_log("FILTER str=%s", *filter_str);
     }
 
     return 0;
@@ -3651,6 +3724,13 @@ avpipe_xc(
             goto xc_done;
         }
         free(filter_str);
+
+        /* Find and store crop filter context for per-frame send_command */
+        if (params->vertical) {
+            if ((rc = crop_get_context(decoder_context, params)) != 0) {
+                goto xc_done;
+            }
+        }
     }
 
     if (!params->bypass_transcoding &&
@@ -4711,6 +4791,17 @@ check_params(
             return eav_param;
         }
     }
+
+    if (params->vertical && params->bypass_transcoding) {
+        elv_err("Incompatible params - vertical crop requires transcoding (bypass must be disabled), url=%s", params->url);
+        return eav_param;
+    }
+
+    if (params->fade && *params->fade != '\0' && params->bypass_transcoding) {
+        elv_err("Incompatible params - fade requires transcoding (bypass must be disabled), url=%s", params->url);
+        return eav_param;
+    }
+
     return eav_success;
 }
 
@@ -4791,7 +4882,14 @@ log_params(
         "deinterlace=%d "
         "use_preprocessed_input=%d "
         "copy_mpegts=%d "
-        "timecode=%s",
+        "timecode=%s "
+        "vertical=%d "
+        "vertical_data_len=%d "
+        "fade=%s "
+        "fade_start_frame=%d "
+        "fade_end_frame=%d "
+        "fade_level_1=%.3f "
+        "fade_level_2=%.3f",
         params->stream_id, params->url,
         avpipe_version(),
         params->bypass_transcoding, params->skip_decoding,
@@ -4818,7 +4916,11 @@ log_params(
         1, params->video_time_base, params->video_frame_duration_ts, params->rotate,
         params->profile ? params->profile : "", params->level,  params->deinterlace,
         params->use_preprocessed_input, params->copy_mpegts,
-        params->timecode);
+        params->timecode,
+        params->vertical, params->vertical_data_len,
+        params->fade ? params->fade : "(null)",
+        params->fade_start_frame, params->fade_end_frame,
+        params->fade_level_1, params->fade_level_2);
     elv_log("AVPIPE XCPARAMS %s", buf);
 }
 
@@ -4967,6 +5069,8 @@ avpipe_free_params(
     free(params->filter_descriptor);
     free(params->mux_spec);
     free(params->extract_images_ts);
+    free_vertical_data(params);
+    free(params->fade);
     free(params);
     xctx->params = NULL;
 }
@@ -5130,4 +5234,24 @@ set_extract_images(
         return;
     }
     params->extract_images_ts[index] = value;
+}
+
+void
+init_vertical_data(
+    xcparams_t *params,
+    const uint8_t *data,
+    int len)
+{
+    params->vertical_data = malloc(len);
+    memcpy(params->vertical_data, data, len);
+    params->vertical_data_len = len;
+}
+
+void
+free_vertical_data(
+    xcparams_t *params)
+{
+    free(params->vertical_data);
+    params->vertical_data = NULL;
+    params->vertical_data_len = 0;
 }
