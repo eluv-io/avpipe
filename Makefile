@@ -6,7 +6,7 @@ SUBDIRS=utils libavpipe exc elvxc
 SRCS=avpipe_handler.c
 OBJS=$(SRCS:%.c=$(BINDIR)/%.o)
 
-.PHONY: all test clean
+.PHONY: all test gotest ctest clean
 
 .DEFAULT_GOAL := dynamic
 
@@ -14,12 +14,17 @@ all install: check-env
 	@for dir in $(SUBDIRS); do \
 	echo "Making $@ in $$dir..."; \
 	(cd $$dir; make $@) || exit 1; \
+	if [ "$$dir" = "libavpipe" ]; then \
+		openssl dgst -md5 lib/libavpipe.a | awk '{print $$NF}' > lib/libavpipe.hash; \
+	fi; \
 	done
 
 dynamic: all
 
+# goclean: nuclear option to reset all caches. Normally not needed — `make`
+# updates lib/libavpipe.hash which triggers automatic Go rebuild via //go:embed.
 goclean: clean
-	@go clean -modcache -cache -testcache -i -r
+	@go clean -cache -testcache -modcache -i -r
 
 clean: lclean
 	@for dir in $(SUBDIRS); do \
@@ -52,5 +57,10 @@ ifndef FFMPEG_DIST
   $(error FFMPEG_DIST is undefined)
 endif
 
-test:
+test: ctest gotest
+
+gotest:
 	@./run_tests.sh
+
+ctest:
+	@$(MAKE) -C libavpipe test

@@ -568,6 +568,7 @@ typedef struct stream_info_t {
     int         codec_type;         // Audio or Video
     int         codec_id;
     char        codec_name[MAX_CODEC_NAME+1];
+    char        codec_tag_string[AV_FOURCC_MAX_STRING_SIZE]; // 4CC string, e.g. "avc1", "ec-3"
     int64_t     duration_ts;
     AVRational  time_base;
     int64_t     nb_frames;
