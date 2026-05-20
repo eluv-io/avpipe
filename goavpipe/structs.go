@@ -200,6 +200,16 @@ const (
 	XcProfileH264Heigh10            = 110 // C.AV_PROFILE_H264_HIGH_10
 )
 
+// Values for XcParams.VideoLayout. Mono and SBS align with CICP frame-packing
+// (ISO/IEC 23001-8); MVHEVC is an extension marking the input as MV-HEVC,
+// which signals avpipe to dispatch the video mez/bypass path through pure Go
+// (mp4e.MakeMezPart) instead of CGO.
+const (
+	VideoLayoutMono   int32 = 0
+	VideoLayoutSBS    int32 = 3
+	VideoLayoutMVHEVC int32 = 7
+)
+
 func XcTypeFromString(xcTypeStr string) XcType {
 	var xcType XcType
 	switch xcTypeStr {
@@ -321,7 +331,7 @@ type XcParams struct {
 	ChannelLayout          int       `json:"channel_layout"`                   // Audio channel layout
 	MaxCLL                 string    `json:"max_cll,omitempty"`
 	MasterDisplay          string    `json:"master_display,omitempty"`
-	VideoLayout            int32     `json:"video_layout,omitempty"`
+	VideoLayout            int32     `json:"video_layout,omitempty"` // see VideoLayout* constants
 	BitDepth               int32     `json:"bitdepth,omitempty"`
 	SyncAudioToStreamId    int       `json:"sync_audio_to_stream_id"`
 	ForceEqualFDuration    bool      `json:"force_equal_frame_duration,omitempty"`

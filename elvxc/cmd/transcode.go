@@ -366,6 +366,7 @@ func InitTranscode(cmdRoot *cobra.Command) error {
 	cmdTranscode.PersistentFlags().StringP("extract-images-ts", "", "", "the frames to extract (PTS, comma separated).")
 	cmdTranscode.PersistentFlags().BoolP("seekable", "", true, "seekable stream.")
 	cmdTranscode.PersistentFlags().Int32("rotate", 0, "Rotate the output video frame (valid values 0, 90, 180, 270).")
+	cmdTranscode.PersistentFlags().Int32("video-layout", 0, "Video layout: 0=mono, 3=side-by-side, 7=MV-HEVC (dispatches mez creation to pure-Go bypass).")
 	cmdTranscode.PersistentFlags().StringP("profile", "", "", "Encoding profile for video. If it is not determined, it will be set automatically.")
 	cmdTranscode.PersistentFlags().Int32("level", 0, "Encoding level for video. If it is not determined, it will be set automatically.")
 	cmdTranscode.PersistentFlags().Int32("deinterlace", 0, "Deinterlace filter (values 0 - none, 1 - bwdif_field, 2 - bwdif_frame send_frame).")
@@ -650,6 +651,11 @@ func doTranscode(cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("Invalid rotate value")
 	}
 
+	videoLayout, err := cmd.Flags().GetInt32("video-layout")
+	if err != nil {
+		return fmt.Errorf("Invalid video-layout value")
+	}
+
 	level, err := cmd.Flags().GetInt32("level")
 	if err != nil {
 		return fmt.Errorf("Invalid level value")
@@ -776,6 +782,7 @@ func doTranscode(cmd *cobra.Command, args []string) error {
 		VideoFrameDurationTs:   int(videoFrameDurationTs),
 		Seekable:               seekable,
 		Rotate:                 int(rotate),
+		VideoLayout:            videoLayout,
 		Profile:                profile,
 		Level:                  int(level),
 		Deinterlace:            int(deinterlace),
