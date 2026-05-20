@@ -972,6 +972,43 @@ func TestAudio2MonoTo1Stereo(t *testing.T) {
 	xcTest(t, outputDir, params, xcTestResult, true)
 }
 
+func TestAudio2MonoUnknownLayoutToStereo(t *testing.T) {
+	url := "./media/hales-episode-10_audio_35s.mov"
+	checkFileExists(t, url)
+
+	outputDir := path.Join(baseOutPath, fn())
+
+	params := &goavpipe.XcParams{
+		BypassTranscoding:   false,
+		Format:              "fmp4-segment",
+		StartTimeTs:         0,
+		DurationTs:          -1,
+		StartSegmentStr:     "1",
+		SegDuration:         "30.08",
+		Ecodec2:             "aac",
+		Dcodec2:             "",
+		AudioBitrate:        128000,
+		XcType:              goavpipe.XcAudioJoin,
+		ChannelLayout:       avpipe.ChannelLayout("stereo"),
+		StreamId:            -1,
+		SyncAudioToStreamId: -1,
+		Url:                 url,
+		DebugFrameLevel:     debugFrameLevel,
+	}
+	params.AudioIndex = []int32{0, 1}
+
+	xcTestResult := &XcTestResult{
+		timeScale:         48000,
+		sampleRate:        48000,
+		channelLayoutName: "stereo",
+	}
+	for i := 1; i <= 2; i++ {
+		xcTestResult.mezFile = append(xcTestResult.mezFile, fmt.Sprintf("%s/asegment0-%d.mp4", outputDir, i))
+	}
+
+	xcTest(t, outputDir, params, xcTestResult, true)
+}
+
 func TestAudio5_1To5_1(t *testing.T) {
 	url := "./media/case_1_video_and_5.1_audio.mp4"
 	checkFileExists(t, url)
@@ -1185,6 +1222,43 @@ func TestAudio6MonoUnequalChannelLayoutsTo5_1(t *testing.T) {
 		channelLayoutName: "5.1",
 	}
 	for i := 1; i < 2; i++ {
+		xcTestResult.mezFile = append(xcTestResult.mezFile, fmt.Sprintf("%s/asegment0-%d.mp4", outputDir, i))
+	}
+
+	xcTest(t, outputDir, params, xcTestResult, true)
+}
+
+func TestAudio6MonoMovPcmTo5_1(t *testing.T) {
+	url := "./media/Black_Panther_Fr_5_1_audio_35s.mov"
+	checkFileExists(t, url)
+
+	outputDir := path.Join(baseOutPath, fn())
+
+	params := &goavpipe.XcParams{
+		BypassTranscoding:   false,
+		Format:              "fmp4-segment",
+		StartTimeTs:         0,
+		DurationTs:          -1,
+		StartSegmentStr:     "1",
+		SegDuration:         "30",
+		Ecodec2:             "aac",
+		Dcodec2:             "",
+		XcType:              goavpipe.XcAudioMerge,
+		ChannelLayout:       avpipe.ChannelLayout("5.1"),
+		FilterDescriptor:    "[0:0][0:1][0:2][0:3][0:4][0:5]amerge=inputs=6,pan=5.1|c0=c0|c1=c1|c2=c2|c3=c3|c4=c4|c5=c5[aout]",
+		StreamId:            -1,
+		SyncAudioToStreamId: -1,
+		Url:                 url,
+		DebugFrameLevel:     debugFrameLevel,
+	}
+	params.AudioIndex = []int32{0, 1, 2, 3, 4, 5}
+
+	xcTestResult := &XcTestResult{
+		timeScale:         48000,
+		sampleRate:        48000,
+		channelLayoutName: "5.1",
+	}
+	for i := 1; i <= 2; i++ {
 		xcTestResult.mezFile = append(xcTestResult.mezFile, fmt.Sprintf("%s/asegment0-%d.mp4", outputDir, i))
 	}
 

@@ -156,8 +156,10 @@ get_audio_avfilter_args(
 {
     AVCodecContext *dec_codec_ctx = decoder_context->codec_context[index];
 
-    if (dec_codec_ctx->ch_layout.order == AV_CHANNEL_ORDER_NATIVE &&
-        dec_codec_ctx->ch_layout.u.mask == 0) {
+    if (dec_codec_ctx->ch_layout.nb_channels > 0 &&
+        (dec_codec_ctx->ch_layout.order == AV_CHANNEL_ORDER_UNSPEC ||
+         (dec_codec_ctx->ch_layout.order == AV_CHANNEL_ORDER_NATIVE &&
+          dec_codec_ctx->ch_layout.u.mask == 0))) {
         av_channel_layout_default(&dec_codec_ctx->ch_layout, dec_codec_ctx->ch_layout.nb_channels);
     }
 
@@ -666,4 +668,3 @@ end:
 
     return ret;
 }
-
