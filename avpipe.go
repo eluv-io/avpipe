@@ -55,6 +55,7 @@ import (
 
 	"github.com/eluv-io/avpipe/broadcastproto/mpegts"
 	"github.com/eluv-io/avpipe/goavpipe"
+	"github.com/eluv-io/avpipe/mp4e"
 )
 
 func init() {
@@ -939,6 +940,23 @@ func Xc(params *goavpipe.XcParams) error {
 	if params == nil {
 		goavpipe.Log.Error("Failed transcoding, params are not set.")
 		return EAV_PARAM
+	}
+
+	// Pure-Go bypass dispatch: when the caller has flagged the input as MV-HEVC
+	// (via VideoLayout) and is asking for video mez creation, route through the
+	// no-CGO repackager in mp4e. The same registered goavpipe Input/OutputOpener
+	// handlers are reused, so callers do not need to wire IO differently.
+	if params.VideoLayout == goavpipe.VideoLayoutMVHEVC &&
+		params.XcType == goavpipe.XcVideo &&
+		params.Format == "fmp4-segment" {
+		goavpipe.Log.Info("MV-HEVC: dispatching mez creation to pure-Go mp4e",
+			"url", params.Url, "seg_duration", params.SegDuration)
+		err := mp4e.MakeMezPart(params)
+		goavpipe.Globals.RemoveURLHandlers(params.Url)
+		if err != nil {
+			goavpipe.Log.Error("MV-HEVC Go bypass failed", err, "url", params.Url)
+		}
+		return err
 	}
 
 	// Convert XcParams to C.txparams_t

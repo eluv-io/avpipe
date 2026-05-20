@@ -452,10 +452,14 @@ typedef enum dif_type {
     dif_bwdif_frame = 2  // Use filter bwdif mode 'send_frame' (one frame per input frame)
 } dif_type;
 
-// Video layout. Values align with ISO/IEC 23001-8 (CICP)
+// Video layout. Values 0 and 3 align with ISO/IEC 23001-8 (CICP).
+// video_layout_mvhevc is an avpipe extension that marks the input as MV-HEVC
+// and is used by the Go layer to dispatch mez creation to a pure-Go bypass
+// path (mp4e.MakeMezPart) instead of the CGO transcode pipeline.
 typedef enum video_layout_t {
-    video_layout_mono = 0, // Monoscopic
-    video_layout_sbs  = 3  // Stereoscopic side-by-side
+    video_layout_mono   = 0, // Monoscopic
+    video_layout_sbs    = 3, // Stereoscopic side-by-side
+    video_layout_mvhevc = 7  // MV-HEVC multi-layer (avpipe extension)
 } video_layout_t;
 
 #define DRAW_TEXT_SHADOW_OFFSET     0.075
