@@ -1,8 +1,8 @@
 # Makefile for mvhevc
 #
 # Paths assume:
-#   - FFmpeg built and installed to ~/.local (pkg-config available)
-#   - x265 built with ENABLE_MULTIVIEW=1 in elv-toolchain-7.1
+#   - FFmpeg/x265 development packages are visible to pkg-config
+#   - x265 built with ENABLE_MULTIVIEW=1 in elv-toolchain
 #
 # Build: make
 # Clean: make clean
@@ -15,14 +15,15 @@ UNAME_S := $(shell uname -s)
 # avpipe include path
 AVPIPE_INCLUDE = ../../include
 
-# Use local FFmpeg install via pkg-config
-PKG_CONFIG_PATH := $(HOME)/.local/lib/pkgconfig
-FFMPEG_CFLAGS  := $(shell PKG_CONFIG_PATH=$(PKG_CONFIG_PATH) pkg-config --cflags libavformat libavcodec libavutil libswscale libavfilter libswresample)
-FFMPEG_LDFLAGS := $(shell PKG_CONFIG_PATH=$(PKG_CONFIG_PATH) pkg-config --libs   libavformat libavcodec libavutil libswscale libavfilter libswresample)
+# FFmpeg/x265 lookup uses the caller's pkg-config environment.
+FFMPEG_PKGS   = libavformat libavcodec libavutil libswscale libavfilter libswresample
+X265_PKGS     = x265
+FFMPEG_CFLAGS = $(shell pkg-config --cflags $(FFMPEG_PKGS))
+FFMPEG_LDFLAGS = $(shell pkg-config --libs $(FFMPEG_PKGS))
 
 # x265 flags - use the multiview-enabled build
-X265_CFLAGS  := $(shell PKG_CONFIG_PATH=$(PKG_CONFIG_PATH) pkg-config --cflags x265)
-X265_LDFLAGS := $(shell PKG_CONFIG_PATH=$(PKG_CONFIG_PATH) pkg-config --libs   x265) -Wl,-rpath
+X265_CFLAGS  = $(shell pkg-config --cflags $(X265_PKGS))
+X265_LDFLAGS = $(shell pkg-config --libs $(X265_PKGS)) -Wl,-rpath
 
 CC = clang
 OBJCXX = clang++
@@ -49,11 +50,24 @@ BINARIES += $(APPLE_BINARY)
 INSTALL_TARGETS += install-apple
 endif
 
-.PHONY: all install clean run-test
+.PHONY: all install clean run-test check-pkg-config
 
 all: $(BINARIES) install
 
-$(TARGET): $(OBJS)
+check-pkg-config:
+	@command -v pkg-config >/dev/null 2>&1 || { \
+		echo "error: pkg-config not found"; \
+		exit 1; \
+	}
+	@pkg-config --exists $(FFMPEG_PKGS) $(X265_PKGS) || { \
+		echo "error: missing pkg-config packages for mvhevc_encoder"; \
+		echo "required: $(FFMPEG_PKGS) $(X265_PKGS)"; \
+		echo "set PKG_CONFIG_PATH to your FFmpeg/x265 pkgconfig directory if needed"; \
+		pkg-config --print-errors --exists $(FFMPEG_PKGS) $(X265_PKGS); \
+		exit 1; \
+	}
+
+$(TARGET): check-pkg-config $(OBJS)
 	$(CC) $(CFLAGS) -o $@ $(OBJS) $(LDFLAGS)
 	@echo ""
 	@echo "Build successful: $(TARGET)"
@@ -80,7 +94,7 @@ install-apple: $(APPLE_BINARY)
 	@echo "Installing $(APPLE_TARGET)"
 	@cp $(APPLE_BINARY) $(ROOT_DIR)/$(BINDIR)/$(APPLE_TARGET)
 
-%.o: %.c mvhevc_xc.h
+%.o: %.c mvhevc_xc.h check-pkg-config
 	$(CC) $(CFLAGS) -c -o $@ $<
 
 clean:

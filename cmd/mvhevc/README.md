@@ -6,6 +6,12 @@ separate 'left-eye' and 'right-eye' sources (ProRes or MP4).
 
 Supports SDR and HDR.
 
+Basic flow:
+
+- SDR: use `mvhevc_encoder` to produce a raw MV-HEVC file from two source files (left eye, right eye), then use `mvhevc add` to create an mp4 from the raw hevc file.
+- HDR (10bit): use `mvhevc_apple` to produce an MV-HEVC mov file from two source file (left eye, right eye), the use `mvhevc fix` to add missing mp4 signaling and create the final mp4 file.
+
+
 ### 1) Encode left/right sources to raw MV-HEVC
 
 `mvhevc_encoder` writes a raw Annex B MV-HEVC elementary stream.
@@ -26,44 +32,12 @@ Where:
 - `-fps` is optional if the left-eye input reports the correct frame rate.
   - use `24000/1001` for 23.976 fps, `24/1` for 24 fps, etc.
 
-### HDR10 encode example
+Important: libx264 only supports 8bit MV-HEVC (for 10 bit we use the Apple toolkit)
 
-For HDR10 output, enable the 10-bit pipeline and HDR10 x265 settings during the
-raw MV-HEVC encode step.
-
-```bash
-./bin/mvhevc_encoder \
-  -bitdepth 10 \
-  -hdr \
-  -max-cll "1000,400" \
-  -master-display "G(13250,34500)B(7500,3000)R(34000,16000)WP(15635,16450)L(10000000,1)" \
-  -keyint 48 \
-  -bframes 0 \
-  -fps 24000/1001 \
-  -w 2560 -h 1440  -bitrate 8500 \
-  left_eye_hdr.mov \
-  right_eye_hdr.mov \
-  output_mvhevc_hdr10.hevc
-```
-
-Where:
-
-- `-bitdepth 10` converts decoded input frames to 10-bit `yuv420p10le` before
-  passing them to x265.
-- `-hdr` enables the HDR10 x265/VUI settings: `hdr10=1`, `hdr10-opt=1`,
-  `colorprim=bt2020`, `transfer=smpte2084`, and `colormatrix=bt2020nc`.
-- `-max-cll` and `-master-display` pass HDR10 mastering metadata to x265.
-- The current MP4 `add` step does not require extra HDR flags; it packages the
-  encoded MV-HEVC stream as-is.
-
-Requires an x265 multiview build that supports 10-bit MV-HEVC. Some x265
-multiview builds enforce 8-bit-only output and will reject this combination.
 
 ### Direct Apple MV-HEVC encode
 
-On macOS 14+, `mvhevc_apple` can encode separate left/right sources directly to
-a `.mov` or `.mp4` using AVFoundation/VideoToolbox. This avoids the raw `.hevc`
-intermediate and the `mvhevc add` packaging step.
+`mvhevc_apple` can encode separate left/right sources directly to a `.mov` using AVFoundation/VideoToolbox.
 
 ```bash
 ./bin/mvhevc_apple \
