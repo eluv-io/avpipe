@@ -37,12 +37,14 @@ func init() {
 	rootCmd.PersistentFlags().Bool("idr", false, "Show IDR (sync) frame positions")
 	rootCmd.PersistentFlags().Bool("hdr", false, "validate and print HDR10 HEVC metadata")
 	rootCmd.PersistentFlags().Bool("mvhevc", false, "print mvhevc metadata")
+	rootCmd.PersistentFlags().Bool("atmos", false, "validate and print Dolby Atmos (EC-3+JOC or AC-4) metadata")
 }
 
 type Output struct {
 	mp4e.HDRReport
-	MVHEVC  any `json:"mvhevc,omitempty"`
-	Default any `json:"default,omitempty"`
+	Atmos   *mp4e.AtmosReport `json:"atmos,omitempty"`
+	MVHEVC  any               `json:"mvhevc,omitempty"`
+	Default any               `json:"default,omitempty"`
 }
 
 func runFmp4Validate(cmd *cobra.Command, args []string) error {
@@ -53,6 +55,7 @@ func runFmp4Validate(cmd *cobra.Command, args []string) error {
 	mvHevc, _ := cmd.Flags().GetBool("mvhevc")
 	idr, _ := cmd.Flags().GetBool("idr")
 	infoFlag, _ := cmd.Flags().GetBool("info")
+	atmos, _ := cmd.Flags().GetBool("atmos")
 
 	var output Output
 	var textOutput []string
@@ -98,6 +101,43 @@ func runFmp4Validate(cmd *cobra.Command, args []string) error {
 
 			if infoFlag {
 				textOutput = append(textOutput, hdrInfo.InfoString())
+			}
+		}
+	}
+
+	// Atmos
+	if atmos {
+		ran = true
+
+		_, err = f.Seek(0, io.SeekStart)
+		if err != nil {
+			return err
+		}
+
+		file, decodeErr := mp4.DecodeFile(f)
+		if file == nil {
+			return fmt.Errorf("parse error: %w", decodeErr)
+		}
+
+		atmosInfo, err := mp4e.ValidateAtmos(file)
+		if err != nil {
+			return err
+		}
+
+		if jsonFlag {
+			report := atmosInfo.Report(infoFlag)
+			if decodeErr != nil && output.ParseWarning == "" {
+				output.ParseWarning = decodeErr.Error()
+			}
+			output.Atmos = &report
+		} else {
+			if decodeErr != nil {
+				textOutput = append(textOutput, fmt.Sprintf("parse warning: %v\n", decodeErr))
+			}
+			textOutput = append(textOutput, atmosInfo.String())
+
+			if infoFlag {
+				textOutput = append(textOutput, atmosInfo.InfoString())
 			}
 		}
 	}
