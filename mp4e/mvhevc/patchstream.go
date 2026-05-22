@@ -9,6 +9,10 @@ import (
 	"github.com/Eyevinn/mp4ff/mp4"
 )
 
+// The StreamPatcher is engaged by wrapping the avpipe Xc output handler.
+// Currently used for restoring MV-HEVC signaling becuase it is dropped by ffmpeg bypass but
+// migth be needed for other special encodings.
+
 type PatchStatus int
 
 const (

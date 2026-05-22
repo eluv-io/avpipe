@@ -246,7 +246,7 @@ const (
 	VideoLayoutMono   VideoLayout = 0
 	VideoLayoutSbs    VideoLayout = 3 // frame-packed side-by-side
 	VideoLayoutTb     VideoLayout = 4 // frame-packed top-bottom
-	VideoLayoutMVHEVC VideoLayout = 5 // multi-layer HEVC (MV-HEVC)
+	VideoLayoutMVHEVC VideoLayout = 10 // multi-layer HEVC (MV-HEVC)
 )
 
 func (l VideoLayout) String() string {

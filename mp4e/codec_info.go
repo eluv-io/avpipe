@@ -15,8 +15,18 @@ import (
 	"github.com/Eyevinn/mp4ff/mp4"
 	"github.com/Eyevinn/mp4ff/sei"
 
-	"github.com/eluv-io/avpipe/goavpipe"
 	"github.com/eluv-io/errors-go"
+)
+
+// Mp4VideoLayout describes the view layout detected from MP4 sample-entry
+// boxes and codec configuration metadata.
+type Mp4VideoLayout int
+
+const (
+	Mp4VideoLayoutMono   Mp4VideoLayout = 0
+	Mp4VideoLayoutSbs    Mp4VideoLayout = 3
+	Mp4VideoLayoutTb     Mp4VideoLayout = 4
+	Mp4VideoLayoutMVHEVC Mp4VideoLayout = 10
 )
 
 // CodecInfo contains information about a media stream's codecs
@@ -45,10 +55,10 @@ type CodecInfo struct {
 	EC3 *EC3Info `json:"ec3,omitempty"`
 
 	// VideoLayout describes the stereoscopic layout (mono, sbs, mvhevc).
-	VideoLayout goavpipe.VideoLayout `json:"video_layout,omitempty"`
+	VideoLayout Mp4VideoLayout `json:"video_layout,omitempty"`
 
-	// EnhancementProfileIDC is the enhancement-layer general_profile_idc
-	// Only meaningful for VideoLayout == VideoLayoutMVHEVC (typically '6')
+	// EnhancementProfileIDC is the enhancement-layer general_profile_idc.
+	// Only meaningful for VideoLayout == Mp4VideoLayoutMVHEVC.
 	EnhancementProfileIDC int `json:"enhancement_profile_idc,omitempty"`
 }
 
@@ -268,7 +278,7 @@ func parseVisualSampleEntryBox(se *mp4.VisualSampleEntryBox) (*CodecInfo, error)
 			CodecTagString:  codecTag,
 			ProfileIDC:      int(sps.ProfileTierLevel.GeneralProfileIDC),
 			Level:           int(sps.ProfileTierLevel.GeneralLevelIDC),
-			VideoLayout:     goavpipe.VideoLayoutMono,
+			VideoLayout:     Mp4VideoLayoutMono,
 		}
 
 		// If VPS declares multiple layers - it's MV-HEVC
@@ -276,7 +286,7 @@ func parseVisualSampleEntryBox(se *mp4.VisualSampleEntryBox) (*CodecInfo, error)
 		// matches the Apple format: `hvc1.<base>,hvc1.<enh>`
 		if vps := parseHvcCVPS(se.HvcC); vps != nil && vps.IsMultiLayer() {
 			if enhPTL := mvhevcEnhancementPTL(vps); enhPTL != nil {
-				info.VideoLayout = goavpipe.VideoLayoutMVHEVC
+				info.VideoLayout = Mp4VideoLayoutMVHEVC
 				info.EnhancementProfileIDC = int(enhPTL.GeneralProfileIDC)
 				info.MimeCodecString = info.MimeCodecString + "," + hevcCodecStringFromPTL(codecTag, *enhPTL)
 				return info, nil
@@ -285,9 +295,9 @@ func parseVisualSampleEntryBox(se *mp4.VisualSampleEntryBox) (*CodecInfo, error)
 
 		// Check for frame-packed stereo (SBS): st3d or HEVC SEI 45 in hvcC
 		// PENDING(SS) if SEI 45 only in mdat and not hvcC we don't see it from the moov - to test CPU/GPU outputs
-		if layout := detectStereoFromVse(se); layout != goavpipe.VideoLayoutMono {
+		if layout := detectStereoFromVse(se); layout != Mp4VideoLayoutMono {
 			info.VideoLayout = layout
-		} else if layout := detectStereoFromSEI(se.HvcC); layout != goavpipe.VideoLayoutMono {
+		} else if layout := detectStereoFromSEI(se.HvcC); layout != Mp4VideoLayoutMono {
 			info.VideoLayout = layout
 		}
 		return info, nil
@@ -348,39 +358,39 @@ func mvhevcEnhancementPTL(vps *hevc.VPS) *hevc.ProfileTierLevel {
 }
 
 // detectStereoFromVse looks for the `st3d` box
-// Returns VideoLayoutMono when absent or stereo_mode is monoscopic (0).
+// Returns Mp4VideoLayoutMono when absent or stereo_mode is monoscopic (0).
 //
 //	stereo_mode == 1 → top-bottom
 //	stereo_mode == 2 → left-right (side-by-side)
 //	other values treated as mono
-func detectStereoFromVse(vse *mp4.VisualSampleEntryBox) goavpipe.VideoLayout {
+func detectStereoFromVse(vse *mp4.VisualSampleEntryBox) Mp4VideoLayout {
 	for _, child := range vse.Children {
 		if child.Type() != "st3d" {
 			continue
 		}
 		raw, ok := child.(*mp4.UnknownBox)
 		if !ok {
-			return goavpipe.VideoLayoutMono
+			return Mp4VideoLayoutMono
 		}
 		payload := raw.Payload()
 		// UnknownBox.Payload includes the FullBox version+flags (4 bytes); the
 		// next byte is stereo_mode.
 		if len(payload) < 5 {
-			return goavpipe.VideoLayoutMono
+			return Mp4VideoLayoutMono
 		}
 		switch payload[4] {
 		case 1:
-			return goavpipe.VideoLayoutTb
+			return Mp4VideoLayoutTb
 		case 2:
-			return goavpipe.VideoLayoutSbs
+			return Mp4VideoLayoutSbs
 		}
-		return goavpipe.VideoLayoutMono
+		return Mp4VideoLayoutMono
 	}
-	return goavpipe.VideoLayoutMono
+	return Mp4VideoLayoutMono
 }
 
 // detectStereoFromSEI scans hvcC for SEI 45 (frame packing)
-// Returns VideoLayoutMono if no usable SEI 45 is present.
+// Returns Mp4VideoLayoutMono if no usable SEI 45 is present.
 //
 // HEVC SEI 45 payload (D.2.16) starts with:
 //
@@ -392,7 +402,7 @@ func detectStereoFromVse(vse *mp4.VisualSampleEntryBox) goavpipe.VideoLayout {
 // frame_packing_arrangement_type values per HEVC D.2.16 Table D.6:
 //
 //	3 = side-by-side, 4 = top-bottom
-func detectStereoFromSEI(hvcC *mp4.HvcCBox) goavpipe.VideoLayout {
+func detectStereoFromSEI(hvcC *mp4.HvcCBox) Mp4VideoLayout {
 	for _, arr := range hvcC.NaluArrays {
 		if arr.NaluType() != hevc.NALU_SEI_PREFIX {
 			continue
@@ -409,15 +419,15 @@ func detectStereoFromSEI(hvcC *mp4.HvcCBox) goavpipe.VideoLayout {
 				if t, ok := framePackingArrangementType(m.Payload()); ok {
 					switch t {
 					case 3:
-						return goavpipe.VideoLayoutSbs
+						return Mp4VideoLayoutSbs
 					case 4:
-						return goavpipe.VideoLayoutTb
+						return Mp4VideoLayoutTb
 					}
 				}
 			}
 		}
 	}
-	return goavpipe.VideoLayoutMono
+	return Mp4VideoLayoutMono
 }
 
 // framePackingArrangementType extracts frame_packing_arrangement_type fro SEI 45

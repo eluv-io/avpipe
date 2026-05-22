@@ -55,7 +55,6 @@ import (
 
 	"github.com/eluv-io/avpipe/broadcastproto/mpegts"
 	"github.com/eluv-io/avpipe/goavpipe"
-	"github.com/eluv-io/avpipe/mp4e/mvhevc"
 )
 
 func init() {
@@ -91,9 +90,10 @@ type IOHandler interface {
 
 // Implement IOHandler
 type ioHandler struct {
-	input    goavpipe.InputHandler // Input file
-	mutex    *sync.Mutex
-	outTable map[int64]goavpipe.OutputHandler // Map of integer handle to output interfaces
+	input         goavpipe.InputHandler // Input file
+	mutex         *sync.Mutex
+	outTable      map[int64]goavpipe.OutputHandler // Map of integer handle to output interfaces
+	restoreMvhevc bool
 }
 
 func getCIOHandler(fd int64) *ioHandler {
@@ -129,7 +129,12 @@ func AVPipeOpenInput(url *C.char, size *C.int64_t) C.int64_t {
 
 	*size = C.int64_t(input.Size())
 
-	h := &ioHandler{input: input, outTable: make(map[int64]goavpipe.OutputHandler), mutex: &sync.Mutex{}}
+	h := &ioHandler{
+		input:         input,
+		outTable:      make(map[int64]goavpipe.OutputHandler),
+		mutex:         &sync.Mutex{},
+		restoreMvhevc: shouldRestoreMvhevcForURL(filename),
+	}
 	goavpipe.Log.Debug("AVPipeOpenInput()", "url", filename, "size", *size, "fd", fd)
 	goavpipe.Globals.PutCIOHandler(fd, h)
 	return C.int64_t(fd)
@@ -370,21 +375,6 @@ func getAVType(av_type C.int) goavpipe.AVType {
 // Go function to have as thin a surface as possible of C functions. This lets these be called
 // easily from other code.
 
-// restoreMvhevc enables the in-stream MV-HEVC moov patcher that re-injects
-// oinf/linf/trgr boxes dropped by the ffmpeg muxer in bypass.
-const restoreMvhevc = true // PENDING(SS) hardocded for testing
-
-func isFmp4VideoOutput(t goavpipe.AVType) bool {
-	// FMP4VideoSegment: fmp4-segment format (per-segment files, ftyp+moov+moof+mdat)
-	// FMP4Stream:       fmp4 format (single fragmented file)
-	// DASHVideoInit:    dash format init segment (ftyp+moov, separate file from chunks)
-	switch t {
-	case goavpipe.FMP4VideoSegment, goavpipe.FMP4Stream, goavpipe.DASHVideoInit:
-		return true
-	}
-	return false
-}
-
 //export AVPipeOpenOutput
 func AVPipeOpenOutput(handler C.int64_t, stream_index, seg_index C.int, pts C.int64_t, stream_type C.int) C.int64_t {
 	return C.int64_t(AVPipeOpenOutputGo(int64(handler), int(stream_index), int(seg_index), int64(pts), getAVType(stream_type)))
@@ -413,10 +403,7 @@ func AVPipeOpenOutputGo(handler int64, stream_index, seg_index int, pts int64, s
 		return -1
 	}
 
-	// MV-HEVC bypass repackaging if necessary
-	if restoreMvhevc && isFmp4VideoOutput(stream_type) {
-		outHandler = mvhevc.WrapOutputHandler(outHandler)
-	}
+	outHandler = maybeWrapMvhevcOutputHandler(outHandler, h.restoreMvhevc, stream_type)
 
 	goavpipe.Log.Debug("AVPipeOpenOutput()", "fd", fd, "stream_index", stream_index, "seg_index", seg_index, "pts", pts, "out_type", stream_type)
 	h.putOutTable(fd, outHandler)
@@ -908,6 +895,11 @@ func Xc(params *goavpipe.XcParams) error {
 		goavpipe.Log.Error("Failed transcoding, params are not set.")
 		return EAV_PARAM
 	}
+	cleanupMvhevcRestore := func() {}
+	if isMvhevcLayout(params) {
+		cleanupMvhevcRestore = registerMvhevcRestoreURL(params.Url)
+	}
+	defer cleanupMvhevcRestore()
 
 	// Convert XcParams to C.txparams_t
 	cparams, err := getCParams(params)
@@ -986,6 +978,8 @@ func GetProfileName(codecId int, profile int) string {
 	return ""
 }
 
+// Probe runs the C libavformat probe and optionally enhances the output with mp4 specific condec info
+// PENDING(SS) Should move this function to avpipe_probe.go
 func Probe(params *goavpipe.XcParams) (*goavpipe.ProbeInfo, error) {
 	var cprobe *C.xcprobe_t
 	var n_streams C.int
@@ -1104,6 +1098,14 @@ func Probe(params *goavpipe.XcParams) (*goavpipe.ProbeInfo, error) {
 
 	probeInfo.ContainerInfo.FormatName = C.GoString((*C.char)(unsafe.Pointer(cprobe.container_info.format_name)))
 	probeInfo.ContainerInfo.Duration = float64(cprobe.container_info.duration)
+	if shouldEnhanceStreamInfo(params, probeInfo.ContainerInfo.FormatName) {
+		codecInfos, err := extractCodecInfoForProbe(params.Url)
+		if err != nil {
+			goavpipe.Log.Debug("Probe codec info enhancement skipped", "url", params.Url, "error", err)
+		} else {
+			enhanceStreamInfo(probeInfo.StreamInfo, codecInfos)
+		}
+	}
 
 	C.free(unsafe.Pointer(cprobe.stream_info))
 	C.free(unsafe.Pointer(cprobe))
@@ -1159,11 +1161,16 @@ func XcInit(params *goavpipe.XcParams) (int32, error) {
 		return -1, avpipeError(rc)
 	}
 
+	if isMvhevcLayout(params) {
+		registerMvhevcRestoreHandle(int32(handle), params.Url)
+	}
+
 	return int32(handle), nil
 }
 
 func XcRun(handle int32) error {
 	defer goavpipe.XCEnded()
+	defer unregisterMvhevcRestoreHandle(handle)
 	if handle < 0 {
 		return EAV_BAD_HANDLE
 	}
@@ -1177,6 +1184,7 @@ func XcRun(handle int32) error {
 }
 
 func XcCancel(handle int32) error {
+	defer unregisterMvhevcRestoreHandle(handle)
 	rc := C.xc_cancel(C.int32_t(handle))
 	if rc == 0 {
 		return nil
