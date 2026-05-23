@@ -1,9 +1,10 @@
 package goavpipe
 
 import (
+	"encoding/json"
+	"fmt"
 	"math/big"
-
-	"github.com/eluv-io/avpipe/mp4e"
+	"strings"
 )
 
 // ProbeInfo is the top-level result returned by avpipe.Probe. It mirrors the
@@ -216,7 +217,7 @@ type Mp4Info struct {
 	Channels int `json:"channels,omitempty"`
 
 	// EC3 holds E-AC-3-specific MP4 decoder configuration, when present.
-	EC3 *mp4e.EC3Info `json:"ec3,omitempty"`
+	EC3 *EC3Info `json:"ec3,omitempty"`
 
 	// VideoLayout describes how one or more views are encoded.
 	VideoLayout VideoLayout `json:"video_layout,omitempty"`
@@ -224,6 +225,61 @@ type Mp4Info struct {
 	// EnhancementProfileIDC is the MV-HEVC enhancement-layer general_profile_idc.
 	// Only meaningful for VideoLayout == VideoLayoutMVHEVC.
 	EnhancementProfileIDC int `json:"enhancement_profile_idc,omitempty"`
+}
+
+// EC3Info holds E-AC-3-specific MP4 decoder configuration.
+type EC3Info struct {
+	// ChanMap is the custom channel map bitmask from the MP4 dec3 box
+	// (ETSI TS 102 366 Table E.1.4).
+	ChanMap uint16 `json:"chan_map"`
+
+	// JOC indicates Joint Object Coding (Dolby Atmos). True when the
+	// flag_ec3_extension_type_a bit is set in the MP4 dec3 box extension
+	// (ETSI TS 103 420).
+	JOC bool `json:"joc"`
+
+	// ComplexityIndex is the Atmos object complexity index
+	// (complexity_index_type_a from ETSI TS 103 420). Only meaningful when
+	// JOC is true.
+	ComplexityIndex int `json:"complexity_index,omitempty"`
+}
+
+// ChanMapHex returns ChanMap as an uppercase hex string; e.g. "F801".
+func (e EC3Info) ChanMapHex() string {
+	return fmt.Sprintf("%04X", e.ChanMap)
+}
+
+// ec3ChanMapNames lists the channel names for each bit of the EC-3 custom
+// channel map, ordered from MSB (bit 15) to LSB (bit 0), per ETSI TS 102 366
+// Table E.1.4.
+var ec3ChanMapNames = [16]string{
+	"L", "C", "R", "Ls", "Rs", "Lc/Rc", "Lrs/Rrs", "Cs",
+	"Ts", "Lsd/Rsd", "Lw/Rw", "Vhl/Vhr", "Vhc", "Lts/Rts", "LFE2", "LFE",
+}
+
+// ChanMapString returns the channel names encoded in ChanMap as a
+// space-separated string; e.g. "L C R Ls Rs LFE".
+func (e EC3Info) ChanMapString() string {
+	var names []string
+	for i, name := range ec3ChanMapNames {
+		if e.ChanMap&(1<<(15-i)) != 0 {
+			names = append(names, name)
+		}
+	}
+	return strings.Join(names, " ")
+}
+
+// MarshalJSON adds an additional chan_map_hex field alongside the numeric
+// chan_map.
+func (e EC3Info) MarshalJSON() ([]byte, error) {
+	type alias EC3Info
+	return json.Marshal(&struct {
+		alias
+		ChanMapHex string `json:"chan_map_hex,omitempty"`
+	}{
+		alias:      alias(e),
+		ChanMapHex: e.ChanMapHex(),
+	})
 }
 
 // SideDataDisplayMatrix holds the display transformation matrix side data
