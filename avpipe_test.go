@@ -2031,6 +2031,7 @@ func runMVHEVCMezAndABRBypass(t *testing.T, c mvhevcCase) {
 		Dcodec:            "hevc",
 		XcType:            goavpipe.XcVideo,
 		StreamId:          -1,
+		VideoLayout:       int32(goavpipe.VideoLayoutMVHEVC),
 		DebugFrameLevel:   debugFrameLevel,
 	}
 	setupOutDir(t, mezDir)

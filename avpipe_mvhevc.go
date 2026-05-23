@@ -98,6 +98,7 @@ func isFmp4VideoOutput(t goavpipe.AVType) bool {
 
 func maybeWrapMvhevcOutputHandler(outHandler goavpipe.OutputHandler, restoreMvhevc bool, outType goavpipe.AVType) goavpipe.OutputHandler {
 	if restoreMvhevc && isFmp4VideoOutput(outType) {
+		goavpipe.Log.Info("Installing MV-HEVC output wrapper", "out_type", outType.Name())
 		return wrapMvhevcOutputHandler(outHandler)
 	}
 	return outHandler
