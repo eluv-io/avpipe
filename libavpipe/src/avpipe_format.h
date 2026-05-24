@@ -105,3 +105,8 @@ void
 copy_source_color_to_output(
     coderctx_t *encoder_context,
     coderctx_t *decoder_context);
+
+void
+dash_synthesize_color_defaults(
+    xcparams_t *params,
+    AVCodecParameters *codecpar);
