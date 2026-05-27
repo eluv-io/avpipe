@@ -19,10 +19,22 @@
 
 #define MAX_VIDEO_BITRATE_KBPS 400000
 
+typedef struct apple_output_config {
+    char *out_file;
+    char *profile;
+    int bitrate_kbps;
+    int maxrate_kbps;
+    int width;
+    int height;
+    int level;
+    int bitdepth;
+} apple_output_config;
+
 typedef struct apple_params {
     const char *left_file;
     const char *right_file;
     const char *out_file;
+    const char *abr_profile_file;
     const char *crf;
     const char *preset;
     const char *tune;
@@ -44,8 +56,34 @@ typedef struct apple_params {
     int fps_num;
     int fps_den;
     int saw_x265_only;
+    int no_upscale;
     double duration_seconds;
+    double quality;
+    apple_output_config *outputs;
+    int output_count;
 } apple_params;
+
+@interface AppleOutputContext : NSObject
+@property(nonatomic, assign) apple_output_config *config;
+@property(nonatomic, strong) NSString *outPath;
+@property(nonatomic, strong) NSString *fileType;
+@property(nonatomic, strong) AVAssetWriter *writer;
+@property(nonatomic, strong) AVAssetWriterInput *writerInput;
+@property(nonatomic, strong) AVAssetWriterInputTaggedPixelBufferGroupAdaptor *adaptor;
+@property(nonatomic, assign) CVPixelBufferPoolRef pool;
+@property(nonatomic, assign) VTPixelTransferSessionRef transfer;
+@property(nonatomic, assign) int outWidth;
+@property(nonatomic, assign) int outHeight;
+@property(nonatomic, assign) int64_t frameCount;
+@end
+
+@implementation AppleOutputContext
+- (void)dealloc
+{
+    if (_transfer)
+        CFRelease(_transfer);
+}
+@end
 
 static void usage(const char *prog)
 {
@@ -63,6 +101,7 @@ static void usage(const char *prog)
         "  -crf <val>          Accepted for CLI compatibility; ignored\n"
         "  -bitrate <kbps>     Target average bitrate, max 400000 kbps\n"
         "  -maxrate <kbps>     Hard data-rate limit over 1 second\n"
+        "  -quality <0.0-1.0>  VideoToolbox compression quality hint\n"
         "  -bufsize <kbits>    Accepted for CLI compatibility; ignored\n"
         "  -w <pixels>         Output width\n"
         "  -h <pixels>         Output height (width auto-computed if -w omitted)\n"
@@ -80,6 +119,12 @@ static void usage(const char *prog)
         "  -duration <sec>     Encode at most this many seconds\n"
         "  -max-cll <val>      HDR MaxCLL/MaxFALL, e.g. \"1000,200\"\n"
         "  -master-display <v> HDR master display string\n"
+        "  -abr-profile <json> Encode all video rungs from an ABR profile\n"
+        "\n"
+        "With -abr-profile, <output.mov|mp4> is used as a base/template. If it\n"
+        "contains %%w, %%h, %%b, %%m, or %%n, those placeholders are expanded to\n"
+        "width, height, kbps, Mbps, and 1-based rung index. Otherwise the tool\n"
+        "adds _<width>x<height>@<Mbps> before the extension.\n"
         "\n",
         prog, prog);
 }
@@ -92,6 +137,7 @@ static void set_defaults(apple_params *p)
     p->bitdepth = 8;
     p->bframes = -1;
     p->scenecut = 40;
+    p->quality = -1.0;
 }
 
 static int parse_positive_double(const char *s, double *out)
@@ -103,6 +149,264 @@ static int parse_positive_double(const char *s, double *out)
     if (end == s || !end || *end != '\0' || !isfinite(v) || v <= 0.0)
         return -1;
     *out = v;
+    return 0;
+}
+
+static int parse_quality_double(const char *s, double *out)
+{
+    char *end = NULL;
+    double v = strtod(s, &end);
+    while (end && *end && isspace((unsigned char)*end))
+        end++;
+    if (end == s || !end || *end != '\0' || !isfinite(v) || v < 0.0 || v > 1.0)
+        return -1;
+    *out = v;
+    return 0;
+}
+
+static int parse_level_value(const char *s)
+{
+    if (!s || !*s)
+        return 0;
+    int major = 0;
+    int minor = 0;
+    if (sscanf(s, "%d.%d", &major, &minor) == 2)
+        return major * 10 + minor;
+    return atoi(s);
+}
+
+static int level_from_json(id value)
+{
+    if (!value || value == (id)kCFNull)
+        return 0;
+    if ([value isKindOfClass:[NSNumber class]])
+        return [(NSNumber *)value intValue];
+    if ([value isKindOfClass:[NSString class]])
+        return parse_level_value([(NSString *)value UTF8String]);
+    return 0;
+}
+
+static char *strdup_nsstring(NSString *s)
+{
+    if (!s)
+        return NULL;
+    return strdup(s.UTF8String);
+}
+
+static NSString *abr_output_path(NSString *base, const apple_output_config *cfg, int index)
+{
+    NSString *mbps = [NSString stringWithFormat:@"%.2f", (double)cfg->bitrate_kbps / 1000.0];
+    if ([base containsString:@"%w"] || [base containsString:@"%h"] ||
+        [base containsString:@"%b"] || [base containsString:@"%m"] ||
+        [base containsString:@"%n"]) {
+        NSString *out = [base copy];
+        out = [out stringByReplacingOccurrencesOfString:@"%w" withString:[NSString stringWithFormat:@"%d", cfg->width]];
+        out = [out stringByReplacingOccurrencesOfString:@"%h" withString:[NSString stringWithFormat:@"%d", cfg->height]];
+        out = [out stringByReplacingOccurrencesOfString:@"%b" withString:[NSString stringWithFormat:@"%d", cfg->bitrate_kbps]];
+        out = [out stringByReplacingOccurrencesOfString:@"%m" withString:mbps];
+        out = [out stringByReplacingOccurrencesOfString:@"%n" withString:[NSString stringWithFormat:@"%d", index + 1]];
+        return out;
+    }
+
+    NSString *ext = [base pathExtension];
+    NSString *stem = [base stringByDeletingPathExtension];
+    NSString *with_suffix = [stem stringByAppendingFormat:@"_%dx%d@%@", cfg->width, cfg->height, mbps];
+    if (ext.length > 0)
+        return [with_suffix stringByAppendingPathExtension:ext];
+    return with_suffix;
+}
+
+static int validate_output_config(const apple_params *p, const apple_output_config *cfg)
+{
+    if (cfg->bitdepth != 8 && cfg->bitdepth != 10) {
+        fprintf(stderr, "Invalid bitdepth %d, expected 8 or 10\n", cfg->bitdepth);
+        return -1;
+    }
+    if (cfg->bitrate_kbps > MAX_VIDEO_BITRATE_KBPS) {
+        fprintf(stderr, "Invalid bitrate %d kbps: maximum is %d kbps (400 Mbps)\n",
+                cfg->bitrate_kbps, MAX_VIDEO_BITRATE_KBPS);
+        return -1;
+    }
+    if (cfg->profile && !strcmp(cfg->profile, "main10") && cfg->bitdepth != 10) {
+        fprintf(stderr, "Profile main10 requires bitdepth 10 for the Apple encoder\n");
+        return -1;
+    }
+    if (p->hdr && cfg->bitdepth != 10) {
+        fprintf(stderr, "HDR output requires bitdepth 10 for the Apple encoder\n");
+        return -1;
+    }
+    return 0;
+}
+
+static int adjusted_bitrate_kbps(const apple_output_config *cfg)
+{
+    if (cfg->bitrate_kbps <= 0)
+        return 0;
+
+    int percent = 100;
+    if (cfg->bitrate_kbps > 35000) {
+        percent = 125;
+    } else if (cfg->bitrate_kbps > 25000) {
+        percent = 120;
+    } else if (cfg->bitrate_kbps > 10000) {
+        percent = 110;
+    }
+
+    int64_t adjusted = ((int64_t)cfg->bitrate_kbps * percent + 99) / 100;
+    if (cfg->maxrate_kbps > 0 && adjusted > cfg->maxrate_kbps)
+        adjusted = cfg->maxrate_kbps;
+    if (adjusted > MAX_VIDEO_BITRATE_KBPS)
+        adjusted = MAX_VIDEO_BITRATE_KBPS;
+    return (int)adjusted;
+}
+
+static void free_outputs(apple_params *p)
+{
+    if (!p->outputs)
+        return;
+    for (int i = 0; i < p->output_count; i++) {
+        free(p->outputs[i].out_file);
+        free(p->outputs[i].profile);
+    }
+    free(p->outputs);
+    p->outputs = NULL;
+    p->output_count = 0;
+}
+
+static int add_single_output(apple_params *p)
+{
+    p->output_count = 1;
+    p->outputs = (apple_output_config *)calloc(1, sizeof(apple_output_config));
+    if (!p->outputs) {
+        fprintf(stderr, "Out of memory\n");
+        return -1;
+    }
+    apple_output_config *cfg = &p->outputs[0];
+    cfg->out_file = strdup(p->out_file);
+    cfg->profile = p->profile ? strdup(p->profile) : NULL;
+    cfg->bitrate_kbps = p->bitrate_kbps;
+    cfg->maxrate_kbps = p->maxrate_kbps;
+    cfg->width = p->width;
+    cfg->height = p->height;
+    cfg->level = p->level;
+    cfg->bitdepth = p->bitdepth;
+    return validate_output_config(p, cfg);
+}
+
+static int load_abr_profile(apple_params *p)
+{
+    NSString *profile_path = [NSString stringWithUTF8String:p->abr_profile_file];
+    NSError *error = nil;
+    NSData *data = [NSData dataWithContentsOfFile:profile_path options:0 error:&error];
+    if (!data) {
+        fprintf(stderr, "Could not read ABR profile %s: %s\n",
+                p->abr_profile_file, error.localizedDescription.UTF8String);
+        return -1;
+    }
+
+    id root = [NSJSONSerialization JSONObjectWithData:data options:0 error:&error];
+    if (![root isKindOfClass:[NSDictionary class]]) {
+        fprintf(stderr, "ABR profile is not a JSON object: %s\n",
+                error.localizedDescription.UTF8String ?: "invalid JSON");
+        return -1;
+    }
+
+    NSDictionary *profile = (NSDictionary *)root;
+    id no_upscale = profile[@"no_upscale"];
+    if ([no_upscale respondsToSelector:@selector(boolValue)])
+        p->no_upscale = [no_upscale boolValue] ? 1 : 0;
+
+    NSDictionary *video_segment = nil;
+    id segment_specs = profile[@"segment_specs"];
+    if ([segment_specs isKindOfClass:[NSDictionary class]]) {
+        id video = [(NSDictionary *)segment_specs objectForKey:@"video"];
+        if ([video isKindOfClass:[NSDictionary class]])
+            video_segment = (NSDictionary *)video;
+    }
+    int bitdepth = p->bitdepth;
+    id bit_depth_value = video_segment[@"bit_depth"];
+    if ([bit_depth_value isKindOfClass:[NSNumber class]])
+        bitdepth = [(NSNumber *)bit_depth_value intValue];
+
+    NSMutableArray<NSDictionary *> *video_rungs = [NSMutableArray array];
+    id ladder_specs = profile[@"ladder_specs"];
+    if ([ladder_specs isKindOfClass:[NSDictionary class]]) {
+        for (id key in (NSDictionary *)ladder_specs) {
+            id ladder = [(NSDictionary *)ladder_specs objectForKey:key];
+            if (![ladder isKindOfClass:[NSDictionary class]])
+                continue;
+            id rung_specs = [(NSDictionary *)ladder objectForKey:@"rung_specs"];
+            if (![rung_specs isKindOfClass:[NSArray class]])
+                continue;
+            for (id rung in (NSArray *)rung_specs) {
+                if (![rung isKindOfClass:[NSDictionary class]])
+                    continue;
+                id media_type = [(NSDictionary *)rung objectForKey:@"media_type"];
+                if ([media_type isKindOfClass:[NSString class]] &&
+                    [(NSString *)media_type isEqualToString:@"video"]) {
+                    [video_rungs addObject:(NSDictionary *)rung];
+                }
+            }
+        }
+    }
+
+    if (video_rungs.count == 0) {
+        fprintf(stderr, "ABR profile contains no video rung_specs\n");
+        return -1;
+    }
+
+    [video_rungs sortUsingComparator:^NSComparisonResult(NSDictionary *a, NSDictionary *b) {
+        int ah = [a[@"height"] intValue];
+        int bh = [b[@"height"] intValue];
+        if (ah != bh)
+            return ah > bh ? NSOrderedAscending : NSOrderedDescending;
+        long long ab = [a[@"bit_rate"] longLongValue];
+        long long bb = [b[@"bit_rate"] longLongValue];
+        if (ab == bb)
+            return NSOrderedSame;
+        return ab > bb ? NSOrderedAscending : NSOrderedDescending;
+    }];
+
+    p->output_count = (int)video_rungs.count;
+    p->outputs = (apple_output_config *)calloc((size_t)p->output_count, sizeof(apple_output_config));
+    if (!p->outputs) {
+        fprintf(stderr, "Out of memory\n");
+        return -1;
+    }
+
+    NSString *base_output = [NSString stringWithUTF8String:p->out_file];
+    for (int i = 0; i < p->output_count; i++) {
+        NSDictionary *rung = video_rungs[(NSUInteger)i];
+        apple_output_config *cfg = &p->outputs[i];
+        long long bit_rate_bps = [rung[@"bit_rate"] longLongValue];
+        cfg->bitrate_kbps = (int)((bit_rate_bps + 999) / 1000);
+        cfg->maxrate_kbps = p->maxrate_kbps;
+        cfg->width = [rung[@"width"] intValue];
+        cfg->height = [rung[@"height"] intValue];
+        cfg->level = level_from_json(rung[@"level"]);
+        if (cfg->level == 0)
+            cfg->level = p->level;
+        cfg->bitdepth = bitdepth;
+
+        id rung_profile = rung[@"profile"];
+        if ([rung_profile isKindOfClass:[NSString class]]) {
+            cfg->profile = strdup([(NSString *)rung_profile UTF8String]);
+        } else if (p->profile) {
+            cfg->profile = strdup(p->profile);
+        }
+
+        NSString *out_path = abr_output_path(base_output, cfg, i);
+        cfg->out_file = strdup_nsstring(out_path);
+
+        if (cfg->bitrate_kbps <= 0 || cfg->width <= 0 || cfg->height <= 0) {
+            fprintf(stderr, "Invalid video rung in ABR profile: width=%d height=%d bitrate=%d kbps\n",
+                    cfg->width, cfg->height, cfg->bitrate_kbps);
+            return -1;
+        }
+        if (validate_output_config(p, cfg) < 0)
+            return -1;
+    }
+
     return 0;
 }
 
@@ -123,6 +427,12 @@ static int parse_args(int argc, char **argv, apple_params *p)
             p->bitrate_kbps = atoi(argv[argi++]);
         } else if (!strcmp(opt, "-maxrate") && argi < argc) {
             p->maxrate_kbps = atoi(argv[argi++]);
+        } else if (!strcmp(opt, "-quality") && argi < argc) {
+            if (parse_quality_double(argv[argi], &p->quality) < 0) {
+                fprintf(stderr, "Invalid quality '%s', expected a value from 0.0 to 1.0\n", argv[argi]);
+                return -1;
+            }
+            argi++;
         } else if (!strcmp(opt, "-bufsize") && argi < argc) {
             p->bufsize_kbits = atoi(argv[argi++]);
             p->saw_x265_only = 1;
@@ -143,7 +453,7 @@ static int parse_args(int argc, char **argv, apple_params *p)
         } else if (!strcmp(opt, "-profile") && argi < argc) {
             p->profile = argv[argi++];
         } else if (!strcmp(opt, "-level") && argi < argc) {
-            p->level = atoi(argv[argi++]);
+            p->level = parse_level_value(argv[argi++]);
             p->saw_x265_only = 1;
         } else if (!strcmp(opt, "-hightier")) {
             p->high_tier = 1;
@@ -161,6 +471,8 @@ static int parse_args(int argc, char **argv, apple_params *p)
                 return -1;
             }
             argi++;
+        } else if (!strcmp(opt, "-abr-profile") && argi < argc) {
+            p->abr_profile_file = argv[argi++];
         } else if (!strcmp(opt, "-max-cll") && argi < argc) {
             p->max_cll = argv[argi++];
         } else if (!strcmp(opt, "-master-display") && argi < argc) {
@@ -194,20 +506,9 @@ static int parse_args(int argc, char **argv, apple_params *p)
         fprintf(stderr, "Invalid bitdepth %d, expected 8 or 10\n", p->bitdepth);
         return -1;
     }
-    if (p->bitrate_kbps > MAX_VIDEO_BITRATE_KBPS) {
-        fprintf(stderr, "Invalid bitrate %d kbps: maximum is %d kbps (400 Mbps)\n",
-                p->bitrate_kbps, MAX_VIDEO_BITRATE_KBPS);
-        return -1;
-    }
-    if (p->profile && !strcmp(p->profile, "main10") && p->bitdepth != 10) {
-        fprintf(stderr, "Profile main10 requires -bitdepth 10 for the Apple encoder\n");
-        return -1;
-    }
-    if (p->hdr && p->bitdepth != 10) {
-        fprintf(stderr, "HDR output requires -bitdepth 10 for the Apple encoder\n");
-        return -1;
-    }
-    return 0;
+    if (p->abr_profile_file)
+        return load_abr_profile(p);
+    return add_single_output(p);
 }
 
 static void put_be16(uint8_t *dst, uint16_t v)
@@ -362,6 +663,165 @@ static CMTaggedBufferGroupRef create_tagged_group(CVPixelBufferRef left, CVPixel
     return group;
 }
 
+static NSString *profile_level_for_output(const apple_output_config *cfg)
+{
+    return cfg->bitdepth == 10 || (cfg->profile && !strcmp(cfg->profile, "main10")) ?
+        (__bridge NSString *)kVTProfileLevel_HEVC_Main10_AutoLevel :
+        (__bridge NSString *)kVTProfileLevel_HEVC_Main_AutoLevel;
+}
+
+static BOOL compute_output_size(const apple_output_config *cfg,
+                                int src_w,
+                                int src_h,
+                                int *out_w,
+                                int *out_h)
+{
+    int w = cfg->width;
+    int h = cfg->height;
+    if (w <= 0 && h <= 0) {
+        w = src_w;
+        h = src_h;
+    } else if (w > 0 && h <= 0) {
+        h = (int)llround((double)w * (double)src_h / (double)src_w);
+    } else if (h > 0 && w <= 0) {
+        w = (int)llround((double)h * (double)src_w / (double)src_h);
+    }
+    if ((w & 1) || (h & 1)) {
+        fprintf(stderr, "Output dimensions must be even for 4:2:0 HEVC (got %dx%d)\n", w, h);
+        return NO;
+    }
+    *out_w = w;
+    *out_h = h;
+    return YES;
+}
+
+static AppleOutputContext *create_output_context(const apple_params *p,
+                                                 apple_output_config *cfg,
+                                                 int src_w,
+                                                 int src_h)
+{
+    AppleOutputContext *ctx = [[AppleOutputContext alloc] init];
+    ctx.config = cfg;
+    ctx.outPath = [NSString stringWithUTF8String:cfg->out_file];
+    ctx.fileType = file_type_for_output(ctx.outPath);
+
+    int out_w = 0;
+    int out_h = 0;
+    if (!compute_output_size(cfg, src_w, src_h, &out_w, &out_h))
+        return nil;
+    ctx.outWidth = out_w;
+    ctx.outHeight = out_h;
+
+    NSURL *out_url = [NSURL fileURLWithPath:ctx.outPath];
+    [[NSFileManager defaultManager] removeItemAtURL:out_url error:nil];
+
+    NSError *error = nil;
+    ctx.writer = [[AVAssetWriter alloc] initWithURL:out_url fileType:ctx.fileType error:&error];
+    if (!ctx.writer) {
+        fprintf(stderr, "Could not create writer for %s: %s\n",
+                cfg->out_file, error.localizedDescription.UTF8String);
+        return nil;
+    }
+
+    NSMutableDictionary *compression = [NSMutableDictionary dictionary];
+    compression[(__bridge NSString *)kVTCompressionPropertyKey_MVHEVCVideoLayerIDs] = @[@0, @1];
+    compression[(__bridge NSString *)kVTCompressionPropertyKey_MVHEVCViewIDs] = @[@0, @1];
+    compression[(__bridge NSString *)kVTCompressionPropertyKey_MVHEVCLeftAndRightViewIDs] = @[@0, @1];
+    compression[(__bridge NSString *)kVTCompressionPropertyKey_HasLeftStereoEyeView] = @YES;
+    compression[(__bridge NSString *)kVTCompressionPropertyKey_HasRightStereoEyeView] = @YES;
+    compression[AVVideoProfileLevelKey] = profile_level_for_output(cfg);
+
+    int encoder_bitrate_kbps = adjusted_bitrate_kbps(cfg);
+    if (encoder_bitrate_kbps > 0)
+        compression[(__bridge NSString *)kVTCompressionPropertyKey_AverageBitRate] = @((int64_t)encoder_bitrate_kbps * 1000);
+    if (cfg->maxrate_kbps > 0)
+        compression[(__bridge NSString *)kVTCompressionPropertyKey_DataRateLimits] = @[@((cfg->maxrate_kbps * 1000) / 8), @1];
+    if (p->quality >= 0.0)
+        compression[(__bridge NSString *)kVTCompressionPropertyKey_Quality] = @(p->quality);
+    if (p->keyint > 0)
+        compression[(__bridge NSString *)kVTCompressionPropertyKey_MaxKeyFrameInterval] = @(p->keyint);
+    if (p->bframes >= 0)
+        compression[(__bridge NSString *)kVTCompressionPropertyKey_AllowFrameReordering] = p->bframes == 0 ? @NO : @YES;
+    if (p->fps_num > 0 && p->fps_den > 0)
+        compression[(__bridge NSString *)kVTCompressionPropertyKey_ExpectedFrameRate] = @((double)p->fps_num / (double)p->fps_den);
+
+    NSMutableDictionary *output_settings = [@{
+        AVVideoCodecKey: AVVideoCodecTypeHEVC,
+        AVVideoWidthKey: @(ctx.outWidth),
+        AVVideoHeightKey: @(ctx.outHeight),
+        AVVideoCompressionPropertiesKey: compression,
+    } mutableCopy];
+
+    if (p->hdr) {
+        NSDictionary *color_props = @{
+            AVVideoColorPrimariesKey: AVVideoColorPrimaries_ITU_R_2020,
+            AVVideoTransferFunctionKey: AVVideoTransferFunction_SMPTE_ST_2084_PQ,
+            AVVideoYCbCrMatrixKey: AVVideoYCbCrMatrix_ITU_R_2020,
+        };
+        output_settings[AVVideoColorPropertiesKey] = color_props;
+        compression[(__bridge NSString *)kVTCompressionPropertyKey_ColorPrimaries] =
+            (__bridge NSString *)kCMFormatDescriptionColorPrimaries_ITU_R_2020;
+        compression[(__bridge NSString *)kVTCompressionPropertyKey_TransferFunction] =
+            (__bridge NSString *)kCMFormatDescriptionTransferFunction_SMPTE_ST_2084_PQ;
+        compression[(__bridge NSString *)kVTCompressionPropertyKey_YCbCrMatrix] =
+            (__bridge NSString *)kCMFormatDescriptionYCbCrMatrix_ITU_R_2020;
+        compression[(__bridge NSString *)kVTCompressionPropertyKey_HDRMetadataInsertionMode] =
+            (__bridge NSString *)kVTHDRMetadataInsertionMode_Auto;
+
+        NSData *mdcv = master_display_data(p->master_display);
+        NSData *clli = content_light_data(p->max_cll);
+        if (mdcv)
+            compression[(__bridge NSString *)kVTCompressionPropertyKey_MasteringDisplayColorVolume] = mdcv;
+        if (clli)
+            compression[(__bridge NSString *)kVTCompressionPropertyKey_ContentLightLevelInfo] = clli;
+    }
+
+    if (![ctx.writer canApplyOutputSettings:output_settings forMediaType:AVMediaTypeVideo]) {
+        fprintf(stderr, "Writer cannot apply requested MV-HEVC output settings for %s\n", cfg->out_file);
+        return nil;
+    }
+
+    ctx.writerInput = [[AVAssetWriterInput alloc] initWithMediaType:AVMediaTypeVideo outputSettings:output_settings];
+    ctx.writerInput.expectsMediaDataInRealTime = NO;
+
+    OSType writer_pixel_format = cfg->bitdepth == 10 ?
+        kCVPixelFormatType_420YpCbCr10BiPlanarVideoRange :
+        kCVPixelFormatType_420YpCbCr8BiPlanarVideoRange;
+    NSDictionary *source_attrs = @{
+        (__bridge NSString *)kCVPixelBufferPixelFormatTypeKey: @(writer_pixel_format),
+        (__bridge NSString *)kCVPixelBufferWidthKey: @(ctx.outWidth),
+        (__bridge NSString *)kCVPixelBufferHeightKey: @(ctx.outHeight),
+        (__bridge NSString *)kCVPixelBufferIOSurfacePropertiesKey: @{},
+    };
+    ctx.adaptor = [[AVAssetWriterInputTaggedPixelBufferGroupAdaptor alloc] initWithAssetWriterInput:ctx.writerInput
+                                                                        sourcePixelBufferAttributes:source_attrs];
+
+    if (![ctx.writer canAddInput:ctx.writerInput]) {
+        fprintf(stderr, "Could not add writer input for %s\n", cfg->out_file);
+        return nil;
+    }
+    [ctx.writer addInput:ctx.writerInput];
+
+    VTPixelTransferSessionRef transfer = NULL;
+    OSStatus st = VTPixelTransferSessionCreate(kCFAllocatorDefault, &transfer);
+    if (st != noErr) {
+        fprintf(stderr, "VTPixelTransferSessionCreate failed for %s: %d\n", cfg->out_file, (int)st);
+        return nil;
+    }
+    ctx.transfer = transfer;
+    VTSessionSetProperty(ctx.transfer, kVTPixelTransferPropertyKey_ScalingMode, kVTScalingMode_Normal);
+    if (p->hdr) {
+        VTSessionSetProperty(ctx.transfer, kVTPixelTransferPropertyKey_DestinationColorPrimaries,
+                             kCMFormatDescriptionColorPrimaries_ITU_R_2020);
+        VTSessionSetProperty(ctx.transfer, kVTPixelTransferPropertyKey_DestinationTransferFunction,
+                             kCMFormatDescriptionTransferFunction_SMPTE_ST_2084_PQ);
+        VTSessionSetProperty(ctx.transfer, kVTPixelTransferPropertyKey_DestinationYCbCrMatrix,
+                             kCMFormatDescriptionYCbCrMatrix_ITU_R_2020);
+    }
+
+    return ctx;
+}
+
 static int encode_apple(const apple_params *p)
 {
     if (@available(macOS 14.0, *)) {
@@ -376,10 +836,8 @@ static int encode_apple(const apple_params *p)
 
     NSString *left_path = [NSString stringWithUTF8String:p->left_file];
     NSString *right_path = [NSString stringWithUTF8String:p->right_file];
-    NSString *out_path = [NSString stringWithUTF8String:p->out_file];
     NSURL *left_url = [NSURL fileURLWithPath:left_path];
     NSURL *right_url = [NSURL fileURLWithPath:right_path];
-    NSURL *out_url = [NSURL fileURLWithPath:out_path];
 
     AVURLAsset *left_asset = [AVURLAsset URLAssetWithURL:left_url options:nil];
     AVURLAsset *right_asset = [AVURLAsset URLAssetWithURL:right_url options:nil];
@@ -406,25 +864,12 @@ static int encode_apple(const apple_params *p)
         return 1;
     }
 
-    int out_w = p->width;
-    int out_h = p->height;
-    if (out_w <= 0 && out_h <= 0) {
-        out_w = src_w;
-        out_h = src_h;
-    } else if (out_w > 0 && out_h <= 0) {
-        out_h = (int)llround((double)out_w * (double)src_h / (double)src_w);
-    } else if (out_h > 0 && out_w <= 0) {
-        out_w = (int)llround((double)out_h * (double)src_w / (double)src_h);
+    int reader_bitdepth = 8;
+    for (int i = 0; i < p->output_count; i++) {
+        if (p->outputs[i].bitdepth > reader_bitdepth)
+            reader_bitdepth = p->outputs[i].bitdepth;
     }
-    if ((out_w & 1) || (out_h & 1)) {
-        fprintf(stderr, "Output dimensions must be even for 4:2:0 HEVC (got %dx%d)\n", out_w, out_h);
-        return 1;
-    }
-
-    OSType writer_pixel_format = p->bitdepth == 10 ?
-        kCVPixelFormatType_420YpCbCr10BiPlanarVideoRange :
-        kCVPixelFormatType_420YpCbCr8BiPlanarVideoRange;
-    OSType reader_pixel_format = p->bitdepth == 10 ?
+    OSType reader_pixel_format = reader_bitdepth == 10 ?
         kCVPixelFormatType_422YpCbCr10 :
         kCVPixelFormatType_32BGRA;
 
@@ -458,91 +903,24 @@ static int encode_apple(const apple_params *p)
     [left_reader addOutput:left_output];
     [right_reader addOutput:right_output];
 
-    [[NSFileManager defaultManager] removeItemAtURL:out_url error:nil];
-    NSString *file_type = file_type_for_output(out_path);
-    AVAssetWriter *writer = [[AVAssetWriter alloc] initWithURL:out_url fileType:file_type error:&error];
-    if (!writer) {
-        fprintf(stderr, "Could not create writer: %s\n", error.localizedDescription.UTF8String);
+    NSMutableArray<AppleOutputContext *> *outputs = [NSMutableArray arrayWithCapacity:(NSUInteger)p->output_count];
+    for (int i = 0; i < p->output_count; i++) {
+        if (p->no_upscale &&
+            ((p->outputs[i].width > 0 && p->outputs[i].width > src_w) ||
+             (p->outputs[i].height > 0 && p->outputs[i].height > src_h))) {
+            fprintf(stderr, "Skipping ABR rung above source size due to no_upscale: %dx%d -> %s\n",
+                    p->outputs[i].width, p->outputs[i].height, p->outputs[i].out_file);
+            continue;
+        }
+        AppleOutputContext *ctx = create_output_context(p, &p->outputs[i], src_w, src_h);
+        if (!ctx)
+            return 1;
+        [outputs addObject:ctx];
+    }
+    if (outputs.count == 0) {
+        fprintf(stderr, "No output rungs remain after applying ABR profile constraints\n");
         return 1;
     }
-
-    NSMutableDictionary *compression = [NSMutableDictionary dictionary];
-    compression[(__bridge NSString *)kVTCompressionPropertyKey_MVHEVCVideoLayerIDs] = @[@0, @1];
-    compression[(__bridge NSString *)kVTCompressionPropertyKey_MVHEVCViewIDs] = @[@0, @1];
-    compression[(__bridge NSString *)kVTCompressionPropertyKey_MVHEVCLeftAndRightViewIDs] = @[@0, @1];
-    compression[(__bridge NSString *)kVTCompressionPropertyKey_HasLeftStereoEyeView] = @YES;
-    compression[(__bridge NSString *)kVTCompressionPropertyKey_HasRightStereoEyeView] = @YES;
-    compression[AVVideoProfileLevelKey] =
-        p->bitdepth == 10 || (p->profile && !strcmp(p->profile, "main10")) ?
-        (__bridge NSString *)kVTProfileLevel_HEVC_Main10_AutoLevel :
-        (__bridge NSString *)kVTProfileLevel_HEVC_Main_AutoLevel;
-
-    if (p->bitrate_kbps > 0)
-        compression[(__bridge NSString *)kVTCompressionPropertyKey_AverageBitRate] = @(p->bitrate_kbps * 1000);
-    if (p->maxrate_kbps > 0)
-        compression[(__bridge NSString *)kVTCompressionPropertyKey_DataRateLimits] = @[@((p->maxrate_kbps * 1000) / 8), @1];
-    if (p->keyint > 0)
-        compression[(__bridge NSString *)kVTCompressionPropertyKey_MaxKeyFrameInterval] = @(p->keyint);
-    if (p->bframes >= 0)
-        compression[(__bridge NSString *)kVTCompressionPropertyKey_AllowFrameReordering] = p->bframes == 0 ? @NO : @YES;
-    if (p->fps_num > 0 && p->fps_den > 0)
-        compression[(__bridge NSString *)kVTCompressionPropertyKey_ExpectedFrameRate] = @((double)p->fps_num / (double)p->fps_den);
-
-    NSMutableDictionary *output_settings = [@{
-        AVVideoCodecKey: AVVideoCodecTypeHEVC,
-        AVVideoWidthKey: @(out_w),
-        AVVideoHeightKey: @(out_h),
-        AVVideoCompressionPropertiesKey: compression,
-    } mutableCopy];
-
-    if (p->hdr) {
-        NSDictionary *color_props = @{
-            AVVideoColorPrimariesKey: AVVideoColorPrimaries_ITU_R_2020,
-            AVVideoTransferFunctionKey: AVVideoTransferFunction_SMPTE_ST_2084_PQ,
-            AVVideoYCbCrMatrixKey: AVVideoYCbCrMatrix_ITU_R_2020,
-        };
-        output_settings[AVVideoColorPropertiesKey] = color_props;
-        compression[(__bridge NSString *)kVTCompressionPropertyKey_ColorPrimaries] =
-            (__bridge NSString *)kCMFormatDescriptionColorPrimaries_ITU_R_2020;
-        compression[(__bridge NSString *)kVTCompressionPropertyKey_TransferFunction] =
-            (__bridge NSString *)kCMFormatDescriptionTransferFunction_SMPTE_ST_2084_PQ;
-        compression[(__bridge NSString *)kVTCompressionPropertyKey_YCbCrMatrix] =
-            (__bridge NSString *)kCMFormatDescriptionYCbCrMatrix_ITU_R_2020;
-        compression[(__bridge NSString *)kVTCompressionPropertyKey_HDRMetadataInsertionMode] =
-            (__bridge NSString *)kVTHDRMetadataInsertionMode_Auto;
-
-        NSData *mdcv = master_display_data(p->master_display);
-        NSData *clli = content_light_data(p->max_cll);
-        if (mdcv)
-            compression[(__bridge NSString *)kVTCompressionPropertyKey_MasteringDisplayColorVolume] = mdcv;
-        if (clli)
-            compression[(__bridge NSString *)kVTCompressionPropertyKey_ContentLightLevelInfo] = clli;
-    }
-
-    if (![writer canApplyOutputSettings:output_settings forMediaType:AVMediaTypeVideo]) {
-        fprintf(stderr, "Writer cannot apply requested MV-HEVC output settings\n");
-        return 1;
-    }
-
-    AVAssetWriterInput *writer_input =
-        [[AVAssetWriterInput alloc] initWithMediaType:AVMediaTypeVideo outputSettings:output_settings];
-    writer_input.expectsMediaDataInRealTime = NO;
-
-    NSDictionary *source_attrs = @{
-        (__bridge NSString *)kCVPixelBufferPixelFormatTypeKey: @(writer_pixel_format),
-        (__bridge NSString *)kCVPixelBufferWidthKey: @(out_w),
-        (__bridge NSString *)kCVPixelBufferHeightKey: @(out_h),
-        (__bridge NSString *)kCVPixelBufferIOSurfacePropertiesKey: @{},
-    };
-    AVAssetWriterInputTaggedPixelBufferGroupAdaptor *adaptor =
-        [[AVAssetWriterInputTaggedPixelBufferGroupAdaptor alloc] initWithAssetWriterInput:writer_input
-                                                             sourcePixelBufferAttributes:source_attrs];
-
-    if (![writer canAddInput:writer_input]) {
-        fprintf(stderr, "Could not add writer input\n");
-        return 1;
-    }
-    [writer addInput:writer_input];
 
     if (![left_reader startReading] || ![right_reader startReading]) {
         fprintf(stderr, "Could not start readers: left=%s right=%s\n",
@@ -550,46 +928,46 @@ static int encode_apple(const apple_params *p)
                 right_reader.error.localizedDescription.UTF8String ?: "ok");
         return 1;
     }
-    if (![writer startWriting]) {
-        fprintf(stderr, "Could not start writer: %s\n", writer.error.localizedDescription.UTF8String);
-        return 1;
-    }
-    [writer startSessionAtSourceTime:kCMTimeZero];
-
-    CVPixelBufferPoolRef pool = adaptor.pixelBufferPool;
-    if (!pool) {
-        fprintf(stderr, "Writer adaptor did not provide a pixel buffer pool\n");
-        return 1;
-    }
-
-    VTPixelTransferSessionRef transfer = NULL;
-    OSStatus st = VTPixelTransferSessionCreate(kCFAllocatorDefault, &transfer);
-    if (st != noErr) {
-        fprintf(stderr, "VTPixelTransferSessionCreate failed: %d\n", (int)st);
-        return 1;
-    }
-    VTSessionSetProperty(transfer, kVTPixelTransferPropertyKey_ScalingMode, kVTScalingMode_Normal);
-    if (p->hdr) {
-        VTSessionSetProperty(transfer, kVTPixelTransferPropertyKey_DestinationColorPrimaries,
-                             kCMFormatDescriptionColorPrimaries_ITU_R_2020);
-        VTSessionSetProperty(transfer, kVTPixelTransferPropertyKey_DestinationTransferFunction,
-                             kCMFormatDescriptionTransferFunction_SMPTE_ST_2084_PQ);
-        VTSessionSetProperty(transfer, kVTPixelTransferPropertyKey_DestinationYCbCrMatrix,
-                             kCMFormatDescriptionYCbCrMatrix_ITU_R_2020);
+    for (AppleOutputContext *ctx in outputs) {
+        if (![ctx.writer startWriting]) {
+            fprintf(stderr, "Could not start writer for %s: %s\n",
+                    ctx.config->out_file, ctx.writer.error.localizedDescription.UTF8String);
+            return 1;
+        }
+        [ctx.writer startSessionAtSourceTime:kCMTimeZero];
+        ctx.pool = ctx.adaptor.pixelBufferPool;
+        if (!ctx.pool) {
+            fprintf(stderr, "Writer adaptor did not provide a pixel buffer pool for %s\n",
+                    ctx.config->out_file);
+            return 1;
+        }
     }
 
     fprintf(stderr, "Apple MV-HEVC encoder configuration:\n");
     fprintf(stderr, "  Input:       %dx%d\n", src_w, src_h);
-    fprintf(stderr, "  Output:      %dx%d %s\n", out_w, out_h, file_type.UTF8String);
-    fprintf(stderr, "  Bit depth:   %d\n", p->bitdepth);
+    fprintf(stderr, "  Outputs:     %lu\n", (unsigned long)outputs.count);
+    for (AppleOutputContext *ctx in outputs) {
+        int encoder_bitrate_kbps = adjusted_bitrate_kbps(ctx.config);
+        fprintf(stderr, "    %dx%d %s requested=%d kbps adjusted=%d kbps bitdepth=%d profile=%s level=%d -> %s\n",
+                ctx.outWidth, ctx.outHeight, ctx.fileType.UTF8String,
+                ctx.config->bitrate_kbps, encoder_bitrate_kbps,
+                ctx.config->bitdepth,
+                ctx.config->profile ? ctx.config->profile : "(auto)",
+                ctx.config->level,
+                ctx.config->out_file);
+    }
     if (p->fps_num > 0)
         fprintf(stderr, "  FPS:         %d/%d\n", p->fps_num, p->fps_den);
-    if (p->bitrate_kbps > 0)
-        fprintf(stderr, "  Bitrate:     %d kbps\n", p->bitrate_kbps);
     if (p->duration_seconds > 0.0)
         fprintf(stderr, "  Duration:    %.3f seconds\n", p->duration_seconds);
+    if (p->quality >= 0.0)
+        fprintf(stderr, "  Quality:     %.3f\n", p->quality);
     if (p->hdr)
         fprintf(stderr, "  HDR10:       BT.2020/PQ + optional MDCV/CLLI\n");
+    if (p->abr_profile_file)
+        fprintf(stderr, "  ABR profile: %s\n", p->abr_profile_file);
+    if (p->no_upscale)
+        fprintf(stderr, "  No upscale:  true\n");
     if (p->saw_x265_only)
         fprintf(stderr, "  Note:        x265-only options were accepted but ignored by the Apple encoder\n");
 
@@ -601,12 +979,6 @@ static int encode_apple(const apple_params *p)
     BOOL ok = YES;
 
     for (;;) {
-        if (!wait_until_ready(writer_input, writer)) {
-            fprintf(stderr, "Writer failed while waiting: %s\n", writer.error.localizedDescription.UTF8String);
-            ok = NO;
-            break;
-        }
-
         CMSampleBufferRef left_sample = [left_output copyNextSampleBuffer];
         CMSampleBufferRef right_sample = [right_output copyNextSampleBuffer];
         if (!left_sample && !right_sample)
@@ -649,76 +1021,93 @@ static int encode_apple(const apple_params *p)
             break;
         }
 
-        CVPixelBufferRef left_dst = NULL;
-        CVPixelBufferRef right_dst = NULL;
-        if (!copy_to_pool(pool, transfer, left_src, p->hdr, &left_dst) ||
-            !copy_to_pool(pool, transfer, right_src, p->hdr, &right_dst)) {
-            if (left_dst)
-                CVPixelBufferRelease(left_dst);
-            if (right_dst)
-                CVPixelBufferRelease(right_dst);
-            CFRelease(left_sample);
-            CFRelease(right_sample);
-            ok = NO;
-            break;
-        }
+        for (AppleOutputContext *ctx in outputs) {
+            if (!wait_until_ready(ctx.writerInput, ctx.writer)) {
+                fprintf(stderr, "Writer failed while waiting for %s: %s\n",
+                        ctx.config->out_file,
+                        ctx.writer.error.localizedDescription.UTF8String ?: "unknown writer error");
+                ok = NO;
+                break;
+            }
 
-        CMTaggedBufferGroupRef group = create_tagged_group(left_dst, right_dst);
-        if (!group) {
+            CVPixelBufferRef left_dst = NULL;
+            CVPixelBufferRef right_dst = NULL;
+            if (!copy_to_pool(ctx.pool, ctx.transfer, left_src, p->hdr, &left_dst) ||
+                !copy_to_pool(ctx.pool, ctx.transfer, right_src, p->hdr, &right_dst)) {
+                if (left_dst)
+                    CVPixelBufferRelease(left_dst);
+                if (right_dst)
+                    CVPixelBufferRelease(right_dst);
+                ok = NO;
+                break;
+            }
+
+            CMTaggedBufferGroupRef group = create_tagged_group(left_dst, right_dst);
+            if (!group) {
+                CVPixelBufferRelease(left_dst);
+                CVPixelBufferRelease(right_dst);
+                ok = NO;
+                break;
+            }
+
+            BOOL appended = [ctx.adaptor appendTaggedPixelBufferGroup:group withPresentationTime:pts];
+            CFRelease(group);
             CVPixelBufferRelease(left_dst);
             CVPixelBufferRelease(right_dst);
-            CFRelease(left_sample);
-            CFRelease(right_sample);
-            ok = NO;
-            break;
+
+            if (!appended) {
+                fprintf(stderr, "appendTaggedPixelBufferGroup failed for %s: %s\n",
+                        ctx.config->out_file,
+                        ctx.writer.error.localizedDescription.UTF8String ?: "unknown writer error");
+                ok = NO;
+                break;
+            }
+            ctx.frameCount++;
         }
 
-        BOOL appended = [adaptor appendTaggedPixelBufferGroup:group withPresentationTime:pts];
-        CFRelease(group);
-        CVPixelBufferRelease(left_dst);
-        CVPixelBufferRelease(right_dst);
         CFRelease(left_sample);
         CFRelease(right_sample);
-
-        if (!appended) {
-            fprintf(stderr, "appendTaggedPixelBufferGroup failed: %s\n",
-                    writer.error.localizedDescription.UTF8String ?: "unknown writer error");
-            ok = NO;
+        if (!ok)
             break;
-        }
 
         frame_count++;
         if (frame_count % 100 == 0)
-            fprintf(stderr, "Encoded %lld frames\n", (long long)frame_count);
+            fprintf(stderr, "Encoded %lld source frames across %lu outputs\n",
+                    (long long)frame_count, (unsigned long)outputs.count);
     }
 
-    if (transfer)
-        CFRelease(transfer);
-
-    [writer_input markAsFinished];
+    for (AppleOutputContext *ctx in outputs)
+        [ctx.writerInput markAsFinished];
     if (!ok) {
-        [writer cancelWriting];
+        for (AppleOutputContext *ctx in outputs)
+            [ctx.writer cancelWriting];
         return 1;
     }
 
-    __block BOOL finished = NO;
-    __block BOOL finish_ok = NO;
-    dispatch_semaphore_t sem = dispatch_semaphore_create(0);
-    [writer finishWritingWithCompletionHandler:^{
-        finish_ok = writer.status == AVAssetWriterStatusCompleted;
-        finished = YES;
-        dispatch_semaphore_signal(sem);
-    }];
-    dispatch_semaphore_wait(sem, DISPATCH_TIME_FOREVER);
+    for (AppleOutputContext *ctx in outputs) {
+        __block BOOL finished = NO;
+        __block BOOL finish_ok = NO;
+        dispatch_semaphore_t sem = dispatch_semaphore_create(0);
+        AVAssetWriter *writer = ctx.writer;
+        [writer finishWritingWithCompletionHandler:^{
+            finish_ok = writer.status == AVAssetWriterStatusCompleted;
+            finished = YES;
+            dispatch_semaphore_signal(sem);
+        }];
+        dispatch_semaphore_wait(sem, DISPATCH_TIME_FOREVER);
 
-    if (!finished || !finish_ok) {
-        fprintf(stderr, "finishWriting failed: %s\n",
-                writer.error.localizedDescription.UTF8String ?: "unknown writer error");
-        return 1;
+        if (!finished || !finish_ok) {
+            fprintf(stderr, "finishWriting failed for %s: %s\n",
+                    ctx.config->out_file,
+                    writer.error.localizedDescription.UTF8String ?: "unknown writer error");
+            return 1;
+        }
     }
 
-    fprintf(stderr, "Encoded %lld frames\n", (long long)frame_count);
-    fprintf(stderr, "Output: %s\n", p->out_file);
+    fprintf(stderr, "Encoded %lld source frames\n", (long long)frame_count);
+    for (AppleOutputContext *ctx in outputs)
+        fprintf(stderr, "Output: %s (%lld frames)\n",
+                ctx.config->out_file, (long long)ctx.frameCount);
     return 0;
 }
 
@@ -733,16 +1122,20 @@ int main(int argc, char **argv)
         apple_params params;
         if (parse_args(argc, argv, &params) < 0) {
             usage(argv[0]);
+            free_outputs(&params);
             return 1;
         }
 
+        int rc = 1;
         @try {
-            return encode_apple(&params);
+            rc = encode_apple(&params);
         } @catch (NSException *exception) {
             fprintf(stderr, "Objective-C exception: %s: %s\n",
                     exception.name.UTF8String,
                     exception.reason.UTF8String ?: "");
-            return 1;
+            rc = 1;
         }
+        free_outputs(&params);
+        return rc;
     }
 }

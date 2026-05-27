@@ -51,6 +51,7 @@ Important: libx264 only supports 8bit MV-HEVC (for 10 bit we use the Apple toolk
   -bframes 0 \
   -fps 24/1 \
   -w 2560 -h 1440  -bitrate 8500 \
+  -quality 0.75 \
   -duration 30.0 \
   left_eye_hdr.mov \
   right_eye_hdr.mov \
@@ -61,6 +62,37 @@ The Apple encoder accepts the same options as `mvhevc_encoder`, but x265-only
 options such as `-crf`, `-preset`, `-tune`, `-level`, `-hightier`, `-bufsize`,
 and `-scenecut` are currently accepted for compatibility and ignored.
 Use `-duration <seconds>` to encode only the first portion of the source.
+Use `-quality <0.0-1.0>` to pass a VideoToolbox compression quality hint; it is
+optional and defaults to VideoToolbox's native behavior.
+For `mvhevc_apple`, requested bitrates above 10 Mbps are automatically adjusted
+up before being passed to VideoToolbox: +10% above 10 Mbps, +20% above 25 Mbps,
+and +25% above 35 Mbps. If `-maxrate` is set, the adjusted bitrate is capped to
+that value.
+
+To encode every video rung from an ABR profile in one pass, add
+`-abr-profile`. The profile supplies each rung's bitrate, width, height,
+profile, and level; `segment_specs.video.bit_depth` supplies bit depth.
+
+```bash
+./bin/mvhevc_apple \
+  -abr-profile /Users/serban/ELV/CODE/elv-utils-js/abr/abr_mv_hevc_hdr_25-30.json \
+  -hdr \
+  -master-display "G(8500,39850)B(6550,2300)R(35400,14600)WP(15635,16450)L(10000000,10)" \
+  -max-cll "0,0" \
+  -keyint 48 \
+  -bframes 0 \
+  -fps 24000/1001 \
+  -duration 67 \
+  left_eye_hdr.mov \
+  right_eye_hdr.mov \
+  output_mvhevc_hdr.mov
+```
+
+This produces one output per video rung using the output argument as a base,
+for example `output_mvhevc_hdr_2560x1440@11.50.mov`. If the profile has
+`no_upscale: true`, rungs larger than the source are skipped. The output
+argument may also use `%w`, `%h`, `%b`, `%m`, and `%n` placeholders for width,
+height, kbps, Mbps, and rung index.
 
 Always 'fix' the output of the Apple encoder:
 
