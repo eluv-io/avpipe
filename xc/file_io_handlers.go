@@ -64,9 +64,6 @@ type fileInput struct {
 
 func (i *fileInput) Read(buf []byte) (int, error) {
 	n, err := i.file.Read(buf)
-	if err == io.EOF {
-		return 0, nil
-	}
 	if i.errorOnRead {
 		return -1, io.ErrNoProgress
 	}

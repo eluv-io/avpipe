@@ -189,6 +189,9 @@ func AVPipeReadInput(fd C.int64_t, buf *C.uint8_t, sz C.int) C.int {
 	}
 
 	if err != nil {
+		if err == io.EOF {
+			return C.int(n)
+		}
 		return C.int(-1)
 	}
 
