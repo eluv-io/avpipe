@@ -99,7 +99,7 @@ func TestExtractCodecInfo(t *testing.T) {
 	})
 
 	t.Run("MV-HEVC SDR", func(t *testing.T) {
-		f, err := os.ReadFile("../media/freeguy_mvhevc_4k.mp4")
+		f, err := os.ReadFile("../media/sample_mvhevc_4k.mp4")
 		require.NoError(t, err)
 		infos, err := ExtractCodecInfo(bytes.NewReader(f))
 		require.NoError(t, err)

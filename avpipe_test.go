@@ -975,7 +975,7 @@ func TestAudio2MonoTo1Stereo(t *testing.T) {
 }
 
 func TestAudio2MonoUnknownLayoutToStereo(t *testing.T) {
-	url := "./media/hales-episode-10_audio_35s.mov"
+	url := "./media/sample_episode_pcm_audio_35s.mov"
 	checkFileExists(t, url)
 
 	outputDir := path.Join(baseOutPath, fn())
@@ -1231,7 +1231,7 @@ func TestAudio6MonoUnequalChannelLayoutsTo5_1(t *testing.T) {
 }
 
 func TestAudio6MonoMovPcmTo5_1(t *testing.T) {
-	url := "./media/Black_Panther_Fr_5_1_audio_35s.mov"
+	url := "./media/sample_6mono_fr_5_1_audio_35s.mov"
 	checkFileExists(t, url)
 
 	outputDir := path.Join(baseOutPath, fn())
@@ -1969,7 +1969,7 @@ type mvhevcCase struct {
 func TestMVHEVC_MezAndABRBypass(t *testing.T) {
 	cases := map[string]mvhevcCase{
 		"SDR_4K": {
-			src:                  "./media/freeguy_mvhevc_4k.mp4",
+			src:                  "./media/sample_mvhevc_4k.mp4",
 			width:                3840,
 			height:               2160,
 			expectBaseProfileIDC: 1, // Main
@@ -1983,7 +1983,7 @@ func TestMVHEVC_MezAndABRBypass(t *testing.T) {
 			expectLevelIDC:       93,
 		},
 		"HDR_1440p": {
-			src:                  "./media/freeguy_mvhevc_2560x1440@8.50.mp4",
+			src:                  "./media/sample_mvhevc_2560x1440@8.50.mp4",
 			width:                2560,
 			height:               1440,
 			expectBaseProfileIDC: 2, // Main 10
