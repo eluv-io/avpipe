@@ -3,6 +3,7 @@ package mp4e
 import (
 	"bytes"
 	"os"
+	"strings"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -70,6 +71,8 @@ func TestExtractCodecInfo(t *testing.T) {
 			"codec descriptor must include profile/level: %s", info.MimeCodecString)
 		require.Equal(t, 2, info.ProfileIDC)
 		require.Equal(t, 120, info.Level)
+		require.Equal(t, Mp4VideoLayoutMono, info.VideoLayout)
+		require.Zero(t, info.EnhancementProfileIDC)
 		//t.Logf("HEVC codec: %s (profile=%d level=%d → %.1f)",
 		//	info.MimeCodecString, info.ProfileIDC, info.Level, float64(info.Level)/30)
 	})
@@ -90,9 +93,35 @@ func TestExtractCodecInfo(t *testing.T) {
 		audio := infos[1]
 		assert.Equal(t, "mp4a", audio.CodecTagString)
 		assert.Equal(t, "mp4a.40.2", audio.MimeCodecString) // AAC-LC
-		assert.Equal(t, 2, audio.ProfileIDC)                  // Audio Object Type 2 = AAC-LC
+		assert.Equal(t, 2, audio.ProfileIDC)                // Audio Object Type 2 = AAC-LC
 		assert.Equal(t, 2, audio.Channels)
 		assert.Nil(t, audio.EC3)
+	})
+
+	t.Run("MV-HEVC SDR", func(t *testing.T) {
+		f, err := os.ReadFile("../media/sample_mvhevc_4k.mp4")
+		require.NoError(t, err)
+		infos, err := ExtractCodecInfo(bytes.NewReader(f))
+		require.NoError(t, err)
+		require.Len(t, infos, 1)
+		info := infos[0]
+		assert.Equal(t, "hvc1", info.CodecTagString)
+		assert.Equal(t, Mp4VideoLayoutMVHEVC, info.VideoLayout, "expected MV-HEVC layout")
+		assert.Equal(t, 1, info.ProfileIDC)            // Main (base)
+		assert.Equal(t, 6, info.EnhancementProfileIDC) // Multiview Main (enhancement)
+		assert.Equal(t, 150, info.Level)
+		// Comma-joined descriptor per RFC 6381 §3.4. Apple-style hvc1 prefix on
+		// both halves; both halves include the trimmed-trailing-zero constraint
+		// suffix produced by the standard HEVC codec-string algorithm.
+		parts := strings.Split(info.MimeCodecString, ",")
+		require.Len(t, parts, 2, "expected exactly two codec descriptors, got %q", info.MimeCodecString)
+		assert.True(t, strings.HasPrefix(parts[0], "hvc1.1."),
+			"base descriptor must be hvc1.1.* (Main), got %q", parts[0])
+		assert.True(t, strings.HasPrefix(parts[1], "hvc1.6."),
+			"enhancement descriptor must be hvc1.6.* (Multiview Main), got %q", parts[1])
+		assert.Contains(t, parts[0], "L150")
+		assert.Contains(t, parts[1], "L150")
+		t.Logf("MV-HEVC SDR codec: %s", info.MimeCodecString)
 	})
 
 	t.Run("Atmos", func(t *testing.T) {

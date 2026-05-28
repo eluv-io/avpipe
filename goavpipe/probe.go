@@ -1,6 +1,11 @@
 package goavpipe
 
-import "math/big"
+import (
+	"encoding/json"
+	"fmt"
+	"math/big"
+	"strings"
+)
 
 // ProbeInfo is the top-level result returned by avpipe.Probe. It mirrors the
 // structure of ffprobe's JSON output, with a "format" object and a "streams"
@@ -54,6 +59,10 @@ type StreamInfo struct {
 	//       updated to 8.1+ (libavformat 62.7+). As a workaround, use
 	//       mp4e.ExtractCodecInfo(), which parses the MP4 box layer directly.
 	MimeCodecString string `json:"mime_codec_string,omitempty"`
+
+	// Mp4Info contains codec details parsed from MP4 sample-entry boxes.
+	// This supplements, but does not replace, the FFmpeg-derived fields above.
+	Mp4Info *Mp4Info `json:"mp4_info,omitempty"`
 
 	// Video-specific fields
 
@@ -187,6 +196,90 @@ type StreamInfo struct {
 	//   codec_long_name      string  human-readable codec description (e.g. "H.264 / AVC / MPEG-4 AVC / MPEG-4 part 10")
 	//   chroma_location      string  chroma sample position (e.g. "left")
 	//   bits_per_sample      int     audio PCM bit depth; relevant for uncompressed/lossless audio (PCM, FLAC)
+
+}
+
+// Mp4Info contains codec details parsed from MP4 sample-entry boxes.
+type Mp4Info struct {
+	// CodecTagString is the sample description entry 4-character code.
+	CodecTagString string `json:"codec_tag_string,omitempty"`
+
+	// MimeCodecString is the RFC 6381 codec string.
+	MimeCodecString string `json:"mime_codec_string,omitempty"`
+
+	// ProfileIDC is the codec profile IDC from MP4 sample-entry parsing.
+	ProfileIDC int `json:"profile_idc,omitempty"`
+
+	// Level is the codec level IDC from MP4 sample-entry parsing.
+	Level int `json:"level,omitempty"`
+
+	// Channels is the number of audio channels from MP4 sample-entry parsing.
+	Channels int `json:"channels,omitempty"`
+
+	// EC3 holds E-AC-3-specific MP4 decoder configuration, when present.
+	EC3 *EC3Info `json:"ec3,omitempty"`
+
+	// VideoLayout describes how one or more views are encoded.
+	VideoLayout VideoLayout `json:"video_layout,omitempty"`
+
+	// EnhancementProfileIDC is the MV-HEVC enhancement-layer general_profile_idc.
+	// Only meaningful for VideoLayout == VideoLayoutMVHEVC.
+	EnhancementProfileIDC int `json:"enhancement_profile_idc,omitempty"`
+}
+
+// EC3Info holds E-AC-3-specific MP4 decoder configuration.
+type EC3Info struct {
+	// ChanMap is the custom channel map bitmask from the MP4 dec3 box
+	// (ETSI TS 102 366 Table E.1.4).
+	ChanMap uint16 `json:"chan_map"`
+
+	// JOC indicates Joint Object Coding (Dolby Atmos). True when the
+	// flag_ec3_extension_type_a bit is set in the MP4 dec3 box extension
+	// (ETSI TS 103 420).
+	JOC bool `json:"joc"`
+
+	// ComplexityIndex is the Atmos object complexity index
+	// (complexity_index_type_a from ETSI TS 103 420). Only meaningful when
+	// JOC is true.
+	ComplexityIndex int `json:"complexity_index,omitempty"`
+}
+
+// ChanMapHex returns ChanMap as an uppercase hex string; e.g. "F801".
+func (e EC3Info) ChanMapHex() string {
+	return fmt.Sprintf("%04X", e.ChanMap)
+}
+
+// ec3ChanMapNames lists the channel names for each bit of the EC-3 custom
+// channel map, ordered from MSB (bit 15) to LSB (bit 0), per ETSI TS 102 366
+// Table E.1.4.
+var ec3ChanMapNames = [16]string{
+	"L", "C", "R", "Ls", "Rs", "Lc/Rc", "Lrs/Rrs", "Cs",
+	"Ts", "Lsd/Rsd", "Lw/Rw", "Vhl/Vhr", "Vhc", "Lts/Rts", "LFE2", "LFE",
+}
+
+// ChanMapString returns the channel names encoded in ChanMap as a
+// space-separated string; e.g. "L C R Ls Rs LFE".
+func (e EC3Info) ChanMapString() string {
+	var names []string
+	for i, name := range ec3ChanMapNames {
+		if e.ChanMap&(1<<(15-i)) != 0 {
+			names = append(names, name)
+		}
+	}
+	return strings.Join(names, " ")
+}
+
+// MarshalJSON adds an additional chan_map_hex field alongside the numeric
+// chan_map.
+func (e EC3Info) MarshalJSON() ([]byte, error) {
+	type alias EC3Info
+	return json.Marshal(&struct {
+		alias
+		ChanMapHex string `json:"chan_map_hex,omitempty"`
+	}{
+		alias:      alias(e),
+		ChanMapHex: e.ChanMapHex(),
+	})
 }
 
 // SideDataDisplayMatrix holds the display transformation matrix side data

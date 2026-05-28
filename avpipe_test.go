@@ -23,6 +23,8 @@ import (
 	"github.com/eluv-io/avpipe/elvxc/cmd"
 	"github.com/eluv-io/avpipe/goavpipe"
 	"github.com/eluv-io/avpipe/internal/testutil"
+	"github.com/eluv-io/avpipe/mp4e"
+	"github.com/eluv-io/avpipe/mp4e/mvhevc"
 	"github.com/eluv-io/avpipe/xc"
 	"github.com/eluv-io/log-go"
 )
@@ -973,7 +975,7 @@ func TestAudio2MonoTo1Stereo(t *testing.T) {
 }
 
 func TestAudio2MonoUnknownLayoutToStereo(t *testing.T) {
-	url := "./media/hales-episode-10_audio_35s.mov"
+	url := "./media/sample_episode_pcm_audio_35s.mov"
 	checkFileExists(t, url)
 
 	outputDir := path.Join(baseOutPath, fn())
@@ -1229,7 +1231,7 @@ func TestAudio6MonoUnequalChannelLayoutsTo5_1(t *testing.T) {
 }
 
 func TestAudio6MonoMovPcmTo5_1(t *testing.T) {
-	url := "./media/Black_Panther_Fr_5_1_audio_35s.mov"
+	url := "./media/sample_6mono_fr_5_1_audio_35s.mov"
 	checkFileExists(t, url)
 
 	outputDir := path.Join(baseOutPath, fn())
@@ -1949,6 +1951,165 @@ func runHEVCHDR10MezAndABR(t *testing.T, ecodec string) {
 		boilerXc(t, &abrParams)
 
 		assertHDR10(t, dashVideoInit(t, abrDir), scaledExpected)
+	}
+}
+
+// mvhevcCase represents parameters for a single MVHEVC source
+type mvhevcCase struct {
+	src                  string // path to source MV-HEVC mp4
+	width, height        uint16 // per-view resolution
+	expectBaseProfileIDC int    // hvcC base layer: 1=Main (SDR), 2=Main 10 (HDR)
+	expectLevelIDC       int    // expected HEVC level_idc (150=L5.1, 156=L5.2, ...)
+	expectHDR10          bool
+	expectMdcv           bool
+	expectClli           bool
+}
+
+// TestMVHEVC_MezAndABRBypass exercises source → mez → ABR for MV-HEVC content for 'bypass'
+func TestMVHEVC_MezAndABRBypass(t *testing.T) {
+	cases := map[string]mvhevcCase{
+		"SDR_4K": {
+			src:                  "./media/sample_mvhevc_4k.mp4",
+			width:                3840,
+			height:               2160,
+			expectBaseProfileIDC: 1, // Main
+			expectLevelIDC:       150,
+		},
+		"SDR_720p": {
+			src:                  "./media/tos_720_mvhevc_sdr.mp4",
+			width:                1280,
+			height:               720,
+			expectBaseProfileIDC: 1, // Main
+			expectLevelIDC:       93,
+		},
+		"HDR_1440p": {
+			src:                  "./media/sample_mvhevc_2560x1440@8.50.mp4",
+			width:                2560,
+			height:               1440,
+			expectBaseProfileIDC: 2, // Main 10
+			expectLevelIDC:       156,
+			expectHDR10:          true,
+		},
+	}
+	for name, c := range cases {
+		t.Run(name, func(t *testing.T) {
+			runMVHEVCMezAndABRBypass(t, c)
+		})
+	}
+}
+
+func runMVHEVCMezAndABRBypass(t *testing.T, c mvhevcCase) {
+	f := fn() + "/" + t.Name()
+	checkFileExists(t, c.src)
+
+	mezDir := path.Join(baseOutPath, f, "Mez")
+	abrDir := path.Join(baseOutPath, f, "ABRBypass")
+
+	// Sanity-check the source has the boxes we expect repackagers to drop —
+	// if it doesn't, there's nothing useful for this test to verify.
+	srcIns, err := mvhevc.Inspect(c.src)
+	failNowOnError(t, err)
+	assert.True(t, srcIns.HasMultiLayerVPS, "source not multi-layer MV-HEVC")
+	assert.True(t, srcIns.HasOinfSgpd, "source missing oinf")
+	assert.True(t, srcIns.HasLinfSgpd, "source missing linf")
+	assert.True(t, srcIns.HasTrgrCstg, "source missing trgr/cstg")
+
+	// Stage 1: source → mez (bypass repackage to fmp4-segment).
+	// Ecodec must be a real encoder libavformat can find even in bypass —
+	// avpipe still allocates an encoder context. libx265 is the natural pick
+	// for HEVC input regardless of bit depth (libx265 handles both 8 and 10).
+	mezParams := &goavpipe.XcParams{
+		Url:               c.src,
+		BypassTranscoding: true,
+		Format:            "fmp4-segment",
+		StartTimeTs:       0,
+		StartPts:          0,
+		DurationTs:        -1,
+		StartSegmentStr:   "1",
+		SegDuration:       "30",
+		Ecodec:            "libx265",
+		Dcodec:            "hevc",
+		XcType:            goavpipe.XcVideo,
+		StreamId:          -1,
+		VideoLayout:       int32(goavpipe.VideoLayoutMVHEVC),
+		DebugFrameLevel:   debugFrameLevel,
+	}
+	setupOutDir(t, mezDir)
+	xcTest(t, mezDir, mezParams, nil, true)
+
+	mezSeg := path.Join(mezDir, "vsegment-1.mp4")
+	// fmp4-segment output preserves the sample-entry children (lhvC/vexu/hfov)
+	// since the mov muxer copies the visual sample entry opaquely.
+	assertMVHEVCStructure(t, mezSeg, c)
+
+	// Stage 2: mez → ABR (bypass only for MVHEVC)
+	abrParams := *mezParams
+	abrParams.Url = mezSeg
+	abrParams.Format = "dash"
+	abrParams.VideoSegDurationTs = 48000
+	abrParams.DurationTs = -1
+	abrParams.BypassTranscoding = true
+	if !abrParams.BypassTranscoding {
+		t.Fatal("ABR params must be bypass for MV-HEVC")
+	}
+
+	setupOutDir(t, abrDir)
+	goavpipe.InitUrlIOHandler(mezSeg,
+		&xc.FileInputOpener{URL: mezSeg},
+		&xc.FileOutputOpener{Dir: abrDir})
+	boilerXc(t, &abrParams)
+
+	// DASH init segment:
+	// - oinf/linf/trgr restored by the in-stream patcher
+	// - lhvC restored by dashenc.c fix
+	assertMVHEVCStructure(t, dashVideoInit(t, abrDir), c)
+}
+
+// assertMVHEVCStructure verifies all MV-HEVC metadata
+func assertMVHEVCStructure(t *testing.T, mp4Path string, c mvhevcCase) {
+	t.Helper()
+	ins, err := mvhevc.Inspect(mp4Path)
+	failNowOnError(t, err)
+	if !assert.True(t, ins.HasVideoTrak, "no video trak in %s", mp4Path) {
+		return
+	}
+	assert.True(t, ins.HasHvcC, "missing hvcC in %s", mp4Path)
+	assert.True(t, ins.HasMultiLayerVPS, "VPS not multi-layer in %s", mp4Path)
+	assert.True(t, ins.HasOinfSgpd, "missing oinf sgpd in %s", mp4Path)
+	assert.True(t, ins.HasLinfSgpd, "missing linf sgpd in %s", mp4Path)
+	assert.True(t, ins.HasTrgrCstg, "missing trgr/cstg in %s", mp4Path)
+	assert.True(t, ins.HasLhvC, "missing lhvC in %s", mp4Path)
+	if c.width > 0 {
+		assert.Equal(t, c.width, ins.Width, "width in %s", mp4Path)
+	}
+	if c.height > 0 {
+		assert.Equal(t, c.height, ins.Height, "height in %s", mp4Path)
+	}
+
+	// Profile/level come from the base-layer SPS — SDR (Main) from HDR (Main 10)
+	mp4f, err := os.Open(mp4Path)
+	if assert.NoError(t, err, "open %s", mp4Path) {
+		defer func() { _ = mp4f.Close() }()
+		infos, err := mp4e.ExtractCodecInfo(mp4f)
+		if assert.NoError(t, err, "ExtractCodecInfo on %s", mp4Path) && len(infos) > 0 {
+			assert.Equal(t, c.expectBaseProfileIDC, infos[0].ProfileIDC, "base profile_idc in %s", mp4Path)
+			assert.Equal(t, c.expectLevelIDC, infos[0].Level, "level_idc in %s", mp4Path)
+		}
+	}
+
+	if c.expectHDR10 {
+		// HDR10 basics: BT.2020 primaries + SMPTE 2084 PQ transfer + BT.2020-NCL matrix + 10-bit.
+		assert.Equal(t, byte(10), ins.BitDepthLuma, "expected 10-bit luma in %s", mp4Path)
+		assert.Equal(t, byte(10), ins.BitDepthChroma, "expected 10-bit chroma in %s", mp4Path)
+		assert.Equal(t, byte(9), ins.ColourPrimaries, "expected BT.2020 colour primaries in %s", mp4Path)
+		assert.Equal(t, byte(16), ins.TransferCharacteristics, "expected SMPTE 2084 (PQ) transfer in %s", mp4Path)
+		assert.Equal(t, byte(9), ins.MatrixCoefficients, "expected BT.2020-NCL matrix in %s", mp4Path)
+	}
+	if c.expectMdcv {
+		assert.True(t, ins.HasMdcv, "missing mdcv (mastering display) in %s", mp4Path)
+	}
+	if c.expectClli {
+		assert.True(t, ins.HasClli, "missing clli (content light level) in %s", mp4Path)
 	}
 }
 

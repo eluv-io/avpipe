@@ -1199,6 +1199,14 @@ prepare_video_encoder(
 
     /* PENDING(SS) WIP hack to force bypass transcode for MV-HEVC inputs */
     if (is_mvhevc(decoder_context->stream[index])) {
+        if (params->video_layout != video_layout_mvhevc) {
+            elv_err("MV-HEVC input detected but video_layout is not mvhevc; set video_layout=%d, url=%s",
+                video_layout_mvhevc, params->url);
+            return eav_param;
+        }
+        if (!params->bypass_transcoding) {
+            elv_warn("MV-HEVC input detected but bypass not set; forcing bypass_transcoding=1, url=%s", params->url);
+        }
         params->bypass_transcoding = 1;
     }
 
@@ -1514,6 +1522,9 @@ prepare_audio_encoder(
 
         /* PENDING(SS) WIP hack to force bypass transcode for Dolby Atmos inputs */
         if (is_dolby_atmos(decoder_context->stream[stream_index])) {
+            if (!params->bypass_transcoding) {
+                elv_warn("Dolby Atmos input detected but bypass not set; forcing bypass_transcoding=1, url=%s", params->url);
+            }
             params->bypass_transcoding = 1;
             params->ecodec2 = strdup("eac3");
         }
