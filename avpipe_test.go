@@ -166,6 +166,53 @@ func TestVideoSeg(t *testing.T) {
 
 }
 
+func TestProResBT709BadFrameColor(t *testing.T) {
+	url := "./media/prores_bt709_bad_frame_color.mov"
+	checkFileExists(t, url)
+
+	outputDir := path.Join(baseOutPath, fn())
+	params := &goavpipe.XcParams{
+		BypassTranscoding:      false,
+		Format:                 "fmp4-segment",
+		AudioBitrate:           128000,
+		AudioSegDurationTs:     -1,
+		BitDepth:               8,
+		CrfStr:                 "23",
+		DurationTs:             -1,
+		Ecodec:                 h264Codec,
+		EncHeight:              -1,
+		EncWidth:               -1,
+		ExtractImageIntervalTs: -1,
+		GPUIndex:               -1,
+		SampleRate:             -1,
+		SegDuration:            "30",
+		StartFragmentIndex:     1,
+		StartSegmentStr:        "1",
+		StreamId:               -1,
+		SyncAudioToStreamId:    -1,
+		VideoBitrate:           -1,
+		VideoSegDurationTs:     -1,
+		ForceKeyInt:            48,
+		XcType:                 goavpipe.XcVideo,
+		Url:                    url,
+		DebugFrameLevel:        debugFrameLevel,
+	}
+	setFastEncodeParams(params, true)
+
+	xcTestResult := &XcTestResult{
+		mezFile:  []string{fmt.Sprintf("%s/vsegment-1.mp4", outputDir)},
+		pixelFmt: "yuv420p",
+	}
+	xcTest(t, outputDir, params, xcTestResult, true)
+
+	probeInfo, err := avpipe.Probe(&goavpipe.XcParams{
+		Url:      xcTestResult.mezFile[0],
+		Seekable: true,
+	})
+	failNowOnError(t, err)
+	requireVideoStreamColor(t, probeInfo, "bt709", "bt709", "bt709")
+}
+
 func TestVideoSegWithRotate(t *testing.T) {
 	if testing.Short() {
 		t.Skip("skipping slow transcoding test in short mode")
@@ -3006,6 +3053,30 @@ type expectedHDR10 struct {
 	Width, Height    int    // 0 = don't check
 	MasteringDisplay string // x265 format "G(...)B(...)R(...)WP(...)L(...)"; "*" = require non-empty
 	MaxCLL           string // "<MaxCLL>,<MaxFALL>"; "*" = require non-empty.
+}
+
+func requireVideoStreamColor(
+	t *testing.T,
+	probe *goavpipe.ProbeInfo,
+	colorPrimaries,
+	colorTransfer,
+	colorSpace string) {
+	t.Helper()
+
+	var si *goavpipe.StreamInfo
+	for i := range probe.StreamInfo {
+		if probe.StreamInfo[i].CodecType == "video" {
+			si = &probe.StreamInfo[i]
+			break
+		}
+	}
+	if !assert.NotNil(t, si, "no video stream in probe result") {
+		return
+	}
+
+	assert.Equal(t, colorPrimaries, si.ColorPrimaries)
+	assert.Equal(t, colorTransfer, si.ColorTransfer)
+	assert.Equal(t, colorSpace, si.ColorSpace)
 }
 
 // assertHDR10 probes and asserts the mp4 video stream matches the expected.
