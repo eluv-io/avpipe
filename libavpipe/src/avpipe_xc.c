@@ -595,6 +595,10 @@ prepare_decoder(
         /* PENDING(RM) Do we need this for audio? Because audio is based on resampling, it doesn't work like video. */
     }
 
+    /* Reconcile video stream color metadata here - used for video buffer source filter and fixing frame color */
+    if (decoder_context->video_stream_index >= 0)
+        reconcile_decoder_video_color(decoder_context, decoder_context->video_stream_index, url);
+
     return 0;
 }
 
@@ -2792,6 +2796,7 @@ transcode_video(
             frame->pkt_dts = frame->pts;
         }
 
+        fix_video_frame_color(decoder_context, frame);
         dump_frame(0, stream_index, "IN ", codec_context->frame_num, frame, debug_frame_level);
 
         ret = check_pts_wrapped(&decoder_context->audio_last_input_pts[stream_index], frame, stream_index);
@@ -3074,6 +3079,10 @@ flush_decoder(
         if (response == AVERROR_EOF) {
             elv_log("GOT EOF url=%s, xc_type=%d, format=%s", p->url, p->xc_type, p->format);
             continue; // PENDING(SSS) why continue and not break?
+        }
+
+        if (codec_context->codec_type == AVMEDIA_TYPE_VIDEO) {
+            fix_video_frame_color(decoder_context, frame);
         }
 
         dump_frame(i >= 0, stream_index,
