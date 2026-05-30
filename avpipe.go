@@ -55,7 +55,7 @@ import (
 
 	"github.com/eluv-io/avpipe/broadcastproto/mpegts"
 	"github.com/eluv-io/avpipe/goavpipe"
-	"github.com/eluv-io/avpipe/mp4e"
+	"github.com/eluv-io/avpipe/goavpipe/avdesc"
 )
 
 func init() {
@@ -1114,7 +1114,7 @@ func Probe(params *goavpipe.XcParams) (*goavpipe.ProbeInfo, error) {
 		}
 
 		if probeArray[i].dovi_config.present != 0 {
-			probeInfo.StreamInfo[i].DOVI = &mp4e.DOVIInfo{
+			probeInfo.StreamInfo[i].DOVI = &avdesc.DOVIInfo{
 				VersionMajor:            int(probeArray[i].dovi_config.dv_version_major),
 				VersionMinor:            int(probeArray[i].dovi_config.dv_version_minor),
 				Profile:                 int(probeArray[i].dovi_config.dv_profile),

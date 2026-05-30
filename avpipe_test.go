@@ -22,6 +22,7 @@ import (
 	"github.com/eluv-io/avpipe"
 	"github.com/eluv-io/avpipe/elvxc/cmd"
 	"github.com/eluv-io/avpipe/goavpipe"
+	"github.com/eluv-io/avpipe/goavpipe/avdesc"
 	"github.com/eluv-io/avpipe/internal/testutil"
 	"github.com/eluv-io/avpipe/mp4e"
 	"github.com/eluv-io/avpipe/mp4e/mvhevc"
@@ -2723,7 +2724,7 @@ func TestProbeDOVI81_MatchesExtractCodecInfo(t *testing.T) {
 	defer func() { _ = f.Close() }()
 	infos, err := mp4e.ExtractCodecInfo(f)
 	require.NoError(t, err)
-	var boxDOVI *mp4e.DOVIInfo
+	var boxDOVI *avdesc.DOVIInfo
 	for _, info := range infos {
 		if info.DOVI != nil {
 			boxDOVI = info.DOVI

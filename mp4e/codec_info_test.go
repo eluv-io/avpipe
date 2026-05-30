@@ -8,6 +8,8 @@ import (
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+
+	"github.com/eluv-io/avpipe/goavpipe/avdesc"
 )
 
 func TestLevelName(t *testing.T) {
@@ -39,13 +41,13 @@ func TestProfileName(t *testing.T) {
 }
 
 func TestDOVICodecString(t *testing.T) {
-	d := DOVIInfo{Profile: 8, Level: 1, FourCC: "dvh1"}
+	d := avdesc.DOVIInfo{Profile: 8, Level: 1, FourCC: "dvh1"}
 	assert.Equal(t, "dvh1.08.01", d.CodecString())
 
-	d2 := DOVIInfo{Profile: 8, Level: 1, FourCC: "dvhe"}
+	d2 := avdesc.DOVIInfo{Profile: 8, Level: 1, FourCC: "dvhe"}
 	assert.Equal(t, "dvhe.08.01", d2.CodecString())
 
-	d3 := DOVIInfo{Profile: 5, Level: 13, FourCC: "dvh1"}
+	d3 := avdesc.DOVIInfo{Profile: 5, Level: 13, FourCC: "dvh1"}
 	assert.Equal(t, "dvh1.05.13", d3.CodecString())
 }
 

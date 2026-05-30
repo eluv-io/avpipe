@@ -6,7 +6,7 @@ import (
 	"math/big"
 	"strings"
 
-	"github.com/eluv-io/avpipe/mp4e"
+	"github.com/eluv-io/avpipe/goavpipe/avdesc"
 )
 
 // ProbeInfo is the top-level result returned by avpipe.Probe. It mirrors the
@@ -174,7 +174,7 @@ type StreamInfo struct {
 
 	// DOVI holds the Dolby Vision decoder configuration record side data
 	// (AV_PKT_DATA_DOVI_CONF). Non-nil when the stream carries a DV configuration.
-	DOVI *mp4e.DOVIInfo `json:"dovi_config,omitempty"`
+	DOVI *avdesc.DOVIInfo `json:"dovi_config,omitempty"`
 
 	// Stereo3DType is the stereoscopic 3D layout of the video stream
 	// (e.g. "side by side", "top and bottom"). Empty for non-stereoscopic
