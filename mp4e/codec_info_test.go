@@ -51,6 +51,32 @@ func TestDOVICodecString(t *testing.T) {
 	assert.Equal(t, "dvh1.05.13", d3.CodecString())
 }
 
+func TestIsDOVIBoxType(t *testing.T) {
+	assert.True(t, isDOVIBoxType("dvcC"))
+	assert.True(t, isDOVIBoxType("dvvC"))
+	assert.True(t, isDOVIBoxType("dvwC"))
+	assert.False(t, isDOVIBoxType("hvcC"))
+}
+
+func TestParseDOVIBoxProfile20(t *testing.T) {
+	// Profile 20 uses the dvwC box name in FFmpeg, but the payload layout is
+	// the same Dolby Vision decoder configuration record as dvcC/dvvC.
+	word := uint16(avdesc.DOVIProfileMVHEVC)<<9 | uint16(13)<<3 | 0b101
+	payload := []byte{1, 0, byte(word >> 8), byte(word), 0x00}
+
+	info, err := parseDOVIBox(payload)
+	require.NoError(t, err)
+	require.NotNil(t, info)
+	assert.Equal(t, 1, info.VersionMajor)
+	assert.Equal(t, 0, info.VersionMinor)
+	assert.Equal(t, avdesc.DOVIProfileMVHEVC, info.Profile)
+	assert.Equal(t, 13, info.Level)
+	assert.True(t, info.RPUPresent)
+	assert.False(t, info.ELPresent)
+	assert.True(t, info.BLPresent)
+	assert.Equal(t, 0, info.BLSignalCompatibilityID)
+}
+
 func TestExtractCodecInfo_DOVI81(t *testing.T) {
 	f, err := os.Open("testdata/dv81-hvc1-init.mp4")
 	require.NoError(t, err)

@@ -2,7 +2,11 @@ package avdesc
 
 import "fmt"
 
-// DOVIInfo holds the Dolby Vision configuration from a dvcC/dvvC box or probe
+const (
+	DOVIProfileMVHEVC = 20 // Required for MV-HEVC
+)
+
+// DOVIInfo holds the Dolby Vision configuration from a dvcC/dvvC/dvwC box or probe
 // side data (AV_PKT_DATA_DOVI_CONF).
 type DOVIInfo struct {
 	// VersionMajor is the major version of the Dolby Vision specification used
