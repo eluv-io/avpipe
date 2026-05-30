@@ -27,10 +27,20 @@
       "duration_ts": 1536000,
       "bit_rate": 640000,
       "nb_frames": 1000,
+      "mp4_info": {
+        "codec_tag_string": "ec-3",
+        "mime_codec_string": "ec-3",
+        "channels": 6,
+        "ec3": {
+          "chan_map": 63489,
+          "chan_map_hex": "F801",
+          "joc": true,
+          "complexity_index": 16
+        }
+      },
       "tags": {
         "handler_name": "Bento4 Sound Handler",
-        "language": "eng",
-        "vendor_id": "[0][0][0][0]"
+        "language": "eng"
       }
     },
     {
@@ -61,11 +71,16 @@
       "duration_ts": 1600000,
       "bit_rate": 302640,
       "nb_frames": 1600,
+      "mp4_info": {
+        "codec_tag_string": "avc1",
+        "mime_codec_string": "avc1.4D4028",
+        "profile_idc": 77,
+        "level": 40
+      },
       "tags": {
         "encoder": "AVC Coding",
         "handler_name": "Bento4 Video Handler",
-        "language": "und",
-        "vendor_id": "[0][0][0][0]"
+        "language": "und"
       }
     }
   ]

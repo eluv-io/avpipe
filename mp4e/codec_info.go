@@ -168,7 +168,7 @@ func ExtractCodecInfo(r io.Reader) (infos []*CodecInfo, err error) {
 		} else if ase, ok := se.(*mp4.AudioSampleEntryBox); ok {
 			info, err = parseAudioSampleEntryBox(ase)
 		} else {
-			info = &CodecInfo{CodecTagString: se.Type()}
+			continue
 		}
 
 		if err != nil {
