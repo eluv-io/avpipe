@@ -56,6 +56,7 @@ const videoBigBuckBunnyPath = "media/bbb_1080p_30fps_60sec.mp4"
 const videoBigBuckBunny3AudioPath = "media/caminandes_llamigos_1080p_4audios.mp4"
 const audioDolbyAtmosPath = "media/Audio_ID_720p_50fps_h264_6ch_640kbps_ddp_joc.mp4"
 const dovi81TestSource = "./media/040_Escape_Frame_0_48_HD_P3D65_24Fps_v1_4444_dv81.mp4"
+const dovi20TestSource = "./media/sample_dv20.mp4"
 
 // HDR10 test settings
 const (
@@ -2285,6 +2286,67 @@ func assertDOVI81(t *testing.T, mp4Path string) {
 	assert.Equal(t, 8, dovi.Profile, "DOVI.Profile in %s", mp4Path)
 	assert.Equal(t, 1, dovi.Level, "DOVI.Level in %s", mp4Path)
 	assert.Equal(t, 1, dovi.BLSignalCompatibilityID, "DOVI.BLSignalCompatibilityID in %s", mp4Path)
+}
+
+// TestDOVI20_MezTranscode verifies that Dolby Vision Profile 20 metadata (dvcC)
+// survives a mezzanine bypass from a dvh1 source (sample_dv20.mp4).
+func TestDOVI20_MezTranscode(t *testing.T) {
+	if testing.Short() {
+		t.Skip("SKIPPING TestDOVI20_MezTranscode (fast mode)")
+	}
+	checkFileExists(t, dovi20TestSource)
+
+	mezDir := path.Join(baseOutPath, fn(), "Mez")
+
+	mezParams := goavpipe.XcParams{
+		Url:               dovi20TestSource,
+		BypassTranscoding: true,
+		Format:            "fmp4-segment",
+		DurationTs:        -1,
+		StartSegmentStr:   "1",
+		SegDuration:       "30",
+		Ecodec:            h265Codec,
+		Dcodec:            "hevc",
+		GPUIndex:          -1,
+		XcType:            goavpipe.XcVideo,
+		Seekable:          true,
+		StreamId:          -1,
+		VideoLayout:       int32(goavpipe.VideoLayoutMVHEVC),
+		DebugFrameLevel:   debugFrameLevel,
+	}
+
+	boilerplate(t, mezDir, dovi20TestSource)
+	boilerXc(t, &mezParams)
+
+	mezSeg := path.Join(mezDir, "vsegment-1.mp4")
+	assertDOVI20(t, mezSeg)
+}
+
+// assertDOVI20 opens the MP4 at mp4Path and asserts that a Dolby Vision
+// configuration box (dvcC, per spec) is present with Profile=20, CCID=0, FourCC=dvh1,
+// and that the stream is MV-HEVC.
+func assertDOVI20(t *testing.T, mp4Path string) {
+	t.Helper()
+	f, err := os.Open(mp4Path)
+	require.NoError(t, err)
+	defer func() { _ = f.Close() }()
+	infos, err := mp4e.ExtractCodecInfo(f)
+	require.NoError(t, err)
+	var info *mp4e.CodecInfo
+	for _, ci := range infos {
+		if ci.DOVI != nil {
+			info = ci
+			break
+		}
+	}
+	require.NotNil(t, info, "dvcC/dvvC box missing from %s", mp4Path)
+	assert.Equal(t, mp4e.Mp4VideoLayoutMVHEVC, info.VideoLayout, "must be MV-HEVC in %s", mp4Path)
+	dovi := info.DOVI
+	assert.Equal(t, 20, dovi.Profile, "DOVI.Profile in %s", mp4Path)
+	assert.Equal(t, 0, dovi.BLSignalCompatibilityID, "DOVI.BLSignalCompatibilityID in %s", mp4Path)
+	assert.Equal(t, "dvh1", dovi.FourCC, "DOVI.FourCC in %s", mp4Path)
+	// Profile 20 must use dvcC per Dolby Vision ISOBMFF spec v2.7.1.
+	assert.Equal(t, "dvcC", dovi.BoxType, "DV config box type in %s", mp4Path)
 }
 
 // TestDOVI81_MezAndDASH verifies that the dvvC box (Dolby Vision configuration)

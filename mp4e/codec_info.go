@@ -58,10 +58,8 @@ type CodecInfo struct {
 	// DOVI is set only when the codec entry contains a Dolby Vision configuration
 	// box (dvcC, dvvC, or dvwC). Common cases:
 	//   hvc1/hev1 with dvvC child — Profile 8.x (cross-compatible)
-	//   hvc1/hev1 with dvwC child — Dolby Vision Profile 20 (required for MV-HEVC)
-	//   dvh1/dvhe as the sample entry type — Profile 5 or Profile 20 (strict DV container)
-	// Note: dvh1/dvhe sample entry types require mp4ff support to be parsed here;
-	// until that is added, those entries fall through to the default CodecInfo path.
+	//   dvh1/dvhe with dvcC child — Profile 5 or Profile 20 (standalone DV)
+	// DOVI.BoxType records which of dvcC/dvvC/dvwC was found.
 	DOVI *avdesc.DOVIInfo `json:"dovi,omitempty"`
 
 	// VideoLayout describes the stereoscopic layout (mono, sbs, mvhevc).
@@ -314,7 +312,7 @@ func parseVisualSampleEntryBox(se *mp4.VisualSampleEntryBox) (*CodecInfo, error)
 	e := errors.T("parseVisualSampleEntryBox", errors.K.Invalid, "codecTag", codecTag)
 
 	switch codecTag {
-	case "hvc1", "hev1":
+	case "hvc1", "hev1", "dvh1", "dvhe":
 		if se.HvcC == nil {
 			return nil, e("reason", "hvcC box missing")
 		}
@@ -351,8 +349,13 @@ func parseVisualSampleEntryBox(se *mp4.VisualSampleEntryBox) (*CodecInfo, error)
 					if doviErr != nil {
 						return nil, e(doviErr, "reason", "failed to parse Dolby Vision box", "box", boxType)
 					}
-					dovi.FourCC = doviFourCC(codecTag)
+					if codecTag == "dvh1" || codecTag == "dvhe" {
+						dovi.FourCC = codecTag
+					} else {
+						dovi.FourCC = doviFourCC(codecTag)
+					}
 					info.DOVI = dovi
+					info.DOVI.BoxType = boxType
 				}
 				break
 			}
@@ -507,7 +510,7 @@ func detectStereoFromSEI(hvcC *mp4.HvcCBox) Mp4VideoLayout {
 	return Mp4VideoLayoutMono
 }
 
-// framePackingArrangementType extracts frame_packing_arrangement_type fro SEI 45
+// framePackingArrangementType extracts frame_packing_arrangement_type for SEI 45
 // Returns the type and true if cancel_flag is false; false otherwise (no type present, error).
 func framePackingArrangementType(payload []byte) (byte, bool) {
 	if len(payload) == 0 {

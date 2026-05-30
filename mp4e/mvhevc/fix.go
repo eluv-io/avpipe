@@ -98,6 +98,9 @@ func fixVideoTrak(trak *mp4.TrakBox, _ *mp4.File) (bool, error) {
 	if ensureColrFromSPSVUI(vse, trak.Tkhd.TrackID) {
 		changed = true
 	}
+	if fixDVBoxType(vse, trak.Tkhd.TrackID) {
+		changed = true
+	}
 	if !hasSgpd(stbl, "oinf") {
 		appendStblSgpd(stbl, "oinf", mp4.BuildOinfFromVPS(vps))
 		log.Info("added oinf sgpd", "trackID", trak.Tkhd.TrackID)
@@ -195,4 +198,56 @@ func appendStblSgpd(stbl *mp4.StblBox, groupingType string, entry mp4.SampleGrou
 		DefaultLength:      uint32(entry.Size()),
 		SampleGroupEntries: []mp4.SampleGroupEntry{entry},
 	})
+}
+
+// fixDVBoxType corrects the DV configuration box FourCC for any child of vse
+// that carries a DOVIDecoderConfigurationRecord (dvcC, dvvC, or dvwC).
+//
+// Per Dolby Vision ISOBMFF spec v2.7.1:
+//
+//	dvcC — profiles ≤ 7 and profile 20
+//	dvvC — profiles 8–10
+//	dvwC — reserved for future use
+//
+// FFmpeg uses dvwC for all profiles > 10 (a bug for profile 20), and content
+// tools sometimes mislabel the box. This function re-checks every DV config
+// box and renames it to the spec-correct FourCC if it differs.
+func fixDVBoxType(vse *mp4.VisualSampleEntryBox, trackID uint32) bool {
+	changed := false
+	for i, c := range vse.Children {
+		if c.Type() != "dvcC" && c.Type() != "dvvC" && c.Type() != "dvwC" {
+			continue
+		}
+		ub, ok := c.(*mp4.UnknownBox)
+		if !ok {
+			continue
+		}
+		payload := ub.Payload()
+		if len(payload) < 4 {
+			continue
+		}
+		// dv_profile occupies bits 15-9 of the big-endian uint16 at bytes 2-3
+		// (matches the DOVIDecoderConfigurationRecord layout in parseDOVIBox).
+		word := uint16(payload[2])<<8 | uint16(payload[3])
+		profile := int((word >> 9) & 0x7f)
+
+		var want string
+		switch {
+		case profile <= 7 || profile == 20:
+			want = "dvcC"
+		case profile >= 8 && profile <= 10:
+			want = "dvvC"
+		default:
+			want = "dvwC" // genuinely future profile — leave as-is
+		}
+
+		if c.Type() == want {
+			continue
+		}
+		const boxHdrSize = 8
+		vse.Children[i] = mp4.CreateUnknownBox(want, uint64(boxHdrSize+len(payload)), payload)
+		log.Info("corrected DV config box", "from", c.Type(), "to", want, "trackID", trackID, "profile", profile)
+		changed = true
+	}
+	return changed
 }

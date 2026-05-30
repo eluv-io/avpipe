@@ -28,8 +28,8 @@ github.com/eluv-io/gls v1.0.0-elv1 h1:fV9z/aLSs5KH8wWMkamoS/Xxl8wmXF76WMx8/N5XEr
 github.com/eluv-io/gls v1.0.0-elv1/go.mod h1:4rPCrom1ZvL5sqFMGiNbCr/QfDq3oljqXEBdstdge0o=
 github.com/eluv-io/log-go v1.0.1 h1:j+/vNR7IwPxzgiwOWOKffWevEGeMhTXZVK7448FUuQg=
 github.com/eluv-io/log-go v1.0.1/go.mod h1:zXLeleJ9LQRHdEOvm7xh1dBQ/t5MJurj7vgfdUmL4jc=
-github.com/eluv-io/mp4ff v0.0.0-20260505172703-d379abafa307 h1:xw/U/rZHuUeC0Mw2T+Vh4EcQ6iZJtow38/b5nLHsiA4=
-github.com/eluv-io/mp4ff v0.0.0-20260505172703-d379abafa307/go.mod h1:hJNUUqOBryLAzUW9wpCJyw2HaI+TCd2rUPhafoS5lgg=
+github.com/eluv-io/mp4ff v0.0.0-20260530044746-5c8385b93fb5 h1:CDA1mUkDCIPeB//ILifDyk4OYS/29sMS5+dM+WEM0l0=
+github.com/eluv-io/mp4ff v0.0.0-20260530044746-5c8385b93fb5/go.mod h1:hJNUUqOBryLAzUW9wpCJyw2HaI+TCd2rUPhafoS5lgg=
 github.com/eluv-io/stack v1.8.2 h1:yocCvAcPy9vW5iBdNnig5Tem8LgOTT8JrOLvDcacnEQ=
 github.com/eluv-io/stack v1.8.2/go.mod h1:MIN/UfmiJlJUFpglnJCj+7DR5sDBUuvQRTENHm1F310=
 github.com/eluv-io/utc-go v1.0.0 h1:SUC9bdAginhb0a9qKZDY4MD1usQedoWN5XjNqdYag6A=

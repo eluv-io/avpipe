@@ -1242,9 +1242,18 @@ prepare_video_encoder(
              encoder_context->format_context->strict_std_compliance = FF_COMPLIANCE_UNOFFICIAL;
         }
 
-        if (is_dovi(in_stream)) {
-            elv_log("BYPASS Dolby Vision detected, url=%s", params->url);
-            /* Allow muxer to write dvvC/dvcC box (requires unofficial compliance) */
+        /* dvh1/dvhe sample entry types ARE Dolby Vision by definition, so set compliance
+         * regardless of whether AV_PKT_DATA_DOVI_CONF was detected in coded_side_data.
+         * For hvc1/hev1+dvvC the side-data check is sufficient. */
+        uint32_t in_codec_tag = in_codecpar->codec_tag;
+        int is_dv_tag = (in_codec_tag == MKTAG('d','v','h','1') ||
+                         in_codec_tag == MKTAG('d','v','h','e'));
+        if (is_dv_tag || is_dovi(in_stream)) {
+            elv_log("BYPASS Dolby Vision detected (tag=%c%c%c%c), url=%s",
+                (in_codec_tag)&0xff, (in_codec_tag>>8)&0xff,
+                (in_codec_tag>>16)&0xff, (in_codec_tag>>24)&0xff,
+                params->url);
+            /* Allow muxer to write dvvC/dvwC box (requires unofficial compliance) */
             encoder_context->format_context->strict_std_compliance = FF_COMPLIANCE_UNOFFICIAL;
         }
 

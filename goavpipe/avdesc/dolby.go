@@ -49,6 +49,10 @@ type DOVIInfo struct {
 	// HEVC codec tag: "hvc1" → "dvh1", "hev1" → "dvhe". Empty when DOVIInfo
 	// originates from a probe (AV_PKT_DATA_DOVI_CONF) rather than mp4e parsing.
 	FourCC string `json:"fourcc,omitempty"`
+
+	// BoxType is the FourCC of the DV configuration box that carried this record
+	// ("dvcC", "dvvC", or "dvwC"). Empty when DOVIInfo originates from a probe.
+	BoxType string `json:"box_type,omitempty"`
 }
 
 // CodecString returns the Dolby Vision codec string, e.g. "dvh1.08.01",
