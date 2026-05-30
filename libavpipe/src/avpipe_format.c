@@ -464,6 +464,23 @@ is_dolby_atmos(
 }
 
 /*
+ * Detect Dolby Vision: checks for the DOVI configuration record side data
+ * on the stream's codecpar. Present on hvc1 (Profile 8) and dvh1 (Profile 5) streams.
+ *
+ * Returns 1 if the stream carries a Dolby Vision configuration, 0 otherwise.
+ */
+int
+is_dovi(
+    const AVStream *stream)
+{
+    if (!stream || !stream->codecpar)
+        return 0;
+    return av_packet_side_data_get(stream->codecpar->coded_side_data,
+                                   stream->codecpar->nb_coded_side_data,
+                                   AV_PKT_DATA_DOVI_CONF) != NULL;
+}
+
+/*
  * Verify the source video color metadata matches expected HDR overrides.
  */
 void

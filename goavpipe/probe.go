@@ -5,6 +5,8 @@ import (
 	"fmt"
 	"math/big"
 	"strings"
+
+	"github.com/eluv-io/avpipe/mp4e"
 )
 
 // ProbeInfo is the top-level result returned by avpipe.Probe. It mirrors the
@@ -59,10 +61,6 @@ type StreamInfo struct {
 	//       updated to 8.1+ (libavformat 62.7+). As a workaround, use
 	//       mp4e.ExtractCodecInfo(), which parses the MP4 box layer directly.
 	MimeCodecString string `json:"mime_codec_string,omitempty"`
-
-	// Mp4Info contains codec details parsed from MP4 sample-entry boxes.
-	// This supplements, but does not replace, the FFmpeg-derived fields above.
-	Mp4Info *Mp4Info `json:"mp4_info,omitempty"`
 
 	// Video-specific fields
 
@@ -163,6 +161,21 @@ type StreamInfo struct {
 	// matrix for rotation. Each element is typed (e.g. SideDataDisplayMatrix).
 	SideData []interface{} `json:"side_data,omitempty"` // ffprobe: "side_data_list"
 
+	// Data not parsed by ffprobe
+
+	// DolbyAtmos is true when the stream is EAC-3 with Joint Object Coding
+	// (JOC), i.e. Dolby Atmos. Derived from codecpar->profile ==
+	// AV_PROFILE_EAC3_DDP_ATMOS, which the EAC-3 decoder sets from sync-frame
+	// headers during avformat_find_stream_info and propagates back to codecpar
+	// via avcodec_parameters_from_context. The dec3 box fields (ChanMap,
+	// ComplexityIndex) are not available here; use mp4e.ExtractCodecInfo when
+	// those are needed.
+	DolbyAtmos bool `json:"dolby_atmos,omitempty"`
+
+	// DOVI holds the Dolby Vision decoder configuration record side data
+	// (AV_PKT_DATA_DOVI_CONF). Non-nil when the stream carries a DV configuration.
+	DOVI *mp4e.DOVIInfo `json:"dovi_config,omitempty"`
+
 	// Stereo3DType is the stereoscopic 3D layout of the video stream
 	// (e.g. "side by side", "top and bottom"). Empty for non-stereoscopic
 	// streams. Derived from AV_PKT_DATA_STEREO3D side data.
@@ -197,6 +210,9 @@ type StreamInfo struct {
 	//   chroma_location      string  chroma sample position (e.g. "left")
 	//   bits_per_sample      int     audio PCM bit depth; relevant for uncompressed/lossless audio (PCM, FLAC)
 
+	// Mp4Info contains codec details parsed from MP4 sample-entry boxes.
+	// This supplements, but does not replace, the FFmpeg-derived fields above.
+	Mp4Info *Mp4Info `json:"mp4_info,omitempty"`
 }
 
 // Mp4Info contains codec details parsed from MP4 sample-entry boxes.
@@ -227,6 +243,7 @@ type Mp4Info struct {
 	EnhancementProfileIDC int `json:"enhancement_profile_idc,omitempty"`
 }
 
+// TODO: EC3Info duplicates mp4e.EC3Info field-for-field; consolidate to *mp4e.EC3Info and remove convertEC3Info in avpipe_probe.go.
 // EC3Info holds E-AC-3-specific MP4 decoder configuration.
 type EC3Info struct {
 	// ChanMap is the custom channel map bitmask from the MP4 dec3 box
@@ -292,6 +309,17 @@ type SideDataDisplayMatrix struct {
 	Rotation float64 `json:"rotation"`
 	// RotationCw is the clockwise rotation angle in degrees (negation of Rotation).
 	RotationCw float64 `json:"rotation_cw"`
+}
+
+// StreamByCodecType returns the first stream whose CodecType matches the given
+// value ("audio", "video", "subtitle", etc.), or nil if none is found.
+func (p *ProbeInfo) StreamByCodecType(codecType string) *StreamInfo {
+	for i := range p.StreamInfo {
+		if p.StreamInfo[i].CodecType == codecType {
+			return &p.StreamInfo[i]
+		}
+	}
+	return nil
 }
 
 // StreamInfoAsArray builds an array where each stream is at its corresponding

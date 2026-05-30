@@ -237,6 +237,7 @@ const (
 	GifImage
 )
 
+// TODO: VideoLayout duplicates mp4e.Mp4VideoLayout (same constants 0/3/4/10); consolidate to mp4e.Mp4VideoLayout and remove the numeric cast in convertMp4Info.
 // VideoLayout describes how a video stream encodes one or more views.
 // Used by XcParams (input) and CodecInfo (decoded output)
 // Numeric values match libavpipe video_layout_t
@@ -366,6 +367,14 @@ type XcParams struct {
 	Level                  int       `json:"level,omitempty"`
 	Deinterlace            int       `json:"deinterlace,omitempty"`
 	Timecode               string    `json:"timecode,omitempty"`
+}
+
+func (p *XcParams) String() string {
+	b, err := json.Marshal(p)
+	if err != nil {
+		return fmt.Sprintf("%+v", *p)
+	}
+	return string(b)
 }
 
 // NewXcParams initializes a XcParams struct with unset/default values

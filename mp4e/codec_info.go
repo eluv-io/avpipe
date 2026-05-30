@@ -29,6 +29,57 @@ const (
 	Mp4VideoLayoutMVHEVC Mp4VideoLayout = 10
 )
 
+// DOVIInfo holds the Dolby Vision configuration from a dvcC/dvvC box or probe
+// side data (AV_PKT_DATA_DOVI_CONF).
+type DOVIInfo struct {
+	// VersionMajor is the major version of the Dolby Vision specification used
+	// to encode the content (e.g. 1 for Dolby Vision specification version 1.x).
+	VersionMajor int `json:"version_major"`
+
+	// VersionMinor is the minor version of the Dolby Vision specification.
+	VersionMinor int `json:"version_minor"`
+
+	// Profile is the Dolby Vision profile number (e.g. 5 = single-layer HDR,
+	// 8 = single-layer cross-compatible with HDR10/HLG base layer).
+	Profile int `json:"profile"`
+
+	// Level specifies the maximum content parameters (resolution, frame rate)
+	// allowed by this Dolby Vision stream; e.g. 6 = up to 1080p60, 9 = up to 4K60.
+	Level int `json:"level"`
+
+	// RPUPresent indicates that this stream carries a Reference Processing Unit
+	// (RPU), which holds the per-frame Dolby Vision metadata.
+	RPUPresent bool `json:"rpu_present"`
+
+	// ELPresent indicates that this stream contains an Enhancement Layer (EL),
+	// present in dual-layer profiles (e.g. Profile 7) but not in single-layer
+	// profiles (e.g. Profile 5 or 8).
+	ELPresent bool `json:"el_present"`
+
+	// BLPresent indicates that this stream contains a Base Layer (BL).
+	// False only in a standalone EL-only track.
+	BLPresent bool `json:"bl_present"`
+
+	// BLSignalCompatibilityID describes the HDR signaling of the base layer,
+	// allowing non-DV decoders to render the stream without Dolby Vision support.
+	// 0 = no backward compatibility (Dolby Vision only), 1 = HDR10, 4 = HLG.
+	BLSignalCompatibilityID int `json:"bl_signal_compatibility_id"`
+
+	// FourCC is the Dolby Vision sample entry FourCC derived from the enclosing
+	// HEVC codec tag: "hvc1" → "dvh1", "hev1" → "dvhe". Empty when DOVIInfo
+	// originates from a probe (AV_PKT_DATA_DOVI_CONF) rather than mp4e parsing.
+	FourCC string `json:"fourcc,omitempty"`
+}
+
+// CodecString returns the Dolby Vision codec string, e.g. "dvh1.08.01",
+// using FourCC. Returns "" if FourCC is empty (e.g. DOVIInfo from a probe).
+func (d DOVIInfo) CodecString() string {
+	if d.FourCC == "" {
+		return ""
+	}
+	return fmt.Sprintf("%s.%02d.%02d", d.FourCC, d.Profile, d.Level)
+}
+
 // CodecInfo contains information about a media stream's codecs
 type CodecInfo struct {
 	// CodecTagString is the sample description entry 4-character code (in the
@@ -53,6 +104,10 @@ type CodecInfo struct {
 
 	// EC3 is set only when the codec is ec-3
 	EC3 *EC3Info `json:"ec3,omitempty"`
+
+	// DOVI is set only when the codec entry contains a Dolby Vision configuration
+	// box (dvcC or dvvC), typically for hvc1/hev1 with Dolby Vision Profile 8.x
+	DOVI *DOVIInfo `json:"dovi,omitempty"`
 
 	// VideoLayout describes the stereoscopic layout (mono, sbs, mvhevc).
 	VideoLayout Mp4VideoLayout `json:"video_layout,omitempty"`
@@ -248,6 +303,53 @@ func parseMP4ACodecInfo(se *mp4.AudioSampleEntryBox) (*CodecInfo, error) {
 	}, nil
 }
 
+// parseDOVIBox parses the payload of a dvcC or dvvC box and returns a DOVIInfo.
+// Layout (from FFmpeg dovi_isom.c):
+//
+//	byte 0:   dv_version_major
+//	byte 1:   dv_version_minor
+//	byte 2-3 (big-endian uint16):
+//	  bits 15-9: dv_profile  (7 bits)
+//	  bits  8-3: dv_level    (6 bits)
+//	  bit     2: rpu_present (1 bit)
+//	  bit     1: el_present  (1 bit)
+//	  bit     0: bl_present  (1 bit)
+//	byte 4:
+//	  bits 7-4: dv_bl_signal_compatibility_id (4 bits)
+func parseDOVIBox(payload []byte) (*DOVIInfo, error) {
+	if len(payload) < 5 {
+		return nil, errors.E("dvcC/dvvC payload too short", "len", len(payload))
+	}
+	word := uint16(payload[2])<<8 | uint16(payload[3])
+	return &DOVIInfo{
+		VersionMajor:            int(payload[0]),
+		VersionMinor:            int(payload[1]),
+		Profile:                 int((word >> 9) & 0x7f),
+		Level:                   int((word >> 3) & 0x3f),
+		RPUPresent:              (word>>2)&1 == 1,
+		ELPresent:               (word>>1)&1 == 1,
+		BLPresent:               word&1 == 1,
+		BLSignalCompatibilityID: int((payload[4] >> 4) & 0x0f),
+	}, nil
+}
+
+// doviFourCC maps the HEVC codec tag to the corresponding Dolby Vision sample
+// entry FourCC. The mapping is defined in Table 1 of "Dolby Vision Streams
+// Within the ISO Base Media File Format" (v2.7.1, §2.1):
+//
+//	DolbyVisionHVC1SampleEntry (dvh1) — out-of-band parameter sets (hvc1-style)
+//	DolbyVisionHEV1SampleEntry (dvhe) — in-band parameter sets  (hev1-style)
+//
+// The dvvC/dvcC configuration box sits inside the DV sample entry alongside
+// the hvcC box; the sample entry type (dvh1 or dvhe) is therefore determined
+// solely by whether the base HEVC track uses hvc1 or hev1.
+func doviFourCC(codecTag string) string {
+	if codecTag == "hev1" {
+		return "dvhe"
+	}
+	return "dvh1"
+}
+
 func parseVisualSampleEntryBox(se *mp4.VisualSampleEntryBox) (*CodecInfo, error) {
 	codecTag := se.Type()
 	e := errors.T("parseVisualSampleEntryBox", errors.K.Invalid, "codecTag", codecTag)
@@ -279,6 +381,22 @@ func parseVisualSampleEntryBox(se *mp4.VisualSampleEntryBox) (*CodecInfo, error)
 			ProfileIDC:      int(sps.ProfileTierLevel.GeneralProfileIDC),
 			Level:           int(sps.ProfileTierLevel.GeneralLevelIDC),
 			VideoLayout:     Mp4VideoLayoutMono,
+		}
+
+		// Look for Dolby Vision configuration box (dvvC or dvcC) in children
+		for _, child := range se.Children {
+			boxType := child.Type()
+			if boxType == "dvvC" || boxType == "dvcC" {
+				if ub, ok := child.(*mp4.UnknownBox); ok {
+					dovi, doviErr := parseDOVIBox(ub.Payload())
+					if doviErr != nil {
+						return nil, e(doviErr, "reason", "failed to parse Dolby Vision box", "box", boxType)
+					}
+					dovi.FourCC = doviFourCC(codecTag)
+					info.DOVI = dovi
+				}
+				break
+			}
 		}
 
 		// If VPS declares multiple layers - it's MV-HEVC
@@ -453,6 +571,7 @@ func framePackingArrangementType(payload []byte) (byte, bool) {
 // ProfileTierLevel alone. Mirrors hevc.CodecString but accepts a PTL directly
 // — used for the MV-HEVC enhancement layer where the PTL comes from the VPS
 // extension array, not from an SPS.
+// TODO: duplicates hevc.CodecString from the imported mp4ff library; replace with hevc.CodecString once it accepts a bare ProfileTierLevel.
 func hevcCodecStringFromPTL(sampleEntry string, ptl hevc.ProfileTierLevel) string {
 	var profilePart string
 	switch ptl.GeneralProfileSpace {

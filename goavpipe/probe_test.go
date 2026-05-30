@@ -1,10 +1,43 @@
 package goavpipe
 
 import (
+	"encoding/json"
+	"os"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
+	"github.com/tidwall/jsonc"
 )
+
+func dolbyAtmosProbe(t *testing.T) *ProbeInfo {
+	t.Helper()
+	raw, err := os.ReadFile("../testdata/avprobe_dolby_atmos.jsonc")
+	require.NoError(t, err)
+	var p ProbeInfo
+	require.NoError(t, json.Unmarshal(jsonc.ToJSON(raw), &p))
+	return &p
+}
+
+func TestStreamByCodecType_Audio(t *testing.T) {
+	p := dolbyAtmosProbe(t)
+	s := p.StreamByCodecType("audio")
+	require.NotNil(t, s)
+	assert.Equal(t, "eac3", s.CodecName)
+	assert.True(t, s.DolbyAtmos)
+}
+
+func TestStreamByCodecType_Video(t *testing.T) {
+	p := dolbyAtmosProbe(t)
+	s := p.StreamByCodecType("video")
+	require.NotNil(t, s)
+	assert.Equal(t, "h264", s.CodecName)
+}
+
+func TestStreamByCodecType_NotFound(t *testing.T) {
+	p := dolbyAtmosProbe(t)
+	assert.Nil(t, p.StreamByCodecType("subtitle"))
+}
 
 func TestStreamInfoAsArray_GapFilling(t *testing.T) {
 	// Stream indices 0 and 2 present; index 1 is absent.

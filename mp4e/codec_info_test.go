@@ -38,6 +38,58 @@ func TestProfileName(t *testing.T) {
 	assert.Equal(t, "", ProfileName("ec-3", 0))
 }
 
+func TestDOVICodecString(t *testing.T) {
+	d := DOVIInfo{Profile: 8, Level: 1, FourCC: "dvh1"}
+	assert.Equal(t, "dvh1.08.01", d.CodecString())
+
+	d2 := DOVIInfo{Profile: 8, Level: 1, FourCC: "dvhe"}
+	assert.Equal(t, "dvhe.08.01", d2.CodecString())
+
+	d3 := DOVIInfo{Profile: 5, Level: 13, FourCC: "dvh1"}
+	assert.Equal(t, "dvh1.05.13", d3.CodecString())
+}
+
+func TestExtractCodecInfo_DOVI81(t *testing.T) {
+	f, err := os.Open("testdata/dv81-hvc1-init.mp4")
+	require.NoError(t, err)
+	defer f.Close()
+
+	infos, err := ExtractCodecInfo(f)
+	require.NoError(t, err)
+	require.Len(t, infos, 1)
+
+	info := infos[0]
+	assert.Equal(t, "hvc1", info.CodecTagString)
+	assert.True(t, len(info.MimeCodecString) > len("hvc1."),
+		"MimeCodecString must include profile/level: %s", info.MimeCodecString)
+	assert.True(t, strings.HasPrefix(info.MimeCodecString, "hvc1."),
+		"MimeCodecString must start with hvc1.: %s", info.MimeCodecString)
+
+	require.NotNil(t, info.DOVI, "DOVI must be set for Dolby Vision file")
+	assert.Equal(t, 8, info.DOVI.Profile, "expected DV profile 8")
+	assert.Equal(t, 1, info.DOVI.Level, "expected DV level 1")
+	assert.Equal(t, 1, info.DOVI.BLSignalCompatibilityID, "expected HDR10 compatibility (1)")
+	assert.True(t, info.DOVI.RPUPresent, "expected RPU present flag")
+	assert.False(t, info.DOVI.ELPresent, "expected EL not present (profile 8.1 is single-layer)")
+	assert.True(t, info.DOVI.BLPresent, "expected BL present flag")
+	assert.Equal(t, "dvh1", info.DOVI.FourCC, "hvc1 codec tag must map to dvh1 DV FourCC")
+}
+
+func TestExtractCodecInfo_HEVC_NoDoVI(t *testing.T) {
+	// hevc-init.m4s is a non-DV HEVC fixture; DOVI must be nil
+	hevcInit, err := os.ReadFile("testdata/hevc-init.m4s")
+	require.NoError(t, err)
+
+	infos, err := ExtractCodecInfo(bytes.NewReader(hevcInit))
+	require.NoError(t, err)
+	require.Len(t, infos, 1)
+
+	info := infos[0]
+	assert.True(t, info.CodecTagString == "hvc1" || info.CodecTagString == "hev1",
+		"expected hvc1 or hev1, got %s", info.CodecTagString)
+	assert.Nil(t, info.DOVI, "DOVI must be nil for non-DV HEVC file")
+}
+
 func TestExtractCodecInfo(t *testing.T) {
 	avcInit, err := os.ReadFile("testdata/vinit-stream0.m4s")
 	require.NoError(t, err)

@@ -4,7 +4,6 @@ import (
 	"encoding/json"
 	"flag"
 	"fmt"
-	"io/ioutil"
 	"math"
 	"math/big"
 	"os"
@@ -17,6 +16,7 @@ import (
 	"time"
 
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 	"github.com/tidwall/jsonc"
 
 	"github.com/eluv-io/avpipe"
@@ -54,6 +54,7 @@ const h265Codec = "libx265"
 const videoBigBuckBunnyPath = "media/bbb_1080p_30fps_60sec.mp4"
 const videoBigBuckBunny3AudioPath = "media/caminandes_llamigos_1080p_4audios.mp4"
 const audioDolbyAtmosPath = "media/Audio_ID_720p_50fps_h264_6ch_640kbps_ddp_joc.mp4"
+const dovi81TestSource = "./media/040_Escape_Frame_0_48_HD_P3D65_24Fps_v1_4444_dv81.mp4"
 
 // HDR10 test settings
 const (
@@ -346,7 +347,7 @@ func TestSingleABRTranscodeWithOverlayWatermark(t *testing.T) {
 
 	outputDir := path.Join(baseOutPath, fn())
 
-	overlayImage, err := ioutil.ReadFile("./media/avpipe.png")
+	overlayImage, err := os.ReadFile("./media/avpipe.png")
 	failNowOnError(t, err)
 
 	params := &goavpipe.XcParams{
@@ -693,7 +694,7 @@ func TestStartTimeTsWithSkipDecoding(t *testing.T) {
 	goavpipe.InitUrlIOHandler(url, &xc.FileInputOpener{URL: url}, &xc.FileOutputOpener{Dir: outputDir})
 	boilerXc(t, params)
 
-	files, err := ioutil.ReadDir(outputDir)
+	files, err := os.ReadDir(outputDir)
 	assert.NoError(t, err)
 	assert.Equal(t, 14, len(files))
 
@@ -739,7 +740,7 @@ func TestStartTimeTsWithoutSkipDecoding(t *testing.T) {
 	goavpipe.InitUrlIOHandler(url, &xc.FileInputOpener{URL: url}, &xc.FileOutputOpener{Dir: outputDir})
 	boilerXc(t, params)
 
-	files, err := ioutil.ReadDir(outputDir)
+	files, err := os.ReadDir(outputDir)
 	assert.NoError(t, err)
 	assert.Equal(t, 14, len(files))
 
@@ -1466,6 +1467,93 @@ func TestMultiAudioXc(t *testing.T) {
 	xcTest(t, outputDir, params, xcTestResult, true)
 }
 
+// TestAudioAtmosBypass verifies that a Dolby Atmos input triggers bypass
+// automatically via is_dolby_atmos() in prepare_audio_encoder (the
+// PENDING(SS) WIP hack at avpipe_xc.c:1522). No BypassTranscoding or Ecodec2
+// is set — the hack mutates params at runtime. If the hack is removed, this
+// test should be updated to expect failure rather than success.
+func TestAudioAtmosBypass(t *testing.T) {
+	url := audioDolbyAtmosPath
+	checkFileExists(t, url)
+
+	outputDir := path.Join(baseOutPath, fn())
+	boilerplate(t, outputDir, url)
+
+	params := &goavpipe.XcParams{
+		Format:              "fmp4-segment",
+		StartTimeTs:         0,
+		DurationTs:          -1,
+		StartSegmentStr:     "1",
+		SegDuration:         "30",
+		EncHeight:           -1,
+		EncWidth:            -1,
+		XcType:              goavpipe.XcAudio,
+		StreamId:            -1,
+		SyncAudioToStreamId: -1,
+		Url:                 url,
+		DebugFrameLevel:     debugFrameLevel,
+	}
+	boilerXc(t, params)
+
+	// Probe the output mezzanine: EAC-3 must be preserved (not re-encoded to AAC).
+	// Re-use the global IO handler set by boilerplate — FileInputOpener.Open opens
+	// whatever URL is passed to it, so no need to reset it for the probe step.
+	mezFile := fmt.Sprintf("%s/asegment0-1.mp4", outputDir)
+	xcparams := &goavpipe.XcParams{Url: mezFile, Seekable: true}
+	probe, err := avpipe.Probe(xcparams)
+	failNowOnError(t, err)
+
+	audioStream := probe.StreamByCodecType("audio")
+	require.NotNil(t, audioStream, "expected an audio stream in the mezzanine output")
+	assert.Equal(t, "eac3", audioStream.CodecName, "Atmos stream must be bypassed as EAC-3, not re-encoded")
+	assert.True(t, audioStream.DolbyAtmos, "expected DolbyAtmos flag to be set in bypass output")
+	assert.Equal(t, int64(640000), audioStream.BitRate, "bit rate must be preserved by bypass")
+	assert.Equal(t, 6, audioStream.Channels, "channel count must be preserved by bypass")
+	assert.Equal(t, "5.1(side)", audioStream.ChannelLayoutName, "channel layout must be preserved by bypass")
+}
+
+// TestAudioAtmosBypassExplicit verifies EAC-3 passthrough using BypassTranscoding=true,
+// which routes audio packets through do_bypass() in avpipe_xc.c without depending on
+// the is_dolby_atmos() auto-bypass heuristic. BypassTranscoding is a global flag; for
+// XcAudio there is no video stream, so it acts as audio-only bypass.
+func TestAudioAtmosBypassExplicit(t *testing.T) {
+	url := audioDolbyAtmosPath
+	checkFileExists(t, url)
+
+	outputDir := path.Join(baseOutPath, fn())
+	boilerplate(t, outputDir, url)
+
+	params := &goavpipe.XcParams{
+		Format:              "fmp4-segment",
+		StartTimeTs:         0,
+		DurationTs:          -1,
+		StartSegmentStr:     "1",
+		SegDuration:         "30",
+		EncHeight:           -1,
+		EncWidth:            -1,
+		XcType:              goavpipe.XcAudio,
+		BypassTranscoding:   true,
+		StreamId:            -1,
+		SyncAudioToStreamId: -1,
+		Url:                 url,
+		DebugFrameLevel:     debugFrameLevel,
+	}
+	boilerXc(t, params)
+
+	mezFile := fmt.Sprintf("%s/asegment0-1.mp4", outputDir)
+	xcparams := &goavpipe.XcParams{Url: mezFile, Seekable: true}
+	probe, err := avpipe.Probe(xcparams)
+	failNowOnError(t, err)
+
+	audioStream := probe.StreamByCodecType("audio")
+	require.NotNil(t, audioStream, "expected an audio stream in the mezzanine output")
+	assert.Equal(t, "eac3", audioStream.CodecName, "audio must be copied as EAC-3, not re-encoded")
+	assert.True(t, audioStream.DolbyAtmos, "DolbyAtmos flag must survive passthrough")
+	assert.Equal(t, int64(640000), audioStream.BitRate, "bit rate must be preserved by bypass")
+	assert.Equal(t, 6, audioStream.Channels, "channel count must be preserved by bypass")
+	assert.Equal(t, "5.1(side)", audioStream.ChannelLayoutName, "channel layout must be preserved by bypass")
+}
+
 // Timebase of BBB0_HD_8_XDCAM_120s_CCBYblendercloud.mxf is 1001/60000 - in this case the mp4 muxer changes timebase to 1/60000
 // Test both with and without explicit video_time_base to verify both pre and post encoding timebase adjustment.
 func TestIrregularTsMezMaker_1001_60000(t *testing.T) {
@@ -1639,7 +1727,7 @@ func TestMXF_H265MezMaker(t *testing.T) {
 		DurationTs:        -1,
 		StartSegmentStr:   "1",
 		SegDuration:       "30.03",
-		Ecodec:            "libx265",
+		Ecodec:            h265Codec,
 		Dcodec:            "jpeg2000",
 		EncHeight:         -1,
 		EncWidth:          -1,
@@ -1829,7 +1917,7 @@ func TestHEVC_H265ABRTranscode(t *testing.T) {
 		DurationTs:        -1,
 		StartSegmentStr:   "1",
 		SegDuration:       "30",
-		Ecodec:            "libx265",
+		Ecodec:            h265Codec,
 		Dcodec:            "hevc",
 		EncHeight:         -1,
 		EncWidth:          -1,
@@ -2116,7 +2204,7 @@ func assertMVHEVCStructure(t *testing.T, mp4Path string, c mvhevcCase) {
 // TestHEVC_HDR10_MezAndABR creates a mez from source and ABR rungs from mez,
 // using libx265 (CPU). Validates: pix_fmt, profile, and colr/mdcv/clli.
 func TestHEVC_HDR10_MezAndABR(t *testing.T) {
-	runHEVCHDR10MezAndABR(t, "libx265")
+	runHEVCHDR10MezAndABR(t, h265Codec)
 }
 
 // TestHEVC_HDR10_MezAndABR_Nvenc creates a mez from souce and ABR rungs from mez,
@@ -2127,6 +2215,109 @@ func TestHEVC_HDR10_MezAndABR_Nvenc(t *testing.T) {
 		t.Skip("enableNvenc=false; skipping hevc_nvenc HDR10 test")
 	}
 	runHEVCHDR10MezAndABR(t, "hevc_nvenc")
+}
+
+// assertDOVI81 opens the MP4 at mp4Path, parses it with mp4e.ExtractCodecInfo,
+// and asserts that a dvvC box is present with the hvc1 codec tag (required for dvh1
+// manifest signalling and Apple HLS compatibility) and Profile=8, Level=1, BLSignalCompatibilityID=1.
+func assertDOVI81(t *testing.T, mp4Path string) {
+	t.Helper()
+	f, err := os.Open(mp4Path)
+	require.NoError(t, err)
+	defer func() { _ = f.Close() }()
+	infos, err := mp4e.ExtractCodecInfo(f)
+	require.NoError(t, err)
+	var info *mp4e.CodecInfo
+	for _, ci := range infos {
+		if ci.DOVI != nil {
+			info = ci
+			break
+		}
+	}
+	require.NotNil(t, info, "dvvC box missing from %s", mp4Path)
+	assert.Equal(t, "hvc1", info.CodecTagString, "codec tag must be hvc1 (not hev1) in %s", mp4Path)
+	dovi := info.DOVI
+	assert.Equal(t, 8, dovi.Profile, "DOVI.Profile in %s", mp4Path)
+	assert.Equal(t, 1, dovi.Level, "DOVI.Level in %s", mp4Path)
+	assert.Equal(t, 1, dovi.BLSignalCompatibilityID, "DOVI.BLSignalCompatibilityID in %s", mp4Path)
+}
+
+// TestDOVI81_MezAndDASH verifies that the dvvC box (Dolby Vision configuration)
+// survives the two-stage bypass pipeline used in production:
+//
+//	source → mez (fmp4-segment, bypass)
+//	mez    → DASH init segment (bypass)
+//
+// Asserts that mp4e.ExtractCodecInfo on the DASH init segment returns DOVI != nil
+// with the hvc1 codec tag preserved (required for dvh1 manifest signaling) and
+// Profile=8, Level=1, BLSignalCompatibilityID=1.
+func TestDOVI81_MezAndDASH(t *testing.T) {
+	if testing.Short() {
+		t.Skip("SKIPPING TestDOVI81_MezAndDASH (fast mode)")
+	}
+	checkFileExists(t, dovi81TestSource)
+
+	mezDir := path.Join(baseOutPath, fn(), "Mez")
+	dashDir := path.Join(baseOutPath, fn(), "DASH")
+
+	// Stage 1: source → mez (fmp4-segment, bypass)
+	// Params mirror what xcMezVideoParams() produces for an h264-default ABR profile
+	// with bypass_mode=true: Ecodec comes from defaultCodecs(), Dcodec is unset,
+	// and dimensions come from the rung spec.
+	mezParams := goavpipe.XcParams{
+		Url:                 dovi81TestSource,
+		BypassTranscoding:   true,
+		Format:              "fmp4-segment",
+		DurationTs:          -1,
+		StartSegmentStr:     "1",
+		VideoBitrate:        4500000,
+		VideoSegDurationTs:  -1,
+		SegDuration:         "30.0000",
+		ForceKeyInt:         48,
+		Ecodec:              "libx264", // ignored for bypass
+		GPUIndex:            -1,
+		EncHeight:           720,
+		EncWidth:            1280,
+		XcType:              goavpipe.XcVideo,
+		Seekable:            true,
+		StreamId:            -1,
+		SyncAudioToStreamId: -1,
+		VideoTimeBase:       24,
+		BitDepth:            8,
+		DebugFrameLevel:     debugFrameLevel,
+	}
+
+	boilerplate(t, mezDir, dovi81TestSource)
+	boilerXc(t, &mezParams)
+
+	// Stage 2: mez → DASH (bypass)
+	mezSeg := path.Join(mezDir, "vsegment-1.mp4")
+	dashParams := goavpipe.XcParams{
+		Url:                mezSeg,
+		BypassTranscoding:  true,
+		Format:             "dash",
+		DurationTs:         25088,
+		StartSegmentStr:    "1",
+		VideoBitrate:       4500000,
+		VideoSegDurationTs: 24576,
+		StartFragmentIndex: 1,
+		ForceKeyInt:        48,
+		Ecodec:             h265Codec, // ignored for bypass
+		GPUIndex:           -1,
+		EncHeight:          720,
+		EncWidth:           1280,
+		XcType:             goavpipe.XcVideo,
+		StreamId:           -1,
+		DebugFrameLevel:    debugFrameLevel,
+	}
+
+	setupOutDir(t, dashDir)
+	goavpipe.InitUrlIOHandler(mezSeg,
+		&xc.FileInputOpener{URL: mezSeg},
+		&xc.FileOutputOpener{Dir: dashDir})
+	boilerXc(t, &dashParams)
+
+	assertDOVI81(t, dashVideoInit(t, dashDir))
 }
 
 func TestAVPipeStats(t *testing.T) {
@@ -2311,7 +2502,7 @@ func TestABRMuxing(t *testing.T) {
 	}
 	url = muxOutDir + "/segment-1.mp4"
 	params.MuxingSpec = muxSpec
-	log.Debug(f, "muxSpec", string(muxSpec))
+	log.Debug(f, "muxSpec", muxSpec)
 
 	goavpipe.InitUrlMuxIOHandler(url, &cmd.AVCmdMuxInputOpener{URL: url}, &cmd.AVCmdMuxOutputOpener{})
 	defer goavpipe.RemoveUrlMuxIOHandler(url)
@@ -2481,6 +2672,75 @@ func TestProbeDolbyAtmos(t *testing.T) {
 	failNowOnError(t, err)
 
 	assert.JSONEq(t, string(jsonc.ToJSON(want)), string(got))
+	//println(string(got))
+}
+
+func TestProbeDOVI81Golden(t *testing.T) {
+	url := dovi81TestSource
+	checkFileExists(t, url)
+
+	goavpipe.InitIOHandler(&xc.FileInputOpener{URL: url}, &concurrentOutputOpener{dir: "test_out/dv81"})
+	xcparams := &goavpipe.XcParams{
+		Url:      url,
+		Seekable: true,
+	}
+	probe, err := avpipe.Probe(xcparams)
+	failNowOnError(t, err)
+
+	got, err := json.Marshal(probe)
+	failNowOnError(t, err)
+
+	want, err := os.ReadFile("testdata/avprobe_dovi_81.jsonc")
+	failNowOnError(t, err)
+
+	// TODO: deep struct comparison less fragile?
+	assert.JSONEq(t, string(jsonc.ToJSON(want)), string(got))
+	println(string(got))
+}
+
+// TestProbeDOVI81_MatchesExtractCodecInfo verifies that the DOVI fields
+// returned by avpipe.Probe() (read from AV_PKT_DATA_DOVI_CONF coded side data
+// via FFmpeg) agree with those returned by mp4e.ExtractCodecInfo() (parsed
+// directly from the dvvC/dvcC MP4 box). Both paths must produce the same result
+// for a given Dolby Vision Profile 8.1 file.
+func TestProbeDOVI81_MatchesExtractCodecInfo(t *testing.T) {
+	url := dovi81TestSource
+	checkFileExists(t, url)
+
+	// Probe via FFmpeg CGO path
+	goavpipe.InitIOHandler(&xc.FileInputOpener{URL: url}, &concurrentOutputOpener{dir: "test_out/dv81"})
+	probe, err := avpipe.Probe(&goavpipe.XcParams{Url: url, Seekable: true})
+	require.NoError(t, err)
+
+	probeVideo := probe.StreamByCodecType("video")
+	require.NotNil(t, probeVideo, "Probe: expected a video stream")
+	probeDOVI := probeVideo.DOVI
+	require.NotNil(t, probeDOVI, "Probe: expected DOVI on video stream")
+
+	// Extract via pure-Go MP4 box parser
+	f, err := os.Open(url)
+	require.NoError(t, err)
+	defer func() { _ = f.Close() }()
+	infos, err := mp4e.ExtractCodecInfo(f)
+	require.NoError(t, err)
+	var boxDOVI *mp4e.DOVIInfo
+	for _, info := range infos {
+		if info.DOVI != nil {
+			boxDOVI = info.DOVI
+			break
+		}
+	}
+	require.NotNil(t, boxDOVI, "ExtractCodecInfo: expected DOVI in codec info")
+
+	// Both parsers must agree on every field
+	assert.Equal(t, boxDOVI.VersionMajor, probeDOVI.VersionMajor)
+	assert.Equal(t, boxDOVI.VersionMinor, probeDOVI.VersionMinor)
+	assert.Equal(t, boxDOVI.Profile, probeDOVI.Profile)
+	assert.Equal(t, boxDOVI.Level, probeDOVI.Level)
+	assert.Equal(t, boxDOVI.RPUPresent, probeDOVI.RPUPresent)
+	assert.Equal(t, boxDOVI.ELPresent, probeDOVI.ELPresent)
+	assert.Equal(t, boxDOVI.BLPresent, probeDOVI.BLPresent)
+	assert.Equal(t, boxDOVI.BLSignalCompatibilityID, probeDOVI.BLSignalCompatibilityID)
 }
 
 func TestProbeWithData(t *testing.T) {
@@ -2581,7 +2841,7 @@ func TestExtractImagesInterval(t *testing.T) {
 
 	xcTest2(t, outPath, params, nil)
 
-	files, err := ioutil.ReadDir(outPath)
+	files, err := os.ReadDir(outPath)
 	failNowOnError(t, err)
 	assert.Equal(t, 6, len(files))
 	var sum int
@@ -2628,7 +2888,7 @@ func TestExtractImagesList(t *testing.T) {
 
 	xcTest2(t, outPath, params, nil)
 
-	files, err := ioutil.ReadDir(outPath)
+	files, err := os.ReadDir(outPath)
 	failNowOnError(t, err)
 	assert.Equal(t, 5, len(files))
 	var sum int
@@ -2677,7 +2937,7 @@ func TestExtractImagesListFast(t *testing.T) {
 
 	xcTest2(t, outPath, params, nil)
 
-	files, err := ioutil.ReadDir(outPath)
+	files, err := os.ReadDir(outPath)
 	failNowOnError(t, err)
 	assert.Equal(t, 1, len(files))
 	pts, err := strconv.ParseInt(strings.Split(files[0].Name(), ".")[0], 10, 32)
@@ -2721,7 +2981,7 @@ func TestExtractAllImages(t *testing.T) {
 
 	xcTest2(t, outPath, params, nil)
 
-	files, err := ioutil.ReadDir(outPath)
+	files, err := os.ReadDir(outPath)
 	failNowOnError(t, err)
 	assert.Equal(t, 1800, len(files))
 	pts, err := strconv.ParseInt(strings.Split(files[0].Name(), ".")[0], 10, 32)
@@ -3014,16 +3274,8 @@ func assertHDR10(t *testing.T, mp4 string, want expectedHDR10) {
 	probe, err := avpipe.Probe(&goavpipe.XcParams{Url: mp4, Seekable: true})
 	failNowOnError(t, err)
 
-	var si *goavpipe.StreamInfo
-	for i := range probe.StreamInfo {
-		if probe.StreamInfo[i].CodecType == "video" {
-			si = &probe.StreamInfo[i]
-			break
-		}
-	}
-	if !assert.NotNil(t, si, "no video stream in %s", mp4) {
-		return
-	}
+	si := probe.StreamByCodecType("video")
+	require.NotNil(t, si, "no video stream in %s", mp4)
 
 	if want.PixFmt != "" && si.PixFmt != nil {
 		assert.Equal(t, want.PixFmt, avpipe.GetPixelFormatName(*si.PixFmt), "pix_fmt in %s", mp4)

@@ -1,5 +1,5 @@
+// bin/elvxc probe -j --seekable -f media/Audio_ID_720p_50fps_h264_6ch_640kbps_ddp_joc.mp4
 {
-  // bin/elvxc probe -j --seekable -f media/Audio_ID_720p_50fps_h264_6ch_640kbps_ddp_joc.mp4
   "format": {
     "format_name": "mov,mp4,m4a,3gp,3g2,mj2",
     "duration": 32
@@ -29,8 +29,19 @@
       "nb_frames": 1000,
       "tags": {
         "handler_name": "Bento4 Sound Handler",
-        "language": "eng",
-        "vendor_id": "[0][0][0][0]"
+        "language": "eng"
+      },
+      "dolby_atmos": true,
+      "mp4_info": {
+        "codec_tag_string": "ec-3",
+        "mime_codec_string": "ec-3",
+        "channels": 6,
+        "ec3": {
+          "chan_map": 63489,
+          "joc": true,
+          "complexity_index": 16,
+          "chan_map_hex": "F801"
+        }
       }
     },
     {
@@ -64,8 +75,13 @@
       "tags": {
         "encoder": "AVC Coding",
         "handler_name": "Bento4 Video Handler",
-        "language": "und",
-        "vendor_id": "[0][0][0][0]"
+        "language": "und"
+      },
+      "mp4_info": {
+        "codec_tag_string": "avc1",
+        "mime_codec_string": "avc1.4D4028",
+        "profile_idc": 77,
+        "level": 40
       }
     }
   ]

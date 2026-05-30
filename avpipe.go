@@ -55,6 +55,7 @@ import (
 
 	"github.com/eluv-io/avpipe/broadcastproto/mpegts"
 	"github.com/eluv-io/avpipe/goavpipe"
+	"github.com/eluv-io/avpipe/mp4e"
 )
 
 func init() {
@@ -891,51 +892,70 @@ func generateI32Handle() int32 {
 	return rand.Int31()
 }
 
-// params: transcoding parameters
+// Xc runs a one-shot transcode job and blocks until it completes. Use this for
+// short-lived or non-cancellable operations such as DASH/HLS segment serving
+// and image extraction. For long-running jobs that need mid-flight cancellation
+// (e.g. mezzanine creation), use XcInit + XcRun + XcCancel instead.
 func Xc(params *goavpipe.XcParams) error {
+	const op = "avpipe.Xc"
 	defer goavpipe.XCEnded()
+
 	if params == nil {
-		goavpipe.Log.Error("Failed transcoding, params are not set.")
+		goavpipe.Log.Error(op, "reason", "nil params")
 		return EAV_PARAM
 	}
+	goavpipe.Log.Debug(op, "XcParams", params)
+	defer goavpipe.Globals.RemoveURLHandlers(params.Url)
+
 	cleanupMvhevcRestore := func() {}
 	if isMvhevcLayout(params) {
 		cleanupMvhevcRestore = registerMvhevcRestoreURL(params.Url)
 	}
 	defer cleanupMvhevcRestore()
 
-	// Convert XcParams to C.txparams_t
 	cparams, err := getCParams(params)
 	if err != nil {
-		goavpipe.Log.Error("Transcoding failed", err, "url", params.Url)
+		goavpipe.Log.Error(op, err, "reason", "bad params", "XcParams", params)
+		return EAV_PARAM
 	}
 
 	rc := C.xc((*C.xcparams_t)(unsafe.Pointer(cparams)))
 
-	goavpipe.Globals.RemoveURLHandlers(params.Url)
-
-	return avpipeError(rc)
+	err = avpipeError(rc)
+	if err != nil {
+		goavpipe.Log.Error(op, err, "reason", "xc failed", "rc", rc, "XcParams", params)
+	}
+	return err
 }
 
+// Mux remuxes/packages an already-encoded stream into a container format.
+// Equivalent to Xc but forces XcType = XcMux and calls C.mux instead of C.xc.
+// Not cancellable.
 func Mux(params *goavpipe.XcParams) error {
+	const op = "avpipe.Mux"
 	defer goavpipe.XCEnded()
+
 	if params == nil {
-		goavpipe.Log.Error("Failed muxing, params are not set")
+		goavpipe.Log.Error(op, "reason", "nil params")
 		return EAV_PARAM
 	}
-
 	params.XcType = goavpipe.XcMux
+	goavpipe.Log.Debug(op, "XcParams", params)
+	defer goavpipe.Globals.RemoveURLHandlers(params.Url)
+
 	cparams, err := getCParams(params)
 	if err != nil {
-		goavpipe.Log.Error("Muxing failed", err, "url", params.Url)
+		goavpipe.Log.Error(op, err, "reason", "bad params", "XcParams", params)
+		return EAV_PARAM
 	}
 
 	rc := C.mux((*C.xcparams_t)(unsafe.Pointer(cparams)))
 
-	goavpipe.Globals.RemoveURLHandlers(params.Url)
-
-	return avpipeError(rc)
-
+	err = avpipeError(rc)
+	if err != nil {
+		goavpipe.Log.Error(op, "reason", "mux failed", "rc", rc, "XcParams", params)
+	}
+	return err
 }
 
 func ChannelLayoutName(nbChannels, channelLayout int) string {
@@ -984,28 +1004,35 @@ func GetProfileName(codecId int, profile int) string {
 // Probe runs the C libavformat probe and optionally enhances the output with mp4 specific condec info
 // PENDING(SS) Should move this function to avpipe_probe.go
 func Probe(params *goavpipe.XcParams) (*goavpipe.ProbeInfo, error) {
-	var cprobe *C.xcprobe_t
-	var n_streams C.int
+	const op = "avpipe.Probe"
 
 	if params == nil {
-		goavpipe.Log.Error("Failed probing, params are not set.")
+		goavpipe.Log.Error(op, "reason", "nil params")
 		return nil, EAV_PARAM
 	}
+	goavpipe.Log.Debug(op, "XcParams", params)
+	defer goavpipe.Globals.RemoveURLHandlers(params.Url)
 
 	cparams, err := getCParams(params)
 	if err != nil {
-		goavpipe.Log.Error("Probing failed", err, "url", params.Url)
+		goavpipe.Log.Error(op, err, "reason", "bad params", "XcParams", params)
+		return nil, EAV_PARAM
 	}
 
-	rc := C.probe((*C.xcparams_t)(unsafe.Pointer(cparams)), (**C.xcprobe_t)(unsafe.Pointer(&cprobe)), (*C.int)(unsafe.Pointer(&n_streams)))
-	if int(rc) != 0 {
-		return nil, avpipeError(rc)
+	var cprobe *C.xcprobe_t
+	var nStreams C.int
+
+	rc := C.probe((*C.xcparams_t)(unsafe.Pointer(cparams)), (**C.xcprobe_t)(unsafe.Pointer(&cprobe)), (*C.int)(unsafe.Pointer(&nStreams)))
+	err = avpipeError(rc)
+	if err != nil {
+		goavpipe.Log.Error(op, "reason", "probe failed", "rc", rc, "XcParams", params)
+		return nil, err
 	}
 
 	probeInfo := &goavpipe.ProbeInfo{}
-	probeInfo.StreamInfo = make([]goavpipe.StreamInfo, int(n_streams))
+	probeInfo.StreamInfo = make([]goavpipe.StreamInfo, int(nStreams))
 	probeArray := (*[1 << 10]C.stream_info_t)(unsafe.Pointer(cprobe.stream_info))
-	for i := 0; i < int(n_streams); i++ {
+	for i := 0; i < int(nStreams); i++ {
 		probeInfo.StreamInfo[i].StreamIndex = int(probeArray[i].stream_index)
 		probeInfo.StreamInfo[i].StreamId = int(probeArray[i].stream_id)
 		probeInfo.StreamInfo[i].CodecType = goavpipe.AVMediaTypeNames[goavpipe.AVMediaType(probeArray[i].codec_type)]
@@ -1086,6 +1113,23 @@ func Probe(params *goavpipe.XcParams) (*goavpipe.ProbeInfo, error) {
 			probeInfo.StreamInfo[i].SideData[0] = displayMatrix
 		}
 
+		if probeArray[i].dovi_config.present != 0 {
+			probeInfo.StreamInfo[i].DOVI = &mp4e.DOVIInfo{
+				VersionMajor:            int(probeArray[i].dovi_config.dv_version_major),
+				VersionMinor:            int(probeArray[i].dovi_config.dv_version_minor),
+				Profile:                 int(probeArray[i].dovi_config.dv_profile),
+				Level:                   int(probeArray[i].dovi_config.dv_level),
+				RPUPresent:              probeArray[i].dovi_config.rpu_present_flag != 0,
+				ELPresent:               probeArray[i].dovi_config.el_present_flag != 0,
+				BLPresent:               probeArray[i].dovi_config.bl_present_flag != 0,
+				BLSignalCompatibilityID: int(probeArray[i].dovi_config.dv_bl_signal_compatibility_id),
+			}
+		}
+
+		if probeArray[i].ec3_joc != 0 {
+			probeInfo.StreamInfo[i].DolbyAtmos = true
+		}
+
 		// Convert AVDictionary data to Tags of type map[string]string using the built in av_dict_get() iterator
 		dict := (*C.AVDictionary)(unsafe.Pointer(probeArray[i].tags))
 		var tag *C.AVDictionaryEntry = (*C.AVDictionaryEntry)(unsafe.Pointer(C.av_dict_get(dict, (*C.char)(C.CString("")), (*C.AVDictionaryEntry)(nil), C.AV_DICT_IGNORE_SUFFIX)))
@@ -1113,19 +1157,24 @@ func Probe(params *goavpipe.XcParams) (*goavpipe.ProbeInfo, error) {
 	C.free(unsafe.Pointer(cprobe.stream_info))
 	C.free(unsafe.Pointer(cprobe))
 
-	goavpipe.Globals.RemoveURLHandlers(params.Url)
-
 	return probeInfo, nil
 }
 
-// Returns a handle and error (if there is any error)
-// In case of error the handle would be zero
+// XcInit initializes a transcode job and returns a handle for it. The actual
+// transcoding is started by XcRun(handle) and can be interrupted at any time
+// via XcCancel(handle). Use this two-phase form instead of Xc when the caller
+// needs cancellation support (e.g. mezzanine creation driven by an LRO).
+// Also sets up the MPEGTS sequential opener for live-stream inputs when
+// params.UseCustomLiveReader is set.
 func XcInit(params *goavpipe.XcParams) (int32, error) {
-	// Convert XcParams to C.txparams_t
+	const op = "avpipe.XcInit"
+
 	if params == nil {
-		goavpipe.Log.Error("Failed transcoding, params are not set.")
+		goavpipe.Log.Error(op, "reason", "nil params")
 		return -1, EAV_PARAM
 	}
+	goavpipe.Log.Debug(op, "XcParams", params)
+	defer goavpipe.Globals.RemoveURLHandlers(params.Url)
 
 	seqOpenerF := func(inFd int64) mpegts.SequentialOpener {
 		// We use 99 as the streamID for mpegts output to avoid collisions with other streams
@@ -1141,13 +1190,14 @@ func XcInit(params *goavpipe.XcParams) (int32, error) {
 		if params.CopyMpegtsFromInput {
 			opener, err = mpegts.NewAutoInputOpener(params.Url, true, seqOpenerF)
 			if params.CopyMpegts {
-				goavpipe.Log.Warn("XcInit() CopyMpegts is set, but CopyMpegtsFromInput is also set", "url", params.Url)
+				goavpipe.Log.Warn(op, "reason", "CopyMpegts is set but CopyMpegtsFromInput is also set", "XcParams", params)
 				params.CopyMpegts = false
 			}
 		} else {
 			opener, err = mpegts.NewAutoInputOpener(params.Url, false, seqOpenerF)
 		}
 		if err != nil {
+			goavpipe.Log.Error(op, err, "XcParams", params)
 			return -1, EAV_PARAM
 		}
 		goavpipe.InitUrlIOHandlerIfNotPresent(params.Url, opener, nil)
@@ -1155,13 +1205,16 @@ func XcInit(params *goavpipe.XcParams) (int32, error) {
 
 	cparams, err := getCParams(params)
 	if err != nil {
-		goavpipe.Log.Error("Initializing transcoder failed", err, "url", params.Url)
+		goavpipe.Log.Error(op, err, "reason", "bad params", "XcParams", params)
+		return -1, EAV_PARAM
 	}
 
 	var handle C.int32_t
 	rc := C.xc_init((*C.xcparams_t)(unsafe.Pointer(cparams)), (*C.int32_t)(unsafe.Pointer(&handle)))
-	if rc != C.eav_success {
-		return -1, avpipeError(rc)
+	err = avpipeError(rc)
+	if err != nil {
+		goavpipe.Log.Error(op, "reason", "xc_init failed", "rc", rc, "XcParams", params)
+		return -1, err
 	}
 
 	if isMvhevcLayout(params) {
@@ -1171,6 +1224,8 @@ func XcInit(params *goavpipe.XcParams) (int32, error) {
 	return int32(handle), nil
 }
 
+// XcRun starts the transcode job previously initialized by XcInit and blocks
+// until it completes or is cancelled via XcCancel.
 func XcRun(handle int32) error {
 	defer goavpipe.XCEnded()
 	defer unregisterMvhevcRestoreHandle(handle)
@@ -1186,6 +1241,8 @@ func XcRun(handle int32) error {
 	return avpipeError(rc)
 }
 
+// XcCancel interrupts a transcode job started with XcInit + XcRun.
+// Safe to call from a different goroutine while XcRun is blocking.
 func XcCancel(handle int32) error {
 	defer unregisterMvhevcRestoreHandle(handle)
 	rc := C.xc_cancel(C.int32_t(handle))

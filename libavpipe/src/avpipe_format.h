@@ -96,6 +96,10 @@ int
 is_dolby_atmos(
     const AVStream *stream);
 
+int
+is_dovi(
+    const AVStream *stream);
+
 void
 verify_hdr_source_color(
     coderctx_t *decoder_context,

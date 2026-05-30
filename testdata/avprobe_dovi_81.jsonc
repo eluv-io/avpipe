@@ -1,0 +1,59 @@
+// bin/elvxc probe -j --seekable -f media/040_Escape_Frame_0_48_HD_P3D65_24Fps_v1_4444_dv81.mp4
+{
+  "format": {
+    "format_name": "mov,mp4,m4a,3gp,3g2,mj2",
+    "duration": 2.0416667461395264
+  },
+  "streams": [
+    {
+      "stream_index": 0,
+      "codec_name": "hevc",
+      "profile": 2,
+      "profile_name": "Main 10",
+      "codec_type": "video",
+      "codec_tag_string": "hvc1",
+      "codec_id": 173,
+      "width": 1280,
+      "height": 720,
+      "has_b_frames": true,
+      "sample_aspect_ratio": "1",
+      "display_aspect_ratio": "16/9",
+      "pix_fmt": 62,
+      "level": 93,
+      "color_range": "tv",
+      "color_space": "bt2020nc",
+      "color_transfer": "smpte2084",
+      "color_primaries": "bt2020",
+      "stream_id": 1,
+      "frame_rate": "24",
+      "avg_frame_rate": "24",
+      "time_base": "1/24",
+      "start_time": 0,
+      "duration_ts": 49,
+      "bit_rate": 3840729,
+      "tags": {
+        "creation_time": "2026-04-30T02:01:48.000000Z",
+        "handler_name": "265:dvp=f8.hdr10@GPAC26.02-revrelease",
+        "language": "und"
+      },
+      "dovi_config": {
+        "version_major": 1,
+        "version_minor": 0,
+        "profile": 8,
+        "level": 1,
+        "rpu_present": true,
+        "el_present": false,
+        "bl_present": true,
+        "bl_signal_compatibility_id": 1
+      },
+      "mastering_display": "G(13250,34500)B(7500,3000)R(34000,16000)WP(15635,16450)L(40000000,50)",
+      "max_cll": "0,0",
+      "mp4_info": {
+        "codec_tag_string": "hvc1",
+        "mime_codec_string": "hvc1.2.4.L93.90",
+        "profile_idc": 2,
+        "level": 93
+      }
+    }
+  ]
+}
