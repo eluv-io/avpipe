@@ -56,7 +56,11 @@ type CodecInfo struct {
 	EC3 *EC3Info `json:"ec3,omitempty"`
 
 	// DOVI is set only when the codec entry contains a Dolby Vision configuration
-	// box (dvcC or dvvC), typically for hvc1/hev1 with Dolby Vision Profile 8.x
+	// box (dvcC or dvvC). Common cases:
+	//   hvc1/hev1 with dvvC child — Profile 8.x (cross-compatible) or Profile 20 (MV-HEVC)
+	//   dvh1/dvhe as the sample entry type — Profile 5 or Profile 20 (strict DV container)
+	// Note: dvh1/dvhe sample entry types require mp4ff support to be parsed here;
+	// until that is added, those entries fall through to the default CodecInfo path.
 	DOVI *avdesc.DOVIInfo `json:"dovi,omitempty"`
 
 	// VideoLayout describes the stereoscopic layout (mono, sbs, mvhevc).

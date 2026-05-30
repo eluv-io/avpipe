@@ -12,8 +12,11 @@ type DOVIInfo struct {
 	// VersionMinor is the minor version of the Dolby Vision specification.
 	VersionMinor int `json:"version_minor"`
 
-	// Profile is the Dolby Vision profile number (e.g. 5 = single-layer HDR,
-	// 8 = single-layer cross-compatible with HDR10/HLG base layer).
+	// Profile is the Dolby Vision profile number.
+	// Common values:
+	//   5  = single-layer, HEVC, no backward compatibility (CCID=0)
+	//   8  = single-layer, HEVC, cross-compatible with HDR10 (CCID=1) or HLG (CCID=4)
+	//   20 = MV-HEVC (stereoscopic), no backward compatibility (CCID=0); extends Profile 5
 	Profile int `json:"profile"`
 
 	// Level specifies the maximum content parameters (resolution, frame rate)
