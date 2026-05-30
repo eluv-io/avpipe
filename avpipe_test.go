@@ -2049,6 +2049,7 @@ type mvhevcCase struct {
 	width, height        uint16 // per-view resolution
 	expectBaseProfileIDC int    // hvcC base layer: 1=Main (SDR), 2=Main 10 (HDR)
 	expectLevelIDC       int    // expected HEVC level_idc (150=L5.1, 156=L5.2, ...)
+	expectDOVIProfile    int    // expected Dolby Vision profile
 	expectHDR10          bool
 	expectMdcv           bool
 	expectClli           bool
@@ -2087,6 +2088,18 @@ func TestMVHEVC_MezAndABRBypass(t *testing.T) {
 	}
 }
 
+// TestDOVI20_MVHEVC_MezAndABRBypass verifies Dolby Vision MV-HEVC bypass.
+func TestDOVI20_MVHEVC_MezAndABRBypass(t *testing.T) {
+	runMVHEVCMezAndABRBypass(t, mvhevcCase{
+		src:                  "./media/3d_test_reel_2024_dovi_mvhevc.mp4",
+		width:                3840,
+		height:               2160,
+		expectBaseProfileIDC: 2, // Main 10
+		expectLevelIDC:       183,
+		expectDOVIProfile:    avdesc.DOVIProfileMVHEVC,
+	})
+}
+
 func runMVHEVCMezAndABRBypass(t *testing.T, c mvhevcCase) {
 	f := fn() + "/" + t.Name()
 	checkFileExists(t, c.src)
@@ -2102,6 +2115,9 @@ func runMVHEVCMezAndABRBypass(t *testing.T, c mvhevcCase) {
 	assert.True(t, srcIns.HasOinfSgpd, "source missing oinf")
 	assert.True(t, srcIns.HasLinfSgpd, "source missing linf")
 	assert.True(t, srcIns.HasTrgrCstg, "source missing trgr/cstg")
+	if c.expectDOVIProfile > 0 {
+		assertDOVIMVHEVCProfile(t, c.src, c.expectDOVIProfile)
+	}
 
 	// Stage 1: source → mez (bypass repackage to fmp4-segment).
 	// Ecodec must be a real encoder libavformat can find even in bypass —
@@ -2183,6 +2199,9 @@ func assertMVHEVCStructure(t *testing.T, mp4Path string, c mvhevcCase) {
 		if assert.NoError(t, err, "ExtractCodecInfo on %s", mp4Path) && len(infos) > 0 {
 			assert.Equal(t, c.expectBaseProfileIDC, infos[0].ProfileIDC, "base profile_idc in %s", mp4Path)
 			assert.Equal(t, c.expectLevelIDC, infos[0].Level, "level_idc in %s", mp4Path)
+			if c.expectDOVIProfile > 0 {
+				assertDOVIMVHEVCCodecInfo(t, infos[0], c.expectDOVIProfile, mp4Path)
+			}
 		}
 	}
 
@@ -2200,6 +2219,31 @@ func assertMVHEVCStructure(t *testing.T, mp4Path string, c mvhevcCase) {
 	if c.expectClli {
 		assert.True(t, ins.HasClli, "missing clli (content light level) in %s", mp4Path)
 	}
+}
+
+func assertDOVIMVHEVCProfile(t *testing.T, mp4Path string, expectProfile int) {
+	t.Helper()
+	f, err := os.Open(mp4Path)
+	require.NoError(t, err)
+	defer func() { _ = f.Close() }()
+
+	infos, err := mp4e.ExtractCodecInfo(f)
+	require.NoError(t, err)
+	require.NotEmpty(t, infos, "no codec info in %s", mp4Path)
+	assertDOVIMVHEVCCodecInfo(t, infos[0], expectProfile, mp4Path)
+}
+
+func assertDOVIMVHEVCCodecInfo(t *testing.T, info *mp4e.CodecInfo, expectProfile int, mp4Path string) {
+	t.Helper()
+	require.NotNil(t, info, "nil codec info for %s", mp4Path)
+	assert.Equal(t, "hvc1", info.CodecTagString, "codec tag in %s", mp4Path)
+	assert.Equal(t, mp4e.Mp4VideoLayoutMVHEVC, info.VideoLayout, "video layout in %s", mp4Path)
+	assert.Equal(t, 6, info.EnhancementProfileIDC, "MV-HEVC enhancement profile_idc in %s", mp4Path)
+	require.NotNil(t, info.DOVI, "Dolby Vision configuration missing from %s", mp4Path)
+	assert.Equal(t, expectProfile, info.DOVI.Profile, "DOVI profile in %s", mp4Path)
+	assert.Equal(t, "dvh1", info.DOVI.FourCC, "DOVI fourcc in %s", mp4Path)
+	assert.True(t, info.DOVI.RPUPresent, "DOVI RPU flag in %s", mp4Path)
+	assert.True(t, info.DOVI.BLPresent, "DOVI BL flag in %s", mp4Path)
 }
 
 // TestHEVC_HDR10_MezAndABR creates a mez from source and ABR rungs from mez,

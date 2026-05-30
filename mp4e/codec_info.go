@@ -56,8 +56,9 @@ type CodecInfo struct {
 	EC3 *EC3Info `json:"ec3,omitempty"`
 
 	// DOVI is set only when the codec entry contains a Dolby Vision configuration
-	// box (dvcC or dvvC). Common cases:
-	//   hvc1/hev1 with dvvC child — Profile 8.x (cross-compatible) or Profile 20 (MV-HEVC)
+	// box (dvcC, dvvC, or dvwC). Common cases:
+	//   hvc1/hev1 with dvvC child — Profile 8.x (cross-compatible)
+	//   hvc1/hev1 with dvwC child — Dolby Vision Profile 20 (required for MV-HEVC)
 	//   dvh1/dvhe as the sample entry type — Profile 5 or Profile 20 (strict DV container)
 	// Note: dvh1/dvhe sample entry types require mp4ff support to be parsed here;
 	// until that is added, those entries fall through to the default CodecInfo path.
@@ -257,7 +258,7 @@ func parseMP4ACodecInfo(se *mp4.AudioSampleEntryBox) (*CodecInfo, error) {
 	}, nil
 }
 
-// parseDOVIBox parses the payload of a dvcC or dvvC box and returns a DOVIInfo.
+// parseDOVIBox parses the payload of a dvcC, dvvC, or dvwC box and returns a DOVIInfo.
 // Layout (from FFmpeg dovi_isom.c):
 //
 //	byte 0:   dv_version_major
@@ -272,7 +273,7 @@ func parseMP4ACodecInfo(se *mp4.AudioSampleEntryBox) (*CodecInfo, error) {
 //	  bits 7-4: dv_bl_signal_compatibility_id (4 bits)
 func parseDOVIBox(payload []byte) (*avdesc.DOVIInfo, error) {
 	if len(payload) < 5 {
-		return nil, errors.E("dvcC/dvvC payload too short", "len", len(payload))
+		return nil, errors.E("dvcC/dvvC/dvwC payload too short", "len", len(payload))
 	}
 	word := uint16(payload[2])<<8 | uint16(payload[3])
 	return &avdesc.DOVIInfo{
@@ -302,6 +303,10 @@ func doviFourCC(codecTag string) string {
 		return "dvhe"
 	}
 	return "dvh1"
+}
+
+func isDOVIBoxType(boxType string) bool {
+	return boxType == "dvvC" || boxType == "dvcC" || boxType == "dvwC"
 }
 
 func parseVisualSampleEntryBox(se *mp4.VisualSampleEntryBox) (*CodecInfo, error) {
@@ -337,10 +342,10 @@ func parseVisualSampleEntryBox(se *mp4.VisualSampleEntryBox) (*CodecInfo, error)
 			VideoLayout:     Mp4VideoLayoutMono,
 		}
 
-		// Look for Dolby Vision configuration box (dvvC or dvcC) in children
+		// Look for Dolby Vision configuration box (dvvC, dvcC, or dvwC) in children.
 		for _, child := range se.Children {
 			boxType := child.Type()
-			if boxType == "dvvC" || boxType == "dvcC" {
+			if isDOVIBoxType(boxType) {
 				if ub, ok := child.(*mp4.UnknownBox); ok {
 					dovi, doviErr := parseDOVIBox(ub.Payload())
 					if doviErr != nil {
