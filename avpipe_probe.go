@@ -2,28 +2,37 @@ package avpipe
 
 import (
 	"fmt"
+	"io"
 
 	"github.com/eluv-io/avpipe/goavpipe"
 	"github.com/eluv-io/avpipe/mp4e"
 )
 
-func extractCodecInfoForProbe(url string) ([]*mp4e.CodecInfo, error) {
+// extractCodecInfoForProbe opens the input for url, extracts MP4 codec info, seeks back
+// to 0, and returns both the codec infos and the open handle. The caller owns the handle.
+func extractCodecInfoForProbe(url string) ([]*mp4e.CodecInfo, goavpipe.InputHandler, error) {
 	inputOpener := goavpipe.GetInputOpener(url)
 	if inputOpener == nil {
-		return nil, fmt.Errorf("input opener not set")
+		return nil, nil, fmt.Errorf("input opener not set")
 	}
 
 	input, err := inputOpener.Open(goavpipe.Globals.GetNextFD(), url)
 	if err != nil {
-		return nil, fmt.Errorf("open input: %w", err)
+		return nil, nil, fmt.Errorf("open input: %w", err)
 	}
-	defer func() {
-		if err := input.Close(); err != nil {
-			goavpipe.Log.Warn("Probe codec info enhancement failed to close input", "url", url, "error", err)
-		}
-	}()
 
-	return mp4e.ExtractCodecInfo(input)
+	infos, err := mp4e.ExtractCodecInfo(input)
+	if err != nil {
+		input.Close()
+		return nil, nil, err
+	}
+
+	if _, seekErr := input.Seek(0, io.SeekStart); seekErr != nil {
+		input.Close()
+		return nil, nil, fmt.Errorf("seek back after pre-extraction: %w", seekErr)
+	}
+
+	return infos, input, nil
 }
 
 func enhanceStreamInfo(streams []goavpipe.StreamInfo, codecInfos []*mp4e.CodecInfo) {
