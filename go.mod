@@ -29,7 +29,6 @@ require (
 )
 
 replace (
-	//github.com/Eyevinn/mp4ff => github.com/eluv-io/mp4ff v0.47.1-0.20260505172703-d379abafa307
 	github.com/Eyevinn/mp4ff => github.com/eluv-io/mp4ff v0.0.0-20260530044746-5c8385b93fb5
 	github.com/modern-go/gls => github.com/eluv-io/gls v1.0.0-elv1
 	github.com/prometheus/prometheus => github.com/prometheus/prometheus v1.7.1-0.20170814170113-3101606756c5
