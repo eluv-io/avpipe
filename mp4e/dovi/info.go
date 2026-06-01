@@ -1,4 +1,4 @@
-package dv
+package dovi
 
 import (
 	"encoding/binary"
