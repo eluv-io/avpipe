@@ -2,25 +2,10 @@ package avpipe
 
 import (
 	"fmt"
-	"strings"
 
 	"github.com/eluv-io/avpipe/goavpipe"
 	"github.com/eluv-io/avpipe/mp4e"
 )
-
-func probeFormatSupportsCodecInfo(formatName string) bool {
-	for _, name := range strings.Split(formatName, ",") {
-		switch name {
-		case "mov", "mp4", "m4a", "3gp", "3g2", "mj2":
-			return true
-		}
-	}
-	return false
-}
-
-func shouldEnhanceStreamInfo(params *goavpipe.XcParams, formatName string) bool {
-	return params != nil && params.Seekable && probeFormatSupportsCodecInfo(formatName)
-}
 
 func extractCodecInfoForProbe(url string) ([]*mp4e.CodecInfo, error) {
 	inputOpener := goavpipe.GetInputOpener(url)

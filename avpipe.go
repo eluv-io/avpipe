@@ -56,6 +56,7 @@ import (
 	"github.com/eluv-io/avpipe/broadcastproto/mpegts"
 	"github.com/eluv-io/avpipe/goavpipe"
 	"github.com/eluv-io/avpipe/goavpipe/avdesc"
+	"github.com/eluv-io/avpipe/mp4e"
 )
 
 func init() {
@@ -1019,6 +1020,18 @@ func Probe(params *goavpipe.XcParams) (*goavpipe.ProbeInfo, error) {
 		return nil, EAV_PARAM
 	}
 
+	// Extract MP4 codec info before the C probe while the input opener is still accessible.
+	// After C.probe returns, InCloser has already fired and cleared the URL table entry, so
+	// extractCodecInfoForProbe would fail to re-open. Non-MP4 inputs fail here gracefully.
+	var preCodecInfos []*mp4e.CodecInfo
+	if params.Seekable {
+		if infos, err := extractCodecInfoForProbe(params.Url); err != nil {
+			goavpipe.Log.Debug("Probe pre-extraction skipped", "url", params.Url, "error", err)
+		} else {
+			preCodecInfos = infos
+		}
+	}
+
 	var cprobe *C.xcprobe_t
 	var nStreams C.int
 
@@ -1145,13 +1158,8 @@ func Probe(params *goavpipe.XcParams) (*goavpipe.ProbeInfo, error) {
 
 	probeInfo.ContainerInfo.FormatName = C.GoString((*C.char)(unsafe.Pointer(cprobe.container_info.format_name)))
 	probeInfo.ContainerInfo.Duration = float64(cprobe.container_info.duration)
-	if shouldEnhanceStreamInfo(params, probeInfo.ContainerInfo.FormatName) {
-		codecInfos, err := extractCodecInfoForProbe(params.Url)
-		if err != nil {
-			goavpipe.Log.Debug("Probe codec info enhancement skipped", "url", params.Url, "error", err)
-		} else {
-			enhanceStreamInfo(probeInfo.StreamInfo, codecInfos)
-		}
+	if preCodecInfos != nil {
+		enhanceStreamInfo(probeInfo.StreamInfo, preCodecInfos)
 	}
 
 	C.free(unsafe.Pointer(cprobe.stream_info))
