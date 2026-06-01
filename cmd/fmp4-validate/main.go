@@ -3,14 +3,16 @@ package main
 import (
 	"encoding/json"
 	"fmt"
-	"github.com/Eyevinn/mp4ff/mp4"
-	"github.com/eluv-io/avpipe/mp4e"
-	"github.com/eluv-io/avpipe/mp4e/mvhevc"
-	"github.com/spf13/cobra"
-	"gopkg.in/yaml.v2"
 	"io"
 	"os"
 	"strings"
+
+	"github.com/Eyevinn/mp4ff/mp4"
+	"github.com/eluv-io/avpipe/mp4e"
+	"github.com/eluv-io/avpipe/mp4e/dovi"
+	"github.com/eluv-io/avpipe/mp4e/mvhevc"
+	"github.com/spf13/cobra"
+	"gopkg.in/yaml.v2"
 )
 
 func main() {
@@ -38,12 +40,14 @@ func init() {
 	rootCmd.PersistentFlags().Bool("hdr", false, "validate and print HDR10 HEVC metadata")
 	rootCmd.PersistentFlags().Bool("mvhevc", false, "print mvhevc metadata")
 	rootCmd.PersistentFlags().Bool("atmos", false, "validate and print Dolby Atmos (EC-3+JOC or AC-4) metadata")
+	rootCmd.PersistentFlags().Bool("dovi", false, "validate and print Dolby Vision metadata")
 }
 
 type Output struct {
 	mp4e.HDRReport
 	Atmos   *mp4e.AtmosReport `json:"atmos,omitempty"`
 	MVHEVC  any               `json:"mvhevc,omitempty"`
+	DV      any               `json:"dovi,omitempty"`
 	Default any               `json:"default,omitempty"`
 }
 
@@ -56,6 +60,7 @@ func runFmp4Validate(cmd *cobra.Command, args []string) error {
 	idr, _ := cmd.Flags().GetBool("idr")
 	infoFlag, _ := cmd.Flags().GetBool("info")
 	atmos, _ := cmd.Flags().GetBool("atmos")
+	doviFlag, _ := cmd.Flags().GetBool("dovi")
 
 	var output Output
 	var textOutput []string
@@ -142,8 +147,30 @@ func runFmp4Validate(cmd *cobra.Command, args []string) error {
 		}
 	}
 
+	// dolby vision
+	if doviFlag {
+		ran = true
+
+		var opts dovi.InfoOptions
+		opts.ShowIDR = idr
+
+		info, err := dovi.Info(path, opts)
+		if err != nil {
+			return err
+		}
+		if jsonFlag {
+			output.DV = info
+		} else {
+			b, err := yaml.Marshal(info)
+			if err != nil {
+				return err
+			}
+			textOutput = append(textOutput, fmt.Sprintf("%s\n", b))
+		}
+	}
+
 	// MVHEVC
-	if mvHevc || idr {
+	if mvHevc {
 		ran = true
 
 		var opts mvhevc.InfoOptions
