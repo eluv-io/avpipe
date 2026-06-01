@@ -209,11 +209,18 @@ func formatDVConfig(r *DVConfigRecord) map[string]any {
 	}
 }
 
+// knownDVProfiles is the set of all known Dolby Vision profile numbers.
+var knownDVProfiles = map[uint8]bool{
+	0: true, 1: true, 2: true, 3: true, 4: true,
+	5: true, 6: true, 7: true, 8: true, 9: true,
+	20: true, // MV-HEVC (spec v2.1)
+}
+
 func validateDVConfig(r *DVConfigRecord) map[string]any {
 	var issues, notes []string
 
-	if r.DVProfile > 9 {
-		issues = append(issues, fmt.Sprintf("unknown DV profile %d (max known: 9)", r.DVProfile))
+	if !knownDVProfiles[r.DVProfile] {
+		issues = append(issues, fmt.Sprintf("unknown DV profile %d", r.DVProfile))
 	}
 	if r.DVLevel == 0 || r.DVLevel > 13 {
 		issues = append(issues, fmt.Sprintf("DV level %d out of expected range [1-13]", r.DVLevel))
@@ -237,6 +244,10 @@ func validateDVConfig(r *DVConfigRecord) map[string]any {
 	case 9: // AVC base layer
 		if r.ELPresentFlag {
 			issues = append(issues, "profile 9 (AVC base) must not have ELPresentFlag set")
+		}
+	case 20: // MV-HEVC single-track, no EL
+		if r.ELPresentFlag {
+			issues = append(issues, "profile 20 (MV-HEVC) must not have ELPresentFlag set")
 		}
 	}
 
@@ -583,16 +594,17 @@ func fileLevelDVQC(f *mp4.File, dvTrackIDs []uint32) map[string]any {
 
 func dvProfileName(p uint8) string {
 	names := map[uint8]string{
-		0: "dvhe.dtr",
-		1: "dvhe.dth",
-		2: "dvhe.dtb",
-		3: "dvhe.st",
-		4: "dvhe.04 (BL+EL HDR10)",
-		5: "dvhe.05 (SL IPTPQc2)",
-		6: "dvhe.06 (BL+EL IPTPQc2)",
-		7: "dvhe.07 (BL+EL+RPU 4K)",
-		8: "dvhe.08 (BL HDR10/SDR compat)",
-		9: "dvav.09 (AVC BL)",
+		0:  "dvhe.dtr",
+		1:  "dvhe.dth",
+		2:  "dvhe.dtb",
+		3:  "dvhe.st",
+		4:  "dvhe.04 (BL+EL HDR10)",
+		5:  "dvhe.05 (SL IPTPQc2)",
+		6:  "dvhe.06 (BL+EL IPTPQc2)",
+		7:  "dvhe.07 (BL+EL+RPU 4K)",
+		8:  "dvhe.08 (BL HDR10/SDR compat)",
+		9:  "dvav.09 (AVC BL)",
+		20: "dvhe.20 (MV-HEVC)",
 	}
 	if n, ok := names[p]; ok {
 		return n
