@@ -464,10 +464,12 @@ is_dolby_atmos(
 }
 
 /*
- * Detect Dolby Vision: checks for the DOVI configuration record side data
- * on the stream's codecpar. Present on hvc1 (Profile 8) and dvh1 (Profile 5) streams.
- *
- * Returns 1 if the stream carries a Dolby Vision configuration, 0 otherwise.
+ * Detect Dolby Vision: returns 1 if the stream carries a Dolby Vision
+ * configuration, 0 otherwise. Two signals are checked:
+ *   1. codec_tag is dvh1 or dvhe — these sample entry types are Dolby Vision
+ *      by definition, even without a DOVI side-data record.
+ *   2. AV_PKT_DATA_DOVI_CONF side data is present on codecpar — covers
+ *      hvc1/hev1+dvvC (Profile 8) streams.
  */
 int
 is_dovi(
@@ -475,6 +477,9 @@ is_dovi(
 {
     if (!stream || !stream->codecpar)
         return 0;
+    uint32_t tag = stream->codecpar->codec_tag;
+    if (tag == MKTAG('d','v','h','1') || tag == MKTAG('d','v','h','e'))
+        return 1;
     return av_packet_side_data_get(stream->codecpar->coded_side_data,
                                    stream->codecpar->nb_coded_side_data,
                                    AV_PKT_DATA_DOVI_CONF) != NULL;

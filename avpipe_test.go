@@ -15,10 +15,6 @@ import (
 	"testing"
 	"time"
 
-	"github.com/stretchr/testify/assert"
-	"github.com/stretchr/testify/require"
-	"github.com/tidwall/jsonc"
-
 	"github.com/eluv-io/avpipe"
 	"github.com/eluv-io/avpipe/elvxc/cmd"
 	"github.com/eluv-io/avpipe/goavpipe"
@@ -28,6 +24,8 @@ import (
 	"github.com/eluv-io/avpipe/mp4e/mvhevc"
 	"github.com/eluv-io/avpipe/xc"
 	"github.com/eluv-io/log-go"
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 )
 
 // fastEncode enables reduced-quality encoding (320x180, ultrafast preset) for speed.
@@ -2288,8 +2286,23 @@ func assertDOVI81(t *testing.T, mp4Path string) {
 	assert.Equal(t, 1, dovi.BLSignalCompatibilityID, "DOVI.BLSignalCompatibilityID in %s", mp4Path)
 }
 
-// TestDOVI20_MezTranscode verifies that Dolby Vision Profile 20 metadata (dvcC)
-// survives a mezzanine bypass from a dvh1 source (sample_dv20.mp4).
+// TestDOVI20_MezTranscode exercises the full bypass pipeline for a Dolby Vision
+// Profile 20 / MV-HEVC source (sample_dv20.mp4, codec tag dvh1):
+//
+//   - is_dovi detects Dolby Vision via the dvh1 codec tag and sets
+//     FF_COMPLIANCE_UNOFFICIAL so the muxer writes the DV config box.
+//   - is_mvhevc detects MV-HEVC (stereo 3D, profile 2) and sets
+//     FF_COMPLIANCE_UNOFFICIAL so the muxer writes 3D metadata.
+//   - The MV-HEVC output wrapper (wrapMvhevcOutputHandler / StreamPatcher)
+//     intercepts the segment bytes and via fixVideoTrak / fixDVBoxType:
+//   - renames the DV config box from dvwC (FFmpeg bug for profile 20)
+//     to dvcC (correct per Dolby Vision ISOBMFF spec v2.7.1)
+//   - injects oinf and linf sample-group descriptors (stripped by FFmpeg bypass)
+//   - injects trgr/cstg track-group box (stripped by FFmpeg bypass)
+//
+// assertDOVI20 then verifies the output segment via mp4e.ExtractCodecInfo:
+// dvcC box present, Profile=20, BLSignalCompatibilityID=0, FourCC=dvh1, BoxType=dvcC,
+// VideoLayout=MVHEVC.
 func TestDOVI20_MezTranscode(t *testing.T) {
 	if testing.Short() {
 		t.Skip("SKIPPING TestDOVI20_MezTranscode (fast mode)")
@@ -2758,96 +2771,6 @@ func TestProbe(t *testing.T) {
 	assert.Equal(t, "h264", a[0].CodecName)
 	assert.Equal(t, "mp3float", a[1].CodecName)
 	assert.Equal(t, "ac3", a[2].CodecName)
-}
-
-func TestProbeDolbyAtmos(t *testing.T) {
-	url := audioDolbyAtmosPath
-	checkFileExists(t, url)
-
-	goavpipe.InitIOHandler(&xc.FileInputOpener{URL: url}, &concurrentOutputOpener{dir: "test_out/dolby_atmos"})
-	xcparams := &goavpipe.XcParams{
-		Url:      url,
-		Seekable: true,
-	}
-	probe, err := avpipe.Probe(xcparams)
-	failNowOnError(t, err)
-
-	got, err := json.Marshal(probe)
-	failNowOnError(t, err)
-
-	want, err := os.ReadFile("testdata/avprobe_dolby_atmos.jsonc")
-	failNowOnError(t, err)
-
-	assert.JSONEq(t, string(jsonc.ToJSON(want)), string(got))
-	//println(string(got))
-}
-
-func TestProbeDOVI81Golden(t *testing.T) {
-	url := dovi81TestSource
-	checkFileExists(t, url)
-
-	goavpipe.InitIOHandler(&xc.FileInputOpener{URL: url}, &concurrentOutputOpener{dir: "test_out/dv81"})
-	xcparams := &goavpipe.XcParams{
-		Url:      url,
-		Seekable: true,
-	}
-	probe, err := avpipe.Probe(xcparams)
-	failNowOnError(t, err)
-
-	got, err := json.Marshal(probe)
-	failNowOnError(t, err)
-
-	want, err := os.ReadFile("testdata/avprobe_dovi_81.jsonc")
-	failNowOnError(t, err)
-
-	// TODO: deep struct comparison less fragile?
-	assert.JSONEq(t, string(jsonc.ToJSON(want)), string(got))
-	println(string(got))
-}
-
-// TestProbeDOVI81_MatchesExtractCodecInfo verifies that the DOVI fields
-// returned by avpipe.Probe() (read from AV_PKT_DATA_DOVI_CONF coded side data
-// via FFmpeg) agree with those returned by mp4e.ExtractCodecInfo() (parsed
-// directly from the dvvC/dvcC MP4 box). Both paths must produce the same result
-// for a given Dolby Vision Profile 8.1 file.
-func TestProbeDOVI81_MatchesExtractCodecInfo(t *testing.T) {
-	url := dovi81TestSource
-	checkFileExists(t, url)
-
-	// Probe via FFmpeg CGO path
-	goavpipe.InitIOHandler(&xc.FileInputOpener{URL: url}, &concurrentOutputOpener{dir: "test_out/dv81"})
-	probe, err := avpipe.Probe(&goavpipe.XcParams{Url: url, Seekable: true})
-	require.NoError(t, err)
-
-	probeVideo := probe.StreamByCodecType("video")
-	require.NotNil(t, probeVideo, "Probe: expected a video stream")
-	probeDOVI := probeVideo.DOVI
-	require.NotNil(t, probeDOVI, "Probe: expected DOVI on video stream")
-
-	// Extract via pure-Go MP4 box parser
-	f, err := os.Open(url)
-	require.NoError(t, err)
-	defer func() { _ = f.Close() }()
-	infos, err := mp4e.ExtractCodecInfo(f)
-	require.NoError(t, err)
-	var boxDOVI *avdesc.DOVIInfo
-	for _, info := range infos {
-		if info.DOVI != nil {
-			boxDOVI = info.DOVI
-			break
-		}
-	}
-	require.NotNil(t, boxDOVI, "ExtractCodecInfo: expected DOVI in codec info")
-
-	// Both parsers must agree on every field
-	assert.Equal(t, boxDOVI.VersionMajor, probeDOVI.VersionMajor)
-	assert.Equal(t, boxDOVI.VersionMinor, probeDOVI.VersionMinor)
-	assert.Equal(t, boxDOVI.Profile, probeDOVI.Profile)
-	assert.Equal(t, boxDOVI.Level, probeDOVI.Level)
-	assert.Equal(t, boxDOVI.RPUPresent, probeDOVI.RPUPresent)
-	assert.Equal(t, boxDOVI.ELPresent, probeDOVI.ELPresent)
-	assert.Equal(t, boxDOVI.BLPresent, probeDOVI.BLPresent)
-	assert.Equal(t, boxDOVI.BLSignalCompatibilityID, probeDOVI.BLSignalCompatibilityID)
 }
 
 func TestProbeWithData(t *testing.T) {

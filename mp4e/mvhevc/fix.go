@@ -235,7 +235,7 @@ func fixDVBoxType(vse *mp4.VisualSampleEntryBox, trackID uint32) bool {
 		switch {
 		case profile <= 7 || profile == 20:
 			want = "dvcC"
-		case profile >= 8 && profile <= 10:
+		case profile <= 10: // && profile >= 8
 			want = "dvvC"
 		default:
 			want = "dvwC" // genuinely future profile — leave as-is

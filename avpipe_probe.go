@@ -23,12 +23,12 @@ func extractCodecInfoForProbe(url string) ([]*mp4e.CodecInfo, goavpipe.InputHand
 
 	infos, err := mp4e.ExtractCodecInfo(input)
 	if err != nil {
-		input.Close()
+		_ = input.Close()
 		return nil, nil, err
 	}
 
 	if _, seekErr := input.Seek(0, io.SeekStart); seekErr != nil {
-		input.Close()
+		_ = input.Close()
 		return nil, nil, fmt.Errorf("seek back after pre-extraction: %w", seekErr)
 	}
 

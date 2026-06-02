@@ -1023,13 +1023,14 @@ func Probe(params *goavpipe.XcParams) (*goavpipe.ProbeInfo, error) {
 	// Extract MP4 codec info before the C probe while the input opener is still accessible.
 	// After C.probe returns, InCloser has already fired and cleared the URL table entry, so
 	// extractCodecInfoForProbe would fail to re-open. Non-MP4 inputs fail here gracefully.
-	// The returned handle is discarded (not closed): it keeps the URL table entry alive so
-	// C.probe can open the same resource, and InCloser cleans up at the end of C.probe.
+	// The handle is kept open so that C.probe can open the same resource concurrently; it is
+	// closed via defer when Probe returns.
 	var preCodecInfos []*mp4e.CodecInfo
 	if params.Seekable {
-		if infos, _, err := extractCodecInfoForProbe(params.Url); err != nil {
+		if infos, h, err := extractCodecInfoForProbe(params.Url); err != nil {
 			goavpipe.Log.Debug("Probe pre-extraction skipped", "url", params.Url, "error", err)
 		} else {
+			defer func() { _ = h.Close() }()
 			preCodecInfos = infos
 		}
 	}
