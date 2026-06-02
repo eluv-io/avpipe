@@ -235,6 +235,12 @@ type Mp4Info struct {
 	// EC3 holds E-AC-3-specific MP4 decoder configuration, when present.
 	EC3 *EC3Info `json:"ec3,omitempty"`
 
+	// DOVI holds the Dolby Vision configuration parsed from the MP4 sample-entry
+	// box (dvcC, dvvC, or dvwC). Unlike StreamInfo.DOVI (which comes from FFmpeg
+	// side data and lacks BoxType/FourCC), this record includes the box type and
+	// the derived DV sample-entry FourCC (e.g. "dvh1").
+	DOVI *avdesc.DOVIInfo `json:"dovi,omitempty"`
+
 	// VideoLayout describes how one or more views are encoded.
 	VideoLayout VideoLayout `json:"video_layout,omitempty"`
 

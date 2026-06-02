@@ -97,7 +97,7 @@ func TestProbeDOVI81_MatchesExtractCodecInfo(t *testing.T) {
 	}
 	require.NotNil(t, boxDOVI, "ExtractCodecInfo: expected DOVI in codec info")
 
-	// Both parsers must agree on every field
+	// Both parsers must agree on the numeric fields
 	assert.Equal(t, boxDOVI.VersionMajor, probeDOVI.VersionMajor)
 	assert.Equal(t, boxDOVI.VersionMinor, probeDOVI.VersionMinor)
 	assert.Equal(t, boxDOVI.Profile, probeDOVI.Profile)
@@ -106,6 +106,17 @@ func TestProbeDOVI81_MatchesExtractCodecInfo(t *testing.T) {
 	assert.Equal(t, boxDOVI.ELPresent, probeDOVI.ELPresent)
 	assert.Equal(t, boxDOVI.BLPresent, probeDOVI.BLPresent)
 	assert.Equal(t, boxDOVI.BLSignalCompatibilityID, probeDOVI.BLSignalCompatibilityID)
+
+	// BoxType and FourCC are only available from the MP4 box path (Mp4Info.DOVI),
+	// not from the FFmpeg side-data path (StreamInfo.DOVI).
+	assert.Empty(t, probeDOVI.BoxType, "StreamInfo.DOVI: BoxType must be empty (side-data path)")
+	assert.Empty(t, probeDOVI.FourCC, "StreamInfo.DOVI: FourCC must be empty (side-data path)")
+
+	require.NotNil(t, probeVideo.Mp4Info, "Mp4Info must be populated")
+	mp4DOVI := probeVideo.Mp4Info.DOVI
+	require.NotNil(t, mp4DOVI, "Mp4Info.DOVI must be set for Dolby Vision file")
+	assert.Equal(t, boxDOVI.BoxType, mp4DOVI.BoxType, "Mp4Info.DOVI.BoxType must match mp4e result")
+	assert.Equal(t, boxDOVI.FourCC, mp4DOVI.FourCC, "Mp4Info.DOVI.FourCC must match mp4e result")
 }
 
 // postCloseFailOpener allows multiple concurrent opens but fails if Open is called after
