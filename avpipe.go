@@ -1130,7 +1130,7 @@ func Probe(params *goavpipe.XcParams) (*goavpipe.ProbeInfo, error) {
 		}
 
 		if probeArray[i].dovi_config.present != 0 {
-			probeInfo.StreamInfo[i].DOVI = &avdesc.DOVIInfo{
+			dovi := &avdesc.DOVIInfo{
 				VersionMajor:            int(probeArray[i].dovi_config.dv_version_major),
 				VersionMinor:            int(probeArray[i].dovi_config.dv_version_minor),
 				Profile:                 int(probeArray[i].dovi_config.dv_profile),
@@ -1140,6 +1140,8 @@ func Probe(params *goavpipe.XcParams) (*goavpipe.ProbeInfo, error) {
 				BLPresent:               probeArray[i].dovi_config.bl_present_flag != 0,
 				BLSignalCompatibilityID: int(probeArray[i].dovi_config.dv_bl_signal_compatibility_id),
 			}
+			dovi.FourCC = avdesc.DOVIFourCC(probeInfo.StreamInfo[i].CodecTagString)
+			probeInfo.StreamInfo[i].DOVI = dovi
 		}
 
 		if probeArray[i].ec3_joc != 0 {

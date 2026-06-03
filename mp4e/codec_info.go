@@ -230,23 +230,6 @@ func parseDOVIBox(payload []byte) (*avdesc.DOVIInfo, error) {
 	}, nil
 }
 
-// doviFourCC maps the HEVC codec tag to the corresponding Dolby Vision sample
-// entry FourCC. The mapping is defined in Table 1 of "Dolby Vision Streams
-// Within the ISO Base Media File Format" (v2.7.1, §2.1):
-//
-//	DolbyVisionHVC1SampleEntry (dvh1) — out-of-band parameter sets (hvc1-style)
-//	DolbyVisionHEV1SampleEntry (dvhe) — in-band parameter sets  (hev1-style)
-//
-// The dvvC/dvcC configuration box sits inside the DV sample entry alongside
-// the hvcC box; the sample entry type (dvh1 or dvhe) is therefore determined
-// solely by whether the base HEVC track uses hvc1 or hev1.
-func doviFourCC(codecTag string) string {
-	if codecTag == "hev1" {
-		return "dvhe"
-	}
-	return "dvh1"
-}
-
 func isDOVIBoxType(boxType string) bool {
 	return boxType == "dvvC" || boxType == "dvcC" || boxType == "dvwC"
 }
@@ -293,11 +276,7 @@ func parseVisualSampleEntryBox(se *mp4.VisualSampleEntryBox) (*CodecInfo, error)
 					if doviErr != nil {
 						return nil, e(doviErr, "reason", "failed to parse Dolby Vision box", "box", boxType)
 					}
-					if codecTag == "dvh1" || codecTag == "dvhe" {
-						dovi.FourCC = codecTag
-					} else {
-						dovi.FourCC = doviFourCC(codecTag)
-					}
+					dovi.FourCC = avdesc.DOVIFourCC(codecTag)
 					info.DOVI = dovi
 					info.DOVI.BoxType = boxType
 				}

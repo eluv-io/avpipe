@@ -49,14 +49,34 @@ type DOVIInfo struct {
 	// 0 = no backward compatibility (Dolby Vision only), 1 = HDR10, 4 = HLG.
 	BLSignalCompatibilityID int `json:"bl_signal_compatibility_id"`
 
-	// FourCC is the Dolby Vision sample entry FourCC derived from the enclosing
-	// HEVC codec tag: "hvc1" → "dvh1", "hev1" → "dvhe". Empty when DOVIInfo
-	// originates from a probe (AV_PKT_DATA_DOVI_CONF) rather than mp4e parsing.
+	// FourCC is the Dolby Vision sample entry FourCC derived from the HEVC codec
+	// tag: "hvc1"/"dvh1" → "dvh1", "hev1"/"dvhe" → "dvhe". Populated in both
+	// the probe path (from StreamInfo.CodecTagString) and mp4e parsing. Empty
+	// for non-HEVC codecs or unknown codec tags.
 	FourCC string `json:"fourcc,omitempty"`
 
 	// BoxType is the FourCC of the DV configuration box that carried this record
 	// ("dvcC", "dvvC", or "dvwC"). Empty when DOVIInfo originates from a probe.
 	BoxType string `json:"box_type,omitempty"`
+}
+
+// DOVIFourCC maps an HEVC codec tag to the corresponding Dolby Vision sample
+// entry FourCC. The mapping is defined in Table 1 of "Dolby Vision Streams
+// Within the ISO Base Media File Format" (v2.7.1, §2.1):
+//
+//	DolbyVisionHVC1SampleEntry (dvh1) — out-of-band parameter sets (hvc1-style)
+//	DolbyVisionHEV1SampleEntry (dvhe) — in-band parameter sets  (hev1-style)
+//
+// Pass-through for DV sample entry tags ("dvh1", "dvhe"). Returns "" for
+// non-HEVC or unrecognised codec tags.
+func DOVIFourCC(codecTag string) string {
+	switch codecTag {
+	case "hev1", "dvhe":
+		return "dvhe"
+	case "hvc1", "dvh1":
+		return "dvh1"
+	}
+	return ""
 }
 
 // CodecString returns the Dolby Vision codec string, e.g. "dvh1.08.01",

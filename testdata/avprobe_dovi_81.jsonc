@@ -44,7 +44,8 @@
         "rpu_present": true,
         "el_present": false,
         "bl_present": true,
-        "bl_signal_compatibility_id": 1
+        "bl_signal_compatibility_id": 1,
+        "fourcc": "dvh1"
       },
       "mastering_display": "G(13250,34500)B(7500,3000)R(34000,16000)WP(15635,16450)L(40000000,50)",
       "max_cll": "0,0",

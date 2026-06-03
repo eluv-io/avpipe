@@ -5,6 +5,7 @@ import (
 	"os"
 	"testing"
 
+	"github.com/eluv-io/avpipe/goavpipe/avdesc"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"github.com/tidwall/jsonc"
@@ -26,6 +27,12 @@ func TestStreamByCodecType_Audio(t *testing.T) {
 	require.NotNil(t, s)
 	assert.Equal(t, "eac3", s.CodecName)
 	assert.True(t, s.DolbyAtmos)
+	require.NotNil(t, s.Mp4Info, "Mp4Info must be present for MP4 EAC-3 stream")
+	require.NotNil(t, s.Mp4Info.EC3, "Mp4Info.EC3 must be present for Dolby Atmos stream")
+	assert.True(t, s.Mp4Info.EC3.JOC, "EC3.JOC must be true for Dolby Atmos")
+	assert.Equal(t, uint16(0xF801), s.Mp4Info.EC3.ChanMap)
+	assert.Equal(t, 16, s.Mp4Info.EC3.ComplexityIndex)
+	assert.Equal(t, &avdesc.EC3Info{JOC: true, ChanMap: 0xF801, ComplexityIndex: 16}, s.Mp4Info.EC3)
 }
 
 func TestStreamByCodecType_Video(t *testing.T) {

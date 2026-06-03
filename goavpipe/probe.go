@@ -36,7 +36,7 @@ type StreamInfo struct {
 
 	// Profile is the codec profile IDC. ProfileName holds the human-readable form.
 	// 0 (omitted) when FFmpeg reports AV_PROFILE_UNKNOWN.
-	Profile int `json:"profile,omitempty"` // ffprobe: string value
+	Profile int `json:"profile,omitempty"` // no ffprobe equivalent
 
 	// ProfileName is the human-readable codec profile (e.g. "High", "Main").
 	// Populated by avpipe.Probe() via GetProfileName().
@@ -166,15 +166,16 @@ type StreamInfo struct {
 	// AV_PROFILE_EAC3_DDP_ATMOS, which the EAC-3 decoder sets from sync-frame
 	// headers during avformat_find_stream_info and propagates back to codecpar
 	// via avcodec_parameters_from_context. The dec3 box fields (ChanMap,
-	// ComplexityIndex) are not available here; use mp4e.ExtractCodecInfo when
-	// those are needed.
+	// ComplexityIndex) are not available here; For MP4 containers, look in
+	// MP4Info.EC3
 	DolbyAtmos bool `json:"dolby_atmos,omitempty"`
 
 	// DOVI holds the Dolby Vision decoder configuration from FFmpeg side data
-	// (AV_PKT_DATA_DOVI_CONF). May be nil even when the stream carries a DV
-	// configuration if FFmpeg did not propagate the side data — in that case
-	// Mp4Info.DOVI (parsed from the dvcC/dvvC/dvwC box) is the authoritative
-	// source. Use GetDOVI() to get the best available record from either source.
+	// (AV_PKT_DATA_DOVI_CONF). FourCC is populated from CodecTagString when the
+	// stream is HEVC-based. May be nil if FFmpeg did not propagate the side data
+	// — in that case Mp4Info.DOVI (parsed from the dvcC/dvvC/dvwC box) is the
+	// authoritative source. Use GetDOVI() to get the best available record from
+	// either source.
 	DOVI *avdesc.DOVIInfo `json:"dovi_config,omitempty"`
 
 	// Stereo3DType is the stereoscopic 3D layout of the video stream

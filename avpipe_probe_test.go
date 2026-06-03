@@ -107,10 +107,10 @@ func TestProbeDOVI81_MatchesExtractCodecInfo(t *testing.T) {
 	assert.Equal(t, boxDOVI.BLPresent, probeDOVI.BLPresent)
 	assert.Equal(t, boxDOVI.BLSignalCompatibilityID, probeDOVI.BLSignalCompatibilityID)
 
-	// BoxType and FourCC are only available from the MP4 box path (Mp4Info.DOVI),
-	// not from the FFmpeg side-data path (StreamInfo.DOVI).
+	// BoxType is only available from the MP4 box path; FourCC is now derived
+	// from CodecTagString in the probe path and must match the mp4e result.
 	assert.Empty(t, probeDOVI.BoxType, "StreamInfo.DOVI: BoxType must be empty (side-data path)")
-	assert.Empty(t, probeDOVI.FourCC, "StreamInfo.DOVI: FourCC must be empty (side-data path)")
+	assert.Equal(t, boxDOVI.FourCC, probeDOVI.FourCC, "StreamInfo.DOVI: FourCC must match mp4e result")
 
 	require.NotNil(t, probeVideo.Mp4Info, "Mp4Info must be populated")
 	mp4DOVI := probeVideo.Mp4Info.DOVI

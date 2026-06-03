@@ -1510,6 +1510,9 @@ func TestAudioAtmosBypass(t *testing.T) {
 	assert.Equal(t, int64(640000), audioStream.BitRate, "bit rate must be preserved by bypass")
 	assert.Equal(t, 6, audioStream.Channels, "channel count must be preserved by bypass")
 	assert.Equal(t, "5.1(side)", audioStream.ChannelLayoutName, "channel layout must be preserved by bypass")
+	require.NotNil(t, audioStream.Mp4Info, "Mp4Info must be present for MP4 EAC-3 stream")
+	require.NotNil(t, audioStream.Mp4Info.EC3, "Mp4Info.EC3 must be present for Dolby Atmos stream")
+	assert.True(t, audioStream.Mp4Info.EC3.JOC, "EC3.JOC must be true for Dolby Atmos")
 }
 
 // TestAudioAtmosBypassExplicit verifies EAC-3 passthrough using BypassTranscoding=true,
@@ -1552,6 +1555,9 @@ func TestAudioAtmosBypassExplicit(t *testing.T) {
 	assert.Equal(t, int64(640000), audioStream.BitRate, "bit rate must be preserved by bypass")
 	assert.Equal(t, 6, audioStream.Channels, "channel count must be preserved by bypass")
 	assert.Equal(t, "5.1(side)", audioStream.ChannelLayoutName, "channel layout must be preserved by bypass")
+	require.NotNil(t, audioStream.Mp4Info, "Mp4Info must be present for MP4 EAC-3 stream")
+	require.NotNil(t, audioStream.Mp4Info.EC3, "Mp4Info.EC3 must be present for Dolby Atmos stream")
+	assert.True(t, audioStream.Mp4Info.EC3.JOC, "EC3.JOC must be true for Dolby Atmos")
 }
 
 // Timebase of BBB0_HD_8_XDCAM_120s_CCBYblendercloud.mxf is 1001/60000 - in this case the mp4 muxer changes timebase to 1/60000
