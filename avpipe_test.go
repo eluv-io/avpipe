@@ -2286,55 +2286,6 @@ func assertDOVI81(t *testing.T, mp4Path string) {
 	assert.Equal(t, 1, dovi.BLSignalCompatibilityID, "DOVI.BLSignalCompatibilityID in %s", mp4Path)
 }
 
-// TestDOVI20_MezTranscode exercises the full bypass pipeline for a Dolby Vision
-// Profile 20 / MV-HEVC source (sample_dv20.mp4, codec tag dvh1):
-//
-//   - is_dovi detects Dolby Vision via the dvh1 codec tag and sets
-//     FF_COMPLIANCE_UNOFFICIAL so the muxer writes the DV config box.
-//   - is_mvhevc detects MV-HEVC (stereo 3D, profile 2) and sets
-//     FF_COMPLIANCE_UNOFFICIAL so the muxer writes 3D metadata.
-//   - The MV-HEVC output wrapper (wrapMvhevcOutputHandler / StreamPatcher)
-//     intercepts the segment bytes and via fixVideoTrak / fixDVBoxType:
-//   - renames the DV config box from dvwC (FFmpeg bug for profile 20)
-//     to dvcC (correct per Dolby Vision ISOBMFF spec v2.7.1)
-//   - injects oinf and linf sample-group descriptors (stripped by FFmpeg bypass)
-//   - injects trgr/cstg track-group box (stripped by FFmpeg bypass)
-//
-// assertDOVI20 then verifies the output segment via mp4e.ExtractCodecInfo:
-// dvcC box present, Profile=20, BLSignalCompatibilityID=0, FourCC=dvh1, BoxType=dvcC,
-// VideoLayout=MVHEVC.
-func TestDOVI20_MezTranscode(t *testing.T) {
-	if testing.Short() {
-		t.Skip("SKIPPING TestDOVI20_MezTranscode (fast mode)")
-	}
-	checkFileExists(t, dovi20TestSource)
-
-	mezDir := path.Join(baseOutPath, fn(), "Mez")
-
-	mezParams := goavpipe.XcParams{
-		Url:               dovi20TestSource,
-		BypassTranscoding: true,
-		Format:            "fmp4-segment",
-		DurationTs:        -1,
-		StartSegmentStr:   "1",
-		SegDuration:       "30",
-		Ecodec:            h265Codec,
-		Dcodec:            "hevc",
-		GPUIndex:          -1,
-		XcType:            goavpipe.XcVideo,
-		Seekable:          true,
-		StreamId:          -1,
-		VideoLayout:       int32(goavpipe.VideoLayoutMVHEVC),
-		DebugFrameLevel:   debugFrameLevel,
-	}
-
-	boilerplate(t, mezDir, dovi20TestSource)
-	boilerXc(t, &mezParams)
-
-	mezSeg := path.Join(mezDir, "vsegment-1.mp4")
-	assertDOVI20(t, mezSeg)
-}
-
 // assertDOVI20 opens the MP4 at mp4Path and asserts that a Dolby Vision
 // configuration box (dvcC, per spec) is present with Profile=20, CCID=0, FourCC=dvh1,
 // and that the stream is MV-HEVC.
@@ -2438,6 +2389,93 @@ func TestDOVI81_MezAndDASH(t *testing.T) {
 	boilerXc(t, &dashParams)
 
 	assertDOVI81(t, dashVideoInit(t, dashDir))
+}
+
+// TestDOVI20_MezAndDASH verifies that the dvcC box (Dolby Vision Profile 20 configuration)
+// survives the two-stage bypass pipeline used in production:
+//
+//	source → mez (fmp4-segment, bypass, VideoLayout=MV-HEVC)
+//	mez    → DASH init segment (bypass, VideoLayout=MV-HEVC)
+//
+// The MV-HEVC output wrapper (wrapMvhevcOutputHandler / StreamPatcher) intercepts
+// segment bytes and, via fixVideoTrak / fixDVBoxType, renames the DV config box from
+// dvwC (FFmpeg bug for profile 20) to dvcC (per Dolby Vision ISOBMFF spec v2.7.1),
+// and injects oinf/linf sample-group descriptors and trgr/cstg track-group box
+// stripped by FFmpeg bypass.
+//
+// Asserts dvcC present at both stages (mez sanity-check + final DASH init segment)
+// with Profile=20, BLSignalCompatibilityID=0, FourCC=dvh1, BoxType=dvcC, and
+// VideoLayout=MVHEVC.
+func TestDOVI20_MezAndDASH(t *testing.T) {
+	if testing.Short() {
+		t.Skip("SKIPPING TestDOVI20_MezAndDASH (fast mode)")
+	}
+	checkFileExists(t, dovi20TestSource)
+
+	mezDir := path.Join(baseOutPath, fn(), "Mez")
+	dashDir := path.Join(baseOutPath, fn(), "DASH")
+
+	// Stage 1: source → mez (fmp4-segment, bypass)
+	// Mirrors xcMezVideoParams() for a bypass_mode=true ABR profile with VideoLayout=MV-HEVC.
+	mezParams := goavpipe.XcParams{
+		Url:                 dovi20TestSource,
+		BypassTranscoding:   true,
+		Format:              "fmp4-segment",
+		DurationTs:          -1,
+		StartSegmentStr:     "1",
+		VideoBitrate:        30000000,
+		VideoSegDurationTs:  -1,
+		SegDuration:         "30.0000",
+		ForceKeyInt:         48,
+		Ecodec:              h265Codec, // ignored for bypass
+		GPUIndex:            -1,
+		EncHeight:           2160,
+		EncWidth:            3840,
+		XcType:              goavpipe.XcVideo,
+		Seekable:            true,
+		StreamId:            -1,
+		SyncAudioToStreamId: -1,
+		VideoTimeBase:       24,
+		VideoLayout:         int32(goavpipe.VideoLayoutMVHEVC),
+		DebugFrameLevel:     debugFrameLevel,
+	}
+
+	boilerplate(t, mezDir, dovi20TestSource)
+	boilerXc(t, &mezParams)
+
+	mezSeg := path.Join(mezDir, "vsegment-1.mp4")
+	assertDOVI20(t, mezSeg) // sanity-check: dvcC must survive stage 1
+
+	// Stage 2: mez → DASH init segment (bypass)
+	// VideoLayout=MV-HEVC triggers the MV-HEVC output wrapper which calls
+	// injectDVProfile20Box when FFmpeg strips the dvcC from the DASH output.
+	dashParams := goavpipe.XcParams{
+		Url:                mezSeg,
+		BypassTranscoding:  true,
+		Format:             "dash",
+		DurationTs:         61440,
+		StartSegmentStr:    "1",
+		VideoBitrate:       30000000,
+		VideoSegDurationTs: 24576,
+		StartFragmentIndex: 1,
+		ForceKeyInt:        48,
+		Ecodec:             h265Codec, // ignored for bypass
+		GPUIndex:           -1,
+		EncHeight:          2160,
+		EncWidth:           3840,
+		XcType:             goavpipe.XcVideo,
+		StreamId:           -1,
+		VideoLayout:        int32(goavpipe.VideoLayoutMVHEVC),
+		DebugFrameLevel:    debugFrameLevel,
+	}
+
+	setupOutDir(t, dashDir)
+	goavpipe.InitUrlIOHandler(mezSeg,
+		&xc.FileInputOpener{URL: mezSeg},
+		&xc.FileOutputOpener{Dir: dashDir})
+	boilerXc(t, &dashParams)
+
+	assertDOVI20(t, dashVideoInit(t, dashDir))
 }
 
 func TestAVPipeStats(t *testing.T) {
