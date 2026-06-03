@@ -52,7 +52,19 @@
         "codec_tag_string": "hvc1",
         "mime_codec_string": "hvc1.2.4.L93.90",
         "profile_idc": 2,
-        "level": 93
+        "level": 93,
+        "dovi": {
+          "version_major": 1,
+          "version_minor": 0,
+          "profile": 8,
+          "level": 1,
+          "rpu_present": true,
+          "el_present": false,
+          "bl_present": true,
+          "bl_signal_compatibility_id": 1,
+          "fourcc": "dvh1",
+          "box_type": "dvvC"
+        }
       }
     }
   ]

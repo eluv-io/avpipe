@@ -1,6 +1,10 @@
 package avdesc
 
-import "fmt"
+import (
+	"fmt"
+
+	"github.com/eluv-io/avpipe/goavpipe/util"
+)
 
 const (
 	DOVIProfileMVHEVC = 20 // Required for MV-HEVC
@@ -63,3 +67,6 @@ func (d DOVIInfo) CodecString() string {
 	}
 	return fmt.Sprintf("%s.%02d.%02d", d.FourCC, d.Profile, d.Level)
 }
+
+// String returns the DOVIInfo as a JSON string, satisfying fmt.Stringer.
+func (d DOVIInfo) String() string { return util.JSONString(d) }

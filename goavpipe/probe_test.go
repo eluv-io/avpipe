@@ -16,6 +16,7 @@ func dolbyAtmosProbe(t *testing.T) *ProbeInfo {
 	require.NoError(t, err)
 	var p ProbeInfo
 	require.NoError(t, json.Unmarshal(jsonc.ToJSON(raw), &p))
+	//println(p.String())
 	return &p
 }
 

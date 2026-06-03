@@ -6,7 +6,6 @@ import (
 	"fmt"
 	"io"
 	"math/bits"
-	"strings"
 
 	"github.com/Eyevinn/mp4ff/aac"
 	"github.com/Eyevinn/mp4ff/avc"
@@ -53,7 +52,7 @@ type CodecInfo struct {
 	Channels int `json:"channels,omitempty"`
 
 	// EC3 is set only when the codec is ec-3
-	EC3 *EC3Info `json:"ec3,omitempty"`
+	EC3 *avdesc.EC3Info `json:"ec3,omitempty"`
 
 	// DOVI is set only when the codec entry contains a Dolby Vision configuration
 	// box (dvcC, dvvC, or dvwC). Common cases:
@@ -82,61 +81,6 @@ func (c CodecInfo) MarshalJSON() ([]byte, error) {
 		alias:       alias(c),
 		ProfileName: ProfileName(c.CodecTagString, c.ProfileIDC),
 		LevelName:   LevelName(c.CodecTagString, c.Level),
-	})
-}
-
-// EC3Info holds E-AC-3-specific fields (Dolby Digital Plus / Atmos)
-type EC3Info struct {
-	// ChanMap is the custom channel map bitmask from the MP4 dec3 box
-	// (ETSI TS 102 366 Table E.1.4)
-	ChanMap uint16 `json:"chan_map"`
-
-	// JOC indicates Joint Object Coding (Dolby Atmos). True when the
-	// flag_ec3_extension_type_a bit is set in the MP4 dec3 box extension
-	// (ETSI TS 103 420)
-	JOC bool `json:"joc"`
-
-	// ComplexityIndex is the Atmos object complexity index
-	// (complexity_index_type_a from ETSI TS 103 420). Only meaningful when
-	// JOC is true.
-	ComplexityIndex int `json:"complexity_index,omitempty"`
-}
-
-// ChanMapHex returns ChanMap as an uppercase hex string; e.g. "F801"
-func (e EC3Info) ChanMapHex() string {
-	return fmt.Sprintf("%04X", e.ChanMap)
-}
-
-// ec3ChanMapNames lists the channel names for each bit of the EC-3 custom
-// channel map, ordered from MSB (bit 15) to LSB (bit 0), per ETSI TS 102 366
-// Table E.1.4.
-var ec3ChanMapNames = [16]string{
-	"L", "C", "R", "Ls", "Rs", "Lc/Rc", "Lrs/Rrs", "Cs",
-	"Ts", "Lsd/Rsd", "Lw/Rw", "Vhl/Vhr", "Vhc", "Lts/Rts", "LFE2", "LFE",
-}
-
-// ChanMapString returns the channel names encoded in ChanMap as a
-// space-separated string; e.g. "L C R Ls Rs LFE"
-func (e EC3Info) ChanMapString() string {
-	var names []string
-	for i, name := range ec3ChanMapNames {
-		if e.ChanMap&(1<<(15-i)) != 0 {
-			names = append(names, name)
-		}
-	}
-	return strings.Join(names, " ")
-}
-
-// MarshalJSON adds an additional chan_map_hex field alongside the numeric
-// chan_map
-func (e EC3Info) MarshalJSON() ([]byte, error) {
-	type alias EC3Info
-	return json.Marshal(&struct {
-		alias
-		ChanMapHex string `json:"chan_map_hex,omitempty"`
-	}{
-		alias:      alias(e),
-		ChanMapHex: e.ChanMapHex(),
 	})
 }
 
@@ -226,7 +170,7 @@ func parseEC3CodecInfo(se *mp4.AudioSampleEntryBox) (*CodecInfo, error) {
 		MimeCodecString: "ec-3",
 		CodecTagString:  "ec-3",
 		Channels:        nChannels,
-		EC3: &EC3Info{
+		EC3: &avdesc.EC3Info{
 			ChanMap:         chanMap,
 			JOC:             joc,
 			ComplexityIndex: complexityIndex,
@@ -374,7 +318,7 @@ func parseVisualSampleEntryBox(se *mp4.VisualSampleEntryBox) (*CodecInfo, error)
 		}
 
 		// Check for frame-packed stereo (SBS): st3d or HEVC SEI 45 in hvcC
-		// PENDING(SS) if SEI 45 only in mdat and not hvcC we don't see it from the moov - to test CPU/GPU outputs
+		// PENDING(SS) if SEI 45 only in mdat and not hvcC, we don't see it from the moov - to test CPU/GPU outputs
 		if layout := detectStereoFromVse(se); layout != Mp4VideoLayoutMono {
 			info.VideoLayout = layout
 		} else if layout := detectStereoFromSEI(se.HvcC); layout != Mp4VideoLayoutMono {

@@ -10,6 +10,7 @@ import (
 	"github.com/eluv-io/avpipe/goavpipe/avdesc"
 	"github.com/eluv-io/avpipe/mp4e"
 	"github.com/eluv-io/avpipe/xc"
+	"github.com/eluv-io/log-go"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"github.com/tidwall/jsonc"
@@ -58,9 +59,8 @@ func TestProbeDOVI81Golden(t *testing.T) {
 	want, err := os.ReadFile("testdata/avprobe_dovi_81.jsonc")
 	failNowOnError(t, err)
 
-	// TODO: deep struct comparison less fragile?
 	assert.JSONEq(t, string(jsonc.ToJSON(want)), string(got))
-	println(string(got))
+	//println(string(got))
 }
 
 // TestProbeDOVI81_MatchesExtractCodecInfo verifies that the DOVI fields
@@ -121,7 +121,7 @@ func TestProbeDOVI81_MatchesExtractCodecInfo(t *testing.T) {
 
 // postCloseFailOpener allows multiple concurrent opens but fails if Open is called after
 // any handle has been closed. This replicates the content-fabric probe path: the URL table
-// entry supports multiple simultaneous opens (pre-extraction + C probe), but is cleared by
+// entry supports multiple simultaneous opens (pre-extraction plus C probe), but is cleared by
 // InCloser after the C probe closes, so any post-probe re-open fails.
 type postCloseFailOpener struct {
 	url    string
@@ -134,9 +134,11 @@ func (o *postCloseFailOpener) Open(fd int64, url string) (goavpipe.InputHandler,
 	o.mu.Lock()
 	defer o.mu.Unlock()
 	if o.closes > 0 {
+		log.Debug("postCloseFailOpener: rejecting re-open after close", "fd", fd, "url", url, "opens", o.opens, "closes", o.closes)
 		return nil, fmt.Errorf("postCloseFailOpener: re-open after close (simulates clearReqCtxTables)")
 	}
 	o.opens++
+	log.Debug("postCloseFailOpener: open", "fd", fd, "url", url, "opens", o.opens)
 	f, err := os.Open(o.url)
 	if err != nil {
 		return nil, err
@@ -162,7 +164,9 @@ func (h *trackingCloseHandler) Stat(_ int, _ goavpipe.AVStatType, _ any) error {
 func (h *trackingCloseHandler) Close() error {
 	h.opener.mu.Lock()
 	h.opener.closes++
+	closes := h.opener.closes
 	h.opener.mu.Unlock()
+	log.Debug("trackingCloseHandler: close", "file", h.file.Name(), "closes", closes)
 	return h.file.Close()
 }
 

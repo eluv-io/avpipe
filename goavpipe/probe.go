@@ -1,12 +1,10 @@
 package goavpipe
 
 import (
-	"encoding/json"
-	"fmt"
 	"math/big"
-	"strings"
 
 	"github.com/eluv-io/avpipe/goavpipe/avdesc"
+	"github.com/eluv-io/avpipe/goavpipe/util"
 )
 
 // ProbeInfo is the top-level result returned by avpipe.Probe. It mirrors the
@@ -172,8 +170,11 @@ type StreamInfo struct {
 	// those are needed.
 	DolbyAtmos bool `json:"dolby_atmos,omitempty"`
 
-	// DOVI holds the Dolby Vision decoder configuration record side data
-	// (AV_PKT_DATA_DOVI_CONF). Non-nil when the stream carries a DV configuration.
+	// DOVI holds the Dolby Vision decoder configuration from FFmpeg side data
+	// (AV_PKT_DATA_DOVI_CONF). May be nil even when the stream carries a DV
+	// configuration if FFmpeg did not propagate the side data — in that case
+	// Mp4Info.DOVI (parsed from the dvcC/dvvC/dvwC box) is the authoritative
+	// source. Use GetDOVI() to get the best available record from either source.
 	DOVI *avdesc.DOVIInfo `json:"dovi_config,omitempty"`
 
 	// Stereo3DType is the stereoscopic 3D layout of the video stream
@@ -190,7 +191,7 @@ type StreamInfo struct {
 	MasteringDisplay string `json:"mastering_display,omitempty"`
 
 	// MaxCLL is the SMPTE ST 2086 content light level, formatted as
-	// "MaxCLL=N,MaxFALL=N" where MaxCLL is the maximum content light level
+	// "MaxCLL=N,MaxFALL=N" where MaxCLL is the maximum content light level,
 	// and MaxFALL is the maximum frame-average light level, both in nits
 	// (e.g. "MaxCLL=1000,MaxFALL=400"). Non-empty only for HDR streams.
 	// Derived from AV_PKT_DATA_CONTENT_LIGHT_LEVEL side data.
@@ -233,12 +234,13 @@ type Mp4Info struct {
 	Channels int `json:"channels,omitempty"`
 
 	// EC3 holds E-AC-3-specific MP4 decoder configuration, when present.
-	EC3 *EC3Info `json:"ec3,omitempty"`
+	EC3 *avdesc.EC3Info `json:"ec3,omitempty"`
 
 	// DOVI holds the Dolby Vision configuration parsed from the MP4 sample-entry
 	// box (dvcC, dvvC, or dvwC). Unlike StreamInfo.DOVI (which comes from FFmpeg
 	// side data and lacks BoxType/FourCC), this record includes the box type and
-	// the derived DV sample-entry FourCC (e.g. "dvh1").
+	// the derived DV sample-entry FourCC (e.g. "dvh1"). Use StreamInfo.GetDOVI()
+	// to get the best available record from either source.
 	DOVI *avdesc.DOVIInfo `json:"dovi,omitempty"`
 
 	// VideoLayout describes how one or more views are encoded.
@@ -247,62 +249,6 @@ type Mp4Info struct {
 	// EnhancementProfileIDC is the MV-HEVC enhancement-layer general_profile_idc.
 	// Only meaningful for VideoLayout == VideoLayoutMVHEVC.
 	EnhancementProfileIDC int `json:"enhancement_profile_idc,omitempty"`
-}
-
-// TODO: EC3Info duplicates mp4e.EC3Info field-for-field; consolidate to *mp4e.EC3Info and remove convertEC3Info in avpipe_probe.go.
-// EC3Info holds E-AC-3-specific MP4 decoder configuration.
-type EC3Info struct {
-	// ChanMap is the custom channel map bitmask from the MP4 dec3 box
-	// (ETSI TS 102 366 Table E.1.4).
-	ChanMap uint16 `json:"chan_map"`
-
-	// JOC indicates Joint Object Coding (Dolby Atmos). True when the
-	// flag_ec3_extension_type_a bit is set in the MP4 dec3 box extension
-	// (ETSI TS 103 420).
-	JOC bool `json:"joc"`
-
-	// ComplexityIndex is the Atmos object complexity index
-	// (complexity_index_type_a from ETSI TS 103 420). Only meaningful when
-	// JOC is true.
-	ComplexityIndex int `json:"complexity_index,omitempty"`
-}
-
-// ChanMapHex returns ChanMap as an uppercase hex string; e.g. "F801".
-func (e EC3Info) ChanMapHex() string {
-	return fmt.Sprintf("%04X", e.ChanMap)
-}
-
-// ec3ChanMapNames lists the channel names for each bit of the EC-3 custom
-// channel map, ordered from MSB (bit 15) to LSB (bit 0), per ETSI TS 102 366
-// Table E.1.4.
-var ec3ChanMapNames = [16]string{
-	"L", "C", "R", "Ls", "Rs", "Lc/Rc", "Lrs/Rrs", "Cs",
-	"Ts", "Lsd/Rsd", "Lw/Rw", "Vhl/Vhr", "Vhc", "Lts/Rts", "LFE2", "LFE",
-}
-
-// ChanMapString returns the channel names encoded in ChanMap as a
-// space-separated string; e.g. "L C R Ls Rs LFE".
-func (e EC3Info) ChanMapString() string {
-	var names []string
-	for i, name := range ec3ChanMapNames {
-		if e.ChanMap&(1<<(15-i)) != 0 {
-			names = append(names, name)
-		}
-	}
-	return strings.Join(names, " ")
-}
-
-// MarshalJSON adds an additional chan_map_hex field alongside the numeric
-// chan_map.
-func (e EC3Info) MarshalJSON() ([]byte, error) {
-	type alias EC3Info
-	return json.Marshal(&struct {
-		alias
-		ChanMapHex string `json:"chan_map_hex,omitempty"`
-	}{
-		alias:      alias(e),
-		ChanMapHex: e.ChanMapHex(),
-	})
 }
 
 // SideDataDisplayMatrix holds the display transformation matrix side data
@@ -317,9 +263,26 @@ type SideDataDisplayMatrix struct {
 	RotationCw float64 `json:"rotation_cw"`
 }
 
+func (p ProbeInfo) String() string             { return util.JSONString(p) }
+func (c ContainerInfo) String() string         { return util.JSONString(c) }
+func (s StreamInfo) String() string            { return util.JSONString(s) }
+func (m Mp4Info) String() string               { return util.JSONString(m) }
+func (s SideDataDisplayMatrix) String() string { return util.JSONString(s) }
+
+// GetDOVI returns the best available Dolby Vision configuration for the stream.
+// It prefers Mp4Info.DOVI (parsed from the dvcC/dvvC/dvwC box, includes FourCC
+// and BoxType) over DOVI (from FFmpeg side data, lacks those fields). Returns
+// nil if neither source has a DOVI record.
+func (s StreamInfo) GetDOVI() *avdesc.DOVIInfo {
+	if s.Mp4Info != nil && s.Mp4Info.DOVI != nil {
+		return s.Mp4Info.DOVI
+	}
+	return s.DOVI
+}
+
 // StreamByCodecType returns the first stream whose CodecType matches the given
 // value ("audio", "video", "subtitle", etc.), or nil if none is found.
-func (p *ProbeInfo) StreamByCodecType(codecType string) *StreamInfo {
+func (p ProbeInfo) StreamByCodecType(codecType string) *StreamInfo {
 	for i := range p.StreamInfo {
 		if p.StreamInfo[i].CodecType == codecType {
 			return &p.StreamInfo[i]
