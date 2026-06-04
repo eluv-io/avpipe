@@ -66,7 +66,11 @@ func warnDOVIMismatch(streamIndex int, probeDOVI, mp4DOVI *avdesc.DOVIInfo) {
 			"stream_index", streamIndex,
 			"probe_dovi", probeDOVI)
 	} else if probeDOVI != nil { // && mp4DOVI != nil
-		if probeDOVI.VersionMajor != mp4DOVI.VersionMajor ||
+		// Intentionally excluded from comparison: BoxType differs by design
+		// (empty in the probe/side-data path, set in the MP4 box path).
+		// If DOVIInfo gains new fields, add them here to check for mismatch.
+		if probeDOVI.FourCC != mp4DOVI.FourCC ||
+			probeDOVI.VersionMajor != mp4DOVI.VersionMajor ||
 			probeDOVI.VersionMinor != mp4DOVI.VersionMinor ||
 			probeDOVI.Profile != mp4DOVI.Profile ||
 			probeDOVI.Level != mp4DOVI.Level ||
@@ -98,4 +102,3 @@ func convertMp4Info(info *mp4e.CodecInfo) *goavpipe.Mp4Info {
 		EnhancementProfileIDC: info.EnhancementProfileIDC,
 	}
 }
-

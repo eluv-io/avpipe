@@ -1187,6 +1187,9 @@ func Probe(params *goavpipe.XcParams) (*goavpipe.ProbeInfo, error) {
 // needs cancellation support (e.g. mezzanine creation driven by an LRO).
 // Also sets up the MPEGTS sequential opener for live-stream inputs when
 // params.UseCustomLiveReader is set.
+//
+// If UseCustomLiveReader is set, the caller is responsible for calling
+// goavpipe.Globals.RemoveURLHandlers(params.Url) after XcRun returns.
 func XcInit(params *goavpipe.XcParams) (int32, error) {
 	const op = "avpipe.XcInit"
 
@@ -1195,7 +1198,6 @@ func XcInit(params *goavpipe.XcParams) (int32, error) {
 		return -1, EAV_PARAM
 	}
 	goavpipe.Log.Debug(op, "XcParams", params)
-	defer goavpipe.Globals.RemoveURLHandlers(params.Url)
 
 	seqOpenerF := func(inFd int64) mpegts.SequentialOpener {
 		// We use 99 as the streamID for mpegts output to avoid collisions with other streams

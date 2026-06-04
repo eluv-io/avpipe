@@ -247,7 +247,7 @@ func sanitizeString(s string) string {
 	}, s)
 }
 
-func isDOVIBoxType(boxType string) bool {
+func IsDOVIBoxType(boxType string) bool {
 	return boxType == "dvvC" || boxType == "dvcC" || boxType == "dvwC"
 }
 
@@ -287,7 +287,7 @@ func parseVisualSampleEntryBox(se *mp4.VisualSampleEntryBox) (*CodecInfo, error)
 		// Look for Dolby Vision configuration box (dvvC, dvcC, or dvwC) in children.
 		for _, child := range se.Children {
 			boxType := child.Type()
-			if isDOVIBoxType(boxType) {
+			if IsDOVIBoxType(boxType) {
 				if ub, ok := child.(*mp4.UnknownBox); ok {
 					dovi, doviErr := ParseDOVIBox(ub.Payload())
 					if doviErr != nil {

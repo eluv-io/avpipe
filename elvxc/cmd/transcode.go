@@ -804,6 +804,12 @@ func doTranscode(cmd *cobra.Command, args []string) error {
 
 			goavpipe.InitUrlIOHandlerIfNotPresent(filename, nil, outOpener)
 
+			// BUG: XcInit is called here but its handle is discarded; the actual
+			// transcoding is done by Xc (a separate one-shot call) rather than XcRun.
+			// XcInit is therefore a no-op and should be removed, or replaced with
+			// XcRun(handle). The InitUrlIOHandlerIfNotPresent above is also orphaned:
+			// Xc's defer RemoveURLHandlers fires on return, but the registered output
+			// opener is never cleaned up by this goroutine on the error path.
 			handle, err := avpipe.XcInit(params)
 			log.Info("XcInit", "handle", handle, "err", err)
 

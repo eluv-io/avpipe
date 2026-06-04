@@ -204,10 +204,13 @@ func TestProbeTS_NoMp4Info(t *testing.T) {
 	url := "./media/bbb_sunflower_2160p_30fps_normal_2min.ts"
 	checkFileExists(t, url)
 
-	goavpipe.InitIOHandler(&xc.FileInputOpener{URL: url}, &concurrentOutputOpener{dir: "test_out/probe_ts"})
+	opener := &postCloseFailOpener{url: url}
+	goavpipe.InitIOHandler(opener, &concurrentOutputOpener{dir: "test_out/probe_ts"})
 
 	probe, err := avpipe.Probe(&goavpipe.XcParams{Url: url, Seekable: true})
 	require.NoError(t, err)
+	assert.Equal(t, 2, opener.opens, "expected pre-extraction open and C probe open")
+	assert.Equal(t, 2, opener.closes, "expected both handles closed: C probe via InCloser, pre-extraction explicitly")
 
 	video := probe.StreamByCodecType("video")
 	require.NotNil(t, video, "expected a video stream")

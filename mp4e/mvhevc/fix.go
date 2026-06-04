@@ -12,7 +12,7 @@ import (
 
 // Fix restores MV-HEVC sample-group and track-group boxes that FFmpeg's
 // muxer drops when repackaging in bypass mode. The dropped boxes (oinf, linf,
-// and trgr/cstg) can be reconstructed from VPS which is expected to be present in the input.
+// and trgr/cstg) can be reconstructed from VPS, which is expected to be present in the input.
 //
 // Only fmp4 input.
 func Fix(inputPath, outputPath string) error {
@@ -219,7 +219,7 @@ func fixDVBoxType(vse *mp4.VisualSampleEntryBox, trackID uint32) bool {
 
 	changed := false
 	for i, c := range vse.Children {
-		if c.Type() != "dvcC" && c.Type() != "dvvC" && c.Type() != "dvwC" {
+		if !mp4e.IsDOVIBoxType(c.Type()) {
 			continue
 		}
 		// If mp4ff adds support for parsing DOVI, revisit this code

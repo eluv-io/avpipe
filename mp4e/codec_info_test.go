@@ -52,10 +52,10 @@ func TestDOVICodecString(t *testing.T) {
 }
 
 func TestIsDOVIBoxType(t *testing.T) {
-	assert.True(t, isDOVIBoxType("dvcC"))
-	assert.True(t, isDOVIBoxType("dvvC"))
-	assert.True(t, isDOVIBoxType("dvwC"))
-	assert.False(t, isDOVIBoxType("hvcC"))
+	assert.True(t, IsDOVIBoxType("dvcC"))
+	assert.True(t, IsDOVIBoxType("dvvC"))
+	assert.True(t, IsDOVIBoxType("dvwC"))
+	assert.False(t, IsDOVIBoxType("hvcC"))
 }
 
 func TestParseDOVIBoxProfile20(t *testing.T) {
