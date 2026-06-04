@@ -550,6 +550,149 @@ copy_source_color_to_output(
         dst->color_range = src->color_range;
 }
 
+static int
+known_color_primaries(
+    enum AVColorPrimaries value)
+{
+    return value > AVCOL_PRI_RESERVED0 &&
+        value != AVCOL_PRI_UNSPECIFIED &&
+        value != AVCOL_PRI_RESERVED &&
+        value < AVCOL_PRI_NB;
+}
+
+static int
+known_color_trc(
+    enum AVColorTransferCharacteristic value)
+{
+    return value > AVCOL_TRC_RESERVED0 &&
+        value != AVCOL_TRC_UNSPECIFIED &&
+        value != AVCOL_TRC_RESERVED &&
+        value < AVCOL_TRC_NB;
+}
+
+static int
+known_color_space(
+    enum AVColorSpace value,
+    enum AVPixelFormat pix_fmt)
+{
+    if (value == AVCOL_SPC_UNSPECIFIED || value < 0 || value >= AVCOL_SPC_NB)
+        return 0;
+    /* AVCOL_SPC_RGB is value 0 (unset) - valid for RGB but not for YUV */
+    if (value == AVCOL_SPC_RGB) {
+        const AVPixFmtDescriptor *desc = av_pix_fmt_desc_get(pix_fmt);
+        if (!desc || !(desc->flags & AV_PIX_FMT_FLAG_RGB))
+            return 0;
+    }
+    return 1;
+}
+
+static int
+known_color_range(
+    enum AVColorRange value)
+{
+    return value > AVCOL_RANGE_UNSPECIFIED &&
+        value < AVCOL_RANGE_NB;
+}
+
+/*
+ * Resolve video stream color info when preparing the decoder.
+ * These values are used for both:
+ * - video input filter
+ * - fix frame color meta when primaries/trc are decoded as "reserved" (0)
+ * Fixes filter error:
+ * "Unsupported input (Operation not supported): fmt:yuv422p10le csp:gbr prim:reserved trc:reserved -> fmt:yuv420p csp:bt709 prim:reserved trc:reserved"
+ */
+void
+reconcile_decoder_video_color(
+    coderctx_t *decoder_context,
+    int stream_index,
+    const char *url)
+{
+    AVCodecContext *codec_context;
+    AVCodecParameters *codecpar;
+    enum AVPixelFormat pix_fmt;
+
+    decoder_context->video_color_primaries = AVCOL_PRI_UNSPECIFIED;
+    decoder_context->video_color_trc       = AVCOL_TRC_UNSPECIFIED;
+    decoder_context->video_colorspace      = AVCOL_SPC_UNSPECIFIED;
+    decoder_context->video_color_range     = AVCOL_RANGE_UNSPECIFIED;
+
+    if (stream_index < 0 ||
+        !decoder_context->codec_context[stream_index] ||
+        !decoder_context->stream[stream_index] ||
+        !decoder_context->stream[stream_index]->codecpar)
+        return;
+
+    codec_context = decoder_context->codec_context[stream_index];
+    codecpar = decoder_context->stream[stream_index]->codecpar;
+    pix_fmt = codec_context->pix_fmt;
+
+    if (known_color_primaries(codec_context->color_primaries)) {
+        decoder_context->video_color_primaries = codec_context->color_primaries;
+        if (known_color_primaries(codecpar->color_primaries) &&
+            codecpar->color_primaries != codec_context->color_primaries)
+            elv_warn("reconcile_decoder_video_color: primaries differ, decoder=%s codecpar=%s, url=%s",
+                av_color_primaries_name(codec_context->color_primaries),
+                av_color_primaries_name(codecpar->color_primaries), url);
+    } else if (known_color_primaries(codecpar->color_primaries)) {
+        decoder_context->video_color_primaries = codecpar->color_primaries;
+    }
+
+    if (known_color_trc(codec_context->color_trc)) {
+        decoder_context->video_color_trc = codec_context->color_trc;
+        if (known_color_trc(codecpar->color_trc) &&
+            codecpar->color_trc != codec_context->color_trc)
+            elv_warn("reconcile_decoder_video_color: transfer differ, decoder=%s codecpar=%s, url=%s",
+                av_color_transfer_name(codec_context->color_trc),
+                av_color_transfer_name(codecpar->color_trc), url);
+    } else if (known_color_trc(codecpar->color_trc)) {
+        decoder_context->video_color_trc = codecpar->color_trc;
+    }
+
+    if (known_color_space(codec_context->colorspace, pix_fmt)) {
+        decoder_context->video_colorspace = codec_context->colorspace;
+        if (known_color_space(codecpar->color_space, pix_fmt) &&
+            codecpar->color_space != codec_context->colorspace)
+            elv_warn("reconcile_decoder_video_color: matrix differ, decoder=%s codecpar=%s, url=%s",
+                av_color_space_name(codec_context->colorspace),
+                av_color_space_name(codecpar->color_space), url);
+    } else if (known_color_space(codecpar->color_space, pix_fmt)) {
+        decoder_context->video_colorspace = codecpar->color_space;
+    }
+
+    if (known_color_range(codec_context->color_range)) {
+        decoder_context->video_color_range = codec_context->color_range;
+        if (known_color_range(codecpar->color_range) &&
+            codecpar->color_range != codec_context->color_range)
+            elv_warn("reconcile_decoder_video_color: range differ, decoder=%s codecpar=%s, url=%s",
+                av_color_range_name(codec_context->color_range),
+                av_color_range_name(codecpar->color_range), url);
+    } else if (known_color_range(codecpar->color_range)) {
+        decoder_context->video_color_range = codecpar->color_range;
+    }
+}
+
+/*
+ * Fix frame color metadata for frames that are decoded as "reserved" (0)
+ */
+void
+fix_video_frame_color(
+    coderctx_t *decoder_context,
+    AVFrame *frame)
+{
+    if (!frame)
+        return;
+
+    if (!known_color_primaries(frame->color_primaries))
+        frame->color_primaries = decoder_context->video_color_primaries;
+    if (!known_color_trc(frame->color_trc))
+        frame->color_trc = decoder_context->video_color_trc;
+    if (!known_color_space(frame->colorspace, frame->format))
+        frame->colorspace = decoder_context->video_colorspace;
+    if (!known_color_range(frame->color_range))
+        frame->color_range = decoder_context->video_color_range;
+}
+
 /* Broad category for a primaries value: 0=unknown, 1=BT.709, 2=BT.601, 3=HDR */
 static int
 color_pri_cat(enum AVColorPrimaries p)

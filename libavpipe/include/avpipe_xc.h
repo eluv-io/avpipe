@@ -372,6 +372,12 @@ typedef struct coderctx_t {
 
     int64_t audio_output_pts;                           /* Used to set PTS directly when using audio FIFO */
 
+    /* Video color metadata reconciled values - used for fixing frame color metadata */
+    enum AVColorPrimaries              video_color_primaries;
+    enum AVColorTransferCharacteristic video_color_trc;
+    enum AVColorSpace                  video_colorspace;
+    enum AVColorRange                  video_color_range;
+
     /* Video filter */
     AVFilterContext *video_buffersink_ctx;
     AVFilterContext *video_buffersrc_ctx;

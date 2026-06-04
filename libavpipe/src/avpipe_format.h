@@ -111,6 +111,17 @@ copy_source_color_to_output(
     coderctx_t *decoder_context);
 
 void
+reconcile_decoder_video_color(
+    coderctx_t *decoder_context,
+    int stream_index,
+    const char *url);
+
+void
+fix_video_frame_color(
+    coderctx_t *decoder_context,
+    AVFrame *frame);
+
+void
 dash_synthesize_color_defaults(
     xcparams_t *params,
     AVCodecParameters *codecpar);
