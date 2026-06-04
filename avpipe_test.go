@@ -3392,9 +3392,9 @@ func requireVideoStreamColor(
 	t.Helper()
 
 	var si *goavpipe.StreamInfo
-	for i := range probe.StreamInfo {
-		if probe.StreamInfo[i].CodecType == "video" {
-			si = &probe.StreamInfo[i]
+	for i := range probe.Streams {
+		if probe.Streams[i].CodecType == "video" {
+			si = &probe.Streams[i]
 			break
 		}
 	}
