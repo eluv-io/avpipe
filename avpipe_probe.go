@@ -2,6 +2,7 @@ package avpipe
 
 import (
 	"io"
+	"reflect"
 
 	"github.com/eluv-io/avpipe/goavpipe"
 	"github.com/eluv-io/avpipe/goavpipe/avdesc"
@@ -52,7 +53,7 @@ func enhanceStreamInfo(streams []goavpipe.StreamInfo, codecInfos []*mp4e.CodecIn
 
 		warnDOVIMismatch(streams[i].StreamIndex, streams[i].DOVI, info.DOVI)
 
-		streams[i].Mp4Info = convertMp4Info(info)
+		streams[i].MP4 = convertMP4Info(info)
 	}
 }
 
@@ -66,18 +67,13 @@ func warnDOVIMismatch(streamIndex int, probeDOVI, mp4DOVI *avdesc.DOVIInfo) {
 			"stream_index", streamIndex,
 			"probe_dovi", probeDOVI)
 	} else if probeDOVI != nil { // && mp4DOVI != nil
-		// Intentionally excluded from comparison: BoxType differs by design
-		// (empty in the probe/side-data path, set in the MP4 box path).
-		// If DOVIInfo gains new fields, add them here to check for mismatch.
-		if probeDOVI.FourCC != mp4DOVI.FourCC ||
-			probeDOVI.VersionMajor != mp4DOVI.VersionMajor ||
-			probeDOVI.VersionMinor != mp4DOVI.VersionMinor ||
-			probeDOVI.Profile != mp4DOVI.Profile ||
-			probeDOVI.Level != mp4DOVI.Level ||
-			probeDOVI.BLSignalCompatibilityID != mp4DOVI.BLSignalCompatibilityID ||
-			probeDOVI.RPUPresent != mp4DOVI.RPUPresent ||
-			probeDOVI.ELPresent != mp4DOVI.ELPresent ||
-			probeDOVI.BLPresent != mp4DOVI.BLPresent {
+		// Compare all fields except BoxType, which is empty in the probe/side-data
+		// path and set only in the MP4 box path — that difference is by design.
+		probe := *probeDOVI
+		mp4 := *mp4DOVI
+		probe.BoxType = ""
+		mp4.BoxType = ""
+		if !reflect.DeepEqual(probe, mp4) {
 			goavpipe.Log.Warn("Probe DOVI mismatch between side data and MP4 box",
 				"stream_index", streamIndex,
 				"probe_dovi", probeDOVI,
@@ -86,11 +82,11 @@ func warnDOVIMismatch(streamIndex int, probeDOVI, mp4DOVI *avdesc.DOVIInfo) {
 	}
 }
 
-func convertMp4Info(info *mp4e.CodecInfo) *goavpipe.Mp4Info {
+func convertMP4Info(info *mp4e.CodecInfo) *goavpipe.MP4Info {
 	if info == nil {
 		return nil
 	}
-	return &goavpipe.Mp4Info{
+	return &goavpipe.MP4Info{
 		CodecTagString:        info.CodecTagString,
 		MimeCodecString:       info.MimeCodecString,
 		ProfileIDC:            info.ProfileIDC,

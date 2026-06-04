@@ -16,6 +16,7 @@ if [ ! -d "$REPO_ROOT/media" ]; then
     exit 1
 fi
 
+# First run all the tests that complete in under 5 seconds (total ~2 minutes)
 echo "=== Short tests ==="
 if ! go test -v -short --timeout 30m ./...; then
     echo "Short tests failed; skipping long tests"
@@ -26,5 +27,6 @@ if $SHORT_ONLY; then
     exit 0
 fi
 
-echo "=== Long tests ==="
+# This takes at least 45 minutes
+echo "=== All tests ==="
 go test -v --timeout 4h ./...

@@ -1022,10 +1022,12 @@ func Probe(params *goavpipe.XcParams) (*goavpipe.ProbeInfo, error) {
 
 	// Extract MP4 codec info before the C probe while the input opener is still accessible.
 	// After C.probe returns, InCloser has already fired and cleared the URL table entry, so
-	// extractCodecInfoForProbe would fail to re-open. Non-MP4 inputs fail here gracefully.
-	// The handle is kept open so that C.probe can open the same resource concurrently; it is
-	// closed via defer when Probe returns.
-	var preCodecInfos []*mp4e.CodecInfo
+	// extractCodecInfoForProbe would fail to re-open. The handle is kept open so that C.probe can
+	// open the same resource concurrently; it is closed via defer when Probe returns.
+	//
+	// Non-MP4 inputs fail here gracefully. Unfortunately, the container format is unknown until
+	// probing, so we cannot skip this step altogether.
+	var codecInfos []*mp4e.CodecInfo
 	if params.Seekable {
 		inputOpener := goavpipe.GetInputOpener(params.Url)
 		if inputOpener == nil {
@@ -1034,11 +1036,9 @@ func Probe(params *goavpipe.XcParams) (*goavpipe.ProbeInfo, error) {
 			goavpipe.Log.Warn("input media open failed", "url", params.Url, "error", openErr, "op", op)
 		} else {
 			defer func() { _ = h.Close() }()
-			if infos, err := extractCodecInfoForProbe(h); err != nil {
-				// expected if not MP4
-				goavpipe.Log.Info("MP4 parsing failed", "url", params.Url, "error", err, "op", op)
-			} else {
-				preCodecInfos = infos
+			if codecInfos, err = extractCodecInfoForProbe(h); err != nil {
+				goavpipe.Log.Info("could not extract codec info (expected if input is not MP4)",
+					"url", params.Url, "reason", err.Error(), "op", op)
 			}
 		}
 	}
@@ -1054,125 +1054,124 @@ func Probe(params *goavpipe.XcParams) (*goavpipe.ProbeInfo, error) {
 	}
 
 	probeInfo := &goavpipe.ProbeInfo{}
-	probeInfo.StreamInfo = make([]goavpipe.StreamInfo, int(nStreams))
+	probeInfo.Streams = make([]goavpipe.StreamInfo, int(nStreams))
 	probeArray := (*[1 << 10]C.stream_info_t)(unsafe.Pointer(cprobe.stream_info))
 	for i := 0; i < int(nStreams); i++ {
-		probeInfo.StreamInfo[i].StreamIndex = int(probeArray[i].stream_index)
-		probeInfo.StreamInfo[i].StreamId = int(probeArray[i].stream_id)
-		probeInfo.StreamInfo[i].CodecType = goavpipe.AVMediaTypeNames[goavpipe.AVMediaType(probeArray[i].codec_type)]
-		probeInfo.StreamInfo[i].CodecID = int(probeArray[i].codec_id)
-		probeInfo.StreamInfo[i].CodecName = C.GoString((*C.char)(unsafe.Pointer(&probeArray[i].codec_name)))
-		probeInfo.StreamInfo[i].CodecTagString = C.GoString((*C.char)(unsafe.Pointer(&probeArray[i].codec_tag_string)))
-		probeInfo.StreamInfo[i].DurationTs = int64(probeArray[i].duration_ts)
-		probeInfo.StreamInfo[i].TimeBase = big.NewRat(int64(probeArray[i].time_base.num), int64(probeArray[i].time_base.den))
-		probeInfo.StreamInfo[i].NBFrames = int64(probeArray[i].nb_frames)
-		probeInfo.StreamInfo[i].StartTime = int64(probeArray[i].start_time)
-		if int64(probeArray[i].avg_frame_rate.den) != 0 {
-			probeInfo.StreamInfo[i].AvgFrameRate = big.NewRat(int64(probeArray[i].avg_frame_rate.num), int64(probeArray[i].avg_frame_rate.den))
+		stream := &probeInfo.Streams[i]
+		cs := &probeArray[i]
+		stream.StreamIndex = int(cs.stream_index)
+		stream.StreamId = int(cs.stream_id)
+		stream.CodecType = goavpipe.AVMediaTypeNames[goavpipe.AVMediaType(cs.codec_type)]
+		stream.CodecID = int(cs.codec_id)
+		stream.CodecName = C.GoString((*C.char)(unsafe.Pointer(&cs.codec_name)))
+		stream.CodecTagString = C.GoString((*C.char)(unsafe.Pointer(&cs.codec_tag_string)))
+		stream.DurationTs = int64(cs.duration_ts)
+		stream.TimeBase = big.NewRat(int64(cs.time_base.num), int64(cs.time_base.den))
+		stream.NBFrames = int64(cs.nb_frames)
+		stream.StartTime = int64(cs.start_time)
+		if int64(cs.avg_frame_rate.den) != 0 {
+			stream.AvgFrameRate = big.NewRat(int64(cs.avg_frame_rate.num), int64(cs.avg_frame_rate.den))
 		} else {
-			probeInfo.StreamInfo[i].AvgFrameRate = big.NewRat(int64(probeArray[i].avg_frame_rate.num), int64(1))
+			stream.AvgFrameRate = big.NewRat(int64(cs.avg_frame_rate.num), int64(1))
 		}
-		if int64(probeArray[i].frame_rate.den) != 0 {
-			probeInfo.StreamInfo[i].FrameRate = big.NewRat(int64(probeArray[i].frame_rate.num), int64(probeArray[i].frame_rate.den))
+		if int64(cs.frame_rate.den) != 0 {
+			stream.FrameRate = big.NewRat(int64(cs.frame_rate.num), int64(cs.frame_rate.den))
 		} else {
-			probeInfo.StreamInfo[i].FrameRate = big.NewRat(int64(probeArray[i].frame_rate.num), int64(1))
+			stream.FrameRate = big.NewRat(int64(cs.frame_rate.num), int64(1))
 		}
-		probeInfo.StreamInfo[i].SampleRate = int(probeArray[i].sample_rate)
-		probeInfo.StreamInfo[i].Channels = int(probeArray[i].channels)
-		if probeInfo.StreamInfo[i].CodecType == "audio" {
-			probeInfo.StreamInfo[i].ChannelLayout = int(probeArray[i].channel_layout)
-			probeInfo.StreamInfo[i].ChannelLayoutName = ChannelLayoutName(probeInfo.StreamInfo[i].Channels, probeInfo.StreamInfo[i].ChannelLayout)
+		stream.SampleRate = int(cs.sample_rate)
+		stream.Channels = int(cs.channels)
+		if stream.CodecType == "audio" {
+			stream.ChannelLayout = int(cs.channel_layout)
+			stream.ChannelLayoutName = ChannelLayoutName(stream.Channels, stream.ChannelLayout)
 		}
-		probeInfo.StreamInfo[i].BitRate = int64(probeArray[i].bit_rate)
-		if probeArray[i].has_b_frames > 0 {
-			probeInfo.StreamInfo[i].HasBFrames = true
+		stream.BitRate = int64(cs.bit_rate)
+		stream.HasBFrames = cs.has_b_frames > 0
+		stream.Width = int(cs.width)
+		stream.Height = int(cs.height)
+		if stream.CodecType == "video" {
+			pixFmt := int(cs.pix_fmt)
+			stream.PixFmt = &pixFmt
+		}
+		if int64(cs.sample_aspect_ratio.den) != 0 {
+			stream.SampleAspectRatio = big.NewRat(int64(cs.sample_aspect_ratio.num), int64(cs.sample_aspect_ratio.den))
 		} else {
-			probeInfo.StreamInfo[i].HasBFrames = false
+			stream.SampleAspectRatio = big.NewRat(int64(cs.sample_aspect_ratio.num), int64(1))
 		}
-		probeInfo.StreamInfo[i].Width = int(probeArray[i].width)
-		probeInfo.StreamInfo[i].Height = int(probeArray[i].height)
-		if probeInfo.StreamInfo[i].CodecType == "video" {
-			pixFmt := int(probeArray[i].pix_fmt)
-			probeInfo.StreamInfo[i].PixFmt = &pixFmt
-		}
-		if int64(probeArray[i].sample_aspect_ratio.den) != 0 {
-			probeInfo.StreamInfo[i].SampleAspectRatio = big.NewRat(int64(probeArray[i].sample_aspect_ratio.num), int64(probeArray[i].sample_aspect_ratio.den))
+		if int64(cs.display_aspect_ratio.den) != 0 {
+			stream.DisplayAspectRatio = big.NewRat(int64(cs.display_aspect_ratio.num), int64(cs.display_aspect_ratio.den))
 		} else {
-			probeInfo.StreamInfo[i].SampleAspectRatio = big.NewRat(int64(probeArray[i].sample_aspect_ratio.num), int64(1))
+			stream.DisplayAspectRatio = big.NewRat(int64(cs.display_aspect_ratio.num), int64(1))
 		}
-		if int64(probeArray[i].display_aspect_ratio.den) != 0 {
-			probeInfo.StreamInfo[i].DisplayAspectRatio = big.NewRat(int64(probeArray[i].display_aspect_ratio.num), int64(probeArray[i].display_aspect_ratio.den))
-		} else {
-			probeInfo.StreamInfo[i].DisplayAspectRatio = big.NewRat(int64(probeArray[i].display_aspect_ratio.num), int64(1))
-		}
-		probeInfo.StreamInfo[i].FieldOrder = goavpipe.AVFieldOrderNames[goavpipe.AVFieldOrder(probeArray[i].field_order)]
+		stream.FieldOrder = goavpipe.AVFieldOrderNames[goavpipe.AVFieldOrder(cs.field_order)]
 		// AV_PROFILE_UNKNOWN = AV_LEVEL_UNKNOWN = -99; normalize to 0 so
 		// the omitempty tag on Profile/Level actually omits unknown values.
 		// Use the raw value for GetProfileName so FFmpeg sees the real sentinel.
-		rawProfile := int(probeArray[i].profile)
+		rawProfile := int(cs.profile)
 		if rawProfile != -99 {
-			probeInfo.StreamInfo[i].Profile = rawProfile
+			stream.Profile = rawProfile
 		}
-		if l := int(probeArray[i].level); l != -99 {
-			probeInfo.StreamInfo[i].Level = l
+		if l := int(cs.level); l != -99 {
+			stream.Level = l
 		}
-		probeInfo.StreamInfo[i].ProfileName = GetProfileName(probeInfo.StreamInfo[i].CodecID, rawProfile)
+		stream.ProfileName = GetProfileName(stream.CodecID, rawProfile)
 
-		probeInfo.StreamInfo[i].ColorPrimaries = C.GoString((*C.char)(unsafe.Pointer(&probeArray[i].color_primaries)))
-		probeInfo.StreamInfo[i].ColorTransfer = C.GoString((*C.char)(unsafe.Pointer(&probeArray[i].color_transfer)))
-		probeInfo.StreamInfo[i].ColorSpace = C.GoString((*C.char)(unsafe.Pointer(&probeArray[i].color_space)))
-		probeInfo.StreamInfo[i].ColorRange = C.GoString((*C.char)(unsafe.Pointer(&probeArray[i].color_range)))
-		probeInfo.StreamInfo[i].MasteringDisplay = C.GoString((*C.char)(unsafe.Pointer(&probeArray[i].mastering_display)))
-		probeInfo.StreamInfo[i].MaxCLL = C.GoString((*C.char)(unsafe.Pointer(&probeArray[i].max_cll)))
-		probeInfo.StreamInfo[i].Stereo3DType = C.GoString((*C.char)(unsafe.Pointer(&probeArray[i].stereo3d_type)))
+		stream.ColorPrimaries = C.GoString((*C.char)(unsafe.Pointer(&cs.color_primaries)))
+		stream.ColorTransfer = C.GoString((*C.char)(unsafe.Pointer(&cs.color_transfer)))
+		stream.ColorSpace = C.GoString((*C.char)(unsafe.Pointer(&cs.color_space)))
+		stream.ColorRange = C.GoString((*C.char)(unsafe.Pointer(&cs.color_range)))
+		stream.MasteringDisplay = C.GoString((*C.char)(unsafe.Pointer(&cs.mastering_display)))
+		stream.MaxCLL = C.GoString((*C.char)(unsafe.Pointer(&cs.max_cll)))
+		stream.Stereo3DType = C.GoString((*C.char)(unsafe.Pointer(&cs.stereo3d_type)))
 
-		rot := float64(probeArray[i].side_data.display_matrix.rotation)
+		rot := float64(cs.side_data.display_matrix.rotation)
 		if rot != 0.0 {
-			probeInfo.StreamInfo[i].SideData = make([]interface{}, 1)
-			displayMatrix := goavpipe.SideDataDisplayMatrix{
+			stream.SideData = make([]interface{}, 1)
+			stream.SideData[0] = goavpipe.SideDataDisplayMatrix{
 				Type:       "Display Matrix",
 				Rotation:   rot,
-				RotationCw: float64(probeArray[i].side_data.display_matrix.rotation_cw),
+				RotationCw: float64(cs.side_data.display_matrix.rotation_cw),
 			}
-			probeInfo.StreamInfo[i].SideData[0] = displayMatrix
 		}
 
-		if probeArray[i].dovi_config.present != 0 {
+		if cs.dovi.present != 0 {
 			dovi := &avdesc.DOVIInfo{
-				VersionMajor:            int(probeArray[i].dovi_config.dv_version_major),
-				VersionMinor:            int(probeArray[i].dovi_config.dv_version_minor),
-				Profile:                 int(probeArray[i].dovi_config.dv_profile),
-				Level:                   int(probeArray[i].dovi_config.dv_level),
-				RPUPresent:              probeArray[i].dovi_config.rpu_present_flag != 0,
-				ELPresent:               probeArray[i].dovi_config.el_present_flag != 0,
-				BLPresent:               probeArray[i].dovi_config.bl_present_flag != 0,
-				BLSignalCompatibilityID: int(probeArray[i].dovi_config.dv_bl_signal_compatibility_id),
+				VersionMajor:            int(cs.dovi.dv_version_major),
+				VersionMinor:            int(cs.dovi.dv_version_minor),
+				Profile:                 int(cs.dovi.dv_profile),
+				Level:                   int(cs.dovi.dv_level),
+				RPUPresent:              cs.dovi.rpu_present_flag != 0,
+				ELPresent:               cs.dovi.el_present_flag != 0,
+				BLPresent:               cs.dovi.bl_present_flag != 0,
+				BLSignalCompatibilityID: int(cs.dovi.dv_bl_signal_compatibility_id),
 			}
-			dovi.FourCC = avdesc.DOVIFourCC(probeInfo.StreamInfo[i].CodecTagString)
-			probeInfo.StreamInfo[i].DOVI = dovi
+			dovi.FourCC = avdesc.DOVIFourCC(stream.CodecTagString)
+			stream.DOVI = dovi
 		}
 
-		if probeArray[i].ec3_joc != 0 {
-			probeInfo.StreamInfo[i].DolbyAtmos = true
+		if cs.ec3_joc != 0 {
+			stream.DolbyAtmos = true
 		}
 
 		// Convert AVDictionary data to Tags of type map[string]string using the built in av_dict_get() iterator
-		dict := (*C.AVDictionary)(unsafe.Pointer(probeArray[i].tags))
-		var tag *C.AVDictionaryEntry = (*C.AVDictionaryEntry)(unsafe.Pointer(C.av_dict_get(dict, (*C.char)(C.CString("")), (*C.AVDictionaryEntry)(nil), C.AV_DICT_IGNORE_SUFFIX)))
+		dict := (*C.AVDictionary)(unsafe.Pointer(cs.tags))
+		emptyKey := C.CString("")
+		var tag *C.AVDictionaryEntry = (*C.AVDictionaryEntry)(unsafe.Pointer(C.av_dict_get(dict, emptyKey, (*C.AVDictionaryEntry)(nil), C.AV_DICT_IGNORE_SUFFIX)))
 		if tag != nil {
-			probeInfo.StreamInfo[i].Tags = map[string]string{}
+			stream.Tags = map[string]string{}
 			for tag != nil {
-				probeInfo.StreamInfo[i].Tags[C.GoString((*C.char)(unsafe.Pointer(tag.key)))] = C.GoString((*C.char)(unsafe.Pointer(tag.value)))
-				tag = (*C.AVDictionaryEntry)(unsafe.Pointer(C.av_dict_get(dict, (*C.char)(C.CString("")), tag, C.AV_DICT_IGNORE_SUFFIX)))
+				stream.Tags[C.GoString((*C.char)(unsafe.Pointer(tag.key)))] = C.GoString((*C.char)(unsafe.Pointer(tag.value)))
+				tag = (*C.AVDictionaryEntry)(unsafe.Pointer(C.av_dict_get(dict, emptyKey, tag, C.AV_DICT_IGNORE_SUFFIX)))
 			}
 		}
+		C.free(unsafe.Pointer(emptyKey))
 		C.av_dict_free(&dict)
 	}
 
-	probeInfo.ContainerInfo.FormatName = C.GoString((*C.char)(unsafe.Pointer(cprobe.container_info.format_name)))
-	probeInfo.ContainerInfo.Duration = float64(cprobe.container_info.duration)
-	if preCodecInfos != nil {
-		enhanceStreamInfo(probeInfo.StreamInfo, preCodecInfos)
+	probeInfo.Format.FormatName = C.GoString((*C.char)(unsafe.Pointer(cprobe.container_info.format_name)))
+	probeInfo.Format.Duration = float64(cprobe.container_info.duration)
+	if codecInfos != nil {
+		enhanceStreamInfo(probeInfo.Streams, codecInfos)
 	}
 
 	C.free(unsafe.Pointer(cprobe.stream_info))
@@ -1189,7 +1188,8 @@ func Probe(params *goavpipe.XcParams) (*goavpipe.ProbeInfo, error) {
 // params.UseCustomLiveReader is set.
 //
 // If UseCustomLiveReader is set, the caller is responsible for calling
-// goavpipe.Globals.RemoveURLHandlers(params.Url) after XcRun returns.
+// goavpipe.Globals.RemoveURLHandlers(params.Url) after XcRun returns,
+// including on error paths where XcInit itself returns an error.
 func XcInit(params *goavpipe.XcParams) (int32, error) {
 	const op = "avpipe.XcInit"
 

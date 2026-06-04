@@ -1510,9 +1510,9 @@ func TestAudioAtmosBypass(t *testing.T) {
 	assert.Equal(t, int64(640000), audioStream.BitRate, "bit rate must be preserved by bypass")
 	assert.Equal(t, 6, audioStream.Channels, "channel count must be preserved by bypass")
 	assert.Equal(t, "5.1(side)", audioStream.ChannelLayoutName, "channel layout must be preserved by bypass")
-	require.NotNil(t, audioStream.Mp4Info, "Mp4Info must be present for MP4 EAC-3 stream")
-	require.NotNil(t, audioStream.Mp4Info.EC3, "Mp4Info.EC3 must be present for Dolby Atmos stream")
-	assert.True(t, audioStream.Mp4Info.EC3.JOC, "EC3.JOC must be true for Dolby Atmos")
+	require.NotNil(t, audioStream.MP4, "MP4 must be present for MP4 EAC-3 stream")
+	require.NotNil(t, audioStream.MP4.EC3, "MP4.EC3 must be present for Dolby Atmos stream")
+	assert.True(t, audioStream.MP4.EC3.JOC, "EC3.JOC must be true for Dolby Atmos")
 }
 
 // TestAudioAtmosBypassExplicit verifies EAC-3 passthrough using BypassTranscoding=true,
@@ -1555,9 +1555,9 @@ func TestAudioAtmosBypassExplicit(t *testing.T) {
 	assert.Equal(t, int64(640000), audioStream.BitRate, "bit rate must be preserved by bypass")
 	assert.Equal(t, 6, audioStream.Channels, "channel count must be preserved by bypass")
 	assert.Equal(t, "5.1(side)", audioStream.ChannelLayoutName, "channel layout must be preserved by bypass")
-	require.NotNil(t, audioStream.Mp4Info, "Mp4Info must be present for MP4 EAC-3 stream")
-	require.NotNil(t, audioStream.Mp4Info.EC3, "Mp4Info.EC3 must be present for Dolby Atmos stream")
-	assert.True(t, audioStream.Mp4Info.EC3.JOC, "EC3.JOC must be true for Dolby Atmos")
+	require.NotNil(t, audioStream.MP4, "MP4 must be present for MP4 EAC-3 stream")
+	require.NotNil(t, audioStream.MP4.EC3, "MP4.EC3 must be present for Dolby Atmos stream")
+	assert.True(t, audioStream.MP4.EC3.JOC, "EC3.JOC must be true for Dolby Atmos")
 }
 
 // Timebase of BBB0_HD_8_XDCAM_120s_CCBYblendercloud.mxf is 1001/60000 - in this case the mp4 muxer changes timebase to 1/60000
@@ -1621,7 +1621,7 @@ func TestIrregularTsMezMaker_1001_60000(t *testing.T) {
 				}
 				probeInfo, err := avpipe.Probe(xcparams)
 				failNowOnError(t, err)
-				si := probeInfo.StreamInfo[0]
+				si := probeInfo.Streams[0]
 				assert.Equal(t, expectedSegDurationTs, si.DurationTs,
 					"segment %d duration_ts mismatch (timebase=%s)", i+1, si.TimeBase.RatString())
 			}
@@ -2329,9 +2329,6 @@ func assertDOVI20(t *testing.T, mp4Path string) {
 // with the hvc1 codec tag preserved (required for dvh1 manifest signaling) and
 // Profile=8, Level=1, BLSignalCompatibilityID=1.
 func TestDOVI81_MezAndDASH(t *testing.T) {
-	if testing.Short() {
-		t.Skip("SKIPPING TestDOVI81_MezAndDASH (fast mode)")
-	}
 	checkFileExists(t, dovi81TestSource)
 
 	mezDir := path.Join(baseOutPath, fn(), "Mez")
@@ -2413,9 +2410,6 @@ func TestDOVI81_MezAndDASH(t *testing.T) {
 // with Profile=20, BLSignalCompatibilityID=0, FourCC=dvh1, BoxType=dvcC, and
 // VideoLayout=MVHEVC.
 func TestDOVI20_MezAndDASH(t *testing.T) {
-	if testing.Short() {
-		t.Skip("SKIPPING TestDOVI20_MezAndDASH (fast mode)")
-	}
 	checkFileExists(t, dovi20TestSource)
 
 	mezDir := path.Join(baseOutPath, fn(), "Mez")
@@ -2714,7 +2708,7 @@ func TestABRMuxing(t *testing.T) {
 	muxOutProbeInfo := boilerProbe(t, xcTestResult)
 
 	assert.Equal(t, true,
-		math.Abs(videoMezProbeInfo[0].ContainerInfo.Duration+videoMezProbeInfo2[0].ContainerInfo.Duration-muxOutProbeInfo[0].ContainerInfo.Duration) < 0.05)
+		math.Abs(videoMezProbeInfo[0].Format.Duration+videoMezProbeInfo2[0].Format.Duration-muxOutProbeInfo[0].Format.Duration) < 0.05)
 }
 
 func TestMarshalParams(t *testing.T) {
@@ -2765,53 +2759,53 @@ func TestProbe(t *testing.T) {
 	}
 	probe, err := avpipe.Probe(xcparams)
 	failNowOnError(t, err)
-	assert.Equal(t, 3, len(probe.StreamInfo))
+	assert.Equal(t, 3, len(probe.Streams))
 
-	assert.Equal(t, 27, probe.StreamInfo[0].CodecID)
-	assert.Equal(t, "h264", probe.StreamInfo[0].CodecName)
-	assert.Equal(t, 100, probe.StreamInfo[0].Profile) // 77 = AV_PROFILE_H264_MAIN
-	assert.Equal(t, 41, probe.StreamInfo[0].Level)
-	assert.Equal(t, int64(1800), probe.StreamInfo[0].NBFrames)
-	assert.Equal(t, int64(1980), probe.StreamInfo[0].StartTime)
-	assert.Equal(t, int64(3081772), probe.StreamInfo[0].BitRate)
-	assert.Equal(t, 1920, probe.StreamInfo[0].Width)
-	assert.Equal(t, 1080, probe.StreamInfo[0].Height)
-	assert.Equal(t, int64(30000), probe.StreamInfo[0].TimeBase.Denom().Int64())
+	assert.Equal(t, 27, probe.Streams[0].CodecID)
+	assert.Equal(t, "h264", probe.Streams[0].CodecName)
+	assert.Equal(t, 100, probe.Streams[0].Profile) // 77 = AV_PROFILE_H264_MAIN
+	assert.Equal(t, 41, probe.Streams[0].Level)
+	assert.Equal(t, int64(1800), probe.Streams[0].NBFrames)
+	assert.Equal(t, int64(1980), probe.Streams[0].StartTime)
+	assert.Equal(t, int64(3081772), probe.Streams[0].BitRate)
+	assert.Equal(t, 1920, probe.Streams[0].Width)
+	assert.Equal(t, 1080, probe.Streams[0].Height)
+	assert.Equal(t, int64(30000), probe.Streams[0].TimeBase.Denom().Int64())
 
-	assert.Equal(t, 86017, probe.StreamInfo[1].CodecID)
-	assert.Equal(t, "mp3float", probe.StreamInfo[1].CodecName)
-	assert.Equal(t, 0, probe.StreamInfo[1].Profile)
-	assert.Equal(t, 0, probe.StreamInfo[1].Level)
-	assert.Equal(t, int64(2500), probe.StreamInfo[1].NBFrames)
-	assert.Equal(t, int64(0), probe.StreamInfo[1].StartTime)
-	assert.Equal(t, int64(160000), probe.StreamInfo[1].BitRate)
-	assert.Equal(t, 0, probe.StreamInfo[1].Width)
-	assert.Equal(t, 0, probe.StreamInfo[1].Height)
-	assert.Equal(t, int64(48000), probe.StreamInfo[1].TimeBase.Denom().Int64())
+	assert.Equal(t, 86017, probe.Streams[1].CodecID)
+	assert.Equal(t, "mp3float", probe.Streams[1].CodecName)
+	assert.Equal(t, 0, probe.Streams[1].Profile)
+	assert.Equal(t, 0, probe.Streams[1].Level)
+	assert.Equal(t, int64(2500), probe.Streams[1].NBFrames)
+	assert.Equal(t, int64(0), probe.Streams[1].StartTime)
+	assert.Equal(t, int64(160000), probe.Streams[1].BitRate)
+	assert.Equal(t, 0, probe.Streams[1].Width)
+	assert.Equal(t, 0, probe.Streams[1].Height)
+	assert.Equal(t, int64(48000), probe.Streams[1].TimeBase.Denom().Int64())
 
-	assert.Equal(t, 86019, probe.StreamInfo[2].CodecID)
-	assert.Equal(t, "ac3", probe.StreamInfo[2].CodecName)
-	assert.Equal(t, 0, probe.StreamInfo[2].Profile)
-	assert.Equal(t, 0, probe.StreamInfo[2].Level)
-	assert.Equal(t, int64(1875), probe.StreamInfo[2].NBFrames)
-	assert.Equal(t, int64(0), probe.StreamInfo[2].StartTime)
-	assert.Equal(t, int64(320000), probe.StreamInfo[2].BitRate)
-	assert.Equal(t, 0, probe.StreamInfo[2].Width)
-	assert.Equal(t, 0, probe.StreamInfo[2].Height)
-	assert.Equal(t, int64(48000), probe.StreamInfo[2].TimeBase.Denom().Int64())
-	assert.Equal(t, 6, probe.StreamInfo[2].Channels)
+	assert.Equal(t, 86019, probe.Streams[2].CodecID)
+	assert.Equal(t, "ac3", probe.Streams[2].CodecName)
+	assert.Equal(t, 0, probe.Streams[2].Profile)
+	assert.Equal(t, 0, probe.Streams[2].Level)
+	assert.Equal(t, int64(1875), probe.Streams[2].NBFrames)
+	assert.Equal(t, int64(0), probe.Streams[2].StartTime)
+	assert.Equal(t, int64(320000), probe.Streams[2].BitRate)
+	assert.Equal(t, 0, probe.Streams[2].Width)
+	assert.Equal(t, 0, probe.Streams[2].Height)
+	assert.Equal(t, int64(48000), probe.Streams[2].TimeBase.Denom().Int64())
+	assert.Equal(t, 6, probe.Streams[2].Channels)
 
 	// Verify CodecTagString (4CC from container)
-	assert.Equal(t, "avc1", probe.StreamInfo[0].CodecTagString)
-	assert.Equal(t, "mp4a", probe.StreamInfo[1].CodecTagString)
-	assert.Equal(t, "ac-3", probe.StreamInfo[2].CodecTagString)
+	assert.Equal(t, "avc1", probe.Streams[0].CodecTagString)
+	assert.Equal(t, "mp4a", probe.Streams[1].CodecTagString)
+	assert.Equal(t, "ac-3", probe.Streams[2].CodecTagString)
 
 	// Verify pre-populated string fields (populated by Probe(), not recomputed here)
-	assert.Equal(t, "High", probe.StreamInfo[0].ProfileName)
-	assert.Equal(t, "5.1(side)", probe.StreamInfo[2].ChannelLayoutName)
+	assert.Equal(t, "High", probe.Streams[0].ProfileName)
+	assert.Equal(t, "5.1(side)", probe.Streams[2].ChannelLayoutName)
 
 	// Test StreamInfoAsArray
-	a := goavpipe.StreamInfoAsArray(probe.StreamInfo)
+	a := goavpipe.StreamInfoAsArray(probe.Streams)
 	assert.Equal(t, "h264", a[0].CodecName)
 	assert.Equal(t, "mp3float", a[1].CodecName)
 	assert.Equal(t, "ac3", a[2].CodecName)
@@ -2828,54 +2822,54 @@ func TestProbeWithData(t *testing.T) {
 	}
 	probe, err := avpipe.Probe(xcparams)
 	failNowOnError(t, err)
-	assert.Equal(t, 9, len(probe.StreamInfo))
+	assert.Equal(t, 9, len(probe.Streams))
 
-	assert.Equal(t, 147, probe.StreamInfo[0].CodecID)
-	assert.Equal(t, "prores", probe.StreamInfo[0].CodecName)
-	assert.Equal(t, 3, probe.StreamInfo[0].Profile) // 3 = AV_PROFILE_MPEG4_MAIN
-	assert.Equal(t, 0, probe.StreamInfo[0].Level)
-	assert.Equal(t, int64(1439), probe.StreamInfo[0].NBFrames)
-	assert.Equal(t, int64(0), probe.StreamInfo[0].StartTime)
-	assert.Equal(t, int64(249054569), probe.StreamInfo[0].BitRate)
-	assert.Equal(t, 1920, probe.StreamInfo[0].Width)
-	assert.Equal(t, 1080, probe.StreamInfo[0].Height)
-	assert.Equal(t, int64(24000), probe.StreamInfo[0].TimeBase.Denom().Int64())
+	assert.Equal(t, 147, probe.Streams[0].CodecID)
+	assert.Equal(t, "prores", probe.Streams[0].CodecName)
+	assert.Equal(t, 3, probe.Streams[0].Profile) // 3 = AV_PROFILE_MPEG4_MAIN
+	assert.Equal(t, 0, probe.Streams[0].Level)
+	assert.Equal(t, int64(1439), probe.Streams[0].NBFrames)
+	assert.Equal(t, int64(0), probe.Streams[0].StartTime)
+	assert.Equal(t, int64(249054569), probe.Streams[0].BitRate)
+	assert.Equal(t, 1920, probe.Streams[0].Width)
+	assert.Equal(t, 1080, probe.Streams[0].Height)
+	assert.Equal(t, int64(24000), probe.Streams[0].TimeBase.Denom().Int64())
 
-	assert.Equal(t, 65548, probe.StreamInfo[1].CodecID)
-	assert.Equal(t, "pcm_s24le", probe.StreamInfo[1].CodecName)
-	assert.Equal(t, 0, probe.StreamInfo[1].Profile)
-	assert.Equal(t, 0, probe.StreamInfo[1].Level)
-	assert.Equal(t, int64(2880480), probe.StreamInfo[1].NBFrames)
-	assert.Equal(t, int64(0), probe.StreamInfo[1].StartTime)
-	assert.Equal(t, int64(1152000), probe.StreamInfo[1].BitRate)
-	assert.Equal(t, 0, probe.StreamInfo[1].Width)
-	assert.Equal(t, 0, probe.StreamInfo[1].Height)
-	assert.Equal(t, int64(48000), probe.StreamInfo[1].TimeBase.Denom().Int64())
+	assert.Equal(t, 65548, probe.Streams[1].CodecID)
+	assert.Equal(t, "pcm_s24le", probe.Streams[1].CodecName)
+	assert.Equal(t, 0, probe.Streams[1].Profile)
+	assert.Equal(t, 0, probe.Streams[1].Level)
+	assert.Equal(t, int64(2880480), probe.Streams[1].NBFrames)
+	assert.Equal(t, int64(0), probe.Streams[1].StartTime)
+	assert.Equal(t, int64(1152000), probe.Streams[1].BitRate)
+	assert.Equal(t, 0, probe.Streams[1].Width)
+	assert.Equal(t, 0, probe.Streams[1].Height)
+	assert.Equal(t, int64(48000), probe.Streams[1].TimeBase.Denom().Int64())
 
-	assert.Equal(t, 65548, probe.StreamInfo[2].CodecID)
-	assert.Equal(t, "pcm_s24le", probe.StreamInfo[2].CodecName)
-	assert.Equal(t, 0, probe.StreamInfo[2].Profile)
-	assert.Equal(t, 0, probe.StreamInfo[2].Level)
-	assert.Equal(t, int64(2880480), probe.StreamInfo[2].NBFrames)
-	assert.Equal(t, int64(0), probe.StreamInfo[2].StartTime)
-	assert.Equal(t, int64(1152000), probe.StreamInfo[2].BitRate)
-	assert.Equal(t, 0, probe.StreamInfo[2].Width)
-	assert.Equal(t, 0, probe.StreamInfo[2].Height)
-	assert.Equal(t, int64(48000), probe.StreamInfo[2].TimeBase.Denom().Int64())
+	assert.Equal(t, 65548, probe.Streams[2].CodecID)
+	assert.Equal(t, "pcm_s24le", probe.Streams[2].CodecName)
+	assert.Equal(t, 0, probe.Streams[2].Profile)
+	assert.Equal(t, 0, probe.Streams[2].Level)
+	assert.Equal(t, int64(2880480), probe.Streams[2].NBFrames)
+	assert.Equal(t, int64(0), probe.Streams[2].StartTime)
+	assert.Equal(t, int64(1152000), probe.Streams[2].BitRate)
+	assert.Equal(t, 0, probe.Streams[2].Width)
+	assert.Equal(t, 0, probe.Streams[2].Height)
+	assert.Equal(t, int64(48000), probe.Streams[2].TimeBase.Denom().Int64())
 
-	assert.Equal(t, 0, probe.StreamInfo[8].CodecID)
-	assert.Equal(t, "", probe.StreamInfo[8].CodecName)
-	assert.Equal(t, 0, probe.StreamInfo[8].Profile)
-	assert.Equal(t, 0, probe.StreamInfo[8].Level)
-	assert.Equal(t, int64(1), probe.StreamInfo[8].NBFrames)
-	assert.Equal(t, int64(0), probe.StreamInfo[8].StartTime)
-	assert.Equal(t, int64(0), probe.StreamInfo[8].BitRate)
-	assert.Equal(t, 0, probe.StreamInfo[8].Width)
-	assert.Equal(t, 0, probe.StreamInfo[8].Height)
-	assert.Equal(t, int64(24000), probe.StreamInfo[8].TimeBase.Denom().Int64())
+	assert.Equal(t, 0, probe.Streams[8].CodecID)
+	assert.Equal(t, "", probe.Streams[8].CodecName)
+	assert.Equal(t, 0, probe.Streams[8].Profile)
+	assert.Equal(t, 0, probe.Streams[8].Level)
+	assert.Equal(t, int64(1), probe.Streams[8].NBFrames)
+	assert.Equal(t, int64(0), probe.Streams[8].StartTime)
+	assert.Equal(t, int64(0), probe.Streams[8].BitRate)
+	assert.Equal(t, 0, probe.Streams[8].Width)
+	assert.Equal(t, 0, probe.Streams[8].Height)
+	assert.Equal(t, int64(24000), probe.Streams[8].TimeBase.Denom().Int64())
 
 	// Test StreamInfoAsArray
-	a := goavpipe.StreamInfoAsArray(probe.StreamInfo)
+	a := goavpipe.StreamInfoAsArray(probe.Streams)
 	assert.Equal(t, "prores", a[0].CodecName)
 	assert.Equal(t, "pcm_s24le", a[1].CodecName)
 	assert.Equal(t, "pcm_s24le", a[2].CodecName)
@@ -3157,7 +3151,7 @@ func boilerProbe(t *testing.T, result *XcTestResult) (probeInfoArray []*goavpipe
 		probeInfo, err := avpipe.Probe(xcparams)
 		failNowOnError(t, err)
 
-		si := probeInfo.StreamInfo[0]
+		si := probeInfo.Streams[0]
 		if result.timeScale > 0 {
 			tb := *si.TimeBase.Denom()
 			assert.Equal(t, 0, tb.Cmp(big.NewInt(int64(result.timeScale))), si.TimeBase)

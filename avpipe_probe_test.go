@@ -112,11 +112,11 @@ func TestProbeDOVI81_MatchesExtractCodecInfo(t *testing.T) {
 	assert.Empty(t, probeDOVI.BoxType, "StreamInfo.DOVI: BoxType must be empty (side-data path)")
 	assert.Equal(t, boxDOVI.FourCC, probeDOVI.FourCC, "StreamInfo.DOVI: FourCC must match mp4e result")
 
-	require.NotNil(t, probeVideo.Mp4Info, "Mp4Info must be populated")
-	mp4DOVI := probeVideo.Mp4Info.DOVI
-	require.NotNil(t, mp4DOVI, "Mp4Info.DOVI must be set for Dolby Vision file")
-	assert.Equal(t, boxDOVI.BoxType, mp4DOVI.BoxType, "Mp4Info.DOVI.BoxType must match mp4e result")
-	assert.Equal(t, boxDOVI.FourCC, mp4DOVI.FourCC, "Mp4Info.DOVI.FourCC must match mp4e result")
+	require.NotNil(t, probeVideo.MP4, "MP4 must be populated")
+	mp4DOVI := probeVideo.MP4.DOVI
+	require.NotNil(t, mp4DOVI, "MP4.DOVI must be set for Dolby Vision file")
+	assert.Equal(t, boxDOVI.BoxType, mp4DOVI.BoxType, "MP4.DOVI.BoxType must match mp4e result")
+	assert.Equal(t, boxDOVI.FourCC, mp4DOVI.FourCC, "MP4.DOVI.FourCC must match mp4e result")
 }
 
 // postCloseFailOpener allows multiple concurrent opens but fails if Open is called after
@@ -170,7 +170,7 @@ func (h *trackingCloseHandler) Close() error {
 	return h.file.Close()
 }
 
-// TestProbeMVHEVC_VideoLayout verifies that Probe populates Mp4Info.VideoLayout correctly
+// TestProbeMVHEVC_VideoLayout verifies that Probe populates MP4.VideoLayout correctly
 // for an MV-HEVC source even when the input opener cannot re-open the file after the C
 // probe has closed it (as is the case in the content-fabric probe path, where InCloser
 // calls clearReqCtxTables after the C probe closes).
@@ -192,15 +192,15 @@ func TestProbeMVHEVC_VideoLayout(t *testing.T) {
 
 	video := probe.StreamByCodecType("video")
 	require.NotNil(t, video, "expected a video stream")
-	require.NotNil(t, video.Mp4Info, "Mp4Info must be populated by enhanceStreamInfo")
-	assert.Equal(t, goavpipe.VideoLayoutMVHEVC, video.Mp4Info.VideoLayout,
+	require.NotNil(t, video.MP4, "MP4 must be populated by enhanceStreamInfo")
+	assert.Equal(t, goavpipe.VideoLayoutMVHEVC, video.MP4.VideoLayout,
 		"VideoLayout must be MVHEVC(10) for MV-HEVC source")
 }
 
-// TestProbeTS_NoMp4Info verifies that Probe succeeds for a non-MP4 container (MPEG-TS)
-// and that Mp4Info is nil on all streams — extractCodecInfoForProbe fails gracefully when
+// TestProbeTS_NoMP4Info verifies that Probe succeeds for a non-MP4 container (MPEG-TS)
+// and that MP4Info is nil on all streams — extractCodecInfoForProbe fails gracefully when
 // mp4.DecodeFile cannot parse the container, leaving the probe result unaffected.
-func TestProbeTS_NoMp4Info(t *testing.T) {
+func TestProbeTS_NoMP4Info(t *testing.T) {
 	url := "./media/bbb_sunflower_2160p_30fps_normal_2min.ts"
 	checkFileExists(t, url)
 
@@ -214,5 +214,5 @@ func TestProbeTS_NoMp4Info(t *testing.T) {
 
 	video := probe.StreamByCodecType("video")
 	require.NotNil(t, video, "expected a video stream")
-	assert.Nil(t, video.Mp4Info, "Mp4Info must be nil for TS container")
+	assert.Nil(t, video.MP4, "MP4 must be nil for TS container")
 }

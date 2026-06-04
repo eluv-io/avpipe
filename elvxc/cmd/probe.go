@@ -75,7 +75,7 @@ func doProbe(cmd *cobra.Command, args []string) error {
 		return enc.Encode(probe)
 	}
 
-	for _, info := range probe.StreamInfo {
+	for _, info := range probe.Streams {
 		channelLayoutName := info.ChannelLayoutName
 		if channelLayoutName == "" {
 			channelLayoutName = "-"
@@ -153,8 +153,8 @@ func doProbe(cmd *cobra.Command, args []string) error {
 	}
 
 	fmt.Printf("Container\n")
-	fmt.Printf("\tformat_name: %s\n", probe.ContainerInfo.FormatName)
-	fmt.Printf("\tduration: %.5f\n", probe.ContainerInfo.Duration)
+	fmt.Printf("\tformat_name: %s\n", probe.Format.FormatName)
+	fmt.Printf("\tduration: %.5f\n", probe.Format.Duration)
 
 	return nil
 }

@@ -560,7 +560,7 @@ typedef struct side_data_t {
     side_data_display_matrix_t display_matrix;
 } side_data_t;
 
-typedef struct dovi_config_t {
+typedef struct dovi_info_t {
     uint8_t present;                         // 1 if AV_PKT_DATA_DOVI_CONF side data found
     uint8_t dv_version_major;
     uint8_t dv_version_minor;
@@ -570,7 +570,7 @@ typedef struct dovi_config_t {
     uint8_t el_present_flag;
     uint8_t bl_present_flag;
     uint8_t dv_bl_signal_compatibility_id;
-} dovi_config_t;
+} dovi_info_t;
 
 typedef struct stream_info_t {
     int         stream_index;       // Stream index in AVFormatContext
@@ -609,7 +609,7 @@ typedef struct stream_info_t {
     char                max_cll[32];              // AV_PKT_DATA_CONTENT_LIGHT_LEVEL
     char                stereo3d_type[32];        // AV_PKT_DATA_STEREO3D
 
-    dovi_config_t       dovi_config;             // AV_PKT_DATA_DOVI_CONF
+    dovi_info_t         dovi;                    // AV_PKT_DATA_DOVI_CONF
     int                 ec3_joc;                 // 1 if Dolby Atmos (JOC); set when codec_context->profile == AV_PROFILE_EAC3_DDP_ATMOS
 
     side_data_t         side_data;

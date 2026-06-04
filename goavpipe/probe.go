@@ -11,12 +11,12 @@ import (
 // structure of ffprobe's JSON output, with a "format" object and a "streams"
 // array.
 type ProbeInfo struct {
-	ContainerInfo ContainerInfo `json:"format"`
-	StreamInfo    []StreamInfo  `json:"streams"`
+	Format  FormatInfo   `json:"format"`
+	Streams []StreamInfo `json:"streams"`
 }
 
-// ContainerInfo holds container-level metadata for a probed media file.
-type ContainerInfo struct {
+// FormatInfo holds container-level metadata for a probed media file.
+type FormatInfo struct {
 	// FormatName is the comma-separated list of short format names as reported
 	// by FFmpeg (e.g. "mov,mp4,m4a,3gp,3g2,mj2").
 	FormatName string `json:"format_name"`
@@ -173,10 +173,10 @@ type StreamInfo struct {
 	// DOVI holds the Dolby Vision decoder configuration from FFmpeg side data
 	// (AV_PKT_DATA_DOVI_CONF). FourCC is populated from CodecTagString when the
 	// stream is HEVC-based. May be nil if FFmpeg did not propagate the side data
-	// — in that case Mp4Info.DOVI (parsed from the dvcC/dvvC/dvwC box) is the
+	// — in that case MP4Info.DOVI (parsed from the dvcC/dvvC/dvwC box) is the
 	// authoritative source. Use GetDOVI() to get the best available record from
 	// either source.
-	DOVI *avdesc.DOVIInfo `json:"dovi_config,omitempty"`
+	DOVI *avdesc.DOVIInfo `json:"dovi,omitempty"`
 
 	// Stereo3DType is the stereoscopic 3D layout of the video stream
 	// (e.g. "side by side", "top and bottom"). Empty for non-stereoscopic
@@ -212,13 +212,13 @@ type StreamInfo struct {
 	//   chroma_location      string  chroma sample position (e.g. "left")
 	//   bits_per_sample      int     audio PCM bit depth; relevant for uncompressed/lossless audio (PCM, FLAC)
 
-	// Mp4Info contains codec details parsed from MP4 sample-entry boxes.
+	// MP4 contains codec details parsed from MP4 sample-entry boxes.
 	// This supplements, but does not replace, the FFmpeg-derived fields above.
-	Mp4Info *Mp4Info `json:"mp4_info,omitempty"`
+	MP4 *MP4Info `json:"mp4,omitempty"`
 }
 
-// Mp4Info contains codec details parsed from MP4 sample-entry boxes.
-type Mp4Info struct {
+// MP4Info contains codec details parsed from MP4 sample-entry boxes.
+type MP4Info struct {
 	// CodecTagString is the sample description entry 4-character code.
 	CodecTagString string `json:"codec_tag_string,omitempty"`
 
@@ -265,18 +265,18 @@ type SideDataDisplayMatrix struct {
 }
 
 func (p ProbeInfo) String() string             { return util.JSONString(p) }
-func (c ContainerInfo) String() string         { return util.JSONString(c) }
+func (c FormatInfo) String() string            { return util.JSONString(c) }
 func (s StreamInfo) String() string            { return util.JSONString(s) }
-func (m Mp4Info) String() string               { return util.JSONString(m) }
+func (m MP4Info) String() string               { return util.JSONString(m) }
 func (s SideDataDisplayMatrix) String() string { return util.JSONString(s) }
 
 // GetDOVI returns the best available Dolby Vision configuration for the stream.
-// It prefers Mp4Info.DOVI (parsed from the dvcC/dvvC/dvwC box, includes FourCC
+// It prefers MP4Info.DOVI (parsed from the dvcC/dvvC/dvwC box, includes FourCC
 // and BoxType) over DOVI (from FFmpeg side data, lacks those fields). Returns
 // nil if neither source has a DOVI record.
 func (s StreamInfo) GetDOVI() *avdesc.DOVIInfo {
-	if s.Mp4Info != nil && s.Mp4Info.DOVI != nil {
-		return s.Mp4Info.DOVI
+	if s.MP4 != nil && s.MP4.DOVI != nil {
+		return s.MP4.DOVI
 	}
 	return s.DOVI
 }
@@ -284,9 +284,9 @@ func (s StreamInfo) GetDOVI() *avdesc.DOVIInfo {
 // StreamByCodecType returns the first stream whose CodecType matches the given
 // value ("audio", "video", "subtitle", etc.), or nil if none is found.
 func (p ProbeInfo) StreamByCodecType(codecType string) *StreamInfo {
-	for i := range p.StreamInfo {
-		if p.StreamInfo[i].CodecType == codecType {
-			return &p.StreamInfo[i]
+	for i := range p.Streams {
+		if p.Streams[i].CodecType == codecType {
+			return &p.Streams[i]
 		}
 	}
 	return nil

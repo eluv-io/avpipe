@@ -36,7 +36,7 @@
         "handler_name": "265:dvp=f8.hdr10@GPAC26.02-revrelease",
         "language": "und"
       },
-      "dovi_config": {
+      "dovi": {
         "version_major": 1,
         "version_minor": 0,
         "profile": 8,
@@ -49,7 +49,7 @@
       },
       "mastering_display": "G(13250,34500)B(7500,3000)R(34000,16000)WP(15635,16450)L(40000000,50)",
       "max_cll": "0,0",
-      "mp4_info": {
+      "mp4": {
         "codec_tag_string": "hvc1",
         "mime_codec_string": "hvc1.2.4.L93.90",
         "profile_idc": 2,

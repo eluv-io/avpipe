@@ -32,7 +32,7 @@
         "language": "eng"
       },
       "dolby_atmos": true,
-      "mp4_info": {
+      "mp4": {
         "codec_tag_string": "ec-3",
         "mime_codec_string": "ec-3",
         "channels": 6,
@@ -77,7 +77,7 @@
         "handler_name": "Bento4 Video Handler",
         "language": "und"
       },
-      "mp4_info": {
+      "mp4": {
         "codec_tag_string": "avc1",
         "mime_codec_string": "avc1.4D4028",
         "profile_idc": 77,

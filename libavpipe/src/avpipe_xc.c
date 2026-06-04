@@ -4514,15 +4514,15 @@ avpipe_probe(
                     if (sd->size >= (int)sizeof(AVDOVIDecoderConfigurationRecord)) {
                         const AVDOVIDecoderConfigurationRecord *dovi =
                             (const AVDOVIDecoderConfigurationRecord *)sd->data;
-                        stream_probes_ptr->dovi_config.present                        = 1;
-                        stream_probes_ptr->dovi_config.dv_version_major               = dovi->dv_version_major;
-                        stream_probes_ptr->dovi_config.dv_version_minor               = dovi->dv_version_minor;
-                        stream_probes_ptr->dovi_config.dv_profile                     = dovi->dv_profile;
-                        stream_probes_ptr->dovi_config.dv_level                       = dovi->dv_level;
-                        stream_probes_ptr->dovi_config.rpu_present_flag               = dovi->rpu_present_flag;
-                        stream_probes_ptr->dovi_config.el_present_flag                = dovi->el_present_flag;
-                        stream_probes_ptr->dovi_config.bl_present_flag                = dovi->bl_present_flag;
-                        stream_probes_ptr->dovi_config.dv_bl_signal_compatibility_id  =
+                        stream_probes_ptr->dovi.present                        = 1;
+                        stream_probes_ptr->dovi.dv_version_major               = dovi->dv_version_major;
+                        stream_probes_ptr->dovi.dv_version_minor               = dovi->dv_version_minor;
+                        stream_probes_ptr->dovi.dv_profile                     = dovi->dv_profile;
+                        stream_probes_ptr->dovi.dv_level                       = dovi->dv_level;
+                        stream_probes_ptr->dovi.rpu_present_flag               = dovi->rpu_present_flag;
+                        stream_probes_ptr->dovi.el_present_flag                = dovi->el_present_flag;
+                        stream_probes_ptr->dovi.bl_present_flag                = dovi->bl_present_flag;
+                        stream_probes_ptr->dovi.dv_bl_signal_compatibility_id  =
                             dovi->dv_bl_signal_compatibility_id;
                     }
                     break;
