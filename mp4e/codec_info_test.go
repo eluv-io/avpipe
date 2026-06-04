@@ -64,7 +64,7 @@ func TestParseDOVIBoxProfile20(t *testing.T) {
 	word := uint16(avdesc.DOVIProfileMVHEVC)<<9 | uint16(13)<<3 | 0b101
 	payload := []byte{1, 0, byte(word >> 8), byte(word), 0x00}
 
-	info, err := parseDOVIBox(payload)
+	info, err := ParseDOVIBox(payload)
 	require.NoError(t, err)
 	require.NotNil(t, info)
 	assert.Equal(t, 1, info.VersionMajor)

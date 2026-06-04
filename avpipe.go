@@ -1027,11 +1027,19 @@ func Probe(params *goavpipe.XcParams) (*goavpipe.ProbeInfo, error) {
 	// closed via defer when Probe returns.
 	var preCodecInfos []*mp4e.CodecInfo
 	if params.Seekable {
-		if infos, h, err := extractCodecInfoForProbe(params.Url); err != nil {
-			goavpipe.Log.Debug("Probe pre-extraction skipped", "url", params.Url, "error", err)
+		inputOpener := goavpipe.GetInputOpener(params.Url)
+		if inputOpener == nil {
+			goavpipe.Log.Debug("MP4 parsing skipped: no input opener", "url", params.Url, "op", op)
+		} else if h, openErr := inputOpener.Open(goavpipe.Globals.GetNextFD(), params.Url); openErr != nil {
+			goavpipe.Log.Warn("input media open failed", "url", params.Url, "error", openErr, "op", op)
 		} else {
 			defer func() { _ = h.Close() }()
-			preCodecInfos = infos
+			if infos, err := extractCodecInfoForProbe(h); err != nil {
+				// expected if not MP4
+				goavpipe.Log.Info("MP4 parsing failed", "url", params.Url, "error", err, "op", op)
+			} else {
+				preCodecInfos = infos
+			}
 		}
 	}
 

@@ -1,39 +1,28 @@
 package avpipe
 
 import (
-	"fmt"
 	"io"
 
 	"github.com/eluv-io/avpipe/goavpipe"
 	"github.com/eluv-io/avpipe/goavpipe/avdesc"
 	"github.com/eluv-io/avpipe/mp4e"
+	"github.com/eluv-io/errors-go"
 )
 
-// extractCodecInfoForProbe opens the input for url, extracts MP4 codec info, seeks back
-// to 0, and returns both the codec infos and the open handle. The caller owns the handle.
-func extractCodecInfoForProbe(url string) ([]*mp4e.CodecInfo, goavpipe.InputHandler, error) {
-	inputOpener := goavpipe.GetInputOpener(url)
-	if inputOpener == nil {
-		return nil, nil, fmt.Errorf("input opener not set")
-	}
-
-	input, err := inputOpener.Open(goavpipe.Globals.GetNextFD(), url)
-	if err != nil {
-		return nil, nil, fmt.Errorf("open input: %w", err)
-	}
-
-	infos, err := mp4e.ExtractCodecInfo(input)
-	if err != nil {
-		_ = input.Close()
-		return nil, nil, err
-	}
-
+// extractCodecInfoForProbe extracts MP4 codec info from input and seeks it back
+// to 0 so the caller can re-read from the beginning. The caller owns the handle
+// and is responsible for opening and closing it.
+func extractCodecInfoForProbe(input goavpipe.InputHandler) ([]*mp4e.CodecInfo, error) {
+	const op = "avpipe.extractCodecInfoForProbe"
+	e := errors.Template(op, errors.K.Invalid.Default())
+	infos, extractErr := mp4e.ExtractCodecInfo(input)
 	if _, seekErr := input.Seek(0, io.SeekStart); seekErr != nil {
-		_ = input.Close()
-		return nil, nil, fmt.Errorf("seek back after pre-extraction: %w", seekErr)
+		if extractErr != nil {
+			goavpipe.Log.Error("seek back failed after failed extraction", "extract_error", extractErr, "op", op)
+		}
+		return nil, e("reason", "seek back after pre-extraction", "error", seekErr)
 	}
-
-	return infos, input, nil
+	return infos, extractErr
 }
 
 func enhanceStreamInfo(streams []goavpipe.StreamInfo, codecInfos []*mp4e.CodecInfo) {
@@ -77,7 +66,9 @@ func warnDOVIMismatch(streamIndex int, probeDOVI, mp4DOVI *avdesc.DOVIInfo) {
 			"stream_index", streamIndex,
 			"probe_dovi", probeDOVI)
 	} else if probeDOVI != nil { // && mp4DOVI != nil
-		if probeDOVI.Profile != mp4DOVI.Profile ||
+		if probeDOVI.VersionMajor != mp4DOVI.VersionMajor ||
+			probeDOVI.VersionMinor != mp4DOVI.VersionMinor ||
+			probeDOVI.Profile != mp4DOVI.Profile ||
 			probeDOVI.Level != mp4DOVI.Level ||
 			probeDOVI.BLSignalCompatibilityID != mp4DOVI.BLSignalCompatibilityID ||
 			probeDOVI.RPUPresent != mp4DOVI.RPUPresent ||

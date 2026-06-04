@@ -6,6 +6,8 @@ import (
 	"fmt"
 	"io"
 	"math/bits"
+	"strings"
+	"unicode/utf8"
 
 	"github.com/Eyevinn/mp4ff/aac"
 	"github.com/Eyevinn/mp4ff/avc"
@@ -88,11 +90,12 @@ func (c CodecInfo) MarshalJSON() ([]byte, error) {
 // all tracks. Supports AVC (avc1/avc3) and HEVC (hvc1/hev1) video tracks, and
 // E-AC-3 (ec-3) and AAC (mp4a) audio tracks.
 func ExtractCodecInfo(r io.Reader) (infos []*CodecInfo, err error) {
-	e := errors.T("ExtractCodecInfo", errors.K.Invalid.Default())
+	const op = "mp4e.ExtractCodecInfo"
+	e := errors.T(op, errors.K.Invalid.Default())
 
 	mp4Data, err := mp4.DecodeFile(r)
 	if err != nil {
-		return nil, e("reason", "failed to parse MP4", err)
+		return nil, e("reason", "failed to parse MP4", "cause", sanitizeString(err.Error()))
 	}
 
 	// Fragmented MP4 (fMP4 init segment): moov is under mp4Data.Init.
@@ -200,7 +203,7 @@ func parseMP4ACodecInfo(se *mp4.AudioSampleEntryBox) (*CodecInfo, error) {
 	}, nil
 }
 
-// parseDOVIBox parses the payload of a dvcC, dvvC, or dvwC box and returns a DOVIInfo.
+// ParseDOVIBox parses the payload of a dvcC, dvvC, or dvwC box and returns a DOVIInfo.
 // Layout (from FFmpeg dovi_isom.c):
 //
 //	byte 0:   dv_version_major
@@ -213,9 +216,11 @@ func parseMP4ACodecInfo(se *mp4.AudioSampleEntryBox) (*CodecInfo, error) {
 //	  bit     0: bl_present  (1 bit)
 //	byte 4:
 //	  bits 7-4: dv_bl_signal_compatibility_id (4 bits)
-func parseDOVIBox(payload []byte) (*avdesc.DOVIInfo, error) {
+func ParseDOVIBox(payload []byte) (*avdesc.DOVIInfo, error) {
+	const op = "mp4e.ParseDOVIBox"
+	e := errors.Template(op, errors.K.Invalid.Default())
 	if len(payload) < 5 {
-		return nil, errors.E("dvcC/dvvC/dvwC payload too short", "len", len(payload))
+		return nil, e("reason", "payload too short", "len", len(payload))
 	}
 	word := uint16(payload[2])<<8 | uint16(payload[3])
 	return &avdesc.DOVIInfo{
@@ -228,6 +233,18 @@ func parseDOVIBox(payload []byte) (*avdesc.DOVIInfo, error) {
 		BLPresent:               word&1 == 1,
 		BLSignalCompatibilityID: int((payload[4] >> 4) & 0x0f),
 	}, nil
+}
+
+// sanitizeString replaces invalid UTF-8 sequences and non-printable characters
+// with '?' so error messages containing binary data are safe to log.
+func sanitizeString(s string) string {
+	s = strings.ToValidUTF8(s, "?")
+	return strings.Map(func(r rune) rune {
+		if r >= 32 && utf8.ValidRune(r) {
+			return r
+		}
+		return '?'
+	}, s)
 }
 
 func isDOVIBoxType(boxType string) bool {
@@ -272,7 +289,7 @@ func parseVisualSampleEntryBox(se *mp4.VisualSampleEntryBox) (*CodecInfo, error)
 			boxType := child.Type()
 			if isDOVIBoxType(boxType) {
 				if ub, ok := child.(*mp4.UnknownBox); ok {
-					dovi, doviErr := parseDOVIBox(ub.Payload())
+					dovi, doviErr := ParseDOVIBox(ub.Payload())
 					if doviErr != nil {
 						return nil, e(doviErr, "reason", "failed to parse Dolby Vision box", "box", boxType)
 					}

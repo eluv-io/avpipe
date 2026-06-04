@@ -3,6 +3,8 @@ package goavpipe
 import (
 	"encoding/json"
 	"fmt"
+
+	"github.com/eluv-io/avpipe/goavpipe/util"
 )
 
 type AVStatType int
@@ -369,13 +371,7 @@ type XcParams struct {
 	Timecode               string    `json:"timecode,omitempty"`
 }
 
-func (p *XcParams) String() string {
-	b, err := json.Marshal(p)
-	if err != nil {
-		return fmt.Sprintf("%+v", *p)
-	}
-	return string(b)
-}
+func (p *XcParams) String() string { return util.JSONString(p) }
 
 // NewXcParams initializes a XcParams struct with unset/default values
 func NewXcParams() *XcParams {

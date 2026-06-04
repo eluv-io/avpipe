@@ -1,10 +1,19 @@
 package util
 
-import "encoding/json"
+import (
+	"encoding/json"
 
-// JSONString marshals v to a JSON string. Marshaling errors are silently
-// ignored; the result is "{}" on failure rather than an empty string.
+	log "github.com/eluv-io/log-go"
+)
+
+// JSONString marshals v to a JSON string. Returns "{}" and logs an error on
+// failure.
 func JSONString(v any) string {
-	b, _ := json.Marshal(v)
+	const op = "util.JSONString"
+	b, err := json.Marshal(v)
+	if err != nil {
+		log.Error("marshal failed", "error", err, "op", op)
+		return "{}"
+	}
 	return string(b)
 }
