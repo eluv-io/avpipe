@@ -318,7 +318,7 @@ func probeVideoColor(t *testing.T, url string) videoColor {
 	probeParams.Url = url
 	info, err := avpipe.Probe(probeParams)
 	require.NoError(t, err, "probe failed for %s", url)
-	for _, si := range info.StreamInfo {
+	for _, si := range info.Streams {
 		if si.CodecType == "video" {
 			return videoColor{
 				Primaries: si.ColorPrimaries,
@@ -474,10 +474,10 @@ func runMezCreate(t *testing.T, sources []mezTestSource, mezDir string) {
 					)
 					probeInfo, err := avpipe.Probe(probeParams)
 					require.NoError(t, err, "Probe failed for %s", partFile)
-					require.NotEmpty(t, probeInfo.StreamInfo, "no streams in %s", partFile)
+					require.NotEmpty(t, probeInfo.Streams, "no streams in %s", partFile)
 
 					// Check video stream properties
-					for _, si := range probeInfo.StreamInfo {
+					for _, si := range probeInfo.Streams {
 						if si.CodecType == "video" {
 							assert.Equal(t, 720, si.Height, "height mismatch")
 							assert.Equal(t, 1280, si.Width, "width mismatch")
@@ -686,10 +686,10 @@ func generateAndValidateABRPart(
 	probeParams.Url = partFile
 	probeInfo, err := avpipe.Probe(probeParams)
 	require.NoError(t, err, "Probe failed for %s", partFile)
-	require.NotEmpty(t, probeInfo.StreamInfo, "no streams in %s", partFile)
+	require.NotEmpty(t, probeInfo.Streams, "no streams in %s", partFile)
 
 	var timescale int64
-	for _, si := range probeInfo.StreamInfo {
+	for _, si := range probeInfo.Streams {
 		if si.CodecType == "video" {
 			// TimeBase is num/den (e.g. 1/12288); timescale = denominator
 			timescale = si.TimeBase.Denom().Int64()

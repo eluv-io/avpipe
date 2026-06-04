@@ -7,6 +7,7 @@ import (
 	"io"
 	"math/bits"
 	"strings"
+	"unicode/utf8"
 
 	"github.com/Eyevinn/mp4ff/aac"
 	"github.com/Eyevinn/mp4ff/avc"
@@ -15,6 +16,7 @@ import (
 	"github.com/Eyevinn/mp4ff/mp4"
 	"github.com/Eyevinn/mp4ff/sei"
 
+	"github.com/eluv-io/avpipe/goavpipe/avdesc"
 	"github.com/eluv-io/errors-go"
 )
 
@@ -52,7 +54,14 @@ type CodecInfo struct {
 	Channels int `json:"channels,omitempty"`
 
 	// EC3 is set only when the codec is ec-3
-	EC3 *EC3Info `json:"ec3,omitempty"`
+	EC3 *avdesc.EC3Info `json:"ec3,omitempty"`
+
+	// DOVI is set only when the codec entry contains a Dolby Vision configuration
+	// box (dvcC, dvvC, or dvwC). Common cases:
+	//   hvc1/hev1 with dvvC child — Profile 8.x (cross-compatible)
+	//   dvh1/dvhe with dvcC child — Profile 5 or Profile 20 (standalone DV)
+	// DOVI.BoxType records which of dvcC/dvvC/dvwC was found.
+	DOVI *avdesc.DOVIInfo `json:"dovi,omitempty"`
 
 	// VideoLayout describes the stereoscopic layout (mono, sbs, mvhevc).
 	VideoLayout Mp4VideoLayout `json:"video_layout,omitempty"`
@@ -77,70 +86,16 @@ func (c CodecInfo) MarshalJSON() ([]byte, error) {
 	})
 }
 
-// EC3Info holds E-AC-3-specific fields (Dolby Digital Plus / Atmos)
-type EC3Info struct {
-	// ChanMap is the custom channel map bitmask from the MP4 dec3 box
-	// (ETSI TS 102 366 Table E.1.4)
-	ChanMap uint16 `json:"chan_map"`
-
-	// JOC indicates Joint Object Coding (Dolby Atmos). True when the
-	// flag_ec3_extension_type_a bit is set in the MP4 dec3 box extension
-	// (ETSI TS 103 420)
-	JOC bool `json:"joc"`
-
-	// ComplexityIndex is the Atmos object complexity index
-	// (complexity_index_type_a from ETSI TS 103 420). Only meaningful when
-	// JOC is true.
-	ComplexityIndex int `json:"complexity_index,omitempty"`
-}
-
-// ChanMapHex returns ChanMap as an uppercase hex string; e.g. "F801"
-func (e EC3Info) ChanMapHex() string {
-	return fmt.Sprintf("%04X", e.ChanMap)
-}
-
-// ec3ChanMapNames lists the channel names for each bit of the EC-3 custom
-// channel map, ordered from MSB (bit 15) to LSB (bit 0), per ETSI TS 102 366
-// Table E.1.4.
-var ec3ChanMapNames = [16]string{
-	"L", "C", "R", "Ls", "Rs", "Lc/Rc", "Lrs/Rrs", "Cs",
-	"Ts", "Lsd/Rsd", "Lw/Rw", "Vhl/Vhr", "Vhc", "Lts/Rts", "LFE2", "LFE",
-}
-
-// ChanMapString returns the channel names encoded in ChanMap as a
-// space-separated string; e.g. "L C R Ls Rs LFE"
-func (e EC3Info) ChanMapString() string {
-	var names []string
-	for i, name := range ec3ChanMapNames {
-		if e.ChanMap&(1<<(15-i)) != 0 {
-			names = append(names, name)
-		}
-	}
-	return strings.Join(names, " ")
-}
-
-// MarshalJSON adds an additional chan_map_hex field alongside the numeric
-// chan_map
-func (e EC3Info) MarshalJSON() ([]byte, error) {
-	type alias EC3Info
-	return json.Marshal(&struct {
-		alias
-		ChanMapHex string `json:"chan_map_hex,omitempty"`
-	}{
-		alias:      alias(e),
-		ChanMapHex: e.ChanMapHex(),
-	})
-}
-
 // ExtractCodecInfo decodes an MP4 container and returns codec information for
 // all tracks. Supports AVC (avc1/avc3) and HEVC (hvc1/hev1) video tracks, and
 // E-AC-3 (ec-3) and AAC (mp4a) audio tracks.
 func ExtractCodecInfo(r io.Reader) (infos []*CodecInfo, err error) {
-	e := errors.T("ExtractCodecInfo", errors.K.Invalid.Default())
+	const op = "mp4e.ExtractCodecInfo"
+	e := errors.T(op, errors.K.Invalid.Default())
 
 	mp4Data, err := mp4.DecodeFile(r)
 	if err != nil {
-		return nil, e("reason", "failed to parse MP4", err)
+		return nil, e("reason", "failed to parse MP4", "cause", sanitizeString(err.Error()))
 	}
 
 	// Fragmented MP4 (fMP4 init segment): moov is under mp4Data.Init.
@@ -218,7 +173,7 @@ func parseEC3CodecInfo(se *mp4.AudioSampleEntryBox) (*CodecInfo, error) {
 		MimeCodecString: "ec-3",
 		CodecTagString:  "ec-3",
 		Channels:        nChannels,
-		EC3: &EC3Info{
+		EC3: &avdesc.EC3Info{
 			ChanMap:         chanMap,
 			JOC:             joc,
 			ComplexityIndex: complexityIndex,
@@ -248,12 +203,60 @@ func parseMP4ACodecInfo(se *mp4.AudioSampleEntryBox) (*CodecInfo, error) {
 	}, nil
 }
 
+// ParseDOVIBox parses the payload of a dvcC, dvvC, or dvwC box and returns a DOVIInfo.
+// Layout (from FFmpeg dovi_isom.c):
+//
+//	byte 0:   dv_version_major
+//	byte 1:   dv_version_minor
+//	byte 2-3 (big-endian uint16):
+//	  bits 15-9: dv_profile  (7 bits)
+//	  bits  8-3: dv_level    (6 bits)
+//	  bit     2: rpu_present (1 bit)
+//	  bit     1: el_present  (1 bit)
+//	  bit     0: bl_present  (1 bit)
+//	byte 4:
+//	  bits 7-4: dv_bl_signal_compatibility_id (4 bits)
+func ParseDOVIBox(payload []byte) (*avdesc.DOVIInfo, error) {
+	const op = "mp4e.ParseDOVIBox"
+	e := errors.Template(op, errors.K.Invalid.Default())
+	if len(payload) < 5 {
+		return nil, e("reason", "payload too short", "len", len(payload))
+	}
+	word := uint16(payload[2])<<8 | uint16(payload[3])
+	return &avdesc.DOVIInfo{
+		VersionMajor:            int(payload[0]),
+		VersionMinor:            int(payload[1]),
+		Profile:                 int((word >> 9) & 0x7f),
+		Level:                   int((word >> 3) & 0x3f),
+		RPUPresent:              (word>>2)&1 == 1,
+		ELPresent:               (word>>1)&1 == 1,
+		BLPresent:               word&1 == 1,
+		BLSignalCompatibilityID: int((payload[4] >> 4) & 0x0f),
+	}, nil
+}
+
+// sanitizeString replaces invalid UTF-8 sequences and non-printable characters
+// with '?' so error messages containing binary data are safe to log.
+func sanitizeString(s string) string {
+	s = strings.ToValidUTF8(s, "?")
+	return strings.Map(func(r rune) rune {
+		if r >= 32 && utf8.ValidRune(r) {
+			return r
+		}
+		return '?'
+	}, s)
+}
+
+func IsDOVIBoxType(boxType string) bool {
+	return boxType == "dvvC" || boxType == "dvcC" || boxType == "dvwC"
+}
+
 func parseVisualSampleEntryBox(se *mp4.VisualSampleEntryBox) (*CodecInfo, error) {
 	codecTag := se.Type()
 	e := errors.T("parseVisualSampleEntryBox", errors.K.Invalid, "codecTag", codecTag)
 
 	switch codecTag {
-	case "hvc1", "hev1":
+	case "hvc1", "hev1", "dvh1", "dvhe":
 		if se.HvcC == nil {
 			return nil, e("reason", "hvcC box missing")
 		}
@@ -281,6 +284,23 @@ func parseVisualSampleEntryBox(se *mp4.VisualSampleEntryBox) (*CodecInfo, error)
 			VideoLayout:     Mp4VideoLayoutMono,
 		}
 
+		// Look for Dolby Vision configuration box (dvvC, dvcC, or dvwC) in children.
+		for _, child := range se.Children {
+			boxType := child.Type()
+			if IsDOVIBoxType(boxType) {
+				if ub, ok := child.(*mp4.UnknownBox); ok {
+					dovi, doviErr := ParseDOVIBox(ub.Payload())
+					if doviErr != nil {
+						return nil, e(doviErr, "reason", "failed to parse Dolby Vision box", "box", boxType)
+					}
+					dovi.FourCC = avdesc.DOVIFourCC(codecTag)
+					info.DOVI = dovi
+					info.DOVI.BoxType = boxType
+				}
+				break
+			}
+		}
+
 		// If VPS declares multiple layers - it's MV-HEVC
 		// Append the enhancement-layer codec descriptor so MimeCodecString
 		// matches the Apple format: `hvc1.<base>,hvc1.<enh>`
@@ -294,7 +314,7 @@ func parseVisualSampleEntryBox(se *mp4.VisualSampleEntryBox) (*CodecInfo, error)
 		}
 
 		// Check for frame-packed stereo (SBS): st3d or HEVC SEI 45 in hvcC
-		// PENDING(SS) if SEI 45 only in mdat and not hvcC we don't see it from the moov - to test CPU/GPU outputs
+		// PENDING(SS) if SEI 45 only in mdat and not hvcC, we don't see it from the moov - to test CPU/GPU outputs
 		if layout := detectStereoFromVse(se); layout != Mp4VideoLayoutMono {
 			info.VideoLayout = layout
 		} else if layout := detectStereoFromSEI(se.HvcC); layout != Mp4VideoLayoutMono {
@@ -430,7 +450,7 @@ func detectStereoFromSEI(hvcC *mp4.HvcCBox) Mp4VideoLayout {
 	return Mp4VideoLayoutMono
 }
 
-// framePackingArrangementType extracts frame_packing_arrangement_type fro SEI 45
+// framePackingArrangementType extracts frame_packing_arrangement_type for SEI 45
 // Returns the type and true if cancel_flag is false; false otherwise (no type present, error).
 func framePackingArrangementType(payload []byte) (byte, bool) {
 	if len(payload) == 0 {
@@ -453,6 +473,7 @@ func framePackingArrangementType(payload []byte) (byte, bool) {
 // ProfileTierLevel alone. Mirrors hevc.CodecString but accepts a PTL directly
 // — used for the MV-HEVC enhancement layer where the PTL comes from the VPS
 // extension array, not from an SPS.
+// TODO: duplicates hevc.CodecString from the imported mp4ff library; replace with hevc.CodecString once it accepts a bare ProfileTierLevel.
 func hevcCodecStringFromPTL(sampleEntry string, ptl hevc.ProfileTierLevel) string {
 	var profilePart string
 	switch ptl.GeneralProfileSpace {

@@ -125,6 +125,15 @@ func (g *GlobalsT) DeleteCIOHandlerAndOutputOpeners(fd int64) {
 	delete(gURLOutputOpenersByHandler, fd)
 }
 
+// RemoveURLHandlers removes the per-URL input and output openers registered by
+// InitUrlIOHandler (or InitUrlIOHandlerIfNotPresent) for the given URL.
+//
+// Callers set URL handlers immediately before starting a job — Xc, Mux, or
+// Probe — and those functions are responsible for removing them when the job
+// finishes (including on error). The typical call site is a deferred call at
+// the top of the job function, placed after the URL handlers are known to be
+// registered (i.e. after the early-return param-validation block but before
+// the C call).
 func (g *GlobalsT) RemoveURLHandlers(url string) {
 	gMutex.Lock()
 	defer gMutex.Unlock()

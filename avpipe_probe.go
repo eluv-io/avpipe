@@ -1,44 +1,29 @@
 package avpipe
 
 import (
-	"fmt"
-	"strings"
+	"io"
+	"reflect"
 
 	"github.com/eluv-io/avpipe/goavpipe"
+	"github.com/eluv-io/avpipe/goavpipe/avdesc"
 	"github.com/eluv-io/avpipe/mp4e"
+	"github.com/eluv-io/errors-go"
 )
 
-func probeFormatSupportsCodecInfo(formatName string) bool {
-	for _, name := range strings.Split(formatName, ",") {
-		switch name {
-		case "mov", "mp4", "m4a", "3gp", "3g2", "mj2":
-			return true
+// extractCodecInfoForProbe extracts MP4 codec info from input and seeks it back
+// to 0 so the caller can re-read from the beginning. The caller owns the handle
+// and is responsible for opening and closing it.
+func extractCodecInfoForProbe(input goavpipe.InputHandler) ([]*mp4e.CodecInfo, error) {
+	const op = "avpipe.extractCodecInfoForProbe"
+	e := errors.Template(op, errors.K.Invalid.Default())
+	infos, extractErr := mp4e.ExtractCodecInfo(input)
+	if _, seekErr := input.Seek(0, io.SeekStart); seekErr != nil {
+		if extractErr != nil {
+			goavpipe.Log.Error("seek back failed after failed extraction", "extract_error", extractErr, "op", op)
 		}
+		return nil, e("reason", "seek back after pre-extraction", "error", seekErr)
 	}
-	return false
-}
-
-func shouldEnhanceStreamInfo(params *goavpipe.XcParams, formatName string) bool {
-	return params != nil && params.Seekable && probeFormatSupportsCodecInfo(formatName)
-}
-
-func extractCodecInfoForProbe(url string) ([]*mp4e.CodecInfo, error) {
-	inputOpener := goavpipe.GetInputOpener(url)
-	if inputOpener == nil {
-		return nil, fmt.Errorf("input opener not set")
-	}
-
-	input, err := inputOpener.Open(goavpipe.Globals.GetNextFD(), url)
-	if err != nil {
-		return nil, fmt.Errorf("open input: %w", err)
-	}
-	defer func() {
-		if err := input.Close(); err != nil {
-			goavpipe.Log.Warn("Probe codec info enhancement failed to close input", "url", url, "error", err)
-		}
-	}()
-
-	return mp4e.ExtractCodecInfo(input)
+	return infos, extractErr
 }
 
 func enhanceStreamInfo(streams []goavpipe.StreamInfo, codecInfos []*mp4e.CodecInfo) {
@@ -66,33 +51,50 @@ func enhanceStreamInfo(streams []goavpipe.StreamInfo, codecInfos []*mp4e.CodecIn
 			streams[i].CodecTagString = info.CodecTagString
 		}
 
-		streams[i].Mp4Info = convertMp4Info(info)
+		warnDOVIMismatch(streams[i].StreamIndex, streams[i].DOVI, info.DOVI)
+
+		streams[i].MP4 = convertMP4Info(info)
 	}
 }
 
-func convertMp4Info(info *mp4e.CodecInfo) *goavpipe.Mp4Info {
+func warnDOVIMismatch(streamIndex int, probeDOVI, mp4DOVI *avdesc.DOVIInfo) {
+	if mp4DOVI != nil && probeDOVI == nil {
+		goavpipe.Log.Warn("Probe DOVI mismatch: MP4 box has DOVI config but side data is absent",
+			"stream_index", streamIndex,
+			"mp4_dovi", mp4DOVI)
+	} else if probeDOVI != nil && mp4DOVI == nil {
+		goavpipe.Log.Warn("Probe DOVI mismatch: side data has DOVI config but MP4 box is absent",
+			"stream_index", streamIndex,
+			"probe_dovi", probeDOVI)
+	} else if probeDOVI != nil { // && mp4DOVI != nil
+		// Compare all fields except BoxType, which is empty in the probe/side-data
+		// path and set only in the MP4 box path — that difference is by design.
+		probe := *probeDOVI
+		mp4 := *mp4DOVI
+		probe.BoxType = ""
+		mp4.BoxType = ""
+		if !reflect.DeepEqual(probe, mp4) {
+			goavpipe.Log.Warn("Probe DOVI mismatch between side data and MP4 box",
+				"stream_index", streamIndex,
+				"probe_dovi", probeDOVI,
+				"mp4_dovi", mp4DOVI)
+		}
+	}
+}
+
+func convertMP4Info(info *mp4e.CodecInfo) *goavpipe.MP4Info {
 	if info == nil {
 		return nil
 	}
-	return &goavpipe.Mp4Info{
+	return &goavpipe.MP4Info{
 		CodecTagString:        info.CodecTagString,
 		MimeCodecString:       info.MimeCodecString,
 		ProfileIDC:            info.ProfileIDC,
 		Level:                 info.Level,
 		Channels:              info.Channels,
-		EC3:                   convertEC3Info(info.EC3),
+		EC3:                   info.EC3,
+		DOVI:                  info.DOVI,
 		VideoLayout:           goavpipe.VideoLayout(info.VideoLayout),
 		EnhancementProfileIDC: info.EnhancementProfileIDC,
-	}
-}
-
-func convertEC3Info(info *mp4e.EC3Info) *goavpipe.EC3Info {
-	if info == nil {
-		return nil
-	}
-	return &goavpipe.EC3Info{
-		ChanMap:         info.ChanMap,
-		JOC:             info.JOC,
-		ComplexityIndex: info.ComplexityIndex,
 	}
 }
