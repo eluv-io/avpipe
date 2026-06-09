@@ -33,6 +33,13 @@ is_custom_input(
 );
 
 int
+is_bypass_bframes(
+    coderctx_t *decoder_context,
+    xcparams_t *params,
+    int stream_index
+);
+
+int
 is_live_container_mpegts(
     coderctx_t *ctx
 );
