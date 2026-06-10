@@ -132,6 +132,37 @@ is_custom_input(
     return 1;
 }
 
+int
+is_bypass_bframes(
+    coderctx_t *decoder_context,
+    xcparams_t *params,
+    int stream_index)
+{
+    if (!decoder_context || !params ||
+        stream_index < 0 ||
+        stream_index >= MAX_STREAMS ||
+        stream_index != decoder_context->video_stream_index ||
+        !params->bypass_transcoding ||
+        !params->format ||
+        strcmp(params->format, "dash"))
+        return 0;
+
+    if (decoder_context->codec_context[stream_index] &&
+        decoder_context->codec_context[stream_index]->has_b_frames > 0)
+        return 1;
+
+    if (decoder_context->codec_parameters[stream_index] &&
+        decoder_context->codec_parameters[stream_index]->video_delay > 0)
+        return 1;
+
+    if (decoder_context->stream[stream_index] &&
+        decoder_context->stream[stream_index]->codecpar &&
+        decoder_context->stream[stream_index]->codecpar->video_delay > 0)
+        return 1;
+
+    return 0;
+}
+
 
 int
 num_audio_output(
