@@ -516,8 +516,8 @@ func AssertSourceOutputFrameTimings(sourceFrames, outputFrames []ABRFrameTiming,
 	if dtsOffset != ptsOffset {
 		return fmt.Errorf("output DTS/PTS should have the same offset from source timeline: dts=%d pts=%d", dtsOffset, ptsOffset)
 	}
-	if dtsOffset != 0 && dtsOffset != startPts {
-		return fmt.Errorf("output timeline offset should be either chunk-local (0) or start_pts (%d), got %d", startPts, dtsOffset)
+	if dtsOffset != startPts {
+		return fmt.Errorf("output timeline offset should equal start_pts (%d), got %d", startPts, dtsOffset)
 	}
 
 	var (
@@ -602,8 +602,6 @@ func SourceOutputPTSComparison(sourceFrames, outputFrames []ABRFrameTiming, stat
 			sourceTiming = fmt.Sprintf("%d/%d", source.DTS, source.PTS)
 			contentDTS := int64(source.DTS) + startPts
 			contentPTS := source.PTS + startPts
-			expectedDTS := int64(source.DTS) + dtsOffset
-			expectedPTS := source.PTS + ptsOffset
 			expectedTiming = fmt.Sprintf("%d/%d", contentDTS, contentPTS)
 			outputTiming = fmt.Sprintf("%d/%d", output.DTS, output.PTS)
 			frameType = source.FrameType
@@ -614,10 +612,10 @@ func SourceOutputPTSComparison(sourceFrames, outputFrames []ABRFrameTiming, stat
 				outputMarker = "new seg"
 			}
 			var differences []string
-			if expectedDTS != int64(output.DTS) {
+			if contentDTS != int64(output.DTS) {
 				differences = append(differences, "DTS")
 			}
-			if expectedPTS != output.PTS {
+			if contentPTS != output.PTS {
 				differences = append(differences, "PTS")
 			}
 			if len(differences) > 0 {
@@ -695,7 +693,6 @@ func AssertABRBypassPartsContiguous(previousName string, previousStartPts int64,
 }
 
 func abrBypassContentSegmentFrames(startPts int64, sourceFrames, outputFrames []ABRFrameTiming, chunk string) ([]abrContentFrame, error) {
-	dtsOffset, ptsOffset := SourceOutputTimelineOffset(sourceFrames, outputFrames)
 	frames := make([]abrContentFrame, 0)
 	for _, frame := range outputFrames {
 		if frame.Chunk != chunk {
@@ -705,8 +702,8 @@ func abrBypassContentSegmentFrames(startPts int64, sourceFrames, outputFrames []
 			chunk:     frame.Chunk,
 			decodeIdx: frame.DecodeIdx,
 			frameType: frame.FrameType,
-			dts:       int64(frame.DTS) - dtsOffset + startPts,
-			pts:       frame.PTS - ptsOffset + startPts,
+			dts:       int64(frame.DTS),
+			pts:       frame.PTS,
 			duration:  frame.Duration,
 		})
 	}
