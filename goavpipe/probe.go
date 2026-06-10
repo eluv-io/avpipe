@@ -1,0 +1,313 @@
+package goavpipe
+
+import (
+	"math/big"
+
+	"github.com/eluv-io/avpipe/goavpipe/avdesc"
+	"github.com/eluv-io/avpipe/goavpipe/util"
+)
+
+// ProbeInfo is the top-level result returned by avpipe.Probe. It mirrors the
+// structure of ffprobe's JSON output, with a "format" object and a "streams"
+// array.
+type ProbeInfo struct {
+	Format  FormatInfo   `json:"format"`
+	Streams []StreamInfo `json:"streams"`
+}
+
+// FormatInfo holds container-level metadata for a probed media file.
+type FormatInfo struct {
+	// FormatName is the comma-separated list of short format names as reported
+	// by FFmpeg (e.g. "mov,mp4,m4a,3gp,3g2,mj2").
+	FormatName string `json:"format_name"`
+	// Duration is the total container duration in seconds.
+	Duration float64 `json:"duration"`
+}
+
+// StreamInfo describes a single audio or video stream within a media container,
+// with fields roughly in the order they appear in ffprobe's JSON output.
+// Not all ffprobe fields are present.
+type StreamInfo struct {
+	// StreamIndex is the zero-based index of this stream within the container.
+	StreamIndex int `json:"stream_index"` // ffprobe: "index"
+
+	// CodecName is the short codec name as reported by FFmpeg (e.g. "h264", "eac3").
+	CodecName string `json:"codec_name,omitempty"`
+
+	// Profile is the codec profile IDC. ProfileName holds the human-readable form.
+	// 0 (omitted) when FFmpeg reports AV_PROFILE_UNKNOWN.
+	Profile int `json:"profile,omitempty"` // no ffprobe equivalent
+
+	// ProfileName is the human-readable codec profile (e.g. "High", "Main").
+	// Populated by avpipe.Probe() via GetProfileName().
+	ProfileName string `json:"profile_name,omitempty"` // ffprobe: "profile"
+
+	// CodecType is the media type: "audio", "video", "data", etc.
+	CodecType string `json:"codec_type,omitempty"`
+
+	// CodecTagString is the four-character code (4CC) from the container
+	// (e.g. "avc1", "ec-3"), derived from AVCodecParameters.codec_tag via
+	// av_fourcc_make_string().
+	CodecTagString string `json:"codec_tag_string,omitempty"`
+
+	// CodecID is the FFmpeg AVCodecID integer for this stream's codec.
+	CodecID int `json:"codec_id,omitempty"` // no ffprobe equivalent
+
+	// MimeCodecString is the RFC 6381 codec string suitable for use in MIME
+	// type codecs parameters (e.g. "avc1.4d4028", "ec-3").
+	// TODO: Populate this via av_mime_codec_str() once the FFmpeg dependency is
+	//       updated to 8.1+ (libavformat 62.7+). As a workaround, use
+	//       mp4e.ExtractCodecInfo(), which parses the MP4 box layer directly.
+	MimeCodecString string `json:"mime_codec_string,omitempty"`
+
+	// Video-specific fields
+
+	// Width is the coded frame width in pixels.
+	Width int `json:"width,omitempty"`
+
+	// Height is the coded frame height in pixels.
+	Height int `json:"height,omitempty"`
+
+	// HasBFrames indicates whether the stream contains B-frames.
+	HasBFrames bool `json:"has_b_frames,omitempty"`
+
+	// SampleAspectRatio is the sample (pixel) aspect ratio.
+	SampleAspectRatio *big.Rat `json:"sample_aspect_ratio,omitempty"`
+
+	// DisplayAspectRatio is the display aspect ratio.
+	DisplayAspectRatio *big.Rat `json:"display_aspect_ratio,omitempty"`
+
+	// PixFmt is the FFmpeg pixel format (enum AVPixelFormat). Nil for
+	// non-video streams. 0 means AV_PIX_FMT_YUV420P.
+	PixFmt *int `json:"pix_fmt,omitempty"` // ffprobe: string value
+
+	// Level is the codec level IDC (e.g. 40 = H.264 level 4.0).
+	// 0 (omitted) when FFmpeg reports AV_LEVEL_UNKNOWN.
+	Level int `json:"level,omitempty"`
+
+	// ColorRange is the luma/chroma sample range: "tv" (limited, 16–235) or
+	// "pc" (full, 0–255). "unknown" when unspecified by the stream.
+	ColorRange string `json:"color_range,omitempty"`
+
+	// ColorSpace is the YCbCr matrix coefficients used to derive luma/chroma
+	// from RGB (e.g. "bt709", "bt2020nc"). "unknown" when unspecified.
+	ColorSpace string `json:"color_space,omitempty"`
+
+	// ColorTransfer is the opto-electrical transfer characteristic (gamma
+	// curve), e.g. "bt709", "smpte2084" (PQ/HDR10), "arib-std-b67" (HLG).
+	// "unknown" when unspecified.
+	ColorTransfer string `json:"color_transfer,omitempty"`
+
+	// ColorPrimaries identifies the chromaticity coordinates of the color
+	// primaries (e.g. "bt709", "bt2020"). "unknown" when unspecified.
+	ColorPrimaries string `json:"color_primaries,omitempty"`
+
+	// FieldOrder describes the interlacing of the video (e.g. "progressive",
+	// "tt", "bb"). Empty for non-video streams or when unknown.
+	FieldOrder string `json:"field_order,omitempty"`
+
+	// Audio-specific fields
+
+	// SampleRate is the audio sampling rate in Hz.
+	SampleRate int `json:"sample_rate,omitempty"`
+
+	// Channels is the number of audio channels.
+	Channels int `json:"channels,omitempty"`
+
+	// ChannelLayout is the FFmpeg channel layout bitmask (AV_CH_LAYOUT_*).
+	// ChannelLayoutName holds the human-readable form.
+	ChannelLayout int `json:"channel_layout,omitempty"` // ffprobe: string value
+
+	// ChannelLayoutName is the human-readable channel layout (e.g. "5.1(side)").
+	// Populated by avpipe.Probe() via ChannelLayoutName().
+	ChannelLayoutName string `json:"channel_layout_name,omitempty"` // ffprobe: "channel_layout"
+
+	// Stream/container fields
+
+	// StreamId is the format-specific stream identifier from the container
+	// (e.g. the PID in MPEG-TS, or the track ID in MP4).
+	StreamId int `json:"stream_id"` // ffprobe: "id"
+
+	// FrameRate is the real base frame rate of the stream. For variable frame
+	// rate streams this is the lowest common denominator.
+	FrameRate *big.Rat `json:"frame_rate,omitempty"` // ffprobe: "r_frame_rate"
+
+	// AvgFrameRate is the average frame rate, as stored in the container.
+	AvgFrameRate *big.Rat `json:"avg_frame_rate,omitempty"`
+
+	// TimeBase is the fundamental unit of time for this stream's timestamps,
+	// expressed as a rational number (e.g. "1/48000" for 48 kHz audio).
+	TimeBase *big.Rat `json:"time_base"`
+
+	// StartTime is the presentation timestamp of the first packet, in TimeBase units.
+	StartTime int64 `json:"start_time"` // ffprobe: "start_pts"
+
+	// DurationTs is the total stream duration in TimeBase units.
+	DurationTs int64 `json:"duration_ts,omitempty"`
+
+	// BitRate is the average bit rate in bits per second.
+	BitRate int64 `json:"bit_rate,omitempty"`
+
+	// NBFrames is the total number of frames in the stream.
+	NBFrames int64 `json:"nb_frames,omitempty"`
+
+	// Tags contains container-level metadata key/value pairs for this stream
+	// (e.g. "language": "eng").
+	Tags map[string]string `json:"tags,omitempty"`
+
+	// SideData holds auxiliary data attached to the stream, such as a display
+	// matrix for rotation. Each element is typed (e.g. SideDataDisplayMatrix).
+	SideData []interface{} `json:"side_data,omitempty"` // ffprobe: "side_data_list"
+
+	// Data not parsed by ffprobe
+
+	// DolbyAtmos is true when the stream is EAC-3 with Joint Object Coding
+	// (JOC), i.e. Dolby Atmos. Derived from codecpar->profile ==
+	// AV_PROFILE_EAC3_DDP_ATMOS, which the EAC-3 decoder sets from sync-frame
+	// headers during avformat_find_stream_info and propagates back to codecpar
+	// via avcodec_parameters_from_context. The dec3 box fields (ChanMap,
+	// ComplexityIndex) are not available here; For MP4 containers, look in
+	// MP4Info.EC3
+	DolbyAtmos bool `json:"dolby_atmos,omitempty"`
+
+	// DOVI holds the Dolby Vision decoder configuration from FFmpeg side data
+	// (AV_PKT_DATA_DOVI_CONF). FourCC is populated from CodecTagString when the
+	// stream is HEVC-based. May be nil if FFmpeg did not propagate the side data
+	// — in that case MP4Info.DOVI (parsed from the dvcC/dvvC/dvwC box) is the
+	// authoritative source. Use GetDOVI() to get the best available record from
+	// either source.
+	DOVI *avdesc.DOVIInfo `json:"dovi,omitempty"`
+
+	// Stereo3DType is the stereoscopic 3D layout of the video stream
+	// (e.g. "side by side", "top and bottom"). Empty for non-stereoscopic
+	// streams. Derived from AV_PKT_DATA_STEREO3D side data.
+	Stereo3DType string `json:"stereo3d_type,omitempty"`
+
+	// MasteringDisplay is the SMPTE ST 2086 mastering display color volume,
+	// formatted as an x265-compatible string with red/green/blue primaries
+	// (x/y coordinates) and min/max luminance
+	// (e.g. "G(13250,34500)B(7500,3000)R(34000,16000)WP(15635,16450)L(10000000,1)").
+	// Non-empty only for HDR streams. Derived from
+	// AV_PKT_DATA_MASTERING_DISPLAY_METADATA side data.
+	MasteringDisplay string `json:"mastering_display,omitempty"`
+
+	// MaxCLL is the SMPTE ST 2086 content light level, formatted as
+	// "MaxCLL=N,MaxFALL=N" where MaxCLL is the maximum content light level,
+	// and MaxFALL is the maximum frame-average light level, both in nits
+	// (e.g. "MaxCLL=1000,MaxFALL=400"). Non-empty only for HDR streams.
+	// Derived from AV_PKT_DATA_CONTENT_LIGHT_LEVEL side data.
+	MaxCLL string `json:"max_cll,omitempty"`
+
+	//  The following ffprobe fields are not populated (yet), but may be of
+	//  interest:
+	//
+	//   disposition          object  stream flags: default, forced, hearing_impaired, multilayer, etc.
+	//   bits_per_raw_sample  int     bit depth per sample (e.g. 8, 10, 12); critical for HDR/10-bit detection
+	//   coded_width          int     coded frame width before cropping; may differ from Width when padding is present
+	//   coded_height         int     coded frame height before cropping
+	//   sample_fmt           string  audio sample format (e.g. "fltp", "s16")
+	//   duration             float64 stream duration in seconds (we only expose DurationTs in timebase units)
+	//   initial_padding      int     audio encoder delay in samples; needed for gapless playback
+	//   codec_long_name      string  human-readable codec description (e.g. "H.264 / AVC / MPEG-4 AVC / MPEG-4 part 10")
+	//   chroma_location      string  chroma sample position (e.g. "left")
+	//   bits_per_sample      int     audio PCM bit depth; relevant for uncompressed/lossless audio (PCM, FLAC)
+
+	// MP4 contains codec details parsed from MP4 sample-entry boxes.
+	// This supplements, but does not replace, the FFmpeg-derived fields above.
+	MP4 *MP4Info `json:"mp4,omitempty"`
+}
+
+// MP4Info contains codec details parsed from MP4 sample-entry boxes.
+type MP4Info struct {
+	// CodecTagString is the sample description entry 4-character code.
+	CodecTagString string `json:"codec_tag_string,omitempty"`
+
+	// MimeCodecString is the RFC 6381 codec string.
+	MimeCodecString string `json:"mime_codec_string,omitempty"`
+
+	// ProfileIDC is the codec profile IDC from MP4 sample-entry parsing.
+	ProfileIDC int `json:"profile_idc,omitempty"`
+
+	// Level is the codec level IDC from MP4 sample-entry parsing.
+	Level int `json:"level,omitempty"`
+
+	// Channels is the number of audio channels from MP4 sample-entry parsing.
+	Channels int `json:"channels,omitempty"`
+
+	// EC3 holds E-AC-3-specific MP4 decoder configuration, when present.
+	EC3 *avdesc.EC3Info `json:"ec3,omitempty"`
+
+	// DOVI holds the Dolby Vision configuration parsed from the MP4 sample-entry
+	// box (dvcC, dvvC, or dvwC). Unlike StreamInfo.DOVI (which comes from FFmpeg
+	// side data and lacks BoxType/FourCC), this record includes the box type and
+	// the derived DV sample-entry FourCC (e.g. "dvh1"). Use StreamInfo.GetDOVI()
+	// to get the best available record from either source.
+	DOVI *avdesc.DOVIInfo `json:"dovi,omitempty"`
+
+	// VideoLayout describes how one or more views are encoded.
+	VideoLayout VideoLayout `json:"video_layout,omitempty"`
+
+	// EnhancementProfileIDC is the MV-HEVC enhancement-layer general_profile_idc.
+	// Only meaningful for VideoLayout == VideoLayoutMVHEVC.
+	EnhancementProfileIDC int `json:"enhancement_profile_idc,omitempty"`
+}
+
+// SideDataDisplayMatrix holds the display transformation matrix side data
+// attached to a video stream. It is the Go representation of
+// AV_PKT_DATA_DISPLAYMATRIX / AV_FRAME_DATA_DISPLAYMATRIX.
+type SideDataDisplayMatrix struct {
+	// Type is always "Display Matrix".
+	Type string `json:"side_data_type"`
+	// Rotation is the counter-clockwise rotation angle in degrees.
+	Rotation float64 `json:"rotation"`
+	// RotationCw is the clockwise rotation angle in degrees (negation of Rotation).
+	RotationCw float64 `json:"rotation_cw"`
+}
+
+func (p ProbeInfo) String() string             { return util.JSONString(p) }
+func (c FormatInfo) String() string            { return util.JSONString(c) }
+func (s StreamInfo) String() string            { return util.JSONString(s) }
+func (m MP4Info) String() string               { return util.JSONString(m) }
+func (s SideDataDisplayMatrix) String() string { return util.JSONString(s) }
+
+// GetDOVI returns the best available Dolby Vision configuration for the stream.
+// It prefers MP4Info.DOVI (parsed from the dvcC/dvvC/dvwC box, includes FourCC
+// and BoxType) over DOVI (from FFmpeg side data, lacks those fields). Returns
+// nil if neither source has a DOVI record.
+func (s StreamInfo) GetDOVI() *avdesc.DOVIInfo {
+	if s.MP4 != nil && s.MP4.DOVI != nil {
+		return s.MP4.DOVI
+	}
+	return s.DOVI
+}
+
+// StreamByCodecType returns the first stream whose CodecType matches the given
+// value ("audio", "video", "subtitle", etc.), or nil if none is found.
+func (p ProbeInfo) StreamByCodecType(codecType string) *StreamInfo {
+	for i := range p.Streams {
+		if p.Streams[i].CodecType == codecType {
+			return &p.Streams[i]
+		}
+	}
+	return nil
+}
+
+// StreamInfoAsArray builds an array where each stream is at its corresponding
+// index by filling in non-existing index positions with codec type "unknown".
+func StreamInfoAsArray(s []StreamInfo) []StreamInfo {
+	maxIdx := 0
+	for _, v := range s {
+		if v.StreamIndex > maxIdx {
+			maxIdx = v.StreamIndex
+		}
+	}
+	a := make([]StreamInfo, maxIdx+1)
+	for i := range a {
+		a[i].StreamIndex = i
+		a[i].CodecType = AVMediaTypeNames[AVMediaType(AVMEDIA_TYPE_UNKNOWN)]
+	}
+	for _, v := range s {
+		a[v.StreamIndex] = v
+	}
+	return a
+}

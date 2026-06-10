@@ -1,7 +1,9 @@
 package cmd
 
 import (
+	"encoding/json"
 	"fmt"
+	"os"
 
 	"github.com/eluv-io/avpipe"
 	"github.com/eluv-io/avpipe/goavpipe"
@@ -22,6 +24,7 @@ func Probe(cmdRoot *cobra.Command) error {
 	cmdProbe.PersistentFlags().BoolP("seekable", "", false, "(optional) seekable stream")
 	cmdProbe.PersistentFlags().BoolP("listen", "", false, "listen mode for RTMP.")
 	cmdProbe.PersistentFlags().Int32("connection-timeout", 0, "connection timeout for RTMP when listening on a port or MPEGTS to receive first UDP datagram.")
+	cmdProbe.PersistentFlags().BoolP("json", "j", false, "(optional) output as JSON")
 
 	return nil
 }
@@ -62,10 +65,20 @@ func doProbe(cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("Probing failed. file=%s", filename)
 	}
 
-	for _, info := range probe.StreamInfo {
-		channelLayoutName := "-"
-		if info.CodecType == "audio" {
-			channelLayoutName = avpipe.ChannelLayoutName(info.Channels, info.ChannelLayout)
+	jsonOutput, err := cmd.Flags().GetBool("json")
+	if err != nil {
+		return fmt.Errorf("Invalid json flag")
+	}
+	if jsonOutput {
+		enc := json.NewEncoder(os.Stdout)
+		enc.SetIndent("", "  ")
+		return enc.Encode(probe)
+	}
+
+	for _, info := range probe.Streams {
+		channelLayoutName := info.ChannelLayoutName
+		if channelLayoutName == "" {
+			channelLayoutName = "-"
 		}
 
 		fmt.Printf("Stream[%d]\n", info.StreamIndex)
@@ -73,7 +86,7 @@ func doProbe(cmd *cobra.Command, args []string) error {
 		fmt.Printf("\tcodec_type: %s\n", info.CodecType)
 		fmt.Printf("\tcodec_id: %d\n", info.CodecID)
 		fmt.Printf("\tcodec_name: %s\n", info.CodecName)
-		fmt.Printf("\tprofile: %s\n", avpipe.GetProfileName(info.CodecID, info.Profile))
+		fmt.Printf("\tprofile: %s\n", info.ProfileName)
 		fmt.Printf("\tlevel: %d\n", info.Level)
 		if uint64(info.DurationTs) != goavpipe.AvNoPtsValue {
 			fmt.Printf("\tduration_ts: %d\n", info.DurationTs)
@@ -87,20 +100,43 @@ func doProbe(cmd *cobra.Command, args []string) error {
 		fmt.Printf("\tchannels: %d\n", info.Channels)
 		fmt.Printf("\tchannel_layout: %s\n", channelLayoutName)
 		fmt.Printf("\tbit_rate: %d\n", info.BitRate)
-		fmt.Printf("\thas_b_frames: %v\n", info.Has_B_Frames)
+		fmt.Printf("\thas_b_frames: %v\n", info.HasBFrames)
 		fmt.Printf("\twidth: %d\n", info.Width)
 		fmt.Printf("\theight: %d\n", info.Height)
-		if info.PixFmt >= 0 {
-			fmt.Printf("\tpix_fmt: %d\n", info.PixFmt)
+		if info.PixFmt != nil {
+			fmt.Printf("\tpix_fmt: %d\n", *info.PixFmt)
 		} else {
 			fmt.Printf("\tpix_fmt: -\n")
 		}
 		fmt.Printf("\tsample_aspect_ratio: %d:%d\n", info.SampleAspectRatio.Num(), info.SampleAspectRatio.Denom())
 		fmt.Printf("\tdisplay_aspect_ratio: %d:%d\n", info.DisplayAspectRatio.Num(), info.DisplayAspectRatio.Denom())
 		fmt.Printf("\tfield_order: %s\n", info.FieldOrder)
+		if info.CodecType == "video" {
+			if info.ColorPrimaries != "" {
+				fmt.Printf("\tcolor_primaries: %s\n", info.ColorPrimaries)
+			}
+			if info.ColorTransfer != "" {
+				fmt.Printf("\tcolor_transfer: %s\n", info.ColorTransfer)
+			}
+			if info.ColorSpace != "" {
+				fmt.Printf("\tcolor_space: %s\n", info.ColorSpace)
+			}
+			if info.ColorRange != "" {
+				fmt.Printf("\tcolor_range: %s\n", info.ColorRange)
+			}
+			if info.MasteringDisplay != "" {
+				fmt.Printf("\tmastering_display: %s\n", info.MasteringDisplay)
+			}
+			if info.MaxCLL != "" {
+				fmt.Printf("\tmax_cll: %s\n", info.MaxCLL)
+			}
+			if info.Stereo3DType != "" {
+				fmt.Printf("\tstereo3d_type: %s\n", info.Stereo3DType)
+			}
+		}
 		/* TODO: Make this a switch based on different SideData */
 		if info.SideData != nil && len(info.SideData) > 0 {
-			displayMatrix, ok := info.SideData[0].(avpipe.SideDataDisplayMatrix)
+			displayMatrix, ok := info.SideData[0].(goavpipe.SideDataDisplayMatrix)
 			if ok {
 				fmt.Printf("\tside_data:\n")
 				fmt.Printf("\t\tdisplay_matrix:\n")
@@ -117,8 +153,8 @@ func doProbe(cmd *cobra.Command, args []string) error {
 	}
 
 	fmt.Printf("Container\n")
-	fmt.Printf("\tformat_name: %s\n", probe.ContainerInfo.FormatName)
-	fmt.Printf("\tduration: %.5f\n", probe.ContainerInfo.Duration)
+	fmt.Printf("\tformat_name: %s\n", probe.Format.FormatName)
+	fmt.Printf("\tduration: %.5f\n", probe.Format.Duration)
 
 	return nil
 }

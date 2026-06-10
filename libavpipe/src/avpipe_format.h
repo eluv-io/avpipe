@@ -95,3 +95,33 @@ is_mvhevc(
 int
 is_dolby_atmos(
     const AVStream *stream);
+
+int
+is_dovi(
+    const AVStream *stream);
+
+void
+verify_hdr_source_color(
+    coderctx_t *decoder_context,
+    xcparams_t *params);
+
+void
+copy_source_color_to_output(
+    coderctx_t *encoder_context,
+    coderctx_t *decoder_context);
+
+void
+reconcile_decoder_video_color(
+    coderctx_t *decoder_context,
+    int stream_index,
+    const char *url);
+
+void
+fix_video_frame_color(
+    coderctx_t *decoder_context,
+    AVFrame *frame);
+
+void
+dash_synthesize_color_defaults(
+    xcparams_t *params,
+    AVCodecParameters *codecpar);

@@ -15,6 +15,7 @@
 #include <libavutil/display.h>
 #include <libavutil/stereo3d.h>
 #include <libavutil/mastering_display_metadata.h>
+#include <libavutil/dovi_meta.h>
 
 #include "avpipe_xc.h"
 #include "avpipe_utils.h"
@@ -293,6 +294,8 @@ prepare_decoder(
     rc = avformat_open_input(&decoder_context->format_context, open_url, NULL, &opts);
     if (rc != 0) {
         elv_err("Could not open input file, err=%s (%d), url=%s", av_err2str(rc), rc, url);
+        if (rc == AVERROR_EXIT)
+            return eav_cancelled;
         return eav_open_input;
     }
 
@@ -515,6 +518,14 @@ prepare_decoder(
         dump_stream(decoder_context->stream[i]);
         dump_codec_parameters(decoder_context->codec_parameters[i]);
         dump_codec_context(decoder_context->codec_context[i]);
+
+        /* Log source color metadata for video streams (taken from the demuxer codecpar
+         * which reflects mp4 'colr' atom or bitstream VUI as applicable). */
+        if (decoder_context->codec_parameters[i]->codec_type == AVMEDIA_TYPE_VIDEO) {
+            AVCodecParameters *cp = decoder_context->codec_parameters[i];
+            log_color_metadata("decode", i,
+                cp->color_primaries, cp->color_trc, cp->color_space, cp->color_range, url);
+        }
     }
 
     /* If it couldn't find identified stream with params->stream_id, then return an error */
@@ -585,6 +596,10 @@ prepare_decoder(
         /* PENDING(RM) Do we need this for audio? Because audio is based on resampling, it doesn't work like video. */
     }
 
+    /* Reconcile video stream color metadata here - used for video buffer source filter and fixing frame color */
+    if (decoder_context->video_stream_index >= 0)
+        reconcile_decoder_video_color(decoder_context, decoder_context->video_stream_index, url);
+
     return 0;
 }
 
@@ -614,11 +629,28 @@ set_encoder_options(
      */
     #define FRAG_OPTS "+frag_every_frame+empty_moov+default_base_moof"
     #define FRAG_OPTS_DELAY "+frag_every_frame+empty_moov+default_base_moof+delay_moov"
+    /* write_colr forces the MP4 muxer to emit a 'colr' nclx box even when only
+     * color_range is set (primaries/trc/space UNSPECIFIED). Without it the muxer
+     * skips the box and the range is lost. */
+    #define FRAG_OPTS_COLR FRAG_OPTS "+write_colr"
+
+    /* Force the 'colr' box whenever any color field is worth preserving.
+     * The muxer's default gate requires all three of primaries+trc+space to be
+     * non-UNSPECIFIED, which drops range-only (or other partial) color info. */
+    int write_colr = 0;
+    if (stream_index == decoder_context->video_stream_index && decoder_context->stream[stream_index]) {
+        AVCodecParameters *src = decoder_context->stream[stream_index]->codecpar;
+        write_colr = src->color_range     != AVCOL_RANGE_UNSPECIFIED ||
+                     src->color_primaries != AVCOL_PRI_UNSPECIFIED   ||
+                     src->color_trc       != AVCOL_TRC_UNSPECIFIED   ||
+                     src->color_space     != AVCOL_SPC_UNSPECIFIED;
+    }
 
     if (!strcmp(params->format, "fmp4")) {
         if (stream_index == decoder_context->video_stream_index) {
-            elv_dbg("set_encoder_options, fmp4 video, stream_index=%d, movflags="FRAG_OPTS, stream_index);
-            av_opt_set(encoder_context->format_context->priv_data, "movflags", FRAG_OPTS, 0);
+            const char *opts = write_colr ? FRAG_OPTS_COLR : FRAG_OPTS;
+            elv_dbg("set_encoder_options, fmp4 video, stream_index=%d, movflags=%s", stream_index, opts);
+            av_opt_set(encoder_context->format_context->priv_data, "movflags", opts, 0);
         }
         if ((i = selected_decoded_audio(decoder_context, stream_index)) >= 0) {
             if ((params->ecodec2 && (!strcmp(params->ecodec2, "ac3") || !strcmp(params->ecodec2, "eac3")))) {
@@ -710,8 +742,9 @@ set_encoder_options(
                 }
             }
             if (stream_index == decoder_context->video_stream_index) {
-                elv_dbg("set_encoder_options, fmp4-segment video, stream_index=%d, movflags="FRAG_OPTS, stream_index);
-                av_opt_set(encoder_context->format_context->priv_data, "segment_format_options", "movflags="FRAG_OPTS, 0);
+                const char *seg_opts = write_colr ? "movflags="FRAG_OPTS_COLR : "movflags="FRAG_OPTS;
+                elv_dbg("set_encoder_options, fmp4-segment video, stream_index=%d, %s", stream_index, seg_opts);
+                av_opt_set(encoder_context->format_context->priv_data, "segment_format_options", seg_opts, 0);
             }
         }
     }
@@ -721,6 +754,9 @@ set_encoder_options(
 
 /*
  * Set H264 specific params profile, and level based on encoding height.
+ * Called only from prepare_video_encoder, which has already validated that
+ * video_stream_index >= 0 and that decoder_context->stream[index] and
+ * encoder_context->codec_context[index] are non-NULL.
  */
 static void
 set_h264_params(
@@ -755,16 +791,27 @@ set_h264_params(
                                                 encoder_codec_context->height);
     }
 
-    {
-        char x264_params[128] = "stitchable=1";
-        if (params->video_layout == video_layout_sbs) {
-            snprintf(x264_params, sizeof(x264_params),
-                "stitchable=1:frame-packing=%d", video_layout_sbs);
-        }
-        av_opt_set(encoder_codec_context->priv_data, "x264-params", x264_params, 0);
-    }
+    char x264_params[128];
+    int off = snprintf(x264_params, sizeof(x264_params), "stitchable=1");
+    if (params->video_layout == video_layout_sbs)
+        off += snprintf(x264_params + off, sizeof(x264_params) - off,
+            ":frame-packing=%d", video_layout_sbs);
+    /* Explicitly signal color range in the SPS VUI so it round-trips through
+     * the mez encode.  The AVCodecContext.color_range field alone is not
+     * enough to trigger VUI writing without the other color fields set. */
+    enum AVColorRange cr = decoder_context->stream[index]->codecpar->color_range;
+    if (cr != AVCOL_RANGE_UNSPECIFIED)
+        snprintf(x264_params + off, sizeof(x264_params) - off,
+            ":range=%s", cr == AVCOL_RANGE_JPEG ? "pc" : "tv");
+    av_opt_set(encoder_codec_context->priv_data, "x264-params", x264_params, 0);
 }
 
+/*
+ * Set H265 specific params profile, and level based on encoding height.
+ * Called only from prepare_video_encoder, which has already validated that
+ * video_stream_index >= 0 and that decoder_context->stream[index] and
+ * encoder_context->codec_context[index] are non-NULL.
+ */
 static int
 set_h265_params(
     coderctx_t *encoder_context,
@@ -794,23 +841,29 @@ set_h265_params(
     char x265_params[512] = {0};
     size_t off = 0;
 
-    /* Set max_cll and master_display meta data for HDR content (omit if "0,0") */
+    /* HDR for libx265:
+     *   - SEI 137/144 emission: handled by libx265's "master-display"/"max-cll" AVOptions.
+     *   - mp4 'mdcv'/'clli' atoms: attach_master_display / attach_max_cll write to
+     *     coded_side_data
+     */
     if (params->max_cll && params->max_cll[0] != '\0' && strcmp(params->max_cll, "0,0") != 0) {
         av_opt_set(encoder_codec_context->priv_data, "max-cll", params->max_cll, 0);
-        /* Also attach as side data - mp4 clli box. */
         if (attach_max_cll(encoder_codec_context, params->max_cll) != eav_success)
             elv_warn("set_h265_params: failed to attach max_cll side data, url=%s", params->url);
     }
     if (params->master_display && params->master_display[0] != '\0') {
+        /* HDR override: verify source color matches BT2020/PQ/BT2020nc/MPEG and warn for any mismatch.
+         * The HDR override values below are still applied unconditionally. */
+        verify_hdr_source_color(decoder_context, params);
+
         off += snprintf(x265_params + off, sizeof(x265_params) - off,
             "hdr10=1:hdr10-opt=1:repeat-headers=1:colorprim=bt2020:transfer=smpte2084:colormatrix=bt2020nc");
         av_opt_set(encoder_codec_context->priv_data, "master-display", params->master_display, 0);
 
-        /* Attach side data - mp4 muxer mdcv box */
         if (attach_master_display(encoder_codec_context, params->master_display) != eav_success)
             elv_warn("set_h265_params: failed to attach master_display side data, url=%s", params->url);
 
-        /* Add HDR10 color metadata into AVCodecContext (populates the colr box) */
+        /* Add HDR10 color metadata into AVCodecContext (populates the colr box and elementary stream VUI) */
         encoder_codec_context->color_range     = AVCOL_RANGE_MPEG;       // "tv"
         encoder_codec_context->color_primaries = AVCOL_PRI_BT2020;
         encoder_codec_context->color_trc       = AVCOL_TRC_SMPTE2084;    // PQ (ST 2084)
@@ -832,6 +885,20 @@ set_h265_params(
     if (params->video_layout == video_layout_sbs) {
         off += snprintf(x265_params + off, sizeof(x265_params) - off,
             "%sframe-packing=%d", off > 0 ? ":" : "", video_layout_sbs);
+    }
+
+    /* Explicitly signal color range in the SPS VUI for both SDR and HDR.
+     * Without this, libx265 doesn't write the range to the VUI even when
+     * AVCodecContext.color_range is set, so probes of the output get UNSPECIFIED.
+     * Prefer the encoder's range (may have been forced above for HDR) over the
+     * source decoder's range. */
+    enum AVColorRange cr = encoder_codec_context->color_range != AVCOL_RANGE_UNSPECIFIED
+        ? encoder_codec_context->color_range
+        : decoder_context->stream[index]->codecpar->color_range;
+    if (cr != AVCOL_RANGE_UNSPECIFIED) {
+        off += snprintf(x265_params + off, sizeof(x265_params) - off,
+            "%srange=%s", off > 0 ? ":" : "",
+            cr == AVCOL_RANGE_JPEG ? "full" : "limited");
     }
 
     if (off > 0)
@@ -1018,23 +1085,41 @@ set_nvidia_hevc_params(
     av_opt_set(encoder_codec_context->priv_data, "preset", "p2", 0); // Valid: p1–p7
     av_opt_set(encoder_codec_context->priv_data, "tune", "hq", 0);   // Valid: hq, ll, ull, lossless, losslesshp
 
-    /* HDR - set max_cll and master_display meta data for HDR content (skip if "0,0") */
+    /* HDR for nvenc:
+     *   - mp4 'mdcv'/'clli' atoms via coded_side_data: safe and necessary so the
+     *     container carries HDR metadata (mediainfo and HDR-aware demuxers read it).
+     *   - in-stream SEI 137/144 via decoded_side_data currently disabled (ifdef NVENC_HDR_SEI)
+     *     Setting pMasteringDisplay/pMaxCll on NV_ENC_PIC_PARAMS triggers an
+     *     invalid-pointer free in nvEncEncodePicture (nvenc.c:3244)
+     * (nvenc has no master_display/max_cll AVOption)
+     */
     if (params->max_cll && params->max_cll[0] != '\0' && strcmp(params->max_cll, "0,0") != 0) {
-        av_opt_set(encoder_codec_context->priv_data, "max_cll", params->max_cll, 0);
         if (attach_max_cll(encoder_codec_context, params->max_cll) != eav_success)
             elv_warn("set_nvidia_hevc_params: failed to attach max_cll side data, url=%s", params->url);
+#if NVENC_HDR_SEI
+        if (attach_max_cll_nvenc(encoder_codec_context, params->max_cll) != eav_success)
+            elv_warn("set_nvidia_hevc_params: failed to attach max_cll decoded side data, url=%s", params->url);
+#endif
     }
     if (params->master_display && params->master_display[0] != '\0') {
+        /* HDR override: verify source color matches BT2020/PQ/BT2020nc/MPEG and warn for any mismatch.
+         * The HDR override values below are still applied unconditionally. */
+        verify_hdr_source_color(decoder_context, params);
+
         encoder_codec_context->pix_fmt        = AV_PIX_FMT_P010;                 // 10-bit
         encoder_codec_context->color_range    = AVCOL_RANGE_MPEG;                // "tv"
         encoder_codec_context->color_primaries= AVCOL_PRI_BT2020;
         encoder_codec_context->color_trc      = AVCOL_TRC_SMPTE2084;             // PQ (ST 2084)
         encoder_codec_context->colorspace     = AVCOL_SPC_BT2020_NCL;            // bt2020nc
-        av_opt_set(encoder_codec_context->priv_data, "master_display", params->master_display, 0);
 
-        /* Attach side data - mp4 mdcv box */
+        /* mp4 'mdcv' atom side data */
         if (attach_master_display(encoder_codec_context, params->master_display) != eav_success)
             elv_warn("set_nvidia_hevc_params: failed to attach master_display side data, url=%s", params->url);
+#if NVENC_HDR_SEI
+        /* SEI 137 emission (nvenc-specific path) - disabled, see NVENC_HDR_SEI above */
+        if (attach_master_display_nvenc(encoder_codec_context, params->master_display) != eav_success)
+            elv_warn("set_nvidia_hevc_params: failed to attach master_display decoded side data, url=%s", params->url);
+#endif
 
         /* HDR10 requires 10bit and main10 - set if not specified */
         if (params->profile == NULL || strlen(params->profile) == 0) {
@@ -1119,6 +1204,14 @@ prepare_video_encoder(
 
     /* PENDING(SS) WIP hack to force bypass transcode for MV-HEVC inputs */
     if (is_mvhevc(decoder_context->stream[index])) {
+        if (params->video_layout != video_layout_mvhevc) {
+            elv_err("MV-HEVC input detected but video_layout is not mvhevc; set video_layout=%d, url=%s",
+                video_layout_mvhevc, params->url);
+            return eav_param;
+        }
+        if (!params->bypass_transcoding) {
+            elv_warn("MV-HEVC input detected but bypass not set; forcing bypass_transcoding=1, url=%s", params->url);
+        }
         params->bypass_transcoding = 1;
     }
 
@@ -1153,6 +1246,12 @@ prepare_video_encoder(
              encoder_context->format_context->strict_std_compliance = FF_COMPLIANCE_UNOFFICIAL;
         }
 
+        if (is_dovi(in_stream)) {
+            elv_log("BYPASS Dolby Vision detected, url=%s", params->url);
+            /* Allow muxer to write dvvC/dvwC box (requires unofficial compliance) */
+            encoder_context->format_context->strict_std_compliance = FF_COMPLIANCE_UNOFFICIAL;
+        }
+
         /* Set output stream timebase when bypass encoding */
         if (params->video_time_base > 0)
             out_stream->time_base = (AVRational) {1, params->video_time_base};
@@ -1173,6 +1272,20 @@ prepare_video_encoder(
             elv_err("Failed to set video encoder options with bypass, url=%s", params->url);
             return rc;
         }
+
+        /* For DASH/HLS, inject BT.709 defaults when only color_range is set so
+         * movenc writes the colr box (write_colr can't reach dashenc's inner contexts). */
+        dash_synthesize_color_defaults(params, out_stream->codecpar);
+
+        /* Bypass: codec params (including color metadata) were copied from the source stream
+         * via avcodec_parameters_copy above, so the mp4 'colr' atom and any elementary stream
+         * VUI signaling are passed through unchanged. */
+        log_color_metadata("encode/bypass", index,
+            out_stream->codecpar->color_primaries,
+            out_stream->codecpar->color_trc,
+            out_stream->codecpar->color_space,
+            out_stream->codecpar->color_range,
+            params->url);
         return 0;
     }
 
@@ -1292,10 +1405,19 @@ prepare_video_encoder(
     else
         set_h264_params(encoder_context, decoder_context, params);
 
-    elv_log("Output pixel_format=%s, profile=%d, level=%d",
+    /* Preserve source color metadata for non-HDR in SPS VUI */
+    int source_color_copied = 0;
+    if (!(params->master_display && params->master_display[0] != '\0')) {
+        copy_source_color_to_output(encoder_context, decoder_context);
+        source_color_copied = 1;
+    }
+
+    elv_log("Output pixel_format=%s, codec=%s, profile=%d, level=%d, color_copied=%d",
         av_get_pix_fmt_name(encoder_codec_context->pix_fmt),
+        params->ecodec,
         encoder_codec_context->profile,
-        encoder_codec_context->level);
+        encoder_codec_context->level,
+        source_color_copied);
 
     /* Set encoder options after setting all codec context parameters */
     rc = set_encoder_options(encoder_context, decoder_context, params, decoder_context->video_stream_index,
@@ -1318,6 +1440,17 @@ prepare_video_encoder(
         elv_err("could not copy encoder parameters to output stream");
         return eav_codec_param;
     }
+
+    /* For DASH/HLS, inject BT.709 defaults when only color_range is set so
+     * movenc writes the colr box (write_colr can't reach dashenc's inner contexts). */
+    dash_synthesize_color_defaults(params, encoder_context->stream[index]->codecpar);
+
+    log_color_metadata("encode", index,
+        encoder_context->stream[index]->codecpar->color_primaries,
+        encoder_context->stream[index]->codecpar->color_trc,
+        encoder_context->stream[index]->codecpar->color_space,
+        encoder_context->stream[index]->codecpar->color_range,
+        params->url);
 
     /* For stereoscopic video - add AV_PKT_DATA_STEREO3D (stvi box) */
     if (params->video_layout == video_layout_sbs) {
@@ -1400,6 +1533,9 @@ prepare_audio_encoder(
 
         /* PENDING(SS) WIP hack to force bypass transcode for Dolby Atmos inputs */
         if (is_dolby_atmos(decoder_context->stream[stream_index])) {
+            if (!params->bypass_transcoding) {
+                elv_warn("Dolby Atmos input detected but bypass not set; forcing bypass_transcoding=1, url=%s", params->url);
+            }
             params->bypass_transcoding = 1;
             params->ecodec2 = strdup("eac3");
         }
@@ -2667,6 +2803,7 @@ transcode_video(
             frame->pkt_dts = frame->pts;
         }
 
+        fix_video_frame_color(decoder_context, frame);
         dump_frame(0, stream_index, "IN ", codec_context->frame_num, frame, debug_frame_level);
 
         ret = check_pts_wrapped(&decoder_context->audio_last_input_pts[stream_index], frame, stream_index);
@@ -2949,6 +3086,10 @@ flush_decoder(
         if (response == AVERROR_EOF) {
             elv_log("GOT EOF url=%s, xc_type=%d, format=%s", p->url, p->xc_type, p->format);
             continue; // PENDING(SSS) why continue and not break?
+        }
+
+        if (codec_context->codec_type == AVMEDIA_TYPE_VIDEO) {
+            fix_video_frame_color(decoder_context, frame);
         }
 
         dump_frame(i >= 0, stream_index,
@@ -4258,6 +4399,7 @@ avpipe_probe(
             stream_probes_ptr->codec_type = decoder_ctx.format_context->streams[i]->codecpar->codec_type;
         }
         stream_probes_ptr->codec_name[MAX_CODEC_NAME] = '\0';
+        av_fourcc_make_string(stream_probes_ptr->codec_tag_string, s->codecpar->codec_tag);
 
         // Estimate duration if not provided by the stream format
         if (s->duration <= 0) {
@@ -4313,19 +4455,21 @@ avpipe_probe(
         stream_probes_ptr->profile = codec_context->profile;
         stream_probes_ptr->level = codec_context->level;
 
-        /* Color metadata store as 'names' */
+        /* Color metadata (video only) stored as human-readable names */
         stream_probes_ptr->color_primaries[0] = '\0';
         stream_probes_ptr->color_transfer[0]  = '\0';
         stream_probes_ptr->color_space[0]     = '\0';
         stream_probes_ptr->color_range[0]     = '\0';
-        const char *cp_name = av_color_primaries_name(s->codecpar->color_primaries);
-        const char *ct_name = av_color_transfer_name(s->codecpar->color_trc);
-        const char *cs_name = av_color_space_name(s->codecpar->color_space);
-        const char *cr_name = av_color_range_name(s->codecpar->color_range);
-        if (cp_name) snprintf(stream_probes_ptr->color_primaries, sizeof(stream_probes_ptr->color_primaries), "%s", cp_name);
-        if (ct_name) snprintf(stream_probes_ptr->color_transfer,  sizeof(stream_probes_ptr->color_transfer),  "%s", ct_name);
-        if (cs_name) snprintf(stream_probes_ptr->color_space,     sizeof(stream_probes_ptr->color_space),     "%s", cs_name);
-        if (cr_name) snprintf(stream_probes_ptr->color_range,     sizeof(stream_probes_ptr->color_range),     "%s", cr_name);
+        if (s->codecpar->codec_type == AVMEDIA_TYPE_VIDEO) {
+            const char *cp_name = av_color_primaries_name(s->codecpar->color_primaries);
+            const char *ct_name = av_color_transfer_name(s->codecpar->color_trc);
+            const char *cs_name = av_color_space_name(s->codecpar->color_space);
+            const char *cr_name = av_color_range_name(s->codecpar->color_range);
+            if (cp_name) snprintf(stream_probes_ptr->color_primaries, sizeof(stream_probes_ptr->color_primaries), "%s", cp_name);
+            if (ct_name) snprintf(stream_probes_ptr->color_transfer,  sizeof(stream_probes_ptr->color_transfer),  "%s", ct_name);
+            if (cs_name) snprintf(stream_probes_ptr->color_space,     sizeof(stream_probes_ptr->color_space),     "%s", cs_name);
+            if (cr_name) snprintf(stream_probes_ptr->color_range,     sizeof(stream_probes_ptr->color_range),     "%s", cr_name);
+        }
 
         stream_probes_ptr->mastering_display[0] = '\0';
         stream_probes_ptr->max_cll[0]           = '\0';
@@ -4375,11 +4519,47 @@ avpipe_probe(
                                 sizeof(stream_probes_ptr->stereo3d_type), "%s", s3d_name);
                     }
                     break;
+                case AV_PKT_DATA_DOVI_CONF:
+                    if (sd->size >= (int)sizeof(AVDOVIDecoderConfigurationRecord)) {
+                        const AVDOVIDecoderConfigurationRecord *dovi =
+                            (const AVDOVIDecoderConfigurationRecord *)sd->data;
+                        stream_probes_ptr->dovi.present                        = 1;
+                        stream_probes_ptr->dovi.dv_version_major               = dovi->dv_version_major;
+                        stream_probes_ptr->dovi.dv_version_minor               = dovi->dv_version_minor;
+                        stream_probes_ptr->dovi.dv_profile                     = dovi->dv_profile;
+                        stream_probes_ptr->dovi.dv_level                       = dovi->dv_level;
+                        stream_probes_ptr->dovi.rpu_present_flag               = dovi->rpu_present_flag;
+                        stream_probes_ptr->dovi.el_present_flag                = dovi->el_present_flag;
+                        stream_probes_ptr->dovi.bl_present_flag                = dovi->bl_present_flag;
+                        stream_probes_ptr->dovi.dv_bl_signal_compatibility_id  =
+                            dovi->dv_bl_signal_compatibility_id;
+                    }
+                    break;
                 default:
                     // Not handled
                     break;
             }
         }
+
+        /* EAC-3 / Dolby Atmos: detect JOC via the codec profile.
+         *
+         * The dec3 box (EC3SpecificBox) in the MP4 container carries the full
+         * Atmos configuration: JOC flag, channel map, and complexity index.
+         * However, FFmpeg's mov_read_dec3() only extracts channel layout from
+         * the dec3 box and discards the raw bytes — they are never stored in
+         * codecpar->extradata and are therefore not available after demuxing.
+         *
+         * JOC can be recovered because the EAC-3 decoder reads
+         * eac3_extension_type_a from the audio sync-frame headers during
+         * avformat_find_stream_info() and sets avctx->profile =
+         * AV_PROFILE_EAC3_DDP_ATMOS, which avcodec_parameters_from_context()
+         * then copies back to codecpar->profile. Channel map and complexity
+         * index are only in the dec3 box and are not exposed by any FFmpeg API
+         * after demuxing; use mp4e.ExtractCodecInfo() (which parses the MP4
+         * box layer directly with mp4ff) when those fields are needed. */
+        if (s->codecpar->codec_id == AV_CODEC_ID_EAC3)
+            stream_probes_ptr->ec3_joc =
+                (s->codecpar->profile == AV_PROFILE_EAC3_DDP_ATMOS) ? 1 : 0;
     }
 
     inctx.closed = 1;

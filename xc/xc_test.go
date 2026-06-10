@@ -1,6 +1,7 @@
 package xc_test
 
 import (
+	"flag"
 	"os"
 	"testing"
 
@@ -9,6 +10,7 @@ import (
 )
 
 func TestMain(m *testing.M) {
+	flag.Parse()
 	log.SetDefault(&log.Config{
 		Level:   "debug",
 		Handler: "text",

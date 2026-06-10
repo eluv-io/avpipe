@@ -372,6 +372,12 @@ typedef struct coderctx_t {
 
     int64_t audio_output_pts;                           /* Used to set PTS directly when using audio FIFO */
 
+    /* Video color metadata reconciled values - used for fixing frame color metadata */
+    enum AVColorPrimaries              video_color_primaries;
+    enum AVColorTransferCharacteristic video_color_trc;
+    enum AVColorSpace                  video_colorspace;
+    enum AVColorRange                  video_color_range;
+
     /* Video filter */
     AVFilterContext *video_buffersink_ctx;
     AVFilterContext *video_buffersrc_ctx;
@@ -455,7 +461,9 @@ typedef enum dif_type {
 // Video layout. Values align with ISO/IEC 23001-8 (CICP)
 typedef enum video_layout_t {
     video_layout_mono = 0, // Monoscopic
-    video_layout_sbs  = 3  // Stereoscopic side-by-side
+    video_layout_sbs  = 3, // Stereoscopic side-by-side
+    video_layout_tb   = 4, // Stereoscopic top-bottom
+    video_layout_mvhevc = 10 // Multi-layer HEVC (MV-HEVC)
 } video_layout_t;
 
 #define DRAW_TEXT_SHADOW_OFFSET     0.075
@@ -558,12 +566,25 @@ typedef struct side_data_t {
     side_data_display_matrix_t display_matrix;
 } side_data_t;
 
+typedef struct dovi_info_t {
+    uint8_t present;                         // 1 if AV_PKT_DATA_DOVI_CONF side data found
+    uint8_t dv_version_major;
+    uint8_t dv_version_minor;
+    uint8_t dv_profile;
+    uint8_t dv_level;
+    uint8_t rpu_present_flag;
+    uint8_t el_present_flag;
+    uint8_t bl_present_flag;
+    uint8_t dv_bl_signal_compatibility_id;
+} dovi_info_t;
+
 typedef struct stream_info_t {
     int         stream_index;       // Stream index in AVFormatContext
     int         stream_id;          // Format-specific stream ID, set by libavformat during decoding
     int         codec_type;         // Audio or Video
     int         codec_id;
     char        codec_name[MAX_CODEC_NAME+1];
+    char        codec_tag_string[AV_FOURCC_MAX_STRING_SIZE]; // 4CC string, e.g. "avc1", "ec-3"
     int64_t     duration_ts;
     AVRational  time_base;
     int64_t     nb_frames;
@@ -593,6 +614,9 @@ typedef struct stream_info_t {
     char                mastering_display[128];   // AV_PKT_DATA_MASTERING_DISPLAY_METADATA
     char                max_cll[32];              // AV_PKT_DATA_CONTENT_LIGHT_LEVEL
     char                stereo3d_type[32];        // AV_PKT_DATA_STEREO3D
+
+    dovi_info_t         dovi;                    // AV_PKT_DATA_DOVI_CONF
+    int                 ec3_joc;                 // 1 if Dolby Atmos (JOC); set when codec_context->profile == AV_PROFILE_EAC3_DDP_ATMOS
 
     side_data_t         side_data;
     AVDictionary        *tags;
