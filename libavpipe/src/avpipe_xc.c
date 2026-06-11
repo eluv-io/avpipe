@@ -9,6 +9,7 @@
  */
 
 #include <libavutil/log.h>
+#include <libavutil/error.h>
 #include "libavutil/audio_fifo.h"
 #include <libswscale/swscale.h>
 #include <libavutil/imgutils.h>
@@ -696,6 +697,15 @@ set_encoder_options(
         av_opt_set_int(encoder_context->format_context->priv_data, "start_fragment_index", params->start_fragment_index,
             AV_OPT_FLAG_ENCODING_PARAM | AV_OPT_SEARCH_CHILDREN);
         av_opt_set(encoder_context->format_context->priv_data, "start_segment", params->start_segment_str, 0);
+
+        if (is_bypass_bframes(decoder_context, params, stream_index)) {
+            int rc = av_opt_set_int(encoder_context->format_context->priv_data, "avpipe_bypass_bframes", 1,
+                AV_OPT_FLAG_ENCODING_PARAM | AV_OPT_SEARCH_CHILDREN);
+            if (rc < 0) {
+                elv_err("Failed to set DASH muxer option avpipe_bypass_bframes, rc=%d, url=%s", rc, params->url);
+                return eav_param;
+            }
+        }
     }
 
     if (!strcmp(params->format, "fmp4-segment") || !strcmp(params->format, "segment")) {

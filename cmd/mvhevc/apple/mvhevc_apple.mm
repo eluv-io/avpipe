@@ -105,7 +105,7 @@ static void usage(const char *prog)
         "  -bufsize <kbits>    Accepted for CLI compatibility; ignored\n"
         "  -w <pixels>         Output width\n"
         "  -h <pixels>         Output height (width auto-computed if -w omitted)\n"
-        "  -keyint <frames>    Max keyframe interval\n"
+        "  -keyint <frames>    Keyframe interval\n"
         "  -bframes <n>        0 disables frame reordering; >0 enables it\n"
         "  -preset <name>      Accepted for CLI compatibility; ignored\n"
         "  -tune <name>        Accepted for CLI compatibility; ignored\n"
