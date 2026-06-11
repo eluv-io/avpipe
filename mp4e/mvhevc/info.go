@@ -48,28 +48,9 @@ func Info(inputPath string, opts InfoOptions) (map[string]any, error) {
 			if !ok {
 				continue
 			}
-
-			val := fmt.Sprintf("%s (%dx%d)", vse.Type(), vse.Width, vse.Height)
-			track["Sample entry"] = val
-
-			if vse.HvcC != nil {
-				track["hvcC (base layer config)"] = printHvcCInfo(vse.HvcC.DecConfRec)
+			for k, v := range printVisualSampleEntryInfo(vse) {
+				track[k] = v
 			}
-
-			if vse.LhvC != nil {
-				track["lhvC (enhancement layer config)"] = printLhvCInfo(vse.LhvC.DecConfRec)
-			}
-
-			if vse.Vexu != nil {
-				track["vexu (Spatial Video)"] = printVexuInfo(vse.Vexu)
-			}
-
-			if vse.Hfov != nil {
-				track["hfov"] = fmt.Sprintf("%d/1000 degrees (%.1f)",
-					vse.Hfov.FieldOfView,
-					float64(vse.Hfov.FieldOfView)/1000.0)
-			}
-			//printVisualSampleEntryInfo(vse, w)
 		}
 
 		timeScale := trak.Mdia.Mdhd.Timescale
@@ -99,7 +80,6 @@ func Info(inputPath string, opts InfoOptions) (map[string]any, error) {
 		if len(oinfs) > 0 {
 			track["oinf (Operating Points Information)"] = oinfs
 		}
-	}
 
 		if len(linfs) > 0 {
 			track["linf (Layer Information)"] = linfs
@@ -111,35 +91,36 @@ func Info(inputPath string, opts InfoOptions) (map[string]any, error) {
 			track["trgr (Track Group)"] = trackGroups
 		}
 		results[key] = track
+	}
 
 	return results, nil
 }
 
-func printVisualSampleEntryInfo(vse *mp4.VisualSampleEntryBox, w io.Writer) {
-	fmt.Fprintf(w, "  Sample entry: %s (%dx%d)\n", vse.Type(), vse.Width, vse.Height)
-
-	if vse.HvcC != nil {
-		printHvcCInfo(vse.HvcC.DecConfRec, w)
+func printVisualSampleEntryInfo(vse *mp4.VisualSampleEntryBox) map[string]any {
+	info := map[string]any{
+		"Sample entry": fmt.Sprintf("%s (%dx%d)", vse.Type(), vse.Width, vse.Height),
 	}
-
+	if vse.HvcC != nil {
+		info["hvcC (base layer config)"] = printHvcCInfo(vse.HvcC.DecConfRec)
+	}
 	if vse.LhvC != nil {
-		printLhvCInfo(vse.LhvC.DecConfRec, w)
+		info["lhvC (enhancement layer config)"] = printLhvCInfo(vse.LhvC.DecConfRec)
 	}
 	if vse.Vexu != nil {
-		printVexuInfo(vse.Vexu, w)
+		info["vexu (Spatial Video)"] = printVexuInfo(vse.Vexu)
 	}
 	if vse.Hfov != nil {
-		fmt.Fprintf(w, "  hfov: %d/1000 degrees (%.1f)\n",
+		info["hfov"] = fmt.Sprintf("%d/1000 degrees (%.1f)",
 			vse.Hfov.FieldOfView,
 			float64(vse.Hfov.FieldOfView)/1000.0)
 	}
 	for _, child := range vse.Children {
 		if colr, ok := child.(*mp4.ColrBox); ok {
-			printColrInfo(colr, w)
+			info["colr"] = printColrInfo(colr)
 		}
 	}
+	return info
 }
-
 
 func printHvcCInfo(hdcr hevc.DecConfRec) map[string]any {
 	hvCCInfo := make(map[string]any)
@@ -196,22 +177,22 @@ func printLhvCInfo(hdcr hevc.DecConfRec) map[string]any {
 	return lhvcInfo
 }
 
-func printColrInfo(colr *mp4.ColrBox, w io.Writer) {
-	fmt.Fprintf(w, "  colr: type=%s", colr.ColorType)
+func printColrInfo(colr *mp4.ColrBox) map[string]any {
+	info := map[string]any{
+		"type": fmt.Sprintf("%s", colr.ColorType),
+	}
 	switch colr.ColorType {
 	case mp4.ColorTypeOnScreenColors:
-		fmt.Fprintf(w, " primaries=%d transfer=%d matrix=%d fullRange=%t",
-			colr.ColorPrimaries,
-			colr.TransferCharacteristics,
-			colr.MatrixCoefficients,
-			colr.FullRangeFlag)
+		info["primaries"] = colr.ColorPrimaries
+		info["transfer"] = colr.TransferCharacteristics
+		info["matrix"] = colr.MatrixCoefficients
+		info["full_range"] = colr.FullRangeFlag
 	case mp4.QuickTimeColorParameters:
-		fmt.Fprintf(w, " primaries=%d transfer=%d matrix=%d",
-			colr.ColorPrimaries,
-			colr.TransferCharacteristics,
-			colr.MatrixCoefficients)
+		info["primaries"] = colr.ColorPrimaries
+		info["transfer"] = colr.TransferCharacteristics
+		info["matrix"] = colr.MatrixCoefficients
 	}
-	fmt.Fprintln(w)
+	return info
 }
 
 func printVexuInfo(vexu *mp4.VexuBox) map[string]any {

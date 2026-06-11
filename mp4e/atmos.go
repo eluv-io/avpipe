@@ -419,6 +419,11 @@ func (a *AtmosInfo) FieldInfo() AtmosFieldInfo {
 	return info
 }
 
+var ec3ChanMapNames = [16]string{
+	"L", "C", "R", "Ls", "Rs", "Lc/Rc", "Lrs/Rrs", "Cs",
+	"Ts", "Lsd/Rsd", "Lw/Rw", "Vhl/Vhr", "Vhc", "Lts/Rts", "LFE2", "LFE",
+}
+
 func ec3ChanMapString(chanMap uint16) string {
 	var names []string
 	for i, name := range ec3ChanMapNames {
