@@ -3,7 +3,6 @@ package mvhevc
 import (
 	"encoding/hex"
 	"fmt"
-	"io"
 	"os"
 
 	"github.com/Eyevinn/mp4ff/hevc"
@@ -14,31 +13,33 @@ type InfoOptions struct {
 	ShowIDR bool
 }
 
-func Info(inputPath string, opts InfoOptions, w io.Writer) error {
-	if w == nil {
-		w = io.Discard
-	}
-
+func Info(inputPath string, opts InfoOptions) (map[string]any, error) {
 	ifd, err := os.Open(inputPath)
 	if err != nil {
-		return fmt.Errorf("could not open input file: %w", err)
+		return nil, fmt.Errorf("could not open input file: %w", err)
 	}
 	defer func() { _ = ifd.Close() }()
 
 	parsedMP4, err := mp4.DecodeFile(ifd, mp4.WithDecodeMode(mp4.DecModeLazyMdat))
 	if err != nil {
-		return fmt.Errorf("could not decode MP4: %w", err)
+		return nil, fmt.Errorf("could not decode MP4: %w", err)
 	}
 
 	if parsedMP4.Moov == nil {
-		return fmt.Errorf("no moov box found")
+		return nil, fmt.Errorf("no moov box found")
 	}
 
+	results := make(map[string]any)
 	for i, trak := range parsedMP4.Moov.Traks {
-		fmt.Fprintf(w, "Track %d (ID=%d):\n", i+1, trak.Tkhd.TrackID)
+		key := fmt.Sprintf("Track %d (ID=%d)", i+1, trak.Tkhd.TrackID)
+
+		track := map[string]any{
+			"track_id": trak.Tkhd.TrackID,
+		}
 
 		stbl := trak.Mdia.Minf.Stbl
 		if stbl == nil || stbl.Stsd == nil {
+			results[key] = track
 			continue
 		}
 
@@ -47,18 +48,22 @@ func Info(inputPath string, opts InfoOptions, w io.Writer) error {
 			if !ok {
 				continue
 			}
-			printVisualSampleEntryInfo(vse, w)
+			for k, v := range printVisualSampleEntryInfo(vse) {
+				track[k] = v
+			}
 		}
 
 		timeScale := trak.Mdia.Mdhd.Timescale
 		trackID := trak.Tkhd.TrackID
 
 		if parsedMP4.IsFragmented() {
-			printFragmentedInfo(parsedMP4, trackID, timeScale, opts.ShowIDR, w)
+			track["Samples Info"] = printFragmentedInfo(parsedMP4, trackID, timeScale, opts)
 		} else {
-			printUnfragmentedSampleInfo(trak, stbl, timeScale, opts.ShowIDR, w)
+			track["Samples Info"] = printUnfragmentedSampleInfo(trak, stbl, timeScale, opts)
 		}
 
+		var oinfs []map[string]any
+		var linfs []map[string]any
 		for _, child := range stbl.Children {
 			sgpd, ok := child.(*mp4.SgpdBox)
 			if !ok {
@@ -66,220 +71,294 @@ func Info(inputPath string, opts InfoOptions, w io.Writer) error {
 			}
 			switch sgpd.GroupingType {
 			case "oinf":
-				printOinfInfo(sgpd, w)
+				oinfs = printOinfInfo(sgpd)
 			case "linf":
-				printLinfInfo(sgpd, w)
+				linfs = printLinfInfo(sgpd)
 			}
 		}
 
-		printTrackGroupInfo(trak, w)
+		if len(oinfs) > 0 {
+			track["oinf (Operating Points Information)"] = oinfs
+		}
+
+		if len(linfs) > 0 {
+			track["linf (Layer Information)"] = linfs
+		}
+
+		var trackGroups map[string]any
+		if trak.Trgr != nil {
+			trackGroups = printTrackGroupInfo(trak)
+			track["trgr (Track Group)"] = trackGroups
+		}
+		results[key] = track
 	}
 
-	return nil
+	return results, nil
 }
 
-func printVisualSampleEntryInfo(vse *mp4.VisualSampleEntryBox, w io.Writer) {
-	fmt.Fprintf(w, "  Sample entry: %s (%dx%d)\n", vse.Type(), vse.Width, vse.Height)
-
+func printVisualSampleEntryInfo(vse *mp4.VisualSampleEntryBox) map[string]any {
+	info := map[string]any{
+		"Sample entry": fmt.Sprintf("%s (%dx%d)", vse.Type(), vse.Width, vse.Height),
+	}
 	if vse.HvcC != nil {
-		printHvcCInfo(vse.HvcC.DecConfRec, w)
+		info["hvcC (base layer config)"] = printHvcCInfo(vse.HvcC.DecConfRec)
 	}
-
 	if vse.LhvC != nil {
-		printLhvCInfo(vse.LhvC.DecConfRec, w)
+		info["lhvC (enhancement layer config)"] = printLhvCInfo(vse.LhvC.DecConfRec)
 	}
-
 	if vse.Vexu != nil {
-		printVexuInfo(vse.Vexu, w)
+		info["vexu (Spatial Video)"] = printVexuInfo(vse.Vexu)
 	}
-
 	if vse.Hfov != nil {
-		fmt.Fprintf(w, "  hfov: %d/1000 degrees (%.1f)\n",
+		info["hfov"] = fmt.Sprintf("%d/1000 degrees (%.1f)",
 			vse.Hfov.FieldOfView,
 			float64(vse.Hfov.FieldOfView)/1000.0)
 	}
-
 	for _, child := range vse.Children {
 		if colr, ok := child.(*mp4.ColrBox); ok {
-			printColrInfo(colr, w)
+			info["colr"] = printColrInfo(colr)
 		}
 	}
+	return info
 }
 
-func printHvcCInfo(hdcr hevc.DecConfRec, w io.Writer) {
-	fmt.Fprintf(w, "  hvcC (base layer config):\n")
-	fmt.Fprintf(w, "    Profile: space=%d tier=%t idc=%d level=%d\n",
+func printHvcCInfo(hdcr hevc.DecConfRec) map[string]any {
+	hvCCInfo := make(map[string]any)
+	hvCCInfo["Profile"] = fmt.Sprintf("space=%d tier=%t idc=%d level=%d",
 		hdcr.GeneralProfileSpace, hdcr.GeneralTierFlag,
 		hdcr.GeneralProfileIDC, hdcr.GeneralLevelIDC)
-	fmt.Fprintf(w, "    Chroma: %d  BitDepth: luma=%d chroma=%d\n",
-		hdcr.ChromaFormatIDC,
+	hvCCInfo["Chroma"] = hdcr.ChromaFormatIDC
+	hvCCInfo["BitDepth"] = fmt.Sprintf("luma=%d chroma=%d",
 		hdcr.BitDepthLumaMinus8+8,
 		hdcr.BitDepthChromaMinus8+8)
-	fmt.Fprintf(w, "    NumTemporalLayers: %d  LengthSize: %d\n",
-		hdcr.NumTemporalLayers, hdcr.LengthSizeMinusOne+1)
+	hvCCInfo["NumTemporalLayers"] = hdcr.NumTemporalLayers
+	hvCCInfo["LengthSize"] = hdcr.LengthSizeMinusOne + 1
 
 	vpsNalus := hdcr.GetNalusForType(hevc.NALU_VPS)
 	if len(vpsNalus) > 0 {
 		vps, err := hevc.ParseVPSNALUnit(vpsNalus[0])
 		if err != nil {
-			fmt.Fprintf(w, "    VPS parse error: %v\n", err)
+			hvCCInfo["VPS"] = fmt.Sprintf("parse error: %v", err.Error())
 		} else {
-			fmt.Fprintf(w, "    VPS: layers=%d views=%d multiLayer=%t\n",
+			hvCCInfo["VPS"] = fmt.Sprintf("layers=%d,views=%d,multiLayer=%t",
 				vps.GetNumLayers(), vps.GetNumViews(), vps.IsMultiLayer())
 		}
 	}
 
 	for _, array := range hdcr.NaluArrays {
-		fmt.Fprintf(w, "    %s: %d nalus (complete=%d)\n",
-			array.NaluType(), len(array.Nalus), array.Complete())
+		hvCCInfo[fmt.Sprintf("%s", array.NaluType())] = fmt.Sprintf("%d nalus (complete=%d)", len(array.Nalus), array.Complete())
 	}
+	return hvCCInfo
 }
 
-func printLhvCInfo(hdcr hevc.DecConfRec, w io.Writer) {
-	fmt.Fprintf(w, "  lhvC (enhancement layer config):\n")
-	fmt.Fprintf(w, "    NumTemporalLayers: %d  LengthSize: %d\n",
-		hdcr.NumTemporalLayers, hdcr.LengthSizeMinusOne+1)
+func printLhvCInfo(hdcr hevc.DecConfRec) map[string]any {
+	lhvcInfo := make(map[string]any)
+	lhvcInfo["NumTemporalLayers"] = hdcr.NumTemporalLayers
+	lhvcInfo["LengthSize"] = hdcr.LengthSizeMinusOne + 1
+
 	for _, array := range hdcr.NaluArrays {
-		fmt.Fprintf(w, "    %s: %d nalus (complete=%d)\n",
-			array.NaluType(), len(array.Nalus), array.Complete())
-		for _, nalu := range array.Nalus {
-			fmt.Fprintf(w, "      %s\n", hex.EncodeToString(nalu))
+		arrayKey := fmt.Sprintf("%s", array.NaluType())
+
+		arrayInfo := map[string]any{
+			"nalus":    len(array.Nalus),
+			"complete": array.Complete(),
 		}
+
+		var naluData []string
+		for _, nalu := range array.Nalus {
+			hexStr := hex.EncodeToString(nalu)
+			naluData = append(naluData, hexStr)
+		}
+		if len(naluData) > 0 {
+			arrayInfo["data"] = naluData
+		}
+		lhvcInfo[arrayKey] = arrayInfo
 	}
+	return lhvcInfo
 }
 
-func printColrInfo(colr *mp4.ColrBox, w io.Writer) {
-	fmt.Fprintf(w, "  colr: type=%s", colr.ColorType)
+func printColrInfo(colr *mp4.ColrBox) map[string]any {
+	info := map[string]any{
+		"type": fmt.Sprintf("%s", colr.ColorType),
+	}
 	switch colr.ColorType {
 	case mp4.ColorTypeOnScreenColors:
-		fmt.Fprintf(w, " primaries=%d transfer=%d matrix=%d fullRange=%t",
-			colr.ColorPrimaries,
-			colr.TransferCharacteristics,
-			colr.MatrixCoefficients,
-			colr.FullRangeFlag)
+		info["primaries"] = colr.ColorPrimaries
+		info["transfer"] = colr.TransferCharacteristics
+		info["matrix"] = colr.MatrixCoefficients
+		info["full_range"] = colr.FullRangeFlag
 	case mp4.QuickTimeColorParameters:
-		fmt.Fprintf(w, " primaries=%d transfer=%d matrix=%d",
-			colr.ColorPrimaries,
-			colr.TransferCharacteristics,
-			colr.MatrixCoefficients)
+		info["primaries"] = colr.ColorPrimaries
+		info["transfer"] = colr.TransferCharacteristics
+		info["matrix"] = colr.MatrixCoefficients
 	}
-	fmt.Fprintln(w)
+	return info
 }
 
-func printVexuInfo(vexu *mp4.VexuBox, w io.Writer) {
-	fmt.Fprintf(w, "  vexu (Spatial Video):\n")
+func printVexuInfo(vexu *mp4.VexuBox) map[string]any {
+
+	info := map[string]any{}
 	if vexu.Eyes != nil {
 		eyes := vexu.Eyes
 		if eyes.Stri != nil {
-			fmt.Fprintf(w, "    stri: left=%t right=%t reversed=%t\n",
+			info["stri"] = fmt.Sprintf("left=%t right=%t reversed=%t",
 				eyes.Stri.HasLeftEye(),
 				eyes.Stri.HasRightEye(),
 				eyes.Stri.EyeViewsReversed())
 		}
 		if eyes.Hero != nil {
-			fmt.Fprintf(w, "    hero: %s (%d)\n",
+			info["hero"] = fmt.Sprintf("%s (%d)",
 				eyes.Hero.HeroEyeName(), eyes.Hero.HeroEye)
 		}
 		if eyes.Cams != nil && eyes.Cams.Blin != nil {
-			fmt.Fprintf(w, "    baseline: %d um (%.1f mm)\n",
+			info["baseline"] = fmt.Sprintf("%d um (%.1f mm)",
 				eyes.Cams.Blin.Baseline,
 				float64(eyes.Cams.Blin.Baseline)/1000.0)
 		}
 	}
 	if vexu.Proj != nil && vexu.Proj.Prji != nil {
-		fmt.Fprintf(w, "    projection: %s\n", vexu.Proj.Prji.ProjectionType)
+		info["projection"] = fmt.Sprintf("%s", vexu.Proj.Prji.ProjectionType)
 	}
+	return info
 }
 
-func printUnfragmentedSampleInfo(trak *mp4.TrakBox, stbl *mp4.StblBox, timeScale uint32, showIDR bool, w io.Writer) {
+func printUnfragmentedSampleInfo(trak *mp4.TrakBox, stbl *mp4.StblBox, timeScale uint32, opts InfoOptions) map[string]any {
 	nrSamples := trak.GetNrSamples()
 	var sampleDur uint32
 	if stbl.Stts != nil && len(stbl.Stts.SampleTimeDelta) > 0 {
 		sampleDur = stbl.Stts.SampleTimeDelta[0]
 	}
+
+	info := map[string]any{}
 	if sampleDur > 0 {
 		fps := float64(timeScale) / float64(sampleDur)
-		fmt.Fprintf(w, "  Samples: %d, Timescale: %d, SampleDur: %d (%.3f fps)\n",
-			nrSamples, timeScale, sampleDur, fps)
+
+		info["Samples"] = fmt.Sprintf("%d", nrSamples)
+		info["Timescale"] = fmt.Sprintf("%d", timeScale)
+		info["SampleDuration"] = fmt.Sprintf("%d (%.3f fps)", sampleDur, fps)
 	} else {
-		fmt.Fprintf(w, "  Samples: %d, Timescale: %d\n", nrSamples, timeScale)
+		info["Samples"] = fmt.Sprintf("%d", nrSamples)
+		info["Timescale"] = fmt.Sprintf("%d", timeScale)
 	}
-	if stbl.Stss != nil && showIDR {
-		printSyncFrameInfo(stbl.Stss.SampleNumber, w)
+
+	if stbl.Stss != nil && opts.ShowIDR {
+		info[fmt.Sprintf("Sync (IDR) frames (%d)", len(stbl.Stss.SampleNumber))] = printSyncFrameInfo(stbl.Stss.SampleNumber)
 	}
+	return info
 }
 
-func printSyncFrameInfo(syncNrs []uint32, w io.Writer) {
-	fmt.Fprintf(w, "  Sync (IDR) frames (%d):\n", len(syncNrs))
+func printSyncFrameInfo(syncNrs []uint32) []string {
+	var frames []string
 	for i, sn := range syncNrs {
 		if i == 0 {
-			fmt.Fprintf(w, "    frame %d\n", sn)
+			frames = append(frames, fmt.Sprintf("frame %d", sn))
 		} else {
 			interval := sn - syncNrs[i-1]
-			fmt.Fprintf(w, "    frame %d (interval=%d)\n", sn, interval)
+			frames = append(frames, fmt.Sprintf("frame %d (interval=%d)", sn, interval))
 		}
 	}
+	return frames
 }
 
-func printOinfInfo(sgpd *mp4.SgpdBox, w io.Writer) {
+func printOinfInfo(sgpd *mp4.SgpdBox) []map[string]any {
+	var infoArr []map[string]any
 	for _, entry := range sgpd.SampleGroupEntries {
 		oinf, ok := entry.(*mp4.OinfSampleGroupEntry)
 		if !ok {
 			continue
 		}
-		fmt.Fprintf(w, "  oinf (Operating Points Information):\n")
-		fmt.Fprintf(w, "    ScalabilityMask: 0x%04x\n", oinf.ScalabilityMask)
-		fmt.Fprintf(w, "    ProfileTierLevels: %d\n", len(oinf.ProfileTierLevels))
-		for j, ptl := range oinf.ProfileTierLevels {
-			fmt.Fprintf(w, "      PTL[%d]: space=%d tier=%t profile=%d level=%d\n",
-				j, ptl.GeneralProfileSpace, ptl.GeneralTierFlag,
-				ptl.GeneralProfileIDC, ptl.GeneralLevelIDC)
+
+		info := map[string]any{
+			"ScalabilityMask": fmt.Sprintf("0x%04x", oinf.ScalabilityMask),
 		}
-		fmt.Fprintf(w, "    OperatingPoints: %d\n", len(oinf.OperatingPoints))
+
+		profiles := map[string]any{
+			"total": fmt.Sprintf("%d", len(oinf.ProfileTierLevels)),
+		}
+		levels := make(map[string]any)
+		for j, ptl := range oinf.ProfileTierLevels {
+			levels[fmt.Sprintf("PTL[%d]", j)] = fmt.Sprintf("space=%d tier=%t profile=%d level=%d",
+				ptl.GeneralProfileSpace, ptl.GeneralTierFlag, ptl.GeneralProfileIDC, ptl.GeneralLevelIDC)
+		}
+		profiles["levels"] = levels
+		info["ProfileTierLevels"] = profiles
+
+		// ====
+
+		opPoints := map[string]any{
+			"total": fmt.Sprintf("%d", len(oinf.OperatingPoints)),
+		}
+		ops := make(map[string]any)
 		for j, op := range oinf.OperatingPoints {
-			fmt.Fprintf(w, "      OP[%d]: olsIdx=%d maxTid=%d layers=%d dims=%dx%d-%dx%d\n",
-				j, op.OutputLayerSetIdx, op.MaxTemporalID, len(op.Layers),
+
+			opVal := fmt.Sprintf("olsIdx=%d maxTid=%d layers=%d dims=%dx%d-%dx%d",
+				op.OutputLayerSetIdx, op.MaxTemporalID, len(op.Layers),
 				op.MinPicWidth, op.MinPicHeight, op.MaxPicWidth, op.MaxPicHeight)
+
+			layerInfo := make(map[string]any)
 			for k, l := range op.Layers {
-				fmt.Fprintf(w, "        layer[%d]: ptlIdx=%d layerId=%d output=%t\n",
-					k, l.PtlIdx, l.LayerID, l.IsOutputLayer)
+				layerInfo[fmt.Sprintf("layer[%d]", k)] = fmt.Sprintf("ptlIdx=%d layerId=%d output=%t",
+					l.PtlIdx, l.LayerID, l.IsOutputLayer)
+			}
+			ops[fmt.Sprintf("OP[%d]", j)] = map[string]any{
+				"info":   opVal,
+				"layers": layerInfo,
 			}
 		}
-		fmt.Fprintf(w, "    DependencyLayers: %d\n", len(oinf.DependencyLayers))
-		for j, dep := range oinf.DependencyLayers {
-			fmt.Fprintf(w, "      Dep[%d]: layerId=%d dependsOn=%v dimIds=%v\n",
-				j, dep.LayerID, dep.DependsOnLayers, dep.DimensionIds)
+		opPoints["points"] = ops
+		info["OperatingPoints"] = opPoints
+
+		// ===
+
+		dependencyLayers := map[string]any{
+			"total": fmt.Sprintf("%d", len(oinf.DependencyLayers)),
 		}
+		layers := make(map[string]any)
+		for j, dep := range oinf.DependencyLayers {
+			layers[fmt.Sprintf("Dep[%d]", j)] = fmt.Sprintf("layerId=%d dependsOn=%v dimIds=%v",
+				dep.LayerID, dep.DependsOnLayers, dep.DimensionIds)
+		}
+		dependencyLayers["layers"] = layers
+		info["DependencyLayers"] = dependencyLayers
+		infoArr = append(infoArr, info)
 	}
+	return infoArr
 }
 
-func printLinfInfo(sgpd *mp4.SgpdBox, w io.Writer) {
+func printLinfInfo(sgpd *mp4.SgpdBox) []map[string]any {
+	var infoArr []map[string]any
 	for _, entry := range sgpd.SampleGroupEntries {
 		linf, ok := entry.(*mp4.LinfSampleGroupEntry)
 		if !ok {
 			continue
 		}
-		fmt.Fprintf(w, "  linf (Layer Information):\n")
-		for j, l := range linf.Layers {
-			fmt.Fprintf(w, "    Layer[%d]: layerId=%d minTid=%d maxTid=%d subFlags=0x%02x\n",
-				j, l.LayerID, l.MinTemporalID, l.MaxTemporalID, l.SubLayerPresenceFlags)
+
+		info := map[string]any{
+			"total": len(linf.Layers),
 		}
+
+		layers := make(map[string]any)
+		for j, l := range linf.Layers {
+			layers[fmt.Sprintf("Layer[%d]", j)] = fmt.Sprintf("layerId=%d minTid=%d maxTid=%d subFlags=0x%02x",
+				l.LayerID, l.MinTemporalID, l.MaxTemporalID, l.SubLayerPresenceFlags)
+		}
+		info["layers"] = layers
+		infoArr = append(infoArr, info)
 	}
+	return infoArr
 }
 
-func printTrackGroupInfo(trak *mp4.TrakBox, w io.Writer) {
-	if trak.Trgr == nil {
-		return
-	}
-	fmt.Fprintf(w, "  trgr (Track Group):\n")
+func printTrackGroupInfo(trak *mp4.TrakBox) map[string]any {
+	info := make(map[string]any)
 	for _, child := range trak.Trgr.Children {
 		if cstg, ok := child.(*mp4.TrackGroupTypeBox); ok {
-			fmt.Fprintf(w, "    %s: trackGroupID=%d\n", cstg.Type(), cstg.TrackGroupID)
+			info[cstg.Type()] = fmt.Sprintf("trackGroupID=%d", cstg.TrackGroupID)
 		}
 	}
+	return info
 }
 
-func printFragmentedInfo(f *mp4.File, trackID uint32, timeScale uint32, showIDR bool, w io.Writer) {
+func printFragmentedInfo(f *mp4.File, trackID uint32, timeScale uint32, opts InfoOptions) map[string]any {
 	var totalSamples uint32
 	var sampleDur uint32
 	var syncFrames []uint32
@@ -327,15 +406,21 @@ func printFragmentedInfo(f *mp4.File, trackID uint32, timeScale uint32, showIDR 
 		}
 	}
 
+	info := map[string]any{}
 	if sampleDur > 0 {
 		fps := float64(timeScale) / float64(sampleDur)
-		fmt.Fprintf(w, "  Samples: %d, Timescale: %d, SampleDur: %d (%.3f fps)\n",
-			totalSamples, timeScale, sampleDur, fps)
+
+		info["Samples"] = fmt.Sprintf("%d", totalSamples)
+		info["Timescale"] = fmt.Sprintf("%d", timeScale)
+		info["SampleDuration"] = fmt.Sprintf("%d (%.3f fps)", sampleDur, fps)
+
 	} else {
-		fmt.Fprintf(w, "  Samples: %d, Timescale: %d\n", totalSamples, timeScale)
+		info["Samples"] = fmt.Sprintf("%d", totalSamples)
+		info["Timescale"] = fmt.Sprintf("%d", timeScale)
 	}
 
-	if showIDR && len(syncFrames) > 0 {
-		printSyncFrameInfo(syncFrames, w)
+	if opts.ShowIDR && len(syncFrames) > 0 {
+		info[fmt.Sprintf("Sync (IDR) frames (%d)", len(syncFrames))] = printSyncFrameInfo(syncFrames)
 	}
+	return info
 }

@@ -12,6 +12,7 @@ require (
 	github.com/stretchr/testify v1.7.0
 	github.com/tidwall/jsonc v0.3.3
 	go.uber.org/atomic v1.11.0
+	gopkg.in/yaml.v2 v2.4.0
 )
 
 require (
