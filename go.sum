@@ -30,7 +30,6 @@ github.com/eluv-io/log-go v1.0.1 h1:j+/vNR7IwPxzgiwOWOKffWevEGeMhTXZVK7448FUuQg=
 github.com/eluv-io/log-go v1.0.1/go.mod h1:zXLeleJ9LQRHdEOvm7xh1dBQ/t5MJurj7vgfdUmL4jc=
 github.com/eluv-io/mp4ff v0.47.1-0.20260603013458-2403cac8f06c h1:MuqTJa23RhKhk8GFFfjU6vR5zD7j0Fe9x6A9n6WDogg=
 github.com/eluv-io/mp4ff v0.47.1-0.20260603013458-2403cac8f06c/go.mod h1:hJNUUqOBryLAzUW9wpCJyw2HaI+TCd2rUPhafoS5lgg=
-github.com/eluv-io/mp4ff v0.47.1-0.20260603013458-2403cac8f06c/go.mod h1:hJNUUqOBryLAzUW9wpCJyw2HaI+TCd2rUPhafoS5lgg=
 github.com/eluv-io/stack v1.8.2 h1:yocCvAcPy9vW5iBdNnig5Tem8LgOTT8JrOLvDcacnEQ=
 github.com/eluv-io/stack v1.8.2/go.mod h1:MIN/UfmiJlJUFpglnJCj+7DR5sDBUuvQRTENHm1F310=
 github.com/eluv-io/utc-go v1.0.0 h1:SUC9bdAginhb0a9qKZDY4MD1usQedoWN5XjNqdYag6A=
@@ -126,7 +125,6 @@ github.com/stretchr/testify v1.5.1/go.mod h1:5W2xD1RspED5o8YsWQXVCued0rvSQ+mT+I5
 github.com/stretchr/testify v1.6.1/go.mod h1:6Fq8oRcR53rry900zMqJjRRixrwX3KX962/h/Wwjteg=
 github.com/stretchr/testify v1.7.0 h1:nwc3DEeHmmLAfoZucVR881uASk0Mfjw8xYJ99tb5CcY=
 github.com/stretchr/testify v1.7.0/go.mod h1:6Fq8oRcR53rry900zMqJjRRixrwX3KX962/h/Wwjteg=
-github.com/tidwall/jsonc v0.3.3/go.mod h1:dw+3CIxqHi+t8eFSpzzMlcVYxKp08UP5CD8/uSFCyJE=
 github.com/tidwall/jsonc v0.3.3 h1:RVQqL3xFfDkKKXIDsrBiVQiEpBtxoKbmMXONb2H/y2w=
 github.com/tidwall/jsonc v0.3.3/go.mod h1:dw+3CIxqHi+t8eFSpzzMlcVYxKp08UP5CD8/uSFCyJE=
 github.com/tj/assert v0.0.0-20171129193455-018094318fb0/go.mod h1:mZ9/Rh9oLWpLLDRpvE+3b7gP/C2YyLFYxNmcLnPTMe0=
