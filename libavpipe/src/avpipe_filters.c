@@ -3,6 +3,7 @@
  */
 
 #include "avpipe_xc.h"
+#include "avpipe_format.h"
 #include "elv_log.h"
 #include "libavutil/pixdesc.h"
 
@@ -52,7 +53,7 @@ init_video_filters(
         dec_codec_ctx->width, dec_codec_ctx->height, dec_codec_ctx->pix_fmt,
         time_base.num, time_base.den,
         dec_codec_ctx->sample_aspect_ratio.num, dec_codec_ctx->sample_aspect_ratio.den,
-        dec_codec_ctx->colorspace, dec_codec_ctx->color_range);
+        decoder_context->video_colorspace, decoder_context->video_color_range);
     elv_dbg("init_video_filters, video srcfilter args=%s", args);
 
     /* video_stream_index should be the same in both encoder and decoder context */

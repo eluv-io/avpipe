@@ -73,7 +73,7 @@ var gURLInputOpeners = make(map[string]InputOpener)           // Keeps InputOpen
 var gURLOutputOpeners = make(map[string]OutputOpener)         // Keeps OutputOpener for specific URL
 var gURLMuxOutputOpeners = make(map[string]MuxOutputOpener)   // Keeps MuxOutputOpener for specific URL
 var gURLOutputOpenersByHandler = make(map[int64]OutputOpener) // Keeps OutputOpener for specific URL
-var gBypassProcessors = make(map[int32]BypassProcessor) // Keeps processors that bypass libavpipe/ffmpeg
+var gBypassProcessors = make(map[int32]BypassProcessor)       // Keeps processors that bypass libavpipe/ffmpeg
 
 // gHandleNum is used for both FDs and handles so that they will not collide if misused.
 var gHandleNum int64
@@ -135,6 +135,15 @@ func (g *GlobalsT) DeleteCIOHandlerAndOutputOpeners(fd int64) {
 	delete(gURLOutputOpenersByHandler, fd)
 }
 
+// RemoveURLHandlers removes the per-URL input and output openers registered by
+// InitUrlIOHandler (or InitUrlIOHandlerIfNotPresent) for the given URL.
+//
+// Callers set URL handlers immediately before starting a job — Xc, Mux, or
+// Probe — and those functions are responsible for removing them when the job
+// finishes (including on error). The typical call site is a deferred call at
+// the top of the job function, placed after the URL handlers are known to be
+// registered (i.e. after the early-return param-validation block but before
+// the C call).
 func (g *GlobalsT) RemoveURLHandlers(url string) {
 	gMutex.Lock()
 	defer gMutex.Unlock()

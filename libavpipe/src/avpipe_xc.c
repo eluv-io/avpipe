@@ -9,12 +9,14 @@
  */
 
 #include <libavutil/log.h>
+#include <libavutil/error.h>
 #include "libavutil/audio_fifo.h"
 #include <libswscale/swscale.h>
 #include <libavutil/imgutils.h>
 #include <libavutil/display.h>
 #include <libavutil/stereo3d.h>
 #include <libavutil/mastering_display_metadata.h>
+#include <libavutil/dovi_meta.h>
 
 #include "avpipe_xc.h"
 #include "avpipe_utils.h"
@@ -595,6 +597,10 @@ prepare_decoder(
         /* PENDING(RM) Do we need this for audio? Because audio is based on resampling, it doesn't work like video. */
     }
 
+    /* Reconcile video stream color metadata here - used for video buffer source filter and fixing frame color */
+    if (decoder_context->video_stream_index >= 0)
+        reconcile_decoder_video_color(decoder_context, decoder_context->video_stream_index, url);
+
     return 0;
 }
 
@@ -691,6 +697,15 @@ set_encoder_options(
         av_opt_set_int(encoder_context->format_context->priv_data, "start_fragment_index", params->start_fragment_index,
             AV_OPT_FLAG_ENCODING_PARAM | AV_OPT_SEARCH_CHILDREN);
         av_opt_set(encoder_context->format_context->priv_data, "start_segment", params->start_segment_str, 0);
+
+        if (is_bypass_bframes(decoder_context, params, stream_index)) {
+            int rc = av_opt_set_int(encoder_context->format_context->priv_data, "avpipe_bypass_bframes", 1,
+                AV_OPT_FLAG_ENCODING_PARAM | AV_OPT_SEARCH_CHILDREN);
+            if (rc < 0) {
+                elv_err("Failed to set DASH muxer option avpipe_bypass_bframes, rc=%d, url=%s", rc, params->url);
+                return eav_param;
+            }
+        }
     }
 
     if (!strcmp(params->format, "fmp4-segment") || !strcmp(params->format, "segment")) {
@@ -1199,6 +1214,14 @@ prepare_video_encoder(
 
     /* PENDING(SS) WIP hack to force bypass transcode for MV-HEVC inputs */
     if (is_mvhevc(decoder_context->stream[index])) {
+        if (params->video_layout != video_layout_mvhevc) {
+            elv_err("MV-HEVC input detected but video_layout is not mvhevc; set video_layout=%d, url=%s",
+                video_layout_mvhevc, params->url);
+            return eav_param;
+        }
+        if (!params->bypass_transcoding) {
+            elv_warn("MV-HEVC input detected but bypass not set; forcing bypass_transcoding=1, url=%s", params->url);
+        }
         params->bypass_transcoding = 1;
     }
 
@@ -1231,6 +1254,12 @@ prepare_video_encoder(
 
             /* Tell/allow muxer to write 3d metadata (st3d, sv3d, vexu, eyes) */
              encoder_context->format_context->strict_std_compliance = FF_COMPLIANCE_UNOFFICIAL;
+        }
+
+        if (is_dovi(in_stream)) {
+            elv_log("BYPASS Dolby Vision detected, url=%s", params->url);
+            /* Allow muxer to write dvvC/dvwC box (requires unofficial compliance) */
+            encoder_context->format_context->strict_std_compliance = FF_COMPLIANCE_UNOFFICIAL;
         }
 
         /* Set output stream timebase when bypass encoding */
@@ -1514,6 +1543,9 @@ prepare_audio_encoder(
 
         /* PENDING(SS) WIP hack to force bypass transcode for Dolby Atmos inputs */
         if (is_dolby_atmos(decoder_context->stream[stream_index])) {
+            if (!params->bypass_transcoding) {
+                elv_warn("Dolby Atmos input detected but bypass not set; forcing bypass_transcoding=1, url=%s", params->url);
+            }
             params->bypass_transcoding = 1;
             params->ecodec2 = strdup("eac3");
         }
@@ -2781,6 +2813,7 @@ transcode_video(
             frame->pkt_dts = frame->pts;
         }
 
+        fix_video_frame_color(decoder_context, frame);
         dump_frame(0, stream_index, "IN ", codec_context->frame_num, frame, debug_frame_level);
 
         ret = check_pts_wrapped(&decoder_context->audio_last_input_pts[stream_index], frame, stream_index);
@@ -3063,6 +3096,10 @@ flush_decoder(
         if (response == AVERROR_EOF) {
             elv_log("GOT EOF url=%s, xc_type=%d, format=%s", p->url, p->xc_type, p->format);
             continue; // PENDING(SSS) why continue and not break?
+        }
+
+        if (codec_context->codec_type == AVMEDIA_TYPE_VIDEO) {
+            fix_video_frame_color(decoder_context, frame);
         }
 
         dump_frame(i >= 0, stream_index,
@@ -4492,11 +4529,47 @@ avpipe_probe(
                                 sizeof(stream_probes_ptr->stereo3d_type), "%s", s3d_name);
                     }
                     break;
+                case AV_PKT_DATA_DOVI_CONF:
+                    if (sd->size >= (int)sizeof(AVDOVIDecoderConfigurationRecord)) {
+                        const AVDOVIDecoderConfigurationRecord *dovi =
+                            (const AVDOVIDecoderConfigurationRecord *)sd->data;
+                        stream_probes_ptr->dovi.present                        = 1;
+                        stream_probes_ptr->dovi.dv_version_major               = dovi->dv_version_major;
+                        stream_probes_ptr->dovi.dv_version_minor               = dovi->dv_version_minor;
+                        stream_probes_ptr->dovi.dv_profile                     = dovi->dv_profile;
+                        stream_probes_ptr->dovi.dv_level                       = dovi->dv_level;
+                        stream_probes_ptr->dovi.rpu_present_flag               = dovi->rpu_present_flag;
+                        stream_probes_ptr->dovi.el_present_flag                = dovi->el_present_flag;
+                        stream_probes_ptr->dovi.bl_present_flag                = dovi->bl_present_flag;
+                        stream_probes_ptr->dovi.dv_bl_signal_compatibility_id  =
+                            dovi->dv_bl_signal_compatibility_id;
+                    }
+                    break;
                 default:
                     // Not handled
                     break;
             }
         }
+
+        /* EAC-3 / Dolby Atmos: detect JOC via the codec profile.
+         *
+         * The dec3 box (EC3SpecificBox) in the MP4 container carries the full
+         * Atmos configuration: JOC flag, channel map, and complexity index.
+         * However, FFmpeg's mov_read_dec3() only extracts channel layout from
+         * the dec3 box and discards the raw bytes — they are never stored in
+         * codecpar->extradata and are therefore not available after demuxing.
+         *
+         * JOC can be recovered because the EAC-3 decoder reads
+         * eac3_extension_type_a from the audio sync-frame headers during
+         * avformat_find_stream_info() and sets avctx->profile =
+         * AV_PROFILE_EAC3_DDP_ATMOS, which avcodec_parameters_from_context()
+         * then copies back to codecpar->profile. Channel map and complexity
+         * index are only in the dec3 box and are not exposed by any FFmpeg API
+         * after demuxing; use mp4e.ExtractCodecInfo() (which parses the MP4
+         * box layer directly with mp4ff) when those fields are needed. */
+        if (s->codecpar->codec_id == AV_CODEC_ID_EAC3)
+            stream_probes_ptr->ec3_joc =
+                (s->codecpar->profile == AV_PROFILE_EAC3_DDP_ATMOS) ? 1 : 0;
     }
 
     inctx.closed = 1;

@@ -19,6 +19,7 @@
 package xc_test
 
 import (
+	"encoding/hex"
 	"flag"
 	"fmt"
 	"math/big"
@@ -29,7 +30,8 @@ import (
 	"strings"
 	"testing"
 
-	"encoding/hex"
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 
 	"github.com/eluv-io/avpipe"
 	"github.com/eluv-io/avpipe/goavpipe"
@@ -38,8 +40,6 @@ import (
 	"github.com/eluv-io/avpipe/pkg/validate"
 	"github.com/eluv-io/avpipe/xc"
 	"github.com/eluv-io/log-go"
-	"github.com/stretchr/testify/assert"
-	"github.com/stretchr/testify/require"
 )
 
 // ---------------------------------------------------------------------------
@@ -86,11 +86,11 @@ var mezTestSources = []mezTestSource{
 	{"TOS8_FHD_51-2_PRHQ_60s_CCBYblendercloud.mov", "24000/1001", 48, false, ""},
 
 	// Currently these files don't work
-	//{"bbb_sunflower_1080p_29_97_fps_normal.mp4", "30000/1001", 60, false, ""}, // Broken - file actually 30/1 fps
-	//{"prores_example.mov",                       "30000/1001", 60, false, ""}, // Broken
-	//{"Rigify-2min-10000ts.mp4", "24/1", 48, false, ""},                        // Broken - duration expected 416, got 417
-	//{"BBB4_HD_51_AVC_120s_CCBYblendercloud.ts", "60/1", 120, false, ""},  // Broken - improper key frame int
-	//{"SIN5_4K_MOS_J2K_60s_CCBYblendercloud.mxf", "24000/1001", 48, false, ""},  // Broken - avg_framerate and timebase
+	// {"bbb_sunflower_1080p_29_97_fps_normal.mp4", "30000/1001", 60, false, ""}, // Broken - file actually 30/1 fps
+	// {"prores_example.mov",                       "30000/1001", 60, false, ""}, // Broken
+	// {"Rigify-2min-10000ts.mp4", "24/1", 48, false, ""},                        // Broken - duration expected 416, got 417
+	// {"BBB4_HD_51_AVC_120s_CCBYblendercloud.ts", "60/1", 120, false, ""},  // Broken - improper key frame int
+	// {"SIN5_4K_MOS_J2K_60s_CCBYblendercloud.mxf", "24000/1001", 48, false, ""},  // Broken - avg_framerate and timebase
 
 }
 
@@ -318,7 +318,7 @@ func probeVideoColor(t *testing.T, url string) videoColor {
 	probeParams.Url = url
 	info, err := avpipe.Probe(probeParams)
 	require.NoError(t, err, "probe failed for %s", url)
-	for _, si := range info.StreamInfo {
+	for _, si := range info.Streams {
 		if si.CodecType == "video" {
 			return videoColor{
 				Primaries: si.ColorPrimaries,
@@ -474,10 +474,10 @@ func runMezCreate(t *testing.T, sources []mezTestSource, mezDir string) {
 					)
 					probeInfo, err := avpipe.Probe(probeParams)
 					require.NoError(t, err, "Probe failed for %s", partFile)
-					require.NotEmpty(t, probeInfo.StreamInfo, "no streams in %s", partFile)
+					require.NotEmpty(t, probeInfo.Streams, "no streams in %s", partFile)
 
 					// Check video stream properties
-					for _, si := range probeInfo.StreamInfo {
+					for _, si := range probeInfo.Streams {
 						if si.CodecType == "video" {
 							assert.Equal(t, 720, si.Height, "height mismatch")
 							assert.Equal(t, 1280, si.Width, "width mismatch")
@@ -686,10 +686,10 @@ func generateAndValidateABRPart(
 	probeParams.Url = partFile
 	probeInfo, err := avpipe.Probe(probeParams)
 	require.NoError(t, err, "Probe failed for %s", partFile)
-	require.NotEmpty(t, probeInfo.StreamInfo, "no streams in %s", partFile)
+	require.NotEmpty(t, probeInfo.Streams, "no streams in %s", partFile)
 
 	var timescale int64
-	for _, si := range probeInfo.StreamInfo {
+	for _, si := range probeInfo.Streams {
 		if si.CodecType == "video" {
 			// TimeBase is num/den (e.g. 1/12288); timescale = denominator
 			timescale = si.TimeBase.Denom().Int64()

@@ -1,7 +1,5 @@
+// ffprobe -v error -show_format -show_streams -print_format json media/Audio_ID_720p_50fps_h264_6ch_640kbps_ddp_joc.mp4
 {
-  "_comments": {
-    "command": "ffprobe -v error -show_format -show_streams -print_format json media/Audio_ID_720p_50fps_h264_6ch_640kbps_ddp_joc.mp4"
-  },
   "streams": [
     {
       "index": 0,

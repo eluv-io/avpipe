@@ -278,6 +278,21 @@ func getAudioIndexes(params *goavpipe.XcParams, audioIndexes string) (err error)
 	return nil
 }
 
+func getVideoLayout(layout string) (int32, error) {
+	switch strings.ToLower(strings.TrimSpace(layout)) {
+	case "", "mono", "0":
+		return int32(goavpipe.VideoLayoutMono), nil
+	case "sbs", "side-by-side", "3":
+		return int32(goavpipe.VideoLayoutSbs), nil
+	case "tb", "top-bottom", "4":
+		return int32(goavpipe.VideoLayoutTb), nil
+	case "mvhevc", "mv-hevc", "10":
+		return int32(goavpipe.VideoLayoutMVHEVC), nil
+	default:
+		return 0, fmt.Errorf("Invalid video-layout: %s", layout)
+	}
+}
+
 // parseExtractImagesTs converts the extract-images-ts string parameter, e.g.
 // "0,64000,128000,1152000", to an int64 array in goavpipe.XcParams
 func parseExtractImagesTs(params *goavpipe.XcParams, s string) (err error) {
@@ -343,6 +358,7 @@ func InitTranscode(cmdRoot *cobra.Command) error {
 	cmdTranscode.PersistentFlags().Int32P("enc-width", "", -1, "default -1 means use source width.")
 	cmdTranscode.PersistentFlags().Int32P("video-time-base", "", 0, "Video encoder timebase, must be > 0 (the actual timebase would be 1/video-time-base).")
 	cmdTranscode.PersistentFlags().Int32P("video-frame-duration-ts", "", 0, "Frame duration of the output video in time base.")
+	cmdTranscode.PersistentFlags().String("video-layout", "", "Video layout, can be 'mono'/0, 'sbs'/3, 'tb'/4, or 'mvhevc'/10.")
 	cmdTranscode.PersistentFlags().Int64P("duration-ts", "", -1, "default -1 means entire stream.")
 	cmdTranscode.PersistentFlags().Int64P("audio-seg-duration-ts", "", 0, "(mandatory if format is not 'segment' and transcoding audio) audio segment duration time base (positive integer).")
 	cmdTranscode.PersistentFlags().Int64P("video-seg-duration-ts", "", 0, "(mandatory if format is not 'segment' and transcoding video) video segment duration time base (positive integer).")
@@ -622,6 +638,11 @@ func doTranscode(cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("video-frame-duration-ts is not valid")
 	}
 
+	videoLayout, err := getVideoLayout(cmd.Flag("video-layout").Value.String())
+	if err != nil {
+		return err
+	}
+
 	durationTs, err := cmd.Flags().GetInt64("duration-ts")
 	if err != nil {
 		return fmt.Errorf("Duration ts is not valid")
@@ -801,6 +822,7 @@ func doTranscode(cmd *cobra.Command, args []string) error {
 		DebugFrameLevel:        debugFrameLevel,
 		VideoTimeBase:          int(videoTimeBase),
 		VideoFrameDurationTs:   int(videoFrameDurationTs),
+		VideoLayout:            videoLayout,
 		Seekable:               seekable,
 		Rotate:                 int(rotate),
 		Profile:                profile,
@@ -831,10 +853,7 @@ func doTranscode(cmd *cobra.Command, args []string) error {
 
 			goavpipe.InitUrlIOHandlerIfNotPresent(filename, nil, outOpener)
 
-			handle, err := avpipe.XcInit(params)
-			log.Info("XcInit", "handle", handle, "err", err)
-
-			err = avpipe.Xc(params)
+			err := avpipe.Xc(params)
 			if err != nil {
 				done <- fmt.Errorf("failed transcoding %s, err=%v", filename, err)
 			} else {

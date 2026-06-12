@@ -8,7 +8,7 @@ require (
 	github.com/Eyevinn/mp4ff v0.51.0
 	github.com/eluv-io/common-go v1.1.22
 	github.com/eluv-io/errors-go v1.0.5
-	github.com/eluv-io/log-go v1.0.10-0.20260314163338-6554b440b488
+	github.com/eluv-io/log-go v1.0.10
 	github.com/grafov/m3u8 v0.11.1
 	github.com/modern-go/gls v0.0.0-20250215024828-78308f6bb19d
 	github.com/spf13/cobra v1.8.1
@@ -64,6 +64,7 @@ require (
 )
 
 replace (
+	github.com/Eyevinn/mp4ff => github.com/eluv-io/mp4ff v0.47.1-0.20260603013458-2403cac8f06c
 	github.com/fxamacker/cbor/v2 => github.com/eluv-io/cbor/v2 v2.8.1-0.20250506081522-e7b11bfa1dad
 	github.com/modern-go/gls => github.com/eluv-io/gls v1.0.0-elv1
 	github.com/prometheus/prometheus => github.com/prometheus/prometheus v1.7.1-0.20170814170113-3101606756c5
