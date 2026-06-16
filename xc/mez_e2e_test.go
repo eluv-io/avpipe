@@ -51,18 +51,27 @@ const testOutBase = "../test_out"
 
 var deleteMezOutput = flag.Bool("delete-mez-output", false, "delete mez output after tests")
 var deleteSegsOutput = flag.Bool("delete-segs-output", false, "delete segment output after tests")
+var srcOverrideAbsFilePath = flag.String("src-file", "", "absolute path to source file for TestEndToEndSingle (overrides default; fps and keyint are derived by probing)")
 
 func mezOutputDir(t *testing.T) string  { return path.Join(testOutBase, "xc_test."+t.Name(), "mez") }
 func segsOutputDir(t *testing.T) string { return path.Join(testOutBase, "xc_test."+t.Name(), "segs") }
 
 // mezTestSource defines a source file and its properties for mez testing.
-// Path is relative to mezSourceDir.
+// Path is relative to mezSourceDir, or absolute.
 type mezTestSource struct {
-	Path        string // file name within mezSourceDir
+	Path        string // file name within mezSourceDir, or an absolute path
 	FrameRate   string // frame rate as "num/den" (e.g. "30000/1001")
 	ForceKeyInt int32  // key frame interval in frames (e.g. 48)
 	Watermark   bool   // if true, also run watermarked ABR variants
 	Ecodec      string // video encoder name; default "libx264" when empty
+}
+
+// mezURL returns the resolved source URL for src.
+func mezURL(src mezTestSource) string {
+	if filepath.IsAbs(src.Path) {
+		return src.Path
+	}
+	return path.Join(mezSourceDir, src.Path)
 }
 
 // mezTestSources is the list of source files used by TestMezCreate.
@@ -84,6 +93,7 @@ var mezTestSources = []mezTestSource{
 	{"video-960.mp4", "30/1", 60, false, ""},
 	{"TOS0_FHD_2_H264_60s_CCBYblendercloud.mp4", "24/1", 48, false, ""},
 	{"TOS8_FHD_51-2_PRHQ_60s_CCBYblendercloud.mov", "24000/1001", 48, false, ""},
+	{"yuvj420p.mov", "30/1", 60, false, "libx265"}, // test if color_range full/pc is preserved
 
 	// Currently these files don't work
 	//{"bbb_sunflower_1080p_29_97_fps_normal.mp4", "30000/1001", 60, false, ""}, // Broken - file actually 30/1 fps
@@ -98,7 +108,11 @@ var mezTestSources = []mezTestSource{
 // duplicates with the same Path (e.g. when the same file is encoded with different codecs).
 // Used as the test subtest name and as the output directory name.
 func mezTestSourceID(src mezTestSource) string {
-	id := strings.TrimSuffix(src.Path, path.Ext(src.Path))
+	p := src.Path
+	if filepath.IsAbs(p) {
+		p = filepath.Base(p)
+	}
+	id := strings.TrimSuffix(p, path.Ext(p))
 	if src.Ecodec != "" && src.Ecodec != "libx264" {
 		id += "_" + src.Ecodec
 	}
@@ -153,7 +167,7 @@ func mezProfileForSource(src mezTestSource) *mezTestProfile {
 
 	params := goavpipe.NewXcParams()
 	params.Format = "fmp4-segment"
-	params.Url = path.Join(mezSourceDir, src.Path)
+	params.Url = mezURL(src)
 	params.Ecodec = src.Ecodec
 	if params.Ecodec == "" {
 		params.Ecodec = "libx264"
@@ -218,7 +232,7 @@ func (w watermarkType) suffix() string {
 // abrVariant defines a DASH/HLS encoding variant to generate from a mez part.
 type abrVariant struct {
 	Name       string               // subtest name
-	RepDir     string               // representation subdirectory (e.g. "h264_720_cenc_wmtxt")
+	RepDir     string               // representation subdirectory (e.g. "720_cenc_wmtxt")
 	Format     string               // "dash" or "hls"
 	Bypass     bool                 // true = copy without transcoding
 	Height     int32                // target height (-1 = preserve source)
@@ -231,10 +245,10 @@ type abrVariant struct {
 
 // abrBaseVariants defines the encoding ladder without encryption or watermark.
 var abrBaseVariants = []abrVariant{
-	{"bypass", "h264_bypass", "dash", true, -1, -1, -1, goavpipe.CryptNone, wmNone, false},
-	{"720p", "h264_720", "dash", false, 720, 1280, 5000000, goavpipe.CryptNone, wmNone, false},
-	{"540p", "h264_540", "dash", false, 540, 960, 3000000, goavpipe.CryptNone, wmNone, false},
-	{"360p", "h264_360", "dash", false, 360, 640, 1000000, goavpipe.CryptNone, wmNone, false},
+	{"bypass", "bypass", "dash", true, -1, -1, -1, goavpipe.CryptNone, wmNone, false},
+	{"720p", "720", "dash", false, 720, 1280, 5000000, goavpipe.CryptNone, wmNone, false},
+	{"540p", "540", "dash", false, 540, 960, 3000000, goavpipe.CryptNone, wmNone, false},
+	{"360p", "360", "dash", false, 360, 640, 1000000, goavpipe.CryptNone, wmNone, false},
 }
 
 // encryptionSchemes is the set of encryption options applied to each base variant.
@@ -331,6 +345,35 @@ func probeVideoColor(t *testing.T, url string) videoColor {
 	return videoColor{}
 }
 
+// mezSourceFromFile probes url and returns a mezTestSource with Path set to url,
+// FrameRate derived from the first video stream, ForceKeyInt set to round(2 × fps),
+// and Ecodec set to "libx265" if the source is HEVC.
+func mezSourceFromFile(t *testing.T, url string) mezTestSource {
+	t.Helper()
+	goavpipe.InitIOHandler(
+		&xc.FileInputOpener{URL: url},
+		&xc.FileOutputOpener{Dir: filepath.Dir(url)},
+	)
+	probeParams := goavpipe.NewXcParams()
+	probeParams.Url = url
+	info, err := avpipe.Probe(probeParams)
+	require.NoError(t, err, "probe failed for %s", url)
+	for _, si := range info.Streams {
+		if si.CodecType == "video" && si.FrameRate != nil {
+			num := si.FrameRate.Num().Int64()
+			den := si.FrameRate.Denom().Int64()
+			keyInt := int32((2*num + den/2) / den) // round(2 * fps)
+			ecodec := ""
+			if si.CodecName == "hevc" {
+				ecodec = "libx265"
+			}
+			return mezTestSource{Path: url, FrameRate: si.FrameRate.RatString(), ForceKeyInt: keyInt, Ecodec: ecodec}
+		}
+	}
+	t.Fatalf("no video stream found in %s", url)
+	return mezTestSource{}
+}
+
 // assertColorMatches compares two videoColor sets with field-level error messages.
 //
 // For primaries/trc/space:
@@ -380,7 +423,7 @@ func TestMezCreate(t *testing.T) {
 	if *deleteMezOutput {
 		t.Cleanup(func() { removeAll(mezDir) })
 	}
-	t.Skip("run via TestEndToEnd, TestEndToEndShort, or TestEndToEndBT709Synthesis")
+	t.Skip("run via TestEndToEnd, TestEndToEndSingle, or TestEndToEndBT709Synthesis")
 	runMezCreate(t, mezTestSources, mezDir)
 }
 
@@ -388,7 +431,7 @@ func runMezCreate(t *testing.T, sources []mezTestSource, mezDir string) {
 	t.Helper()
 	for _, src := range sources {
 		t.Run(mezTestSourceID(src), func(t *testing.T) {
-			url := path.Join(mezSourceDir, src.Path)
+			url := mezURL(src)
 			log.Info("STARTING TestMezCreate", "source", url)
 
 			skipIfFileMissing(t, url)
@@ -530,7 +573,7 @@ func TestABRCreate(t *testing.T) {
 	if *deleteSegsOutput {
 		t.Cleanup(func() { removeAll(segsDir) })
 	}
-	t.Skip("run via TestEndToEnd, TestEndToEndShort, or TestEndToEndBT709Synthesis")
+	t.Skip("run via TestEndToEnd, TestEndToEndSingle, or TestEndToEndBT709Synthesis")
 	runABRCreate(t, mezTestSources, mezDir, segsDir)
 }
 
@@ -538,7 +581,7 @@ func runABRCreate(t *testing.T, sources []mezTestSource, mezDir, segsDir string)
 	t.Helper()
 	for _, src := range sources {
 		t.Run(mezTestSourceID(src), func(t *testing.T) {
-			url := path.Join(mezSourceDir, src.Path)
+			url := mezURL(src)
 			skipIfFileMissing(t, url)
 
 			profile := mezProfileForSource(src)
@@ -635,7 +678,7 @@ func ensureMezParts(t *testing.T, src mezTestSource, profile *mezTestProfile, vi
 	}
 
 	// No parts on disk — create them
-	url := path.Join(mezSourceDir, src.Path)
+	url := mezURL(src)
 	err := os.MkdirAll(videoMezDir, 0755)
 	require.NoError(t, err)
 
@@ -971,24 +1014,30 @@ func runE2E(t *testing.T, sources []mezTestSource, mezDir, segsDir string) {
 }
 
 // TestEndToEnd runs all phases against the full mezTestSources matrix.
-// Skipped under -short; use TestEndToEndShort for quick feedback.
+// Skipped under -short; use TestEndToEndSingle for quick feedback.
 //
 // Run:
 // - Individual phases:  go test ./xc/ -run TestMezCreate
 // - Full pipeline:      go test ./xc/ -run TestEndToEnd
 func TestEndToEnd(t *testing.T) {
 	if testing.Short() {
-		t.Skip("use TestEndToEndShort for a quick smoke test")
+		t.Skip("use TestEndToEndSingle for a quick smoke test")
 	}
 	runE2E(t, mezTestSources, mezOutputDir(t), segsOutputDir(t))
 }
 
-// TestEndToEndShort runs the full mez + ABR pipeline on a single small source.
+// TestEndToEndSingle runs the full mez + ABR pipeline on a single small source.
 // Suitable for quick development feedback; not skipped under -short.
-func TestEndToEndShort(t *testing.T) {
-	runE2E(t, []mezTestSource{
-		{"bbb_1080p_30fps_10sec.mp4", "30/1", 60, false, ""},
-	}, mezOutputDir(t), segsOutputDir(t))
+//
+// Override the source file with -src-file (absolute path):
+//
+//	go test ./xc/ -run TestEndToEndSingle -src-file /abs/path/to/file.mov
+func TestEndToEndSingle(t *testing.T) {
+	src := mezTestSource{"bbb_1080p_30fps_10sec.mp4", "30/1", 60, false, ""}
+	if *srcOverrideAbsFilePath != "" {
+		src = mezSourceFromFile(t, *srcOverrideAbsFilePath)
+	}
+	runE2E(t, []mezTestSource{src}, mezOutputDir(t), segsOutputDir(t))
 }
 
 // TestEndToEndBT709Synthesis exercises dash_synthesize_color_defaults using a
