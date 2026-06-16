@@ -168,6 +168,12 @@ func TestVideoSeg(t *testing.T) {
 }
 
 func TestProResBT709BadFrameColor(t *testing.T) {
+	// Some of the video frames in this test file carry reserved
+	// primaries/transfer and unspecified colorspace:
+	//
+	// ffprobe -v error -select_streams v:0 -show_entries frame=color_space,color_primaries,color_transfer,color_range -of csv=p=0 media/prores_bt709_bad_frame_color.mov | sort | uniq -c
+	//   144 tv,bt709,bt709,bt709
+	//    74 tv,unknown,reserved,reserved
 	url := "./media/prores_bt709_bad_frame_color.mov"
 	checkFileExists(t, url)
 
@@ -3314,8 +3320,9 @@ func removeDirContents(dir string) error {
 		return err
 	}
 	defer func() {
-		e := d.Close()
-		log.Error("error closing dir", e, "dir", dir)
+		if e := d.Close(); e != nil {
+			log.Error("error closing dir", e, "dir", dir)
+		}
 	}()
 	names, err := d.Readdirnames(-1)
 	if err != nil {
