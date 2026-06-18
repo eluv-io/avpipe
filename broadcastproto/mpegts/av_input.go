@@ -79,6 +79,15 @@ func createTransport(url string, cfg *goavpipe.InputConfig) (transport.Transport
 	if tp == nil {
 		return nil, fmt.Errorf("unsupported transport protocol: %s", url)
 	}
+
+	goavpipe.Log.Info("input transport created",
+		"url", url,
+		"scheme", scheme,
+		"copy_mode", cfg.CopyMode,
+		"input_packaging", string(cfg.InputPackaging),
+		"copy_packaging", string(cfg.CopyPackaging),
+		"packaging_mode", string(tp.PackagingMode()))
+
 	return tp, nil
 }
 

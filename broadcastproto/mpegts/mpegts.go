@@ -56,6 +56,8 @@ type MpegtsPacketProcessor struct {
 	pcr           uint64        // Last seen PCR value
 	outBuf        []byte        // Preallocated byte buffer
 	closeCh       chan struct{}
+
+	startLogged bool // ensure logging TS processing route once
 }
 
 func NewMpegtsPacketProcessor(cfg TsConfig, seqOpener SequentialOpener, inFd int64) *MpegtsPacketProcessor {
@@ -63,6 +65,11 @@ func NewMpegtsPacketProcessor(cfg TsConfig, seqOpener SequentialOpener, inFd int
 	if cfg.Packaging == transport.RtpTs {
 		rtpStats = &RTPStats{}
 	}
+	mpegtslog.Info("mpegts packet processor created",
+		"fd", inFd,
+		"packaging", string(cfg.Packaging),
+		"rtp_stats", rtpStats != nil,
+		"segment_length_sec", cfg.SegmentLengthSec)
 	return &MpegtsPacketProcessor{
 		cfg:              cfg,
 		opener:           seqOpener,
@@ -143,6 +150,14 @@ func NewTSStats() *TSStats {
 }
 
 func (mpp *MpegtsPacketProcessor) ProcessDatagram(datagram []byte) {
+	if !mpp.startLogged {
+		mpp.startLogged = true
+		mpegtslog.Info("mpegts processing first datagram",
+			"fd", mpp.inFd,
+			"packaging", string(mpp.cfg.Packaging),
+			"datagram_len", len(datagram))
+	}
+
 	mpegtsOffset := 0
 	if mpp.cfg.Packaging == transport.RtpTs {
 		if len(datagram) < 12+188 { // RTP header + at least one TS packet
