@@ -1,0 +1,53 @@
+# Doxyfile for the avpipe C library (libavpipe) public API.
+#
+# Run with:  make docs        (output: doc/doxygen/html/index.html)
+#
+# This is a minimal, hand-maintained config (only non-default settings are
+# listed); Doxygen supplies defaults for everything else. The canonical
+# documentation lives in the header comments themselves — this file only
+# controls how they are rendered.
+
+PROJECT_NAME           = avpipe
+PROJECT_BRIEF          = "Audio/video transcoding pipeline (libavpipe) C API"
+OUTPUT_DIRECTORY       = doc/doxygen
+
+# C, not C++: tweak member display and treat `typedef struct X {...} X` as one entity.
+OPTIMIZE_OUTPUT_FOR_C  = YES
+TYPEDEF_HIDES_STRUCT   = YES
+
+# Only emit entities that actually carry doc comments (keeps the output focused
+# on what we've documented while the pass is in progress).
+EXTRACT_ALL            = NO
+JAVADOC_AUTOBRIEF      = YES
+MARKDOWN_SUPPORT       = YES
+
+INPUT                  = libavpipe/include/avpipe_xc.h
+RECURSIVE              = NO
+
+GENERATE_HTML          = YES
+GENERATE_LATEX         = NO
+# Flip to YES later to produce a machine-readable feedstock (e.g. for a
+# JSON Schema transform). Off for now.
+GENERATE_XML           = NO
+
+# The header contains many internal structs we are not documenting yet; hide the
+# undocumented ones and don't warn about them, so the output (and the warning
+# stream) stays focused on what we've actually documented.
+HIDE_UNDOC_CLASSES     = YES
+WARN_IF_UNDOCUMENTED   = NO
+
+QUIET                  = YES
+WARN_NO_PARAMDOC       = YES
+# Set to YES (or FAIL_ON_WARNINGS) while authoring to catch malformed comments.
+WARN_AS_ERROR          = NO
+
+# --- Custom documentation axes (no Doxygen built-in exists for these) ---------
+# Each expands to a titled paragraph (`@par`); the text after the command becomes
+# the paragraph body. `^^` is a newline inside an alias value. Defined without
+# arguments so the values may contain commas/spaces freely.
+#   @obligation Mandatory | Optional | Conditional
+#   @default    <effective default / sentinel meaning>
+#   @domain     <acceptable values, including units>
+ALIASES += "obligation=@par Obligation^^"
+ALIASES += "default=@par Default^^"
+ALIASES += "domain=@par Acceptable values^^"

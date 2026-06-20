@@ -75,3 +75,6 @@ temp/
 test_out/
 
 media
+
+# Generated API docs
+/doc/doxygen/

@@ -6,7 +6,7 @@ SUBDIRS=utils libavpipe exc elvxc cmd/mvhevc
 SRCS=avpipe_handler.c
 OBJS=$(SRCS:%.c=$(BINDIR)/%.o)
 
-.PHONY: all test gotest ctest clean
+.PHONY: all test gotest ctest clean docs
 
 .DEFAULT_GOAL := dynamic
 
@@ -64,3 +64,9 @@ gotest:
 
 ctest:
 	@$(MAKE) -C libavpipe test
+
+# Generate HTML API docs from the header comments (requires doxygen).
+# Output: doc/doxygen/html/index.html
+docs:
+	@command -v doxygen >/dev/null 2>&1 || { echo "doxygen not found; install it (e.g. brew install doxygen)"; exit 1; }
+	doxygen Doxyfile

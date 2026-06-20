@@ -420,94 +420,326 @@ typedef struct coderctx_t {
     volatile int    stopped;
 } coderctx_t;
 
+/** @brief Content protection / encryption scheme for the output. */
 typedef enum crypt_scheme_t {
-    crypt_none,
-    crypt_aes128,
-    crypt_cenc,
-    crypt_cbc1,
-    crypt_cens,
-    crypt_cbcs
+    crypt_none,     ///< No encryption.
+    crypt_aes128,   ///< HLS AES-128 (whole-segment).
+    crypt_cenc,     ///< MPEG Common Encryption, AES-CTR (cenc).
+    crypt_cbc1,     ///< MPEG Common Encryption, AES-CBC (cbc1).
+    crypt_cens,     ///< MPEG Common Encryption, AES-CTR subsample pattern (cens).
+    crypt_cbcs      ///< MPEG Common Encryption, AES-CBC subsample pattern (cbcs).
 } crypt_scheme_t;
 
+/** @brief Kind of transcoding to perform. Some values are bit flags combined
+ *         with @ref xc_video / @ref xc_audio. */
 typedef enum xc_type_t {
-    xc_none                 = 0,
-    xc_video                = 1,
-    xc_audio                = 2,
-    xc_all                  = 3,    // xc_video | xc_audio
-    xc_audio_merge          = 6,    // 0x04 | xc_audio
-    xc_audio_join           = 10,   // 0x08 | xc_audio
-    xc_audio_pan            = 18,   // 0x10 | xc_audio
-    xc_mux                  = 32,
-    xc_extract_images       = 65,   // 0x40 | xc_video
-    xc_extract_all_images   = 129,  // 0x80 | xc_video
-    xc_probe                = 256
+    xc_none                 = 0,    ///< Unset; treated as @ref xc_all when stream_id < 0.
+    xc_video                = 1,    ///< Transcode video.
+    xc_audio                = 2,    ///< Transcode audio.
+    xc_all                  = 3,    ///< Transcode video and audio (xc_video | xc_audio).
+    xc_audio_merge          = 6,    ///< Merge audio streams (0x04 | xc_audio).
+    xc_audio_join           = 10,   ///< Join audio streams (0x08 | xc_audio).
+    xc_audio_pan            = 18,   ///< Pan audio channels (0x10 | xc_audio).
+    xc_mux                  = 32,   ///< Mux pre-made ABR segments into fMP4/MP4.
+    xc_extract_images       = 65,   ///< Extract images at given timestamps (0x40 | xc_video).
+    xc_extract_all_images   = 129,  ///< Extract all images (0x80 | xc_video).
+    xc_probe                = 256   ///< Probe the input only.
 } xc_type_t;
 
-/* handled image types in get_overlay_filter_string*/
+/** @brief Watermark overlay image type (handled in get_overlay_filter_string). */
 typedef enum image_type {
-    unknown_image,
-    png_image,
-    jpg_image,
-    gif_image
+    unknown_image,  ///< Unknown / unset.
+    png_image,      ///< PNG.
+    jpg_image,      ///< JPEG.
+    gif_image       ///< GIF.
 } image_type;
 
-// deinterlacing filter types
+/** @brief Deinterlacing filter selection. */
 typedef enum dif_type {
-    dif_none        = 0, // No deinterlacing
-    dif_bwdif       = 1, // Use filter bwdif mode 'send_field' (two frames per input frame)
-    dif_bwdif_frame = 2  // Use filter bwdif mode 'send_frame' (one frame per input frame)
+    dif_none        = 0, ///< No deinterlacing.
+    dif_bwdif       = 1, ///< bwdif mode 'send_field' (two frames per input frame).
+    dif_bwdif_frame = 2  ///< bwdif mode 'send_frame' (one frame per input frame).
 } dif_type;
 
-// Video layout. Values align with ISO/IEC 23001-8 (CICP)
+/** @brief Video layout. Values align with ISO/IEC 23001-8 (CICP). */
 typedef enum video_layout_t {
-    video_layout_mono = 0, // Monoscopic
-    video_layout_sbs  = 3, // Stereoscopic side-by-side
-    video_layout_tb   = 4, // Stereoscopic top-bottom
-    video_layout_mvhevc = 10 // Multi-layer HEVC (MV-HEVC)
+    video_layout_mono   = 0,  ///< Monoscopic.
+    video_layout_sbs    = 3,  ///< Stereoscopic side-by-side.
+    video_layout_tb     = 4,  ///< Stereoscopic top-bottom.
+    video_layout_mvhevc = 10  ///< Multi-layer HEVC (MV-HEVC).
 } video_layout_t;
 
 #define DRAW_TEXT_SHADOW_OFFSET     0.075
 #define MAX_EXTRACT_IMAGES_SZ       100
 
-// Notes:
-//   * rc_max_rate and rc_buffer_size must be set together or not at all; they correspond to ffmpeg's bufsize and maxrate
-//   * setting video_bitrate clobbers rc_max_rate and rc_buffer_size
+/**
+ * @brief Transcoding parameters for avpipe_init() / the avpipe transcoding API.
+ *
+ * @invariant Setting video_bitrate (> 0) raises rc_max_rate and rc_buffer_size
+ *            to at least video_bitrate (in check_params). rc_max_rate and
+ *            rc_buffer_size map to ffmpeg's maxrate and bufsize.
+ *
+ * @note Each field's @b Default is the effective library behavior when the field
+ *       is left unset. Where the library passes a value through unchanged, the
+ *       listed default is that of the reference CLI (exc/elv_xc.c); other
+ *       bindings (e.g. the Go XcParams / NewXcParams) may set different defaults.
+ */
 typedef struct xcparams_t {
-    char    *url;                   // URL of the input for transcoding
-    int     bypass_transcoding;     // if 0 means do transcoding, otherwise bypass transcoding (only copy)
-    char    *format;                // Output format [Required, Values: dash, hls, mp4, fmp4]
-    int64_t start_time_ts;          // Transcode the source starting from this time
-    int64_t start_pts;              // Starting PTS for output
-    int64_t duration_ts;            // Transcode time period [-1 for entire source length from start_time_ts]
-    char    *start_segment_str;     // Specify index of the first segment  TODO: change type to int
+    /**
+     * @brief URL of the input to transcode.
+     * @obligation Mandatory
+     * @domain a file path, or a network URL (e.g. udp://127.0.0.1:PORT, rtmp://...)
+     */
+    char    *url;
+    /**
+     * @brief Copy input packets to the output without transcoding.
+     * @obligation Optional
+     * @default 0 (transcode)
+     * @domain 0 (transcode) or 1 (copy only)
+     * @note Forced to 1 for MV-HEVC and Dolby Atmos inputs.
+     */
+    int     bypass_transcoding;
+    /**
+     * @brief Output format / packaging.
+     * @obligation Mandatory
+     * @domain dash, hls, image2, mp4, fmp4, segment, fmp4-segment
+     */
+    char    *format;
+    /**
+     * @brief Skip input up to this time before transcoding.
+     * @obligation Optional
+     * @default 0 (start at the beginning)
+     * @domain input-stream PTS ticks; > 0 seeks/skips
+     */
+    int64_t start_time_ts;
+    /**
+     * @brief Starting PTS for the output.
+     * @obligation Optional
+     * @default 0
+     * @domain >= 0, output PTS ticks (a negative value is rejected)
+     */
+    int64_t start_pts;
+    /**
+     * @brief Length of input to transcode, measured from start_time_ts.
+     * @obligation Optional
+     * @default -1 (entire source from start_time_ts)
+     * @domain input-stream PTS ticks; > 0 bounds the output, or -1
+     */
+    int64_t duration_ts;
+    /**
+     * @brief Index of the first output segment.
+     * @obligation Optional
+     * @default "1" (CLI reference; parsed via atoi)
+     * @domain numeric string, segment index >= 1
+     */
+    char    *start_segment_str;
+    /**
+     * @brief Output video bitrate.
+     * @obligation Optional
+     * @default unused — encode by CRF instead (CLI reference: -1)
+     * @domain integer > 0, bits/sec
+     * @warning Mutually exclusive with crf_str. If > 0, raises rc_max_rate and rc_buffer_size to at least this value.
+     * @see crf_str
+     */
     int     video_bitrate;
+    /**
+     * @brief Output audio bitrate.
+     * @obligation Optional
+     * @default 0 (used as-is; CLI reference: 128000)
+     * @domain integer > 0, bits/sec
+     */
     int     audio_bitrate;
-    int     sample_rate;            // Audio sampling rate
-    int     channel_layout;         // Audio channel layout for output
+    /**
+     * @brief Output audio sample rate.
+     * @obligation Optional
+     * @default <= 0: derive from the source (CLI reference: -1)
+     * @domain Hz; for the aac encoder must be a valid AAC rate (otherwise replaced with the default AAC rate)
+     */
+    int     sample_rate;
+    /**
+     * @brief Output audio channel layout.
+     * @obligation Optional
+     * @default 0 (preserve the source layout)
+     * @domain ffmpeg channel-layout mask; the CLI accepts "mono", "stereo", "5.0", "5.1"
+     */
+    int     channel_layout;
+    /**
+     * @brief Constant Rate Factor (CRF) video quality.
+     * @obligation Optional
+     * @default unused unless set (CLI reference: "23")
+     * @domain numeric string, 1 (best) .. 52 (worst)
+     * @warning Mutually exclusive with video_bitrate.
+     * @see video_bitrate
+     */
     char    *crf_str;
-    char    *preset;                // Sets encoding speed to compression ratio
-    int     rc_max_rate;            // Maximum encoding bit rate, used in conjuction with rc_buffer_size [Default: 0]
-    int     rc_buffer_size;         // Determines the interval used to limit bit rate [Default: 0]
-    int64_t audio_seg_duration_ts;  // In ts units. It is used for transcoding and producing audio ABR/mez segments
-    int64_t video_seg_duration_ts;  // In ts units. It is used for transcoding and producing video ABR/mez segments 
-    char    *seg_duration;          // In sec units. It is used for transcoding and producing mp4 segments
+    /**
+     * @brief Encoder preset (speed/efficiency trade-off).
+     * @obligation Optional
+     * @default unused unless set (CLI reference: "medium")
+     * @domain ultrafast, superfast, veryfast, faster, fast, medium, slow, slower, veryslow
+     */
+    char    *preset;
+    /**
+     * @brief Maximum encoding bit rate (ffmpeg maxrate).
+     * @obligation Optional
+     * @default 0 (applied only if > 0)
+     * @domain integer > 0, bits/sec
+     * @note Auto-raised to video_bitrate when smaller (see the struct invariant).
+     */
+    int     rc_max_rate;
+    /**
+     * @brief Rate-control buffer size (ffmpeg bufsize).
+     * @obligation Optional
+     * @default 0 (applied only if > 0)
+     * @domain integer > 0, bits
+     * @note Auto-raised to video_bitrate when smaller (see the struct invariant).
+     */
+    int     rc_buffer_size;
+    /**
+     * @brief Audio ABR/mez segment duration, in timescale ticks.
+     * @obligation Conditional
+     * @default <= 0: derived from seg_duration when that is set
+     * @domain timescale ticks, > 0
+     * @pre Required when transcoding audio and neither seg_duration is set nor format is "mp4".
+     * @see seg_duration
+     */
+    int64_t audio_seg_duration_ts;
+    /**
+     * @brief Video ABR/mez segment duration, in timescale ticks.
+     * @obligation Conditional
+     * @default <= 0: derived from seg_duration when that is set
+     * @domain timescale ticks, > 0
+     * @pre Required when transcoding video (not image extraction) and neither seg_duration is set nor format is "mp4".
+     * @see seg_duration
+     */
+    int64_t video_seg_duration_ts;
+    /**
+     * @brief Segment duration in seconds (alternative to the *_seg_duration_ts fields).
+     * @obligation Conditional
+     * @default none (NULL)
+     * @domain a positive number as a string, in seconds
+     * @pre Required for format "segment".
+     */
+    char    *seg_duration;
+    /**
+     * @brief (Unused.)
+     * @internal Declared but not read by the library.
+     */
     int     seg_duration_fr;
+    /**
+     * @brief Index of the first fMP4 fragment.
+     * @obligation Optional
+     * @default 0
+     * @domain integer >= 0
+     */
     int     start_fragment_index;
-    int     force_keyint;           // Force a key (IDR) frame at this interval
-    int     force_equal_fduration;  // Force all frames to have equal frame duration 
-    char    *ecodec;                // Video encoder
-    char    *ecodec2;               // Audio encoder when xc_type & xc_audio
-    char    *dcodec;                // Video decoder
-    char    *dcodec2;               // Audio decoder when xc_type & xc_audio
-    int     gpu_index;              // GPU index for transcoding, must be >= 0
+    /**
+     * @brief Force an IDR key frame every N frames (sets the GOP size).
+     * @obligation Optional
+     * @default 0 (use the codec default GOP)
+     * @domain integer > 0, frames
+     */
+    int     force_keyint;
+    /**
+     * @brief Force all frames to have equal duration.
+     * @obligation Optional
+     * @default 0 (off)
+     * @domain 0 or 1
+     * @pre Only takes effect for format "fmp4-segment".
+     */
+    int     force_equal_fduration;
+    /**
+     * @brief Video encoder name.
+     * @obligation Optional
+     * @default "libx264" (CLI reference)
+     * @domain an ffmpeg encoder, e.g. libx264, libx265, h264_nvenc, hevc_nvenc, h264_videotoolbox, mjpeg
+     */
+    char    *ecodec;
+    /**
+     * @brief Audio encoder name (when xc_type includes audio).
+     * @obligation Optional
+     * @default "aac" (CLI reference)
+     * @domain aac, ac3, eac3, mp2, mp3
+     * @note May be forced to eac3 for Dolby Atmos.
+     */
+    char    *ecodec2;
+    /**
+     * @brief Video decoder name (used if non-empty).
+     * @obligation Optional
+     * @default none — auto-select (CLI reference: "")
+     * @domain h264, h264_cuvid, jpeg2000, hevc
+     */
+    char    *dcodec;
+    /**
+     * @brief Audio decoder name (used if non-empty).
+     * @obligation Optional
+     * @default none — auto-select (CLI reference: "")
+     * @domain e.g. aac, ac3, eac3
+     */
+    char    *dcodec2;
+    /**
+     * @brief GPU index for hardware transcoding.
+     * @obligation Optional
+     * @default -1 (no GPU)
+     * @domain integer >= 0 (applied only when >= 0)
+     */
+    int     gpu_index;
+    /**
+     * @brief Output (encoded) video height in pixels.
+     * @obligation Optional
+     * @default -1 (use the source height)
+     * @domain positive integer (e.g. 2160, 1080, 720), or -1
+     */
     int     enc_height;
+    /**
+     * @brief Output (encoded) video width in pixels.
+     * @obligation Optional
+     * @default -1 (use the source width)
+     * @domain positive integer (e.g. 3840, 1920, 1280), or -1
+     */
     int     enc_width;
-    char    *crypt_iv;              // 16-byte AES IV in hex [Optional, Default: Generated]
-    char    *crypt_key;             // 16-byte AES key in hex [Optional, Default: Generated]
-    char    *crypt_kid;             // 16-byte UUID in hex [Optional, required for CENC]
-    char    *crypt_key_url;         // Specify a key URL in the manifest [Optional, Default: key.bin]
-    int     skip_decoding;          // If set, then skip the packets until start_time_ts without decoding
+    /**
+     * @brief AES initialization vector (16 bytes, hex).
+     * @obligation Optional
+     * @default none — passed to the muxer only when set
+     * @domain 32 hex characters (16 bytes)
+     * @see crypt_scheme
+     */
+    char    *crypt_iv;
+    /**
+     * @brief AES content key (16 bytes, hex).
+     * @obligation Optional
+     * @default none — passed to the muxer only when set
+     * @domain 32 hex characters (16 bytes)
+     * @see crypt_scheme
+     */
+    char    *crypt_key;
+    /**
+     * @brief Key ID (KID): 16-byte UUID, hex-encoded.
+     * @obligation Conditional
+     * @domain 32 hex characters: ^[0-9a-fA-F]{32}$
+     * @pre Required for Common Encryption schemes (crypt_cenc, crypt_cbc1, crypt_cens, crypt_cbcs).
+     * @see crypt_scheme
+     */
+    char    *crypt_kid;
+    /**
+     * @brief Key URL written into the manifest.
+     * @obligation Optional
+     * @default none — written only when set
+     * @domain a URL string
+     * @see crypt_scheme
+     */
+    char    *crypt_key_url;
+    /**
+     * @brief Skip (do not decode) packets before start_time_ts.
+     * @obligation Optional
+     * @default 0 (off)
+     * @domain 0 or 1
+     * @pre Only takes effect when start_time_ts > 0.
+     */
+    int     skip_decoding;
 
+<<<<<<< Updated upstream
     crypt_scheme_t  crypt_scheme;   // Content protection / DRM / encryption [Optional, Default: crypt_none]
     xc_type_t       xc_type;        // Default: 0 means transcode 'everything'
     int             copy_mpegts;    // Create a copy of the input stream (only MPEGTS and SRT)
@@ -528,31 +760,324 @@ typedef struct xcparams_t {
     char        *watermark_shadow_color;    // Watermark shadow color
     char        *watermark_timecode;        // Watermark timecode string (i.e 00\:00\:00\:00)
     float       watermark_timecode_rate;    // Watermark timecode frame rate
+=======
+    /**
+     * @brief Content protection / encryption scheme.
+     * @obligation Optional
+     * @default crypt_none (no encryption)
+     * @domain see crypt_scheme_t
+     */
+    crypt_scheme_t  crypt_scheme;
+    /**
+     * @brief Kind of transcoding to perform.
+     * @obligation Optional
+     * @default xc_none, treated as xc_all (transcode everything) when stream_id < 0
+     * @domain see xc_type_t
+     * @warning Incompatible with stream_id >= 0, which selects a single stream and overrides this.
+     * @see stream_id
+     */
+    xc_type_t       xc_type;
+    /**
+     * @brief Copy the input elementary stream into the output.
+     * @obligation Optional
+     * @default 0 (off)
+     * @domain 0 or 1; MPEGTS/SRT/RTP inputs only
+     * @warning Requires format "fmp4-segment".
+     */
+    int             copy_mpegts;
+    /**
+     * @brief Use a custom (preprocessed) UDP input handler instead of the ffmpeg demuxer.
+     * @obligation Optional
+     * @default 0 (off)
+     * @domain 0 or 1
+     */
+    int         use_preprocessed_input;
+    /**
+     * @brief Whether the input is seekable.
+     * @obligation Optional
+     * @default 0 (not seekable)
+     * @domain 0 or 1
+     * @note A non-seekable stream with its moov box at the end causes many reads up to that atom.
+     */
+    int         seekable;
+    /**
+     * @brief Listen mode (wait for an incoming connection), for RTMP.
+     * @obligation Optional
+     * @default 1 (listen)
+     * @domain 0 or 1
+     * @see connection_timeout
+     */
+    int         listen;
+    /**
+     * @brief Watermark text to overlay.
+     * @obligation Optional
+     * @default none (no watermark)
+     * @domain string up to WATERMARK_STRING_SZ-1 characters
+     * @note Watermark priority is timecode > text > overlay image.
+     */
+    char        *watermark_text;
+    /**
+     * @brief Watermark X location (ffmpeg expression).
+     * @obligation Conditional
+     * @domain a position expression string, e.g. "W*0.05"
+     * @pre Must be non-empty when a text or timecode watermark is set.
+     */
+    char        *watermark_xloc;
+    /**
+     * @brief Watermark Y location (ffmpeg expression).
+     * @obligation Conditional
+     * @domain a position expression string, e.g. "H*0.9"
+     * @pre Must be non-empty when a text or timecode watermark is set.
+     */
+    char        *watermark_yloc;
+    /**
+     * @brief Watermark font size relative to frame height (font_size = value * height).
+     * @obligation Conditional
+     * @domain float in [0, 1]
+     * @pre Must be in range when a text or timecode watermark is set.
+     */
+    float       watermark_relative_sz;
+    /**
+     * @brief Watermark font color.
+     * @obligation Conditional
+     * @default none (CLI reference: white)
+     * @domain a color name or value
+     * @pre Must be non-empty when a text or timecode watermark is set.
+     */
+    char        *watermark_font_color;
+    /**
+     * @brief Draw a shadow behind the watermark text.
+     * @obligation Optional
+     * @default 0 (no shadow)
+     * @domain 0 or 1
+     * @pre When 1, watermark_shadow_color must be non-empty.
+     */
+    int         watermark_shadow;
+    /**
+     * @brief Path to an overlay image file.
+     * @obligation Optional
+     * @default none
+     * @domain a file path
+     * @note Read by the CLI (exc/elv_xc.c) to populate watermark_overlay; not read by the library.
+     */
+    char        *overlay_filename;
+    /**
+     * @brief Overlay image as an in-memory buffer.
+     * @obligation Conditional
+     * @default none
+     * @domain raw image bytes (length in watermark_overlay_len, type in watermark_overlay_type)
+     * @pre watermark_overlay_type must not be unknown_image when an overlay is used.
+     */
+    char        *watermark_overlay;
+    /**
+     * @brief Overlay image type.
+     * @obligation Conditional
+     * @default unknown_image
+     * @domain see image_type
+     * @pre Must be a known type when watermark_overlay is set.
+     */
+    image_type  watermark_overlay_type;
+    /**
+     * @brief Length of the watermark_overlay buffer.
+     * @internal Companion length field for watermark_overlay.
+     */
+    int         watermark_overlay_len;
+    /**
+     * @brief Watermark shadow color.
+     * @obligation Conditional
+     * @default none (CLI reference: white)
+     * @domain a color name or value
+     * @pre Required when watermark_shadow is 1.
+     */
+    char        *watermark_shadow_color;
+    /**
+     * @brief Burned-in timecode watermark.
+     * @obligation Optional
+     * @default none
+     * @domain a timecode string, e.g. 00:00:00:00
+     * @note Highest watermark priority (timecode > text > overlay).
+     * @see watermark_timecode_rate
+     */
+    char        *watermark_timecode;
+    /**
+     * @brief Frame rate for the timecode watermark.
+     * @obligation Conditional
+     * @default -1
+     * @domain float frames/sec, > 0
+     * @pre Required (> 0) when watermark_timecode is set.
+     */
+    float       watermark_timecode_rate;
+>>>>>>> Stashed changes
 
-    int         audio_index[MAX_STREAMS]; // Audio index(s) for mez making, may need to become an array of indexes
-    int         n_audio;                    // Number of entries in audio_index
-    int         sync_audio_to_stream_id;    // mpegts only, default is 0
-    int         bitdepth;                   // Can be 8, 10, 12
-    char        *max_cll;                   // Maximum Content Light Level (HDR only)
-    char        *master_display;            // Master display (HDR only)
-    int         video_layout;               // Video layout (eg. stereoscopic SBS)
-    int         stream_id;                  // Stream id to trasncode, should be >= 0
-    char        *filter_descriptor;         // Filter descriptor if tx-type == audio-merge
+    /**
+     * @brief Input audio stream indices to transcode.
+     * @obligation Optional
+     * @domain up to MAX_STREAMS entries, each a stream index >= 0; entries must be unique
+     * @see n_audio
+     */
+    int         audio_index[MAX_STREAMS];
+    /**
+     * @brief Number of valid entries in audio_index.
+     * @internal Companion length field for audio_index.
+     */
+    int         n_audio;
+    /**
+     * @brief Synchronize audio to the given video stream id.
+     * @obligation Optional
+     * @default -1 (disabled)
+     * @domain a stream id >= 0; MPEGTS/live with format "fmp4-segment" only
+     */
+    int         sync_audio_to_stream_id;
+    /**
+     * @brief Encoding bit depth.
+     * @obligation Optional
+     * @default 8 (the library sets 8 when unset)
+     * @domain 8, 10, or 12
+     */
+    int         bitdepth;
+    /**
+     * @brief HDR Maximum Content Light Level / FALL.
+     * @obligation Optional
+     * @default none (skipped if NULL, empty, or "0,0")
+     * @domain "maxCLL,maxFALL" e.g. "1514,172"; libx265 only
+     */
+    char        *max_cll;
+    /**
+     * @brief HDR mastering display metadata.
+     * @obligation Optional
+     * @default none (applied if non-empty)
+     * @domain an ffmpeg master-display string; libx265 only
+     * @pre If set, profile must be "main10".
+     * @see profile
+     */
+    char        *master_display;
+    /**
+     * @brief Video layout (mono / stereoscopic).
+     * @obligation Optional
+     * @default video_layout_mono (0)
+     * @domain see video_layout_t
+     */
+    int         video_layout;
+    /**
+     * @brief Transcode only the single input stream with this id.
+     * @obligation Optional
+     * @default -1 (all streams)
+     * @domain a stream id >= 0
+     * @warning Incompatible with xc_type / n_audio; requires a segment duration; overrides xc_type.
+     * @see xc_type
+     */
+    int         stream_id;
+    /**
+     * @brief ffmpeg filter-graph descriptor (for audio pan/merge/join).
+     * @obligation Conditional
+     * @default none
+     * @domain an ffmpeg filter description string
+     * @pre Required for xc_type audio-pan / audio-merge / audio-join.
+     * @warning Not validated by the library; a missing descriptor for those modes crashes at runtime.
+     */
+    char        *filter_descriptor;
+    /**
+     * @brief Muxing spec (for xc_type xc_mux).
+     * @obligation Conditional
+     * @default none
+     * @domain a newline-delimited muxing spec
+     * @pre Used when xc_type is xc_mux.
+     */
     char        *mux_spec;
-    int64_t     extract_image_interval_ts;  // Write frames at this interval. Default: -1 (will use DEFAULT_FRAME_INTERVAL_S)
-    int64_t     *extract_images_ts;         // Write frames at these timestamps. Mutually exclusive with extract_image_interval_ts
-    int         extract_images_sz;          // Size of the array extract_images_ts
+    /**
+     * @brief Extract a frame at this interval.
+     * @obligation Conditional
+     * @default -1 (use the default interval, DEFAULT_FRAME_INTERVAL_S)
+     * @domain timescale ticks; < 0 selects the default
+     * @warning Mutually exclusive with extract_images_ts.
+     * @see extract_images_ts
+     */
+    int64_t     extract_image_interval_ts;
+    /**
+     * @brief Extract frames at these explicit timestamps.
+     * @obligation Conditional
+     * @default none
+     * @domain an array of PTS timestamps (count in extract_images_sz)
+     * @pre Required when extract_images_sz > 0.
+     * @warning Mutually exclusive with extract_image_interval_ts.
+     */
+    int64_t     *extract_images_ts;
+    /**
+     * @brief Number of entries in extract_images_ts.
+     * @internal Companion length field for extract_images_ts.
+     */
+    int         extract_images_sz;
 
-    int         video_time_base;            // New video encoder time_base (1/video_time_base)
-    int         video_frame_duration_ts;    // Frame duration of the output video in time base
+    /**
+     * @brief Output video time base, as the denominator of 1/value.
+     * @obligation Optional
+     * @default 0 (use the input/derived time base)
+     * @domain integer > 0 (the denominator)
+     */
+    int         video_time_base;
+    /**
+     * @brief Fixed output video frame duration, in the video time base.
+     * @obligation Conditional
+     * @default 0 (derive per frame)
+     * @domain ticks in the video time base, > 0
+     * @warning Required (> 0) when deinterlace is bwdif.
+     * @see deinterlace
+     */
+    int         video_frame_duration_ts;
 
+    /**
+     * @brief Emit very low-level per-frame debug logs.
+     * @obligation Optional
+     * @default 0 (off)
+     * @domain 0 or 1
+     */
     int         debug_frame_level;
-    int         connection_timeout;         // Connection timeout in sec for RTMP or MPEGTS protocols
-    int         rotate;                     // For video transpose or rotation
+    /**
+     * @brief Connection timeout for live protocols.
+     * @obligation Optional
+     * @default 0 (no timeout; CLI reference: 10)
+     * @domain seconds; applied only when > 0, with listen and a live protocol
+     * @see listen
+     */
+    int         connection_timeout;
+    /**
+     * @brief Rotate / transpose the video.
+     * @obligation Optional
+     * @default 0 (no rotation)
+     * @domain 0, 90, 180, 270 degrees; 90/270 swap width and height
+     * @warning Cannot be combined with deinterlace or a watermark.
+     */
+    int         rotate;
+    /**
+     * @brief Encoder profile.
+     * @obligation Optional
+     * @default none (auto-select)
+     * @domain H.264: baseline, main, extended, high, high10, high422, high444; H.265: main, main10
+     * @pre HDR output (master_display set) requires "main10".
+     */
     char        *profile;
+    /**
+     * @brief Encoder level.
+     * @obligation Optional
+     * @default <= 0 (auto-select)
+     * @domain one of {9,10,11,12,13,20,21,22,30,31,32,40,41,42,50,51,52,60,61,62}, or <= 0
+     */
     int         level;
-    dif_type    deinterlace;                // Deinterlacing filter
-    char        *timecode;                  // Original timecode string
+    /**
+     * @brief Deinterlacing filter.
+     * @obligation Optional
+     * @default dif_none
+     * @domain see dif_type
+     * @warning Cannot be combined with rotate; bwdif requires video_frame_duration_ts > 0.
+     */
+    dif_type    deinterlace;
+    /**
+     * @brief Original (source) timecode, written as output metadata.
+     * @obligation Optional
+     * @default none
+     * @domain a timecode string, e.g. 01:00:00:00
+     */
+    char        *timecode;
 } xcparams_t;
 
 #define MAX_CODEC_NAME  256
