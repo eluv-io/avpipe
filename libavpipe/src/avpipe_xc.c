@@ -1748,6 +1748,9 @@ prepare_encoder(
             filename2 = "fsegment-audio-%05d.mp4";
     } else if (!strcmp(params->format, "image2")) {
         filename = "%d.jpeg";
+    } else if (!strcmp(params->format, "mpegts")) {
+        /* Continuous MPEGTS stream, single output (ffmpeg mpegts muxer) */
+        filename = "mpegts-stream.ts";
     }
 
     /*
@@ -2471,6 +2474,14 @@ encode_frame(
             outctx->frames_written++;
             out_handlers->avpipe_stater(outctx, stream_index, out_stat_frame_written);
         }
+
+        /*
+         * Video duration is computed as a PTS delta above - this is incorrect when there
+         * are B-frames as it can go negative (or a larger positive). Don't pass a
+         * negative duration to the muxer (ffmpeg logs warnings and sets it to 0 anyway).
+         */
+        if (output_packet->duration < 0)
+            output_packet->duration = 0;
 
         /* mux encoded frame */
         ret = av_interleaved_write_frame(format_context, output_packet);
@@ -3721,6 +3732,23 @@ avpipe_xc(
         goto xc_done;
     }
 
+    /*
+     * Format 'mpegts' - call io_open() explicitly.
+     * Background: segment.c and dashenc.c are designed to call io_open() because
+     * they have multiple outputs. For the avpipe 'mux' job we modified movenc.c to call
+     * io_open() so we can follow the same callback convention in avpipe.
+     * (we could remove the movenc.c change in the future and just have avpipe mux call)
+     */
+    if ((params->xc_type & xc_video) && !strcmp(params->format, "mpegts") &&
+        !encoder_context->format_context->pb) {
+        AVFormatContext *fc = encoder_context->format_context;
+        if (fc->io_open(fc, &fc->pb, fc->url, AVIO_FLAG_WRITE, NULL) < 0) {
+            elv_err("Failed to open mpegts output pb, url=%s", params->url);
+            rc = eav_write_header;
+            goto xc_done;
+        }
+    }
+
     if ((params->xc_type & xc_video) &&
         avformat_write_header(encoder_context->format_context, NULL) != eav_success) {
         elv_err("Failed to write video output file header, url=%s", params->url);
@@ -4096,6 +4124,14 @@ xc_done:
 
     if ((params->xc_type & xc_video) && rc == eav_success)
         av_write_trailer(encoder_context->format_context);
+
+    /* Format "mpegts" - we called io_open() explicitly so close explicitly */
+    if ((params->xc_type & xc_video) && !strcmp(params->format, "mpegts") &&
+        encoder_context->format_context->pb) {
+        AVFormatContext *fc = encoder_context->format_context;
+        fc->io_close2(fc, fc->pb);
+        fc->pb = NULL;
+    }
     if ((params->xc_type & xc_audio) && rc == eav_success) {
         for (int i=0; i<encoder_context->n_audio_output; i++)
             av_write_trailer(encoder_context->format_context2[i]);
@@ -4632,8 +4668,9 @@ check_params(
          strcmp(params->format, "mp4") &&
          strcmp(params->format, "fmp4") &&
          strcmp(params->format, "segment") &&
-         strcmp(params->format, "fmp4-segment"))) {
-        elv_err("Output format can be only \"dash\", \"hls\", \"image2\", \"mp4\", \"fmp4\", \"segment\", or \"fmp4-segment\", url=%s", params->url);
+         strcmp(params->format, "fmp4-segment") &&
+         strcmp(params->format, "mpegts"))) {
+        elv_err("Output format can be only \"dash\", \"hls\", \"image2\", \"mp4\", \"fmp4\", \"segment\", \"fmp4-segment\", or \"mpegts\", url=%s", params->url);
         return eav_param;
     }
 
