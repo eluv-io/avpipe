@@ -7,13 +7,13 @@ SHORT_ONLY=false
 while [[ $# -gt 0 ]]; do
   case "$1" in
     --av-pipe-path)
-      AV_PIPE_PATH="$2"  # Grab the next argument
+      AV_PIPE_PATH="${2:-}"
       AV_PIPE_MEDIA_DIR="$AV_PIPE_PATH/media"
-      shift 2       # Move past --message and its value
+      shift 2
       ;;
     --short)
-      SHORT_ONLY=true  # Turn on the feature flag
-      shift 1          # Move past just --short
+      SHORT_ONLY=true
+      shift 1
       ;;
     *)
       echo "Unknown argument: $1"
@@ -30,17 +30,17 @@ fi
 
 # Check that avpipe dir is found in container
 if [ ! -d "$AV_PIPE_PATH" ]; then
-  echo "Error: Directory '$AV_PIPE_PATH' cannot be found in container. Check volume mounts argument for container run command." >&2
+  echo "Error: Directory '$AV_PIPE_PATH' cannot be found in container. Check volume mounts argument for container run command."
   exit 1
 fi
 
 # Check if the media directoy is present in the avpipe directory
 if [ ! -d "$AV_PIPE_MEDIA_DIR" ]; then
-  echo "Error: Directory '$AV_PIPE_MEDIA_DIR' cannot be found. Check volume mounts argument for container run command." >&2
+  echo "Error: Directory '$AV_PIPE_MEDIA_DIR' cannot be found. Check volume mounts argument for container run command."
   exit 1
 fi
 
-cd $AV_PIPE_PATH
+cd "$AV_PIPE_PATH"
 
 if [ "$SHORT_ONLY" = "true" ]; then
     ./run_tests.sh --short
