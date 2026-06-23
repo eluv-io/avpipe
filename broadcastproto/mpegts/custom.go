@@ -214,7 +214,7 @@ func (f *MpegTsConsumer) ReaderLoop() {
 				"chan cap", cap(f.pktChan))
 		}
 
-		f.pp.ProcessDatagram(pkt.Data)
+		f.pp.ProcessDatagram(time.Now(), pkt.Data)
 		pkt.Release()
 	}
 }
