@@ -430,9 +430,7 @@ func TestSingleABRTranscodeWithOverlayWatermark(t *testing.T) {
 // Each variant runs with and without SkipDecoding.
 func TestSingleABRFade(t *testing.T) {
 	url := videoBigBuckBunnyPath
-	if fileMissing(url, fn()) {
-		return
-	}
+	checkFileExists(t, url);
 
 	fadeVariants := []struct {
 		name           string
