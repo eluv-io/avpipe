@@ -89,6 +89,10 @@ func (c CodecInfo) MarshalJSON() ([]byte, error) {
 // ExtractCodecInfo decodes an MP4 container and returns codec information for
 // all tracks. Supports AVC (avc1/avc3) and HEVC (hvc1/hev1) video tracks, and
 // E-AC-3 (ec-3) and AAC (mp4a) audio tracks.
+//
+// PENDING(SS) This function is not used and is replaced by ExtractCodecInfoLazy
+// It reads the entire file into memory (including ProRes which will return no streams).
+// Remove once we know we don't need full parsing
 func ExtractCodecInfo(r io.Reader) (infos []*CodecInfo, err error) {
 	const op = "mp4e.ExtractCodecInfo"
 	e := errors.T(op, errors.K.Invalid.Default())
@@ -97,6 +101,32 @@ func ExtractCodecInfo(r io.Reader) (infos []*CodecInfo, err error) {
 	if err != nil {
 		return nil, e("reason", "failed to parse MP4", "cause", sanitizeString(err.Error()))
 	}
+	return extractCodecInfoFromFile(mp4Data)
+}
+
+// ExtractCodecInfoLazy decodes an MP4 container and returns codec information for
+// all tracks. Supports AVC (avc1/avc3) and HEVC (hvc1/hev1) video tracks, and
+// E-AC-3 (ec-3) and AAC (mp4a) audio tracks.
+//
+// Reads only the box headers and the moov box and seeks past media payload.
+//
+// PENDING(SS) It can't parse elementary stream info - if that's needed we need to
+// load 'some' media data to extract NAL info.
+func ExtractCodecInfoLazy(r io.ReadSeeker) (infos []*CodecInfo, err error) {
+	const op = "mp4e.ExtractCodecInfoLazy"
+	e := errors.T(op, errors.K.Invalid.Default())
+
+	mp4Data, err := mp4.DecodeFile(r, mp4.WithDecodeMode(mp4.DecModeLazyMdat))
+	if err != nil {
+		return nil, e("reason", "failed to parse MP4", "cause", sanitizeString(err.Error()))
+	}
+	return extractCodecInfoFromFile(mp4Data)
+}
+
+// extractCodecInfoFromFile builds CodecInfo for every track of a decoded MP4.
+// It reads only moov-level boxes, so it is safe on a lazily decoded file
+func extractCodecInfoFromFile(mp4Data *mp4.File) (infos []*CodecInfo, err error) {
+	e := errors.T("mp4e.extractCodecInfoFromFile", errors.K.Invalid.Default())
 
 	// Fragmented MP4 (fMP4 init segment): moov is under mp4Data.Init.
 	// Regular MP4: moov is directly under mp4Data.
