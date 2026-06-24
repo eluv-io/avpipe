@@ -43,16 +43,16 @@ func TestProbeRTMPConnect(t *testing.T) {
 	probeInfo, err := avpipe.Probe(XCParams)
 
 	assert.NoError(t, err)
-	assert.Equal(t, "h264", probeInfo.StreamInfo[0].CodecName)
-	assert.Equal(t, 1920, probeInfo.StreamInfo[0].Width)
-	assert.Equal(t, 1080, probeInfo.StreamInfo[0].Height)
-	assert.Equal(t, 578, probeInfo.StreamInfo[0].Profile)
-	assert.Equal(t, 40, probeInfo.StreamInfo[0].Level)
+	assert.Equal(t, "h264", probeInfo.Streams[0].CodecName)
+	assert.Equal(t, 1920, probeInfo.Streams[0].Width)
+	assert.Equal(t, 1080, probeInfo.Streams[0].Height)
+	assert.Equal(t, 578, probeInfo.Streams[0].Profile)
+	assert.Equal(t, 40, probeInfo.Streams[0].Level)
 
-	assert.Equal(t, "aac", probeInfo.StreamInfo[1].CodecName)
-	assert.Equal(t, int64(55566), probeInfo.StreamInfo[1].BitRate)
-	assert.Equal(t, 2, probeInfo.StreamInfo[1].Channels)
-	assert.Equal(t, 3, probeInfo.StreamInfo[1].ChannelLayout)
+	assert.Equal(t, "aac", probeInfo.Streams[1].CodecName)
+	assert.Equal(t, int64(55566), probeInfo.Streams[1].BitRate)
+	assert.Equal(t, 2, probeInfo.Streams[1].Channels)
+	assert.Equal(t, 3, probeInfo.Streams[1].ChannelLayout)
 
 	liveSource.Stop()
 
@@ -82,7 +82,7 @@ func TestProbeRTMPListen(t *testing.T) {
 	goavpipe.InitIOHandler(&inputOpener{}, &outputOpener{})
 
 	done := make(chan bool, 1)
-	var probeInfo *avpipe.ProbeInfo
+	var probeInfo *goavpipe.ProbeInfo
 	var err error
 
 	go func() {
@@ -99,16 +99,16 @@ func TestProbeRTMPListen(t *testing.T) {
 	<-done
 	assert.NoError(t, err)
 	tlog.Info("Probe done", "probeInfo", fmt.Sprintf("%+v", *probeInfo))
-	assert.Equal(t, "h264", probeInfo.StreamInfo[0].CodecName)
-	assert.Equal(t, 1920, probeInfo.StreamInfo[0].Width)
-	assert.Equal(t, 1080, probeInfo.StreamInfo[0].Height)
-	assert.Equal(t, 578, probeInfo.StreamInfo[0].Profile)
-	assert.Equal(t, 40, probeInfo.StreamInfo[0].Level)
+	assert.Equal(t, "h264", probeInfo.Streams[0].CodecName)
+	assert.Equal(t, 1920, probeInfo.Streams[0].Width)
+	assert.Equal(t, 1080, probeInfo.Streams[0].Height)
+	assert.Equal(t, 578, probeInfo.Streams[0].Profile)
+	assert.Equal(t, 40, probeInfo.Streams[0].Level)
 
-	assert.Equal(t, "aac", probeInfo.StreamInfo[1].CodecName)
-	assert.Equal(t, int64(55566), probeInfo.StreamInfo[1].BitRate)
-	assert.Equal(t, 2, probeInfo.StreamInfo[1].Channels)
-	assert.Equal(t, 3, probeInfo.StreamInfo[1].ChannelLayout)
+	assert.Equal(t, "aac", probeInfo.Streams[1].CodecName)
+	assert.Equal(t, int64(55566), probeInfo.Streams[1].BitRate)
+	assert.Equal(t, 2, probeInfo.Streams[1].Channels)
+	assert.Equal(t, 3, probeInfo.Streams[1].ChannelLayout)
 
 	liveSource.Stop()
 }
@@ -137,7 +137,7 @@ func TestProbeRTMPNoStream(t *testing.T) {
 	probeInfo, err := avpipe.Probe(XCParams)
 
 	assert.Error(t, err)
-	assert.Equal(t, (*avpipe.ProbeInfo)(nil), probeInfo)
+	assert.Equal(t, (*goavpipe.ProbeInfo)(nil), probeInfo)
 }
 
 // 1) Starts ffmpeg for streaming UDP MPEGTS
@@ -174,16 +174,16 @@ func TestProbeUDPConnect(t *testing.T) {
 	probeInfo, err := avpipe.Probe(XCParams)
 
 	assert.NoError(t, err)
-	assert.Equal(t, "h264", probeInfo.StreamInfo[0].CodecName)
-	assert.Equal(t, 1280, probeInfo.StreamInfo[0].Width)
-	assert.Equal(t, 720, probeInfo.StreamInfo[0].Height)
-	assert.Equal(t, 100, probeInfo.StreamInfo[0].Profile)
-	assert.Equal(t, 32, probeInfo.StreamInfo[0].Level)
+	assert.Equal(t, "h264", probeInfo.Streams[0].CodecName)
+	assert.Equal(t, 1280, probeInfo.Streams[0].Width)
+	assert.Equal(t, 720, probeInfo.Streams[0].Height)
+	assert.Equal(t, 100, probeInfo.Streams[0].Profile)
+	assert.Equal(t, 32, probeInfo.Streams[0].Level)
 
-	assert.Equal(t, "ac3", probeInfo.StreamInfo[1].CodecName)
-	assert.Equal(t, int64(384000), probeInfo.StreamInfo[1].BitRate)
-	assert.Equal(t, 6, probeInfo.StreamInfo[1].Channels)
-	assert.Equal(t, 1551, probeInfo.StreamInfo[1].ChannelLayout)
+	assert.Equal(t, "ac3", probeInfo.Streams[1].CodecName)
+	assert.Equal(t, int64(384000), probeInfo.Streams[1].BitRate)
+	assert.Equal(t, 6, probeInfo.Streams[1].Channels)
+	assert.Equal(t, 1551, probeInfo.Streams[1].ChannelLayout)
 
 	liveSource.Stop()
 
@@ -212,7 +212,7 @@ func TestProbeUDPListen(t *testing.T) {
 	goavpipe.InitIOHandler(&inputOpener{}, &outputOpener{})
 
 	done := make(chan bool, 1)
-	var probeInfo *avpipe.ProbeInfo
+	var probeInfo *goavpipe.ProbeInfo
 	var err error
 
 	go func() {
@@ -229,16 +229,16 @@ func TestProbeUDPListen(t *testing.T) {
 
 	<-done
 	assert.NoError(t, err)
-	assert.Equal(t, "h264", probeInfo.StreamInfo[0].CodecName)
-	assert.Equal(t, 1280, probeInfo.StreamInfo[0].Width)
-	assert.Equal(t, 720, probeInfo.StreamInfo[0].Height)
-	assert.Equal(t, 100, probeInfo.StreamInfo[0].Profile)
-	assert.Equal(t, 32, probeInfo.StreamInfo[0].Level)
+	assert.Equal(t, "h264", probeInfo.Streams[0].CodecName)
+	assert.Equal(t, 1280, probeInfo.Streams[0].Width)
+	assert.Equal(t, 720, probeInfo.Streams[0].Height)
+	assert.Equal(t, 100, probeInfo.Streams[0].Profile)
+	assert.Equal(t, 32, probeInfo.Streams[0].Level)
 
-	assert.Equal(t, "ac3", probeInfo.StreamInfo[1].CodecName)
-	assert.Equal(t, int64(384000), probeInfo.StreamInfo[1].BitRate)
-	assert.Equal(t, 6, probeInfo.StreamInfo[1].Channels)
-	assert.Equal(t, 1551, probeInfo.StreamInfo[1].ChannelLayout)
+	assert.Equal(t, "ac3", probeInfo.Streams[1].CodecName)
+	assert.Equal(t, int64(384000), probeInfo.Streams[1].BitRate)
+	assert.Equal(t, 6, probeInfo.Streams[1].Channels)
+	assert.Equal(t, 1551, probeInfo.Streams[1].ChannelLayout)
 
 	liveSource.Stop()
 }
@@ -268,5 +268,5 @@ func TestProbeUDPNoStream(t *testing.T) {
 	probeInfo, err := avpipe.Probe(XCParams)
 
 	assert.Error(t, err)
-	assert.Equal(t, (*avpipe.ProbeInfo)(nil), probeInfo)
+	assert.Equal(t, (*goavpipe.ProbeInfo)(nil), probeInfo)
 }

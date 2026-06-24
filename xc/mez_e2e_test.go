@@ -1,13 +1,13 @@
 // End-to-end tests for mezzanine and ABR segment XC jobs.
 //
-//	Phase 1 (TestMezCreate): Transcode source file into mez part (fmp4)
+//	Phase 1 (TestMezCreate): Transcode a source file into mez part (fmp4)
 //	Phase 2 (TestABRCreate): Generate ABR segments from each mez part
 //
 // The test matrix is: resolution x encryption x watermark
 //
-// - resoution:  bypass, 720p, 540p, 360p
-// - encryption:  none, cenc, cbcs, aes-128
-// - watermark:   none, text, image  (only for sources with Watermark=true)
+// - Resoution:  bypass, 720p, 540p, 360p
+// - Encryption:  none, cenc, cbcs, aes-128
+// - Watermark:   none, text, image  (only for sources with Watermark=true)
 //
 // Each phase can also be run independently:
 //
@@ -15,10 +15,11 @@
 //	go test ./xc/ -run TestABRCreate  (comment out skip)
 //	go test ./xc/ -run TestEndToEnd
 //
-// Output and logs under ./test_run/  (mez/ and segs/)
+// Output goes under ../test_out/xc_test.<TestName>/mez and .../segs.
 package xc_test
 
 import (
+	"flag"
 	"fmt"
 	"math/big"
 	"os"
@@ -32,6 +33,7 @@ import (
 
 	"github.com/eluv-io/avpipe"
 	"github.com/eluv-io/avpipe/goavpipe"
+	"github.com/eluv-io/avpipe/internal/testutil"
 	"github.com/eluv-io/avpipe/mp4e"
 	"github.com/eluv-io/avpipe/pkg/validate"
 	"github.com/eluv-io/avpipe/xc"
@@ -45,30 +47,31 @@ import (
 // ---------------------------------------------------------------------------
 
 const mezSourceDir = "../media"
-const mezOutputDir = "../test_out/xc/mez"
-const segsOutputDir = "../test_out/xc/segs"
+const testOutBase = "../test_out"
 
-// keepMezOutput prevents cleanup of mez output
-const keepMezOutput = true
+var deleteMezOutput = flag.Bool("delete-mez-output", false, "delete mez output after tests")
+var deleteSegsOutput = flag.Bool("delete-segs-output", false, "delete segment output after tests")
+var srcOverrideAbsFilePath = flag.String("src-file", "", "absolute path to source file for TestEndToEndSingle (overrides default; fps and keyint are derived by probing)")
 
-// keepSegsOutput prevents cleanup of ABR segment output
-const keepSegsOutput = true
-
-// enableNvenc enables tests on NVIDIA GPU
-const enableNvenc = false
-
-// e2eMode is set to true when tests run inside TestEndToEnd.
-// PENDING(SS) simplify and remove this global so tests can run correctly in parallel
-var e2eMode bool
+func mezOutputDir(t *testing.T) string  { return path.Join(testOutBase, "xc_test."+t.Name(), "mez") }
+func segsOutputDir(t *testing.T) string { return path.Join(testOutBase, "xc_test."+t.Name(), "segs") }
 
 // mezTestSource defines a source file and its properties for mez testing.
-// Path is relative to mezSourceDir.
+// Path is relative to mezSourceDir, or absolute.
 type mezTestSource struct {
-	Path        string // file name within mezSourceDir
+	Path        string // file name within mezSourceDir, or an absolute path
 	FrameRate   string // frame rate as "num/den" (e.g. "30000/1001")
 	ForceKeyInt int32  // key frame interval in frames (e.g. 48)
 	Watermark   bool   // if true, also run watermarked ABR variants
 	Ecodec      string // video encoder name; default "libx264" when empty
+}
+
+// mezURL returns the resolved source URL for src.
+func mezURL(src mezTestSource) string {
+	if filepath.IsAbs(src.Path) {
+		return src.Path
+	}
+	return path.Join(mezSourceDir, src.Path)
 }
 
 // mezTestSources is the list of source files used by TestMezCreate.
@@ -90,6 +93,7 @@ var mezTestSources = []mezTestSource{
 	{"video-960.mp4", "30/1", 60, false, ""},
 	{"TOS0_FHD_2_H264_60s_CCBYblendercloud.mp4", "24/1", 48, false, ""},
 	{"TOS8_FHD_51-2_PRHQ_60s_CCBYblendercloud.mov", "24000/1001", 48, false, ""},
+	{"yuvj420p.mov", "30/1", 60, false, "libx265"}, // test if color_range full/pc is preserved
 
 	// Currently these files don't work
 	//{"bbb_sunflower_1080p_29_97_fps_normal.mp4", "30000/1001", 60, false, ""}, // Broken - file actually 30/1 fps
@@ -104,16 +108,20 @@ var mezTestSources = []mezTestSource{
 // duplicates with the same Path (e.g. when the same file is encoded with different codecs).
 // Used as the test subtest name and as the output directory name.
 func mezTestSourceID(src mezTestSource) string {
-	id := strings.TrimSuffix(src.Path, path.Ext(src.Path))
+	p := src.Path
+	if filepath.IsAbs(p) {
+		p = filepath.Base(p)
+	}
+	id := strings.TrimSuffix(p, path.Ext(p))
 	if src.Ecodec != "" && src.Ecodec != "libx264" {
 		id += "_" + src.Ecodec
 	}
 	return id
 }
 
-// Append nvenc-encoded variants when enableNvenc is set
+// Append nvenc-encoded variants when an NVIDIA GPU is available.
 func init() {
-	if !enableNvenc {
+	if !testutil.NvidiaExist() {
 		return
 	}
 	mezTestSources = append(mezTestSources,
@@ -151,7 +159,7 @@ func parseFrameRate(s string) *big.Rat {
 	return r
 }
 
-// mezProfileForSource builds the encoding + verification profile for a given
+// mezProfileForSource builds the encoding and verification profile for a given
 // source.
 func mezProfileForSource(src mezTestSource) *mezTestProfile {
 	frameRate := parseFrameRate(src.FrameRate)
@@ -159,7 +167,7 @@ func mezProfileForSource(src mezTestSource) *mezTestProfile {
 
 	params := goavpipe.NewXcParams()
 	params.Format = "fmp4-segment"
-	params.Url = path.Join(mezSourceDir, src.Path)
+	params.Url = mezURL(src)
 	params.Ecodec = src.Ecodec
 	if params.Ecodec == "" {
 		params.Ecodec = "libx264"
@@ -224,7 +232,7 @@ func (w watermarkType) suffix() string {
 // abrVariant defines a DASH/HLS encoding variant to generate from a mez part.
 type abrVariant struct {
 	Name       string               // subtest name
-	RepDir     string               // representation subdirectory (e.g. "h264_720_cenc_wmtxt")
+	RepDir     string               // representation subdirectory (e.g. "720_cenc_wmtxt")
 	Format     string               // "dash" or "hls"
 	Bypass     bool                 // true = copy without transcoding
 	Height     int32                // target height (-1 = preserve source)
@@ -237,10 +245,10 @@ type abrVariant struct {
 
 // abrBaseVariants defines the encoding ladder without encryption or watermark.
 var abrBaseVariants = []abrVariant{
-	{"bypass", "h264_bypass", "dash", true, -1, -1, -1, goavpipe.CryptNone, wmNone, false},
-	{"720p", "h264_720", "dash", false, 720, 1280, 5000000, goavpipe.CryptNone, wmNone, false},
-	{"540p", "h264_540", "dash", false, 540, 960, 3000000, goavpipe.CryptNone, wmNone, false},
-	{"360p", "h264_360", "dash", false, 360, 640, 1000000, goavpipe.CryptNone, wmNone, false},
+	{"bypass", "bypass", "dash", true, -1, -1, -1, goavpipe.CryptNone, wmNone, false},
+	{"720p", "720", "dash", false, 720, 1280, 5000000, goavpipe.CryptNone, wmNone, false},
+	{"540p", "540", "dash", false, 540, 960, 3000000, goavpipe.CryptNone, wmNone, false},
+	{"360p", "360", "dash", false, 360, 640, 1000000, goavpipe.CryptNone, wmNone, false},
 }
 
 // encryptionSchemes is the set of encryption options applied to each base variant.
@@ -257,7 +265,7 @@ var encryptionSchemes = []struct {
 // watermarkOptions applied to each variant (wmNone is always included).
 var watermarkOptions = []struct {
 	WM      watermarkType
-	NeedsWM bool // only include for sources with Watermark=true
+	NeedsWM bool // only include it for sources with Watermark=true
 }{
 	{wmNone, false},
 	{wmText, true},
@@ -289,13 +297,18 @@ func buildABRVariants() []abrVariant {
 	return variants
 }
 
-func fileMissing(url string) bool {
-	info, err := os.Stat(url)
-	if err != nil {
-		log.Warn("Skipping, input file not accessible", "file", url, "err", err)
-		return true
+func removeAll(dir string) {
+	if err := os.RemoveAll(dir); err != nil {
+		log.Warn("failed to remove directory", "dir", dir, "err", err)
 	}
-	return info.IsDir()
+}
+
+func skipIfFileMissing(t *testing.T, url string) {
+	t.Helper()
+	info, err := os.Stat(url)
+	if err != nil || info.IsDir() {
+		t.Skipf("input file not accessible: %s", url)
+	}
 }
 
 // videoColor groups general video color metadata for the first video stream of a file,
@@ -319,7 +332,7 @@ func probeVideoColor(t *testing.T, url string) videoColor {
 	probeParams.Url = url
 	info, err := avpipe.Probe(probeParams)
 	require.NoError(t, err, "probe failed for %s", url)
-	for _, si := range info.StreamInfo {
+	for _, si := range info.Streams {
 		if si.CodecType == "video" {
 			return videoColor{
 				Primaries: si.ColorPrimaries,
@@ -332,12 +345,66 @@ func probeVideoColor(t *testing.T, url string) videoColor {
 	return videoColor{}
 }
 
-// assertColorMatches compares two videoColor sets with field-level error messages.
-func assertColorMatches(t *testing.T, want, got videoColor, label, url string) {
+// mezSourceFromFile probes url and returns a mezTestSource with Path set to url,
+// FrameRate derived from the first video stream, ForceKeyInt set to round(2 × fps),
+// and Ecodec set to "libx265" if the source is HEVC.
+func mezSourceFromFile(t *testing.T, url string) mezTestSource {
 	t.Helper()
-	assert.Equal(t, want.Primaries, got.Primaries, "color_primaries pass-through (%s) in %s", label, url)
-	assert.Equal(t, want.Transfer, got.Transfer, "color_transfer pass-through (%s) in %s", label, url)
-	assert.Equal(t, want.Space, got.Space, "color_space pass-through (%s) in %s", label, url)
+	goavpipe.InitIOHandler(
+		&xc.FileInputOpener{URL: url},
+		&xc.FileOutputOpener{Dir: filepath.Dir(url)},
+	)
+	probeParams := goavpipe.NewXcParams()
+	probeParams.Url = url
+	info, err := avpipe.Probe(probeParams)
+	require.NoError(t, err, "probe failed for %s", url)
+	for _, si := range info.Streams {
+		if si.CodecType == "video" && si.FrameRate != nil {
+			num := si.FrameRate.Num().Int64()
+			den := si.FrameRate.Denom().Int64()
+			keyInt := int32((2*num + den/2) / den) // round(2 * fps)
+			ecodec := ""
+			if si.CodecName == "hevc" {
+				ecodec = "libx265"
+			}
+			return mezTestSource{Path: url, FrameRate: si.FrameRate.RatString(), ForceKeyInt: keyInt, Ecodec: ecodec}
+		}
+	}
+	t.Fatalf("no video stream found in %s", url)
+	return mezTestSource{}
+}
+
+// assertColorMatches compares two videoColor sets with field-level error messages.
+//
+// For primaries/trc/space:
+//   - If the source value is known (not "unknown"), assert it passes through unchanged.
+//   - If the source value is "unknown" and expectSynthesis is true (DASH/HLS output),
+//     dash_synthesize_color_defaults fills in BT.709 when all three fields are
+//     UNSPECIFIED and color_range is known — assert "bt709" in that case.
+//   - Otherwise skip (mez/fmp4-segment output does not synthesize).
+//
+// The color_range is always asserted verbatim.
+//
+// NOT TESTED: partial synthesis — when one or two of primaries/trc/space are set and
+// dash_synthesize_color_defaults fills in the remaining fields to match. Covering that
+// case would require sources with partial color metadata, which none of the current
+// mezTestSources have.
+func assertColorMatches(t *testing.T, want, got videoColor, label, url string, expectSynthesis bool) {
+	t.Helper()
+	// synthesis fires only when color_range is known and all three primaries/trc/space are UNSPECIFIED
+	synthesized := expectSynthesis &&
+		want.Range != "" && want.Range != "unknown" &&
+		want.Primaries == "unknown" && want.Transfer == "unknown" && want.Space == "unknown"
+	assertColor := func(wantVal, gotVal, field string) {
+		if wantVal != "" && wantVal != "unknown" {
+			assert.Equal(t, wantVal, gotVal, "%s pass-through (%s) in %s", field, label, url)
+		} else if synthesized {
+			assert.Equal(t, "bt709", gotVal, "synthesized %s (%s) in %s", field, label, url)
+		}
+	}
+	assertColor(want.Primaries, got.Primaries, "color_primaries")
+	assertColor(want.Transfer, got.Transfer, "color_transfer")
+	assertColor(want.Space, got.Space, "color_space")
 	assert.Equal(t, want.Range, got.Range, "color_range pass-through (%s) in %s", label, url)
 }
 
@@ -352,18 +419,22 @@ func assertColorMatches(t *testing.T, want, got videoColor, label, url string) {
 // TestMezCreate creates mez parts from each source in mezTestSources and
 // validates them.
 func TestMezCreate(t *testing.T) {
-	if !e2eMode {
-		t.Skip("Use TestEndToEnd or comment out this skip")
+	mezDir := mezOutputDir(t)
+	if *deleteMezOutput {
+		t.Cleanup(func() { removeAll(mezDir) })
 	}
-	for _, src := range mezTestSources {
+	t.Skip("run via TestEndToEnd, TestEndToEndSingle, or TestEndToEndBT709Synthesis")
+	runMezCreate(t, mezTestSources, mezDir)
+}
+
+func runMezCreate(t *testing.T, sources []mezTestSource, mezDir string) {
+	t.Helper()
+	for _, src := range sources {
 		t.Run(mezTestSourceID(src), func(t *testing.T) {
-			url := path.Join(mezSourceDir, src.Path)
+			url := mezURL(src)
 			log.Info("STARTING TestMezCreate", "source", url)
 
-			if fileMissing(url) {
-				t.Skipf("source file missing: %s", url)
-				return
-			}
+			skipIfFileMissing(t, url)
 
 			// Capture source color metadata so we can verify mez parts pass it through
 			// to the mp4 'colr' atom (UNSPECIFIED fields are passed through unchanged).
@@ -379,12 +450,9 @@ func TestMezCreate(t *testing.T) {
 
 			// Output directory per source file.
 			baseName := mezTestSourceID(src)
-			videoMezDir := path.Join(mezOutputDir, baseName)
+			videoMezDir := path.Join(mezDir, baseName)
 			err := os.MkdirAll(videoMezDir, 0755)
 			require.NoError(t, err)
-			if !keepMezOutput && !e2eMode {
-				t.Cleanup(func() { os.RemoveAll(videoMezDir) })
-			}
 
 			// --- Stage 1: Create video mez parts ---
 			goavpipe.InitIOHandler(
@@ -449,10 +517,10 @@ func TestMezCreate(t *testing.T) {
 					)
 					probeInfo, err := avpipe.Probe(probeParams)
 					require.NoError(t, err, "Probe failed for %s", partFile)
-					require.NotEmpty(t, probeInfo.StreamInfo, "no streams in %s", partFile)
+					require.NotEmpty(t, probeInfo.Streams, "no streams in %s", partFile)
 
 					// Check video stream properties
-					for _, si := range probeInfo.StreamInfo {
+					for _, si := range probeInfo.Streams {
 						if si.CodecType == "video" {
 							assert.Equal(t, 720, si.Height, "height mismatch")
 							assert.Equal(t, 1280, si.Width, "width mismatch")
@@ -472,7 +540,7 @@ func TestMezCreate(t *testing.T) {
 								Space:     si.ColorSpace,
 								Range:     si.ColorRange,
 							}
-							assertColorMatches(t, srcColor, mezColor, "mez", partFile)
+							assertColorMatches(t, srcColor, mezColor, "mez", partFile, false)
 						}
 					}
 				})
@@ -488,29 +556,37 @@ func TestMezCreate(t *testing.T) {
 // TestABRCreate generates DASH/HLS segments from mez parts and validates them.
 // It uses contiguous segment start numbers and PTS to mimic the production use case.
 //
-// - re-runs the mez creation if parts are not already on disk.
+// - Re-runs the mez creation if parts are not already on disk.
 // - Encrypted segments are decrypted before validation.
 //
 // Validation:
 //   - Init segment codec config (SPS/PPS/VPS) is identical across parts
 //   - Consecutive DTS and equal frame durations within and across chunks
 //   - Correct segment/fragment numbering across parts
-//   - Expected frame counts (except last segment)
+//   - Expected frame counts (except the last segment)
 func TestABRCreate(t *testing.T) {
-	if !e2eMode {
-		t.Skip("Use TestEndToEnd or comment out this skip")
+	mezDir := mezOutputDir(t)
+	segsDir := segsOutputDir(t)
+	if *deleteMezOutput {
+		t.Cleanup(func() { removeAll(mezDir) })
 	}
-	for _, src := range mezTestSources {
+	if *deleteSegsOutput {
+		t.Cleanup(func() { removeAll(segsDir) })
+	}
+	t.Skip("run via TestEndToEnd, TestEndToEndSingle, or TestEndToEndBT709Synthesis")
+	runABRCreate(t, mezTestSources, mezDir, segsDir)
+}
+
+func runABRCreate(t *testing.T, sources []mezTestSource, mezDir, segsDir string) {
+	t.Helper()
+	for _, src := range sources {
 		t.Run(mezTestSourceID(src), func(t *testing.T) {
-			url := path.Join(mezSourceDir, src.Path)
-			if fileMissing(url) {
-				t.Skipf("source file missing: %s", url)
-				return
-			}
+			url := mezURL(src)
+			skipIfFileMissing(t, url)
 
 			profile := mezProfileForSource(src)
 			baseName := mezTestSourceID(src)
-			videoMezDir := path.Join(mezOutputDir, baseName)
+			videoMezDir := path.Join(mezDir, baseName)
 
 			// Ensure mez parts exist (create if needed)
 			partFiles := ensureMezParts(t, src, profile, videoMezDir)
@@ -533,17 +609,17 @@ func TestABRCreate(t *testing.T) {
 				t.Run(v.Name, func(t *testing.T) {
 					// State carried across parts for continuity
 					var (
-						nextSegNum  int                 = 1 // next chunk file number
+						nextSegNum                      = 1 // next chunk file number
 						nextFragIdx int32               = 1 // next mfhd sequence number
 						nextPts     int64               = 0 // next starting PTS/DTS
-						refInitInfo *xc.InitSegmentInfo     // init from first part
-						prevResult  *abrPartResult          // result from previous part
+						refInitInfo *xc.InitSegmentInfo     // init from the first part
+						prevResult  *abrPartResult          // result from the previous part
 					)
 
 					for partIdx, partFile := range partFiles {
 						isLastPart := partIdx == len(partFiles)-1
 						partName := fmt.Sprintf("part_%02d", partIdx+1)
-						abrDir := path.Join(segsOutputDir, baseName, v.RepDir, partName)
+						abrDir := path.Join(segsDir, baseName, v.RepDir, partName)
 
 						t.Run(partName, func(t *testing.T) {
 							result := generateAndValidateABRPart(t, v, partFile, abrDir, profile,
@@ -568,7 +644,7 @@ func TestABRCreate(t *testing.T) {
 							require.NoError(t, iErr, "ValidateInitSegment failed for %s", initFile)
 
 							// Color metadata must round-trip from source through mez to ABR 'colr' atom.
-							assertColorMatches(t, srcColor, probeVideoColor(t, initFile), "abr-init", initFile)
+							assertColorMatches(t, srcColor, probeVideoColor(t, initFile), "abr-init", initFile, true)
 
 							if partIdx == 0 {
 								refInitInfo = initInfo
@@ -602,7 +678,7 @@ func ensureMezParts(t *testing.T, src mezTestSource, profile *mezTestProfile, vi
 	}
 
 	// No parts on disk — create them
-	url := path.Join(mezSourceDir, src.Path)
+	url := mezURL(src)
 	err := os.MkdirAll(videoMezDir, 0755)
 	require.NoError(t, err)
 
@@ -618,7 +694,7 @@ func ensureMezParts(t *testing.T, src mezTestSource, profile *mezTestProfile, vi
 	return partFiles
 }
 
-// abrPartResult carries continuity state from one part to the next.
+// abrPartResult carries a continuity state from one part to the next.
 type abrPartResult struct {
 	NextSegNum  int    // next chunk file number (for StartSegmentStr)
 	NextFragIdx int32  // next mfhd sequence number (for StartFragmentIndex)
@@ -643,9 +719,6 @@ func generateAndValidateABRPart(
 
 	err := os.MkdirAll(abrDir, 0755)
 	require.NoError(t, err)
-	if !keepSegsOutput && !e2eMode {
-		t.Cleanup(func() { os.RemoveAll(abrDir) })
-	}
 
 	// Probe the mez part to get timescale for VideoSegDurationTs
 	goavpipe.InitIOHandler(
@@ -656,10 +729,10 @@ func generateAndValidateABRPart(
 	probeParams.Url = partFile
 	probeInfo, err := avpipe.Probe(probeParams)
 	require.NoError(t, err, "Probe failed for %s", partFile)
-	require.NotEmpty(t, probeInfo.StreamInfo, "no streams in %s", partFile)
+	require.NotEmpty(t, probeInfo.Streams, "no streams in %s", partFile)
 
 	var timescale int64
-	for _, si := range probeInfo.StreamInfo {
+	for _, si := range probeInfo.Streams {
 		if si.CodecType == "video" {
 			// TimeBase is num/den (e.g. 1/12288); timescale = denominator
 			timescale = si.TimeBase.Denom().Int64()
@@ -719,6 +792,7 @@ func generateAndValidateABRPart(
 		params.WatermarkOverlayType = goavpipe.PngImage
 		params.WatermarkXLoc = "main_w/2-overlay_w/2"
 		params.WatermarkYLoc = "main_h/2-overlay_h/2"
+	case wmNone:
 	}
 
 	// Write XCPARAMS file for debugging
@@ -763,7 +837,9 @@ func generateAndValidateABRPart(
 		params.WatermarkText,
 		params.WatermarkOverlayLen,
 	)
-	os.WriteFile(xcparamsFile, []byte(xcparamsContent), 0644)
+	if err = os.WriteFile(xcparamsFile, []byte(xcparamsContent), 0644); err != nil {
+		log.Warn("failed to write file", "file", xcparamsFile, "err", err)
+	}
 
 	goavpipe.InitIOHandler(
 		&xc.FileInputOpener{URL: partFile},
@@ -795,6 +871,9 @@ func generateAndValidateABRPart(
 			scheme = mp4e.CryptCBCS
 		case goavpipe.CryptAES128:
 			scheme = mp4e.CryptAES128
+		case goavpipe.CryptNone:
+		case goavpipe.CryptCBC1:
+		case goavpipe.CryptCENS:
 		}
 
 		// Decrypt init segment
@@ -918,26 +997,58 @@ func generateAndValidateABRPart(
 	return partResult
 }
 
-// TestEndToEnd runs all phases in sequence, reusing intermediate output.
-// Cleanup happens once at the end (unless keepMezOutput/keepSegsOutput are set).
-//
-// Run:
-// - individual phases:  go test ./xc/ -run TestMezCreate
-// - full pipeline:      go test ./xc/ -run TestEndToEnd
-func TestEndToEnd(t *testing.T) {
-	e2eMode = true
-	defer func() { e2eMode = false }()
+// runE2E runs both phases against the given sources and cleans up.
+func runE2E(t *testing.T, sources []mezTestSource, mezDir, segsDir string) {
+	t.Helper()
+	t.Run("phase1-mez", func(t *testing.T) { runMezCreate(t, sources, mezDir) })
+	t.Run("phase2-abr", func(t *testing.T) { runABRCreate(t, sources, mezDir, segsDir) })
 
-	t.Run("phase1-mez", TestMezCreate)
-	t.Run("phase2-abr", TestABRCreate)
-
-	// Cleanup all output after both phases complete
 	t.Cleanup(func() {
-		if !keepMezOutput {
-			os.RemoveAll(mezOutputDir)
+		if *deleteMezOutput {
+			removeAll(mezDir)
 		}
-		if !keepSegsOutput {
-			os.RemoveAll(segsOutputDir)
+		if *deleteSegsOutput {
+			removeAll(segsDir)
 		}
 	})
+}
+
+// TestEndToEnd runs all phases against the full mezTestSources matrix.
+// Skipped under -short; use TestEndToEndSingle for quick feedback.
+//
+// Run:
+// - Individual phases:  go test ./xc/ -run TestMezCreate
+// - Full pipeline:      go test ./xc/ -run TestEndToEnd
+func TestEndToEnd(t *testing.T) {
+	if testing.Short() {
+		t.Skip("use TestEndToEndSingle for a quick smoke test")
+	}
+	runE2E(t, mezTestSources, mezOutputDir(t), segsOutputDir(t))
+}
+
+// TestEndToEndSingle runs the full mez + ABR pipeline on a single small source.
+// Suitable for quick development feedback; not skipped under -short.
+//
+// Override the source file with -src-file (absolute path):
+//
+//	go test ./xc/ -run TestEndToEndSingle -src-file /abs/path/to/file.mov
+func TestEndToEndSingle(t *testing.T) {
+	src := mezTestSource{"bbb_1080p_30fps_10sec.mp4", "30/1", 60, false, ""}
+	if *srcOverrideAbsFilePath != "" {
+		src = mezSourceFromFile(t, *srcOverrideAbsFilePath)
+	}
+	runE2E(t, []mezTestSource{src}, mezOutputDir(t), segsOutputDir(t))
+}
+
+// TestEndToEndBT709Synthesis exercises dash_synthesize_color_defaults using a
+// source that has color_range=tv but unknown primaries/trc/space. The ABR init
+// segment must contain color_primaries=bt709, color_trc=bt709, color_space=bt709
+// synthesized by dash_synthesize_color_defaults.
+func TestEndToEndBT709Synthesis(t *testing.T) {
+	if testing.Short() {
+		t.Skip("skipping slow transcoding test in short mode")
+	}
+	runE2E(t, []mezTestSource{
+		{"03_caminandes_llamigos_h265_1080p.mp4", "24/1", 48, false, ""},
+	}, mezOutputDir(t), segsOutputDir(t))
 }
