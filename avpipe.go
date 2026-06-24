@@ -468,9 +468,9 @@ func AVPipeWriteOutput(handler C.int64_t, fd C.int64_t, buf *C.uint8_t, sz C.int
 
 // AVPipeWriteOutputGo writes the given buffer to the goavpipe.OutputHandler
 // pointed to by fd in the table of handler.
-// The optional allowTake parameter when true commits the caller to no modification
-// of the buffer thus allowing the callee to take ownership of the buffer.
-func AVPipeWriteOutputGo(handler int64, fd int64, buf []byte, allowTake ...bool) int {
+// The allowTake parameter when true commits the caller to no modification of
+// the buffer thus allowing the callee to take ownership of the buffer.
+func AVPipeWriteOutputGo(handler int64, fd int64, buf []byte, allowTake bool) int {
 	if len(buf) == 0 {
 		return 0
 	}
@@ -491,12 +491,7 @@ func AVPipeWriteOutputGo(handler int64, fd int64, buf []byte, allowTake ...bool)
 		return -1
 	}
 
-	canTake := false
-	if len(allowTake) > 0 {
-		canTake = allowTake[0]
-	}
-
-	n, err := h.OutWriter(C.int64_t(fd), buf, canTake)
+	n, err := h.OutWriter(C.int64_t(fd), buf, allowTake)
 	if err != nil {
 		return -1
 	}
