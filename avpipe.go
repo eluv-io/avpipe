@@ -463,10 +463,14 @@ func AVPipeWriteOutput(handler C.int64_t, fd C.int64_t, buf *C.uint8_t, sz C.int
 	gobuf := make([]byte, sz)
 	C.memcpy(unsafe.Pointer(&gobuf[0]), unsafe.Pointer(buf), C.size_t(sz))
 
-	return C.int(AVPipeWriteOutputGo(int64(handler), int64(fd), gobuf))
+	return C.int(AVPipeWriteOutputGo(int64(handler), int64(fd), gobuf, true))
 }
 
-func AVPipeWriteOutputGo(handler int64, fd int64, buf []byte) int {
+// AVPipeWriteOutputGo writes the given buffer to the goavpipe.OutputHandler
+// pointed to by fd in the table of handler.
+// The optional allowTake parameter when true commits the caller to no modification
+// of the buffer thus allowing the callee to take ownership of the buffer.
+func AVPipeWriteOutputGo(handler int64, fd int64, buf []byte, allowTake ...bool) int {
 	if len(buf) == 0 {
 		return 0
 	}
@@ -487,7 +491,12 @@ func AVPipeWriteOutputGo(handler int64, fd int64, buf []byte) int {
 		return -1
 	}
 
-	n, err := h.OutWriter(C.int64_t(fd), buf)
+	canTake := false
+	if len(allowTake) > 0 {
+		canTake = allowTake[0]
+	}
+
+	n, err := h.OutWriter(C.int64_t(fd), buf, canTake)
 	if err != nil {
 		return -1
 	}
@@ -514,9 +523,33 @@ func AVPipeWriteMuxOutput(fd C.int64_t, buf *C.uint8_t, sz C.int) C.int {
 	return C.int(n)
 }
 
-func (h *ioHandler) OutWriter(fd C.int64_t, buf []byte) (int, error) {
+func (h *ioHandler) OutWriter(fd C.int64_t, buf []byte, canTake bool) (int, error) {
+	// Taker is an optional interface of OutputHandler where 'buf' is taken by
+	// the receiver which then assumes the ownership of that buffer (as opposed
+	// to the io.Writer where the caller keeps the ownership of the buffer).
+	// NOTE:
+	// * after calling 'Take' the caller must not modify the passed in buffer.
+	// * the Taker interface is defined and used in avcache-go/cache for page segments
+	type Taker interface {
+		Take(b []byte) error
+	}
+
 	outHandler := h.getOutTable(int64(fd))
-	n, err := outHandler.Write(buf)
+
+	var taker Taker
+	if canTake {
+		taker, _ = outHandler.(Taker)
+	}
+
+	var n int
+	var err error
+	if taker != nil {
+		n = len(buf)
+		err = taker.Take(buf)
+	} else {
+		n, err = outHandler.Write(buf)
+	}
+
 	if traceIo {
 		goavpipe.Log.Debug("OutWriter written", "n", n, "error", err)
 	}
