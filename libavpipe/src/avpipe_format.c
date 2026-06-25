@@ -132,6 +132,37 @@ is_custom_input(
     return 1;
 }
 
+int
+is_bypass_bframes(
+    coderctx_t *decoder_context,
+    xcparams_t *params,
+    int stream_index)
+{
+    if (!decoder_context || !params ||
+        stream_index < 0 ||
+        stream_index >= MAX_STREAMS ||
+        stream_index != decoder_context->video_stream_index ||
+        !params->bypass_transcoding ||
+        !params->format ||
+        strcmp(params->format, "dash"))
+        return 0;
+
+    if (decoder_context->codec_context[stream_index] &&
+        decoder_context->codec_context[stream_index]->has_b_frames > 0)
+        return 1;
+
+    if (decoder_context->codec_parameters[stream_index] &&
+        decoder_context->codec_parameters[stream_index]->video_delay > 0)
+        return 1;
+
+    if (decoder_context->stream[stream_index] &&
+        decoder_context->stream[stream_index]->codecpar &&
+        decoder_context->stream[stream_index]->codecpar->video_delay > 0)
+        return 1;
+
+    return 0;
+}
+
 
 int
 num_audio_output(
@@ -464,6 +495,28 @@ is_dolby_atmos(
 }
 
 /*
+ * Detect Dolby Vision: returns 1 if the stream carries a Dolby Vision
+ * configuration, 0 otherwise. Two signals are checked:
+ *   1. codec_tag is dvh1 or dvhe — these sample entry types are Dolby Vision
+ *      by definition, even without a DOVI side-data record.
+ *   2. AV_PKT_DATA_DOVI_CONF side data is present on codecpar — covers
+ *      hvc1/hev1+dvvC (Profile 8) streams.
+ */
+int
+is_dovi(
+    const AVStream *stream)
+{
+    if (!stream || !stream->codecpar)
+        return 0;
+    uint32_t tag = stream->codecpar->codec_tag;
+    if (tag == MKTAG('d','v','h','1') || tag == MKTAG('d','v','h','e'))
+        return 1;
+    return av_packet_side_data_get(stream->codecpar->coded_side_data,
+                                   stream->codecpar->nb_coded_side_data,
+                                   AV_PKT_DATA_DOVI_CONF) != NULL;
+}
+
+/*
  * Verify the source video color metadata matches expected HDR overrides.
  */
 void
@@ -526,4 +579,274 @@ copy_source_color_to_output(
         dst->colorspace = src->color_space;
     if (src->color_range != AVCOL_RANGE_UNSPECIFIED)
         dst->color_range = src->color_range;
+}
+
+static int
+known_color_primaries(
+    enum AVColorPrimaries value)
+{
+    return value > AVCOL_PRI_RESERVED0 &&
+        value != AVCOL_PRI_UNSPECIFIED &&
+        value != AVCOL_PRI_RESERVED &&
+        value < AVCOL_PRI_NB;
+}
+
+static int
+known_color_trc(
+    enum AVColorTransferCharacteristic value)
+{
+    return value > AVCOL_TRC_RESERVED0 &&
+        value != AVCOL_TRC_UNSPECIFIED &&
+        value != AVCOL_TRC_RESERVED &&
+        value < AVCOL_TRC_NB;
+}
+
+static int
+known_color_space(
+    enum AVColorSpace value,
+    enum AVPixelFormat pix_fmt)
+{
+    if (value == AVCOL_SPC_UNSPECIFIED || value < 0 || value >= AVCOL_SPC_NB)
+        return 0;
+    /* AVCOL_SPC_RGB is value 0 (unset) - valid for RGB but not for YUV */
+    if (value == AVCOL_SPC_RGB) {
+        const AVPixFmtDescriptor *desc = av_pix_fmt_desc_get(pix_fmt);
+        if (!desc || !(desc->flags & AV_PIX_FMT_FLAG_RGB))
+            return 0;
+    }
+    return 1;
+}
+
+static int
+known_color_range(
+    enum AVColorRange value)
+{
+    return value > AVCOL_RANGE_UNSPECIFIED &&
+        value < AVCOL_RANGE_NB;
+}
+
+/*
+ * Resolve video stream color info when preparing the decoder.
+ * These values are used for both:
+ * - video input filter
+ * - fix frame color meta when primaries/trc are decoded as "reserved" (0)
+ * Fixes filter error:
+ * "Unsupported input (Operation not supported): fmt:yuv422p10le csp:gbr prim:reserved trc:reserved -> fmt:yuv420p csp:bt709 prim:reserved trc:reserved"
+ */
+void
+reconcile_decoder_video_color(
+    coderctx_t *decoder_context,
+    int stream_index,
+    const char *url)
+{
+    AVCodecContext *codec_context;
+    AVCodecParameters *codecpar;
+    enum AVPixelFormat pix_fmt;
+
+    decoder_context->video_color_primaries = AVCOL_PRI_UNSPECIFIED;
+    decoder_context->video_color_trc       = AVCOL_TRC_UNSPECIFIED;
+    decoder_context->video_colorspace      = AVCOL_SPC_UNSPECIFIED;
+    decoder_context->video_color_range     = AVCOL_RANGE_UNSPECIFIED;
+
+    if (stream_index < 0 ||
+        !decoder_context->codec_context[stream_index] ||
+        !decoder_context->stream[stream_index] ||
+        !decoder_context->stream[stream_index]->codecpar)
+        return;
+
+    codec_context = decoder_context->codec_context[stream_index];
+    codecpar = decoder_context->stream[stream_index]->codecpar;
+    pix_fmt = codec_context->pix_fmt;
+
+    if (known_color_primaries(codec_context->color_primaries)) {
+        decoder_context->video_color_primaries = codec_context->color_primaries;
+        if (known_color_primaries(codecpar->color_primaries) &&
+            codecpar->color_primaries != codec_context->color_primaries)
+            elv_warn("reconcile_decoder_video_color: primaries differ, decoder=%s codecpar=%s, url=%s",
+                av_color_primaries_name(codec_context->color_primaries),
+                av_color_primaries_name(codecpar->color_primaries), url);
+    } else if (known_color_primaries(codecpar->color_primaries)) {
+        decoder_context->video_color_primaries = codecpar->color_primaries;
+    }
+
+    if (known_color_trc(codec_context->color_trc)) {
+        decoder_context->video_color_trc = codec_context->color_trc;
+        if (known_color_trc(codecpar->color_trc) &&
+            codecpar->color_trc != codec_context->color_trc)
+            elv_warn("reconcile_decoder_video_color: transfer differ, decoder=%s codecpar=%s, url=%s",
+                av_color_transfer_name(codec_context->color_trc),
+                av_color_transfer_name(codecpar->color_trc), url);
+    } else if (known_color_trc(codecpar->color_trc)) {
+        decoder_context->video_color_trc = codecpar->color_trc;
+    }
+
+    if (known_color_space(codec_context->colorspace, pix_fmt)) {
+        decoder_context->video_colorspace = codec_context->colorspace;
+        if (known_color_space(codecpar->color_space, pix_fmt) &&
+            codecpar->color_space != codec_context->colorspace)
+            elv_warn("reconcile_decoder_video_color: matrix differ, decoder=%s codecpar=%s, url=%s",
+                av_color_space_name(codec_context->colorspace),
+                av_color_space_name(codecpar->color_space), url);
+    } else if (known_color_space(codecpar->color_space, pix_fmt)) {
+        decoder_context->video_colorspace = codecpar->color_space;
+    }
+
+    if (known_color_range(codec_context->color_range)) {
+        decoder_context->video_color_range = codec_context->color_range;
+        if (known_color_range(codecpar->color_range) &&
+            codecpar->color_range != codec_context->color_range)
+            elv_warn("reconcile_decoder_video_color: range differ, decoder=%s codecpar=%s, url=%s",
+                av_color_range_name(codec_context->color_range),
+                av_color_range_name(codecpar->color_range), url);
+    } else if (known_color_range(codecpar->color_range)) {
+        decoder_context->video_color_range = codecpar->color_range;
+    }
+}
+
+/*
+ * Fix frame color metadata for frames that are decoded as "reserved" (0)
+ */
+void
+fix_video_frame_color(
+    coderctx_t *decoder_context,
+    AVFrame *frame)
+{
+    if (!frame)
+        return;
+
+    if (!known_color_primaries(frame->color_primaries))
+        frame->color_primaries = decoder_context->video_color_primaries;
+    if (!known_color_trc(frame->color_trc))
+        frame->color_trc = decoder_context->video_color_trc;
+    if (!known_color_space(frame->colorspace, frame->format))
+        frame->colorspace = decoder_context->video_colorspace;
+    if (!known_color_range(frame->color_range))
+        frame->color_range = decoder_context->video_color_range;
+}
+
+/* Broad category for a primaries value: 0=unknown, 1=BT.709, 2=BT.601, 3=HDR */
+static int
+color_pri_cat(enum AVColorPrimaries p)
+{
+    switch (p) {
+    case AVCOL_PRI_BT709:     return 1;
+    case AVCOL_PRI_SMPTE170M:
+    case AVCOL_PRI_BT470BG:
+    case AVCOL_PRI_BT470M:    return 2;
+    case AVCOL_PRI_BT2020:    return 3;
+    default:                  return 0;
+    }
+}
+
+/* Broad category for a TRC value: 0=unknown, 1=BT.709, 2=BT.601, 3=HDR */
+static int
+color_trc_cat(enum AVColorTransferCharacteristic t)
+{
+    switch (t) {
+    case AVCOL_TRC_BT709:          return 1;
+    case AVCOL_TRC_SMPTE170M:
+    case AVCOL_TRC_GAMMA22:
+    case AVCOL_TRC_GAMMA28:        return 2;
+    case AVCOL_TRC_SMPTE2084:
+    case AVCOL_TRC_ARIB_STD_B67:   return 3;
+    default:                       return 0;
+    }
+}
+
+/* Broad category for a colorspace value: 0=unknown, 1=BT.709, 2=BT.601, 3=HDR */
+static int
+color_spc_cat(enum AVColorSpace s)
+{
+    switch (s) {
+    case AVCOL_SPC_BT709:          return 1;
+    case AVCOL_SPC_SMPTE170M:
+    case AVCOL_SPC_BT470BG:        return 2;
+    case AVCOL_SPC_BT2020_NCL:
+    case AVCOL_SPC_BT2020_CL:      return 3;
+    default:                       return 0;
+    }
+}
+
+/* For DASH/HLS output, dashenc creates inner MP4 muxer contexts that we cannot
+ * inject write_colr into. movenc's colr-box gate requires at least one of
+ * primaries/trc/space to be non-UNSPECIFIED; when only color_range is set the
+ * box is skipped and the range value is lost.
+ *
+ * When color metadata is partially or fully absent, fill in the missing fields
+ * so the colr box is written and range is preserved.  Detection rules:
+ *   - All three UNSPECIFIED → synthesize BT.709 (standard SDR default)
+ *   - Partial metadata → detect color space from set fields; fill only the gaps
+ *   - Inconsistent metadata (e.g. bt2020 primaries + bt709 trc) → log error, no-op
+ *   - HDR without an unambiguous TRC → no-op (can't distinguish HDR10 from HLG)
+ */
+void
+dash_synthesize_color_defaults(
+    xcparams_t *params,
+    AVCodecParameters *codecpar)
+{
+    if (strcmp(params->format, "dash") && strcmp(params->format, "hls"))
+        return;
+    if (!codecpar || codecpar->color_range == AVCOL_RANGE_UNSPECIFIED)
+        return;
+
+    enum AVColorPrimaries              pri = codecpar->color_primaries;
+    enum AVColorTransferCharacteristic trc = codecpar->color_trc;
+    enum AVColorSpace                  spc = codecpar->color_space;
+
+    /* All three already set — nothing to do */
+    if (pri != AVCOL_PRI_UNSPECIFIED &&
+        trc != AVCOL_TRC_UNSPECIFIED &&
+        spc != AVCOL_SPC_UNSPECIFIED)
+        return;
+
+    /* Detect overall color category from whichever fields are set */
+    int cats[3] = { color_pri_cat(pri), color_trc_cat(trc), color_spc_cat(spc) };
+    int cat = 0;
+    for (int i = 0; i < 3; i++) {
+        if (cats[i] == 0)
+            continue;
+        if (cat != 0 && cat != cats[i]) {
+            elv_err("dash_synthesize_color_defaults: incoherent color metadata "
+                    "(primaries=%d trc=%d space=%d), url=%s", pri, trc, spc, params->url);
+            return;
+        }
+        cat = cats[i];
+    }
+
+    if (cat == 0) {
+        /* All UNSPECIFIED — synthesize BT.709 */
+        codecpar->color_primaries = AVCOL_PRI_BT709;
+        codecpar->color_trc       = AVCOL_TRC_BT709;
+        codecpar->color_space     = AVCOL_SPC_BT709;
+        return;
+    }
+
+    if (cat == 1) {
+        /* BT.709 */
+        if (pri == AVCOL_PRI_UNSPECIFIED) codecpar->color_primaries = AVCOL_PRI_BT709;
+        if (trc == AVCOL_TRC_UNSPECIFIED) codecpar->color_trc       = AVCOL_TRC_BT709;
+        if (spc == AVCOL_SPC_UNSPECIFIED) codecpar->color_space     = AVCOL_SPC_BT709;
+        return;
+    }
+
+    if (cat == 2) {
+        /* BT.601 — PAL (BT470BG/GAMMA28) vs NTSC (SMPTE170M) */
+        int pal = (pri == AVCOL_PRI_BT470BG || pri == AVCOL_PRI_BT470M ||
+                   trc == AVCOL_TRC_GAMMA22  || trc == AVCOL_TRC_GAMMA28 ||
+                   spc == AVCOL_SPC_BT470BG);
+        if (pri == AVCOL_PRI_UNSPECIFIED)
+            codecpar->color_primaries = pal ? AVCOL_PRI_BT470BG  : AVCOL_PRI_SMPTE170M;
+        if (trc == AVCOL_TRC_UNSPECIFIED)
+            codecpar->color_trc       = pal ? AVCOL_TRC_GAMMA28  : AVCOL_TRC_SMPTE170M;
+        if (spc == AVCOL_SPC_UNSPECIFIED)
+            codecpar->color_space     = pal ? AVCOL_SPC_BT470BG  : AVCOL_SPC_SMPTE170M;
+        return;
+    }
+
+    /* cat == 3: HDR — only fill when TRC unambiguously identifies the standard */
+    if (trc == AVCOL_TRC_SMPTE2084 || trc == AVCOL_TRC_ARIB_STD_B67) {
+        if (pri == AVCOL_PRI_UNSPECIFIED) codecpar->color_primaries = AVCOL_PRI_BT2020;
+        if (spc == AVCOL_SPC_UNSPECIFIED) codecpar->color_space     = AVCOL_SPC_BT2020_NCL;
+    }
+    /* Without TRC, can't distinguish HDR10 from HLG — leave as-is */
 }

@@ -10,7 +10,9 @@ require (
 	github.com/modern-go/gls v0.0.0-20250215024828-78308f6bb19d
 	github.com/spf13/cobra v0.0.5
 	github.com/stretchr/testify v1.7.0
+	github.com/tidwall/jsonc v0.3.3
 	go.uber.org/atomic v1.11.0
+	gopkg.in/yaml.v2 v2.4.0
 )
 
 require (
@@ -28,6 +30,7 @@ require (
 )
 
 replace (
+	github.com/Eyevinn/mp4ff => github.com/eluv-io/mp4ff v0.47.1-0.20260603013458-2403cac8f06c
 	github.com/modern-go/gls => github.com/eluv-io/gls v1.0.0-elv1
 	github.com/prometheus/prometheus => github.com/prometheus/prometheus v1.7.1-0.20170814170113-3101606756c5
 	gopkg.in/urfave/cli.v1 => github.com/urfave/cli v1.22.0

@@ -1,13 +1,10 @@
-if ! [ -x `command -v gsutil` ]
-then
-    echo "gsutil could not be found, install gsutil"
-    exit 1
-fi
+#!/usr/bin/env bash
+set -euo pipefail
 
-if [ ! -d "./media" ]
-then
-    mkdir ./media
-    gsutil -m cp 'gs://eluvio-test-assets/*' ./media
+REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+if [ ! -d "$REPO_ROOT/media" ]; then
+    echo "Test media not found. Run: ./scripts/download-test-assets.sh" >&2
+    exit 1
 fi
 
 echo "Running live UDP tests"

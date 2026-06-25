@@ -16,6 +16,9 @@ import (
 )
 
 func TestUdpToMp4(t *testing.T) {
+	if testing.Short() {
+		t.Skip("skipping slow live stream test in short mode")
+	}
 	setupLogging()
 	outputDir := path.Join(baseOutPath, fn())
 	setupOutDir(t, outputDir)
@@ -122,6 +125,9 @@ func TestUdpToMp4(t *testing.T) {
 }
 
 func TestMultiAudioUdpToMp4(t *testing.T) {
+	if testing.Short() {
+		t.Skip("skipping slow live stream test in short mode")
+	}
 	setupLogging()
 	outputDir := path.Join(baseOutPath, fn())
 	setupOutDir(t, outputDir)
@@ -407,6 +413,9 @@ func TestUdpToMp4WithCancelling2(t *testing.T) {
 
 // Cancels the live stream transcoding some time after starting the transcoding (20 sec after XcRun).
 func TestUdpToMp4WithCancelling3(t *testing.T) {
+	if testing.Short() {
+		t.Skip("skipping slow live stream test in short mode")
+	}
 	setupLogging()
 	outputDir := path.Join(baseOutPath, fn())
 	setupOutDir(t, outputDir)

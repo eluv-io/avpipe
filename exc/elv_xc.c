@@ -10,6 +10,7 @@
 #include <sys/stat.h>
 #include <unistd.h>
 #include <fcntl.h>
+#include <stdio.h>
 #include <libavutil/log.h>
 #include <libavutil/pixdesc.h>
 #include <errno.h>
@@ -1011,6 +1012,27 @@ static int get_extract_images_ts(char *s, xcparams_t *params) {
     return i;
 }
 
+static int
+get_video_layout(
+    const char *s,
+    int *video_layout
+)
+{
+    if (!strcmp(s, "mono") || !strcmp(s, "0")) {
+        *video_layout = video_layout_mono;
+    } else if (!strcmp(s, "sbs") || !strcmp(s, "side-by-side") || !strcmp(s, "3")) {
+        *video_layout = video_layout_sbs;
+    } else if (!strcmp(s, "tb") || !strcmp(s, "top-bottom") || !strcmp(s, "4")) {
+        *video_layout = video_layout_tb;
+    } else if (!strcmp(s, "mvhevc") || !strcmp(s, "mv-hevc") || !strcmp(s, "10")) {
+        *video_layout = video_layout_mvhevc;
+    } else {
+        return -1;
+    }
+
+    return 0;
+}
+
 static void
 usage(
     char *progname,
@@ -1099,6 +1121,7 @@ usage(
         "\t-copy-mpegts :           (optional) Default 0. Create a copy of the MPEGTS input (for MPEGTS, SRT, RTP)\n"
         "\t-video-bitrate :         (optional) Mutually exclusive with crf. Default: -1 (unused)\n"
         "\t-video-frame-duration-ts :  (optional) Frame duration of the output video in time base.\n"
+        "\t-video-layout :          (optional) Video layout, can be \"mono\"/0, \"sbs\"/3, \"tb\"/4, or \"mvhevc\"/10.\n"
         "\t-video-seg-duration-ts : (mandatory If format is not \"segment\" and transcoding video) video segment duration time base (positive integer).\n"
         "\t-video-time-base :       (optional) Video encoder timebase, must be > 0 (the actual timebase would be 1/video-time-base).\n"
         "\t-wm-text :               (optional) Watermark text that will be presented in every video frame if it exist. It has higher priority than overlay watermark.\n"
@@ -1596,12 +1619,7 @@ main(
                 }
                 fclose(vd_fp);
             } else if (!strcmp(argv[i], "-video-layout")) {
-                /* Accept both label and numeric CICP */
-                if (!strcmp(argv[i+1], "sbs") || !strcmp(argv[i+1], "3")) {
-                    p.video_layout = video_layout_sbs;
-                } else if (!strcmp(argv[i+1], "mono") || !strcmp(argv[i+1], "0")) {
-                    p.video_layout = video_layout_mono;
-                } else {
+                if (get_video_layout(argv[i+1], &p.video_layout) < 0) {
                     usage(argv[0], argv[i], EXIT_FAILURE);
                 }
             } else {
@@ -1682,6 +1700,12 @@ main(
 
     elv_logger_open(NULL, "exc", 10, log_size*1024*1024, elv_log_file);
     elv_set_log_level(elv_log_debug);
+
+    if (p.video_layout == video_layout_mvhevc) {
+        fprintf(stderr, "Error: MVHEVC restore output handler is not available\n");
+        elv_err("MVHEVC restore output handler is not available");
+        return EXIT_FAILURE;
+    }
 
     if (!strcmp(command, "probe")) {
         p.xc_type = xc_probe;

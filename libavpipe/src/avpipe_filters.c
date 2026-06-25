@@ -5,6 +5,7 @@
 #include "avpipe_xc.h"
 #include "avpipe_filters.h"
 #include "avpipe_utils.h"
+#include "avpipe_format.h"
 #include "elv_log.h"
 #include "libavutil/pixdesc.h"
 
@@ -54,7 +55,7 @@ init_video_filters(
         dec_codec_ctx->width, dec_codec_ctx->height, dec_codec_ctx->pix_fmt,
         time_base.num, time_base.den,
         dec_codec_ctx->sample_aspect_ratio.num, dec_codec_ctx->sample_aspect_ratio.den,
-        dec_codec_ctx->colorspace, dec_codec_ctx->color_range);
+        decoder_context->video_colorspace, decoder_context->video_color_range);
     elv_dbg("init_video_filters, video srcfilter args=%s", args);
 
     /* video_stream_index should be the same in both encoder and decoder context */
@@ -158,8 +159,10 @@ get_audio_avfilter_args(
 {
     AVCodecContext *dec_codec_ctx = decoder_context->codec_context[index];
 
-    if (dec_codec_ctx->ch_layout.order == AV_CHANNEL_ORDER_NATIVE &&
-        dec_codec_ctx->ch_layout.u.mask == 0) {
+    if (dec_codec_ctx->ch_layout.nb_channels > 0 &&
+        (dec_codec_ctx->ch_layout.order == AV_CHANNEL_ORDER_UNSPEC ||
+         (dec_codec_ctx->ch_layout.order == AV_CHANNEL_ORDER_NATIVE &&
+          dec_codec_ctx->ch_layout.u.mask == 0))) {
         av_channel_layout_default(&dec_codec_ctx->ch_layout, dec_codec_ctx->ch_layout.nb_channels);
     }
 

@@ -92,84 +92,12 @@ Manual examples:
 
 ### Parameters
 
-```c
-typedef struct xcparams_t {
-    char    *url;                       // URL of the input for transcoding
-    int     bypass_transcoding;         // if 0 means do transcoding, otherwise bypass transcoding
-    char    *format;                    // Output format [Required, Values: dash, hls, mp4, fmp4]
-    int64_t start_time_ts;              // Transcode the source starting from this time
-    int64_t start_pts;                  // Starting PTS for output
-    int64_t duration_ts;                // Transcode time period from start_time_ts (-1 for entire source)
-    char    *start_segment_str;         // Specify index of the first segment  TODO: change type to int
-    int     video_bitrate;
-    int     audio_bitrate;
-    int     sample_rate;                // Audio sampling rate
-    int     channel_layout;             // Audio channel layout for output
-    char    *crf_str;
-    char    *preset;                    // Sets encoding speed to compression ratio
-    int     rc_max_rate;                // Maximum encoding bit rate, used in conjunction with rc_buffer_size
-    int     rc_buffer_size;             // Determines the interval used to limit bit rate [Default: 0]
-    int64_t     audio_seg_duration_ts;  // For transcoding and producing audio ABR/mez segments
-    int64_t     video_seg_duration_ts;  // For transcoding and producing video ABR/mez segments
-    char    *seg_duration;              // In sec units, can be used instead of ts units
-    int     seg_duration_fr;
-    int     start_fragment_index;
-    int     force_keyint;               // Force a key (IDR) frame at this interval
-    int     force_equal_fduration;      // Force all frames to have equal frame duration
-    char    *ecodec;                    // Video encoder
-    char    *ecodec2;                   // Audio encoder when xc_type & xc_audio
-    char    *dcodec;                    // Video decoder
-    char    *dcodec2;                   // Audio decoder when xc_type & xc_audio
-    int     gpu_index;                  // GPU index for transcoding, must be >= 0
-    int     enc_height;
-    int     enc_width;
-    char    *crypt_iv;                  // 16-byte AES IV in hex (Optional, Default: Generated)
-    char    *crypt_key;                 // 16-byte AES key in hex (Optional, Default: Generated)
-    char    *crypt_kid;                 // 16-byte UUID in hex (Optional, required for CENC)
-    char    *crypt_key_url;             // Specify a key URL in the manifest (Optional, Default: key.bin)
-    int     skip_decoding;              // If set, then skip the packets until start_time_ts without decoding
-
-    crypt_scheme_t  crypt_scheme;       // Content protection / DRM / encryption (Default: crypt_none)
-    xc_type_t       xc_type;            // Default: 0 means transcode 'everything'
-
-    int         seekable;               // Default: 0 means not seekable. A non seekable stream with moov box in
-                                            //          the end causes a lot of reads up to moov atom.
-    int         listen;                     // Default is 1, listen mode for RTMP
-    char        *watermark_text;            // Default: NULL or empty text means no watermark
-    char        *watermark_xloc;            // Default 0
-    char        *watermark_yloc;            // Default 0
-    float       watermark_relative_sz;      // Default 0
-    char        *watermark_font_color;      // black
-    int         watermark_shadow;           // Default 1, means shadow exist
-    char        *overlay_filename;          // Overlay file name
-    char        *watermark_overlay;         // Overlay image buffer, default is NULL
-    image_type  watermark_overlay_type;     // Overlay image type, default is png
-    int         watermark_overlay_len;      // Length of watermark_overlay if there is any
-    char        *watermark_shadow_color;    // Watermark shadow color
-    char        *watermark_timecode;        // Watermark timecode string (i.e 00\:00\:00\:00)
-    float       watermark_timecode_rate;    // Watermark timecode frame rate
-    int         audio_index[MAX_AUDIO_MUX]; // Audio index(s) for mez making
-    int         n_audio;                    // Number of entries in audio_index
-    int         audio_fill_gap;             // Audio only, fills the gap if there is a jump in PTS
-    int         sync_audio_to_stream_id;    // mpegts only, default is 0
-    int         bitdepth;                   // Can be 8, 10, 12
-    char        *max_cll;                   // Maximum Content Light Level (HDR only)
-    char        *master_display;            // Master display (HDR only)
-    int         stream_id;                  // Stream id to trasncode, should be >= 0
-    char        *filter_descriptor;         // Filter descriptor if tx-type == audio-merge
-    char        *mux_spec;
-    int64_t     extract_image_interval_ts;  // Write frames at this interval. Default: -1
-    int64_t     *extract_images_ts;         // Write frames at these timestamps.
-    int         extract_images_sz;          // Size of the array extract_images_ts
-
-    int         video_time_base;            // New video encoder time_base (1/video_time_base)
-    int         video_frame_duration_ts;    // Frame duration of the output video in time base
-
-    int         debug_frame_level;
-    int         connection_timeout;         // Connection timeout in sec for RTMP or MPEGTS protocols
-} xcparams_t;
-
-```
+The authoritative list of transcoding parameters — every field, its type, default,
+and constraints — is the `xcparams_t` struct in
+[`libavpipe/include/avpipe_xc.h`](libavpipe/include/avpipe_xc.h). That header is the
+single source of truth; this README intentionally does **not** duplicate the struct
+so the two cannot drift apart. The sections below explain how to combine those
+parameters to drive common use cases.
 
 - **Determining input:** the url parameter uniquely identifies the input source that will be transcoded. It can be a filename, a network URL that identifies a stream (i.e udp://localhost:22001), or another source that contains the input audio/video for transcoding.
 
