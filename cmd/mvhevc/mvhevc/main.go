@@ -1,6 +1,7 @@
 package main
 
 import (
+	"encoding/json"
 	"errors"
 	"flag"
 	"fmt"
@@ -79,7 +80,13 @@ func runInfo(args []string, w io.Writer) error {
 		return fmt.Errorf("need input file")
 	}
 
-	return mvhevc.Info(fs.Arg(0), opts, w)
+	result, err := mvhevc.Info(fs.Arg(0), opts)
+	if err != nil {
+		return err
+	}
+	enc := json.NewEncoder(w)
+	enc.SetIndent("", "  ")
+	return enc.Encode(result)
 }
 
 func runAdd(args []string) error {

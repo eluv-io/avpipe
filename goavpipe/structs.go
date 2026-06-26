@@ -294,7 +294,7 @@ const (
 	CryptCBCS
 )
 
-// XcParams should match with txparams_t in avpipe_xc.h
+// XcParams should match with xcparams_t in avpipe_xc.h
 type XcParams struct {
 	Url                    string      `json:"url"`
 	InputCfg               InputConfig `json:"input_cfg"`
