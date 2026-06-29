@@ -6,6 +6,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/Eyevinn/mp4ff/avc"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
@@ -56,6 +57,36 @@ func TestIsDOVIBoxType(t *testing.T) {
 	assert.True(t, IsDOVIBoxType("dvvC"))
 	assert.True(t, IsDOVIBoxType("dvwC"))
 	assert.False(t, IsDOVIBoxType("hvcC"))
+}
+
+func TestX264SettingsCompatibilityWarnings(t *testing.T) {
+	settings := "x264 - core 165 - options: cabac=1 ref=1 8x8dct=1 weightp=2 bframes=0 keyint=60 stitchable=1 constrained_intra=0"
+	x264 := parseX264SettingsText(settings)
+	require.NotNil(t, x264)
+	assert.Equal(t, 1, x264.Ref)
+	require.NotNil(t, x264.CABAC)
+	assert.True(t, *x264.CABAC)
+	require.NotNil(t, x264.Transform8x8)
+	assert.True(t, *x264.Transform8x8)
+	require.NotNil(t, x264.WeightP)
+	assert.Equal(t, 2, *x264.WeightP)
+	require.NotNil(t, x264.BFrames)
+	assert.Equal(t, 0, *x264.BFrames)
+	assert.Equal(t, 60, x264.KeyInt)
+
+	stats := &AVCSliceStats{X264: x264}
+	addAVCCompatibilityWarnings(stats,
+		&avc.SPS{NumRefFrames: 3},
+		&avc.PPS{
+			NumRefIdxI0DefaultActiveMinus1: 2,
+			EntropyCodingModeFlag:          true,
+			Transform8x8ModeFlag:           true,
+			WeightedPredFlag:               true,
+		})
+
+	require.Len(t, stats.CompatibilityWarnings, 2)
+	assert.Contains(t, stats.CompatibilityWarnings[0], "x264 ref=1")
+	assert.Contains(t, stats.CompatibilityWarnings[1], "num_ref_idx_l0_default_active=3")
 }
 
 func TestParseDOVIBoxProfile20(t *testing.T) {

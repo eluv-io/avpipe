@@ -826,6 +826,7 @@ func getCParams(params *goavpipe.XcParams) (*C.xcparams_t, error) {
 		rotate:                    C.int(params.Rotate),
 		profile:                   C.CString(params.Profile),
 		level:                     C.int(params.Level),
+		h264_refs:                 C.int(params.H264Refs),
 		deinterlace:               C.dif_type(params.Deinterlace),
 		timecode:                  C.CString(params.Timecode),
 

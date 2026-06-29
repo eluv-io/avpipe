@@ -6,6 +6,8 @@ import (
 	"fmt"
 	"io"
 	"math/bits"
+	"sort"
+	"strconv"
 	"strings"
 	"unicode/utf8"
 
@@ -69,6 +71,106 @@ type CodecInfo struct {
 	// EnhancementProfileIDC is the enhancement-layer general_profile_idc.
 	// Only meaningful for VideoLayout == Mp4VideoLayoutMVHEVC.
 	EnhancementProfileIDC int `json:"enhancement_profile_idc,omitempty"`
+
+	// AVC holds H.264 SPS/PPS parameters (and, when media samples are present,
+	// a summary of actual slice reference usage). Populated only for avc1/avc3.
+	AVC *AVCParams `json:"avc,omitempty"`
+}
+
+// AVCParams holds the H.264 SPS/PPS parameters that must be consistent across
+// segments sharing a common init segment (and across a splice) for seamless
+// playback, plus an optional summary of the coded slices' actual reference
+// usage. The classic failure is the slices referencing more frames than the
+// SPS max_num_ref_frames declares ("reference count overflow") — see
+// AVCSliceStats.ExceedsMaxRefFrames.
+type AVCParams struct {
+	// --- SPS ---
+	MaxNumRefFrames  uint `json:"max_num_ref_frames"` // the "ref" count (x264 --ref)
+	PicOrderCntType  uint `json:"pic_order_cnt_type"`
+	FrameMbsOnlyFlag bool `json:"frame_mbs_only_flag"`
+	Width            uint `json:"width,omitempty"`
+	Height           uint `json:"height,omitempty"`
+
+	// --- PPS ---
+	EntropyCodingCABAC   bool `json:"entropy_coding_cabac"` // true = CABAC, false = CAVLC
+	Transform8x8Mode     bool `json:"transform_8x8_mode"`   // x264 8x8dct
+	WeightedPred         bool `json:"weighted_pred"`        // x264 weightp
+	WeightedBipredIDC    uint `json:"weighted_bipred_idc"`
+	ConstrainedIntraPred bool `json:"constrained_intra_pred"`
+	NumRefIdxL0Default   uint `json:"num_ref_idx_l0_default_active"` // PPS default (minus1 + 1)
+	NumRefIdxL1Default   uint `json:"num_ref_idx_l1_default_active"`
+
+	// Slices summarizes per-slice reference usage parsed from the media
+	// samples. Present only when the input contains media fragments.
+	Slices *AVCSliceStats `json:"slices,omitempty"`
+
+	// Parameter sets retained for slice-header parsing (not serialized).
+	spsMap map[uint32]*avc.SPS
+	ppsMap map[uint32]*avc.PPS
+}
+
+// AVCSliceStats summarizes the actual reference usage of the coded slices.
+// A mismatch between this and the SPS (max_num_ref_frames) means the segment
+// is internally inconsistent and will fail to decode across an init change or
+// splice — exactly the corruption seen in mis-encoded partial segments.
+type AVCSliceStats struct {
+	Count             int            `json:"count"`
+	SliceTypeCounts   map[string]int `json:"slice_type_counts"`            // I/P/B/SP/SI -> count
+	NumRefIdxL0Counts map[int]int    `json:"num_ref_idx_l0_active_counts"` // active L0 refs -> #slices
+	// MaxNumRefIdxL0Active is the largest L0 reference-list size declared by any
+	// slice header. NOTE: this is informational only — it is NOT a decodability
+	// signal. A list may legitimately be larger than max_num_ref_frames (the
+	// decoder pads by repeating refs), and real reference corruption lives in
+	// the entropy-coded macroblock ref_idx values / DPB state, which header
+	// parsing cannot see. Use an actual decode to verify decodability.
+	MaxNumRefIdxL0Active int `json:"max_num_ref_idx_l0_active"`
+
+	// UnparsedSlices is the number of coded slices whose header could not be
+	// parsed against the active SPS/PPS — e.g. the slice references a parameter
+	// set id not present in the init, or the SPS bit-layout doesn't match. A
+	// non-zero value when checking a media segment against a supplied/foreign
+	// init is a strong signal that the m4s does NOT match that init.
+	UnparsedSlices int `json:"unparsed_slices,omitempty"`
+
+	// --- B-frame info (only present when the stream contains B-slices) ---
+
+	// HasBFrames is true if any coded slice is a B-slice.
+	HasBFrames bool `json:"has_b_frames,omitempty"`
+	// MaxConsecutiveBFrames is the longest run of consecutive B-slices in
+	// decode order (e.g. 1 for IbBP, 2 for IBBP, larger for hierarchical B).
+	MaxConsecutiveBFrames int `json:"max_consecutive_b_frames,omitempty"`
+	// NumRefIdxL1Counts is the histogram of active L1 (forward) references per
+	// B-slice; MaxNumRefIdxL1Active is the maximum. L1 is used only by B-slices.
+	NumRefIdxL1Counts    map[int]int `json:"num_ref_idx_l1_active_counts,omitempty"`
+	MaxNumRefIdxL1Active int         `json:"max_num_ref_idx_l1_active,omitempty"`
+	// MaxReorderDepthFrames is the actual B-frame reference span: the maximum
+	// (decode_index - display_index) over all frames, i.e. how many frames the
+	// decoder must hold because B-frames reference frames decoded later. It is
+	// derived from each slice's POC vs decode order (0 when no reordering).
+	MaxReorderDepthFrames int `json:"max_reorder_depth_frames,omitempty"`
+
+	// X264 reports encoder settings found in user-data-unregistered SEI NALUs
+	// carried by the media. This is useful when checking a media fragment
+	// against a foreign init, because the fragment may have no in-band SPS/PPS.
+	X264 *AVCX264Settings `json:"x264,omitempty"`
+
+	// CompatibilityWarnings records likely init/media mismatches detected from
+	// slice headers and encoder settings. These are warnings because a full
+	// decoder is still the final arbiter for entropy-coded macroblock state.
+	CompatibilityWarnings []string `json:"compatibility_warnings,omitempty"`
+}
+
+// AVCX264Settings summarizes the x264 "options:" user-data SEI when present.
+type AVCX264Settings struct {
+	Raw              string `json:"raw"`
+	Ref              int    `json:"ref,omitempty"`
+	CABAC            *bool  `json:"cabac,omitempty"`
+	Transform8x8     *bool  `json:"transform_8x8,omitempty"`
+	WeightP          *int   `json:"weightp,omitempty"`
+	BFrames          *int   `json:"bframes,omitempty"`
+	KeyInt           int    `json:"keyint,omitempty"`
+	Stitchable       *bool  `json:"stitchable,omitempty"`
+	ConstrainedIntra *bool  `json:"constrained_intra,omitempty"`
 }
 
 // MarshalJSON adds additional profile_name and level_name fields alongside the
@@ -90,9 +192,10 @@ func (c CodecInfo) MarshalJSON() ([]byte, error) {
 // all tracks. Supports AVC (avc1/avc3) and HEVC (hvc1/hev1) video tracks, and
 // E-AC-3 (ec-3) and AAC (mp4a) audio tracks.
 //
-// PENDING(SS) This function is not used and is replaced by ExtractCodecInfoLazy
-// It reads the entire file into memory (including ProRes which will return no streams).
-// Remove once we know we don't need full parsing
+// The entire file is read into memory, including the mdat payload. When the
+// caller only needs init-level fields (codec strings, profile/level, channels,
+// EC3/JOC, Dolby Vision, video layout) and not the AVC slice statistics, prefer
+// ExtractCodecInfoLazy, which skips the mdat payload via seeking.
 func ExtractCodecInfo(r io.Reader) (infos []*CodecInfo, err error) {
 	const op = "mp4e.ExtractCodecInfo"
 	e := errors.T(op, errors.K.Invalid.Default())
@@ -101,17 +204,19 @@ func ExtractCodecInfo(r io.Reader) (infos []*CodecInfo, err error) {
 	if err != nil {
 		return nil, e("reason", "failed to parse MP4", "cause", sanitizeString(err.Error()))
 	}
-	return extractCodecInfoFromFile(mp4Data)
+	return extractCodecInfoFromFile(mp4Data, true)
 }
 
-// ExtractCodecInfoLazy decodes an MP4 container and returns codec information for
-// all tracks. Supports AVC (avc1/avc3) and HEVC (hvc1/hev1) video tracks, and
-// E-AC-3 (ec-3) and AAC (mp4a) audio tracks.
+// ExtractCodecInfoLazy returns the same init-level codec information as
+// ExtractCodecInfo WITHOUT reading the mdat payload into memory: mp4ff's lazy
+// mdat decode mode reads only the box headers and the moov box and seeks past
+// the (potentially gigabyte-sized) media payload. Peak memory is therefore
+// ~the size of moov, independent of the file or segment size, and it works
+// regardless of where moov sits (front for faststart, back otherwise).
 //
-// Reads only the box headers and the moov box and seeks past media payload.
-//
-// PENDING(SS) It can't parse elementary stream info - if that's needed we need to
-// load 'some' media data to extract NAL info.
+// Because the media samples are not loaded, the AVC slice statistics
+// (CodecInfo.AVC.Slices) are NOT populated. This is the mode used by Probe,
+// which consumes only init-level fields. Requires an io.ReadSeeker.
 func ExtractCodecInfoLazy(r io.ReadSeeker) (infos []*CodecInfo, err error) {
 	const op = "mp4e.ExtractCodecInfoLazy"
 	e := errors.T(op, errors.K.Invalid.Default())
@@ -120,12 +225,16 @@ func ExtractCodecInfoLazy(r io.ReadSeeker) (infos []*CodecInfo, err error) {
 	if err != nil {
 		return nil, e("reason", "failed to parse MP4", "cause", sanitizeString(err.Error()))
 	}
-	return extractCodecInfoFromFile(mp4Data)
+	return extractCodecInfoFromFile(mp4Data, false)
 }
 
 // extractCodecInfoFromFile builds CodecInfo for every track of a decoded MP4.
-// It reads only moov-level boxes, so it is safe on a lazily decoded file
-func extractCodecInfoFromFile(mp4Data *mp4.File) (infos []*CodecInfo, err error) {
+// When analyzeSlices is true and the input carries media fragments, the AVC
+// track is augmented with the actual slice reference-usage statistics parsed
+// from the media samples — which requires the mdat payload to be in memory
+// (i.e. a non-lazy decode). With analyzeSlices false the mdat-dependent work is
+// skipped, so a lazily decoded file (no mdat in memory) can be passed safely.
+func extractCodecInfoFromFile(mp4Data *mp4.File, analyzeSlices bool) (infos []*CodecInfo, err error) {
 	e := errors.T("mp4e.extractCodecInfoFromFile", errors.K.Invalid.Default())
 
 	// Fragmented MP4 (fMP4 init segment): moov is under mp4Data.Init.
@@ -135,6 +244,17 @@ func extractCodecInfoFromFile(mp4Data *mp4.File) (infos []*CodecInfo, err error)
 		moov = mp4Data.Init.Moov
 	} else if mp4Data.Moov != nil {
 		moov = mp4Data.Moov
+	} else if len(mp4Data.Segments) > 0 {
+		// Bare media segment (moof+mdat, no init/moov). Slice analysis needs the
+		// media samples; skip it entirely on a lazy decode where mdat was not
+		// read (there is no init-level codec info to report in this case).
+		if !analyzeSlices {
+			return nil, nil
+		}
+		// Analyze the slices and pull SPS/PPS from in-band NAL units if present
+		// (usually absent in DASH — they live in the init; pass one via
+		// ExtractCodecInfoWithInit).
+		return extractFromMediaSegments(mp4Data.Segments, nil), nil
 	} else {
 		return nil, e("reason", "moov box not found")
 	}
@@ -163,7 +283,134 @@ func extractCodecInfoFromFile(mp4Data *mp4.File) (infos []*CodecInfo, err error)
 		}
 	}
 
+	// If the input carries media fragments (a self-contained segment), parse
+	// the coded slices and attach the actual reference-usage summary to the
+	// AVC track. (Assumes a single AVC video track, which is the case for the
+	// per-segment files this is used on.) Skipped on a lazy decode, where the
+	// media samples were not read into memory.
+	if analyzeSlices && len(mp4Data.Segments) > 0 {
+		for _, info := range infos {
+			if info.AVC == nil || info.AVC.spsMap == nil {
+				continue
+			}
+			if stats := analyzeAVCSlices(mp4Data.Segments, info.AVC.spsMap,
+				info.AVC.ppsMap); stats != nil && stats.Count > 0 {
+				info.AVC.Slices = stats
+			}
+		}
+	}
+
 	return
+}
+
+// ExtractCodecInfoWithInit pairs a media segment with an init segment WITHOUT
+// concatenating them, and parses the media's coded slices against the init's
+// SPS/PPS. This is the way to check whether a DASH media segment actually
+// matches a given init: if the m4s was produced by a different encode, its
+// slices will not parse cleanly against this init and Slices.UnparsedSlices
+// will be non-zero (and the SPS/PPS reported are the init's, for comparison).
+func ExtractCodecInfoWithInit(media, initSeg io.Reader) ([]*CodecInfo, error) {
+	const op = "mp4e.ExtractCodecInfoWithInit"
+	e := errors.T(op, errors.K.Invalid.Default())
+
+	initInfos, err := ExtractCodecInfo(initSeg)
+	if err != nil {
+		return nil, e("reason", "failed to parse init segment", err)
+	}
+	var avcInfo *CodecInfo
+	for _, ci := range initInfos {
+		if ci.AVC != nil && ci.AVC.spsMap != nil {
+			avcInfo = ci
+			break
+		}
+	}
+	if avcInfo == nil {
+		return nil, e("reason", "init segment has no AVC video track with parameter sets")
+	}
+
+	mediaData, err := mp4.DecodeFile(media)
+	if err != nil {
+		return nil, e("reason", "failed to parse media segment", "cause", sanitizeString(err.Error()))
+	}
+	if len(mediaData.Segments) == 0 {
+		return nil, e("reason", "media input has no fragments (expected a media segment)")
+	}
+
+	// Slice stats parsed against the INIT's parameter sets — the whole point.
+	avcInfo.AVC.Slices = analyzeAVCSlices(mediaData.Segments, avcInfo.AVC.spsMap, avcInfo.AVC.ppsMap)
+	return []*CodecInfo{avcInfo}, nil
+}
+
+// extractFromMediaSegments builds CodecInfo for a bare media segment (no init).
+// SPS/PPS come from initParams if supplied, else from in-band NAL units (if
+// any). When no parameter sets are available the slice headers cannot be fully
+// parsed (only slice types), which is surfaced via Slices.UnparsedSlices.
+func extractFromMediaSegments(segments []*mp4.MediaSegment, initParams *AVCParams) []*CodecInfo {
+	params := initParams
+	if params == nil {
+		params = scanInbandAVCParams(segments) // nil if none in-band
+	}
+
+	info := &CodecInfo{CodecTagString: "avc1"}
+	var spsMap map[uint32]*avc.SPS
+	var ppsMap map[uint32]*avc.PPS
+	if params != nil {
+		info.AVC = params
+		spsMap, ppsMap = params.spsMap, params.ppsMap
+		for _, s := range spsMap { // representative SPS for codec string/profile
+			info.MimeCodecString = avc.CodecString("avc1", s)
+			info.ProfileIDC = int(s.Profile)
+			info.Level = int(s.Level)
+			break
+		}
+	} else {
+		info.AVC = &AVCParams{}
+	}
+	info.AVC.Slices = analyzeAVCSlices(segments, spsMap, ppsMap)
+	return []*CodecInfo{info}
+}
+
+// scanInbandAVCParams collects any SPS/PPS NAL units carried in-band in the
+// media samples and parses them. Returns nil if none are present (the common
+// DASH case, where parameter sets live only in the init segment).
+func scanInbandAVCParams(segments []*mp4.MediaSegment) *AVCParams {
+	var spsNalus, ppsNalus [][]byte
+	for _, seg := range segments {
+		for _, frag := range seg.Fragments {
+			samples, err := frag.GetFullSamples(nil)
+			if err != nil {
+				continue
+			}
+			for i := range samples {
+				nalus, err := avc.GetNalusFromSample(samples[i].Data)
+				if err != nil {
+					continue
+				}
+				for _, nalu := range nalus {
+					if len(nalu) == 0 {
+						continue
+					}
+					switch avc.GetNaluType(nalu[0]) {
+					case avc.NALU_SPS:
+						spsNalus = append(spsNalus, nalu)
+					case avc.NALU_PPS:
+						ppsNalus = append(ppsNalus, nalu)
+					}
+				}
+			}
+			if len(spsNalus) > 0 && len(ppsNalus) > 0 {
+				break
+			}
+		}
+	}
+	if len(spsNalus) == 0 {
+		return nil
+	}
+	params, err := parseAVCParams(spsNalus, ppsNalus)
+	if err != nil {
+		return nil
+	}
+	return params
 }
 
 func parseAudioSampleEntryBox(se *mp4.AudioSampleEntryBox) (*CodecInfo, error) {
@@ -362,15 +609,398 @@ func parseVisualSampleEntryBox(se *mp4.VisualSampleEntryBox) (*CodecInfo, error)
 		if err != nil {
 			return nil, e(err, "reason", "failed to parse AVC SPS")
 		}
-		return &CodecInfo{
+		info := &CodecInfo{
 			MimeCodecString: avc.CodecString(codecTag, sps),
 			CodecTagString:  codecTag,
 			ProfileIDC:      int(sps.Profile),
 			Level:           int(sps.Level),
-		}, nil
+		}
+		// Parse the SPS/PPS parameter sets for the SPS/PPS detail fields (and
+		// retain them for slice-header analysis of the media samples).
+		if params, perr := parseAVCParams(se.AvcC.SPSnalus, se.AvcC.PPSnalus); perr == nil {
+			info.AVC = params
+		}
+		return info, nil
 	default:
 		return &CodecInfo{CodecTagString: codecTag}, nil
 	}
+}
+
+// parseAVCParams parses SPS and PPS NAL units into AVCParams and retains the
+// parsed parameter sets (keyed by id) for slice-header analysis. The NALUs may
+// come from an avcC box (init segment) or from in-band sample data.
+func parseAVCParams(spsNalus, ppsNalus [][]byte) (*AVCParams, error) {
+	e := errors.T("parseAVCParams", errors.K.Invalid)
+	if len(spsNalus) == 0 {
+		return nil, e("reason", "no SPS NAL units")
+	}
+
+	spsMap := make(map[uint32]*avc.SPS)
+	var firstSPS *avc.SPS
+	for _, n := range spsNalus {
+		s, err := avc.ParseSPSNALUnit(n, false)
+		if err != nil {
+			continue
+		}
+		spsMap[s.ParameterID] = s
+		if firstSPS == nil {
+			firstSPS = s
+		}
+	}
+	if firstSPS == nil {
+		return nil, e("reason", "failed to parse any AVC SPS")
+	}
+
+	ppsMap := make(map[uint32]*avc.PPS)
+	var firstPPS *avc.PPS
+	for _, n := range ppsNalus {
+		p, err := avc.ParsePPSNALUnit(n, spsMap)
+		if err != nil {
+			continue
+		}
+		ppsMap[p.PicParameterSetID] = p
+		if firstPPS == nil {
+			firstPPS = p
+		}
+	}
+
+	params := &AVCParams{
+		MaxNumRefFrames:  firstSPS.NumRefFrames,
+		PicOrderCntType:  firstSPS.PicOrderCntType,
+		FrameMbsOnlyFlag: firstSPS.FrameMbsOnlyFlag,
+		Width:            firstSPS.Width,
+		Height:           firstSPS.Height,
+		spsMap:           spsMap,
+		ppsMap:           ppsMap,
+	}
+	if firstPPS != nil {
+		params.EntropyCodingCABAC = firstPPS.EntropyCodingModeFlag
+		params.Transform8x8Mode = firstPPS.Transform8x8ModeFlag
+		params.WeightedPred = firstPPS.WeightedPredFlag
+		params.WeightedBipredIDC = firstPPS.WeightedBipredIDC
+		params.ConstrainedIntraPred = firstPPS.ConstrainedIntraPredFlag
+		params.NumRefIdxL0Default = firstPPS.NumRefIdxI0DefaultActiveMinus1 + 1
+		params.NumRefIdxL1Default = firstPPS.NumRefIdxI1DefaultActiveMinus1 + 1
+	}
+	return params, nil
+}
+
+// analyzeAVCSlices walks the media fragments' samples, parses every coded
+// slice header, and summarizes the actual reference usage. maxRefFrames is the
+// SPS max_num_ref_frames used to flag overflow.
+func analyzeAVCSlices(
+	segments []*mp4.MediaSegment,
+	spsMap map[uint32]*avc.SPS,
+	ppsMap map[uint32]*avc.PPS,
+) *AVCSliceStats {
+
+	stats := &AVCSliceStats{
+		SliceTypeCounts:   make(map[string]int),
+		NumRefIdxL0Counts: make(map[int]int),
+		NumRefIdxL1Counts: make(map[int]int),
+	}
+
+	// Representative SPS for POC parameters (uniform in practice).
+	var sps0 *avc.SPS
+	for _, s := range spsMap {
+		sps0 = s
+		break
+	}
+	var pps0 *avc.PPS
+	for _, p := range ppsMap {
+		pps0 = p
+		break
+	}
+	maxPocLsb := 0
+	if sps0 != nil {
+		maxPocLsb = 1 << (sps0.Log2MaxPicOrderCntLsbMinus4 + 4)
+	}
+	prevPocMsb, prevPocLsb := 0, 0
+
+	// Per-frame picture order count and IDR flags, in decode order, to derive
+	// the reorder depth (the actual B-frame reference span). Reordering only
+	// happens with pic_order_cnt_type 0; types 1/2 are display==decode order.
+	canReorder := sps0 != nil && sps0.PicOrderCntType == 0
+	var pocs []int
+	var idrFlags []bool
+	curBRun := 0
+
+	for _, seg := range segments {
+		for _, frag := range seg.Fragments {
+			samples, err := frag.GetFullSamples(nil)
+			if err != nil {
+				continue
+			}
+			for i := range samples {
+				nalus, err := avc.GetNalusFromSample(samples[i].Data)
+				if err != nil {
+					continue
+				}
+				for _, nalu := range nalus {
+					if len(nalu) == 0 {
+						continue
+					}
+					nt := avc.GetNaluType(nalu[0])
+					if nt == avc.NALU_SEI && stats.X264 == nil {
+						if x264 := parseX264SettingsFromSEI(nalu, sps0); x264 != nil {
+							stats.X264 = x264
+						}
+						continue
+					}
+					if nt != avc.NALU_NON_IDR && nt != avc.NALU_IDR {
+						continue
+					}
+					stats.Count++
+					// Slice type is readable without SPS/PPS (it precedes the
+					// parameter-set id in the slice header).
+					if st, e := avc.GetSliceTypeFromNALU(nalu); e == nil {
+						stats.SliceTypeCounts[sliceTypeName(st)]++
+					}
+					// Full slice-header parse needs the matching SPS/PPS. A
+					// failure means the slice doesn't match the active parameter
+					// sets (foreign/absent init) — count it as a mismatch signal.
+					sh, err := avc.ParseSliceHeader(nalu, spsMap, ppsMap)
+					if err != nil {
+						stats.UnparsedSlices++
+						continue
+					}
+					base := avc.SliceType(sh.SliceType % 5)
+
+					// Active L0 references; only P/SP/B slices reference frames.
+					l0 := 0
+					switch base {
+					case avc.SLICE_P, avc.SLICE_SP, avc.SLICE_B:
+						l0 = int(sh.NumRefIdxL0ActiveMinus1) + 1
+					}
+					stats.NumRefIdxL0Counts[l0]++
+					if l0 > stats.MaxNumRefIdxL0Active {
+						stats.MaxNumRefIdxL0Active = l0
+					}
+
+					// B-slice specifics: L1 (forward) references + B-run length.
+					if base == avc.SLICE_B {
+						stats.HasBFrames = true
+						l1 := int(sh.NumRefIdxL1ActiveMinus1) + 1
+						stats.NumRefIdxL1Counts[l1]++
+						if l1 > stats.MaxNumRefIdxL1Active {
+							stats.MaxNumRefIdxL1Active = l1
+						}
+						curBRun++
+						if curBRun > stats.MaxConsecutiveBFrames {
+							stats.MaxConsecutiveBFrames = curBRun
+						}
+					} else {
+						curBRun = 0
+					}
+
+					// Picture order count (display order) for reorder-depth.
+					nalRefIdc := (nalu[0] >> 5) & 0x03
+					poc := len(pocs) // default: decode order (POC type 1/2, no reorder)
+					if sps0 != nil {
+						if nt == avc.NALU_IDR {
+							poc, prevPocMsb, prevPocLsb = 0, 0, 0
+						} else if sps0.PicOrderCntType == 0 && maxPocLsb > 0 {
+							lsb := int(sh.PicOrderCntLsb)
+							msb := prevPocMsb
+							if lsb < prevPocLsb && prevPocLsb-lsb >= maxPocLsb/2 {
+								msb = prevPocMsb + maxPocLsb
+							} else if lsb > prevPocLsb && lsb-prevPocLsb > maxPocLsb/2 {
+								msb = prevPocMsb - maxPocLsb
+							}
+							poc = msb + lsb
+							if nalRefIdc != 0 { // only reference pictures update prev
+								prevPocMsb, prevPocLsb = msb, lsb
+							}
+						}
+					}
+					pocs = append(pocs, poc)
+					idrFlags = append(idrFlags, nt == avc.NALU_IDR)
+				}
+			}
+		}
+	}
+
+	if canReorder {
+		stats.MaxReorderDepthFrames = maxReorderDepth(pocs, idrFlags)
+	}
+	addAVCCompatibilityWarnings(stats, sps0, pps0)
+	return stats
+}
+
+func parseX264SettingsFromSEI(nalu []byte, sps *avc.SPS) *AVCX264Settings {
+	msgs, err := avc.ParseSEINalu(nalu, sps)
+	if err != nil && len(msgs) == 0 {
+		return nil
+	}
+	for _, msg := range msgs {
+		unregistered, ok := msg.(*sei.UnregisteredSEI)
+		if !ok {
+			continue
+		}
+		payload := unregistered.Payload()
+		if len(payload) <= 16 {
+			continue
+		}
+		settings := strings.TrimRight(string(payload[16:]), "\x00")
+		if x264 := parseX264SettingsText(settings); x264 != nil {
+			return x264
+		}
+	}
+	return nil
+}
+
+func parseX264SettingsText(settings string) *AVCX264Settings {
+	if !strings.Contains(settings, "x264") || !strings.Contains(settings, "options:") {
+		return nil
+	}
+	settings = sanitizeString(settings)
+	x264 := &AVCX264Settings{Raw: settings}
+
+	opts := parseEncoderOptions(settings)
+	if v, ok := parseOptionInt(opts, "ref"); ok {
+		x264.Ref = v
+	}
+	if v, ok := parseOptionBool(opts, "cabac"); ok {
+		x264.CABAC = &v
+	}
+	if v, ok := parseOptionBool(opts, "8x8dct"); ok {
+		x264.Transform8x8 = &v
+	}
+	if v, ok := parseOptionInt(opts, "weightp"); ok {
+		x264.WeightP = &v
+	}
+	if v, ok := parseOptionInt(opts, "bframes"); ok {
+		x264.BFrames = &v
+	}
+	if v, ok := parseOptionInt(opts, "keyint"); ok {
+		x264.KeyInt = v
+	}
+	if v, ok := parseOptionBool(opts, "stitchable"); ok {
+		x264.Stitchable = &v
+	}
+	if v, ok := parseOptionBool(opts, "constrained_intra"); ok {
+		x264.ConstrainedIntra = &v
+	}
+	return x264
+}
+
+func parseEncoderOptions(settings string) map[string]string {
+	idx := strings.Index(settings, "options:")
+	if idx < 0 {
+		return nil
+	}
+	opts := make(map[string]string)
+	for _, field := range strings.Fields(settings[idx+len("options:"):]) {
+		key, value, ok := strings.Cut(field, "=")
+		if !ok || key == "" {
+			continue
+		}
+		opts[key] = strings.TrimRight(value, "\x00")
+	}
+	return opts
+}
+
+func parseOptionInt(opts map[string]string, key string) (int, bool) {
+	value, ok := opts[key]
+	if !ok {
+		return 0, false
+	}
+	if i := strings.IndexByte(value, ':'); i >= 0 {
+		value = value[:i]
+	}
+	parsed, err := strconv.Atoi(value)
+	if err != nil {
+		return 0, false
+	}
+	return parsed, true
+}
+
+func parseOptionBool(opts map[string]string, key string) (bool, bool) {
+	value, ok := parseOptionInt(opts, key)
+	if !ok {
+		return false, false
+	}
+	return value != 0, true
+}
+
+func addAVCCompatibilityWarnings(stats *AVCSliceStats, sps *avc.SPS, pps *avc.PPS) {
+	if stats == nil || stats.X264 == nil {
+		return
+	}
+	x264 := stats.X264
+	if sps != nil && x264.Ref > 0 && uint(x264.Ref) != sps.NumRefFrames {
+		stats.CompatibilityWarnings = append(stats.CompatibilityWarnings,
+			fmt.Sprintf("x264 ref=%d but active SPS max_num_ref_frames=%d", x264.Ref, sps.NumRefFrames))
+	}
+	if pps == nil {
+		return
+	}
+	ppsL0 := int(pps.NumRefIdxI0DefaultActiveMinus1) + 1
+	if x264.Ref > 0 && x264.Ref != ppsL0 {
+		stats.CompatibilityWarnings = append(stats.CompatibilityWarnings,
+			fmt.Sprintf("x264 ref=%d but active PPS num_ref_idx_l0_default_active=%d", x264.Ref, ppsL0))
+	}
+	if x264.CABAC != nil && *x264.CABAC != pps.EntropyCodingModeFlag {
+		stats.CompatibilityWarnings = append(stats.CompatibilityWarnings,
+			fmt.Sprintf("x264 cabac=%t but active PPS entropy_coding_cabac=%t", *x264.CABAC, pps.EntropyCodingModeFlag))
+	}
+	if x264.Transform8x8 != nil && *x264.Transform8x8 != pps.Transform8x8ModeFlag {
+		stats.CompatibilityWarnings = append(stats.CompatibilityWarnings,
+			fmt.Sprintf("x264 8x8dct=%t but active PPS transform_8x8_mode=%t", *x264.Transform8x8, pps.Transform8x8ModeFlag))
+	}
+	if x264.WeightP != nil && (*x264.WeightP > 0) != pps.WeightedPredFlag {
+		stats.CompatibilityWarnings = append(stats.CompatibilityWarnings,
+			fmt.Sprintf("x264 weightp=%d but active PPS weighted_pred=%t", *x264.WeightP, pps.WeightedPredFlag))
+	}
+}
+
+// maxReorderDepth returns the maximum (decode_index - display_index) over all
+// frames, computed per GOP (reset at each IDR, which flushes the DPB). It is
+// the number of frames the decoder must hold for B-frame reordering — i.e. the
+// actual reference span B-frames introduce between decode and display order.
+func maxReorderDepth(pocs []int, idr []bool) int {
+	maxDepth, i, n := 0, 0, len(pocs)
+	for i < n {
+		// GOP is [i, j): up to (but not including) the next IDR.
+		j := i + 1
+		for j < n && !idr[j] {
+			j++
+		}
+		gop := pocs[i:j]
+		order := make([]int, len(gop))
+		for k := range order {
+			order[k] = k
+		}
+		sort.SliceStable(order, func(a, b int) bool { return gop[order[a]] < gop[order[b]] })
+		rank := make([]int, len(gop))
+		for r, k := range order {
+			rank[k] = r
+		}
+		for k := range gop {
+			if d := k - rank[k]; d > maxDepth {
+				maxDepth = d
+			}
+		}
+		i = j
+	}
+	return maxDepth
+}
+
+// sliceTypeName maps an AVC slice_type (0-9) to its base I/P/B/SP/SI name.
+func sliceTypeName(t avc.SliceType) string {
+	switch avc.SliceType(t % 5) {
+	case avc.SLICE_P:
+		return "P"
+	case avc.SLICE_B:
+		return "B"
+	case avc.SLICE_I:
+		return "I"
+	case avc.SLICE_SP:
+		return "SP"
+	case avc.SLICE_SI:
+		return "SI"
+	}
+	return "?"
 }
 
 // parseHvcCVPS finds and decodes the VPS NALU embedded in an hvcC sample entry.

@@ -551,6 +551,7 @@ typedef struct xcparams_t {
     int         rotate;                     // For video transpose or rotation
     char        *profile;
     int         level;
+    int         h264_refs;                  // H.264 reference frames, 0 lets encoder choose
     dif_type    deinterlace;                // Deinterlacing filter
     char        *timecode;                  // Original timecode string
 } xcparams_t;

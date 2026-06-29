@@ -1,6 +1,7 @@
 package avpipe_test
 
 import (
+	"encoding/binary"
 	"encoding/json"
 	"flag"
 	"fmt"
@@ -2529,6 +2530,220 @@ func TestDOVI20_MezAndDASH(t *testing.T) {
 	boilerXc(t, &dashParams)
 
 	assertDOVI20(t, dashVideoInit(t, dashDir))
+}
+
+func TestLivePartialDASHRegularInitMismatchLocalTST(t *testing.T) {
+	const (
+		source        = "TST/live-hqt_8DP5G69DZnNU6FQtvZ9Aqr3mMVjMaeNSyivPiRJL.mp4"
+		serverSegment = "TST/live-seg000715-30000-180000.m4s"
+	)
+	checkFileExists(t, source)
+	checkFileExists(t, serverSegment)
+
+	assertAVCRefMismatchInMP4(t, serverSegment)
+	serverInit := initSegmentBytesFromFMP4(t, serverSegment)
+
+	dashDir := path.Join(baseOutPath, fn(), "DASH")
+	params := &goavpipe.XcParams{
+		Url:                 source,
+		BypassTranscoding:   false,
+		Format:              "dash",
+		StartTimeTs:         1650000,
+		StartPts:            126900000,
+		DurationTs:          150000,
+		StartSegmentStr:     "715",
+		VideoBitrate:        9500000,
+		AudioBitrate:        0,
+		SampleRate:          0,
+		CrfStr:              "",
+		Preset:              "",
+		RcMaxRate:           0,
+		RcBufferSize:        0,
+		AudioSegDurationTs:  0,
+		VideoSegDurationTs:  180000,
+		StartFragmentIndex:  42851,
+		ForceKeyInt:         60,
+		Ecodec:              h264Codec,
+		GPUIndex:            -1,
+		EncHeight:           1080,
+		EncWidth:            1920,
+		XcType:              goavpipe.XcVideo,
+		Seekable:            false,
+		StreamId:            -1,
+		SyncAudioToStreamId: 0,
+		BitDepth:            0,
+		DebugFrameLevel:     debugFrameLevel,
+	}
+
+	setupOutDir(t, dashDir)
+	goavpipe.InitUrlIOHandler(source,
+		&xc.FileInputOpener{URL: source},
+		&xc.FileOutputOpener{Dir: dashDir})
+	boilerXc(t, params)
+
+	chunkFile := path.Join(dashDir, "vchunk-stream0-00715.m4s")
+	require.FileExists(t, chunkFile, "DASH chunk missing")
+
+	joinedFile := path.Join(dashDir, "server-init-plus-vchunk-stream0-00715.m4s")
+	writeConcatenatedSegment(t, joinedFile, serverInit, chunkFile)
+	assertAVCRefMismatchInMP4(t, joinedFile)
+}
+
+func TestVODPartialDASHRegularInitMismatchLocalTST(t *testing.T) {
+	const (
+		source        = "TST/p2.mp4"
+		serverInit    = "TST/init.m4s"
+		serverSegment = "TST/seg-60-0-29696.mp4"
+	)
+	checkFileExists(t, source)
+	checkFileExists(t, serverInit)
+	checkFileExists(t, serverSegment)
+
+	assertAVCRefMismatchInMP4(t, serverSegment)
+
+	dashDir := path.Join(baseOutPath, fn(), "DASH")
+	params := &goavpipe.XcParams{
+		Url:                 source,
+		BypassTranscoding:   false,
+		Format:              "dash",
+		StartTimeTs:         430080,
+		StartPts:            1382400,
+		DurationTs:          29696,
+		StartSegmentStr:     "60",
+		VideoBitrate:        9500000,
+		AudioBitrate:        0,
+		SampleRate:          0,
+		CrfStr:              "",
+		Preset:              "",
+		RcMaxRate:           0,
+		RcBufferSize:        0,
+		AudioSegDurationTs:  0,
+		VideoSegDurationTs:  30720,
+		StartFragmentIndex:  3541,
+		ForceKeyInt:         60,
+		Ecodec:              h264Codec,
+		GPUIndex:            -1,
+		EncHeight:           1080,
+		EncWidth:            1920,
+		XcType:              goavpipe.XcVideo,
+		Seekable:            false,
+		StreamId:            -1,
+		SyncAudioToStreamId: 0,
+		BitDepth:            0,
+		// Forcing parameters for testing regular-init compatibility with partial media.
+		// Level:    40,
+		// H264Refs: 3,
+		DebugFrameLevel: debugFrameLevel,
+	}
+
+	setupOutDir(t, dashDir)
+	goavpipe.InitUrlIOHandler(source,
+		&xc.FileInputOpener{URL: source},
+		&xc.FileOutputOpener{Dir: dashDir})
+	boilerXc(t, params)
+
+	chunkFile := path.Join(dashDir, "vchunk-stream0-00060.m4s")
+	require.FileExists(t, chunkFile, "DASH chunk missing")
+
+	serverInitBytes, err := os.ReadFile(serverInit)
+	require.NoError(t, err)
+
+	joinedFile := path.Join(dashDir, "server-init-plus-vchunk-stream0-00060.m4s")
+	writeConcatenatedSegment(t, joinedFile, serverInitBytes, chunkFile)
+	assertAVCRegularInitCompatibleInMP4(t, joinedFile)
+}
+
+func assertAVCRefMismatchInMP4(t *testing.T, filename string) {
+	t.Helper()
+
+	f, err := os.Open(filename)
+	require.NoError(t, err)
+	defer f.Close()
+
+	infos, err := mp4e.ExtractCodecInfo(f)
+	require.NoError(t, err)
+	requireAVCRefMismatch(t, infos)
+}
+
+func requireAVCRefMismatch(t *testing.T, infos []*mp4e.CodecInfo) {
+	t.Helper()
+
+	require.Len(t, infos, 1)
+	require.NotNil(t, infos[0].AVC)
+	require.NotNil(t, infos[0].AVC.Slices)
+	require.NotNil(t, infos[0].AVC.Slices.X264)
+
+	assert.Equal(t, uint(3), infos[0].AVC.MaxNumRefFrames)
+	assert.Equal(t, uint(3), infos[0].AVC.NumRefIdxL0Default)
+	assert.Equal(t, 1, infos[0].AVC.Slices.X264.Ref)
+	assert.Contains(t, infos[0].AVC.Slices.CompatibilityWarnings,
+		"x264 ref=1 but active SPS max_num_ref_frames=3")
+	assert.Contains(t, infos[0].AVC.Slices.CompatibilityWarnings,
+		"x264 ref=1 but active PPS num_ref_idx_l0_default_active=3")
+}
+
+func assertAVCRegularInitCompatibleInMP4(t *testing.T, filename string) {
+	t.Helper()
+
+	f, err := os.Open(filename)
+	require.NoError(t, err)
+	defer f.Close()
+
+	infos, err := mp4e.ExtractCodecInfo(f)
+	require.NoError(t, err)
+	require.Len(t, infos, 1)
+	require.NotNil(t, infos[0].AVC)
+	require.NotNil(t, infos[0].AVC.Slices)
+	require.NotNil(t, infos[0].AVC.Slices.X264)
+
+	assert.Equal(t, 40, infos[0].Level)
+	assert.Equal(t, uint(3), infos[0].AVC.MaxNumRefFrames)
+	assert.Equal(t, uint(3), infos[0].AVC.NumRefIdxL0Default)
+	assert.Equal(t, 3, infos[0].AVC.Slices.X264.Ref)
+	assert.Empty(t, infos[0].AVC.Slices.CompatibilityWarnings)
+}
+
+func writeConcatenatedSegment(t *testing.T, outputFile string, initSegment []byte, chunkFile string) {
+	t.Helper()
+
+	chunk, err := os.ReadFile(chunkFile)
+	require.NoError(t, err)
+
+	joined := make([]byte, 0, len(initSegment)+len(chunk))
+	joined = append(joined, initSegment...)
+	joined = append(joined, chunk...)
+	require.NoError(t, os.WriteFile(outputFile, joined, 0644))
+}
+
+func initSegmentBytesFromFMP4(t *testing.T, filename string) []byte {
+	t.Helper()
+
+	data, err := os.ReadFile(filename)
+	require.NoError(t, err)
+
+	for off := 0; off+8 <= len(data); {
+		size := uint64(binary.BigEndian.Uint32(data[off : off+4]))
+		boxType := string(data[off+4 : off+8])
+		headerSize := uint64(8)
+		if size == 1 {
+			require.LessOrEqual(t, off+16, len(data), "extended MP4 box header exceeds file size")
+			size = binary.BigEndian.Uint64(data[off+8 : off+16])
+			headerSize = 16
+		} else if size == 0 {
+			size = uint64(len(data) - off)
+		}
+
+		require.GreaterOrEqual(t, size, headerSize, "invalid MP4 box size for %s", boxType)
+		require.LessOrEqual(t, off+int(size), len(data), "MP4 box %s exceeds file size", boxType)
+
+		if boxType == "styp" || boxType == "moof" {
+			return data[:off]
+		}
+		off += int(size)
+	}
+
+	t.Fatalf("no media box found in %s", filename)
+	return nil
 }
 
 func TestAVPipeStats(t *testing.T) {

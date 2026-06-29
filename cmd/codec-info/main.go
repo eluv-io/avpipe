@@ -22,8 +22,10 @@ func main() {
 
 func run(args []string, w io.Writer) error {
 	fs := flag.NewFlagSet(appName, flag.ContinueOnError)
+	var initFile string
+	fs.StringVar(&initFile, "init", "", "init segment to pair with a bare media (m4s) segment, without concatenating; the media's slices are parsed against this init's SPS/PPS")
 	fs.Usage = func() {
-		_, _ = fmt.Fprintf(os.Stderr, "%s extracts codec information from an MP4 or fMP4 init segment and prints it as JSON.\n\nUsage: %s <file>\n", appName, appName)
+		_, _ = fmt.Fprintf(os.Stderr, "%s extracts codec information from an MP4/fMP4 segment and prints it as JSON.\n\nUsage:\n  %s <file>\n  %s -init <init.m4s> <media.m4s>\n", appName, appName, appName)
 		fs.PrintDefaults()
 	}
 
@@ -45,7 +47,17 @@ func run(args []string, w io.Writer) error {
 	}
 	defer func() { _ = f.Close() }()
 
-	infos, err := mp4e.ExtractCodecInfo(f)
+	var infos []*mp4e.CodecInfo
+	if initFile != "" {
+		initF, ierr := os.Open(initFile)
+		if ierr != nil {
+			return fmt.Errorf("could not open init file: %w", ierr)
+		}
+		defer func() { _ = initF.Close() }()
+		infos, err = mp4e.ExtractCodecInfoWithInit(f, initF)
+	} else {
+		infos, err = mp4e.ExtractCodecInfo(f)
+	}
 	if err != nil {
 		return fmt.Errorf("could not extract codec info: %w", err)
 	}

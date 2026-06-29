@@ -367,6 +367,7 @@ type XcParams struct {
 	Rotate                 int       `json:"rotate,omitempty"`
 	Profile                string    `json:"profile,omitempty"`
 	Level                  int       `json:"level,omitempty"`
+	H264Refs               int       `json:"h264_refs,omitempty"`
 	Deinterlace            int       `json:"deinterlace,omitempty"`
 	Timecode               string    `json:"timecode,omitempty"`
 }
