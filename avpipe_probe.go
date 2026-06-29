@@ -13,17 +13,10 @@ import (
 // extractCodecInfoForProbe extracts MP4 codec info from input and seeks it back
 // to 0 so the caller can re-read from the beginning. The caller owns the handle
 // and is responsible for opening and closing it.
-//
-// It uses the lazy decode path: only the box headers and moov are read, the
-// mdat payload is skipped via seeking. This keeps peak memory at ~the moov size
-// regardless of the input size — Probe runs on both full files and smaller
-// parts, and only consumes init-level fields (never the AVC slice statistics).
-// InputHandler satisfies io.ReadSeeker (it has Read and Seek), as lazy mode
-// requires.
 func extractCodecInfoForProbe(input goavpipe.InputHandler) ([]*mp4e.CodecInfo, error) {
 	const op = "avpipe.extractCodecInfoForProbe"
 	e := errors.Template(op, errors.K.Invalid.Default())
-	infos, extractErr := mp4e.ExtractCodecInfoLazy(input)
+	infos, extractErr := mp4e.ExtractCodecInfoLazy(input) // Only loading MP4 box headers
 	if _, seekErr := input.Seek(0, io.SeekStart); seekErr != nil {
 		if extractErr != nil {
 			goavpipe.Log.Error("seek back failed after failed extraction", "extract_error", extractErr, "op", op)
