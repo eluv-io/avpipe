@@ -94,6 +94,7 @@ var mezTestSources = []mezTestSource{
 	{"TOS0_FHD_2_H264_60s_CCBYblendercloud.mp4", "24/1", 48, false, ""},
 	{"TOS8_FHD_51-2_PRHQ_60s_CCBYblendercloud.mov", "24000/1001", 48, false, ""},
 	{"yuvj420p.mov", "30/1", 60, false, "libx265"}, // test if color_range full/pc is preserved
+	{"yuvj420p.mov", "30/1", 60, false, ""},        // same, through libx264 (set_h264_params color path)
 
 	// Currently these files don't work
 	// {"bbb_sunflower_1080p_29_97_fps_normal.mp4", "30000/1001", 60, false, ""}, // Broken - file actually 30/1 fps

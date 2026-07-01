@@ -520,8 +520,8 @@ typedef struct xcparams_t {
     char        *watermark_xloc;            // Default 0
     char        *watermark_yloc;            // Default 0
     float       watermark_relative_sz;      // Default 0
-    char        *watermark_font_color;      // black
-    int         watermark_shadow;           // Default 1, means shadow exist 
+    char        *watermark_font_color;      // Default: white. Must be non-empty when watermark_text is set
+    int         watermark_shadow;           // Default: 0 (no shadow)
     char        *overlay_filename;          // Overlay file name
     char        *watermark_overlay;         // Overlay image buffer, default is NULL
     image_type  watermark_overlay_type;     // Overlay image type, default is png
