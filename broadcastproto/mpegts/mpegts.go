@@ -52,7 +52,7 @@ type MpegtsPacketProcessor struct {
 	periodicStatsLog timeutil.Periodic
 
 	continuityMap map[int]uint8 // Map of PID to last continuity counter
-	pcrPid        int           // PID we track PCRs from; pinned to the first PCR-bearing PID (0 = not set)
+	pcrPid        int           // PID we track PCRs from; pinned to the first PCR-bearing PID (-1 = not set)
 	outBuf        []byte        // Preallocated byte buffer
 	closeCh       chan struct{}
 
@@ -73,6 +73,7 @@ func NewMpegtsPacketProcessor(cfg TsConfig, seqOpener SequentialOpener, inFd int
 		cfg:              cfg,
 		opener:           seqOpener,
 		inFd:             inFd,
+		pcrPid:           -1, // -1 = not set; PID 0 is a valid PID that may carry PCRs
 		continuityMap:    make(map[int]uint8),
 		stats:            NewTSStats(),
 		rtpStats:         rtpStats,
@@ -343,10 +344,10 @@ func (mpp *MpegtsPacketProcessor) updatePCR(pkt packet.Packet) {
 	}
 
 	// Pin PCR tracking to the first PID that carries a PCR and ignore the rest. Multi-program streams carry an
-	// independent PCR per program, so mixing them would make the FirstPCR/LastPCR stats meaningless. PID 0 is the PAT
-	// (which cannot carry PCRs), so 0 is a safe "not set" sentinel.
+	// independent PCR per program, so mixing them would make the FirstPCR/LastPCR stats meaningless. -1 is the "not
+	// set" sentinel, since PID 0 is a valid PID that may legitimately carry PCRs.
 	pid := pkt.PID()
-	if mpp.pcrPid != 0 && pid != mpp.pcrPid {
+	if mpp.pcrPid != -1 && pid != mpp.pcrPid {
 		return
 	}
 
@@ -359,7 +360,7 @@ func (mpp *MpegtsPacketProcessor) updatePCR(pkt packet.Packet) {
 	// Count PCR wraps on the pinned PID: a wrap is a large backward jump from near PcrMax back towards 0. Skip the
 	// first PCR, when there is nothing to compare against yet. PCR is otherwise stats-only; segmentation is driven
 	// purely by wall-clock time.
-	if mpp.pcrPid != 0 {
+	if mpp.pcrPid != -1 {
 		prev := mpp.stats.LastPCR.Load()
 		if pcr < prev && prev-pcr > PcrMax/2 {
 			mpp.stats.NumWraps.Inc()
