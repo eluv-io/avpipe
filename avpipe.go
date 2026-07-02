@@ -1209,6 +1209,17 @@ func Probe(params *goavpipe.XcParams) (*goavpipe.ProbeInfo, error) {
 	return probeInfo, nil
 }
 
+// cancelableInputOpener is implemented by BypassLibavReader input openers that run their own Go network read loop
+// (mpegts/custom). XcCancel uses it to unblock a read that is parked on a dead source: C.xc_cancel only cancels the
+// ffmpeg/libav side, so without this the Go read loop stays blocked until it times out on its own and live/stop hangs.
+type cancelableInputOpener interface {
+	CancelInput()
+}
+
+// cancelableInputOpeners maps a live transcode handle to its cancelable input opener. Registered by XcInit when
+// BypassLibavReader is set, removed when XcRun completes.
+var cancelableInputOpeners sync.Map // int32 handle -> cancelableInputOpener
+
 // XcInit initializes a transcode job and returns a handle for it. The actual
 // transcoding is started by XcRun(handle) and can be interrupted at any time
 // via XcCancel(handle). Use this two-phase form instead of Xc when the caller
@@ -1246,15 +1257,15 @@ func XcInit(params *goavpipe.XcParams) (int32, error) {
 		return handle, nil
 	}
 
+	var bypassOpener goavpipe.InputOpener
 	if params.InputCfg.BypassLibavReader {
-		var opener goavpipe.InputOpener
 		var err error
-		opener, err = mpegts.NewAutoInputOpener(params, seqOpenerF)
+		bypassOpener, err = mpegts.NewAutoInputOpener(params, seqOpenerF)
 		if err != nil {
 			goavpipe.Log.Error(op, err, "XcParams", params)
 			return -1, EAV_PARAM
 		}
-		goavpipe.InitUrlIOHandlerIfNotPresent(params.Url, opener, nil)
+		goavpipe.InitUrlIOHandlerIfNotPresent(params.Url, bypassOpener, nil)
 	}
 
 	cparams, err := getCParams(params)
@@ -1269,6 +1280,11 @@ func XcInit(params *goavpipe.XcParams) (int32, error) {
 	if err != nil {
 		goavpipe.Log.Error(op, "reason", "xc_init failed", "rc", rc, "XcParams", params)
 		return -1, err
+	}
+
+	// Track the input opener by handle so XcCancel can unblock its Go read loop (see cancelableInputOpener).
+	if c, ok := bypassOpener.(cancelableInputOpener); ok {
+		cancelableInputOpeners.Store(int32(handle), c)
 	}
 
 	if isMvhevcLayout(params) {
@@ -1307,6 +1323,7 @@ func XcRun(handle int32) error {
 	if handle < 0 {
 		return EAV_BAD_HANDLE
 	}
+	defer cancelableInputOpeners.Delete(handle)
 	goavpipe.AssociateGIDWithHandle(handle)
 	rc := C.xc_run(C.int32_t(handle))
 	if rc == 0 {
@@ -1329,7 +1346,14 @@ func XcCancel(handle int32) error {
 	}
 
 	defer unregisterMvhevcRestoreHandle(handle)
+
+	// Cancel the ffmpeg/libav side first (sets the cancel flag), then unblock the Go input read loop if this job uses a
+	// BypassLibavReader opener. Without the latter, a read parked on a dead source (custom/mpegts input opener) keeps
+	// xc_run blocked until the source read times out on its own, so XcCancel (and live/stop) would hang.
 	rc := C.xc_cancel(C.int32_t(handle))
+	if v, ok := cancelableInputOpeners.Load(handle); ok {
+		v.(cancelableInputOpener).CancelInput()
+	}
 	if rc == 0 {
 		return nil
 	}

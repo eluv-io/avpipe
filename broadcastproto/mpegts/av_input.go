@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"io"
 	"strings"
+	"sync"
 	"time"
 
 	"go.uber.org/atomic"
@@ -96,6 +97,9 @@ type mpegtsInputOpener struct {
 
 	seqOpener SequentialOpenerFactory
 	cfg       *goavpipe.InputConfig
+
+	mu      sync.Mutex
+	handler *mpegtsInputHandler // the handler created by Open, tracked so CancelInput can unblock its read
 }
 
 func (mio *mpegtsInputOpener) Open(fd int64, url string) (goavpipe.InputHandler, error) {
@@ -135,6 +139,10 @@ func (mio *mpegtsInputOpener) Open(fd int64, url string) (goavpipe.InputHandler,
 		gih:              gih,
 	}
 
+	mio.mu.Lock()
+	mio.handler = mih
+	mio.mu.Unlock()
+
 	if copyStream {
 		go func() {
 			handle, ok := goavpipe.GIDHandle()
@@ -152,6 +160,18 @@ func (mio *mpegtsInputOpener) Open(fd int64, url string) (goavpipe.InputHandler,
 	return mih, nil
 }
 
+// CancelInput unblocks a Read() parked on the transport (e.g. a dead source) by closing the underlying transport
+// reader, so the avpipe transcode read returns and the job can tear down. Called from XcCancel; full cleanup still
+// happens in the handler's Close(). Safe to call before Open (no-op) and concurrently with Close.
+func (mio *mpegtsInputOpener) CancelInput() {
+	mio.mu.Lock()
+	h := mio.handler
+	mio.mu.Unlock()
+	if h != nil {
+		h.cancel()
+	}
+}
+
 type mpegtsInputHandler struct {
 	rc        io.ReadCloser
 	transport transport.Transport
@@ -162,9 +182,21 @@ type mpegtsInputHandler struct {
 	outputSplit      chan<- []byte
 	packetsDropped   atomic.Uint64
 	readerLoopDoneCh chan struct{}
+	rcCloseOnce      sync.Once // guards closing rc from both cancel() and Close()
 
 	// gih is the global input handler, used to pass input stats through to the normal live
 	gih goavpipe.InputHandler
+}
+
+// cancel closes the transport reader to unblock a blocked Read(). Idempotent; the remaining teardown (draining the copy
+// channel, waiting for the reader loop) is done by Close().
+func (mih *mpegtsInputHandler) cancel() {
+	mih.closeRC()
+}
+
+func (mih *mpegtsInputHandler) closeRC() (err error) {
+	mih.rcCloseOnce.Do(func() { err = mih.rc.Close() })
+	return err
 }
 
 // Read is called from ffmpeg. It should read from an internal channel that is fed by our own read loop.
@@ -192,7 +224,7 @@ func (mih *mpegtsInputHandler) Read(buf []byte) (int, error) {
 }
 
 func (mih *mpegtsInputHandler) Close() error {
-	err := mih.rc.Close()
+	err := mih.closeRC()
 
 	if mih.outputSplit != nil {
 		ch := mih.outputSplit

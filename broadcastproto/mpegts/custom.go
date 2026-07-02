@@ -21,6 +21,9 @@ type customInputOpener struct {
 	transport transport.Transport
 	seqOpener SequentialOpenerFactory
 	cfg       *goavpipe.XcParams
+
+	mu      sync.Mutex
+	handler *customInputHandler // the handler created by Open, tracked so CancelInput can unblock its read
 }
 
 func (c *customInputOpener) Open(fd int64, url string) (goavpipe.InputHandler, error) {
@@ -89,6 +92,10 @@ func (c *customInputOpener) Open(fd int64, url string) (goavpipe.InputHandler, e
 		gih:            gih,
 	}
 
+	c.mu.Lock()
+	c.handler = handler
+	c.mu.Unlock()
+
 	if copyStream {
 		handle, hasHandle := goavpipe.GIDHandle()
 		handler.wg.Add(1)
@@ -106,6 +113,18 @@ func (c *customInputOpener) Open(fd int64, url string) (goavpipe.InputHandler, e
 	}
 
 	return handler, nil
+}
+
+// CancelInput unblocks a Read() parked on the consumer channel by cancelling the network reader (which closes the
+// consumer channels), so the avpipe transcode read returns and the job can tear down. Called from XcCancel; full
+// cleanup still happens in the handler's Close(). Safe to call before Open (no-op) and concurrently with Close.
+func (c *customInputOpener) CancelInput() {
+	c.mu.Lock()
+	h := c.handler
+	c.mu.Unlock()
+	if h != nil {
+		h.netReader.Cancel()
+	}
 }
 
 type customInputHandler struct {
