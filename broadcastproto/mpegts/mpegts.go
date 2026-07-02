@@ -38,8 +38,7 @@ type MpegtsPacketProcessor struct {
 
 	inFd         int64
 	opener       SequentialOpener
-	segStartPcr  uint64 // PCR at the start of the current segment
-	segStartTime time.Time
+	segStartTime time.Time // wall-clock time at the start of the current segment
 	currentWc    io.WriteCloser
 
 	// statsMu is _only_ used for updating cc errors by PID
@@ -53,7 +52,7 @@ type MpegtsPacketProcessor struct {
 	periodicStatsLog timeutil.Periodic
 
 	continuityMap map[int]uint8 // Map of PID to last continuity counter
-	pcr           uint64        // Last seen PCR value
+	pcrPid        int           // PID we track PCRs from; pinned to the first PCR-bearing PID (-1 = not set)
 	outBuf        []byte        // Preallocated byte buffer
 	closeCh       chan struct{}
 
@@ -74,6 +73,7 @@ func NewMpegtsPacketProcessor(cfg TsConfig, seqOpener SequentialOpener, inFd int
 		cfg:              cfg,
 		opener:           seqOpener,
 		inFd:             inFd,
+		pcrPid:           -1, // -1 = not set; PID 0 is a valid PID that may carry PCRs
 		continuityMap:    make(map[int]uint8),
 		stats:            NewTSStats(),
 		rtpStats:         rtpStats,
@@ -149,7 +149,7 @@ func NewTSStats() *TSStats {
 	}
 }
 
-func (mpp *MpegtsPacketProcessor) ProcessDatagram(datagram []byte) {
+func (mpp *MpegtsPacketProcessor) ProcessDatagram(now time.Time, datagram []byte) {
 	if !mpp.startLogged {
 		mpp.startLogged = true
 		mpegtslog.Info("mpegts processing first datagram",
@@ -179,7 +179,7 @@ func (mpp *MpegtsPacketProcessor) ProcessDatagram(datagram []byte) {
 		}
 		swapped := mpp.rtpStats.FirstTimestamp.CompareAndSwap(0, dgHeader.Timestamp)
 		if swapped {
-			mpp.rtpStats.RefTime = time.Now()
+			mpp.rtpStats.RefTime = now
 			mpp.rtpStats.FirstSeqNum.Store(uint32(dgHeader.SequenceNumber))
 			defer mpp.PushStats() // defer so that ts stats are included in the stats
 		}
@@ -216,12 +216,7 @@ func (mpp *MpegtsPacketProcessor) ProcessDatagram(datagram []byte) {
 		}
 	}
 
-	if mpp.pcr == 0 {
-		// Wait for at least one packet with PCR before writing
-		return
-	}
-
-	mpp.writeDatagram(datagram, badPackets == 0 && hasPadding && StripTsPadding.Load(), mpegtsOffset)
+	mpp.writeDatagram(now, datagram, badPackets == 0 && hasPadding && StripTsPadding.Load(), mpegtsOffset)
 }
 
 func (mpp *MpegtsPacketProcessor) HandleMpegtsPacket(pkt packet.Packet) error {
@@ -348,43 +343,52 @@ func (mpp *MpegtsPacketProcessor) updatePCR(pkt packet.Packet) {
 		return
 	}
 
+	// Pin PCR tracking to the first PID that carries a PCR and ignore the rest. Multi-program streams carry an
+	// independent PCR per program, so mixing them would make the FirstPCR/LastPCR stats meaningless. -1 is the "not
+	// set" sentinel, since PID 0 is a valid PID that may legitimately carry PCRs.
+	pid := pkt.PID()
+	if mpp.pcrPid != -1 && pid != mpp.pcrPid {
+		return
+	}
+
 	pcr, err := a.PCR()
 	if err != nil {
 		mpp.stats.ErrorsAdapationField.Inc()
 		return
 	}
-	mpp.pcr = pcr
 
-	mpp.stats.FirstPCR.CompareAndSwap(0, mpp.pcr)
-	mpp.stats.LastPCR.Store(mpp.pcr)
+	// Count PCR wraps on the pinned PID: a wrap is a large backward jump from near PcrMax back towards 0. Skip the
+	// first PCR, when there is nothing to compare against yet. PCR is otherwise stats-only; segmentation is driven
+	// purely by wall-clock time.
+	if mpp.pcrPid != -1 {
+		prev := mpp.stats.LastPCR.Load()
+		if pcr < prev && prev-pcr > PcrMax/2 {
+			mpp.stats.NumWraps.Inc()
+		}
+	}
+	mpp.pcrPid = pid
+
+	mpp.stats.FirstPCR.CompareAndSwap(0, pcr)
+	mpp.stats.LastPCR.Store(pcr)
 }
 
-func (mpp *MpegtsPacketProcessor) writeDatagram(datagram []byte, removePadding bool, rtpPayloadOffset int) {
+func (mpp *MpegtsPacketProcessor) writeDatagram(now time.Time, datagram []byte, removePadding bool, rtpPayloadOffset int) {
 	if mpp.currentWc == nil {
 		if mpp.stats.ErrorsOpeningOutput.Load() > 50 {
 			return
 		}
 
-		err := mpp.openNextOutput()
+		err := mpp.openNextOutput(now)
 		if err != nil {
 			return
 		}
 	}
 
-	curCloseToZero := PcrTs*30 > mpp.pcr
-	prevCloseToMax := PcrMax-(PcrTs*60) < mpp.segStartPcr
-	pcrWrapped := prevCloseToMax && curCloseToZero
-	pcrPastSegmentBounds := mpp.pcr > mpp.segStartPcr && mpp.pcr-mpp.segStartPcr > mpp.cfg.SegmentLengthSec*PcrTs
-	segTimeFarTooLong := time.Since(mpp.segStartTime) > time.Duration(mpp.cfg.SegmentLengthSec)*time.Second*2
-	if pcrWrapped || pcrPastSegmentBounds || segTimeFarTooLong {
-		mpegtslog.Debug("opening next output", "pcrWrapped", pcrWrapped, "pcrPastSegmentBounds", pcrPastSegmentBounds, "pcr", mpp.pcr, "segStartPcr", mpp.segStartPcr)
-		if pcrWrapped {
-			mpp.stats.NumWraps.Inc()
-		}
-		if segTimeFarTooLong {
-			mpp.stats.NumTimedRotate.Inc()
-		}
-		err := mpp.openNextOutput()
+	segmentLength := time.Duration(mpp.cfg.SegmentLengthSec) * time.Second
+	if segmentLength > 0 && now.Sub(mpp.segStartTime) >= segmentLength {
+		mpegtslog.Debug("opening next output", "reason", "wallclock", "segStartTime", mpp.segStartTime)
+		mpp.stats.NumTimedRotate.Inc()
+		err := mpp.openNextOutput(now)
 		if err != nil {
 			return
 		}
@@ -433,7 +437,7 @@ func (mpp *MpegtsPacketProcessor) writeDatagram(datagram []byte, removePadding b
 	mpp.stats.BytesWritten.Add(uint64(n))
 }
 
-func (mpp *MpegtsPacketProcessor) openNextOutput() error {
+func (mpp *MpegtsPacketProcessor) openNextOutput(now time.Time) error {
 	startTime := time.Now()
 	var closeDone time.Time
 	defer func() {
@@ -460,8 +464,7 @@ func (mpp *MpegtsPacketProcessor) openNextOutput() error {
 	}
 	mpp.stats.NumSegments.Inc()
 	mpp.currentWc = wc
-	mpp.segStartPcr = mpp.pcr
-	mpp.segStartTime = time.Now()
+	mpp.segStartTime = now
 	return nil
 }
 

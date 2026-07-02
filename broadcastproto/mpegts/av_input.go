@@ -251,6 +251,6 @@ func (mih *mpegtsInputHandler) ReaderLoop(ch chan []byte, packetsDropped *atomic
 			goavpipe.Log.Trace("Processed packets", "count", nPackets, "chan size", len(ch), "chan cap", cap(ch))
 		}
 
-		ts.ProcessDatagram(buf)
+		ts.ProcessDatagram(time.Now(), buf)
 	}
 }
