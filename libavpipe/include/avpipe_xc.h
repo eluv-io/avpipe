@@ -551,6 +551,7 @@ typedef struct xcparams_t {
     int         rotate;                     // For video transpose or rotation
     char        *profile;
     int         level;
+    char        *tier;                      // HEVC tier, only supported for libx265 ("main" or "high")
     dif_type    deinterlace;                // Deinterlacing filter
     char        *timecode;                  // Original timecode string
 } xcparams_t;
