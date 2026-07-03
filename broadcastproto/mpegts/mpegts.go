@@ -1,6 +1,7 @@
 package mpegts
 
 import (
+	"encoding/binary"
 	"errors"
 	"io"
 	"sync"
@@ -78,7 +79,8 @@ func NewMpegtsPacketProcessor(cfg TsConfig, seqOpener SequentialOpener, inFd int
 		stats:            NewTSStats(),
 		rtpStats:         rtpStats,
 		periodicStatsLog: timeutil.NewPeriodic(30 * time.Second),
-		outBuf:           make([]byte, 64*1024), // Max datagram size
+		// Max datagram size plus room for the TLV header and (for ATS-TS) the arrival timestamp prefix.
+		outBuf: make([]byte, 64*1024+tlv.TLV_HEADER_LEN+tlv.AtsTimestampLen),
 		closeCh:          make(chan struct{}),
 	}
 }
@@ -395,7 +397,7 @@ func (mpp *MpegtsPacketProcessor) writeDatagram(now time.Time, datagram []byte, 
 	}
 
 	switch mpp.cfg.Packaging {
-	case transport.RawTs, transport.RtpTs:
+	case transport.RawTs, transport.RtpTs, transport.AtsTs:
 	default:
 		goavpipe.Log.Error("packaging mode unknown. Bailing out on writing datagram", "packaging_mode", mpp.cfg.Packaging)
 		return
@@ -403,7 +405,8 @@ func (mpp *MpegtsPacketProcessor) writeDatagram(now time.Time, datagram []byte, 
 
 	dataToWrite := datagram
 
-	if mpp.cfg.Packaging == transport.RtpTs {
+	switch mpp.cfg.Packaging {
+	case transport.RtpTs:
 		var tlvType = tlv.TlvTypeRtpTs
 		if removePadding && StripTsPadding.Load() {
 			tlvType = tlv.TlvTypeRtpTsNoPad
@@ -420,6 +423,19 @@ func (mpp *MpegtsPacketProcessor) writeDatagram(now time.Time, datagram []byte, 
 		copy(mpp.outBuf, tlvHeader)
 		copy(mpp.outBuf[len(tlvHeader):], datagram)
 		dataToWrite = mpp.outBuf[:len(tlvHeader)+len(datagram)]
+
+	case transport.AtsTs:
+		// The TLV value is an 8-byte arrival timestamp followed by the raw TS datagram.
+		tlvHeader, err := tlv.TlvHeader(tlv.AtsTimestampLen+len(datagram), tlv.TlvTypeAtsTs)
+		if err != nil {
+			mpp.stats.ErrorsOther.Inc()
+			return
+		}
+		n := copy(mpp.outBuf, tlvHeader)
+		binary.BigEndian.PutUint64(mpp.outBuf[n:], uint64(now.UnixNano()))
+		n += tlv.AtsTimestampLen
+		n += copy(mpp.outBuf[n:], datagram)
+		dataToWrite = mpp.outBuf[:n]
 	}
 
 	startTime := time.Now()

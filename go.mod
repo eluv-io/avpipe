@@ -6,7 +6,7 @@ require (
 	github.com/Comcast/gots v0.0.0-20200213175321-9799558ed3e2
 	github.com/Comcast/gots/v2 v2.2.1
 	github.com/Eyevinn/mp4ff v0.51.0
-	github.com/eluv-io/common-go v1.1.22
+	github.com/eluv-io/common-go v1.1.24-0.20260702220848-d0d76ff13ca8
 	github.com/eluv-io/errors-go v1.0.5
 	github.com/eluv-io/log-go v1.0.10
 	github.com/grafov/m3u8 v0.11.1
@@ -29,6 +29,7 @@ require (
 	github.com/datarhei/gosrt v0.9.0 // indirect
 	github.com/davecgh/go-spew v1.1.1 // indirect
 	github.com/eluv-io/apexlog-go v1.9.1-elv4 // indirect
+	github.com/eluv-io/mapstructure v1.5.1 // indirect
 	github.com/eluv-io/stack v1.8.2 // indirect
 	github.com/eluv-io/utc-go v1.0.1 // indirect
 	github.com/fxamacker/cbor/v2 v2.8.0 // indirect
@@ -43,7 +44,6 @@ require (
 	github.com/json-iterator/go v1.1.9 // indirect
 	github.com/kr/pretty v0.3.1 // indirect
 	github.com/leodido/go-urn v1.2.0 // indirect
-	github.com/mitchellh/mapstructure v1.4.3 // indirect
 	github.com/modern-go/concurrent v0.0.0-20180306012644-bacd9c7ef1dd // indirect
 	github.com/modern-go/reflect2 v1.0.2 // indirect
 	github.com/mr-tron/base58 v1.2.0 // indirect

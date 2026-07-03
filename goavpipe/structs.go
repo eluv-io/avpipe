@@ -526,6 +526,8 @@ func (ic *InputConfig) Validate(url string) error {
 			// TODO: We should be able to handle RTP over UDP as well
 			return errors.New("RTP packaging can only be used with RTP URLs")
 		}
+		// ATS-TS is allowed with any source: for RTP sources the RTP header is stripped and only the arrival timestamp
+		// plus the TS payload are recorded.
 		return nil
 	case CopyModeRemuxed:
 		if ic.CopyPackaging != transport.RawTs {

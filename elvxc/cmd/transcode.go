@@ -703,6 +703,8 @@ func doTranscode(cmd *cobra.Command, args []string) error {
 		copyMode = goavpipe.CopyModeNone
 	case "raw":
 		copyMode = goavpipe.CopyModeRaw
+	case "raw_only":
+		copyMode = goavpipe.CopyModeRawOnly
 	case "remuxed":
 		copyMode = goavpipe.CopyModeRemuxed
 	default:
@@ -719,6 +721,8 @@ func doTranscode(cmd *cobra.Command, args []string) error {
 		copyPackaging = transport.RawTs
 	case "rtp_ts":
 		copyPackaging = transport.RtpTs
+	case "ats_ts":
+		copyPackaging = transport.AtsTs
 	default:
 		return fmt.Errorf("Unsupported copy-packaging value")
 	}

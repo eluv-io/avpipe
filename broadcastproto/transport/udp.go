@@ -27,12 +27,19 @@ var _ Transport = (*udpProto)(nil)
 type udpProto struct {
 	Url string
 
+	// packaging is the desired output packaging. UDP carries raw TS (no RTP layer), so the meaningful choices are
+	// RawTs and AtsTs (which additionally records the packet arrival timestamp).
+	packaging TsPackagingMode
+
 	Conn *net.UDPConn
 }
 
-func NewUDPTransport(url string) Transport {
-	log.Debug("Creating new UDP transport", "url", url)
-	return &udpProto{Url: url}
+func NewUDPTransport(url string, packaging TsPackagingMode) Transport {
+	log.Debug("Creating new UDP transport", "url", url, "packaging", string(packaging))
+	if packaging == UnknownPackagingMode {
+		packaging = RawTs
+	}
+	return &udpProto{Url: url, packaging: packaging}
 }
 
 func (u *udpProto) URL() string {
@@ -44,7 +51,7 @@ func (u *udpProto) Handler() string {
 }
 
 func (u *udpProto) PackagingMode() TsPackagingMode {
-	return RawTs
+	return u.packaging
 }
 
 // Open a live URL

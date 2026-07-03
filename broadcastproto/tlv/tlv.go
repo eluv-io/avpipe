@@ -17,6 +17,10 @@ const TLV_HEADER_LEN = 3
 
 const U16MAX = 0xFFFF
 
+// AtsTimestampLen is the size in bytes of the arrival timestamp prefixed to the TS data in a TlvTypeAtsTs value. The
+// timestamp is an int64 nanoseconds-since-Unix-epoch value encoded big-endian.
+const AtsTimestampLen = 8
+
 const (
 	TlvTypeUnknown TlvType = iota
 	TlvTypeRtpTs
@@ -25,6 +29,10 @@ const (
 	TlvTypeRawTs
 	// TlvTypeRtpTsNoPad is RTP-TS with padding stripped.
 	TlvTypeRtpTsNoPad
+	// TlvTypeAtsTs is an Arrival-Time-Stamped raw MPEG-TS datagram: the value is an 8-byte arrival timestamp (see
+	// AtsTimestampLen) followed by the raw TS packets of a single received datagram. Used in place of RTP-TS when the
+	// input carries no RTP layer (or unusable RTP timestamps) but the packet arrival time still needs to be recorded.
+	TlvTypeAtsTs
 )
 
 var ErrUnknownTlvType = fmt.Errorf("unknown TLV type")
@@ -37,6 +45,8 @@ func (pt TlvType) String() string {
 		return "Raw-TS"
 	case TlvTypeRtpTsNoPad:
 		return "RTP-TS-NoPad"
+	case TlvTypeAtsTs:
+		return "ATS-TS"
 	default:
 		return fmt.Sprintf("Unknown:%d", pt)
 	}
@@ -61,6 +71,8 @@ func ByteToTLVType(b byte) (TlvType, error) {
 		return TlvTypeRawTs, nil
 	case 0x03:
 		return TlvTypeRtpTsNoPad, nil
+	case 0x04:
+		return TlvTypeAtsTs, nil
 	}
 	return TlvTypeUnknown, ErrUnknownTlvType
 }
@@ -87,9 +99,19 @@ func ValidateTLV(data []byte) (TlvType, error) {
 		err = validateRtpTS(data[TLV_HEADER_LEN : TLV_HEADER_LEN+dataLen])
 	case TlvTypeRawTs:
 		err = validateRawTS(data[TLV_HEADER_LEN : TLV_HEADER_LEN+dataLen])
+	case TlvTypeAtsTs:
+		err = validateAtsTS(data[TLV_HEADER_LEN : TLV_HEADER_LEN+dataLen])
 	}
 
 	return tlvType, err
+}
+
+// validateAtsTS validates an ATS-TS value: an 8-byte arrival timestamp prefix followed by raw TS packets.
+func validateAtsTS(data []byte) error {
+	if len(data) < AtsTimestampLen {
+		return fmt.Errorf("ATS-TS data too short to contain timestamp: %d", len(data))
+	}
+	return validateRawTS(data[AtsTimestampLen:])
 }
 
 func validateRtpTS(data []byte) error {

@@ -17,4 +17,5 @@ const (
 	UnknownPackagingMode TsPackagingMode = ""
 	RawTs                TsPackagingMode = "raw_ts" // Used in SMPTE ST2022
 	RtpTs                TsPackagingMode = "rtp_ts"
+	AtsTs                TsPackagingMode = "ats_ts" // Arrival-Time-Stamped MPEG-TS stream
 )

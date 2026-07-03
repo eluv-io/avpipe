@@ -202,6 +202,7 @@ func (r *NetReader) readLoop(reader io.ReadCloser) (cont bool, err error) {
 		if err != nil {
 			return r.isRecoverable(err), errors.E("readLoop", errors.K.IO.Default(), err)
 		}
+		pkt.ReceivedAt = time.Now()
 		pkt.Data, err = r.transformer.Transform(pkt.Data[:n])
 		if err != nil {
 			return r.isRecoverable(err), errors.E("readLoop", errors.K.IO.Default(), err)

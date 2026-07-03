@@ -52,7 +52,7 @@ func TestNetReader_happyPath(t *testing.T) {
 
 // TestNetReader_CancelNoInput tests canceling the NetReader in the case no packets are received.
 func TestNetReader_CancelNoInput(t *testing.T) {
-	ctx := createNetReader(transport.NewUDPTransport("udp://localhost:12345"))
+	ctx := createNetReader(transport.NewUDPTransport("udp://localhost:12345", transport.RawTs))
 
 	running, err := ctx.netReader.Status()
 	require.True(t, running)

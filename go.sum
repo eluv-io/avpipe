@@ -30,8 +30,8 @@ github.com/eluv-io/apexlog-go v1.9.1-elv4 h1:lJE8+Y+GtUhw1BBAlFePuVZg78jCKgeFsdq
 github.com/eluv-io/apexlog-go v1.9.1-elv4/go.mod h1:pZhIuRbWTsOm5WEOxke9B2dczjQuaEGeJXEYd5lCxkk=
 github.com/eluv-io/cbor/v2 v2.8.1-0.20250506081522-e7b11bfa1dad h1:30fHO0KQJrcDV0uDZ5nWUFwen7FZcBIa13x6S5MsWi4=
 github.com/eluv-io/cbor/v2 v2.8.1-0.20250506081522-e7b11bfa1dad/go.mod h1:koW2XJwOj9cAvE4+oLHCQtCKLfPor83Jbyyy8OwOAzE=
-github.com/eluv-io/common-go v1.1.22 h1:xs5M4wuz6O9KEolymr66Rps2Cf+Ej1WqQbgsx3wQwcw=
-github.com/eluv-io/common-go v1.1.22/go.mod h1:R/JMz3mKy1E8aCM/mt6erIS2ix9x6+elarIdAP9Rlgg=
+github.com/eluv-io/common-go v1.1.24-0.20260702220848-d0d76ff13ca8 h1:qkSaqlc+DkK2ui/EIxlSIrYOkeRB1ZLfrZT1FiAP1R4=
+github.com/eluv-io/common-go v1.1.24-0.20260702220848-d0d76ff13ca8/go.mod h1:Hk5VEhFteXqjPkVHs1wC/USojJWOtUJ4w6L9dqE1SzM=
 github.com/eluv-io/errors-go v1.0.5 h1:PBWfjun72cii9aI9aL/5LN0jDI+PYJLzhhkr+ayJ1ms=
 github.com/eluv-io/errors-go v1.0.5/go.mod h1:SoBNolWeyjrvHosBsIpxlQAq5/jVvqWsw/o0XpGMtKU=
 github.com/eluv-io/gls v1.0.0-elv1 h1:fV9z/aLSs5KH8wWMkamoS/Xxl8wmXF76WMx8/N5XEr8=
@@ -40,6 +40,8 @@ github.com/eluv-io/inject-go v1.0.2 h1:1+t2LqRHk1Ns+2JUBN9dqATxa6Y+7ay7GftfJVXqf
 github.com/eluv-io/inject-go v1.0.2/go.mod h1:03/vIoB3v+J0ASXrdw7nes2Qc2MeY9BKYf2BWJCJf3M=
 github.com/eluv-io/log-go v1.0.10 h1:/fjLjiBXwy5ocJXuzneRVzvUalIeTPSH6jAdFiaWN+Y=
 github.com/eluv-io/log-go v1.0.10/go.mod h1:TvBaLIOvcrBpmgMaewgyZQSVY056WIfdCIliuGou+iw=
+github.com/eluv-io/mapstructure v1.5.1 h1:yxilnJ5GN6K2Kn1tEEuWJcVmONEMNso1uNJkJYIWQbQ=
+github.com/eluv-io/mapstructure v1.5.1/go.mod h1:HGl3bHmRju3DIQnCWotnLvMLhiTrYCLR9fOKtK8W5uQ=
 github.com/eluv-io/mp4ff v0.47.1-0.20260603013458-2403cac8f06c h1:MuqTJa23RhKhk8GFFfjU6vR5zD7j0Fe9x6A9n6WDogg=
 github.com/eluv-io/mp4ff v0.47.1-0.20260603013458-2403cac8f06c/go.mod h1:hJNUUqOBryLAzUW9wpCJyw2HaI+TCd2rUPhafoS5lgg=
 github.com/eluv-io/stack v1.8.2 h1:yocCvAcPy9vW5iBdNnig5Tem8LgOTT8JrOLvDcacnEQ=
@@ -120,8 +122,6 @@ github.com/mattn/go-isatty v0.0.5/go.mod h1:Iq45c/XA43vh69/j3iqttzPXn0bhXyGjM0Hd
 github.com/mattn/go-isatty v0.0.8/go.mod h1:Iq45c/XA43vh69/j3iqttzPXn0bhXyGjM0Hdxcsrc5s=
 github.com/mattn/go-isatty v0.0.12/go.mod h1:cbi8OIDigv2wuxKPP5vlRcQ1OAZbq2CE4Kysco4FUpU=
 github.com/mgutz/ansi v0.0.0-20170206155736-9520e82c474b/go.mod h1:01TrycV0kFyexm33Z7vhZRXopbI8J3TDReVlkTgMUxE=
-github.com/mitchellh/mapstructure v1.4.3 h1:OVowDSCllw/YjdLkam3/sm7wEtOy59d8ndGgCcyj8cs=
-github.com/mitchellh/mapstructure v1.4.3/go.mod h1:bFUtVrKA4DC2yAKiSyO/QUcy7e+RRV2QTWOzhPopBRo=
 github.com/modern-go/concurrent v0.0.0-20180228061459-e0a39a4cb421/go.mod h1:6dJC0mAP4ikYIbvyc7fijjWJddQyLn8Ig3JB5CqoB9Q=
 github.com/modern-go/concurrent v0.0.0-20180306012644-bacd9c7ef1dd h1:TRLaZ9cD/w8PVh93nsPXa1VrQ6jlwL5oN8l14QlcNfg=
 github.com/modern-go/concurrent v0.0.0-20180306012644-bacd9c7ef1dd/go.mod h1:6dJC0mAP4ikYIbvyc7fijjWJddQyLn8Ig3JB5CqoB9Q=

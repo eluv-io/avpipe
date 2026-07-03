@@ -233,7 +233,9 @@ func (f *MpegTsConsumer) ReaderLoop() {
 				"chan cap", cap(f.pktChan))
 		}
 
-		f.pp.ProcessDatagram(time.Now(), pkt.Data)
+		// Use the packet's network arrival time (recorded by the NetReader) rather than the current time: this drives
+		// both wall-clock segmentation and, for ATS-TS packaging, the arrival timestamp written to the output.
+		f.pp.ProcessDatagram(pkt.ReceivedAt, pkt.Data)
 		pkt.Release()
 	}
 }

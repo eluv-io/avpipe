@@ -67,9 +67,9 @@ func createTransport(url string, cfg *goavpipe.InputConfig) (transport.Transport
 
 	switch scheme {
 	case "rtp":
-		tp = transport.NewRTPTransport(url, cfg.CopyPackaging != transport.RtpTs)
+		tp = transport.NewRTPTransport(url, cfg.CopyPackaging)
 	case "udp":
-		tp = transport.NewUDPTransport(url)
+		tp = transport.NewUDPTransport(url, cfg.CopyPackaging)
 	case "srt+rtp": // same as srt:// with RTP TS input packaging
 		cfg.InputPackaging = transport.RtpTs
 		fallthrough
