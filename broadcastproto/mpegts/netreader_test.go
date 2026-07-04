@@ -39,15 +39,26 @@ func TestNetReader_happyPath(t *testing.T) {
 		Packaging: transport.RtpTs,
 	})
 
+	// Consume exactly the data produced by the source. The NetReader treats io.EOF as recoverable and never abandons a
+	// source on its own, so shutdown is driven explicitly via Cancel() below, mirroring how production callers
+	// (BypassProcessor / customInputHandler) tear it down.
 	res := &bytes.Buffer{}
-	for pkt := range ctx.consumer.pktChan {
+	for res.Len() < len(reader.src) {
+		pkt := <-ctx.consumer.pktChan
+		require.NotNil(t, pkt)
 		res.Write(pkt.Data)
 		pkt.Release()
 	}
 	require.Equal(t, reader.src, res.Bytes())
 	require.EqualValues(t, 0, ctx.consumer.pktDropped.Load())
-
 	require.Greater(t, watch.Duration(), 2*time.Second+400*time.Millisecond)
+
+	// Cancel closes the consumer channels; draining to close confirms a clean shutdown (and lets goleak verify no
+	// goroutines are left behind).
+	ctx.netReader.Cancel()
+	for pkt := range ctx.consumer.pktChan {
+		pkt.Release()
+	}
 }
 
 // TestNetReader_CancelNoInput tests canceling the NetReader in the case no packets are received.
@@ -152,6 +163,7 @@ func newTestReader(packetCount, packetSize, packetRate int) *testReader {
 		ipd:        time.Second / time.Duration(packetRate),
 		src:        randomBytes,
 		reader:     bytes.NewReader(randomBytes),
+		closeCh:    make(chan struct{}),
 	}
 }
 
@@ -160,6 +172,7 @@ type testReader struct {
 	src        []byte
 	reader     io.Reader
 	closed     atomic.Bool
+	closeCh    chan struct{} // closed by Close to unblock a Read waiting after the source data is exhausted
 	ipd        time.Duration // inter-packet delay
 	ticker     *time.Ticker
 }
@@ -169,6 +182,7 @@ func (t *testReader) Close() error {
 		if t.ticker != nil {
 			t.ticker.Stop()
 		}
+		close(t.closeCh)
 	}
 	return nil
 }
@@ -181,7 +195,18 @@ func (t *testReader) Read(p []byte) (n int, err error) {
 		t.ticker = time.NewTicker(t.ipd)
 		time.Sleep(t.ipd / 2)
 	} else {
-		<-t.ticker.C
+		select {
+		case <-t.ticker.C:
+		case <-t.closeCh:
+			return 0, io.EOF
+		}
 	}
-	return t.reader.Read(p[:min(len(p), t.packetSize)])
+	n, err = t.reader.Read(p[:min(len(p), t.packetSize)])
+	if err == io.EOF && n == 0 {
+		// Source data exhausted. Model a live source that simply stops delivering more data: block until closed rather
+		// than returning EOF, so the NetReader keeps the source open until the test cancels it (as production does).
+		<-t.closeCh
+		return 0, io.EOF
+	}
+	return n, err
 }

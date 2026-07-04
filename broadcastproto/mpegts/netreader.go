@@ -231,6 +231,10 @@ func (r *NetReader) readLoop(reader io.ReadCloser) (cont bool, err error) {
 }
 
 func (r *NetReader) isRecoverable(_ error) bool {
+	// All read errors are treated as recoverable, including io.EOF: a live source (UDP/RTP/SRT) may momentarily close
+	// or hit end-of-stream and later resume, so the NetReader reconnects rather than abandoning the source. Shutdown is
+	// driven by Cancel(), not by the source returning EOF. Retries are bounded by MaxRecoverAttempts (and connection
+	// attempts by connect()).
 	return true
 }
 
