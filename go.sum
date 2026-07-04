@@ -32,6 +32,8 @@ github.com/eluv-io/cbor/v2 v2.8.1-0.20250506081522-e7b11bfa1dad h1:30fHO0KQJrcDV
 github.com/eluv-io/cbor/v2 v2.8.1-0.20250506081522-e7b11bfa1dad/go.mod h1:koW2XJwOj9cAvE4+oLHCQtCKLfPor83Jbyyy8OwOAzE=
 github.com/eluv-io/common-go v1.1.24-0.20260702220848-d0d76ff13ca8 h1:qkSaqlc+DkK2ui/EIxlSIrYOkeRB1ZLfrZT1FiAP1R4=
 github.com/eluv-io/common-go v1.1.24-0.20260702220848-d0d76ff13ca8/go.mod h1:Hk5VEhFteXqjPkVHs1wC/USojJWOtUJ4w6L9dqE1SzM=
+github.com/eluv-io/common-go v1.1.24-0.20260704012819-9cd186ecd754 h1:VVGa1Gk9qsowXdv5hvSwhOdjueDXsI8MHijdtVvP2jk=
+github.com/eluv-io/common-go v1.1.24-0.20260704012819-9cd186ecd754/go.mod h1:Hk5VEhFteXqjPkVHs1wC/USojJWOtUJ4w6L9dqE1SzM=
 github.com/eluv-io/errors-go v1.0.5 h1:PBWfjun72cii9aI9aL/5LN0jDI+PYJLzhhkr+ayJ1ms=
 github.com/eluv-io/errors-go v1.0.5/go.mod h1:SoBNolWeyjrvHosBsIpxlQAq5/jVvqWsw/o0XpGMtKU=
 github.com/eluv-io/gls v1.0.0-elv1 h1:fV9z/aLSs5KH8wWMkamoS/Xxl8wmXF76WMx8/N5XEr8=

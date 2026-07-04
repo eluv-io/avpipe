@@ -2,6 +2,7 @@ package mpegts
 
 import (
 	"bytes"
+	"fmt"
 	"io"
 	"sync"
 	"testing"
@@ -17,6 +18,7 @@ import (
 	"github.com/eluv-io/common-go/media/pktpool"
 	"github.com/eluv-io/common-go/util/byteutil"
 	"github.com/eluv-io/common-go/util/syncutil"
+	"github.com/eluv-io/common-go/util/testutil"
 	"github.com/eluv-io/common-go/util/timeutil"
 	"github.com/eluv-io/log-go"
 )
@@ -79,6 +81,44 @@ func TestNetReader_CancelNoInput(t *testing.T) {
 	}()
 
 	require.False(t, syncutil.WaitTimeout(wg, time.Second))
+}
+
+// TestNetReader_CancelNoInput_Srt tests canceling the NetReader while it is blocked in an SRT Accept
+// waiting for a source that never connects. Cancel must promptly interrupt the blocked Accept (rather
+// than hang until a connection arrives or the connect/peer-idle timeout elapses) and tear down cleanly,
+// closing the consumer channels and leaking no goroutines. This mirrors a live recorder being stopped
+// while its SRT source is down.
+func TestNetReader_CancelNoInput_Srt(t *testing.T) {
+	defer goleak.VerifyNone(t)
+
+	port, err := testutil.FreePort()
+	require.NoError(t, err)
+	url := fmt.Sprintf("srt://127.0.0.1:%d?mode=listener", port)
+
+	ctx := createNetReader(transport.NewSRTTransport(url, transport.RawTs, transport.RawTs))
+
+	running, err := ctx.netReader.Status()
+	require.True(t, running)
+	require.NoError(t, err)
+
+	// Give the SRT listener time to start and block in Accept waiting for a source that never connects.
+	time.Sleep(500 * time.Millisecond)
+
+	// Cancel must return promptly despite the pending Accept.
+	wg := &sync.WaitGroup{}
+	wg.Add(1)
+	go func() {
+		defer wg.Done()
+		ctx.netReader.Cancel()
+	}()
+	require.False(t, syncutil.WaitTimeout(wg, time.Second), "Cancel did not return promptly")
+
+	// Cancel closes the consumer channels; draining to close confirms a clean shutdown of the read path.
+	for pkt := range ctx.consumer.pktChan {
+		pkt.Release()
+	}
+
+	ctx.assertStaus(t, false)
 }
 
 func createNetReader(tp transport.Transport) netReaderTestCtx {

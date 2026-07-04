@@ -136,6 +136,17 @@ func (r *NetReader) process() error {
 		}
 		r.reader.Store(&reader)
 
+		// Re-check for cancellation after storing the reader: if Cancel ran between connect() returning
+		// and the Store above, its reader.Swap may have missed this reader and would leave a blocked Read
+		// (e.g. a pending SRT Accept) hanging. Close the reader ourselves so the read is interrupted and
+		// the connection is not leaked, then stop.
+		if r.ctx.Err() != nil {
+			if stored := r.reader.Swap(nil); stored != nil {
+				errors.Log((*stored).Close, logNetReader.Info)
+			}
+			return e(context.Cause(r.ctx))
+		}
+
 		cont, err := r.readLoop(reader) // readLoop closes reader!
 		if cont {
 			if r.config.MaxRecoverAttempts <= 0 || i < r.config.MaxRecoverAttempts {
