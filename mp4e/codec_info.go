@@ -116,11 +116,54 @@ func ExtractCodecInfoLazy(r io.ReadSeeker) (infos []*CodecInfo, err error) {
 	const op = "mp4e.ExtractCodecInfoLazy"
 	e := errors.T(op, errors.K.Invalid.Default())
 
-	mp4Data, err := mp4.DecodeFile(r, mp4.WithDecodeMode(mp4.DecModeLazyMdat))
+	// Light detection of MP4/MOV (ISOBMFF) using header sniff.
+	// The decoder may crash or run out of memory for an incorrect format.
+	looksMP4 := HasISOBMFFHeader(r)
+	if _, err = r.Seek(0, io.SeekStart); err != nil {
+		return nil, e("reason", "seek to start after header sniff", "error", err)
+	}
+	if !looksMP4 {
+		return nil, e("reason", "not an ISOBMFF/MP4 container")
+	}
+
+	// Cap the total bytes read into memory during the lazy parse. This is critical to avoid
+	// out-of-memory situations with unexpected file formats.
+	lr := newLimitedReadSeeker(r, maxLazyReadBytes)
+
+	mp4Data, err := mp4.DecodeFile(lr, mp4.WithDecodeMode(mp4.DecModeLazyMdat))
 	if err != nil {
 		return nil, e("reason", "failed to parse MP4", "cause", sanitizeString(err.Error()))
 	}
 	return extractCodecInfoFromFile(mp4Data)
+}
+
+// maxLazyReadBytes bounds the cumulative bytes read into memory during a lazy MP4 parse
+const maxLazyReadBytes = 512 << 20 // 512 MB
+
+// limitedReadSeeker caps the cumulative number of bytes returned by Read (passing Seek through unchanged)
+type limitedReadSeeker struct {
+	r         io.ReadSeeker
+	remaining int64
+}
+
+func newLimitedReadSeeker(r io.ReadSeeker, limit int64) *limitedReadSeeker {
+	return &limitedReadSeeker{r: r, remaining: limit}
+}
+
+func (l *limitedReadSeeker) Read(p []byte) (int, error) {
+	if l.remaining <= 0 {
+		return 0, errors.E("mp4 codec info", "reason", "read limit exceeded", "bytes", maxLazyReadBytes)
+	}
+	if int64(len(p)) > l.remaining {
+		p = p[:l.remaining]
+	}
+	n, err := l.r.Read(p)
+	l.remaining -= int64(n)
+	return n, err
+}
+
+func (l *limitedReadSeeker) Seek(offset int64, whence int) (int64, error) {
+	return l.r.Seek(offset, whence)
 }
 
 // extractCodecInfoFromFile builds CodecInfo for every track of a decoded MP4.

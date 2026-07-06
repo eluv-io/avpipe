@@ -1030,7 +1030,7 @@ func GetProfileName(codecId int, profile int) string {
 	return ""
 }
 
-// Probe runs the C libavformat probe and optionally enhances the output with mp4 specific condec info
+// Probe runs the C libavformat probe and optionally enhances the output with mp4 specific codec info
 // PENDING(SS) Should move this function to avpipe_probe.go
 func Probe(params *goavpipe.XcParams) (*goavpipe.ProbeInfo, error) {
 	const op = "avpipe.Probe"
@@ -1053,8 +1053,15 @@ func Probe(params *goavpipe.XcParams) (*goavpipe.ProbeInfo, error) {
 	// extractCodecInfoForProbe would fail to re-open. The handle is kept open so that C.probe can
 	// open the same resource concurrently; it is closed via defer when Probe returns.
 	//
-	// Non-MP4 inputs fail here gracefully. Unfortunately, the container format is unknown until
-	// probing, so we cannot skip this step altogether.
+	// This sequence is designed to work in the Content Fabric context:
+	// - we have one req context per URL and one part reader
+	// - we create two 'input contexts' pointing to the same reader
+	//
+	// In order to make this work we implement this sequence:
+	// - open the handler for the MP4 extraction first (don't close)
+	// - seek back to 0
+	// - invoke the C.Probe which opens its own handle the closes its own handle via callbacks
+	// - finally close the MP4 extraction handle
 	var codecInfos []*mp4e.CodecInfo
 	if params.Seekable {
 		inputOpener := goavpipe.GetInputOpener(params.Url)
@@ -1198,6 +1205,7 @@ func Probe(params *goavpipe.XcParams) (*goavpipe.ProbeInfo, error) {
 
 	probeInfo.Format.FormatName = C.GoString((*C.char)(unsafe.Pointer(cprobe.container_info.format_name)))
 	probeInfo.Format.Duration = float64(cprobe.container_info.duration)
+
 	if codecInfos != nil {
 		enhanceStreamInfo(probeInfo.Streams, codecInfos)
 	}
