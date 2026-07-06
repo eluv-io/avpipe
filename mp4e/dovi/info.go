@@ -78,9 +78,12 @@ func Info(inputPath string, opts InfoOptions) (map[string]any, error) {
 	}
 	defer func() { _ = ifd.Close() }()
 
-	parsedMP4, err := mp4.DecodeFile(ifd, mp4.WithDecodeMode(mp4.DecModeLazyMdat))
-	if err != nil {
-		return nil, fmt.Errorf("could not decode MP4: %w", err)
+	// Non-fatal decode errors: some files have unknown/proprietary top-level
+	// boxes after mdat that mp4ff cannot parse. As long as moov was decoded we
+	// have everything we need.
+	parsedMP4, decodeErr := mp4.DecodeFile(ifd, mp4.WithDecodeMode(mp4.DecModeLazyMdat))
+	if parsedMP4 == nil {
+		return nil, fmt.Errorf("could not decode MP4: %w", decodeErr)
 	}
 
 	if parsedMP4.Moov == nil {
@@ -191,6 +194,9 @@ func Info(inputPath string, opts InfoOptions) (map[string]any, error) {
 	}
 
 	results["File-level QC"] = fileLevelDVQC(parsedMP4, dvTrackIDs)
+	if decodeErr != nil {
+		results["parse_warning"] = decodeErr.Error()
+	}
 	return results, nil
 }
 
