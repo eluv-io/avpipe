@@ -3,14 +3,13 @@ package mvhevc
 import (
 	"encoding/binary"
 	"fmt"
-	"io"
 	"os"
-	"path/filepath"
-	"strings"
 
 	"github.com/Eyevinn/mp4ff/avc"
 	"github.com/Eyevinn/mp4ff/hevc"
 	"github.com/Eyevinn/mp4ff/mp4"
+
+	"github.com/eluv-io/avpipe/mp4e"
 )
 
 const (
@@ -114,8 +113,7 @@ func applySpatialOptions(inp *input, opts AddOptions) error {
 }
 
 func isMP4Input(path string) bool {
-	ext := strings.ToLower(filepath.Ext(path))
-	if ext == ".mp4" || ext == ".m4v" || ext == ".mov" {
+	if mp4e.IsMP4Extension(path) {
 		return true
 	}
 	// Also check ISOBMFF/QuickTime ftyp box
@@ -124,11 +122,7 @@ func isMP4Input(path string) bool {
 		return false
 	}
 	defer func() { _ = f.Close() }()
-	var hdr [8]byte
-	if _, err := io.ReadFull(f, hdr[:]); err != nil {
-		return false
-	}
-	return string(hdr[4:8]) == "ftyp"
+	return mp4e.HasFtypHeader(f)
 }
 
 func parseAnnexBInput(inputPath string, fps float64) (*input, error) {
