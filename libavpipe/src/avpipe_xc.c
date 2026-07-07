@@ -906,6 +906,12 @@ set_h265_params(
             cr == AVCOL_RANGE_JPEG ? "full" : "limited");
     }
 
+    if (params->tier && params->tier[0] != '\0') {
+        off += snprintf(x265_params + off, sizeof(x265_params) - off,
+            "%shigh-tier=%d", off > 0 ? ":" : "",
+            strcmp(params->tier, "high") == 0 ? 1 : 0);
+    }
+
     if (off > 0)
         av_opt_set(encoder_codec_context->priv_data, "x265-params", x265_params, 0);
 
@@ -4773,6 +4779,19 @@ check_params(
         return eav_param;
     }
 
+    if (params->tier && params->tier[0] != '\0') {
+        if (strcmp(params->tier, "main") && strcmp(params->tier, "high")) {
+            elv_err("Invalid tier %s, must be \"main\" or \"high\", url=%s",
+                params->tier, params->url);
+            return eav_param;
+        }
+        if (!params->ecodec || strcmp(params->ecodec, "libx265")) {
+            elv_err("Tier is only supported for libx265, ecodec=%s, url=%s",
+                params->ecodec ? params->ecodec : "", params->url);
+            return eav_param;
+        }
+    }
+
     if (params->copy_mpegts) {
         if (strcmp(params->format, "fmp4-segment")) {
             elv_err("Invalid copy MPEGTS - only valid for fmp4 mez segment");
@@ -4856,6 +4875,7 @@ log_params(
         "rotate=%d "
         "profile=%s "
         "level=%d "
+        "tier=%s "
         "deinterlace=%d "
         "use_preprocessed_input=%d "
         "copy_mpegts=%d "
@@ -4884,7 +4904,8 @@ log_params(
         params->filter_descriptor,
         params->extract_image_interval_ts, params->extract_images_sz,
         1, params->video_time_base, params->video_frame_duration_ts, params->rotate,
-        params->profile ? params->profile : "", params->level,  params->deinterlace,
+        params->profile ? params->profile : "", params->level,
+        params->tier ? params->tier : "", params->deinterlace,
         params->use_preprocessed_input, params->copy_mpegts,
         params->timecode);
     elv_log("AVPIPE XCPARAMS %s", buf);
@@ -4922,6 +4943,7 @@ avpipe_copy_xcparams(
     p2->max_cll = safe_strdup(p->max_cll);
     p2->master_display = safe_strdup(p->master_display);
     p2->preset = safe_strdup(p->preset);
+    p2->tier = safe_strdup(p->tier);
     p2->start_segment_str = safe_strdup(p->start_segment_str);
     p2->watermark_text = safe_strdup(p->watermark_text);
     p2->watermark_timecode = safe_strdup(p->watermark_timecode);
@@ -5032,6 +5054,7 @@ avpipe_free_params(
     free(params->timecode);
     free(params->max_cll);
     free(params->master_display);
+    free(params->tier);
     free(params->filter_descriptor);
     free(params->mux_spec);
     free(params->extract_images_ts);

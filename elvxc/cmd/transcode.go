@@ -384,6 +384,7 @@ func InitTranscode(cmdRoot *cobra.Command) error {
 	cmdTranscode.PersistentFlags().Int32("rotate", 0, "Rotate the output video frame (valid values 0, 90, 180, 270).")
 	cmdTranscode.PersistentFlags().StringP("profile", "", "", "Encoding profile for video. If it is not determined, it will be set automatically.")
 	cmdTranscode.PersistentFlags().Int32("level", 0, "Encoding level for video. If it is not determined, it will be set automatically.")
+	cmdTranscode.PersistentFlags().String("tier", "", "Encoding tier for libx265, can be 'main' or 'high'.")
 	cmdTranscode.PersistentFlags().Int32("deinterlace", 0, "Deinterlace filter (values 0 - none, 1 - bwdif_field, 2 - bwdif_frame send_frame).")
 	cmdTranscode.PersistentFlags().Bool("use-custom-live-reader", false, "Read live media via a custom reader instead of using libavformat")
 	cmdTranscode.PersistentFlags().Bool("copy-mpegts", false, "Create an MPEGTS output (for MPEGTS, SRT, RTP)")
@@ -677,6 +678,7 @@ func doTranscode(cmd *cobra.Command, args []string) error {
 	}
 
 	profile := cmd.Flag("profile").Value.String()
+	tier := cmd.Flag("tier").Value.String()
 
 	deinterlace, err := cmd.Flags().GetInt32("deinterlace")
 	if err != nil {
@@ -800,6 +802,7 @@ func doTranscode(cmd *cobra.Command, args []string) error {
 		Rotate:                 int(rotate),
 		Profile:                profile,
 		Level:                  int(level),
+		Tier:                   tier,
 		Deinterlace:            int(deinterlace),
 	}
 
