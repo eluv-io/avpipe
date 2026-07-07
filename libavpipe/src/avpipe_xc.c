@@ -3571,81 +3571,10 @@ get_filter_str(
                 encoder_context->codec_context[encoder_context->video_stream_index]->width,
                 encoder_context->codec_context[encoder_context->video_stream_index]->height);
         }
-        /*
-         * Append fade filter if specified.
-         *
-         * Blend-based fade (when fade_start_frame, fade_end_frame, fade_level_1, fade_level_2 are set):
-         *
-         *   General formula:
-         *     rate = (level2 - level1) / (end_frame - start_frame)
-         *     blend expr: A * clip(level1 + rate * (N - start_frame), 0, 1)
-         *
-         *   Example 1 (fade out from 1.0 to ~0.5, frames 30-59):
-         *                                                                        start_frame
-         *                                                                        |
-         *     format=gbrp,split[a][b];[a][b]blend=all_expr='A*clip(1.000-0.017*(N-30),0,1)':enable='between(n,30,59)',format=yuv420p
-         *                                                         |    |
-         *                                                     level1   rate = (level2-level1)/(end_frame-start_frame)
-         *
-         *   Example 2 (fade out from ~0.5 to 0.0, frames 0-29):
-         *                                                                       start_frame
-         *                                                                       |
-         *     format=gbrp,split[a][b];[a][b]blend=all_expr='A*clip(0.492-0.017*(N-0),0,1)':enable='between(n,0,29)',format=yuv420p
-         *                                                         |    |
-         *                                                     level1   rate = (level2-level1)/(end_frame-start_frame)
-         */
-        if (params->fade && *params->fade != '\0') {
-            char fade_buf[512];
-            /*
-             * Compute frame offset: fade frame numbers are relative to the output and the filter counts
-             * all frames from the start of the stream (when no skip_decoding).
-             * - frame_offset = start_time_ts / frame_duration_ts.
-             */
-            int frame_offset = 0;
-            if (params->start_time_ts > 0 && !params->skip_decoding) {
-                AVCodecContext *enc_ctx = encoder_context->codec_context[encoder_context->video_stream_index];
-                int frame_dur = enc_ctx->time_base.den / 30; /* fallback 30fps */
-                if (encoder_context->stream[encoder_context->video_stream_index] &&
-                    encoder_context->stream[encoder_context->video_stream_index]->avg_frame_rate.num > 0) {
-                    AVRational fr = encoder_context->stream[encoder_context->video_stream_index]->avg_frame_rate;
-                    frame_dur = enc_ctx->time_base.den * fr.den / fr.num;
-                }
-                if (frame_dur > 0)
-                    frame_offset = (int)(params->start_time_ts / frame_dur);
-                elv_log("FILTER fade frame_offset=%d (start_time_ts=%"PRId64" frame_dur=%d)", frame_offset, params->start_time_ts, frame_dur);
-            }
-            if (params->fade_end_frame > params->fade_start_frame &&
-                (params->fade_level_1 != 0.0 || params->fade_level_2 != 0.0)) {
-                int S = params->fade_start_frame + frame_offset;
-                int E = params->fade_end_frame + frame_offset;
-                double L1 = params->fade_level_1;
-                double L2 = params->fade_level_2;
-                double rate = (L2 - L1) / (double)(E - S);
-                snprintf(fade_buf, sizeof(fade_buf),
-                    ",format=gbrp,split[a][b];[a][b]blend=all_expr='A*clip(%.3f%+.3f*(N-%d),0,1)':enable='between(n,%d,%d)',format=yuv420p",
-                    L1, rate, S, S, E);
-            } else if (!strcmp(params->fade, "in")) {
-                if (params->fade_end_frame > params->fade_start_frame) {
-                    snprintf(fade_buf, sizeof(fade_buf), ",fade=t=in:s=%d:n=%d",
-                        params->fade_start_frame + frame_offset,
-                        params->fade_end_frame - params->fade_start_frame);
-                } else {
-                    snprintf(fade_buf, sizeof(fade_buf), ",fade=t=in:s=%d:n=30", frame_offset);
-                }
-            } else if (!strcmp(params->fade, "out")) {
-                if (params->fade_end_frame > params->fade_start_frame) {
-                    snprintf(fade_buf, sizeof(fade_buf), ",fade=t=out:s=%d:n=%d",
-                        params->fade_start_frame + frame_offset,
-                        params->fade_end_frame - params->fade_start_frame);
-                } else {
-                    snprintf(fade_buf, sizeof(fade_buf), ",fade=t=out:s=%d:n=30", frame_offset);
-                }
-            } else {
-                elv_err("Invalid fade param '%s', must be 'in' or 'out'", params->fade);
-                free(*filter_str);
-                return eav_param;
-            }
-            strncat(*filter_str, fade_buf, FILTER_STRING_SZ - strlen(*filter_str) - 1);
+        int ret = append_fade_filter(*filter_str, FILTER_STRING_SZ, encoder_context, params);
+        if (ret != 0) {
+            free(*filter_str);
+            return ret;
         }
         elv_log("FILTER str=%s", *filter_str);
     }

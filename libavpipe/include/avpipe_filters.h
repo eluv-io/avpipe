@@ -7,6 +7,8 @@
 #ifndef AVPIPE_FILTERS_H
 #define AVPIPE_FILTERS_H
 
+#include <stddef.h>
+
 #include "avpipe_xc.h"
 
 int
@@ -37,6 +39,22 @@ init_audio_merge_pan_filters(
 int
 init_audio_join_filters(
     coderctx_t *decoder_context,
+    coderctx_t *encoder_context,
+    xcparams_t *params);
+
+/**
+ * @brief   Append a fade filter to an existing video filter string.
+ *
+ * @param   filter_str          Filter string buffer to append to.
+ * @param   filter_str_sz       Total size of filter_str.
+ * @param   encoder_context     Encoder context used for frame offset calculation.
+ * @param   params              Transcoding parameters with fade settings.
+ * @return  0 on success, eav_param for invalid fade settings.
+ */
+int
+append_fade_filter(
+    char *filter_str,
+    size_t filter_str_sz,
     coderctx_t *encoder_context,
     xcparams_t *params);
 
