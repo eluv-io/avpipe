@@ -700,6 +700,37 @@ crop_calc_width(
     return w;
 }
 
+/* Calculate frame offset for partial segments.
+ * Unless skip_decoding is enabled, the decoder sees all frames before start_time_ts so we need
+ * to adjust the frame index for the verticalize filter.
+ */
+static int
+crop_frame_offset(
+    coderctx_t *encoder_context,
+    xcparams_t *params)
+{
+    if (!params || params->start_time_ts <= 0 || params->skip_decoding)
+        return 0;
+
+    AVCodecContext *enc_ctx = encoder_context->codec_context[encoder_context->video_stream_index];
+    if (!enc_ctx)
+        return 0;
+
+    int frame_dur = enc_ctx->time_base.den > 0 ? enc_ctx->time_base.den / 30 : 0;
+
+    if (encoder_context->stream[encoder_context->video_stream_index] &&
+        encoder_context->stream[encoder_context->video_stream_index]->avg_frame_rate.num > 0 &&
+        encoder_context->stream[encoder_context->video_stream_index]->avg_frame_rate.den > 0) {
+        AVRational fr = encoder_context->stream[encoder_context->video_stream_index]->avg_frame_rate;
+        frame_dur = enc_ctx->time_base.den * fr.den / fr.num;
+    }
+
+    if (frame_dur <= 0)
+        return 0;
+
+    return (int)(params->start_time_ts / frame_dur);
+}
+
 void
 crop_send_command(
     coderctx_t *decoder_context,
@@ -721,7 +752,7 @@ crop_send_command(
     int scaled_width = dec_ctx->width * enc_height / dec_ctx->height;
     int crop_width = crop_calc_width(enc_height);
     int crop_x = 0;
-    int frame_idx = dec_ctx->frame_num - 1; /* frame_number is 1-based */
+    int frame_idx = dec_ctx->frame_num - 1 - crop_frame_offset(encoder_context, params); /* frame_number is 1-based */
     
     crop_x = vertical_data_crop_x(params->vertical_data, params->vertical_data_len, frame_idx, scaled_width, crop_width);
 

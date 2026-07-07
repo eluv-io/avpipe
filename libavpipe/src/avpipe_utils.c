@@ -402,6 +402,10 @@ vertical_data_crop_x(
 {
     /* Currently 4 bytes per frame (uint32 LE) */
     int n_entries = data_len / 4;
+    if (n_entries <= 0)
+        return 0;
+    if (frame_idx < 0)
+        frame_idx = 0;
     if (frame_idx >= n_entries)
         frame_idx = n_entries - 1;
     uint32_t v = ((uint32_t *)vertical_data)[frame_idx];

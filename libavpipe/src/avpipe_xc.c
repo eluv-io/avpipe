@@ -4847,9 +4847,19 @@ check_params(
         }
     }
 
-    if (params->vertical && params->bypass_transcoding) {
-        elv_err("Incompatible params - vertical crop requires transcoding (bypass must be disabled), url=%s", params->url);
-        return eav_param;
+    if (params->vertical) {
+        if (params->bypass_transcoding) {
+            elv_err("Incompatible params - vertical crop requires transcoding (bypass must be disabled), url=%s", params->url);
+            return eav_param;
+        }
+        if (params->vertical != vertical_32bpf) {
+            elv_err("Unsupported vertical data type=%d url=%s", params->vertical, params->url);
+            return eav_param;
+        }
+        if (params->vertical_data == NULL || params->vertical_data_len < 4 || params->vertical_data_len % 4 > 0) {
+            elv_err("Bad vertical data - missing or too short url=%s", params->url);
+            return eav_param;
+        }
     }
 
     if (params->fade && *params->fade != '\0' && params->bypass_transcoding) {
@@ -5027,6 +5037,14 @@ avpipe_copy_xcparams(
         memcpy(p2->extract_images_ts, p->extract_images_ts, size);
     }
     p2->seg_duration = safe_strdup(p->seg_duration);
+    p2->fade = safe_strdup(p->fade);
+    p2->vertical_data = NULL;
+    p2->vertical_data_len = 0;
+    if (p->vertical_data != NULL && p->vertical_data_len > 0) {
+        p2->vertical_data = (uint8_t *) calloc(1, p->vertical_data_len);
+        memcpy(p2->vertical_data, p->vertical_data, p->vertical_data_len);
+        p2->vertical_data_len = p->vertical_data_len;
+    }
 
     return p2;
 }
