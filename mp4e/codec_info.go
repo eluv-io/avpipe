@@ -310,6 +310,21 @@ func ParseDOVIBox(payload []byte) (*avdesc.DOVIInfo, error) {
 	}, nil
 }
 
+// doviInfoFromBox converts a natively-decoded mp4ff Dolby Vision configuration
+// box into a DOVIInfo. FourCC and BoxType are set by the caller.
+func doviInfoFromBox(b *mp4.DoViConfigurationBox) *avdesc.DOVIInfo {
+	return &avdesc.DOVIInfo{
+		VersionMajor:            int(b.DVVersionMajor),
+		VersionMinor:            int(b.DVVersionMinor),
+		Profile:                 int(b.DVProfile),
+		Level:                   int(b.DVLevel),
+		RPUPresent:              b.RPUPresentFlag,
+		ELPresent:               b.ELPresentFlag,
+		BLPresent:               b.BLPresentFlag,
+		BLSignalCompatibilityID: int(b.DVBLSignalCompatibilityID),
+	}
+}
+
 // sanitizeString replaces invalid UTF-8 sequences and non-printable characters
 // with '?' so error messages containing binary data are safe to log.
 func sanitizeString(s string) string {
@@ -359,21 +374,13 @@ func parseVisualSampleEntryBox(se *mp4.VisualSampleEntryBox) (*CodecInfo, error)
 			VideoLayout:     Mp4VideoLayoutMono,
 		}
 
-		// Look for Dolby Vision configuration box (dvvC, dvcC, or dvwC) in children.
-		for _, child := range se.Children {
-			boxType := child.Type()
-			if IsDOVIBoxType(boxType) {
-				if ub, ok := child.(*mp4.UnknownBox); ok {
-					dovi, doviErr := ParseDOVIBox(ub.Payload())
-					if doviErr != nil {
-						return nil, e(doviErr, "reason", "failed to parse Dolby Vision box", "box", boxType)
-					}
-					dovi.FourCC = avdesc.DOVIFourCC(codecTag)
-					info.DOVI = dovi
-					info.DOVI.BoxType = boxType
-				}
-				break
-			}
+		// Dolby Vision configuration box (dvcC/dvvC/dvwC) is decoded natively by
+		// mp4ff (>= v0.53.0) and exposed as VisualSampleEntryBox.DoViConfig.
+		if se.DoViConfig != nil {
+			dovi := doviInfoFromBox(se.DoViConfig)
+			dovi.FourCC = avdesc.DOVIFourCC(codecTag)
+			dovi.BoxType = se.DoViConfig.Type()
+			info.DOVI = dovi
 		}
 
 		// If VPS declares multiple layers - it's MV-HEVC
@@ -438,8 +445,11 @@ func parseHvcCVPS(hvcC *mp4.HvcCBox) *hevc.VPS {
 // (for MV-HEVC this is the Multiview Main profile idc=6)
 func mvhevcEnhancementPTL(vps *hevc.VPS) *hevc.ProfileTierLevel {
 	basePTL := vps.ProfileTierLevel
-	for i := range vps.ExtProfileTierLevels {
-		ptl := vps.ExtProfileTierLevels[i]
+	if vps.Extension == nil {
+		return nil
+	}
+	for i := range vps.Extension.ExtProfileTierLevels {
+		ptl := vps.Extension.ExtProfileTierLevels[i]
 		if ptl.GeneralProfileIDC == 0 {
 			continue // placeholder/copy of base
 		}

@@ -3,7 +3,7 @@ module github.com/eluv-io/avpipe
 require (
 	github.com/Comcast/gots v0.0.0-20200213175321-9799558ed3e2
 	github.com/Comcast/gots/v2 v2.2.1
-	github.com/Eyevinn/mp4ff v0.51.0
+	github.com/Eyevinn/mp4ff v0.53.0
 	github.com/eluv-io/errors-go v1.0.0
 	github.com/eluv-io/log-go v1.0.1
 	github.com/grafov/m3u8 v0.11.1
@@ -30,7 +30,6 @@ require (
 )
 
 replace (
-	github.com/Eyevinn/mp4ff => github.com/eluv-io/mp4ff v0.47.1-0.20260603013458-2403cac8f06c
 	github.com/modern-go/gls => github.com/eluv-io/gls v1.0.0-elv1
 	github.com/prometheus/prometheus => github.com/prometheus/prometheus v1.7.1-0.20170814170113-3101606756c5
 	gopkg.in/urfave/cli.v1 => github.com/urfave/cli v1.22.0
