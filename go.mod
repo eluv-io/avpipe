@@ -5,7 +5,7 @@ go 1.26
 require (
 	github.com/Comcast/gots v0.0.0-20200213175321-9799558ed3e2
 	github.com/Comcast/gots/v2 v2.2.1
-	github.com/Eyevinn/mp4ff v0.51.0
+	github.com/Eyevinn/mp4ff v0.56.0
 	github.com/eluv-io/common-go v1.1.27
 	github.com/eluv-io/errors-go v1.0.5
 	github.com/eluv-io/log-go v1.0.10
@@ -67,7 +67,6 @@ require (
 )
 
 replace (
-	github.com/Eyevinn/mp4ff => github.com/eluv-io/mp4ff v0.47.1-0.20260603013458-2403cac8f06c
 	github.com/fxamacker/cbor/v2 => github.com/eluv-io/cbor/v2 v2.8.1-0.20250506081522-e7b11bfa1dad
 	github.com/modern-go/gls => github.com/eluv-io/gls v1.0.0-elv1
 	github.com/prometheus/prometheus => github.com/prometheus/prometheus v1.7.1-0.20170814170113-3101606756c5

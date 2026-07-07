@@ -230,19 +230,10 @@ func parseEC3CodecInfo(se *mp4.AudioSampleEntryBox) (*CodecInfo, error) {
 	d := se.Dec3
 	nChannels, chanMap := d.ChannelInfo()
 
-	// Parse the JOC extension from the dec3 reserved bytes (ETSI TS 103 420).
-	// Layout (big-endian, MSB-first within each byte):
-	//   bits[7:1]  reserved (7 bits, all zero)
-	//   bits[0]    flag_ec3_extension_type_a (1 bit, LSB of first byte)
-	//   bits[15:8] complexity_index_type_a   (8 bits, second byte; present iff flag==1)
-	var joc bool
-	var complexityIndex int
-	if len(d.Reserved) >= 1 && d.Reserved[0]&0x01 == 1 {
-		joc = true
-		if len(d.Reserved) >= 2 {
-			complexityIndex = int(d.Reserved[1])
-		}
-	}
+	// mp4ff decodes the JOC extension (ETSI TS 103 420) into Dec3Box.JOCComplexity,
+	// which is non-zero only when flag_ec3_extension_type_a is set.
+	joc := d.JOCComplexity > 0
+	complexityIndex := int(d.JOCComplexity)
 
 	return &CodecInfo{
 		MimeCodecString: "ec-3",
@@ -310,6 +301,21 @@ func ParseDOVIBox(payload []byte) (*avdesc.DOVIInfo, error) {
 	}, nil
 }
 
+// doviInfoFromBox converts a natively-decoded mp4ff Dolby Vision configuration
+// box into a DOVIInfo. FourCC and BoxType are set by the caller.
+func doviInfoFromBox(b *mp4.DoViConfigurationBox) *avdesc.DOVIInfo {
+	return &avdesc.DOVIInfo{
+		VersionMajor:            int(b.DVVersionMajor),
+		VersionMinor:            int(b.DVVersionMinor),
+		Profile:                 int(b.DVProfile),
+		Level:                   int(b.DVLevel),
+		RPUPresent:              b.RPUPresentFlag,
+		ELPresent:               b.ELPresentFlag,
+		BLPresent:               b.BLPresentFlag,
+		BLSignalCompatibilityID: int(b.DVBLSignalCompatibilityID),
+	}
+}
+
 // sanitizeString replaces invalid UTF-8 sequences and non-printable characters
 // with '?' so error messages containing binary data are safe to log.
 func sanitizeString(s string) string {
@@ -359,21 +365,13 @@ func parseVisualSampleEntryBox(se *mp4.VisualSampleEntryBox) (*CodecInfo, error)
 			VideoLayout:     Mp4VideoLayoutMono,
 		}
 
-		// Look for Dolby Vision configuration box (dvvC, dvcC, or dvwC) in children.
-		for _, child := range se.Children {
-			boxType := child.Type()
-			if IsDOVIBoxType(boxType) {
-				if ub, ok := child.(*mp4.UnknownBox); ok {
-					dovi, doviErr := ParseDOVIBox(ub.Payload())
-					if doviErr != nil {
-						return nil, e(doviErr, "reason", "failed to parse Dolby Vision box", "box", boxType)
-					}
-					dovi.FourCC = avdesc.DOVIFourCC(codecTag)
-					info.DOVI = dovi
-					info.DOVI.BoxType = boxType
-				}
-				break
-			}
+		// Dolby Vision configuration box (dvcC/dvvC/dvwC) is decoded natively by
+		// mp4ff (>= v0.53.0) and exposed as VisualSampleEntryBox.DoViConfig.
+		if se.DoViConfig != nil {
+			dovi := doviInfoFromBox(se.DoViConfig)
+			dovi.FourCC = avdesc.DOVIFourCC(codecTag)
+			dovi.BoxType = se.DoViConfig.Type()
+			info.DOVI = dovi
 		}
 
 		// If VPS declares multiple layers - it's MV-HEVC
@@ -438,8 +436,11 @@ func parseHvcCVPS(hvcC *mp4.HvcCBox) *hevc.VPS {
 // (for MV-HEVC this is the Multiview Main profile idc=6)
 func mvhevcEnhancementPTL(vps *hevc.VPS) *hevc.ProfileTierLevel {
 	basePTL := vps.ProfileTierLevel
-	for i := range vps.ExtProfileTierLevels {
-		ptl := vps.ExtProfileTierLevels[i]
+	if vps.Extension == nil {
+		return nil
+	}
+	for i := range vps.Extension.ExtProfileTierLevels {
+		ptl := vps.Extension.ExtProfileTierLevels[i]
 		if ptl.GeneralProfileIDC == 0 {
 			continue // placeholder/copy of base
 		}
