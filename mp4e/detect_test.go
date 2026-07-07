@@ -38,10 +38,19 @@ func TestHasISOBMFFHeader(t *testing.T) {
 		return b
 	}
 	for _, typ := range []string{"ftyp", "styp", "moov", "moof", "mdat", "sidx", "free"} {
-		require.True(t, HasISOBMFFHeader(bytes.NewReader(box(typ))), typ)
+		ok, _ := HasISOBMFFHeader(bytes.NewReader(box(typ)))
+		require.True(t, ok, typ)
 	}
-	// non-ISOBMFF leaders
-	require.False(t, HasISOBMFFHeader(bytes.NewReader([]byte("RIFF\x00\x00\x00\x00WAVE"))))
-	require.False(t, HasISOBMFFHeader(bytes.NewReader([]byte{0x06, 0x0e, 0x2b, 0x34, 0x02, 0x05, 0x01, 0x01}))) // MXF
-	require.False(t, HasISOBMFFHeader(bytes.NewReader([]byte{0x00, 0x01})))                                     // too short
+	// non-ISOBMFF leaders: header bytes are returned so a caller can log them
+	ok, hdr := HasISOBMFFHeader(bytes.NewReader([]byte("RIFF\x00\x00\x00\x00WAVE")))
+	require.False(t, ok)
+	require.Equal(t, []byte("RIFF\x00\x00\x00\x00"), hdr)
+
+	ok, _ = HasISOBMFFHeader(bytes.NewReader([]byte{0x06, 0x0e, 0x2b, 0x34, 0x02, 0x05, 0x01, 0x01})) // MXF
+	require.False(t, ok)
+
+	// too short: returns the partial header actually read
+	ok, hdr = HasISOBMFFHeader(bytes.NewReader([]byte{0x00, 0x01}))
+	require.False(t, ok)
+	require.Equal(t, []byte{0x00, 0x01}, hdr)
 }

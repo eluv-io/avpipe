@@ -233,7 +233,7 @@ func TestExtractCodecInfoLazyBoundsMemoryOnGarbage(t *testing.T) {
 	require.Nil(t, infos)
 }
 
-// TestLimitedReadSeeker verifies probe MP$ extrace read cap
+// TestLimitedReadSeeker verifies probe MP4 extract read cap
 func TestLimitedReadSeeker(t *testing.T) {
 	data := make([]byte, 1000)
 	lr := newLimitedReadSeeker(bytes.NewReader(data), 100)

@@ -65,10 +65,13 @@ var isobmffTopLevelBoxTypes = map[string]bool{
 // HasFtypHeader it also accepts segment leaders (styp/moof), so it recognizes
 // DASH/HLS fMP4 segments as well as whole files. It reads 8 bytes and does not
 // seek back, so the caller must reposition the reader before decoding.
-func HasISOBMFFHeader(r io.Reader) bool {
-	var hdr [8]byte
-	if _, err := io.ReadFull(r, hdr[:]); err != nil {
-		return false
+//
+// Returns the header bytes read (up to 8)
+func HasISOBMFFHeader(r io.Reader) (ok bool, hdr []byte) {
+	var buf [8]byte
+	n, err := io.ReadFull(r, buf[:])
+	if err != nil {
+		return false, buf[:n]
 	}
-	return isobmffTopLevelBoxTypes[string(hdr[4:8])]
+	return isobmffTopLevelBoxTypes[string(buf[4:8])], buf[:n]
 }

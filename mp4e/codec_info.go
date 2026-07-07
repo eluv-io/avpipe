@@ -118,18 +118,20 @@ func ExtractCodecInfoLazy(r io.ReadSeeker) (infos []*CodecInfo, err error) {
 
 	// Light detection of MP4/MOV (ISOBMFF) using header sniff.
 	// The decoder may crash or run out of memory for an incorrect format.
-	looksMP4 := HasISOBMFFHeader(r)
+	looksMP4, hdr := HasISOBMFFHeader(r)
 	if _, err = r.Seek(0, io.SeekStart); err != nil {
 		return nil, e("reason", "seek to start after header sniff", "error", err)
 	}
 	if !looksMP4 {
-		return nil, e("reason", "not an ISOBMFF/MP4 container")
+		return nil, e("reason", "not an ISOBMFF/MP4 container", "header", fmt.Sprintf("%x", hdr))
 	}
 
 	// Cap the total bytes read into memory during the lazy parse. This is critical to avoid
 	// out-of-memory situations with unexpected file formats.
 	lr := newLimitedReadSeeker(r, maxLazyReadBytes)
 
+	// PENDING(SS) We could make a SafeDecodeFile() wrapper that engages the bytes cap and
+	// suitable ISOBMFF checks.
 	mp4Data, err := mp4.DecodeFile(lr, mp4.WithDecodeMode(mp4.DecModeLazyMdat))
 	if err != nil {
 		return nil, e("reason", "failed to parse MP4", "cause", sanitizeString(err.Error()))
@@ -152,7 +154,7 @@ func newLimitedReadSeeker(r io.ReadSeeker, limit int64) *limitedReadSeeker {
 
 func (l *limitedReadSeeker) Read(p []byte) (int, error) {
 	if l.remaining <= 0 {
-		return 0, errors.E("mp4 codec info", "reason", "read limit exceeded", "bytes", maxLazyReadBytes)
+		return 0, errors.E("mp4 codec info", "reason", "read limit exceeded", "limit", maxLazyReadBytes)
 	}
 	if int64(len(p)) > l.remaining {
 		p = p[:l.remaining]

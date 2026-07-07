@@ -1060,7 +1060,7 @@ func Probe(params *goavpipe.XcParams) (*goavpipe.ProbeInfo, error) {
 	// In order to make this work we implement this sequence:
 	// - open the handler for the MP4 extraction first (don't close)
 	// - seek back to 0
-	// - invoke the C.Probe which opens its own handle the closes its own handle via callbacks
+	// - invoke the C.Probe which opens its own handle then closes its own handle via callbacks
 	// - finally close the MP4 extraction handle
 	var codecInfos []*mp4e.CodecInfo
 	if params.Seekable {
