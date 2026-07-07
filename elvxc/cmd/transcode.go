@@ -385,6 +385,13 @@ func InitTranscode(cmdRoot *cobra.Command) error {
 	cmdTranscode.PersistentFlags().StringP("profile", "", "", "Encoding profile for video. If it is not determined, it will be set automatically.")
 	cmdTranscode.PersistentFlags().Int32("level", 0, "Encoding level for video. If it is not determined, it will be set automatically.")
 	cmdTranscode.PersistentFlags().Int32("deinterlace", 0, "Deinterlace filter (values 0 - none, 1 - bwdif_field, 2 - bwdif_frame send_frame).")
+	cmdTranscode.PersistentFlags().Int32("vertical", 0, "Vertical video crop type (0 - none, 1 - 32bpf).")
+	cmdTranscode.PersistentFlags().StringP("vertical-data", "", "", "Path to binary file with per-frame crop x data (4 bytes per frame, uint32).")
+	cmdTranscode.PersistentFlags().StringP("fade", "", "", "Fade filter ('in' or 'out').")
+	cmdTranscode.PersistentFlags().Int32("fade-start-frame", 0, "Fade start frame (used with blend-based fade).")
+	cmdTranscode.PersistentFlags().Int32("fade-end-frame", 0, "Fade end frame (used with blend-based fade).")
+	cmdTranscode.PersistentFlags().Float64("fade-level-1", 0, "Fade blend start level (e.g. 1.0).")
+	cmdTranscode.PersistentFlags().Float64("fade-level-2", 0, "Fade blend end level (e.g. 0.0).")
 	cmdTranscode.PersistentFlags().Bool("use-custom-live-reader", false, "Read live media via a custom reader instead of using libavformat")
 	cmdTranscode.PersistentFlags().Bool("copy-mpegts", false, "Create an MPEGTS output (for MPEGTS, SRT, RTP)")
 	cmdTranscode.PersistentFlags().Bool("copy-mpegts-from-input", false, "Create a copy of the MPEGTS input (for MPEGTS, SRT, RTP)")
@@ -683,6 +690,39 @@ func doTranscode(cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("Invalid deinterlace value")
 	}
 
+	vertical, err := cmd.Flags().GetInt32("vertical")
+	if err != nil {
+		return fmt.Errorf("Invalid vertical value")
+	}
+
+	verticalDataFile := cmd.Flag("vertical-data").Value.String()
+	var verticalData []byte
+	if verticalDataFile != "" {
+		verticalData, err = os.ReadFile(verticalDataFile)
+		if err != nil {
+			return fmt.Errorf("Failed to read vertical-data file: %v", err)
+		}
+	}
+
+	fade := cmd.Flag("fade").Value.String()
+
+	fadeStartFrame, err := cmd.Flags().GetInt32("fade-start-frame")
+	if err != nil {
+		return fmt.Errorf("Invalid fade-start-frame value")
+	}
+	fadeEndFrame, err := cmd.Flags().GetInt32("fade-end-frame")
+	if err != nil {
+		return fmt.Errorf("Invalid fade-end-frame value")
+	}
+	fadeLevel1, err := cmd.Flags().GetFloat64("fade-level-1")
+	if err != nil {
+		return fmt.Errorf("Invalid fade-level-1 value")
+	}
+	fadeLevel2, err := cmd.Flags().GetFloat64("fade-level-2")
+	if err != nil {
+		return fmt.Errorf("Invalid fade-level-2 value")
+	}
+
 	useCustomLiveReader, err := cmd.Flags().GetBool("use-custom-live-reader")
 	if err != nil {
 		return fmt.Errorf("Invalid copy-mpegts value")
@@ -801,6 +841,13 @@ func doTranscode(cmd *cobra.Command, args []string) error {
 		Profile:                profile,
 		Level:                  int(level),
 		Deinterlace:            int(deinterlace),
+		Vertical:               int(vertical),
+		VerticalData:           verticalData,
+		Fade:                   fade,
+		FadeStartFrame:         int(fadeStartFrame),
+		FadeEndFrame:           int(fadeEndFrame),
+		FadeLevel1:             fadeLevel1,
+		FadeLevel2:             fadeLevel2,
 	}
 
 	err = getAudioIndexes(params, audioIndex)

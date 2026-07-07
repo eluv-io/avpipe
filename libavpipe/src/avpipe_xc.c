@@ -53,36 +53,7 @@
 #define DEFAULT_ACC_SAMPLE_RATE     48000
 #define MAX_FRAME_READ_RETRIES      300
 
-extern int
-init_video_filters(
-    const char *filters_descr,
-    coderctx_t *decoder_context,
-    coderctx_t *encoder_context,
-    xcparams_t *params);
-
-extern int
-init_audio_filters(
-    coderctx_t *decoder_context,
-    coderctx_t *encoder_context,
-    xcparams_t *params);
-
-int
-init_audio_pan_filters(
-    const char *filters_descr,
-    coderctx_t *decoder_context,
-    coderctx_t *encoder_context);
-
-int
-init_audio_merge_pan_filters(
-    const char *filters_descr,
-    coderctx_t *decoder_context,
-    coderctx_t *encoder_context);
-
-extern int
-init_audio_join_filters(
-    coderctx_t *decoder_context,
-    coderctx_t *encoder_context,
-    xcparams_t *params);
+#include "avpipe_filters.h"
 
 extern const char *
 av_get_pix_fmt_name(
@@ -1333,6 +1304,10 @@ prepare_video_encoder(
     if (params->rotate == 90 || params->rotate == 270) {
         encoder_codec_context->height = params->enc_height != -1 ? params->enc_height : decoder_context->codec_context[index]->width;
         encoder_codec_context->width = params->enc_width != -1 ? params->enc_width : decoder_context->codec_context[index]->height;
+    }
+    /* If vertical crop is set, encoder width must match crop output */
+    if (params->vertical) {
+        encoder_codec_context->width = crop_calc_width(encoder_codec_context->height);
     }
     if (params->video_time_base > 0) {
         encoder_codec_context->time_base = (AVRational) {1, params->video_time_base};
@@ -2824,6 +2799,9 @@ transcode_video(
 
         decoder_context->video_pts = packet->pts;
 
+        /* Send crop x command per frame for vertical video */
+        crop_send_command(decoder_context, encoder_context, p);
+
         /* Rescale video frame to encoder timebase before sending to the filter
          * (filter is initialized with the encoder timebase).
          * Use stream time_base (not codec_context time_base) because in ffmpeg 8.x
@@ -3584,10 +3562,21 @@ get_filter_str(
             return eav_filter_string_init;
         }
         *filter_str = (char *) calloc(FILTER_STRING_SZ, 1);
-        sprintf(*filter_str, "scale=%d:%d",
-            encoder_context->codec_context[encoder_context->video_stream_index]->width,
-            encoder_context->codec_context[encoder_context->video_stream_index]->height);
-            elv_dbg("FILTER scale=%s", *filter_str);
+        if (params->vertical) {
+            int enc_height = encoder_context->codec_context[encoder_context->video_stream_index]->height;
+            sprintf(*filter_str, "scale=-2:%d,crop=%d:ih:200:0",
+                enc_height, crop_calc_width(enc_height));
+        } else {
+            sprintf(*filter_str, "scale=%d:%d",
+                encoder_context->codec_context[encoder_context->video_stream_index]->width,
+                encoder_context->codec_context[encoder_context->video_stream_index]->height);
+        }
+        int ret = append_fade_filter(*filter_str, FILTER_STRING_SZ, encoder_context, params);
+        if (ret != 0) {
+            free(*filter_str);
+            return ret;
+        }
+        elv_log("FILTER str=%s", *filter_str);
     }
 
     return 0;
@@ -3683,6 +3672,13 @@ avpipe_xc(
             goto xc_done;
         }
         free(filter_str);
+
+        /* Find and store crop filter context for per-frame send_command */
+        if (params->vertical) {
+            if ((rc = crop_get_context(decoder_context, params)) != 0) {
+                goto xc_done;
+            }
+        }
     }
 
     if (!params->bypass_transcoding &&
@@ -4779,6 +4775,27 @@ check_params(
             return eav_param;
         }
     }
+
+    if (params->vertical) {
+        if (params->bypass_transcoding) {
+            elv_err("Incompatible params - vertical crop requires transcoding (bypass must be disabled), url=%s", params->url);
+            return eav_param;
+        }
+        if (params->vertical != vertical_32bpf) {
+            elv_err("Unsupported vertical data type=%d url=%s", params->vertical, params->url);
+            return eav_param;
+        }
+        if (params->vertical_data == NULL || params->vertical_data_len < 4 || params->vertical_data_len % 4 > 0) {
+            elv_err("Bad vertical data - missing or too short url=%s", params->url);
+            return eav_param;
+        }
+    }
+
+    if (params->fade && *params->fade != '\0' && params->bypass_transcoding) {
+        elv_err("Incompatible params - fade requires transcoding (bypass must be disabled), url=%s", params->url);
+        return eav_param;
+    }
+
     return eav_success;
 }
 
@@ -4859,7 +4876,14 @@ log_params(
         "deinterlace=%d "
         "use_preprocessed_input=%d "
         "copy_mpegts=%d "
-        "timecode=%s",
+        "timecode=%s "
+        "vertical=%d "
+        "vertical_data_len=%d "
+        "fade=%s "
+        "fade_start_frame=%d "
+        "fade_end_frame=%d "
+        "fade_level_1=%.3f "
+        "fade_level_2=%.3f",
         params->stream_id, params->url,
         avpipe_version(),
         params->bypass_transcoding, params->skip_decoding,
@@ -4886,7 +4910,11 @@ log_params(
         1, params->video_time_base, params->video_frame_duration_ts, params->rotate,
         params->profile ? params->profile : "", params->level,  params->deinterlace,
         params->use_preprocessed_input, params->copy_mpegts,
-        params->timecode);
+        params->timecode,
+        params->vertical, params->vertical_data_len,
+        params->fade ? params->fade : "(null)",
+        params->fade_start_frame, params->fade_end_frame,
+        params->fade_level_1, params->fade_level_2);
     elv_log("AVPIPE XCPARAMS %s", buf);
 }
 
@@ -4938,6 +4966,14 @@ avpipe_copy_xcparams(
         memcpy(p2->extract_images_ts, p->extract_images_ts, size);
     }
     p2->seg_duration = safe_strdup(p->seg_duration);
+    p2->fade = safe_strdup(p->fade);
+    p2->vertical_data = NULL;
+    p2->vertical_data_len = 0;
+    if (p->vertical_data != NULL && p->vertical_data_len > 0) {
+        p2->vertical_data = (uint8_t *) calloc(1, p->vertical_data_len);
+        memcpy(p2->vertical_data, p->vertical_data, p->vertical_data_len);
+        p2->vertical_data_len = p->vertical_data_len;
+    }
 
     return p2;
 }
@@ -5035,6 +5071,8 @@ avpipe_free_params(
     free(params->filter_descriptor);
     free(params->mux_spec);
     free(params->extract_images_ts);
+    free_vertical_data(params);
+    free(params->fade);
     free(params);
     xctx->params = NULL;
 }
@@ -5198,4 +5236,24 @@ set_extract_images(
         return;
     }
     params->extract_images_ts[index] = value;
+}
+
+void
+init_vertical_data(
+    xcparams_t *params,
+    const uint8_t *data,
+    int len)
+{
+    params->vertical_data = malloc(len);
+    memcpy(params->vertical_data, data, len);
+    params->vertical_data_len = len;
+}
+
+void
+free_vertical_data(
+    xcparams_t *params)
+{
+    free(params->vertical_data);
+    params->vertical_data = NULL;
+    params->vertical_data_len = 0;
 }

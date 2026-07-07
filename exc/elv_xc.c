@@ -1097,6 +1097,13 @@ usage(
         "\t-rc-buffer-size :        (optional) Determines the interval used to limit bit rate\n"
         "\t-rc-max-rate :           (optional) Maximum encoding bit rate, used in conjuction with rc-buffer-size\n"
         "\t-rotate :                (optional) Rotate the input video. Default is 0 with no rotation, other values 90, 180, 270.\n"
+        "\t-fade :                  (optional) Fade filter ('in' or 'out').\n"
+        "\t-fade-start-frame :      (optional) Fade start frame for blend-based fade.\n"
+        "\t-fade-end-frame :        (optional) Fade end frame for blend-based fade.\n"
+        "\t-fade-level-1 :          (optional) Fade blend start level (e.g. 1.0).\n"
+        "\t-fade-level-2 :          (optional) Fade blend end level (e.g. 0.0).\n"
+        "\t-vertical :              (optional) Vertical video crop type. Default is 0 (none), 1 (32bpf).\n"
+        "\t-vertical-data :         (optional) Path to binary file with per-frame crop x data (4 bytes per frame, uint32 LE).\n"
         "\t-sample-rate :           (optional) Default: -1. For aac output sample rate is set to input sample rate and this parameter is ignored.\n"
         "\t-seekable :              (optional) Seekable stream. Default is 0, must be 0 or 1\n"
         "\t-seg-duration :          (mandatory if format is \"segment\") segment duration secs (positive integer). It is used for making mp4 segments.\n"
@@ -1207,6 +1214,7 @@ main(
         .sync_audio_to_stream_id = -1,      /* Default -1 (no sync to a video stream) */
         .rotate = 0,                        /* Default 0 (means no transpose/rotation) */
         .deinterlace = 0,                   /* Default 0 (no deinterlacing) */
+        .vertical = 0,                      /* Default 0 (no vertical crop) */
         .xc_type = xc_none,
         .video_bitrate = -1,                /* not used if using CRF */
         .watermark_text = NULL,
@@ -1398,6 +1406,24 @@ main(
                 } else {
                     usage(argv[0], argv[i], EXIT_FAILURE);
                 }
+            } else if (!strcmp(argv[i], "-fade")) {
+                p.fade = strdup(argv[i+1]);
+            } else if (!strcmp(argv[i], "-fade-start-frame")) {
+                if (sscanf(argv[i+1], "%d", &p.fade_start_frame) != 1) {
+                    usage(argv[0], argv[i], EXIT_FAILURE);
+                }
+            } else if (!strcmp(argv[i], "-fade-end-frame")) {
+                if (sscanf(argv[i+1], "%d", &p.fade_end_frame) != 1) {
+                    usage(argv[0], argv[i], EXIT_FAILURE);
+                }
+            } else if (!strcmp(argv[i], "-fade-level-1")) {
+                if (sscanf(argv[i+1], "%lf", &p.fade_level_1) != 1) {
+                    usage(argv[0], argv[i], EXIT_FAILURE);
+                }
+            } else if (!strcmp(argv[i], "-fade-level-2")) {
+                if (sscanf(argv[i+1], "%lf", &p.fade_level_2) != 1) {
+                    usage(argv[0], argv[i], EXIT_FAILURE);
+                }
             } else if (!strcmp(argv[i], "-filter-descriptor")) {
                 p.filter_descriptor = strdup(argv[i+1]);
             } else if (strlen(argv[i]) > 2) {
@@ -1565,6 +1591,33 @@ main(
                 }
                 if (p.video_time_base <= 0)
                     usage(argv[0], argv[i], EXIT_FAILURE);
+            } else if (!strcmp(argv[i], "-vertical")) {
+                if (sscanf(argv[i+1], "%d", &p.vertical) != 1) {
+                    usage(argv[0], argv[i], EXIT_FAILURE);
+                }
+            } else if (!strcmp(argv[i], "-vertical-data")) {
+                const char *vd_path = argv[i+1];
+                FILE *vd_fp = fopen(vd_path, "rb");
+                if (!vd_fp) {
+                    fprintf(stderr, "Failed to open vertical-data file: %s\n", vd_path);
+                    exit(EXIT_FAILURE);
+                }
+                fseek(vd_fp, 0, SEEK_END);
+                long vd_size = ftell(vd_fp);
+                fseek(vd_fp, 0, SEEK_SET);
+                if (vd_size <= 0) {
+                    fprintf(stderr, "vertical-data file is empty: %s\n", vd_path);
+                    fclose(vd_fp);
+                    exit(EXIT_FAILURE);
+                }
+                p.vertical_data_len = (int)vd_size;
+                p.vertical_data = (uint8_t *)malloc(vd_size);
+                if (fread(p.vertical_data, 1, vd_size, vd_fp) != (size_t)vd_size) {
+                    fprintf(stderr, "Failed to read vertical-data file: %s\n", vd_path);
+                    fclose(vd_fp);
+                    exit(EXIT_FAILURE);
+                }
+                fclose(vd_fp);
             } else if (!strcmp(argv[i], "-video-layout")) {
                 if (get_video_layout(argv[i+1], &p.video_layout) < 0) {
                     usage(argv[0], argv[i], EXIT_FAILURE);
