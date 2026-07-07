@@ -1,7 +1,6 @@
 package dovi
 
 import (
-	"encoding/binary"
 	"encoding/hex"
 	"fmt"
 	"os"
@@ -38,35 +37,19 @@ type DVConfigRecord struct {
 	BLSignalCompatibilityID uint8
 }
 
-// parseDVConfig parses the raw payload of a dvcC or dvvC UnknownBox.
-// The payload is the box body after the 8-byte box header has been stripped
-// by mp4ff, so byte 0 is dv_version_major.
-func parseDVConfig(payload []byte) (*DVConfigRecord, error) {
-	if len(payload) < 4 {
-		return nil, fmt.Errorf("dv config payload too short: %d bytes (need 4)", len(payload))
+// dvRecordFromBox converts a natively-decoded mp4ff Dolby Vision configuration
+// box (dvcC/dvvC/dvwC) into a DVConfigRecord.
+func dvRecordFromBox(b *mp4.DoViConfigurationBox) *DVConfigRecord {
+	return &DVConfigRecord{
+		DVVersionMajor:          b.DVVersionMajor,
+		DVVersionMinor:          b.DVVersionMinor,
+		DVProfile:               b.DVProfile,
+		DVLevel:                 b.DVLevel,
+		RPUPresentFlag:          b.RPUPresentFlag,
+		ELPresentFlag:           b.ELPresentFlag,
+		BLPresentFlag:           b.BLPresentFlag,
+		BLSignalCompatibilityID: b.DVBLSignalCompatibilityID,
 	}
-	r := &DVConfigRecord{}
-	r.DVVersionMajor = payload[0]
-	r.DVVersionMinor = payload[1]
-
-	// Bytes 2-3 packed (big-endian 16-bit word):
-	// [15:9]  dv_profile        (7 bits)
-	// [8:3]   dv_level          (6 bits)
-	// [2]     rpu_present_flag
-	// [1]     el_present_flag
-	// [0]     bl_present_flag
-	word := binary.BigEndian.Uint16(payload[2:4])
-	r.DVProfile = uint8((word >> 9) & 0x7F)
-	r.DVLevel = uint8((word >> 3) & 0x3F)
-	r.RPUPresentFlag = (word>>2)&0x1 == 1
-	r.ELPresentFlag = (word>>1)&0x1 == 1
-	r.BLPresentFlag = word&0x1 == 1
-
-	// byte 4: bl_signal_compat_id in the high nibble (bits [7:4])
-	if len(payload) >= 5 {
-		r.BLSignalCompatibilityID = (payload[4] >> 4) & 0x0F
-	}
-	return r, nil
 }
 
 // Info inspects an MP4 file for Dolby Vision correctness and QC,
@@ -115,24 +98,16 @@ func Info(inputPath string, opts InfoOptions) (map[string]any, error) {
 
 			track["Sample entry"] = fmt.Sprintf("%s (%dx%d)", vse.Type(), vse.Width, vse.Height)
 
-			// dvcC / dvvC land as UnknownBox children of the sample entry
+			// dvcC / dvvC / dvwC are decoded natively by mp4ff (>= v0.53.0) into
+			// a typed DoViConfigurationBox.
 			for _, vseChild := range vse.Children {
-				ub, ok := vseChild.(*mp4.UnknownBox)
+				dcfg, ok := vseChild.(*mp4.DoViConfigurationBox)
 				if !ok {
 					continue
 				}
-				boxType := ub.Type()
-				if boxType != "dvcC" && boxType != "dvvC" {
-					continue
-				}
+				boxType := dcfg.Type()
 				isDVTrack = true
-				rec, parseErr := parseDVConfig(ub.Payload())
-				if parseErr != nil {
-					track[fmt.Sprintf("%s (DV config)", boxType)] = map[string]any{
-						"error": parseErr.Error(),
-					}
-					continue
-				}
+				rec := dvRecordFromBox(dcfg)
 				infoKey := fmt.Sprintf("%s (DV config)", boxType)
 				track[infoKey] = formatDVConfig(rec)
 				track[infoKey+" QC"] = validateDVConfig(rec)
