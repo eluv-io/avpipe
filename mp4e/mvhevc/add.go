@@ -557,7 +557,10 @@ func buildAndWriteMP4(inp *input, outputPath string) error {
 	stbl.AddChild(stco)
 
 	if inp.vps.IsMultiLayer() {
-		oinf := mp4.BuildOinfFromVPS(inp.vps)
+		oinf, err := mp4.BuildOinfFromVPS(inp.vps)
+		if err != nil {
+			return fmt.Errorf("build oinf from VPS: %w", err)
+		}
 		sgpdOinf := &mp4.SgpdBox{
 			Version:            2,
 			GroupingType:       "oinf",
@@ -572,7 +575,10 @@ func buildAndWriteMP4(inp *input, outputPath string) error {
 		stbl.AddChild(sbgpOinf)
 
 		maxTids := make([]byte, inp.vps.GetNumLayers())
-		linf := mp4.BuildLinfFromVPS(inp.vps, maxTids)
+		linf, err := mp4.BuildLinfFromVPS(inp.vps, maxTids)
+		if err != nil {
+			return fmt.Errorf("build linf from VPS: %w", err)
+		}
 		sgpdLinf := &mp4.SgpdBox{
 			Version:            2,
 			GroupingType:       "linf",
