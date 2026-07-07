@@ -70,6 +70,10 @@ var isobmffTopLevelBoxTypes = map[string]bool{
 func HasISOBMFFHeader(r io.Reader) (ok bool, hdr []byte) {
 	var buf [8]byte
 	n, err := io.ReadFull(r, buf[:])
+	// Extra careful with misbehaving reader returning negative count
+	if n < 0 {
+		n = 0
+	}
 	if err != nil {
 		return false, buf[:n]
 	}
