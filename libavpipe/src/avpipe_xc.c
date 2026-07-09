@@ -208,13 +208,44 @@ check_input_stream(
     return eav_success;
 }
 
+/*
+ * @brief   Opens the input, discovers and selects its streams, and sets up per-stream decoders.
+ *
+ * Despite the name, most of this function is demux/stream-discovery work that every entry point
+ * needs -- transcode (avpipe_init), probe (avpipe_probe), AND remux/bypass alike. It allocates and
+ * opens the input format_context (avformat_open_input), probes stream info
+ * (avformat_find_stream_info), and then populates, per stream: decoder_context->stream[i],
+ * codec_parameters[i] (= stream->codecpar, incl. extradata such as AC-4's dac4), the selected
+ * video_stream_index / audio_stream_index[] / n_audio, and stream timebases -- selection driven by
+ * params (stream_id / audio_index / xc_type). All of this is required to copy a stream, so bypass
+ * depends on it even though it never decodes.
+ *
+ * Setting up a decoder *codec* (avcodec_find_decoder -> alloc -> open) is only the final per-stream
+ * step, and it is the only part that is decode-specific. Callers that never decode (probe, bypass)
+ * pass allow_missing_decoder=1 so a stream whose codec has no FFmpeg decoder (e.g. AC-4) is still
+ * identified and gets a bare codec_context from codecpar, instead of failing the decoder gate.
+ *
+ * @param   decoder_context        out: populated with the opened demuxer, selected streams, and
+ *                                  (where a decoder exists / was opened) decoder codec contexts.
+ * @param   in_handlers            avpipe I/O handlers used to open/read the input.
+ * @param   inctx                  input context (url, alt_url, params).
+ * @param   params                 transcode parameters (stream selection, xc_type, live opts, ...).
+ * @param   seekable               whether the custom input reader should advertise seek support.
+ * @param   allow_missing_decoder  tolerate a stream whose codec has no FFmpeg decoder
+ *                                  (identify/bypass only -- never decodes): pass 1 from probe and
+ *                                  for a bypass transcode; 0 for a transcode that must decode (it
+ *                                  then errors at the decoder gate for an undecodable codec).
+ *
+ * @return  eav_success on success, otherwise an eav_* error code.
+ */
 static int
 prepare_decoder(
     coderctx_t *decoder_context,
     avpipe_io_handler_t *in_handlers,
     ioctx_t *inctx,
     xcparams_t *params,
-    int seekable)
+    int seekable,
+    int allow_missing_decoder)
 {
     int rc;
     decoder_context->video_last_dts = AV_NOPTS_VALUE;
@@ -459,9 +490,23 @@ prepare_decoder(
         }
 
         if (decoder_context->codec_parameters[i]->codec_type != AVMEDIA_TYPE_DATA && !decoder_context->codec[i]) {
-            elv_err("Unsupported decoder codec param=%s, codec_id=%d, url=%s",
-                params ? params->dcodec : "", decoder_context->codec_parameters[i]->codec_id, url);
-            return eav_codec_param;
+            /*
+             * A codec with no FFmpeg decoder (e.g. AC-4) can still be *identified* (probe) and
+             * *bypassed* (stream copy) -- neither path decodes. When the caller allows it
+             * (probe, or a bypass transcode) fall through: we still allocate a bare
+             * codec_context from codecpar (below) so probe can report sample_rate/channels and
+             * the bypass path has stream params, but skip avcodec_open2 (guarded below) since
+             * there is no decoder to open. codec[i] stays NULL, which prepare_audio_encoder()
+             * uses as the "no decoder" signal to take its codecpar-copy bypass branch. Only a
+             * transcode that must actually decode (allow_missing_decoder == 0) errors here.
+             */
+            if (!allow_missing_decoder) {
+                elv_err("Unsupported decoder codec param=%s, codec_id=%d, url=%s",
+                    params ? params->dcodec : "", decoder_context->codec_parameters[i]->codec_id, url);
+                return eav_codec_param;
+            }
+            elv_log("No decoder for codec_id=%d, stream=%d; identify/bypass only (no decode), url=%s",
+                decoder_context->codec_parameters[i]->codec_id, i, url);
         }
 
         decoder_context->codec_context[i] = avcodec_alloc_context3(decoder_context->codec[i]);
@@ -486,8 +531,10 @@ prepare_decoder(
         else
             decoder_context->codec_context[i]->thread_count = DEFAULT_THREAD_COUNT;
 
-        /* Open the decoder (initialize the decoder codec_context[i] using given codec[i]). */
-        if (decoder_context->codec_parameters[i]->codec_type != AVMEDIA_TYPE_DATA &&
+        /* Open the decoder (initialize the decoder codec_context[i] using given codec[i]).
+         * Skip when there is no decoder codec (identify/bypass-only stream, e.g. AC-4): the
+         * bare codec_context carries codecpar for probe/bypass but cannot be opened. */
+        if (decoder_context->codec_parameters[i]->codec_type != AVMEDIA_TYPE_DATA && decoder_context->codec[i] &&
              (rc = avcodec_open2(decoder_context->codec_context[i], decoder_context->codec[i], NULL)) < 0) {
             elv_err("Failed to open codec through avcodec_open2, err=%d, param=%s, codec_id=%s, url=%s",
                 rc, params->dcodec, avcodec_get_name(decoder_context->codec_parameters[i]->codec_id), url);
@@ -1528,6 +1575,49 @@ prepare_audio_encoder(
         if (stream_index < 0) {
             elv_dbg("No audio stream detected by decoder.");
             return eav_stream_index;
+        }
+
+        /*
+         * Passthrough for a codec with no FFmpeg decoder AND no encoder (e.g. AC-4):
+         * prepare_decoder() found no decoder codec for this stream (codec[stream_index] is
+         * NULL; it allocated only a bare codec_context from codecpar). Mirror the video bypass
+         * path (set_encoder_context): copy the input codecpar -- including the dac4 extradata --
+         * to the output stream and skip building/opening any decoder or encoder context.
+         * do_bypass() only copies packets, so no encoder codec_context is needed downstream.
+         * This branch is reached ONLY for bypass streams that had no decoder, so the EAC3/aac
+         * paths below (which always have a decoder codec) are unaffected.
+         */
+        if (params->bypass_transcoding && !decoder_context->codec[stream_index]) {
+            AVStream *in_stream = decoder_context->stream[stream_index];
+            AVStream *out_stream;
+
+            format_context = encoder_context->format_context2[i];
+            encoder_context->audio_last_dts[i] = AV_NOPTS_VALUE;
+            encoder_context->audio_stream_index[output_stream_index] = output_stream_index;
+            encoder_context->n_audio = 1;
+
+            format_context->io_open = elv_io_open;
+            format_context->io_close2 = elv_io_close;
+
+            out_stream = avformat_new_stream(format_context, NULL);
+            encoder_context->stream[output_stream_index] = out_stream;
+
+            rc = avcodec_parameters_copy(out_stream->codecpar, in_stream->codecpar);
+            if (rc < 0) {
+                elv_err("BYPASS (no decoder) failed to copy audio codec parameters, url=%s", params->url);
+                return eav_codec_param;
+            }
+            /* Let the muxer pick the tag (e.g. 'ac-4') from its codec-tag table. */
+            out_stream->codecpar->codec_tag = 0;
+            out_stream->time_base = in_stream->time_base;
+
+            rc = set_encoder_options(encoder_context, decoder_context, params,
+                stream_index, out_stream->time_base.den);
+            if (rc < 0) {
+                elv_err("Failed to set audio encoder options with bypass (no decoder), url=%s", params->url);
+                return rc;
+            }
+            continue;
         }
 
         if (!decoder_context->codec_context[stream_index]) {
@@ -2613,10 +2703,11 @@ transcode_audio(
 
 
     if (debug_frame_level)
+        /* enc_codec_context is NULL for a decoder/encoder-less bypass (e.g. AC-4); guard the deref. */
         elv_dbg("DECODE stream_index=%d send_packet pts=%"PRId64" dts=%"PRId64
             " duration=%d, input frame_size=%d, output frame_size=%d, audio_output_pts=%"PRId64,
             stream_index, packet->pts, packet->dts, packet->duration, codec_context->frame_size,
-            enc_codec_context->frame_size, decoder_context->audio_output_pts);
+            enc_codec_context ? enc_codec_context->frame_size : -1, decoder_context->audio_output_pts);
 
     if (params->bypass_transcoding) {
         return do_bypass(1, decoder_context, encoder_context, packet, params, debug_frame_level);
@@ -3636,7 +3727,8 @@ avpipe_xc(
     }
 
     if ((rc = prepare_decoder(&xctx->decoder_ctx,
-            in_handlers, inctx, params, params->seekable)) != eav_success) {
+            in_handlers, inctx, params, params->seekable,
+            /*allow_missing_decoder=*/params && params->bypass_transcoding)) != eav_success) {
         elv_err("Failure in preparing decoder, url=%s, rc=%d", params->url, rc);
         return rc;
     }
@@ -4280,6 +4372,13 @@ avpipe_channel_name(
     int nb_channels,
     int channel_layout)
 {
+    /* channel_layout < 0 means "unknown/unspecified" (e.g. a probed stream whose demuxer did not
+     * derive a layout). Guard it: a negative int sign-extends to all-ones when promoted for the
+     * bitmask test below, which would otherwise report the first channel ("FL") for an unknown
+     * layout. */
+    if (channel_layout < 0)
+        return "";
+
     const channel_layout_info_t *info = get_channel_layout_info(nb_channels, channel_layout);
     if (info != NULL) {
         return info->name;
@@ -4369,7 +4468,8 @@ avpipe_probe(
         goto avpipe_probe_end;
     }
 
-    if ((rc = prepare_decoder(&decoder_ctx, in_handlers, &inctx, params, params->seekable)) != eav_success) {
+    if ((rc = prepare_decoder(&decoder_ctx, in_handlers, &inctx, params, params->seekable,
+            /*allow_missing_decoder=*/1)) != eav_success) {   /* probe identifies all streams, never decodes */
         elv_err("avpipe_probe failed to prepare decoder, url=%s", url);
         goto avpipe_probe_end;
     }
@@ -4401,7 +4501,12 @@ avpipe_probe(
             stream_probes_ptr->codec_id = codec->id;
             strncpy(stream_probes_ptr->codec_name, codec->name, MAX_CODEC_NAME);
         } else {
-            stream_probes_ptr->codec_type = decoder_ctx.format_context->streams[i]->codecpar->codec_type;
+            /* No decoder for this codec (e.g. AC-4): still identify it from codecpar so probe
+             * reports codec_id/codec_name (avcodec_get_name yields "ac4"), not an empty stream. */
+            AVCodecParameters *cp = s->codecpar;
+            stream_probes_ptr->codec_type = cp->codec_type;
+            stream_probes_ptr->codec_id = cp->codec_id;
+            strncpy(stream_probes_ptr->codec_name, avcodec_get_name(cp->codec_id), MAX_CODEC_NAME);
         }
         stream_probes_ptr->codec_name[MAX_CODEC_NAME] = '\0';
         av_fourcc_make_string(stream_probes_ptr->codec_tag_string, s->codecpar->codec_tag);
@@ -4449,6 +4554,11 @@ avpipe_probe(
         stream_probes_ptr->has_b_frames = codec_context->has_b_frames;
         stream_probes_ptr->sample_rate = codec_context->sample_rate;
         stream_probes_ptr->channels = codec_context->ch_layout.nb_channels;
+        /* NOTE: AC-4 (no decoder) reports channel_layout = -1. The mov demuxer does not derive
+         * AC-4's channel layout -- it lives in the dac4/ac4_dsi, which the demuxer doesn't parse
+         * into ch_layout -- so codecpar has an unspecified layout (ffprobe shows "unknown", mask 0),
+         * nothing meaningful to report here. The real layout must be derived from the dac4/ac4_dsi
+         * (in the Go probe layer). avpipe_channel_name() renders this -1 as "" (unknown). */
         if (codec && codec->type == AVMEDIA_TYPE_AUDIO)
             stream_probes_ptr->channel_layout = codec_context->ch_layout.u.mask;
         else
