@@ -1,4 +1,6 @@
 #!/bin/bash
+#
+# elv-toolchain build env: point avpipe at the FFmpeg fork + SRT installed under ~/.local.
 
 # For use with https://github.com/qluvio/elv-toolchain output
 

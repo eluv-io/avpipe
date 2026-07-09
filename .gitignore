@@ -63,7 +63,9 @@ dkms.conf
 /bin/
 /include/
 /lib/
-!/lib/libavpipe.hash
+/media
+
+/doc/doxygen/
 /elvxc/elvxc
 /exc/bin/
 cmd/mvhevc/.build/
@@ -74,4 +76,4 @@ O/
 temp/
 test_out/
 
-media
+!/lib/libavpipe.hash
