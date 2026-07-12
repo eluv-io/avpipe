@@ -1000,6 +1000,25 @@ enum {
 };
 
 static void
+set_nvidia_quality_params(
+    AVCodecContext *encoder_codec_context,
+    xcparams_t *params)
+{
+    const char *preset = "p2";
+
+    if (params->preset != NULL && params->preset[0] != '\0')
+        preset = params->preset;
+
+    av_opt_set(encoder_codec_context->priv_data, "preset", preset, 0); // Valid: p1–p7
+    av_opt_set(encoder_codec_context->priv_data, "tune", "hq", 0);   // Valid: hq, ll, ull, lossless, losslesshp
+
+    if (!strcmp(preset, "p6") || !strcmp(preset, "p7")) {
+        av_opt_set(encoder_codec_context->priv_data, "spatial_aq", "on", 0);
+        av_opt_set(encoder_codec_context->priv_data, "temporal_aq", "on", 0);
+    }
+}
+
+static void
 set_nvidia_h264_params(
     coderctx_t *encoder_context,
     coderctx_t *decoder_context,
@@ -1033,11 +1052,7 @@ set_nvidia_h264_params(
     av_opt_set_int(encoder_codec_context->priv_data, "level", encoder_codec_context->level, 0);
 */
 
-    /*
-     * Default preset - fast and good quality (previously "PRESET_LOW_LATENCY_HQ")
-     */
-    av_opt_set(encoder_codec_context->priv_data, "preset", "p2", 0); // Valid: p1–p7
-    av_opt_set(encoder_codec_context->priv_data, "tune", "hq", 0);   // Valid: hq, ll, ull, lossless, losslesshp
+    set_nvidia_quality_params(encoder_codec_context, params);
 
     /*
      * We might want to set one of the following options in future:
@@ -1084,11 +1099,7 @@ set_nvidia_hevc_params(
         av_opt_set(encoder_codec_context->priv_data, "tier", "high", 0);
     }
 
-    /*
-     * Default preset - fast and good quality (previously "PRESET_LOW_LATENCY_HQ")
-     */
-    av_opt_set(encoder_codec_context->priv_data, "preset", "p2", 0); // Valid: p1–p7
-    av_opt_set(encoder_codec_context->priv_data, "tune", "hq", 0);   // Valid: hq, ll, ull, lossless, losslesshp
+    set_nvidia_quality_params(encoder_codec_context, params);
 
     /* HDR for nvenc:
      *   - mp4 'mdcv'/'clli' atoms via coded_side_data: safe and necessary so the
