@@ -39,6 +39,28 @@ Important: libx264 only supports 8bit MV-HEVC (for 10 bit we use the Apple toolk
 
 `mvhevc_apple` can encode separate left/right sources directly to a `.mov` using AVFoundation/VideoToolbox.
 
+For 8-bit SDR output from 10-bit SDR ProRes sources:
+
+```bash
+./bin/mvhevc_apple \
+  -bitdepth 8 \
+  -profile main \
+  -keyint 48 \
+  -bframes 0 \
+  -fps 24000/1001 \
+  -bitrate 8500 \
+  left_eye_sdr.mov \
+  right_eye_sdr.mov \
+  output_spatial_sdr.mov
+```
+
+The SDR encoder preserves color primaries, transfer characteristics, and matrix
+coefficients from the ProRes track metadata. The left and right sources must
+have compatible color metadata. Do not use `-hdr`, `-master-display`, or
+`-max-cll` for SDR output.
+
+For 10-bit HDR10 output:
+
 ```bash
 ./bin/mvhevc_apple \
   -bitdepth 10 \

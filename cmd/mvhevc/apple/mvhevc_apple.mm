@@ -70,6 +70,7 @@ typedef struct apple_params {
 @property(nonatomic, strong) AVAssetWriter *writer;
 @property(nonatomic, strong) AVAssetWriterInput *writerInput;
 @property(nonatomic, strong) AVAssetWriterInputTaggedPixelBufferGroupAdaptor *adaptor;
+@property(nonatomic, strong) NSDictionary<NSString *, NSString *> *colorProperties;
 @property(nonatomic, assign) CVPixelBufferPoolRef pool;
 @property(nonatomic, assign) VTPixelTransferSessionRef transfer;
 @property(nonatomic, assign) int outWidth;
@@ -585,10 +586,92 @@ static BOOL wait_until_ready(AVAssetWriterInput *input, AVAssetWriter *writer)
     return YES;
 }
 
+static NSString *format_description_string_extension(CFDictionaryRef extensions,
+                                                     CFStringRef key)
+{
+    if (!extensions)
+        return nil;
+    CFTypeRef value = CFDictionaryGetValue(extensions, key);
+    if (!value || CFGetTypeID(value) != CFStringGetTypeID())
+        return nil;
+    return (__bridge NSString *)value;
+}
+
+static NSDictionary<NSString *, NSString *> *track_color_properties(AVAssetTrack *track)
+{
+    NSArray *format_descriptions = track.formatDescriptions;
+    if (format_descriptions.count == 0)
+        return nil;
+
+    CMFormatDescriptionRef format =
+        (__bridge CMFormatDescriptionRef)format_descriptions.firstObject;
+    CFDictionaryRef extensions = CMFormatDescriptionGetExtensions(format);
+    NSString *primaries = format_description_string_extension(
+        extensions, kCMFormatDescriptionExtension_ColorPrimaries);
+    NSString *transfer = format_description_string_extension(
+        extensions, kCMFormatDescriptionExtension_TransferFunction);
+    NSString *matrix = format_description_string_extension(
+        extensions, kCMFormatDescriptionExtension_YCbCrMatrix);
+
+    NSMutableDictionary<NSString *, NSString *> *properties =
+        [NSMutableDictionary dictionaryWithCapacity:3];
+    if (primaries)
+        properties[AVVideoColorPrimariesKey] = primaries;
+    if (transfer)
+        properties[AVVideoTransferFunctionKey] = transfer;
+    if (matrix)
+        properties[AVVideoYCbCrMatrixKey] = matrix;
+    return properties.count > 0 ? [properties copy] : nil;
+}
+
+static NSDictionary<NSString *, NSString *> *resolve_sdr_color_properties(
+    AVAssetTrack *left_track,
+    AVAssetTrack *right_track,
+    BOOL *compatible)
+{
+    NSDictionary<NSString *, NSString *> *left = track_color_properties(left_track);
+    NSDictionary<NSString *, NSString *> *right = track_color_properties(right_track);
+    NSArray<NSString *> *keys = @[
+        AVVideoColorPrimariesKey,
+        AVVideoTransferFunctionKey,
+        AVVideoYCbCrMatrixKey,
+    ];
+    NSMutableDictionary<NSString *, NSString *> *resolved =
+        [NSMutableDictionary dictionaryWithCapacity:3];
+
+    *compatible = YES;
+    for (NSString *key in keys) {
+        NSString *left_value = left[key];
+        NSString *right_value = right[key];
+        if (left_value && right_value && ![left_value isEqualToString:right_value]) {
+            fprintf(stderr, "Left/right SDR color metadata differs for %s: %s vs %s\n",
+                    key.UTF8String, left_value.UTF8String, right_value.UTF8String);
+            *compatible = NO;
+            return nil;
+        }
+        NSString *value = left_value ?: right_value;
+        if (value)
+            resolved[key] = value;
+    }
+
+    if (resolved.count == 0)
+        return nil;
+    if (resolved.count != keys.count) {
+        fprintf(stderr,
+                "Warning: SDR source color metadata is incomplete; not writing color signaling\n");
+        return nil;
+    }
+    if (left.count != right.count) {
+        fprintf(stderr,
+                "Warning: only one eye has complete SDR color metadata; using it for both views\n");
+    }
+    return [resolved copy];
+}
+
 static BOOL copy_to_pool(CVPixelBufferPoolRef pool,
                          VTPixelTransferSessionRef transfer,
                          CVImageBufferRef src,
-                         BOOL hdr,
+                         NSDictionary<NSString *, NSString *> *color_properties,
                          CVPixelBufferRef *dst_out)
 {
     CVPixelBufferRef dst = NULL;
@@ -605,15 +688,15 @@ static BOOL copy_to_pool(CVPixelBufferPoolRef pool,
         return NO;
     }
 
-    if (hdr) {
+    if (color_properties) {
         CVBufferSetAttachment(dst, kCVImageBufferColorPrimariesKey,
-                              kCVImageBufferColorPrimaries_ITU_R_2020,
+                              (__bridge CFStringRef)color_properties[AVVideoColorPrimariesKey],
                               kCVAttachmentMode_ShouldPropagate);
         CVBufferSetAttachment(dst, kCVImageBufferTransferFunctionKey,
-                              kCVImageBufferTransferFunction_SMPTE_ST_2084_PQ,
+                              (__bridge CFStringRef)color_properties[AVVideoTransferFunctionKey],
                               kCVAttachmentMode_ShouldPropagate);
         CVBufferSetAttachment(dst, kCVImageBufferYCbCrMatrixKey,
-                              kCVImageBufferYCbCrMatrix_ITU_R_2020,
+                              (__bridge CFStringRef)color_properties[AVVideoYCbCrMatrixKey],
                               kCVAttachmentMode_ShouldPropagate);
     }
 
@@ -698,7 +781,8 @@ static BOOL compute_output_size(const apple_output_config *cfg,
 static AppleOutputContext *create_output_context(const apple_params *p,
                                                  apple_output_config *cfg,
                                                  int src_w,
-                                                 int src_h)
+                                                 int src_h,
+                                                 NSDictionary<NSString *, NSString *> *sdr_color_properties)
 {
     AppleOutputContext *ctx = [[AppleOutputContext alloc] init];
     ctx.config = cfg;
@@ -753,18 +837,24 @@ static AppleOutputContext *create_output_context(const apple_params *p,
     } mutableCopy];
 
     if (p->hdr) {
-        NSDictionary *color_props = @{
+        ctx.colorProperties = @{
             AVVideoColorPrimariesKey: AVVideoColorPrimaries_ITU_R_2020,
             AVVideoTransferFunctionKey: AVVideoTransferFunction_SMPTE_ST_2084_PQ,
             AVVideoYCbCrMatrixKey: AVVideoYCbCrMatrix_ITU_R_2020,
         };
-        output_settings[AVVideoColorPropertiesKey] = color_props;
+    } else {
+        ctx.colorProperties = sdr_color_properties;
+    }
+    if (ctx.colorProperties) {
+        output_settings[AVVideoColorPropertiesKey] = ctx.colorProperties;
         compression[(__bridge NSString *)kVTCompressionPropertyKey_ColorPrimaries] =
-            (__bridge NSString *)kCMFormatDescriptionColorPrimaries_ITU_R_2020;
+            ctx.colorProperties[AVVideoColorPrimariesKey];
         compression[(__bridge NSString *)kVTCompressionPropertyKey_TransferFunction] =
-            (__bridge NSString *)kCMFormatDescriptionTransferFunction_SMPTE_ST_2084_PQ;
+            ctx.colorProperties[AVVideoTransferFunctionKey];
         compression[(__bridge NSString *)kVTCompressionPropertyKey_YCbCrMatrix] =
-            (__bridge NSString *)kCMFormatDescriptionYCbCrMatrix_ITU_R_2020;
+            ctx.colorProperties[AVVideoYCbCrMatrixKey];
+    }
+    if (p->hdr) {
         compression[(__bridge NSString *)kVTCompressionPropertyKey_HDRMetadataInsertionMode] =
             (__bridge NSString *)kVTHDRMetadataInsertionMode_Auto;
 
@@ -810,13 +900,13 @@ static AppleOutputContext *create_output_context(const apple_params *p,
     }
     ctx.transfer = transfer;
     VTSessionSetProperty(ctx.transfer, kVTPixelTransferPropertyKey_ScalingMode, kVTScalingMode_Normal);
-    if (p->hdr) {
+    if (ctx.colorProperties) {
         VTSessionSetProperty(ctx.transfer, kVTPixelTransferPropertyKey_DestinationColorPrimaries,
-                             kCMFormatDescriptionColorPrimaries_ITU_R_2020);
+                             (__bridge CFStringRef)ctx.colorProperties[AVVideoColorPrimariesKey]);
         VTSessionSetProperty(ctx.transfer, kVTPixelTransferPropertyKey_DestinationTransferFunction,
-                             kCMFormatDescriptionTransferFunction_SMPTE_ST_2084_PQ);
+                             (__bridge CFStringRef)ctx.colorProperties[AVVideoTransferFunctionKey]);
         VTSessionSetProperty(ctx.transfer, kVTPixelTransferPropertyKey_DestinationYCbCrMatrix,
-                             kCMFormatDescriptionYCbCrMatrix_ITU_R_2020);
+                             (__bridge CFStringRef)ctx.colorProperties[AVVideoYCbCrMatrixKey]);
     }
 
     return ctx;
@@ -862,6 +952,15 @@ static int encode_apple(const apple_params *p)
         fprintf(stderr, "Left/right dimensions differ: %dx%d vs %dx%d\n",
                 src_w, src_h, right_w, right_h);
         return 1;
+    }
+
+    NSDictionary<NSString *, NSString *> *sdr_color_properties = nil;
+    if (!p->hdr) {
+        BOOL compatible = YES;
+        sdr_color_properties = resolve_sdr_color_properties(
+            left_track, right_track, &compatible);
+        if (!compatible)
+            return 1;
     }
 
     int reader_bitdepth = 8;
@@ -912,7 +1011,8 @@ static int encode_apple(const apple_params *p)
                     p->outputs[i].width, p->outputs[i].height, p->outputs[i].out_file);
             continue;
         }
-        AppleOutputContext *ctx = create_output_context(p, &p->outputs[i], src_w, src_h);
+        AppleOutputContext *ctx = create_output_context(
+            p, &p->outputs[i], src_w, src_h, sdr_color_properties);
         if (!ctx)
             return 1;
         [outputs addObject:ctx];
@@ -964,6 +1064,11 @@ static int encode_apple(const apple_params *p)
         fprintf(stderr, "  Quality:     %.3f\n", p->quality);
     if (p->hdr)
         fprintf(stderr, "  HDR10:       BT.2020/PQ + optional MDCV/CLLI\n");
+    else if (sdr_color_properties)
+        fprintf(stderr, "  SDR color:   primaries=%s transfer=%s matrix=%s\n",
+                [sdr_color_properties[AVVideoColorPrimariesKey] UTF8String],
+                [sdr_color_properties[AVVideoTransferFunctionKey] UTF8String],
+                [sdr_color_properties[AVVideoYCbCrMatrixKey] UTF8String]);
     if (p->abr_profile_file)
         fprintf(stderr, "  ABR profile: %s\n", p->abr_profile_file);
     if (p->no_upscale)
@@ -1032,8 +1137,8 @@ static int encode_apple(const apple_params *p)
 
             CVPixelBufferRef left_dst = NULL;
             CVPixelBufferRef right_dst = NULL;
-            if (!copy_to_pool(ctx.pool, ctx.transfer, left_src, p->hdr, &left_dst) ||
-                !copy_to_pool(ctx.pool, ctx.transfer, right_src, p->hdr, &right_dst)) {
+            if (!copy_to_pool(ctx.pool, ctx.transfer, left_src, ctx.colorProperties, &left_dst) ||
+                !copy_to_pool(ctx.pool, ctx.transfer, right_src, ctx.colorProperties, &right_dst)) {
                 if (left_dst)
                     CVPixelBufferRelease(left_dst);
                 if (right_dst)
