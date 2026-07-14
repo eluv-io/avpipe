@@ -51,12 +51,14 @@ import (
 	"math/big"
 	"math/rand"
 	"sync"
+	"syscall"
 	"unsafe"
 
 	"github.com/eluv-io/avpipe/broadcastproto/mpegts"
 	"github.com/eluv-io/avpipe/goavpipe"
 	"github.com/eluv-io/avpipe/goavpipe/avdesc"
 	"github.com/eluv-io/avpipe/mp4e"
+	"github.com/eluv-io/errors-go"
 )
 
 func init() {
@@ -112,34 +114,40 @@ func getCIOHandler(fd int64) *ioHandler {
 
 //export AVPipeOpenInput
 func AVPipeOpenInput(url *C.char, size *C.int64_t) C.int64_t {
-	filename := C.GoString((*C.char)(unsafe.Pointer(url)))
-	urlInputOpener := goavpipe.GetInputOpener(filename)
-	urlOutputOpener := goavpipe.GetOutputOpener(filename)
+	fd, s := AVPipeOpenInputGo(C.GoString((*C.char)(unsafe.Pointer(url))))
+	*size = C.int64_t(s)
+	return C.int64_t(fd)
+}
+
+func AVPipeOpenInputGo(url string) (fd, size int64) {
+	urlInputOpener := goavpipe.GetInputOpener(url)
+	urlOutputOpener := goavpipe.GetOutputOpener(url)
 
 	if urlInputOpener == nil || urlOutputOpener == nil {
 		goavpipe.Log.Error("Input or output opener(s) are not set", "urlInputOpener", urlInputOpener, "urlOutputOpener", urlOutputOpener)
-		return C.int64_t(-1)
+		return -1, 0
 	}
-	goavpipe.Log.Debug("AVPipeOpenInput()", "url", filename)
+	goavpipe.Log.Debug("AVPipeOpenInput()", "url", url)
 
-	fd := goavpipe.Globals.AssignOutputOpener(urlOutputOpener)
+	fd = goavpipe.Globals.AssignOutputOpener(urlOutputOpener)
 
-	input, err := urlInputOpener.Open(fd, filename)
+	input, err := urlInputOpener.Open(fd, url)
 	if err != nil {
-		return C.int64_t(-1)
+		goavpipe.Log.Debug("AVPipeOpenInput()", err, "url", url)
+		return -1, 0
 	}
 
-	*size = C.int64_t(input.Size())
+	size = input.Size()
 
 	h := &ioHandler{
 		input:         input,
 		outTable:      make(map[int64]goavpipe.OutputHandler),
 		mutex:         &sync.Mutex{},
-		restoreMvhevc: shouldRestoreMvhevcForURL(filename),
+		restoreMvhevc: shouldRestoreMvhevcForURL(url),
 	}
-	goavpipe.Log.Debug("AVPipeOpenInput()", "url", filename, "size", *size, "fd", fd)
+	goavpipe.Log.Debug("AVPipeOpenInput()", "url", url, "size", size, "fd", fd)
 	goavpipe.Globals.PutCIOHandler(fd, h)
-	return C.int64_t(fd)
+	return fd, size
 }
 
 //export AVPipeOpenMuxInput
@@ -182,7 +190,7 @@ func AVPipeReadInput(fd C.int64_t, buf *C.uint8_t, sz C.int) C.int {
 		goavpipe.Log.Debug("AVPipeReadInput()", "fd", fd, "buf", buf, "sz", sz)
 	}
 
-	//gobuf := C.GoBytes(unsafe.Pointer(buf), sz)
+	// gobuf := C.GoBytes(unsafe.Pointer(buf), sz)
 	gobuf := make([]byte, sz)
 
 	n, err := h.InReader(gobuf)
@@ -191,6 +199,12 @@ func AVPipeReadInput(fd C.int64_t, buf *C.uint8_t, sz C.int) C.int {
 	}
 
 	if err != nil {
+		goavpipe.Log.Warn("AVPipeReadInput()", err, "fd", fd, "buf", buf, "sz", sz)
+		if _, ok := errors.GetField(err, goavpipe.ErrRetryField); ok {
+			// By convention a return code -1 is considered graceful termination and the avpipe job completes with no error
+			// A return code of -EIO is interpreted as a read failure and the avpipe job exits with eav_read_input
+			return C.int(-int(syscall.EIO))
+		}
 		if err == io.EOF {
 			return C.int(n)
 		}
@@ -286,6 +300,18 @@ func AVPipeStatInput(fd C.int64_t, stream_index C.int, avp_stat C.avp_stat_t, st
 	return C.int(0)
 }
 
+func AVPipeStatInputGo(fd int64, streamIndex int, t goavpipe.AVStatType, args any) (err error) {
+	h := getCIOHandler(int64(fd))
+	if h == nil {
+		return fmt.Errorf("input stats - failed to find input handler (fd=%d)", fd)
+	}
+	err = h.input.Stat(streamIndex, t, args)
+	if err != nil {
+		err = fmt.Errorf("input stats - failed to forward (%v)", err)
+	}
+	return err
+}
+
 func (h *ioHandler) InStat(stream_index C.int, avp_stat C.avp_stat_t, stat_args unsafe.Pointer) error {
 	var err error
 
@@ -312,6 +338,9 @@ func (h *ioHandler) InStat(stream_index C.int, avp_stat C.avp_stat_t, stat_args 
 	case C.in_stat_data_scte35:
 		statArgs := C.GoString((*C.char)(stat_args))
 		err = h.input.Stat(streamIndex, goavpipe.AV_IN_STAT_DATA_SCTE35, statArgs)
+	case C.in_stat_mpegts:
+		statArgs := C.GoString((*C.char)(stat_args))
+		err = h.input.Stat(streamIndex, goavpipe.AV_IN_STAT_MPEGTS, statArgs)
 	}
 
 	return err
@@ -457,7 +486,7 @@ func AVPipeWriteOutput(handler C.int64_t, fd C.int64_t, buf *C.uint8_t, sz C.int
 		return C.int(0)
 	}
 
-	//gobuf := C.GoBytes(unsafe.Pointer(buf), sz)
+	// gobuf := C.GoBytes(unsafe.Pointer(buf), sz)
 	// This should be the equivalent of using GoBytes() but safer if the
 	// Go implementation uses C pointer to wrap a slice.
 	gobuf := make([]byte, sz)
@@ -876,11 +905,11 @@ func getCParams(params *goavpipe.XcParams) (*C.xcparams_t, error) {
 		cparams.force_equal_fduration = C.int(1)
 	}
 
-	if params.CopyMpegts {
+	if params.InputCfg.CopyMode == goavpipe.CopyModeRemuxed {
 		cparams.copy_mpegts = C.int(1)
 	}
 
-	if params.UseCustomLiveReader {
+	if params.InputCfg.BypassLibavReader {
 		cparams.use_preprocessed_input = C.int(1)
 	}
 
@@ -1216,6 +1245,17 @@ func Probe(params *goavpipe.XcParams) (*goavpipe.ProbeInfo, error) {
 	return probeInfo, nil
 }
 
+// cancelableInputOpener is implemented by BypassLibavReader input openers that run their own Go network read loop
+// (mpegts/custom). XcCancel uses it to unblock a read that is parked on a dead source: C.xc_cancel only cancels the
+// ffmpeg/libav side, so without this the Go read loop stays blocked until it times out on its own and live/stop hangs.
+type cancelableInputOpener interface {
+	CancelInput()
+}
+
+// cancelableInputOpeners maps a live transcode handle to its cancelable input opener. Registered by XcInit when
+// BypassLibavReader is set, removed when XcRun completes.
+var cancelableInputOpeners sync.Map // int32 handle -> cancelableInputOpener
+
 // XcInit initializes a transcode job and returns a handle for it. The actual
 // transcoding is started by XcRun(handle) and can be interrupted at any time
 // via XcCancel(handle). Use this two-phase form instead of Xc when the caller
@@ -1242,24 +1282,26 @@ func XcInit(params *goavpipe.XcParams) (int32, error) {
 		return NewAVPipeSequentialOutWriter(inFd, 99, goavpipe.MpegtsSegment)
 	}
 
-	// Here we should setup the input opener if specified by the params
-	if params.UseCustomLiveReader {
-		var opener goavpipe.InputOpener
-		var err error
-		if params.CopyMpegtsFromInput {
-			opener, err = mpegts.NewAutoInputOpener(params.Url, true, seqOpenerF)
-			if params.CopyMpegts {
-				goavpipe.Log.Warn(op, "reason", "CopyMpegts is set but CopyMpegtsFromInput is also set", "XcParams", params)
-				params.CopyMpegts = false
-			}
-		} else {
-			opener, err = mpegts.NewAutoInputOpener(params.Url, false, seqOpenerF)
+	if params.InputCfg.CopyMode == goavpipe.CopyModeRawOnly {
+		goavpipe.Log.Info("initializing bypass processor", "copy_mode", params.InputCfg.CopyMode)
+		// Bypass ffmpeg completely and copy the stream verbatim to parts
+		bypassProcessor, err := mpegts.NewBypassProcessor(params, seqOpenerF)
+		if err != nil {
+			return -1, errors.E("XcInit", errors.K.Invalid.Default(), err)
 		}
+		handle := goavpipe.Globals.InitBypassProcessor(bypassProcessor)
+		return handle, nil
+	}
+
+	var bypassOpener goavpipe.InputOpener
+	if params.InputCfg.BypassLibavReader {
+		var err error
+		bypassOpener, err = mpegts.NewAutoInputOpener(params, seqOpenerF)
 		if err != nil {
 			goavpipe.Log.Error(op, err, "XcParams", params)
 			return -1, EAV_PARAM
 		}
-		goavpipe.InitUrlIOHandlerIfNotPresent(params.Url, opener, nil)
+		goavpipe.InitUrlIOHandlerIfNotPresent(params.Url, bypassOpener, nil)
 	}
 
 	cparams, err := getCParams(params)
@@ -1276,6 +1318,11 @@ func XcInit(params *goavpipe.XcParams) (int32, error) {
 		return -1, err
 	}
 
+	// Track the input opener by handle so XcCancel can unblock its Go read loop (see cancelableInputOpener).
+	if c, ok := bypassOpener.(cancelableInputOpener); ok {
+		cancelableInputOpeners.Store(int32(handle), c)
+	}
+
 	if isMvhevcLayout(params) {
 		registerMvhevcRestoreHandle(int32(handle), params.Url)
 	}
@@ -1287,10 +1334,32 @@ func XcInit(params *goavpipe.XcParams) (int32, error) {
 // until it completes or is cancelled via XcCancel.
 func XcRun(handle int32) error {
 	defer goavpipe.XCEnded()
+
+	if handle < -1 {
+		processor, ok := goavpipe.Globals.GetBypassProcessor(handle)
+		if !ok {
+			return EAV_BAD_HANDLE
+		}
+		defer func() {
+			goavpipe.Globals.DeleteBypassProcessor(handle)
+		}()
+		fd, _ := AVPipeOpenInputGo(processor.XcParams().Url)
+		if fd < 0 {
+			return EAV_OPEN_INPUT
+		}
+		err := processor.Start(fd)
+		if err != nil {
+			return err
+		}
+		processor.Wait()
+		return nil
+	}
+
 	defer unregisterMvhevcRestoreHandle(handle)
 	if handle < 0 {
 		return EAV_BAD_HANDLE
 	}
+	defer cancelableInputOpeners.Delete(handle)
 	goavpipe.AssociateGIDWithHandle(handle)
 	rc := C.xc_run(C.int32_t(handle))
 	if rc == 0 {
@@ -1303,8 +1372,24 @@ func XcRun(handle int32) error {
 // XcCancel interrupts a transcode job started with XcInit + XcRun.
 // Safe to call from a different goroutine while XcRun is blocking.
 func XcCancel(handle int32) error {
+	if handle < -1 {
+		processor, ok := goavpipe.Globals.GetBypassProcessor(handle)
+		if !ok {
+			return EAV_BAD_HANDLE
+		}
+		processor.Cancel()
+		return nil
+	}
+
 	defer unregisterMvhevcRestoreHandle(handle)
+
+	// Cancel the ffmpeg/libav side first (sets the cancel flag), then unblock the Go input read loop if this job uses a
+	// BypassLibavReader opener. Without the latter, a read parked on a dead source (custom/mpegts input opener) keeps
+	// xc_run blocked until the source read times out on its own, so XcCancel (and live/stop) would hang.
 	rc := C.xc_cancel(C.int32_t(handle))
+	if v, ok := cancelableInputOpeners.Load(handle); ok {
+		v.(cancelableInputOpener).CancelInput()
+	}
 	if rc == 0 {
 		return nil
 	}
