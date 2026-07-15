@@ -89,11 +89,15 @@ optional and defaults to VideoToolbox's native behavior.
 For `mvhevc_apple`, requested bitrates above 10 Mbps are automatically adjusted
 up before being passed to VideoToolbox: +10% above 10 Mbps, +20% above 25 Mbps,
 and +25% above 35 Mbps. If `-maxrate` is set, the adjusted bitrate is capped to
-that value.
+that value. VideoToolbox's stereo MV-HEVC encoder rejects its hard
+`DataRateLimits` property, so `-maxrate` is not a guaranteed VBV peak.
 
 To encode every video rung from an ABR profile in one pass, add
 `-abr-profile`. The profile supplies each rung's bitrate, width, height,
-profile, and level; `segment_specs.video.bit_depth` supplies bit depth.
+profile, and level; `segment_specs.video.bit_depth` supplies bit depth. An
+optional per-rung `max_bit_rate` caps the adjusted average target. An explicit
+CLI `-maxrate` overrides `max_bit_rate` for every rung. It is not a guaranteed
+VBV peak for stereo MV-HEVC.
 
 ```bash
 ./bin/mvhevc_apple \

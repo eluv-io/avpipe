@@ -2,6 +2,8 @@ package mvhevc
 
 import (
 	"fmt"
+	"io"
+	"math"
 	"os"
 
 	"github.com/Eyevinn/mp4ff/hevc"
@@ -13,8 +15,6 @@ import (
 // Fix restores MV-HEVC sample-group and track-group boxes that FFmpeg's
 // muxer drops when repackaging in bypass mode. The dropped boxes (oinf, linf,
 // and trgr/cstg) can be reconstructed from VPS, which is expected to be present in the input.
-//
-// Only fmp4 input.
 func Fix(inputPath, outputPath string) error {
 	log.Info("fixing MV-HEVC boxes", "input", inputPath, "output", outputPath)
 
@@ -24,13 +24,20 @@ func Fix(inputPath, outputPath string) error {
 	}
 	defer func() { _ = in.Close() }()
 
-	parsedMP4, err := mp4.DecodeFile(in)
+	if err := ensureDifferentFiles(in, outputPath); err != nil {
+		return err
+	}
+
+	// DecModeLazyMdat parses the box tree but seeks over media payloads. This
+	// keeps memory use proportional to metadata size, rather than file size.
+	parsedMP4, err := mp4.DecodeFile(in, mp4.WithDecodeMode(mp4.DecModeLazyMdat))
 	if err != nil {
 		return fmt.Errorf("decode MP4: %w", err)
 	}
 	if parsedMP4.Moov == nil {
 		return fmt.Errorf("no moov box")
 	}
+	originalMoovSize := parsedMP4.Moov.Size()
 
 	changed := false
 	for _, trak := range parsedMP4.Moov.Traks {
@@ -47,6 +54,9 @@ func Fix(inputPath, outputPath string) error {
 	if !changed {
 		log.Info("no missing MV-HEVC boxes; copying input through unchanged")
 	}
+	if err := adjustChunkOffsetsForMoovResize(parsedMP4, originalMoovSize); err != nil {
+		return fmt.Errorf("adjust chunk offsets: %w", err)
+	}
 
 	out, err := os.Create(outputPath)
 	if err != nil {
@@ -54,17 +64,134 @@ func Fix(inputPath, outputPath string) error {
 	}
 	defer func() { _ = out.Close() }()
 
-	// EncModeBoxTree preserves the raw top-level box sequence (ftyp, moov,
-	// moof, mdat, moof, mdat, ...).
-	// The moov is re-rendered with the new size.
-	// The moof/mdat children are untouched, so internal offsets remain valid.
-	parsedMP4.FragEncMode = mp4.EncModeBoxTree
-
-	if err := parsedMP4.Encode(out); err != nil {
+	// A lazy mdat's Encode method emits only its header. Walk the original
+	// top-level box order and stream every lazy payload from the input file.
+	if err := encodeFileWithLazyMdat(parsedMP4, in, out); err != nil {
 		return fmt.Errorf("encode: %w", err)
 	}
 	log.Info("wrote MV-HEVC MP4", "output", outputPath)
 	return nil
+}
+
+func ensureDifferentFiles(input *os.File, outputPath string) error {
+	inputInfo, err := input.Stat()
+	if err != nil {
+		return fmt.Errorf("stat input: %w", err)
+	}
+	outputInfo, err := os.Stat(outputPath)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return nil
+		}
+		return fmt.Errorf("stat output: %w", err)
+	}
+	if os.SameFile(inputInfo, outputInfo) {
+		return fmt.Errorf("input and output must be different files")
+	}
+	return nil
+}
+
+// encodeFileWithLazyMdat preserves the decoded top-level box sequence. Normal
+// boxes are encoded from the parsed tree; lazy mdat payloads are copied from
+// their original absolute offsets without being materialized in memory.
+func encodeFileWithLazyMdat(file *mp4.File, input io.ReadSeeker, output io.Writer) error {
+	for i, box := range file.Children {
+		mdat, lazy := box.(*mp4.MdatBox)
+		if !lazy || !mdat.IsLazy() {
+			if err := box.Encode(output); err != nil {
+				return fmt.Errorf("top-level box %d (%s): %w", i, box.Type(), err)
+			}
+			continue
+		}
+
+		payloadOffset := mdat.PayloadAbsoluteOffset()
+		payloadSize := mdat.GetLazyDataSize()
+		if payloadOffset > math.MaxInt64 || payloadSize > math.MaxInt64 {
+			return fmt.Errorf("top-level box %d (mdat): payload range exceeds int64", i)
+		}
+		if err := mdat.Encode(output); err != nil {
+			return fmt.Errorf("top-level box %d (mdat) header: %w", i, err)
+		}
+		written, err := mdat.CopyData(int64(payloadOffset), int64(payloadSize), input, output)
+		if err != nil {
+			return fmt.Errorf("top-level box %d (mdat) payload: %w", i, err)
+		}
+		if uint64(written) != payloadSize {
+			return fmt.Errorf("top-level box %d (mdat) payload: copied %d of %d bytes", i, written, payloadSize)
+		}
+	}
+	return nil
+}
+
+// adjustChunkOffsetsForMoovResize handles progressive fast-start files, where
+// moov precedes mdat. Re-encoding a larger repaired moov shifts all later media
+// chunks, whose stco/co64 values are absolute file offsets. Files with mdat
+// before moov (the usual AVAssetWriter layout) need no offset changes.
+func adjustChunkOffsetsForMoovResize(file *mp4.File, originalMoovSize uint64) error {
+	if file.Moov == nil || file.Mdat == nil || file.Moov.StartPos >= file.Mdat.StartPos {
+		return nil
+	}
+
+	newMoovSize := file.Moov.Size()
+	if newMoovSize == originalMoovSize {
+		return nil
+	}
+	if file.Moov.StartPos > math.MaxUint64-originalMoovSize {
+		return fmt.Errorf("original moov end overflows uint64")
+	}
+	originalMoovEnd := file.Moov.StartPos + originalMoovSize
+
+	for _, trak := range file.Moov.Traks {
+		if trak.Mdia == nil || trak.Mdia.Minf == nil || trak.Mdia.Minf.Stbl == nil {
+			continue
+		}
+		stbl := trak.Mdia.Minf.Stbl
+		if stbl.Stco != nil {
+			for i, offset := range stbl.Stco.ChunkOffset {
+				if uint64(offset) < originalMoovEnd {
+					continue
+				}
+				adjusted, err := resizeOffset(uint64(offset), originalMoovSize, newMoovSize)
+				if err != nil {
+					return fmt.Errorf("trak %d stco[%d]: %w", trak.Tkhd.TrackID, i, err)
+				}
+				if adjusted > math.MaxUint32 {
+					return fmt.Errorf("trak %d stco[%d]: adjusted offset %d exceeds uint32; co64 conversion required",
+						trak.Tkhd.TrackID, i, adjusted)
+				}
+				stbl.Stco.ChunkOffset[i] = uint32(adjusted)
+			}
+		}
+		if stbl.Co64 != nil {
+			for i, offset := range stbl.Co64.ChunkOffset {
+				if offset < originalMoovEnd {
+					continue
+				}
+				adjusted, err := resizeOffset(offset, originalMoovSize, newMoovSize)
+				if err != nil {
+					return fmt.Errorf("trak %d co64[%d]: %w", trak.Tkhd.TrackID, i, err)
+				}
+				stbl.Co64.ChunkOffset[i] = adjusted
+			}
+		}
+	}
+	return nil
+}
+
+func resizeOffset(offset, oldSize, newSize uint64) (uint64, error) {
+	if newSize >= oldSize {
+		growth := newSize - oldSize
+		if offset > math.MaxUint64-growth {
+			return 0, fmt.Errorf("offset overflow")
+		}
+		return offset + growth, nil
+	}
+
+	shrink := oldSize - newSize
+	if offset < shrink {
+		return 0, fmt.Errorf("offset underflow")
+	}
+	return offset - shrink, nil
 }
 
 func fixVideoTrak(trak *mp4.TrakBox, _ *mp4.File) (bool, error) {

@@ -101,7 +101,7 @@ static void usage(const char *prog)
         "Options:\n"
         "  -crf <val>          Accepted for CLI compatibility; ignored\n"
         "  -bitrate <kbps>     Target average bitrate, max 400000 kbps\n"
-        "  -maxrate <kbps>     Hard data-rate limit over 1 second\n"
+        "  -maxrate <kbps>     Cap the adjusted average bitrate; hard stereo cap unsupported\n"
         "  -quality <0.0-1.0>  VideoToolbox compression quality hint\n"
         "  -bufsize <kbits>    Accepted for CLI compatibility; ignored\n"
         "  -w <pixels>         Output width\n"
@@ -226,6 +226,11 @@ static int validate_output_config(const apple_params *p, const apple_output_conf
     if (cfg->bitrate_kbps > MAX_VIDEO_BITRATE_KBPS) {
         fprintf(stderr, "Invalid bitrate %d kbps: maximum is %d kbps (400 Mbps)\n",
                 cfg->bitrate_kbps, MAX_VIDEO_BITRATE_KBPS);
+        return -1;
+    }
+    if (cfg->maxrate_kbps > MAX_VIDEO_BITRATE_KBPS) {
+        fprintf(stderr, "Invalid max bitrate %d kbps: maximum is %d kbps (400 Mbps)\n",
+                cfg->maxrate_kbps, MAX_VIDEO_BITRATE_KBPS);
         return -1;
     }
     if (cfg->profile && !strcmp(cfg->profile, "main10") && cfg->bitdepth != 10) {
@@ -381,7 +386,13 @@ static int load_abr_profile(apple_params *p)
         apple_output_config *cfg = &p->outputs[i];
         long long bit_rate_bps = [rung[@"bit_rate"] longLongValue];
         cfg->bitrate_kbps = (int)((bit_rate_bps + 999) / 1000);
-        cfg->maxrate_kbps = p->maxrate_kbps;
+        id max_bit_rate_value = rung[@"max_bit_rate"];
+        if (p->maxrate_kbps > 0) {
+            cfg->maxrate_kbps = p->maxrate_kbps;
+        } else if ([max_bit_rate_value respondsToSelector:@selector(longLongValue)]) {
+            long long max_bit_rate_bps = [max_bit_rate_value longLongValue];
+            cfg->maxrate_kbps = (int)((max_bit_rate_bps + 999) / 1000);
+        }
         cfg->width = [rung[@"width"] intValue];
         cfg->height = [rung[@"height"] intValue];
         cfg->level = level_from_json(rung[@"level"]);
@@ -818,8 +829,6 @@ static AppleOutputContext *create_output_context(const apple_params *p,
     int encoder_bitrate_kbps = adjusted_bitrate_kbps(cfg);
     if (encoder_bitrate_kbps > 0)
         compression[(__bridge NSString *)kVTCompressionPropertyKey_AverageBitRate] = @((int64_t)encoder_bitrate_kbps * 1000);
-    if (cfg->maxrate_kbps > 0)
-        compression[(__bridge NSString *)kVTCompressionPropertyKey_DataRateLimits] = @[@((cfg->maxrate_kbps * 1000) / 8), @1];
     if (p->quality >= 0.0)
         compression[(__bridge NSString *)kVTCompressionPropertyKey_Quality] = @(p->quality);
     if (p->keyint > 0)
@@ -1048,9 +1057,9 @@ static int encode_apple(const apple_params *p)
     fprintf(stderr, "  Outputs:     %lu\n", (unsigned long)outputs.count);
     for (AppleOutputContext *ctx in outputs) {
         int encoder_bitrate_kbps = adjusted_bitrate_kbps(ctx.config);
-        fprintf(stderr, "    %dx%d %s requested=%d kbps adjusted=%d kbps bitdepth=%d profile=%s level=%d -> %s\n",
+        fprintf(stderr, "    %dx%d %s requested=%d kbps adjusted=%d kbps max=%d kbps bitdepth=%d profile=%s level=%d -> %s\n",
                 ctx.outWidth, ctx.outHeight, ctx.fileType.UTF8String,
-                ctx.config->bitrate_kbps, encoder_bitrate_kbps,
+                ctx.config->bitrate_kbps, encoder_bitrate_kbps, ctx.config->maxrate_kbps,
                 ctx.config->bitdepth,
                 ctx.config->profile ? ctx.config->profile : "(auto)",
                 ctx.config->level,
@@ -1073,6 +1082,15 @@ static int encode_apple(const apple_params *p)
         fprintf(stderr, "  ABR profile: %s\n", p->abr_profile_file);
     if (p->no_upscale)
         fprintf(stderr, "  No upscale:  true\n");
+    BOOL has_maxrate = NO;
+    for (AppleOutputContext *ctx in outputs) {
+        if (ctx.config->maxrate_kbps > 0) {
+            has_maxrate = YES;
+            break;
+        }
+    }
+    if (has_maxrate)
+        fprintf(stderr, "  Max bitrate: caps the adjusted average target; VideoToolbox stereo MV-HEVC does not support a hard data-rate limit\n");
     if (p->saw_x265_only)
         fprintf(stderr, "  Note:        x265-only options were accepted but ignored by the Apple encoder\n");
 
