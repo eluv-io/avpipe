@@ -20,7 +20,7 @@ import (
 )
 
 func TestProbeDolbyAtmos(t *testing.T) {
-	url := audioDolbyAtmosPath
+	url := assetEC3Atmos
 	checkFileExists(t, url)
 
 	goavpipe.InitIOHandler(&xc.FileInputOpener{URL: url}, &concurrentOutputOpener{dir: "test_out/dolby_atmos"})
@@ -41,8 +41,54 @@ func TestProbeDolbyAtmos(t *testing.T) {
 	//println(string(got))
 }
 
+// TestProbeAC4 drives the full C→Go probe path on an AC-4 (dac4) file and
+// asserts the AC-4 metadata is surfaced via MP4Info.AC4, including the RFC 6381
+// codec string. AC-4 has no decoder in the fork, so this also exercises the
+// probe's allow-missing-decoder gate. The C/ffmpeg layer cannot derive AC-4
+// channel layout (its ChannelLayoutName is empty), but the parsed dac4
+// presentation DSI can — so the layout IS asserted here via MP4.AC4.ChannelLayout().
+//
+// This is the end-to-end probe smoke test on a single 5.1 file. For broader AC-4
+// DSI coverage across shapes (stereo, 5.1, 5.1.4, Atmos vs non-Atmos IMS, A-JOC
+// object audio) and fields (derived atmos/immersive/ims, channel layout, the raw
+// substream-group model), see mp4e.TestExtractCodecInfo_AC4, which parses the same
+// dac4 boxes directly without the C probe.
+func TestProbeAC4(t *testing.T) {
+	url := assetAC4
+	checkFileExists(t, url)
+
+	goavpipe.InitIOHandler(&xc.FileInputOpener{URL: url}, &concurrentOutputOpener{dir: "O"})
+	xcparams := &goavpipe.XcParams{
+		Url:      url,
+		Seekable: true,
+	}
+	probe, err := avpipe.Probe(xcparams)
+	failNowOnError(t, err)
+	require.Equal(t, 1, len(probe.Streams))
+
+	s := probe.Streams[0]
+	assert.Equal(t, "ac4", s.CodecName)
+	assert.Equal(t, 86119, s.CodecID)
+	assert.Equal(t, "ac-4", s.CodecTagString)
+
+	require.NotNil(t, s.MP4, "expected MP4 info for AC-4 stream")
+	require.NotNil(t, s.MP4.AC4, "expected MP4.AC4 for AC-4 stream")
+	assert.Equal(t, "ac-4.02.01.01", s.MP4.MimeCodecString)
+	assert.Equal(t, "ac-4.02.01.01", s.MP4.AC4.MimeCodecString())
+	assert.Equal(t, 2, s.MP4.AC4.BitstreamVersion)
+	assert.Equal(t, 1, s.MP4.AC4.PresentationVersion)
+	assert.Equal(t, 1, s.MP4.AC4.MDCompat)
+	assert.Equal(t, 48000, s.MP4.AC4.SampleRate)
+	assert.Equal(t, "25 fps", s.MP4.AC4.FrameRate)
+	// Channel layout recovered from the dac4 DSI (ch_mode 4 = 5.1), which the
+	// C/ffmpeg probe reports as unknown.
+	require.NotNil(t, s.MP4.AC4.ChMode)
+	assert.Equal(t, 4, *s.MP4.AC4.ChMode)
+	assert.Equal(t, "5.1", s.MP4.AC4.ChannelLayout())
+}
+
 func TestProbeDOVI81Golden(t *testing.T) {
-	url := dovi81TestSource
+	url := assetDOVI81
 	checkFileExists(t, url)
 
 	goavpipe.InitIOHandler(&xc.FileInputOpener{URL: url}, &concurrentOutputOpener{dir: "test_out/dv81"})
@@ -69,7 +115,7 @@ func TestProbeDOVI81Golden(t *testing.T) {
 // directly from the dvvC/dvcC MP4 box). Both paths must produce the same result
 // for a given Dolby Vision Profile 8.1 file.
 func TestProbeDOVI81_MatchesExtractCodecInfo(t *testing.T) {
-	url := dovi81TestSource
+	url := assetDOVI81
 	checkFileExists(t, url)
 
 	// Probe via FFmpeg CGO path
@@ -179,7 +225,7 @@ func (h *trackingCloseHandler) Close() error {
 // and C probe can both hold handles), but any open attempt after a close fails.
 // enhanceStreamInfo must therefore use codec infos extracted before the C probe, not after.
 func TestProbeMVHEVC_VideoLayout(t *testing.T) {
-	url := dovi20TestSource
+	url := assetDOVI20
 	checkFileExists(t, url)
 
 	opener := &postCloseFailOpener{url: url}
