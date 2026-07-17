@@ -15,6 +15,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/Eyevinn/mp4ff/mp4"
 	"github.com/eluv-io/avpipe"
 	"github.com/eluv-io/avpipe/elvxc/cmd"
 	"github.com/eluv-io/avpipe/goavpipe"
@@ -50,19 +51,25 @@ const baseOutPath = "test_out"
 const debugFrameLevel = false
 const h264Codec = "libx264"
 const h265Codec = "libx265"
-const videoBigBuckBunnyPath = "media/bbb_1080p_30fps_60sec.mp4"
-const videoBigBuckBunny3AudioPath = "media/caminandes_llamigos_1080p_4audios.mp4"
-const audioDolbyAtmosPath = "media/Audio_ID_720p_50fps_h264_6ch_640kbps_ddp_joc.mp4"
-const dovi81TestSource = "./media/040_Escape_Frame_0_48_HD_P3D65_24Fps_v1_4444_dv81.mp4"
-const dovi20TestSource = "./media/sample_dv20.mp4"
 
-// HDR10 test settings
-const (
-	hdr10TestSource     = "./media/hdr10-plus-injected.mp4"
-	hdr10TestDurationTs = int64(35 * 24000) // 35s @ 1/24000 timebase = 1 full mez seg + fragment
-	hdr10MasterDisplay  = "G(8500,39850)B(6550,2300)R(35400,14600)WP(15635,16450)L(10000000,10)"
-	hdr10MaxCLL         = "1000,400"
-)
+const assetAC4 = "media/Audio_ID_6ch_128kbps_25fps_ac4.mp4"                       // AC4
+const assetBBB = "media/bbb_1080p_30fps_60sec.mp4"                                // AVC, MP3, AC3
+const assetDOVI20 = "media/sample_dv20.mp4"                                       // MV-HEVC DOVI 20
+const assetDOVI81 = "media/040_Escape_Frame_0_48_HD_P3D65_24Fps_v1_4444_dv81.mp4" // HEVC DOVI 8.1
+const assetEC3Atmos = "media/Audio_ID_720p_50fps_h264_6ch_640kbps_ddp_joc.mp4"    // AVC, EC3 JOC
+const assetMultiAudio = "media/caminandes_llamigos_1080p_4audios.mp4"             // AVC, AAC
+
+var assetHDR10P = struct {
+	Path          string
+	DurationTs    int64
+	MasterDisplay string
+	MaxCLL        string
+}{
+	Path:          "media/hdr10-plus-injected.mp4",
+	DurationTs:    35 * 24000,
+	MasterDisplay: "G(8500,39850)B(6550,2300)R(35400,14600)WP(15635,16450)L(10000000,10)",
+	MaxCLL:        "1000,400",
+}
 
 // enableNvenc enables tests on NVIDIA GPU
 const enableNvenc = false
@@ -99,7 +106,7 @@ func (coo *concurrentOutputOpener) Open(h, _ int64, streamIndex, segIndex int,
 }
 
 func TestAudioSeg(t *testing.T) {
-	url := videoBigBuckBunnyPath
+	url := assetBBB
 	checkFileExists(t, url)
 
 	outputDir := path.Join(baseOutPath, fn())
@@ -132,7 +139,7 @@ func TestAudioSeg(t *testing.T) {
 }
 
 func TestVideoSeg(t *testing.T) {
-	url := videoBigBuckBunnyPath
+	url := assetBBB
 	checkFileExists(t, url)
 
 	outputDir := path.Join(baseOutPath, fn())
@@ -224,7 +231,7 @@ func TestVideoSegWithRotate(t *testing.T) {
 	if testing.Short() {
 		t.Skip("skipping slow transcoding test in short mode")
 	}
-	url := videoBigBuckBunnyPath
+	url := assetBBB
 	checkFileExists(t, url)
 
 	outputDir := path.Join(baseOutPath, fn())
@@ -259,7 +266,7 @@ func TestVideoSegWithRotate(t *testing.T) {
 }
 
 func TestVideoSegDoubleTS(t *testing.T) {
-	url := videoBigBuckBunnyPath
+	url := assetBBB
 	outputDir := path.Join(baseOutPath, fn())
 	params := &goavpipe.XcParams{
 		BypassTranscoding:      false,
@@ -294,7 +301,7 @@ func TestVideoSegDoubleTS(t *testing.T) {
 }
 
 func TestSingleABRTranscode(t *testing.T) {
-	url := videoBigBuckBunnyPath
+	url := assetBBB
 	checkFileExists(t, url)
 
 	outputDir := path.Join(baseOutPath, fn())
@@ -328,7 +335,7 @@ func TestSingleABRTranscode(t *testing.T) {
 }
 
 func TestSingleABRTranscodeByStreamId(t *testing.T) {
-	url := videoBigBuckBunnyPath
+	url := assetBBB
 	checkFileExists(t, url)
 
 	outputDir := path.Join(baseOutPath, fn())
@@ -360,7 +367,7 @@ func TestSingleABRTranscodeByStreamId(t *testing.T) {
 }
 
 func TestSingleABRTranscodeWithWatermark(t *testing.T) {
-	url := videoBigBuckBunnyPath
+	url := assetBBB
 	checkFileExists(t, url)
 
 	outputDir := path.Join(baseOutPath, fn())
@@ -395,7 +402,7 @@ func TestSingleABRTranscodeWithWatermark(t *testing.T) {
 }
 
 func TestSingleABRTranscodeWithOverlayWatermark(t *testing.T) {
-	url := videoBigBuckBunnyPath
+	url := assetBBB
 	checkFileExists(t, url)
 
 	outputDir := path.Join(baseOutPath, fn())
@@ -431,7 +438,7 @@ func TestSingleABRTranscodeWithOverlayWatermark(t *testing.T) {
 }
 
 func TestV2SingleABRTranscode(t *testing.T) {
-	url := videoBigBuckBunnyPath
+	url := assetBBB
 	checkFileExists(t, url)
 
 	outputDir := path.Join(baseOutPath, fn())
@@ -465,7 +472,7 @@ func TestV2SingleABRTranscode(t *testing.T) {
 }
 
 func TestV2SingleABRTranscodeIOHandler(t *testing.T) {
-	url := videoBigBuckBunnyPath
+	url := assetBBB
 	checkFileExists(t, url)
 
 	outputDir := path.Join(baseOutPath, fn())
@@ -499,7 +506,7 @@ func TestV2SingleABRTranscodeIOHandler(t *testing.T) {
 }
 
 func TestV2SingleABRTranscodeCancelling(t *testing.T) {
-	url := videoBigBuckBunnyPath
+	url := assetBBB
 	checkFileExists(t, url)
 
 	outputDir := path.Join(baseOutPath, fn())
@@ -584,7 +591,7 @@ func TestNvidiaABRTranscode(t *testing.T) {
 
 	outputDir := path.Join(baseOutPath, fn())
 	boilerplate(t, outputDir, "")
-	url := videoBigBuckBunnyPath
+	url := assetBBB
 	checkFileExists(t, url)
 
 	nThreads := 2
@@ -618,7 +625,7 @@ func TestNvidiaFmp4SegmentAspectRatio(t *testing.T) {
 	}
 	outputDir := path.Join(baseOutPath, fn())
 	boilerplate(t, outputDir, "")
-	url := videoBigBuckBunnyPath
+	url := assetBBB
 	checkFileExists(t, url)
 
 	params := &goavpipe.XcParams{
@@ -654,7 +661,7 @@ func TestConcurrentABRTranscode(t *testing.T) {
 	}
 	outputDir := path.Join(baseOutPath, fn())
 	boilerplate(t, outputDir, "")
-	url := videoBigBuckBunnyPath
+	url := assetBBB
 	checkFileExists(t, url)
 
 	nThreads := 10
@@ -684,7 +691,7 @@ func TestConcurrentABRTranscode(t *testing.T) {
 func TestSettingProfileLevel(t *testing.T) {
 	outputDir := path.Join(baseOutPath, fn())
 	boilerplate(t, outputDir, "")
-	url := videoBigBuckBunnyPath
+	url := assetBBB
 	checkFileExists(t, url)
 
 	params := &goavpipe.XcParams{
@@ -1479,7 +1486,7 @@ func TestMultiAudioXc(t *testing.T) {
 	if testing.Short() {
 		t.Skip("skipping slow transcoding test in short mode")
 	}
-	url := videoBigBuckBunny3AudioPath
+	url := assetMultiAudio
 
 	checkFileExists(t, url)
 
@@ -1526,7 +1533,7 @@ func TestMultiAudioXc(t *testing.T) {
 // is set — the hack mutates params at runtime. If the hack is removed, this
 // test should be updated to expect failure rather than success.
 func TestAudioAtmosBypass(t *testing.T) {
-	url := audioDolbyAtmosPath
+	url := assetEC3Atmos
 	checkFileExists(t, url)
 
 	outputDir := path.Join(baseOutPath, fn())
@@ -1573,7 +1580,7 @@ func TestAudioAtmosBypass(t *testing.T) {
 // the is_dolby_atmos() auto-bypass heuristic. BypassTranscoding is a global flag; for
 // XcAudio there is no video stream, so it acts as audio-only bypass.
 func TestAudioAtmosBypassExplicit(t *testing.T) {
-	url := audioDolbyAtmosPath
+	url := assetEC3Atmos
 	checkFileExists(t, url)
 
 	outputDir := path.Join(baseOutPath, fn())
@@ -1611,6 +1618,163 @@ func TestAudioAtmosBypassExplicit(t *testing.T) {
 	require.NotNil(t, audioStream.MP4, "MP4 must be present for MP4 EAC-3 stream")
 	require.NotNil(t, audioStream.MP4.EC3, "MP4.EC3 must be present for Dolby Atmos stream")
 	assert.True(t, audioStream.MP4.EC3.JOC, "EC3.JOC must be true for Dolby Atmos")
+}
+
+// TestAudioAC4Bypass verifies AC-4 passthrough (BypassTranscoding=true) through the
+// fMP4 mux and back: it bypasses the AC-4 source to an fmp4-segment mezzanine, then
+// re-probes that output and asserts the dac4 config survives and MP4.AC4 surfaces the
+// codec string. Unlike TestProbeAC4 (which probes the source), this exercises the
+// delivery-format path — the output takes the fragmented Init.Moov branch in
+// extractCodecInfoFromFile, and confirms dac4 survives avpipe's encoder-less bypass mux.
+// AC-4 has no auto-bypass heuristic (unlike is_dolby_atmos), so BypassTranscoding is
+// required. The ffmpeg/C probe cannot derive AC-4 channel layout (ChannelLayoutName is
+// empty by design), but the parsed dac4 DSI can — so the layout IS asserted here, via
+// MP4.AC4.ChannelLayout()/ChMode, proving the exact channel config survives the bypass.
+// atmosCheckOK reports whether the named check in an AtmosInfo passed (false if
+// the check is absent).
+func atmosCheckOK(a *mp4e.AtmosInfo, name string) bool {
+	for _, c := range a.Checks {
+		if c.Name == name {
+			return c.OK
+		}
+	}
+	return false
+}
+
+func TestAudioAC4Bypass(t *testing.T) {
+	url := assetAC4
+	checkFileExists(t, url)
+
+	outputDir := path.Join(baseOutPath, fn())
+	boilerplate(t, outputDir, url)
+
+	params := &goavpipe.XcParams{
+		Format:              "fmp4-segment",
+		StartTimeTs:         0,
+		DurationTs:          -1,
+		StartSegmentStr:     "1",
+		SegDuration:         "30",
+		EncHeight:           -1,
+		EncWidth:            -1,
+		XcType:              goavpipe.XcAudio,
+		BypassTranscoding:   true,
+		StreamId:            -1,
+		SyncAudioToStreamId: -1,
+		Url:                 url,
+		DebugFrameLevel:     debugFrameLevel,
+	}
+	boilerXc(t, params)
+
+	mezFile := fmt.Sprintf("%s/asegment0-1.mp4", outputDir)
+	xcparams := &goavpipe.XcParams{Url: mezFile, Seekable: true}
+	probe, err := avpipe.Probe(xcparams)
+	failNowOnError(t, err)
+
+	audioStream := probe.StreamByCodecType("audio")
+	require.NotNil(t, audioStream, "expected an audio stream in the mezzanine output")
+	assert.Equal(t, "ac4", audioStream.CodecName, "AC-4 must be copied as ac4, not re-encoded")
+	assert.Equal(t, 6, audioStream.Channels, "channel count must be preserved by bypass")
+	require.NotNil(t, audioStream.MP4, "MP4 must be present for MP4 AC-4 stream")
+	require.NotNil(t, audioStream.MP4.AC4, "MP4.AC4 must survive the bypass mux (dac4 preserved)")
+	assert.Equal(t, "ac-4.02.01.01", audioStream.MP4.MimeCodecString)
+	assert.Equal(t, "ac-4.02.01.01", audioStream.MP4.AC4.MimeCodecString())
+	assert.Equal(t, 1, audioStream.MP4.AC4.MDCompat)
+	assert.Equal(t, 2, audioStream.MP4.AC4.BitstreamVersion)
+	assert.Equal(t, 1, audioStream.MP4.AC4.PresentationVersion)
+
+	// dac4 semantic conformance — the same check `fmp4-validate --atmos` runs
+	// (mp4e.ValidateAtmos). Proves the bypassed dac4 is not merely present but
+	// fully re-parseable: the structural checks (dac4, presentation) pass and the
+	// presentations survive. The "atmos" gate correctly reports NOT Atmos — this is
+	// a plain 5.1 stream — mirroring how a non-JOC E-AC-3 fails validateEC3's "joc".
+	segF, err := os.Open(mezFile)
+	require.NoError(t, err)
+	defer segF.Close()
+	mp4File, err := mp4.DecodeFile(segF)
+	require.NoError(t, err)
+	atmos, err := mp4e.ValidateAtmos(mp4File)
+	require.NoError(t, err)
+	assert.True(t, atmosCheckOK(atmos, "dac4"), "dac4 must parse")
+	assert.True(t, atmosCheckOK(atmos, "presentation"), "presentations must parse")
+	assert.False(t, atmosCheckOK(atmos, "atmos"), "plain 5.1 AC-4 is not Atmos")
+	require.NotNil(t, atmos.AC4, "ValidateAtmos must parse the dac4 presentations")
+	assert.Equal(t, 1, atmos.AC4.MDCompat)
+	assert.EqualValues(t, 2, atmos.AC4.BitstreamVersion)
+	assert.EqualValues(t, 1, atmos.AC4.NPresentations)
+	require.Len(t, atmos.AC4.Presentations, 1, "all presentations must be carried")
+	assert.False(t, atmos.AC4.IsImmersive(), "5.1 AC-4 is channel-based, not immersive")
+	// The dac4 DSI recovers the speaker layout that ffmpeg reports as "unknown"
+	// for AC-4 — and proves the exact channel config (ch_mode 4) survives bypass,
+	// not merely the channel count.
+	require.NotNil(t, atmos.AC4.ChMode, "dsi_presentation_ch_mode must survive bypass")
+	assert.Equal(t, 4, *atmos.AC4.ChMode, "dsi_presentation_ch_mode (5.1) must survive bypass")
+	assert.Equal(t, "5.1", atmos.AC4.ChannelLayout(), "derived channel layout")
+}
+
+// bypassAudioToDashInit bypasses an audio source to the DASH format and returns
+// the parsed codec info of the produced init segment (ainit-stream0.m4s). Because
+// a DASH audio init segment carries the moov (and its config box: dac4/dec3) but no
+// media samples, ffmpeg-based avpipe.Probe would report no streams — so this parses
+// the init directly at the mp4e box layer (ExtractCodecInfoLazy), which reads the
+// config box from the fragmented Init.Moov. This is the piece that proves a Dolby
+// config box survives the dashenc.c mux path (distinct from movenc/fmp4-segment).
+func bypassAudioToDashInit(t *testing.T, url string) *mp4e.CodecInfo {
+	checkFileExists(t, url)
+
+	outputDir := path.Join(baseOutPath, fn())
+	boilerplate(t, outputDir, url)
+
+	params := &goavpipe.XcParams{
+		Format:              "dash",
+		StartTimeTs:         0,
+		DurationTs:          -1,
+		StartSegmentStr:     "1",
+		SegDuration:         "30",
+		EncHeight:           -1,
+		EncWidth:            -1,
+		XcType:              goavpipe.XcAudio,
+		BypassTranscoding:   true,
+		StreamId:            -1,
+		SyncAudioToStreamId: -1,
+		Url:                 url,
+		DebugFrameLevel:     debugFrameLevel,
+	}
+	boilerXc(t, params)
+
+	initFile := fmt.Sprintf("%s/ainit-stream0.m4s", outputDir)
+	f, err := os.Open(initFile)
+	require.NoError(t, err, "expected DASH audio init segment %s", initFile)
+	defer f.Close()
+
+	infos, err := mp4e.ExtractCodecInfoLazy(f)
+	require.NoError(t, err)
+	require.Len(t, infos, 1, "expected one audio track in the DASH init segment")
+	return infos[0]
+}
+
+// TestAudioAC4BypassDash is the DASH twin of TestAudioAC4Bypass: it confirms the
+// dac4 config box survives avpipe's encoder-less bypass through the dashenc.c mux
+// path (not just movenc/fmp4-segment) and that MP4.AC4 is recoverable from the
+// resulting DASH audio init segment.
+func TestAudioAC4BypassDash(t *testing.T) {
+	info := bypassAudioToDashInit(t, assetAC4)
+	assert.Equal(t, "ac-4", info.CodecTagString)
+	require.NotNil(t, info.AC4, "MP4.AC4 must survive the dashenc.c bypass mux (dac4 preserved)")
+	assert.Equal(t, "ac-4.02.01.01", info.MimeCodecString)
+	assert.Equal(t, "ac-4.02.01.01", info.AC4.MimeCodecString())
+	assert.Equal(t, 2, info.AC4.BitstreamVersion)
+	assert.Equal(t, 1, info.AC4.PresentationVersion)
+	assert.Equal(t, 1, info.AC4.MDCompat)
+}
+
+// TestAudioAtmosBypassDash is the previously-missing EAC-3 DASH regression guard:
+// it proves the dec3 box (incl. the JOC/Atmos extension) survives the dashenc.c
+// bypass mux path. No test previously covered any Dolby config box through dashenc.
+func TestAudioAtmosBypassDash(t *testing.T) {
+	info := bypassAudioToDashInit(t, assetEC3Atmos)
+	assert.Equal(t, "ec-3", info.CodecTagString)
+	require.NotNil(t, info.EC3, "MP4.EC3 must survive the dashenc.c bypass mux (dec3 preserved)")
+	assert.True(t, info.EC3.JOC, "EC3.JOC must remain set for Dolby Atmos through dashenc")
 }
 
 // Timebase of BBB0_HD_8_XDCAM_120s_CCBYblendercloud.mxf is 1001/60000 - in this case the mp4 muxer changes timebase to 1/60000
@@ -2012,7 +2176,7 @@ func runHEVCHDR10MezAndABR(t *testing.T, ecodec string) {
 	if testing.Short() {
 		t.Skip("SKIPPING " + f + " (fast mode)")
 	}
-	checkFileExists(t, hdr10TestSource)
+	checkFileExists(t, assetHDR10P.Path)
 
 	mezDir := path.Join(baseOutPath, f, "Mez")
 	bypassDir := path.Join(baseOutPath, f, "ABRBypass")
@@ -2020,12 +2184,12 @@ func runHEVCHDR10MezAndABR(t *testing.T, ecodec string) {
 
 	// Stage 1: source → mez (no bitdepth and profile specified)
 	mezParams := &goavpipe.XcParams{
-		Url:               hdr10TestSource,
+		Url:               assetHDR10P.Path,
 		BypassTranscoding: false,
 		Format:            "fmp4-segment",
 		StartTimeTs:       0,
 		StartPts:          0,
-		DurationTs:        hdr10TestDurationTs,
+		DurationTs:        assetHDR10P.DurationTs,
 		StartSegmentStr:   "1",
 		SegDuration:       "30",
 		Ecodec:            ecodec,
@@ -2034,8 +2198,8 @@ func runHEVCHDR10MezAndABR(t *testing.T, ecodec string) {
 		EncWidth:          -1, // preserve 3840
 		XcType:            goavpipe.XcVideo,
 		StreamId:          -1,
-		MasterDisplay:     hdr10MasterDisplay,
-		MaxCLL:            hdr10MaxCLL,
+		MasterDisplay:     assetHDR10P.MasterDisplay,
+		MaxCLL:            assetHDR10P.MaxCLL,
 		DebugFrameLevel:   debugFrameLevel,
 	}
 
@@ -2051,8 +2215,8 @@ func runHEVCHDR10MezAndABR(t *testing.T, ecodec string) {
 		ColorRange:       "tv",
 		Width:            3840,
 		Height:           2160,
-		MasteringDisplay: hdr10MasterDisplay,
-		MaxCLL:           hdr10MaxCLL,
+		MasteringDisplay: assetHDR10P.MasterDisplay,
+		MaxCLL:           assetHDR10P.MaxCLL,
 	}
 	assertHDR10(t, path.Join(mezDir, "vsegment-1.mp4"), mezExpected)
 	assertHDR10(t, path.Join(mezDir, "vsegment-2.mp4"), mezExpected)
@@ -2382,7 +2546,7 @@ func assertDOVI20(t *testing.T, mp4Path string) {
 // with the hvc1 codec tag preserved (required for dvh1 manifest signaling) and
 // Profile=8, Level=1, BLSignalCompatibilityID=1.
 func TestDOVI81_MezAndDASH(t *testing.T) {
-	checkFileExists(t, dovi81TestSource)
+	checkFileExists(t, assetDOVI81)
 
 	mezDir := path.Join(baseOutPath, fn(), "Mez")
 	dashDir := path.Join(baseOutPath, fn(), "DASH")
@@ -2392,7 +2556,7 @@ func TestDOVI81_MezAndDASH(t *testing.T) {
 	// with bypass_mode=true: Ecodec comes from defaultCodecs(), Dcodec is unset,
 	// and dimensions come from the rung spec.
 	mezParams := goavpipe.XcParams{
-		Url:                 dovi81TestSource,
+		Url:                 assetDOVI81,
 		BypassTranscoding:   true,
 		Format:              "fmp4-segment",
 		DurationTs:          -1,
@@ -2414,7 +2578,7 @@ func TestDOVI81_MezAndDASH(t *testing.T) {
 		DebugFrameLevel:     debugFrameLevel,
 	}
 
-	boilerplate(t, mezDir, dovi81TestSource)
+	boilerplate(t, mezDir, assetDOVI81)
 	boilerXc(t, &mezParams)
 
 	// Stage 2: mez → DASH (bypass)
@@ -2463,7 +2627,7 @@ func TestDOVI81_MezAndDASH(t *testing.T) {
 // with Profile=20, BLSignalCompatibilityID=0, FourCC=dvh1, BoxType=dvcC, and
 // VideoLayout=MVHEVC.
 func TestDOVI20_MezAndDASH(t *testing.T) {
-	checkFileExists(t, dovi20TestSource)
+	checkFileExists(t, assetDOVI20)
 
 	mezDir := path.Join(baseOutPath, fn(), "Mez")
 	dashDir := path.Join(baseOutPath, fn(), "DASH")
@@ -2471,7 +2635,7 @@ func TestDOVI20_MezAndDASH(t *testing.T) {
 	// Stage 1: source → mez (fmp4-segment, bypass)
 	// Mirrors xcMezVideoParams() for a bypass_mode=true ABR profile with VideoLayout=MV-HEVC.
 	mezParams := goavpipe.XcParams{
-		Url:                 dovi20TestSource,
+		Url:                 assetDOVI20,
 		BypassTranscoding:   true,
 		Format:              "fmp4-segment",
 		DurationTs:          -1,
@@ -2493,7 +2657,7 @@ func TestDOVI20_MezAndDASH(t *testing.T) {
 		DebugFrameLevel:     debugFrameLevel,
 	}
 
-	boilerplate(t, mezDir, dovi20TestSource)
+	boilerplate(t, mezDir, assetDOVI20)
 	boilerXc(t, &mezParams)
 
 	mezSeg := path.Join(mezDir, "vsegment-1.mp4")
@@ -2802,7 +2966,7 @@ func TestUnmarshalParamsNumAudioBackwardsCompat(t *testing.T) {
 }
 
 func TestProbe(t *testing.T) {
-	url := videoBigBuckBunnyPath
+	url := assetBBB
 	checkFileExists(t, url)
 
 	goavpipe.InitIOHandler(&xc.FileInputOpener{URL: url}, &concurrentOutputOpener{dir: "O"})
@@ -2929,7 +3093,7 @@ func TestProbeWithData(t *testing.T) {
 }
 
 func TestExtractImagesInterval(t *testing.T) {
-	url := videoBigBuckBunnyPath
+	url := assetBBB
 	checkFileExists(t, url)
 
 	outPath := path.Join(baseOutPath, fn())
@@ -2975,7 +3139,7 @@ func TestExtractImagesInterval(t *testing.T) {
 }
 
 func TestExtractImagesList(t *testing.T) {
-	url := videoBigBuckBunnyPath
+	url := assetBBB
 	checkFileExists(t, url)
 
 	outPath := path.Join(baseOutPath, fn())
@@ -3023,7 +3187,7 @@ func TestExtractImagesList(t *testing.T) {
 
 // Should exit after extracting the first frame
 func TestExtractImagesListFast(t *testing.T) {
-	url := videoBigBuckBunnyPath
+	url := assetBBB
 	checkFileExists(t, url)
 
 	outPath := path.Join(baseOutPath, fn())
@@ -3070,7 +3234,7 @@ func TestExtractAllImages(t *testing.T) {
 	if testing.Short() {
 		t.Skip("skipping slow transcoding test in short mode")
 	}
-	url := videoBigBuckBunnyPath
+	url := assetBBB
 	checkFileExists(t, url)
 
 	outPath := path.Join(baseOutPath, fn())

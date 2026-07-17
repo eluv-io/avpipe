@@ -5,18 +5,35 @@ import (
 	"strings"
 
 	"github.com/Eyevinn/mp4ff/mp4"
+	"github.com/eluv-io/avpipe/goavpipe/avdesc"
 )
 
 // AtmosInfo holds Dolby Atmos signaling information extracted from an MP4
 // container. Atmos can be carried via E-AC-3 + JOC (ETSI TS 103 420) or AC-4
 // (ETSI TS 103 190-2).
+//
+// TODO(refactor): this type conflates two concerns — general codec validation
+// (AC-3 / E-AC-3 / AC-4 config parsing and conformance) and Atmos-specific
+// signaling. They should be separated: codec validation belongs in a
+// codec-neutral validator (Atmos is just one property it can report), and Atmos
+// detection should sit on top of that rather than owning the whole struct.
+//
+// Both codec paths gate on Atmos consistently — validateEC3 via its "joc" check
+// and validateAC4 via its "atmos" check (a non-Atmos stream is a failed check in
+// each). But each still conflates codec conformance (parsing the dec3/dac4 config
+// box + structure) with the Atmos gate. The separation to make: a codec-neutral
+// validator that reports structure and properties, with Atmos detection layered
+// on top, rather than baking both into one per-codec method.
 type AtmosInfo struct {
 	TrackID uint32
 	CodecID string
 
 	Audio AtmosAudioInfo
 	EC3   AtmosEC3Info
-	AC4   AtmosAC4Info
+	// AC4 is the shared AC-4 descriptor (nil when the track is not AC-4). Unlike
+	// EC3, AC-4 has no separate validation struct: avdesc.AC4Info already carries
+	// the full per-presentation DSI this report needs.
+	AC4 *avdesc.AC4Info
 
 	Checks []AtmosCheck
 	Errors []string
@@ -55,24 +72,6 @@ type AtmosEC3Substream struct {
 	LFEOn     byte
 	NumDepSub byte
 	ChanLoc   uint16
-}
-
-// AtmosAC4Info captures AC-4 specific fields. Atmos / immersive content is
-// signaled via presentation_version >= 1 in ac4_dsi_v1.
-type AtmosAC4Info struct {
-	Present          bool
-	AC4DSIVersion    uint8
-	BitstreamVersion uint8
-	FSIndex          uint8
-	SampleRate       int
-	FrameRateIndex   uint8
-	FrameRate        string
-	NPresentations   uint16
-	Presentations    []AtmosAC4Presentation
-}
-
-type AtmosAC4Presentation struct {
-	Version uint8
 }
 
 type AtmosFieldInfo struct {
@@ -244,46 +243,43 @@ func (a *AtmosInfo) validateAC4(ase *mp4.AudioSampleEntryBox) {
 		a.addCheck("presentation", false, "cannot evaluate AC-4 presentations without dac4")
 		return
 	}
-	d := ase.Dac4
-	ac4 := AtmosAC4Info{
-		Present:          true,
-		AC4DSIVersion:    d.AC4DSIVersion,
-		BitstreamVersion: d.BitstreamVersion,
-		FSIndex:          d.FSIndex,
-		SampleRate:       d.GetSamplingFrequency(),
-		FrameRateIndex:   d.FrameRateIndex,
-		FrameRate:        d.GetFrameRateString(),
-		NPresentations:   d.NPresentations,
-	}
-	for _, pr := range d.Presentations {
-		ac4.Presentations = append(ac4.Presentations, AtmosAC4Presentation{
-			Version: pr.PresentationVersion,
-		})
+	ac4, err := buildAC4Info(ase.Dac4)
+	if err != nil {
+		a.addCheck("dac4", false, "failed to parse dac4: %s", err.Error())
+		a.addCheck("presentation", false, "cannot evaluate AC-4 presentations (dac4 parse failed)")
+		return
 	}
 	a.AC4 = ac4
 
-	a.addCheck("dac4", true, "ac4DSIVersion=%d bitstreamVersion=%d frameRate=%s sampleRate=%d nPresentations=%d",
-		ac4.AC4DSIVersion, ac4.BitstreamVersion, ac4.FrameRate, ac4.SampleRate, ac4.NPresentations)
+	a.addCheck("dac4", true, "ac4DSIVersion=%d bitstreamVersion=%d mdcompat=%d frameRate=%s sampleRate=%d nPresentations=%d",
+		ac4.AC4DSIVersion, ac4.BitstreamVersion, ac4.MDCompat, ac4.FrameRate, ac4.SampleRate, ac4.NPresentations)
 
-	// AC-4 immersive (Atmos) requires at least one presentation parsed as
-	// ac4_presentation_v1_dsi (or later), which carries object-based /
-	// immersive signaling per ETSI TS 103 190-2.
-	hasImmersive := false
+	// "presentation" is a structural check (the DSI decoded to >=1 presentation);
+	// immersive-ness is reported here informationally, never gated on — a
+	// channel-based height bed (e.g. 5.1.4) is immersive but not Atmos.
+	if len(ac4.Presentations) == 0 {
+		a.addCheck("presentation", false, "no presentations parsed (declared=%d)", ac4.NPresentations)
+		return
+	}
 	var versions []string
 	for _, pr := range ac4.Presentations {
 		versions = append(versions, fmt.Sprintf("%d", pr.Version))
-		if pr.Version >= 1 {
-			hasImmersive = true
-		}
 	}
-	if hasImmersive {
-		a.addCheck("presentation", true, "presentation_versions=[%s] - immersive (Atmos-capable)",
-			strings.Join(versions, ","))
-	} else if len(versions) > 0 {
-		a.addCheck("presentation", false, "presentation_versions=[%s] - no immersive (v>=1) presentation, not Atmos",
-			strings.Join(versions, ","))
-	} else {
-		a.addCheck("presentation", false, "no presentations parsed (declared=%d)", ac4.NPresentations)
+	a.addCheck("presentation", true, "presentation_versions=[%s] immersive=%t layout=%q",
+		strings.Join(versions, ","), ac4.IsImmersive(), ac4.ChannelLayout())
+
+	// "atmos" is the Atmos gate, mirroring validateEC3's "joc" check: a non-Atmos
+	// stream (plain channel-based, a channel-based height bed, or non-Atmos IMS) is
+	// a FAILED check — exactly as a non-JOC E-AC-3 fails "joc". Atmos is A-JOC
+	// object audio (non-IMS) or dolby_atmos_indicator (IMS).
+	switch {
+	case !ac4.IsDolbyAtmos():
+		a.addCheck("atmos", false, "not Atmos: no A-JOC objects or dolby_atmos_indiI cator (immersive=%t ims=%t)",
+			ac4.IsImmersive(), ac4.IsIMS())
+	case ac4.IsIMS():
+		a.addCheck("atmos", true, "dolby_atmos_indicator=1 (immersive stereo)")
+	default:
+		a.addCheck("atmos", true, "A-JOC object audio")
 	}
 }
 
@@ -402,7 +398,7 @@ func (a *AtmosInfo) FieldInfo() AtmosFieldInfo {
 		}
 	}
 
-	if a.AC4.Present {
+	if a.AC4 != nil {
 		info.AC4DSIVersion = fmt.Sprintf("%d", a.AC4.AC4DSIVersion)
 		info.AC4BitstreamVer = fmt.Sprintf("%d", a.AC4.BitstreamVersion)
 		info.AC4FrameRate = a.AC4.FrameRate

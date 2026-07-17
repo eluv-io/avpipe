@@ -93,6 +93,7 @@ func convertMP4Info(info *mp4e.CodecInfo) *goavpipe.MP4Info {
 		Level:                 info.Level,
 		Channels:              info.Channels,
 		EC3:                   info.EC3,
+		AC4:                   info.AC4,
 		DOVI:                  info.DOVI,
 		VideoLayout:           goavpipe.VideoLayout(info.VideoLayout),
 		EnhancementProfileIDC: info.EnhancementProfileIDC,

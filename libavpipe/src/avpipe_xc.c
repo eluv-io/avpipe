@@ -4506,7 +4506,11 @@ avpipe_probe(
             AVCodecParameters *cp = s->codecpar;
             stream_probes_ptr->codec_type = cp->codec_type;
             stream_probes_ptr->codec_id = cp->codec_id;
-            strncpy(stream_probes_ptr->codec_name, avcodec_get_name(cp->codec_id), MAX_CODEC_NAME);
+            /* Skip AV_CODEC_ID_NONE: avcodec_get_name yields "none" for a genuinely
+             * codec-less stream (e.g. data/timecode); leave codec_name empty (calloc'd)
+             * as before. Real decoder-less codecs like AC-4 have a non-NONE id. */
+            if (cp->codec_id != AV_CODEC_ID_NONE)
+                strncpy(stream_probes_ptr->codec_name, avcodec_get_name(cp->codec_id), MAX_CODEC_NAME);
         }
         stream_probes_ptr->codec_name[MAX_CODEC_NAME] = '\0';
         av_fourcc_make_string(stream_probes_ptr->codec_tag_string, s->codecpar->codec_tag);

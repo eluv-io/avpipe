@@ -56,6 +56,9 @@ type CodecInfo struct {
 	// EC3 is set only when the codec is ec-3
 	EC3 *avdesc.EC3Info `json:"ec3,omitempty"`
 
+	// AC4 is set only when the codec is ac-4
+	AC4 *avdesc.AC4Info `json:"ac4,omitempty"`
+
 	// DOVI is set only when the codec entry contains a Dolby Vision configuration
 	// box (dvcC, dvvC, or dvwC). Common cases:
 	//   hvc1/hev1 with dvvC child — Profile 8.x (cross-compatible)
@@ -215,6 +218,8 @@ func parseAudioSampleEntryBox(se *mp4.AudioSampleEntryBox) (*CodecInfo, error) {
 	switch se.Type() {
 	case "ec-3":
 		return parseEC3CodecInfo(se)
+	case "ac-4":
+		return parseAC4CodecInfo(se)
 	case "mp4a":
 		return parseMP4ACodecInfo(se)
 	default:
@@ -254,6 +259,93 @@ func parseEC3CodecInfo(se *mp4.AudioSampleEntryBox) (*CodecInfo, error) {
 			ComplexityIndex: complexityIndex,
 		},
 	}, nil
+}
+
+func parseAC4CodecInfo(se *mp4.AudioSampleEntryBox) (*CodecInfo, error) {
+	e := errors.T("parseAC4CodecInfo", errors.K.Invalid.Default())
+	if se.Dac4 == nil {
+		return nil, e("reason", "ac-4 sample entry box missing dac4 box")
+	}
+	ac4, err := buildAC4Info(se.Dac4)
+	if err != nil {
+		return nil, e(err)
+	}
+	return &CodecInfo{
+		MimeCodecString: ac4.MimeCodecString(),
+		CodecTagString:  "ac-4",
+		Channels:        int(se.ChannelCount),
+		AC4:             ac4,
+	}, nil
+}
+
+// buildAC4Info extracts the AC-4 fields from a dac4 box: the identification /
+// codec-string fields (from the first, default presentation) plus the
+// fully-decoded per-presentation DSI for every presentation. It is the single
+// AC-4 parse shared by the probe path and Atmos validation.
+//
+// It is version-strict: only ac4_dsi_version 1 (ac4_dsi_v1) and per-presentation
+// presentation_version 1 or 2 (IMS) are supported. Any other version is an
+// unsupported layout that would parse to garbage (mp4ff cannot even feed a true
+// ac4_dsi_version 0 box), so it returns an error rather than silently
+// mis-decoding. This is stricter than ETSI's forward-compatible skip, a
+// deliberate choice for a transcoder that must not mishandle unknown content.
+func buildAC4Info(d *mp4.Dac4Box) (*avdesc.AC4Info, error) {
+	e := errors.T("buildAC4Info", errors.K.Invalid.Default())
+	if int(d.AC4DSIVersion) != 1 {
+		return nil, e("reason", "unsupported ac4_dsi_version", "ac4_dsi_version", int(d.AC4DSIVersion))
+	}
+	info := &avdesc.AC4Info{
+		AC4DSIVersion:    int(d.AC4DSIVersion),
+		BitstreamVersion: int(d.BitstreamVersion),
+		SampleRate:       d.GetSamplingFrequency(),
+		FrameRate:        d.GetFrameRateString(),
+		FrameRateIndex:   int(d.FrameRateIndex),
+		NPresentations:   int(d.NPresentations),
+	}
+	for i := range d.Presentations {
+		pr := d.Presentations[i]
+		version := int(pr.PresentationVersion)
+		if version != 1 && version != 2 {
+			return nil, e("reason", "unsupported presentation_version",
+				"presentation_index", i, "presentation_version", version)
+		}
+		p, ok := parseAC4PresentationDSI(version, pr.PresentationData)
+		if !ok {
+			// The deep parse diverged; keep the minimal fields the codec string
+			// needs (mdcompat needs only the first DSI byte). ChMode stays nil
+			// (unknown / not decodable), not a misleading Mono.
+			p = avdesc.AC4Presentation{Version: version, MDCompat: ac4MDCompat(pr)}
+		}
+		info.Presentations = append(info.Presentations, p)
+
+		if i == 0 {
+			// Top-level fields describe the default presentation (codec string +
+			// channel signaling). Interpreted flags (atmos/immersive/ims) are
+			// derived via AC4Info methods, not stored.
+			info.PresentationVersion = p.Version
+			info.MDCompat = p.MDCompat
+			info.PresentationChannelMask = p.ChannelMask
+			info.ChMode = p.ChMode
+			info.TopChannelPairs = p.TopChannelPairs
+		}
+	}
+	return info, nil
+}
+
+// ac4MDCompat extracts the mdcompat field from an AC-4 presentation DSI.
+// Per ETSI TS 103 190-2, ac4_presentation_v1_dsi begins with presentation_config_v1
+// (5 bits); unless it is 6 (b_add_emdf_substreams, which carries no mdcompat) the
+// next 3 bits are mdcompat. So for a v1 presentation mdcompat is the low 3 bits of
+// the first DSI byte. Only valid for presentation_version >= 1 (v0 uses a different
+// layout). Returns 0 when unavailable, so the codec string still forms (…00).
+func ac4MDCompat(pr mp4.AC4Presentation) int {
+	if pr.PresentationVersion < 1 || len(pr.PresentationData) < 1 {
+		return 0
+	}
+	if presentationConfigV1 := pr.PresentationData[0] >> 3; presentationConfigV1 == 6 {
+		return 0
+	}
+	return int(pr.PresentationData[0] & 0x07)
 }
 
 func parseMP4ACodecInfo(se *mp4.AudioSampleEntryBox) (*CodecInfo, error) {

@@ -9,6 +9,8 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
+	"github.com/Eyevinn/mp4ff/mp4"
+
 	"github.com/eluv-io/avpipe/goavpipe/avdesc"
 )
 
@@ -221,6 +223,159 @@ func TestExtractCodecInfo(t *testing.T) {
 		assert.True(t, info.EC3.JOC, "expected JOC flag for Dolby Atmos file")
 		assert.Equal(t, 16, info.EC3.ComplexityIndex)
 	})
+}
+
+// TestExtractCodecInfo_AC4 verifies AC-4 (dac4) parsing and the RFC 6381 codec
+// string ac-4.<bv>.<pv>.<mdcompat> across the Dolby AC-4 Online Delivery Kit
+// samples: stereo, 5.1, 5.1.4 (immersive), and immersive stereo (IMS, which has
+// a leading presentation_version=2). Ground truth verified against Bento4's
+// mp4dump and the raw dac4 bytes.
+func TestExtractCodecInfo_AC4(t *testing.T) {
+	cases := []struct {
+		name         string
+		file         string
+		wantMime     string
+		wantBV       int
+		wantPV       int
+		wantMDCompat int
+		wantNPres    int
+		wantChannels int // 0 = do not assert
+		// Deep presentation-DSI fields. wantMask/wantChMode/wantTopPairs are
+		// ground-truthed against Bento4 mp4dump (presentation_channel_mask_v1,
+		// dsi_presentation_ch_mode, pres_top_channel_pairs). wantAjoc/wantDolbyAtmos
+		// exercise the derived methods: Atmos = A-JOC objects (non-IMS) or
+		// dolby_atmos_indicator (IMS), NOT the raw immersive_audio_indicator bit.
+		wantMask       uint32
+		wantChMode     int
+		wantTopPairs   int
+		wantIMS        bool
+		wantImmersive  bool
+		wantAjoc       bool
+		wantDolbyAtmos bool
+		wantFrameRate  string
+		wantLayout     string
+	}{
+		{"stereo", "../media/Audio_ID_2ch_64kbps_25fps_ac4.mp4", "ac-4.02.01.00", 2, 1, 0, 1, 2, 0x01, 1, 0, false, false, false, false, "25 fps", "stereo"},
+		{"5.1", "../media/Audio_ID_6ch_128kbps_25fps_ac4.mp4", "ac-4.02.01.01", 2, 1, 1, 1, 6, 0x47, 4, 0, false, false, false, false, "25 fps", "5.1"},
+		// 5.1.4 is a channel-based height bed: immersive (TopPairs>0) but NOT Atmos.
+		// This row is the regression guard for the immersive_audio_indicator bug.
+		// ch_mode 12 is the "7.1.4" container; back_channels_present=false + 2 top
+		// pairs refine it to the actual 5.1.4 layout.
+		{"5.1.4", "../media/Audio_ID_514ch_192kbps_25fps_ac4.mp4", "ac-4.02.01.02", 2, 1, 2, 1, 0, 0x77, 12, 2, false, true, false, false, "25 fps", "5.1.4"},
+		// IMS pair: same codec string, discriminated only by dolby_atmos_indicator.
+		{"ims-atmos", "../media/Audio_ID_ims_112kbps_25fps_ac4.mp4", "ac-4.02.02.00", 2, 2, 0, 2, 2, 0x01, 1, 0, true, true, false, true, "25 fps", "stereo"},
+		{"ims-nonatmos", "../media/sample_ac4_ims_nonatmos.mp4", "ac-4.02.02.00", 2, 2, 0, 2, 2, 0x01, 1, 0, true, true, false, false, "25 fps", "stereo"},
+		// A-JOC object audio: genuine non-IMS Dolby Atmos, detected via b_ajoc.
+		// (This clip is authored at frame_rate_index 13 = 23.44 fps / 2048 SPF.)
+		// Object-based → no fixed speaker layout.
+		{"atmos", "../media/sample_ac4_atmos.mp4", "ac-4.02.01.03", 2, 1, 3, 1, 2, 0x800000, -1, 0, false, true, true, true, "23.44 fps", ""},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			f, err := os.ReadFile(tc.file)
+			require.NoError(t, err)
+			infos, err := ExtractCodecInfo(bytes.NewReader(f))
+			require.NoError(t, err)
+			require.Len(t, infos, 1)
+			info := infos[0]
+			assert.Equal(t, "ac-4", info.CodecTagString)
+			assert.Equal(t, tc.wantMime, info.MimeCodecString)
+			require.NotNil(t, info.AC4)
+			assert.Equal(t, tc.wantMime, info.AC4.MimeCodecString())
+			assert.Equal(t, tc.wantBV, info.AC4.BitstreamVersion)
+			assert.Equal(t, tc.wantPV, info.AC4.PresentationVersion)
+			assert.Equal(t, tc.wantMDCompat, info.AC4.MDCompat)
+			assert.Equal(t, tc.wantNPres, info.AC4.NPresentations)
+			assert.Equal(t, 48000, info.AC4.SampleRate)
+			assert.Equal(t, tc.wantFrameRate, info.AC4.FrameRate)
+			if tc.wantChannels != 0 {
+				assert.Equal(t, tc.wantChannels, info.Channels)
+			}
+			assert.Equal(t, tc.wantMask, info.AC4.PresentationChannelMask, "presentation_channel_mask_v1")
+			// ChMode is *int: negative wantChMode means "expect nil" (object /
+			// not-channel-coded), otherwise expect a pointer to that value.
+			if tc.wantChMode < 0 {
+				assert.Nil(t, info.AC4.ChMode, "dsi_presentation_ch_mode (object → nil)")
+			} else {
+				require.NotNil(t, info.AC4.ChMode, "dsi_presentation_ch_mode")
+				assert.Equal(t, tc.wantChMode, *info.AC4.ChMode, "dsi_presentation_ch_mode")
+			}
+			assert.Equal(t, tc.wantTopPairs, info.AC4.TopChannelPairs, "pres_top_channel_pairs")
+			assert.Equal(t, tc.wantIMS, info.AC4.IsIMS(), "IsIMS")
+			assert.Equal(t, tc.wantImmersive, info.AC4.IsImmersive(), "IsImmersive")
+			assert.Equal(t, tc.wantAjoc, info.AC4.Ajoc(), "Ajoc")
+			assert.Equal(t, tc.wantDolbyAtmos, info.AC4.IsDolbyAtmos(), "IsDolbyAtmos")
+			assert.Equal(t, tc.wantLayout, info.AC4.ChannelLayout(), "ChannelLayout")
+			require.NotEmpty(t, info.AC4.Presentations)
+
+			// Raw-structure spot checks: the model must reflect substream groups,
+			// not just the derived flags.
+			switch tc.name {
+			case "atmos":
+				g := info.AC4.Presentations[0].SubstreamGroups
+				require.NotEmpty(t, g, "A-JOC presentation must carry substream groups")
+				assert.False(t, g[0].ChannelCoded, "A-JOC group is object-coded")
+				require.NotEmpty(t, g[0].Substreams)
+				assert.True(t, g[0].Substreams[0].Ajoc, "b_ajoc must be captured")
+			case "5.1.4":
+				g := info.AC4.Presentations[0].SubstreamGroups
+				require.NotEmpty(t, g, "channel bed must carry substream groups")
+				assert.True(t, g[0].ChannelCoded, "5.1.4 group is channel-coded")
+				require.NotEmpty(t, g[0].Substreams)
+				assert.NotZero(t, g[0].Substreams[0].ChannelGroups, "channel groups must be captured")
+			}
+
+			t.Logf("%s: mask=%#x layout=%q topPairs=%d ajoc=%v atmos=%v ims=%v immersive=%v",
+				tc.name, info.AC4.PresentationChannelMask, info.AC4.ChannelLayout(), info.AC4.TopChannelPairs,
+				info.AC4.Ajoc(), info.AC4.IsDolbyAtmos(), info.AC4.IsIMS(), info.AC4.IsImmersive())
+		})
+	}
+}
+
+// TestBuildAC4Info_UnsupportedVersions verifies the parser errors on layouts it
+// does not support rather than silently mis-decoding.
+func TestBuildAC4Info_UnsupportedVersions(t *testing.T) {
+	// ac4_dsi_version 0 (legacy ac4_dsi, Part 1) — unsupported.
+	_, err := buildAC4Info(&mp4.Dac4Box{AC4DSIVersion: 0})
+	require.Error(t, err, "ac4_dsi_version 0 must error")
+
+	// A v1 box with a presentation_version 0 (legacy v0 struct) — unsupported.
+	_, err = buildAC4Info(&mp4.Dac4Box{
+		AC4DSIVersion:  1,
+		NPresentations: 1,
+		Presentations:  []mp4.AC4Presentation{{PresentationVersion: 0, PresentationData: []byte{0x00}}},
+	})
+	require.Error(t, err, "presentation_version 0 must error")
+
+	// A v1 box with an unknown presentation_version (>2) — unsupported.
+	_, err = buildAC4Info(&mp4.Dac4Box{
+		AC4DSIVersion:  1,
+		NPresentations: 1,
+		Presentations:  []mp4.AC4Presentation{{PresentationVersion: 3, PresentationData: []byte{0x00}}},
+	})
+	require.Error(t, err, "presentation_version 3 must error")
+}
+
+// TestBuildAC4Info_TruncatedPresentation verifies the !ok fallback: a supported
+// version whose DSI payload is too short to fully decode must degrade gracefully —
+// no panic, no error, codec-string fields (version, mdcompat) still set from the
+// first byte, and ChMode left nil (unknown, not a misleading Mono).
+func TestBuildAC4Info_TruncatedPresentation(t *testing.T) {
+	// One byte 0x1f = config_v1 3 (top 5 bits), mdcompat 7 (low 3 bits). The parser
+	// reads config+mdcompat (8 bits) then overruns on b_presentation_id → ok=false.
+	box := &mp4.Dac4Box{
+		AC4DSIVersion:  1,
+		NPresentations: 1,
+		Presentations:  []mp4.AC4Presentation{{PresentationVersion: 1, PresentationData: []byte{0x1f}}},
+	}
+	info, err := buildAC4Info(box)
+	require.NoError(t, err, "supported version must not error on a short payload")
+	require.Len(t, info.Presentations, 1)
+	p := info.Presentations[0]
+	assert.Equal(t, 1, p.Version)
+	assert.Equal(t, 7, p.MDCompat, "mdcompat from the first DSI byte")
+	assert.Nil(t, p.ChMode, "ChMode must be nil on an incomplete parse, not a false Mono")
+	assert.Nil(t, info.ChMode, "top-level ChMode mirrors the (nil) default presentation")
 }
 
 // TestExtractCodecInfoLazyBoundsMemoryOnGarbage verifies parsing of a bogus header
