@@ -11,6 +11,7 @@
 #include <libavutil/pixdesc.h>
 
 #include <string.h>
+#include <inttypes.h>
 
 #include "avpipe_utils.h"
 #include "avpipe_xc.h"
@@ -395,6 +396,105 @@ void frame_rescale_time_base(
 
     if (frame->duration > 0)
         frame->duration = av_rescale_q(frame->duration, src_time_base, dst_time_base);
+}
+
+/*
+ * Initialize the PTS/DTS unwrap state.
+ * Compute wrap modulus once per stream (modulus is 0 for streams that don't need unrwap).
+ */
+void
+pts_unwrap_init(
+    coderctx_t *ctx)
+{
+    AVFormatContext *fc = ctx->format_context;
+    unsigned nb = fc ? fc->nb_streams : 0;
+    int is_mpegts = fc && fc->iformat && fc->iformat->name &&
+        !strcmp(fc->iformat->name, "mpegts");
+    const char *url = (ctx->inctx && ctx->inctx->url) ? ctx->inctx->url : "";
+
+    for (unsigned i = 0; i < nb && i < MAX_STREAMS; i++) {
+        AVStream *st = fc->streams[i];
+        int pts_wrap_bits = st->pts_wrap_bits;
+        enum AVMediaType mtype = st->codecpar->codec_type;
+        const char *mtype_str = av_get_media_type_string(mtype);
+        int64_t wrap_modulus = (pts_wrap_bits > 0 && pts_wrap_bits < 63) ?
+            ((int64_t)1 << pts_wrap_bits) : 0;
+
+        ctx->pts_unwrapper[i].wrap_modulus = wrap_modulus;
+        ctx->pts_unwrapper[i].stream_index = i;
+        ctx->pts_unwrapper[i].kind = 'P';
+        ctx->pts_unwrapper[i].url = url;
+
+        ctx->dts_unwrapper[i].wrap_modulus = wrap_modulus;
+        ctx->dts_unwrapper[i].stream_index = i;
+        ctx->dts_unwrapper[i].kind = 'T';
+        ctx->dts_unwrapper[i].url = url;
+
+        if (!mtype_str)
+            mtype_str = "unknown";
+
+        elv_log("PTS UNWRAP INIT stream_index=%d, media_type=%s, pts_wrap_bits=%d, "
+            "time_base=%d/%d, wrap_modulus=%"PRId64", is_mpegts=%d, url=%s",
+            i, mtype_str, pts_wrap_bits, st->time_base.num, st->time_base.den,
+            wrap_modulus, is_mpegts, url);
+
+        /*
+         * For MPEGTS timestamps are always 33-bit (90 kHz).
+         */
+        if (is_mpegts &&
+            (mtype == AVMEDIA_TYPE_VIDEO || mtype == AVMEDIA_TYPE_AUDIO) &&
+            pts_wrap_bits != 33) {
+            elv_err("PTS UNWRAP INIT unexpected pts_wrap_bits for MPEGTS stream_index=%d, "
+                "media_type=%s, pts_wrap_bits=%d (expected 33), url=%s",
+                i, mtype_str, pts_wrap_bits, url);
+        }
+    }
+}
+
+/*
+ * Convert a wrapped timestamp into a monotonic int64 value.
+ * Unwrap state is stored per stream (modulus is calculated at initialization).
+ *
+ * Wrap detection:
+ * - when step between consecutive raw values exceeds half the modular range:
+ *   - a large negative step means the counter wrapped forward (so add one modulus),
+ *   - a large positive step means it wrapped backward (so subtract one modulus).
+ * - if wrap modulus is 0 - no unwrapping
+ */
+int64_t
+pts_unwrap(
+    pts_unwrapper_t *u,
+    int64_t ts)
+{
+    if (ts == AV_NOPTS_VALUE || u->wrap_modulus <= 0)
+        return ts;
+
+    if (!u->has_last) {
+        u->has_last = 1;
+        u->last = ts;
+        u->offset = 0;
+        return ts;
+    }
+
+    const int64_t half = u->wrap_modulus / 2;
+    int64_t diff = ts - u->last;
+    if (diff < -half || diff > half) {
+        const char *direction;
+        if (diff < -half) {
+            u->offset += u->wrap_modulus;   /* wrapped forward (jumped back near 0) */
+            direction = "forward";
+        } else {
+            u->offset -= u->wrap_modulus;   /* wrapped backward */
+            direction = "backward";
+        }
+        elv_log("PTS UNWRAP stream_index=%d, kind=%c, direction=%s, raw=%"PRId64", "
+            "prev_raw=%"PRId64", offset=%"PRId64", unwrapped=%"PRId64", url=%s",
+            u->stream_index, u->kind ? u->kind : '?', direction, ts, u->last,
+            u->offset, ts + u->offset, u->url ? u->url : "");
+    }
+
+    u->last = ts;
+    return ts + u->offset;
 }
 
 /*
