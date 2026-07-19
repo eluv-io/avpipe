@@ -290,6 +290,12 @@ prepare_decoder(
         av_dict_set(&opts, "analyzeduration", "10000000", 0);  // microseconds
     }
 
+    /*
+     * Disable ffmpeg timestamp correction (it only works once an produces bad PTS after)
+     * This way we receive raw wrapped timestamp and apply our own unwrapping.
+     */
+    av_dict_set(&opts, "correct_ts_overflow", "0", 0);
+
     /* Allocate AVFormatContext in format_context and find input file format */
     const char *open_url = (inctx->alt_url && inctx->alt_url[0]) ? inctx->alt_url : inctx->url;
     rc = avformat_open_input(&decoder_context->format_context, open_url, NULL, &opts);
@@ -305,6 +311,9 @@ prepare_decoder(
         elv_err("Could not get input stream info, url=%s", url);
         return eav_stream_info;
     }
+
+    /* Precompute per-stream PTS/DTS wrap moduli now that pts_wrap_bits is known. */
+    pts_unwrap_init(decoder_context);
 
     dump_streams(inctx->url, decoder_context->format_context);
 
@@ -2565,27 +2574,6 @@ do_bypass(
     return eav_success;
 }
 
-static avpipe_error_t
-check_pts_wrapped(
-    int64_t *last_input_pts,
-    AVFrame *frame,
-    int stream_index)
-{
-    if (!frame || !last_input_pts)
-        return eav_success;
-
-    /* If the stream was wrapped then issue an error */
-    if (*last_input_pts && *last_input_pts - frame->pts > MAX_WRAP_PTS) {
-        elv_warn("PTS WRAPPED stream_index=%d, last_input_pts=%"PRId64", frame->pts=%"PRId64, stream_index, *last_input_pts, frame->pts);
-        return eav_pts_wrapped;
-    }
-
-    if (frame->pts > *last_input_pts)
-        *last_input_pts = frame->pts;
-
-    return eav_success;
-}
-
 static int
 transcode_audio(
     coderctx_t *decoder_context,
@@ -2657,12 +2645,6 @@ transcode_audio(
         }
 
         dump_frame(1, stream_index, "IN ", codec_context->frame_num, frame, debug_frame_level);
-
-        ret = check_pts_wrapped(&decoder_context->audio_last_input_pts[stream_index], frame, stream_index);
-        if (ret == eav_pts_wrapped) {
-            av_frame_unref(frame);
-            return ret;
-        }
 
         decoder_context->audio_pts[stream_index] = packet->pts;
 
@@ -2810,12 +2792,6 @@ transcode_video(
 
         fix_video_frame_color(decoder_context, frame);
         dump_frame(0, stream_index, "IN ", codec_context->frame_num, frame, debug_frame_level);
-
-        ret = check_pts_wrapped(&decoder_context->audio_last_input_pts[stream_index], frame, stream_index);
-        if (ret == eav_pts_wrapped) {
-            av_frame_unref(frame);
-            return ret;
-        }
 
         if (do_instrument) {
             elv_since(&tv, &since);
@@ -3889,6 +3865,12 @@ avpipe_xc(
 
         const char *st = stream_type_str(encoder_context, input_packet->stream_index);
         int stream_index = input_packet->stream_index;
+
+        /* Unwrap MPEGTS timestamps into a monotonic timeline */
+        if (stream_index >= 0 && stream_index < MAX_STREAMS) {
+            input_packet->pts = pts_unwrap(&decoder_context->pts_unwrapper[stream_index], input_packet->pts);
+            input_packet->dts = pts_unwrap(&decoder_context->dts_unwrapper[stream_index], input_packet->dts);
+        }
 
         // Record PTS of first frame read - excute only for the desired stream
         if ((stream_index == decoder_context->video_stream_index && (params->xc_type & xc_video)) ||
