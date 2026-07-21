@@ -78,8 +78,8 @@ func TestProbeAC4(t *testing.T) {
 	assert.Equal(t, 2, s.MP4.AC4.BitstreamVersion)
 	assert.Equal(t, 1, s.MP4.AC4.PresentationVersion)
 	assert.Equal(t, 1, s.MP4.AC4.MDCompat)
-	assert.Equal(t, 48000, s.MP4.AC4.SampleRate)
-	assert.Equal(t, "25 fps", s.MP4.AC4.FrameRate)
+	assert.Equal(t, 48000, s.MP4.AC4.SampleRate())
+	assert.Equal(t, "25", s.MP4.AC4.FrameRate().RatString())
 	// Channel layout recovered from the dac4 DSI (ch_mode 4 = 5.1), which the
 	// C/ffmpeg probe reports as unknown.
 	require.NotNil(t, s.MP4.AC4.ChMode)

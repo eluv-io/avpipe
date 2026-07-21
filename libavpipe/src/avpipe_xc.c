@@ -1602,6 +1602,18 @@ prepare_audio_encoder(
             out_stream = avformat_new_stream(format_context, NULL);
             encoder_context->stream[output_stream_index] = out_stream;
 
+            /*
+             * INVARIANT (AC-4 dac4): copying codecpar verbatim carries the dac4
+             * box (AC4SpecificBox) through unchanged. That is CORRECT only because
+             * this is a pure sample-passthrough remux: the set of presentations,
+             * substream groups, and the encode's bitrate/frame-rate are all
+             * unchanged, so dac4 -- a derived summary of ac4_toc() state, not source
+             * data -- stays accurate (per ETSI TS 103 190-2; container repackaging,
+             * segmentation, and duration trimming are all safe to copy). If AC-4
+             * ever gains a path that drops/renumbers presentations, restructures
+             * substream groups, or otherwise mutates what dac4 describes, the box
+             * MUST be regenerated from the new ac4_toc() state, not copied here.
+             */
             rc = avcodec_parameters_copy(out_stream->codecpar, in_stream->codecpar);
             if (rc < 0) {
                 elv_err("BYPASS (no decoder) failed to copy audio codec parameters, url=%s", params->url);

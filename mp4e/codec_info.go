@@ -297,8 +297,7 @@ func buildAC4Info(d *mp4.Dac4Box) (*avdesc.AC4Info, error) {
 	info := &avdesc.AC4Info{
 		AC4DSIVersion:    int(d.AC4DSIVersion),
 		BitstreamVersion: int(d.BitstreamVersion),
-		SampleRate:       d.GetSamplingFrequency(),
-		FrameRate:        d.GetFrameRateString(),
+		FSIndex:          int(d.FSIndex),
 		FrameRateIndex:   int(d.FrameRateIndex),
 		NPresentations:   int(d.NPresentations),
 	}
