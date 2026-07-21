@@ -2,6 +2,7 @@ package avdesc
 
 import (
 	"fmt"
+	"math/big"
 
 	"github.com/eluv-io/avpipe/goavpipe/util"
 )
@@ -34,17 +35,16 @@ type AC4Info struct {
 	// presentation, used as the third component of the codec string.
 	MDCompat int `json:"mdcompat"`
 
-	// SampleRate is the audio sampling frequency in Hz (44100 or 48000).
-	SampleRate int `json:"sample_rate,omitempty"`
+	// FSIndex is the dac4 fs_index: the base-sampling-frequency selector
+	// (0 = 44.1 kHz, 1 = 48 kHz; ETSI TS 103 190-1 Table 77). This is the raw
+	// field; the output rate (which also depends on the per-substream
+	// dsi_sf_multiplier) is computed by SampleRate().
+	FSIndex int `json:"fs_index"`
 
-	// FrameRate is the human-readable AC-4 frame rate (e.g. "25 fps").
-	FrameRate string `json:"frame_rate,omitempty"`
-
-	// FrameRateIndex is the dac4 frame_rate_index (ETSI TS 103 190-2 Table E.1).
-	// It is the exact, lossless frame-rate identity (unlike the FrameRate string,
-	// which cannot distinguish the 1000/1001 rates), used to derive the AC-4
-	// frame duration for segmentation. No omitempty: index 0 (23.976 fps) is
-	// valid and must survive the round-trip.
+	// FrameRateIndex is the raw dac4 frame_rate_index (ETSI TS 103 190-1 Table 83).
+	// It is the lossless frame-rate identity used to derive the AC-4 frame duration
+	// for segmentation; FrameRate() turns it into the exact rate. No omitempty:
+	// index 0 (23.976 fps) is valid and must survive the round-trip.
 	FrameRateIndex int `json:"frame_rate_index"`
 
 	// NPresentations is the number of presentations declared in the dac4 box.
@@ -335,6 +335,83 @@ func (a AC4Info) IsIMS() bool { return a.defaultPresentation().Version == 2 }
 // ChannelLayout returns the default presentation's speaker layout (e.g. "5.1"),
 // or "" for object-based audio. See AC4Presentation.ChannelLayout.
 func (a AC4Info) ChannelLayout() string { return a.defaultPresentation().ChannelLayout() }
+
+// SampleRate returns the output sampling frequency in Hz. It is NOT a raw dac4
+// field: per ETSI TS 103 190-1 Table E.5d / TS 103 190-2 §G.2.2 the
+// @audioSamplingRate is derived from BOTH fs_index and the per-substream
+// dsi_sf_multiplier. At a 48 kHz base (fs_index=1) the default presentation's
+// dsi_sf_multiplier 0/1/2 selects 48/96/192 kHz; a 44.1 kHz base (fs_index=0)
+// has no multiplier. Returns 0 for an unrecognized combination.
+func (a AC4Info) SampleRate() int {
+	if a.FSIndex == 0 {
+		return 44100 // 44.1 kHz base has no sampling-frequency multiplier
+	}
+	switch a.defaultPresentation().sfMultiplier() { // dsi_sf_multiplier, Table E.5d
+	case 0:
+		return 48000
+	case 1:
+		return 96000
+	case 2:
+		return 192000
+	default:
+		return 0 // 3 is reserved
+	}
+}
+
+// FrameRate returns the exact AC-4 frame rate in fps as a rational, derived from
+// FrameRateIndex (ETSI TS 103 190-1 Table 83). A rational rather than a float
+// because the five NTSC rates have no exact float form (e.g. 23.976 = 24000/1001).
+// Index 13 is special — its rate is base_sampling_frequency/2048, so it depends on
+// FSIndex: 48000/2048 (= 375/16 = 23.4375) at a 48 kHz base, 44100/2048
+// (= 11025/512 ≈ 21.53) at 44.1 kHz. Returns nil for a reserved/invalid index
+// (14, 15). The returned value is a fresh copy the caller may mutate freely.
+func (a AC4Info) FrameRate() *big.Rat {
+	switch {
+	case a.FrameRateIndex == 13:
+		base := int64(48000)
+		if a.FSIndex == 0 {
+			base = 44100
+		}
+		return big.NewRat(base, 2048)
+	case a.FrameRateIndex >= 0 && a.FrameRateIndex < len(ac4FrameRates):
+		return new(big.Rat).Set(ac4FrameRates[a.FrameRateIndex]) // copy: big.Rat is mutable
+	default:
+		return nil
+	}
+}
+
+// ac4FrameRates maps frame_rate_index 0-12 to the exact AC-4 frame rate in fps
+// (ETSI TS 103 190-1 Table 83). The five NTSC rates (0, 3, 5, 8, 11) are exactly
+// 1000/1001 of their integer neighbours. Index 13 is base-dependent (see
+// FrameRate); 14-15 are reserved.
+var ac4FrameRates = [13]*big.Rat{
+	big.NewRat(24000, 1001),  // 0: 23.976
+	big.NewRat(24, 1),        // 1
+	big.NewRat(25, 1),        // 2
+	big.NewRat(30000, 1001),  // 3: 29.97
+	big.NewRat(30, 1),        // 4
+	big.NewRat(48000, 1001),  // 5: 47.95
+	big.NewRat(48, 1),        // 6
+	big.NewRat(50, 1),        // 7
+	big.NewRat(60000, 1001),  // 8: 59.94
+	big.NewRat(60, 1),        // 9
+	big.NewRat(100, 1),       // 10
+	big.NewRat(120000, 1001), // 11: 119.88
+	big.NewRat(120, 1),       // 12
+}
+
+// sfMultiplier returns the presentation's dsi_sf_multiplier, read from its first
+// substream (the constant-configuration constraint means all substreams of a
+// deliverable stream share it). Returns 0 (no multiplier) when the presentation
+// carries no decoded substreams.
+func (p AC4Presentation) sfMultiplier() int {
+	for _, g := range p.SubstreamGroups {
+		if len(g.Substreams) > 0 {
+			return g.Substreams[0].SFMultiplier
+		}
+	}
+	return 0
+}
 
 // MimeCodecString returns the RFC 6381 codec string for AC-4:
 // "ac-4.<bitstream_version>.<presentation_version>.<mdcompat>", three

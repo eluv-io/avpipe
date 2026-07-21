@@ -2,11 +2,26 @@ package mp4e
 
 import (
 	"fmt"
+	"math/big"
 	"strings"
 
 	"github.com/Eyevinn/mp4ff/mp4"
 	"github.com/eluv-io/avpipe/goavpipe/avdesc"
 )
+
+// ac4FrameRateString formats an AC-4 frame-rate rational as a decimal for
+// display, e.g. "25 fps", "23.976 fps", "23.438 fps"; "reserved" when the
+// frame_rate_index is unmapped (nil). Rounded to 3 decimals with trailing zeros
+// trimmed — a lossy human-readable form; the exact rate stays in AC4Info.FrameRate().
+func ac4FrameRateString(fr *big.Rat) string {
+	if fr == nil {
+		return "reserved"
+	}
+	s := fr.FloatString(3)
+	s = strings.TrimRight(s, "0")
+	s = strings.TrimRight(s, ".")
+	return s + " fps"
+}
 
 // AtmosInfo holds Dolby Atmos signaling information extracted from an MP4
 // container. Atmos can be carried via E-AC-3 + JOC (ETSI TS 103 420) or AC-4
@@ -184,6 +199,10 @@ func findAtmosCapableAudio(file *mp4.File) (*mp4.TrakBox, *mp4.AudioSampleEntryB
 	return nil, nil, false
 }
 
+// validateEC3 records the E-AC-3 checks on a: "dec3" is structural (the dec3 box
+// is present and parses), and "joc" is the Atmos gate — it is OK only when the
+// JOC/Dolby-Atmos extension is present (ETSI TS 103 420), so a non-JOC E-AC-3
+// fails "joc". See validateAC4 for the parallel AC-4 checks.
 func (a *AtmosInfo) validateEC3(ase *mp4.AudioSampleEntryBox) {
 	if ase.Dec3 == nil {
 		a.addCheck("dec3", false, "missing dec3 box in ec-3 sample entry")
@@ -237,6 +256,11 @@ func (a *AtmosInfo) validateEC3(ase *mp4.AudioSampleEntryBox) {
 	}
 }
 
+// validateAC4 records the AC-4 checks on a, structured to parallel validateEC3:
+// "dac4" and "presentation" are structural (the dac4 box parses to >=1
+// presentation), and "atmos" is the Atmos gate — it fails for a non-Atmos stream
+// (plain channel-based, a channel-based height bed, or non-Atmos IMS), just as
+// "joc" fails for non-JOC E-AC-3.
 func (a *AtmosInfo) validateAC4(ase *mp4.AudioSampleEntryBox) {
 	if ase.Dac4 == nil {
 		a.addCheck("dac4", false, "missing dac4 box in ac-4 sample entry")
@@ -252,7 +276,7 @@ func (a *AtmosInfo) validateAC4(ase *mp4.AudioSampleEntryBox) {
 	a.AC4 = ac4
 
 	a.addCheck("dac4", true, "ac4DSIVersion=%d bitstreamVersion=%d mdcompat=%d frameRate=%s sampleRate=%d nPresentations=%d",
-		ac4.AC4DSIVersion, ac4.BitstreamVersion, ac4.MDCompat, ac4.FrameRate, ac4.SampleRate, ac4.NPresentations)
+		ac4.AC4DSIVersion, ac4.BitstreamVersion, ac4.MDCompat, ac4FrameRateString(ac4.FrameRate()), ac4.SampleRate(), ac4.NPresentations)
 
 	// "presentation" is a structural check (the DSI decoded to >=1 presentation);
 	// immersive-ness is reported here informationally, never gated on — a
@@ -274,7 +298,7 @@ func (a *AtmosInfo) validateAC4(ase *mp4.AudioSampleEntryBox) {
 	// object audio (non-IMS) or dolby_atmos_indicator (IMS).
 	switch {
 	case !ac4.IsDolbyAtmos():
-		a.addCheck("atmos", false, "not Atmos: no A-JOC objects or dolby_atmos_indiI cator (immersive=%t ims=%t)",
+		a.addCheck("atmos", false, "not Atmos: no A-JOC objects or dolby_atmos_indicator (immersive=%t ims=%t)",
 			ac4.IsImmersive(), ac4.IsIMS())
 	case ac4.IsIMS():
 		a.addCheck("atmos", true, "dolby_atmos_indicator=1 (immersive stereo)")
@@ -401,7 +425,7 @@ func (a *AtmosInfo) FieldInfo() AtmosFieldInfo {
 	if a.AC4 != nil {
 		info.AC4DSIVersion = fmt.Sprintf("%d", a.AC4.AC4DSIVersion)
 		info.AC4BitstreamVer = fmt.Sprintf("%d", a.AC4.BitstreamVersion)
-		info.AC4FrameRate = a.AC4.FrameRate
+		info.AC4FrameRate = ac4FrameRateString(a.AC4.FrameRate())
 		var versions []string
 		for _, pr := range a.AC4.Presentations {
 			versions = append(versions, fmt.Sprintf("v%d", pr.Version))

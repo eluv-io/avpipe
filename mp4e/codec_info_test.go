@@ -252,23 +252,23 @@ func TestExtractCodecInfo_AC4(t *testing.T) {
 		wantImmersive  bool
 		wantAjoc       bool
 		wantDolbyAtmos bool
-		wantFrameRate  string
+		wantFrameRate  string // FrameRate().RatString(), e.g. "25" or "375/16"
 		wantLayout     string
 	}{
-		{"stereo", "../media/Audio_ID_2ch_64kbps_25fps_ac4.mp4", "ac-4.02.01.00", 2, 1, 0, 1, 2, 0x01, 1, 0, false, false, false, false, "25 fps", "stereo"},
-		{"5.1", "../media/Audio_ID_6ch_128kbps_25fps_ac4.mp4", "ac-4.02.01.01", 2, 1, 1, 1, 6, 0x47, 4, 0, false, false, false, false, "25 fps", "5.1"},
+		{"stereo", "../media/Audio_ID_2ch_64kbps_25fps_ac4.mp4", "ac-4.02.01.00", 2, 1, 0, 1, 2, 0x01, 1, 0, false, false, false, false, "25", "stereo"},
+		{"5.1", "../media/Audio_ID_6ch_128kbps_25fps_ac4.mp4", "ac-4.02.01.01", 2, 1, 1, 1, 6, 0x47, 4, 0, false, false, false, false, "25", "5.1"},
 		// 5.1.4 is a channel-based height bed: immersive (TopPairs>0) but NOT Atmos.
 		// This row is the regression guard for the immersive_audio_indicator bug.
 		// ch_mode 12 is the "7.1.4" container; back_channels_present=false + 2 top
 		// pairs refine it to the actual 5.1.4 layout.
-		{"5.1.4", "../media/Audio_ID_514ch_192kbps_25fps_ac4.mp4", "ac-4.02.01.02", 2, 1, 2, 1, 0, 0x77, 12, 2, false, true, false, false, "25 fps", "5.1.4"},
+		{"5.1.4", "../media/Audio_ID_514ch_192kbps_25fps_ac4.mp4", "ac-4.02.01.02", 2, 1, 2, 1, 0, 0x77, 12, 2, false, true, false, false, "25", "5.1.4"},
 		// IMS pair: same codec string, discriminated only by dolby_atmos_indicator.
-		{"ims-atmos", "../media/Audio_ID_ims_112kbps_25fps_ac4.mp4", "ac-4.02.02.00", 2, 2, 0, 2, 2, 0x01, 1, 0, true, true, false, true, "25 fps", "stereo"},
-		{"ims-nonatmos", "../media/sample_ac4_ims_nonatmos.mp4", "ac-4.02.02.00", 2, 2, 0, 2, 2, 0x01, 1, 0, true, true, false, false, "25 fps", "stereo"},
+		{"ims-atmos", "../media/Audio_ID_ims_112kbps_25fps_ac4.mp4", "ac-4.02.02.00", 2, 2, 0, 2, 2, 0x01, 1, 0, true, true, false, true, "25", "stereo"},
+		{"ims-nonatmos", "../media/sample_ac4_ims_nonatmos.mp4", "ac-4.02.02.00", 2, 2, 0, 2, 2, 0x01, 1, 0, true, true, false, false, "25", "stereo"},
 		// A-JOC object audio: genuine non-IMS Dolby Atmos, detected via b_ajoc.
-		// (This clip is authored at frame_rate_index 13 = 23.44 fps / 2048 SPF.)
+		// (frame_rate_index 13 at a 48 kHz base = 48000/2048 = 375/16 = 23.4375 fps.)
 		// Object-based → no fixed speaker layout.
-		{"atmos", "../media/sample_ac4_atmos.mp4", "ac-4.02.01.03", 2, 1, 3, 1, 2, 0x800000, -1, 0, false, true, true, true, "23.44 fps", ""},
+		{"atmos", "../media/sample_ac4_atmos.mp4", "ac-4.02.01.03", 2, 1, 3, 1, 2, 0x800000, -1, 0, false, true, true, true, "375/16", ""},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -286,8 +286,8 @@ func TestExtractCodecInfo_AC4(t *testing.T) {
 			assert.Equal(t, tc.wantPV, info.AC4.PresentationVersion)
 			assert.Equal(t, tc.wantMDCompat, info.AC4.MDCompat)
 			assert.Equal(t, tc.wantNPres, info.AC4.NPresentations)
-			assert.Equal(t, 48000, info.AC4.SampleRate)
-			assert.Equal(t, tc.wantFrameRate, info.AC4.FrameRate)
+			assert.Equal(t, 48000, info.AC4.SampleRate())
+			assert.Equal(t, tc.wantFrameRate, info.AC4.FrameRate().RatString())
 			if tc.wantChannels != 0 {
 				assert.Equal(t, tc.wantChannels, info.Channels)
 			}
@@ -376,6 +376,57 @@ func TestBuildAC4Info_TruncatedPresentation(t *testing.T) {
 	assert.Equal(t, 7, p.MDCompat, "mdcompat from the first DSI byte")
 	assert.Nil(t, p.ChMode, "ChMode must be nil on an incomplete parse, not a false Mono")
 	assert.Nil(t, info.ChMode, "top-level ChMode mirrors the (nil) default presentation")
+}
+
+// TestAC4SampleRate verifies the derived output sample rate against ETSI TS
+// 103 190-1 Table E.5d: base from fs_index, multiplied by the default
+// presentation's dsi_sf_multiplier at a 48 kHz base. The local assets are all
+// 48 kHz / multiplier 0, so this synthetic test is the only coverage of the
+// 96/192 kHz branches.
+func TestAC4SampleRate(t *testing.T) {
+	// withMultiplier builds an AC4Info whose default presentation's first
+	// substream carries the given dsi_sf_multiplier.
+	withMultiplier := func(fsIndex, sfMult int) avdesc.AC4Info {
+		return avdesc.AC4Info{
+			FSIndex: fsIndex,
+			Presentations: []avdesc.AC4Presentation{{
+				SubstreamGroups: []avdesc.AC4SubstreamGroup{{
+					Substreams: []avdesc.AC4Substream{{SFMultiplier: sfMult}},
+				}},
+			}},
+		}
+	}
+	// 44.1 kHz base: no multiplier regardless of the substream field.
+	assert.Equal(t, 44100, withMultiplier(0, 0).SampleRate())
+	assert.Equal(t, 44100, withMultiplier(0, 1).SampleRate())
+	// 48 kHz base: dsi_sf_multiplier 0/1/2 → 48/96/192 kHz; 3 is reserved.
+	assert.Equal(t, 48000, withMultiplier(1, 0).SampleRate())
+	assert.Equal(t, 96000, withMultiplier(1, 1).SampleRate())
+	assert.Equal(t, 192000, withMultiplier(1, 2).SampleRate())
+	assert.Equal(t, 0, withMultiplier(1, 3).SampleRate(), "reserved multiplier → unknown")
+	// No decoded substreams (e.g. truncated parse) → base rate, no multiplier.
+	assert.Equal(t, 48000, avdesc.AC4Info{FSIndex: 1}.SampleRate())
+}
+
+// TestAC4FrameRate verifies the exact-rational frame rate against ETSI TS
+// 103 190-1 Table 83: NTSC rates as 1000/1001 fractions (no float rounding), the
+// base-dependent index 13, and nil for reserved indices.
+func TestAC4FrameRate(t *testing.T) {
+	rat := func(idx, fsIndex int) string {
+		fr := avdesc.AC4Info{FrameRateIndex: idx, FSIndex: fsIndex}.FrameRate()
+		if fr == nil {
+			return "nil"
+		}
+		return fr.RatString()
+	}
+	assert.Equal(t, "24000/1001", rat(0, 1)) // 23.976 — exact, unrepresentable as float
+	assert.Equal(t, "25", rat(2, 1))
+	assert.Equal(t, "30000/1001", rat(3, 1)) // 29.97
+	assert.Equal(t, "120000/1001", rat(11, 1))
+	assert.Equal(t, "375/16", rat(13, 1))    // 48000/2048 at a 48 kHz base
+	assert.Equal(t, "11025/512", rat(13, 0)) // 44100/2048 at a 44.1 kHz base
+	assert.Equal(t, "nil", rat(14, 1))       // reserved
+	assert.Equal(t, "nil", rat(15, 1))       // reserved
 }
 
 // TestExtractCodecInfoLazyBoundsMemoryOnGarbage verifies parsing of a bogus header
