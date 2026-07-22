@@ -400,7 +400,7 @@ void frame_rescale_time_base(
 
 /*
  * Initialize the PTS/DTS unwrap state.
- * Compute wrap modulus once per stream (modulus is 0 for streams that don't need unrwap).
+ * Compute wrap modulus once per stream (modulus is 0 for streams that don't need unwrap).
  */
 void
 pts_unwrap_init(
@@ -420,11 +420,13 @@ pts_unwrap_init(
         int64_t wrap_modulus = (pts_wrap_bits > 0 && pts_wrap_bits < 63) ?
             ((int64_t)1 << pts_wrap_bits) : 0;
 
+        memset(&ctx->pts_unwrapper[i], 0, sizeof(ctx->pts_unwrapper[i]));
         ctx->pts_unwrapper[i].wrap_modulus = wrap_modulus;
         ctx->pts_unwrapper[i].stream_index = i;
         ctx->pts_unwrapper[i].kind = 'P';
         ctx->pts_unwrapper[i].url = url;
 
+        memset(&ctx->dts_unwrapper[i], 0, sizeof(ctx->dts_unwrapper[i]));
         ctx->dts_unwrapper[i].wrap_modulus = wrap_modulus;
         ctx->dts_unwrapper[i].stream_index = i;
         ctx->dts_unwrapper[i].kind = 'T';
@@ -458,7 +460,10 @@ pts_unwrap_init(
  * Wrap detection:
  * - when step between consecutive raw values exceeds half the modular range:
  *   - a large negative step means the counter wrapped forward (so add one modulus),
- *   - a large positive step means it wrapped backward (so subtract one modulus).
+ *   - a large positive step means the packet belongs to the previous wrap epoch
+ *     (so subtract one modulus).
+ *   Reordered B-frame PTS can cross a wrap boundary in either direction. Adjusting
+ *   the epoch preserves their timeline position; it does not mean the clock reversed.
  * - if wrap modulus is 0 - no unwrapping
  */
 int64_t
@@ -484,8 +489,8 @@ pts_unwrap(
             u->offset += u->wrap_modulus;   /* wrapped forward (jumped back near 0) */
             direction = "forward";
         } else {
-            u->offset -= u->wrap_modulus;   /* wrapped backward */
-            direction = "backward";
+            u->offset -= u->wrap_modulus;   /* packet belongs to previous wrap epoch */
+            direction = "previous epoch";
         }
         elv_log("PTS UNWRAP stream_index=%d, kind=%c, direction=%s, raw=%"PRId64", "
             "prev_raw=%"PRId64", offset=%"PRId64", unwrapped=%"PRId64", url=%s",

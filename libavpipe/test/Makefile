@@ -12,7 +12,7 @@ CFLAGS := -O0 -ggdb -Wall \
 LIBS := $(FFMPEG_LIBS) \
 	-L$(TOP_DIR)/lib -lutils
 
-TESTS := test_color_defaults
+TESTS := test_color_defaults test_pts_unwrap
 OUT   := out
 BINS  := $(addprefix $(OUT)/,$(TESTS))
 
@@ -25,6 +25,9 @@ $(OUT):
 	mkdir -p $(OUT)
 
 $(OUT)/test_color_defaults: test_color_defaults.c unity/unity.c | $(OUT)
+	gcc $(CFLAGS) $^ -o $@ $(LIBS)
+
+$(OUT)/test_pts_unwrap: test_pts_unwrap.c unity/unity.c | $(OUT)
 	gcc $(CFLAGS) $^ -o $@ $(LIBS)
 
 clean:

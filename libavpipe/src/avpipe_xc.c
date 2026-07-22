@@ -291,8 +291,9 @@ prepare_decoder(
     }
 
     /*
-     * Disable ffmpeg timestamp correction (it only works once an produces bad PTS after)
-     * This way we receive raw wrapped timestamp and apply our own unwrapping.
+     * Disable FFmpeg timestamp correction. It only corrects one wrap and produces
+     * incorrect PTS after subsequent wraps. Receive raw wrapped timestamps and apply
+     * our own unwrapping instead.
      */
     av_dict_set(&opts, "correct_ts_overflow", "0", 0);
 
