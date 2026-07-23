@@ -75,5 +75,3 @@ O/
 !go.mod
 temp/
 test_out/
-
-!/lib/libavpipe.hash
