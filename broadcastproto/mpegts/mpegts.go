@@ -13,6 +13,7 @@ import (
 	"github.com/eluv-io/avpipe/broadcastproto/tlv"
 	"github.com/eluv-io/avpipe/broadcastproto/transport"
 	"github.com/eluv-io/avpipe/goavpipe"
+	"github.com/eluv-io/common-go/media/pktpool"
 	"github.com/eluv-io/common-go/util/timeutil"
 	elog "github.com/eluv-io/log-go"
 )
@@ -25,6 +26,11 @@ const (
 // StripTsPadding indicates whether the payload of TS padding packets in RTP-TS streams should be stripped. For now
 // this is not configurable per stream, since it has low performance impact and potentially saves bandwidth.
 var StripTsPadding = atomic.NewBool(false)
+
+// outputTlvWrapCap is the head room reserved in front of each pooled datagram so the TLV output framing can be written
+// into it zero-copy (see Packet.FrameTlv / ProcessDatagramPacket): a TLV header plus, for ATS-TS, the
+// arrival-timestamp prefix.
+const outputTlvWrapCap = tlv.TLV_HEADER_LEN + tlv.AtsTimestampLen
 
 var mpegtslog = elog.Get("avpipe/broadcastproto/mpegts")
 
@@ -153,7 +159,24 @@ func NewTSStats() *TSStats {
 	}
 }
 
+// ProcessDatagram analyzes and writes a raw datagram received at time now. The datagram bytes are never mutated - the
+// TLV output framing is copied into a separate buffer before writing - so it is safe to call when datagram's backing
+// storage is shared with other consumers. It is used by pool-less callers (the libav reader path and tests); pooled
+// callers should use ProcessDatagramPacket to frame the output zero-copy.
 func (mpp *MpegtsPacketProcessor) ProcessDatagram(now time.Time, datagram []byte) {
+	mpp.process(now, datagram, nil)
+}
+
+// ProcessDatagramPacket analyzes and writes the datagram held by pkt, framing the TLV output zero-copy into pkt's
+// reserved head room (see Packet.FrameTlv). Framing does not mutate pkt (Data and the decode cursor are untouched), so
+// this is safe even when pkt is shared with other consumers through the pool's reference counting.
+func (mpp *MpegtsPacketProcessor) ProcessDatagramPacket(now time.Time, pkt *pktpool.Packet) {
+	mpp.process(now, pkt.Data, pkt)
+}
+
+// process runs the shared analysis over datagram and then writes it. When pkt is non-nil (datagram == pkt.Data) the
+// output framing is written zero-copy into pkt's head room; otherwise it is copied into mpp.outBuf.
+func (mpp *MpegtsPacketProcessor) process(now time.Time, datagram []byte, pkt *pktpool.Packet) {
 	if !mpp.startLogged {
 		mpp.startLogged = true
 		mpegtslog.Info("mpegts processing first datagram",
@@ -220,7 +243,7 @@ func (mpp *MpegtsPacketProcessor) ProcessDatagram(now time.Time, datagram []byte
 		}
 	}
 
-	mpp.writeDatagram(now, datagram, badPackets == 0 && hasPadding && StripTsPadding.Load(), mpegtsOffset)
+	mpp.writeDatagram(now, datagram, pkt, badPackets == 0 && hasPadding && StripTsPadding.Load(), mpegtsOffset)
 }
 
 func (mpp *MpegtsPacketProcessor) HandleMpegtsPacket(pkt *packet.Packet) error {
@@ -383,7 +406,9 @@ func (mpp *MpegtsPacketProcessor) updatePCR(pkt *packet.Packet) {
 	mpp.stats.LastPCR.Store(pcr)
 }
 
-func (mpp *MpegtsPacketProcessor) writeDatagram(now time.Time, datagram []byte, removePadding bool, rtpPayloadOffset int) {
+func (mpp *MpegtsPacketProcessor) writeDatagram(
+	now time.Time, datagram []byte, pkt *pktpool.Packet, removePadding bool, rtpPayloadOffset int) {
+
 	if mpp.currentWc == nil {
 		if mpp.stats.ErrorsOpeningOutput.Load() > 50 {
 			return
@@ -412,39 +437,9 @@ func (mpp *MpegtsPacketProcessor) writeDatagram(now time.Time, datagram []byte, 
 		return
 	}
 
-	dataToWrite := datagram
-
-	switch mpp.cfg.Packaging {
-	case transport.RtpTs:
-		var tlvType = tlv.TlvTypeRtpTs
-		if removePadding && StripTsPadding.Load() {
-			tlvType = tlv.TlvTypeRtpTsNoPad
-			var stripped, faulty int
-			datagram, stripped, faulty = RemoveTsPadding(datagram, rtpPayloadOffset)
-			mpp.stats.StrippedPaddingPackets.Add(uint64(stripped))
-			mpp.stats.FaultyPaddingPackets.Add(uint64(faulty))
-		}
-		tlvHeader, err := tlv.TlvHeader(len(datagram), tlvType)
-		if err != nil {
-			mpp.stats.ErrorsOther.Inc()
-			return
-		}
-		copy(mpp.outBuf, tlvHeader)
-		copy(mpp.outBuf[len(tlvHeader):], datagram)
-		dataToWrite = mpp.outBuf[:len(tlvHeader)+len(datagram)]
-
-	case transport.AtsTs:
-		// The TLV value is an 8-byte arrival timestamp followed by the raw TS datagram.
-		tlvHeader, err := tlv.TlvHeader(tlv.AtsTimestampLen+len(datagram), tlv.TlvTypeAtsTs)
-		if err != nil {
-			mpp.stats.ErrorsOther.Inc()
-			return
-		}
-		n := copy(mpp.outBuf, tlvHeader)
-		binary.BigEndian.PutUint64(mpp.outBuf[n:], uint64(now.UnixNano()))
-		n += tlv.AtsTimestampLen
-		n += copy(mpp.outBuf[n:], datagram)
-		dataToWrite = mpp.outBuf[:n]
+	dataToWrite, ok := mpp.frame(now, datagram, pkt, removePadding, rtpPayloadOffset)
+	if !ok {
+		return
 	}
 
 	startTime := time.Now()
@@ -460,6 +455,86 @@ func (mpp *MpegtsPacketProcessor) writeDatagram(now time.Time, datagram []byte, 
 	}
 	mpp.stats.PacketsWritten.Inc()
 	mpp.stats.BytesWritten.Add(uint64(n))
+}
+
+// frame builds the framed output bytes for the datagram according to the configured packaging. When pkt is non-nil
+// (datagram == pkt.Data) the common case is framed zero-copy into pkt's head room via Packet.FrameTlv; the pool-less
+// []byte case and the (rare) padding-stripping case copy into mpp.outBuf. In no case is the input datagram mutated, so
+// framing is always safe when the datagram is shared with other consumers.
+func (mpp *MpegtsPacketProcessor) frame(
+	now time.Time,
+	datagram []byte,
+	pkt *pktpool.Packet,
+	removePadding bool,
+	rtpPayloadOffset int,
+) (out []byte, ok bool) {
+
+	switch mpp.cfg.Packaging {
+	case transport.RtpTs:
+		if removePadding && StripTsPadding.Load() {
+			// Padding removal compacts the datagram, so the result cannot be a zero-copy view of the input: copy into
+			// outBuf and strip there, leaving the (possibly shared) input untouched.
+			return mpp.frameStripped(datagram, rtpPayloadOffset)
+		}
+		return mpp.frameTlv(pkt, datagram, byte(tlv.TlvTypeRtpTs), nil)
+
+	case transport.AtsTs:
+		// The TLV value is an 8-byte arrival timestamp followed by the raw TS datagram.
+		var ts [tlv.AtsTimestampLen]byte
+		binary.BigEndian.PutUint64(ts[:], uint64(now.UnixNano()))
+		return mpp.frameTlv(pkt, datagram, byte(tlv.TlvTypeAtsTs), ts[:])
+
+	default: // transport.RawTs and any pass-through: write the datagram unchanged.
+		return datagram, true
+	}
+}
+
+// frameTlv wraps datagram (with the optional prefix between header and payload) in a TLV header. With a pooled packet
+// it frames zero-copy into the packet's head room via Packet.FrameTlv (non-mutating, so safe for a shared packet); the
+// pool-less []byte caller copies header + prefix + datagram into mpp.outBuf.
+func (mpp *MpegtsPacketProcessor) frameTlv(pkt *pktpool.Packet, datagram []byte, typ byte, prefix []byte) ([]byte, bool) {
+	if pkt != nil {
+		out, err := pkt.FrameTlv(typ, prefix)
+		if err != nil {
+			mpp.stats.ErrorsOther.Inc()
+			return nil, false
+		}
+		return out, true
+	}
+	tlvHeader, err := tlv.TlvHeader(len(prefix)+len(datagram), tlv.TlvType(typ))
+	if err != nil {
+		mpp.stats.ErrorsOther.Inc()
+		return nil, false
+	}
+	n := copy(mpp.outBuf, tlvHeader)
+	n += copy(mpp.outBuf[n:], prefix)
+	n += copy(mpp.outBuf[n:], datagram)
+	return mpp.outBuf[:n], true
+}
+
+// frameStripped copies datagram into mpp.outBuf behind a TLV-header-sized slot, strips TS padding within that copy
+// (never touching the possibly-shared input), then writes the RtpTsNoPad header in front of the stripped body so the
+// header and body form one contiguous slice.
+func (mpp *MpegtsPacketProcessor) frameStripped(datagram []byte, rtpPayloadOffset int) ([]byte, bool) {
+	const hdr = tlv.TLV_HEADER_LEN
+	n := copy(mpp.outBuf[hdr:], datagram)
+	stripped := mpp.stripTsPadding(mpp.outBuf[hdr:hdr+n], rtpPayloadOffset)
+	tlvHeader, err := tlv.TlvHeader(len(stripped), tlv.TlvTypeRtpTsNoPad)
+	if err != nil {
+		mpp.stats.ErrorsOther.Inc()
+		return nil, false
+	}
+	copy(mpp.outBuf, tlvHeader)
+	return mpp.outBuf[:hdr+len(stripped)], true
+}
+
+// stripTsPadding removes TS padding from datagram in place and records the padding stats, returning the shortened
+// slice (which aliases datagram's backing storage).
+func (mpp *MpegtsPacketProcessor) stripTsPadding(datagram []byte, rtpPayloadOffset int) []byte {
+	data, stripped, faulty := RemoveTsPadding(datagram, rtpPayloadOffset)
+	mpp.stats.StrippedPaddingPackets.Add(uint64(stripped))
+	mpp.stats.FaultyPaddingPackets.Add(uint64(faulty))
+	return data
 }
 
 func (mpp *MpegtsPacketProcessor) openNextOutput(now time.Time) error {
