@@ -351,6 +351,11 @@ prepare_decoder(
 
     for (int i = 0; i < decoder_context->format_context->nb_streams && i < MAX_STREAMS; i++) {
 
+        /* Whether this is the stream this job will decode (selected for transcoding).
+         * Set at the point of selection: the implicit video/audio picks in the switch
+         * cases below, or the explicit stream_id match after the switch. */
+        int selected_stream = 0;
+
         switch (decoder_context->format_context->streams[i]->codecpar->codec_type) {
         case AVMEDIA_TYPE_VIDEO:
             /* Video, copy codec params from stream format context */
@@ -360,6 +365,7 @@ prepare_decoder(
             /* If no stream ID specified - choose the first video stream encountered */
             if (params && (params->xc_type & xc_video) && params->stream_id < 0 && decoder_context->video_stream_index < 0) {
                 decoder_context->video_stream_index = i;
+                selected_stream = 1;
                 if (check_stream_index(params, decoder_context) != eav_success)
                     return eav_param;
             }
@@ -393,6 +399,9 @@ prepare_decoder(
                 (selected_audio_index(params, i) >= 0 || (params->n_audio == 0 && decoder_context->n_audio == 0))) {
                 decoder_context->audio_stream_index[decoder_context->n_audio] = i;
                 decoder_context->n_audio++;
+                /* This is a decode target only when the job actually transcodes audio. */
+                if (params->xc_type & xc_audio)
+                    selected_stream = 1;
             }
             elv_dbg("AUDIO STREAM %d, codec_id=%s, stream_id=%d, timebase=%d, xc_type=%d, channels=%d, url=%s",
                 i, avcodec_get_name(decoder_context->codec_parameters[i]->codec_id), decoder_context->stream[i]->id,
@@ -442,8 +451,7 @@ prepare_decoder(
             continue;
         }
 
-        /* Is this the stream selected for transcoding? */
-        int selected_stream = 0;
+        /* Explicit stream_id selection (implicit video/audio picks were set in the switch). */
         int this_stream_id =  decoder_context->live_proto == avp_proto_rtmp ? i : decoder_context->stream[i]->id;
         if (params && this_stream_id == params->stream_id) {
             elv_log("STREAM MATCH stream_id=%d, stream_index=%d, xc_type=%d, url=%s",
@@ -461,14 +469,6 @@ prepare_decoder(
             elv_log("STREAM MATCH sync_stream_id=%d stream_index=%d, url=%s",
                 params->sync_audio_to_stream_id, i, url);
             sync_id_index = i;
-        }
-
-        /* If stream ID is not set - match audio_index */
-        if (params && params->stream_id < 0 &&
-            params->xc_type & xc_audio &&
-            (selected_audio_index(params, i) >= 0 ||
-                (decoder_context->n_audio > 0 && decoder_context->audio_stream_index[decoder_context->n_audio-1] == i))) {
-            selected_stream = 1;
         }
 
         /*
@@ -491,21 +491,25 @@ prepare_decoder(
 
         if (decoder_context->codec_parameters[i]->codec_type != AVMEDIA_TYPE_DATA && !decoder_context->codec[i]) {
             /*
-             * A codec with no FFmpeg decoder (e.g. AC-4) can still be *identified* (probe) and
-             * *bypassed* (stream copy) -- neither path decodes. When the caller allows it
-             * (probe, or a bypass transcode) fall through: we still allocate a bare
-             * codec_context from codecpar (below) so probe can report sample_rate/channels and
-             * the bypass path has stream params, but skip avcodec_open2 (guarded below) since
-             * there is no decoder to open. codec[i] stays NULL, which prepare_audio_encoder()
-             * uses as the "no decoder" signal to take its codecpar-copy bypass branch. Only a
-             * transcode that must actually decode (allow_missing_decoder == 0) errors here.
+             * A codec with no FFmpeg decoder (e.g. AC-4) can still be *identified* (probe),
+             * *bypassed* (stream copy), or simply *ignored* -- e.g. the AC-4 audio track of a
+             * muxed master during a video-only transcode, a stream this job never decodes. None
+             * of those paths decode, so a missing decoder is only fatal for a stream this job
+             * must actually decode: the selected video stream of a video transcode, or a
+             * selected audio stream of an audio transcode. For any other stream -- not the
+             * decode target, or a caller that tolerates it (probe / bypass) -- fall through: we
+             * still allocate a bare codec_context from codecpar (below) so probe can report
+             * sample_rate/channels and the bypass path has stream params, but skip avcodec_open2
+             * (guarded below) since there is no decoder to open. codec[i] stays NULL, which
+             * prepare_audio_encoder() uses as the "no decoder" signal to take its codecpar-copy
+             * bypass branch.
              */
-            if (!allow_missing_decoder) {
+            if (!allow_missing_decoder && selected_stream) {
                 elv_err("Unsupported decoder codec param=%s, codec_id=%d, url=%s",
                     params ? params->dcodec : "", decoder_context->codec_parameters[i]->codec_id, url);
                 return eav_codec_param;
             }
-            elv_log("No decoder for codec_id=%d, stream=%d; identify/bypass only (no decode), url=%s",
+            elv_log("No decoder for codec_id=%d, stream=%d; identify/bypass/ignore only (no decode), url=%s",
                 decoder_context->codec_parameters[i]->codec_id, i, url);
         }
 
