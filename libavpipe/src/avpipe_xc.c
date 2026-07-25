@@ -214,7 +214,8 @@ prepare_decoder(
     avpipe_io_handler_t *in_handlers,
     ioctx_t *inctx,
     xcparams_t *params,
-    int seekable)
+    int seekable,
+    int use_custom_pts_unwrap)
 {
     int rc;
     decoder_context->video_last_dts = AV_NOPTS_VALUE;
@@ -290,12 +291,6 @@ prepare_decoder(
         av_dict_set(&opts, "analyzeduration", "10000000", 0);  // microseconds
     }
 
-    /*
-     * Disable ffmpeg timestamp correction (it only works once an produces bad PTS after)
-     * This way we receive raw wrapped timestamp and apply our own unwrapping.
-     */
-    av_dict_set(&opts, "correct_ts_overflow", "0", 0);
-
     /* Allocate AVFormatContext in format_context and find input file format */
     const char *open_url = (inctx->alt_url && inctx->alt_url[0]) ? inctx->alt_url : inctx->url;
     rc = avformat_open_input(&decoder_context->format_context, open_url, NULL, &opts);
@@ -306,6 +301,16 @@ prepare_decoder(
         return eav_open_input;
     }
 
+    /*
+     * Disable ffmpeg timestamp correction for MPEG TS (it doesn't handle it correctly).
+     * Keep the ffmpeg correction for probe (even when mepgts) and all other streams.
+     */
+    int is_mpegts = decoder_context->format_context->iformat &&
+        decoder_context->format_context->iformat->name &&
+        !strcmp(decoder_context->format_context->iformat->name, "mpegts");
+    decoder_context->format_context->correct_ts_overflow =
+        !(use_custom_pts_unwrap && is_mpegts);
+
     /* Retrieve stream information */
     if (avformat_find_stream_info(decoder_context->format_context,  NULL) < 0) {
         elv_err("Could not get input stream info, url=%s", url);
@@ -313,7 +318,8 @@ prepare_decoder(
     }
 
     /* Precompute per-stream PTS/DTS wrap moduli now that pts_wrap_bits is known. */
-    pts_unwrap_init(decoder_context);
+    if (pts_unwrap_init(decoder_context) < 0)
+        return eav_timebase;
 
     dump_streams(inctx->url, decoder_context->format_context);
 
@@ -3292,7 +3298,12 @@ skip_for_sync(
 
     /* We are processing the audio packets now.
      * Skip until the audio PTS has reached the first video key frame PTS
-     * PENDING(SSS) - this is incorrect if audio PTS is muxed ahead of video
+     *
+     * PENDING(SS) - this fails in several cases:
+     * - if audio PTS is muxed ahead of video
+     * - if audio and video PTS start right at the wrap point for example:
+     *   - first video PTS: 8,589,927,600  (just before wrap)
+     *   - first audio PTS:         2,788  (just after wrap)
      */
     if (decoder_context->first_key_frame_pts == AV_NOPTS_VALUE ||
         input_packet->pts < decoder_context->first_key_frame_pts) {
@@ -3612,7 +3623,7 @@ avpipe_xc(
     }
 
     if ((rc = prepare_decoder(&xctx->decoder_ctx,
-            in_handlers, inctx, params, params->seekable)) != eav_success) {
+            in_handlers, inctx, params, params->seekable, 1)) != eav_success) {
         elv_err("Failure in preparing decoder, url=%s, rc=%d", params->url, rc);
         return rc;
     }
@@ -4351,7 +4362,8 @@ avpipe_probe(
         goto avpipe_probe_end;
     }
 
-    if ((rc = prepare_decoder(&decoder_ctx, in_handlers, &inctx, params, params->seekable)) != eav_success) {
+    if ((rc = prepare_decoder(
+            &decoder_ctx, in_handlers, &inctx, params, params->seekable, 0)) != eav_success) {
         elv_err("avpipe_probe failed to prepare decoder, url=%s", url);
         goto avpipe_probe_end;
     }

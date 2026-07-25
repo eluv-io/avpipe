@@ -90,7 +90,7 @@ void frame_rescale_time_base(
     AVRational src_time_base,
     AVRational dst_time_base);
 
-void
+int
 pts_unwrap_init(
     coderctx_t *ctx);
 

@@ -400,9 +400,9 @@ void frame_rescale_time_base(
 
 /*
  * Initialize the PTS/DTS unwrap state.
- * Compute wrap modulus once per stream (modulus is 0 for streams that don't need unrwap).
+ * Compute wrap modulus once per stream (modulus is 0 for streams that don't need unwrap).
  */
-void
+int
 pts_unwrap_init(
     coderctx_t *ctx)
 {
@@ -417,44 +417,50 @@ pts_unwrap_init(
         int pts_wrap_bits = st->pts_wrap_bits;
         enum AVMediaType mtype = st->codecpar->codec_type;
         const char *mtype_str = av_get_media_type_string(mtype);
-        int64_t wrap_modulus = (pts_wrap_bits > 0 && pts_wrap_bits < 63) ?
-            ((int64_t)1 << pts_wrap_bits) : 0;
-
-        ctx->pts_unwrapper[i].wrap_modulus = wrap_modulus;
-        ctx->pts_unwrapper[i].stream_index = i;
-        ctx->pts_unwrapper[i].kind = 'P';
-        ctx->pts_unwrapper[i].url = url;
-
-        ctx->dts_unwrapper[i].wrap_modulus = wrap_modulus;
-        ctx->dts_unwrapper[i].stream_index = i;
-        ctx->dts_unwrapper[i].kind = 'T';
-        ctx->dts_unwrapper[i].url = url;
+        int64_t wrap_modulus = is_mpegts ? ((int64_t)1 << 33) : 0;
 
         if (!mtype_str)
             mtype_str = "unknown";
 
+         /* MPEGTS timestamps are always 33-bit with timescale 90,000 */
+        if (is_mpegts &&
+            (pts_wrap_bits != 33 ||
+             st->time_base.num != 1 ||
+             st->time_base.den != 90000)) {
+            elv_err("PTS UNWRAP INIT unexpected MPEGTS timestamp parameters "
+                "stream_index=%d, media_type=%s, pts_wrap_bits=%d, "
+                "time_base=%d/%d (expected 33, 1/90000), url=%s",
+                (int)i, mtype_str, pts_wrap_bits,
+                st->time_base.num, st->time_base.den, url);
+            return -1;
+        }
+
+        ctx->pts_unwrapper[i].wrap_modulus = wrap_modulus;
+        ctx->pts_unwrapper[i].stream_index = (int)i;
+        ctx->pts_unwrapper[i].kind = 'P';
+        ctx->pts_unwrapper[i].url = url;
+
+        ctx->dts_unwrapper[i].wrap_modulus = wrap_modulus;
+        ctx->dts_unwrapper[i].stream_index = (int)i;
+        ctx->dts_unwrapper[i].kind = 'T';
+        ctx->dts_unwrapper[i].url = url;
+
         elv_log("PTS UNWRAP INIT stream_index=%d, media_type=%s, pts_wrap_bits=%d, "
             "time_base=%d/%d, wrap_modulus=%"PRId64", is_mpegts=%d, url=%s",
-            i, mtype_str, pts_wrap_bits, st->time_base.num, st->time_base.den,
+            (int)i, mtype_str, pts_wrap_bits, st->time_base.num, st->time_base.den,
             wrap_modulus, is_mpegts, url);
-
-        /*
-         * For MPEGTS timestamps are always 33-bit (90 kHz).
-         */
-        if (is_mpegts &&
-            (mtype == AVMEDIA_TYPE_VIDEO || mtype == AVMEDIA_TYPE_AUDIO) &&
-            pts_wrap_bits != 33) {
-            elv_err("PTS UNWRAP INIT unexpected pts_wrap_bits for MPEGTS stream_index=%d, "
-                "media_type=%s, pts_wrap_bits=%d (expected 33), url=%s",
-                i, mtype_str, pts_wrap_bits, url);
-        }
     }
+
+    return 0;
 }
 
 /*
  * Convert a wrapped timestamp into a monotonic int64 value.
  * Unwrap state is stored per stream (modulus is calculated at initialization).
  *
+ * Limitations:
+ * - unwrapping doesn't distinguish an actual MPEGTS stream reset - this has to be
+ *   handled by starting a new xc job by the upper layer
  * Wrap detection:
  * - when step between consecutive raw values exceeds half the modular range:
  *   - a large negative step means the counter wrapped forward (so add one modulus),
