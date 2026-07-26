@@ -1,12 +1,11 @@
 package goavpipe
 
 import (
-	"bytes"
-	"encoding/binary"
-	"encoding/hex"
 	"fmt"
+	"strconv"
 	"strings"
 	"sync"
+	"time"
 
 	"github.com/modern-go/gls"
 
@@ -16,39 +15,49 @@ import (
 // logWrapper is used to wrap the standard log-go logger to include the handle of the AVPipe job in
 // question, if it is known
 type logWrapper struct {
-	log *elog.Log
+	log elog.Throttled
 }
 
 func (l *logWrapper) Trace(msg string, fields ...interface{}) {
-	fields = append(fields, logHandleIfKnown()...)
-	l.log.Trace(msg, fields...)
+	if l.log.IsTrace() {
+		l.log.Trace(msg, appendHandle(fields)...)
+	}
 }
 
 func (l *logWrapper) Debug(msg string, fields ...interface{}) {
-	fields = append(fields, logHandleIfKnown()...)
-	l.log.Debug(msg, fields...)
+	if l.log.IsDebug() {
+		l.log.Debug(msg, appendHandle(fields)...)
+	}
 }
 
 func (l *logWrapper) Info(msg string, fields ...interface{}) {
-	fields = append(fields, logHandleIfKnown()...)
-	l.log.Info(msg, fields...)
+	if l.log.IsInfo() {
+		l.log.Info(msg, appendHandle(fields)...)
+	}
 }
 
 func (l *logWrapper) Warn(msg string, fields ...interface{}) {
 	dispatchToChannelIfPresent("WARN", msg, fields...)
-	fields = append(fields, logHandleIfKnown()...)
-	l.log.Warn(msg, fields...)
+	if l.log.IsWarn() {
+		l.log.Warn(msg, appendHandle(fields)...)
+	}
 }
 
 func (l *logWrapper) Error(msg string, fields ...interface{}) {
 	dispatchToChannelIfPresent("ERROR", msg, fields...)
-	fields = append(fields, logHandleIfKnown()...)
-	l.log.Error(msg, fields...)
+	if l.log.IsError() {
+		l.log.Error(msg, appendHandle(fields)...)
+	}
 }
 
 func (l *logWrapper) Fatal(msg string, fields ...interface{}) {
-	fields = append(fields, logHandleIfKnown()...)
-	l.log.Fatal(msg, fields...)
+	l.log.Fatal(msg, appendHandle(fields)...)
+}
+
+func (l *logWrapper) Throttle(key string, period ...time.Duration) *logWrapper {
+	return &logWrapper{
+		log: l.log.Throttle(key, period...),
+	}
 }
 
 var Log = logWrapper{log: elog.Get("/avpipe")}
@@ -154,13 +163,11 @@ func GIDHandle() (int32, bool) {
 	return handle.(int32), true
 }
 
-func logHandleIfKnown() []interface{} {
+func appendHandle(fields []any) []any {
 	if handle, ok := GIDHandle(); ok {
-		buf := &bytes.Buffer{}
-		binary.Write(buf, binary.BigEndian, handle)
-		return []interface{}{"avp", hex.EncodeToString(buf.Bytes())}
+		return append(fields, "avp", strconv.FormatInt(int64(handle), 16))
 	}
-	return nil
+	return fields
 }
 
 func dispatchToChannelIfPresent(level string, msg string, fields ...interface{}) {
@@ -168,7 +175,7 @@ func dispatchToChannelIfPresent(level string, msg string, fields ...interface{})
 		handleChanMapMu.Lock()
 		defer handleChanMapMu.Unlock()
 		if ch, ok := handleChanMap[handle]; ok {
-			//space-combine fields
+			// space-combine fields
 			strs := []string{level, msg}
 			for _, field := range fields {
 				strs = append(strs, fmt.Sprint(field))

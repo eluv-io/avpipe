@@ -19,6 +19,7 @@
 package xc_test
 
 import (
+	"encoding/hex"
 	"flag"
 	"fmt"
 	"math/big"
@@ -29,7 +30,8 @@ import (
 	"strings"
 	"testing"
 
-	"encoding/hex"
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 
 	"github.com/eluv-io/avpipe"
 	"github.com/eluv-io/avpipe/goavpipe"
@@ -38,8 +40,6 @@ import (
 	"github.com/eluv-io/avpipe/pkg/validate"
 	"github.com/eluv-io/avpipe/xc"
 	"github.com/eluv-io/log-go"
-	"github.com/stretchr/testify/assert"
-	"github.com/stretchr/testify/require"
 )
 
 // ---------------------------------------------------------------------------
@@ -97,11 +97,11 @@ var mezTestSources = []mezTestSource{
 	{"yuvj420p.mov", "30/1", 60, false, ""},        // same, through libx264 (set_h264_params color path)
 
 	// Currently these files don't work
-	//{"bbb_sunflower_1080p_29_97_fps_normal.mp4", "30000/1001", 60, false, ""}, // Broken - file actually 30/1 fps
-	//{"prores_example.mov",                       "30000/1001", 60, false, ""}, // Broken
-	//{"Rigify-2min-10000ts.mp4", "24/1", 48, false, ""},                        // Broken - duration expected 416, got 417
-	//{"BBB4_HD_51_AVC_120s_CCBYblendercloud.ts", "60/1", 120, false, ""},  // Broken - improper key frame int
-	//{"SIN5_4K_MOS_J2K_60s_CCBYblendercloud.mxf", "24000/1001", 48, false, ""},  // Broken - avg_framerate and timebase
+	// {"bbb_sunflower_1080p_29_97_fps_normal.mp4", "30000/1001", 60, false, ""}, // Broken - file actually 30/1 fps
+	// {"prores_example.mov",                       "30000/1001", 60, false, ""}, // Broken
+	// {"Rigify-2min-10000ts.mp4", "24/1", 48, false, ""},                        // Broken - duration expected 416, got 417
+	// {"BBB4_HD_51_AVC_120s_CCBYblendercloud.ts", "60/1", 120, false, ""},  // Broken - improper key frame int
+	// {"SIN5_4K_MOS_J2K_60s_CCBYblendercloud.mxf", "24000/1001", 48, false, ""},  // Broken - avg_framerate and timebase
 
 }
 

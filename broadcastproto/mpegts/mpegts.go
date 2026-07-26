@@ -1,64 +1,93 @@
 package mpegts
 
 import (
-	"encoding/json"
+	"encoding/binary"
+	"errors"
 	"io"
 	"sync"
 	"time"
 
 	"github.com/Comcast/gots/v2/packet"
-	elog "github.com/eluv-io/log-go"
 	"go.uber.org/atomic"
+
+	"github.com/eluv-io/avpipe/broadcastproto/tlv"
+	"github.com/eluv-io/avpipe/broadcastproto/transport"
+	"github.com/eluv-io/avpipe/goavpipe"
+	"github.com/eluv-io/common-go/util/timeutil"
+	elog "github.com/eluv-io/log-go"
 )
 
-const PcrTs uint64 = 27_000_000
-const PcrMax uint64 = ((1 << 33) * 300) + (1 << 9)
+const (
+	PcrTs  uint64 = 27_000_000
+	PcrMax uint64 = ((1 << 33) * 300) + (1 << 9)
+)
+
+// StripTsPadding indicates whether the payload of TS padding packets in RTP-TS streams should be stripped. For now
+// this is not configurable per stream, since it has low performance impact and potentially saves bandwidth.
+var StripTsPadding = atomic.NewBool(false)
 
 var mpegtslog = elog.Get("avpipe/broadcastproto/mpegts")
 
 type SequentialOpener interface {
 	OpenNext() (io.WriteCloser, error)
+	Stat(args any) error
+	ReportStart() error
 }
-
-// Special TS stream and descriptor types (not defined in 'gots')
-const TsStreamTypeJpegXS = 0x32
-const TsDescriptorSt2038 = 0xc4 // Commonly ST 2038 or ST 291 (Evertz, Imagine, Harmonic)
-
-// Locally defined stream types
-const TsStreamTypeLocalSt2038 = 0xe4 // Locally defined type
 
 type MpegtsPacketProcessor struct {
 	cfg TsConfig
 
 	inFd         int64
 	opener       SequentialOpener
-	segStartPcr  uint64 // PCR at the start of the current segment
-	segStartTime time.Time
+	segStartTime time.Time // wall-clock time at the start of the current segment
 	currentWc    io.WriteCloser
 
 	// statsMu is _only_ used for updating cc errors by PID
 	statsMu sync.Mutex
 
-	stats         *TSStats
-	continuityMap map[int]uint8 // Map of PID to last continuity counter
-	pcr           uint64        // Last seen PCR value
+	stats *TSStats
+	// rtpStats is used to keep track of RTP-specific information in the case that the packaging is
+	// RTP-MPEGTS. It is _nil_ iff cfg.Packaging is not RTP-TS.
+	rtpStats *RTPStats
+	// Periodic for logging stats
+	periodicStatsLog timeutil.Periodic
 
-	closeCh chan struct{}
+	continuityMap map[int]uint8 // Map of PID to last continuity counter
+	pcrPid        int           // PID we track PCRs from; pinned to the first PCR-bearing PID (-1 = not set)
+	outBuf        []byte        // Preallocated byte buffer
+	closeCh       chan struct{}
+
+	startLogged bool // ensure logging TS processing route once
 }
 
 func NewMpegtsPacketProcessor(cfg TsConfig, seqOpener SequentialOpener, inFd int64) *MpegtsPacketProcessor {
+	var rtpStats *RTPStats
+	if cfg.Packaging == transport.RtpTs {
+		rtpStats = &RTPStats{}
+	}
+	mpegtslog.Info("mpegts packet processor created",
+		"fd", inFd,
+		"packaging", string(cfg.Packaging),
+		"rtp_stats", rtpStats != nil,
+		"segment_length_sec", cfg.SegmentLengthSec)
 	return &MpegtsPacketProcessor{
-		cfg:           cfg,
-		opener:        seqOpener,
-		inFd:          inFd,
-		continuityMap: make(map[int]uint8),
-		stats:         NewTSStats(),
-		closeCh:       make(chan struct{}),
+		cfg:              cfg,
+		opener:           seqOpener,
+		inFd:             inFd,
+		pcrPid:           -1, // -1 = not set; PID 0 is a valid PID that may carry PCRs
+		continuityMap:    make(map[int]uint8),
+		stats:            NewTSStats(),
+		rtpStats:         rtpStats,
+		periodicStatsLog: timeutil.NewPeriodic(30 * time.Second),
+		// Max datagram size plus room for the TLV header and (for ATS-TS) the arrival timestamp prefix.
+		outBuf: make([]byte, 64*1024+tlv.TLV_HEADER_LEN+tlv.AtsTimestampLen),
+		closeCh:          make(chan struct{}),
 	}
 }
 
 type TsConfig struct {
 	SegmentLengthSec uint64
+	Packaging        transport.TsPackagingMode
 
 	AnalyzeVideo bool
 	AnalyzeData  bool
@@ -68,10 +97,15 @@ type TSStats struct {
 	PacketsReceived atomic.Uint64
 	PacketsWritten  atomic.Uint64
 	// PacketsDropped is updated by the sender to the channel, which is why it is a pointer
-	PacketsDropped *atomic.Uint64
-	BadPackets     atomic.Uint64
-	BytesReceived  atomic.Uint64
-	BytesWritten   atomic.Uint64
+	PacketsDropped         *atomic.Uint64
+	SmallPacketsDropped    atomic.Uint64 // small packets (< 188 bytes) are dropped
+	RtcpPacketsDropped     atomic.Uint64 // small dropped packets with are likely RTCP (included in SmallPacketsDropped)
+	BadPackets             atomic.Uint64
+	BytesReceived          atomic.Uint64
+	BytesWritten           atomic.Uint64
+	PaddingPackets         atomic.Uint64
+	FaultyPaddingPackets   atomic.Uint64
+	StrippedPaddingPackets atomic.Uint64
 
 	MaxBufInPeriod atomic.Uint64
 	MinBufInPeriod atomic.Uint64
@@ -96,70 +130,148 @@ type TSStats struct {
 	ErrorsCCByPid           map[int]uint64
 }
 
+type RTPStats struct {
+	FirstSeqNum     atomic.Uint32
+	LastSeqNum      atomic.Uint32
+	SeqNumSkipTot   atomic.Uint32
+	SeqNumSkipCount atomic.Uint64
+
+	// RTP timestamp interpretation is different by application
+	FirstTimestamp atomic.Uint32
+	LastTimestamp  atomic.Uint32
+	RefTime        time.Time // System time when first timestamp is set
+
+	BadPackets  atomic.Uint64 // Invalid RTP packets
+	LongHeaders atomic.Uint64 // LongHeaders keeps track of RTP headers longer than 12 bytes
+}
+
 func NewTSStats() *TSStats {
 	return &TSStats{
 		ErrorsCCByPid: make(map[int]uint64),
 	}
 }
 
-func (mpp *MpegtsPacketProcessor) ProcessPackets(packets []byte) {
-	for offset := 0; offset+188 <= len(packets); offset += 188 {
-		p := toTSPacket(packets[offset : offset+188])
-		mpp.HandlePacket(p)
+func (mpp *MpegtsPacketProcessor) ProcessDatagram(now time.Time, datagram []byte) {
+	if !mpp.startLogged {
+		mpp.startLogged = true
+		mpegtslog.Info("mpegts processing first datagram",
+			"fd", mpp.inFd,
+			"packaging", string(mpp.cfg.Packaging),
+			"datagram_len", len(datagram))
 	}
-	if len(packets)%188 != 0 {
-		mpp.stats.ErrorsIncompletePackets.Inc()
+
+	mpegtsOffset := 0
+	if mpp.cfg.Packaging == transport.RtpTs {
+		if len(datagram) < 12+188 { // RTP header + at least one TS packet
+			mpp.stats.SmallPacketsDropped.Inc()
+			if isRTCP(datagram) {
+				mpp.stats.RtcpPacketsDropped.Inc()
+			}
+			return
+		}
+
+		dgHeader, err := transport.ParseRTPHeader(datagram)
+		if err != nil {
+			mpp.rtpStats.BadPackets.Inc()
+			return
+		}
+		mpegtsOffset = dgHeader.ByteLength()
+		if mpegtsOffset != 12 {
+			mpp.rtpStats.LongHeaders.Inc()
+		}
+		swapped := mpp.rtpStats.FirstTimestamp.CompareAndSwap(0, dgHeader.Timestamp)
+		if swapped {
+			mpp.rtpStats.RefTime = now
+			mpp.rtpStats.FirstSeqNum.Store(uint32(dgHeader.SequenceNumber))
+			defer mpp.PushStats() // defer so that ts stats are included in the stats
+		}
+		mpp.rtpStats.LastTimestamp.Store(dgHeader.Timestamp)
+		mpp.rtpStats.LastSeqNum.Store(uint32(dgHeader.SequenceNumber))
+
+		// TODO: Sequence number / discontinuity processing
+	} else if len(datagram) < 188 { // RTPat least one TS packet
+		mpp.stats.SmallPacketsDropped.Inc()
+		return
 	}
+
+	// Extract PCR
+	badPackets := 0
+	hasPadding := false
+	for offset := mpegtsOffset; offset+188 <= len(datagram); offset += 188 {
+		pkt := toTSPacket(datagram[offset : offset+188])
+		err := mpp.HandleMpegtsPacket(pkt)
+		if err != nil {
+			badPackets++
+		} else if mpp.cfg.Packaging == transport.RtpTs {
+			if pkt.IsNull() {
+				mpp.stats.PaddingPackets.Inc()
+				// do not remove padding here, just flag it. We will remove it later if and only if none of the packets
+				// in the datagram are bad.
+				hasPadding = true
+			}
+		}
+	}
+
+	if badPackets > 0 {
+		if mpp.cfg.Packaging == transport.RtpTs {
+			mpp.rtpStats.BadPackets.Inc()
+		}
+	}
+
+	mpp.writeDatagram(now, datagram, badPackets == 0 && hasPadding && StripTsPadding.Load(), mpegtsOffset)
 }
 
-func (mpp *MpegtsPacketProcessor) HandlePacket(pkt packet.Packet) {
+func (mpp *MpegtsPacketProcessor) HandleMpegtsPacket(pkt packet.Packet) error {
 	mpp.stats.PacketsReceived.Inc()
 	mpp.stats.BytesReceived.Add(uint64(len(pkt)))
 
 	if pkt.CheckErrors() != nil {
 		mpp.stats.BadPackets.Inc()
-		return
+		return errors.New("bad mpegts packet")
 	}
 
 	mpp.checkContinuityCounter(pkt)
 	mpp.updatePCR(pkt)
 
-	if mpp.pcr == 0 {
-		// Wait for at least one packet with PCR before writing
-		return
-	}
-
 	if mpp.cfg.AnalyzeData || mpp.cfg.AnalyzeVideo {
 		// TODO(Nate): Copy over some of the logic analyzing this stuff
 	}
 
-	s := time.Now()
-	mpp.writePacket(pkt)
-	dur := time.Since(s)
-	if dur > 50*time.Millisecond {
-		mpegtslog.Warn("MPEGTS writePacket took too long", "duration", dur)
-	}
-
+	return nil
 }
 
-// Kick off a job that periodically logs the stats of this job
+// StartReportingStats kicks off a job that periodically logs the stats
 func (mpp *MpegtsPacketProcessor) StartReportingStats() {
+	// must be smaller than the 1s interval used by the live-recorder for calculation of "stalls"
+	reportingInterval := 900 * time.Millisecond
 	go func() {
-		ticker := time.NewTicker(5 * time.Second)
+		ticker := time.NewTicker(reportingInterval)
 		defer ticker.Stop()
 		for {
 			select {
 			case <-ticker.C:
-				mpp.statsMu.Lock()
-				v, _ := json.Marshal(mpp.stats)
-				mpegtslog.Debug("mpegts stats", "stats", string(v))
-				mpp.statsMu.Unlock()
-				mpp.resetChannelSizeStats()
+				mpp.PushStats()
 			case <-mpp.closeCh:
 				return
 			}
 		}
 	}()
+}
+
+func (mpp *MpegtsPacketProcessor) PushStats() {
+	mpp.statsMu.Lock()
+	exportStats := exportStats(mpp.stats, mpp.rtpStats)
+	mpp.statsMu.Unlock()
+	mpp.resetChannelSizeStats()
+
+	mpp.periodicStatsLog.Do(func() {
+		mpegtslog.Debug("mpegts stats", "fd", mpp.inFd, "stats", exportStats)
+	})
+	_ = mpp.opener.Stat(exportStats)
+}
+
+func (mpp *MpegtsPacketProcessor) ReportStart() {
+	_ = mpp.opener.ReportStart()
 }
 
 func (mpp *MpegtsPacketProcessor) Stop() {
@@ -174,15 +286,15 @@ func (mpp *MpegtsPacketProcessor) RegisterPacketsDropped(packetsDropped *atomic.
 }
 
 func (mpp *MpegtsPacketProcessor) UpdateChannelSizeStats(size int) {
-	max := mpp.stats.MaxBufInPeriod.Load()
-	min := mpp.stats.MinBufInPeriod.Load()
+	maxBuf := mpp.stats.MaxBufInPeriod.Load()
+	minBuf := mpp.stats.MinBufInPeriod.Load()
 
-	if uint64(size) > max {
-		mpp.stats.MaxBufInPeriod.CompareAndSwap(max, uint64(size))
+	if uint64(size) > maxBuf {
+		mpp.stats.MaxBufInPeriod.CompareAndSwap(maxBuf, uint64(size))
 	}
 
-	if uint64(size) < min {
-		mpp.stats.MinBufInPeriod.CompareAndSwap(min, uint64(size))
+	if uint64(size) < minBuf {
+		mpp.stats.MinBufInPeriod.CompareAndSwap(minBuf, uint64(size))
 	}
 }
 
@@ -233,49 +345,105 @@ func (mpp *MpegtsPacketProcessor) updatePCR(pkt packet.Packet) {
 		return
 	}
 
+	// Pin PCR tracking to the first PID that carries a PCR and ignore the rest. Multi-program streams carry an
+	// independent PCR per program, so mixing them would make the FirstPCR/LastPCR stats meaningless. -1 is the "not
+	// set" sentinel, since PID 0 is a valid PID that may legitimately carry PCRs.
+	pid := pkt.PID()
+	if mpp.pcrPid != -1 && pid != mpp.pcrPid {
+		return
+	}
+
 	pcr, err := a.PCR()
 	if err != nil {
 		mpp.stats.ErrorsAdapationField.Inc()
 		return
 	}
-	mpp.pcr = pcr
 
-	mpp.stats.FirstPCR.CompareAndSwap(0, mpp.pcr)
-	mpp.stats.LastPCR.Store(mpp.pcr)
+	// Count PCR wraps on the pinned PID: a wrap is a large backward jump from near PcrMax back towards 0. Skip the
+	// first PCR, when there is nothing to compare against yet. PCR is otherwise stats-only; segmentation is driven
+	// purely by wall-clock time.
+	if mpp.pcrPid != -1 {
+		prev := mpp.stats.LastPCR.Load()
+		if pcr < prev && prev-pcr > PcrMax/2 {
+			mpp.stats.NumWraps.Inc()
+		}
+	}
+	mpp.pcrPid = pid
+
+	mpp.stats.FirstPCR.CompareAndSwap(0, pcr)
+	mpp.stats.LastPCR.Store(pcr)
 }
 
-func (mpp *MpegtsPacketProcessor) writePacket(pkt packet.Packet) {
+func (mpp *MpegtsPacketProcessor) writeDatagram(now time.Time, datagram []byte, removePadding bool, rtpPayloadOffset int) {
 	if mpp.currentWc == nil {
 		if mpp.stats.ErrorsOpeningOutput.Load() > 50 {
 			return
 		}
 
-		err := mpp.openNextOutput()
+		err := mpp.openNextOutput(now)
 		if err != nil {
 			return
 		}
 	}
 
-	curCloseToZero := PcrTs*30 > mpp.pcr
-	prevCloseToMax := PcrMax-(PcrTs*60) < mpp.segStartPcr
-	pcrWrapped := prevCloseToMax && curCloseToZero
-	pcrPastSegmentBounds := mpp.pcr > mpp.segStartPcr && mpp.pcr-mpp.segStartPcr > mpp.cfg.SegmentLengthSec*PcrTs
-	segTimeFarTooLong := time.Since(mpp.segStartTime) > time.Duration(mpp.cfg.SegmentLengthSec)*time.Second*2
-	if pcrWrapped || pcrPastSegmentBounds || segTimeFarTooLong {
-		mpegtslog.Debug("opening next output", "pcrWrapped", pcrWrapped, "pcrPastSegmentBounds", pcrPastSegmentBounds, "pcr", mpp.pcr, "segStartPcr", mpp.segStartPcr)
-		if pcrWrapped {
-			mpp.stats.NumWraps.Inc()
-		}
-		if segTimeFarTooLong {
-			mpp.stats.NumTimedRotate.Inc()
-		}
-		err := mpp.openNextOutput()
+	segmentLength := time.Duration(mpp.cfg.SegmentLengthSec) * time.Second
+	if segmentLength > 0 && now.Sub(mpp.segStartTime) >= segmentLength {
+		mpegtslog.Debug("opening next output", "reason", "wallclock", "segStartTime", mpp.segStartTime)
+		mpp.stats.NumTimedRotate.Inc()
+		err := mpp.openNextOutput(now)
 		if err != nil {
 			return
 		}
 	}
 
-	n, err := mpp.currentWc.Write(pkt[:])
+	switch mpp.cfg.Packaging {
+	case transport.RawTs, transport.RtpTs, transport.AtsTs:
+	default:
+		goavpipe.Log.Error("packaging mode unknown. Bailing out on writing datagram", "packaging_mode", mpp.cfg.Packaging)
+		return
+	}
+
+	dataToWrite := datagram
+
+	switch mpp.cfg.Packaging {
+	case transport.RtpTs:
+		var tlvType = tlv.TlvTypeRtpTs
+		if removePadding && StripTsPadding.Load() {
+			tlvType = tlv.TlvTypeRtpTsNoPad
+			var stripped, faulty int
+			datagram, stripped, faulty = RemoveTsPadding(datagram, rtpPayloadOffset)
+			mpp.stats.StrippedPaddingPackets.Add(uint64(stripped))
+			mpp.stats.FaultyPaddingPackets.Add(uint64(faulty))
+		}
+		tlvHeader, err := tlv.TlvHeader(len(datagram), tlvType)
+		if err != nil {
+			mpp.stats.ErrorsOther.Inc()
+			return
+		}
+		copy(mpp.outBuf, tlvHeader)
+		copy(mpp.outBuf[len(tlvHeader):], datagram)
+		dataToWrite = mpp.outBuf[:len(tlvHeader)+len(datagram)]
+
+	case transport.AtsTs:
+		// The TLV value is an 8-byte arrival timestamp followed by the raw TS datagram.
+		tlvHeader, err := tlv.TlvHeader(tlv.AtsTimestampLen+len(datagram), tlv.TlvTypeAtsTs)
+		if err != nil {
+			mpp.stats.ErrorsOther.Inc()
+			return
+		}
+		n := copy(mpp.outBuf, tlvHeader)
+		binary.BigEndian.PutUint64(mpp.outBuf[n:], uint64(now.UnixNano()))
+		n += tlv.AtsTimestampLen
+		n += copy(mpp.outBuf[n:], datagram)
+		dataToWrite = mpp.outBuf[:n]
+	}
+
+	startTime := time.Now()
+	n, err := mpp.currentWc.Write(dataToWrite)
+	dur := time.Since(startTime)
+	if dur > 50*time.Millisecond {
+		goavpipe.Log.Warn("mpegts write too slow", "dur", dur)
+	}
 
 	if err != nil {
 		mpp.stats.ErrorsWriting.Inc()
@@ -285,7 +453,7 @@ func (mpp *MpegtsPacketProcessor) writePacket(pkt packet.Packet) {
 	mpp.stats.BytesWritten.Add(uint64(n))
 }
 
-func (mpp *MpegtsPacketProcessor) openNextOutput() error {
+func (mpp *MpegtsPacketProcessor) openNextOutput(now time.Time) error {
 	startTime := time.Now()
 	var closeDone time.Time
 	defer func() {
@@ -306,28 +474,63 @@ func (mpp *MpegtsPacketProcessor) openNextOutput() error {
 
 	wc, err := mpp.opener.OpenNext()
 	if err != nil {
-		mpegtslog.Error("Failed to open next segment", "err", err)
-		mpp.stats.ErrorsOpeningOutput.Inc()
-		if mpp.stats.ErrorsOpeningOutput.Load() > 50 {
-			mpegtslog.Fatal("Too many errors opening output segments, giving up attempts")
-		}
+		count := mpp.stats.ErrorsOpeningOutput.Inc()
+		mpegtslog.Error("Failed to open next segment", "count", count, err)
 		return err
 	}
 	mpp.stats.NumSegments.Inc()
 	mpp.currentWc = wc
-	mpp.segStartPcr = mpp.pcr
-	mpp.segStartTime = time.Now()
+	mpp.segStartTime = now
 	return nil
 }
 
 // toTSPacket converts a byte slice to a TS packet.
 // If the byte slice is not exactly 188 bytes, it panics.
 func toTSPacket(data []byte) packet.Packet {
-	if len(data) != packet.PacketSize {
-		// Should never occur if called correctly
-		panic("invalid TS packet size")
+	// simply perform a type conversion, which does not copy any data, but references the same underlying data. Panics
+	// if the data is not 188 bytes.
+	return packet.Packet(data)
+}
+
+// RemoveTsPadding removes the padding payload of TS padding packets within the given RTP packet. The removal is
+// performed in-place. The TS header of padding packets is preserved. Returns the RTP packet with the stripped TS
+// packets and the number of stripped and faulty padding packets.
+func RemoveTsPadding(pkt []byte, rtpHdrLen int) (res []byte, stripped, faulty int) {
+outer:
+	for offset := rtpHdrLen; offset+188 <= len(pkt); offset += 188 {
+		tsPkt := toTSPacket(pkt[offset : offset+188])
+		if tsPkt.CheckErrors() != nil && tsPkt.IsNull() {
+			for i := 4; i < 188; i++ {
+				// make sure the payload is really just padding
+				if pkt[offset+i] != 0xFF {
+					faulty++
+					continue outer
+				}
+			}
+
+			// a padding packet: strip the payload.
+			// TS header: 4 bytes, payload: 184 bytes
+			copy(pkt[offset+4:], pkt[offset+188:]) // preserve padding packet header
+			pkt = pkt[:len(pkt)-184]               // adjust datagram size...
+			offset -= 184                          // ... and offset to account for the removed payload
+			stripped++
+		}
 	}
-	var pkt packet.Packet
-	copy(pkt[:], data[:packet.PacketSize])
-	return pkt
+	return pkt, stripped, faulty
+}
+
+func isRTCP(data []byte) bool {
+	if len(data) < 2 {
+		return false
+	}
+	// The second byte (index 1) contains the Payload Type
+	pt := data[1]
+
+	// RTCP Packet Types:
+	// 200: SR (Sender Report)
+	// 201: RR (Receiver Report)
+	// 202: SDES (Source Description)
+	// 203: BYE (Goodbye)
+	// 204: APP (Application-defined)
+	return pt >= 200 && pt <= 204
 }
