@@ -116,6 +116,8 @@ type mvhevcOutputHandler struct {
 	patcher *mvhevcpatch.StreamPatcher
 }
 
+// mvhevcOutputHandler deliberately does not implement the optional Taker
+// interface (it buffers and rewrites)
 func (h *mvhevcOutputHandler) Write(buf []byte) (int, error) {
 	return h.patcher.Write(buf)
 }

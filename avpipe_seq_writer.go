@@ -66,7 +66,7 @@ func (h *avpipeSequentialOutHandler) Write(p []byte) (n int, err error) {
 		return 0, errOutputClosed
 	}
 
-	n = AVPipeWriteOutputGo(h.inFd, *h.outFd, p)
+	n = AVPipeWriteOutputGo(h.inFd, *h.outFd, p, false)
 	if n < 0 {
 		return 0, fmt.Errorf("failed to write to output fd %d", *h.outFd)
 	}
