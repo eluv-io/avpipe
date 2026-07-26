@@ -256,11 +256,13 @@ func openTransport(url, packaging string) (transport.Transport, error) {
 		}
 	}
 
+	// The pipeline consumes raw 188-byte TS packets, so the transport must deliver RawTs
+	// (for RTP input this strips the RTP header).
 	switch p {
 	case "ts":
-		return transport.NewUDPTransport(url), nil
+		return transport.NewUDPTransport(url, transport.RawTs), nil
 	case "rtp":
-		return transport.NewRTPTransport(url), nil
+		return transport.NewRTPTransport(url, transport.RawTs), nil
 	default:
 		return nil, fmt.Errorf("unknown -packaging %q (want auto, ts, or rtp)", packaging)
 	}
