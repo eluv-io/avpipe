@@ -16,7 +16,7 @@ import (
 func extractCodecInfoForProbe(input goavpipe.InputHandler) ([]*mp4e.CodecInfo, error) {
 	const op = "avpipe.extractCodecInfoForProbe"
 	e := errors.Template(op, errors.K.Invalid.Default())
-	infos, extractErr := mp4e.ExtractCodecInfo(input)
+	infos, extractErr := mp4e.ExtractCodecInfoLazy(input) // Only loading MP4 box headers
 	if _, seekErr := input.Seek(0, io.SeekStart); seekErr != nil {
 		if extractErr != nil {
 			goavpipe.Log.Error("seek back failed after failed extraction", "extract_error", extractErr, "op", op)

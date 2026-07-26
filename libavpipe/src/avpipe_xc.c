@@ -806,13 +806,8 @@ set_h264_params(
     if (params->video_layout == video_layout_sbs)
         off += snprintf(x264_params + off, sizeof(x264_params) - off,
             ":frame-packing=%d", video_layout_sbs);
-    /* Explicitly signal color range in the SPS VUI so it round-trips through
-     * the mez encode.  The AVCodecContext.color_range field alone is not
-     * enough to trigger VUI writing without the other color fields set. */
-    enum AVColorRange cr = decoder_context->stream[index]->codecpar->color_range;
-    if (cr != AVCOL_RANGE_UNSPECIFIED)
-        snprintf(x264_params + off, sizeof(x264_params) - off,
-            ":range=%s", cr == AVCOL_RANGE_JPEG ? "pc" : "tv");
+    /* Color metadata (range/primaries/trc/matrix) is already set on the encoder
+     * context by copy_source_color_to_output(), so no x264-params fullrange option is needed. */
     av_opt_set(encoder_codec_context->priv_data, "x264-params", x264_params, 0);
 }
 
