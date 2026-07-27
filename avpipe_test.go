@@ -2770,22 +2770,52 @@ func TestMarshalParams(t *testing.T) {
 		VideoSegDurationTs: 180000,
 		EncHeight:          720,
 		EncWidth:           1280,
+		Tier:               "high",
 		XcType:             goavpipe.XcVideo,
 	}
 	bytes, err := json.Marshal(params)
 	assert.NoError(t, err)
-	_ = bytes
-	// TODO: Add asserts
+	var raw map[string]interface{}
+	require.NoError(t, json.Unmarshal(bytes, &raw))
+	assert.Equal(t, "high", raw["tier"])
 }
 
 func TestUnmarshalParams(t *testing.T) {
 	var params goavpipe.XcParams
-	bytes := []byte(`{"video_bitrate":8000000,"seg_duration_ts":180000,"seg_duration_fr":50,"enc_height":720,"enc_width":1280,"xc_type":1}`)
+	bytes := []byte(`{"video_bitrate":8000000,"seg_duration_ts":180000,"seg_duration_fr":50,"enc_height":720,"enc_width":1280,"xc_type":1,"tier":"main"}`)
 	err := json.Unmarshal(bytes, &params)
 	assert.NoError(t, err)
 	assert.Equal(t, int(goavpipe.XcVideo), int(params.XcType), "XcVideo type expected")
+	assert.Equal(t, "main", params.Tier)
 
 	// TODO: More checks
+}
+
+func TestTierValidationRejectsUnsupportedCodecs(t *testing.T) {
+	for _, tc := range []struct {
+		name   string
+		ecodec string
+		tier   string
+	}{
+		{name: "h264", ecodec: "libx264", tier: "high"},
+		{name: "hevc nvenc", ecodec: "hevc_nvenc", tier: "high"},
+		{name: "invalid libx265 tier", ecodec: "libx265", tier: "medium"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			params := &goavpipe.XcParams{
+				Url:      videoBigBuckBunnyPath,
+				Format:   "mp4",
+				XcType:   goavpipe.XcVideo,
+				Ecodec:   tc.ecodec,
+				StreamId: -1,
+				Tier:     tc.tier,
+			}
+
+			handle, err := avpipe.XcInit(params)
+			assert.Equal(t, int32(-1), handle)
+			require.ErrorIs(t, err, avpipe.EAV_PARAM)
+		})
+	}
 }
 
 func TestUnmarshalParamsNumAudioBackwardsCompat(t *testing.T) {

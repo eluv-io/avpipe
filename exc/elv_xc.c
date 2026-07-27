@@ -1096,6 +1096,7 @@ usage(
         "\t-r :                     (optional) number of repeats. Default is 1 repeat, must be bigger than 1\n"
         "\t-rc-buffer-size :        (optional) Determines the interval used to limit bit rate\n"
         "\t-rc-max-rate :           (optional) Maximum encoding bit rate, used in conjuction with rc-buffer-size\n"
+        "\t-tier :                  (optional) Encoding tier for libx265, can be \"main\" or \"high\".\n"
         "\t-rotate :                (optional) Rotate the input video. Default is 0 with no rotation, other values 90, 180, 270.\n"
         "\t-sample-rate :           (optional) Default: -1. For aac output sample rate is set to input sample rate and this parameter is ignored.\n"
         "\t-seekable :              (optional) Seekable stream. Default is 0, must be 0 or 1\n"
@@ -1540,6 +1541,8 @@ main(
                     usage(argv[0], argv[i], EXIT_FAILURE);
                 }
                 if ( n_threads < 1 ) usage(argv[0], argv[i], EXIT_FAILURE);
+            } else if (!strcmp(argv[i], "-tier")) {
+                p.tier = strdup(argv[i+1]);
             } else if (!strcmp(argv[i], "-timecode")) {
                 p.timecode = strdup(argv[i+1]);
             } else {
