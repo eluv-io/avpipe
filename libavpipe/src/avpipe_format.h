@@ -91,6 +91,15 @@ void frame_rescale_time_base(
     AVRational dst_time_base);
 
 int
+pts_unwrap_init(
+    coderctx_t *ctx);
+
+int64_t
+pts_unwrap(
+    pts_unwrapper_t *u,
+    int64_t ts);
+
+int
 copy_stream_side_data(
     AVStream *out_stream,
     const AVStream *in_stream);

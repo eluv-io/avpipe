@@ -16,6 +16,9 @@ if [ ! -d "$REPO_ROOT/media" ]; then
     exit 1
 fi
 
+# C-level tests (Unity - always short)
+make -C libavpipe/test
+
 # First run all the tests that complete in under 5 seconds (total ~2 minutes)
 echo "=== Short tests ==="
 if ! go test -v -short --timeout 30m ./...; then
