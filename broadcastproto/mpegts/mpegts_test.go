@@ -1,6 +1,7 @@
 package mpegts
 
 import (
+	"errors"
 	"io"
 	"testing"
 	"time"
@@ -131,6 +132,36 @@ func TestMpegtsPacketProcessorPcrWrapStat(t *testing.T) {
 	require.EqualValues(t, 1, pp.stats.NumWraps.Load())
 }
 
+func TestMpegtsPacketProcessorStopClosesFinalOutput(t *testing.T) {
+	opener := &recordingSequentialOpener{}
+	pp := newTestMpegtsPacketProcessor(opener)
+
+	pkt := mustTSPacket(t)
+	pp.ProcessDatagram(time.Unix(1000, 0), pkt[:])
+	require.Len(t, opener.writers, 1)
+
+	require.NoError(t, pp.Stop())
+	require.Equal(t, 1, opener.writers[0].closes)
+
+	// Stop is safe to call repeatedly and does not close the output twice.
+	require.NoError(t, pp.Stop())
+	require.Equal(t, 1, opener.writers[0].closes)
+}
+
+func TestMpegtsPacketProcessorStopReturnsFinalOutputCloseError(t *testing.T) {
+	closeErr := errors.New("close failed")
+	opener := &recordingSequentialOpener{closeErr: closeErr}
+	pp := newTestMpegtsPacketProcessor(opener)
+
+	pkt := mustTSPacket(t)
+	pp.ProcessDatagram(time.Unix(1000, 0), pkt[:])
+
+	require.ErrorIs(t, pp.Stop(), closeErr)
+	// The original close result remains available without retrying Close.
+	require.ErrorIs(t, pp.Stop(), closeErr)
+	require.Equal(t, 1, opener.writers[0].closes)
+}
+
 func newTestMpegtsPacketProcessor(opener SequentialOpener) *MpegtsPacketProcessor {
 	return NewMpegtsPacketProcessor(
 		TsConfig{
@@ -162,12 +193,16 @@ func mustTSPacketWithPCR(t *testing.T, pid int, pcr uint64) packet.Packet {
 }
 
 type recordingSequentialOpener struct {
-	opens int
+	opens    int
+	closeErr error
+	writers  []*recordingWriteCloser
 }
 
 func (o *recordingSequentialOpener) OpenNext() (io.WriteCloser, error) {
 	o.opens++
-	return &recordingWriteCloser{}, nil
+	writer := &recordingWriteCloser{closeErr: o.closeErr}
+	o.writers = append(o.writers, writer)
+	return writer, nil
 }
 
 func (o *recordingSequentialOpener) Stat(_ any) error {
@@ -178,12 +213,16 @@ func (o *recordingSequentialOpener) ReportStart() error {
 	return nil
 }
 
-type recordingWriteCloser struct{}
+type recordingWriteCloser struct {
+	closes   int
+	closeErr error
+}
 
 func (w *recordingWriteCloser) Write(p []byte) (int, error) {
 	return len(p), nil
 }
 
 func (w *recordingWriteCloser) Close() error {
-	return nil
+	w.closes++
+	return w.closeErr
 }

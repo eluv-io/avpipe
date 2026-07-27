@@ -43,6 +43,9 @@ type BypassProcessor struct {
 	netReader *NetReader
 	running   atomic.Bool
 	waitGroup sync.WaitGroup
+
+	statusMu       sync.Mutex
+	outputCloseErr error
 }
 
 func (bp *BypassProcessor) XcParams() *goavpipe.XcParams {
@@ -52,9 +55,25 @@ func (bp *BypassProcessor) XcParams() *goavpipe.XcParams {
 func (bp *BypassProcessor) Status() (running bool, err error) {
 	netReader := bp.netReader
 	if netReader != nil {
-		return netReader.Status()
+		running, err = netReader.Status()
 	}
-	return false, nil
+
+	bp.statusMu.Lock()
+	outputCloseErr := bp.outputCloseErr
+	bp.statusMu.Unlock()
+
+	if outputCloseErr == nil {
+		return running, err
+	}
+	if err == nil {
+		return false, outputCloseErr
+	}
+	return running, errors.E(
+		"BypassProcessor.Status",
+		errors.K.IO.Default(),
+		err,
+		"output_close_error", outputCloseErr,
+	)
 }
 
 func (bp *BypassProcessor) Start(fd int64) error {
@@ -93,7 +112,11 @@ func (bp *BypassProcessor) Start(fd int64) error {
 	go func() {
 		defer bp.waitGroup.Done()
 		goavpipe.Log.Debug("bypass processor copy loop initiated")
-		mpegTsConsumer.ReaderLoop()
+		if err := mpegTsConsumer.ReaderLoop(); err != nil {
+			bp.statusMu.Lock()
+			bp.outputCloseErr = err
+			bp.statusMu.Unlock()
+		}
 		goavpipe.Log.Debug("bypass processor copy loop terminated")
 	}()
 

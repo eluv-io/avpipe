@@ -133,6 +133,7 @@ func AVPipeOpenInputGo(url string) (fd, size int64) {
 
 	input, err := urlInputOpener.Open(fd, url)
 	if err != nil {
+		goavpipe.Globals.DeleteCIOHandlerAndOutputOpeners(fd)
 		goavpipe.Log.Debug("AVPipeOpenInput()", err, "url", url)
 		return -1, 0
 	}
@@ -1332,7 +1333,7 @@ func XcInit(params *goavpipe.XcParams) (int32, error) {
 
 // XcRun starts the transcode job previously initialized by XcInit and blocks
 // until it completes or is cancelled via XcCancel.
-func XcRun(handle int32) error {
+func XcRun(handle int32) (runErr error) {
 	defer goavpipe.XCEnded()
 
 	if handle < -1 {
@@ -1347,12 +1348,33 @@ func XcRun(handle int32) error {
 		if fd < 0 {
 			return EAV_OPEN_INPUT
 		}
+		defer func() {
+			if rc := AVPipeCloseInput(C.int64_t(fd)); rc != 0 {
+				closeErr := errors.E(
+					"XcRun",
+					errors.K.IO.Default(),
+					"reason", "failed to close raw-only input",
+					"fd", fd,
+				)
+				if runErr == nil {
+					runErr = closeErr
+				} else {
+					runErr = errors.E(
+						"XcRun",
+						errors.K.IO.Default(),
+						runErr,
+						"close_input_error", closeErr,
+					)
+				}
+			}
+		}()
 		err := processor.Start(fd)
 		if err != nil {
 			return err
 		}
 		processor.Wait()
-		return nil
+		_, err = processor.Status()
+		return err
 	}
 
 	defer unregisterMvhevcRestoreHandle(handle)
