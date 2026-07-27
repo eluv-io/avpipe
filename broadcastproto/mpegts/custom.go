@@ -106,7 +106,9 @@ func (c *customInputOpener) Open(fd int64, url string) (goavpipe.InputHandler, e
 				defer goavpipe.DissociateGIDFromHandle()
 			}
 			goavpipe.Log.Debug("MPEGTS copy loop initiated")
-			handler.mpegTsConsumer.ReaderLoop()
+			if err := handler.mpegTsConsumer.ReaderLoop(); err != nil {
+				goavpipe.Log.Error("failed to close final MPEGTS copy output", err)
+			}
 			goavpipe.Log.Debug("MPEGTS copy loop terminated")
 		}()
 	} else {
@@ -211,12 +213,14 @@ func (f *MpegTsConsumer) Chan() chan<- *pktpool.Packet {
 	return f.pktChan
 }
 
-func (f *MpegTsConsumer) ReaderLoop() {
+func (f *MpegTsConsumer) ReaderLoop() (err error) {
 	f.pp.RegisterPacketsDropped(&f.packetsDropped)
 
 	nPackets := 0
 	f.pp.StartReportingStats()
-	defer f.pp.Stop()
+	defer func() {
+		err = f.pp.Stop()
+	}()
 	for pkt := range f.pktChan {
 		if nPackets == 0 {
 			if f.onFirstPacket != nil {
@@ -238,4 +242,5 @@ func (f *MpegTsConsumer) ReaderLoop() {
 		f.pp.ProcessDatagram(pkt.ReceivedAt, pkt.Data)
 		pkt.Release()
 	}
+	return nil
 }

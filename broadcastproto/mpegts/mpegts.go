@@ -56,6 +56,8 @@ type MpegtsPacketProcessor struct {
 	pcrPid        int           // PID we track PCRs from; pinned to the first PCR-bearing PID (-1 = not set)
 	outBuf        []byte        // Preallocated byte buffer
 	closeCh       chan struct{}
+	stopOnce      sync.Once
+	stopErr       error
 
 	startLogged bool // ensure logging TS processing route once
 }
@@ -80,8 +82,8 @@ func NewMpegtsPacketProcessor(cfg TsConfig, seqOpener SequentialOpener, inFd int
 		rtpStats:         rtpStats,
 		periodicStatsLog: timeutil.NewPeriodic(30 * time.Second),
 		// Max datagram size plus room for the TLV header and (for ATS-TS) the arrival timestamp prefix.
-		outBuf: make([]byte, 64*1024+tlv.TLV_HEADER_LEN+tlv.AtsTimestampLen),
-		closeCh:          make(chan struct{}),
+		outBuf:  make([]byte, 64*1024+tlv.TLV_HEADER_LEN+tlv.AtsTimestampLen),
+		closeCh: make(chan struct{}),
 	}
 }
 
@@ -274,11 +276,18 @@ func (mpp *MpegtsPacketProcessor) ReportStart() {
 	_ = mpp.opener.ReportStart()
 }
 
-func (mpp *MpegtsPacketProcessor) Stop() {
-	if mpp.closeCh != nil {
+func (mpp *MpegtsPacketProcessor) Stop() error {
+	mpp.stopOnce.Do(func() {
 		close(mpp.closeCh)
-		mpp.closeCh = nil
-	}
+		if mpp.currentWc != nil {
+			mpp.stopErr = mpp.currentWc.Close()
+			if mpp.stopErr != nil {
+				mpegtslog.Error("failed to close final MPEGTS output", "err", mpp.stopErr)
+			}
+			mpp.currentWc = nil
+		}
+	})
+	return mpp.stopErr
 }
 
 func (mpp *MpegtsPacketProcessor) RegisterPacketsDropped(packetsDropped *atomic.Uint64) {
