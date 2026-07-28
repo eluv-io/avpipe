@@ -492,10 +492,14 @@ func AVPipeWriteOutput(handler C.int64_t, fd C.int64_t, buf *C.uint8_t, sz C.int
 	gobuf := make([]byte, sz)
 	C.memcpy(unsafe.Pointer(&gobuf[0]), unsafe.Pointer(buf), C.size_t(sz))
 
-	return C.int(AVPipeWriteOutputGo(int64(handler), int64(fd), gobuf))
+	return C.int(AVPipeWriteOutputGo(int64(handler), int64(fd), gobuf, true))
 }
 
-func AVPipeWriteOutputGo(handler int64, fd int64, buf []byte) int {
+// AVPipeWriteOutputGo writes the given buffer to the goavpipe.OutputHandler
+// pointed to by fd in the table of handler.
+// The allowTake parameter when true commits the caller to no modification of
+// the buffer thus allowing the callee to take ownership of the buffer.
+func AVPipeWriteOutputGo(handler int64, fd int64, buf []byte, allowTake bool) int {
 	if len(buf) == 0 {
 		return 0
 	}
@@ -516,7 +520,7 @@ func AVPipeWriteOutputGo(handler int64, fd int64, buf []byte) int {
 		return -1
 	}
 
-	n, err := h.OutWriter(C.int64_t(fd), buf)
+	n, err := h.OutWriter(C.int64_t(fd), buf, allowTake)
 	if err != nil {
 		return -1
 	}
@@ -543,9 +547,33 @@ func AVPipeWriteMuxOutput(fd C.int64_t, buf *C.uint8_t, sz C.int) C.int {
 	return C.int(n)
 }
 
-func (h *ioHandler) OutWriter(fd C.int64_t, buf []byte) (int, error) {
+func (h *ioHandler) OutWriter(fd C.int64_t, buf []byte, canTake bool) (int, error) {
+	// Taker is an optional interface of OutputHandler where 'buf' is taken by
+	// the receiver which then assumes the ownership of that buffer (as opposed
+	// to the io.Writer where the caller keeps the ownership of the buffer).
+	// NOTE:
+	// * after calling 'Take' the caller must not modify the passed in buffer.
+	// * the Taker interface is defined and used in avcache-go/cache for page segments
+	type Taker interface {
+		Take(b []byte) error
+	}
+
 	outHandler := h.getOutTable(int64(fd))
-	n, err := outHandler.Write(buf)
+
+	var taker Taker
+	if canTake {
+		taker, _ = outHandler.(Taker)
+	}
+
+	var n int
+	var err error
+	if taker != nil {
+		n = len(buf)
+		err = taker.Take(buf)
+	} else {
+		n, err = outHandler.Write(buf)
+	}
+
 	if traceIo {
 		goavpipe.Log.Debug("OutWriter written", "n", n, "error", err)
 	}
@@ -1031,7 +1059,7 @@ func GetProfileName(codecId int, profile int) string {
 	return ""
 }
 
-// Probe runs the C libavformat probe and optionally enhances the output with mp4 specific condec info
+// Probe runs the C libavformat probe and optionally enhances the output with mp4 specific codec info
 // PENDING(SS) Should move this function to avpipe_probe.go
 func Probe(params *goavpipe.XcParams) (*goavpipe.ProbeInfo, error) {
 	const op = "avpipe.Probe"
@@ -1054,8 +1082,15 @@ func Probe(params *goavpipe.XcParams) (*goavpipe.ProbeInfo, error) {
 	// extractCodecInfoForProbe would fail to re-open. The handle is kept open so that C.probe can
 	// open the same resource concurrently; it is closed via defer when Probe returns.
 	//
-	// Non-MP4 inputs fail here gracefully. Unfortunately, the container format is unknown until
-	// probing, so we cannot skip this step altogether.
+	// This sequence is designed to work in the Content Fabric context:
+	// - we have one req context per URL and one part reader
+	// - we create two 'input contexts' pointing to the same reader
+	//
+	// In order to make this work we implement this sequence:
+	// - open the handler for the MP4 extraction first (don't close)
+	// - seek back to 0
+	// - invoke the C.Probe which opens its own handle then closes its own handle via callbacks
+	// - finally close the MP4 extraction handle
 	var codecInfos []*mp4e.CodecInfo
 	if params.Seekable {
 		inputOpener := goavpipe.GetInputOpener(params.Url)
@@ -1199,6 +1234,7 @@ func Probe(params *goavpipe.XcParams) (*goavpipe.ProbeInfo, error) {
 
 	probeInfo.Format.FormatName = C.GoString((*C.char)(unsafe.Pointer(cprobe.container_info.format_name)))
 	probeInfo.Format.Duration = float64(cprobe.container_info.duration)
+
 	if codecInfos != nil {
 		enhanceStreamInfo(probeInfo.Streams, codecInfos)
 	}
