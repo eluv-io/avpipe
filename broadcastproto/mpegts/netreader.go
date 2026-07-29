@@ -19,6 +19,11 @@ import (
 
 var logNetReader = elog.Get("avpipe/broadcastproto/netreader")
 
+// errNetReaderCleanStop is the sentinel cancellation cause used for a clean stop (no error). It exists because
+// context.WithCancelCause records context.Canceled as the cause when its CancelCauseFunc is invoked with a nil cause,
+// so Status() could not otherwise distinguish "stopped, no error" from an explicit Cancel() or a real failure.
+var errNetReaderCleanStop = errors.Str("NetReader: clean stop")
+
 // Consumer is a consumer of packets from the NetReader. See pktpool.Packet for correct handling of packets.
 type Consumer interface {
 	// Name returns the name of this consumer
@@ -80,8 +85,14 @@ type NetReader struct {
 }
 
 func (r *NetReader) Status() (running bool, err error) {
-	err = context.Cause(r.ctx)
-	return err == nil, err
+	cause := context.Cause(r.ctx)
+	if cause == nil {
+		return true, nil
+	}
+	if errors.Is(cause, errNetReaderCleanStop) {
+		return false, nil
+	}
+	return false, cause
 }
 
 func (r *NetReader) start() error {
@@ -109,7 +120,11 @@ func (r *NetReader) start() error {
 			}
 			r.cancel(e.IfNotNil(err))
 		} else {
-			r.cancel(nil)
+			// Unreachable today: isRecoverable() always returns true, so readLoop/process only ever return via a
+			// real error or an explicit Cancel(); process() cannot currently return nil. Handled anyway so a future
+			// change to isRecoverable (e.g. treating some read errors as terminal) reports a clean stop correctly
+			// via errNetReaderCleanStop instead of the ambiguous context.Canceled that cancel(nil) would record.
+			r.cancel(errNetReaderCleanStop)
 		}
 	}()
 
@@ -117,7 +132,8 @@ func (r *NetReader) start() error {
 }
 
 func (r *NetReader) Cancel() {
-	r.cancel(errors.E("NetReader.Cancel", errors.K.Warn, "reason", "canceled by user request"))
+	cancelErr := errors.E("NetReader.Cancel", errors.K.Warn, "reason", "canceled by user request")
+	r.cancel(cancelErr)
 	reader := r.reader.Swap(nil)
 	if reader != nil {
 		errors.Log((*reader).Close, logNetReader.Info)
