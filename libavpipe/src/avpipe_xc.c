@@ -313,6 +313,12 @@ prepare_decoder(
 
     /* Retrieve stream information */
     if (avformat_find_stream_info(decoder_context->format_context,  NULL) < 0) {
+        /* The interrupt callback (decode_interrupt_cb) can abort this call the same way it aborts
+         * avformat_open_input() above. Check the cancellation flag directly instead of the ffmpeg return code,
+         * since avformat_find_stream_info() isn't guaranteed to propagate AVERROR_EXIT verbatim through all of
+         * its internal probing paths. */
+        if (decoder_context->cancelled)
+            return eav_cancelled;
         elv_err("Could not get input stream info, url=%s", url);
         return eav_stream_info;
     }
@@ -361,7 +367,13 @@ prepare_decoder(
                  * integration test that tests live restarts. In that case, it's been observed that
                  * retrying the probe entirely fixes the issue.
                  *
-                 * See libavformat/utils.c:has_codec_parameters for the checks in ffmpeg internals. */
+                 * See libavformat/utils.c:has_codec_parameters for the checks in ffmpeg internals.
+                 *
+                 * A cancellation requested while the probe was still in progress (too little time for a real
+                 * frame to arrive) is a common cause of this, so report it as such rather than as a stream-info
+                 * failure. */
+                if (decoder_context->cancelled)
+                    return eav_cancelled;
                 elv_err("avformat_find_stream_info failed to get input stream info");
                 return eav_stream_info;
             }

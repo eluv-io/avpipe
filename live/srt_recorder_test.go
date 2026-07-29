@@ -187,9 +187,16 @@ func TestSrtToMp4WithCancelling0(t *testing.T) {
 
 	<-done
 
-	// The following hangs in XcRun() / C.xc_run()... Needs to be fixed there - out-of-scope of current change.
-	// err = runAndFiniXc(handle)
-	// assert.Equal(t, avpipe.EAV_CANCELLED, err)
+	// The XcCancel above races with XcInit in the goroutine, so it very likely lands on the zero-value handle
+	// before the real one is assigned. xc_table_cancel() silently succeeds when a handle isn't registered yet, so
+	// that call reports success without actually cancelling anything. Without the real handle cancelled before
+	// XcRun, and with no live source ever started in this test and no ConnectionTimeout set, XcRun would block
+	// indefinitely in xc_run()'s SRT listen loop. Cancel the real, now-valid handle before running it.
+	err = avpipe.XcCancel(handle)
+	assert.NoError(t, err)
+
+	err = runAndFiniXc(handle)
+	assert.Equal(t, avpipe.EAV_CANCELLED, err)
 }
 
 // Cancels the SRT live stream transcoding immediately after initializing the transcoding (after XcInit).
