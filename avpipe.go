@@ -67,6 +67,7 @@ func init() {
 	goavpipe.SetXcInitFn(XcInit)
 	goavpipe.SetXcRunFn(XcRun)
 	goavpipe.SetXcCancelFn(XcCancel)
+	goavpipe.SetXcFiniFn(XcFini)
 }
 
 const traceIo bool = false
@@ -1257,17 +1258,42 @@ type cancelableInputOpener interface {
 // BypassLibavReader is set, removed when XcRun completes.
 var cancelableInputOpeners sync.Map // int32 handle -> cancelableInputOpener
 
+// xcJob represents the state of an avpipe 'xc' job
+// PENDING(SS) - currently only URL mapping but planning to consolidate all job state here
+type xcJob struct {
+	url string
+}
+
+var (
+	xcJobsMu sync.Mutex
+	xcJobs   = make(map[int32]*xcJob)
+)
+
+func putXCJob(handle int32, job *xcJob) {
+	xcJobsMu.Lock()
+	xcJobs[handle] = job
+	xcJobsMu.Unlock()
+}
+
+func takeXCJob(handle int32) (*xcJob, bool) {
+	xcJobsMu.Lock()
+	defer xcJobsMu.Unlock()
+
+	job, ok := xcJobs[handle]
+	if ok {
+		delete(xcJobs, handle)
+	}
+	return job, ok
+}
+
 // XcInit initializes a transcode job and returns a handle for it. The actual
 // transcoding is started by XcRun(handle) and can be interrupted at any time
-// via XcCancel(handle). Use this two-phase form instead of Xc when the caller
+// via XcCancel(handle). Every successful XcInit must be paired with XcFini
+// after XcRun returns. Use this two-phase form instead of Xc when the caller
 // needs cancellation support (e.g. mezzanine creation driven by an LRO).
 // Also sets up the MPEGTS sequential opener for live-stream inputs when
 // params.UseCustomLiveReader is set.
-//
-// If UseCustomLiveReader is set, the caller is responsible for calling
-// goavpipe.Globals.RemoveURLHandlers(params.Url) after XcRun returns,
-// including on error paths where XcInit itself returns an error.
-func XcInit(params *goavpipe.XcParams) (int32, error) {
+func XcInit(params *goavpipe.XcParams) (handle int32, retErr error) {
 	const op = "avpipe.XcInit"
 
 	if params == nil {
@@ -1275,6 +1301,14 @@ func XcInit(params *goavpipe.XcParams) (int32, error) {
 		return -1, EAV_PARAM
 	}
 	goavpipe.Log.Debug(op, "XcParams", params)
+
+	job := &xcJob{url: params.Url}
+	defer func() {
+		if retErr != nil {
+			// Failures don't return a handle so XcFini cannot be called
+			goavpipe.Globals.RemoveURLHandlers(job.url)
+		}
+	}()
 
 	seqOpenerF := func(inFd int64) mpegts.SequentialOpener {
 		// We use 99 as the streamID for mpegts output to avoid collisions with other streams
@@ -1290,7 +1324,8 @@ func XcInit(params *goavpipe.XcParams) (int32, error) {
 		if err != nil {
 			return -1, errors.E("XcInit", errors.K.Invalid.Default(), err)
 		}
-		handle := goavpipe.Globals.InitBypassProcessor(bypassProcessor)
+		handle = goavpipe.Globals.InitBypassProcessor(bypassProcessor)
+		putXCJob(handle, job)
 		return handle, nil
 	}
 
@@ -1311,24 +1346,26 @@ func XcInit(params *goavpipe.XcParams) (int32, error) {
 		return -1, EAV_PARAM
 	}
 
-	var handle C.int32_t
-	rc := C.xc_init((*C.xcparams_t)(unsafe.Pointer(cparams)), (*C.int32_t)(unsafe.Pointer(&handle)))
+	var cHandle C.int32_t
+	rc := C.xc_init((*C.xcparams_t)(unsafe.Pointer(cparams)), (*C.int32_t)(unsafe.Pointer(&cHandle)))
 	err = avpipeError(rc)
 	if err != nil {
 		goavpipe.Log.Error(op, "reason", "xc_init failed", "rc", rc, "XcParams", params)
 		return -1, err
 	}
+	handle = int32(cHandle)
 
 	// Track the input opener by handle so XcCancel can unblock its Go read loop (see cancelableInputOpener).
 	if c, ok := bypassOpener.(cancelableInputOpener); ok {
-		cancelableInputOpeners.Store(int32(handle), c)
+		cancelableInputOpeners.Store(handle, c)
 	}
 
 	if isMvhevcLayout(params) {
-		registerMvhevcRestoreHandle(int32(handle), params.Url)
+		registerMvhevcRestoreHandle(handle, params.Url)
 	}
 
-	return int32(handle), nil
+	putXCJob(handle, job)
+	return handle, nil
 }
 
 // XcRun starts the transcode job previously initialized by XcInit and blocks
@@ -1389,6 +1426,19 @@ func XcRun(handle int32) (runErr error) {
 	}
 
 	return avpipeError(rc)
+}
+
+// XcFini releases job state for jobs created with XcInit
+// It must be called exactly once after XcRun returns, regardless of whether
+// XcRun succeeded, failed, or was cancelled.
+func XcFini(handle int32) error {
+	job, ok := takeXCJob(handle)
+	if !ok {
+		return EAV_BAD_HANDLE
+	}
+
+	goavpipe.Globals.RemoveURLHandlers(job.url)
+	return nil
 }
 
 // XcCancel interrupts a transcode job started with XcInit + XcRun.

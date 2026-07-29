@@ -186,6 +186,8 @@ func TestSrtToMp4WithCancelling0(t *testing.T) {
 	}
 
 	<-done
+	err = runAndFiniXc(handle)
+	assert.Equal(t, avpipe.EAV_CANCELLED, err)
 }
 
 // Cancels the SRT live stream transcoding immediately after initializing the transcoding (after XcInit).
@@ -250,6 +252,8 @@ func TestSrtToMp4WithCancelling1(t *testing.T) {
 	} else {
 		tlog.Info("Cancelling SRT stream completed", "err", err, "url", url)
 	}
+	err = runAndFiniXc(handle)
+	assert.Equal(t, avpipe.EAV_CANCELLED, err)
 }
 
 // Cancels the SRT live stream transcoding immediately after starting the transcoding (1 sec after XcRun).
@@ -303,7 +307,7 @@ func TestSrtToMp4WithCancelling2(t *testing.T) {
 			done <- true
 			return
 		}
-		err = avpipe.XcRun(handle)
+		err = runAndFiniXc(handle)
 		if err != nil && err != avpipe.EAV_CANCELLED {
 			t.Error("Transcoding SRT stream failed", "err", err)
 		}
@@ -387,7 +391,7 @@ func TestSrtToMp4WithCancelling3(t *testing.T) {
 	<-done
 
 	go func() {
-		err := avpipe.XcRun(handle)
+		err := runAndFiniXc(handle)
 		if err != nil && err != avpipe.EAV_CANCELLED {
 			t.Error("Transcoding SRT stream failed", "err", err)
 		}
@@ -463,7 +467,7 @@ func TestSrtToMp4WithCancelling4(t *testing.T) {
 	<-done
 
 	go func() {
-		err := avpipe.XcRun(handle)
+		err := runAndFiniXc(handle)
 		if err != nil && err != avpipe.EAV_CANCELLED && err != avpipe.EAV_OPEN_INPUT {
 			t.Error("Transcoding SRT stream failed", "err", err)
 		}

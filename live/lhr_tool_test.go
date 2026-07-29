@@ -685,6 +685,19 @@ func failNowOnError(t *testing.T, err error) {
 	}
 }
 
+// runAndFiniXc is a one-shot invocation of both XcRun and XcFini
+func runAndFiniXc(handle int32) error {
+	runErr := avpipe.XcRun(handle)
+	finiErr := avpipe.XcFini(handle)
+	if runErr == nil {
+		return finiErr
+	}
+	if finiErr == nil {
+		return runErr
+	}
+	return errors.E("run and finalize transcode", runErr, "fini_error", finiErr)
+}
+
 func removeDirContents(dir string) error {
 	d, err := os.Open(dir)
 	if err != nil {
