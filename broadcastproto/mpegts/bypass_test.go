@@ -5,13 +5,15 @@ import (
 	"errors"
 	"testing"
 
-	elverrors "github.com/eluv-io/errors-go"
 	"github.com/stretchr/testify/require"
+
+	elverrors "github.com/eluv-io/errors-go"
 )
 
 func TestBypassProcessorStatusReturnsOutputCloseError(t *testing.T) {
 	closeErr := errors.New("output close failed")
-	bp := &BypassProcessor{outputCloseErr: closeErr}
+	bp := &BypassProcessor{}
+	bp.outputCloseErr.Store(&errWrapper{err: closeErr})
 
 	running, err := bp.Status()
 	require.False(t, running)
@@ -25,14 +27,12 @@ func TestBypassProcessorStatusPreservesReaderAndOutputCloseErrors(t *testing.T) 
 	cancel(readErr)
 
 	bp := &BypassProcessor{
-		netReader:      &NetReader{ctx: ctx},
-		outputCloseErr: closeErr,
+		netReader: &NetReader{ctx: ctx},
 	}
+	bp.outputCloseErr.Store(&errWrapper{err: closeErr})
 
 	running, err := bp.Status()
 	require.False(t, running)
-	require.ErrorIs(t, err, readErr)
-	closeErrField, ok := elverrors.GetField(err, "output_close_error")
-	require.True(t, ok)
-	require.Equal(t, closeErr.Error(), closeErrField)
+	require.ErrorIs(t, err.(*elverrors.ErrorList).Errors[0], readErr)
+	require.ErrorIs(t, err.(*elverrors.ErrorList).Errors[1], closeErr)
 }

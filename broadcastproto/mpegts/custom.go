@@ -219,7 +219,7 @@ func (f *MpegTsConsumer) ReaderLoop() (err error) {
 	nPackets := 0
 	f.pp.StartReportingStats()
 	defer func() {
-		err = f.pp.Stop()
+		err = errors.Append(err, f.pp.Stop())
 	}()
 	for pkt := range f.pktChan {
 		if nPackets == 0 {

@@ -44,8 +44,7 @@ type BypassProcessor struct {
 	running   atomic.Bool
 	waitGroup sync.WaitGroup
 
-	statusMu       sync.Mutex
-	outputCloseErr error
+	outputCloseErr atomic.Pointer[errWrapper]
 }
 
 func (bp *BypassProcessor) XcParams() *goavpipe.XcParams {
@@ -58,22 +57,10 @@ func (bp *BypassProcessor) Status() (running bool, err error) {
 		running, err = netReader.Status()
 	}
 
-	bp.statusMu.Lock()
-	outputCloseErr := bp.outputCloseErr
-	bp.statusMu.Unlock()
-
-	if outputCloseErr == nil {
-		return running, err
+	if val := bp.outputCloseErr.Load(); val != nil {
+		return false, errors.Append(err, val.err)
 	}
-	if err == nil {
-		return false, outputCloseErr
-	}
-	return running, errors.E(
-		"BypassProcessor.Status",
-		errors.K.IO.Default(),
-		err,
-		"output_close_error", outputCloseErr,
-	)
+	return running, err
 }
 
 func (bp *BypassProcessor) Start(fd int64) error {
@@ -113,9 +100,7 @@ func (bp *BypassProcessor) Start(fd int64) error {
 		defer bp.waitGroup.Done()
 		goavpipe.Log.Debug("bypass processor copy loop initiated")
 		if err := mpegTsConsumer.ReaderLoop(); err != nil {
-			bp.statusMu.Lock()
-			bp.outputCloseErr = err
-			bp.statusMu.Unlock()
+			bp.outputCloseErr.Store(&errWrapper{err: err})
 		}
 		goavpipe.Log.Debug("bypass processor copy loop terminated")
 	}()
@@ -143,4 +128,9 @@ func (bp *BypassProcessor) Wait() {
 		bp.netReader.waitGroup.Wait()
 	}
 	bp.waitGroup.Wait()
+}
+
+// errWrapper is a simple wrapper for an error to allow storing it in an atomic.Pointer.
+type errWrapper struct {
+	err error
 }

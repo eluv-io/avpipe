@@ -19,11 +19,12 @@ import (
 	"testing"
 	"time"
 
+	"github.com/stretchr/testify/assert"
+
 	"github.com/eluv-io/avpipe"
 	"github.com/eluv-io/avpipe/goavpipe"
 	"github.com/eluv-io/errors-go"
 	elog "github.com/eluv-io/log-go"
-	"github.com/stretchr/testify/assert"
 )
 
 // Test Streams
@@ -145,7 +146,7 @@ func DisabledTestHLSVideoOnly(t *testing.T) {
 	if err != nil {
 		t.Error(err)
 	}
-	readers, err := NewHLSReaders(manifestURL, goavpipe.XcVideo) //readers, err := NewHLSReaders(manifestURL, STVideoOnly)
+	readers, err := NewHLSReaders(manifestURL, goavpipe.XcVideo) // readers, err := NewHLSReaders(manifestURL, STVideoOnly)
 	if err != nil {
 		t.Error(err)
 	}
@@ -578,7 +579,7 @@ func (o *outputCtx) Write(buf []byte) (int, error) {
 
 func (o *outputCtx) Seek(offset int64, whence int) (int64, error) {
 	tlog.Debug("OUT_SEEK", "url", o.tc.url)
-	//return o.file.Seek(offset, whence)
+	// return o.file.Seek(offset, whence)
 	return -1, fmt.Errorf("OUT_SEEK url=%s", o.tc.url)
 }
 
@@ -689,13 +690,7 @@ func failNowOnError(t *testing.T, err error) {
 func runAndFiniXc(handle int32) error {
 	runErr := avpipe.XcRun(handle)
 	finiErr := avpipe.XcFini(handle)
-	if runErr == nil {
-		return finiErr
-	}
-	if finiErr == nil {
-		return runErr
-	}
-	return errors.E("run and finalize transcode", runErr, "fini_error", finiErr)
+	return errors.Append(runErr, finiErr)
 }
 
 func removeDirContents(dir string) error {

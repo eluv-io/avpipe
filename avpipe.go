@@ -1393,16 +1393,7 @@ func XcRun(handle int32) (runErr error) {
 					"reason", "failed to close raw-only input",
 					"fd", fd,
 				)
-				if runErr == nil {
-					runErr = closeErr
-				} else {
-					runErr = errors.E(
-						"XcRun",
-						errors.K.IO.Default(),
-						runErr,
-						"close_input_error", closeErr,
-					)
-				}
+				runErr = errors.Append(runErr, closeErr)
 			}
 		}()
 		err := processor.Start(fd)
