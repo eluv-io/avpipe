@@ -274,7 +274,7 @@ func (mih *mpegtsInputHandler) ReaderLoop(ch chan []byte, packetsDropped *atomic
 
 	nPackets := 0
 	ts.StartReportingStats()
-	defer ts.Stop()
+	defer errors.Log(ts.Stop, goavpipe.Log.Error)
 	for buf := range ch {
 		nPackets++
 

@@ -133,8 +133,14 @@ func TestRtmpToMp4_1(t *testing.T) {
 	testComplete <- true
 }
 
-// Cancels the RTMP live stream transcoding, with no source, immediately after initializing the transcoding (after XcInit).
-// This test was hanging with avpipe release-1.15 and before (this is fixed in release-1.16).
+// Verifies that XcInit() returns promptly for an RTMP listener with no source ever connecting, then cancels and
+// runs the job to completion.
+//
+// XcInit used to do the actual input-open-and-probe work synchronously, so with no source ever connecting it would
+// block forever inside avformat_open_input()'s accept - this was the release-1.15-and-earlier hang fixed by "Make
+// avpipe_init() nonblocking" (#50). XcInit is run in a goroutine and awaited via a select with a timeout, rather
+// than a plain <-done, so a regression back to blocking behavior fails this test promptly with a clear message
+// instead of relying on the surrounding `go test` suite-level timeout to eventually kill it.
 func TestRtmpToMp4WithCancelling0(t *testing.T) {
 	setupLogging()
 	outputDir := path.Join(baseOutPath, fn())
@@ -177,16 +183,25 @@ func TestRtmpToMp4WithCancelling0(t *testing.T) {
 
 	var handle int32
 	var err error
+	initDone := make(chan bool, 1)
 	go func() {
 		tlog.Info("Transcoding RTMP stream start", "params", fmt.Sprintf("%+v", *xcParams))
 		handle, err = avpipe.XcInit(xcParams)
 		if err != nil {
 			t.Error("XcInit initializing RTMP stream failed", "err", err)
 		}
+		initDone <- true
+	}()
 
-		err = avpipe.XcRun(handle)
-		assert.Equal(t, err, avpipe.EAV_CANCELLED)
+	select {
+	case <-initDone:
+	case <-time.After(10 * time.Second):
+		t.Fatal("XcInit did not return in time - possible regression to blocking behavior with no live source")
+	}
 
+	go func() {
+		err := runAndFiniXc(handle)
+		assert.Equal(t, avpipe.EAV_CANCELLED, err)
 		done <- true
 	}()
 
@@ -212,7 +227,6 @@ func TestRtmpToMp4WithCancelling1(t *testing.T) {
 
 	log.Info("STARTING " + outputDir)
 
-	done := make(chan bool, 1)
 	liveSource := NewLiveSource()
 	url := fmt.Sprintf(RTMP_SOURCE, liveSource.Port)
 
@@ -245,24 +259,16 @@ func TestRtmpToMp4WithCancelling1(t *testing.T) {
 
 	goavpipe.InitIOHandler(&inputOpener{dir: outputDir}, &outputOpener{dir: outputDir})
 
-	var handle int32
-	var err error
-	go func() {
-		tlog.Info("Transcoding RTMP stream start", "params", fmt.Sprintf("%+v", *xcParams))
-		handle, err = avpipe.XcInit(xcParams)
-		if err != nil {
-			t.Error("XcInit initializing RTMP stream failed", "err", err)
-		}
-
-		done <- true
-	}()
+	tlog.Info("Transcoding RTMP stream start", "params", fmt.Sprintf("%+v", *xcParams))
+	handle, err := avpipe.XcInit(xcParams)
+	if err != nil {
+		t.Fatal("XcInit initializing RTMP stream failed", "err", err)
+	}
 
 	err = liveSource.Start("rtmp_connect")
 	if err != nil {
 		t.Error(err)
 	}
-
-	<-done
 
 	err = avpipe.XcCancel(handle)
 	assert.NoError(t, err)
@@ -272,6 +278,8 @@ func TestRtmpToMp4WithCancelling1(t *testing.T) {
 	} else {
 		tlog.Info("Cancelling RTMP stream completed", "err", err, "url", url)
 	}
+	err = runAndFiniXc(handle)
+	assert.Equal(t, avpipe.EAV_CANCELLED, err)
 }
 
 // Cancels the RTMP live stream transcoding immediately after starting the transcoding (1 sec after XcRun).
@@ -315,17 +323,15 @@ func TestRtmpToMp4WithCancelling2(t *testing.T) {
 
 	goavpipe.InitIOHandler(&inputOpener{dir: outputDir}, &outputOpener{dir: outputDir})
 
-	var handle int32
-	var err error
+	tlog.Info("Transcoding RTMP stream start", "params", fmt.Sprintf("%+v", *xcParams))
+	handle, err := avpipe.XcInit(xcParams)
+	if err != nil {
+		t.Fatal("XcInit initializing RTMP stream failed", "err", err)
+	}
+
 	go func() {
-		tlog.Info("Transcoding RTMP stream start", "params", fmt.Sprintf("%+v", *xcParams))
-		handle, err = avpipe.XcInit(xcParams)
-		if err != nil {
-			t.Error("XcInit initializing RTMP stream failed", "err", err)
-		}
-		done <- true
 		tlog.Info("Transcoding RTMP stream XcRun", "handle", handle)
-		err = avpipe.XcRun(handle)
+		err := runAndFiniXc(handle)
 		if err != nil && err != avpipe.EAV_CANCELLED {
 			t.Error("Transcoding RTMP stream failed", "err", err)
 		}
@@ -339,8 +345,6 @@ func TestRtmpToMp4WithCancelling2(t *testing.T) {
 
 	// Wait 1 second for transcoding to start
 	time.Sleep(1 * time.Second)
-
-	<-done
 
 	err = avpipe.XcCancel(handle)
 	assert.NoError(t, err)
@@ -397,28 +401,19 @@ func TestRtmpToMp4WithCancelling3(t *testing.T) {
 
 	goavpipe.InitIOHandler(&inputOpener{dir: outputDir}, &outputOpener{dir: outputDir})
 
-	var handle int32
-	var err error
-	go func() {
-
-		tlog.Info("Transcoding RTMP stream start", "params", fmt.Sprintf("%+v", *xcParams))
-		handle, err = avpipe.XcInit(xcParams)
-		if err != nil {
-			t.Error("XcInit initializing RTMP stream failed", "err", err)
-		}
-
-		done <- true
-	}()
+	tlog.Info("Transcoding RTMP stream start", "params", fmt.Sprintf("%+v", *xcParams))
+	handle, err := avpipe.XcInit(xcParams)
+	if err != nil {
+		t.Fatal("XcInit initializing RTMP stream failed", "err", err)
+	}
 
 	err = liveSource.Start("rtmp_connect")
 	if err != nil {
 		t.Error(err)
 	}
 
-	<-done
-
 	go func() {
-		err := avpipe.XcRun(handle)
+		err := runAndFiniXc(handle)
 		if err != nil && err != avpipe.EAV_CANCELLED {
 			t.Error("Transcoding RTMP stream failed", "err", err)
 		}
@@ -479,28 +474,19 @@ func TestRtmpToMp4WithCancelling4(t *testing.T) {
 
 	goavpipe.InitIOHandler(&inputOpener{dir: outputDir}, &outputOpener{dir: outputDir})
 
-	var handle int32
-	var err error
-	go func() {
-		tlog.Info("Transcoding RTMP stream start", "params", fmt.Sprintf("%+v", *xcParams))
-
-		handle, err = avpipe.XcInit(xcParams)
-		if err != nil {
-			t.Error("XcInitializing RTMP stream failed", "err", err)
-		}
-
-		done <- true
-	}()
+	tlog.Info("Transcoding RTMP stream start", "params", fmt.Sprintf("%+v", *xcParams))
+	handle, err := avpipe.XcInit(xcParams)
+	if err != nil {
+		t.Fatal("XcInitializing RTMP stream failed", "err", err)
+	}
 
 	err = liveSource.Start("rtmp_connect")
 	if err != nil {
 		t.Error(err)
 	}
 
-	<-done
-
 	go func() {
-		err := avpipe.XcRun(handle)
+		err := runAndFiniXc(handle)
 		if err != nil && err != avpipe.EAV_CANCELLED {
 			t.Error("Transcoding RTMP stream failed", "err", err)
 		}

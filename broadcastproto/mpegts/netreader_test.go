@@ -2,6 +2,8 @@ package mpegts
 
 import (
 	"bytes"
+	"context"
+	"errors"
 	"fmt"
 	"io"
 	"sync"
@@ -119,6 +121,41 @@ func TestNetReader_CancelNoInput_Srt(t *testing.T) {
 	}
 
 	ctx.assertStaus(t, false)
+}
+
+// TestNetReader_StatusDistinguishesSuccessFromCancellation is a regression test for Status() reporting every clean
+// stop as canceled: context.WithCancelCause records context.Canceled as the cause even when its CancelCauseFunc is
+// invoked with a nil cause, so deriving Status()'s error straight from context.Cause(ctx) made "stopped, no error"
+// indistinguishable from an explicit Cancel(). cancel(errNetReaderCleanStop) must report a clean stop instead.
+func TestNetReader_StatusDistinguishesSuccessFromCancellation(t *testing.T) {
+	ctx, cancel := context.WithCancelCause(context.Background())
+	r := &NetReader{ctx: ctx}
+
+	running, err := r.Status()
+	require.True(t, running)
+	require.NoError(t, err)
+
+	cancel(errNetReaderCleanStop)
+
+	running, err = r.Status()
+	require.False(t, running)
+	require.NoError(t, err)
+}
+
+// TestNetReader_StatusReportsFirstResultOnly verifies Status() reports the first cancellation cause, mirroring the
+// first-cancel-wins semantics of context.WithCancelCause.
+func TestNetReader_StatusReportsFirstResultOnly(t *testing.T) {
+	ctx, cancel := context.WithCancelCause(context.Background())
+	r := &NetReader{ctx: ctx}
+	firstErr := errors.New("first")
+	secondErr := errors.New("second")
+
+	cancel(firstErr)
+	cancel(secondErr)
+
+	_, err := r.Status()
+	require.ErrorIs(t, err, firstErr)
+	require.NotErrorIs(t, err, secondErr)
 }
 
 func createNetReader(tp transport.Transport) netReaderTestCtx {

@@ -337,6 +337,8 @@ func TestUdpToMp4WithCancelling1(t *testing.T) {
 	} else {
 		tlog.Info("Cancelling UDP stream completed", "err", err, "url", url)
 	}
+	err = runAndFiniXc(handle)
+	assert.Equal(t, avpipe.EAV_CANCELLED, err)
 }
 
 // Cancels the live stream transcoding immediately after starting the transcoding (1 sec after XcRun).
@@ -389,7 +391,7 @@ func TestUdpToMp4WithCancelling2(t *testing.T) {
 		t.Error("XcInitializing UDP stream failed", "err", err)
 	}
 	go func() {
-		err := avpipe.XcRun(handle)
+		err := runAndFiniXc(handle)
 		if err != nil && err != avpipe.EAV_CANCELLED {
 			t.Error("Transcoding UDP stream failed", "err", err)
 		}
@@ -464,7 +466,7 @@ func TestUdpToMp4WithCancelling3(t *testing.T) {
 		t.Error("XcInitializing UDP stream failed", "err", err)
 	}
 	go func() {
-		err := avpipe.XcRun(handle)
+		err := runAndFiniXc(handle)
 		if err != nil && err != avpipe.EAV_CANCELLED {
 			t.Error("Transcoding UDP stream failed", "err", err)
 		}
@@ -536,7 +538,7 @@ func TestUdpToMp4WithCancelling4(t *testing.T) {
 	}
 
 	go func() {
-		err := avpipe.XcRun(handle)
+		err := runAndFiniXc(handle)
 		if err != nil && err != avpipe.EAV_CANCELLED {
 			t.Error("Transcoding UDP stream failed", "err", err)
 		}
