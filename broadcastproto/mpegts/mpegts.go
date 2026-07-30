@@ -223,7 +223,7 @@ func (mpp *MpegtsPacketProcessor) ProcessDatagram(now time.Time, datagram []byte
 	mpp.writeDatagram(now, datagram, badPackets == 0 && hasPadding && StripTsPadding.Load(), mpegtsOffset)
 }
 
-func (mpp *MpegtsPacketProcessor) HandleMpegtsPacket(pkt packet.Packet) error {
+func (mpp *MpegtsPacketProcessor) HandleMpegtsPacket(pkt *packet.Packet) error {
 	mpp.stats.PacketsReceived.Inc()
 	mpp.stats.BytesReceived.Add(uint64(len(pkt)))
 
@@ -313,7 +313,7 @@ func (mpp *MpegtsPacketProcessor) resetChannelSizeStats() {
 	mpp.stats.MinBufInPeriod.Store(maxU64)
 }
 
-func (mpp *MpegtsPacketProcessor) checkContinuityCounter(pkt packet.Packet) {
+func (mpp *MpegtsPacketProcessor) checkContinuityCounter(pkt *packet.Packet) {
 	pid := pkt.PID()
 
 	if !pkt.HasPayload() || pkt.IsNull() {
@@ -338,7 +338,7 @@ func (mpp *MpegtsPacketProcessor) checkContinuityCounter(pkt packet.Packet) {
 	}
 }
 
-func (mpp *MpegtsPacketProcessor) updatePCR(pkt packet.Packet) {
+func (mpp *MpegtsPacketProcessor) updatePCR(pkt *packet.Packet) {
 	if !pkt.HasAdaptationField() {
 		return
 	}
@@ -493,12 +493,11 @@ func (mpp *MpegtsPacketProcessor) openNextOutput(now time.Time) error {
 	return nil
 }
 
-// toTSPacket converts a byte slice to a TS packet.
-// If the byte slice is not exactly 188 bytes, it panics.
-func toTSPacket(data []byte) packet.Packet {
-	// simply perform a type conversion, which does not copy any data, but references the same underlying data. Panics
-	// if the data is not 188 bytes.
-	return packet.Packet(data)
+// toTSPacket returns data as a *packet.Packet: a zero-copy conversion that aliases data's underlying array rather
+// than copying it, so mutations through the result (or to data) are visible through both. The caller must not use
+// the result after data is mutated, reused, or released. Panics if data is not at least 188 bytes.
+func toTSPacket(data []byte) *packet.Packet {
+	return (*packet.Packet)(data)
 }
 
 // RemoveTsPadding removes the padding payload of TS padding packets within the given RTP packet. The removal is
@@ -508,7 +507,7 @@ func RemoveTsPadding(pkt []byte, rtpHdrLen int) (res []byte, stripped, faulty in
 outer:
 	for offset := rtpHdrLen; offset+188 <= len(pkt); offset += 188 {
 		tsPkt := toTSPacket(pkt[offset : offset+188])
-		if tsPkt.CheckErrors() != nil && tsPkt.IsNull() {
+		if tsPkt.IsNull() && tsPkt.CheckErrors() == nil {
 			for i := 4; i < 188; i++ {
 				// make sure the payload is really just padding
 				if pkt[offset+i] != 0xFF {
