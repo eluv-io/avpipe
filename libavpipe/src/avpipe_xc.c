@@ -146,7 +146,7 @@ selected_audio_index(
 
 static int
 decode_interrupt_cb(
-    void *ctx) 
+    void *ctx)
 {
     coderctx_t *decoder_ctx = (coderctx_t *)ctx;
     if (decoder_ctx->cancelled)
@@ -287,8 +287,8 @@ prepare_decoder(
     }
 
     if (is_live_source(decoder_context)) {
-        av_dict_set(&opts, "probesize", "100M", 0);  // bytes
-        av_dict_set(&opts, "analyzeduration", "10000000", 0);  // microseconds
+        av_dict_set(&opts, "probesize", "300M", 0);  // bytes
+        av_dict_set(&opts, "analyzeduration", "30000000", 0);  // microseconds
     }
 
     /* Allocate AVFormatContext in format_context and find input file format */
@@ -313,6 +313,12 @@ prepare_decoder(
 
     /* Retrieve stream information */
     if (avformat_find_stream_info(decoder_context->format_context,  NULL) < 0) {
+        /* The interrupt callback (decode_interrupt_cb) can abort this call the same way it aborts
+         * avformat_open_input() above. Check the cancellation flag directly instead of the ffmpeg return code,
+         * since avformat_find_stream_info() isn't guaranteed to propagate AVERROR_EXIT verbatim through all of
+         * its internal probing paths. */
+        if (decoder_context->cancelled)
+            return eav_cancelled;
         elv_err("Could not get input stream info, url=%s", url);
         return eav_stream_info;
     }
@@ -361,7 +367,13 @@ prepare_decoder(
                  * integration test that tests live restarts. In that case, it's been observed that
                  * retrying the probe entirely fixes the issue.
                  *
-                 * See libavformat/utils.c:has_codec_parameters for the checks in ffmpeg internals. */
+                 * See libavformat/utils.c:has_codec_parameters for the checks in ffmpeg internals.
+                 *
+                 * A cancellation requested while the probe was still in progress (too little time for a real
+                 * frame to arrive) is a common cause of this, so report it as such rather than as a stream-info
+                 * failure. */
+                if (decoder_context->cancelled)
+                    return eav_cancelled;
                 elv_err("avformat_find_stream_info failed to get input stream info");
                 return eav_stream_info;
             }
@@ -459,7 +471,7 @@ prepare_decoder(
          * Find decoder and initialize decoder context.
          * Pick params->dcodec if this is the selected stream (stream_id or audio_index)
          */
-        if (params != NULL && params->dcodec != NULL && params->dcodec[0] != '\0' && 
+        if (params != NULL && params->dcodec != NULL && params->dcodec[0] != '\0' &&
             decoder_context->format_context->streams[i]->codecpar->codec_type == AVMEDIA_TYPE_VIDEO) {
             elv_log("STREAM SELECTED this_stream_id=%d, id=%d idx=%d xc_type=%d dcodec=%s, url=%s",
                 this_stream_id, decoder_context->stream[i]->id, i, params->xc_type, params->dcodec, url);
@@ -743,7 +755,7 @@ set_encoder_options(
             elv_dbg("setting \"fmp4-segment\" audio segment_time to %s, seg_duration_ts=%"PRId64", url=%s",
                 params->seg_duration, seg_duration_ts, params->url);
             av_opt_set(encoder_context->format_context2[i]->priv_data, "reset_timestamps", "on", 0);
-        } 
+        }
         if (stream_index == decoder_context->video_stream_index) {
             if (params->video_seg_duration_ts > 0)
                 seg_duration_ts = params->video_seg_duration_ts;
@@ -1015,6 +1027,25 @@ enum {
 };
 
 static void
+set_nvidia_quality_params(
+    AVCodecContext *encoder_codec_context,
+    xcparams_t *params)
+{
+    const char *preset = "p2";
+
+    if (params->preset != NULL && params->preset[0] != '\0')
+        preset = params->preset;
+
+    av_opt_set(encoder_codec_context->priv_data, "preset", preset, 0); // Valid: p1–p7
+    av_opt_set(encoder_codec_context->priv_data, "tune", "hq", 0);   // Valid: hq, ll, ull, lossless, losslesshp
+
+    if (!strcmp(preset, "p6") || !strcmp(preset, "p7")) {
+        av_opt_set(encoder_codec_context->priv_data, "spatial_aq", "on", 0);
+        av_opt_set(encoder_codec_context->priv_data, "temporal_aq", "on", 0);
+    }
+}
+
+static void
 set_nvidia_h264_params(
     coderctx_t *encoder_context,
     coderctx_t *decoder_context,
@@ -1048,11 +1079,7 @@ set_nvidia_h264_params(
     av_opt_set_int(encoder_codec_context->priv_data, "level", encoder_codec_context->level, 0);
 */
 
-    /*
-     * Default preset - fast and good quality (previously "PRESET_LOW_LATENCY_HQ")
-     */
-    av_opt_set(encoder_codec_context->priv_data, "preset", "p2", 0); // Valid: p1–p7
-    av_opt_set(encoder_codec_context->priv_data, "tune", "hq", 0);   // Valid: hq, ll, ull, lossless, losslesshp
+    set_nvidia_quality_params(encoder_codec_context, params);
 
     /*
      * We might want to set one of the following options in future:
@@ -1099,11 +1126,7 @@ set_nvidia_hevc_params(
         av_opt_set(encoder_codec_context->priv_data, "tier", "high", 0);
     }
 
-    /*
-     * Default preset - fast and good quality (previously "PRESET_LOW_LATENCY_HQ")
-     */
-    av_opt_set(encoder_codec_context->priv_data, "preset", "p2", 0); // Valid: p1–p7
-    av_opt_set(encoder_codec_context->priv_data, "tune", "hq", 0);   // Valid: hq, ll, ull, lossless, losslesshp
+    set_nvidia_quality_params(encoder_codec_context, params);
 
     /* HDR for nvenc:
      *   - mp4 'mdcv'/'clli' atoms via coded_side_data: safe and necessary so the
@@ -3844,7 +3867,7 @@ avpipe_xc(
 
         rc = av_read_frame(decoder_context->format_context, input_packet);
 
-        if ((rc == AVERROR(EAGAIN) || rc == AVERROR(EIO) || rc == AVERROR_INVALIDDATA) && nretries < MAX_FRAME_READ_RETRIES) {
+        if ((rc == AVERROR(EAGAIN) || rc == AVERROR_INVALIDDATA) && nretries < MAX_FRAME_READ_RETRIES) {
             if (nretries % 10 == 0) {
                 elv_warn("packet unreadable or corrupt - %s (%d) retries=%d", av_err2str(rc), rc, nretries);
             }
@@ -4123,7 +4146,7 @@ xc_done:
         strncat(audio_last_pts_sent_encode_buf, buf, (MAX_STREAMS + 1) * 20 - strlen(audio_last_pts_sent_encode_buf));
         sprintf(buf, "%"PRId64, encoder_context->audio_last_pts_encoded[audio_index]);
         strncat(audio_last_pts_encoded_buf, buf, (MAX_STREAMS + 1) * 20 - strlen(audio_last_pts_encoded_buf));
-    } 
+    }
 
     elv_log("avpipe_xc done url=%s, rc=%d, xctx->err=%d, xc-type=%d, "
         "last video_pts=%"PRId64" audio_pts=%"PRId64

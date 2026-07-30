@@ -11,12 +11,22 @@ import (
 const maxUDPPacketSize = 1<<16 - 1
 
 type rtpProto struct {
-	Url string
+	Url  string
+	Mode TsPackagingMode
 }
 
-func NewRTPTransport(url string) Transport {
-	log.Debug("Creating new RTP transport", "url", url)
-	return &rtpProto{Url: url}
+// NewRTPTransport creates a transport for an RTP source. The packaging argument selects the desired output packaging:
+//   - RtpTs keeps the RTP framing (the RTP header is retained in the delivered datagram).
+//   - RawTs and AtsTs strip the RTP header so the delivered datagram is raw TS; AtsTs additionally records the packet
+//     arrival timestamp downstream.
+//
+// An unset packaging defaults to RtpTs.
+func NewRTPTransport(url string, packaging TsPackagingMode) Transport {
+	if packaging == UnknownPackagingMode {
+		packaging = RtpTs
+	}
+	log.Debug("Creating new RTP transport", "url", url, "packaging", string(packaging))
+	return &rtpProto{Url: url, Mode: packaging}
 }
 
 func (r *rtpProto) URL() string {
@@ -27,8 +37,14 @@ func (r *rtpProto) Handler() string {
 	return "rtp"
 }
 
+func (r *rtpProto) PackagingMode() TsPackagingMode {
+	return r.Mode
+}
+
 func (r *rtpProto) Open() (io.ReadCloser, error) {
-	udpTransport := NewUDPTransport(r.Url)
+	// The inner UDP transport is used only to open the connection for reading; RTP framing is handled by the rtpHandler
+	// below, so its packaging mode is irrelevant here.
+	udpTransport := NewUDPTransport(r.Url, RawTs)
 
 	rc, err := udpTransport.Open()
 	if err != nil {
@@ -41,6 +57,7 @@ func (r *rtpProto) Open() (io.ReadCloser, error) {
 
 	return &rtpHandler{
 		buf:     make([]byte, maxUDPPacketSize),
+		Mode:    r.Mode,
 		udpConn: udpConn,
 	}, nil
 }
@@ -49,6 +66,8 @@ type rtpHandler struct {
 	buf      []byte
 	bufStart int
 	bufEnd   int
+
+	Mode TsPackagingMode
 
 	udpConn *net.UDPConn
 }
@@ -60,6 +79,10 @@ func (h *rtpHandler) Close() error {
 	return nil
 }
 
+// Read reads precisely one datagram and returns it fully if it fits in the requesting buffer,
+// or else partially, and returns the remainder in the next Read() call(s).  It only reads a new
+// datagram from the network once it has fully return the previous datagram.
+// SS thinking we might discard the rest of the datagram instead which is the standard OS behavior for datagrams
 func (h *rtpHandler) Read(p []byte) (int, error) {
 	if h.bufStart >= h.bufEnd {
 		err := h.readNewPacket()
@@ -82,13 +105,19 @@ func (h *rtpHandler) readNewPacket() error {
 	if err != nil {
 		return err
 	}
-	headerEnd, err := StripRTP(h.buf[:h.bufEnd])
-	if err != nil {
-		// TODO(Nate): Is this the best resolution here? Should we just try again at this layer? Or rely on caller to do so?
-		log.Warn("Failed to strip RTP header", "err", err)
-		return err
+
+	// Strip the RTP header for any packaging that does not retain RTP framing (RawTs, AtsTs), leaving the delivered
+	// datagram as raw TS.
+	if h.Mode != RtpTs {
+		headerEnd, err := StripRTP(h.buf[:h.bufEnd])
+		if err != nil {
+			// TODO(Nate): Is this the best resolution here? Should we just try again at this layer? Or rely on caller to do so?
+			log.Warn("Failed to strip RTP header", "err", err)
+			return err
+		}
+		h.bufStart = headerEnd
 	}
-	h.bufStart = headerEnd
+
 	return nil
 }
 
@@ -157,6 +186,9 @@ func ParseRTPHeader(data []byte) (*RTPHeader, error) {
 	lenCSRC := 4 * int(header.CSRCCount)
 	if len(data) < baseHeaderSize+lenCSRC {
 		return nil, fmt.Errorf("RTP packet too short for CSRCs: expected at least %d bytes, got %d", baseHeaderSize+lenCSRC, len(data))
+	}
+	if header.Version != 2 {
+		return nil, fmt.Errorf("unsupported RTP version: %d", header.Version)
 	}
 	if header.Extension {
 		extLen := binary.BigEndian.Uint16(data[baseHeaderSize+lenCSRC+2 : baseHeaderSize+lenCSRC+4]) // Read extension length
