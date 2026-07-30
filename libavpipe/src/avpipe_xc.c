@@ -288,7 +288,7 @@ prepare_decoder(
 
     if (is_live_source(decoder_context)) {
         av_dict_set(&opts, "probesize", "300M", 0);  // bytes
-        av_dict_set(&opts, "analyzeduration", "30000000", 0);  // microseconds10
+        av_dict_set(&opts, "analyzeduration", "30000000", 0);  // microseconds
     }
 
     /* Allocate AVFormatContext in format_context and find input file format */
