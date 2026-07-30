@@ -1269,12 +1269,15 @@ var (
 	xcJobs   = make(map[int32]*xcJob)
 )
 
+// putXCJob stores the xcJob in the global map keyed by handle. It is used to track jobs for cancellation and cleanup.
 func putXCJob(handle int32, job *xcJob) {
 	xcJobsMu.Lock()
 	xcJobs[handle] = job
 	xcJobsMu.Unlock()
 }
 
+// takeXCJob removes the xcJob from the global map keyed by handle and returns it. It is used to retrieve jobs for
+// cancellation and cleanup.
 func takeXCJob(handle int32) (*xcJob, bool) {
 	xcJobsMu.Lock()
 	defer xcJobsMu.Unlock()
