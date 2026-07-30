@@ -1419,9 +1419,8 @@ func XcRun(handle int32) (runErr error) {
 	return avpipeError(rc)
 }
 
-// XcFini releases job state for jobs created with XcInit
-// It must be called exactly once after XcRun returns, regardless of whether
-// XcRun succeeded, failed, or was cancelled.
+// XcFini releases job state for jobs created with XcInit. Every successful XcInit must be paired with XcFini, including
+// when XcRun fails or is cancelled with XcCancel.
 func XcFini(handle int32) error {
 	job, ok := takeXCJob(handle)
 	if !ok {

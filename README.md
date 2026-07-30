@@ -188,7 +188,7 @@ All the APIs in the C/Go library can be categories as the following:
 - `XcInit(params *XcParams):` initializes a transcoding context in avpipe and returns its corresponding 32bit handle to the client code. This handle can be used to start or cancel the transcoding job.
 - `XcRun(handle int32):` starts the transcoding job that corresponds to the obtained handle by `XcInit()`.
 - `XcCancel(handle int32):` cancels or stops the transcoding job corresponding to the handle.
-- `XcFini(handle int32):` releases state for a job after `XcRun()` returns. Every successful `XcInit()` must be paired with `XcFini()` (including fails and cancels)
+- `XcFini(handle int32):` releases state for a job after `XcRun()` returns. Every successful `XcInit()` must be paired with `XcFini()`, including when `XcRun()` fails or is canceled with `XcCancel()`.
 
 ##### IO handler APIs
 
