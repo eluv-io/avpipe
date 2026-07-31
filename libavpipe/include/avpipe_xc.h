@@ -416,6 +416,7 @@ typedef struct coderctx_t {
     int64_t first_encoding_video_pts;                   /* PTS of first video frame sent to the encoder */
     int64_t first_encoding_audio_pts[MAX_STREAMS];      /* PTS of first audio frame sent to the encoder */
     int64_t first_read_packet_pts[MAX_STREAMS];         /* PTS of first packet read - which might not be decodable */
+    int64_t audio_bypass_seg_start_pts[MAX_STREAMS];    /* Input PTS starting the audio segment currently being written (bypass) */
 
     int64_t video_encoder_prev_pts;     /* Previous pts for video output (encoder) */
     int64_t video_duration;             /* Duration/pts of original frame */

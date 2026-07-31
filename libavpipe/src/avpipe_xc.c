@@ -2658,6 +2658,59 @@ end_encode_frame:
     return rc;
 }
 
+/*
+ * Warn when the segment the muxer is about to close is materially longer than requested.
+ *
+ * AC-4 is bypass-only, so avpipe cannot place I-frames: both segmenters cut only on
+ * AV_PKT_FLAG_KEY (libavformat/segment.c, dashenc.c), which for AC-4 means a sample whose ac4_toc
+ * sets b_iframe_global. If the requested segment duration is not a multiple of the source's I-frame
+ * interval the muxer silently overshoots to the next I-frame, so a segment longer than requested is
+ * the signal that the request and the source disagree. Several I-frames within one segment is legal
+ * and must not warn, and the short final segment never reaches the threshold so it never warns.
+ *
+ * The cut is predicted from the input packets rather than observed from the output, because
+ * out_tracker->seg_index only advances when the next segment file is opened, which is muxer
+ * internal and can lag the packet that caused the cut. The model here is dashenc's - elapsed
+ * duration measured from the start of the current segment. segment.c cuts on an absolute grid
+ * instead, so after an overshoot the two disagree about where the following boundary falls; that
+ * affects which later segments are also reported, not whether the first overshoot is.
+ */
+static void
+check_bypass_segment_duration(
+    coderctx_t *encoder_context,
+    AVPacket *packet,
+    int stream_index,
+    xcparams_t *params)
+{
+    if (params->audio_seg_duration_ts <= 0 || packet->duration <= 0 ||
+        packet->pts == AV_NOPTS_VALUE)
+        return;
+
+    int64_t *seg_start_pts = &encoder_context->audio_bypass_seg_start_pts[stream_index];
+
+    if (*seg_start_pts == AV_NOPTS_VALUE) {
+        *seg_start_pts = packet->pts;
+        return;
+    }
+
+    if (!(packet->flags & AV_PKT_FLAG_KEY))
+        return;
+
+    const int64_t seg_duration_ts = packet->pts - *seg_start_pts;
+    if (seg_duration_ts < params->audio_seg_duration_ts)
+        return;
+
+    /* This packet is the first of a new segment, so the previous one is now complete */
+    if (seg_duration_ts - params->audio_seg_duration_ts > packet->duration)
+        elv_warn("BYPASS audio segment longer than requested duration_ts=%"PRId64
+            " requested_ts=%"PRId64" frame_duration_ts=%"PRId64" stream_index=%d"
+            " start_pts=%"PRId64" url=%s",
+            seg_duration_ts, params->audio_seg_duration_ts, packet->duration,
+            stream_index, *seg_start_pts, params->url);
+
+    *seg_start_pts = packet->pts;
+}
+
 static int
 do_bypass(
     int is_audio,
@@ -2673,6 +2726,14 @@ do_bypass(
 
     packet->pts += p->start_pts;
     packet->dts += p->start_pts;
+
+    /* Before the output remap below overwrites stream_index */
+    const int in_stream_index = packet->stream_index;
+    AVStream *in_stream = decoder_context->stream[in_stream_index];
+
+    if (is_audio && in_stream && in_stream->codecpar &&
+        in_stream->codecpar->codec_id == AV_CODEC_ID_AC4)
+        check_bypass_segment_duration(encoder_context, packet, in_stream_index, p);
 
     dump_packet(is_audio, "BYPASS ", packet, debug_frame_level);
 
@@ -3368,6 +3429,63 @@ should_stop_decoding(
     return 0;
 }
 
+/*
+ * Returns 1 if the input packet falls outside the source's edit list (edts/elst) and must not be
+ * carried into a bypass output.
+ *
+ * The mov demuxer applies the edit list by rebasing the retained samples so the first one presents
+ * at PTS 0 and flagging every sample outside the edit AV_PKT_FLAG_DISCARD (mov_fix_index() in
+ * libavformat/mov.c) - in practice an encoder priming frame at the head, which then carries a
+ * negative PTS, and whole frames past the edit end at the tail. A decoder honors that flag; the
+ * bypass path has no decoder, so unless the packet is dropped here it is muxed as an ordinary
+ * sample and the trim is either re-signaled as an output edit list (movenc writes one when the
+ * first PTS is negative) or silently lost - the segment muxer runs with reset_timestamps=on, which
+ * rebases each segment to 0 and so leaves movenc no negative start time to compensate for, shifting
+ * the whole presentation timeline by the priming duration.
+ *
+ * Dropping the sample outright, rather than propagating the trim, is only lossless for AC-4: a
+ * sample whose ac4_toc sets b_iframe_global is encoded independently of preceding frames (ETSI TS
+ * 103 190-2), and the encoder places such a sample immediately after the priming frame, so nothing
+ * that is presented depends on what is dropped. This must NOT be generalized to AAC, whose frames
+ * depend on the previous block's MDCT overlap - hence the codec gate.
+ */
+static int
+skip_discarded_bypass_packet(
+    coderctx_t *decoder_context,
+    AVPacket *input_packet,
+    xcparams_t *params)
+{
+    if (!params->bypass_transcoding ||
+        selected_decoded_audio(decoder_context, input_packet->stream_index) < 0)
+        return 0;
+
+    AVStream *stream = decoder_context->stream[input_packet->stream_index];
+    if (!stream || !stream->codecpar || stream->codecpar->codec_id != AV_CODEC_ID_AC4)
+        return 0;
+
+    if (input_packet->flags & AV_PKT_FLAG_DISCARD) {
+        elv_log("BYPASS DROP out-of-edit AC-4 packet stream_index=%d pts=%"PRId64" dts=%"PRId64
+            " duration=%"PRId64" size=%d flags=%x url=%s",
+            input_packet->stream_index, input_packet->pts, input_packet->dts,
+            input_packet->duration, input_packet->size, input_packet->flags, params->url);
+        return 1;
+    }
+
+    /*
+     * A retained packet carrying AV_PKT_DATA_SKIP_SAMPLES means the edit trims part of a sample
+     * (media_time is not frame aligned): mov_fix_index() keeps such a frame and asks the decoder to
+     * drop samples from within it instead of discarding it. ISOBMFF cannot express a sub-sample trim
+     * on the output either, so the bypass path can only carry the whole sample - warn rather than
+     * lose the distinction silently. Not produced by DEE, whose media_time is a whole frame.
+     */
+    if (av_packet_get_side_data(input_packet, AV_PKT_DATA_SKIP_SAMPLES, NULL))
+        elv_warn("BYPASS partial-sample AC-4 edit not applied, whole sample kept stream_index=%d "
+            "pts=%"PRId64" duration=%"PRId64" url=%s",
+            input_packet->stream_index, input_packet->pts, input_packet->duration, params->url);
+
+    return 0;
+}
+
 static int
 skip_until_start_time_pts(
     coderctx_t *decoder_context,
@@ -3983,6 +4101,7 @@ avpipe_xc(
         encoder_context->first_read_packet_pts[j] = AV_NOPTS_VALUE;
         encoder_context->audio_last_pts_sent_encode[j] = AV_NOPTS_VALUE;
         encoder_context->audio_last_pts_encoded[j] = AV_NOPTS_VALUE;
+        encoder_context->audio_bypass_seg_start_pts[j] = AV_NOPTS_VALUE;
     }
     decoder_context->first_key_frame_pts = AV_NOPTS_VALUE;
     decoder_context->is_av_synced = 0;
@@ -4028,6 +4147,18 @@ avpipe_xc(
 
         if (input_packet->flags & AV_PKT_FLAG_CORRUPT) {
             elv_warn("packet corrupt pts=%"PRId64, input_packet->pts);
+            av_packet_free(&input_packet);
+            continue;
+        }
+
+        /*
+         * Drop packets the source's edit list excludes before any per-packet state is recorded, so
+         * that first_read_packet_pts/audio_input_start_pts - and therefore the start_time_ts and
+         * duration_ts arithmetic derived from them - reflect the presented timeline, not the
+         * trimmed-away priming frame.
+         */
+        if (skip_discarded_bypass_packet(decoder_context, input_packet, params)) {
+            av_packet_unref(input_packet);
             av_packet_free(&input_packet);
             continue;
         }
