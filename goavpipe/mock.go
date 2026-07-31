@@ -5,6 +5,7 @@ type muxFnT = func(params *XcParams) error
 type xcInitFnT = func(params *XcParams) (int32, error)
 type xcRunFnT = func(handle int32) error
 type xcCancelFnT = func(handle int32) error
+type xcFiniFnT = func(handle int32) error
 
 // These various variables are used to allow mocking of the avpipe interface in tests
 // They are _not_ thread-safe, so they should only be set in tests or in a controlled manner
@@ -15,6 +16,7 @@ var muxFn muxFnT
 var xcInitFn xcInitFnT
 var xcRunFn xcRunFnT
 var xcCancelFn xcCancelFnT
+var xcFiniFn xcFiniFnT
 
 func Xc(params *XcParams) error {
 	return xcFn(params)
@@ -34,6 +36,10 @@ func XcRun(handle int32) error {
 
 func XcCancel(handle int32) error {
 	return xcCancelFn(handle)
+}
+
+func XcFini(handle int32) error {
+	return xcFiniFn(handle)
 }
 
 // SetXcFn sets the function to be used for transcoding, and returns the previous value.
@@ -69,4 +75,11 @@ func SetXcCancelFn(fn xcCancelFnT) xcCancelFnT {
 	oldXcCancelFn := xcCancelFn
 	xcCancelFn = fn
 	return oldXcCancelFn
+}
+
+// SetXcFiniFn sets the function to be used for finalizing transcoding, and returns the previous value.
+func SetXcFiniFn(fn xcFiniFnT) xcFiniFnT {
+	oldXcFiniFn := xcFiniFn
+	xcFiniFn = fn
+	return oldXcFiniFn
 }
