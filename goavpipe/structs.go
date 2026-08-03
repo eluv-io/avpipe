@@ -482,6 +482,10 @@ type InputConfig struct {
 	Processor InputProcessorConfig `json:"processor"`
 	// if true, read net packets in separate go routine, decoupled from ffmpeg with channel
 	CustomReadLoopEnabled bool `json:"custom_read_loop_enabled"`
+	// StreamBitrate is the total CBR TS mux rate in bits/s of the retranscoded output
+	// (copy_mode 'retranscode_stream' only). Must exceed the video bitrate plus the
+	// passthrough peak.
+	StreamBitrate int `json:"stream_bitrate,omitempty"`
 }
 
 func (ic *InputConfig) Validate(url string) error {
@@ -495,7 +499,9 @@ func (ic *InputConfig) Validate(url string) error {
 	isSRT := strings.HasPrefix(url, "srt://")
 	isUDP := strings.HasPrefix(url, "udp://")
 
-	useLibavReader := !ic.BypassLibavReader
+	// retranscode_stream never uses a network reader: the caller feeds datagrams
+	// directly to the transcode processor.
+	useLibavReader := !ic.BypassLibavReader && ic.CopyMode != CopyModeRetranscode
 
 	if useLibavReader && !(isRTP || isSRT || isUDP) {
 		return errors.New("FFMPEG reader can only be used with RTP, SRT, or UDP URLs")
@@ -504,8 +510,8 @@ func (ic *InputConfig) Validate(url string) error {
 	switch ic.CopyMode {
 	case CopyModeUnknown:
 		return errors.New("copy mode must be set to a valid value")
-	case CopyModeNone, CopyModeRaw, CopyModeRawOnly, CopyModeRemuxed:
-	case CopyModeRepackage, CopyModeRetranscode:
+	case CopyModeNone, CopyModeRaw, CopyModeRawOnly, CopyModeRemuxed, CopyModeRetranscode:
+	case CopyModeRepackage:
 		return fmt.Errorf("copy mode not implemented: %s", ic.CopyMode)
 	default:
 		return fmt.Errorf("invalid copy mode: %s", ic.CopyMode)
@@ -532,6 +538,14 @@ func (ic *InputConfig) Validate(url string) error {
 	case CopyModeRemuxed:
 		if ic.CopyPackaging != transport.RawTs {
 			return errors.New("remuxed copying only supports raw ts packaging")
+		}
+		return nil
+	case CopyModeRetranscode:
+		if ic.CopyPackaging != transport.RtpTs {
+			return fmt.Errorf("retranscode_stream only supports rtp_ts copy packaging (got %q)", ic.CopyPackaging)
+		}
+		if ic.StreamBitrate <= 0 {
+			return errors.New("retranscode_stream requires stream_bitrate (the CBR output mux rate)")
 		}
 		return nil
 	}

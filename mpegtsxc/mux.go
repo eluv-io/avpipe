@@ -1,4 +1,4 @@
-package main
+package mpegtsxc
 
 import (
 	"io"
@@ -7,11 +7,14 @@ import (
 )
 
 // videoPkt is a re-encoded video TS packet recovered from avpipe's output
-// - already remapped onto the source video PID (CC rewritten, PCR overwritten)
-// - dts is the access unit's DTS
+//   - already remapped onto the source video PID (CC rewritten, PCR overwritten)
+//   - dts is the access unit's DTS (parts mode: unwrapped onto the media timeline)
+//   - ets is the packet's emission timestamp, 27 MHz (parts mode only: interpolated
+//     across the AU's frame interval, leading DTS by PcrLead)
 type videoPkt struct {
 	data packet.Packet
 	dts  int64
+	ets  int64
 }
 
 // muxOutput interleaves the passthrough packets with the re-encoded video packets
@@ -32,7 +35,7 @@ func muxOutput(dest string, out io.WriteCloser, fifo *PassthroughFifo, videoCh <
 		// 1. Emit a passthrough packet if inside the lead window (or source ended and video is done)
 		if pendOther != nil {
 			videoDone := !videoOpen && pendVideo == nil
-			fits := lastVideoDtsStc >= 0 && int64(pendOther.pcr) <= lastVideoDtsStc+leadTicks
+			fits := lastVideoDtsStc >= 0 && pendOther.ets <= lastVideoDtsStc+leadTicks
 			if videoDone || fits {
 				if _, err := out.Write(pendOther.data[:]); err != nil {
 					return err

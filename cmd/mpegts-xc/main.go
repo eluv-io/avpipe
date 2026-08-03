@@ -6,7 +6,6 @@ package main
 import (
 	"flag"
 	"fmt"
-	"io"
 	"os"
 	"os/signal"
 	"strings"
@@ -16,21 +15,11 @@ import (
 
 	"github.com/eluv-io/avpipe"
 	"github.com/eluv-io/avpipe/broadcastproto/transport"
+	"github.com/eluv-io/avpipe/mpegtsxc"
 	elog "github.com/eluv-io/log-go"
 )
 
 var log = elog.Get("mpegts-xc")
-
-const tsPacketSize = 188
-
-const (
-	pcrClockHz = 27_000_000
-
-	// pcrLeadTicks - how much regenerated PCR leads DTS (approx. decoder buffer delay)
-	pcrLeadTicks = 300 * pcrClockHz / 1000 // 300 ms;
-)
-
-func ticks27(d time.Duration) int64 { return int64(d.Seconds() * pcrClockHz) }
 
 func main() {
 	url := flag.String("url", "", "input MPEGTS URL, e.g. udp://239.255.0.1:1234 (required)")
@@ -57,7 +46,7 @@ func main() {
 
 	log.Info("mpegts-xc starting", "url", *url, "width", *encWidth, "height", *encHeight, "ecodec", *ecodec)
 
-	// Open the input transport - 'udp' or 'rtp URL
+	// Open the input transport - 'udp' or 'rtp' URL
 	tr, err := openTransport(*url, *packaging)
 	if err != nil {
 		log.Error("mpegts-xc: failed to select transport", "err", err)
@@ -70,50 +59,25 @@ func main() {
 	}
 	defer rc.Close()
 
-	classifier := NewClassifier()
-	stats := newStats()
-
-	// Source clock for phase-locking the pacer to the source (only in CBR mode)
-	cbr := *streamBitrate > 0
-	var srcClock *sourceClock
-	if cbr {
-		srcClock = newSourceClock()
-	}
-
-	// Passthrough FIFO for "other" packets (audio, data, PCR-PID, PSI,
-	// Sized so it can safely hold passthrough packets for the duration of transcoding.
-	fifo := NewPassthroughFifo(16384)
-	proc := newProcessor(classifier, fifo, stats, srcClock)
-
-	// Channel from classified/filtered input -> avpipe xc
-	// Closing signals EOF to avpipe xc
-	videoCh := make(chan []byte, 8192)
-
-	// Channel avpipe xc -> mpegts muxer/interleaver
-	videoOutCh := make(chan videoPkt, 8192)
-
-	avpipeDone := make(chan error, 1)
-	go func() {
-		avpipeDone <- runAvpipeXc(int32(*encWidth), int32(*encHeight), *ecodec, *dcodec, int32(*videoBitrate),
-			videoCh, videoOutCh, classifier, int64(pcrLeadTicks), cbr)
-	}()
-
 	out, err := openOutput(*outFile)
 	if err != nil {
 		log.Error("mpegts-xc: failed to open output", "out", *outFile, "err", err)
 		os.Exit(1)
 	}
 
-	// In CBR mode the pacer wraps the sink: it emits at exactly stream bitrate and adds TS padding
-	var sink io.WriteCloser = out
-	if cbr {
-		sink = newPacer(out, *streamBitrate, classifier, srcClock)
-		log.Info("mpegts-xc CBR output", "streamBitrate", *streamBitrate, "videoBitrate", *videoBitrate)
+	xc, err := mpegtsxc.NewLiveTranscoder(nil, mpegtsxc.Config{
+		EncWidth:      int32(*encWidth),
+		EncHeight:     int32(*encHeight),
+		Ecodec:        *ecodec,
+		Dcodec:        *dcodec,
+		VideoBitrate:  int32(*videoBitrate),
+		StreamBitrate: *streamBitrate,
+		MaxLead:       *maxLead,
+	}, out)
+	if err != nil {
+		log.Error("mpegts-xc: failed to start transcoder", "err", err)
+		os.Exit(1)
 	}
-	outputDone := make(chan error, 1)
-	go func() {
-		outputDone <- muxOutput(*outFile, sink, fifo, videoOutCh, ticks27(*maxLead))
-	}()
 
 	// triggerStop closes the stop channel and the input reader (which blocks on UDP read)
 	// Can be fired by a signal or idle watchdog (source idleness)
@@ -135,7 +99,7 @@ func main() {
 		triggerStop("interrupt")
 	}()
 
-	// Idle input watchdog (for UDP/RTP input).  Apply
+	// Idle input watchdog (for UDP/RTP input).
 	// Applies only after the input connected (not a connection timeout)
 	if *idleTimeout > 0 {
 		go func() {
@@ -149,7 +113,7 @@ func main() {
 				case <-stop:
 					return
 				case <-ticker.C:
-					cur := stats.Datagrams()
+					cur := xc.Stats().Datagrams
 					switch {
 					case cur != last:
 						last = cur
@@ -173,20 +137,18 @@ func main() {
 			case <-stop:
 				return
 			case <-statsTicker.C:
-				stats.Log(classifier.VideoPID(), fifo.Len(), fifo.Dropped())
+				xc.LogStats()
 				// In CBR mode the pacer should phase-lock to the source within a few seconds
 				// Warn if that doesn't happen
-				if srcClock != nil && stats.Datagrams() > 0 && !srcClock.Locked() {
+				sn := xc.Stats()
+				if sn.CbrMode && sn.Datagrams > 0 && !sn.PhaseLocked {
 					log.Warn("mpegts-xc: phase-lock not acquired — pacer is on local clock so output will drift")
 				}
 			}
 		}
 	}()
 
-	var (
-		dropped uint64
-		buf     = make([]byte, 65536)
-	)
+	buf := make([]byte, 65536)
 
 readLoop:
 	for {
@@ -209,39 +171,25 @@ readLoop:
 			continue
 		}
 
-		forward := proc.handleDatagram(buf[:n])
+		_ = xc.Feed(buf[:n])
 
-		// Forward video + PSI packets to avpipe (non-blocking; drop if behind).
-		if len(forward) > 0 {
-			select {
-			case videoCh <- forward:
-			default:
-				dropped++
-				if dropped%100 == 1 {
-					log.Warn("mpegts-xc: dropping forwarded packets, avpipe behind", "dropped", dropped)
-				}
-			}
-		}
-
-		if *maxDatagrams > 0 && stats.Datagrams() >= uint64(*maxDatagrams) {
+		if *maxDatagrams > 0 && xc.Stats().Datagrams >= uint64(*maxDatagrams) {
 			log.Info("mpegts-xc: reached -max datagrams", "max", *maxDatagrams)
 			break
 		}
 	}
 
 	// Drain: close the avpipe xc feed and the FIFO and wait to complete
-	close(videoCh)
-	fifo.Close()
-	xcErr := <-avpipeDone
-	outErr := <-outputDone
+	err = xc.Finish()
 
-	stats.Log(classifier.VideoPID(), fifo.Len(), fifo.Dropped()) // final
+	xc.LogStats() // final
+	sn := xc.Stats()
 	log.Info("mpegts-xc done",
-		"droppedForward", dropped, "fifoDropped", fifo.Dropped(),
-		"videoPID", classifier.VideoPID(), "xcErr", xcErr, "muxErr", outErr)
+		"droppedForward", sn.ForwardDropped, "fifoDropped", sn.FifoDropped,
+		"videoPID", sn.VideoPID, "err", err)
 }
 
-// openTransport selects input packaging by eiher URL or input packaging configuration
+// openTransport selects input packaging by either URL or input packaging configuration
 func openTransport(url, packaging string) (transport.Transport, error) {
 	if !strings.HasPrefix(url, "udp://") && !strings.HasPrefix(url, "rtp://") {
 		return nil, fmt.Errorf("url must start with udp:// or rtp://: %q", url)

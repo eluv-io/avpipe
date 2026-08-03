@@ -1,4 +1,4 @@
-package main
+package mpegtsxc
 
 import (
 	"fmt"
@@ -50,6 +50,28 @@ func (s *Stats) setOtherPTS(pid int, pts int64) {
 	s.mu.Lock()
 	s.otherPTS[pid] = pts
 	s.mu.Unlock()
+}
+
+// snapshot fills the input-side counters of a StatsSnapshot.
+func (s *Stats) snapshot(videoPID int) StatsSnapshot {
+	sn := StatsSnapshot{
+		Datagrams: s.datagrams.Load(),
+		TsVideo:   s.tsVideo.Load(),
+		TsOther:   s.tsOther.Load(),
+		VideoPID:  videoPID,
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.videoPTS >= 0 && len(s.otherPTS) > 0 {
+		sn.OtherAheadOfVideoMs = make(map[int]float64, len(s.otherPTS))
+		for pid, pts := range s.otherPTS {
+			if pid == videoPID {
+				continue
+			}
+			sn.OtherAheadOfVideoMs[pid] = float64(pts-s.videoPTS) / 90.0
+		}
+	}
+	return sn
 }
 
 // Log formats and logs the periodic stats

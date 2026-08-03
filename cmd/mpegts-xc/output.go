@@ -11,6 +11,8 @@ import (
 // udpDatagramPackets is the number of TS packets per UDP datagram (7*188=1316),
 const udpDatagramPackets = 7
 
+const tsPacketSize = 188
+
 // openOutput returns the muxer's output sink
 // - target "udp://" uses a UDP sender (note 'rtp://' not handled yet)
 // - otherwise treated as a file path
