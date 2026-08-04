@@ -516,12 +516,6 @@ func AVPipeWriteOutputGo(handler int64, fd int64, buf []byte, allowTake bool) in
 		goavpipe.Log.Debug("AVPipeWriteOutputGo", "fd", fd, "buf_size", len(buf))
 	}
 
-	if h.getOutTable(fd) == nil {
-		msg := fmt.Sprintf("OutWriterX outTable entry is NULL, fd=%d", fd)
-		goavpipe.Log.Error(msg)
-		return -1
-	}
-
 	n, err := h.OutWriter(C.int64_t(fd), buf, allowTake)
 	if err != nil {
 		return -1
@@ -561,6 +555,11 @@ func (h *ioHandler) OutWriter(fd C.int64_t, buf []byte, canTake bool) (int, erro
 	}
 
 	outHandler := h.getOutTable(int64(fd))
+	if outHandler == nil {
+		msg := fmt.Sprintf("OutWriter outTable entry is nil, fd=%d", fd)
+		goavpipe.Log.Error(msg)
+		return -1, errors.Str(msg)
+	}
 
 	var taker Taker
 	if canTake {
