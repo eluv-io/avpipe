@@ -307,7 +307,7 @@ func (mpp *MpegtsPacketProcessor) PushStats() {
 	mpp.resetChannelSizeStats()
 
 	mpp.periodicStatsLog.Do(func() {
-		mpegtslog.Debug("mpegts stats", "fd", mpp.inFd, "stats", exportStats)
+		mpegtslog.Debug("mpegts stats", "fd", mpp.inFd, "stats", &exportStats)
 	})
 	_ = mpp.opener.Stat(exportStats)
 }
