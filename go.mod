@@ -11,6 +11,7 @@ require (
 	github.com/eluv-io/log-go v1.0.10
 	github.com/grafov/m3u8 v0.11.1
 	github.com/modern-go/gls v0.0.0-20250215024828-78308f6bb19d
+	github.com/pion/rtp v1.8.25
 	github.com/spf13/cobra v1.8.1
 	github.com/stretchr/testify v1.11.1
 	github.com/tidwall/jsonc v0.3.3
@@ -48,11 +49,11 @@ require (
 	github.com/modern-go/reflect2 v1.0.2 // indirect
 	github.com/mr-tron/base58 v1.2.0 // indirect
 	github.com/pion/randutil v0.1.0 // indirect
-	github.com/pion/rtp v1.8.25 // indirect
 	github.com/pkg/errors v0.9.1 // indirect
 	github.com/pmezard/go-difflib v1.0.0 // indirect
 	github.com/rogpeppe/go-internal v1.13.1 // indirect
 	github.com/satori/go.uuid v1.2.0 // indirect
+	github.com/smarty/go-disruptor v0.5.0 // indirect
 	github.com/spf13/pflag v1.0.5 // indirect
 	github.com/ugorji/go/codec v1.1.7 // indirect
 	github.com/x448/float16 v0.8.4 // indirect
