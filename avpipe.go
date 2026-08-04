@@ -192,7 +192,10 @@ func AVPipeReadInput(fd C.int64_t, buf *C.uint8_t, sz C.int) C.int {
 		goavpipe.Log.Debug("AVPipeReadInput()", "fd", fd, "buf", buf, "sz", sz)
 	}
 
-	// gobuf := C.GoBytes(unsafe.Pointer(buf), sz)
+	if pr, ok := h.input.(goavpipe.PacketReader); ok {
+		return avPipeReadInputPacket(pr, fd, buf, sz)
+	}
+
 	gobuf := make([]byte, sz)
 
 	n, err := h.InReader(gobuf)
@@ -200,6 +203,41 @@ func AVPipeReadInput(fd C.int64_t, buf *C.uint8_t, sz C.int) C.int {
 		C.memcpy(unsafe.Pointer(buf), unsafe.Pointer(&gobuf[0]), C.size_t(n))
 	}
 
+	return avPipeReadInputResult(n, err, fd, buf, sz)
+}
+
+// avPipeReadInputPacket implements AVPipeReadInput for InputHandlers that support reading directly into a pooled
+// packet, saving the copy into an intermediate gobuf that the plain-[]byte InReader path needs.
+func avPipeReadInputPacket(pr goavpipe.PacketReader, fd C.int64_t, buf *C.uint8_t, sz C.int) C.int {
+	res, err := pr.ReadPacket()
+	if err != nil {
+		return avPipeReadInputResult(0, err, fd, buf, sz)
+	}
+	defer res.Release()
+
+	data := truncateToRequestedSize(res.T.Data, int(sz))
+	n := len(data)
+	if n > 0 {
+		C.memcpy(unsafe.Pointer(buf), unsafe.Pointer(&data[0]), C.size_t(n))
+	}
+	return avPipeReadInputResult(n, nil, fd, buf, sz)
+}
+
+// truncateToRequestedSize bounds data to at most sz bytes, logging a warning when truncation is necessary. ffmpeg
+// only ever asked for sz bytes; the plain-[]byte read path can't over-read (its destination buffer is exactly sz
+// bytes), but a pooled packet read isn't bounded that way, so this makes the same silent-OS-truncation behavior the
+// plain path already has explicit and visible.
+func truncateToRequestedSize(data []byte, sz int) []byte {
+	if len(data) <= sz {
+		return data
+	}
+	goavpipe.Log.Warn("AVPipeReadInput() packet larger than requested read size, truncating", "len", len(data), "sz", sz)
+	return data[:sz]
+}
+
+// avPipeReadInputResult applies AVPipeReadInput's error-to-return-code convention, shared by the plain-[]byte and
+// PacketReader read paths.
+func avPipeReadInputResult(n int, err error, fd C.int64_t, buf *C.uint8_t, sz C.int) C.int {
 	if err != nil {
 		goavpipe.Log.Warn("AVPipeReadInput()", err, "fd", fd, "buf", buf, "sz", sz)
 		if _, ok := errors.GetField(err, goavpipe.ErrRetryField); ok {

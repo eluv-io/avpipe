@@ -33,6 +33,7 @@ Then split the output out to a segmenter if configured on
 */
 
 var _ goavpipe.InputOpener = (*mpegtsInputOpener)(nil)
+var _ goavpipe.PacketReader = (*mpegtsInputHandler)(nil)
 
 type SequentialOpenerFactory func(inFd int64) SequentialOpener
 
@@ -237,6 +238,36 @@ func (mih *mpegtsInputHandler) Read(buf []byte) (int, error) {
 		return n, err
 	}
 	return n, nil
+}
+
+// ReadPacket reads one datagram directly into a pooled packet, avoiding the extra copy Read() needs to satisfy its
+// plain []byte contract. Callers that can consume a *pktpool.Packet directly (e.g. AVPipeReadInput, when it detects
+// this interface) should prefer this over Read(). Like Read(), it fans the same read out to outputSplit (if set) via
+// the pool's reference counting - the underlying bytes are read exactly once regardless of how many consumers see
+// them. The returned Resource has exactly one outstanding reference belonging to the caller; release it when done.
+func (mih *mpegtsInputHandler) ReadPacket() (pktpool.Resource, error) {
+	res := mih.packetPool.Borrow()
+	res.T.ReceivedAt = time.Now()
+	err := res.T.FromReader(mih.rc)
+	if err != nil {
+		res.Release()
+		// mark error as retryable to ffmpeg/avpipe, matching Read()
+		return nil, errors.E("readPacket", errors.K.IO.Default(), err, goavpipe.ErrRetryField, true)
+	}
+
+	if mih.outputSplit != nil {
+		res.Reference() // second reference for the async consumer; this call's own reference is returned to the caller
+		select {
+		case mih.outputSplit <- res:
+		default:
+			res.Release()
+			mih.packetsDropped.Inc()
+			goavpipe.Log.Throttle("split-channel-full", time.Second).Warn(
+				"Output split channel is full, dropping data", "size", len(res.T.Data))
+		}
+	}
+
+	return res, nil
 }
 
 func (mih *mpegtsInputHandler) Close() error {
