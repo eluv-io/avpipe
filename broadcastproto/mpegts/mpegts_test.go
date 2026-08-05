@@ -112,6 +112,32 @@ func TestMpegtsPacketProcessorPcrPidPinning(t *testing.T) {
 	require.EqualValues(t, PcrTs*2, pp.stats.LastPCR.Load())
 }
 
+// TestMpegtsPacketProcessorContinuityCounterError covers continuity-counter validation, which prior to
+// tracker.MediaTracker's adoption had no test coverage at all despite being one of the two core tracking algorithms.
+// This logic itself now lives in mpp.tracker (mpegts.TsStreamTracker), surfaced here via ExportedStats.TS.ErrorsCC.
+func TestMpegtsPacketProcessorContinuityCounterError(t *testing.T) {
+	base := time.Unix(1000, 0)
+	opener := &recordingSequentialOpener{}
+	pp := newTestMpegtsPacketProcessor(opener)
+
+	pkt := packet.New()
+	pkt.SetPID(100)
+	pkt.SetContinuityCounter(0)
+	pp.ProcessDatagramPacket(base, mustDatagramPacket(t, pkt[:]))
+	require.EqualValues(t, 0, statsOf(pp).TS.ErrorsCC, "the first packet on a PID establishes the baseline, not an error")
+
+	// Skip a continuity-counter value: expected 1, actual 5.
+	pkt.SetContinuityCounter(5)
+	pp.ProcessDatagramPacket(base, mustDatagramPacket(t, pkt[:]))
+	require.EqualValues(t, 1, statsOf(pp).TS.ErrorsCC)
+
+	// The tracker's expectation continues from the actually-observed counter, so a correctly incremented follow-up
+	// packet is not itself flagged.
+	pkt.SetContinuityCounter(6)
+	pp.ProcessDatagramPacket(base, mustDatagramPacket(t, pkt[:]))
+	require.EqualValues(t, 1, statsOf(pp).TS.ErrorsCC)
+}
+
 func TestMpegtsPacketProcessorPcrWrapStat(t *testing.T) {
 	base := time.Unix(1000, 0)
 
@@ -121,18 +147,18 @@ func TestMpegtsPacketProcessorPcrWrapStat(t *testing.T) {
 	// Seed the pinned PID with a PCR near the top of the counter range. The first PCR is never a wrap.
 	high := mustTSPacketWithPCR(t, 100, (PcrMax/4)*3)
 	pp.ProcessDatagramPacket(base, mustDatagramPacket(t, high[:]))
-	require.EqualValues(t, 0, pp.stats.NumWraps.Load())
+	require.EqualValues(t, 0, statsOf(pp).TS.NumWraps)
 
 	// A large backward jump on the pinned PID is a counter wrap.
 	low := mustTSPacketWithPCR(t, 100, PcrTs)
 	pp.ProcessDatagramPacket(base, mustDatagramPacket(t, low[:]))
-	require.EqualValues(t, 1, pp.stats.NumWraps.Load())
+	require.EqualValues(t, 1, statsOf(pp).TS.NumWraps)
 	require.EqualValues(t, PcrTs, pp.stats.LastPCR.Load())
 
 	// A normal forward advance is not a wrap.
 	fwd := mustTSPacketWithPCR(t, 100, PcrTs*2)
 	pp.ProcessDatagramPacket(base, mustDatagramPacket(t, fwd[:]))
-	require.EqualValues(t, 1, pp.stats.NumWraps.Load())
+	require.EqualValues(t, 1, statsOf(pp).TS.NumWraps)
 }
 
 func TestMpegtsPacketProcessorStopClosesFinalOutput(t *testing.T) {
@@ -258,7 +284,7 @@ func TestRemoveTsPadding(t *testing.T) {
 }
 
 func newTestMpegtsPacketProcessor(opener SequentialOpener) *MpegtsPacketProcessor {
-	return NewMpegtsPacketProcessor(
+	pp := NewMpegtsPacketProcessor(
 		TsConfig{
 			SegmentLengthSec: 1,
 			Packaging:        transport.RawTs,
@@ -266,6 +292,11 @@ func newTestMpegtsPacketProcessor(opener SequentialOpener) *MpegtsPacketProcesso
 		opener,
 		1,
 	)
+	// exportStats (via PushStats or statsOf) reads TSStats.PacketsDropped, which is only non-nil once registered -
+	// every production caller does this before processing any packets (see custom.go/av_input.go).
+	var packetsDropped atomic.Uint64
+	pp.RegisterPacketsDropped(&packetsDropped)
+	return pp
 }
 
 func newTestMpegtsPacketProcessorRTP(opener SequentialOpener) *MpegtsPacketProcessor {
@@ -308,8 +339,8 @@ func TestMpegtsPacketProcessorRTP(t *testing.T) {
 
 		require.Equal(t, 1, opener.opens)
 		require.EqualValues(t, 1, pp.stats.PacketsWritten.Load())
-		require.EqualValues(t, 0, pp.rtpStats.BadPackets.Load())
-		require.EqualValues(t, 0, pp.rtpStats.LongHeaders.Load())
+		require.EqualValues(t, 0, statsOf(pp).RTP.BadPackets)
+		require.EqualValues(t, 0, statsOf(pp).RTP.LongHeaders)
 		require.EqualValues(t, 100, pp.rtpStats.FirstSeqNum.Load())
 		require.EqualValues(t, 100, pp.rtpStats.LastSeqNum.Load())
 		require.EqualValues(t, 9000, pp.rtpStats.FirstTimestamp.Load())
@@ -337,10 +368,10 @@ func TestMpegtsPacketProcessorRTP(t *testing.T) {
 
 		pp.ProcessDatagramPacket(base, mustDatagramPacket(t, datagram))
 
-		require.EqualValues(t, 0, pp.rtpStats.BadPackets.Load())
-		require.EqualValues(t, 1, pp.rtpStats.LongHeaders.Load()) // header is longer than the base 12 bytes
+		require.EqualValues(t, 0, statsOf(pp).RTP.BadPackets)
+		require.EqualValues(t, 1, statsOf(pp).RTP.LongHeaders) // header is longer than the base 12 bytes
 		require.EqualValues(t, 1, pp.stats.PacketsWritten.Load())
-		require.EqualValues(t, 0, pp.stats.BadPackets.Load())
+		require.EqualValues(t, 0, statsOf(pp).TS.BadPackets)
 	})
 
 	t.Run("excludes RTP padding from TS packet processing", func(t *testing.T) {
@@ -354,10 +385,10 @@ func TestMpegtsPacketProcessorRTP(t *testing.T) {
 
 		pp.ProcessDatagramPacket(base, mustDatagramPacket(t, datagram))
 
-		require.EqualValues(t, 0, pp.rtpStats.BadPackets.Load())
-		require.EqualValues(t, 0, pp.stats.ErrorsIncompletePackets.Load())
+		require.EqualValues(t, 0, statsOf(pp).RTP.BadPackets)
+		require.EqualValues(t, 0, statsOf(pp).TS.ErrorsIncompletePackets)
 		require.EqualValues(t, 1, pp.stats.PacketsWritten.Load())
-		require.EqualValues(t, 0, pp.stats.BadPackets.Load())
+		require.EqualValues(t, 0, statsOf(pp).TS.BadPackets)
 	})
 
 	t.Run("flags a non-188-aligned remainder as incomplete instead of silently truncating", func(t *testing.T) {
@@ -371,7 +402,7 @@ func TestMpegtsPacketProcessorRTP(t *testing.T) {
 
 		pp.ProcessDatagramPacket(base, mustDatagramPacket(t, datagram))
 
-		require.EqualValues(t, 1, pp.stats.ErrorsIncompletePackets.Load())
+		require.EqualValues(t, 1, statsOf(pp).TS.ErrorsIncompletePackets)
 		require.Equal(t, 0, opener.opens)
 	})
 
@@ -384,9 +415,15 @@ func TestMpegtsPacketProcessorRTP(t *testing.T) {
 
 		pp.ProcessDatagramPacket(base, mustDatagramPacket(t, datagram))
 
-		require.EqualValues(t, 1, pp.rtpStats.BadPackets.Load())
+		require.EqualValues(t, 1, statsOf(pp).RTP.BadPackets)
 		require.Equal(t, 0, opener.opens)
 	})
+}
+
+// statsOf returns pp's exported stats snapshot, for tests checking fields now sourced from mpp.tracker (see
+// exportStats) rather than a plain atomic field on pp.stats/pp.rtpStats.
+func statsOf(pp *MpegtsPacketProcessor) ExportedStats {
+	return exportStats(pp.stats, pp.rtpStats, pp.tracker.Stats())
 }
 
 // mustDatagramPacket returns a *pktpool.Packet loaded with data, for tests exercising ProcessDatagramPacket - the

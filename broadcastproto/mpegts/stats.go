@@ -4,56 +4,96 @@ import (
 	"encoding/json"
 	"time"
 
+	"github.com/eluv-io/common-go/media/tracker"
 	"github.com/eluv-io/common-go/util/jsonutil"
 )
 
-func exportStats(ts *TSStats, rtp *RTPStats) (res ExportedStats) {
+// exportStats builds the JSON-exported stats from avpipe's own operational counters (ts, rtpStats) and the shared
+// tracker's stats (stream), which now owns most of the stream-integrity tracking. ExportedTSStats/ExportedRTPStats
+// keep their original field names/shapes for backward JSON compatibility (see the legacy-field comments below); only
+// their population source changed for the fields tracker.MediaTracker now computes.
+func exportStats(ts *TSStats, rtpStats *RTPStats, stream *tracker.Stats) (res ExportedStats) {
 	if ts != nil {
 		res.TS.PacketsReceived = ts.PacketsReceived.Load()
 		res.TS.PacketsWritten = ts.PacketsWritten.Load()
 		res.TS.PacketsDropped = ts.PacketsDropped.Load()
-		res.TS.SmallPacketsDropped = ts.SmallPacketsDropped.Load()
-		res.TS.RtcpPacketsDropped = ts.RtcpPacketsDropped.Load()
-		res.TS.BadPackets = ts.BadPackets.Load()
 		res.TS.BytesReceived = ts.BytesReceived.Load()
 		res.TS.BytesWritten = ts.BytesWritten.Load()
-		res.TS.PaddingPackets = ts.PaddingPackets.Load()
+		// FaultyPaddingPackets/StrippedPaddingPackets are both byproducts of the padding-stripping operation itself
+		// (see stripTsPadding/RemoveTsPadding) - an avpipe output-pipeline concern, not a stream-integrity stat, so
+		// they stay avpipe-managed rather than sourced from the tracker.
 		res.TS.FaultyPaddingPackets = ts.FaultyPaddingPackets.Load()
 		res.TS.StrippedPaddingPackets = ts.StrippedPaddingPackets.Load()
 		res.TS.MaxBufInPeriod = ts.MaxBufInPeriod.Load()
 		res.TS.MinBufInPeriod = ts.MinBufInPeriod.Load()
-		res.TS.VideoPacketCount = ts.VideoPacketCount.Load()
-		res.TS.AudioPacketCount = ts.AudioPacketCount.Load()
-		res.TS.DataPacketCount = ts.DataPacketCount.Load()
 		res.TS.FirstPCR = ts.FirstPCR.Load()
 		res.TS.LastPCR = ts.LastPCR.Load()
 		res.TS.NumSegments = uint64(ts.NumSegments.Load())
-		res.TS.NumWraps = uint64(ts.NumWraps.Load())
 		res.TS.NumTimedRotate = uint64(ts.NumTimedRotate.Load())
-		res.TS.ErrorsCC = ts.ErrorsCC.Load()
-		res.TS.ErrorsAdaptationField = ts.ErrorsAdaptationField.Load()
 		res.TS.ErrorsOther = ts.ErrorsOther.Load()
-		res.TS.ErrorsIncompletePackets = ts.ErrorsIncompletePackets.Load()
 		res.TS.ErrorsOpeningOutput = ts.ErrorsOpeningOutput.Load()
 		res.TS.ErrorsWriting = ts.ErrorsWriting.Load()
 	}
-	if rtp != nil {
-		res.RTP.FirstSeqNum = uint64(rtp.FirstSeqNum.Load())
-		res.RTP.LastSeqNum = uint64(rtp.LastSeqNum.Load())
-		res.RTP.SeqNumSkipTot = uint64(rtp.SeqNumSkipTot.Load())
-		res.RTP.SeqNumSkipCount = rtp.SeqNumSkipCount.Load()
-		res.RTP.FirstTimestamp = uint64(rtp.FirstTimestamp.Load())
-		res.RTP.LastTimestamp = uint64(rtp.LastTimestamp.Load())
-		res.RTP.RefTime = rtp.RefTime
-		res.RTP.BadPackets = rtp.BadPackets.Load()
-		res.RTP.LongHeaders = rtp.LongHeaders.Load()
+	if rtpStats != nil {
+		res.RTP.FirstSeqNum = uint64(rtpStats.FirstSeqNum.Load())
+		res.RTP.LastSeqNum = uint64(rtpStats.LastSeqNum.Load())
+		res.RTP.FirstTimestamp = uint64(rtpStats.FirstTimestamp.Load())
+		res.RTP.LastTimestamp = uint64(rtpStats.LastTimestamp.Load())
+		res.RTP.RefTime = rtpStats.RefTime
+	}
+	if stream != nil {
+		res.Stream = stream
+
+		res.TS.SmallPacketsDropped = stream.Errors.SmallPacketsDropped
+		res.TS.RtcpPacketsDropped = stream.Errors.RtcpPacketsDropped
+		res.TS.BadPackets = stream.Errors.BadPackets
+		res.TS.ErrorsCC = uint64(stream.Errors.CcErrors)
+		res.TS.ErrorsAdaptationField = stream.Errors.AdaptationFieldErrors
+		res.TS.ErrorsIncompletePackets = stream.Errors.IncompletePackets
+
+		if stream.Ts != nil {
+			cat := stream.Ts.Categorize()
+			res.TS.VideoPacketCount = uint64(cat.Video)
+			res.TS.AudioPacketCount = uint64(cat.Audio)
+			res.TS.DataPacketCount = uint64(cat.Other)
+			res.TS.PaddingPackets = uint64(cat.Padding)
+		}
+
+		pcrPinned := false
+		for _, c := range stream.Clocks {
+			switch c.Source {
+			case "rtp":
+				res.RTP.BadPackets = stream.Errors.BadPackets
+				res.RTP.LongHeaders = stream.Errors.LongHeaders
+				res.RTP.SeqNumSkipCount = c.ErrorCount
+				for _, g := range c.Gaps {
+					res.RTP.SeqNumSkipTot += uint64(absInt64(g.SeqDiff))
+				}
+			case "pcr":
+				if !pcrPinned {
+					// NumWraps is pinned to the first PCR-bearing PID discovered, mirroring FirstPCR/LastPCR above and
+					// avpipe's pre-tracker behavior. Clocks lists "pcr" entries in discovery order, so the first one
+					// found is that PID; other programs' wraps remain visible via stream.Clocks directly.
+					res.TS.NumWraps = uint64(c.NumWraps)
+					pcrPinned = true
+				}
+			}
+		}
 	}
 	return res
 }
 
+func absInt64(n int64) int64 {
+	if n < 0 {
+		return -n
+	}
+	return n
+}
+
 type ExportedStats struct {
-	TS  ExportedTSStats  `json:"ts,omitzero"`
-	RTP ExportedRTPStats `json:"rtp,omitzero"`
+	TS     ExportedTSStats  `json:"ts,omitzero"`
+	RTP    ExportedRTPStats `json:"rtp,omitzero"`
+	Stream *tracker.Stats   `json:"stream,omitempty"`
 }
 
 func (e *ExportedStats) String() string {

@@ -24,7 +24,7 @@ func TestExportedStats_StringRequiresPointer(t *testing.T) {
 	ts := newTestTSStats()
 	ts.PacketsReceived.Store(42)
 	ts.BytesReceived.Store(1234)
-	stats := exportStats(ts, &RTPStats{})
+	stats := exportStats(ts, &RTPStats{}, nil)
 
 	_, ok := any(stats).(fmt.Stringer)
 	require.False(t, ok, "ExportedStats value must not implement fmt.Stringer")
@@ -41,7 +41,7 @@ func TestExportedStats_FmtSprintProducesValidJSON(t *testing.T) {
 	ts := newTestTSStats()
 	ts.PacketsReceived.Store(42)
 	ts.BytesReceived.Store(1234)
-	stats := exportStats(ts, &RTPStats{})
+	stats := exportStats(ts, &RTPStats{}, nil)
 
 	s := fmt.Sprint(&stats)
 
@@ -63,7 +63,7 @@ func TestExportedStats_MarshalJSON(t *testing.T) {
 	ts.PacketsWritten.Store(7)
 	rtp := &RTPStats{}
 	rtp.LastSeqNum.Store(99)
-	stats := exportStats(ts, rtp)
+	stats := exportStats(ts, rtp, nil)
 
 	bb, err := json.Marshal(stats)
 	require.NoError(t, err)
