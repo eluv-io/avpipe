@@ -16,7 +16,6 @@ func exportStats(ts *TSStats, rtpStats *RTPStats, stream *tracker.Stats) (res Ex
 	if ts != nil {
 		res.TS.PacketsWritten = ts.PacketsWritten.Load()
 		res.TS.PacketsDropped = ts.PacketsDropped.Load()
-		res.TS.BytesReceived = ts.BytesReceived.Load()
 		res.TS.BytesWritten = ts.BytesWritten.Load()
 		// BadPackets is computed by avpipe itself (not sourced from mpp.tracker), since mpp.tracker's own BadPackets
 		// counts a different, RTP-only condition - see TSStats.BadPackets. FaultyPaddingPackets/StrippedPaddingPackets
@@ -44,15 +43,16 @@ func exportStats(ts *TSStats, rtpStats *RTPStats, stream *tracker.Stats) (res Ex
 	if stream != nil {
 		res.Stream = stream
 
-		// PacketsReceived counts datagrams (network reads), matching PacketsDropped's granularity (both feed the
-		// same "Recv/Drop %" report) - the pre-tracker code counted TS packets here instead, which made that ratio
-		// meaningless. DiscardedPackets aggregates every condition under which a whole datagram is rejected before
-		// its TS packets ever reach tsTracker: too small to plausibly contain one (SmallPacketsDropped, which
-		// includes the RtcpPacketsDropped subset), a malformed/wrong-version RTP header (BadPackets), or a TS
-		// payload that isn't a multiple of the TS packet size (IncompletePackets). It does not include per-packet
-		// conditions (AdaptationFieldErrors, FaultyPaddingPackets, CC errors) since those datagrams are still
-		// otherwise processed.
+		// PacketsReceived/BytesReceived count datagrams/datagram-bytes (network reads), matching PacketsDropped's
+		// granularity (both feed the same "Recv/Drop %" report) - the pre-tracker code counted TS packets/TS-only
+		// bytes here instead, which made that ratio meaningless. DiscardedPackets aggregates every condition under
+		// which a whole datagram is rejected before its TS packets ever reach tsTracker: too small to plausibly
+		// contain one (SmallPacketsDropped, which includes the RtcpPacketsDropped subset), a malformed/wrong-version
+		// RTP header (BadPackets), or a TS payload that isn't a multiple of the TS packet size (IncompletePackets).
+		// It does not include per-packet conditions (AdaptationFieldErrors, FaultyPaddingPackets, CC errors) since
+		// those datagrams are still otherwise processed.
 		res.TS.PacketsReceived = stream.Packets
+		res.TS.BytesReceived = stream.Bytes
 		res.TS.DiscardedPackets = stream.Errors.SmallPacketsDropped + stream.Errors.BadPackets + stream.Errors.IncompletePackets
 
 		res.TS.SmallPacketsDropped = stream.Errors.SmallPacketsDropped
