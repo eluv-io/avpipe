@@ -84,34 +84,6 @@ func TestMpegtsPacketProcessorWallClockSegmentation(t *testing.T) {
 	})
 }
 
-func TestMpegtsPacketProcessorPcrPidPinning(t *testing.T) {
-	// PCR is stats-only here, but multi-program streams carry an independent PCR per program, so tracking must pin to
-	// a single PID to keep FirstPCR/LastPCR meaningful.
-	base := time.Unix(1000, 0)
-
-	opener := &recordingSequentialOpener{}
-	pp := newTestMpegtsPacketProcessor(opener)
-
-	// The first PCR-bearing PID pins PCR tracking.
-	pinned := mustTSPacketWithPCR(t, 100, PcrTs)
-	pp.ProcessDatagramPacket(base, mustDatagramPacket(t, pinned[:]))
-	require.Equal(t, 100, pp.pcrPid)
-	require.EqualValues(t, PcrTs, pp.stats.FirstPCR.Load())
-	require.EqualValues(t, PcrTs, pp.stats.LastPCR.Load())
-
-	// A PCR from a different program is ignored: the pinned PID and LastPCR are unchanged.
-	otherProgram := mustTSPacketWithPCR(t, 200, PcrTs*5)
-	pp.ProcessDatagramPacket(base, mustDatagramPacket(t, otherProgram[:]))
-	require.Equal(t, 100, pp.pcrPid)
-	require.EqualValues(t, PcrTs, pp.stats.LastPCR.Load())
-
-	// A later PCR from the pinned program updates LastPCR.
-	pinnedLater := mustTSPacketWithPCR(t, 100, PcrTs*2)
-	pp.ProcessDatagramPacket(base, mustDatagramPacket(t, pinnedLater[:]))
-	require.Equal(t, 100, pp.pcrPid)
-	require.EqualValues(t, PcrTs*2, pp.stats.LastPCR.Load())
-}
-
 // TestMpegtsPacketProcessorContinuityCounterError covers continuity-counter validation, which prior to
 // tracker.MediaTracker's adoption had no test coverage at all despite being one of the two core tracking algorithms.
 // This logic itself now lives in mpp.tracker (mpegts.TsStreamTracker), surfaced here via ExportedStats.TS.ErrorsCC.
@@ -153,12 +125,91 @@ func TestMpegtsPacketProcessorPcrWrapStat(t *testing.T) {
 	low := mustTSPacketWithPCR(t, 100, PcrTs)
 	pp.ProcessDatagramPacket(base, mustDatagramPacket(t, low[:]))
 	require.EqualValues(t, 1, statsOf(pp).TS.NumWraps)
-	require.EqualValues(t, PcrTs, pp.stats.LastPCR.Load())
 
 	// A normal forward advance is not a wrap.
 	fwd := mustTSPacketWithPCR(t, 100, PcrTs*2)
 	pp.ProcessDatagramPacket(base, mustDatagramPacket(t, fwd[:]))
 	require.EqualValues(t, 1, statsOf(pp).TS.NumWraps)
+}
+
+// TestMpegtsPacketProcessorPacketsReceivedCountsDatagrams is a regression test for a real bug: PacketsReceived used
+// to count TS packets (188-byte units), while PacketsDropped (fed by the channel sender, see RegisterPacketsDropped)
+// counts datagrams - so a "Recv/Drop %" report combining the two was comparing different units and could never be
+// meaningful. PacketsReceived now comes from mpp.tracker, which counts once per datagram like PacketsDropped does.
+func TestMpegtsPacketProcessorPacketsReceivedCountsDatagrams(t *testing.T) {
+	base := time.Unix(1000, 0)
+	opener := &recordingSequentialOpener{}
+	pp := newTestMpegtsPacketProcessor(opener)
+
+	// One datagram carrying 3 TS packets must count as 1 received "packet" (datagram), not 3.
+	var datagram []byte
+	for i := 0; i < 3; i++ {
+		pkt := mustTSPacket()
+		pkt.SetPID(7)
+		datagram = append(datagram, pkt[:]...)
+	}
+	pp.ProcessDatagramPacket(base, mustDatagramPacket(t, datagram))
+	require.EqualValues(t, 1, statsOf(pp).TS.PacketsReceived)
+
+	pp.ProcessDatagramPacket(base, mustDatagramPacket(t, datagram))
+	require.EqualValues(t, 2, statsOf(pp).TS.PacketsReceived, "counts once more per datagram, regardless of TS packets within it")
+}
+
+// TestMpegtsPacketProcessorDiscardedPackets verifies DiscardedPackets aggregates every condition under which a whole
+// datagram is rejected before its TS packets reach mpp.tracker's tsTracker: too small (raw, non-RTP path) and a
+// non-188-aligned TS payload (RTP path). Per-packet conditions within an otherwise-processed datagram (CC errors,
+// adaptation-field errors) are NOT included - see the comment on DiscardedPackets in exportStats.
+func TestMpegtsPacketProcessorDiscardedPackets(t *testing.T) {
+	base := time.Unix(1000, 0)
+
+	t.Run("too small (raw TS)", func(t *testing.T) {
+		opener := &recordingSequentialOpener{}
+		pp := newTestMpegtsPacketProcessor(opener)
+
+		pp.ProcessDatagramPacket(base, mustDatagramPacket(t, []byte{0x47, 0x00}))
+		require.EqualValues(t, 1, statsOf(pp).TS.DiscardedPackets)
+		require.EqualValues(t, 1, statsOf(pp).TS.SmallPacketsDropped)
+	})
+
+	t.Run("non-188-aligned TS payload (RTP)", func(t *testing.T) {
+		opener := &recordingSequentialOpener{}
+		pp := newTestMpegtsPacketProcessorRTP(opener)
+
+		tsPkt := mustTSPacket()
+		tsPkt.SetPID(7)
+		payload := append(append([]byte{}, tsPkt[:]...), 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12)
+		datagram := mustRTPDatagram(t, pionrtp.Header{Version: 2, SequenceNumber: 1, Timestamp: 1}, payload)
+
+		pp.ProcessDatagramPacket(base, mustDatagramPacket(t, datagram))
+		require.EqualValues(t, 1, statsOf(pp).TS.DiscardedPackets)
+		require.EqualValues(t, 1, statsOf(pp).TS.ErrorsIncompletePackets)
+	})
+
+	t.Run("bad RTP version", func(t *testing.T) {
+		opener := &recordingSequentialOpener{}
+		pp := newTestMpegtsPacketProcessorRTP(opener)
+
+		tsPkt := mustTSPacket()
+		datagram := mustRTPDatagram(t, pionrtp.Header{Version: 1, SequenceNumber: 1, Timestamp: 1}, tsPkt[:])
+
+		pp.ProcessDatagramPacket(base, mustDatagramPacket(t, datagram))
+		require.EqualValues(t, 1, statsOf(pp).TS.DiscardedPackets)
+	})
+
+	t.Run("a continuity-counter error is not discarded", func(t *testing.T) {
+		opener := &recordingSequentialOpener{}
+		pp := newTestMpegtsPacketProcessor(opener)
+
+		pkt := packet.New()
+		pkt.SetPID(100)
+		pkt.SetContinuityCounter(0)
+		pp.ProcessDatagramPacket(base, mustDatagramPacket(t, pkt[:]))
+		pkt.SetContinuityCounter(5) // skip: triggers a CC error, but the datagram is still processed
+		pp.ProcessDatagramPacket(base, mustDatagramPacket(t, pkt[:]))
+
+		require.EqualValues(t, 1, statsOf(pp).TS.ErrorsCC)
+		require.EqualValues(t, 0, statsOf(pp).TS.DiscardedPackets)
+	})
 }
 
 func TestMpegtsPacketProcessorStopClosesFinalOutput(t *testing.T) {

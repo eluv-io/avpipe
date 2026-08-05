@@ -58,11 +58,9 @@ type MpegtsPacketProcessor struct {
 	periodicStatsLog timeutil.Periodic
 
 	// tracker tracks the incoming stream's timing and integrity (continuity counters, PCR/RTP clock correlation,
-	// gap detection, input-validation errors, etc.); its stats are surfaced via ExportedStats.Stream. See
-	// trackPCRExtremes for the handful of legacy stats fields it does not itself cover.
+	// gap detection, input-validation errors, etc.); its stats are surfaced via ExportedStats.Stream.
 	tracker tracker.MediaTracker
 
-	pcrPid   int    // PID pinned for FirstPCR/LastPCR bookkeeping (-1 = not set); see trackPCRExtremes
 	outBuf   []byte // Preallocated byte buffer
 	closeCh  chan struct{}
 	stopOnce sync.Once
@@ -85,7 +83,6 @@ func NewMpegtsPacketProcessor(cfg TsConfig, seqOpener SequentialOpener, inFd int
 		cfg:              cfg,
 		opener:           seqOpener,
 		inFd:             inFd,
-		pcrPid:           -1, // -1 = not set; PID 0 is a valid PID that may carry PCRs
 		stats:            NewTSStats(),
 		rtpStats:         rtpStats,
 		periodicStatsLog: timeutil.NewPeriodic(30 * time.Second),
@@ -105,14 +102,12 @@ type TsConfig struct {
 }
 
 // TSStats holds avpipe's own operational stats about its output pipeline (segmentation, writing, channel
-// backpressure) plus a small amount of legacy PCR bookkeeping (FirstPCR/LastPCR) that mpp.tracker does not itself
-// expose. All other stream-integrity stats (continuity-counter errors, PCR wraps, input-validation errors, per-PID
-// stream structure) now live in mpp.tracker (tracker.MediaTracker) and are surfaced via ExportedStats.Stream;
-// exportStats also maps a subset of them onto the legacy ExportedTSStats/ExportedRTPStats fields below for backward
-// JSON compatibility.
+// backpressure). All stream-integrity stats (continuity-counter errors, PCR wraps, input-validation errors, per-PID
+// stream structure, and the total packets/bytes received) now live in mpp.tracker (tracker.MediaTracker) and are
+// surfaced via ExportedStats.Stream; exportStats also maps a subset of them onto the legacy
+// ExportedTSStats/ExportedRTPStats fields below for backward JSON compatibility.
 type TSStats struct {
-	PacketsReceived atomic.Uint64
-	PacketsWritten  atomic.Uint64
+	PacketsWritten atomic.Uint64
 	// PacketsDropped is updated by the sender to the channel, which is why it is a pointer
 	PacketsDropped *atomic.Uint64
 	BytesReceived  atomic.Uint64
@@ -128,8 +123,6 @@ type TSStats struct {
 	MaxBufInPeriod atomic.Uint64
 	MinBufInPeriod atomic.Uint64
 
-	FirstPCR       atomic.Uint64 // First seen PCR value on the pinned PID; see trackPCRExtremes
-	LastPCR        atomic.Uint64 // Last seen PCR value on the pinned PID; see trackPCRExtremes
 	NumSegments    atomic.Int64
 	NumTimedRotate atomic.Int64
 
@@ -231,20 +224,17 @@ func (mpp *MpegtsPacketProcessor) ProcessDatagramPacket(now time.Time, pkt *pktp
 	tsPackets := tsLayer.Packets()
 
 	// This second pass over the already-decoded tsPackets is cheap (no re-parsing): it maintains avpipe-specific
-	// bookkeeping mpp.tracker does not itself cover - PacketsReceived/BytesReceived, the FirstPCR/LastPCR legacy
-	// fields (trackPCRExtremes), and the padding-stripping decision below, which (unlike mpp.tracker's own
-	// input-validation) requires knowing whether *this* datagram is safe to compact in place.
+	// bookkeeping mpp.tracker does not itself cover - BytesReceived and the padding-stripping decision below, which
+	// (unlike mpp.tracker's own input-validation) requires knowing whether *this* datagram is safe to compact in place.
 	badPackets := false
 	hasPadding := false
 	for _, tsPkt := range tsPackets {
-		mpp.stats.PacketsReceived.Inc()
 		mpp.stats.BytesReceived.Add(uint64(len(tsPkt)))
 		if tsPkt.CheckErrors() != nil {
 			mpp.stats.BadPackets.Inc()
 			badPackets = true
 			continue
 		}
-		mpp.trackPCRExtremes(tsPkt)
 		if mpp.cfg.Packaging == transport.RtpTs && tsPkt.IsNull() {
 			// do not remove padding here, just flag it. We will remove it later if and only if none of the packets
 			// in the datagram are bad.
@@ -329,44 +319,6 @@ func (mpp *MpegtsPacketProcessor) resetChannelSizeStats() {
 	maxU64 := ^uint64(0)
 	mpp.stats.MaxBufInPeriod.Store(0)
 	mpp.stats.MinBufInPeriod.Store(maxU64)
-}
-
-// trackPCRExtremes maintains the legacy FirstPCR/LastPCR stats fields: it pins to the first PID that carries a PCR
-// (mirroring mpp.tracker's own per-PID discovery, so both agree on which PID is "the" program clock) and records
-// that PID's first and most recent PCR values. All other PCR-related tracking - continuity counters, wrap detection,
-// jitter, per-PID correlation - is delegated to mpp.tracker (tracker.MediaTracker); see exportStats.
-func (mpp *MpegtsPacketProcessor) trackPCRExtremes(pkt *packet.Packet) {
-	if !pkt.HasAdaptationField() {
-		return
-	}
-
-	// Cannot fail as we already checked for adaptation field
-	a, _ := pkt.AdaptationField()
-
-	hasPcr, err := a.HasPCR()
-	if err != nil || !hasPcr {
-		return
-	}
-
-	// Pin PCR tracking to the first PID that carries a PCR and ignore the rest. Multi-program streams carry an
-	// independent PCR per program, so mixing them would make the FirstPCR/LastPCR stats meaningless. -1 is the "not
-	// set" sentinel, since PID 0 is a valid PID that may legitimately carry PCRs.
-	pid := pkt.PID()
-	if mpp.pcrPid != -1 && pid != mpp.pcrPid {
-		return
-	}
-
-	pcr, err := a.PCR()
-	if err != nil {
-		return
-	}
-
-	if mpp.pcrPid == -1 {
-		// Pin the PCR to this PID
-		mpp.pcrPid = pid
-		mpp.stats.FirstPCR.CompareAndSwap(0, pcr)
-	}
-	mpp.stats.LastPCR.Store(pcr)
 }
 
 func (mpp *MpegtsPacketProcessor) writeDatagram(
