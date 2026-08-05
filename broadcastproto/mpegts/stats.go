@@ -31,7 +31,7 @@ func exportStats(ts *TSStats, rtp *RTPStats) (res ExportedStats) {
 		res.TS.NumWraps = uint64(ts.NumWraps.Load())
 		res.TS.NumTimedRotate = uint64(ts.NumTimedRotate.Load())
 		res.TS.ErrorsCC = ts.ErrorsCC.Load()
-		res.TS.ErrorsAdapationField = ts.ErrorsAdapationField.Load()
+		res.TS.ErrorsAdaptationField = ts.ErrorsAdaptationField.Load()
 		res.TS.ErrorsOther = ts.ErrorsOther.Load()
 		res.TS.ErrorsIncompletePackets = ts.ErrorsIncompletePackets.Load()
 		res.TS.ErrorsOpeningOutput = ts.ErrorsOpeningOutput.Load()
@@ -91,7 +91,7 @@ type ExportedTSStats struct {
 	NumTimedRotate uint64 `json:"num_timed_rotate"`
 
 	ErrorsCC                uint64 `json:"errors_cc"`
-	ErrorsAdapationField    uint64 `json:"errors_adapation_field"`
+	ErrorsAdaptationField   uint64 `json:"errors_adaptation_field"`
 	ErrorsOther             uint64 `json:"errors_other"`
 	ErrorsIncompletePackets uint64 `json:"errors_incomplete_packets"`
 	ErrorsOpeningOutput     uint64 `json:"errors_opening_output"`

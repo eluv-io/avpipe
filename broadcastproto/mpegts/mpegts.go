@@ -130,7 +130,7 @@ type TSStats struct {
 
 	// Errors in the continuity counter
 	ErrorsCC                atomic.Uint64
-	ErrorsAdapationField    atomic.Uint64
+	ErrorsAdaptationField   atomic.Uint64
 	ErrorsOther             atomic.Uint64
 	ErrorsIncompletePackets atomic.Uint64
 	ErrorsOpeningOutput     atomic.Uint64
@@ -205,37 +205,30 @@ func (mpp *MpegtsPacketProcessor) ProcessDatagramPacket(now time.Time, pkt *pktp
 		if mpegtsOffset != 12 {
 			mpp.rtpStats.LongHeaders.Inc()
 		}
-		swapped := mpp.rtpStats.FirstTimestamp.CompareAndSwap(0, hdr.Timestamp)
-		if swapped {
+		if mpp.rtpStats.FirstTimestamp.CompareAndSwap(0, hdr.Timestamp) {
 			mpp.rtpStats.RefTime = now
 			mpp.rtpStats.FirstSeqNum.Store(uint32(hdr.SequenceNumber))
 			defer mpp.PushStats() // defer so that ts stats are included in the stats
 		}
 		mpp.rtpStats.LastTimestamp.Store(hdr.Timestamp)
 		mpp.rtpStats.LastSeqNum.Store(uint32(hdr.SequenceNumber))
-
-		// TODO: Sequence number / discontinuity processing
-
-		tsLayer, err := pkt.Ts()
-		if err != nil {
-			// Ts() requires the RTP payload to be an exact multiple of 188 bytes; a well-formed MPEGTS-over-RTP
-			// source always satisfies this, so a mismatch here indicates a malformed/corrupt datagram.
-			mpp.stats.ErrorsIncompletePackets.Inc()
-			return
-		}
-		tsPackets = tsLayer.Packets()
 	} else {
-		if len(datagram) < 188 { // at least one TS packet
+		// raw MPEG-TS
+		if len(datagram) < 188 { // require at least one TS packet, otherwise drop it
 			mpp.stats.SmallPacketsDropped.Inc()
 			return
 		}
-		tsLayer, err := pkt.Ts()
-		if err != nil {
-			mpp.stats.ErrorsIncompletePackets.Inc()
-			return
-		}
-		tsPackets = tsLayer.Packets()
 	}
+
+	tsLayer, err := pkt.Ts()
+	if err != nil {
+		// Ts() requires the RTP payload to be an exact multiple of 188 bytes; a well-formed MPEGTS-over-RTP
+		// source always satisfies this, so a mismatch here indicates a malformed/corrupt datagram.
+		mpp.stats.ErrorsIncompletePackets.Inc()
+		mpegtslog.Throttle("ts-decode").Warn("mpegts processing error", err, "fd", mpp.inFd)
+		return
+	}
+	tsPackets = tsLayer.Packets()
 
 	// Extract PCR
 	badPackets := 0
@@ -354,14 +347,13 @@ func (mpp *MpegtsPacketProcessor) resetChannelSizeStats() {
 }
 
 func (mpp *MpegtsPacketProcessor) checkContinuityCounter(pkt *packet.Packet) {
-	pid := pkt.PID()
-
 	if !pkt.HasPayload() || pkt.IsNull() {
 		// per spec, continuity counter only applies to packets with payload
 		return
 	}
 
 	cc := uint8(pkt.ContinuityCounter())
+	pid := pkt.PID()
 
 	lastCC, exists := mpp.continuityMap[pid]
 	mpp.continuityMap[pid] = cc
@@ -388,7 +380,7 @@ func (mpp *MpegtsPacketProcessor) updatePCR(pkt *packet.Packet) {
 
 	hasPcr, err := a.HasPCR()
 	if err != nil {
-		mpp.stats.ErrorsAdapationField.Inc()
+		mpp.stats.ErrorsAdaptationField.Inc()
 		return
 	} else if !hasPcr {
 		return
@@ -404,22 +396,24 @@ func (mpp *MpegtsPacketProcessor) updatePCR(pkt *packet.Packet) {
 
 	pcr, err := a.PCR()
 	if err != nil {
-		mpp.stats.ErrorsAdapationField.Inc()
+		mpp.stats.ErrorsAdaptationField.Inc()
 		return
 	}
 
-	// Count PCR wraps on the pinned PID: a wrap is a large backward jump from near PcrMax back towards 0. Skip the
-	// first PCR, when there is nothing to compare against yet. PCR is otherwise stats-only; segmentation is driven
-	// purely by wall-clock time.
-	if mpp.pcrPid != -1 {
+	if mpp.pcrPid == -1 {
+		// Pin the PCR to this PID
+		mpp.pcrPid = pid
+		mpp.stats.FirstPCR.CompareAndSwap(0, pcr)
+	} else {
+		// Count PCR wraps on the pinned PID: a wrap is a large backward jump from near PcrMax back towards 0. Skip the
+		// first PCR, when there is nothing to compare against yet. PCR is otherwise stats-only; segmentation is driven
+		// purely by wall-clock time.
 		prev := mpp.stats.LastPCR.Load()
 		if pcr < prev && prev-pcr > PcrMax/2 {
 			mpp.stats.NumWraps.Inc()
 		}
 	}
-	mpp.pcrPid = pid
 
-	mpp.stats.FirstPCR.CompareAndSwap(0, pcr)
 	mpp.stats.LastPCR.Store(pcr)
 }
 
