@@ -19,9 +19,11 @@ func exportStats(ts *TSStats, rtpStats *RTPStats, stream *tracker.Stats) (res Ex
 		res.TS.PacketsDropped = ts.PacketsDropped.Load()
 		res.TS.BytesReceived = ts.BytesReceived.Load()
 		res.TS.BytesWritten = ts.BytesWritten.Load()
-		// FaultyPaddingPackets/StrippedPaddingPackets are both byproducts of the padding-stripping operation itself
-		// (see stripTsPadding/RemoveTsPadding) - an avpipe output-pipeline concern, not a stream-integrity stat, so
-		// they stay avpipe-managed rather than sourced from the tracker.
+		// BadPackets is computed by avpipe itself (not sourced from mpp.tracker), since mpp.tracker's own BadPackets
+		// counts a different, RTP-only condition - see TSStats.BadPackets. FaultyPaddingPackets/StrippedPaddingPackets
+		// are both byproducts of the padding-stripping operation itself (see stripTsPadding/RemoveTsPadding) - an
+		// avpipe output-pipeline concern, not a stream-integrity stat, so they stay avpipe-managed too.
+		res.TS.BadPackets = ts.BadPackets.Load()
 		res.TS.FaultyPaddingPackets = ts.FaultyPaddingPackets.Load()
 		res.TS.StrippedPaddingPackets = ts.StrippedPaddingPackets.Load()
 		res.TS.MaxBufInPeriod = ts.MaxBufInPeriod.Load()
@@ -40,13 +42,13 @@ func exportStats(ts *TSStats, rtpStats *RTPStats, stream *tracker.Stats) (res Ex
 		res.RTP.FirstTimestamp = uint64(rtpStats.FirstTimestamp.Load())
 		res.RTP.LastTimestamp = uint64(rtpStats.LastTimestamp.Load())
 		res.RTP.RefTime = rtpStats.RefTime
+		res.RTP.BadPackets = rtpStats.BadPackets.Load()
 	}
 	if stream != nil {
 		res.Stream = stream
 
 		res.TS.SmallPacketsDropped = stream.Errors.SmallPacketsDropped
 		res.TS.RtcpPacketsDropped = stream.Errors.RtcpPacketsDropped
-		res.TS.BadPackets = stream.Errors.BadPackets
 		res.TS.ErrorsCC = uint64(stream.Errors.CcErrors)
 		res.TS.ErrorsAdaptationField = stream.Errors.AdaptationFieldErrors
 		res.TS.ErrorsIncompletePackets = stream.Errors.IncompletePackets
@@ -63,9 +65,10 @@ func exportStats(ts *TSStats, rtpStats *RTPStats, stream *tracker.Stats) (res Ex
 		for _, c := range stream.Clocks {
 			switch c.Source {
 			case "rtp":
-				res.RTP.BadPackets = stream.Errors.BadPackets
 				res.RTP.LongHeaders = stream.Errors.LongHeaders
 				res.RTP.SeqNumSkipCount = c.ErrorCount
+				// c.Gaps is bounded by tracker.Config.MaxGaps (100 by default), so on a long-running stream with more
+				// than MaxGaps gaps, SeqNumSkipTot undercounts - it only sums the retained gaps, not all of them.
 				for _, g := range c.Gaps {
 					res.RTP.SeqNumSkipTot += uint64(absInt64(g.SeqDiff))
 				}
