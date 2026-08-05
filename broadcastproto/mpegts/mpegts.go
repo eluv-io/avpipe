@@ -117,6 +117,9 @@ type TSStats struct {
 	PacketsDropped *atomic.Uint64
 	BytesReceived  atomic.Uint64
 	BytesWritten   atomic.Uint64
+	// BadPackets counts TS packets that fail CheckErrors(); computed here (not sourced from mpp.tracker) so it isn't
+	// conflated with mpp.tracker's own BadPackets, which counts a different, RTP-only condition. See exportStats.
+	BadPackets atomic.Uint64
 	// FaultyPaddingPackets/StrippedPaddingPackets are byproducts of the padding-stripping operation itself (see
 	// stripTsPadding/RemoveTsPadding) - an avpipe output-pipeline concern, not a stream-integrity stat.
 	FaultyPaddingPackets   atomic.Uint64
@@ -145,6 +148,11 @@ type RTPStats struct {
 	FirstTimestamp atomic.Uint32
 	LastTimestamp  atomic.Uint32
 	RefTime        time.Time // System time when first timestamp is set
+
+	// BadPackets counts a malformed RTP header, an unsupported RTP version, or at least one contained TS packet
+	// failing CheckErrors() - computed here (not sourced from mpp.tracker) so it isn't conflated with mpp.tracker's
+	// own BadPackets, which counts RTP-layer failures only. See exportStats.
+	BadPackets atomic.Uint64
 }
 
 func NewTSStats() *TSStats {
@@ -186,10 +194,12 @@ func (mpp *MpegtsPacketProcessor) ProcessDatagramPacket(now time.Time, pkt *pktp
 		// call above already decoded this layer, so this is a cached accessor, not a re-parse.
 		rtpLayer, err := pkt.Rtp()
 		if err != nil {
+			mpp.rtpStats.BadPackets.Inc()
 			return
 		}
 		hdr := rtpLayer.Packet().Header
 		if hdr.Version != 2 {
+			mpp.rtpStats.BadPackets.Inc()
 			return
 		}
 		// Header length derived from where pion actually placed the payload, not Header.MarshalSize() (which can
@@ -230,6 +240,7 @@ func (mpp *MpegtsPacketProcessor) ProcessDatagramPacket(now time.Time, pkt *pktp
 		mpp.stats.PacketsReceived.Inc()
 		mpp.stats.BytesReceived.Add(uint64(len(tsPkt)))
 		if tsPkt.CheckErrors() != nil {
+			mpp.stats.BadPackets.Inc()
 			badPackets = true
 			continue
 		}
@@ -239,6 +250,9 @@ func (mpp *MpegtsPacketProcessor) ProcessDatagramPacket(now time.Time, pkt *pktp
 			// in the datagram are bad.
 			hasPadding = true
 		}
+	}
+	if badPackets && mpp.cfg.Packaging == transport.RtpTs {
+		mpp.rtpStats.BadPackets.Inc()
 	}
 
 	if mpp.cfg.AnalyzeData || mpp.cfg.AnalyzeVideo {
