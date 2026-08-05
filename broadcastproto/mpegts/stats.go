@@ -14,7 +14,6 @@ import (
 // their population source changed for the fields tracker.MediaTracker now computes.
 func exportStats(ts *TSStats, rtpStats *RTPStats, stream *tracker.Stats) (res ExportedStats) {
 	if ts != nil {
-		res.TS.PacketsReceived = ts.PacketsReceived.Load()
 		res.TS.PacketsWritten = ts.PacketsWritten.Load()
 		res.TS.PacketsDropped = ts.PacketsDropped.Load()
 		res.TS.BytesReceived = ts.BytesReceived.Load()
@@ -28,8 +27,6 @@ func exportStats(ts *TSStats, rtpStats *RTPStats, stream *tracker.Stats) (res Ex
 		res.TS.StrippedPaddingPackets = ts.StrippedPaddingPackets.Load()
 		res.TS.MaxBufInPeriod = ts.MaxBufInPeriod.Load()
 		res.TS.MinBufInPeriod = ts.MinBufInPeriod.Load()
-		res.TS.FirstPCR = ts.FirstPCR.Load()
-		res.TS.LastPCR = ts.LastPCR.Load()
 		res.TS.NumSegments = uint64(ts.NumSegments.Load())
 		res.TS.NumTimedRotate = uint64(ts.NumTimedRotate.Load())
 		res.TS.ErrorsOther = ts.ErrorsOther.Load()
@@ -46,6 +43,17 @@ func exportStats(ts *TSStats, rtpStats *RTPStats, stream *tracker.Stats) (res Ex
 	}
 	if stream != nil {
 		res.Stream = stream
+
+		// PacketsReceived counts datagrams (network reads), matching PacketsDropped's granularity (both feed the
+		// same "Recv/Drop %" report) - the pre-tracker code counted TS packets here instead, which made that ratio
+		// meaningless. DiscardedPackets aggregates every condition under which a whole datagram is rejected before
+		// its TS packets ever reach tsTracker: too small to plausibly contain one (SmallPacketsDropped, which
+		// includes the RtcpPacketsDropped subset), a malformed/wrong-version RTP header (BadPackets), or a TS
+		// payload that isn't a multiple of the TS packet size (IncompletePackets). It does not include per-packet
+		// conditions (AdaptationFieldErrors, FaultyPaddingPackets, CC errors) since those datagrams are still
+		// otherwise processed.
+		res.TS.PacketsReceived = stream.Packets
+		res.TS.DiscardedPackets = stream.Errors.SmallPacketsDropped + stream.Errors.BadPackets + stream.Errors.IncompletePackets
 
 		res.TS.SmallPacketsDropped = stream.Errors.SmallPacketsDropped
 		res.TS.RtcpPacketsDropped = stream.Errors.RtcpPacketsDropped
@@ -74,9 +82,9 @@ func exportStats(ts *TSStats, rtpStats *RTPStats, stream *tracker.Stats) (res Ex
 				}
 			case "pcr":
 				if !pcrPinned {
-					// NumWraps is pinned to the first PCR-bearing PID discovered, mirroring FirstPCR/LastPCR above and
-					// avpipe's pre-tracker behavior. Clocks lists "pcr" entries in discovery order, so the first one
-					// found is that PID; other programs' wraps remain visible via stream.Clocks directly.
+					// NumWraps is pinned to the first PCR-bearing PID discovered, mirroring avpipe's pre-tracker
+					// behavior. Clocks lists "pcr" entries in discovery order, so the first one found is that PID;
+					// other programs' wraps remain visible via stream.Clocks directly.
 					res.TS.NumWraps = uint64(c.NumWraps)
 					pcrPinned = true
 				}
@@ -111,6 +119,7 @@ type ExportedTSStats struct {
 	PacketsReceived        uint64 `json:"packets_received"`
 	PacketsWritten         uint64 `json:"packets_written"`
 	PacketsDropped         uint64 `json:"packets_dropped"`
+	DiscardedPackets       uint64 `json:"discarded_packets"`
 	SmallPacketsDropped    uint64 `json:"small_packets_dropped"`
 	RtcpPacketsDropped     uint64 `json:"rtcp_packets_dropped"`
 	BadPackets             uint64 `json:"bad_packets"`
@@ -127,8 +136,6 @@ type ExportedTSStats struct {
 	AudioPacketCount uint64 `json:"audio_packet_count"`
 	DataPacketCount  uint64 `json:"data_packet_count"`
 
-	FirstPCR       uint64 `json:"first_pcr"`
-	LastPCR        uint64 `json:"last_pcr"`
 	NumSegments    uint64 `json:"num_segments"`
 	NumWraps       uint64 `json:"num_wraps"`
 	NumTimedRotate uint64 `json:"num_timed_rotate"`

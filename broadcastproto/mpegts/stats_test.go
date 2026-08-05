@@ -7,6 +7,8 @@ import (
 
 	"github.com/stretchr/testify/require"
 	"go.uber.org/atomic"
+
+	"github.com/eluv-io/common-go/media/tracker"
 )
 
 // newTestTSStats returns a TSStats with PacketsDropped registered, matching what every production caller does via
@@ -22,7 +24,6 @@ func newTestTSStats() *TSStats {
 // bug) silently falls back to Go's native struct formatting instead of the intended JSON.
 func TestExportedStats_StringRequiresPointer(t *testing.T) {
 	ts := newTestTSStats()
-	ts.PacketsReceived.Store(42)
 	ts.BytesReceived.Store(1234)
 	stats := exportStats(ts, &RTPStats{}, nil)
 
@@ -39,9 +40,8 @@ func TestExportedStats_StringRequiresPointer(t *testing.T) {
 // native "%v" struct format.
 func TestExportedStats_FmtSprintProducesValidJSON(t *testing.T) {
 	ts := newTestTSStats()
-	ts.PacketsReceived.Store(42)
 	ts.BytesReceived.Store(1234)
-	stats := exportStats(ts, &RTPStats{}, nil)
+	stats := exportStats(ts, &RTPStats{}, &tracker.Stats{Packets: 42})
 
 	s := fmt.Sprint(&stats)
 
