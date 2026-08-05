@@ -24,7 +24,6 @@ func newTestTSStats() *TSStats {
 // bug) silently falls back to Go's native struct formatting instead of the intended JSON.
 func TestExportedStats_StringRequiresPointer(t *testing.T) {
 	ts := newTestTSStats()
-	ts.BytesReceived.Store(1234)
 	stats := exportStats(ts, &RTPStats{}, nil)
 
 	_, ok := any(stats).(fmt.Stringer)
@@ -40,8 +39,7 @@ func TestExportedStats_StringRequiresPointer(t *testing.T) {
 // native "%v" struct format.
 func TestExportedStats_FmtSprintProducesValidJSON(t *testing.T) {
 	ts := newTestTSStats()
-	ts.BytesReceived.Store(1234)
-	stats := exportStats(ts, &RTPStats{}, &tracker.Stats{Packets: 42})
+	stats := exportStats(ts, &RTPStats{}, &tracker.Stats{Packets: 42, Bytes: 1234})
 
 	s := fmt.Sprint(&stats)
 

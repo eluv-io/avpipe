@@ -110,7 +110,6 @@ type TSStats struct {
 	PacketsWritten atomic.Uint64
 	// PacketsDropped is updated by the sender to the channel, which is why it is a pointer
 	PacketsDropped *atomic.Uint64
-	BytesReceived  atomic.Uint64
 	BytesWritten   atomic.Uint64
 	// BadPackets counts TS packets that fail CheckErrors(); computed here (not sourced from mpp.tracker) so it isn't
 	// conflated with mpp.tracker's own BadPackets, which counts a different, RTP-only condition. See exportStats.
@@ -223,13 +222,12 @@ func (mpp *MpegtsPacketProcessor) ProcessDatagramPacket(now time.Time, pkt *pktp
 	}
 	tsPackets := tsLayer.Packets()
 
-	// This second pass over the already-decoded tsPackets is cheap (no re-parsing): it maintains avpipe-specific
-	// bookkeeping mpp.tracker does not itself cover - BytesReceived and the padding-stripping decision below, which
-	// (unlike mpp.tracker's own input-validation) requires knowing whether *this* datagram is safe to compact in place.
+	// This second pass over the already-decoded tsPackets is cheap (no re-parsing): it maintains the padding-stripping
+	// decision below, which (unlike mpp.tracker's own input-validation) requires knowing whether *this* datagram is
+	// safe to compact in place.
 	badPackets := false
 	hasPadding := false
 	for _, tsPkt := range tsPackets {
-		mpp.stats.BytesReceived.Add(uint64(len(tsPkt)))
 		if tsPkt.CheckErrors() != nil {
 			mpp.stats.BadPackets.Inc()
 			badPackets = true

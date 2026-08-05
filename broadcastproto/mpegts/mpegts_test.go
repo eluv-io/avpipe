@@ -132,16 +132,19 @@ func TestMpegtsPacketProcessorPcrWrapStat(t *testing.T) {
 	require.EqualValues(t, 1, statsOf(pp).TS.NumWraps)
 }
 
-// TestMpegtsPacketProcessorPacketsReceivedCountsDatagrams is a regression test for a real bug: PacketsReceived used
-// to count TS packets (188-byte units), while PacketsDropped (fed by the channel sender, see RegisterPacketsDropped)
-// counts datagrams - so a "Recv/Drop %" report combining the two was comparing different units and could never be
-// meaningful. PacketsReceived now comes from mpp.tracker, which counts once per datagram like PacketsDropped does.
+// TestMpegtsPacketProcessorPacketsReceivedCountsDatagrams is a regression test for a real bug: PacketsReceived/
+// BytesReceived used to count TS packets/TS-only bytes (188-byte units), while PacketsDropped (fed by the channel
+// sender, see RegisterPacketsDropped) counts datagrams - so a "Recv/Drop %" report combining the two was comparing
+// different units and could never be meaningful. Both now come from mpp.tracker, which counts once per datagram
+// (full datagram bytes, including the raw TS bytes here since this processor is non-RTP) like PacketsDropped does.
 func TestMpegtsPacketProcessorPacketsReceivedCountsDatagrams(t *testing.T) {
 	base := time.Unix(1000, 0)
 	opener := &recordingSequentialOpener{}
 	pp := newTestMpegtsPacketProcessor(opener)
 
-	// One datagram carrying 3 TS packets must count as 1 received "packet" (datagram), not 3.
+	// One datagram carrying 3 TS packets must count as 1 received "packet" (datagram), not 3, and its bytes as the
+	// full datagram length, not the sum of the individual TS packets (equal here since this is a raw, non-RTP
+	// datagram with no header of its own, but sourced independently of the TS-packet loop either way).
 	var datagram []byte
 	for i := 0; i < 3; i++ {
 		pkt := mustTSPacket()
@@ -150,9 +153,11 @@ func TestMpegtsPacketProcessorPacketsReceivedCountsDatagrams(t *testing.T) {
 	}
 	pp.ProcessDatagramPacket(base, mustDatagramPacket(t, datagram))
 	require.EqualValues(t, 1, statsOf(pp).TS.PacketsReceived)
+	require.EqualValues(t, len(datagram), statsOf(pp).TS.BytesReceived)
 
 	pp.ProcessDatagramPacket(base, mustDatagramPacket(t, datagram))
 	require.EqualValues(t, 2, statsOf(pp).TS.PacketsReceived, "counts once more per datagram, regardless of TS packets within it")
+	require.EqualValues(t, 2*len(datagram), statsOf(pp).TS.BytesReceived)
 }
 
 // TestMpegtsPacketProcessorDiscardedPackets verifies DiscardedPackets aggregates every condition under which a whole
