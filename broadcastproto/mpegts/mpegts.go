@@ -130,16 +130,12 @@ type TSStats struct {
 	ErrorsWriting       atomic.Uint64
 }
 
-// RTPStats holds avpipe's own legacy RTP header bookkeeping (first/last sequence number and timestamp) that
-// mpp.tracker does not itself expose. Packet/error/gap tracking is delegated to mpp.tracker; see exportStats.
+// RTPStats holds avpipe's own RTP-specific bookkeeping that mpp.tracker does not itself expose. Sequence/timestamp
+// tracking, gap detection, and clock correlation are all delegated to mpp.tracker's "rtp" ClockStats; see exportStats.
 type RTPStats struct {
-	FirstSeqNum atomic.Uint32
-	LastSeqNum  atomic.Uint32
-
-	// RTP timestamp interpretation is different by application
-	FirstTimestamp atomic.Uint32
-	LastTimestamp  atomic.Uint32
-	RefTime        time.Time // System time when first timestamp is set
+	// started gates the deferred PushStats call on the very first RTP packet (mirroring startLogged's role for the
+	// first-datagram log line), so the first stats push happens promptly rather than waiting for the periodic ticker.
+	started atomic.Bool
 
 	// BadPackets counts a malformed RTP header, an unsupported RTP version, or at least one contained TS packet
 	// failing CheckErrors() - computed here (not sourced from mpp.tracker) so it isn't conflated with mpp.tracker's
@@ -197,13 +193,9 @@ func (mpp *MpegtsPacketProcessor) ProcessDatagramPacket(now time.Time, pkt *pktp
 		// Header length derived from where pion actually placed the payload, not Header.MarshalSize() (which can
 		// under-report for extension-bearing packets) - see pktpool.RtpPacket.decode's own comment for why.
 		mpegtsOffset = len(datagram) - len(rtpLayer.Payload) - int(hdr.PaddingSize)
-		if mpp.rtpStats.FirstTimestamp.CompareAndSwap(0, hdr.Timestamp) {
-			mpp.rtpStats.RefTime = now
-			mpp.rtpStats.FirstSeqNum.Store(uint32(hdr.SequenceNumber))
+		if mpp.rtpStats.started.CompareAndSwap(false, true) {
 			defer mpp.PushStats() // defer so that ts stats are included in the stats
 		}
-		mpp.rtpStats.LastTimestamp.Store(hdr.Timestamp)
-		mpp.rtpStats.LastSeqNum.Store(uint32(hdr.SequenceNumber))
 	} else {
 		// raw MPEG-TS
 		if len(datagram) < 188 { // require at least one TS packet, otherwise drop it

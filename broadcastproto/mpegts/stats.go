@@ -2,7 +2,6 @@ package mpegts
 
 import (
 	"encoding/json"
-	"time"
 
 	"github.com/eluv-io/common-go/media/tracker"
 	"github.com/eluv-io/common-go/util/jsonutil"
@@ -33,11 +32,6 @@ func exportStats(ts *TSStats, rtpStats *RTPStats, stream *tracker.Stats) (res Ex
 		res.TS.ErrorsWriting = ts.ErrorsWriting.Load()
 	}
 	if rtpStats != nil {
-		res.RTP.FirstSeqNum = uint64(rtpStats.FirstSeqNum.Load())
-		res.RTP.LastSeqNum = uint64(rtpStats.LastSeqNum.Load())
-		res.RTP.FirstTimestamp = uint64(rtpStats.FirstTimestamp.Load())
-		res.RTP.LastTimestamp = uint64(rtpStats.LastTimestamp.Load())
-		res.RTP.RefTime = rtpStats.RefTime
 		res.RTP.BadPackets = rtpStats.BadPackets.Load()
 	}
 	if stream != nil {
@@ -150,14 +144,8 @@ type ExportedTSStats struct {
 }
 
 type ExportedRTPStats struct {
-	FirstSeqNum     uint64 `json:"first_seq_num"`
-	LastSeqNum      uint64 `json:"last_seq_num"`
 	SeqNumSkipTot   uint64 `json:"seq_num_skip_tot"`
 	SeqNumSkipCount uint64 `json:"seq_num_skip_count"`
-
-	FirstTimestamp uint64    `json:"first_timestamp"`
-	LastTimestamp  uint64    `json:"last_timestamp"`
-	RefTime        time.Time `json:"ref_time"`
 
 	BadPackets  uint64 `json:"bad_packets"`
 	LongHeaders uint64 `json:"long_headers"`

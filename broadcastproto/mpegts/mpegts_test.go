@@ -397,10 +397,7 @@ func TestMpegtsPacketProcessorRTP(t *testing.T) {
 		require.EqualValues(t, 1, pp.stats.PacketsWritten.Load())
 		require.EqualValues(t, 0, statsOf(pp).RTP.BadPackets)
 		require.EqualValues(t, 0, statsOf(pp).RTP.LongHeaders)
-		require.EqualValues(t, 100, pp.rtpStats.FirstSeqNum.Load())
-		require.EqualValues(t, 100, pp.rtpStats.LastSeqNum.Load())
-		require.EqualValues(t, 9000, pp.rtpStats.FirstTimestamp.Load())
-		require.EqualValues(t, 9000, pp.rtpStats.LastTimestamp.Load())
+		require.True(t, pp.rtpStats.started.Load(), "the first RTP packet flips the started sentinel (triggers a deferred PushStats)")
 	})
 
 	t.Run("computes header length correctly with CSRC and extension present", func(t *testing.T) {

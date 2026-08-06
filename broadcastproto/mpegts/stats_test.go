@@ -60,7 +60,7 @@ func TestExportedStats_MarshalJSON(t *testing.T) {
 	ts := newTestTSStats()
 	ts.PacketsWritten.Store(7)
 	rtp := &RTPStats{}
-	rtp.LastSeqNum.Store(99)
+	rtp.BadPackets.Store(99)
 	stats := exportStats(ts, rtp, nil)
 
 	bb, err := json.Marshal(stats)
