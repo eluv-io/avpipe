@@ -57,8 +57,8 @@ func TestExportedStats_FmtSprintProducesValidJSON(t *testing.T) {
 
 	srtFields, ok := decoded["srt"].(map[string]any)
 	require.True(t, ok, "decoded JSON must have an \"srt\" object when the source is SRT")
-	require.EqualValues(t, 5, srtFields["Version"])
-	require.EqualValues(t, true, srtFields["Encrypted"])
+	require.EqualValues(t, 5, srtFields["version"])
+	require.EqualValues(t, true, srtFields["encrypted"])
 }
 
 // TestExportedStats_SrtOmittedForNonSrtSource verifies the "srt" field is absent entirely (not just null) for a
