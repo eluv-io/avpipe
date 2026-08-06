@@ -1,5 +1,7 @@
 #!/bin/bash
 
+# For use with https://github.com/qluvio/elv-toolchain output
+
 export FFMPEG_DIST="$HOME/.local"
 export SRT_DIST="$HOME/.local/bin"
 export PKG_CONFIG_PATH="$HOME/.local/lib/pkgconfig"

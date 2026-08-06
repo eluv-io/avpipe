@@ -43,7 +43,8 @@ fi
 cd "$AV_PIPE_PATH"
 
 if [ "$SHORT_ONLY" = "true" ]; then
-    ./run_tests.sh --short
+  make ctest
+  ./run_go_tests.sh --short
 else
-    ./run_tests.sh
+  make test
 fi

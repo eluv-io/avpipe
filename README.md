@@ -68,7 +68,7 @@ The following repositories can be checked out in any directory, but for better o
 ### Test avpipe
 
 By script:
-  - `run_tests.sh` to run avpipe core functionality and transcoding tests.
+  - `run_go_tests.sh` to run avpipe core functionality and transcoding tests.
   - `run_live_tests.sh`: to run avipe live-streaming functionality tests.
 
 Manual examples:

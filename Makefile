@@ -60,7 +60,7 @@ endif
 test: ctest gotest
 
 gotest:
-	@./run_tests.sh
+	@./run_go_tests.sh
 
 ctest:
 	@$(MAKE) -C libavpipe test
