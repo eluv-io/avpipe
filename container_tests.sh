@@ -40,8 +40,12 @@ if [ ! -d "$AV_PIPE_MEDIA_DIR" ]; then
   exit 1
 fi
 
+# fix dubious ownership
+git config --global --add safe.directory "$AV_PIPE_PATH"
 cd "$AV_PIPE_PATH"
-
+source init-local.sh
+make clean
+make
 if [ "$SHORT_ONLY" = "true" ]; then
   make ctest
   ./run_go_tests.sh --short
