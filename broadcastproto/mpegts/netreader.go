@@ -11,6 +11,7 @@ import (
 	"github.com/eluv-io/avpipe/goavpipe"
 	"github.com/eluv-io/common-go/format/duration"
 	"github.com/eluv-io/common-go/media"
+	mio "github.com/eluv-io/common-go/media/io"
 	"github.com/eluv-io/common-go/media/pktpool"
 	"github.com/eluv-io/common-go/util/timeutil"
 	"github.com/eluv-io/errors-go"
@@ -84,6 +85,21 @@ type NetReader struct {
 	running   atomic.Bool
 	waitGroup sync.WaitGroup
 	reader    atomic.Pointer[io.ReadCloser] // the current reader, used for closing when the NetReader is canceled
+}
+
+// ConnStats returns the current connection's statistics, if there is an active reader and it reports them (e.g. an
+// SRT connection - see mio.StatsReporter). ok is false if there's no active reader yet (not yet connected, or
+// between reconnect attempts) or the reader doesn't implement mio.StatsReporter (e.g. a plain UDP socket).
+func (r *NetReader) ConnStats(details bool) (stats mio.ConnStats, ok bool) {
+	reader := r.reader.Load()
+	if reader == nil {
+		return mio.ConnStats{}, false
+	}
+	reporter, ok := (*reader).(mio.StatsReporter)
+	if !ok {
+		return mio.ConnStats{}, false
+	}
+	return reporter.ConnStats(details), true
 }
 
 func (r *NetReader) Status() (running bool, err error) {

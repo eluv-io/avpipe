@@ -17,6 +17,7 @@ import (
 	"github.com/eluv-io/avpipe/broadcastproto/transport"
 	"github.com/eluv-io/avpipe/goavpipe"
 	"github.com/eluv-io/common-go/format/duration"
+	mio "github.com/eluv-io/common-go/media/io"
 	"github.com/eluv-io/common-go/media/pktpool"
 	"github.com/eluv-io/common-go/util/byteutil"
 	"github.com/eluv-io/common-go/util/syncutil"
@@ -156,6 +157,52 @@ func TestNetReader_StatusReportsFirstResultOnly(t *testing.T) {
 	_, err := r.Status()
 	require.ErrorIs(t, err, firstErr)
 	require.NotErrorIs(t, err, secondErr)
+}
+
+// TestNetReader_ConnStats verifies ConnStats reports (ok=false, zero value) when there's no active reader yet or the
+// active reader doesn't implement mio.StatsReporter (e.g. a plain UDP socket), and forwards to the reader - details
+// included - when it does (e.g. an SRT connection).
+func TestNetReader_ConnStats(t *testing.T) {
+	var nr NetReader
+
+	_, ok := nr.ConnStats(true)
+	require.False(t, ok, "no active reader yet")
+
+	var plain io.ReadCloser = &noopReadCloser{}
+	nr.reader.Store(&plain)
+	_, ok = nr.ConnStats(true)
+	require.False(t, ok, "the active reader doesn't implement mio.StatsReporter")
+
+	fake := &fakeStatsReporterReadCloser{stats: mio.ConnStats{RemoteAddr: "1.2.3.4:5678"}}
+	var reporter io.ReadCloser = fake
+	nr.reader.Store(&reporter)
+
+	stats, ok := nr.ConnStats(true)
+	require.True(t, ok)
+	require.Equal(t, "1.2.3.4:5678", stats.RemoteAddr)
+	require.True(t, fake.lastDetails, "details is forwarded to the underlying reporter")
+
+	_, _ = nr.ConnStats(false)
+	require.False(t, fake.lastDetails)
+}
+
+type noopReadCloser struct{}
+
+func (*noopReadCloser) Read([]byte) (int, error) { return 0, io.EOF }
+func (*noopReadCloser) Close() error             { return nil }
+
+// fakeStatsReporterReadCloser is a minimal io.ReadCloser that also implements mio.StatsReporter, for testing
+// NetReader.ConnStats/RtpDecapsulator.ConnStats without a real SRT connection.
+type fakeStatsReporterReadCloser struct {
+	stats       mio.ConnStats
+	lastDetails bool
+}
+
+func (*fakeStatsReporterReadCloser) Read([]byte) (int, error) { return 0, io.EOF }
+func (*fakeStatsReporterReadCloser) Close() error             { return nil }
+func (f *fakeStatsReporterReadCloser) ConnStats(details bool) mio.ConnStats {
+	f.lastDetails = details
+	return f.stats
 }
 
 func createNetReader(tp transport.Transport) netReaderTestCtx {

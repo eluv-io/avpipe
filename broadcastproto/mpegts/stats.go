@@ -3,15 +3,17 @@ package mpegts
 import (
 	"encoding/json"
 
+	mio "github.com/eluv-io/common-go/media/io"
 	"github.com/eluv-io/common-go/media/tracker"
 	"github.com/eluv-io/common-go/util/jsonutil"
 )
 
-// exportStats builds the JSON-exported stats from avpipe's own operational counters (ts, rtpStats) and the shared
-// tracker's stats (stream), which now owns most of the stream-integrity tracking. ExportedTSStats/ExportedRTPStats
-// keep their original field names/shapes for backward JSON compatibility (see the legacy-field comments below); only
-// their population source changed for the fields tracker.MediaTracker now computes.
-func exportStats(ts *TSStats, rtpStats *RTPStats, stream *tracker.Stats) (res ExportedStats) {
+// exportStats builds the JSON-exported stats from avpipe's own operational counters (ts, rtpStats), the shared
+// tracker's stats (stream), which now owns most of the stream-integrity tracking, and the underlying connection's
+// SRT stats (srt), if any. ExportedTSStats/ExportedRTPStats keep their original field names/shapes for backward JSON
+// compatibility (see the legacy-field comments below); only their population source changed for the fields
+// tracker.MediaTracker now computes.
+func exportStats(ts *TSStats, rtpStats *RTPStats, stream *tracker.Stats, srt *mio.SrtConnStats) (res ExportedStats) {
 	if ts != nil {
 		res.TS.PacketsWritten = ts.PacketsWritten.Load()
 		res.TS.PacketsDropped = ts.PacketsDropped.Load()
@@ -85,6 +87,7 @@ func exportStats(ts *TSStats, rtpStats *RTPStats, stream *tracker.Stats) (res Ex
 			}
 		}
 	}
+	res.Srt = srt
 	return res
 }
 
@@ -99,6 +102,10 @@ type ExportedStats struct {
 	TS     ExportedTSStats  `json:"ts,omitzero"`
 	RTP    ExportedRTPStats `json:"rtp,omitzero"`
 	Stream *tracker.Stats   `json:"stream,omitempty"`
+	// Srt is the underlying connection's SRT protocol stats (RTT, bandwidth, retransmits, buffer levels - see
+	// mio.SrtConnStats) - nil unless the source is an SRT pull or push connection. See MpegtsPacketProcessor's
+	// connStats/SetConnStatsSource.
+	Srt *mio.SrtConnStats `json:"srt,omitempty"`
 }
 
 func (e *ExportedStats) String() string {

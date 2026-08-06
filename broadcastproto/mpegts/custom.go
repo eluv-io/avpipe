@@ -84,6 +84,9 @@ func (c *customInputOpener) Open(fd int64, url string) (goavpipe.InputHandler, e
 		c.transport,
 		consumers,
 	)
+	if mpegTsConsumer != nil {
+		mpegTsConsumer.pp.SetConnStatsSource(netReader)
+	}
 
 	handler := &customInputHandler{
 		netReader:      netReader,

@@ -13,6 +13,7 @@ import (
 	"github.com/eluv-io/avpipe/broadcastproto/tlv"
 	"github.com/eluv-io/avpipe/broadcastproto/transport"
 	"github.com/eluv-io/avpipe/goavpipe"
+	mio "github.com/eluv-io/common-go/media/io"
 	"github.com/eluv-io/common-go/media/pktpool"
 	"github.com/eluv-io/common-go/media/tracker"
 	"github.com/eluv-io/common-go/util/timeutil"
@@ -60,6 +61,24 @@ type MpegtsPacketProcessor struct {
 	// tracker tracks the incoming stream's timing and integrity (continuity counters, PCR/RTP clock correlation,
 	// gap detection, input-validation errors, etc.); its stats are surfaced via ExportedStats.Stream.
 	tracker tracker.MediaTracker
+
+	// connStats, if set, reports the underlying network connection's statistics (e.g. SRT protocol stats),
+	// surfaced via ExportedStats.Srt. nil for a source that doesn't report them (e.g. plain UDP), or before the
+	// caller has wired one in - a NetReader doesn't exist yet when NewMpegtsPacketProcessor runs, so this is set
+	// after the fact via SetConnStatsSource, not passed to the constructor.
+	connStats connStatsSource
+
+	// fullStats caches the expensive-to-gather parts of PushStats's report (mpp.tracker's snapshot, which walks
+	// every tracked PID, and the connection's SRT stats) so they refresh on their own slower interval instead of
+	// every PushStats call. PushStats itself still runs frequently (see StartReportingStats) because
+	// content-fabric's live-recorder stall detection needs TSStats.BytesWritten - a plain atomic, unaffected by
+	// this cache - to stay fresh; the tracker/SRT snapshots have no such requirement.
+	fullStats struct {
+		mu        sync.Mutex
+		expiresAt time.Time
+		tracker   *tracker.Stats
+		srt       *mio.SrtConnStats
+	}
 
 	outBuf   []byte // Preallocated byte buffer
 	closeCh  chan struct{}
@@ -261,13 +280,56 @@ func (mpp *MpegtsPacketProcessor) StartReportingStats() {
 }
 
 func (mpp *MpegtsPacketProcessor) PushStats() {
-	exportStats := exportStats(mpp.stats, mpp.rtpStats, mpp.tracker.Stats())
+	trackerStats, srtStats := mpp.refreshFullStats()
+	exportStats := exportStats(mpp.stats, mpp.rtpStats, trackerStats, srtStats)
 	mpp.resetChannelSizeStats()
 
 	mpp.periodicStatsLog.Do(func() {
 		mpegtslog.Debug("mpegts stats", "fd", mpp.inFd, "stats", &exportStats)
 	})
 	_ = mpp.opener.Stat(exportStats)
+}
+
+// fullStatsRefreshInterval bounds how often PushStats re-gathers the expensive parts of its report - mpp.tracker's
+// snapshot (walks every tracked PID) and the connection's SRT stats (a protocol-level query, not a plain atomic
+// load). PushStats itself runs far more often than this (see StartReportingStats); refreshFullStats reuses the
+// cached values on calls that land inside the same interval. A var, not a const, so tests can shrink it instead of
+// sleeping for real.
+var fullStatsRefreshInterval = 5 * time.Second
+
+// refreshFullStats returns mpp.tracker's stats and, if mpp.connStats is set, the connection's SRT stats - refreshing
+// both together at most once per fullStatsRefreshInterval and reusing the cached values otherwise.
+func (mpp *MpegtsPacketProcessor) refreshFullStats() (*tracker.Stats, *mio.SrtConnStats) {
+	mpp.fullStats.mu.Lock()
+	defer mpp.fullStats.mu.Unlock()
+
+	now := time.Now()
+	if now.Before(mpp.fullStats.expiresAt) {
+		return mpp.fullStats.tracker, mpp.fullStats.srt
+	}
+
+	mpp.fullStats.tracker = mpp.tracker.Stats()
+	mpp.fullStats.srt = nil
+	if mpp.connStats != nil {
+		if cs, ok := mpp.connStats.ConnStats(true); ok {
+			mpp.fullStats.srt = cs.SRT
+		}
+	}
+	mpp.fullStats.expiresAt = now.Add(fullStatsRefreshInterval)
+	return mpp.fullStats.tracker, mpp.fullStats.srt
+}
+
+// connStatsSource is implemented by *NetReader; kept as a minimal interface (rather than depending on NetReader
+// directly) so MpegtsPacketProcessor stays testable with a fake. See SetConnStatsSource.
+type connStatsSource interface {
+	ConnStats(details bool) (mio.ConnStats, bool)
+}
+
+// SetConnStatsSource wires src as the source of ExportedStats.Srt. It is a setter rather than a constructor
+// parameter because the underlying connection (a *NetReader, see bypass.go/custom.go) doesn't exist until after
+// NewMpegtsPacketProcessor has already been called and returned.
+func (mpp *MpegtsPacketProcessor) SetConnStatsSource(src connStatsSource) {
+	mpp.connStats = src
 }
 
 func (mpp *MpegtsPacketProcessor) ReportStart() {
