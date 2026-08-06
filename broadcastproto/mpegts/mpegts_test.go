@@ -15,7 +15,6 @@ import (
 	"github.com/eluv-io/avpipe/broadcastproto/transport"
 	mio "github.com/eluv-io/common-go/media/io"
 	"github.com/eluv-io/common-go/media/pktpool"
-	"github.com/eluv-io/common-go/media/tracker"
 )
 
 func TestMpegtsPacketProcessorWallClockSegmentation(t *testing.T) {
@@ -434,27 +433,25 @@ func TestMpegtsPacketProcessor_refreshFullStats_Caches(t *testing.T) {
 
 // TestMpegtsPacketProcessor_PushStats_ConcurrentReceiverCopyIsRaceFree is a regression test for the data race that
 // Snapshot-based reuse in refreshFullStats would otherwise permit: mpp.fullStats.tracker (see its field doc) is now
-// mutated in place on every real refresh rather than replaced, so a receiver that retains ExportedStats.Stream past
-// a single PushStats call (as content-fabric's live-recorder AV_IN_STAT_MPEGTS handler does) must deep-copy it via
-// CopyInto at the point of receipt, into memory it owns outright, rather than aliasing avpipe's pointer - otherwise
-// a reader goroutine racing PushStats's own goroutine would race on *tracker.Stats's fields with no shared lock to
-// prevent it (avpipe and content-fabric are separate modules, each with its own, disjoint mutex). This drives
-// PushStats (with fullStatsRefreshInterval forced to 0, so every call performs a real Snapshot mutation, not a
-// cached reuse) and a receiver simulating that handler's copy-on-receipt discipline concurrently, under -race.
+// mutated in place on every real refresh rather than replaced, so a receiver that retains an ExportedStats past a
+// single PushStats call (as content-fabric's live-recorder AV_IN_STAT_MPEGTS handler does) must deep-copy it via
+// CopyInto at the point of receipt, into memory it owns outright, rather than aliasing avpipe's Stream pointer -
+// otherwise a reader goroutine racing PushStats's own goroutine would race on *tracker.Stats's fields with no shared
+// lock to prevent it (avpipe and content-fabric are separate modules, each with its own, disjoint mutex). This
+// drives PushStats (with fullStatsRefreshInterval forced to 0, so every call performs a real Snapshot mutation, not
+// a cached reuse) and a receiver simulating that handler's copy-on-receipt discipline concurrently, under -race.
 func TestMpegtsPacketProcessor_PushStats_ConcurrentReceiverCopyIsRaceFree(t *testing.T) {
 	defer func(saved time.Duration) { fullStatsRefreshInterval = saved }(fullStatsRefreshInterval)
 	fullStatsRefreshInterval = 0
 
 	var mu sync.Mutex
-	owned := &tracker.Stats{} // mirrors l.StatusReport.InputStats.Stream: the receiver's own, reused destination
+	owned := &ExportedStats{} // mirrors l.StatusReport.InputStats: the receiver's own, reused destination
 
 	opener := &recordingSequentialOpener{}
 	opener.onStat = func(stats ExportedStats) {
 		mu.Lock()
 		defer mu.Unlock()
-		if stats.Stream != nil {
-			stats.Stream.CopyInto(owned)
-		}
+		stats.CopyInto(owned)
 	}
 	pp := newTestMpegtsPacketProcessor(opener)
 
@@ -480,7 +477,7 @@ func TestMpegtsPacketProcessor_PushStats_ConcurrentReceiverCopyIsRaceFree(t *tes
 	}()
 	go func() {
 		defer wg.Done()
-		reader := &tracker.Stats{}
+		reader := &ExportedStats{}
 		for {
 			mu.Lock()
 			owned.CopyInto(reader)
