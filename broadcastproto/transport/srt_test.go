@@ -7,6 +7,7 @@ import (
 	pionrtp "github.com/pion/rtp"
 	"github.com/stretchr/testify/require"
 
+	mio "github.com/eluv-io/common-go/media/io"
 	"github.com/eluv-io/common-go/media/pktpool"
 )
 
@@ -86,6 +87,37 @@ func TestRtpDecapsulatorStripsAcrossRepeatedReads(t *testing.T) {
 		require.NoError(t, err)
 		require.Equal(t, tsPkt, buf[:n], "datagram %d", i)
 	}
+}
+
+// TestRtpDecapsulator_ConnStats_Passthrough verifies that stripping the RTP layer doesn't break the mio.StatsReporter
+// chain: the wrapped reader's stats (e.g. an SRT connection's) come through unchanged.
+func TestRtpDecapsulator_ConnStats_Passthrough(t *testing.T) {
+	fake := &fakeStatsReporter{stats: mio.ConnStats{RemoteAddr: "1.2.3.4:5678"}}
+	dec := newTestRtpDecapsulator(fake)
+
+	stats := dec.ConnStats(true)
+	require.Equal(t, "1.2.3.4:5678", stats.RemoteAddr)
+	require.True(t, fake.lastDetails)
+}
+
+// TestRtpDecapsulator_ConnStats_NonReporter verifies a zero ConnStats (not a panic) when the wrapped reader doesn't
+// implement mio.StatsReporter (e.g. a plain UDP socket).
+func TestRtpDecapsulator_ConnStats_NonReporter(t *testing.T) {
+	dec := newTestRtpDecapsulator(&fakeReadCloser{})
+	require.Zero(t, dec.ConnStats(true))
+}
+
+// fakeStatsReporter is a minimal io.ReadCloser that also implements mio.StatsReporter.
+type fakeStatsReporter struct {
+	stats       mio.ConnStats
+	lastDetails bool
+}
+
+func (*fakeStatsReporter) Read([]byte) (int, error) { return 0, io.EOF }
+func (*fakeStatsReporter) Close() error             { return nil }
+func (f *fakeStatsReporter) ConnStats(details bool) mio.ConnStats {
+	f.lastDetails = details
+	return f.stats
 }
 
 func newTestRtpDecapsulator(reader io.ReadCloser) *RtpDecapsulator {

@@ -8,6 +8,7 @@ import (
 	"github.com/stretchr/testify/require"
 	"go.uber.org/atomic"
 
+	mio "github.com/eluv-io/common-go/media/io"
 	"github.com/eluv-io/common-go/media/tracker"
 )
 
@@ -24,7 +25,7 @@ func newTestTSStats() *TSStats {
 // bug) silently falls back to Go's native struct formatting instead of the intended JSON.
 func TestExportedStats_StringRequiresPointer(t *testing.T) {
 	ts := newTestTSStats()
-	stats := exportStats(ts, &RTPStats{}, nil)
+	stats := exportStats(ts, &RTPStats{}, nil, nil)
 
 	_, ok := any(stats).(fmt.Stringer)
 	require.False(t, ok, "ExportedStats value must not implement fmt.Stringer")
@@ -39,7 +40,8 @@ func TestExportedStats_StringRequiresPointer(t *testing.T) {
 // native "%v" struct format.
 func TestExportedStats_FmtSprintProducesValidJSON(t *testing.T) {
 	ts := newTestTSStats()
-	stats := exportStats(ts, &RTPStats{}, &tracker.Stats{Packets: 42, Bytes: 1234})
+	srt := &mio.SrtConnStats{Version: 5, Encrypted: true}
+	stats := exportStats(ts, &RTPStats{}, &tracker.Stats{Packets: 42, Bytes: 1234}, srt)
 
 	s := fmt.Sprint(&stats)
 
@@ -52,6 +54,24 @@ func TestExportedStats_FmtSprintProducesValidJSON(t *testing.T) {
 	require.True(t, ok, "decoded JSON must have a \"ts\" object")
 	require.EqualValues(t, 42, tsFields["packets_received"])
 	require.EqualValues(t, 1234, tsFields["bytes_received"])
+
+	srtFields, ok := decoded["srt"].(map[string]any)
+	require.True(t, ok, "decoded JSON must have an \"srt\" object when the source is SRT")
+	require.EqualValues(t, 5, srtFields["Version"])
+	require.EqualValues(t, true, srtFields["Encrypted"])
+}
+
+// TestExportedStats_SrtOmittedForNonSrtSource verifies the "srt" field is absent entirely (not just null) for a
+// non-SRT source, so a dashboard consuming this JSON can key its SRT-specific UI off the field's presence.
+func TestExportedStats_SrtOmittedForNonSrtSource(t *testing.T) {
+	stats := exportStats(newTestTSStats(), &RTPStats{}, nil, nil)
+
+	bb, err := json.Marshal(stats)
+	require.NoError(t, err)
+
+	var decoded map[string]any
+	require.NoError(t, json.Unmarshal(bb, &decoded))
+	require.NotContains(t, decoded, "srt")
 }
 
 // TestExportedStats_MarshalJSON confirms ExportedStats marshals to valid, round-trippable JSON on its own, independent
@@ -61,7 +81,7 @@ func TestExportedStats_MarshalJSON(t *testing.T) {
 	ts.PacketsWritten.Store(7)
 	rtp := &RTPStats{}
 	rtp.BadPackets.Store(99)
-	stats := exportStats(ts, rtp, nil)
+	stats := exportStats(ts, rtp, nil, &mio.SrtConnStats{Version: 5})
 
 	bb, err := json.Marshal(stats)
 	require.NoError(t, err)

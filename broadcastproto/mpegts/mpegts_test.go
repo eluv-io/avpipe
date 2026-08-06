@@ -12,6 +12,7 @@ import (
 	"go.uber.org/atomic"
 
 	"github.com/eluv-io/avpipe/broadcastproto/transport"
+	mio "github.com/eluv-io/common-go/media/io"
 	"github.com/eluv-io/common-go/media/pktpool"
 )
 
@@ -380,6 +381,64 @@ func mustRTPDatagram(t *testing.T, hdr pionrtp.Header, payload []byte) []byte {
 	return data
 }
 
+// TestMpegtsPacketProcessorConnStats verifies SetConnStatsSource wiring end to end: PushStats surfaces the source's
+// SRT stats via ExportedStats.Srt, and omits it entirely (rather than a zero value) when no source is set.
+func TestMpegtsPacketProcessorConnStats(t *testing.T) {
+	opener := &recordingSequentialOpener{}
+	pp := newTestMpegtsPacketProcessor(opener)
+
+	pp.PushStats()
+	require.Nil(t, opener.lastStat.Srt, "no connStatsSource set")
+
+	fake := &fakeConnStatsSource{stats: mio.ConnStats{SRT: &mio.SrtConnStats{Version: 5, Encrypted: true}}, ok: true}
+	pp.SetConnStatsSource(fake)
+
+	pp.fullStats.expiresAt = time.Time{} // force a refresh instead of reusing the first PushStats call's cache
+	pp.PushStats()
+	require.Same(t, fake.stats.SRT, opener.lastStat.Srt)
+	require.True(t, fake.lastDetails, "PushStats requests full protocol stats, not just Version/Encrypted")
+
+	fake.ok = false
+	pp.fullStats.expiresAt = time.Time{} // force a refresh instead of waiting out fullStatsRefreshInterval
+	pp.PushStats()
+	require.Nil(t, opener.lastStat.Srt, "the source no longer reports stats (e.g. disconnected)")
+}
+
+// TestMpegtsPacketProcessor_refreshFullStats_Caches verifies the expensive parts of PushStats's report (the tracker
+// snapshot, the connection's SRT stats) are only re-gathered once per fullStatsRefreshInterval, not on every call -
+// see the field doc on MpegtsPacketProcessor.fullStats for why.
+func TestMpegtsPacketProcessor_refreshFullStats_Caches(t *testing.T) {
+	defer func(saved time.Duration) { fullStatsRefreshInterval = saved }(fullStatsRefreshInterval)
+
+	opener := &recordingSequentialOpener{}
+	pp := newTestMpegtsPacketProcessor(opener)
+	fake := &fakeConnStatsSource{stats: mio.ConnStats{SRT: &mio.SrtConnStats{Version: 1}}, ok: true}
+	pp.SetConnStatsSource(fake)
+
+	fullStatsRefreshInterval = time.Hour
+	tracker1, srt1 := pp.refreshFullStats()
+	fake.stats.SRT = &mio.SrtConnStats{Version: 2} // a real refresh would now see this
+	tracker2, srt2 := pp.refreshFullStats()
+	require.Same(t, tracker1, tracker2, "reused the cached tracker snapshot")
+	require.Same(t, srt1, srt2, "reused the cached SRT stats, not fake.stats.SRT's new value")
+
+	fullStatsRefreshInterval = 0 // every call is immediately expired
+	pp.fullStats.expiresAt = time.Time{}
+	_, srt3 := pp.refreshFullStats()
+	require.Same(t, fake.stats.SRT, srt3, "expired cache triggers a real refresh")
+}
+
+type fakeConnStatsSource struct {
+	stats       mio.ConnStats
+	ok          bool
+	lastDetails bool
+}
+
+func (f *fakeConnStatsSource) ConnStats(details bool) (mio.ConnStats, bool) {
+	f.lastDetails = details
+	return f.stats, f.ok
+}
+
 func TestMpegtsPacketProcessorRTP(t *testing.T) {
 	base := time.Unix(1000, 0)
 
@@ -474,9 +533,12 @@ func TestMpegtsPacketProcessorRTP(t *testing.T) {
 }
 
 // statsOf returns pp's exported stats snapshot, for tests checking fields now sourced from mpp.tracker (see
-// exportStats) rather than a plain atomic field on pp.stats/pp.rtpStats.
+// exportStats) rather than a plain atomic field on pp.stats/pp.rtpStats. It reads mpp.tracker.Stats() directly
+// (bypassing PushStats/refreshFullStats and its cache) so it always reflects the latest ProcessDatagramPacket call;
+// SRT stats are out of scope for these tests, so srt is always nil here - see TestMpegtsPacketProcessorConnStats for
+// that wiring.
 func statsOf(pp *MpegtsPacketProcessor) ExportedStats {
-	return exportStats(pp.stats, pp.rtpStats, pp.tracker.Stats())
+	return exportStats(pp.stats, pp.rtpStats, pp.tracker.Stats(), nil)
 }
 
 // mustDatagramPacket returns a *pktpool.Packet loaded with data, for tests exercising ProcessDatagramPacket - the
@@ -522,6 +584,7 @@ type recordingSequentialOpener struct {
 	opens    int
 	closeErr error
 	writers  []*recordingWriteCloser
+	lastStat ExportedStats
 }
 
 func (o *recordingSequentialOpener) OpenNext() (io.WriteCloser, error) {
@@ -531,7 +594,8 @@ func (o *recordingSequentialOpener) OpenNext() (io.WriteCloser, error) {
 	return writer, nil
 }
 
-func (o *recordingSequentialOpener) Stat(_ any) error {
+func (o *recordingSequentialOpener) Stat(stat any) error {
+	o.lastStat = stat.(ExportedStats)
 	return nil
 }
 
