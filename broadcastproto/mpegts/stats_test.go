@@ -91,3 +91,56 @@ func TestExportedStats_MarshalJSON(t *testing.T) {
 	require.NoError(t, json.Unmarshal(bb, &roundTripped))
 	require.Equal(t, stats, roundTripped)
 }
+
+// TestExportedStats_CopyInto_DetachesStream is a regression test for the data race this whole reuse design would
+// otherwise permit: a caller retaining an ExportedStats past a single Stat call (e.g. content-fabric's
+// live-recorder) must not alias Stream, since MpegtsPacketProcessor mutates it in place on later PushStats calls.
+func TestExportedStats_CopyInto_DetachesStream(t *testing.T) {
+	src := ExportedStats{
+		TS:     ExportedTSStats{PacketsWritten: 7},
+		RTP:    ExportedRTPStats{BadPackets: 3},
+		Stream: &tracker.Stats{Packets: 10, Clocks: []tracker.ClockStats{{Source: "rtp", Samples: 5}}},
+		Srt:    &mio.SrtConnStats{Version: 1},
+	}
+
+	var dst ExportedStats
+	src.CopyInto(&dst)
+
+	require.Equal(t, src.TS, dst.TS)
+	require.Equal(t, src.RTP, dst.RTP)
+	require.Same(t, src.Srt, dst.Srt, "Srt is never reused/mutated in place, so a plain pointer assignment is correct")
+	require.NotNil(t, dst.Stream)
+	require.NotSame(t, src.Stream, dst.Stream, "CopyInto must not alias the original *tracker.Stats")
+	require.EqualValues(t, 10, dst.Stream.Packets)
+
+	// Simulate MpegtsPacketProcessor reusing/mutating its Stream on the next PushStats call.
+	src.Stream.Packets = 999
+	src.Stream.Clocks[0].Samples = 999
+
+	require.EqualValues(t, 10, dst.Stream.Packets, "dst must be unaffected by mutating the source afterward")
+	require.EqualValues(t, 5, dst.Stream.Clocks[0].Samples)
+}
+
+// TestExportedStats_CopyInto_ReusesDestinationStream verifies CopyInto reuses dst.Stream in place (the whole point
+// of Snapshot-based reuse) rather than allocating a new one when the destination already has one.
+func TestExportedStats_CopyInto_ReusesDestinationStream(t *testing.T) {
+	src := ExportedStats{Stream: &tracker.Stats{Packets: 1}}
+	dst := ExportedStats{Stream: &tracker.Stats{Packets: 999}}
+	existing := dst.Stream
+
+	src.CopyInto(&dst)
+
+	require.Same(t, existing, dst.Stream, "CopyInto must reuse dst's existing *tracker.Stats, not allocate a new one")
+	require.EqualValues(t, 1, dst.Stream.Packets)
+}
+
+// TestExportedStats_CopyInto_NilStream verifies CopyInto clears dst.Stream (rather than panicking or leaving a
+// stale value) when the source has no stream - e.g. a non-SRT/non-mpegts source, or before the first stats push.
+func TestExportedStats_CopyInto_NilStream(t *testing.T) {
+	dst := ExportedStats{Stream: &tracker.Stats{Packets: 999}}
+
+	var src ExportedStats
+	src.CopyInto(&dst)
+
+	require.Nil(t, dst.Stream)
+}
