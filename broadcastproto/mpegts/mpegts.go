@@ -73,6 +73,14 @@ type MpegtsPacketProcessor struct {
 	// every PushStats call. PushStats itself still runs frequently (see StartReportingStats) because
 	// content-fabric's live-recorder stall detection needs TSStats.BytesWritten - a plain atomic, unaffected by
 	// this cache - to stay fresh; the tracker/SRT snapshots have no such requirement.
+	//
+	// tracker is gathered via mpp.tracker.Snapshot, which mutates it in place rather than replacing it with a new
+	// object each refresh - the whole point being to bound allocations on this hot path. Its contents are only
+	// stable until the next refreshFullStats call actually refreshes (i.e. up to fullStatsRefreshInterval later);
+	// any consumer that retains it past a single PushStats call (as content-fabric's live-recorder does) must
+	// deep-copy it first - see recPeriodStatusReport.Clone/CopyInto on the content-fabric side, and the
+	// AV_IN_STAT_MPEGTS handler's copy-on-receipt, for how that's handled today. srt has no such requirement:
+	// connStatsSource.ConnStats returns a fresh *mio.SrtConnStats every call, never reused.
 	fullStats struct {
 		mu        sync.Mutex
 		expiresAt time.Time
@@ -308,7 +316,10 @@ func (mpp *MpegtsPacketProcessor) refreshFullStats() (*tracker.Stats, *mio.SrtCo
 		return mpp.fullStats.tracker, mpp.fullStats.srt
 	}
 
-	mpp.fullStats.tracker = mpp.tracker.Stats()
+	if mpp.fullStats.tracker == nil {
+		mpp.fullStats.tracker = &tracker.Stats{}
+	}
+	mpp.tracker.Snapshot(mpp.fullStats.tracker, true, utc.New(now), tracker.SnapshotOptions{})
 	mpp.fullStats.srt = nil
 	if mpp.connStats != nil {
 		if cs, ok := mpp.connStats.ConnStats(true); ok {

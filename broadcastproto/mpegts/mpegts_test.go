@@ -3,6 +3,7 @@ package mpegts
 import (
 	"errors"
 	"io"
+	"sync"
 	"testing"
 	"time"
 
@@ -14,6 +15,7 @@ import (
 	"github.com/eluv-io/avpipe/broadcastproto/transport"
 	mio "github.com/eluv-io/common-go/media/io"
 	"github.com/eluv-io/common-go/media/pktpool"
+	"github.com/eluv-io/common-go/media/tracker"
 )
 
 func TestMpegtsPacketProcessorWallClockSegmentation(t *testing.T) {
@@ -424,8 +426,73 @@ func TestMpegtsPacketProcessor_refreshFullStats_Caches(t *testing.T) {
 
 	fullStatsRefreshInterval = 0 // every call is immediately expired
 	pp.fullStats.expiresAt = time.Time{}
-	_, srt3 := pp.refreshFullStats()
+	tracker3, srt3 := pp.refreshFullStats()
 	require.Same(t, fake.stats.SRT, srt3, "expired cache triggers a real refresh")
+	require.Same(t, tracker1, tracker3,
+		"a real refresh mutates the tracker snapshot in place via Snapshot, not a fresh allocation via Stats")
+}
+
+// TestMpegtsPacketProcessor_PushStats_ConcurrentReceiverCopyIsRaceFree is a regression test for the data race that
+// Snapshot-based reuse in refreshFullStats would otherwise permit: mpp.fullStats.tracker (see its field doc) is now
+// mutated in place on every real refresh rather than replaced, so a receiver that retains ExportedStats.Stream past
+// a single PushStats call (as content-fabric's live-recorder AV_IN_STAT_MPEGTS handler does) must deep-copy it via
+// CopyInto at the point of receipt, into memory it owns outright, rather than aliasing avpipe's pointer - otherwise
+// a reader goroutine racing PushStats's own goroutine would race on *tracker.Stats's fields with no shared lock to
+// prevent it (avpipe and content-fabric are separate modules, each with its own, disjoint mutex). This drives
+// PushStats (with fullStatsRefreshInterval forced to 0, so every call performs a real Snapshot mutation, not a
+// cached reuse) and a receiver simulating that handler's copy-on-receipt discipline concurrently, under -race.
+func TestMpegtsPacketProcessor_PushStats_ConcurrentReceiverCopyIsRaceFree(t *testing.T) {
+	defer func(saved time.Duration) { fullStatsRefreshInterval = saved }(fullStatsRefreshInterval)
+	fullStatsRefreshInterval = 0
+
+	var mu sync.Mutex
+	owned := &tracker.Stats{} // mirrors l.StatusReport.InputStats.Stream: the receiver's own, reused destination
+
+	opener := &recordingSequentialOpener{}
+	opener.onStat = func(stats ExportedStats) {
+		mu.Lock()
+		defer mu.Unlock()
+		if stats.Stream != nil {
+			stats.Stream.CopyInto(owned)
+		}
+	}
+	pp := newTestMpegtsPacketProcessor(opener)
+
+	// Give the tracker real, multi-PID data to walk on every Snapshot call, so CopyInto has non-trivial nested
+	// slices/pointers (Clocks, Ts.Streams, each *HistogramCapture) to detach, not just the zero-value early return.
+	base := time.Unix(1000, 0)
+	for pid := 100; pid < 105; pid++ {
+		pkt := packet.New()
+		pkt.SetPID(pid)
+		pp.ProcessDatagramPacket(base, mustDatagramPacket(t, (*pkt)[:]))
+	}
+
+	stop := make(chan struct{})
+	var wg sync.WaitGroup
+	wg.Add(2)
+
+	go func() {
+		defer wg.Done()
+		defer close(stop)
+		for i := 0; i < 300; i++ {
+			pp.PushStats()
+		}
+	}()
+	go func() {
+		defer wg.Done()
+		reader := &tracker.Stats{}
+		for {
+			mu.Lock()
+			owned.CopyInto(reader)
+			mu.Unlock()
+			select {
+			case <-stop:
+				return
+			default:
+			}
+		}
+	}()
+	wg.Wait()
 }
 
 type fakeConnStatsSource struct {
@@ -585,6 +652,9 @@ type recordingSequentialOpener struct {
 	closeErr error
 	writers  []*recordingWriteCloser
 	lastStat ExportedStats
+	// onStat, if set, is called with every Stat report in addition to recording it in lastStat - used by tests that
+	// need to react to (e.g. copy out of) a report on the same goroutine that produced it.
+	onStat func(ExportedStats)
 }
 
 func (o *recordingSequentialOpener) OpenNext() (io.WriteCloser, error) {
@@ -596,6 +666,9 @@ func (o *recordingSequentialOpener) OpenNext() (io.WriteCloser, error) {
 
 func (o *recordingSequentialOpener) Stat(stat any) error {
 	o.lastStat = stat.(ExportedStats)
+	if o.onStat != nil {
+		o.onStat(o.lastStat)
+	}
 	return nil
 }
 
