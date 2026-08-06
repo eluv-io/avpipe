@@ -144,3 +144,22 @@ func TestExportedStats_CopyInto_NilStream(t *testing.T) {
 
 	require.Nil(t, dst.Stream)
 }
+
+// TestExportedStats_Clone_DetachesEvenWhenSourceWasShallowCopied is a regression test for the bug CopyInto alone
+// permits when the caller's destination came from a shallow struct copy of the source (e.g. content-fabric's
+// recPeriodStatusReport.Clone doing `o := *r` before detaching InputStats): dst.Stream would already alias
+// src.Stream, so CopyInto would mistake that alias for a genuine, independent destination to reuse and copy the
+// source into itself - leaving the "clone" aliased after all. Clone sidesteps this entirely by always copying into
+// a fresh, zero-value ExportedStats, never an existing destination that might itself be the alias.
+func TestExportedStats_Clone_DetachesEvenWhenSourceWasShallowCopied(t *testing.T) {
+	src := ExportedStats{Stream: &tracker.Stats{Packets: 10}}
+	shallow := src // mirrors `o := *r`: shallow.Stream aliases src.Stream
+
+	shallow = src.Clone()
+
+	require.NotSame(t, src.Stream, shallow.Stream, "Clone must not alias the original *tracker.Stats")
+	require.EqualValues(t, 10, shallow.Stream.Packets)
+
+	src.Stream.Packets = 999
+	require.EqualValues(t, 10, shallow.Stream.Packets, "clone must be unaffected by mutating the source afterward")
+}
