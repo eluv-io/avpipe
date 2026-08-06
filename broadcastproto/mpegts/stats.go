@@ -131,6 +131,17 @@ func (e *ExportedStats) CopyInto(dst *ExportedStats) {
 	e.Stream.CopyInto(dst.Stream)
 }
 
+// Clone returns an independent copy of e, detached from any Stream MpegtsPacketProcessor may still be
+// reusing/mutating in place - equivalent to CopyInto into a fresh, zero-value ExportedStats. Prefer this over
+// CopyInto whenever the caller doesn't already hold a specific *ExportedStats to reuse as the destination (e.g. one
+// whose Stream might otherwise still alias e's own, as when e itself came from a shallow struct copy) - CopyInto
+// into such a destination would mistake that alias for a genuine, independent destination to reuse.
+func (e *ExportedStats) Clone() ExportedStats {
+	var dst ExportedStats
+	e.CopyInto(&dst)
+	return dst
+}
+
 func (e *ExportedStats) String() string {
 	bb, err := json.Marshal(e)
 	if err != nil {
