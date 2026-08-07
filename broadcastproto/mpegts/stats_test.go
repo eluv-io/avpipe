@@ -13,19 +13,21 @@ import (
 )
 
 // newTestTSStats returns a TSStats with PacketsDropped registered, matching what every production caller does via
-// MpegtsPacketProcessor.RegisterPacketsDropped - exportStats dereferences it unconditionally.
+// MpegtsPacketProcessor.RegisterPacketsDropped - ExportedStats.populate dereferences it unconditionally.
 func newTestTSStats() *TSStats {
 	ts := NewTSStats()
 	ts.PacketsDropped = &atomic.Uint64{}
 	return ts
 }
 
-// TestExportedStats_StringRequiresPointer documents why PushStats must log &exportStats rather than exportStats:
-// String() has a pointer receiver, so only *ExportedStats satisfies fmt.Stringer. Passing the value (the original
-// bug) silently falls back to Go's native struct formatting instead of the intended JSON.
+// TestExportedStats_StringRequiresPointer documents why PushStats must log its ExportedStats destination by
+// pointer rather than by value: String() has a pointer receiver, so only *ExportedStats satisfies fmt.Stringer.
+// Passing the value (the original bug) silently falls back to Go's native struct formatting instead of the
+// intended JSON.
 func TestExportedStats_StringRequiresPointer(t *testing.T) {
 	ts := newTestTSStats()
-	stats := exportStats(ts, &RTPStats{}, nil, nil)
+	var stats ExportedStats
+	stats.populate(ts, &RTPStats{})
 
 	_, ok := any(stats).(fmt.Stringer)
 	require.False(t, ok, "ExportedStats value must not implement fmt.Stringer")
@@ -41,7 +43,8 @@ func TestExportedStats_StringRequiresPointer(t *testing.T) {
 func TestExportedStats_FmtSprintProducesValidJSON(t *testing.T) {
 	ts := newTestTSStats()
 	srt := &mio.SrtConnStats{Version: 5, Encrypted: true}
-	stats := exportStats(ts, &RTPStats{}, &tracker.Stats{Packets: 42, Bytes: 1234}, srt)
+	stats := ExportedStats{Stream: &tracker.Stats{Packets: 42, Bytes: 1234}, Srt: srt}
+	stats.populate(ts, &RTPStats{})
 
 	s := fmt.Sprint(&stats)
 
@@ -64,7 +67,8 @@ func TestExportedStats_FmtSprintProducesValidJSON(t *testing.T) {
 // TestExportedStats_SrtOmittedForNonSrtSource verifies the "srt" field is absent entirely (not just null) for a
 // non-SRT source, so a dashboard consuming this JSON can key its SRT-specific UI off the field's presence.
 func TestExportedStats_SrtOmittedForNonSrtSource(t *testing.T) {
-	stats := exportStats(newTestTSStats(), &RTPStats{}, nil, nil)
+	var stats ExportedStats
+	stats.populate(newTestTSStats(), &RTPStats{})
 
 	bb, err := json.Marshal(stats)
 	require.NoError(t, err)
@@ -81,7 +85,8 @@ func TestExportedStats_MarshalJSON(t *testing.T) {
 	ts.PacketsWritten.Store(7)
 	rtp := &RTPStats{}
 	rtp.BadPackets.Store(99)
-	stats := exportStats(ts, rtp, nil, &mio.SrtConnStats{Version: 5})
+	stats := ExportedStats{Srt: &mio.SrtConnStats{Version: 5}}
+	stats.populate(ts, rtp)
 
 	bb, err := json.Marshal(stats)
 	require.NoError(t, err)
