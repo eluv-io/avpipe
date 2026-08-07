@@ -3,6 +3,7 @@ package mpegts
 import (
 	"io"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/require"
 
@@ -86,6 +87,33 @@ func TestMpegtsInputHandlerReadPacketNoFanOut(t *testing.T) {
 
 	require.Equal(t, tsPkt[:], res.T.Data)
 	require.EqualValues(t, 0, mih.packetsDropped.Load())
+}
+
+// TestMpegtsInputHandlerReadPacketStampsReceivedAt is a regression test: ReadPacket once stamped ReceivedAt before
+// calling FromReader, which internally resets the packet (including ReceivedAt) as part of loading - so the stamp was
+// always wiped immediately, leaving ReceivedAt permanently zero. That silently broke the MPEG-TS copy track's
+// wall-clock segment rotation (MpegtsPacketProcessor.writeDatagram keys off ReceivedAt), since the segment-length
+// check could never see elapsed time. ReceivedAt must be stamped after FromReader returns, matching Read() above.
+func TestMpegtsInputHandlerReadPacketStampsReceivedAt(t *testing.T) {
+	tsPkt := mustTSPacket()
+
+	mih := &mpegtsInputHandler{
+		rc:         &onceReadCloser{data: tsPkt[:]},
+		transport:  &transport.Mock{Packaging: transport.RawTs},
+		seqOpener:  &recordingSequentialOpener{},
+		packetPool: pktpool.NewPacketPool(outputTlvWrapCap, inputPacketPoolCap),
+	}
+
+	before := time.Now()
+	res, err := mih.ReadPacket()
+	after := time.Now()
+	require.NoError(t, err)
+	require.NotNil(t, res)
+	defer res.Release()
+
+	require.False(t, res.T.ReceivedAt.IsZero())
+	require.False(t, res.T.ReceivedAt.Before(before))
+	require.False(t, res.T.ReceivedAt.After(after))
 }
 
 // TestMpegtsInputHandlerReadPacketFanOut confirms ReadPacket hands the same underlying packet to both the caller and

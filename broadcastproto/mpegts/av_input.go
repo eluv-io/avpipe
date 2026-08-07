@@ -247,7 +247,6 @@ func (mih *mpegtsInputHandler) Read(buf []byte) (int, error) {
 // them. The returned Resource has exactly one outstanding reference belonging to the caller; release it when done.
 func (mih *mpegtsInputHandler) ReadPacket() (pktpool.Resource, error) {
 	res := mih.packetPool.Borrow()
-	res.T.ReceivedAt = time.Now()
 	err := res.T.FromReader(mih.rc)
 	if err != nil {
 		res.Release()
