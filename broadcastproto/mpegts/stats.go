@@ -8,37 +8,35 @@ import (
 	"github.com/eluv-io/common-go/util/jsonutil"
 )
 
-// exportStats builds the JSON-exported stats from avpipe's own operational counters (ts, rtpStats), the shared
-// tracker's stats (stream), which now owns most of the stream-integrity tracking, and the underlying connection's
-// SRT stats (srt), if any. ExportedTSStats/ExportedRTPStats keep their original field names/shapes for backward JSON
-// compatibility (see the legacy-field comments below); only their population source changed for the fields
-// tracker.MediaTracker now computes.
-func exportStats(ts *TSStats, rtpStats *RTPStats, stream *tracker.Stats, srt *mio.SrtConnStats) (res ExportedStats) {
+// populate fills e.TS and e.RTP from avpipe's own operational counters (ts, rtpStats) and e.Stream - the shared
+// tracker's stats, which now owns most of the stream-integrity tracking - which the caller must already have set
+// (e.g. via MpegtsPacketProcessor.refreshFullStats). It does not touch e.Stream or e.Srt. ExportedTSStats/
+// ExportedRTPStats keep their original field names/shapes for backward JSON compatibility (see the legacy-field
+// comments below); only their population source changed for the fields tracker.MediaTracker now computes.
+func (e *ExportedStats) populate(ts *TSStats, rtpStats *RTPStats) {
 	if ts != nil {
-		res.TS.PacketsWritten = ts.PacketsWritten.Load()
-		res.TS.PacketsDropped = ts.PacketsDropped.Load()
-		res.TS.BytesWritten = ts.BytesWritten.Load()
+		e.TS.PacketsWritten = ts.PacketsWritten.Load()
+		e.TS.PacketsDropped = ts.PacketsDropped.Load()
+		e.TS.BytesWritten = ts.BytesWritten.Load()
 		// BadPackets is computed by avpipe itself (not sourced from mpp.tracker), since mpp.tracker's own BadPackets
 		// counts a different, RTP-only condition - see TSStats.BadPackets. FaultyPaddingPackets/StrippedPaddingPackets
 		// are both byproducts of the padding-stripping operation itself (see stripTsPadding/RemoveTsPadding) - an
 		// avpipe output-pipeline concern, not a stream-integrity stat, so they stay avpipe-managed too.
-		res.TS.BadPackets = ts.BadPackets.Load()
-		res.TS.FaultyPaddingPackets = ts.FaultyPaddingPackets.Load()
-		res.TS.StrippedPaddingPackets = ts.StrippedPaddingPackets.Load()
-		res.TS.MaxBufInPeriod = ts.MaxBufInPeriod.Load()
-		res.TS.MinBufInPeriod = ts.MinBufInPeriod.Load()
-		res.TS.NumSegments = uint64(ts.NumSegments.Load())
-		res.TS.NumTimedRotate = uint64(ts.NumTimedRotate.Load())
-		res.TS.ErrorsOther = ts.ErrorsOther.Load()
-		res.TS.ErrorsOpeningOutput = ts.ErrorsOpeningOutput.Load()
-		res.TS.ErrorsWriting = ts.ErrorsWriting.Load()
+		e.TS.BadPackets = ts.BadPackets.Load()
+		e.TS.FaultyPaddingPackets = ts.FaultyPaddingPackets.Load()
+		e.TS.StrippedPaddingPackets = ts.StrippedPaddingPackets.Load()
+		e.TS.MaxBufInPeriod = ts.MaxBufInPeriod.Load()
+		e.TS.MinBufInPeriod = ts.MinBufInPeriod.Load()
+		e.TS.NumSegments = uint64(ts.NumSegments.Load())
+		e.TS.NumTimedRotate = uint64(ts.NumTimedRotate.Load())
+		e.TS.ErrorsOther = ts.ErrorsOther.Load()
+		e.TS.ErrorsOpeningOutput = ts.ErrorsOpeningOutput.Load()
+		e.TS.ErrorsWriting = ts.ErrorsWriting.Load()
 	}
 	if rtpStats != nil {
-		res.RTP.BadPackets = rtpStats.BadPackets.Load()
+		e.RTP.BadPackets = rtpStats.BadPackets.Load()
 	}
-	if stream != nil {
-		res.Stream = stream
-
+	if stream := e.Stream; stream != nil {
 		// PacketsReceived/BytesReceived count datagrams/datagram-bytes (network reads), matching PacketsDropped's
 		// granularity (both feed the same "Recv/Drop %" report) - the pre-tracker code counted TS packets/TS-only
 		// bytes here instead, which made that ratio meaningless. DiscardedPackets aggregates every condition under
@@ -47,48 +45,46 @@ func exportStats(ts *TSStats, rtpStats *RTPStats, stream *tracker.Stats, srt *mi
 		// RTP header (BadPackets), or a TS payload that isn't a multiple of the TS packet size (IncompletePackets).
 		// It does not include per-packet conditions (AdaptationFieldErrors, FaultyPaddingPackets, CC errors) since
 		// those datagrams are still otherwise processed.
-		res.TS.PacketsReceived = stream.Packets
-		res.TS.BytesReceived = stream.Bytes
-		res.TS.DiscardedPackets = stream.Errors.SmallPacketsDropped + stream.Errors.BadPackets + stream.Errors.IncompletePackets
+		e.TS.PacketsReceived = stream.Packets
+		e.TS.BytesReceived = stream.Bytes
+		e.TS.DiscardedPackets = stream.Errors.SmallPacketsDropped + stream.Errors.BadPackets + stream.Errors.IncompletePackets
 
-		res.TS.SmallPacketsDropped = stream.Errors.SmallPacketsDropped
-		res.TS.RtcpPacketsDropped = stream.Errors.RtcpPacketsDropped
-		res.TS.ErrorsCC = uint64(stream.Errors.CcErrors)
-		res.TS.ErrorsAdaptationField = stream.Errors.AdaptationFieldErrors
-		res.TS.ErrorsIncompletePackets = stream.Errors.IncompletePackets
+		e.TS.SmallPacketsDropped = stream.Errors.SmallPacketsDropped
+		e.TS.RtcpPacketsDropped = stream.Errors.RtcpPacketsDropped
+		e.TS.ErrorsCC = uint64(stream.Errors.CcErrors)
+		e.TS.ErrorsAdaptationField = stream.Errors.AdaptationFieldErrors
+		e.TS.ErrorsIncompletePackets = stream.Errors.IncompletePackets
 
 		if stream.Ts != nil {
 			cat := stream.Ts.Categorize()
-			res.TS.VideoPacketCount = uint64(cat.Video)
-			res.TS.AudioPacketCount = uint64(cat.Audio)
-			res.TS.DataPacketCount = uint64(cat.Other)
-			res.TS.PaddingPackets = uint64(cat.Padding)
+			e.TS.VideoPacketCount = uint64(cat.Video)
+			e.TS.AudioPacketCount = uint64(cat.Audio)
+			e.TS.DataPacketCount = uint64(cat.Other)
+			e.TS.PaddingPackets = uint64(cat.Padding)
 		}
 
 		pcrPinned := false
 		for _, c := range stream.Clocks {
 			switch c.Source {
 			case "rtp":
-				res.RTP.LongHeaders = stream.Errors.LongHeaders
-				res.RTP.SeqNumSkipCount = c.ErrorCount
+				e.RTP.LongHeaders = stream.Errors.LongHeaders
+				e.RTP.SeqNumSkipCount = c.ErrorCount
 				// c.Gaps is bounded by tracker.Config.MaxGaps (100 by default), so on a long-running stream with more
 				// than MaxGaps gaps, SeqNumSkipTot undercounts - it only sums the retained gaps, not all of them.
 				for _, g := range c.Gaps {
-					res.RTP.SeqNumSkipTot += uint64(absInt64(g.SeqDiff))
+					e.RTP.SeqNumSkipTot += uint64(absInt64(g.SeqDiff))
 				}
 			case "pcr":
 				if !pcrPinned {
 					// NumWraps is pinned to the first PCR-bearing PID discovered, mirroring avpipe's pre-tracker
 					// behavior. Clocks lists "pcr" entries in discovery order, so the first one found is that PID;
 					// other programs' wraps remain visible via stream.Clocks directly.
-					res.TS.NumWraps = uint64(c.NumWraps)
+					e.TS.NumWraps = uint64(c.NumWraps)
 					pcrPinned = true
 				}
 			}
 		}
 	}
-	res.Srt = srt
-	return res
 }
 
 func absInt64(n int64) int64 {
