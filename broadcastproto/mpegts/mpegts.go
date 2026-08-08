@@ -16,7 +16,6 @@ import (
 	mio "github.com/eluv-io/common-go/media/io"
 	"github.com/eluv-io/common-go/media/pktpool"
 	"github.com/eluv-io/common-go/media/tracker"
-	"github.com/eluv-io/common-go/util/timeutil"
 	elog "github.com/eluv-io/log-go"
 	"github.com/eluv-io/utc-go"
 )
@@ -41,6 +40,10 @@ type SequentialOpener interface {
 	OpenNext() (io.WriteCloser, error)
 	Stat(args any) error
 	ReportStart() error
+	// ReportBytesWritten pushes a lightweight, high-frequency signal for stall detection - the total number of bytes
+	// written so far - separate from Stat's full ExportedStats push, which runs on its own, much slower cadence. See
+	// MpegtsPacketProcessor's StartReportingStats.
+	ReportBytesWritten(n uint64) error
 }
 
 type MpegtsPacketProcessor struct {
@@ -55,14 +58,11 @@ type MpegtsPacketProcessor struct {
 	// rtpStats is used to keep track of RTP-specific information in the case that the packaging is
 	// RTP-MPEGTS. It is _nil_ iff cfg.Packaging is not RTP-TS.
 	rtpStats *RTPStats
-	// Periodic for logging stats. timeutil.Periodic is documented as not safe for concurrent callers;
-	// periodicStatsLogMu guards its one call site in PushStats, which can run concurrently with itself - see its
-	// doc.
-	periodicStatsLog   timeutil.Periodic
-	periodicStatsLogMu sync.Mutex
 
-	// tracker tracks the incoming stream's timing and integrity (continuity counters, PCR/RTP clock correlation,
-	// gap detection, input-validation errors, etc.); its stats are surfaced via ExportedStats.Stream.
+	// tracker tracks the incoming stream's timing and integrity (continuity counters, PCR/RTP clock correlation, gap
+	// detection, input-validation errors, etc.); its stats are surfaced via ExportedStats.Stream. It is safe for
+	// concurrent use by its own design (TrackPacket from the packet-processing path, Snapshot from
+	// reportFullStatsLoop), independent of any locking in MpegtsPacketProcessor itself.
 	tracker tracker.MediaTracker
 
 	// connStats, if set, reports the underlying network connection's statistics (e.g. SRT protocol stats),
@@ -70,27 +70,6 @@ type MpegtsPacketProcessor struct {
 	// caller has wired one in - a NetReader doesn't exist yet when NewMpegtsPacketProcessor runs, so this is set
 	// after the fact via SetConnStatsSource, not passed to the constructor.
 	connStats connStatsSource
-
-	// fullStats caches the expensive-to-gather parts of PushStats's report (mpp.tracker's snapshot, which walks
-	// every tracked PID, and the connection's SRT stats) so they refresh on their own slower interval instead of
-	// every PushStats call. PushStats itself still runs frequently (see StartReportingStats) because
-	// content-fabric's live-recorder stall detection needs TSStats.BytesWritten - a plain atomic, unaffected by
-	// this cache - to stay fresh; the tracker/SRT snapshots have no such requirement.
-	//
-	// tracker is the scratch buffer mpp.tracker.Snapshot mutates in place on each refresh, bounding allocations on
-	// this hot path - it must never be handed to a PushStats caller directly. Instead, refreshFullStats copies
-	// tracker's current contents into a caller-supplied destination (via the cheap Stats.CopyInto, not another
-	// Snapshot) on every call, whether or not that particular call triggered a real refresh. This matters because
-	// PushStats can run concurrently with itself (see its doc): each call site owns its own destination and never
-	// shares it with another concurrent call, so a concurrent refresh mutating tracker in place can never race a
-	// caller's use of stats it already copied out - see pushStatsInto and StartReportingStats. srt needs no such
-	// copy: connStatsSource.ConnStats returns a fresh *mio.SrtConnStats every call, never reused/mutated afterward.
-	fullStats struct {
-		mu        sync.Mutex
-		expiresAt time.Time
-		tracker   *tracker.Stats
-		srt       *mio.SrtConnStats
-	}
 
 	outBuf   []byte // Preallocated byte buffer
 	closeCh  chan struct{}
@@ -111,13 +90,14 @@ func NewMpegtsPacketProcessor(cfg TsConfig, seqOpener SequentialOpener, inFd int
 		"rtp_stats", rtpStats != nil,
 		"segment_length_sec", cfg.SegmentLengthSec)
 	return &MpegtsPacketProcessor{
-		cfg:              cfg,
-		opener:           seqOpener,
-		inFd:             inFd,
-		stats:            NewTSStats(),
-		rtpStats:         rtpStats,
-		periodicStatsLog: timeutil.NewPeriodic(30 * time.Second),
-		tracker:          tracker.NewMediaTracker(fmt.Sprintf("fd-%d", inFd), tracker.Config{Rtp: cfg.Packaging == transport.RtpTs}),
+		cfg:      cfg,
+		opener:   seqOpener,
+		inFd:     inFd,
+		stats:    NewTSStats(),
+		rtpStats: rtpStats,
+		tracker: tracker.NewMediaTracker(
+			fmt.Sprintf("fd-%d", inFd),
+			tracker.Config{Rtp: cfg.Packaging == transport.RtpTs}),
 		// Max datagram size plus room for the TLV header and (for ATS-TS) the arrival timestamp prefix.
 		outBuf:  make([]byte, 64*1024+tlv.TLV_HEADER_LEN+tlv.AtsTimestampLen),
 		closeCh: make(chan struct{}),
@@ -166,10 +146,6 @@ type TSStats struct {
 // tracking, gap detection, and clock correlation are all delegated to mpp.tracker's "rtp" ClockStats; see
 // ExportedStats.populate.
 type RTPStats struct {
-	// started gates the deferred PushStats call on the very first RTP packet (mirroring startLogged's role for the
-	// first-datagram log line), so the first stats push happens promptly rather than waiting for the periodic ticker.
-	started atomic.Bool
-
 	// BadPackets counts a malformed RTP header, an unsupported RTP version, or at least one contained TS packet
 	// failing CheckErrors() - computed here (not sourced from mpp.tracker) so it isn't conflated with mpp.tracker's
 	// own BadPackets, which counts RTP-layer failures only. See ExportedStats.populate.
@@ -193,6 +169,12 @@ func (mpp *MpegtsPacketProcessor) ProcessDatagramPacket(now time.Time, pkt *pktp
 			"fd", mpp.inFd,
 			"packaging", string(mpp.cfg.Packaging),
 			"datagram_len", len(datagram))
+		// Prompt first ping so stall detection doesn't have to wait for reportBytesWrittenLoop's first tick -
+		// regardless of transport: both RTP and raw TS packaging feed mpp.stats.BytesWritten via writeDatagram below,
+		// and content-fabric's CopyModeRawOnly stall check applies independently of packaging. Deferred because
+		// BytesWritten is only updated by writeDatagram, so reading it now (before this datagram's bytes are counted)
+		// would report a stale value one packet behind.
+		defer mpp.reportBytesWritten()
 	}
 
 	// Feed the tracker unconditionally, before any of the accept/reject checks below, so it sees (and counts) every
@@ -226,9 +208,6 @@ func (mpp *MpegtsPacketProcessor) ProcessDatagramPacket(now time.Time, pkt *pktp
 		// Header length derived from where pion actually placed the payload, not Header.MarshalSize() (which can
 		// under-report for extension-bearing packets) - see pktpool.RtpPacket.decode's own comment for why.
 		mpegtsOffset = len(datagram) - len(rtpLayer.Payload) - int(hdr.PaddingSize)
-		if mpp.rtpStats.started.CompareAndSwap(false, true) {
-			defer mpp.PushStats() // defer so that ts stats are included in the stats
-		}
 	} else {
 		// raw MPEG-TS
 		if len(datagram) < 188 { // require at least one TS packet, otherwise drop it
@@ -275,100 +254,85 @@ func (mpp *MpegtsPacketProcessor) ProcessDatagramPacket(now time.Time, pkt *pktp
 	mpp.writeDatagram(now, datagram, pkt, !badPackets && hasPadding && StripTsPadding.Load(), mpegtsOffset)
 }
 
-// StartReportingStats kicks off a job that periodically logs the stats
+// StartReportingStats kicks off two independent, differently-paced reporting loops: a fast one pushing just the
+// BytesWritten signal that content-fabric's live-recorder needs for stall detection (see ReportBytesWritten's doc), and
+// a slow one pushing the full ExportedStats (tracker snapshot, SRT stats) for logging/status-reporting purposes.
+// Splitting them means the full-stats gather (mpp.tracker.Snapshot, which walks every tracked PID) only runs as often
+// as it's actually needed, with no caching/locking required - see reportFullStatsLoop.
 func (mpp *MpegtsPacketProcessor) StartReportingStats() {
-	// must be smaller than the 1s interval used by the live-recorder for calculation of "stalls"
-	reportingInterval := 900 * time.Millisecond
-	go func() {
-		// Reused across every tick by this goroutine alone - never shared with ProcessDatagramPacket's deferred
-		// call, so CopyInto's destination-reuse (see pushStatsInto/refreshFullStats) bounds this to near-zero
-		// allocation once the tracked PID set stabilizes, without needing to share any state across goroutines.
-		var stats ExportedStats
-		ticker := time.NewTicker(reportingInterval)
-		defer ticker.Stop()
-		for {
-			select {
-			case <-ticker.C:
-				mpp.pushStatsInto(&stats)
-			case <-mpp.closeCh:
-				return
-			}
-		}
-	}()
+	go mpp.reportBytesWrittenLoop()
+	go mpp.reportFullStatsLoop()
 }
 
-// PushStats gathers and reports the processor's current stats into a fresh, one-off destination. It can run
-// concurrently with itself: it's called both from StartReportingStats's periodic ticker goroutine and, once,
-// deferred from ProcessDatagramPacket on the first RTP packet (so the first push happens promptly instead of
-// waiting for the ticker) - these can race each other on any given fd. A caller that needs to do this repeatedly on
-// a hot path (as StartReportingStats does) should call pushStatsInto directly with its own persistent,
-// exclusively-owned destination instead, to avoid allocating one on every call - see StartReportingStats.
+// reportBytesWrittenLoop pushes ReportBytesWritten on a fast, fixed interval - must stay smaller than the 1s interval
+// the live-recorder uses to calculate stalls (see ReportBytesWritten's doc).
+func (mpp *MpegtsPacketProcessor) reportBytesWrittenLoop() {
+	reportingInterval := 900 * time.Millisecond
+	ticker := time.NewTicker(reportingInterval)
+	defer ticker.Stop()
+	for {
+		select {
+		case <-ticker.C:
+			mpp.reportBytesWritten()
+		case <-mpp.closeCh:
+			return
+		}
+	}
+}
+
+// reportBytesWritten pushes the total bytes written so far - the one signal content-fabric's live-recorder needs, at
+// high frequency, to detect a stalled stream (comparing successive values; see startHealthChecking on the
+// content-fabric side). Deliberately minimal: no tracker snapshot, no lock, just an atomic load and a push.
+func (mpp *MpegtsPacketProcessor) reportBytesWritten() {
+	_ = mpp.opener.ReportBytesWritten(mpp.stats.BytesWritten.Load())
+}
+
+// reportFullStatsLoop pushes full ExportedStats on a slow, fixed interval.
+func (mpp *MpegtsPacketProcessor) reportFullStatsLoop() {
+	fullStatsInterval := 5 * time.Second
+	// Reused across every tick by this goroutine alone, so CopyInto/Snapshot's destination-reuse bounds this to
+	// near-zero allocation once the tracked PID set stabilizes.
+	var stats ExportedStats
+	ticker := time.NewTicker(fullStatsInterval)
+	defer ticker.Stop()
+	for {
+		select {
+		case <-ticker.C:
+			mpp.pushStatsInto(&stats)
+		case <-mpp.closeCh:
+			return
+		}
+	}
+}
+
+// PushStats gathers and reports the processor's full stats into a fresh, one-off destination. Exported for callers
+// outside the two reporting loops (e.g. tests, or a manual one-off report); a caller doing this repeatedly should
+// call pushStatsInto directly with its own persistent, exclusively-owned destination instead, to avoid allocating
+// one on every call - see reportFullStatsLoop.
 func (mpp *MpegtsPacketProcessor) PushStats() {
 	mpp.pushStatsInto(&ExportedStats{})
 }
 
-// pushStatsInto is PushStats's implementation, gathering into the caller-supplied dst instead of a fresh one-off
-// allocation. dst must be exclusively owned by the caller for the duration of this call and never shared with
-// another concurrent pushStatsInto/PushStats call (see refreshFullStats and fullStats's doc) - this is what makes
-// PushStats's two concurrent call sites (see its doc) safe without needing to synchronize between them directly.
-// resetChannelSizeStats (plain atomics) needs no synchronization for that overlap either; refreshFullStats and
-// periodicStatsLogMu below exist specifically to make the rest of this function safe under it.
+// pushStatsInto gathers statistics into the caller-supplied dst instead of a fresh one-off allocation. dst must be
+// exclusively owned by the caller for the duration of this call.
 func (mpp *MpegtsPacketProcessor) pushStatsInto(dst *ExportedStats) {
-	mpp.refreshFullStats(dst)
-	dst.populate(mpp.stats, mpp.rtpStats)
-	mpp.resetChannelSizeStats()
-
-	// periodicStatsLog (timeutil.Periodic) is documented as not safe for concurrent callers; PushStats can have
-	// them (see above), so its own mutex guards just this call, not the rest of this function.
-	mpp.periodicStatsLogMu.Lock()
-	mpp.periodicStatsLog.Do(func() {
-		mpegtslog.Debug("mpegts stats", "fd", mpp.inFd, "stats", dst)
-	})
-	mpp.periodicStatsLogMu.Unlock()
-
-	_ = mpp.opener.Stat(*dst)
-}
-
-// fullStatsRefreshInterval bounds how often PushStats re-gathers the expensive parts of its report - mpp.tracker's
-// snapshot (walks every tracked PID) and the connection's SRT stats (a protocol-level query, not a plain atomic
-// load). PushStats itself runs far more often than this (see StartReportingStats); refreshFullStats reuses the
-// cached values on calls that land inside the same interval. A var, not a const, so tests can shrink it instead of
-// sleeping for real.
-var fullStatsRefreshInterval = 5 * time.Second
-
-// refreshFullStats copies mpp.tracker's current stats into dst.Stream (via the cheap Stats.CopyInto, reusing
-// dst.Stream's existing slices/pointers where their shape already matches a previous call, allocating dst.Stream
-// itself only if it's nil) and sets dst.Srt, if mpp.connStats is set. The underlying gather (mpp.tracker.Snapshot,
-// which walks every tracked PID) only happens at most once per fullStatsRefreshInterval; dst is refreshed from the
-// cached scratch buffer on every call regardless, so it always reflects the latest available snapshot even on a
-// cache-hit call. Because dst.Stream is copied into (never aliased) while fullStats.mu is held, and dst is
-// exclusively owned by the caller (see pushStatsInto), this stays safe under PushStats's concurrent callers
-// without needing a fresh allocation on every refresh.
-func (mpp *MpegtsPacketProcessor) refreshFullStats(dst *ExportedStats) {
-	mpp.fullStats.mu.Lock()
-	defer mpp.fullStats.mu.Unlock()
-
 	now := time.Now()
-	if !now.Before(mpp.fullStats.expiresAt) {
-		if mpp.fullStats.tracker == nil {
-			mpp.fullStats.tracker = &tracker.Stats{}
-		}
-		mpp.tracker.Snapshot(mpp.fullStats.tracker, true, utc.New(now), tracker.SnapshotOptions{})
-
-		mpp.fullStats.srt = nil
-		if mpp.connStats != nil {
-			if cs, ok := mpp.connStats.ConnStats(true); ok {
-				mpp.fullStats.srt = cs.SRT
-			}
-		}
-		mpp.fullStats.expiresAt = now.Add(fullStatsRefreshInterval)
-	}
-
 	if dst.Stream == nil {
 		dst.Stream = &tracker.Stats{}
 	}
-	mpp.fullStats.tracker.CopyInto(dst.Stream)
-	dst.Srt = mpp.fullStats.srt
+	mpp.tracker.Snapshot(dst.Stream, true, utc.New(now), tracker.SnapshotOptions{})
+
+	dst.Srt = nil
+	if mpp.connStats != nil {
+		if cs, ok := mpp.connStats.ConnStats(true); ok {
+			dst.Srt = cs.SRT
+		}
+	}
+
+	dst.populate(mpp.stats, mpp.rtpStats)
+	mpp.resetChannelSizeStats()
+
+	_ = mpp.opener.Stat(*dst)
 }
 
 // connStatsSource is implemented by *NetReader; kept as a minimal interface (rather than depending on NetReader

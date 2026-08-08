@@ -12,9 +12,11 @@ import (
 	"github.com/stretchr/testify/require"
 	"go.uber.org/atomic"
 
+	"github.com/eluv-io/avpipe/broadcastproto/tlv"
 	"github.com/eluv-io/avpipe/broadcastproto/transport"
 	mio "github.com/eluv-io/common-go/media/io"
 	"github.com/eluv-io/common-go/media/pktpool"
+	"github.com/eluv-io/log-go"
 )
 
 func TestMpegtsPacketProcessorWallClockSegmentation(t *testing.T) {
@@ -394,68 +396,22 @@ func TestMpegtsPacketProcessorConnStats(t *testing.T) {
 	fake := &fakeConnStatsSource{stats: mio.ConnStats{SRT: &mio.SrtConnStats{Version: 5, Encrypted: true}}, ok: true}
 	pp.SetConnStatsSource(fake)
 
-	pp.fullStats.expiresAt = time.Time{} // force a refresh instead of reusing the first PushStats call's cache
 	pp.PushStats()
 	require.Same(t, fake.stats.SRT, opener.lastStat.Srt)
 	require.True(t, fake.lastDetails, "PushStats requests full protocol stats, not just Version/Encrypted")
 
 	fake.ok = false
-	pp.fullStats.expiresAt = time.Time{} // force a refresh instead of waiting out fullStatsRefreshInterval
 	pp.PushStats()
 	require.Nil(t, opener.lastStat.Srt, "the source no longer reports stats (e.g. disconnected)")
 }
 
-// TestMpegtsPacketProcessor_refreshFullStats_Caches verifies the expensive part of refreshFullStats's report (the
-// tracker snapshot, the connection's SRT stats) is only re-gathered once per fullStatsRefreshInterval, not on every
-// call - documented on MpegtsPacketProcessor.fullStats. Since refreshFullStats now copies into a caller-supplied
-// destination rather than returning a shared pointer (see its doc and
-// TestMpegtsPacketProcessor_PushStats_ConcurrentCallersAreRaceFree for why), caching is observed via content, not
-// pointer identity: a packet tracked while the cache is still valid must not show up in a cache-hit call's
-// destination, but must show up once a forced real refresh runs.
-func TestMpegtsPacketProcessor_refreshFullStats_Caches(t *testing.T) {
-	defer func(saved time.Duration) { fullStatsRefreshInterval = saved }(fullStatsRefreshInterval)
-
-	opener := &recordingSequentialOpener{}
-	pp := newTestMpegtsPacketProcessor(opener)
-	fake := &fakeConnStatsSource{stats: mio.ConnStats{SRT: &mio.SrtConnStats{Version: 1}}, ok: true}
-	pp.SetConnStatsSource(fake)
-
-	base := time.Unix(1000, 0)
-	pkt := packet.New()
-	pkt.SetPID(100)
-	pp.ProcessDatagramPacket(base, mustDatagramPacket(t, (*pkt)[:]))
-
-	fullStatsRefreshInterval = time.Hour
-	var dst1, dst2 ExportedStats
-	pp.refreshFullStats(&dst1)
-	fake.stats.SRT = &mio.SrtConnStats{Version: 2} // a real refresh would now see this
-
-	pp.ProcessDatagramPacket(base, mustDatagramPacket(t, (*pkt)[:])) // tracked, but not yet reflected (cache hit)
-	pp.refreshFullStats(&dst2)
-	require.Same(t, dst1.Srt, dst2.Srt, "reused the cached SRT stats, not fake.stats.SRT's new value")
-	require.Equal(t, dst1.Stream, dst2.Stream, "reused the cached tracker snapshot, ignoring the packet tracked after it")
-
-	fullStatsRefreshInterval = 0 // every call is immediately expired
-	pp.fullStats.expiresAt = time.Time{}
-	var dst3 ExportedStats
-	pp.refreshFullStats(&dst3)
-	require.Same(t, fake.stats.SRT, dst3.Srt, "expired cache triggers a real refresh")
-	require.NotEqual(t, dst1.Stream, dst3.Stream, "a real refresh picks up the packet tracked while the cache was still valid")
-	require.Equal(t, uint64(2), dst3.Stream.Packets, "both tracked packets are now reflected")
-}
-
-// TestMpegtsPacketProcessor_refreshFullStats_DestinationReuseReducesAllocations is a regression test for the
-// allocation-reduction goal fullStats exists for in the first place (see its field doc): a caller that reuses the
-// same destination across repeated calls (as StartReportingStats's ticker goroutine does) must allocate less than
-// one that passes a fresh destination every call - the pre-this-fix behavior of always publishing a freshly
-// allocated detached copy on every real refresh, which is what partly undid the point of Snapshot's own
-// destination-reuse design. mpp.tracker.Snapshot's own per-PID walk (sorting tracked PIDs, unrelated to this fix -
-// see maputil.SortedKeys) still allocates something on every real refresh regardless of dst reuse, so this asserts
-// a relative reduction, not an absolute zero.
-func TestMpegtsPacketProcessor_refreshFullStats_DestinationReuseReducesAllocations(t *testing.T) {
-	defer func(saved time.Duration) { fullStatsRefreshInterval = saved }(fullStatsRefreshInterval)
-	fullStatsRefreshInterval = 0 // every call performs a real refresh - the path this test is about
-
+// TestMpegtsPacketProcessor_pushStatsInto_DestinationReuseReducesAllocations is a regression test for the
+// allocation-reduction goal behind reusing dst across ticks (see reportFullStatsLoop's doc): a caller that reuses
+// the same destination across repeated calls must allocate less than one that passes a fresh destination every
+// call. mpp.tracker.Snapshot's own per-PID walk (sorting tracked PIDs, unrelated to destination reuse - see
+// maputil.SortedKeys) still allocates something on every call regardless of dst reuse, so this asserts a relative
+// reduction, not an absolute zero.
+func TestMpegtsPacketProcessor_pushStatsInto_DestinationReuseReducesAllocations(t *testing.T) {
 	opener := &recordingSequentialOpener{}
 	pp := newTestMpegtsPacketProcessor(opener)
 
@@ -468,16 +424,17 @@ func TestMpegtsPacketProcessor_refreshFullStats_DestinationReuseReducesAllocatio
 	}
 
 	var reused ExportedStats
-	pp.refreshFullStats(&reused) // warm up: sizes reused.Stream's nested slices/structs to the current PID set
+	pp.pushStatsInto(&reused) // warm up: sizes reused.Stream's nested slices/structs to the current PID set
 
 	reusedAllocs := testing.AllocsPerRun(50, func() {
-		pp.refreshFullStats(&reused)
+		pp.pushStatsInto(&reused)
 	})
 	freshAllocs := testing.AllocsPerRun(50, func() {
 		var fresh ExportedStats
-		pp.refreshFullStats(&fresh)
+		pp.pushStatsInto(&fresh)
 	})
 
+	log.Info("allocs", "reused", reusedAllocs, "fresh", freshAllocs)
 	require.Less(t, reusedAllocs, freshAllocs,
 		"reusing dst across calls must allocate less than passing a fresh destination every call - CopyInto's own "+
 			"nested Streams/HistogramCapture reuse should not add to Snapshot's unavoidable per-call cost once "+
@@ -485,19 +442,15 @@ func TestMpegtsPacketProcessor_refreshFullStats_DestinationReuseReducesAllocatio
 }
 
 // TestMpegtsPacketProcessor_PushStats_ConcurrentReceiverCopyIsRaceFree is a regression test for the data race that
-// Snapshot-based reuse in refreshFullStats would otherwise permit: mpp.fullStats.tracker (see its field doc) is
-// mutated in place on every real refresh, and each PushStats call's own destination (see pushStatsInto) only stays
-// valid for that single call - so a receiver that retains an ExportedStats past it (as content-fabric's
-// live-recorder AV_IN_STAT_MPEGTS handler does) must deep-copy it via CopyInto at the point of receipt, into memory
-// it owns outright, rather than aliasing avpipe's Stream pointer - otherwise a reader goroutine racing PushStats's
-// own goroutine would race on *tracker.Stats's fields with no shared lock to prevent it (avpipe and content-fabric
-// are separate modules, each with its own, disjoint mutex). This drives PushStats (with fullStatsRefreshInterval
-// forced to 0, so every call performs a real Snapshot mutation, not a cached reuse) and a receiver simulating that
-// handler's copy-on-receipt discipline concurrently, under -race.
+// Snapshot-based reuse in pushStatsInto would otherwise permit: each PushStats call's own destination (see
+// pushStatsInto) is mutated in place by mpp.tracker.Snapshot on every call, and only stays valid for that single call -
+// so a receiver that retains an ExportedStats past it (as content-fabric's live-recorder AV_IN_STAT_MPEGTS handler
+// does) must deep-copy it via CopyInto at the point of receipt, into its own memory, rather than aliasing avpipe's
+// Stream pointer - otherwise a reader goroutine racing PushStats's own goroutine would race on *tracker.Stats's fields
+// with no shared lock to prevent it (avpipe and content-fabric are separate modules, each with its own, disjoint
+// mutex). This drives PushStats and a receiver simulating that handler's copy-on-receipt discipline concurrently, under
+// -race.
 func TestMpegtsPacketProcessor_PushStats_ConcurrentReceiverCopyIsRaceFree(t *testing.T) {
-	defer func(saved time.Duration) { fullStatsRefreshInterval = saved }(fullStatsRefreshInterval)
-	fullStatsRefreshInterval = 0
-
 	var mu sync.Mutex
 	owned := &ExportedStats{} // mirrors l.StatusReport.InputStats: the receiver's own, reused destination
 
@@ -546,24 +499,14 @@ func TestMpegtsPacketProcessor_PushStats_ConcurrentReceiverCopyIsRaceFree(t *tes
 	wg.Wait()
 }
 
-// TestMpegtsPacketProcessor_PushStats_ConcurrentCallersAreRaceFree is a regression test for the data race reported
-// on avpipe PR #206: PushStats can run concurrently with itself (see its doc - the periodic ticker from
-// StartReportingStats and the one-time deferred call on the first RTP packet from ProcessDatagramPacket can race
-// each other on any given fd). Before the fix, refreshFullStats returned mpp.fullStats.tracker directly - the
-// scratch buffer mpp.tracker.Snapshot mutates in place on every refresh - so one goroutine's PushStats could be
-// exporting/logging that pointer's fields while a concurrent PushStats call mutated it via Snapshot, with
-// fullStats.mu protecting only refreshFullStats' own body, not the caller's subsequent use of what it returned. The
-// fix gives each PushStats call its own destination (see pushStatsInto) instead. This drives two goroutines both
-// calling PushStats() directly (skipping the ticker/RTP plumbing, to keep the test fast - each call still gets its
-// own one-off destination, same as production's RTP-triggered call site), with fullStatsRefreshInterval forced to 0
-// so every single call performs a real refresh, and an opener that reads Stream's fields on receipt - exactly what
-// such a race would corrupt. A connStatsSource is wired in too, so the Srt branch of refreshFullStats/PushStats runs
-// under the same concurrent load (Srt needs no detach - see fullStats's field doc - but should still be exercised
-// here, not just Stream).
+// TestMpegtsPacketProcessor_PushStats_ConcurrentCallersAreRaceFree is a regression test guarding against reintroducing
+// the data race originally reported on avpipe PR #206: PushStats can run concurrently with itself (production callers
+// are now reportFullStatsLoop's own ticker plus any manual/test caller of the exported PushStats). Each call gathers
+// into its own one-off destination and touches no shared state, so this should be race-free by construction; this test
+// exists to catch a future regression, not a currently-open bug. This drives two goroutines both calling PushStats()
+// directly, with an opener that reads Stream's fields on receipt. A connStatsSource is wired in too, so the
+// Srt-gathering branch of pushStatsInto runs under the same concurrent load.
 func TestMpegtsPacketProcessor_PushStats_ConcurrentCallersAreRaceFree(t *testing.T) {
-	defer func(saved time.Duration) { fullStatsRefreshInterval = saved }(fullStatsRefreshInterval)
-	fullStatsRefreshInterval = 0
-
 	var reportsMu sync.Mutex
 	reports := 0
 
@@ -610,15 +553,76 @@ func TestMpegtsPacketProcessor_PushStats_ConcurrentCallersAreRaceFree(t *testing
 	require.NotNil(t, opener.lastStat.Srt)
 }
 
+// fakeConnStatsSource is a test double for mio.ConnStatsSource used to verify that MpegtsPacketProcessor's
+// SetConnStatsSource wiring works end to end.
 type fakeConnStatsSource struct {
+	mu          sync.Mutex
 	stats       mio.ConnStats
 	ok          bool
 	lastDetails bool
 }
 
+// ConnStats can be called concurrently by design, so this fake's own bookkeeping needs a lock, just like
+// recordingSequentialOpener's.
 func (f *fakeConnStatsSource) ConnStats(details bool) (mio.ConnStats, bool) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
 	f.lastDetails = details
 	return f.stats, f.ok
+}
+
+// TestMpegtsPacketProcessor_ReportBytesWritten verifies the lightweight stall-detection ping end to end, for both RTP
+// and raw TS packaging (content-fabric's CopyModeRawOnly stall check applies independently of packaging - see
+// ProcessDatagramPacket's doc): the first datagram triggers one prompt report (independent of the full-stats path - no
+// tracker/connStats involvement at all), later datagrams don't trigger another prompt report, and a later
+// reportBytesWritten call (simulating a reportBytesWrittenLoop tick) reflects the current, larger BytesWritten value.
+func TestMpegtsPacketProcessor_ReportBytesWritten(t *testing.T) {
+	base := time.Unix(1000, 0)
+
+	t.Run("RTP", func(t *testing.T) {
+		opener := &recordingSequentialOpener{}
+		pp := newTestMpegtsPacketProcessorRTP(opener)
+
+		require.Empty(t, opener.bytesWrittenReports, "no datagram written yet")
+
+		tsPkt := mustTSPacket()
+		tsPkt.SetPID(7)
+		datagram := mustRTPDatagram(t, pionrtp.Header{Version: 2, SequenceNumber: 1, Timestamp: 9000}, tsPkt[:])
+		pp.ProcessDatagramPacket(base, mustDatagramPacket(t, datagram))
+
+		require.Len(t, opener.bytesWrittenReports, 1, "the first datagram triggers one prompt ping")
+		require.EqualValues(t, pp.stats.BytesWritten.Load(), opener.bytesWrittenReports[0])
+		require.Equal(t, len(datagram)+tlv.TLV_HEADER_LEN, int(pp.stats.BytesWritten.Load())) // output is TLV wrapped!
+
+		tsPkt2 := mustTSPacket()
+		tsPkt2.SetPID(7)
+		datagram2 := mustRTPDatagram(t, pionrtp.Header{Version: 2, SequenceNumber: 2, Timestamp: 9010}, tsPkt2[:])
+		pp.ProcessDatagramPacket(base, mustDatagramPacket(t, datagram2))
+		require.Len(t, opener.bytesWrittenReports, 1, "only the first datagram triggers a prompt ping")
+
+		pp.reportBytesWritten() // simulates a reportBytesWrittenLoop tick
+		require.Len(t, opener.bytesWrittenReports, 2)
+		require.EqualValues(t, pp.stats.BytesWritten.Load(), opener.bytesWrittenReports[1])
+		require.Greater(t, opener.bytesWrittenReports[1], opener.bytesWrittenReports[0],
+			"BytesWritten grew after the second datagram")
+		require.Equal(t, 2*(len(datagram)+tlv.TLV_HEADER_LEN), int(pp.stats.BytesWritten.Load())) // output is TLV wrapped!
+	})
+
+	t.Run("raw TS", func(t *testing.T) {
+		opener := &recordingSequentialOpener{}
+		pp := newTestMpegtsPacketProcessor(opener)
+
+		require.Empty(t, opener.bytesWrittenReports, "no datagram written yet")
+
+		pkt := mustTSPacket()
+		pkt.SetPID(7)
+		pp.ProcessDatagramPacket(base, mustDatagramPacket(t, pkt[:]))
+
+		require.Len(t, opener.bytesWrittenReports, 1,
+			"the first datagram triggers one prompt ping regardless of packaging")
+		require.EqualValues(t, pp.stats.BytesWritten.Load(), opener.bytesWrittenReports[0])
+		require.Equal(t, len(pkt), int(pp.stats.BytesWritten.Load())) // output is raw TS, so not TLV wrapped!
+	})
 }
 
 func TestMpegtsPacketProcessorRTP(t *testing.T) {
@@ -638,7 +642,7 @@ func TestMpegtsPacketProcessorRTP(t *testing.T) {
 		require.EqualValues(t, 1, pp.stats.PacketsWritten.Load())
 		require.EqualValues(t, 0, statsOf(pp).RTP.BadPackets)
 		require.EqualValues(t, 0, statsOf(pp).RTP.LongHeaders)
-		require.True(t, pp.rtpStats.started.Load(), "the first RTP packet flips the started sentinel (triggers a deferred PushStats)")
+		require.Len(t, opener.bytesWrittenReports, 1, "the first datagram triggers a prompt reportBytesWritten")
 	})
 
 	t.Run("computes header length correctly with CSRC and extension present", func(t *testing.T) {
@@ -715,10 +719,9 @@ func TestMpegtsPacketProcessorRTP(t *testing.T) {
 }
 
 // statsOf returns pp's exported stats snapshot, for tests checking fields now sourced from mpp.tracker (see
-// ExportedStats.populate) rather than a plain atomic field on pp.stats/pp.rtpStats. It reads mpp.tracker.Stats() directly
-// (bypassing PushStats/refreshFullStats and its cache) so it always reflects the latest ProcessDatagramPacket call;
-// SRT stats are out of scope for these tests, so srt is always nil here - see TestMpegtsPacketProcessorConnStats for
-// that wiring.
+// ExportedStats.populate) rather than a plain atomic field on pp.stats/pp.rtpStats. It reads mpp.tracker.Stats()
+// directly (bypassing PushStats/pushStatsInto) so it always reflects the latest ProcessDatagramPacket call; SRT stats
+// are out of scope for these tests, so srt is always nil here - see TestMpegtsPacketProcessorConnStats for that wiring.
 func statsOf(pp *MpegtsPacketProcessor) ExportedStats {
 	dst := ExportedStats{Stream: pp.tracker.Stats()}
 	dst.populate(pp.stats, pp.rtpStats)
@@ -772,10 +775,13 @@ type recordingSequentialOpener struct {
 	// onStat, if set, is called with every Stat report in addition to recording it in lastStat - used by tests that
 	// need to react to (e.g. copy out of) a report on the same goroutine that produced it.
 	onStat func(ExportedStats)
-	// statMu guards lastStat/onStat against tests that call PushStats concurrently from multiple goroutines (e.g.
-	// TestMpegtsPacketProcessor_PushStats_ConcurrentCallersAreRaceFree) - Stat itself is the opener's own bookkeeping,
-	// not the production code under test, so it just needs to not be a race in its own right.
+	// statMu guards lastStat/onStat/lastBytesWritten against tests that call PushStats/ReportBytesWritten concurrently
+	// from multiple goroutines (e.g. TestMpegtsPacketProcessor_PushStats_ConcurrentCallersAreRaceFree) -
+	// Stat/ReportBytesWritten are the opener's own bookkeeping, not the production code under test, so they just need
+	// to not be a race in their own right.
 	statMu sync.Mutex
+	// bytesWrittenReports records every ReportBytesWritten call, in order.
+	bytesWrittenReports []uint64
 }
 
 func (o *recordingSequentialOpener) OpenNext() (io.WriteCloser, error) {
@@ -796,6 +802,13 @@ func (o *recordingSequentialOpener) Stat(stat any) error {
 }
 
 func (o *recordingSequentialOpener) ReportStart() error {
+	return nil
+}
+
+func (o *recordingSequentialOpener) ReportBytesWritten(n uint64) error {
+	o.statMu.Lock()
+	defer o.statMu.Unlock()
+	o.bytesWrittenReports = append(o.bytesWrittenReports, n)
 	return nil
 }
 
