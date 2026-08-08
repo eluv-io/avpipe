@@ -9,10 +9,10 @@ import (
 )
 
 // populate fills e.TS and e.RTP from avpipe's own operational counters (ts, rtpStats) and e.Stream - the shared
-// tracker's stats, which now owns most of the stream-integrity tracking - which the caller must already have set
-// (e.g. via MpegtsPacketProcessor.refreshFullStats). It does not touch e.Stream or e.Srt. ExportedTSStats/
-// ExportedRTPStats keep their original field names/shapes for backward JSON compatibility (see the legacy-field
-// comments below); only their population source changed for the fields tracker.MediaTracker now computes.
+// tracker's stats, which now owns most of the stream-integrity tracking - which the caller must already have set (e.g.
+// via MpegtsPacketProcessor.pushStatsInto). It does not touch e.Stream or e.Srt. ExportedTSStats/ ExportedRTPStats keep
+// their original field names/shapes for backward JSON compatibility (see the legacy-field comments below); only their
+// population source changed for the fields tracker.MediaTracker now computes.
 func (e *ExportedStats) populate(ts *TSStats, rtpStats *RTPStats) {
 	if ts != nil {
 		e.TS.PacketsWritten = ts.PacketsWritten.Load()
@@ -106,8 +106,8 @@ type ExportedStats struct {
 
 // CopyInto deep-copies e into dst, reusing dst.Stream where possible instead of allocating a new one. Callers that
 // retain an ExportedStats past a single Stat call (e.g. content-fabric's live-recorder) must use this instead of a
-// plain assignment: MpegtsPacketProcessor reuses and mutates its Stream snapshot in place across PushStats calls
-// (see refreshFullStats's field doc), so aliasing it would let a reader race that mutation.
+// plain assignment: MpegtsPacketProcessor reuses and mutates its Stream snapshot in place across pushStatsInto calls
+// (see reportFullStatsLoop's doc), so aliasing it would let a reader race that mutation.
 //
 // TS/RTP are plain value structs, safe to assign directly. Srt is rebuilt fresh by connStatsSource.ConnStats on
 // every call (see NetReader.ConnStats and its StatsReporter chain), never reused, so it's also safe to assign
