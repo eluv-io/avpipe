@@ -11,6 +11,7 @@ import (
 	"github.com/eluv-io/avpipe/broadcastproto/mpegts"
 	"github.com/eluv-io/avpipe/broadcastproto/transport"
 	"github.com/eluv-io/avpipe/goavpipe"
+	"github.com/eluv-io/common-go/media/rtp"
 )
 
 // InitTranscodeProcessor creates a TranscodeProcessor and registers it as a bypass
@@ -175,7 +176,7 @@ func (p *TranscodeProcessor) emit(d OutputDatagram) error {
 	p.rtpUnwrapped += int64(int32(d.RtpTs - p.lastRtpTs))
 	p.lastRtpTs = d.RtpTs
 
-	elapsed := time.Duration(p.rtpUnwrapped) * time.Second / 90000
+	elapsed := rtp.TicksToDuration(p.rtpUnwrapped)
 	if wall := time.Since(p.refWall); wall < elapsed {
 		elapsed = wall
 	}
