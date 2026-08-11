@@ -238,6 +238,94 @@ func TestPartsTranscoderRoundTrip(t *testing.T) {
 	}
 }
 
+// TestPartsTranscoderConcurrentStop reproduces the production crash of 2026-08-11:
+// a feeder goroutine blocked in Feed (pipeline behind, video channel full) while
+// another goroutine - having observed the cancellation - calls Finish, which closed
+// videoCh under the pending channel send ("panic: send on closed channel"). With
+// the feedMu serialization, Cancel unblocks the feeder and Finish waits for it.
+func TestPartsTranscoderConcurrentStop(t *testing.T) {
+	if testing.Short() {
+		t.Skip("short mode: skipping transcode round-trip")
+	}
+	ffmpeg, err := exec.LookPath("ffmpeg")
+	if err != nil {
+		t.Skip("ffmpeg not found in PATH")
+	}
+	avpipe.SetCLoggers()
+
+	src := filepath.Join(t.TempDir(), "src.ts")
+	cmd := exec.Command(ffmpeg, "-y", "-hide_banner", "-loglevel", "error",
+		"-f", "lavfi", "-i", "testsrc2=size=640x360:rate=30:duration=4",
+		"-f", "lavfi", "-i", "sine=frequency=440:duration=4",
+		"-c:v", "libx264", "-preset", "veryfast", "-b:v", "1000000",
+		"-c:a", "aac", "-b:a", "96000",
+		"-muxrate", "2000000", "-f", "mpegts", src)
+	if out, err := cmd.CombinedOutput(); err != nil {
+		t.Fatalf("ffmpeg source generation failed: %v\n%s", err, out)
+	}
+	tsData, err := os.ReadFile(src)
+	if err != nil {
+		t.Fatal(err)
+	}
+	tsData = tsData[:len(tsData)/188*188]
+
+	const muxrate = 2_000_000
+	for round := 0; round < 3; round++ {
+		xc, err := NewPartsTranscoder(nil, Config{
+			EncWidth:      320,
+			EncHeight:     180,
+			Ecodec:        "libx264",
+			VideoBitrate:  500_000,
+			StreamBitrate: 2_500_000,
+		}, func(d OutputDatagram) error { return nil })
+		if err != nil {
+			t.Fatal(err)
+		}
+
+		// Feeder goroutine: pump datagrams (cycling over the asset) until the
+		// pipeline reports an error - it will spend most time blocked in Feed.
+		feederDone := make(chan struct{})
+		go func() {
+			defer close(feederDone)
+			seq := uint16(0)
+			for {
+				for off := 0; off < len(tsData); off += 7 * 188 {
+					end := off + 7*188
+					if end > len(tsData) {
+						end = len(tsData)
+					}
+					dg := make([]byte, 12+end-off)
+					dg[0] = 0x80
+					dg[1] = 33
+					binary.BigEndian.PutUint16(dg[2:4], seq)
+					binary.BigEndian.PutUint32(dg[4:8], uint32(int64(off)*8*90000/muxrate))
+					binary.BigEndian.PutUint32(dg[8:12], 0x1234abcd)
+					copy(dg[12:], tsData[off:end])
+					seq++
+					if err := xc.Feed(dg); err != nil {
+						return
+					}
+				}
+			}
+		}()
+
+		// Let the feeder get going (and likely block on backpressure), then stop
+		// from this goroutine - the production stop path (cancel, then finish,
+		// concurrent with a parked Feed).
+		time.Sleep(300 * time.Millisecond)
+		xc.Cancel()
+		if err := xc.Finish(); err == nil {
+			t.Fatalf("round %d: Finish after Cancel returned nil error", round)
+		}
+
+		select {
+		case <-feederDone:
+		case <-time.After(10 * time.Second):
+			t.Fatalf("round %d: feeder did not unblock after Cancel+Finish", round)
+		}
+	}
+}
+
 // TestPartsTranscoderDiscontinuity injects a seq/ts gap mid-stream and verifies the
 // discontinuity is flagged while the output timeline stays monotonic and on-grid.
 func TestPartsTranscoderDiscontinuity(t *testing.T) {

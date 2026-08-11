@@ -38,6 +38,15 @@ type PartsTranscoder struct {
 	muxEnded chan struct{} // closed when the merge/packager goroutine returned
 	muxErr   error
 
+	// feedMu serializes Feed with Finish's close of videoCh: cancellation can leave
+	// a caller goroutine parked in Feed's channel send while another goroutine
+	// (observing the cancel) already calls Finish - closing the channel under a
+	// pending send panics. A blocked Feed holds feedMu; Finish waits for it (the
+	// send is always released: by the encoder draining the channel, or by xcEnded
+	// closing after a cancel or encoder failure).
+	feedMu       sync.Mutex
+	videoChClose bool // set under feedMu before videoCh is closed
+
 	errMu    sync.Mutex
 	firstErr error
 
@@ -141,8 +150,13 @@ func NewPartsTranscoder(ctx context.Context, cfg Config, emit func(OutputDatagra
 // Feed pushes one complete input RTP datagram (12-byte header included, i.e. one
 // rtp_ts TLV value). Blocks for backpressure. Returns the sticky pipeline error once
 // the job has failed or been cancelled; datagrams that fail RTP parsing are counted
-// and skipped without error.
+// and skipped without error. Safe against a concurrent Finish (see feedMu).
 func (t *PartsTranscoder) Feed(rtpDatagram []byte) error {
+	t.feedMu.Lock()
+	defer t.feedMu.Unlock()
+	if t.videoChClose {
+		return t.errOrClosed()
+	}
 	if err := t.err(); err != nil {
 		return err
 	}
@@ -182,7 +196,14 @@ func (t *PartsTranscoder) Feed(rtpDatagram []byte) error {
 // concurrently with Feed. Idempotent.
 func (t *PartsTranscoder) Finish() error {
 	t.finishOnce.Do(func() {
+		// Wait for any in-flight Feed before closing its send channel (a pending
+		// send on a channel that gets closed panics). The Feed always exits: the
+		// encoder drains the channel, or xcEnded closes on cancel/failure.
+		t.feedMu.Lock()
+		t.videoChClose = true
 		close(t.videoCh) // EOF to avpipe => encoder flush, then videoOutCh closes
+		t.feedMu.Unlock()
+
 		<-t.xcEnded
 		t.fifo.Close()
 		<-t.muxEnded
@@ -200,7 +221,9 @@ func (t *PartsTranscoder) Finish() error {
 // Cancel aborts the transcode immediately. The caller should still call Finish to
 // drain and collect the error. Idempotent, safe from any goroutine.
 func (t *PartsTranscoder) Cancel() {
-	t.fail(context.Canceled)
+	// Wrap so the sticky error is attributable to Cancel (vs. an external
+	// context) when it surfaces from Feed/Finish; errors.Is still matches.
+	t.fail(fmt.Errorf("mpegtsxc: transcode cancelled: %w", context.Canceled))
 	t.session.Cancel()
 }
 
