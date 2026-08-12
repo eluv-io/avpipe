@@ -564,11 +564,15 @@ type fakeConnStatsSource struct {
 
 // ConnStats can be called concurrently by design, so this fake's own bookkeeping needs a lock, just like
 // recordingSequentialOpener's.
-func (f *fakeConnStatsSource) ConnStats(details bool) (mio.ConnStats, bool) {
+func (f *fakeConnStatsSource) ConnStats(into *mio.ConnStats, details bool) bool {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	f.lastDetails = details
-	return f.stats, f.ok
+	if !f.ok {
+		return false
+	}
+	*into = f.stats
+	return true
 }
 
 // TestMpegtsPacketProcessor_ReportBytesWritten verifies the lightweight stall-detection ping end to end, for both RTP

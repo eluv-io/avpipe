@@ -99,7 +99,8 @@ func TestExportedStats_MarshalJSON(t *testing.T) {
 
 // TestExportedStats_CopyInto_DetachesStream is a regression test for the data race this whole reuse design would
 // otherwise permit: a caller retaining an ExportedStats past a single Stat call (e.g. content-fabric's
-// live-recorder) must not alias Stream, since MpegtsPacketProcessor mutates it in place on later PushStats calls.
+// live-recorder) must not alias Stream or Srt, since MpegtsPacketProcessor mutates both in place on later PushStats
+// calls (Srt via connStatsSource.ConnStats's copy-into contract - see NetReader.ConnStats).
 func TestExportedStats_CopyInto_DetachesStream(t *testing.T) {
 	src := ExportedStats{
 		TS:     ExportedTSStats{PacketsWritten: 7},
@@ -113,41 +114,48 @@ func TestExportedStats_CopyInto_DetachesStream(t *testing.T) {
 
 	require.Equal(t, src.TS, dst.TS)
 	require.Equal(t, src.RTP, dst.RTP)
-	require.Same(t, src.Srt, dst.Srt, "Srt is never reused/mutated in place, so a plain pointer assignment is correct")
+	require.NotNil(t, dst.Srt)
+	require.NotSame(t, src.Srt, dst.Srt, "CopyInto must not alias the original *mio.SrtConnStats")
+	require.Equal(t, uint32(1), dst.Srt.Version)
 	require.NotNil(t, dst.Stream)
 	require.NotSame(t, src.Stream, dst.Stream, "CopyInto must not alias the original *tracker.Stats")
 	require.EqualValues(t, 10, dst.Stream.Packets)
 
-	// Simulate MpegtsPacketProcessor reusing/mutating its Stream on the next PushStats call.
+	// Simulate MpegtsPacketProcessor reusing/mutating its Stream and Srt on the next PushStats call.
 	src.Stream.Packets = 999
 	src.Stream.Clocks[0].Samples = 999
+	src.Srt.Version = 999
 
 	require.EqualValues(t, 10, dst.Stream.Packets, "dst must be unaffected by mutating the source afterward")
 	require.EqualValues(t, 5, dst.Stream.Clocks[0].Samples)
+	require.Equal(t, uint32(1), dst.Srt.Version, "dst must be unaffected by mutating the source afterward")
 }
 
-// TestExportedStats_CopyInto_ReusesDestinationStream verifies CopyInto reuses dst.Stream in place (the whole point
-// of Snapshot-based reuse) rather than allocating a new one when the destination already has one.
+// TestExportedStats_CopyInto_ReusesDestinationStream verifies CopyInto reuses dst.Stream/dst.Srt in place (the whole
+// point of Snapshot-/ConnStats-based reuse) rather than allocating new ones when the destination already has them.
 func TestExportedStats_CopyInto_ReusesDestinationStream(t *testing.T) {
-	src := ExportedStats{Stream: &tracker.Stats{Packets: 1}}
-	dst := ExportedStats{Stream: &tracker.Stats{Packets: 999}}
-	existing := dst.Stream
+	src := ExportedStats{Stream: &tracker.Stats{Packets: 1}, Srt: &mio.SrtConnStats{Version: 1}}
+	dst := ExportedStats{Stream: &tracker.Stats{Packets: 999}, Srt: &mio.SrtConnStats{Version: 999}}
+	existingStream, existingSrt := dst.Stream, dst.Srt
 
 	src.CopyInto(&dst)
 
-	require.Same(t, existing, dst.Stream, "CopyInto must reuse dst's existing *tracker.Stats, not allocate a new one")
+	require.Same(t, existingStream, dst.Stream, "CopyInto must reuse dst's existing *tracker.Stats, not allocate a new one")
 	require.EqualValues(t, 1, dst.Stream.Packets)
+	require.Same(t, existingSrt, dst.Srt, "CopyInto must reuse dst's existing *mio.SrtConnStats, not allocate a new one")
+	require.EqualValues(t, 1, dst.Srt.Version)
 }
 
-// TestExportedStats_CopyInto_NilStream verifies CopyInto clears dst.Stream (rather than panicking or leaving a
-// stale value) when the source has no stream - e.g. a non-SRT/non-mpegts source, or before the first stats push.
+// TestExportedStats_CopyInto_NilStream verifies CopyInto clears dst.Stream/dst.Srt (rather than panicking or leaving
+// a stale value) when the source has neither - e.g. before the first stats push, or a non-SRT source for Srt alone.
 func TestExportedStats_CopyInto_NilStream(t *testing.T) {
-	dst := ExportedStats{Stream: &tracker.Stats{Packets: 999}}
+	dst := ExportedStats{Stream: &tracker.Stats{Packets: 999}, Srt: &mio.SrtConnStats{Version: 999}}
 
 	var src ExportedStats
 	src.CopyInto(&dst)
 
 	require.Nil(t, dst.Stream)
+	require.Nil(t, dst.Srt)
 }
 
 // TestExportedStats_Clone_DetachesEvenWhenSourceWasShallowCopied is a regression test for the bug CopyInto alone

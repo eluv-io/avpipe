@@ -322,11 +322,12 @@ func (mpp *MpegtsPacketProcessor) pushStatsInto(dst *ExportedStats) {
 	}
 	mpp.tracker.Snapshot(dst.Stream, true, utc.New(now), tracker.SnapshotOptions{})
 
+	// Reuse dst.Srt's existing allocation (if any) as the destination, so a caller that reuses dst across calls (e.g.
+	// reportFullStatsLoop) doesn't allocate a new SrtConnStats on every tick.
+	cs := mio.ConnStats{SRT: dst.Srt}
 	dst.Srt = nil
-	if mpp.connStats != nil {
-		if cs, ok := mpp.connStats.ConnStats(true); ok {
-			dst.Srt = cs.SRT
-		}
+	if mpp.connStats != nil && mpp.connStats.ConnStats(&cs, true) {
+		dst.Srt = cs.SRT
 	}
 
 	dst.populate(mpp.stats, mpp.rtpStats)
@@ -338,7 +339,7 @@ func (mpp *MpegtsPacketProcessor) pushStatsInto(dst *ExportedStats) {
 // connStatsSource is implemented by *NetReader; kept as a minimal interface (rather than depending on NetReader
 // directly) so MpegtsPacketProcessor stays testable with a fake. See SetConnStatsSource.
 type connStatsSource interface {
-	ConnStats(details bool) (mio.ConnStats, bool)
+	ConnStats(into *mio.ConnStats, details bool) bool
 }
 
 // SetConnStatsSource wires src as the source of ExportedStats.Srt. It is a setter rather than a constructor

@@ -165,24 +165,25 @@ func TestNetReader_StatusReportsFirstResultOnly(t *testing.T) {
 func TestNetReader_ConnStats(t *testing.T) {
 	var nr NetReader
 
-	_, ok := nr.ConnStats(true)
+	var stats mio.ConnStats
+	ok := nr.ConnStats(&stats, true)
 	require.False(t, ok, "no active reader yet")
 
 	var plain io.ReadCloser = &noopReadCloser{}
 	nr.reader.Store(&plain)
-	_, ok = nr.ConnStats(true)
+	ok = nr.ConnStats(&stats, true)
 	require.False(t, ok, "the active reader doesn't implement mio.StatsReporter")
 
 	fake := &fakeStatsReporterReadCloser{stats: mio.ConnStats{RemoteAddr: "1.2.3.4:5678"}}
 	var reporter io.ReadCloser = fake
 	nr.reader.Store(&reporter)
 
-	stats, ok := nr.ConnStats(true)
+	ok = nr.ConnStats(&stats, true)
 	require.True(t, ok)
 	require.Equal(t, "1.2.3.4:5678", stats.RemoteAddr)
 	require.True(t, fake.lastDetails, "details is forwarded to the underlying reporter")
 
-	_, _ = nr.ConnStats(false)
+	_ = nr.ConnStats(&stats, false)
 	require.False(t, fake.lastDetails)
 }
 
