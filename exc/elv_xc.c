@@ -1074,9 +1074,10 @@ usage(
         "\t                                    Output goes to directory ./O\n"
         "\t-filter-descriptor :     (mandatory if xc-type is audio-pan). Audio filter descriptor the same as ffmpeg format.\n"
         "\t                                    For example: -filter-descriptor [0:1]pan=stereo|c0<c1+0.707*c2|c1<c2+0.707*c1[aout]\n"
-        "\t-format :                (optional) Package format. Default is \"dash\", can be: \"dash\", \"hls\", \"mp4\", \"fmp4\", \"segment\", \"fmp4-segment\", or \"image2\"\n"
+        "\t-format :                (optional) Package format. Default is \"dash\", can be: \"dash\", \"hls\", \"mp4\", \"fmp4\", \"segment\", \"fmp4-segment\", \"mpegts\", or \"image2\"\n"
         "\t                                    Using \"segment\" format produces self contained mp4 segments with start pts from 0 for each segment\n"
         "\t                                    Using \"fmp4-segment\" format produces self contained mp4 segments with continious pts.\n"
+        "\t                                    Using \"mpegts\" format produces a single continuous MPEGTS stream.\n"
         "\t                                    Using \"fmp4-segment\" generates segments that are appropriate for live streaming.\n"
         "\t-force-keyint :          (optional) Force IDR key frame in this interval.\n"
         "\t-gpu-index :             (optional) Use the GPU with specified index for transcoding (export CUDA_DEVICE_ORDER=PCI_BUS_ID would use smi index).\n"
@@ -1393,6 +1394,8 @@ main(
                     p.format = strdup("segment");
                 } else if (strcmp(argv[i+1], "fmp4-segment") == 0) {
                     p.format = strdup("fmp4-segment");
+                } else if (strcmp(argv[i+1], "mpegts") == 0) {
+                    p.format = strdup("mpegts");
                 } else if (strcmp(argv[i+1], "image2") == 0) {
                     p.format = strdup("image2");
                 } else {
@@ -1668,6 +1671,7 @@ main(
     if (strcmp(p.format, "segment") &&
         strcmp(p.format, "fmp4-segment") &&
         strcmp(p.format, "mp4") &&
+        strcmp(p.format, "mpegts") &&
         p.seg_duration == NULL &&
         p.audio_seg_duration_ts <= 0 && p.xc_type & xc_audio) {
         usage(argv[0], "audio_seg_duration_ts or seg_duration", EXIT_FAILURE);
@@ -1675,6 +1679,7 @@ main(
     if (strcmp(p.format, "segment") &&
         strcmp(p.format, "fmp4-segment") &&
         strcmp(p.format, "mp4") &&
+        strcmp(p.format, "mpegts") &&
         p.seg_duration == NULL &&
         p.video_seg_duration_ts <= 0 &&
         p.xc_type & xc_video &&
