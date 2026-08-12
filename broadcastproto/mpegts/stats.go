@@ -104,19 +104,25 @@ type ExportedStats struct {
 	Srt *mio.SrtConnStats `json:"srt,omitempty"`
 }
 
-// CopyInto deep-copies e into dst, reusing dst.Stream where possible instead of allocating a new one. Callers that
-// retain an ExportedStats past a single Stat call (e.g. content-fabric's live-recorder) must use this instead of a
-// plain assignment: MpegtsPacketProcessor reuses and mutates its Stream snapshot in place across pushStatsInto calls
-// (see reportFullStatsLoop's doc), so aliasing it would let a reader race that mutation.
+// CopyInto deep-copies e into dst, reusing dst.Stream/dst.Srt where possible instead of allocating new ones. Callers
+// that retain an ExportedStats past a single Stat call (e.g. content-fabric's live-recorder) must use this instead of
+// a plain assignment: MpegtsPacketProcessor reuses and mutates its Stream snapshot, and now also its Srt (via
+// connStatsSource.ConnStats's copy-into contract - see NetReader.ConnStats and its StatsReporter chain), in place
+// across pushStatsInto calls (see reportFullStatsLoop's doc), so aliasing either would let a reader race that
+// mutation.
 //
-// TS/RTP are plain value structs, safe to assign directly. Srt is rebuilt fresh by connStatsSource.ConnStats on
-// every call (see NetReader.ConnStats and its StatsReporter chain), never reused, so it's also safe to assign
-// directly - if that ever changes, the fix belongs here, next to the type that knows which of its fields are
-// reused, not in a downstream caller guessing at avpipe's internals.
+// TS/RTP are plain value structs, safe to assign directly.
 func (e *ExportedStats) CopyInto(dst *ExportedStats) {
 	dst.TS = e.TS
 	dst.RTP = e.RTP
-	dst.Srt = e.Srt
+	if e.Srt == nil {
+		dst.Srt = nil
+	} else {
+		if dst.Srt == nil {
+			dst.Srt = &mio.SrtConnStats{}
+		}
+		*dst.Srt = *e.Srt
+	}
 	if e.Stream == nil {
 		dst.Stream = nil
 		return

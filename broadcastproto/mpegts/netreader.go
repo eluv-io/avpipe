@@ -87,20 +87,21 @@ type NetReader struct {
 	reader    atomic.Pointer[io.ReadCloser] // the current reader, used for closing when the NetReader is canceled
 }
 
-// ConnStats returns the current connection's statistics, if there is an active reader and it reports them (e.g. an
-// SRT connection - see mio.StatsReporter). ok is false if there's no active reader yet (not yet connected, or
-// between reconnect attempts) or the reader doesn't implement mio.StatsReporter (e.g. a plain UDP socket).
-func (r *NetReader) ConnStats(details bool) (stats mio.ConnStats, ok bool) {
+// ConnStats copies the current connection's statistics into into, if there is an active reader and it reports them
+// (e.g. an SRT connection - see mio.StatsReporter). It returns false without touching into if there's no active
+// reader yet (not yet connected, or between reconnect attempts) or the reader doesn't implement mio.StatsReporter
+// (e.g. a plain UDP socket).
+func (r *NetReader) ConnStats(into *mio.ConnStats, details bool) bool {
 	reader := r.reader.Load()
 	if reader == nil {
-		return mio.ConnStats{}, false
+		return false
 	}
 	reporter, ok := (*reader).(mio.StatsReporter)
 	if !ok {
-		return mio.ConnStats{}, false
+		return false
 	}
-	reporter.ConnStats(&stats, details)
-	return stats, true
+	reporter.ConnStats(into, details)
+	return true
 }
 
 func (r *NetReader) Status() (running bool, err error) {
