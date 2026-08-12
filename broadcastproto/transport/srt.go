@@ -94,9 +94,10 @@ func (r *RtpDecapsulator) Close() error {
 
 // ConnStats forwards to the wrapped reader if it implements mio.StatsReporter, so stripping the RTP layer here
 // doesn't break the reporter chain for RTP-over-SRT ingest (see srtProto.Open's StripRtp case).
-func (r *RtpDecapsulator) ConnStats(details bool) mio.ConnStats {
+func (r *RtpDecapsulator) ConnStats(into *mio.ConnStats, details bool) {
 	if reporter, ok := r.reader.(mio.StatsReporter); ok {
-		return reporter.ConnStats(details)
+		reporter.ConnStats(into, details)
+		return
 	}
-	return mio.ConnStats{}
+	*into = mio.ConnStats{}
 }
