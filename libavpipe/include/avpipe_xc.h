@@ -97,7 +97,8 @@ typedef enum avp_stat_t {
     out_stat_encoding_end_pts = 9,          // The last PTS encoded. This stat is recorded when a file is closed
     out_stat_start_file = 10,               // Sent when a new file is opened and reports the segment index
     out_stat_end_file = 11,                 // Sent when a file is closed and reports the segment index
-    in_stat_data_scte35 = 12               // SCTE data arrived
+    in_stat_data_scte35 = 12,               // SCTE data arrived
+    in_stat_mpegts = 13                     // MPEGTS input stats (including RTP if applicable)
 } avp_stat_t;
 
 typedef enum avp_live_proto_t {
@@ -267,8 +268,23 @@ typedef struct avpipe_io_handler_t {
     avpipe_stater_f avpipe_stater;
 } avpipe_io_handler_t;
 
-#define MAX_WRAP_PTS        ((int64_t)8589000000)
 #define MAX_AVFILENAME_LEN  128
+
+/*
+ * PTS/DTS unwrapper state for one input stream
+ *
+ * MPEGTS timestamps wrap every 2^33/90000 ~= 26.5 hours
+ * Unwrapping converts timestamps to monotonic int64. PTS and DTS are unwrapped independently.
+ */
+typedef struct pts_unwrapper_t {
+    const char *url;            /* input url */
+    int         stream_index;   /* input stream index */
+    int64_t     wrap_modulus;   /* 2^pts_wrap_bits, or 0 to disable unwrapping */
+    int         has_last;       /* set once the first timestamp is seen */
+    int64_t     last;           /* last raw (wrapped) input timestamp */
+    int64_t     offset;         /* accumulated wrap offset (added to raw timestamps) */
+    char        kind;           /* 'P' (PTS) or 'T' (DTS) */
+} pts_unwrapper_t;
 
 /*
  * Decoder/encoder context, keeps both video and audio stream ffmpeg contexts
@@ -355,10 +371,8 @@ typedef struct coderctx_t {
     int data_scte35_stream_index;                       /* Index of SCTE-35 data stream */
     int data_stream_index;                              /* Index of an unrecognized data stream */
 
-    int64_t video_last_wrapped_pts;                     /* Video last wrapped pts */
-    int64_t video_last_input_pts;                       /* Video last input pts */
-    int64_t audio_last_wrapped_pts[MAX_STREAMS];        /* Audio last wrapped pts */
-    int64_t audio_last_input_pts[MAX_STREAMS];          /* Audio last input pts */
+    pts_unwrapper_t pts_unwrapper[MAX_STREAMS];         /* PTS unwrap state (per stream)*/
+    pts_unwrapper_t dts_unwrapper[MAX_STREAMS];         /* DTS unwrap state (per stream)*/
     int64_t video_last_dts;
     int64_t audio_last_dts[MAX_STREAMS];
     int64_t last_key_frame;                             /* pts of last key frame */

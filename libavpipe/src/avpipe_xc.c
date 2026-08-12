@@ -117,7 +117,7 @@ selected_audio_index(
 
 static int
 decode_interrupt_cb(
-    void *ctx) 
+    void *ctx)
 {
     coderctx_t *decoder_ctx = (coderctx_t *)ctx;
     if (decoder_ctx->cancelled)
@@ -185,7 +185,8 @@ prepare_decoder(
     avpipe_io_handler_t *in_handlers,
     ioctx_t *inctx,
     xcparams_t *params,
-    int seekable)
+    int seekable,
+    int use_custom_pts_unwrap)
 {
     int rc;
     decoder_context->video_last_dts = AV_NOPTS_VALUE;
@@ -257,8 +258,8 @@ prepare_decoder(
     }
 
     if (is_live_source(decoder_context)) {
-        av_dict_set(&opts, "probesize", "100M", 0);  // bytes
-        av_dict_set(&opts, "analyzeduration", "10000000", 0);  // microseconds
+        av_dict_set(&opts, "probesize", "300M", 0);  // bytes
+        av_dict_set(&opts, "analyzeduration", "30000000", 0);  // microseconds
     }
 
     /* Allocate AVFormatContext in format_context and find input file format */
@@ -271,11 +272,31 @@ prepare_decoder(
         return eav_open_input;
     }
 
+    /*
+     * Disable ffmpeg timestamp correction for MPEG TS (it doesn't handle it correctly).
+     * Keep the ffmpeg correction for probe (even when mepgts) and all other streams.
+     */
+    int is_mpegts = decoder_context->format_context->iformat &&
+        decoder_context->format_context->iformat->name &&
+        !strcmp(decoder_context->format_context->iformat->name, "mpegts");
+    decoder_context->format_context->correct_ts_overflow =
+        !(use_custom_pts_unwrap && is_mpegts);
+
     /* Retrieve stream information */
     if (avformat_find_stream_info(decoder_context->format_context,  NULL) < 0) {
+        /* The interrupt callback (decode_interrupt_cb) can abort this call the same way it aborts
+         * avformat_open_input() above. Check the cancellation flag directly instead of the ffmpeg return code,
+         * since avformat_find_stream_info() isn't guaranteed to propagate AVERROR_EXIT verbatim through all of
+         * its internal probing paths. */
+        if (decoder_context->cancelled)
+            return eav_cancelled;
         elv_err("Could not get input stream info, url=%s", url);
         return eav_stream_info;
     }
+
+    /* Precompute per-stream PTS/DTS wrap moduli now that pts_wrap_bits is known. */
+    if (pts_unwrap_init(decoder_context) < 0)
+        return eav_timebase;
 
     dump_streams(inctx->url, decoder_context->format_context);
 
@@ -317,7 +338,13 @@ prepare_decoder(
                  * integration test that tests live restarts. In that case, it's been observed that
                  * retrying the probe entirely fixes the issue.
                  *
-                 * See libavformat/utils.c:has_codec_parameters for the checks in ffmpeg internals. */
+                 * See libavformat/utils.c:has_codec_parameters for the checks in ffmpeg internals.
+                 *
+                 * A cancellation requested while the probe was still in progress (too little time for a real
+                 * frame to arrive) is a common cause of this, so report it as such rather than as a stream-info
+                 * failure. */
+                if (decoder_context->cancelled)
+                    return eav_cancelled;
                 elv_err("avformat_find_stream_info failed to get input stream info");
                 return eav_stream_info;
             }
@@ -415,7 +442,7 @@ prepare_decoder(
          * Find decoder and initialize decoder context.
          * Pick params->dcodec if this is the selected stream (stream_id or audio_index)
          */
-        if (params != NULL && params->dcodec != NULL && params->dcodec[0] != '\0' && 
+        if (params != NULL && params->dcodec != NULL && params->dcodec[0] != '\0' &&
             decoder_context->format_context->streams[i]->codecpar->codec_type == AVMEDIA_TYPE_VIDEO) {
             elv_log("STREAM SELECTED this_stream_id=%d, id=%d idx=%d xc_type=%d dcodec=%s, url=%s",
                 this_stream_id, decoder_context->stream[i]->id, i, params->xc_type, params->dcodec, url);
@@ -699,7 +726,7 @@ set_encoder_options(
             elv_dbg("setting \"fmp4-segment\" audio segment_time to %s, seg_duration_ts=%"PRId64", url=%s",
                 params->seg_duration, seg_duration_ts, params->url);
             av_opt_set(encoder_context->format_context2[i]->priv_data, "reset_timestamps", "on", 0);
-        } 
+        }
         if (stream_index == decoder_context->video_stream_index) {
             if (params->video_seg_duration_ts > 0)
                 seg_duration_ts = params->video_seg_duration_ts;
@@ -971,6 +998,25 @@ enum {
 };
 
 static void
+set_nvidia_quality_params(
+    AVCodecContext *encoder_codec_context,
+    xcparams_t *params)
+{
+    const char *preset = "p2";
+
+    if (params->preset != NULL && params->preset[0] != '\0')
+        preset = params->preset;
+
+    av_opt_set(encoder_codec_context->priv_data, "preset", preset, 0); // Valid: p1–p7
+    av_opt_set(encoder_codec_context->priv_data, "tune", "hq", 0);   // Valid: hq, ll, ull, lossless, losslesshp
+
+    if (!strcmp(preset, "p6") || !strcmp(preset, "p7")) {
+        av_opt_set(encoder_codec_context->priv_data, "spatial_aq", "on", 0);
+        av_opt_set(encoder_codec_context->priv_data, "temporal_aq", "on", 0);
+    }
+}
+
+static void
 set_nvidia_h264_params(
     coderctx_t *encoder_context,
     coderctx_t *decoder_context,
@@ -1004,11 +1050,7 @@ set_nvidia_h264_params(
     av_opt_set_int(encoder_codec_context->priv_data, "level", encoder_codec_context->level, 0);
 */
 
-    /*
-     * Default preset - fast and good quality (previously "PRESET_LOW_LATENCY_HQ")
-     */
-    av_opt_set(encoder_codec_context->priv_data, "preset", "p2", 0); // Valid: p1–p7
-    av_opt_set(encoder_codec_context->priv_data, "tune", "hq", 0);   // Valid: hq, ll, ull, lossless, losslesshp
+    set_nvidia_quality_params(encoder_codec_context, params);
 
     /*
      * We might want to set one of the following options in future:
@@ -1055,11 +1097,7 @@ set_nvidia_hevc_params(
         av_opt_set(encoder_codec_context->priv_data, "tier", "high", 0);
     }
 
-    /*
-     * Default preset - fast and good quality (previously "PRESET_LOW_LATENCY_HQ")
-     */
-    av_opt_set(encoder_codec_context->priv_data, "preset", "p2", 0); // Valid: p1–p7
-    av_opt_set(encoder_codec_context->priv_data, "tune", "hq", 0);   // Valid: hq, ll, ull, lossless, losslesshp
+    set_nvidia_quality_params(encoder_codec_context, params);
 
     /* HDR for nvenc:
      *   - mp4 'mdcv'/'clli' atoms via coded_side_data: safe and necessary so the
@@ -2540,27 +2578,6 @@ do_bypass(
     return eav_success;
 }
 
-static avpipe_error_t
-check_pts_wrapped(
-    int64_t *last_input_pts,
-    AVFrame *frame,
-    int stream_index)
-{
-    if (!frame || !last_input_pts)
-        return eav_success;
-
-    /* If the stream was wrapped then issue an error */
-    if (*last_input_pts && *last_input_pts - frame->pts > MAX_WRAP_PTS) {
-        elv_warn("PTS WRAPPED stream_index=%d, last_input_pts=%"PRId64", frame->pts=%"PRId64, stream_index, *last_input_pts, frame->pts);
-        return eav_pts_wrapped;
-    }
-
-    if (frame->pts > *last_input_pts)
-        *last_input_pts = frame->pts;
-
-    return eav_success;
-}
-
 static int
 transcode_audio(
     coderctx_t *decoder_context,
@@ -2632,12 +2649,6 @@ transcode_audio(
         }
 
         dump_frame(1, stream_index, "IN ", codec_context->frame_num, frame, debug_frame_level);
-
-        ret = check_pts_wrapped(&decoder_context->audio_last_input_pts[stream_index], frame, stream_index);
-        if (ret == eav_pts_wrapped) {
-            av_frame_unref(frame);
-            return ret;
-        }
 
         decoder_context->audio_pts[stream_index] = packet->pts;
 
@@ -2785,12 +2796,6 @@ transcode_video(
 
         fix_video_frame_color(decoder_context, frame);
         dump_frame(0, stream_index, "IN ", codec_context->frame_num, frame, debug_frame_level);
-
-        ret = check_pts_wrapped(&decoder_context->audio_last_input_pts[stream_index], frame, stream_index);
-        if (ret == eav_pts_wrapped) {
-            av_frame_unref(frame);
-            return ret;
-        }
 
         if (do_instrument) {
             elv_since(&tv, &since);
@@ -3294,7 +3299,12 @@ skip_for_sync(
 
     /* We are processing the audio packets now.
      * Skip until the audio PTS has reached the first video key frame PTS
-     * PENDING(SSS) - this is incorrect if audio PTS is muxed ahead of video
+     *
+     * PENDING(SS) - this fails in several cases:
+     * - if audio PTS is muxed ahead of video
+     * - if audio and video PTS start right at the wrap point for example:
+     *   - first video PTS: 8,589,927,600  (just before wrap)
+     *   - first audio PTS:         2,788  (just after wrap)
      */
     if (decoder_context->first_key_frame_pts == AV_NOPTS_VALUE ||
         input_packet->pts < decoder_context->first_key_frame_pts) {
@@ -3625,7 +3635,7 @@ avpipe_xc(
     }
 
     if ((rc = prepare_decoder(&xctx->decoder_ctx,
-            in_handlers, inctx, params, params->seekable)) != eav_success) {
+            in_handlers, inctx, params, params->seekable, 1)) != eav_success) {
         elv_err("Failure in preparing decoder, url=%s, rc=%d", params->url, rc);
         return rc;
     }
@@ -3853,7 +3863,7 @@ avpipe_xc(
 
         rc = av_read_frame(decoder_context->format_context, input_packet);
 
-        if ((rc == AVERROR(EAGAIN) || rc == AVERROR(EIO) || rc == AVERROR_INVALIDDATA) && nretries < MAX_FRAME_READ_RETRIES) {
+        if ((rc == AVERROR(EAGAIN) || rc == AVERROR_INVALIDDATA) && nretries < MAX_FRAME_READ_RETRIES) {
             if (nretries % 10 == 0) {
                 elv_warn("packet unreadable or corrupt - %s (%d) retries=%d", av_err2str(rc), rc, nretries);
             }
@@ -3885,6 +3895,12 @@ avpipe_xc(
 
         const char *st = stream_type_str(encoder_context, input_packet->stream_index);
         int stream_index = input_packet->stream_index;
+
+        /* Unwrap MPEGTS timestamps into a monotonic timeline */
+        if (stream_index >= 0 && stream_index < MAX_STREAMS) {
+            input_packet->pts = pts_unwrap(&decoder_context->pts_unwrapper[stream_index], input_packet->pts);
+            input_packet->dts = pts_unwrap(&decoder_context->dts_unwrapper[stream_index], input_packet->dts);
+        }
 
         // Record PTS of first frame read - excute only for the desired stream
         if ((stream_index == decoder_context->video_stream_index && (params->xc_type & xc_video)) ||
@@ -4126,7 +4142,7 @@ xc_done:
         strncat(audio_last_pts_sent_encode_buf, buf, (MAX_STREAMS + 1) * 20 - strlen(audio_last_pts_sent_encode_buf));
         sprintf(buf, "%"PRId64, encoder_context->audio_last_pts_encoded[audio_index]);
         strncat(audio_last_pts_encoded_buf, buf, (MAX_STREAMS + 1) * 20 - strlen(audio_last_pts_encoded_buf));
-    } 
+    }
 
     elv_log("avpipe_xc done url=%s, rc=%d, xctx->err=%d, xc-type=%d, "
         "last video_pts=%"PRId64" audio_pts=%"PRId64
@@ -4365,7 +4381,8 @@ avpipe_probe(
         goto avpipe_probe_end;
     }
 
-    if ((rc = prepare_decoder(&decoder_ctx, in_handlers, &inctx, params, params->seekable)) != eav_success) {
+    if ((rc = prepare_decoder(
+            &decoder_ctx, in_handlers, &inctx, params, params->seekable, 0)) != eav_success) {
         elv_err("avpipe_probe failed to prepare decoder, url=%s", url);
         goto avpipe_probe_end;
     }

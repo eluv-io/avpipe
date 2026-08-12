@@ -28,8 +28,7 @@ func NewAVPipeSequentialOutWriter(inFd int64, streamIndex int, streamType goavpi
 type avpipeSequentialOutHandler struct {
 	mu sync.Mutex
 
-	//inFd is the identifier assigned to the input when it was opened. In some places this is called
-	//'handler'.
+	// inFd is the identifier assigned to the input when it was opened. In some places this is called 'handler'.
 	inFd        int64
 	streamIndex int
 	streamType  goavpipe.AVType
@@ -90,4 +89,14 @@ func (h *avpipeSequentialOutHandler) Close() error {
 
 	h.outFd = nil
 	return nil
+}
+
+func (h *avpipeSequentialOutHandler) Stat(args any) error {
+	err := AVPipeStatInputGo(h.inFd, h.streamIndex, goavpipe.AV_IN_STAT_MPEGTS, args)
+	return err
+}
+
+func (h *avpipeSequentialOutHandler) ReportStart() error {
+	err := AVPipeStatInputGo(h.inFd, h.streamIndex, goavpipe.AV_IN_STAT_MPEGTS_START, "")
+	return err
 }

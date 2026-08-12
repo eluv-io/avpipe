@@ -608,6 +608,7 @@ func TestV2SingleABRTranscodeCancelling(t *testing.T) {
 	}(handle)
 	err2 := avpipe.XcRun(handle)
 	assert.Error(t, err2)
+	failNowOnError(t, avpipe.XcFini(handle))
 
 	params.XcType = goavpipe.XcAudio
 	params.Ecodec2 = "aac"
@@ -619,6 +620,7 @@ func TestV2SingleABRTranscodeCancelling(t *testing.T) {
 	assert.NoError(t, err)
 	err = avpipe.XcRun(handleA)
 	assert.Error(t, err)
+	failNowOnError(t, avpipe.XcFini(handleA))
 }
 
 func doTranscode(t *testing.T,
@@ -1956,6 +1958,7 @@ func TestMezMakerWithOpenInputError(t *testing.T) {
 	failNowOnError(t, err)
 	err = avpipe.XcRun(handle)
 	assert.Error(t, err)
+	failNowOnError(t, avpipe.XcFini(handle))
 
 }
 
@@ -1999,6 +2002,7 @@ func TestMezMakerWithReadInputError(t *testing.T) {
 	failNowOnError(t, err)
 	err = avpipe.XcRun(handle)
 	assert.Error(t, err)
+	failNowOnError(t, avpipe.XcFini(handle))
 
 }
 
@@ -3323,8 +3327,10 @@ func boilerXc2(t *testing.T, params *goavpipe.XcParams) {
 	handle, err := avpipe.XcInit(params)
 	failNowOnError(t, err)
 	assert.Greater(t, handle, int32(0))
-	err = avpipe.XcRun(handle)
-	failNowOnError(t, err)
+	runErr := avpipe.XcRun(handle)
+	finiErr := avpipe.XcFini(handle)
+	failNowOnError(t, runErr)
+	failNowOnError(t, finiErr)
 }
 
 func setFastEncodeParams(p *goavpipe.XcParams, always bool) bool {

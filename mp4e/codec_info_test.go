@@ -222,3 +222,47 @@ func TestExtractCodecInfo(t *testing.T) {
 		assert.Equal(t, 16, info.EC3.ComplexityIndex)
 	})
 }
+
+// TestExtractCodecInfoLazyBoundsMemoryOnGarbage verifies parsing of a bogus header
+// advertising a multi-GB body
+func TestExtractCodecInfoLazyBoundsMemoryOnGarbage(t *testing.T) {
+	// size = 0x7fffffff (~2GB) followed by a garbage box type and a little data.
+	data := []byte{0x7f, 0xff, 0xff, 0xff, 0x2d, 0x85, 0x00, 0x1e, 0xde, 0xad, 0xbe, 0xef}
+	infos, err := ExtractCodecInfoLazy(bytes.NewReader(data))
+	require.Error(t, err)
+	require.Nil(t, infos)
+}
+
+// TestLimitedReadSeeker verifies probe MP4 extract read cap
+func TestLimitedReadSeeker(t *testing.T) {
+	data := make([]byte, 1000)
+	lr := newLimitedReadSeeker(bytes.NewReader(data), 100)
+
+	// Seeks are free and must not consume the read budget.
+	pos, err := lr.Seek(500, 0) // io.SeekStart
+	require.NoError(t, err)
+	require.Equal(t, int64(500), pos)
+	pos, err = lr.Seek(0, 0)
+	require.NoError(t, err)
+	require.Equal(t, int64(0), pos)
+
+	// Reads are capped: io.ReadAll accumulates at most the limit, then errors.
+	buf := make([]byte, 4096)
+	got, err := lr.Read(buf)
+	require.NoError(t, err)
+	require.Equal(t, 100, got) // truncated to the remaining budget
+	_, err = lr.Read(buf)
+	require.Error(t, err) // budget exhausted
+	require.Contains(t, err.Error(), "read limit")
+}
+
+// TestExtractCodecInfoLazyRewindsOnNonMP4 verifies probe header sniff
+func TestExtractCodecInfoLazyRewindsOnNonMP4(t *testing.T) {
+	r := bytes.NewReader([]byte("RIFF\x24\x00\x00\x00WAVEfmt some more bytes here"))
+	infos, err := ExtractCodecInfoLazy(r)
+	require.Error(t, err)
+	require.Nil(t, infos)
+	pos, seekErr := r.Seek(0, 1) // io.SeekCurrent
+	require.NoError(t, seekErr)
+	require.Equal(t, int64(0), pos)
+}
