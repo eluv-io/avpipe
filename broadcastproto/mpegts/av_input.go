@@ -11,8 +11,14 @@ import (
 
 	"github.com/eluv-io/avpipe/broadcastproto/transport"
 	"github.com/eluv-io/avpipe/goavpipe"
+	"github.com/eluv-io/common-go/media/pktpool"
 	"github.com/eluv-io/errors-go"
 )
+
+// inputPacketPoolCap upper-bounds the size of a single read handed to mpegtsInputHandler.Read: matches
+// AVIO_IN_BUF_SIZE (libavpipe/include/avpipe_xc.h), the largest buffer ffmpeg's custom I/O will ever request a read
+// into.
+const inputPacketPoolCap = 1024 * 1024
 
 /*
 
@@ -27,6 +33,7 @@ Then split the output out to a segmenter if configured on
 */
 
 var _ goavpipe.InputOpener = (*mpegtsInputOpener)(nil)
+var _ goavpipe.PacketReader = (*mpegtsInputHandler)(nil)
 
 type SequentialOpenerFactory func(inFd int64) SequentialOpener
 
@@ -121,11 +128,11 @@ func (mio *mpegtsInputOpener) Open(fd int64, url string) (goavpipe.InputHandler,
 
 	goavpipe.Log.Debug("MPEGTS custom input opener opened", "fd", fd, "url", url, "transport", mio.transport.Handler())
 
-	var ch chan []byte
+	var ch chan pktpool.Resource
 
 	copyStream := mio.cfg.CopyMode == goavpipe.CopyModeRaw
 	if copyStream {
-		ch = make(chan []byte, 20*1024)
+		ch = make(chan pktpool.Resource, 20*1024)
 	}
 
 	mih := &mpegtsInputHandler{
@@ -133,6 +140,7 @@ func (mio *mpegtsInputOpener) Open(fd int64, url string) (goavpipe.InputHandler,
 		transport:        mio.transport,
 		seqOpener:        mio.seqOpener(fd),
 		copyStream:       copyStream,
+		packetPool:       pktpool.NewPacketPool(outputTlvWrapCap, inputPacketPoolCap),
 		outputSplit:      ch,
 		readerLoopDoneCh: make(chan struct{}),
 		inFd:             fd,
@@ -179,7 +187,8 @@ type mpegtsInputHandler struct {
 	inFd      int64
 
 	copyStream       bool
-	outputSplit      chan<- []byte
+	packetPool       *pktpool.Pool
+	outputSplit      chan<- pktpool.Resource
 	packetsDropped   atomic.Uint64
 	readerLoopDoneCh chan struct{}
 	rcCloseOnce      sync.Once // guards closing rc from both cancel() and Close()
@@ -207,11 +216,19 @@ func (mih *mpegtsInputHandler) Read(buf []byte) (int, error) {
 
 	n, err := mih.rc.Read(buf)
 	if mih.outputSplit != nil && n > 0 {
-		select {
-		case mih.outputSplit <- buf[:n]:
-		default:
-			mih.packetsDropped.Inc()
-			goavpipe.Log.Throttle("split-channel-full", time.Second).Warn("Output split channel is full, dropping data", "size", n)
+		res := mih.packetPool.Borrow()
+		if loadErr := res.T.From(buf[:n]); loadErr != nil {
+			res.Release()
+			goavpipe.Log.Error("MPEGTS Read", "reason", "failed to load packet into pool", "err", loadErr)
+		} else {
+			res.T.ReceivedAt = time.Now()
+			select {
+			case mih.outputSplit <- res:
+			default:
+				res.Release()
+				mih.packetsDropped.Inc()
+				goavpipe.Log.Throttle("split-channel-full", time.Second).Warn("Output split channel is full, dropping data", "size", n)
+			}
 		}
 	}
 	if err != nil {
@@ -221,6 +238,36 @@ func (mih *mpegtsInputHandler) Read(buf []byte) (int, error) {
 		return n, err
 	}
 	return n, nil
+}
+
+// ReadPacket reads one datagram directly into a pooled packet, avoiding the extra copy Read() needs to satisfy its
+// plain []byte contract. Callers that can consume a *pktpool.Packet directly (e.g. AVPipeReadInput, when it detects
+// this interface) should prefer this over Read(). Like Read(), it fans the same read out to outputSplit (if set) via
+// the pool's reference counting - the underlying bytes are read exactly once regardless of how many consumers see
+// them. The returned Resource has exactly one outstanding reference belonging to the caller; release it when done.
+func (mih *mpegtsInputHandler) ReadPacket() (pktpool.Resource, error) {
+	res := mih.packetPool.Borrow()
+	res.T.ReceivedAt = time.Now()
+	err := res.T.FromReader(mih.rc)
+	if err != nil {
+		res.Release()
+		// mark error as retryable to ffmpeg/avpipe, matching Read()
+		return nil, errors.E("readPacket", errors.K.IO.Default(), err, goavpipe.ErrRetryField, true)
+	}
+
+	if mih.outputSplit != nil {
+		res.Reference() // second reference for the async consumer; this call's own reference is returned to the caller
+		select {
+		case mih.outputSplit <- res:
+		default:
+			res.Release()
+			mih.packetsDropped.Inc()
+			goavpipe.Log.Throttle("split-channel-full", time.Second).Warn(
+				"Output split channel is full, dropping data", "size", len(res.T.Data))
+		}
+	}
+
+	return res, nil
 }
 
 func (mih *mpegtsInputHandler) Close() error {
@@ -255,7 +302,7 @@ func (mih *mpegtsInputHandler) Stat(streamIndex int, statType goavpipe.AVStatTyp
 	return mih.gih.Stat(streamIndex, statType, statArgs)
 }
 
-func (mih *mpegtsInputHandler) ReaderLoop(ch chan []byte, packetsDropped *atomic.Uint64) {
+func (mih *mpegtsInputHandler) ReaderLoop(ch chan pktpool.Resource, packetsDropped *atomic.Uint64) {
 
 	tsCfg := TsConfig{
 		SegmentLengthSec: 30,
@@ -275,7 +322,7 @@ func (mih *mpegtsInputHandler) ReaderLoop(ch chan []byte, packetsDropped *atomic
 	nPackets := 0
 	ts.StartReportingStats()
 	defer errors.Log(ts.Stop, goavpipe.Log.Error)
-	for buf := range ch {
+	for res := range ch {
 		nPackets++
 
 		if nPackets%1000 == 0 {
@@ -283,6 +330,7 @@ func (mih *mpegtsInputHandler) ReaderLoop(ch chan []byte, packetsDropped *atomic
 			goavpipe.Log.Trace("Processed packets", "count", nPackets, "chan size", len(ch), "chan cap", cap(ch))
 		}
 
-		ts.ProcessDatagram(time.Now(), buf)
+		ts.ProcessDatagramPacket(res.T.ReceivedAt, res.T)
+		res.Release()
 	}
 }

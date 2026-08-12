@@ -46,22 +46,22 @@ func TestNetReader_happyPath(t *testing.T) {
 	// Consume exactly the data produced by the source. The NetReader treats io.EOF as recoverable and never abandons a
 	// source on its own, so shutdown is driven explicitly via Cancel() below, mirroring how production callers
 	// (BypassProcessor / customInputHandler) tear it down.
-	res := &bytes.Buffer{}
-	for res.Len() < len(reader.src) {
-		pkt := <-ctx.consumer.pktChan
-		require.NotNil(t, pkt)
-		res.Write(pkt.Data)
-		pkt.Release()
+	buf := &bytes.Buffer{}
+	for buf.Len() < len(reader.src) {
+		res := <-ctx.consumer.pktChan
+		require.NotNil(t, res)
+		buf.Write(res.T.Data)
+		res.Release()
 	}
-	require.Equal(t, reader.src, res.Bytes())
+	require.Equal(t, reader.src, buf.Bytes())
 	require.EqualValues(t, 0, ctx.consumer.pktDropped.Load())
 	require.Greater(t, watch.Duration(), 2*time.Second+400*time.Millisecond)
 
 	// Cancel closes the consumer channels; draining to close confirms a clean shutdown (and lets goleak verify no
 	// goroutines are left behind).
 	ctx.netReader.Cancel()
-	for pkt := range ctx.consumer.pktChan {
-		pkt.Release()
+	for res := range ctx.consumer.pktChan {
+		res.Release()
 	}
 }
 
@@ -116,8 +116,8 @@ func TestNetReader_CancelNoInput_Srt(t *testing.T) {
 	require.False(t, syncutil.WaitTimeout(wg, time.Second), "Cancel did not return promptly")
 
 	// Cancel closes the consumer channels; draining to close confirms a clean shutdown of the read path.
-	for pkt := range ctx.consumer.pktChan {
-		pkt.Release()
+	for res := range ctx.consumer.pktChan {
+		res.Release()
 	}
 
 	ctx.assertStaus(t, false)
@@ -176,7 +176,7 @@ func createNetReader(tp transport.Transport) netReaderTestCtx {
 	}
 
 	tc := &testConsumer{
-		pktChan: make(chan *pktpool.Packet, 100),
+		pktChan: make(chan pktpool.Resource, 100),
 	}
 	netReader := StartNetReader(
 		cfg.Url,
@@ -212,7 +212,7 @@ func (ctx *netReaderTestCtx) assertStaus(t *testing.T, wantRunning bool) {
 // ---------------------------------------------------------------------------------------------------------------------
 
 type testConsumer struct {
-	pktChan    chan *pktpool.Packet
+	pktChan    chan pktpool.Resource
 	pktDropped atomic.Int64
 }
 
@@ -220,7 +220,7 @@ func (t *testConsumer) Name() string {
 	return "test-consumer"
 }
 
-func (t *testConsumer) Chan() chan<- *pktpool.Packet {
+func (t *testConsumer) Chan() chan<- pktpool.Resource {
 	return t.pktChan
 }
 

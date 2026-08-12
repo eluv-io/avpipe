@@ -13,6 +13,7 @@ import (
 	"github.com/eluv-io/avpipe/broadcastproto/tlv"
 	"github.com/eluv-io/avpipe/broadcastproto/transport"
 	"github.com/eluv-io/avpipe/goavpipe"
+	"github.com/eluv-io/common-go/media/pktpool"
 	"github.com/eluv-io/common-go/util/timeutil"
 	elog "github.com/eluv-io/log-go"
 )
@@ -25,6 +26,11 @@ const (
 // StripTsPadding indicates whether the payload of TS padding packets in RTP-TS streams should be stripped. For now
 // this is not configurable per stream, since it has low performance impact and potentially saves bandwidth.
 var StripTsPadding = atomic.NewBool(false)
+
+// outputTlvWrapCap is the head room reserved in front of each pooled datagram so the TLV output framing can be written
+// into it zero-copy (see Packet.FrameTlv / ProcessDatagramPacket): a TLV header plus, for ATS-TS, the
+// arrival-timestamp prefix.
+const outputTlvWrapCap = tlv.TLV_HEADER_LEN + tlv.AtsTimestampLen
 
 var mpegtslog = elog.Get("avpipe/broadcastproto/mpegts")
 
@@ -124,7 +130,7 @@ type TSStats struct {
 
 	// Errors in the continuity counter
 	ErrorsCC                atomic.Uint64
-	ErrorsAdapationField    atomic.Uint64
+	ErrorsAdaptationField   atomic.Uint64
 	ErrorsOther             atomic.Uint64
 	ErrorsIncompletePackets atomic.Uint64
 	ErrorsOpeningOutput     atomic.Uint64
@@ -153,7 +159,13 @@ func NewTSStats() *TSStats {
 	}
 }
 
-func (mpp *MpegtsPacketProcessor) ProcessDatagram(now time.Time, datagram []byte) {
+// ProcessDatagramPacket analyzes and writes the datagram held by pkt, framing the TLV output zero-copy into pkt's
+// reserved head room (see Packet.FrameTlv), and decoding RTP/MPEG-TS lazily via pkt.Rtp()/pkt.Ts(). Framing does not
+// mutate pkt (Data and the decode cursor are untouched), so this is safe even when pkt is shared with other
+// consumers through the pool's reference counting - as long as no other consumer decodes a layer on the same pkt (see
+// the pkt.Rtp() call below).
+func (mpp *MpegtsPacketProcessor) ProcessDatagramPacket(now time.Time, pkt *pktpool.Packet) {
+	datagram := pkt.Data
 	if !mpp.startLogged {
 		mpp.startLogged = true
 		mpegtslog.Info("mpegts processing first datagram",
@@ -163,6 +175,8 @@ func (mpp *MpegtsPacketProcessor) ProcessDatagram(now time.Time, datagram []byte
 	}
 
 	mpegtsOffset := 0
+	var tsPackets []*packet.Packet
+
 	if mpp.cfg.Packaging == transport.RtpTs {
 		if len(datagram) < 12+188 { // RTP header + at least one TS packet
 			mpp.stats.SmallPacketsDropped.Inc()
@@ -172,40 +186,59 @@ func (mpp *MpegtsPacketProcessor) ProcessDatagram(now time.Time, datagram []byte
 			return
 		}
 
-		dgHeader, err := transport.ParseRTPHeader(datagram)
+		// Only MpegTsConsumer decodes any layer of a shared pkt today (Fmp4Consumer only reads .Data), so calling
+		// Rtp()/Ts() here is safe. If a future consumer ever decodes a layer on the same shared pkt, that call must be
+		// sequenced relative to this one - pktpool.Packet's decode cursor is shared and forward-only.
+		rtpLayer, err := pkt.Rtp()
 		if err != nil {
 			mpp.rtpStats.BadPackets.Inc()
 			return
 		}
-		mpegtsOffset = dgHeader.ByteLength()
+		hdr := rtpLayer.Packet().Header
+		if hdr.Version != 2 {
+			mpp.rtpStats.BadPackets.Inc()
+			return
+		}
+		// Header length derived from where pion actually placed the payload, not Header.MarshalSize() (which can
+		// under-report for extension-bearing packets) - see pktpool.RtpPacket.decode's own comment for why.
+		mpegtsOffset = len(datagram) - len(rtpLayer.Payload) - int(hdr.PaddingSize)
 		if mpegtsOffset != 12 {
 			mpp.rtpStats.LongHeaders.Inc()
 		}
-		swapped := mpp.rtpStats.FirstTimestamp.CompareAndSwap(0, dgHeader.Timestamp)
-		if swapped {
+		if mpp.rtpStats.FirstTimestamp.CompareAndSwap(0, hdr.Timestamp) {
 			mpp.rtpStats.RefTime = now
-			mpp.rtpStats.FirstSeqNum.Store(uint32(dgHeader.SequenceNumber))
+			mpp.rtpStats.FirstSeqNum.Store(uint32(hdr.SequenceNumber))
 			defer mpp.PushStats() // defer so that ts stats are included in the stats
 		}
-		mpp.rtpStats.LastTimestamp.Store(dgHeader.Timestamp)
-		mpp.rtpStats.LastSeqNum.Store(uint32(dgHeader.SequenceNumber))
+		mpp.rtpStats.LastTimestamp.Store(hdr.Timestamp)
+		mpp.rtpStats.LastSeqNum.Store(uint32(hdr.SequenceNumber))
+	} else {
+		// raw MPEG-TS
+		if len(datagram) < 188 { // require at least one TS packet, otherwise drop it
+			mpp.stats.SmallPacketsDropped.Inc()
+			return
+		}
+	}
 
-		// TODO: Sequence number / discontinuity processing
-	} else if len(datagram) < 188 { // RTPat least one TS packet
-		mpp.stats.SmallPacketsDropped.Inc()
+	tsLayer, err := pkt.Ts()
+	if err != nil {
+		// Ts() requires the RTP payload to be an exact multiple of 188 bytes; a well-formed MPEGTS-over-RTP
+		// source always satisfies this, so a mismatch here indicates a malformed/corrupt datagram.
+		mpp.stats.ErrorsIncompletePackets.Inc()
+		mpegtslog.Throttle("ts-decode").Warn("mpegts processing error", err, "fd", mpp.inFd)
 		return
 	}
+	tsPackets = tsLayer.Packets()
 
 	// Extract PCR
 	badPackets := 0
 	hasPadding := false
-	for offset := mpegtsOffset; offset+188 <= len(datagram); offset += 188 {
-		pkt := toTSPacket(datagram[offset : offset+188])
-		err := mpp.HandleMpegtsPacket(pkt)
+	for _, tsPkt := range tsPackets {
+		err := mpp.HandleMpegtsPacket(tsPkt)
 		if err != nil {
 			badPackets++
 		} else if mpp.cfg.Packaging == transport.RtpTs {
-			if pkt.IsNull() {
+			if tsPkt.IsNull() {
 				mpp.stats.PaddingPackets.Inc()
 				// do not remove padding here, just flag it. We will remove it later if and only if none of the packets
 				// in the datagram are bad.
@@ -220,7 +253,7 @@ func (mpp *MpegtsPacketProcessor) ProcessDatagram(now time.Time, datagram []byte
 		}
 	}
 
-	mpp.writeDatagram(now, datagram, badPackets == 0 && hasPadding && StripTsPadding.Load(), mpegtsOffset)
+	mpp.writeDatagram(now, datagram, pkt, badPackets == 0 && hasPadding && StripTsPadding.Load(), mpegtsOffset)
 }
 
 func (mpp *MpegtsPacketProcessor) HandleMpegtsPacket(pkt *packet.Packet) error {
@@ -314,14 +347,13 @@ func (mpp *MpegtsPacketProcessor) resetChannelSizeStats() {
 }
 
 func (mpp *MpegtsPacketProcessor) checkContinuityCounter(pkt *packet.Packet) {
-	pid := pkt.PID()
-
 	if !pkt.HasPayload() || pkt.IsNull() {
 		// per spec, continuity counter only applies to packets with payload
 		return
 	}
 
 	cc := uint8(pkt.ContinuityCounter())
+	pid := pkt.PID()
 
 	lastCC, exists := mpp.continuityMap[pid]
 	mpp.continuityMap[pid] = cc
@@ -348,7 +380,7 @@ func (mpp *MpegtsPacketProcessor) updatePCR(pkt *packet.Packet) {
 
 	hasPcr, err := a.HasPCR()
 	if err != nil {
-		mpp.stats.ErrorsAdapationField.Inc()
+		mpp.stats.ErrorsAdaptationField.Inc()
 		return
 	} else if !hasPcr {
 		return
@@ -364,26 +396,30 @@ func (mpp *MpegtsPacketProcessor) updatePCR(pkt *packet.Packet) {
 
 	pcr, err := a.PCR()
 	if err != nil {
-		mpp.stats.ErrorsAdapationField.Inc()
+		mpp.stats.ErrorsAdaptationField.Inc()
 		return
 	}
 
-	// Count PCR wraps on the pinned PID: a wrap is a large backward jump from near PcrMax back towards 0. Skip the
-	// first PCR, when there is nothing to compare against yet. PCR is otherwise stats-only; segmentation is driven
-	// purely by wall-clock time.
-	if mpp.pcrPid != -1 {
+	if mpp.pcrPid == -1 {
+		// Pin the PCR to this PID
+		mpp.pcrPid = pid
+		mpp.stats.FirstPCR.CompareAndSwap(0, pcr)
+	} else {
+		// Count PCR wraps on the pinned PID: a wrap is a large backward jump from near PcrMax back towards 0. Skip the
+		// first PCR, when there is nothing to compare against yet. PCR is otherwise stats-only; segmentation is driven
+		// purely by wall-clock time.
 		prev := mpp.stats.LastPCR.Load()
 		if pcr < prev && prev-pcr > PcrMax/2 {
 			mpp.stats.NumWraps.Inc()
 		}
 	}
-	mpp.pcrPid = pid
 
-	mpp.stats.FirstPCR.CompareAndSwap(0, pcr)
 	mpp.stats.LastPCR.Store(pcr)
 }
 
-func (mpp *MpegtsPacketProcessor) writeDatagram(now time.Time, datagram []byte, removePadding bool, rtpPayloadOffset int) {
+func (mpp *MpegtsPacketProcessor) writeDatagram(
+	now time.Time, datagram []byte, pkt *pktpool.Packet, removePadding bool, rtpPayloadOffset int) {
+
 	if mpp.currentWc == nil {
 		if mpp.stats.ErrorsOpeningOutput.Load() > 50 {
 			return
@@ -412,39 +448,9 @@ func (mpp *MpegtsPacketProcessor) writeDatagram(now time.Time, datagram []byte, 
 		return
 	}
 
-	dataToWrite := datagram
-
-	switch mpp.cfg.Packaging {
-	case transport.RtpTs:
-		var tlvType = tlv.TlvTypeRtpTs
-		if removePadding && StripTsPadding.Load() {
-			tlvType = tlv.TlvTypeRtpTsNoPad
-			var stripped, faulty int
-			datagram, stripped, faulty = RemoveTsPadding(datagram, rtpPayloadOffset)
-			mpp.stats.StrippedPaddingPackets.Add(uint64(stripped))
-			mpp.stats.FaultyPaddingPackets.Add(uint64(faulty))
-		}
-		tlvHeader, err := tlv.TlvHeader(len(datagram), tlvType)
-		if err != nil {
-			mpp.stats.ErrorsOther.Inc()
-			return
-		}
-		copy(mpp.outBuf, tlvHeader)
-		copy(mpp.outBuf[len(tlvHeader):], datagram)
-		dataToWrite = mpp.outBuf[:len(tlvHeader)+len(datagram)]
-
-	case transport.AtsTs:
-		// The TLV value is an 8-byte arrival timestamp followed by the raw TS datagram.
-		tlvHeader, err := tlv.TlvHeader(tlv.AtsTimestampLen+len(datagram), tlv.TlvTypeAtsTs)
-		if err != nil {
-			mpp.stats.ErrorsOther.Inc()
-			return
-		}
-		n := copy(mpp.outBuf, tlvHeader)
-		binary.BigEndian.PutUint64(mpp.outBuf[n:], uint64(now.UnixNano()))
-		n += tlv.AtsTimestampLen
-		n += copy(mpp.outBuf[n:], datagram)
-		dataToWrite = mpp.outBuf[:n]
+	dataToWrite, ok := mpp.frame(now, datagram, pkt, removePadding, rtpPayloadOffset)
+	if !ok {
+		return
 	}
 
 	startTime := time.Now()
@@ -460,6 +466,86 @@ func (mpp *MpegtsPacketProcessor) writeDatagram(now time.Time, datagram []byte, 
 	}
 	mpp.stats.PacketsWritten.Inc()
 	mpp.stats.BytesWritten.Add(uint64(n))
+}
+
+// frame builds the framed output bytes for the datagram according to the configured packaging. When pkt is non-nil
+// (datagram == pkt.Data) the common case is framed zero-copy into pkt's head room via Packet.FrameTlv; the pool-less
+// []byte case and the (rare) padding-stripping case copy into mpp.outBuf. In no case is the input datagram mutated, so
+// framing is always safe when the datagram is shared with other consumers.
+func (mpp *MpegtsPacketProcessor) frame(
+	now time.Time,
+	datagram []byte,
+	pkt *pktpool.Packet,
+	removePadding bool,
+	rtpPayloadOffset int,
+) (out []byte, ok bool) {
+
+	switch mpp.cfg.Packaging {
+	case transport.RtpTs:
+		if removePadding && StripTsPadding.Load() {
+			// Padding removal compacts the datagram, so the result cannot be a zero-copy view of the input: copy into
+			// outBuf and strip there, leaving the (possibly shared) input untouched.
+			return mpp.frameStripped(datagram, rtpPayloadOffset)
+		}
+		return mpp.frameTlv(pkt, datagram, byte(tlv.TlvTypeRtpTs), nil)
+
+	case transport.AtsTs:
+		// The TLV value is an 8-byte arrival timestamp followed by the raw TS datagram.
+		var ts [tlv.AtsTimestampLen]byte
+		binary.BigEndian.PutUint64(ts[:], uint64(now.UnixNano()))
+		return mpp.frameTlv(pkt, datagram, byte(tlv.TlvTypeAtsTs), ts[:])
+
+	default: // transport.RawTs and any pass-through: write the datagram unchanged.
+		return datagram, true
+	}
+}
+
+// frameTlv wraps datagram (with the optional prefix between header and payload) in a TLV header. With a pooled packet
+// it frames zero-copy into the packet's head room via Packet.FrameTlv (non-mutating, so safe for a shared packet); the
+// pool-less []byte caller copies header + prefix + datagram into mpp.outBuf.
+func (mpp *MpegtsPacketProcessor) frameTlv(pkt *pktpool.Packet, datagram []byte, typ byte, prefix []byte) ([]byte, bool) {
+	if pkt != nil {
+		out, err := pkt.FrameTlv(typ, prefix)
+		if err != nil {
+			mpp.stats.ErrorsOther.Inc()
+			return nil, false
+		}
+		return out, true
+	}
+	tlvHeader, err := tlv.TlvHeader(len(prefix)+len(datagram), tlv.TlvType(typ))
+	if err != nil {
+		mpp.stats.ErrorsOther.Inc()
+		return nil, false
+	}
+	n := copy(mpp.outBuf, tlvHeader)
+	n += copy(mpp.outBuf[n:], prefix)
+	n += copy(mpp.outBuf[n:], datagram)
+	return mpp.outBuf[:n], true
+}
+
+// frameStripped copies datagram into mpp.outBuf behind a TLV-header-sized slot, strips TS padding within that copy
+// (never touching the possibly-shared input), then writes the RtpTsNoPad header in front of the stripped body so the
+// header and body form one contiguous slice.
+func (mpp *MpegtsPacketProcessor) frameStripped(datagram []byte, rtpPayloadOffset int) ([]byte, bool) {
+	const hdr = tlv.TLV_HEADER_LEN
+	n := copy(mpp.outBuf[hdr:], datagram)
+	stripped := mpp.stripTsPadding(mpp.outBuf[hdr:hdr+n], rtpPayloadOffset)
+	tlvHeader, err := tlv.TlvHeader(len(stripped), tlv.TlvTypeRtpTsNoPad)
+	if err != nil {
+		mpp.stats.ErrorsOther.Inc()
+		return nil, false
+	}
+	copy(mpp.outBuf, tlvHeader)
+	return mpp.outBuf[:hdr+len(stripped)], true
+}
+
+// stripTsPadding removes TS padding from datagram in place and records the padding stats, returning the shortened
+// slice (which aliases datagram's backing storage).
+func (mpp *MpegtsPacketProcessor) stripTsPadding(datagram []byte, rtpPayloadOffset int) []byte {
+	data, stripped, faulty := RemoveTsPadding(datagram, rtpPayloadOffset)
+	mpp.stats.StrippedPaddingPackets.Add(uint64(stripped))
+	mpp.stats.FaultyPaddingPackets.Add(uint64(faulty))
+	return data
 }
 
 func (mpp *MpegtsPacketProcessor) openNextOutput(now time.Time) error {

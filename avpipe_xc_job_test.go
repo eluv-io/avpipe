@@ -68,6 +68,28 @@ func TestXcInitFailureRollsBackURLHandlersAndDoesNotCreateJob(t *testing.T) {
 	require.Equal(t, jobsBefore, jobsAfter)
 }
 
+func TestTruncateToRequestedSize(t *testing.T) {
+	t.Run("shorter than sz returned as-is", func(t *testing.T) {
+		data := []byte{1, 2, 3}
+		require.Equal(t, data, truncateToRequestedSize(data, 10))
+	})
+
+	t.Run("exactly sz returned as-is", func(t *testing.T) {
+		data := []byte{1, 2, 3}
+		require.Equal(t, data, truncateToRequestedSize(data, 3))
+	})
+
+	t.Run("longer than sz truncated", func(t *testing.T) {
+		data := []byte{1, 2, 3, 4, 5}
+		require.Equal(t, []byte{1, 2, 3}, truncateToRequestedSize(data, 3))
+	})
+
+	t.Run("zero sz truncates to empty", func(t *testing.T) {
+		data := []byte{1, 2, 3}
+		require.Empty(t, truncateToRequestedSize(data, 0))
+	})
+}
+
 type xcJobTestInputOpener struct{}
 
 func (*xcJobTestInputOpener) Open(_ int64, _ string) (goavpipe.InputHandler, error) {
