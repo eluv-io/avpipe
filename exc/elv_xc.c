@@ -1059,7 +1059,7 @@ usage(
         "\t-crypt-kid :             (optional) 16-byte key ID, as hex\n"
         "\t-crypt-scheme :          (optional) Encryption scheme. Default is \"none\", can be: \"aes-128\", \"cenc\", \"cbc1\", \"cens\", \"cbcs\"\n"
         "\t-crypt-url :             (optional) Specify a key URL in the HLS manifest\n"
-        "\t-d :                     (optional) Decoder name. For video default is \"h264\", can be: \"h264\", \"h264_cuvid\", \"jpeg2000\", \"hevc\"\n"
+        "\t-d :                     (optional) Decoder name. For video common values are: \"h264\", \"h264_cuvid\", \"jpeg2000\", \"hevc\", \"hevc_cuvid\"\n"
         "\t                                    For audio default is \"aac\", but for ts files should be set to \"ac3\"\n"
         "\t-debug-frame-level :     (optional) Enable/disable debug frame level. Default is 0, must be 0 or 1.\n"
         "\t-deinterlace :           (optional) Deinterlace filter. Default is 0 (none), can be: 1 (bwdif send_field), 2 (bwdif send_frame)\n"
@@ -1083,12 +1083,13 @@ usage(
         "\t-level:                  (optional) Encoding level for video. If it is not determined, it will be set automatically.\n"
         "\t-listen:                 (optional) Listen mode for RTMP. Must be 0 or 1, by default is on (value 1)\n"
         "\t-log-size:               (optional) Log size in MB. Default is 100MB.\n"
-        "\t-master-display :        (optional) Master display, only valid if encoder is libx265.\n"
-        "\t-max-cll :               (optional) Maximum Content Light Level and Maximum Frame Average Light Level, only valid if encoder is libx265.\n"
-        "\t                                    This parameter is a comma separated of max-cll and max-fall (i.e \"1514,172\").\n"
+        "\t-master-display :        (optional) HDR10 mastering-display override for libx265 or hevc_nvenc. If omitted, valid input metadata is copied.\n"
+        "\t-max-cll :               (optional) HDR10 Maximum Content Light Level and Maximum Frame Average Light Level override for libx265 or hevc_nvenc.\n"
+        "\t                                    This parameter is a comma separated max-cll and max-fall (i.e. \"1514,172\"); \"0,0\" suppresses input CLL metadata.\n"
         "\t-mux-spec :              (optional) Muxing spec file.\n"
-        "\t-preset :                (optional) Preset string to determine compression speed. Default is \"medium\". Valid values are: \"ultrafast\", \"superfast\",\n"
-        "\t                                    \"veryfast\", \"faster\", \"fast\", \"medium\", \"slow\", \"slower\", \"veryslow\".\n"
+        "\t-preset :                (optional) Preset string to determine compression speed. Default is \"medium\". Software encoders accept \"ultrafast\" through\n"
+        "\t                                    \"veryslow\". NVIDIA accepts p1 through p7 and maps software preset names to p1 through p7.\n"
+        "\t-preserve-dolby-vision : (optional) Preserve Dolby Vision RPU metadata. Default is 0, must be 0 or 1. Requires libx265, bitdepth 10, and profile main10.\n"
         "\t-profile :               (optional) Encoding profile for video. If it is not determined, it will be set automatically.\n"
         "\t                                    Valid H264 profiles: \"baseline\", \"main\", \"extended\", \"high\", \"high10\", \"high422\", \"high444\"\n"
         "\t                                    Valid H265 profiles: \"main\", \"main10\"\n"
@@ -1452,6 +1453,11 @@ main(
         case 'p':
             if (!strcmp(argv[i], "-preset")) {
                 p.preset = strdup(argv[i+1]);
+            } else if (!strcmp(argv[i], "-preserve-dolby-vision")) {
+                if (sscanf(argv[i+1], "%d", &p.preserve_dolby_vision) != 1 ||
+                    (p.preserve_dolby_vision != 0 && p.preserve_dolby_vision != 1)) {
+                    usage(argv[0], argv[i], EXIT_FAILURE);
+                }
             } else if (!strcmp(argv[i], "-profile")) {
                 p.profile = strdup(argv[i+1]);
             } else {
