@@ -907,6 +907,10 @@ func getCParams(params *goavpipe.XcParams) (*C.xcparams_t, error) {
 		cparams.force_equal_fduration = C.int(1)
 	}
 
+	if params.PreserveDolbyVision {
+		cparams.preserve_dolby_vision = C.int(1)
+	}
+
 	if params.InputCfg.CopyMode == goavpipe.CopyModeRemuxed {
 		cparams.copy_mpegts = C.int(1)
 	}

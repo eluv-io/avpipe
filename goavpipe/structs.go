@@ -349,6 +349,7 @@ type XcParams struct {
 	MasterDisplay          string      `json:"master_display,omitempty"`
 	VideoLayout            int32       `json:"video_layout,omitempty"`
 	BitDepth               int32       `json:"bitdepth,omitempty"`
+	PreserveDolbyVision    bool        `json:"preserve_dolby_vision,omitempty"`
 	SyncAudioToStreamId    int         `json:"sync_audio_to_stream_id"`
 	ForceEqualFDuration    bool        `json:"force_equal_frame_duration,omitempty"`
 	MuxingSpec             string      `json:"muxing_spec,omitempty"`
