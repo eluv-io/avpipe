@@ -99,8 +99,14 @@ type StatsSnapshot struct {
 	FifoDropped    uint64 // passthrough packets dropped (live mode only)
 	ForwardDropped uint64 // video datagrams dropped because avpipe was behind (live mode only)
 
-	OutDatagrams    uint64 // output RTP datagrams emitted (parts mode)
-	Discontinuities uint64 // input discontinuities detected (parts mode)
+	OutDatagrams      uint64 // output RTP datagrams emitted (parts mode)
+	Discontinuities   uint64 // input discontinuities detected (parts mode)
+	BadInputDatagrams uint64 // input datagrams skipped due to RTP parse errors (parts mode)
+
+	// GridBehind is how far content currently lags the CBR slot grid (parts mode).
+	// Persistently > 0 means StreamBitrate is too low for the content rate: the
+	// output media timeline stretches and ts-paced consumers fall behind real time.
+	GridBehind time.Duration
 
 	// OtherAheadOfVideoMs is how far each non-video PID's PES PTS leads the video's
 	// (the empirical input for choosing MaxLead).

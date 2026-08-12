@@ -50,8 +50,12 @@ type rtpPackager struct {
 	// discPending is set from the Feed goroutine (input gap detector) and consumed on
 	// the mux goroutine by the next synthesized PCR (discontinuity_indicator) or
 	// datagram flush.
-	discPending  atomic.Bool
-	behindWarned bool
+	discPending atomic.Bool
+
+	// grid-overload tracking: behindTicks is the current content lag behind the
+	// slot grid (27 MHz); warned again each time the lag grows by another second.
+	behindTicks     atomic.Int64
+	warnBehindTicks int64
 
 	outDatagrams atomic.Uint64
 	null         [tsPacketSize]byte
@@ -79,6 +83,7 @@ func newRtpPackager(cfg *Config, classifier *Classifier, emit func(OutputDatagra
 		maxGapSlots:     maxGapSlots,
 		lastPcrN:        -1 << 62,
 		lastVidCC:       -1,
+		warnBehindTicks: pcrClockHz, // first warning at 1s of lag
 		ssrc:            cfg.SSRC,
 		pt:              cfg.PayloadType,
 		null:            nullPacket(),
@@ -103,6 +108,12 @@ func (g *rtpPackager) NoteDiscontinuity() { g.discPending.Store(true) }
 
 func (g *rtpPackager) OutDatagrams() uint64 { return g.outDatagrams.Load() }
 
+// GridBehind reports how far content currently lags the slot grid. Safe from any
+// goroutine.
+func (g *rtpPackager) GridBehind() time.Duration {
+	return time.Duration(g.behindTicks.Load()/27) * time.Microsecond
+}
+
 // Packet places one merged content packet on the slot grid, filling any intervening
 // slots with PCR/null packets.
 func (g *rtpPackager) Packet(p mergedPkt) error {
@@ -117,14 +128,28 @@ func (g *rtpPackager) Packet(p mergedPkt) error {
 	if d := p.ets - g.anchor; d > 0 {
 		nDue = d / g.tppTicks
 	}
+	if nDue >= g.sent {
+		// Content caught up with the grid: reset overload tracking so a later,
+		// distinct overload episode warns again.
+		g.behindTicks.Store(0)
+		if g.warnBehindTicks > int64(pcrClockHz) {
+			g.warnBehindTicks = pcrClockHz
+		}
+	}
 	switch {
 	case nDue < g.sent:
 		// Content behind the grid goes out in the next free slot. Persistent lateness
-		// means the content rate exceeds StreamBitrate.
-		if (g.sent-nDue)*g.tppTicks > int64(pcrClockHz) && !g.behindWarned {
-			g.behindWarned = true
-			log.Warn("mpegts-xc packager: content more than 1s behind the CBR grid — "+
-				"StreamBitrate is too low for the content rate", "behindSlots", g.sent-nDue)
+		// means the content rate exceeds StreamBitrate: the output media timeline
+		// stretches and every ts-paced consumer (part rotation, egress pacer) falls
+		// behind real time. Warn again for each additional second of lag.
+		behind := (g.sent - nDue) * g.tppTicks
+		g.behindTicks.Store(behind)
+		if behind > g.warnBehindTicks {
+			g.warnBehindTicks = behind + int64(pcrClockHz)
+			log.Warn("mpegts-xc packager: content behind the CBR grid — "+
+				"StreamBitrate is too low for the content rate",
+				"behind", (time.Duration(behind/27) * time.Microsecond).String(),
+				"behindSlots", g.sent-nDue)
 		}
 		nDue = g.sent
 	case nDue-g.sent > g.maxGapSlots:

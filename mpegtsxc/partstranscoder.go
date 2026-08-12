@@ -233,6 +233,8 @@ func (t *PartsTranscoder) Stats() StatsSnapshot {
 	sn.FifoLen = t.fifo.Len()
 	sn.OutDatagrams = t.packager.OutDatagrams()
 	sn.Discontinuities = t.gaps.Discontinuities()
+	sn.GridBehind = t.packager.GridBehind()
+	sn.BadInputDatagrams = t.badDatagrams.Load()
 	return sn
 }
 
