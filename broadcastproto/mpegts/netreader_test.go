@@ -200,9 +200,9 @@ type fakeStatsReporterReadCloser struct {
 
 func (*fakeStatsReporterReadCloser) Read([]byte) (int, error) { return 0, io.EOF }
 func (*fakeStatsReporterReadCloser) Close() error             { return nil }
-func (f *fakeStatsReporterReadCloser) ConnStats(details bool) mio.ConnStats {
+func (f *fakeStatsReporterReadCloser) ConnStats(into *mio.ConnStats, details bool) {
 	f.lastDetails = details
-	return f.stats
+	*into = f.stats
 }
 
 func createNetReader(tp transport.Transport) netReaderTestCtx {

@@ -99,7 +99,8 @@ func (r *NetReader) ConnStats(details bool) (stats mio.ConnStats, ok bool) {
 	if !ok {
 		return mio.ConnStats{}, false
 	}
-	return reporter.ConnStats(details), true
+	reporter.ConnStats(&stats, details)
+	return stats, true
 }
 
 func (r *NetReader) Status() (running bool, err error) {

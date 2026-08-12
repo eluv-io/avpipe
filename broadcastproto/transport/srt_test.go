@@ -95,7 +95,8 @@ func TestRtpDecapsulator_ConnStats_Passthrough(t *testing.T) {
 	fake := &fakeStatsReporter{stats: mio.ConnStats{RemoteAddr: "1.2.3.4:5678"}}
 	dec := newTestRtpDecapsulator(fake)
 
-	stats := dec.ConnStats(true)
+	var stats mio.ConnStats
+	dec.ConnStats(&stats, true)
 	require.Equal(t, "1.2.3.4:5678", stats.RemoteAddr)
 	require.True(t, fake.lastDetails)
 }
@@ -104,7 +105,9 @@ func TestRtpDecapsulator_ConnStats_Passthrough(t *testing.T) {
 // implement mio.StatsReporter (e.g. a plain UDP socket).
 func TestRtpDecapsulator_ConnStats_NonReporter(t *testing.T) {
 	dec := newTestRtpDecapsulator(&fakeReadCloser{})
-	require.Zero(t, dec.ConnStats(true))
+	var stats mio.ConnStats
+	dec.ConnStats(&stats, true)
+	require.Zero(t, stats)
 }
 
 // fakeStatsReporter is a minimal io.ReadCloser that also implements mio.StatsReporter.
@@ -115,9 +118,9 @@ type fakeStatsReporter struct {
 
 func (*fakeStatsReporter) Read([]byte) (int, error) { return 0, io.EOF }
 func (*fakeStatsReporter) Close() error             { return nil }
-func (f *fakeStatsReporter) ConnStats(details bool) mio.ConnStats {
+func (f *fakeStatsReporter) ConnStats(into *mio.ConnStats, details bool) {
 	f.lastDetails = details
-	return f.stats
+	*into = f.stats
 }
 
 func newTestRtpDecapsulator(reader io.ReadCloser) *RtpDecapsulator {
