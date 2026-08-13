@@ -848,9 +848,11 @@ static int
 set_h265_params(
     coderctx_t *encoder_context,
     coderctx_t *decoder_context,
-    xcparams_t *params)
+    xcparams_t *params,
+    const hdr10_metadata_t *hdr10_metadata)
 {
     int index = decoder_context->video_stream_index;
+    int rc;
     AVCodecContext *encoder_codec_context = encoder_context->codec_context[index];
 
     /*
@@ -858,7 +860,9 @@ set_h265_params(
      * which is the most common type of video used with consumer devices
      * For HDR10 we need MAIN 10 that supports 10 bit profile.
      */
-    if (params->profile != NULL && strlen(params->profile) > 0) {
+    if (hdr10_metadata->enabled) {
+        av_opt_set(encoder_codec_context->priv_data, "profile", "main10", 0);
+    } else if (params->profile != NULL && strlen(params->profile) > 0) {
         /* Can be only main or main10 profiles */
         av_opt_set(encoder_codec_context->priv_data, "profile", params->profile, 0);
     } else if (params->bitdepth == 8) {
@@ -869,48 +873,42 @@ set_h265_params(
         av_opt_set(encoder_codec_context->priv_data, "profile", "main12", 0);
     }
 
+    if (params->preserve_dolby_vision) {
+        rc = av_opt_set_int(encoder_codec_context->priv_data, "dolbyvision", 1, 0);
+        if (rc < 0) {
+            elv_err("Failed to enable Dolby Vision preservation, err=%s (%d), url=%s",
+                av_err2str(rc), rc, params->url);
+            return eav_param;
+        }
+    }
+
     /* Build x265-params as a single colon-separated string */
     char x265_params[512] = {0};
     size_t off = 0;
 
-    /* HDR for libx265:
-     *   - SEI 137/144 emission: handled by libx265's "master-display"/"max-cll" AVOptions.
-     *   - mp4 'mdcv'/'clli' atoms: attach_master_display / attach_max_cll write to
-     *     coded_side_data
-     */
-    if (params->max_cll && params->max_cll[0] != '\0' && strcmp(params->max_cll, "0,0") != 0) {
-        av_opt_set(encoder_codec_context->priv_data, "max-cll", params->max_cll, 0);
-        if (attach_max_cll(encoder_codec_context, params->max_cll) != eav_success)
-            elv_warn("set_h265_params: failed to attach max_cll side data, url=%s", params->url);
-    }
-    if (params->master_display && params->master_display[0] != '\0') {
-        /* HDR override: verify source color matches BT2020/PQ/BT2020nc/MPEG and warn for any mismatch.
-         * The HDR override values below are still applied unconditionally. */
-        verify_hdr_source_color(decoder_context, params);
-
+    /* avpipe_codec has already attached common container side data.
+     * libx265 also needs its private options to emit HDR10 SEI/VUI. */
+    if (hdr10_metadata->enabled) {
         off += snprintf(x265_params + off, sizeof(x265_params) - off,
             "hdr10=1:hdr10-opt=1:repeat-headers=1:colorprim=bt2020:transfer=smpte2084:colormatrix=bt2020nc");
-        av_opt_set(encoder_codec_context->priv_data, "master-display", params->master_display, 0);
-
-        if (attach_master_display(encoder_codec_context, params->master_display) != eav_success)
-            elv_warn("set_h265_params: failed to attach master_display side data, url=%s", params->url);
-
-        /* Add HDR10 color metadata into AVCodecContext (populates the colr box and elementary stream VUI) */
-        encoder_codec_context->color_range     = AVCOL_RANGE_MPEG;       // "tv"
-        encoder_codec_context->color_primaries = AVCOL_PRI_BT2020;
-        encoder_codec_context->color_trc       = AVCOL_TRC_SMPTE2084;    // PQ (ST 2084)
-        encoder_codec_context->colorspace      = AVCOL_SPC_BT2020_NCL;   // bt2020nc
-
-        /* HDR10 requires 10bit and main10 - set if not specified */
-        if (params->profile == NULL || strlen(params->profile) == 0) {
-            av_opt_set(encoder_codec_context->priv_data, "profile", "main10", 0);
-        } else if (strcmp(params->profile, "main10") != 0) {
-            elv_err("HDR (master_display set) requires profile=main10, got profile=%s, url=%s",
-                params->profile, params->url);
-            return eav_param;
+        if (hdr10_metadata->master_display[0] != '\0') {
+            rc = av_opt_set(encoder_codec_context->priv_data, "master-display",
+                            hdr10_metadata->master_display, 0);
+            if (rc < 0) {
+                elv_err("Failed to set libx265 master-display, err=%s (%d), url=%s",
+                    av_err2str(rc), rc, params->url);
+                return eav_param;
+            }
         }
-        /* Always force 10-bit */
-        encoder_codec_context->pix_fmt = AV_PIX_FMT_YUV420P10LE;
+        if (hdr10_metadata->max_cll[0] != '\0') {
+            rc = av_opt_set(encoder_codec_context->priv_data, "max-cll",
+                            hdr10_metadata->max_cll, 0);
+            if (rc < 0) {
+                elv_err("Failed to set libx265 max-cll, err=%s (%d), url=%s",
+                    av_err2str(rc), rc, params->url);
+                return eav_param;
+            }
+        }
     }
 
     /* Stereoscopic frame packing (HEVC SEI: Frame Packing Arrangement SEI) */
@@ -1026,26 +1024,70 @@ enum {
     PRESET_LOSSLESS_HP,
 };
 
-static void
+static const char *
+normalize_nvidia_preset(
+    const char *preset)
+{
+    if (!preset || preset[0] == '\0' || !strcmp(preset, "medium"))
+        return "p4";
+    if (!strcmp(preset, "p1") || !strcmp(preset, "p2") ||
+        !strcmp(preset, "p3") || !strcmp(preset, "p4") ||
+        !strcmp(preset, "p5") || !strcmp(preset, "p6") ||
+        !strcmp(preset, "p7"))
+        return preset;
+    if (!strcmp(preset, "ultrafast") || !strcmp(preset, "superfast"))
+        return "p1";
+    if (!strcmp(preset, "veryfast") || !strcmp(preset, "faster"))
+        return "p2";
+    if (!strcmp(preset, "fast"))
+        return "p3";
+    if (!strcmp(preset, "slow"))
+        return "p5";
+    if (!strcmp(preset, "slower"))
+        return "p6";
+    if (!strcmp(preset, "veryslow"))
+        return "p7";
+    return NULL;
+}
+
+static int
 set_nvidia_quality_params(
     AVCodecContext *encoder_codec_context,
     xcparams_t *params)
 {
-    const char *preset = "p2";
+    const char *preset = normalize_nvidia_preset(params->preset);
+    int rc;
 
-    if (params->preset != NULL && params->preset[0] != '\0')
-        preset = params->preset;
+    if (!preset) {
+        elv_err("Invalid NVIDIA preset=%s; expected p1-p7 or an x26x speed preset, url=%s",
+            params->preset ? params->preset : "", params->url);
+        return eav_param;
+    }
 
-    av_opt_set(encoder_codec_context->priv_data, "preset", preset, 0); // Valid: p1–p7
-    av_opt_set(encoder_codec_context->priv_data, "tune", "hq", 0);   // Valid: hq, ll, ull, lossless, losslesshp
+    rc = av_opt_set(encoder_codec_context->priv_data, "preset", preset, 0); // Valid: p1-p7
+    if (rc < 0) {
+        elv_err("Failed to set NVIDIA preset=%s, err=%s (%d), url=%s",
+            preset, av_err2str(rc), rc, params->url);
+        return eav_param;
+    }
+    rc = av_opt_set(encoder_codec_context->priv_data, "tune", "hq", 0);
+    if (rc < 0) {
+        elv_err("Failed to set NVIDIA tune=hq, err=%s (%d), url=%s",
+            av_err2str(rc), rc, params->url);
+        return eav_param;
+    }
 
     if (!strcmp(preset, "p6") || !strcmp(preset, "p7")) {
         av_opt_set(encoder_codec_context->priv_data, "spatial_aq", "on", 0);
         av_opt_set(encoder_codec_context->priv_data, "temporal_aq", "on", 0);
     }
+
+    elv_log("NVIDIA preset requested=%s normalized=%s, url=%s",
+        params->preset ? params->preset : "", preset, params->url);
+    return eav_success;
 }
 
-static void
+static int
 set_nvidia_h264_params(
     coderctx_t *encoder_context,
     coderctx_t *decoder_context,
@@ -1079,7 +1121,8 @@ set_nvidia_h264_params(
     av_opt_set_int(encoder_codec_context->priv_data, "level", encoder_codec_context->level, 0);
 */
 
-    set_nvidia_quality_params(encoder_codec_context, params);
+    if (set_nvidia_quality_params(encoder_codec_context, params) != eav_success)
+        return eav_param;
 
     /*
      * We might want to set one of the following options in future:
@@ -1100,13 +1143,15 @@ set_nvidia_h264_params(
      * sprintf(level, "%d.", 15);
      * av_opt_set(encoder_codec_context->priv_data, "cq", level, 0);
      */
+    return eav_success;
 }
 
 static int
 set_nvidia_hevc_params(
     coderctx_t *encoder_context,
     coderctx_t *decoder_context,
-    xcparams_t *params)
+    xcparams_t *params,
+    const hdr10_metadata_t *hdr10_metadata)
 {
     int index = decoder_context->video_stream_index;
     AVCodecContext *encoder_codec_context = encoder_context->codec_context[index];
@@ -1116,65 +1161,22 @@ set_nvidia_hevc_params(
     if (params->gpu_index >= 0)
         av_opt_set_int(encoder_codec_context->priv_data, "gpu", params->gpu_index, 0);
 
-    if (params->profile != NULL && strlen(params->profile) > 0) {
-        av_opt_set(encoder_codec_context->priv_data, "profile", params->profile, 0);
-    } else if (params->bitdepth == 8) {
-        av_opt_set(encoder_codec_context->priv_data, "profile", "main", 0);
-        av_opt_set(encoder_codec_context->priv_data, "tier", "high", 0);
-    } else if (params->bitdepth >= 10) {
+    if (hdr10_metadata->enabled) {
         av_opt_set(encoder_codec_context->priv_data, "profile", "main10", 0);
         av_opt_set(encoder_codec_context->priv_data, "tier", "high", 0);
-    }
-
-    set_nvidia_quality_params(encoder_codec_context, params);
-
-    /* HDR for nvenc:
-     *   - mp4 'mdcv'/'clli' atoms via coded_side_data: safe and necessary so the
-     *     container carries HDR metadata (mediainfo and HDR-aware demuxers read it).
-     *   - in-stream SEI 137/144 via decoded_side_data currently disabled (ifdef NVENC_HDR_SEI)
-     *     Setting pMasteringDisplay/pMaxCll on NV_ENC_PIC_PARAMS triggers an
-     *     invalid-pointer free in nvEncEncodePicture (nvenc.c:3244)
-     * (nvenc has no master_display/max_cll AVOption)
-     */
-    if (params->max_cll && params->max_cll[0] != '\0' && strcmp(params->max_cll, "0,0") != 0) {
-        if (attach_max_cll(encoder_codec_context, params->max_cll) != eav_success)
-            elv_warn("set_nvidia_hevc_params: failed to attach max_cll side data, url=%s", params->url);
-#if NVENC_HDR_SEI
-        if (attach_max_cll_nvenc(encoder_codec_context, params->max_cll) != eav_success)
-            elv_warn("set_nvidia_hevc_params: failed to attach max_cll decoded side data, url=%s", params->url);
-#endif
-    }
-    if (params->master_display && params->master_display[0] != '\0') {
-        /* HDR override: verify source color matches BT2020/PQ/BT2020nc/MPEG and warn for any mismatch.
-         * The HDR override values below are still applied unconditionally. */
-        verify_hdr_source_color(decoder_context, params);
-
-        encoder_codec_context->pix_fmt        = AV_PIX_FMT_P010;                 // 10-bit
-        encoder_codec_context->color_range    = AVCOL_RANGE_MPEG;                // "tv"
-        encoder_codec_context->color_primaries= AVCOL_PRI_BT2020;
-        encoder_codec_context->color_trc      = AVCOL_TRC_SMPTE2084;             // PQ (ST 2084)
-        encoder_codec_context->colorspace     = AVCOL_SPC_BT2020_NCL;            // bt2020nc
-
-        /* mp4 'mdcv' atom side data */
-        if (attach_master_display(encoder_codec_context, params->master_display) != eav_success)
-            elv_warn("set_nvidia_hevc_params: failed to attach master_display side data, url=%s", params->url);
-#if NVENC_HDR_SEI
-        /* SEI 137 emission (nvenc-specific path) - disabled, see NVENC_HDR_SEI above */
-        if (attach_master_display_nvenc(encoder_codec_context, params->master_display) != eav_success)
-            elv_warn("set_nvidia_hevc_params: failed to attach master_display decoded side data, url=%s", params->url);
-#endif
-
-        /* HDR10 requires 10bit and main10 - set if not specified */
-        if (params->profile == NULL || strlen(params->profile) == 0) {
+    } else {
+        if (params->profile != NULL && params->profile[0] != '\0') {
+            av_opt_set(encoder_codec_context->priv_data, "profile", params->profile, 0);
+        } else if (params->bitdepth == 8) {
+            av_opt_set(encoder_codec_context->priv_data, "profile", "main", 0);
+            av_opt_set(encoder_codec_context->priv_data, "tier", "high", 0);
+        } else if (params->bitdepth >= 10) {
             av_opt_set(encoder_codec_context->priv_data, "profile", "main10", 0);
-        } else if (strcmp(params->profile, "main10") != 0) {
-            elv_err("HDR (master_display set) requires profile=main10, got profile=%s, url=%s",
-                params->profile, params->url);
-            return eav_param;
+            av_opt_set(encoder_codec_context->priv_data, "tier", "high", 0);
         }
     }
 
-    return 0;
+    return set_nvidia_quality_params(encoder_codec_context, params);
 }
 
 static int
@@ -1194,10 +1196,10 @@ set_pixel_fmt(
         encoder_codec_context->pix_fmt = AV_PIX_FMT_YUV420P;
         break;
     case 10:
-        /* AV_PIX_FMT_YUV420P10LE: 15bpp, (1 Cr & Cb sample per 2x2 Y samples), little-endian.
-         * If encoder is h265 then AV_PIX_FMT_YUV420P10LE matches with MAIN10 profile (V1).
-         */
-        encoder_codec_context->pix_fmt = AV_PIX_FMT_YUV420P10LE;
+        /* NVENC accepts semiplanar p010le for HEVC Main10, while software
+         * encoders use planar yuv420p10le. */
+        encoder_codec_context->pix_fmt = !strcmp(params->ecodec, "hevc_nvenc") ?
+            AV_PIX_FMT_P010 : AV_PIX_FMT_YUV420P10LE;
         break;
     case 12:
         if (!strcmp(params->ecodec, "libx265")) {
@@ -1224,6 +1226,7 @@ prepare_video_encoder(
 {
     int rc = 0;
     int index = decoder_context->video_stream_index;
+    hdr10_metadata_t hdr10_metadata = {0};
 
     if (index < 0) {
         elv_dbg("No video stream detected by decoder.");
@@ -1349,7 +1352,9 @@ prepare_video_encoder(
         // av_opt_set(encoder_codec_context->priv_data, "crf_max", params->crf_str, AV_OPT_FLAG_ENCODING_PARAM | AV_OPT_SEARCH_CHILDREN);
     }
 
-    if (params->preset && strlen(params->preset) > 0) {
+    /* NVENC presets are normalized and applied by the codec-specific setup. */
+    if (params->preset && strlen(params->preset) > 0 &&
+        strcmp(params->ecodec, "h264_nvenc") && strcmp(params->ecodec, "hevc_nvenc")) {
         av_opt_set(encoder_codec_context->priv_data, "preset", params->preset, AV_OPT_FLAG_ENCODING_PARAM | AV_OPT_SEARCH_CHILDREN);
     }
 
@@ -1430,16 +1435,38 @@ prepare_video_encoder(
         /* otherwise set encoder pixel format to AV_PIX_FMT_YUV420P. */
         encoder_codec_context->pix_fmt = AV_PIX_FMT_YUV420P;
 #endif
+    /* Resolve and apply HDR10 once for both supported HEVC encoders. This must
+     * precede pixel-format selection because HDR10 promotes the output to
+     * 10-bit; encoder-specific setup below only supplies private options. */
+    if (!strcmp(params->ecodec, "libx265") ||
+        !strcmp(params->ecodec, "hevc_nvenc")) {
+        rc = resolve_hdr10_metadata(decoder_context->stream[index],
+                                    decoder_context->codec_context[index],
+                                    params, &hdr10_metadata);
+        if (rc != eav_success)
+            return rc;
+        rc = configure_hdr10_encoder_context(encoder_codec_context,
+                                              params, &hdr10_metadata);
+        if (rc != eav_success)
+            return rc;
+        if (hdr10_metadata.enabled)
+            verify_hdr_source_color(decoder_context, params);
+    }
+
     if ((rc = set_pixel_fmt(encoder_codec_context, params)) != eav_success)
         return rc;
 
-    if (!strcmp(params->ecodec, "h264_nvenc"))
-        set_nvidia_h264_params(encoder_context, decoder_context, params);
+    if (!strcmp(params->ecodec, "h264_nvenc")) {
+        if ((rc = set_nvidia_h264_params(encoder_context, decoder_context, params)) != eav_success)
+            return rc;
+    }
     else if (!strcmp(params->ecodec, "hevc_nvenc")) {
-        if ((rc = set_nvidia_hevc_params(encoder_context, decoder_context, params)) != eav_success)
+        if ((rc = set_nvidia_hevc_params(encoder_context, decoder_context, params,
+                                         &hdr10_metadata)) != eav_success)
             return rc;
     } else if (!strcmp(params->ecodec, "libx265")) {
-        if ((rc = set_h265_params(encoder_context, decoder_context, params)) != eav_success)
+        if ((rc = set_h265_params(encoder_context, decoder_context, params,
+                                  &hdr10_metadata)) != eav_success)
             return rc;
     } else if (!strcmp(params->ecodec, "h264_ni_enc") || !strcmp(params->ecodec, "h264_ni_quadra_enc"))
         set_netint_h264_params(encoder_context, decoder_context, params);
@@ -1448,9 +1475,10 @@ prepare_video_encoder(
     else
         set_h264_params(encoder_context, decoder_context, params);
 
-    /* Preserve source color metadata for non-HDR in SPS VUI */
+    /* Preserve source color metadata for non-HDR. The shared HDR path has
+     * already applied canonical BT.2020/PQ signaling for either HEVC encoder. */
     int source_color_copied = 0;
-    if (!(params->master_display && params->master_display[0] != '\0')) {
+    if (!hdr10_metadata.enabled) {
         copy_source_color_to_output(encoder_context, decoder_context);
         source_color_copied = 1;
     }
@@ -4725,6 +4753,24 @@ check_params(
         elv_log("Set bitdepth=%d, url=%s", params->bitdepth, params->url);
     }
 
+    if (params->preserve_dolby_vision) {
+        if (params->bitdepth != 10) {
+            elv_err("preserve_dolby_vision requires bitdepth=10, got bitdepth=%d, url=%s",
+                params->bitdepth, params->url);
+            return eav_param;
+        }
+        if (!params->profile || strcmp(params->profile, "main10") != 0) {
+            elv_err("preserve_dolby_vision requires profile=main10, got profile=%s, url=%s",
+                params->profile ? params->profile : "", params->url);
+            return eav_param;
+        }
+        if (!params->ecodec || strcmp(params->ecodec, "libx265") != 0) {
+            elv_err("preserve_dolby_vision requires encoder=libx265, got encoder=%s, url=%s",
+                params->ecodec ? params->ecodec : "", params->url);
+            return eav_param;
+        }
+    }
+
     if (params->xc_type & xc_audio &&
         params->sample_rate > 0 &&
         !strcmp(params->ecodec2, "aac") &&
@@ -4861,6 +4907,7 @@ log_params(
         "wm_overlay_type=%d "
         "wm_overlay_len=%d "
         "bitdepth=%d "
+        "preserve_dolby_vision=%d "
         "listen=%d "
         "max_cll=\"%s\" "
         "master_display=\"%s\" "
@@ -4894,7 +4941,7 @@ log_params(
         params->channel_layout, avpipe_channel_layout_name(params->channel_layout),
         params->sync_audio_to_stream_id,
         params->watermark_overlay_type, params->watermark_overlay_len,
-        params->bitdepth, params->listen,
+        params->bitdepth, params->preserve_dolby_vision, params->listen,
         params->max_cll ? params->max_cll : "",
         params->master_display ? params->master_display : "",
         params->video_layout,
