@@ -290,6 +290,16 @@ func (mpp *MpegtsPacketProcessor) Stop() error {
 	return mpp.stopErr
 }
 
+// CloseOutput closes the current output writer, if any (end of stream/period).
+func (mpp *MpegtsPacketProcessor) CloseOutput() {
+	if mpp.currentWc != nil {
+		if err := mpp.currentWc.Close(); err != nil {
+			mpegtslog.Error("Failed to close current output", "err", err)
+		}
+		mpp.currentWc = nil
+	}
+}
+
 func (mpp *MpegtsPacketProcessor) RegisterPacketsDropped(packetsDropped *atomic.Uint64) {
 	mpp.stats.PacketsDropped = packetsDropped
 }
