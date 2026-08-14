@@ -68,12 +68,13 @@ func (e *ExportedStats) populate(ts *TSStats, rtpStats *RTPStats) {
 			switch c.Source {
 			case "rtp":
 				e.RTP.LongHeaders = stream.Errors.LongHeaders
-				e.RTP.SeqNumSkipCount = c.ErrorCount
-				// c.Gaps is bounded by tracker.Config.MaxGaps (100 by default), so on a long-running stream with more
-				// than MaxGaps gaps, SeqNumSkipTot undercounts - it only sums the retained gaps, not all of them.
-				for _, g := range c.Gaps {
-					e.RTP.SeqNumSkipTot += uint64(absInt64(g.SeqDiff))
-				}
+				// c.ErrorCount/c.Gaps cover both sequence-number and timestamp discontinuities and (for Gaps) are
+				// bounded by tracker.Config.MaxGaps, so deriving SeqNumSkipCount/SeqNumSkipTot from them would both
+				// misclassify timestamp-only gaps as sequence skips and undercount on a long-running stream with
+				// more than MaxGaps gaps. c.SeqGapCount/c.SeqGapTotal are the tracker's dedicated, cumulative,
+				// sequence-only counters - a plain assignment (not +=) since dst may be reused across refreshes.
+				e.RTP.SeqNumSkipCount = c.SeqGapCount
+				e.RTP.SeqNumSkipTot = c.SeqGapTotal
 			case "pcr":
 				if !pcrPinned {
 					// NumWraps is pinned to the first PCR-bearing PID discovered, mirroring avpipe's pre-tracker
@@ -87,13 +88,6 @@ func (e *ExportedStats) populate(ts *TSStats, rtpStats *RTPStats) {
 	}
 }
 
-func absInt64(n int64) int64 {
-	if n < 0 {
-		return -n
-	}
-	return n
-}
-
 type ExportedStats struct {
 	TS     ExportedTSStats  `json:"ts,omitzero"`
 	RTP    ExportedRTPStats `json:"rtp,omitzero"`
@@ -105,11 +99,10 @@ type ExportedStats struct {
 }
 
 // CopyInto deep-copies e into dst, reusing dst.Stream/dst.Srt where possible instead of allocating new ones. Callers
-// that retain an ExportedStats past a single Stat call (e.g. content-fabric's live-recorder) must use this instead of
-// a plain assignment: MpegtsPacketProcessor reuses and mutates its Stream snapshot, and now also its Srt (via
+// that retain an ExportedStats past a single Stat call (e.g. content-fabric's live-recorder) must use this instead of a
+// plain assignment: MpegtsPacketProcessor reuses and mutates its Stream snapshot, and now also its Srt (via
 // connStatsSource.ConnStats's copy-into contract - see NetReader.ConnStats and its StatsReporter chain), in place
-// across pushStatsInto calls (see reportFullStatsLoop's doc), so aliasing either would let a reader race that
-// mutation.
+// across pushStatsInto calls (see reportFullStatsLoop's doc), so aliasing either would let a reader race that mutation.
 //
 // TS/RTP are plain value structs, safe to assign directly.
 func (e *ExportedStats) CopyInto(dst *ExportedStats) {

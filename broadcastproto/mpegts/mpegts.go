@@ -287,7 +287,10 @@ func (mpp *MpegtsPacketProcessor) reportBytesWritten() {
 	_ = mpp.opener.ReportBytesWritten(mpp.stats.BytesWritten.Load())
 }
 
-// reportFullStatsLoop pushes full ExportedStats on a slow, fixed interval.
+// reportFullStatsLoop pushes full ExportedStats on a slow, fixed interval, plus once immediately on entry and once
+// more just before returning - time.NewTicker's first tick only fires after the full interval, and select alone
+// gives no report at all on shutdown, so without these an ingest shorter than fullStatsInterval would otherwise
+// never produce a single full stats report, and no report would ever reflect the stream's final state.
 func (mpp *MpegtsPacketProcessor) reportFullStatsLoop() {
 	fullStatsInterval := 5 * time.Second
 	// Reused across every tick by this goroutine alone, so CopyInto/Snapshot's destination-reuse bounds this to
@@ -295,11 +298,13 @@ func (mpp *MpegtsPacketProcessor) reportFullStatsLoop() {
 	var stats ExportedStats
 	ticker := time.NewTicker(fullStatsInterval)
 	defer ticker.Stop()
+	mpp.pushStatsInto(&stats)
 	for {
 		select {
 		case <-ticker.C:
 			mpp.pushStatsInto(&stats)
 		case <-mpp.closeCh:
+			mpp.pushStatsInto(&stats)
 			return
 		}
 	}
@@ -316,11 +321,11 @@ func (mpp *MpegtsPacketProcessor) PushStats() {
 // pushStatsInto gathers statistics into the caller-supplied dst instead of a fresh one-off allocation. dst must be
 // exclusively owned by the caller for the duration of this call.
 func (mpp *MpegtsPacketProcessor) pushStatsInto(dst *ExportedStats) {
-	now := time.Now()
+	now := utc.Now()
 	if dst.Stream == nil {
 		dst.Stream = &tracker.Stats{}
 	}
-	mpp.tracker.Snapshot(dst.Stream, true, utc.New(now), tracker.SnapshotOptions{})
+	mpp.tracker.Snapshot(dst.Stream, true, now, tracker.SnapshotOptions{})
 
 	// Reuse dst.Srt's existing allocation (if any) as the destination, so a caller that reuses dst across calls (e.g.
 	// reportFullStatsLoop) doesn't allocate a new SrtConnStats on every tick.

@@ -187,6 +187,90 @@ func TestNetReader_ConnStats(t *testing.T) {
 	require.False(t, fake.lastDetails)
 }
 
+// TestNetReader_ConnStats_NoStaleReaderBetweenReconnects is a regression test for process() leaving r.reader pointed
+// at the previous connection's now-closed reader until the next connect() succeeds and overwrites it: during that
+// window, ConnStats would report ok=true with stale data from the closed reader (if it implements
+// mio.StatsReporter), contradicting its own doc comment that "between reconnect attempts" means no active reader
+// (ok=false). Uses a transport whose second Open() call blocks, giving a deterministic window - entered only after
+// process() has processed the first connection's end-of-stream and (with the fix) cleared r.reader - in which to
+// observe ConnStats.
+func TestNetReader_ConnStats_NoStaleReaderBetweenReconnects(t *testing.T) {
+	defer goleak.VerifyNone(t)
+
+	// first's Read returns io.EOF immediately, ending the first connection right away.
+	first := &fakeStatsReporterReadCloser{stats: mio.ConnStats{RemoteAddr: "1.2.3.4:5678"}}
+	second := newBlockingReadCloser()
+	tp := &sequencedTransport{
+		first:         first,
+		second:        second,
+		reachedSecond: make(chan struct{}),
+		proceed:       make(chan struct{}),
+	}
+
+	ctx := createNetReader(tp)
+
+	select {
+	case <-tp.reachedSecond:
+	case <-time.After(5 * time.Second):
+		t.Fatal("reconnect never reached the second Open() call")
+	}
+
+	var stats mio.ConnStats
+	ok := ctx.netReader.ConnStats(&stats, true)
+	require.False(t, ok, "no active reader during the reconnect window")
+
+	close(tp.proceed)
+	ctx.netReader.Cancel()
+	for res := range ctx.consumer.pktChan {
+		res.Release()
+	}
+}
+
+// sequencedTransport returns first on its first Open() call; its second call closes reachedSecond (signaling the
+// test that a reconnect attempt is now in flight) and blocks until proceed is closed, then returns second. Not safe
+// for more than two Open() calls.
+type sequencedTransport struct {
+	first, second io.ReadCloser
+	opens         int
+	reachedSecond chan struct{}
+	proceed       chan struct{}
+}
+
+func (s *sequencedTransport) Open() (io.ReadCloser, error) {
+	s.opens++
+	if s.opens == 1 {
+		return s.first, nil
+	}
+	close(s.reachedSecond)
+	<-s.proceed
+	return s.second, nil
+}
+
+func (s *sequencedTransport) URL() string                              { return "mock://sequenced" }
+func (s *sequencedTransport) Handler() string                          { return "mock" }
+func (s *sequencedTransport) PackagingMode() transport.TsPackagingMode { return transport.RawTs }
+
+// blockingReadCloser blocks Read until Close is called, then returns io.EOF - mirroring a live connection that has
+// no data until torn down (e.g. by Cancel(), which closes the active reader to unblock a pending Read).
+type blockingReadCloser struct {
+	closed chan struct{}
+	once   sync.Once
+}
+
+func newBlockingReadCloser() *blockingReadCloser {
+	return &blockingReadCloser{closed: make(chan struct{})}
+}
+
+func (b *blockingReadCloser) Read([]byte) (int, error) {
+	<-b.closed
+	return 0, io.EOF
+}
+
+func (b *blockingReadCloser) Close() error {
+	b.once.Do(func() { close(b.closed) })
+	return nil
+}
+
 type noopReadCloser struct{}
 
 func (*noopReadCloser) Read([]byte) (int, error) { return 0, io.EOF }

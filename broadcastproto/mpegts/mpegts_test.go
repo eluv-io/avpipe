@@ -343,6 +343,34 @@ func TestRemoveTsPadding(t *testing.T) {
 	})
 }
 
+// TestMpegtsPacketProcessor_ReportFullStatsLoop_ImmediateAndFinalReport is a regression test for
+// reportFullStatsLoop's 5-second ticker: time.NewTicker's first tick only fires after the full interval, and a bare
+// select gives no report at all on shutdown - so before the fix, an ingest shorter than 5s never produced a single
+// full stats report, and no report ever reflected the stream's final state. Verifies a report arrives immediately
+// on StartReportingStats (well before the 5s interval), and one more arrives after Stop().
+func TestMpegtsPacketProcessor_ReportFullStatsLoop_ImmediateAndFinalReport(t *testing.T) {
+	reports := make(chan struct{}, 8)
+	opener := &recordingSequentialOpener{}
+	opener.onStat = func(ExportedStats) { reports <- struct{}{} }
+	pp := newTestMpegtsPacketProcessor(opener)
+
+	pp.StartReportingStats()
+	defer pp.Stop()
+
+	select {
+	case <-reports:
+	case <-time.After(2 * time.Second):
+		t.Fatal("no report arrived immediately on StartReportingStats, well before the 5s ticker interval")
+	}
+
+	require.NoError(t, pp.Stop())
+	select {
+	case <-reports:
+	case <-time.After(2 * time.Second):
+		t.Fatal("no final report arrived after Stop()")
+	}
+}
+
 func newTestMpegtsPacketProcessor(opener SequentialOpener) *MpegtsPacketProcessor {
 	pp := NewMpegtsPacketProcessor(
 		TsConfig{
@@ -442,14 +470,19 @@ func TestMpegtsPacketProcessor_pushStatsInto_DestinationReuseReducesAllocations(
 }
 
 // TestMpegtsPacketProcessor_PushStats_ConcurrentReceiverCopyIsRaceFree is a regression test for the data race that
-// Snapshot-based reuse in pushStatsInto would otherwise permit: each PushStats call's own destination (see
-// pushStatsInto) is mutated in place by mpp.tracker.Snapshot on every call, and only stays valid for that single call -
-// so a receiver that retains an ExportedStats past it (as content-fabric's live-recorder AV_IN_STAT_MPEGTS handler
-// does) must deep-copy it via CopyInto at the point of receipt, into its own memory, rather than aliasing avpipe's
-// Stream pointer - otherwise a reader goroutine racing PushStats's own goroutine would race on *tracker.Stats's fields
-// with no shared lock to prevent it (avpipe and content-fabric are separate modules, each with its own, disjoint
-// mutex). This drives PushStats and a receiver simulating that handler's copy-on-receipt discipline concurrently, under
-// -race.
+// Snapshot-based reuse in pushStatsInto would otherwise permit: a destination reused across calls (as
+// reportFullStatsLoop's own does, and as this test's writer goroutine mirrors below - see reused) is mutated in
+// place by mpp.tracker.Snapshot on every call, and only stays valid for that single call - so a receiver that
+// retains an ExportedStats past it (as content-fabric's live-recorder AV_IN_STAT_MPEGTS handler does) must deep-copy
+// it via CopyInto at the point of receipt, into its own memory, rather than aliasing avpipe's Stream pointer -
+// otherwise a reader goroutine racing the writer's own goroutine would race on *tracker.Stats's fields with no
+// shared lock to prevent it (avpipe and content-fabric are separate modules, each with its own, disjoint mutex).
+// The writer deliberately calls pushStatsInto with its own persistent, reused destination rather than the exported
+// PushStats (which gathers into a fresh, one-off ExportedStats on every call - see PushStats's own doc): a fresh
+// destination on every call never actually exercises the in-place-mutation hazard CopyInto exists to guard against
+// (no single *tracker.Stats object is ever mutated across two calls), so even a shallow copy in place of CopyInto
+// would have passed under -race with PushStats. This drives that reused-destination writer and a receiver simulating
+// the live-recorder handler's copy-on-receipt discipline concurrently, under -race.
 func TestMpegtsPacketProcessor_PushStats_ConcurrentReceiverCopyIsRaceFree(t *testing.T) {
 	var mu sync.Mutex
 	owned := &ExportedStats{} // mirrors l.StatusReport.InputStats: the receiver's own, reused destination
@@ -478,8 +511,9 @@ func TestMpegtsPacketProcessor_PushStats_ConcurrentReceiverCopyIsRaceFree(t *tes
 	go func() {
 		defer wg.Done()
 		defer close(stop)
+		var reused ExportedStats // exclusively owned by this goroutine, reused across calls like reportFullStatsLoop's
 		for i := 0; i < 300; i++ {
-			pp.PushStats()
+			pp.pushStatsInto(&reused)
 		}
 	}()
 	go func() {
