@@ -78,6 +78,44 @@ func TestExportedStats_SrtOmittedForNonSrtSource(t *testing.T) {
 	require.NotContains(t, decoded, "srt")
 }
 
+// TestExportedStats_Populate_SeqNumSkipFromTracker verifies SeqNumSkipCount/SeqNumSkipTot are sourced directly from
+// the tracker's dedicated, cumulative, sequence-only ClockStats.SeqGapCount/SeqGapTotal fields - not derived from
+// ErrorCount/Gaps, which also cover timestamp-only discontinuities and are bounded by MaxGaps.
+func TestExportedStats_Populate_SeqNumSkipFromTracker(t *testing.T) {
+	stats := ExportedStats{Stream: &tracker.Stats{
+		Clocks: []tracker.ClockStats{{
+			Source: "rtp",
+			// ErrorCount/Gaps deliberately don't agree with SeqGapCount/SeqGapTotal, so a test that passed by
+			// accident (e.g. still reading the wrong fields) would be caught.
+			ErrorCount:  99,
+			SeqGapCount: 3,
+			SeqGapTotal: 42,
+		}},
+	}}
+	stats.populate(newTestTSStats(), &RTPStats{})
+
+	require.EqualValues(t, 3, stats.RTP.SeqNumSkipCount)
+	require.EqualValues(t, 42, stats.RTP.SeqNumSkipTot)
+}
+
+// TestExportedStats_Populate_SeqNumSkipNotDoubleCountedOnRefresh is a regression test for populate deriving
+// SeqNumSkipTot by summing ClockStats.Gaps with +=: since populate is called into a destination reused across every
+// reportFullStatsLoop tick, that resummed the same still-retained gaps on every refresh, inflating the total further
+// each call. A plain assignment (as populate now does, mirroring SeqNumSkipCount's own assignment) must not exhibit
+// that even when the same ExportedStats/Stream is reused and populated repeatedly with the same tracker snapshot.
+func TestExportedStats_Populate_SeqNumSkipNotDoubleCountedOnRefresh(t *testing.T) {
+	stats := ExportedStats{Stream: &tracker.Stats{
+		Clocks: []tracker.ClockStats{{Source: "rtp", SeqGapCount: 3, SeqGapTotal: 42}},
+	}}
+	ts := newTestTSStats()
+
+	stats.populate(ts, &RTPStats{})
+	require.EqualValues(t, 42, stats.RTP.SeqNumSkipTot)
+
+	stats.populate(ts, &RTPStats{}) // simulates a second reportFullStatsLoop tick reusing the same dst
+	require.EqualValues(t, 42, stats.RTP.SeqNumSkipTot, "must not have doubled to 84")
+}
+
 // TestExportedStats_MarshalJSON confirms ExportedStats marshals to valid, round-trippable JSON on its own, independent
 // of String().
 func TestExportedStats_MarshalJSON(t *testing.T) {

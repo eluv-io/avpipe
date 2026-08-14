@@ -87,10 +87,10 @@ type NetReader struct {
 	reader    atomic.Pointer[io.ReadCloser] // the current reader, used for closing when the NetReader is canceled
 }
 
-// ConnStats copies the current connection's statistics into into, if there is an active reader and it reports them
-// (e.g. an SRT connection - see mio.StatsReporter). It returns false without touching into if there's no active
-// reader yet (not yet connected, or between reconnect attempts) or the reader doesn't implement mio.StatsReporter
-// (e.g. a plain UDP socket).
+// ConnStats copies the current connection's statistics into the given mio.ConnStats instance (if there is an active
+// reader and the reader supports statistics, e.g. an SRT connection - see mio.StatsReporter). It returns false without
+// touching the ConnStats instance if there's no active reader yet (not yet connected, or between reconnect attempts) or
+// the reader doesn't implement mio.StatsReporter (e.g. a plain UDP socket).
 func (r *NetReader) ConnStats(into *mio.ConnStats, details bool) bool {
 	reader := r.reader.Load()
 	if reader == nil {
@@ -184,6 +184,12 @@ func (r *NetReader) process() error {
 		}
 
 		cont, err := r.readLoop(reader) // readLoop closes reader!
+		// Clear the now-closed reader immediately, rather than leaving it in place until the next successful
+		// connect()'s Store below: ConnStats documents "between reconnect attempts" as no active reader (ok=false),
+		// but without this, a closed reader from the previous connection would still satisfy Load() != nil and, if
+		// it implements mio.StatsReporter, report stale stats throughout the reconnect window. Harmless if Cancel
+		// runs concurrently: its own Swap(nil) becomes a no-op on an already-nil/already-closed reader either way.
+		r.reader.Store(nil)
 		if cont {
 			if r.config.MaxRecoverAttempts <= 0 || i < r.config.MaxRecoverAttempts {
 				logNetReader.Info("recoverable processor error, will retry", e(err))
