@@ -11,6 +11,7 @@ import (
 
 	"github.com/eluv-io/avpipe/broadcastproto/transport"
 	"github.com/eluv-io/avpipe/goavpipe"
+	mio "github.com/eluv-io/common-go/media/io"
 	"github.com/eluv-io/common-go/media/pktpool"
 	"github.com/eluv-io/errors-go"
 )
@@ -247,7 +248,6 @@ func (mih *mpegtsInputHandler) Read(buf []byte) (int, error) {
 // them. The returned Resource has exactly one outstanding reference belonging to the caller; release it when done.
 func (mih *mpegtsInputHandler) ReadPacket() (pktpool.Resource, error) {
 	res := mih.packetPool.Borrow()
-	res.T.ReceivedAt = time.Now()
 	err := res.T.FromReader(mih.rc)
 	if err != nil {
 		res.Release()
@@ -318,6 +318,7 @@ func (mih *mpegtsInputHandler) ReaderLoop(ch chan pktpool.Resource, packetsDropp
 		mih.inFd,
 	)
 	ts.RegisterPacketsDropped(packetsDropped)
+	ts.SetConnStatsSource(directConnStatsSource{mih.rc})
 
 	nPackets := 0
 	ts.StartReportingStats()
@@ -333,4 +334,19 @@ func (mih *mpegtsInputHandler) ReaderLoop(ch chan pktpool.Resource, packetsDropp
 		ts.ProcessDatagramPacket(res.T.ReceivedAt, res.T)
 		res.Release()
 	}
+}
+
+// directConnStatsSource adapts an io.ReadCloser to connStatsSource, so ReaderLoop's MpegtsPacketProcessor can surface
+// ExportedStats.Srt the same way bypass.go/custom.go's NetReader-backed paths do. Unlike NetReader, mih.rc is a
+// single connection for this handler's whole lifetime (no reconnection), so a plain type assertion per call - rather
+// than NetReader's atomic-pointer/staleness handling - is enough.
+type directConnStatsSource struct{ rc io.ReadCloser }
+
+func (d directConnStatsSource) ConnStats(into *mio.ConnStats, details bool) bool {
+	reporter, ok := d.rc.(mio.StatsReporter)
+	if !ok {
+		return false
+	}
+	reporter.ConnStats(into, details)
+	return true
 }

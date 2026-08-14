@@ -111,6 +111,7 @@ func (bp *BypassProcessor) Start(fd int64) error {
 		bp.transport,
 		[]Consumer{mpegTsConsumer},
 	)
+	processor.SetConnStatsSource(bp.netReader)
 
 	return nil
 }

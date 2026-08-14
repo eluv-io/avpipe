@@ -28,6 +28,7 @@ const (
 	AV_IN_STAT_DATA_SCTE35              = 12
 	AV_IN_STAT_MPEGTS                   = 13
 	AV_IN_STAT_MPEGTS_START             = 14
+	AV_IN_STAT_MPEGTS_BYTES_WRITTEN     = 15
 )
 
 func (a AVStatType) Name() string {
@@ -60,6 +61,8 @@ func (a AVStatType) Name() string {
 		return "AV_IN_STAT_MPEGTS"
 	case AV_IN_STAT_MPEGTS_START:
 		return "AV_IN_STAT_MPEGTS_START"
+	case AV_IN_STAT_MPEGTS_BYTES_WRITTEN:
+		return "AV_IN_STAT_MPEGTS_BYTES_WRITTEN"
 	default:
 		return fmt.Sprintf("Unknown(%d)", a)
 	}
