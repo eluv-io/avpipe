@@ -1,4 +1,4 @@
-package mp4e
+package ac4
 
 import (
 	"io"
@@ -13,16 +13,16 @@ import (
 // room for the bitstream_version variable_bits escape while keeping per-sample reads tiny.
 const tocReadBytes = 64
 
-// AC4SampleSync is one AC-4 sample's I-frame status, pairing the authoritative bitstream
+// SampleSync is one AC-4 sample's I-frame status, pairing the authoritative bitstream
 // flag against the container's view.
-type AC4SampleSync struct {
+type SampleSync struct {
 	SampleNumber  int    // 1-based sample number
 	DecodeTime    uint64 // absolute decode time in the track's mdhd timescale
 	IFrameGlobal  bool   // ac4_toc.b_iframe_global (bitstream truth)
 	ContainerSync bool   // container sync flag: stss membership / !sample_is_non_sync_sample
 
 	// PresentationTime is DecodeTime mapped through the track's edit list — DecodeTime
-	// minus AC4Edit.MediaTime — in the mdhd timescale. It equals DecodeTime when no edit
+	// minus Edit.MediaTime — in the mdhd timescale. It equals DecodeTime when no edit
 	// was applied. AC-4 is audio, so there are no composition offsets and this is the
 	// whole of the media-to-presentation mapping; it is NOT mp4ff's
 	// FullSample.PresentationTime (decode time plus composition offset, edit-unaware).
@@ -39,19 +39,19 @@ type AC4SampleSync struct {
 	InEdit bool
 }
 
-// AC4Edit is a track's edit list reduced to the single head/tail trim that ISOBMFF audio
+// Edit is a track's edit list reduced to the single head/tail trim that ISOBMFF audio
 // uses in practice: media_time trims at the head, media_time + segment_duration bounds the
 // tail. Nothing else is applied.
 //
 // The trim is what a Dolby encoder emits to remove the AC-4 priming frame (DEE's
 // "offset": -2048 becomes elst {segment_duration=480000, media_time=2048}), so applying it
 // is what makes the results describe presented audio rather than stored samples.
-type AC4Edit struct {
+type Edit struct {
 	// Present reports that the track has an edts/elst holding at least one entry.
 	Present bool
 
 	// Applied reports that the edit list was a single simple forward mapping and was used
-	// to compute AC4SampleSync.PresentationTime/InEdit and the track's trim counters.
+	// to compute SampleSync.PresentationTime/InEdit and the track's trim counters.
 	// When Present is true and Applied is false the edit was left unapplied and every
 	// sample reads as in-edit — see Unapplied for why. Check Present && !Applied rather
 	// than assuming an unapplied edit means the source had none.
@@ -79,18 +79,18 @@ type AC4Edit struct {
 	Duration uint64
 }
 
-// primingBasis values for AC4Track.PrimingBasis.
+// primingBasis values for Track.PrimingBasis.
 const (
 	// PrimingFromEdit means PrimingSamples came from the edit list: definitive.
 	PrimingFromEdit = "edit-list"
 
 	// PrimingFromCadence means PrimingSamples came from the I-frame cadence heuristic
-	// (see AC4Track.PrimingBasis): suggestive only.
+	// (see Track.PrimingBasis): suggestive only.
 	PrimingFromCadence = "iframe-cadence"
 )
 
-// AC4Track holds the I-frame results for one AC-4 track.
-type AC4Track struct {
+// Track holds the I-frame results for one AC-4 track.
+type Track struct {
 	TrackID int
 
 	// SamplesProcessed is the number of samples parsed for this track before the
@@ -112,7 +112,7 @@ type AC4Track struct {
 	// FrameErrors is the number of samples that could not be read or whose ac4_toc could
 	// not be parsed. Such samples are skipped and the scan continues, so they are not
 	// counted in SamplesProcessed or the mismatch counters. A whole track/file only fails
-	// (non-nil error from AC4IFrames) when it cannot be decoded at all.
+	// (non-nil error from IFrames) when it cannot be decoded at all.
 	FrameErrors int
 
 	// IFrames holds the true I-frames, up to the requested limit. Samples the edit list
@@ -120,17 +120,31 @@ type AC4Track struct {
 	// against the limit — the mismatch this package exists to find is between what a file
 	// stores and what it claims, so nothing is filtered out of the raw results. Filter on
 	// InEdit to get the presented I-frames.
-	IFrames []AC4SampleSync
+	IFrames []SampleSync
 
 	// Edit is the track's edit list as interpreted, including whether it was applied.
-	Edit AC4Edit
+	Edit Edit
 
 	// SamplesInEdit and SamplesTrimmed split SamplesProcessed by whether the edit list
 	// presents the sample. SamplesTrimmed is 0 unless Edit.Applied and the edit actually
-	// trims something; SamplesInEdit is the presented frame count, which is what a
-	// segment's duration should be derived from.
+	// trims something; SamplesInEdit is the presented frame count.
+	//
+	// Do NOT derive a duration from SamplesInEdit * frame duration. A sample straddling the
+	// edit end is counted here in full (see PartialTailTrim), so that product overstates the
+	// presented span whenever Edit.Duration is not a multiple of the frame length. Use
+	// PresentedDuration.
 	SamplesInEdit  int
 	SamplesTrimmed int
+
+	// PresentedDuration is the presented span in the mdhd timescale: the sum, over the
+	// processed samples, of the part of each sample that falls inside the edit. It equals
+	// Edit.Duration for a bounded edit scanned to completion, and the sum of the sample
+	// durations when there is no edit or the edit is unbounded — so it is the one duration a
+	// caller can use without special-casing which of those three cases applies.
+	//
+	// Like SamplesProcessed it covers only the samples this scan processed, so a run limited
+	// by maxIFramesPerTrack reports a partial value.
+	PresentedDuration uint64
 
 	// PrimingSamples is the number of whole samples the head trim removes — the AC-4
 	// priming frame(s). PrimingBasis says where the number came from: PrimingFromEdit
@@ -149,36 +163,48 @@ type AC4Track struct {
 	PrimingBasis   string
 
 	// PartialHeadTrim reports that MediaTime falls inside a sample rather than on a
-	// boundary, so the head trim is sub-sample. That sample is reported in-edit (whole)
-	// with a negative PresentationTime, because neither ISOBMFF output nor this scan can
-	// express a partial sample. The mov demuxer takes the same position, keeping the
-	// sample and attaching AV_PKT_DATA_SKIP_SAMPLES. A Dolby encoder does not produce it.
+	// boundary, so the head trim is sub-sample. That sample is reported in-edit (whole) with
+	// a negative PresentationTime; PresentedDuration counts only the part inside the edit.
+	// The mov demuxer takes the same position, keeping the sample and attaching
+	// AV_PKT_DATA_SKIP_SAMPLES. A Dolby encoder does not produce it.
 	PartialHeadTrim bool
+
+	// PartialTailTrim reports the same at the other end: Edit.Duration is not a multiple of
+	// the frame length, so the edit ends inside the last presented sample. That sample is
+	// kept whole and counted in SamplesInEdit, which is why SamplesInEdit * frame duration
+	// overstates the presented span — see PresentedDuration.
+	//
+	// Unlike the head case, a Dolby encoder does produce this routinely: DEE writes
+	// segment_duration to the content length, which is not generally a frame multiple. It is
+	// also the trim avpipe's fmp4-segment bypass cannot carry, because that path emits no
+	// edit list at all (see skip_discarded_bypass_packet in libavpipe/src/avpipe_xc.c), so up
+	// to one frame of encoder padding survives at the tail of a bypassed mez.
+	PartialTailTrim bool
 }
 
-// AC4IFrames parses ac4_toc per sample for every AC-4 track in an MP4/fMP4 file and
+// IFrames parses ac4_toc per sample for every AC-4 track in an MP4/fMP4 file and
 // returns, per track, the positions whose b_iframe_global is set — the true I-frames —
 // plus counters of where the container sync signaling disagrees with the bitstream
-// (AC4Track.ContainerSyncNotIFrame / IFrameNotContainerSync), tallied over the samples
+// (Track.ContainerSyncNotIFrame / IFrameNotContainerSync), tallied over the samples
 // processed before the limit. maxIFramesPerTrack <= 0 means unlimited (whole track).
 //
 // It always runs the scan to completion when it can: a sample that cannot be read or
-// parsed is counted in AC4Track.FrameErrors and skipped, never aborting the job. The
+// parsed is counted in Track.FrameErrors and skipped, never aborting the job. The
 // returned error is non-nil only for a failure that prevents processing — the file
 // cannot be decoded, or a fragment's data cannot be read — and even then the per-track
 // results gathered so far are returned alongside it.
 //
 // It also applies the track's edit list, so the results describe presented audio and not
-// merely stored samples: each AC4SampleSync carries a PresentationTime and an InEdit flag,
-// and AC4Track reports the edit itself (AC4Track.Edit), the presented/trimmed sample split,
-// and how many priming frames the track begins with (AC4Track.PrimingSamples). Samples the
+// merely stored samples: each SampleSync carries a PresentationTime and an InEdit flag,
+// and Track reports the edit itself (Track.Edit), the presented/trimmed sample split,
+// and how many priming frames the track begins with (Track.PrimingSamples). Samples the
 // edit trims are flagged, never dropped from the results.
 //
 // It decodes with DecModeLazyMdat and reads sample bytes on demand from rs (progressive:
 // per-sample ranges; fragmented: one fragment's mdat at a time), stopping each track once
 // it reaches the limit, so it never loads the whole input into memory.
-func AC4IFrames(rs io.ReadSeeker, maxIFramesPerTrack int) ([]AC4Track, error) {
-	e := errors.T("mp4e.AC4IFrames", errors.K.Invalid.Default())
+func IFrames(rs io.ReadSeeker, maxIFramesPerTrack int) ([]Track, error) {
+	e := errors.T("ac4.IFrames", errors.K.Invalid.Default())
 	file, err := mp4.DecodeFile(rs, mp4.WithDecodeMode(mp4.DecModeLazyMdat))
 	if err != nil {
 		return nil, e(err, "reason", "decode ac4 file")
@@ -187,29 +213,31 @@ func AC4IFrames(rs io.ReadSeeker, maxIFramesPerTrack int) ([]AC4Track, error) {
 		return nil, e("reason", "no moov box")
 	}
 	if file.IsFragmented() {
-		return ac4FramesFragmented(file, rs, maxIFramesPerTrack)
+		return framesFragmented(file, rs, maxIFramesPerTrack)
 	}
-	return ac4FramesProgressive(file, rs, maxIFramesPerTrack)
+	return framesProgressive(file, rs, maxIFramesPerTrack)
 }
 
-// ac4SampleClass is how a track's edit list treats one sample.
-type ac4SampleClass int
+// sampleClass is how a track's edit list treats one sample.
+type sampleClass int
 
 const (
-	ac4InEdit      ac4SampleClass = iota // presented (at least partly)
-	ac4TrimmedHead                       // wholly before the edit start: priming frame
-	ac4TrimmedTail                       // at or past the edit end
+	inEdit      sampleClass = iota // presented (at least partly)
+	trimmedHead                    // wholly before the edit start: priming frame
+	trimmedTail                    // at or past the edit end
 )
 
-// ac4SampleEdit is the edit list's verdict on one sample.
-type ac4SampleEdit struct {
+// sampleEdit is the edit list's verdict on one sample.
+type sampleEdit struct {
 	presentationTime int64
-	class            ac4SampleClass
-	partialHead      bool // the edit start falls inside this sample
+	class            sampleClass
+	partialHead      bool   // the edit start falls inside this sample
+	partialTail      bool   // the edit end falls inside this sample
+	presentedDur     uint64 // the part of this sample inside the edit, mdhd timescale
 }
 
-// ac4EditWindow is a parsed edit reduced to what classifying a sample needs.
-type ac4EditWindow struct {
+// editWindow is a parsed edit reduced to what classifying a sample needs.
+type editWindow struct {
 	applied   bool
 	mediaTime int64
 	editEnd   int64 // exclusive presented end, media timescale; valid only if bounded
@@ -218,41 +246,62 @@ type ac4EditWindow struct {
 
 // classify maps one sample's decode interval through the edit. A sample is presented if any
 // part of it falls inside the edit, which is what both ISOBMFF and the mov demuxer do: a
-// sample straddling either boundary is kept whole, since neither a container nor this scan
-// can represent a fraction of a sample.
-func (w ac4EditWindow) classify(decodeTime uint64, dur uint32) ac4SampleEdit {
+// sample straddling either boundary is kept whole.
+//
+// Keeping it whole is a statement about the sample, not about the timeline. ISOBMFF does
+// express a sub-sample trim: ISO/IEC 14496-12 8.6.6.1 NOTE says edits are not restricted to
+// fall on sample times, and that the first and last samples of an edit may need to be decoded
+// and then sliced by the receiver. That trim lives in the edit list, not in the sample table —
+// 8.6.1.2.1 defines the sum of the stts deltas as the length of the media, "not considering any
+// edit list". So this scan keeps samples whole and reports the presented span separately, as
+// presentedDur, which Track.PresentedDuration accumulates.
+func (w editWindow) classify(decodeTime uint64, dur uint32) sampleEdit {
 	start := int64(decodeTime)
 	if !w.applied {
-		return ac4SampleEdit{presentationTime: start, class: ac4InEdit}
+		return sampleEdit{presentationTime: start, class: inEdit, presentedDur: uint64(dur)}
 	}
 	end := start + int64(dur)
-	res := ac4SampleEdit{presentationTime: start - w.mediaTime}
+	res := sampleEdit{presentationTime: start - w.mediaTime}
 	switch {
 	case start < w.mediaTime && end <= w.mediaTime:
-		res.class = ac4TrimmedHead
+		res.class = trimmedHead
 	case w.bounded && start >= w.editEnd:
-		res.class = ac4TrimmedTail
+		res.class = trimmedTail
 	default:
-		res.class = ac4InEdit
-		res.partialHead = start < w.mediaTime // kept, but its head is trimmed
+		res.class = inEdit
+		res.partialHead = start < w.mediaTime          // kept, but its head is trimmed
+		res.partialTail = w.bounded && end > w.editEnd // kept, but its tail is trimmed
+		res.presentedDur = uint64(w.presentedSpan(start, end))
 	}
 	return res
 }
 
-// parseAC4Edit reads a track's edit list and reduces it to the head/tail trim this scan
+// presentedSpan is the length of [start, end) that falls inside the edit. Only meaningful for
+// a sample classify has put in-edit, so the intersection is always non-empty.
+func (w editWindow) presentedSpan(start, end int64) int64 {
+	if start < w.mediaTime {
+		start = w.mediaTime
+	}
+	if w.bounded && end > w.editEnd {
+		end = w.editEnd
+	}
+	return end - start
+}
+
+// parseEdit reads a track's edit list and reduces it to the head/tail trim this scan
 // applies, returning both the reportable result and the classifier. An edit list it will
 // not interpret comes back Present with Unapplied set and a zero (inactive) window.
-func parseAC4Edit(trak *mp4.TrakBox, movieTimescale uint32) (AC4Edit, ac4EditWindow) {
-	var edit AC4Edit
+func parseEdit(trak *mp4.TrakBox, movieTimescale uint32) (Edit, editWindow) {
+	var edit Edit
 	if trak.Edts == nil {
-		return edit, ac4EditWindow{}
+		return edit, editWindow{}
 	}
 	var entries []mp4.ElstEntry
 	for _, elst := range trak.Edts.Elst {
 		entries = append(entries, elst.Entries...)
 	}
 	if len(entries) == 0 {
-		return edit, ac4EditWindow{}
+		return edit, editWindow{}
 	}
 	edit.Present = true
 
@@ -260,7 +309,7 @@ func parseAC4Edit(trak *mp4.TrakBox, movieTimescale uint32) (AC4Edit, ac4EditWin
 		// Multi-entry lists express dwells, gaps and reordering; interpreting them as a
 		// single trim would be wrong, so report rather than guess.
 		edit.Unapplied = "multiple edit list entries"
-		return edit, ac4EditWindow{}
+		return edit, editWindow{}
 	}
 	en := entries[0]
 	switch {
@@ -271,7 +320,7 @@ func parseAC4Edit(trak *mp4.TrakBox, movieTimescale uint32) (AC4Edit, ac4EditWin
 		edit.Unapplied = "media rate is not 1.0"
 	}
 	if edit.Unapplied != "" {
-		return edit, ac4EditWindow{}
+		return edit, editWindow{}
 	}
 
 	var mediaTimescale uint32
@@ -279,10 +328,10 @@ func parseAC4Edit(trak *mp4.TrakBox, movieTimescale uint32) (AC4Edit, ac4EditWin
 		mediaTimescale = trak.Mdia.Mdhd.Timescale
 	}
 	edit.MediaTime = en.MediaTime
-	edit.Duration = ac4ScaleToMedia(en.SegmentDuration, movieTimescale, mediaTimescale)
+	edit.Duration = scaleToMedia(en.SegmentDuration, movieTimescale, mediaTimescale)
 	edit.Applied = true
 
-	w := ac4EditWindow{applied: true, mediaTime: en.MediaTime}
+	w := editWindow{applied: true, mediaTime: en.MediaTime}
 	if edit.Duration > 0 { // 0 = unbounded, per ISOBMFF and movenc's identity edit
 		w.bounded = true
 		w.editEnd = en.MediaTime + int64(edit.Duration)
@@ -290,7 +339,7 @@ func parseAC4Edit(trak *mp4.TrakBox, movieTimescale uint32) (AC4Edit, ac4EditWin
 	return edit, w
 }
 
-// ac4ScaleToMedia converts an elst segment_duration from the movie (mvhd) timescale to the
+// scaleToMedia converts an elst segment_duration from the movie (mvhd) timescale to the
 // track's media (mdhd) timescale, rounding to nearest so an inexact ratio cannot trim a
 // sample that should be presented.
 //
@@ -299,7 +348,7 @@ func parseAC4Edit(trak *mp4.TrakBox, movieTimescale uint32) (AC4Edit, ac4EditWin
 // hypothetical, though — media/Audio_ID_720p_50fps_h264_514ch_192kbps_ac4_fra.mp4 has mvhd
 // 1000 against mdhd 48000 and would be trimmed 48x early if the timescales were conflated;
 // it simply has no edts. Hence the unit test on this function rather than on an asset.
-func ac4ScaleToMedia(d uint64, movieTimescale, mediaTimescale uint32) uint64 {
+func scaleToMedia(d uint64, movieTimescale, mediaTimescale uint32) uint64 {
 	if d == 0 || movieTimescale == 0 || mediaTimescale == 0 ||
 		movieTimescale == mediaTimescale {
 		return d
@@ -307,39 +356,43 @@ func ac4ScaleToMedia(d uint64, movieTimescale, mediaTimescale uint32) uint64 {
 	return (d*uint64(mediaTimescale) + uint64(movieTimescale)/2) / uint64(movieTimescale)
 }
 
-// ac4RecordSampleEdit tallies one processed sample against the edit. PrimingSamples counts
-// the head-trimmed samples directly; ac4FinalizePriming turns that into a basis. Only
+// recordSampleEdit tallies one processed sample against the edit. PrimingSamples counts
+// the head-trimmed samples directly; finalizePriming turns that into a basis. Only
 // processed samples are tallied, so SamplesInEdit + SamplesTrimmed == SamplesProcessed and
 // a sample counted in FrameErrors appears in none of the three.
-func ac4RecordSampleEdit(track *AC4Track, res ac4SampleEdit) {
+func recordSampleEdit(track *Track, res sampleEdit) {
 	if res.partialHead {
 		track.PartialHeadTrim = true
 	}
+	if res.partialTail {
+		track.PartialTailTrim = true
+	}
+	track.PresentedDuration += res.presentedDur
 	switch res.class {
-	case ac4InEdit:
+	case inEdit:
 		track.SamplesInEdit++
 	default:
 		track.SamplesTrimmed++
-		if res.class == ac4TrimmedHead {
+		if res.class == trimmedHead {
 			track.PrimingSamples++
 		}
 	}
 }
 
-// ac4FinalizePriming settles how many priming frames the track begins with, preferring the
+// finalizePriming settles how many priming frames the track begins with, preferring the
 // edit list and falling back to the I-frame cadence. Call once per track, after the scan.
-func ac4FinalizePriming(track *AC4Track) {
+func finalizePriming(track *Track) {
 	if track.PrimingSamples > 0 {
 		track.PrimingBasis = PrimingFromEdit // the edit list said so: definitive
 		return
 	}
-	if ac4CadencePriming(track.IFrames) {
+	if cadencePriming(track.IFrames) {
 		track.PrimingSamples = 1
 		track.PrimingBasis = PrimingFromCadence
 	}
 }
 
-// ac4CadencePriming reports the priming signature in a track's I-frame list: sample 1 is an
+// cadencePriming reports the priming signature in a track's I-frame list: sample 1 is an
 // I-frame, sample 2 is the next one, and the I-frame after that is more than one sample
 // later. The middle condition is the priming frame's cadence anchor; the last one keeps a
 // stream whose every frame is an I-frame from reading as primed. Requiring three I-frames
@@ -347,7 +400,7 @@ func ac4FinalizePriming(track *AC4Track) {
 //
 // Suggestive only — it is a cadence, not a signal. Use it just for sources whose edit list
 // is gone (an avpipe fmp4-segment mez writes no edts), never in place of one that is there.
-func ac4CadencePriming(iframes []AC4SampleSync) bool {
+func cadencePriming(iframes []SampleSync) bool {
 	if len(iframes) < 3 || iframes[0].SampleNumber != 1 {
 		return false
 	}
@@ -355,20 +408,20 @@ func ac4CadencePriming(iframes []AC4SampleSync) bool {
 		iframes[2].SampleNumber-iframes[1].SampleNumber > 1
 }
 
-func ac4FramesProgressive(file *mp4.File, rs io.ReadSeeker, max int) ([]AC4Track, error) {
+func framesProgressive(file *mp4.File, rs io.ReadSeeker, max int) ([]Track, error) {
 	var movieTimescale uint32
 	if file.Moov.Mvhd != nil {
 		movieTimescale = file.Moov.Mvhd.Timescale
 	}
-	var out []AC4Track
+	var out []Track
 	for _, trak := range file.Moov.Traks {
-		if !isAC4Trak(trak) {
+		if !isTrak(trak) {
 			continue
 		}
 		stbl := trak.Mdia.Minf.Stbl
-		track := AC4Track{TrackID: int(trak.Tkhd.TrackID)}
-		var window ac4EditWindow
-		track.Edit, window = parseAC4Edit(trak, movieTimescale)
+		track := Track{TrackID: int(trak.Tkhd.TrackID)}
+		var window editWindow
+		track.Edit, window = parseEdit(trak, movieTimescale)
 		nrSamples := stbl.Stsz.GetNrSamples()
 		var decodeTime uint64
 		for nr := uint32(1); nr <= nrSamples; nr++ {
@@ -391,16 +444,16 @@ func ac4FramesProgressive(file *mp4.File, rs io.ReadSeeker, max int) ([]AC4Track
 			containerSync := stbl.Stss == nil || stbl.Stss.IsSyncSample(nr)
 			edit := window.classify(decodeTime, dur)
 			track.SamplesProcessed++
-			ac4CountMismatch(&track, toc.IFrameGlobal, containerSync)
-			ac4RecordSampleEdit(&track, edit)
+			countMismatch(&track, toc.IFrameGlobal, containerSync)
+			recordSampleEdit(&track, edit)
 			if toc.IFrameGlobal {
-				track.IFrames = append(track.IFrames, AC4SampleSync{
+				track.IFrames = append(track.IFrames, SampleSync{
 					SampleNumber:     int(nr),
 					DecodeTime:       decodeTime,
 					IFrameGlobal:     true,
 					ContainerSync:    containerSync,
 					PresentationTime: edit.presentationTime,
-					InEdit:           edit.class == ac4InEdit,
+					InEdit:           edit.class == inEdit,
 				})
 				if max > 0 && len(track.IFrames) >= max {
 					break
@@ -408,7 +461,7 @@ func ac4FramesProgressive(file *mp4.File, rs io.ReadSeeker, max int) ([]AC4Track
 			}
 			decodeTime += uint64(dur)
 		}
-		ac4FinalizePriming(&track)
+		finalizePriming(&track)
 		out = append(out, track)
 	}
 	return out, nil
@@ -432,31 +485,31 @@ func readProgressiveSample(rs io.ReadSeeker, trak *mp4.TrakBox, nr uint32) ([]by
 	return readRange(rs, int64(ranges[0].Offset), readLen)
 }
 
-type ac4TrackState struct {
-	track      AC4Track
+type trackState struct {
+	track      Track
 	nextSample int // 1-based running sample number across fragments
-	window     ac4EditWindow
+	window     editWindow
 }
 
-func ac4FramesFragmented(file *mp4.File, rs io.ReadSeeker, max int) ([]AC4Track, error) {
+func framesFragmented(file *mp4.File, rs io.ReadSeeker, max int) ([]Track, error) {
 	var movieTimescale uint32
 	if file.Moov.Mvhd != nil {
 		movieTimescale = file.Moov.Mvhd.Timescale
 	}
 	var order []uint32
 	trexByID := map[uint32]*mp4.TrexBox{}
-	states := map[uint32]*ac4TrackState{}
+	states := map[uint32]*trackState{}
 	for _, trak := range file.Moov.Traks {
-		if !isAC4Trak(trak) {
+		if !isTrak(trak) {
 			continue
 		}
 		id := trak.Tkhd.TrackID
 		order = append(order, id)
-		st := &ac4TrackState{track: AC4Track{TrackID: int(id)}, nextSample: 1}
+		st := &trackState{track: Track{TrackID: int(id)}, nextSample: 1}
 		// A fragmented file's edit list lives in the init segment's trak, so it applies
 		// across every fragment; sample decode times are absolute (tfdt/trun), so the
 		// same classifier works unchanged.
-		st.track.Edit, st.window = parseAC4Edit(trak, movieTimescale)
+		st.track.Edit, st.window = parseEdit(trak, movieTimescale)
 		states[id] = st
 		if file.Moov.Mvex != nil {
 			trexByID[id], _ = file.Moov.Mvex.GetTrex(id)
@@ -466,7 +519,7 @@ func ac4FramesFragmented(file *mp4.File, rs io.ReadSeeker, max int) ([]AC4Track,
 		return nil, nil
 	}
 
-	e := errors.T("mp4e.ac4FramesFragmented", errors.K.Invalid.Default())
+	e := errors.T("mp4e.framesFragmented", errors.K.Invalid.Default())
 	var firstErr error // first structural (whole-fragment) failure; results still returned
 	done := map[uint32]bool{}
 	remaining := len(order)
@@ -504,7 +557,7 @@ func ac4FramesFragmented(file *mp4.File, rs io.ReadSeeker, max int) ([]AC4Track,
 					}
 					continue
 				}
-				if ac4AppendFragmentSamples(states[id], samples, max) {
+				if appendFragmentSamples(states[id], samples, max) {
 					done[id] = true
 					remaining--
 				}
@@ -518,9 +571,9 @@ func ac4FramesFragmented(file *mp4.File, rs io.ReadSeeker, max int) ([]AC4Track,
 		}
 	}
 
-	out := make([]AC4Track, 0, len(order))
+	out := make([]Track, 0, len(order))
 	for _, id := range order {
-		ac4FinalizePriming(&states[id].track)
+		finalizePriming(&states[id].track)
 		out = append(out, states[id].track)
 	}
 	return out, firstErr
@@ -537,9 +590,9 @@ func fragHasTrack(frag *mp4.Fragment, id uint32) bool {
 	return false
 }
 
-// ac4AppendFragmentSamples appends the I-frames from one fragment's samples, advancing the
+// appendFragmentSamples appends the I-frames from one fragment's samples, advancing the
 // track's running sample number. It returns true once the track reaches the limit.
-func ac4AppendFragmentSamples(st *ac4TrackState, samples []mp4.FullSample, max int) bool {
+func appendFragmentSamples(st *trackState, samples []mp4.FullSample, max int) bool {
 	for i := range samples {
 		s := &samples[i]
 		nr := st.nextSample
@@ -559,18 +612,18 @@ func ac4AppendFragmentSamples(st *ac4TrackState, samples []mp4.FullSample, max i
 		containerSync := !mp4.DecodeSampleFlags(s.Flags).SampleIsNonSync
 		edit := st.window.classify(s.DecodeTime, s.Dur)
 		st.track.SamplesProcessed++
-		ac4CountMismatch(&st.track, toc.IFrameGlobal, containerSync)
-		ac4RecordSampleEdit(&st.track, edit)
+		countMismatch(&st.track, toc.IFrameGlobal, containerSync)
+		recordSampleEdit(&st.track, edit)
 		if !toc.IFrameGlobal {
 			continue
 		}
-		st.track.IFrames = append(st.track.IFrames, AC4SampleSync{
+		st.track.IFrames = append(st.track.IFrames, SampleSync{
 			SampleNumber:     nr,
 			DecodeTime:       s.DecodeTime,
 			IFrameGlobal:     true,
 			ContainerSync:    containerSync,
 			PresentationTime: edit.presentationTime,
-			InEdit:           edit.class == ac4InEdit,
+			InEdit:           edit.class == inEdit,
 		})
 		if max > 0 && len(st.track.IFrames) >= max {
 			return true
@@ -579,10 +632,10 @@ func ac4AppendFragmentSamples(st *ac4TrackState, samples []mp4.FullSample, max i
 	return false
 }
 
-// ac4CountMismatch updates a track's sync-signaling mismatch counters for one processed
+// countMismatch updates a track's sync-signaling mismatch counters for one processed
 // sample: container over-marking (container says sync, bitstream says not an I-frame) and
 // the reverse (a real I-frame the container does not flag as sync).
-func ac4CountMismatch(track *AC4Track, iframeGlobal, containerSync bool) {
+func countMismatch(track *Track, iframeGlobal, containerSync bool) {
 	switch {
 	case containerSync && !iframeGlobal:
 		track.ContainerSyncNotIFrame++
@@ -591,7 +644,7 @@ func ac4CountMismatch(track *AC4Track, iframeGlobal, containerSync bool) {
 	}
 }
 
-func isAC4Trak(trak *mp4.TrakBox) bool {
+func isTrak(trak *mp4.TrakBox) bool {
 	if trak.Mdia == nil || trak.Mdia.Minf == nil || trak.Mdia.Minf.Stbl == nil ||
 		trak.Mdia.Minf.Stbl.Stsd == nil {
 		return false

@@ -3448,6 +3448,14 @@ should_stop_decoding(
  * 103 190-2), and the encoder places such a sample immediately after the priming frame, so nothing
  * that is presented depends on what is dropped. This must NOT be generalized to AAC, whose frames
  * depend on the previous block's MDCT overlap - hence the codec gate.
+ *
+ * This mechanism is whole-frame only. An elst.segment_duration that is not a multiple of the AC-4
+ * frame length leaves a sub-frame remainder inside the last kept sample, which no drop can express
+ * and which cannot be expressed on the output either (see the AV_PKT_DATA_SKIP_SAMPLES comment
+ * below). The output is then longer than the source's presented duration by up to one frame - e.g.
+ * DEE Atmos at frame_rate_index 13 (2048 ticks) with segment_duration 480000: the 235 presented
+ * frames span 481280, so 1280 ticks (26.7 ms) of encoder padding survive at the tail. Accepted by
+ * design, not an oversight.
  */
 static int
 skip_discarded_bypass_packet(
@@ -3474,9 +3482,20 @@ skip_discarded_bypass_packet(
     /*
      * A retained packet carrying AV_PKT_DATA_SKIP_SAMPLES means the edit trims part of a sample
      * (media_time is not frame aligned): mov_fix_index() keeps such a frame and asks the decoder to
-     * drop samples from within it instead of discarding it. ISOBMFF cannot express a sub-sample trim
-     * on the output either, so the bypass path can only carry the whole sample - warn rather than
-     * lose the distinction silently. Not produced by DEE, whose media_time is a whole frame.
+     * drop samples from within it instead of discarding it.
+     *
+     * ISOBMFF can express a sub-sample trim, but only through an edit list: ISO/IEC 14496-12
+     * 8.6.6.1 NOTE states that edits are not restricted to fall on sample times, and that the first
+     * and last samples of an edit may need to be decoded and then sliced by the receiver. This path
+     * cannot emit one, for the reset_timestamps=on reason above. A shortened stts/trun sample
+     * duration is not a substitute: 8.6.1.2.1 defines the sum of the deltas as the length of the
+     * *media* in the track, "not considering any edit list", so shortening a sample would misstate
+     * what is stored rather than express what is presented. (AC-4 does legitimately use non-matching
+     * deltas - ETSI TS 103 190-2 table E.1 mandates a non-constant 1601/1602 at frame_rate_index 3
+     * with timescale 48000 - but that is timescale rounding whose sum stays exact, not a trim.)
+     *
+     * So the bypass path can only carry the whole sample - warn rather than lose the distinction
+     * silently. Not produced by DEE, whose media_time is a whole frame.
      */
     if (av_packet_get_side_data(input_packet, AV_PKT_DATA_SKIP_SAMPLES, NULL))
         elv_warn("BYPASS partial-sample AC-4 edit not applied, whole sample kept stream_index=%d "

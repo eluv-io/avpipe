@@ -1,9 +1,7 @@
-package mp4e
+package ac4
 
 import (
 	"bytes"
-	"encoding/json"
-	"flag"
 	"os"
 	"testing"
 
@@ -13,13 +11,6 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-// ac4DumpFile points TestAC4Dump at an arbitrary AC-4 MP4 to inspect, e.g.:
-//
-//	go test ./mp4e/ -run TestAC4Dump -v \
-//	    -ac4.file=/Users/peter/d/media/dolby/ac4-atmos/elv_ac4_atmos_bumblebee.mp4
-var ac4DumpFile = flag.String("ac4.file", "",
-	"path to an AC-4 MP4 to dump parsed info for (TestAC4Dump); empty skips the test")
-
 // assetAC4 is a progressive (non-fragmented) 5.1 AC-4 audio-only file. Ground truth
 // (verified out of band): 25 fps, 800 samples, an I-frame every 25 frames -> 32 total at
 // samples 1,26,51,...,776, with a correct stss (container and bitstream agree).
@@ -27,27 +18,51 @@ var ac4DumpFile = flag.String("ac4.file", "",
 // segment_duration 1536000} whose end lands exactly on the last sample's end, so it
 // exercises the tail boundary without excluding anything.
 const (
-	assetAC4         = "../media/Audio_ID_6ch_128kbps_25fps_ac4.mp4" // AVC absent; AC4 5.1, progressive
+	assetAC4         = "../../media/Audio_ID_6ch_128kbps_25fps_ac4.mp4" // AVC absent; AC4 5.1, progressive
 	assetAC4Samples  = 800
 	assetAC4IFrames  = 32
 	assetAC4Interval = 25
 	assetAC4EditDur  = 1536000 // = 800 samples x 1920 ticks, mvhd and mdhd both 48000
 )
 
-// assetAC4Priming is the DEE-authored Atmos asset: 237 samples at 2048 ticks
-// (frame_rate_index 13), an I-frame every 47 frames, and the only asset with a priming
-// frame — elst {segment_duration 480000, media_time 2048} trims sample 1 at the head and
-// sample 237 past the edit's end, leaving 235 presented frames = 5 x 47.
+// assetAC4Atmos10s is the longer DEE-authored Atmos asset: 237 samples at 2048 ticks
+// (frame_rate_index 13), an I-frame every 47 frames — elst {segment_duration 480000,
+// media_time 2048} trims sample 1 at the head and sample 237 past the edit's end, leaving
+// 235 presented frames = 5 x 47. Of the 7 I-frames, 5 are presented and both trimmed
+// samples happen to be I-frames, which is the coverage it adds over assetAC4Atmos: an
+// I-frame wholly past the edit end, reported rather than dropped.
 //
-// Absolute path: not yet in gs://eluvio-test-assets, so tests using it skip when absent.
+// Same content as assetAC4Atmos otherwise — both are DEE Atmos at frame_rate_index 13 with a
+// priming frame and a segment_duration that is not a frame multiple. Length and I-frame
+// cadence are what differ, so the two are worth keeping as separate rows.
 const (
-	assetAC4Priming          = "/Users/peter/d/media/dolby/ac4-atmos/elv_ac4_atmos_bumblebee.mp4"
-	assetAC4PrimingSamples   = 237
-	assetAC4PrimingInEdit    = 235
-	assetAC4PrimingFrameDur  = 2048
-	assetAC4PrimingInterval  = 47
-	assetAC4PrimingMediaTime = 2048
-	assetAC4PrimingEditDur   = 480000
+	assetAC4Atmos10s          = "../../media/sample_ac4_atmos_10s.mp4"
+	assetAC4Atmos10sSamples   = 237
+	assetAC4Atmos10sInEdit    = 235
+	assetAC4Atmos10sIFrames   = 7
+	assetAC4Atmos10sFrameDur  = 2048
+	assetAC4Atmos10sInterval  = 47
+	assetAC4Atmos10sMediaTime = 2048
+	assetAC4Atmos10sEditDur   = 480000
+)
+
+// assetAC4Atmos is the in-repo DEE-authored Atmos asset: 49 samples at 2048 ticks
+// (frame_rate_index 13), an I-frame every 23 frames, a priming frame at the head, and an
+// elst whose segment_duration is NOT a multiple of the frame length —
+// {media_time 2048, segment_duration 96000} with 2048-tick frames, so the edit ends 1792
+// ticks into sample 48 rather than on a boundary.
+//
+// It is the short counterpart to assetAC4Atmos10s for the partial-tail case:
+// PresentedDuration is 96000 while SamplesInEdit x 2048 is 96256.
+const (
+	assetAC4Atmos          = "../../media/sample_ac4_atmos.mp4"
+	assetAC4AtmosSamples   = 49
+	assetAC4AtmosInEdit    = 47
+	assetAC4AtmosIFrames   = 4
+	assetAC4AtmosFrameDur  = 2048
+	assetAC4AtmosInterval  = 23
+	assetAC4AtmosMediaTime = 2048
+	assetAC4AtmosEditDur   = 96000
 )
 
 // assetAC4Frag is a fragmented file whose AC-4 track (5.1.4) is sync-over-marked: the
@@ -55,16 +70,16 @@ const (
 // bitstream I-frame. This is unrelated content to assetAC4 — the matching I-frame counts
 // are a coincidence of both being ~32 s of 25 fps AC-4, not a shared elementary stream.
 const (
-	assetAC4Frag        = "../media/Audio_ID_720p_50fps_h264_514ch_192kbps_ac4_fra.mp4" // AVC + AC4 5.1.4, fragmented
+	assetAC4Frag        = "../../media/Audio_ID_720p_50fps_h264_514ch_192kbps_ac4_fra.mp4" // AVC + AC4 5.1.4, fragmented
 	assetAC4FragIFrames = 32
 )
 
-func TestAC4IFramesProgressive(t *testing.T) {
+func TestIFramesProgressive(t *testing.T) {
 	f, err := os.ReadFile(assetAC4)
 	require.NoError(t, err)
 
 	// Unlimited: full set of true I-frames.
-	tracks, err := AC4IFrames(bytes.NewReader(f), 0)
+	tracks, err := IFrames(bytes.NewReader(f), 0)
 	require.NoError(t, err)
 	require.Len(t, tracks, 1)
 	tr := tracks[0]
@@ -99,7 +114,7 @@ func TestAC4IFramesProgressive(t *testing.T) {
 	}
 
 	// Default limit stops early; counters are over the samples processed up to that point.
-	tracks, err = AC4IFrames(bytes.NewReader(f), ac4.DefaultMaxIFrames)
+	tracks, err = IFrames(bytes.NewReader(f), ac4.DefaultMaxIFrames)
 	require.NoError(t, err)
 	require.Len(t, tracks, 1)
 	assert.Len(t, tracks[0].IFrames, ac4.DefaultMaxIFrames)
@@ -107,14 +122,14 @@ func TestAC4IFramesProgressive(t *testing.T) {
 	assert.Equal(t, (ac4.DefaultMaxIFrames-1)*assetAC4Interval+1, tracks[0].SamplesProcessed)
 }
 
-// TestAC4IFramesFragmentedOvermarked proves the payoff: the container marks every sample
+// TestIFramesFragmentedOvermarked proves the payoff: the container marks every sample
 // as a sync sample, yet the bitstream has only a fraction that many true I-frames.
-func TestAC4IFramesFragmentedOvermarked(t *testing.T) {
+func TestIFramesFragmentedOvermarked(t *testing.T) {
 	f, err := os.ReadFile(assetAC4Frag)
 	if err != nil {
 		t.Skipf("fragmented asset not present: %v", err)
 	}
-	tracks, err := AC4IFrames(bytes.NewReader(f), 0)
+	tracks, err := IFrames(bytes.NewReader(f), 0)
 	require.NoError(t, err)
 	require.Len(t, tracks, 1, "one AC-4 track")
 	tr := tracks[0]
@@ -145,80 +160,136 @@ func TestAC4IFramesFragmentedOvermarked(t *testing.T) {
 	}
 }
 
-// TestAC4EditPrimingTrim is the edit-list payoff: on the one asset that has a priming
-// frame, the scan reports presented audio rather than stored samples — the priming frame
-// and the out-of-edit tail flagged as trimmed, presentation time rebased to the edit, and
-// the priming count taken from the edit list rather than guessed.
-//
-// The presentation times are also the bridge to what avpipe emits. Applying the edit puts
-// the presented I-frames at 0, 96256, 192512, ... which is exactly where AC4IFrames finds
-// them (as decode times) in avpipe's edit-list-free bypass output. Asserting the times
-// rather than two hard-coded sample-number lists keeps the two views tied together.
-func TestAC4EditPrimingTrim(t *testing.T) {
-	f, err := os.ReadFile(assetAC4Priming)
-	if err != nil {
-		t.Skipf("priming asset not present: %v", err)
-	}
-	tracks, err := AC4IFrames(bytes.NewReader(f), 0)
-	require.NoError(t, err)
-	require.Len(t, tracks, 1)
-	tr := tracks[0]
+// editAsset is one asset's ground truth for TestEditApplied. Both assets are DEE-authored
+// Atmos at frame_rate_index 13 with a priming frame and an elst whose segment_duration is
+// not a frame multiple; they differ in length and I-frame cadence.
+type editAsset struct {
+	name string
+	path string
 
-	require.True(t, tr.Edit.Applied, "unapplied: %s", tr.Edit.Unapplied)
-	assert.EqualValues(t, assetAC4PrimingMediaTime, tr.Edit.MediaTime)
-	assert.EqualValues(t, assetAC4PrimingEditDur, tr.Edit.Duration)
+	samples   int    // SamplesProcessed
+	inEdit    int    // SamplesInEdit
+	iframes   int    // I-frames in the file, including those the edit trims
+	presented int    // I-frames the edit presents
+	frameDur  uint64 // sample duration, mdhd ticks
+	interval  int    // frames between presented I-frames
+	mediaTime int64  // elst media_time
+	editDur   uint64 // elst segment_duration, mdhd ticks
 
-	// One priming frame at the head and one sample past the edit's end at the tail.
-	assert.Equal(t, assetAC4PrimingSamples, tr.SamplesProcessed)
-	assert.Equal(t, assetAC4PrimingInEdit, tr.SamplesInEdit)
-	assert.Equal(t, assetAC4PrimingSamples-assetAC4PrimingInEdit, tr.SamplesTrimmed)
-	assert.Equal(t, 1, tr.PrimingSamples)
-	assert.Equal(t, PrimingFromEdit, tr.PrimingBasis,
-		"with an edit list present the count must be definitive, not inferred")
-	assert.False(t, tr.PartialHeadTrim, "media_time 2048 is exactly one frame")
-
-	// Sample 1 is the priming frame: an I-frame, but not presented. Its presentation time
-	// is the negative pts the mov demuxer reports for the same sample (-2048), which is how
-	// this reference implementation and avpipe's C path are checked against each other.
-	require.NotEmpty(t, tr.IFrames)
-	first := tr.IFrames[0]
-	assert.Equal(t, 1, first.SampleNumber)
-	assert.False(t, first.InEdit, "the priming frame is trimmed, not presented")
-	assert.EqualValues(t, -assetAC4PrimingMediaTime, first.PresentationTime)
-
-	// The presented I-frames sit at exact multiples of the I-frame interval from
-	// presentation time 0 — the segment boundaries avpipe can cut on.
-	var presented []AC4SampleSync
-	for _, sync := range tr.IFrames {
-		if sync.InEdit {
-			presented = append(presented, sync)
-		}
-	}
-	require.Equal(t, assetAC4PrimingInEdit/assetAC4PrimingInterval, len(presented))
-	for i, sync := range presented {
-		assert.EqualValues(t, i*assetAC4PrimingInterval*assetAC4PrimingFrameDur,
-			sync.PresentationTime, "presented I-frame %d", i)
-		// Same fact stated in sample numbers: renumbering the source's samples past the
-		// priming frame gives the output's sample numbers.
-		assert.Equal(t, i*assetAC4PrimingInterval+1, sync.SampleNumber-tr.PrimingSamples,
-			"presented I-frame %d renumbered", i)
-	}
-
-	// The tail sample is an I-frame the edit excludes, and it is reported, not dropped.
-	last := tr.IFrames[len(tr.IFrames)-1]
-	assert.Equal(t, assetAC4PrimingSamples, last.SampleNumber)
-	assert.False(t, last.InEdit, "the sample past the edit end is trimmed")
+	// tailIFrame reports that the sample past the edit's end is itself an I-frame, so the
+	// scan must report it with InEdit false rather than drop it. Only the longer asset has
+	// one, which is the coverage it adds over the in-repo file.
+	tailIFrame bool
 }
 
-// TestAC4IFramesESEquivalence builds an AC-4 elementary stream from the progressive
+var editAssets = []editAsset{{
+	name: "in-repo Atmos", path: assetAC4Atmos,
+	samples: assetAC4AtmosSamples, inEdit: assetAC4AtmosInEdit,
+	iframes: assetAC4AtmosIFrames, presented: assetAC4AtmosIFrames - 1,
+	frameDur: assetAC4AtmosFrameDur, interval: assetAC4AtmosInterval,
+	mediaTime: assetAC4AtmosMediaTime, editDur: assetAC4AtmosEditDur,
+}, {
+	name: "DEE Atmos 10s", path: assetAC4Atmos10s,
+	samples: assetAC4Atmos10sSamples, inEdit: assetAC4Atmos10sInEdit,
+	iframes: assetAC4Atmos10sIFrames, presented: assetAC4Atmos10sIFrames - 2,
+	frameDur: assetAC4Atmos10sFrameDur, interval: assetAC4Atmos10sInterval,
+	mediaTime: assetAC4Atmos10sMediaTime, editDur: assetAC4Atmos10sEditDur,
+	tailIFrame: true,
+}}
+
+// TestEditApplied is the edit-list payoff: the scan reports presented audio rather than
+// stored samples — the priming frame and any out-of-edit tail flagged as trimmed,
+// presentation time rebased to the edit, and the priming count taken from the edit list
+// rather than guessed.
+//
+// It also covers the partial tail. Neither asset's segment_duration is a multiple of the
+// frame length, so the edit ends inside the last presented sample. That sample is kept whole
+// and counted in SamplesInEdit — matching what both ISOBMFF and the mov demuxer do — so
+// SamplesInEdit x frame duration overstates the presented span, and PresentedDuration is the
+// number a caller must use.
+//
+// The presentation times are the bridge to what avpipe emits: they are exactly where IFrames
+// finds the I-frames (as decode times) in avpipe's edit-list-free bypass output, which
+// TestAudioAC4BypassStructure asserts from the other side.
+func TestEditApplied(t *testing.T) {
+	for _, a := range editAssets {
+		t.Run(a.name, func(t *testing.T) {
+			f, err := os.ReadFile(a.path)
+			require.NoError(t, err)
+
+			tracks, err := IFrames(bytes.NewReader(f), 0)
+			require.NoError(t, err)
+			require.Len(t, tracks, 1)
+			tr := tracks[0]
+
+			require.True(t, tr.Edit.Applied, "unapplied: %s", tr.Edit.Unapplied)
+			assert.EqualValues(t, a.mediaTime, tr.Edit.MediaTime)
+			assert.EqualValues(t, a.editDur, tr.Edit.Duration)
+
+			// One priming frame at the head; whole samples past the edit end at the tail.
+			assert.Equal(t, a.samples, tr.SamplesProcessed)
+			assert.Equal(t, a.inEdit, tr.SamplesInEdit)
+			assert.Equal(t, a.samples-a.inEdit, tr.SamplesTrimmed)
+			assert.Equal(t, 1, tr.PrimingSamples)
+			assert.Equal(t, PrimingFromEdit, tr.PrimingBasis,
+				"with an edit list present the count must be definitive, not inferred")
+			assert.False(t, tr.PartialHeadTrim, "media_time is exactly one frame")
+
+			// The edit end lands inside the last presented sample, which is kept and counted
+			// in SamplesInEdit — hence the two durations differ.
+			assert.True(t, tr.PartialTailTrim, "segment_duration is not a frame multiple")
+			assert.EqualValues(t, a.editDur, tr.PresentedDuration,
+				"PresentedDuration must equal the edit's segment_duration")
+			assert.NotEqual(t, uint64(a.inEdit)*a.frameDur, tr.PresentedDuration,
+				"the whole-sample product overstates the presented span - that is why the field exists")
+
+			// Sample 1 is the priming frame: an I-frame, but not presented. Its presentation
+			// time is the negative pts the mov demuxer reports for the same sample, which is
+			// how this reference implementation and avpipe's C path are checked against each
+			// other.
+			require.Len(t, tr.IFrames, a.iframes)
+			first := tr.IFrames[0]
+			assert.Equal(t, 1, first.SampleNumber)
+			assert.False(t, first.InEdit, "the priming frame is trimmed, not presented")
+			assert.EqualValues(t, -a.mediaTime, first.PresentationTime)
+
+			// The presented I-frames sit at exact multiples of the I-frame interval from
+			// presentation time 0 — the segment boundaries avpipe can cut on.
+			var presented []SampleSync
+			for _, sync := range tr.IFrames {
+				if sync.InEdit {
+					presented = append(presented, sync)
+				}
+			}
+			require.Len(t, presented, a.presented)
+			for i, sync := range presented {
+				assert.EqualValues(t, uint64(i*a.interval)*a.frameDur, sync.PresentationTime,
+					"presented I-frame %d", i)
+				// Same fact in sample numbers: renumbering the source's samples past the
+				// priming frame gives the output's sample numbers.
+				assert.Equal(t, i*a.interval+1, sync.SampleNumber-tr.PrimingSamples,
+					"presented I-frame %d renumbered", i)
+			}
+
+			// An I-frame wholly past the edit end is reported, not dropped.
+			if a.tailIFrame {
+				tail := tr.IFrames[len(tr.IFrames)-1]
+				assert.Equal(t, a.samples, tail.SampleNumber)
+				assert.False(t, tail.InEdit, "the sample past the edit end is trimmed")
+			}
+		})
+	}
+}
+
+// TestIFramesESEquivalence builds an AC-4 elementary stream from the progressive
 // file's samples (no external tooling) and asserts the ES scanner finds the same I-frame
 // positions as the MP4 adapter — a true equivalence test on identical frame bytes.
-func TestAC4IFramesESEquivalence(t *testing.T) {
+func TestIFramesESEquivalence(t *testing.T) {
 	f, err := os.ReadFile(assetAC4)
 	require.NoError(t, err)
 
 	// MP4 adapter I-frame sample numbers -> expected 0-based ES indices.
-	tracks, err := AC4IFrames(bytes.NewReader(f), 0)
+	tracks, err := IFrames(bytes.NewReader(f), 0)
 	require.NoError(t, err)
 	require.Len(t, tracks, 1)
 	var wantIdx []int
@@ -227,20 +298,20 @@ func TestAC4IFramesESEquivalence(t *testing.T) {
 	}
 
 	// Wrap every AC-4 sample in a 0xAC40 sync frame to synthesize the ES.
-	es := ac4ESFromProgressive(t, f)
+	es := esFromProgressive(t, f)
 	gotIdx, err := ac4.IFrameIndices(bytes.NewReader(es), 0)
 	require.NoError(t, err)
 	assert.Equal(t, wantIdx, gotIdx)
 }
 
-// TestAC4IFramesTruncatedCountsFrameErrors truncates the file mid-mdat (moov precedes
+// TestIFramesTruncatedCountsFrameErrors truncates the file mid-mdat (moov precedes
 // mdat, so it still decodes) and verifies the scan runs to completion: samples past the
 // cut are counted in FrameErrors and skipped, not fatal, and results are still returned.
-func TestAC4IFramesTruncatedCountsFrameErrors(t *testing.T) {
+func TestIFramesTruncatedCountsFrameErrors(t *testing.T) {
 	f, err := os.ReadFile(assetAC4)
 	require.NoError(t, err)
 
-	tracks, err := AC4IFrames(bytes.NewReader(f[:len(f)/2]), 0)
+	tracks, err := IFrames(bytes.NewReader(f[:len(f)/2]), 0)
 	require.NoError(t, err) // per-sample read failures are non-fatal
 	require.Len(t, tracks, 1)
 	tr := tracks[0]
@@ -250,54 +321,7 @@ func TestAC4IFramesTruncatedCountsFrameErrors(t *testing.T) {
 		"every sample is either processed or counted as an error")
 }
 
-// TestAC4Dump prints the parsed AC-4 info for the file given via -ac4.file: the dac4
-// codec/presentation info (from ExtractCodecInfo) and the per-track I-frame scan with its
-// mismatch/error counters (from AC4IFrames). It is a diagnostic, not an assertion — it
-// skips unless a file is provided and completes even on a partial scan.
-func TestAC4Dump(t *testing.T) {
-	if *ac4DumpFile == "" {
-		t.Skip("set -ac4.file=<path> to dump parsed AC-4 info")
-	}
-	f, err := os.ReadFile(*ac4DumpFile)
-	require.NoError(t, err)
-	t.Logf("file: %s (%d bytes)", *ac4DumpFile, len(f))
-
-	// dac4 codec / presentation info.
-	infos, err := ExtractCodecInfo(bytes.NewReader(f))
-	require.NoError(t, err)
-	for _, ci := range infos {
-		if ci.AC4 == nil {
-			continue
-		}
-		t.Logf("codec string: %s", ci.AC4.MimeCodecString())
-		b, err := json.MarshalIndent(ci.AC4, "", "  ")
-		require.NoError(t, err)
-		t.Logf("dac4 AC4Info:\n%s", b)
-	}
-
-	// Per-track I-frame scan (unlimited). Print results even if the scan hit a structural
-	// error — AC4IFrames returns whatever it gathered.
-	tracks, err := AC4IFrames(bytes.NewReader(f), 0)
-	if err != nil {
-		t.Logf("AC4IFrames error (partial results follow): %v", err)
-	}
-	for _, tr := range tracks {
-		t.Logf("track %d: samplesProcessed=%d iframes=%d frameErrors=%d containerSyncNotIFrame=%d iframeNotContainerSync=%d",
-			tr.TrackID, tr.SamplesProcessed, len(tr.IFrames), tr.FrameErrors,
-			tr.ContainerSyncNotIFrame, tr.IFrameNotContainerSync)
-		t.Logf("  edit: present=%v applied=%v unapplied=%q mediaTime=%d duration=%d",
-			tr.Edit.Present, tr.Edit.Applied, tr.Edit.Unapplied, tr.Edit.MediaTime, tr.Edit.Duration)
-		t.Logf("  samplesInEdit=%d samplesTrimmed=%d priming=%d basis=%q partialHeadTrim=%v",
-			tr.SamplesInEdit, tr.SamplesTrimmed, tr.PrimingSamples, tr.PrimingBasis,
-			tr.PartialHeadTrim)
-		for _, s := range tr.IFrames {
-			t.Logf("  I-frame sample=%d decodeTime=%d presentationTime=%d inEdit=%v containerSync=%v",
-				s.SampleNumber, s.DecodeTime, s.PresentationTime, s.InEdit, s.ContainerSync)
-		}
-	}
-}
-
-// TestAC4CadencePrimingOnAsset exercises the cadence heuristic on real bitstream data by
+// TestCadencePrimingOnAsset exercises the cadence heuristic on real bitstream data by
 // neutralizing the priming asset's head trim: with media_time 0 the edit list no longer
 // says anything about priming, but the priming frame is still there as sample 1. That is
 // exactly the shape of an avpipe fmp4-segment mez, which writes no edts at all — the case
@@ -305,14 +329,14 @@ func TestAC4Dump(t *testing.T) {
 //
 // media_time is zeroed in place rather than by removing the edts, because this file has
 // moov before mdat: dropping a box would shift mdat and invalidate every stco offset.
-func TestAC4CadencePrimingOnAsset(t *testing.T) {
-	f, err := os.ReadFile(assetAC4Priming)
+func TestCadencePrimingOnAsset(t *testing.T) {
+	f, err := os.ReadFile(assetAC4Atmos10s)
 	if err != nil {
 		t.Skipf("priming asset not present: %v", err)
 	}
-	patched := ac4ZeroElstMediaTime(t, f)
+	patched := zeroElstMediaTime(t, f)
 
-	tracks, err := AC4IFrames(bytes.NewReader(patched), 0)
+	tracks, err := IFrames(bytes.NewReader(patched), 0)
 	require.NoError(t, err)
 	require.Len(t, tracks, 1)
 	tr := tracks[0]
@@ -332,10 +356,10 @@ func TestAC4CadencePrimingOnAsset(t *testing.T) {
 	assert.Equal(t, PrimingFromCadence, tr.PrimingBasis)
 }
 
-// ac4ZeroElstMediaTime returns a copy of an MP4 with the first elst entry's media_time set
+// zeroElstMediaTime returns a copy of an MP4 with the first elst entry's media_time set
 // to 0, leaving every byte offset unchanged. Version 0 layout from the 'elst' type marker:
 // +4 version/flags, +8 entry_count, +12 segment_duration, +16 media_time (all 32-bit).
-func ac4ZeroElstMediaTime(t *testing.T, data []byte) []byte {
+func zeroElstMediaTime(t *testing.T, data []byte) []byte {
 	t.Helper()
 	i := bytes.Index(data, []byte("elst"))
 	require.GreaterOrEqual(t, i, 0, "asset must have an elst to patch")
@@ -346,9 +370,9 @@ func ac4ZeroElstMediaTime(t *testing.T, data []byte) []byte {
 	return out
 }
 
-// ac4TrakWithEdit builds the minimum trak parseAC4Edit reads: a media timescale and an
+// trakWithEdit builds the minimum trak parseEdit reads: a media timescale and an
 // optional edit list. Nil entries means no edts at all.
-func ac4TrakWithEdit(mediaTimescale uint32, entries []mp4.ElstEntry) *mp4.TrakBox {
+func trakWithEdit(mediaTimescale uint32, entries []mp4.ElstEntry) *mp4.TrakBox {
 	trak := &mp4.TrakBox{
 		Mdia: &mp4.MdiaBox{Mdhd: &mp4.MdhdBox{Timescale: mediaTimescale}},
 	}
@@ -358,7 +382,7 @@ func ac4TrakWithEdit(mediaTimescale uint32, entries []mp4.ElstEntry) *mp4.TrakBo
 	return trak
 }
 
-func TestParseAC4Edit(t *testing.T) {
+func TestParseEdit(t *testing.T) {
 	simple := func(dur uint64, mediaTime int64) mp4.ElstEntry {
 		return mp4.ElstEntry{SegmentDuration: dur, MediaTime: mediaTime, MediaRateInteger: 1}
 	}
@@ -420,8 +444,8 @@ func TestParseAC4Edit(t *testing.T) {
 		wantPresent: true, wantUnapplied: "media rate is not 1.0",
 	}} {
 		t.Run(tc.name, func(t *testing.T) {
-			trak := ac4TrakWithEdit(tc.mediaTimescale, tc.entries)
-			edit, window := parseAC4Edit(trak, tc.movieTimescale)
+			trak := trakWithEdit(tc.mediaTimescale, tc.entries)
+			edit, window := parseEdit(trak, tc.movieTimescale)
 
 			assert.Equal(t, tc.wantPresent, edit.Present)
 			assert.Equal(t, tc.wantApplied, edit.Applied)
@@ -440,87 +464,93 @@ func TestParseAC4Edit(t *testing.T) {
 	}
 }
 
-func TestAC4EditWindowClassify(t *testing.T) {
+func TestEditWindowClassify(t *testing.T) {
 	// media_time 2048, presented duration 480000 -> edit end 482048: the DEE asset's edit.
-	trimming := ac4EditWindow{applied: true, mediaTime: 2048, editEnd: 482048, bounded: true}
-	unbounded := ac4EditWindow{applied: true, mediaTime: 2048}
+	trimming := editWindow{applied: true, mediaTime: 2048, editEnd: 482048, bounded: true}
+	unbounded := editWindow{applied: true, mediaTime: 2048}
 
 	for _, tc := range []struct {
-		name        string
-		window      ac4EditWindow
-		decodeTime  uint64
-		dur         uint32
-		wantPT      int64
-		wantClass   ac4SampleClass
-		wantPartial bool
+		name            string
+		window          editWindow
+		decodeTime      uint64
+		dur             uint32
+		wantPT          int64
+		wantClass       sampleClass
+		wantPartialHead bool
+		wantPartialTail bool
+		wantPresented   uint64
 	}{{
 		name:   "no edit applied leaves decode time alone",
-		window: ac4EditWindow{}, decodeTime: 4096, dur: 2048,
-		wantPT: 4096, wantClass: ac4InEdit,
+		window: editWindow{}, decodeTime: 4096, dur: 2048,
+		wantPT: 4096, wantClass: inEdit, wantPresented: 2048,
 	}, {
 		name:   "priming frame ends exactly at the edit start",
 		window: trimming, decodeTime: 0, dur: 2048,
-		wantPT: -2048, wantClass: ac4TrimmedHead,
+		wantPT: -2048, wantClass: trimmedHead,
 	}, {
 		name:   "first presented sample starts at the edit start",
 		window: trimming, decodeTime: 2048, dur: 2048,
-		wantPT: 0, wantClass: ac4InEdit,
+		wantPT: 0, wantClass: inEdit, wantPresented: 2048,
 	}, {
-		// The last sample straddles the edit end: kept whole, since neither a container
-		// nor this scan can express a fraction of a sample.
-		name:   "sample straddling the edit end is kept",
+		// The last sample straddles the edit end. It is kept whole because this scan
+		// reports stored samples; the trim it carries shows up in presentedDur (768 of
+		// its 2048 ticks) rather than by reclassifying or shortening the sample.
+		name:   "sample straddling the edit end is kept whole but flagged partial-tail",
 		window: trimming, decodeTime: 481280, dur: 2048,
-		wantPT: 479232, wantClass: ac4InEdit,
+		wantPT: 479232, wantClass: inEdit, wantPartialTail: true, wantPresented: 768,
 	}, {
 		name:   "sample starting at the edit end is trimmed",
 		window: trimming, decodeTime: 482048, dur: 2048,
-		wantPT: 480000, wantClass: ac4TrimmedTail,
+		wantPT: 480000, wantClass: trimmedTail,
 	}, {
 		name:   "sample past the edit end is trimmed",
 		window: trimming, decodeTime: 483328, dur: 2048,
-		wantPT: 481280, wantClass: ac4TrimmedTail,
+		wantPT: 481280, wantClass: trimmedTail,
 	}, {
 		// Unbounded (segment_duration 0): the head still trims, the tail never does.
 		name:   "unbounded edit trims the head",
 		window: unbounded, decodeTime: 0, dur: 2048,
-		wantPT: -2048, wantClass: ac4TrimmedHead,
+		wantPT: -2048, wantClass: trimmedHead,
 	}, {
 		name:   "unbounded edit never trims the tail",
 		window: unbounded, decodeTime: 1 << 40, dur: 2048,
-		wantPT: 1<<40 - 2048, wantClass: ac4InEdit,
+		wantPT: 1<<40 - 2048, wantClass: inEdit, wantPresented: 2048,
 	}, {
 		// media_time inside a sample: mov keeps it (with SKIP_SAMPLES) rather than
 		// dropping it, and so does this, flagging the sub-sample trim.
 		name:   "sample straddling the edit start is kept and flagged",
 		window: trimming, decodeTime: 1024, dur: 2048,
-		wantPT: -1024, wantClass: ac4InEdit, wantPartial: true,
+		wantPT: -1024, wantClass: inEdit, wantPartialHead: true, wantPresented: 1024,
 	}, {
 		// A zero-duration sample at the edit start is presented, not head-trimmed: the
-		// "ends at or before media_time" rule alone would exclude it.
+		// "ends at or before media_time" rule alone would exclude it. It contributes
+		// nothing to the presented span.
 		name:   "zero duration sample at the edit start is presented",
 		window: trimming, decodeTime: 2048, dur: 0,
-		wantPT: 0, wantClass: ac4InEdit,
+		wantPT: 0, wantClass: inEdit,
 	}} {
 		t.Run(tc.name, func(t *testing.T) {
 			got := tc.window.classify(tc.decodeTime, tc.dur)
 			assert.Equal(t, tc.wantPT, got.presentationTime)
 			assert.Equal(t, tc.wantClass, got.class)
-			assert.Equal(t, tc.wantPartial, got.partialHead)
+			assert.Equal(t, tc.wantPartialHead, got.partialHead, "partialHead")
+			assert.Equal(t, tc.wantPartialTail, got.partialTail, "partialTail")
+			assert.Equal(t, tc.wantPresented, got.presentedDur, "presentedDur")
 		})
 	}
 }
 
-func TestAC4CadencePriming(t *testing.T) {
-	iframesAt := func(nrs ...int) []AC4SampleSync {
-		out := make([]AC4SampleSync, 0, len(nrs))
+func TestCadencePriming(t *testing.T) {
+	iframesAt := func(nrs ...int) []SampleSync {
+		out := make([]SampleSync, 0, len(nrs))
 		for _, nr := range nrs {
-			out = append(out, AC4SampleSync{SampleNumber: nr, IFrameGlobal: true})
+			out = append(out, SampleSync{SampleNumber: nr, IFrameGlobal: true})
 		}
 		return out
 	}
 	for _, tc := range []struct {
 		name    string
-		iframes []AC4SampleSync
+		iframes []SampleSync
 		want    bool
 	}{{
 		// The signature: a priming frame written as ordinary content, then the cadence
@@ -543,16 +573,16 @@ func TestAC4CadencePriming(t *testing.T) {
 		name: "no iframes", iframes: nil, want: false,
 	}} {
 		t.Run(tc.name, func(t *testing.T) {
-			assert.Equal(t, tc.want, ac4CadencePriming(tc.iframes))
+			assert.Equal(t, tc.want, cadencePriming(tc.iframes))
 			// Whatever the cadence says, an edit list that already counted head-trimmed
 			// samples wins and reports itself as the basis.
-			track := AC4Track{IFrames: tc.iframes, PrimingSamples: 1}
-			ac4FinalizePriming(&track)
+			track := Track{IFrames: tc.iframes, PrimingSamples: 1}
+			finalizePriming(&track)
 			assert.Equal(t, PrimingFromEdit, track.PrimingBasis)
 			assert.Equal(t, 1, track.PrimingSamples)
 
-			track = AC4Track{IFrames: tc.iframes}
-			ac4FinalizePriming(&track)
+			track = Track{IFrames: tc.iframes}
+			finalizePriming(&track)
 			if tc.want {
 				assert.Equal(t, PrimingFromCadence, track.PrimingBasis)
 				assert.Equal(t, 1, track.PrimingSamples)
@@ -564,13 +594,13 @@ func TestAC4CadencePriming(t *testing.T) {
 	}
 }
 
-func ac4ESFromProgressive(t *testing.T, mp4Data []byte) []byte {
+func esFromProgressive(t *testing.T, mp4Data []byte) []byte {
 	t.Helper()
 	file, err := mp4.DecodeFile(bytes.NewReader(mp4Data))
 	require.NoError(t, err)
 	var es bytes.Buffer
 	for _, trak := range file.Moov.Traks {
-		if !isAC4Trak(trak) {
+		if !isTrak(trak) {
 			continue
 		}
 		stbl := trak.Mdia.Minf.Stbl

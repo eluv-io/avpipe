@@ -115,9 +115,10 @@ d=$(run_bypass seg fmp4-segment "$AC4_SAMPLE")
 seg=$(find "$d/O" -name 'afsegment*.mp4' 2>/dev/null | sort | head -1)
 if [ -z "$seg" ]; then bad "fmp4-segment (no output segment)" "$d/exc.log"
 else
-    case "$(box_cmp "$AC4_SAMPLE" "$seg" dac4)" in
+    r=$(box_cmp "$AC4_SAMPLE" "$seg" dac4)
+    case "$r" in
         MATCH)  ok "fmp4-segment (dac4 byte-identical to source)";;
-        r)      bad "fmp4-segment (dac4 $r)";;
+        *)      bad "fmp4-segment (dac4 $r)";;
     esac
 fi
 
@@ -125,9 +126,10 @@ d=$(run_bypass dash dash "$AC4_SAMPLE")
 init=$(find "$d/O" -name 'ainit-stream*.m4s' 2>/dev/null | head -1)
 if [ -z "$init" ]; then bad "dash (no audio init segment)"
 else
-    case "$(box_cmp "$AC4_SAMPLE" "$init" dac4)" in
+    r=$(box_cmp "$AC4_SAMPLE" "$init" dac4)
+    case "$r" in
         MATCH)  ok "dash init (dac4 byte-identical to source)";;
-        r)      bad "dash init (dac4 $r)";;
+        *)      bad "dash init (dac4 $r)";;
     esac
 fi
 

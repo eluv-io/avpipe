@@ -17,6 +17,7 @@ import (
 	"github.com/Eyevinn/mp4ff/sei"
 
 	"github.com/eluv-io/avpipe/goavpipe/avdesc"
+	mp4ac4 "github.com/eluv-io/avpipe/mp4e/ac4"
 	"github.com/eluv-io/errors-go"
 )
 
@@ -308,7 +309,7 @@ func buildAC4Info(d *mp4.Dac4Box) (*avdesc.AC4Info, error) {
 			return nil, e("reason", "unsupported presentation_version",
 				"presentation_index", i, "presentation_version", version)
 		}
-		p, ok := parseAC4PresentationDSI(version, pr.PresentationData)
+		p, ok := mp4ac4.ParsePresentationDSI(version, pr.PresentationData)
 		if !ok {
 			// The deep parse diverged; keep the minimal fields the codec string
 			// needs (mdcompat needs only the first DSI byte). ChMode stays nil

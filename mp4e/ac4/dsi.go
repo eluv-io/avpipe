@@ -1,4 +1,4 @@
-package mp4e
+package ac4
 
 import (
 	"bytes"
@@ -7,11 +7,11 @@ import (
 	"github.com/eluv-io/avpipe/goavpipe/avdesc"
 )
 
-// parseAC4PresentationDSI decodes a single ac4_presentation_v1_dsi (ETSI TS
+// ParsePresentationDSI decodes a single ac4_presentation_v1_dsi (ETSI TS
 // 103 190-2 §E.10; presentation_version 2 is the Dolby Delivery Kit IMS extension)
-// from a presentation's raw payload. version is AC4Presentation.PresentationVersion
-// and data is AC4Presentation.PresentationData (which begins at
-// presentation_config_v1). It returns the fully-decoded (public) AC4Presentation
+// from a presentation's raw payload. version is avdesc.AC4Presentation.PresentationVersion
+// and data is avdesc.AC4Presentation.PresentationData (which begins at
+// presentation_config_v1). It returns the fully-decoded (public) avdesc.AC4Presentation
 // plus an ok flag: ok is true only when the parse stayed within the payload and hit
 // no bitstream error — callers must treat the deep fields as valid only when ok is
 // true (Version/Config/MDCompat, read from the first byte, are set regardless).
@@ -19,13 +19,13 @@ import (
 // The full raw content is captured; nothing structurally meaningful is discarded
 // (only reserved/opaque byte regions — filter_data, add-EMDF substream ids — are
 // consumed without being stored). Interpreted values (Atmos/immersive/IMS) are
-// derived by the AC4Presentation methods, never stored here.
+// derived by the avdesc.AC4Presentation methods, never stored here.
 //
 // The bit layout is ported from Bento4's AP4_Dac4Atom constructor
 // (Source/C++/Core/Ap4Dac4Atom.cpp), matched by mp4dump, and cross-checked
 // against ETSI TS 103 190-2 §E.10/§E.11/§E.12. Only presentation_version 1 and 2
-// are decoded here; version gating/errors live in buildAC4Info.
-func parseAC4PresentationDSI(version int, data []byte) (avdesc.AC4Presentation, bool) {
+// are decoded here; version gating/errors live in mp4e.buildAC4Info.
+func ParsePresentationDSI(version int, data []byte) (avdesc.AC4Presentation, bool) {
 	p := avdesc.AC4Presentation{}
 	p.Version = version
 	if version != 1 && version != 2 {

@@ -1,6 +1,7 @@
 package avpipe_test
 
 import (
+	"bytes"
 	"encoding/json"
 	"flag"
 	"fmt"
@@ -22,6 +23,7 @@ import (
 	"github.com/eluv-io/avpipe/goavpipe/avdesc"
 	"github.com/eluv-io/avpipe/internal/testutil"
 	"github.com/eluv-io/avpipe/mp4e"
+	"github.com/eluv-io/avpipe/mp4e/ac4"
 	"github.com/eluv-io/avpipe/mp4e/mvhevc"
 	"github.com/eluv-io/avpipe/xc"
 	"github.com/eluv-io/log-go"
@@ -53,6 +55,8 @@ const h264Codec = "libx264"
 const h265Codec = "libx265"
 
 const assetAC4 = "media/Audio_ID_6ch_128kbps_25fps_ac4.mp4"                       // AC4
+const assetAC4Atmos = "media/sample_ac4_atmos.mp4"                                // AC4 Atmos (A-JOC), priming frame + non-frame-aligned elst
+const assetAC4Atmos10s = "media/sample_ac4_atmos_10s.mp4"                         // same, 10 s / I-frame every 47
 const assetBBB = "media/bbb_1080p_30fps_60sec.mp4"                                // AVC, MP3, AC3
 const assetDOVI20 = "media/sample_dv20.mp4"                                       // MV-HEVC DOVI 20
 const assetDOVI81 = "media/040_Escape_Frame_0_48_HD_P3D65_24Fps_v1_4444_dv81.mp4" // HEVC DOVI 8.1
@@ -1711,6 +1715,170 @@ func TestAudioAC4Bypass(t *testing.T) {
 	require.NotNil(t, atmos.AC4.ChMode, "dsi_presentation_ch_mode must survive bypass")
 	assert.Equal(t, 4, *atmos.AC4.ChMode, "dsi_presentation_ch_mode (5.1) must survive bypass")
 	assert.Equal(t, "5.1", atmos.AC4.ChannelLayout(), "derived channel layout")
+
+	// Frame-aligned regression, the no-op side of the drop TestAudioAC4BypassStructure
+	// exercises. This asset's elst {media_time 0, segment_duration 1536000} lands exactly on
+	// the last sample's end, so bypass must drop nothing, emit uniform durations, and produce
+	// a total equal to the source's presented span. Everything is derived from the source
+	// rather than hard-coded, so it stays honest if the asset is ever regenerated.
+	srcBytes, err := os.ReadFile(url)
+	require.NoError(t, err)
+	srcTracks, err := ac4.IFrames(bytes.NewReader(srcBytes), 0)
+	require.NoError(t, err)
+	require.Len(t, srcTracks, 1)
+	source := srcTracks[0]
+	require.Equal(t, source.SamplesProcessed, source.SamplesInEdit, "this asset's edit trims nothing")
+	require.False(t, source.PartialTailTrim, "this asset's edit end is frame-aligned")
+
+	var total uint64
+	var count int
+	var firstDur uint32
+	for seg := 1; ; seg++ {
+		segFile := fmt.Sprintf("%s/asegment0-%d.mp4", outputDir, seg)
+		if _, statErr := os.Stat(segFile); statErr != nil {
+			break
+		}
+		samples, sErr := xc.DashChunkFullSamples(segFile)
+		require.NoError(t, sErr)
+		for i, s := range samples {
+			if firstDur == 0 {
+				firstDur = s.Dur
+			}
+			assert.EqualValues(t, firstDur, s.Dur, "segment %d sample %d: durations must stay uniform", seg, i)
+			total += uint64(s.Dur)
+		}
+		count += len(samples)
+	}
+	require.NotZero(t, count, "the bypass must have produced samples")
+	assert.Equal(t, source.SamplesInEdit, count, "no sample may be dropped when the edit trims nothing")
+	assert.EqualValues(t, source.PresentedDuration, total,
+		"output duration must equal the source's presented span exactly when the edit is frame-aligned")
+}
+
+// TestAudioAC4BypassStructure asserts the structural contract of AC-4 bypass output, which
+// TestAudioAC4Bypass (codec/dac4/DSI only) does not cover. The source edit list is resolved at
+// ingest by dropping out-of-edit samples rather than re-signaled downstream (see
+// skip_discarded_bypass_packet in libavpipe/src/avpipe_xc.c), so the output must carry exactly
+// the presented frames, carry no edit list, and preserve the presented I-frame timeline.
+//
+// Both DEE Atmos assets exercise it, at different lengths and I-frame cadences. The 2 s file
+// has elst {media_time 2048, segment_duration 96000} over 2048-tick frames — sample 1 is the
+// priming frame, sample 49 is wholly past the edit end, and the edit ends 1792 ticks inside
+// sample 48, leaving 256 ticks of tail padding. The 10 s file is the same shape at 5x the
+// padding (1280 ticks), which keeps that assertion from reading as a magic constant.
+func TestAudioAC4BypassStructure(t *testing.T) {
+	for _, tc := range []struct {
+		name string
+		url  string
+		// wantTailPadding is how much longer the output is than the source presents, in
+		// mdhd ticks: SamplesInEdit x frame duration minus the edit's segment_duration.
+		wantTailPadding uint64
+	}{
+		{"2s interval 23", assetAC4Atmos, 256},
+		{"10s interval 47", assetAC4Atmos10s, 1280},
+	} {
+		t.Run(tc.name, func(t *testing.T) { testAC4BypassStructure(t, tc.url, tc.wantTailPadding) })
+	}
+}
+
+func testAC4BypassStructure(t *testing.T, url string, wantTailPadding uint64) {
+	checkFileExists(t, url)
+
+	outputDir := path.Join(baseOutPath, fmt.Sprintf("%s.%s", fn(), path.Base(url)))
+	boilerplate(t, outputDir, url)
+
+	params := &goavpipe.XcParams{
+		Format:              "fmp4-segment",
+		StartTimeTs:         0,
+		DurationTs:          -1,
+		StartSegmentStr:     "1",
+		SegDuration:         "30",
+		EncHeight:           -1,
+		EncWidth:            -1,
+		XcType:              goavpipe.XcAudio,
+		BypassTranscoding:   true,
+		StreamId:            -1,
+		SyncAudioToStreamId: -1,
+		Url:                 url,
+		DebugFrameLevel:     debugFrameLevel,
+	}
+	boilerXc(t, params)
+
+	mezFile := fmt.Sprintf("%s/asegment0-1.mp4", outputDir)
+	checkFileExists(t, mezFile)
+	// ~2 s of content at a 30 s segment duration: it all lands in one segment.
+	assert.NoFileExists(t, fmt.Sprintf("%s/asegment0-2.mp4", outputDir))
+
+	srcBytes, err := os.ReadFile(url)
+	require.NoError(t, err)
+	srcTracks, err := ac4.IFrames(bytes.NewReader(srcBytes), 0)
+	require.NoError(t, err)
+	require.Len(t, srcTracks, 1)
+	source := srcTracks[0]
+	require.True(t, source.Edit.Applied, "the source must carry the edit this test is about")
+
+	outBytes, err := os.ReadFile(mezFile)
+	require.NoError(t, err)
+	outTracks, err := ac4.IFrames(bytes.NewReader(outBytes), 0)
+	require.NoError(t, err)
+	require.Len(t, outTracks, 1)
+	mez := outTracks[0]
+
+	// The drop: the output carries the presented frames and nothing else — not the priming
+	// frame at the head, not the whole sample past the edit end at the tail.
+	assert.Equal(t, source.SamplesInEdit, mez.SamplesProcessed,
+		"output sample count must equal the source's presented frame count")
+
+	// The trim is resolved at ingest, never re-signaled: no edts survives into the mez.
+	assert.False(t, mez.Edit.Present, "bypass must not emit an edit list")
+
+	// The sharpest head-drop check. cadencePriming looks for two I-frames one sample apart —
+	// the signature a priming frame leaves in an edit-list-free file. If the priming frame
+	// survived the drop, the output would read as primed. It must not.
+	assert.Equal(t, 0, mez.PrimingSamples, "the priming frame must not survive the drop")
+	assert.Empty(t, mez.PrimingBasis, "an output with no priming frame must not read as primed")
+
+	// The bridge between the reference scan and the C path: the source's presented I-frame
+	// presentation times are exactly the output's I-frame decode times. mp4e/ac4's
+	// TestEditApplied asserts the same identity from the source side.
+	var want []int64
+	for _, sync := range source.IFrames {
+		if sync.InEdit {
+			want = append(want, sync.PresentationTime)
+		}
+	}
+	var got []int64
+	for _, sync := range mez.IFrames {
+		got = append(got, int64(sync.DecodeTime))
+	}
+	require.NotEmpty(t, want, "the source must present some I-frames, else the comparison is vacuous")
+	assert.Equal(t, want, got, "the presented I-frame timeline must survive bypass")
+
+	// Decoding starts at sample 1, so it has to be a random access point, and the output's
+	// sync signaling must agree with the bitstream in both directions.
+	require.NotEmpty(t, mez.IFrames)
+	assert.Equal(t, 1, mez.IFrames[0].SampleNumber, "the first output sample must be an I-frame")
+	assert.Equal(t, 0, mez.ContainerSyncNotIFrame, "no sync over-marking in the output")
+	assert.Equal(t, 0, mez.IFrameNotContainerSync, "every true I-frame must be flagged sync")
+
+	// The accepted tail padding, pinned deliberately. The source presents 96000 ticks; the
+	// output carries whole frames only, so it runs 256 ticks (5.333 ms) longer. That is not a
+	// bug to fix here: a sub-frame tail trim is only expressible through an edit list (ISO/IEC
+	// 14496-12 8.6.6.1 NOTE), this path emits none, and a shortened sample duration is not a
+	// substitute because 8.6.1.2.1 defines the stts sum as the length of the media, "not
+	// considering any edit list". If this number changes it must be a deliberate edit.
+	samples, err := xc.DashChunkFullSamples(mezFile) // works on any fragmented mp4, not just DASH
+	require.NoError(t, err)
+	require.Len(t, samples, source.SamplesInEdit)
+	var total uint64
+	for i, s := range samples {
+		assert.EqualValues(t, samples[0].Dur, s.Dur, "sample %d: bypass carries whole frames", i)
+		total += uint64(s.Dur)
+	}
+	assert.Greater(t, total, source.PresentedDuration,
+		"the output is longer than the source presents, by the sub-frame tail padding")
+	assert.EqualValues(t, wantTailPadding, total-source.PresentedDuration,
+		"accepted tail padding, in mdhd ticks (48 kHz)")
 }
 
 // bypassAudioToDashInit bypasses an audio source to the DASH format and returns
@@ -1720,7 +1888,10 @@ func TestAudioAC4Bypass(t *testing.T) {
 // the init directly at the mp4e box layer (ExtractCodecInfoLazy), which reads the
 // config box from the fragmented Init.Moov. This is the piece that proves a Dolby
 // config box survives the dashenc.c mux path (distinct from movenc/fmp4-segment).
-func bypassAudioToDashInit(t *testing.T, url string) *mp4e.CodecInfo {
+// It also returns the output directory so a caller can assert on the media chunks. Note the
+// directory is named after this helper, not the calling test (fn() uses runtime.Caller(1)), so
+// the DASH bypass tests share it and must not run in parallel.
+func bypassAudioToDashInit(t *testing.T, url string) (*mp4e.CodecInfo, string) {
 	checkFileExists(t, url)
 
 	outputDir := path.Join(baseOutPath, fn())
@@ -1751,7 +1922,7 @@ func bypassAudioToDashInit(t *testing.T, url string) *mp4e.CodecInfo {
 	infos, err := mp4e.ExtractCodecInfoLazy(f)
 	require.NoError(t, err)
 	require.Len(t, infos, 1, "expected one audio track in the DASH init segment")
-	return infos[0]
+	return infos[0], outputDir
 }
 
 // TestAudioAC4BypassDash is the DASH twin of TestAudioAC4Bypass: it confirms the
@@ -1759,7 +1930,7 @@ func bypassAudioToDashInit(t *testing.T, url string) *mp4e.CodecInfo {
 // path (not just movenc/fmp4-segment) and that MP4.AC4 is recoverable from the
 // resulting DASH audio init segment.
 func TestAudioAC4BypassDash(t *testing.T) {
-	info := bypassAudioToDashInit(t, assetAC4)
+	info, outputDir := bypassAudioToDashInit(t, assetAC4)
 	assert.Equal(t, "ac-4", info.CodecTagString)
 	require.NotNil(t, info.AC4, "MP4.AC4 must survive the dashenc.c bypass mux (dac4 preserved)")
 	assert.Equal(t, "ac-4.02.01.01", info.MimeCodecString)
@@ -1767,13 +1938,49 @@ func TestAudioAC4BypassDash(t *testing.T) {
 	assert.Equal(t, 2, info.AC4.BitstreamVersion)
 	assert.Equal(t, 1, info.AC4.PresentationVersion)
 	assert.Equal(t, 1, info.AC4.MDCompat)
+
+	// dashenc writes its own trun/tfhd, so the ingest-time drop has to be re-checked here
+	// rather than inferred from the fmp4-segment result. Two things to pin:
+	//
+	//  1. The init's elst is movenc's identity entry {media_time 0, segment_duration 0} —
+	//     emitted for every fragmented output, and NOT a trim. The fmp4-segment path emits no
+	//     elst at all, so the two mux paths differ here in a way that looks alarming and is
+	//     benign. Asserting the exact values is what stops a real trim hiding behind it.
+	//  2. The chunks carry the source's presented frame count, same as the mez path.
+	initBytes, err := os.ReadFile(fmt.Sprintf("%s/ainit-stream0.m4s", outputDir))
+	require.NoError(t, err)
+	initTracks, err := ac4.IFrames(bytes.NewReader(initBytes), 0)
+	require.NoError(t, err)
+	require.Len(t, initTracks, 1)
+	initEdit := initTracks[0].Edit
+	assert.True(t, initEdit.Present, "dashenc emits movenc's identity edit list")
+	assert.EqualValues(t, 0, initEdit.MediaTime, "identity edit: no head trim")
+	assert.EqualValues(t, 0, initEdit.Duration, "identity edit: unbounded, no tail trim")
+
+	srcBytes, err := os.ReadFile(assetAC4)
+	require.NoError(t, err)
+	srcTracks, err := ac4.IFrames(bytes.NewReader(srcBytes), 0)
+	require.NoError(t, err)
+	require.Len(t, srcTracks, 1)
+
+	chunks, err := filepath.Glob(fmt.Sprintf("%s/achunk-stream0-*.m4s", outputDir))
+	require.NoError(t, err)
+	require.NotEmpty(t, chunks, "expected DASH media chunks")
+	var count int
+	for _, chunk := range chunks {
+		samples, sErr := xc.DashChunkFullSamples(chunk)
+		require.NoError(t, sErr)
+		count += len(samples)
+	}
+	assert.Equal(t, srcTracks[0].SamplesInEdit, count,
+		"the DASH path must carry the same presented frame count as the source's edit")
 }
 
 // TestAudioAtmosBypassDash is the previously-missing EAC-3 DASH regression guard:
 // it proves the dec3 box (incl. the JOC/Atmos extension) survives the dashenc.c
 // bypass mux path. No test previously covered any Dolby config box through dashenc.
 func TestAudioAtmosBypassDash(t *testing.T) {
-	info := bypassAudioToDashInit(t, assetEC3Atmos)
+	info, _ := bypassAudioToDashInit(t, assetEC3Atmos)
 	assert.Equal(t, "ec-3", info.CodecTagString)
 	require.NotNil(t, info.EC3, "MP4.EC3 must survive the dashenc.c bypass mux (dec3 preserved)")
 	assert.True(t, info.EC3.JOC, "EC3.JOC must remain set for Dolby Atmos through dashenc")
