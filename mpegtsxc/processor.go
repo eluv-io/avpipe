@@ -1,9 +1,11 @@
 package mpegtsxc
 
 import (
+	"fmt"
 	"time"
 
 	"github.com/Comcast/gots/v2/packet"
+	"github.com/eluv-io/avpipe/broadcastproto/mpegts"
 )
 
 // processor routes each TS packet read from the source:
@@ -19,6 +21,7 @@ import (
 // establishes the clock.
 type processor struct {
 	classifier *Classifier
+	selector   *mpegts.Selector
 	fifo       *PassthroughFifo
 	stats      *Stats
 	srcClock   *sourceClock   // optional (live CBR mode); fed input PCR for phase-lock
@@ -29,8 +32,8 @@ type processor struct {
 	clockSeen  bool   // parts mode: first PCR observed
 }
 
-func newProcessor(c *Classifier, f *PassthroughFifo, s *Stats, srcClock *sourceClock, timeline *mediaTimeline) *processor {
-	return &processor{classifier: c, fifo: f, stats: s, srcClock: srcClock, timeline: timeline}
+func newProcessor(c *Classifier, selector *mpegts.Selector, f *PassthroughFifo, s *Stats, srcClock *sourceClock, timeline *mediaTimeline) *processor {
+	return &processor{classifier: c, selector: selector, fifo: f, stats: s, srcClock: srcClock, timeline: timeline}
 }
 
 type dgCounts struct{ video, other, psi uint64 }
@@ -40,13 +43,13 @@ type dgCounts struct{ video, other, psi uint64 }
 // - classifies
 // - pushes passthrough packets into the FIFO (records the counts in stats)
 // - returns a freshly-allocated buffer of the video + PSI packets to forward to avpipe xc
-func (p *processor) handleDatagram(data []byte) (forward []byte) {
+func (p *processor) handleDatagram(data []byte) (forward []byte, retErr error) {
 	var counts dgCounts
 	defer func() { p.stats.addDatagram(counts) }()
 
 	if len(data) < tsPacketSize || data[0] != 0x47 {
 		// Raw TS expected: sync byte at offset 0 (RTP is stripped upstream).
-		return nil
+		return nil, nil
 	}
 
 	forward = make([]byte, 0, len(data))
@@ -54,45 +57,80 @@ func (p *processor) handleDatagram(data []byte) (forward []byte) {
 		var pkt packet.Packet
 		copy(pkt[:], data[off:off+tsPacketSize])
 
-		class := p.classifier.Classify(pkt)
-
-		// Discard everything until the video PID is known (PMT parsed).
-		if !p.classifier.Ready() {
-			continue
+		selected := []packet.Packet{pkt}
+		if p.selector != nil {
+			var err error
+			selected, err = p.selector.Push(&pkt)
+			if err != nil {
+				return forward, fmt.Errorf("mpegtsxc: source selection failed: %w", err)
+			}
+			if err := applyResolvedSelection(p.classifier, p.selector.Snapshot()); err != nil {
+				return forward, err
+			}
 		}
 
-		p.updatePCR(pkt)
-		p.trackPTS(pkt, class)
-
-		parts := p.timeline != nil
-		if parts && !p.clockSeen {
-			// Parts mode: no merge tag exists until the first PCR; discard the preroll
-			// (PAT/PMT repeat continuously, so nothing essential is lost).
-			continue
-		}
-		tag := int64(p.currentPCR)
-		if parts {
-			tag = p.currentTag
-		}
-
-		// Forward only the video PID + PAT/PMT to avpipe xc
-		// Only works when PCR is in the video PID (which is common).
-		// TODO: if the PCR PID differs from the video PID, must forward the PCR-PID packets
-		// avpipe xc so it has a clock reference (or else likely makes garbage timestamps)
-		switch class {
-		case ClassVideo:
-			counts.video++
-			forward = append(forward, pkt[:]...)
-		case ClassPSI:
-			counts.psi++
-			forward = append(forward, pkt[:]...)
-			p.push(tsItem{data: pkt, ets: tag}, parts)
-		default:
-			counts.other++
-			p.push(tsItem{data: pkt, ets: tag}, parts)
+		for i := range selected {
+			p.handlePacket(selected[i], &counts, &forward)
 		}
 	}
-	return forward
+	return forward, nil
+}
+
+func applyResolvedSelection(classifier *Classifier, snapshot mpegts.SelectionSnapshot) error {
+	if !snapshot.Ready {
+		return nil
+	}
+	if len(snapshot.ProgramIDs) != 1 {
+		return fmt.Errorf("mpegtsxc: selection resolved to %d programs; exactly one is required", len(snapshot.ProgramIDs))
+	}
+	if len(snapshot.VideoPIDs) != 1 {
+		return fmt.Errorf("mpegtsxc: selection resolved to %d explicitly selected video PIDs; exactly one is required", len(snapshot.VideoPIDs))
+	}
+	if len(snapshot.PCRPIDs) != 1 {
+		return fmt.Errorf("mpegtsxc: selection resolved to %d PCR PIDs; exactly one is required", len(snapshot.PCRPIDs))
+	}
+	classifier.SetSelection(snapshot.PMTPIDs, snapshot.VideoPIDs[0], snapshot.PCRPIDs[0])
+	return nil
+}
+
+func (p *processor) handlePacket(pkt packet.Packet, counts *dgCounts, forward *[]byte) {
+	class := p.classifier.Classify(pkt)
+
+	// Discard everything until the video PID is known (PMT parsed).
+	if !p.classifier.Ready() {
+		return
+	}
+
+	p.updatePCR(pkt)
+	p.trackPTS(pkt, class)
+
+	parts := p.timeline != nil
+	if parts && !p.clockSeen {
+		// Parts mode: no merge tag exists until the first PCR; discard the preroll
+		// (PAT/PMT repeat continuously, so nothing essential is lost).
+		return
+	}
+	tag := int64(p.currentPCR)
+	if parts {
+		tag = p.currentTag
+	}
+
+	// Forward only the video PID + PAT/PMT to avpipe xc
+	// Only works when PCR is in the video PID (which is common).
+	// TODO: if the PCR PID differs from the video PID, must forward the PCR-PID packets
+	// avpipe xc so it has a clock reference (or else likely makes garbage timestamps)
+	switch class {
+	case ClassVideo:
+		counts.video++
+		*forward = append(*forward, pkt[:]...)
+	case ClassPSI:
+		counts.psi++
+		*forward = append(*forward, pkt[:]...)
+		p.push(tsItem{data: pkt, ets: tag}, parts)
+	default:
+		counts.other++
+		p.push(tsItem{data: pkt, ets: tag}, parts)
+	}
 }
 
 func (p *processor) push(item tsItem, blocking bool) {

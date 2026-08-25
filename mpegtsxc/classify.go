@@ -39,6 +39,18 @@ func (c *Classifier) VideoPID() int { return c.videoPID }
 func (c *Classifier) PcrPID() int   { return c.pcrPID }
 func (c *Classifier) Ready() bool   { return c.videoPID >= 0 }
 
+// SetSelection installs the already-resolved state of the shared MPEG-TS
+// selector. This avoids reparsing rewritten PAT/PMT tables in the transcode path.
+func (c *Classifier) SetSelection(pmtPIDs []uint16, videoPID, pcrPID uint16) {
+	c.patSeen = true
+	c.pmtPIDs = make(map[int]bool, len(pmtPIDs))
+	for _, pid := range pmtPIDs {
+		c.pmtPIDs[int(pid)] = true
+	}
+	c.videoPID = int(videoPID)
+	c.pcrPID = int(pcrPID)
+}
+
 // Classify inspects a 188-byte TS packet and returns its 'class'
 // Updates PAT/PMT state
 func (c *Classifier) Classify(pkt packet.Packet) PacketClass {

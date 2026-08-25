@@ -2,17 +2,24 @@ package mpegtsxc
 
 import (
 	"context"
+	"fmt"
 	"io"
 	"sync"
 	"time"
 
 	"go.uber.org/atomic"
 
+	"github.com/eluv-io/avpipe/broadcastproto/mpegts"
 	"github.com/eluv-io/avpipe/goavpipe"
 )
 
 // Config holds the transcode parameters shared by live and parts mode.
 type Config struct {
+	// MPEGTSSelection filters the source multiplex before classification and
+	// transcoding. The transcode pipeline requires the resolved selection to
+	// contain exactly one program and one explicitly selected video PID.
+	MPEGTSSelection *goavpipe.MPEGTSSelection
+
 	// Encoder (both modes)
 	EncWidth  int32  // downscale target width (-1 = source width)
 	EncHeight int32  // downscale target height (-1 = source height)
@@ -95,6 +102,12 @@ type StatsSnapshot struct {
 	TsOther   uint64 // input TS packets passed through (other + PSI)
 	VideoPID  int    // source video PID (-1 until the PMT is parsed)
 
+	SelectionReady     bool
+	SelectedProgramIDs []uint16
+	SelectedPMTPIDs    []uint16
+	SelectedPCRPIDs    []uint16
+	SelectedPIDs       []uint16
+
 	FifoLen        int    // passthrough FIFO occupancy
 	FifoDropped    uint64 // passthrough packets dropped (live mode only)
 	ForwardDropped uint64 // video datagrams dropped because avpipe was behind (live mode only)
@@ -142,6 +155,13 @@ type LiveTranscoder struct {
 func NewLiveTranscoder(ctx context.Context, cfg Config, sink io.WriteCloser) (*LiveTranscoder, error) {
 	cfg = cfg.withDefaults()
 
+	if err := validateTranscodeSelection(cfg.MPEGTSSelection); err != nil {
+		return nil, err
+	}
+	selector, err := mpegts.NewSelector(cfg.MPEGTSSelection)
+	if err != nil {
+		return nil, fmt.Errorf("mpegtsxc: invalid MPEG-TS selection: %w", err)
+	}
 	classifier := NewClassifier()
 	stats := newStats()
 
@@ -155,7 +175,7 @@ func NewLiveTranscoder(ctx context.Context, cfg Config, sink io.WriteCloser) (*L
 	// Passthrough FIFO for "other" packets (audio, data, PCR-PID, PSI)
 	// Sized so it can safely hold passthrough packets for the duration of transcoding.
 	fifo := NewPassthroughFifo(16384)
-	proc := newProcessor(classifier, fifo, stats, srcClock, nil)
+	proc := newProcessor(classifier, selector, fifo, stats, srcClock, nil)
 
 	// Channel from classified/filtered input -> avpipe xc; closing signals EOF
 	videoCh := make(chan []byte, 8192)
@@ -203,7 +223,10 @@ func NewLiveTranscoder(ctx context.Context, cfg Config, sink io.WriteCloser) (*L
 // pipeline. Never blocks: if the video transcode is behind, the datagram's video
 // packets are dropped and counted.
 func (t *LiveTranscoder) Feed(tsDatagram []byte) error {
-	forward := t.proc.handleDatagram(tsDatagram)
+	forward, err := t.proc.handleDatagram(tsDatagram)
+	if err != nil {
+		return err
+	}
 	if len(forward) > 0 {
 		select {
 		case t.videoCh <- forward:
@@ -244,6 +267,7 @@ func (t *LiveTranscoder) Cancel() {
 // Stats returns a snapshot of the pipeline counters.
 func (t *LiveTranscoder) Stats() StatsSnapshot {
 	sn := t.stats.snapshot(t.classifier.VideoPID())
+	populateSelectionStats(&sn, t.proc.selector)
 	sn.FifoLen = t.fifo.Len()
 	sn.FifoDropped = t.fifo.Dropped()
 	sn.ForwardDropped = t.forwardDropped.Load()
@@ -252,6 +276,28 @@ func (t *LiveTranscoder) Stats() StatsSnapshot {
 		sn.PhaseLocked = t.srcClock.Locked()
 	}
 	return sn
+}
+
+func validateTranscodeSelection(selection *goavpipe.MPEGTSSelection) error {
+	if err := selection.Validate(); err != nil {
+		return fmt.Errorf("mpegtsxc: invalid MPEG-TS selection: %w", err)
+	}
+	if selection != nil && len(selection.ProgramIDs) > 1 {
+		return fmt.Errorf("mpegtsxc: retranscode supports exactly one selected program")
+	}
+	return nil
+}
+
+func populateSelectionStats(stats *StatsSnapshot, selector *mpegts.Selector) {
+	if selector == nil {
+		return
+	}
+	snapshot := selector.Snapshot()
+	stats.SelectionReady = snapshot.Ready
+	stats.SelectedProgramIDs = snapshot.ProgramIDs
+	stats.SelectedPMTPIDs = snapshot.PMTPIDs
+	stats.SelectedPCRPIDs = snapshot.PCRPIDs
+	stats.SelectedPIDs = snapshot.SelectedPIDs
 }
 
 // LogStats logs the periodic pipeline stats (CLI convenience).

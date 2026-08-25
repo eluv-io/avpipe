@@ -91,24 +91,28 @@ func NewTranscodeProcessor(params *goavpipe.XcParams, seqOpenerF mpegts.Sequenti
 	if params.VideoBitrate <= 0 {
 		return nil, fmt.Errorf("mpegtsxc: video_bitrate is required (the encoder must be capped below stream_bitrate)")
 	}
+	if err := validateTranscodeSelection(params.InputCfg.MPEGTSSelection); err != nil {
+		return nil, err
+	}
 	params.InputCfg.Processor = params.InputCfg.Processor.ApplyDefaults()
 
 	cfg := Config{
-		EncWidth:      params.EncWidth,
-		EncHeight:     params.EncHeight,
-		Ecodec:        params.Ecodec,
-		Dcodec:        params.Dcodec,
-		VideoBitrate:  params.VideoBitrate,
-		RcMaxRate:     params.RcMaxRate,
-		RcBufferSize:  params.RcBufferSize,
-		CrfStr:        params.CrfStr,
-		Preset:        params.Preset,
-		ForceKeyInt:   params.ForceKeyInt,
-		Profile:       params.Profile,
-		Level:         params.Level,
-		GPUIndex:      params.GPUIndex,
-		BitDepth:      params.BitDepth,
-		StreamBitrate: params.InputCfg.StreamBitrate,
+		MPEGTSSelection: params.InputCfg.MPEGTSSelection,
+		EncWidth:        params.EncWidth,
+		EncHeight:       params.EncHeight,
+		Ecodec:          params.Ecodec,
+		Dcodec:          params.Dcodec,
+		VideoBitrate:    params.VideoBitrate,
+		RcMaxRate:       params.RcMaxRate,
+		RcBufferSize:    params.RcBufferSize,
+		CrfStr:          params.CrfStr,
+		Preset:          params.Preset,
+		ForceKeyInt:     params.ForceKeyInt,
+		Profile:         params.Profile,
+		Level:           params.Level,
+		GPUIndex:        params.GPUIndex,
+		BitDepth:        params.BitDepth,
+		StreamBitrate:   params.InputCfg.StreamBitrate,
 	}.withDefaults()
 
 	return &TranscodeProcessor{

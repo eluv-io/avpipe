@@ -487,6 +487,59 @@ type InputConfig struct {
 	// (copy_mode 'retranscode_stream' only). Must exceed the video bitrate plus the
 	// passthrough peak.
 	StreamBitrate int `json:"stream_bitrate,omitempty"`
+	// MPEGTSSelection optionally selects programs or elementary PIDs from an MPEG-TS
+	// video retranscode. ProgramIDs and PIDs are mutually exclusive. PAT, PMT and PCR
+	// packets required to describe and clock the selected streams are retained
+	// automatically.
+	MPEGTSSelection *MPEGTSSelection `json:"mpegts_selection,omitempty"`
+}
+
+// MPEGTSSelection selects a subset of an MPEG transport stream. ProgramIDs are
+// PAT program_number values. PIDs are elementary/PCR packet identifiers declared
+// by a PMT; callers do not list PAT or PMT PIDs.
+type MPEGTSSelection struct {
+	ProgramIDs []uint16 `json:"program_ids,omitempty"`
+	PIDs       []uint16 `json:"pids,omitempty"`
+}
+
+// Validate checks the static selection constraints. Stream-dependent constraints
+// (whether programs/PIDs exist and which programs own the PIDs) are checked by the
+// MPEG-TS selector once PAT/PMT tables arrive.
+func (s *MPEGTSSelection) Validate() error {
+	if s == nil {
+		return nil
+	}
+	hasPrograms := len(s.ProgramIDs) > 0
+	hasPIDs := len(s.PIDs) > 0
+	if hasPrograms == hasPIDs {
+		return errors.New("mpegts_selection requires exactly one of program_ids or pids")
+	}
+	seen := make(map[uint16]bool)
+	if hasPrograms {
+		for _, id := range s.ProgramIDs {
+			if id == 0 {
+				return errors.New("mpegts_selection program ID 0 is reserved")
+			}
+			if seen[id] {
+				return fmt.Errorf("duplicate mpegts_selection program ID %d", id)
+			}
+			seen[id] = true
+		}
+		return nil
+	}
+	for _, pid := range s.PIDs {
+		if pid == 0 {
+			return errors.New("mpegts_selection PID 0 is the PAT and is retained automatically")
+		}
+		if pid >= 0x1fff {
+			return fmt.Errorf("invalid mpegts_selection PID %d: valid selectable PIDs are 1..8190", pid)
+		}
+		if seen[pid] {
+			return fmt.Errorf("duplicate mpegts_selection PID %d", pid)
+		}
+		seen[pid] = true
+	}
+	return nil
 }
 
 func (ic *InputConfig) Validate(url string) error {
@@ -494,6 +547,12 @@ func (ic *InputConfig) Validate(url string) error {
 	zeroInputConfig := InputConfig{}
 	if *ic == zeroInputConfig {
 		return nil
+	}
+	if err := ic.MPEGTSSelection.Validate(); err != nil {
+		return err
+	}
+	if ic.MPEGTSSelection != nil && ic.CopyMode != CopyModeRetranscode {
+		return errors.New("mpegts_selection requires copy mode 'retranscode_stream'")
 	}
 
 	isRTP := strings.HasPrefix(url, "rtp://")
@@ -542,6 +601,9 @@ func (ic *InputConfig) Validate(url string) error {
 		}
 		return nil
 	case CopyModeRetranscode:
+		if ic.MPEGTSSelection != nil && len(ic.MPEGTSSelection.ProgramIDs) > 1 {
+			return errors.New("retranscode_stream supports exactly one selected MPEG-TS program")
+		}
 		if ic.CopyPackaging != transport.RtpTs {
 			return fmt.Errorf("retranscode_stream only supports rtp_ts copy packaging (got %q)", ic.CopyPackaging)
 		}

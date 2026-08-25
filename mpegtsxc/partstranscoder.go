@@ -7,6 +7,7 @@ import (
 
 	"go.uber.org/atomic"
 
+	"github.com/eluv-io/avpipe/broadcastproto/mpegts"
 	"github.com/eluv-io/avpipe/broadcastproto/transport"
 )
 
@@ -69,7 +70,14 @@ func NewPartsTranscoder(ctx context.Context, cfg Config, emit func(OutputDatagra
 	if cfg.VideoBitrate <= 0 {
 		return nil, fmt.Errorf("mpegtsxc: VideoBitrate is required in parts mode (the encoder must be capped below StreamBitrate)")
 	}
+	if err := validateTranscodeSelection(cfg.MPEGTSSelection); err != nil {
+		return nil, err
+	}
 
+	selector, err := mpegts.NewSelector(cfg.MPEGTSSelection)
+	if err != nil {
+		return nil, fmt.Errorf("mpegtsxc: invalid MPEG-TS selection: %w", err)
+	}
 	classifier := NewClassifier()
 	stats := newStats()
 	timeline := &mediaTimeline{}
@@ -78,7 +86,7 @@ func NewPartsTranscoder(ctx context.Context, cfg Config, emit func(OutputDatagra
 	// The FIFO must absorb the passthrough packets produced while the encoder works
 	// through its latency (lookahead + B-frames); pushes block when it fills.
 	fifo := NewPassthroughFifo(65536)
-	proc := newProcessor(classifier, fifo, stats, nil, timeline)
+	proc := newProcessor(classifier, selector, fifo, stats, nil, timeline)
 	packager := newRtpPackager(&cfg, classifier, emit)
 
 	videoCh := make(chan []byte, 8192)
@@ -178,7 +186,10 @@ func (t *PartsTranscoder) Feed(rtpDatagram []byte) error {
 	}
 
 	// Passthrough pushes inside may block until the merge drains them.
-	forward := t.proc.handleDatagram(rtpDatagram[hdr.ByteLength():])
+	forward, err := t.proc.handleDatagram(rtpDatagram[hdr.ByteLength():])
+	if err != nil {
+		return err
+	}
 
 	if len(forward) > 0 {
 		select {
@@ -230,6 +241,7 @@ func (t *PartsTranscoder) Cancel() {
 // Stats returns a snapshot of the pipeline counters.
 func (t *PartsTranscoder) Stats() StatsSnapshot {
 	sn := t.stats.snapshot(t.classifier.VideoPID())
+	populateSelectionStats(&sn, t.proc.selector)
 	sn.FifoLen = t.fifo.Len()
 	sn.OutDatagrams = t.packager.OutDatagrams()
 	sn.Discontinuities = t.gaps.Discontinuities()

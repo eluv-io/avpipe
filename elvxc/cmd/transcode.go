@@ -311,6 +311,43 @@ func parseExtractImagesTs(params *goavpipe.XcParams, s string) (err error) {
 	return
 }
 
+func parseMPEGTSSelection(programValues, pidValues []string) (*goavpipe.MPEGTSSelection, error) {
+	if len(programValues) == 0 && len(pidValues) == 0 {
+		return nil, nil
+	}
+	parse := func(name string, values []string, max uint64) ([]uint16, error) {
+		res := make([]uint16, 0, len(values))
+		for _, value := range values {
+			original := value
+			value = strings.TrimSpace(value)
+			base := 10
+			if strings.HasPrefix(value, "0x") || strings.HasPrefix(value, "0X") {
+				base = 16
+				value = value[2:]
+			}
+			n, err := strconv.ParseUint(value, base, 16)
+			if err != nil || n == 0 || n > max {
+				return nil, fmt.Errorf("invalid %s value %q (expected 1..%d, decimal or 0x-prefixed hex)", name, original, max)
+			}
+			res = append(res, uint16(n))
+		}
+		return res, nil
+	}
+	programIDs, err := parse("mpegts-program-id", programValues, 0xffff)
+	if err != nil {
+		return nil, err
+	}
+	pids, err := parse("mpegts-pids", pidValues, 0x1ffe)
+	if err != nil {
+		return nil, err
+	}
+	selection := &goavpipe.MPEGTSSelection{ProgramIDs: programIDs, PIDs: pids}
+	if err := selection.Validate(); err != nil {
+		return nil, err
+	}
+	return selection, nil
+}
+
 func InitTranscode(cmdRoot *cobra.Command) error {
 	cmdTranscode := &cobra.Command{
 		Use:   "transcode",
@@ -392,8 +429,10 @@ func InitTranscode(cmdRoot *cobra.Command) error {
 	cmdTranscode.PersistentFlags().Int32("level", 0, "Encoding level for video. If it is not determined, it will be set automatically.")
 	cmdTranscode.PersistentFlags().Int32("deinterlace", 0, "Deinterlace filter (values 0 - none, 1 - bwdif_field, 2 - bwdif_frame send_frame).")
 	cmdTranscode.PersistentFlags().Bool("bypass-libav-reader", false, "Read live media input directly instead of using libavformat")
-	cmdTranscode.PersistentFlags().String("copy-mode", "none", "Create a copy of the input: 'none' 'raw' 'remuxed'")
+	cmdTranscode.PersistentFlags().String("copy-mode", "none", "Create a copy of the input: 'none' 'raw' 'raw_only' 'remuxed'")
 	cmdTranscode.PersistentFlags().String("copy-packaging", "", "Format of the copy of the input: 'raw_ts' 'rtp_ts'")
+	cmdTranscode.PersistentFlags().String("mpegts-program-id", "", "Select one MPEG-TS PAT program ID for MPEG-TS video transcoding (decimal or 0x-prefixed hex)")
+	cmdTranscode.PersistentFlags().StringSlice("mpegts-pids", nil, "Select exact MPEG-TS elementary PIDs for MPEG-TS video transcoding (comma-separated; decimal or 0x-prefixed hex)")
 
 	return nil
 }
@@ -740,6 +779,23 @@ func doTranscode(cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("Unsupported copy-packaging value")
 	}
 
+	mpegtsProgramID, err := cmd.Flags().GetString("mpegts-program-id")
+	if err != nil {
+		return fmt.Errorf("Invalid mpegts-program-id value")
+	}
+	mpegtsPIDs, err := cmd.Flags().GetStringSlice("mpegts-pids")
+	if err != nil {
+		return fmt.Errorf("Invalid mpegts-pids value")
+	}
+	var mpegtsProgramIDs []string
+	if strings.TrimSpace(mpegtsProgramID) != "" {
+		mpegtsProgramIDs = []string{mpegtsProgramID}
+	}
+	mpegtsSelection, err := parseMPEGTSSelection(mpegtsProgramIDs, mpegtsPIDs)
+	if err != nil {
+		return err
+	}
+
 	cryptScheme := goavpipe.CryptNone
 	val := cmd.Flag("crypt-scheme").Value.String()
 	if len(val) > 0 {
@@ -781,6 +837,7 @@ func doTranscode(cmd *cobra.Command, args []string) error {
 			CopyMode:          copyMode,
 			CopyPackaging:     copyPackaging,
 			BypassLibavReader: bypassLibavReader,
+			MPEGTSSelection:   mpegtsSelection,
 		},
 		BypassTranscoding:      bypass,
 		Format:                 format,
