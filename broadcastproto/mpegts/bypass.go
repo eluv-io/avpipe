@@ -95,6 +95,11 @@ func (bp *BypassProcessor) Start(fd int64) error {
 		},
 	}
 
+	consumer := reorderingConsumerFor(
+		mpegTsConsumer, bp.transport.PackagingMode(), bp.xcParams.InputCfg.Processor.ReorderBuffer, bp.fd,
+		bp.xcParams.Url,
+	)
+
 	bp.waitGroup.Add(1)
 	go func() {
 		defer bp.waitGroup.Done()
@@ -109,7 +114,7 @@ func (bp *BypassProcessor) Start(fd int64) error {
 		time.Millisecond*time.Duration(bp.xcParams.ConnectionTimeout),
 		bp.xcParams.InputCfg.Processor,
 		bp.transport,
-		[]Consumer{mpegTsConsumer},
+		[]Consumer{consumer},
 	)
 	processor.SetConnStatsSource(bp.netReader)
 

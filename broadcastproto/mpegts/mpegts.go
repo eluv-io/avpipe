@@ -65,11 +65,15 @@ type MpegtsPacketProcessor struct {
 	// reportFullStatsLoop), independent of any locking in MpegtsPacketProcessor itself.
 	tracker tracker.MediaTracker
 
-	// connStats, if set, reports the underlying network connection's statistics (e.g. SRT protocol stats),
-	// surfaced via ExportedStats.Srt. nil for a source that doesn't report them (e.g. plain UDP), or before the
-	// caller has wired one in - a NetReader doesn't exist yet when NewMpegtsPacketProcessor runs, so this is set
-	// after the fact via SetConnStatsSource, not passed to the constructor.
+	// connStats, if set, reports the underlying network connection's statistics (e.g. SRT protocol stats), surfaced via
+	// ExportedStats.Srt. nil for a source that doesn't report them (e.g. plain UDP), or before the caller has wired one
+	// in via SetConnStatsSource.
 	connStats connStatsSource
+
+	// reorderStats, if set, reports RTP packet-reordering correction statistics, surfaced via ExportedStats.Reorder.
+	// nil for RawTs/AtsTs packaging (re-ordering not supported) or before the caller has wired one in via
+	// SetReorderStatsSource.
+	reorderStats reorderStatsSource
 
 	outBuf   []byte // Preallocated byte buffer
 	closeCh  chan struct{}
@@ -335,6 +339,10 @@ func (mpp *MpegtsPacketProcessor) pushStatsInto(dst *ExportedStats) {
 		dst.Srt = cs.SRT
 	}
 
+	if mpp.reorderStats != nil {
+		dst.Reorder = mpp.reorderStats.Stats()
+	}
+
 	dst.populate(mpp.stats, mpp.rtpStats)
 	mpp.resetChannelSizeStats()
 
@@ -352,6 +360,20 @@ type connStatsSource interface {
 // NewMpegtsPacketProcessor has already been called and returned.
 func (mpp *MpegtsPacketProcessor) SetConnStatsSource(src connStatsSource) {
 	mpp.connStats = src
+}
+
+// reorderStatsSource is implemented by *ReorderingConsumer; kept as a minimal interface (rather than depending on
+// ReorderingConsumer directly) so MpegtsPacketProcessor stays testable with a fake. See SetReorderStatsSource.
+type reorderStatsSource interface {
+	Stats() ReorderConsumerStats
+}
+
+// SetReorderStatsSource wires src as the source of ExportedStats.Reorder. It is a setter rather than a constructor
+// parameter because in custom.go's wiring, the ReorderingConsumer wraps this processor's own consumer and so is
+// constructed after NewMpegtsPacketProcessor has already been called and returned. Only called for RtpTs packaging;
+// ExportedStats.Reorder stays zero-value when never set.
+func (mpp *MpegtsPacketProcessor) SetReorderStatsSource(src reorderStatsSource) {
+	mpp.reorderStats = src
 }
 
 func (mpp *MpegtsPacketProcessor) ReportStart() {

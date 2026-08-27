@@ -57,6 +57,13 @@ func NewAutoInputOpener(cfg *goavpipe.XcParams, seqOpener SequentialOpenerFactor
 		}, nil
 	}
 
+	if cfg.InputCfg.Processor.ReorderBuffer.Enabled {
+		goavpipe.Log.Warn("reorder_buffer.enabled is set but the legacy (non-custom) read loop does not support "+
+			"it; reordering correction will not be applied",
+			"url", cfg.Url,
+		)
+	}
+
 	return &mpegtsInputOpener{
 		transport: tp,
 		seqOpener: seqOpener,

@@ -96,6 +96,9 @@ type ExportedStats struct {
 	// mio.SrtConnStats) - nil unless the source is an SRT pull or push connection. See MpegtsPacketProcessor's
 	// connStats/SetConnStatsSource.
 	Srt *mio.SrtConnStats `json:"srt,omitempty"`
+	// Reorder is the RTP packet-reordering correction stats, zero-value unless a ReorderingConsumer is wired in for
+	// this source (RtpTs packaging only). See MpegtsPacketProcessor's reorderStats/SetReorderStatsSource.
+	Reorder ReorderConsumerStats `json:"reorder,omitzero"`
 }
 
 // CopyInto deep-copies e into dst, reusing dst.Stream/dst.Srt where possible instead of allocating new ones. Callers
@@ -104,10 +107,13 @@ type ExportedStats struct {
 // connStatsSource.ConnStats's copy-into contract - see NetReader.ConnStats and its StatsReporter chain), in place
 // across pushStatsInto calls (see reportFullStatsLoop's doc), so aliasing either would let a reader race that mutation.
 //
-// TS/RTP are plain value structs, safe to assign directly.
+// TS/RTP/Reorder are plain value structs, safe to assign directly - unlike Stream/Srt, ReorderingConsumer.Stats
+// (like pushStatsInto itself) gathers a fresh snapshot into a new value on every call, never reusing/mutating one in
+// place across calls, so there is nothing to alias-guard here.
 func (e *ExportedStats) CopyInto(dst *ExportedStats) {
 	dst.TS = e.TS
 	dst.RTP = e.RTP
+	dst.Reorder = e.Reorder
 	if e.Srt == nil {
 		dst.Srt = nil
 	} else {

@@ -74,7 +74,10 @@ func (c *customInputOpener) Open(fd int64, url string) (goavpipe.InputHandler, e
 			pktChan: make(chan pktpool.Resource, c.cfg.InputCfg.Processor.ChannelCap),
 			pp:      processor,
 		}
-		consumers = append(consumers, mpegTsConsumer)
+
+		consumers = append(consumers, reorderingConsumerFor(
+			mpegTsConsumer, c.transport.PackagingMode(), c.cfg.InputCfg.Processor.ReorderBuffer, fd, url,
+		))
 	}
 
 	netReader := StartNetReader(
