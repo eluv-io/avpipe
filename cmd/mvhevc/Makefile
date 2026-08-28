@@ -11,6 +11,7 @@ TOP_DIR ?= $(shell pwd)
 ROOT_DIR ?= $(TOP_DIR)/../..
 BINDIR ?= bin
 UNAME_S := $(shell uname -s)
+include ../../uniqfeed.make
 
 # avpipe include path
 AVPIPE_INCLUDE = ../../include
@@ -28,7 +29,9 @@ X265_LDFLAGS = $(shell pkg-config --libs $(X265_PKGS)) -Wl,-rpath
 CC = clang
 OBJCXX = clang++
 CFLAGS = -Wall -Wextra -g -O2 -I$(AVPIPE_INCLUDE) $(FFMPEG_CFLAGS) $(X265_CFLAGS)
-LDFLAGS = $(FFMPEG_LDFLAGS) $(X265_LDFLAGS) -lc++ -lpthread
+LDFLAGS = $(FFMPEG_LDFLAGS) $(X265_LDFLAGS) -lc++ -lpthread \
+	-Wl,--copy-dt-needed-entries -Wl,--no-as-needed \
+	$(UNIQFEED_RPATHLINKS) $(UNIQFEED_LIBDIRS) $(UNIQFEED_AUTO_LIBS)
 OBJCXXFLAGS = -Wall -Wextra -g -O2 -std=c++17 -fobjc-arc -mmacosx-version-min=14.0
 APPLE_FRAMEWORKS = -framework Foundation -framework AVFoundation -framework CoreMedia -framework CoreVideo -framework VideoToolbox
 

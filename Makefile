@@ -6,14 +6,14 @@ SUBDIRS=utils libavpipe exc elvxc cmd/mvhevc
 SRCS=avpipe_handler.c
 OBJS=$(SRCS:%.c=$(BINDIR)/%.o)
 
-.PHONY: all test gotest ctest clean
+.PHONY: all test gotest ctest clean stage-local-deps
 
 .DEFAULT_GOAL := dynamic
 
 all install: check-env
-	@for dir in $(SUBDIRS); do \
+	+@for dir in $(SUBDIRS); do \
 	echo "Making $@ in $$dir..."; \
-	(cd $$dir; make $@) || exit 1; \
+	$(MAKE) -C $$dir $@ || exit 1; \
 	if [ "$$dir" = "libavpipe" ]; then \
 		openssl dgst -md5 lib/libavpipe.a | awk '{print $$NF}' > lib/libavpipe.hash; \
 	fi; \
@@ -21,15 +21,18 @@ all install: check-env
 
 dynamic: all
 
+stage-local-deps:
+	@./scripts/stage_local_deps.sh
+
 # goclean: nuclear option to reset all caches. Normally not needed — `make`
 # updates lib/libavpipe.hash which triggers automatic Go rebuild via //go:embed.
 goclean: clean
 	@go clean -cache -testcache -modcache -i -r
 
 clean: lclean
-	@for dir in $(SUBDIRS); do \
+	+@for dir in $(SUBDIRS); do \
 	echo "Making $@ in $$dir..."; \
-	(cd $$dir; make $@) || exit 1; \
+	$(MAKE) -C $$dir $@ || exit 1; \
 	done
 
 avpipe:

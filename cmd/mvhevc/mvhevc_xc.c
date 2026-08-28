@@ -440,7 +440,6 @@ static int setup_encoder(mvhevc_ctx *c)
         return -1;
     }
     api->param_parse(param, "format", "0");
-    param->numLayers = param->numViews;
 
     /* Profile */
     {
