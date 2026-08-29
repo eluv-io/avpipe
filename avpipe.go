@@ -882,6 +882,7 @@ func getCParams(params *goavpipe.XcParams) (*C.xcparams_t, error) {
 		extract_images_sz:         C.int(extractImagesSize),
 		video_time_base:           C.int(params.VideoTimeBase),
 		video_frame_duration_ts:   C.int(params.VideoFrameDurationTs),
+		video_fps:                 C.int(params.VideoFps),
 		rotate:                    C.int(params.Rotate),
 		profile:                   C.CString(params.Profile),
 		level:                     C.int(params.Level),

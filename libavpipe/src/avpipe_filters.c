@@ -7,6 +7,46 @@
 #include "elv_log.h"
 #include "libavutil/pixdesc.h"
 
+int
+validate_video_fps(
+    coderctx_t *decoder_context,
+    xcparams_t *params)
+{
+    AVRational nominal_frame_rate;
+    AVRational requested_frame_rate;
+    int index;
+
+    if (params->video_fps <= 0)
+        return eav_success;
+
+    index = decoder_context->video_stream_index;
+    if (index < 0 || !decoder_context->format_context ||
+        !decoder_context->stream[index]) {
+        elv_err("Invalid video_fps without a video stream, url=%s",
+            params->url);
+        return eav_param;
+    }
+
+    nominal_frame_rate = av_guess_frame_rate(decoder_context->format_context,
+        decoder_context->stream[index], NULL);
+    requested_frame_rate = (AVRational) {params->video_fps, 1};
+
+    if (nominal_frame_rate.num <= 0 || nominal_frame_rate.den <= 0) {
+        elv_err("Failed to determine source frame rate for video_fps=%d, url=%s",
+            params->video_fps, params->url);
+        return eav_param;
+    }
+
+    if (av_cmp_q(nominal_frame_rate, requested_frame_rate) != 0) {
+        elv_err("Invalid video_fps not matching frame rate, video_fps=%d source_fps=%d/%d url=%s",
+            params->video_fps, nominal_frame_rate.num, nominal_frame_rate.den,
+            params->url);
+        return eav_param;
+    }
+
+    return eav_success;
+}
+
 /*
  * @brief   Used to initialize video filter.
  * @return  Returns 0 if successful, otherwise eav_filter_init if there is an error.
@@ -24,6 +64,8 @@ init_video_filters(
     int ret = 0;
     const AVFilter *buffersrc  = avfilter_get_by_name("buffer");
     const AVFilter *buffersink = avfilter_get_by_name("buffersink");
+    AVFilterContext *fps_ctx = NULL;
+    AVFilterContext *fps_timebase_ctx = NULL;
     AVFilterInOut *outputs = avfilter_inout_alloc();
     AVFilterInOut *inputs  = avfilter_inout_alloc();
     AVRational time_base;
@@ -92,6 +134,60 @@ init_video_filters(
     }
 
     /*
+     * Frame rate stabilization using 'fps' filter (dupe/remove frames to produce constant fps)
+     * Currently only for RTMP inputs.
+     */
+    if (decoder_context->live_proto == avp_proto_rtmp && params->video_fps > 0) {
+        const AVFilter *fps = avfilter_get_by_name("fps");
+        const AVFilter *settb = avfilter_get_by_name("settb");
+        char fps_args[64];
+        char settb_args[64];
+
+        if (!fps || !settb) {
+            elv_err("init_video_filters, fps or settb filter is not available");
+            ret = AVERROR_FILTER_NOT_FOUND;
+            goto end;
+        }
+
+        snprintf(fps_args, sizeof(fps_args), "fps=%d:round=near", params->video_fps);
+        ret = avfilter_graph_create_filter(&fps_ctx, fps, "rtmp_fps", fps_args, NULL,
+            decoder_context->video_filter_graph);
+        if (ret < 0) {
+            elv_err("init_video_filters, cannot create fps filter fps=%d err=%d",
+                params->video_fps, ret);
+            goto end;
+        }
+
+        snprintf(settb_args, sizeof(settb_args), "expr=%d/%d", time_base.num,
+            time_base.den);
+
+        /* Restore the encoder time base after the fps filter. */
+        ret = avfilter_graph_create_filter(&fps_timebase_ctx, settb,
+            "fps_timebase", settb_args, NULL,
+            decoder_context->video_filter_graph);
+        if (ret < 0) {
+            elv_err("init_video_filters, cannot create fps timebase filter time_base=%d/%d err=%d",
+                time_base.num, time_base.den, ret);
+            goto end;
+        }
+
+        ret = avfilter_link(fps_ctx, 0, fps_timebase_ctx, 0);
+        if (ret < 0) {
+            elv_err("init_video_filters, cannot link fps filter to timebase filter err=%d", ret);
+            goto end;
+        }
+
+        ret = avfilter_link(fps_timebase_ctx, 0,
+            decoder_context->video_buffersink_ctx, 0);
+        if (ret < 0) {
+            elv_err("init_video_filters, cannot link fps timebase filter to sink err=%d", ret);
+            goto end;
+        }
+
+        elv_log("Enabled fps filter fps=%d, url=%s", params->video_fps, params->url);
+    }
+
+    /*
      * Set the endpoints for the filter graph. The filter_graph will
      * be linked to the graph described by filters_descr.
      */
@@ -114,7 +210,7 @@ init_video_filters(
      * default.
      */
     inputs->name       = av_strdup("out");
-    inputs->filter_ctx = decoder_context->video_buffersink_ctx;
+    inputs->filter_ctx = fps_ctx ? fps_ctx : decoder_context->video_buffersink_ctx;
     inputs->pad_idx    = 0;
     inputs->next       = NULL;
 
