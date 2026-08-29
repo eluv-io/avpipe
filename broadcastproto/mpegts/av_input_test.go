@@ -3,11 +3,13 @@ package mpegts
 import (
 	"io"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/require"
 
 	"github.com/eluv-io/avpipe/broadcastproto/transport"
 	"github.com/eluv-io/avpipe/goavpipe"
+	mio "github.com/eluv-io/common-go/media/io"
 	"github.com/eluv-io/common-go/media/pktpool"
 	"github.com/eluv-io/errors-go"
 )
@@ -88,6 +90,33 @@ func TestMpegtsInputHandlerReadPacketNoFanOut(t *testing.T) {
 	require.EqualValues(t, 0, mih.packetsDropped.Load())
 }
 
+// TestMpegtsInputHandlerReadPacketStampsReceivedAt is a regression test: ReadPacket once stamped ReceivedAt before
+// calling FromReader, which internally resets the packet (including ReceivedAt) as part of loading - so the stamp was
+// always wiped immediately, leaving ReceivedAt permanently zero. That silently broke the MPEG-TS copy track's
+// wall-clock segment rotation (MpegtsPacketProcessor.writeDatagram keys off ReceivedAt), since the segment-length
+// check could never see elapsed time. ReceivedAt must be stamped after FromReader returns, matching Read() above.
+func TestMpegtsInputHandlerReadPacketStampsReceivedAt(t *testing.T) {
+	tsPkt := mustTSPacket()
+
+	mih := &mpegtsInputHandler{
+		rc:         &onceReadCloser{data: tsPkt[:]},
+		transport:  &transport.Mock{Packaging: transport.RawTs},
+		seqOpener:  &recordingSequentialOpener{},
+		packetPool: pktpool.NewPacketPool(outputTlvWrapCap, inputPacketPoolCap),
+	}
+
+	before := time.Now()
+	res, err := mih.ReadPacket()
+	after := time.Now()
+	require.NoError(t, err)
+	require.NotNil(t, res)
+	defer res.Release()
+
+	require.False(t, res.T.ReceivedAt.IsZero())
+	require.False(t, res.T.ReceivedAt.Before(before))
+	require.False(t, res.T.ReceivedAt.After(after))
+}
+
 // TestMpegtsInputHandlerReadPacketFanOut confirms ReadPacket hands the same underlying packet to both the caller and
 // outputSplit, without re-reading.
 func TestMpegtsInputHandlerReadPacketFanOut(t *testing.T) {
@@ -137,6 +166,44 @@ func TestMpegtsInputHandlerReadPacketDropsOnFullChannel(t *testing.T) {
 
 	require.Equal(t, tsPkt[:], res.T.Data)
 	require.EqualValues(t, 1, mih.packetsDropped.Load())
+}
+
+// TestMpegtsInputHandlerReaderLoop_ConnStatsWired is a regression test for SRT connection stats never being surfaced
+// on the direct/bypass-off ingest path (CustomReadLoopEnabled == false, i.e. avpipe's own ffmpeg-driven read path):
+// ReaderLoop's MpegtsPacketProcessor never had SetConnStatsSource wired to mih.rc, unlike bypass.go/custom.go's
+// NetReader-backed paths, so ExportedStats.Srt silently stayed nil here even when the underlying reader (e.g. an SRT
+// connection) supports mio.StatsReporter. Drives ReaderLoop with a fake StatsReporter as mih.rc and confirms a Srt
+// report surfaces its stats.
+func TestMpegtsInputHandlerReaderLoop_ConnStatsWired(t *testing.T) {
+	reports := make(chan ExportedStats, 8)
+	opener := &recordingSequentialOpener{}
+	opener.onStat = func(stats ExportedStats) { reports <- stats }
+
+	ch := make(chan pktpool.Resource)
+	mih := &mpegtsInputHandler{
+		rc:         &fakeStatsReporterReadCloser{stats: mio.ConnStats{SRT: &mio.SrtConnStats{Version: 7}}},
+		transport:  &transport.Mock{Packaging: transport.RawTs},
+		seqOpener:  opener,
+		packetPool: pktpool.NewPacketPool(outputTlvWrapCap, inputPacketPoolCap),
+	}
+
+	done := make(chan struct{})
+	go func() {
+		mih.ReaderLoop(ch, &mih.packetsDropped)
+		close(done)
+	}()
+	defer func() {
+		close(ch)
+		<-done
+	}()
+
+	select {
+	case stats := <-reports:
+		require.NotNil(t, stats.Srt, "SRT connection stats must be surfaced on the direct ingest path too")
+		require.EqualValues(t, 7, stats.Srt.Version)
+	case <-time.After(2 * time.Second):
+		t.Fatal("no stats report arrived")
+	}
 }
 
 // TestMpegtsInputHandlerReadPacketError confirms a read error is released and wrapped as retryable, matching Read().

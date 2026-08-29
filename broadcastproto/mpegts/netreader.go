@@ -11,6 +11,7 @@ import (
 	"github.com/eluv-io/avpipe/goavpipe"
 	"github.com/eluv-io/common-go/format/duration"
 	"github.com/eluv-io/common-go/media"
+	mio "github.com/eluv-io/common-go/media/io"
 	"github.com/eluv-io/common-go/media/pktpool"
 	"github.com/eluv-io/common-go/util/timeutil"
 	"github.com/eluv-io/errors-go"
@@ -84,6 +85,23 @@ type NetReader struct {
 	running   atomic.Bool
 	waitGroup sync.WaitGroup
 	reader    atomic.Pointer[io.ReadCloser] // the current reader, used for closing when the NetReader is canceled
+}
+
+// ConnStats copies the current connection's statistics into the given mio.ConnStats instance (if there is an active
+// reader and the reader supports statistics, e.g. an SRT connection - see mio.StatsReporter). It returns false without
+// touching the ConnStats instance if there's no active reader yet (not yet connected, or between reconnect attempts) or
+// the reader doesn't implement mio.StatsReporter (e.g. a plain UDP socket).
+func (r *NetReader) ConnStats(into *mio.ConnStats, details bool) bool {
+	reader := r.reader.Load()
+	if reader == nil {
+		return false
+	}
+	reporter, ok := (*reader).(mio.StatsReporter)
+	if !ok {
+		return false
+	}
+	reporter.ConnStats(into, details)
+	return true
 }
 
 func (r *NetReader) Status() (running bool, err error) {
@@ -166,6 +184,12 @@ func (r *NetReader) process() error {
 		}
 
 		cont, err := r.readLoop(reader) // readLoop closes reader!
+		// Clear the now-closed reader immediately, rather than leaving it in place until the next successful
+		// connect()'s Store below: ConnStats documents "between reconnect attempts" as no active reader (ok=false),
+		// but without this, a closed reader from the previous connection would still satisfy Load() != nil and, if
+		// it implements mio.StatsReporter, report stale stats throughout the reconnect window. Harmless if Cancel
+		// runs concurrently: its own Swap(nil) becomes a no-op on an already-nil/already-closed reader either way.
+		r.reader.Store(nil)
 		if cont {
 			if r.config.MaxRecoverAttempts <= 0 || i < r.config.MaxRecoverAttempts {
 				logNetReader.Info("recoverable processor error, will retry", e(err))
@@ -233,7 +257,6 @@ func (r *NetReader) readLoop(reader io.ReadCloser) (cont bool, err error) {
 			res.Release()
 			return r.isRecoverable(err), errors.E("readLoop", errors.K.IO.Default(), err)
 		}
-		pkt.ReceivedAt = time.Now()
 		pkt.Data, err = r.transformer.Transform(pkt.Data)
 		if err != nil {
 			res.Release()

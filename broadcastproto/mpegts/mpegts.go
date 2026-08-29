@@ -2,7 +2,7 @@ package mpegts
 
 import (
 	"encoding/binary"
-	"errors"
+	"fmt"
 	"io"
 	"sync"
 	"time"
@@ -13,9 +13,11 @@ import (
 	"github.com/eluv-io/avpipe/broadcastproto/tlv"
 	"github.com/eluv-io/avpipe/broadcastproto/transport"
 	"github.com/eluv-io/avpipe/goavpipe"
+	mio "github.com/eluv-io/common-go/media/io"
 	"github.com/eluv-io/common-go/media/pktpool"
-	"github.com/eluv-io/common-go/util/timeutil"
+	"github.com/eluv-io/common-go/media/tracker"
 	elog "github.com/eluv-io/log-go"
+	"github.com/eluv-io/utc-go"
 )
 
 const (
@@ -38,6 +40,10 @@ type SequentialOpener interface {
 	OpenNext() (io.WriteCloser, error)
 	Stat(args any) error
 	ReportStart() error
+	// ReportBytesWritten pushes a lightweight, high-frequency signal for stall detection - the total number of bytes
+	// written so far - separate from Stat's full ExportedStats push, which runs on its own, much slower cadence. See
+	// MpegtsPacketProcessor's StartReportingStats.
+	ReportBytesWritten(n uint64) error
 }
 
 type MpegtsPacketProcessor struct {
@@ -48,22 +54,31 @@ type MpegtsPacketProcessor struct {
 	segStartTime time.Time // wall-clock time at the start of the current segment
 	currentWc    io.WriteCloser
 
-	// statsMu is _only_ used for updating cc errors by PID
-	statsMu sync.Mutex
-
 	stats *TSStats
 	// rtpStats is used to keep track of RTP-specific information in the case that the packaging is
 	// RTP-MPEGTS. It is _nil_ iff cfg.Packaging is not RTP-TS.
 	rtpStats *RTPStats
-	// Periodic for logging stats
-	periodicStatsLog timeutil.Periodic
 
-	continuityMap map[int]uint8 // Map of PID to last continuity counter
-	pcrPid        int           // PID we track PCRs from; pinned to the first PCR-bearing PID (-1 = not set)
-	outBuf        []byte        // Preallocated byte buffer
-	closeCh       chan struct{}
-	stopOnce      sync.Once
-	stopErr       error
+	// tracker tracks the incoming stream's timing and integrity (continuity counters, PCR/RTP clock correlation, gap
+	// detection, input-validation errors, etc.); its stats are surfaced via ExportedStats.Stream. It is safe for
+	// concurrent use by its own design (TrackPacket from the packet-processing path, Snapshot from
+	// reportFullStatsLoop), independent of any locking in MpegtsPacketProcessor itself.
+	tracker tracker.MediaTracker
+
+	// connStats, if set, reports the underlying network connection's statistics (e.g. SRT protocol stats), surfaced via
+	// ExportedStats.Srt. nil for a source that doesn't report them (e.g. plain UDP), or before the caller has wired one
+	// in via SetConnStatsSource.
+	connStats connStatsSource
+
+	// reorderStats, if set, reports RTP packet-reordering correction statistics, surfaced via ExportedStats.Reorder.
+	// nil for RawTs/AtsTs packaging (re-ordering not supported) or before the caller has wired one in via
+	// SetReorderStatsSource.
+	reorderStats reorderStatsSource
+
+	outBuf   []byte // Preallocated byte buffer
+	closeCh  chan struct{}
+	stopOnce sync.Once
+	stopErr  error
 
 	startLogged bool // ensure logging TS processing route once
 }
@@ -79,14 +94,14 @@ func NewMpegtsPacketProcessor(cfg TsConfig, seqOpener SequentialOpener, inFd int
 		"rtp_stats", rtpStats != nil,
 		"segment_length_sec", cfg.SegmentLengthSec)
 	return &MpegtsPacketProcessor{
-		cfg:              cfg,
-		opener:           seqOpener,
-		inFd:             inFd,
-		pcrPid:           -1, // -1 = not set; PID 0 is a valid PID that may carry PCRs
-		continuityMap:    make(map[int]uint8),
-		stats:            NewTSStats(),
-		rtpStats:         rtpStats,
-		periodicStatsLog: timeutil.NewPeriodic(30 * time.Second),
+		cfg:      cfg,
+		opener:   seqOpener,
+		inFd:     inFd,
+		stats:    NewTSStats(),
+		rtpStats: rtpStats,
+		tracker: tracker.NewMediaTracker(
+			fmt.Sprintf("fd-%d", inFd),
+			tracker.Config{Rtp: cfg.Packaging == transport.RtpTs}),
 		// Max datagram size plus room for the TLV header and (for ATS-TS) the arrival timestamp prefix.
 		outBuf:  make([]byte, 64*1024+tlv.TLV_HEADER_LEN+tlv.AtsTimestampLen),
 		closeCh: make(chan struct{}),
@@ -101,62 +116,48 @@ type TsConfig struct {
 	AnalyzeData  bool
 }
 
+// TSStats holds avpipe's own operational stats about its output pipeline (segmentation, writing, channel
+// backpressure). All stream-integrity stats (continuity-counter errors, PCR wraps, input-validation errors, per-PID
+// stream structure, and the total packets/bytes received) now live in mpp.tracker (tracker.MediaTracker) and are
+// surfaced via ExportedStats.Stream; ExportedStats.populate also maps a subset of them onto the legacy
+// ExportedTSStats/ExportedRTPStats fields below for backward JSON compatibility.
 type TSStats struct {
-	PacketsReceived atomic.Uint64
-	PacketsWritten  atomic.Uint64
+	PacketsWritten atomic.Uint64
 	// PacketsDropped is updated by the sender to the channel, which is why it is a pointer
-	PacketsDropped         *atomic.Uint64
-	SmallPacketsDropped    atomic.Uint64 // small packets (< 188 bytes) are dropped
-	RtcpPacketsDropped     atomic.Uint64 // small dropped packets with are likely RTCP (included in SmallPacketsDropped)
-	BadPackets             atomic.Uint64
-	BytesReceived          atomic.Uint64
-	BytesWritten           atomic.Uint64
-	PaddingPackets         atomic.Uint64
+	PacketsDropped *atomic.Uint64
+	BytesWritten   atomic.Uint64
+	// BadPackets counts TS packets that fail CheckErrors(); computed here (not sourced from mpp.tracker) so it isn't
+	// conflated with mpp.tracker's own BadPackets, which counts a different, RTP-only condition. See
+	// ExportedStats.populate.
+	BadPackets atomic.Uint64
+	// FaultyPaddingPackets/StrippedPaddingPackets are byproducts of the padding-stripping operation itself (see
+	// stripTsPadding/RemoveTsPadding) - an avpipe output-pipeline concern, not a stream-integrity stat.
 	FaultyPaddingPackets   atomic.Uint64
 	StrippedPaddingPackets atomic.Uint64
 
 	MaxBufInPeriod atomic.Uint64
 	MinBufInPeriod atomic.Uint64
 
-	VideoPacketCount atomic.Uint64
-	AudioPacketCount atomic.Uint64
-	DataPacketCount  atomic.Uint64
-
-	FirstPCR       atomic.Uint64 // First seen PCR value
-	LastPCR        atomic.Uint64 // Last seen PCR value
 	NumSegments    atomic.Int64
-	NumWraps       atomic.Int64
 	NumTimedRotate atomic.Int64
 
-	// Errors in the continuity counter
-	ErrorsCC                atomic.Uint64
-	ErrorsAdaptationField   atomic.Uint64
-	ErrorsOther             atomic.Uint64
-	ErrorsIncompletePackets atomic.Uint64
-	ErrorsOpeningOutput     atomic.Uint64
-	ErrorsWriting           atomic.Uint64
-	ErrorsCCByPid           map[int]uint64
+	ErrorsOther         atomic.Uint64
+	ErrorsOpeningOutput atomic.Uint64
+	ErrorsWriting       atomic.Uint64
 }
 
+// RTPStats holds avpipe's own RTP-specific bookkeeping that mpp.tracker does not itself expose. Sequence/timestamp
+// tracking, gap detection, and clock correlation are all delegated to mpp.tracker's "rtp" ClockStats; see
+// ExportedStats.populate.
 type RTPStats struct {
-	FirstSeqNum     atomic.Uint32
-	LastSeqNum      atomic.Uint32
-	SeqNumSkipTot   atomic.Uint32
-	SeqNumSkipCount atomic.Uint64
-
-	// RTP timestamp interpretation is different by application
-	FirstTimestamp atomic.Uint32
-	LastTimestamp  atomic.Uint32
-	RefTime        time.Time // System time when first timestamp is set
-
-	BadPackets  atomic.Uint64 // Invalid RTP packets
-	LongHeaders atomic.Uint64 // LongHeaders keeps track of RTP headers longer than 12 bytes
+	// BadPackets counts a malformed RTP header, an unsupported RTP version, or at least one contained TS packet
+	// failing CheckErrors() - computed here (not sourced from mpp.tracker) so it isn't conflated with mpp.tracker's
+	// own BadPackets, which counts RTP-layer failures only. See ExportedStats.populate.
+	BadPackets atomic.Uint64
 }
 
 func NewTSStats() *TSStats {
-	return &TSStats{
-		ErrorsCCByPid: make(map[int]uint64),
-	}
+	return &TSStats{}
 }
 
 // ProcessDatagramPacket analyzes and writes the datagram held by pkt, framing the TLV output zero-copy into pkt's
@@ -172,23 +173,32 @@ func (mpp *MpegtsPacketProcessor) ProcessDatagramPacket(now time.Time, pkt *pktp
 			"fd", mpp.inFd,
 			"packaging", string(mpp.cfg.Packaging),
 			"datagram_len", len(datagram))
+		// Prompt first ping so stall detection doesn't have to wait for reportBytesWrittenLoop's first tick -
+		// regardless of transport: both RTP and raw TS packaging feed mpp.stats.BytesWritten via writeDatagram below,
+		// and content-fabric's CopyModeRawOnly stall check applies independently of packaging. Deferred because
+		// BytesWritten is only updated by writeDatagram, so reading it now (before this datagram's bytes are counted)
+		// would report a stale value one packet behind.
+		defer mpp.reportBytesWritten()
 	}
 
+	// Feed the tracker unconditionally, before any of the accept/reject checks below, so it sees (and counts) every
+	// datagram exactly as received - including ones this method goes on to drop. Its returned error is used only for
+	// statistics (surfaced via ExportedStats.Stream/populate below); it does not affect the write decision below,
+	// which mirrors avpipe's own framing requirements (RTP header length, exact multiple-of-188 TS payload) rather
+	// than the tracker's more general integrity checks.
+	_ = mpp.tracker.TrackPacket(utc.New(now), pkt)
+
 	mpegtsOffset := 0
-	var tsPackets []*packet.Packet
 
 	if mpp.cfg.Packaging == transport.RtpTs {
 		if len(datagram) < 12+188 { // RTP header + at least one TS packet
-			mpp.stats.SmallPacketsDropped.Inc()
-			if isRTCP(datagram) {
-				mpp.stats.RtcpPacketsDropped.Inc()
-			}
 			return
 		}
 
 		// Only MpegTsConsumer decodes any layer of a shared pkt today (Fmp4Consumer only reads .Data), so calling
 		// Rtp()/Ts() here is safe. If a future consumer ever decodes a layer on the same shared pkt, that call must be
-		// sequenced relative to this one - pktpool.Packet's decode cursor is shared and forward-only.
+		// sequenced relative to this one - pktpool.Packet's decode cursor is shared and forward-only. mpp.tracker's
+		// call above already decoded this layer, so this is a cached accessor, not a re-parse.
 		rtpLayer, err := pkt.Rtp()
 		if err != nil {
 			mpp.rtpStats.BadPackets.Inc()
@@ -202,107 +212,168 @@ func (mpp *MpegtsPacketProcessor) ProcessDatagramPacket(now time.Time, pkt *pktp
 		// Header length derived from where pion actually placed the payload, not Header.MarshalSize() (which can
 		// under-report for extension-bearing packets) - see pktpool.RtpPacket.decode's own comment for why.
 		mpegtsOffset = len(datagram) - len(rtpLayer.Payload) - int(hdr.PaddingSize)
-		if mpegtsOffset != 12 {
-			mpp.rtpStats.LongHeaders.Inc()
-		}
-		if mpp.rtpStats.FirstTimestamp.CompareAndSwap(0, hdr.Timestamp) {
-			mpp.rtpStats.RefTime = now
-			mpp.rtpStats.FirstSeqNum.Store(uint32(hdr.SequenceNumber))
-			defer mpp.PushStats() // defer so that ts stats are included in the stats
-		}
-		mpp.rtpStats.LastTimestamp.Store(hdr.Timestamp)
-		mpp.rtpStats.LastSeqNum.Store(uint32(hdr.SequenceNumber))
 	} else {
 		// raw MPEG-TS
 		if len(datagram) < 188 { // require at least one TS packet, otherwise drop it
-			mpp.stats.SmallPacketsDropped.Inc()
 			return
 		}
 	}
 
+	// mpp.tracker's call above already decoded this layer, so this is a cached accessor, not a re-parse.
 	tsLayer, err := pkt.Ts()
 	if err != nil {
 		// Ts() requires the RTP payload to be an exact multiple of 188 bytes; a well-formed MPEGTS-over-RTP
-		// source always satisfies this, so a mismatch here indicates a malformed/corrupt datagram.
-		mpp.stats.ErrorsIncompletePackets.Inc()
+		// source always satisfies this, so a mismatch here indicates a malformed/corrupt datagram. Already counted
+		// by mpp.tracker (ErrorStats.IncompletePackets).
 		mpegtslog.Throttle("ts-decode").Warn("mpegts processing error", err, "fd", mpp.inFd)
 		return
 	}
-	tsPackets = tsLayer.Packets()
+	tsPackets := tsLayer.Packets()
 
-	// Extract PCR
-	badPackets := 0
+	// This second pass over the already-decoded tsPackets is cheap (no re-parsing): it maintains the padding-stripping
+	// decision below, which (unlike mpp.tracker's own input-validation) requires knowing whether *this* datagram is
+	// safe to compact in place.
+	badPackets := false
 	hasPadding := false
 	for _, tsPkt := range tsPackets {
-		err := mpp.HandleMpegtsPacket(tsPkt)
-		if err != nil {
-			badPackets++
-		} else if mpp.cfg.Packaging == transport.RtpTs {
-			if tsPkt.IsNull() {
-				mpp.stats.PaddingPackets.Inc()
-				// do not remove padding here, just flag it. We will remove it later if and only if none of the packets
-				// in the datagram are bad.
-				hasPadding = true
-			}
+		if tsPkt.CheckErrors() != nil {
+			mpp.stats.BadPackets.Inc()
+			badPackets = true
+			continue
+		}
+		if mpp.cfg.Packaging == transport.RtpTs && tsPkt.IsNull() {
+			// do not remove padding here, just flag it. We will remove it later if and only if none of the packets
+			// in the datagram are bad.
+			hasPadding = true
 		}
 	}
-
-	if badPackets > 0 {
-		if mpp.cfg.Packaging == transport.RtpTs {
-			mpp.rtpStats.BadPackets.Inc()
-		}
+	if badPackets && mpp.cfg.Packaging == transport.RtpTs {
+		mpp.rtpStats.BadPackets.Inc()
 	}
-
-	mpp.writeDatagram(now, datagram, pkt, badPackets == 0 && hasPadding && StripTsPadding.Load(), mpegtsOffset)
-}
-
-func (mpp *MpegtsPacketProcessor) HandleMpegtsPacket(pkt *packet.Packet) error {
-	mpp.stats.PacketsReceived.Inc()
-	mpp.stats.BytesReceived.Add(uint64(len(pkt)))
-
-	if pkt.CheckErrors() != nil {
-		mpp.stats.BadPackets.Inc()
-		return errors.New("bad mpegts packet")
-	}
-
-	mpp.checkContinuityCounter(pkt)
-	mpp.updatePCR(pkt)
 
 	if mpp.cfg.AnalyzeData || mpp.cfg.AnalyzeVideo {
 		// TODO(Nate): Copy over some of the logic analyzing this stuff
 	}
 
-	return nil
+	mpp.writeDatagram(now, datagram, pkt, !badPackets && hasPadding && StripTsPadding.Load(), mpegtsOffset)
 }
 
-// StartReportingStats kicks off a job that periodically logs the stats
+// StartReportingStats kicks off two independent, differently-paced reporting loops: a fast one pushing just the
+// BytesWritten signal that content-fabric's live-recorder needs for stall detection (see ReportBytesWritten's doc), and
+// a slow one pushing the full ExportedStats (tracker snapshot, SRT stats) for logging/status-reporting purposes.
+// Splitting them means the full-stats gather (mpp.tracker.Snapshot, which walks every tracked PID) only runs as often
+// as it's actually needed, with no caching/locking required - see reportFullStatsLoop.
 func (mpp *MpegtsPacketProcessor) StartReportingStats() {
-	// must be smaller than the 1s interval used by the live-recorder for calculation of "stalls"
-	reportingInterval := 900 * time.Millisecond
-	go func() {
-		ticker := time.NewTicker(reportingInterval)
-		defer ticker.Stop()
-		for {
-			select {
-			case <-ticker.C:
-				mpp.PushStats()
-			case <-mpp.closeCh:
-				return
-			}
-		}
-	}()
+	go mpp.reportBytesWrittenLoop()
+	go mpp.reportFullStatsLoop()
 }
 
+// reportBytesWrittenLoop pushes ReportBytesWritten on a fast, fixed interval - must stay smaller than the 1s interval
+// the live-recorder uses to calculate stalls (see ReportBytesWritten's doc).
+func (mpp *MpegtsPacketProcessor) reportBytesWrittenLoop() {
+	reportingInterval := 900 * time.Millisecond
+	ticker := time.NewTicker(reportingInterval)
+	defer ticker.Stop()
+	for {
+		select {
+		case <-ticker.C:
+			mpp.reportBytesWritten()
+		case <-mpp.closeCh:
+			return
+		}
+	}
+}
+
+// reportBytesWritten pushes the total bytes written so far - the one signal content-fabric's live-recorder needs, at
+// high frequency, to detect a stalled stream (comparing successive values; see startHealthChecking on the
+// content-fabric side). Deliberately minimal: no tracker snapshot, no lock, just an atomic load and a push.
+func (mpp *MpegtsPacketProcessor) reportBytesWritten() {
+	_ = mpp.opener.ReportBytesWritten(mpp.stats.BytesWritten.Load())
+}
+
+// reportFullStatsLoop pushes full ExportedStats on a slow, fixed interval, plus once immediately on entry and once
+// more just before returning - time.NewTicker's first tick only fires after the full interval, and select alone
+// gives no report at all on shutdown, so without these an ingest shorter than fullStatsInterval would otherwise
+// never produce a single full stats report, and no report would ever reflect the stream's final state.
+func (mpp *MpegtsPacketProcessor) reportFullStatsLoop() {
+	fullStatsInterval := 5 * time.Second
+	// Reused across every tick by this goroutine alone, so CopyInto/Snapshot's destination-reuse bounds this to
+	// near-zero allocation once the tracked PID set stabilizes.
+	var stats ExportedStats
+	ticker := time.NewTicker(fullStatsInterval)
+	defer ticker.Stop()
+	mpp.pushStatsInto(&stats)
+	for {
+		select {
+		case <-ticker.C:
+			mpp.pushStatsInto(&stats)
+		case <-mpp.closeCh:
+			mpp.pushStatsInto(&stats)
+			return
+		}
+	}
+}
+
+// PushStats gathers and reports the processor's full stats into a fresh, one-off destination. Exported for callers
+// outside the two reporting loops (e.g. tests, or a manual one-off report); a caller doing this repeatedly should
+// call pushStatsInto directly with its own persistent, exclusively-owned destination instead, to avoid allocating
+// one on every call - see reportFullStatsLoop.
 func (mpp *MpegtsPacketProcessor) PushStats() {
-	mpp.statsMu.Lock()
-	exportStats := exportStats(mpp.stats, mpp.rtpStats)
-	mpp.statsMu.Unlock()
+	mpp.pushStatsInto(&ExportedStats{})
+}
+
+// pushStatsInto gathers statistics into the caller-supplied dst instead of a fresh one-off allocation. dst must be
+// exclusively owned by the caller for the duration of this call.
+func (mpp *MpegtsPacketProcessor) pushStatsInto(dst *ExportedStats) {
+	now := utc.Now()
+	if dst.Stream == nil {
+		dst.Stream = &tracker.Stats{}
+	}
+	mpp.tracker.Snapshot(dst.Stream, true, now, tracker.SnapshotOptions{})
+
+	// Reuse dst.Srt's existing allocation (if any) as the destination, so a caller that reuses dst across calls (e.g.
+	// reportFullStatsLoop) doesn't allocate a new SrtConnStats on every tick.
+	cs := mio.ConnStats{SRT: dst.Srt}
+	dst.Srt = nil
+	if mpp.connStats != nil && mpp.connStats.ConnStats(&cs, true) {
+		dst.Srt = cs.SRT
+	}
+
+	if mpp.reorderStats != nil {
+		dst.Reorder = mpp.reorderStats.Stats()
+	}
+
+	dst.populate(mpp.stats, mpp.rtpStats)
 	mpp.resetChannelSizeStats()
 
-	mpp.periodicStatsLog.Do(func() {
-		mpegtslog.Debug("mpegts stats", "fd", mpp.inFd, "stats", &exportStats)
-	})
-	_ = mpp.opener.Stat(exportStats)
+	_ = mpp.opener.Stat(*dst)
+}
+
+// connStatsSource is implemented by *NetReader; kept as a minimal interface (rather than depending on NetReader
+// directly) so MpegtsPacketProcessor stays testable with a fake. See SetConnStatsSource.
+type connStatsSource interface {
+	ConnStats(into *mio.ConnStats, details bool) bool
+}
+
+// SetConnStatsSource wires src as the source of ExportedStats.Srt. It is a setter rather than a constructor
+// parameter because the underlying connection (a *NetReader, see bypass.go/custom.go) doesn't exist until after
+// NewMpegtsPacketProcessor has already been called and returned.
+func (mpp *MpegtsPacketProcessor) SetConnStatsSource(src connStatsSource) {
+	mpp.connStats = src
+}
+
+// reorderStatsSource is implemented by *ReorderingConsumer; kept as a minimal interface (rather than depending on
+// ReorderingConsumer directly) so MpegtsPacketProcessor stays testable with a fake. See SetReorderStatsSource.
+type reorderStatsSource interface {
+	Stats() ReorderConsumerStats
+}
+
+// SetReorderStatsSource wires src as the source of ExportedStats.Reorder. It is a setter rather than a constructor
+// parameter because in custom.go's wiring, the ReorderingConsumer wraps this processor's own consumer and so is
+// constructed after NewMpegtsPacketProcessor has already been called and returned. Only called for RtpTs packaging;
+// ExportedStats.Reorder stays zero-value when never set.
+func (mpp *MpegtsPacketProcessor) SetReorderStatsSource(src reorderStatsSource) {
+	mpp.reorderStats = src
 }
 
 func (mpp *MpegtsPacketProcessor) ReportStart() {
@@ -344,77 +415,6 @@ func (mpp *MpegtsPacketProcessor) resetChannelSizeStats() {
 	maxU64 := ^uint64(0)
 	mpp.stats.MaxBufInPeriod.Store(0)
 	mpp.stats.MinBufInPeriod.Store(maxU64)
-}
-
-func (mpp *MpegtsPacketProcessor) checkContinuityCounter(pkt *packet.Packet) {
-	if !pkt.HasPayload() || pkt.IsNull() {
-		// per spec, continuity counter only applies to packets with payload
-		return
-	}
-
-	cc := uint8(pkt.ContinuityCounter())
-	pid := pkt.PID()
-
-	lastCC, exists := mpp.continuityMap[pid]
-	mpp.continuityMap[pid] = cc
-
-	if exists && cc != (lastCC+1)%16 {
-		mpp.statsMu.Lock()
-		mpp.stats.ErrorsCC.Inc()
-		if _, ok := mpp.stats.ErrorsCCByPid[pid]; !ok {
-			mpp.stats.ErrorsCCByPid[pid] = 1
-		} else {
-			mpp.stats.ErrorsCCByPid[pid]++
-		}
-		mpp.statsMu.Unlock()
-	}
-}
-
-func (mpp *MpegtsPacketProcessor) updatePCR(pkt *packet.Packet) {
-	if !pkt.HasAdaptationField() {
-		return
-	}
-
-	// Cannot fail as we already checked for adaptation field
-	a, _ := pkt.AdaptationField()
-
-	hasPcr, err := a.HasPCR()
-	if err != nil {
-		mpp.stats.ErrorsAdaptationField.Inc()
-		return
-	} else if !hasPcr {
-		return
-	}
-
-	// Pin PCR tracking to the first PID that carries a PCR and ignore the rest. Multi-program streams carry an
-	// independent PCR per program, so mixing them would make the FirstPCR/LastPCR stats meaningless. -1 is the "not
-	// set" sentinel, since PID 0 is a valid PID that may legitimately carry PCRs.
-	pid := pkt.PID()
-	if mpp.pcrPid != -1 && pid != mpp.pcrPid {
-		return
-	}
-
-	pcr, err := a.PCR()
-	if err != nil {
-		mpp.stats.ErrorsAdaptationField.Inc()
-		return
-	}
-
-	if mpp.pcrPid == -1 {
-		// Pin the PCR to this PID
-		mpp.pcrPid = pid
-		mpp.stats.FirstPCR.CompareAndSwap(0, pcr)
-	} else {
-		// Count PCR wraps on the pinned PID: a wrap is a large backward jump from near PcrMax back towards 0. Skip the
-		// first PCR, when there is nothing to compare against yet. PCR is otherwise stats-only; segmentation is driven
-		// purely by wall-clock time.
-		prev := mpp.stats.LastPCR.Load()
-		if pcr < prev && prev-pcr > PcrMax/2 {
-			mpp.stats.NumWraps.Inc()
-		}
-	}
-
-	mpp.stats.LastPCR.Store(pcr)
 }
 
 func (mpp *MpegtsPacketProcessor) writeDatagram(
@@ -611,20 +611,4 @@ outer:
 		}
 	}
 	return pkt, stripped, faulty
-}
-
-func isRTCP(data []byte) bool {
-	if len(data) < 2 {
-		return false
-	}
-	// The second byte (index 1) contains the Payload Type
-	pt := data[1]
-
-	// RTCP Packet Types:
-	// 200: SR (Sender Report)
-	// 201: RR (Receiver Report)
-	// 202: SDES (Source Description)
-	// 203: BYE (Goodbye)
-	// 204: APP (Application-defined)
-	return pt >= 200 && pt <= 204
 }
