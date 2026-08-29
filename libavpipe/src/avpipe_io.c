@@ -134,6 +134,10 @@ elv_io_open(
                 outctx->type = avpipe_aes_128_key;
                 outctx->seg_index = -2;
             }
+            else if (strstr(url, "mpegts-stream")) {
+                /* Continuous MPEGTS stream, single output (format="mpegts") */
+                outctx->type = avpipe_mpegts_segment;
+            }
             else if (!strncmp(url, "mp4", 3)) {
                 outctx->type = avpipe_mp4_stream;
             } else if (strstr(url, "fsegment")) {
