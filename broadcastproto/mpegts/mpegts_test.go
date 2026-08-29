@@ -7,9 +7,12 @@ import (
 	"time"
 
 	"github.com/Comcast/gots/v2/packet"
+	pionrtp "github.com/pion/rtp"
 	"github.com/stretchr/testify/require"
+	"go.uber.org/atomic"
 
 	"github.com/eluv-io/avpipe/broadcastproto/transport"
+	"github.com/eluv-io/common-go/media/pktpool"
 )
 
 func TestMpegtsPacketProcessorWallClockSegmentation(t *testing.T) {
@@ -22,7 +25,7 @@ func TestMpegtsPacketProcessorWallClockSegmentation(t *testing.T) {
 		pp := newTestMpegtsPacketProcessor(opener)
 
 		pkt := mustTSPacket()
-		pp.ProcessDatagram(base, pkt[:])
+		pp.ProcessDatagramPacket(base, mustDatagramPacket(t, pkt[:]))
 
 		require.Equal(t, 1, opener.opens)
 		require.EqualValues(t, 1, pp.stats.NumSegments.Load())
@@ -35,11 +38,11 @@ func TestMpegtsPacketProcessorWallClockSegmentation(t *testing.T) {
 		pp := newTestMpegtsPacketProcessor(opener)
 
 		pkt := mustTSPacket()
-		pp.ProcessDatagram(base, pkt[:])
+		pp.ProcessDatagramPacket(base, mustDatagramPacket(t, pkt[:]))
 		require.Equal(t, 1, opener.opens)
 
 		// Still inside the 1s segment: same segment, no timed rotation.
-		pp.ProcessDatagram(base.Add(500*time.Millisecond), pkt[:])
+		pp.ProcessDatagramPacket(base.Add(500*time.Millisecond), mustDatagramPacket(t, pkt[:]))
 
 		require.Equal(t, 1, opener.opens)
 		require.EqualValues(t, 1, pp.stats.NumSegments.Load())
@@ -51,11 +54,11 @@ func TestMpegtsPacketProcessorWallClockSegmentation(t *testing.T) {
 		pp := newTestMpegtsPacketProcessor(opener)
 
 		pkt := mustTSPacket()
-		pp.ProcessDatagram(base, pkt[:])
+		pp.ProcessDatagramPacket(base, mustDatagramPacket(t, pkt[:]))
 		require.Equal(t, 1, opener.opens)
 
 		// At exactly the segment length the next datagram rolls over to a new segment.
-		pp.ProcessDatagram(base.Add(time.Second), pkt[:])
+		pp.ProcessDatagramPacket(base.Add(time.Second), mustDatagramPacket(t, pkt[:]))
 
 		require.Equal(t, 2, opener.opens)
 		require.EqualValues(t, 2, pp.stats.NumSegments.Load())
@@ -67,12 +70,12 @@ func TestMpegtsPacketProcessorWallClockSegmentation(t *testing.T) {
 		pp := newTestMpegtsPacketProcessor(opener)
 
 		pkt := mustTSPacket()
-		pp.ProcessDatagram(base, pkt[:])
+		pp.ProcessDatagramPacket(base, mustDatagramPacket(t, pkt[:]))
 		require.Equal(t, 1, opener.opens)
 
 		// One datagram per elapsed second produces one new segment each.
 		for i := 1; i <= 3; i++ {
-			pp.ProcessDatagram(base.Add(time.Duration(i)*time.Second), pkt[:])
+			pp.ProcessDatagramPacket(base.Add(time.Duration(i)*time.Second), mustDatagramPacket(t, pkt[:]))
 		}
 
 		require.Equal(t, 4, opener.opens)
@@ -91,20 +94,20 @@ func TestMpegtsPacketProcessorPcrPidPinning(t *testing.T) {
 
 	// The first PCR-bearing PID pins PCR tracking.
 	pinned := mustTSPacketWithPCR(t, 100, PcrTs)
-	pp.ProcessDatagram(base, pinned[:])
+	pp.ProcessDatagramPacket(base, mustDatagramPacket(t, pinned[:]))
 	require.Equal(t, 100, pp.pcrPid)
 	require.EqualValues(t, PcrTs, pp.stats.FirstPCR.Load())
 	require.EqualValues(t, PcrTs, pp.stats.LastPCR.Load())
 
 	// A PCR from a different program is ignored: the pinned PID and LastPCR are unchanged.
 	otherProgram := mustTSPacketWithPCR(t, 200, PcrTs*5)
-	pp.ProcessDatagram(base, otherProgram[:])
+	pp.ProcessDatagramPacket(base, mustDatagramPacket(t, otherProgram[:]))
 	require.Equal(t, 100, pp.pcrPid)
 	require.EqualValues(t, PcrTs, pp.stats.LastPCR.Load())
 
 	// A later PCR from the pinned program updates LastPCR.
 	pinnedLater := mustTSPacketWithPCR(t, 100, PcrTs*2)
-	pp.ProcessDatagram(base, pinnedLater[:])
+	pp.ProcessDatagramPacket(base, mustDatagramPacket(t, pinnedLater[:]))
 	require.Equal(t, 100, pp.pcrPid)
 	require.EqualValues(t, PcrTs*2, pp.stats.LastPCR.Load())
 }
@@ -117,18 +120,18 @@ func TestMpegtsPacketProcessorPcrWrapStat(t *testing.T) {
 
 	// Seed the pinned PID with a PCR near the top of the counter range. The first PCR is never a wrap.
 	high := mustTSPacketWithPCR(t, 100, (PcrMax/4)*3)
-	pp.ProcessDatagram(base, high[:])
+	pp.ProcessDatagramPacket(base, mustDatagramPacket(t, high[:]))
 	require.EqualValues(t, 0, pp.stats.NumWraps.Load())
 
 	// A large backward jump on the pinned PID is a counter wrap.
 	low := mustTSPacketWithPCR(t, 100, PcrTs)
-	pp.ProcessDatagram(base, low[:])
+	pp.ProcessDatagramPacket(base, mustDatagramPacket(t, low[:]))
 	require.EqualValues(t, 1, pp.stats.NumWraps.Load())
 	require.EqualValues(t, PcrTs, pp.stats.LastPCR.Load())
 
 	// A normal forward advance is not a wrap.
 	fwd := mustTSPacketWithPCR(t, 100, PcrTs*2)
-	pp.ProcessDatagram(base, fwd[:])
+	pp.ProcessDatagramPacket(base, mustDatagramPacket(t, fwd[:]))
 	require.EqualValues(t, 1, pp.stats.NumWraps.Load())
 }
 
@@ -137,7 +140,7 @@ func TestMpegtsPacketProcessorStopClosesFinalOutput(t *testing.T) {
 	pp := newTestMpegtsPacketProcessor(opener)
 
 	pkt := mustTSPacket()
-	pp.ProcessDatagram(time.Unix(1000, 0), pkt[:])
+	pp.ProcessDatagramPacket(time.Unix(1000, 0), mustDatagramPacket(t, pkt[:]))
 	require.Len(t, opener.writers, 1)
 
 	require.NoError(t, pp.Stop())
@@ -154,7 +157,7 @@ func TestMpegtsPacketProcessorStopReturnsFinalOutputCloseError(t *testing.T) {
 	pp := newTestMpegtsPacketProcessor(opener)
 
 	pkt := mustTSPacket()
-	pp.ProcessDatagram(time.Unix(1000, 0), pkt[:])
+	pp.ProcessDatagramPacket(time.Unix(1000, 0), mustDatagramPacket(t, pkt[:]))
 
 	require.ErrorIs(t, pp.Stop(), closeErr)
 	// The original close result remains available without retrying Close.
@@ -263,6 +266,138 @@ func newTestMpegtsPacketProcessor(opener SequentialOpener) *MpegtsPacketProcesso
 		opener,
 		1,
 	)
+}
+
+func newTestMpegtsPacketProcessorRTP(opener SequentialOpener) *MpegtsPacketProcessor {
+	pp := NewMpegtsPacketProcessor(
+		TsConfig{
+			SegmentLengthSec: 1,
+			Packaging:        transport.RtpTs,
+		},
+		opener,
+		1,
+	)
+	// PushStats() (triggered on the first RTP packet) reads TSStats.PacketsDropped, which is only non-nil once
+	// registered - every production caller does this before processing any packets (see custom.go/av_input.go).
+	var packetsDropped atomic.Uint64
+	pp.RegisterPacketsDropped(&packetsDropped)
+	return pp
+}
+
+// mustRTPDatagram marshals an RTP packet with the given header and payload into raw wire bytes.
+func mustRTPDatagram(t *testing.T, hdr pionrtp.Header, payload []byte) []byte {
+	t.Helper()
+	pkt := pionrtp.Packet{Header: hdr, Payload: payload}
+	data, err := pkt.Marshal()
+	require.NoError(t, err)
+	return data
+}
+
+func TestMpegtsPacketProcessorRTP(t *testing.T) {
+	base := time.Unix(1000, 0)
+
+	t.Run("decodes a well-formed RTP+TS datagram", func(t *testing.T) {
+		opener := &recordingSequentialOpener{}
+		pp := newTestMpegtsPacketProcessorRTP(opener)
+
+		tsPkt := mustTSPacket()
+		tsPkt.SetPID(7) // non-null, so it's not also flagged as padding
+		datagram := mustRTPDatagram(t, pionrtp.Header{Version: 2, SequenceNumber: 100, Timestamp: 9000}, tsPkt[:])
+
+		pp.ProcessDatagramPacket(base, mustDatagramPacket(t, datagram))
+
+		require.Equal(t, 1, opener.opens)
+		require.EqualValues(t, 1, pp.stats.PacketsWritten.Load())
+		require.EqualValues(t, 0, pp.rtpStats.BadPackets.Load())
+		require.EqualValues(t, 0, pp.rtpStats.LongHeaders.Load())
+		require.EqualValues(t, 100, pp.rtpStats.FirstSeqNum.Load())
+		require.EqualValues(t, 100, pp.rtpStats.LastSeqNum.Load())
+		require.EqualValues(t, 9000, pp.rtpStats.FirstTimestamp.Load())
+		require.EqualValues(t, 9000, pp.rtpStats.LastTimestamp.Load())
+	})
+
+	t.Run("computes header length correctly with CSRC and extension present", func(t *testing.T) {
+		// Regression guard for the header-length computation: must not use Header.MarshalSize() (can under-report for
+		// extension-bearing packets - see pktpool.RtpPacket.decode's comment), but derive it from where the payload
+		// actually landed instead. A wrong offset here would misalign every TS packet, failing CheckErrors().
+		opener := &recordingSequentialOpener{}
+		pp := newTestMpegtsPacketProcessorRTP(opener)
+
+		hdr := pionrtp.Header{
+			Version:        2,
+			SequenceNumber: 1,
+			Timestamp:      1,
+			CSRC:           []uint32{0x11111111, 0x22222222},
+		}
+		require.NoError(t, hdr.SetExtension(1, []byte{0xAA, 0xBB, 0xCC, 0xDD}))
+
+		tsPkt := mustTSPacket()
+		tsPkt.SetPID(7)
+		datagram := mustRTPDatagram(t, hdr, tsPkt[:])
+
+		pp.ProcessDatagramPacket(base, mustDatagramPacket(t, datagram))
+
+		require.EqualValues(t, 0, pp.rtpStats.BadPackets.Load())
+		require.EqualValues(t, 1, pp.rtpStats.LongHeaders.Load()) // header is longer than the base 12 bytes
+		require.EqualValues(t, 1, pp.stats.PacketsWritten.Load())
+		require.EqualValues(t, 0, pp.stats.BadPackets.Load())
+	})
+
+	t.Run("excludes RTP padding from TS packet processing", func(t *testing.T) {
+		opener := &recordingSequentialOpener{}
+		pp := newTestMpegtsPacketProcessorRTP(opener)
+
+		tsPkt := mustTSPacket()
+		tsPkt.SetPID(7)
+		hdr := pionrtp.Header{Version: 2, SequenceNumber: 1, Timestamp: 1, Padding: true, PaddingSize: 200}
+		datagram := mustRTPDatagram(t, hdr, tsPkt[:])
+
+		pp.ProcessDatagramPacket(base, mustDatagramPacket(t, datagram))
+
+		require.EqualValues(t, 0, pp.rtpStats.BadPackets.Load())
+		require.EqualValues(t, 0, pp.stats.ErrorsIncompletePackets.Load())
+		require.EqualValues(t, 1, pp.stats.PacketsWritten.Load())
+		require.EqualValues(t, 0, pp.stats.BadPackets.Load())
+	})
+
+	t.Run("flags a non-188-aligned remainder as incomplete instead of silently truncating", func(t *testing.T) {
+		opener := &recordingSequentialOpener{}
+		pp := newTestMpegtsPacketProcessorRTP(opener)
+
+		tsPkt := mustTSPacket()
+		tsPkt.SetPID(7)
+		payload := append(append([]byte{}, tsPkt[:]...), []byte{1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12}...)
+		datagram := mustRTPDatagram(t, pionrtp.Header{Version: 2, SequenceNumber: 1, Timestamp: 1}, payload)
+
+		pp.ProcessDatagramPacket(base, mustDatagramPacket(t, datagram))
+
+		require.EqualValues(t, 1, pp.stats.ErrorsIncompletePackets.Load())
+		require.Equal(t, 0, opener.opens)
+	})
+
+	t.Run("rejects a non-version-2 packet", func(t *testing.T) {
+		opener := &recordingSequentialOpener{}
+		pp := newTestMpegtsPacketProcessorRTP(opener)
+
+		tsPkt := mustTSPacket()
+		datagram := mustRTPDatagram(t, pionrtp.Header{Version: 1, SequenceNumber: 1, Timestamp: 1}, tsPkt[:])
+
+		pp.ProcessDatagramPacket(base, mustDatagramPacket(t, datagram))
+
+		require.EqualValues(t, 1, pp.rtpStats.BadPackets.Load())
+		require.Equal(t, 0, opener.opens)
+	})
+}
+
+// mustDatagramPacket returns a *pktpool.Packet loaded with data, for tests exercising ProcessDatagramPacket - the
+// only entry point now that MpegtsPacketProcessor no longer accepts a plain []byte.
+func mustDatagramPacket(t *testing.T, data []byte) *pktpool.Packet {
+	t.Helper()
+	// outputTlvWrapCap head room matches production pools (NetReader, av_input.go): RtpTs/AtsTs packaging frames its
+	// output via Packet.FrameTlv, which needs this reserved space in front of the payload.
+	pkt := pktpool.NewPacket(outputTlvWrapCap, len(data))
+	require.NoError(t, pkt.From(data))
+	return pkt
 }
 
 // mustTSPacket returns a valid (null) TS packet usable as a single-packet datagram.

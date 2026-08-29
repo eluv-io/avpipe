@@ -87,7 +87,7 @@ func (bp *BypassProcessor) Start(fd int64) error {
 		bp.fd,
 	)
 	mpegTsConsumer := &MpegTsConsumer{
-		pktChan: make(chan *pktpool.Packet, bp.xcParams.InputCfg.Processor.ChannelCap),
+		pktChan: make(chan pktpool.Resource, bp.xcParams.InputCfg.Processor.ChannelCap),
 		pp:      processor,
 		onFirstPacket: func() {
 			logNetReader.Debug("first packet received", e.Fields()...)
