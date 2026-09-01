@@ -23,29 +23,29 @@ ifeq ($(OSNAME), Linux)
 	SHARED_LIB=libutils.so
 endif
 
-all: libs install
+all: install
 
-install:
-	@(if [ ! -d $(TOP_DIR)/../$(LIBDIR) ]; then mkdir $(TOP_DIR)/../$(LIBDIR); fi)
+install: libs
+	@mkdir -p $(TOP_DIR)/../$(LIBDIR)
 	@echo Installing libutils.a
 	@cp $(LIBDIR)/* $(TOP_DIR)/../$(LIBDIR)
-	@(if [ ! -d $(TOP_DIR)/../$(INCDIR) ]; then mkdir $(TOP_DIR)/../$(INCDIR); fi)
+	@mkdir -p $(TOP_DIR)/../$(INCDIR)
 	@echo Installing includes
 	@cp $(INCDIR)/* $(TOP_DIR)/../$(INCDIR)
 
 libs: $(OBJS)
-	@(if [ ! -d $(LIBDIR) ]; then mkdir $(LIBDIR); fi)
+	@mkdir -p $(LIBDIR)
 	@echo Making libutils.a
 	@ar cr $(LIBDIR)/libutils.a $?
 	@ranlib $(LIBDIR)/libutils.a
 
 sharedlibs: $(OBJS)
-	@(if [ ! -d $(LIBDIR) ]; then mkdir $(LIBDIR); fi)
+	@mkdir -p $(LIBDIR)
 	@echo Making ${SHARED_LIB}
 	@gcc ${SHARED_FLAGS} -o $(LIBDIR)/${SHARED_LIB} $?
 
 $(BINDIR)/%.o: src/%.c
-	@(if [ ! -d $(BINDIR) ]; then mkdir $(BINDIR); fi)
+	@mkdir -p $(BINDIR)
 	@echo "Compiling ..." $<
 	gcc ${FLAGS} ${INCDIRS} -c $< -o $@
 

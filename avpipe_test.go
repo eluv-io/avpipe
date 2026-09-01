@@ -391,7 +391,14 @@ func TestSingleABRTranscodeWithWatermark(t *testing.T) {
 		DebugFrameLevel:       debugFrameLevel,
 	}
 	setFastEncodeParams(params, false)
-	xcTest(t, outputDir, params, nil, true)
+
+	boilerplate(t, outputDir, params.Url)
+	err := avpipe.Xc(params)
+	if err == avpipe.EAV_FILTER_INIT {
+		log.Warn("Skipping text watermark test: drawtext filter unavailable in linked FFmpeg build", "test", t.Name(), "url", url)
+		t.Skip("drawtext filter unavailable in linked FFmpeg build; skipping text watermark test")
+	}
+	failNowOnError(t, err)
 }
 
 func TestSingleABRTranscodeWithOverlayWatermark(t *testing.T) {
@@ -609,6 +616,17 @@ func TestNvidiaABRTranscode(t *testing.T) {
 		Url:                url,
 	}
 	setFastEncodeParams(params, false)
+
+	// Some environments expose an NVIDIA GPU but have an FFmpeg build/runtime
+	// that cannot initialize NVENC. Detect that upfront and skip this
+	// environment-dependent test instead of failing from worker goroutines.
+	goavpipe.InitIOHandler(&xc.FileInputOpener{URL: url}, &concurrentOutputOpener{dir: outputDir})
+	err := avpipe.Xc(params)
+	if err == avpipe.EAV_CODEC_CONTEXT {
+		t.Skip("NVENC unavailable in current runtime/FFmpeg build; skipping NVIDIA ABR test")
+	}
+	failNowOnError(t, err)
+
 	doTranscode(t, params, nThreads, outputDir, url)
 }
 

@@ -24,16 +24,16 @@ func TestXcFiniRemovesJobAndURLHandlers(t *testing.T) {
 
 	putXCJob(handle, &xcJob{url: url})
 
-	require.Same(t, inputOpener, goavpipe.GetInputOpener(url))
-	require.Same(t, outputOpener, goavpipe.GetOutputOpener(url))
+	require.True(t, goavpipe.GetInputOpener(url) == inputOpener)
+	require.True(t, goavpipe.GetOutputOpener(url) == outputOpener)
 	require.NoError(t, XcFini(handle))
 
 	xcJobsMu.Lock()
 	_, jobExists := xcJobs[handle]
 	xcJobsMu.Unlock()
 	require.False(t, jobExists)
-	require.NotSame(t, inputOpener, goavpipe.GetInputOpener(url))
-	require.NotSame(t, outputOpener, goavpipe.GetOutputOpener(url))
+	require.False(t, goavpipe.GetInputOpener(url) == inputOpener)
+	require.False(t, goavpipe.GetOutputOpener(url) == outputOpener)
 	require.ErrorIs(t, XcFini(handle), EAV_BAD_HANDLE)
 }
 
@@ -59,8 +59,8 @@ func TestXcInitFailureRollsBackURLHandlersAndDoesNotCreateJob(t *testing.T) {
 
 	require.Error(t, err)
 	require.Equal(t, int32(-1), handle)
-	require.NotSame(t, inputOpener, goavpipe.GetInputOpener(url))
-	require.NotSame(t, outputOpener, goavpipe.GetOutputOpener(url))
+	require.False(t, goavpipe.GetInputOpener(url) == inputOpener)
+	require.False(t, goavpipe.GetOutputOpener(url) == outputOpener)
 
 	xcJobsMu.Lock()
 	jobsAfter := len(xcJobs)
