@@ -13,7 +13,7 @@ OBJS=$(SRCS:%.c=$(BINDIR)/%.o)
 all: install
 
 install: exc
-	@(if [ ! -d $(TOP_DIR)/../$(BINDIR) ]; then mkdir $(TOP_DIR)/../$(BINDIR); fi)
+	@mkdir -p $(TOP_DIR)/../$(BINDIR)
 	@echo Installing exc
 	@cp $(BINDIR)/exc $(TOP_DIR)/../$(BINDIR)
 
@@ -22,7 +22,7 @@ exc: $(OBJS)
 	gcc $? ${CFLAGS} ${LDFLAGS} -Wl,--copy-dt-needed-entries -Wl,--no-as-needed ${UNIQFEED_RPATHLINKS} ${LIBDIRS} ${UNIQFEED_LIBDIRS} ${LIBS} ${UNIQFEED_LIBS} $(UNIQFEED_AUTO_LIBS) -o $(BINDIR)/exc
 
 $(BINDIR)/%.o: %.c
-	@(if [ ! -d $(BINDIR) ]; then mkdir $(BINDIR); fi)
+	@mkdir -p $(BINDIR)
 	@echo "Compiling " $<
 	gcc ${CFLAGS} ${INCDIRS} -c $< -o $@
 

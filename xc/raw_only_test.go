@@ -17,14 +17,14 @@ func TestXcRunRawOnlyReturnsTerminalErrorAndClosesInput(t *testing.T) {
 		params:    &goavpipe.XcParams{Url: "test://raw-only-terminal-error"},
 		statusErr: terminalErr,
 	}
-	handle := initRawOnlyTest(t, processor, input)
+	handle, outputOpenerBefore := initRawOnlyTest(t, processor, input)
 
 	err := avpipe.XcRun(handle)
 
 	require.ErrorIs(t, err, terminalErr)
 	require.True(t, processor.waited)
 	require.Equal(t, 1, input.closes)
-	assertRawOnlyTestCleanedUp(t, handle, processor.fd)
+	assertRawOnlyTestCleanedUp(t, handle, processor.fd, outputOpenerBefore)
 }
 
 func TestXcRunRawOnlyClosesInputWhenStartFails(t *testing.T) {
@@ -34,14 +34,14 @@ func TestXcRunRawOnlyClosesInputWhenStartFails(t *testing.T) {
 		params:   &goavpipe.XcParams{Url: "test://raw-only-start-error"},
 		startErr: startErr,
 	}
-	handle := initRawOnlyTest(t, processor, input)
+	handle, outputOpenerBefore := initRawOnlyTest(t, processor, input)
 
 	err := avpipe.XcRun(handle)
 
 	require.ErrorIs(t, err, startErr)
 	require.False(t, processor.waited)
 	require.Equal(t, 1, input.closes)
-	assertRawOnlyTestCleanedUp(t, handle, processor.fd)
+	assertRawOnlyTestCleanedUp(t, handle, processor.fd, outputOpenerBefore)
 }
 
 func TestXcRunRawOnlyReturnsInputCloseError(t *testing.T) {
@@ -50,18 +50,19 @@ func TestXcRunRawOnlyReturnsInputCloseError(t *testing.T) {
 	processor := &rawOnlyTestProcessor{
 		params: &goavpipe.XcParams{Url: "test://raw-only-close-error"},
 	}
-	handle := initRawOnlyTest(t, processor, input)
+	handle, outputOpenerBefore := initRawOnlyTest(t, processor, input)
 
 	err := avpipe.XcRun(handle)
 
 	require.Error(t, err)
 	require.Contains(t, err.Error(), "failed to close raw-only input")
 	require.Equal(t, 1, input.closes)
-	assertRawOnlyTestCleanedUp(t, handle, processor.fd)
+	assertRawOnlyTestCleanedUp(t, handle, processor.fd, outputOpenerBefore)
 }
 
-func initRawOnlyTest(t *testing.T, processor *rawOnlyTestProcessor, input *rawOnlyTestInput) int32 {
+func initRawOnlyTest(t *testing.T, processor *rawOnlyTestProcessor, input *rawOnlyTestInput) (int32, goavpipe.OutputOpener) {
 	t.Helper()
+	outputOpenerBefore := goavpipe.GetOutputOpenerByHandler(-1)
 
 	url := processor.params.Url
 	inSet, outSet := goavpipe.InitUrlIOHandlerIfNotPresent(
@@ -75,17 +76,17 @@ func initRawOnlyTest(t *testing.T, processor *rawOnlyTestProcessor, input *rawOn
 		goavpipe.Globals.RemoveURLHandlers(url)
 	})
 
-	return goavpipe.Globals.InitBypassProcessor(processor)
+	return goavpipe.Globals.InitBypassProcessor(processor), outputOpenerBefore
 }
 
-func assertRawOnlyTestCleanedUp(t *testing.T, handle int32, fd int64) {
+func assertRawOnlyTestCleanedUp(t *testing.T, handle int32, fd int64, outputOpenerBefore goavpipe.OutputOpener) {
 	t.Helper()
 
 	_, processorExists := goavpipe.Globals.GetBypassProcessor(handle)
 	require.False(t, processorExists)
 	_, inputHandlerExists := goavpipe.Globals.GetCIOHandler(fd)
 	require.False(t, inputHandlerExists)
-	require.Nil(t, goavpipe.GetOutputOpenerByHandler(fd))
+	require.True(t, outputOpenerBefore == goavpipe.GetOutputOpenerByHandler(fd))
 }
 
 type rawOnlyTestProcessor struct {

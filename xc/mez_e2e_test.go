@@ -20,6 +20,7 @@ package xc_test
 
 import (
 	"encoding/hex"
+	"errors"
 	"flag"
 	"fmt"
 	"math/big"
@@ -52,6 +53,7 @@ const testOutBase = "../test_out"
 var deleteMezOutput = flag.Bool("delete-mez-output", false, "delete mez output after tests")
 var deleteSegsOutput = flag.Bool("delete-segs-output", false, "delete segment output after tests")
 var srcOverrideAbsFilePath = flag.String("src-file", "", "absolute path to source file for TestEndToEndSingle (overrides default; fps and keyint are derived by probing)")
+var runFullE2E = flag.Bool("run-full-e2e", false, "run full TestEndToEnd matrix (long-running)")
 
 func mezOutputDir(t *testing.T) string  { return path.Join(testOutBase, "xc_test."+t.Name(), "mez") }
 func segsOutputDir(t *testing.T) string { return path.Join(testOutBase, "xc_test."+t.Name(), "segs") }
@@ -461,6 +463,7 @@ func runMezCreate(t *testing.T, sources []mezTestSource, mezDir string) {
 				&xc.FileOutputOpener{Dir: videoMezDir},
 			)
 			err = avpipe.Xc(profile.params)
+			skipIfNvencUnavailable(t, profile.params.Ecodec, url, err)
 			require.NoError(t, err, "Xc failed for %s", url)
 
 			// --- Stage 2: Validate each mez part ---
@@ -688,11 +691,21 @@ func ensureMezParts(t *testing.T, src mezTestSource, profile *mezTestProfile, vi
 		&xc.FileOutputOpener{Dir: videoMezDir},
 	)
 	err = avpipe.Xc(profile.params)
+	skipIfNvencUnavailable(t, profile.params.Ecodec, url, err)
 	require.NoError(t, err, "Xc mez creation failed for %s", url)
 
 	partFiles, _ = filepath.Glob(filepath.Join(videoMezDir, "vsegment-*.mp4"))
 	sort.Strings(partFiles)
 	return partFiles
+}
+
+func skipIfNvencUnavailable(t *testing.T, ecodec, url string, err error) {
+	t.Helper()
+	if strings.HasSuffix(ecodec, "_nvenc") && errors.Is(err, avpipe.EAV_CODEC_CONTEXT) {
+		log.Warn("Skipping NVENC E2E source: NVENC unavailable in current runtime/FFmpeg build",
+			"test", t.Name(), "encoder", ecodec, "url", url)
+		t.Skipf("NVENC unavailable in current runtime/FFmpeg build; skipping NVENC source (%s)", ecodec)
+	}
 }
 
 // abrPartResult carries a continuity state from one part to the next.
@@ -847,6 +860,11 @@ func generateAndValidateABRPart(
 		&xc.FileOutputOpener{Dir: abrDir},
 	)
 	err = avpipe.Xc(params)
+	if v.Watermark == wmText && errors.Is(err, avpipe.EAV_FILTER_INIT) {
+		log.Warn("Skipping ABR text watermark variant: drawtext filter unavailable in linked FFmpeg build",
+			"test", t.Name(), "variant", v.Name, "part", partFile)
+		t.Skipf("drawtext filter unavailable in linked FFmpeg build; skipping text watermark ABR variant %s", v.Name)
+	}
 	require.NoError(t, err, "ABR Xc failed for %s variant %s", partFile, v.Name)
 
 	// --- Decrypt if encrypted ---
@@ -1021,6 +1039,9 @@ func runE2E(t *testing.T, sources []mezTestSource, mezDir, segsDir string) {
 // - Individual phases:  go test ./xc/ -run TestMezCreate
 // - Full pipeline:      go test ./xc/ -run TestEndToEnd
 func TestEndToEnd(t *testing.T) {
+	if !*runFullE2E {
+		t.Skip("full E2E matrix disabled by default; use -run-full-e2e to enable, or run TestEndToEndSingle")
+	}
 	if testing.Short() {
 		t.Skip("use TestEndToEndSingle for a quick smoke test")
 	}
