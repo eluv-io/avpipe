@@ -4,6 +4,7 @@ import (
 	"io"
 
 	mio "github.com/eluv-io/common-go/media/io"
+	"github.com/eluv-io/common-go/media/pktpool"
 	"github.com/eluv-io/errors-go"
 )
 
@@ -50,7 +51,7 @@ func (s *srtProto) Open() (reader io.ReadCloser, err error) {
 
 	if s.StripRtp {
 		// strip RTP headers if the source actually contains them
-		return &RtpDecapsulator{reader: reader}, nil
+		return &RtpDecapsulator{reader: reader, pkt: pktpool.NewPacket(0, maxUDPPacketSize)}, nil
 	}
 
 	return reader, nil
@@ -64,22 +65,39 @@ func (s *srtProto) PackagingMode() TsPackagingMode {
 
 type RtpDecapsulator struct {
 	reader io.ReadCloser
+	pkt    *pktpool.Packet // scratch packet reused across reads via repeated From() calls
 }
 
 func (r *RtpDecapsulator) Read(p []byte) (n int, err error) {
 	n, err = r.reader.Read(p)
 	if n > 0 {
-		hdr, err := ParseRTPHeader(p[:n])
-		if err != nil {
-			return 0, err
+		if fromErr := r.pkt.From(p[:n]); fromErr != nil {
+			return 0, fromErr
 		}
-		headerLen := hdr.ByteLength()
-		copy(p, p[headerLen:n])
-		return n - headerLen, nil
+		rtpLayer, rtpErr := r.pkt.Rtp()
+		if rtpErr != nil {
+			return 0, rtpErr
+		}
+		if rtpLayer.Packet().Header.Version != 2 {
+			return 0, errors.Str("unsupported RTP version")
+		}
+		// payload aliases r.pkt's own buffer (not p), so this is a plain forward copy, not an overlap concern.
+		copy(p, rtpLayer.Payload)
+		return len(rtpLayer.Payload), err
 	}
 	return n, err
 }
 
 func (r *RtpDecapsulator) Close() error {
 	return r.reader.Close()
+}
+
+// ConnStats forwards to the wrapped reader if it implements mio.StatsReporter, so stripping the RTP layer here
+// doesn't break the reporter chain for RTP-over-SRT ingest (see srtProto.Open's StripRtp case).
+func (r *RtpDecapsulator) ConnStats(into *mio.ConnStats, details bool) {
+	if reporter, ok := r.reader.(mio.StatsReporter); ok {
+		reporter.ConnStats(into, details)
+		return
+	}
+	*into = mio.ConnStats{}
 }
