@@ -303,7 +303,7 @@ func GetGlobalInputOpener() InputOpener {
 
 // GetURLInputOpener returns the input opener registered for url by
 // InitUrlIOHandler, or nil if none is registered. Does not fall back to
-// the global opener
+// the global opener.
 func GetURLInputOpener(url string) InputOpener {
 	gMutex.Lock()
 	defer gMutex.Unlock()
@@ -322,13 +322,15 @@ func GetOutputOpener(url string) OutputOpener {
 
 // GetURLOutputOpener returns the output opener registered for url by
 // InitUrlIOHandler, or nil if none is registered. Does not fall back
-// to the global opener
+// to the global opener.
 func GetURLOutputOpener(url string) OutputOpener {
 	gMutex.Lock()
 	defer gMutex.Unlock()
 	return gURLOutputOpeners[url]
 }
 
+// GetGlobalOutputOpener returns the global output opener set by InitIOHandler,
+// or nil if none is set.
 func GetGlobalOutputOpener() OutputOpener {
 	gMutex.Lock()
 	defer gMutex.Unlock()

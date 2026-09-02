@@ -47,6 +47,10 @@ func TestXcInitFailureRollsBackURLHandlersAndDoesNotCreateJob(t *testing.T) {
 		goavpipe.Globals.RemoveURLHandlers(url)
 	})
 
+	// verify registration before cleanup
+	require.Same(t, inputOpener, goavpipe.GetURLInputOpener(url))
+	require.Same(t, outputOpener, goavpipe.GetURLOutputOpener(url))
+
 	xcJobsMu.Lock()
 	jobsBefore := len(xcJobs)
 	xcJobsMu.Unlock()
