@@ -374,6 +374,7 @@ typedef struct coderctx_t {
     pts_unwrapper_t pts_unwrapper[MAX_STREAMS];         /* PTS unwrap state (per stream)*/
     pts_unwrapper_t dts_unwrapper[MAX_STREAMS];         /* DTS unwrap state (per stream)*/
     int64_t video_last_dts;
+    int64_t video_last_fps_slot;                        /* Last input frame slot when video_fps is enabled */
     int64_t audio_last_dts[MAX_STREAMS];
     int64_t last_key_frame;                             /* pts of last key frame */
     int64_t forced_keyint_countdown;                    /* frames until next forced key frame */
@@ -560,6 +561,7 @@ typedef struct xcparams_t {
 
     int         video_time_base;            // New video encoder time_base (1/video_time_base)
     int         video_frame_duration_ts;    // Frame duration of the output video in time base
+    int         video_fps;                  // Frame stabilization FPS filter; must match source nominal rate (0=disabled)
 
     int         debug_frame_level;
     int         connection_timeout;         // Connection timeout in sec for RTMP or MPEGTS protocols

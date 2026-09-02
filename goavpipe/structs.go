@@ -366,6 +366,7 @@ type XcParams struct {
 	ExtractImagesTs        []int64     `json:"extract_images_ts,omitempty"`
 	VideoTimeBase          int         `json:"video_time_base,omitempty"`
 	VideoFrameDurationTs   int         `json:"video_frame_duration_ts,omitempty"`
+	VideoFps               int         `json:"video_fps,omitempty"`
 	Rotate                 int         `json:"rotate,omitempty"`
 	Profile                string      `json:"profile,omitempty"`
 	Level                  int         `json:"level,omitempty"`

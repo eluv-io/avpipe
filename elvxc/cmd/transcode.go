@@ -358,6 +358,7 @@ func InitTranscode(cmdRoot *cobra.Command) error {
 	cmdTranscode.PersistentFlags().Int32P("enc-width", "", -1, "default -1 means use source width.")
 	cmdTranscode.PersistentFlags().Int32P("video-time-base", "", 0, "Video encoder timebase, must be > 0 (the actual timebase would be 1/video-time-base).")
 	cmdTranscode.PersistentFlags().Int32P("video-frame-duration-ts", "", 0, "Frame duration of the output video in time base.")
+	cmdTranscode.PersistentFlags().Int32P("video-fps", "", 0, "RTMP-only FPS filter; must match the source nominal frame rate. Disabled when zero.")
 	cmdTranscode.PersistentFlags().String("video-layout", "", "Video layout, can be 'mono'/0, 'sbs'/3, 'tb'/4, or 'mvhevc'/10.")
 	cmdTranscode.PersistentFlags().Int64P("duration-ts", "", -1, "default -1 means entire stream.")
 	cmdTranscode.PersistentFlags().Int64P("audio-seg-duration-ts", "", 0, "(mandatory if format is not 'segment' and transcoding audio) audio segment duration time base (positive integer).")
@@ -651,6 +652,11 @@ func doTranscode(cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("video-frame-duration-ts is not valid")
 	}
 
+	videoFps, err := cmd.Flags().GetInt32("video-fps")
+	if err != nil || videoFps < 0 {
+		return fmt.Errorf("video-fps is not valid")
+	}
+
 	videoLayout, err := getVideoLayout(cmd.Flag("video-layout").Value.String())
 	if err != nil {
 		return err
@@ -840,6 +846,7 @@ func doTranscode(cmd *cobra.Command, args []string) error {
 		DebugFrameLevel:        debugFrameLevel,
 		VideoTimeBase:          int(videoTimeBase),
 		VideoFrameDurationTs:   int(videoFrameDurationTs),
+		VideoFps:               int(videoFps),
 		VideoLayout:            videoLayout,
 		Seekable:               seekable,
 		Rotate:                 int(rotate),
