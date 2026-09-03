@@ -205,8 +205,8 @@ func TestMultiAudioUdpToMp4(t *testing.T) {
 			"frames", result.FrameCount, "timescale", result.Timescale,
 			"sample_dur", result.SampleDur, "dts_start", result.DtsStart,
 			"dts_end", result.DtsEnd, "last", isLast)
-		assert.Equal(t, 0, result.DtsProblems, "DTS problems in %s", f)
-		assert.Equal(t, 0, result.DurProblems, "duration problems in %s", f)
+		assert.Equal(t, 0, result.DtsProblems, "DTS problems in %s: %v", f, result.Errors)
+		assert.Equal(t, 0, result.DurProblems, "duration problems in %s: %v", f, result.Errors)
 		if !isLast {
 			// All non-last parts should have the expected duration
 			expectedDurTs := uint64(xcParams.VideoSegDurationTs)
@@ -235,8 +235,8 @@ func TestMultiAudioUdpToMp4(t *testing.T) {
 				"frames", result.FrameCount, "timescale", result.Timescale,
 				"sample_dur", result.SampleDur, "dts_start", result.DtsStart,
 				"dts_end", result.DtsEnd, "last", isLast)
-			assert.Equal(t, 0, result.DtsProblems, "DTS problems in %s", f)
-			assert.Equal(t, 0, result.DurProblems, "duration problems in %s", f)
+			assert.Equal(t, 0, result.DtsProblems, "DTS problems in %s: %v", f, result.Errors)
+			assert.Equal(t, 0, result.DurProblems, "duration problems in %s: %v", f, result.Errors)
 			if !isLast {
 				expectedDurTs := uint64(xcParams.AudioSegDurationTs)
 				actualDurTs := result.DtsEnd - result.DtsStart
