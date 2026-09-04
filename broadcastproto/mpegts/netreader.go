@@ -11,6 +11,7 @@ import (
 	"github.com/eluv-io/avpipe/goavpipe"
 	"github.com/eluv-io/common-go/format/duration"
 	"github.com/eluv-io/common-go/media"
+	mio "github.com/eluv-io/common-go/media/io"
 	"github.com/eluv-io/common-go/media/pktpool"
 	"github.com/eluv-io/common-go/util/timeutil"
 	"github.com/eluv-io/errors-go"
@@ -24,12 +25,14 @@ var logNetReader = elog.Get("avpipe/broadcastproto/netreader")
 // so Status() could not otherwise distinguish "stopped, no error" from an explicit Cancel() or a real failure.
 var errNetReaderCleanStop = errors.Str("NetReader: clean stop")
 
-// Consumer is a consumer of packets from the NetReader. See pktpool.Packet for correct handling of packets.
+// Consumer is a consumer of packets from the NetReader. Packets are delivered as reference-counted pktpool.Resource
+// handles; a consumer must call Release() on each handle it receives once done with it (see pktpool for the ownership
+// contract).
 type Consumer interface {
 	// Name returns the name of this consumer
 	Name() string
 	// Chan returns the channel on which packets are sent
-	Chan() chan<- *pktpool.Packet
+	Chan() chan<- pktpool.Resource
 	// PacketDropped is called when a packet is dropped because the consumer's channel is full. This call must not
 	// block!
 	PacketDropped()
@@ -56,7 +59,7 @@ func StartNetReader(
 		transport:         tp,
 		consumers:         consumers,
 		transformer:       transformer,
-		packetPool:        pktpool.NewPacketPool(config.MaxPacketSize),
+		packetPool:        pktpool.NewPacketPool(outputTlvWrapCap, config.MaxPacketSize),
 		ctx:               ctx,
 		cancel:            cancel,
 	}
@@ -66,7 +69,7 @@ func StartNetReader(
 }
 
 // NetReader reads packets from a network source and forwards them to consumers. It uses a pool of packets to avoid
-// allocations. Consumers must call pkt.Release() when they are done with the packet.
+// allocations. Consumers must call Release() on each pktpool.Resource they receive when done with it.
 type NetReader struct {
 	url               string
 	connectionTimeout time.Duration
@@ -75,13 +78,30 @@ type NetReader struct {
 	consumers         []Consumer
 
 	transformer media.Transformer
-	packetPool  *pktpool.PacketPool
+	packetPool  *pktpool.Pool
 	ctx         context.Context
 	cancel      context.CancelCauseFunc
 
 	running   atomic.Bool
 	waitGroup sync.WaitGroup
 	reader    atomic.Pointer[io.ReadCloser] // the current reader, used for closing when the NetReader is canceled
+}
+
+// ConnStats copies the current connection's statistics into the given mio.ConnStats instance (if there is an active
+// reader and the reader supports statistics, e.g. an SRT connection - see mio.StatsReporter). It returns false without
+// touching the ConnStats instance if there's no active reader yet (not yet connected, or between reconnect attempts) or
+// the reader doesn't implement mio.StatsReporter (e.g. a plain UDP socket).
+func (r *NetReader) ConnStats(into *mio.ConnStats, details bool) bool {
+	reader := r.reader.Load()
+	if reader == nil {
+		return false
+	}
+	reporter, ok := (*reader).(mio.StatsReporter)
+	if !ok {
+		return false
+	}
+	reporter.ConnStats(into, details)
+	return true
 }
 
 func (r *NetReader) Status() (running bool, err error) {
@@ -164,6 +184,12 @@ func (r *NetReader) process() error {
 		}
 
 		cont, err := r.readLoop(reader) // readLoop closes reader!
+		// Clear the now-closed reader immediately, rather than leaving it in place until the next successful
+		// connect()'s Store below: ConnStats documents "between reconnect attempts" as no active reader (ok=false),
+		// but without this, a closed reader from the previous connection would still satisfy Load() != nil and, if
+		// it implements mio.StatsReporter, report stale stats throughout the reconnect window. Harmless if Cancel
+		// runs concurrently: its own Swap(nil) becomes a no-op on an already-nil/already-closed reader either way.
+		r.reader.Store(nil)
 		if cont {
 			if r.config.MaxRecoverAttempts <= 0 || i < r.config.MaxRecoverAttempts {
 				logNetReader.Info("recoverable processor error, will retry", e(err))
@@ -224,29 +250,29 @@ func (r *NetReader) readLoop(reader io.ReadCloser) (cont bool, err error) {
 	defer errors.Log(reader.Close, logNetReader.Info)
 	throttledLog := logNetReader.Throttle("net-reader-dropped-packet", 100*time.Millisecond)
 	for {
-		pkt := r.packetPool.GetPacket()
-		n, err := reader.Read(pkt.Data)
+		res := r.packetPool.Borrow()
+		pkt := res.T
+		err := pkt.FromReader(reader)
 		if err != nil {
-			pkt.Release()
+			res.Release()
 			return r.isRecoverable(err), errors.E("readLoop", errors.K.IO.Default(), err)
 		}
-		pkt.ReceivedAt = time.Now()
-		pkt.Data, err = r.transformer.Transform(pkt.Data[:n])
+		pkt.Data, err = r.transformer.Transform(pkt.Data)
 		if err != nil {
-			pkt.Release()
+			res.Release()
 			return r.isRecoverable(err), errors.E("readLoop", errors.K.IO.Default(), err)
 		}
 
 		for _, consumer := range r.consumers {
-			pkt.Reference()
+			res.Reference()
 			select {
-			case consumer.Chan() <- pkt:
+			case consumer.Chan() <- res:
 			case <-r.ctx.Done():
-				pkt.Release(2) // release both the packet and the reference to it since we return
+				res.ReleaseN(2) // release both the packet and the reference to it since we return
 				return false, r.ctx.Err()
 			default:
 				// consumer busy: drop packet
-				pkt.Release()
+				res.Release()
 				consumer.PacketDropped()
 				throttledLog.Warn("packet dropped",
 					"reason", "consumer channel full",
@@ -255,7 +281,7 @@ func (r *NetReader) readLoop(reader io.ReadCloser) (cont bool, err error) {
 					"channel_cap", cap(consumer.Chan()))
 			}
 		}
-		pkt.Release()
+		res.Release()
 	}
 }
 

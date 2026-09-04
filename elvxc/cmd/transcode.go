@@ -333,9 +333,9 @@ func InitTranscode(cmdRoot *cobra.Command) error {
 	cmdTranscode.PersistentFlags().StringP("channel-layout", "", "", "audio channel layout.")
 	cmdTranscode.PersistentFlags().Int32P("gpu-index", "", -1, "Use the GPU with specified index for transcoding (export CUDA_DEVICE_ORDER=PCI_BUS_ID would use smi index).")
 	cmdTranscode.PersistentFlags().Int32P("sync-audio-to-stream-id", "", -1, "sync audio to video iframe of specific stream-id when input stream is mpegts")
-	cmdTranscode.PersistentFlags().StringP("encoder", "e", "libx264", "encoder codec, default is 'libx264', can be: 'libx264', 'libx265', 'h264_nvenc', 'h264_videotoolbox', or 'mjpeg'.")
+	cmdTranscode.PersistentFlags().StringP("encoder", "e", "libx264", "encoder codec, default is 'libx264', can be: 'libx264', 'libx265', 'h264_nvenc', 'hevc_nvenc', 'h264_videotoolbox', or 'mjpeg'.")
 	cmdTranscode.PersistentFlags().StringP("audio-encoder", "", "aac", "audio encoder, default is 'aac', can be: 'aac', 'ac3', 'mp2', 'mp3'.")
-	cmdTranscode.PersistentFlags().StringP("decoder", "d", "", "video decoder, default is 'h264', can be: 'h264', 'h264_cuvid', 'jpeg2000', 'hevc'.")
+	cmdTranscode.PersistentFlags().StringP("decoder", "d", "", "video decoder, automatically selected when empty; common values include 'h264', 'h264_cuvid', 'jpeg2000', 'hevc', and 'hevc_cuvid'.")
 	cmdTranscode.PersistentFlags().StringP("audio-decoder", "", "", "audio decoder, default is '' and will be automatically chosen.")
 	cmdTranscode.PersistentFlags().StringP("format", "", "dash", "package format, can be 'dash', 'hls', 'mp4', 'fmp4', 'segment', 'fmp4-segment', or 'image2'.")
 	cmdTranscode.PersistentFlags().StringP("filter-descriptor", "", "", " Audio filter descriptor the same as ffmpeg format")
@@ -343,7 +343,7 @@ func InitTranscode(cmdRoot *cobra.Command) error {
 	cmdTranscode.PersistentFlags().BoolP("equal-fduration", "", false, "force equal frame duration. Must be 0 or 1 and only valid for 'fmp4-segment' format.")
 	cmdTranscode.PersistentFlags().StringP("xc-type", "", "", "transcoding type, can be 'all', 'video', 'audio', 'audio-join', 'audio-pan', 'audio-merge', 'extract-images' or 'extract-all-images'.")
 	cmdTranscode.PersistentFlags().Int32P("crf", "", 23, "mutually exclusive with video-bitrate.")
-	cmdTranscode.PersistentFlags().StringP("preset", "", "medium", "Preset string to determine compression speed, can be: 'ultrafast', 'superfast', 'veryfast', 'faster', 'fast', 'medium', 'slow', 'slower', 'veryslow'")
+	cmdTranscode.PersistentFlags().StringP("preset", "", "medium", "Encoding speed/quality preset. Software encoders accept ultrafast..veryslow; NVIDIA accepts p1..p7 and maps the software preset names to p1..p7.")
 	cmdTranscode.PersistentFlags().Int64P("start-time-ts", "", 0, "offset to start transcoding")
 	cmdTranscode.PersistentFlags().Int32P("stream-id", "", -1, "if it is valid it will be used to transcode elementary stream with that stream-id")
 	cmdTranscode.PersistentFlags().Int64P("start-pts", "", 0, "starting PTS for output.")
@@ -380,9 +380,10 @@ func InitTranscode(cmdRoot *cobra.Command) error {
 	cmdTranscode.PersistentFlags().String("wm-shadow-color", "white", "watermark shadow color.")
 	cmdTranscode.PersistentFlags().String("wm-overlay", "", "watermark overlay image file.")
 	cmdTranscode.PersistentFlags().String("wm-overlay-type", "png", "watermark overlay image file type, can be 'png', 'jpg', 'gif'.")
-	cmdTranscode.PersistentFlags().String("max-cll", "", "Maximum Content Light Level and Maximum Frame Average Light Level, only valid if encoder is libx265.")
-	cmdTranscode.PersistentFlags().String("master-display", "", "Master display, only valid if encoder is libx265.")
+	cmdTranscode.PersistentFlags().String("max-cll", "", "HDR10 MaxCLL,MaxFALL override for libx265 or hevc_nvenc. When empty, valid input metadata is copied; 0,0 suppresses it.")
+	cmdTranscode.PersistentFlags().String("master-display", "", "HDR10 mastering-display override for libx265 or hevc_nvenc. When empty, valid input metadata is copied.")
 	cmdTranscode.PersistentFlags().Int32("bitdepth", 8, "Refers to number of colors each pixel can have, can be 8, 10, 12.")
+	cmdTranscode.PersistentFlags().Bool("preserve-dolby-vision", false, "Preserve Dolby Vision RPU metadata. Requires libx265, bitdepth 10, and profile main10.")
 	cmdTranscode.PersistentFlags().Int64P("extract-image-interval-ts", "", -1, "extract frames at this interval.")
 	cmdTranscode.PersistentFlags().StringP("extract-images-ts", "", "", "the frames to extract (PTS, comma separated).")
 	cmdTranscode.PersistentFlags().BoolP("seekable", "", true, "seekable stream.")
@@ -566,6 +567,10 @@ func doTranscode(cmd *cobra.Command, args []string) error {
 	if err != nil {
 		return fmt.Errorf("bitdepth is not valid, should be 8, 10, or 12")
 	}
+	preserveDolbyVision, err := cmd.Flags().GetBool("preserve-dolby-vision")
+	if err != nil {
+		return fmt.Errorf("preserve-dolby-vision is not valid")
+	}
 
 	crf, err := cmd.Flags().GetInt32("crf")
 	if err != nil || crf < 0 || crf > 51 {
@@ -573,8 +578,16 @@ func doTranscode(cmd *cobra.Command, args []string) error {
 	}
 
 	preset := cmd.Flag("preset").Value.String()
-	if preset != "ultrafast" && preset != "superfast" && preset != "veryfast" && preset != "faster" &&
-		preset != "fast" && preset != "medium" && preset != "slow" && preset != "slower" && preset != "veryslow" {
+	softwarePreset := preset == "ultrafast" || preset == "superfast" || preset == "veryfast" ||
+		preset == "faster" || preset == "fast" || preset == "medium" || preset == "slow" ||
+		preset == "slower" || preset == "veryslow"
+	nvencPreset := preset == "p1" || preset == "p2" || preset == "p3" || preset == "p4" ||
+		preset == "p5" || preset == "p6" || preset == "p7"
+	if strings.HasSuffix(encoder, "_nvenc") {
+		if !softwarePreset && !nvencPreset {
+			return fmt.Errorf("NVIDIA preset is not valid, should be p1..p7 or one of the software speed presets")
+		}
+	} else if !softwarePreset {
 		return fmt.Errorf("preset is not valid, should be one of: 'ultrafast', 'superfast', 'veryfast', 'faster', 'fast', 'medium', 'slow', 'slower', 'veryslow'")
 	}
 
@@ -857,6 +870,7 @@ func doTranscode(cmd *cobra.Command, args []string) error {
 		MaxCLL:                 maxCLL,
 		MasterDisplay:          masterDisplay,
 		BitDepth:               bitDepth,
+		PreserveDolbyVision:    preserveDolbyVision,
 		ForceEqualFDuration:    forceEqualFrameDuration,
 		SyncAudioToStreamId:    int(syncAudioToStreamId),
 		StreamId:               streamId,

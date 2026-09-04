@@ -1,7 +1,6 @@
 #include <stdlib.h>
 #include <sys/types.h>
 #include <sys/socket.h>
-#include <sys/select.h>
 #include <netinet/in.h>
 #include <arpa/inet.h>
 #include <netdb.h>
@@ -9,27 +8,30 @@
 #include <string.h>
 #include <unistd.h>
 #include <fcntl.h>
+#include <poll.h>
 
 
 #include "elv_sock.h"
 #include "elv_log.h"
 
+/*
+ * Use poll() rather than select(): fd_set only holds FD_SETSIZE (1024)
+ *
+ * Returns > 0 if the descriptor is readable, 0 on timeout, -1 on error (errno set).
+ */
 int
 readable_timeout(
     int fd,
     int sec)
 {
-    fd_set			rset;
-    struct timeval	tv;
+    struct pollfd	pfd;
 
-    FD_ZERO(&rset);
-    FD_SET(fd, &rset);
-
-    tv.tv_sec = sec;
-    tv.tv_usec = 0;
+    pfd.fd = fd;
+    pfd.events = POLLIN;
+    pfd.revents = 0;
 
     /* > 0 if descriptor is readable */
-    return(select(fd+1, &rset, NULL, NULL, &tv));
+    return(poll(&pfd, 1, sec*1000));
 }
 
 int

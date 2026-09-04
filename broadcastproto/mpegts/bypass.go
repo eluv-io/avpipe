@@ -87,13 +87,18 @@ func (bp *BypassProcessor) Start(fd int64) error {
 		bp.fd,
 	)
 	mpegTsConsumer := &MpegTsConsumer{
-		pktChan: make(chan *pktpool.Packet, bp.xcParams.InputCfg.Processor.ChannelCap),
+		pktChan: make(chan pktpool.Resource, bp.xcParams.InputCfg.Processor.ChannelCap),
 		pp:      processor,
 		onFirstPacket: func() {
 			logNetReader.Debug("first packet received", e.Fields()...)
 			processor.ReportStart()
 		},
 	}
+
+	consumer := reorderingConsumerFor(
+		mpegTsConsumer, bp.transport.PackagingMode(), bp.xcParams.InputCfg.Processor.ReorderBuffer, bp.fd,
+		bp.xcParams.Url,
+	)
 
 	bp.waitGroup.Add(1)
 	go func() {
@@ -109,8 +114,9 @@ func (bp *BypassProcessor) Start(fd int64) error {
 		time.Millisecond*time.Duration(bp.xcParams.ConnectionTimeout),
 		bp.xcParams.InputCfg.Processor,
 		bp.transport,
-		[]Consumer{mpegTsConsumer},
+		[]Consumer{consumer},
 	)
+	processor.SetConnStatsSource(bp.netReader)
 
 	return nil
 }

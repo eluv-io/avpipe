@@ -63,6 +63,11 @@ func TestXcRunRawOnlyReturnsInputCloseError(t *testing.T) {
 func initRawOnlyTest(t *testing.T, processor *rawOnlyTestProcessor, input *rawOnlyTestInput) int32 {
 	t.Helper()
 
+	prevIn := goavpipe.GetGlobalInputOpener()
+	prevOut := goavpipe.GetGlobalOutputOpener()
+	goavpipe.InitIOHandler(nil, nil)
+	t.Cleanup(func() { goavpipe.InitIOHandler(prevIn, prevOut) })
+
 	url := processor.params.Url
 	inSet, outSet := goavpipe.InitUrlIOHandlerIfNotPresent(
 		url,

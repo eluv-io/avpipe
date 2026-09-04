@@ -554,6 +554,7 @@ typedef struct xcparams_t {
     int         n_audio;                    // Number of entries in audio_index
     int         sync_audio_to_stream_id;    // mpegts only, default is 0
     int         bitdepth;                   // Can be 8, 10, 12
+    int         preserve_dolby_vision;      // Preserve Dolby Vision RPU metadata while transcoding
     char        *max_cll;                   // Maximum Content Light Level (HDR only)
     char        *master_display;            // Master display (HDR only)
     int         video_layout;               // Video layout (eg. stereoscopic SBS)

@@ -9,6 +9,7 @@ import (
 	"github.com/eluv-io/avpipe/broadcastproto/transport"
 	"github.com/eluv-io/avpipe/goavpipe/util"
 	"github.com/eluv-io/common-go/format/duration"
+	"github.com/eluv-io/common-go/media/rtp"
 )
 
 type AVStatType int
@@ -28,6 +29,7 @@ const (
 	AV_IN_STAT_DATA_SCTE35              = 12
 	AV_IN_STAT_MPEGTS                   = 13
 	AV_IN_STAT_MPEGTS_START             = 14
+	AV_IN_STAT_MPEGTS_BYTES_WRITTEN     = 15
 )
 
 func (a AVStatType) Name() string {
@@ -60,6 +62,8 @@ func (a AVStatType) Name() string {
 		return "AV_IN_STAT_MPEGTS"
 	case AV_IN_STAT_MPEGTS_START:
 		return "AV_IN_STAT_MPEGTS_START"
+	case AV_IN_STAT_MPEGTS_BYTES_WRITTEN:
+		return "AV_IN_STAT_MPEGTS_BYTES_WRITTEN"
 	default:
 		return fmt.Sprintf("Unknown(%d)", a)
 	}
@@ -349,6 +353,7 @@ type XcParams struct {
 	MasterDisplay          string      `json:"master_display,omitempty"`
 	VideoLayout            int32       `json:"video_layout,omitempty"`
 	BitDepth               int32       `json:"bitdepth,omitempty"`
+	PreserveDolbyVision    bool        `json:"preserve_dolby_vision,omitempty"`
 	SyncAudioToStreamId    int         `json:"sync_audio_to_stream_id"`
 	ForceEqualFDuration    bool        `json:"force_equal_frame_duration,omitempty"`
 	MuxingSpec             string      `json:"muxing_spec,omitempty"`
@@ -598,6 +603,11 @@ type InputProcessorConfig struct {
 	MaxPacketSize      int           `json:"max_packet_size"`      // the size of the buffer for reading packets
 	ChannelCap         int           `json:"channel_cap"`          // the capacity of channels used for packet forwarding
 	PartDuration       duration.Spec `json:"part_duration"`        // the duration of each part that is generated from the stream data
+
+	// ReorderBuffer configures the optional RTP packet-reordering correction applied to RtpTs-packaged sources on
+	// the raw-copy-to-fabric-part path (see broadcastproto/mpegts.ReorderingConsumer). Not used for RawTs/AtsTs
+	// packaging (no per-datagram sequence number to key on).
+	ReorderBuffer ReorderBufferConfig `json:"reorder_buffer"`
 }
 
 // ApplyDefaults applies default values to a copy of this input processor configuration.
@@ -619,8 +629,36 @@ func (i InputProcessorConfig) ApplyDefaults() InputProcessorConfig {
 	} else if i.PartDuration < duration.Second {
 		i.PartDuration = duration.Second
 	}
+	if i.ReorderBuffer.Enabled {
+		i.ReorderBuffer = i.ReorderBuffer.ApplyDefaults()
+	}
 	// if i.RecoverTimeout == 0 {
 	// 	i.RecoverTimeout = 30 * duration.Second
 	// }
 	return i
+}
+
+// ReorderBufferConfig configures the optional RTP packet-reordering correction (see InputProcessorConfig.ReorderBuffer).
+type ReorderBufferConfig struct {
+	Enabled   bool          `json:"enabled"`    // opts into reordering correction; disabled by default
+	MaxWindow int           `json:"max_window"` // max sequence-number span (packets) a gap may hold
+	MaxWait   duration.Spec `json:"max_wait"`   // max wall-clock time a gap may stay open
+	MaxJump   int           `json:"max_jump"`   // sequence-number discontinuity that forces a resync
+}
+
+// ApplyDefaults applies default values to a copy of this reorder-buffer configuration, mirroring rtp.NewReorderBuffer's
+// own fallback for a non-positive maxWindow/maxWait/maxJump. Calling this explicitly - rather than passing zero values
+// through and relying on that fallback - keeps the configuration actually used visible to the caller (e.g. for logging)
+// instead of implicit in common-go.
+func (r ReorderBufferConfig) ApplyDefaults() ReorderBufferConfig {
+	if r.MaxWindow <= 0 {
+		r.MaxWindow = rtp.DefaultReorderMaxWindow
+	}
+	if r.MaxWait <= 0 {
+		r.MaxWait = duration.Spec(rtp.DefaultReorderMaxWait)
+	}
+	if r.MaxJump <= r.MaxWindow {
+		r.MaxJump = 4 * r.MaxWindow
+	}
+	return r
 }
