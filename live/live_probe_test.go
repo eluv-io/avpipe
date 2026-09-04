@@ -83,21 +83,22 @@ func TestProbeRTMPListen(t *testing.T) {
 
 	done := make(chan bool, 1)
 	var probeInfo *goavpipe.ProbeInfo
-	var err error
+	var probeErr error
 
 	go func() {
 		tlog.Info("Probing RTMP stream start", "params", fmt.Sprintf("%+v", *XCParams))
-		probeInfo, err = avpipe.Probe(XCParams)
+		probeInfo, probeErr = avpipe.Probe(XCParams)
 		done <- true
 	}()
 
-	err = liveSource.Start("rtmp_connect")
+	time.Sleep(1 * time.Second)
+	err := liveSource.Start("rtmp_connect")
 	if err != nil {
 		t.Error(err)
 	}
 
 	<-done
-	assert.NoError(t, err)
+	assert.NoError(t, probeErr)
 	tlog.Info("Probe done", "probeInfo", fmt.Sprintf("%+v", *probeInfo))
 	assert.Equal(t, "h264", probeInfo.Streams[0].CodecName)
 	assert.Equal(t, 1920, probeInfo.Streams[0].Width)
@@ -213,22 +214,22 @@ func TestProbeUDPListen(t *testing.T) {
 
 	done := make(chan bool, 1)
 	var probeInfo *goavpipe.ProbeInfo
-	var err error
+	var probeErr error
 
 	go func() {
 		tlog.Info("Probing MPEGTS stream start", "params", fmt.Sprintf("%+v", *XCParams))
-		probeInfo, err = avpipe.Probe(XCParams)
+		probeInfo, probeErr = avpipe.Probe(XCParams)
 		done <- true
 	}()
 
 	// Start ffmpeg UDP MPEGTS
-	err = liveSource.Start("udp")
+	err := liveSource.Start("udp")
 	if err != nil {
 		t.Error(err)
 	}
 
 	<-done
-	assert.NoError(t, err)
+	assert.NoError(t, probeErr)
 	assert.Equal(t, "h264", probeInfo.Streams[0].CodecName)
 	assert.Equal(t, 1280, probeInfo.Streams[0].Width)
 	assert.Equal(t, 720, probeInfo.Streams[0].Height)

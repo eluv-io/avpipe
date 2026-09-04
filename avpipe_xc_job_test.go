@@ -24,16 +24,16 @@ func TestXcFiniRemovesJobAndURLHandlers(t *testing.T) {
 
 	putXCJob(handle, &xcJob{url: url})
 
-	require.Same(t, inputOpener, goavpipe.GetInputOpener(url))
-	require.Same(t, outputOpener, goavpipe.GetOutputOpener(url))
+	require.Same(t, inputOpener, goavpipe.GetURLInputOpener(url))
+	require.Same(t, outputOpener, goavpipe.GetURLOutputOpener(url))
 	require.NoError(t, XcFini(handle))
 
 	xcJobsMu.Lock()
 	_, jobExists := xcJobs[handle]
 	xcJobsMu.Unlock()
 	require.False(t, jobExists)
-	require.NotSame(t, inputOpener, goavpipe.GetInputOpener(url))
-	require.NotSame(t, outputOpener, goavpipe.GetOutputOpener(url))
+	require.Nil(t, goavpipe.GetURLInputOpener(url))
+	require.Nil(t, goavpipe.GetURLOutputOpener(url))
 	require.ErrorIs(t, XcFini(handle), EAV_BAD_HANDLE)
 }
 
@@ -47,6 +47,10 @@ func TestXcInitFailureRollsBackURLHandlersAndDoesNotCreateJob(t *testing.T) {
 		goavpipe.Globals.RemoveURLHandlers(url)
 	})
 
+	// verify registration before cleanup
+	require.Same(t, inputOpener, goavpipe.GetURLInputOpener(url))
+	require.Same(t, outputOpener, goavpipe.GetURLOutputOpener(url))
+
 	xcJobsMu.Lock()
 	jobsBefore := len(xcJobs)
 	xcJobsMu.Unlock()
@@ -59,8 +63,9 @@ func TestXcInitFailureRollsBackURLHandlersAndDoesNotCreateJob(t *testing.T) {
 
 	require.Error(t, err)
 	require.Equal(t, int32(-1), handle)
-	require.NotSame(t, inputOpener, goavpipe.GetInputOpener(url))
-	require.NotSame(t, outputOpener, goavpipe.GetOutputOpener(url))
+
+	require.Nil(t, goavpipe.GetURLInputOpener(url))
+	require.Nil(t, goavpipe.GetURLOutputOpener(url))
 
 	xcJobsMu.Lock()
 	jobsAfter := len(xcJobs)

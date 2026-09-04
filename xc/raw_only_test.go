@@ -64,7 +64,7 @@ func initRawOnlyTest(t *testing.T, processor *rawOnlyTestProcessor, input *rawOn
 	t.Helper()
 
 	prevIn := goavpipe.GetGlobalInputOpener()
-	prevOut := goavpipe.GetOutputOpener("")
+	prevOut := goavpipe.GetGlobalOutputOpener()
 	goavpipe.InitIOHandler(nil, nil)
 	t.Cleanup(func() { goavpipe.InitIOHandler(prevIn, prevOut) })
 
