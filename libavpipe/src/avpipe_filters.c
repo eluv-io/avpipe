@@ -3,6 +3,8 @@
  */
 
 #include "avpipe_xc.h"
+#include "avpipe_filters.h"
+#include "avpipe_utils.h"
 #include "avpipe_format.h"
 #include "elv_log.h"
 #include "libavutil/pixdesc.h"
@@ -668,4 +670,191 @@ end:
         return eav_filter_init;
 
     return ret;
+}
+
+/* Calculate frame offset for partial segments.
+ * Unless skip_decoding is enabled, the decoder sees all frames before start_time_ts so we need
+ * to adjust the frame index for the filter (applies to verticalized and fade currently)
+ */
+static int
+filter_frame_offset(
+    coderctx_t *encoder_context,
+    xcparams_t *params,
+    int *frame_dur_out)
+{
+    if (frame_dur_out)
+        *frame_dur_out = 0;
+
+    if (!params || params->start_time_ts <= 0 || params->skip_decoding)
+        return 0;
+
+    AVCodecContext *enc_ctx = encoder_context->codec_context[encoder_context->video_stream_index];
+    if (!enc_ctx)
+        return 0;
+
+    int frame_dur = enc_ctx->time_base.den > 0 ? enc_ctx->time_base.den / 30 : 0;
+
+    if (encoder_context->stream[encoder_context->video_stream_index] &&
+        encoder_context->stream[encoder_context->video_stream_index]->avg_frame_rate.num > 0 &&
+        encoder_context->stream[encoder_context->video_stream_index]->avg_frame_rate.den > 0) {
+        AVRational fr = encoder_context->stream[encoder_context->video_stream_index]->avg_frame_rate;
+        frame_dur = enc_ctx->time_base.den * fr.den / fr.num;
+    }
+
+    if (frame_dur <= 0)
+        return 0;
+
+    if (frame_dur_out)
+        *frame_dur_out = frame_dur;
+
+    return (int)(params->start_time_ts / frame_dur);
+}
+
+int
+crop_get_context(
+    coderctx_t *decoder_context,
+    xcparams_t *params)
+{
+    for (unsigned int i = 0; i < decoder_context->video_filter_graph->nb_filters; i++) {
+        AVFilterContext *f = decoder_context->video_filter_graph->filters[i];
+        if (strcmp(f->filter->name, "crop") == 0) {
+            decoder_context->video_crop_ctx = f;
+            elv_log("Found crop filter '%s' for vertical video, url=%s", f->name, params->url);
+            return 0;
+        }
+    }
+    elv_err("Failed to find crop filter in graph, url=%s", params->url);
+    return eav_filter_init;
+}
+
+int
+crop_calc_width(
+    int source_height)
+{
+    /* 9:16 aspect ratio, ensure even width for codec compatibility */
+    int w = source_height * 9 / 16;
+    if (w % 2 != 0)
+        w += 1;
+    return w;
+}
+
+void
+crop_send_command(
+    coderctx_t *decoder_context,
+    coderctx_t *encoder_context,
+    xcparams_t *params)
+{
+    if (!decoder_context->video_crop_ctx)
+        return;
+
+    if (!params->vertical_data || params->vertical_data_len <= 0)
+        return;
+
+    AVCodecContext *dec_ctx = decoder_context->codec_context[decoder_context->video_stream_index];
+    int enc_height = encoder_context->codec_context[encoder_context->video_stream_index]->height;
+
+    char cmd_res[128];
+    char x_val[16];
+    /* After scale filter the frame is at scaled dimensions */
+    int scaled_width = dec_ctx->width * enc_height / dec_ctx->height;
+    int crop_width = crop_calc_width(enc_height);
+    int crop_x = 0;
+    int frame_idx = dec_ctx->frame_num - 1 - filter_frame_offset(encoder_context, params, NULL); /* frame_number is 1-based */
+
+    crop_x = vertical_data_crop_x(params->vertical_data, params->vertical_data_len, frame_idx, scaled_width, crop_width);
+
+    snprintf(x_val, sizeof(x_val), "%d", crop_x);
+    int ret = avfilter_graph_send_command(decoder_context->video_filter_graph,
+        decoder_context->video_crop_ctx->name, "x", x_val, cmd_res, sizeof(cmd_res), 0);
+    if (ret < 0) {
+        elv_err("Failed to send crop x command, ret=%d, url=%s", ret, params->url);
+    }
+}
+
+/*
+ * This filter implements two kinds of fades:
+ *
+ * - simple 'in' or 'out' - these are pre-canned, using the ffmpeg 'fade' filter and they apply when
+ *   the fade levels are not specified
+ * - blended - these apply when the fade levels are specified
+ *
+ * Blend-based fade (when fade_start_frame, fade_end_frame, fade_level_1, fade_level_2 are set):
+ *
+ *   General formula:
+ *     rate = (level2 - level1) / (end_frame - start_frame)
+ *     blend expr: A * clip(level1 + rate * (N - start_frame), 0, 1)
+ *
+ *   Example 1 (fade out from 1.0 to ~0.5, frames 30-59):
+ *                                                                        start_frame
+ *                                                                        |
+ *     format=gbrp,split[a][b];[a][b]blend=all_expr='A*clip(1.000-0.017*(N-30),0,1)':enable='between(n,30,59)',format=yuv420p
+ *                                                         |    |
+ *                                                     level1   rate = (level2-level1)/(end_frame-start_frame)
+ *
+ *   Example 2 (fade out from ~0.5 to 0.0, frames 0-29):
+ *                                                                       start_frame
+ *                                                                       |
+ *     format=gbrp,split[a][b];[a][b]blend=all_expr='A*clip(0.492-0.017*(N-0),0,1)':enable='between(n,0,29)',format=yuv420p
+ *                                                         |    |
+ *                                                     level1   rate = (level2-level1)/(end_frame-start_frame)
+ */
+
+int
+append_fade_filter(
+    char *filter_str,
+    size_t filter_str_sz,
+    coderctx_t *encoder_context,
+    xcparams_t *params)
+{
+    if (!params || !params->fade || *params->fade == '\0')
+        return 0;
+
+    char fade_buf[512];
+    int frame_dur = 0;
+    int frame_offset = filter_frame_offset(encoder_context, params, &frame_dur);
+
+    if (params->start_time_ts > 0 && !params->skip_decoding) {
+        elv_log("FILTER fade frame_offset=%d (start_time_ts=%"PRId64" frame_dur=%d)",
+            frame_offset, params->start_time_ts, frame_dur);
+    }
+
+    if (params->fade_end_frame > params->fade_start_frame &&
+        (params->fade_level_1 != 0.0 || params->fade_level_2 != 0.0)) {
+        int S = params->fade_start_frame + frame_offset;
+        int E = params->fade_end_frame + frame_offset;
+        double L1 = params->fade_level_1;
+        double L2 = params->fade_level_2;
+        double rate = (L2 - L1) / (double)(E - S);
+        snprintf(fade_buf, sizeof(fade_buf),
+            ",format=gbrp,split[a][b];[a][b]blend=all_expr='A*clip(%.3f%+.3f*(N-%d),0,1)':enable='between(n,%d,%d)',format=yuv420p",
+            L1, rate, S, S, E);
+    } else if (!strcmp(params->fade, "in")) {
+        if (params->fade_end_frame > params->fade_start_frame) {
+            snprintf(fade_buf, sizeof(fade_buf), ",fade=t=in:s=%d:n=%d",
+                params->fade_start_frame + frame_offset,
+                params->fade_end_frame - params->fade_start_frame);
+        } else {
+            snprintf(fade_buf, sizeof(fade_buf), ",fade=t=in:s=%d:n=30", frame_offset);
+        }
+    } else if (!strcmp(params->fade, "out")) {
+        if (params->fade_end_frame > params->fade_start_frame) {
+            snprintf(fade_buf, sizeof(fade_buf), ",fade=t=out:s=%d:n=%d",
+                params->fade_start_frame + frame_offset,
+                params->fade_end_frame - params->fade_start_frame);
+        } else {
+            snprintf(fade_buf, sizeof(fade_buf), ",fade=t=out:s=%d:n=30", frame_offset);
+        }
+    } else {
+        elv_err("Invalid fade param '%s', must be 'in' or 'out'", params->fade);
+        return eav_param;
+    }
+
+    size_t filter_len = strlen(filter_str);
+    if (filter_len >= filter_str_sz) {
+        elv_err("Fade filter append failed - filter string is full, url=%s", params->url);
+        return eav_filter_string_init;
+    }
+
+    strncat(filter_str, fade_buf, filter_str_sz - filter_len - 1);
+    return 0;
 }
