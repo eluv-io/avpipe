@@ -2833,7 +2833,9 @@ transcode_video(
         decoder_context->video_pts = packet->pts;
 
         /* Send crop x command per frame for vertical video */
-        crop_send_command(decoder_context, encoder_context, p);
+        ret = crop_send_command(decoder_context, encoder_context, p);
+        if (ret != eav_success)
+            return ret;
 
         /* Rescale video frame to encoder timebase before sending to the filter
          * (filter is initialized with the encoder timebase).
@@ -3106,6 +3108,12 @@ flush_decoder(
 
         if (codec_context->codec_type == AVMEDIA_TYPE_VIDEO) {
             fix_video_frame_color(decoder_context, frame);
+            ret = crop_send_command(decoder_context, encoder_context, p);
+            if (ret != eav_success) {
+                av_frame_free(&filt_frame);
+                av_frame_free(&frame);
+                return ret;
+            }
         }
 
         dump_frame(i >= 0, stream_index,
@@ -4108,8 +4116,12 @@ xc_done:
     /*
      * Flush all frames, first flush decoder buffers, then encoder buffers by passing NULL frame.
      */
-    if (params->xc_type & xc_video && xctx->err != eav_write_frame)
-        flush_decoder(decoder_context, encoder_context, encoder_context->video_stream_index, params, debug_frame_level);
+    if (params->xc_type & xc_video && xctx->err != eav_write_frame) {
+        int flush_rc = flush_decoder(decoder_context, encoder_context,
+            encoder_context->video_stream_index, params, debug_frame_level);
+        if (!xctx->err && flush_rc != eav_success)
+            xctx->err = flush_rc;
+    }
     if (params->xc_type & xc_audio && xctx->err != eav_write_frame) {
         for (int i=0; i<decoder_context->n_audio; i++)
             flush_decoder(decoder_context, encoder_context, encoder_context->audio_stream_index[i], params, debug_frame_level);
@@ -4848,8 +4860,18 @@ check_params(
             elv_err("Unsupported vertical data type=%d url=%s", params->vertical, params->url);
             return eav_param;
         }
-        if (params->vertical_data == NULL || params->vertical_data_len < 4 || params->vertical_data_len % 4 > 0) {
+        int has_vertical_data = params->vertical_data != NULL && params->vertical_data_len > 0;
+        int has_vertical_reader = params->vertical_data_reader != NULL;
+        if (has_vertical_data && has_vertical_reader) {
+            elv_err("Bad vertical data - buffer and reader are mutually exclusive, url=%s", params->url);
+            return eav_param;
+        }
+        if (!has_vertical_data && !has_vertical_reader) {
             elv_err("Bad vertical data - missing or too short url=%s", params->url);
+            return eav_param;
+        }
+        if (has_vertical_data && (params->vertical_data_len < 4 || params->vertical_data_len % 4 > 0)) {
+            elv_err("Bad vertical data - buffer is too short or not aligned to 4 bytes, url=%s", params->url);
             return eav_param;
         }
     }
@@ -4943,6 +4965,7 @@ log_params(
         "timecode=%s "
         "vertical=%d "
         "vertical_data_len=%d "
+        "vertical_data_reader=%d "
         "fade=%s "
         "fade_start_frame=%d "
         "fade_end_frame=%d "
@@ -4975,7 +4998,7 @@ log_params(
         params->profile ? params->profile : "", params->level,  params->deinterlace,
         params->use_preprocessed_input, params->copy_mpegts,
         params->timecode,
-        params->vertical, params->vertical_data_len,
+        params->vertical, params->vertical_data_len, params->vertical_data_reader != NULL,
         params->fade ? params->fade : "(null)",
         params->fade_start_frame, params->fade_end_frame,
         params->fade_level_1, params->fade_level_2);

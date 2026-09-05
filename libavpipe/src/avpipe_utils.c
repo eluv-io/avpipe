@@ -408,7 +408,21 @@ vertical_data_crop_x(
         frame_idx = 0;
     if (frame_idx >= n_entries)
         frame_idx = n_entries - 1;
-    uint32_t v = ((uint32_t *)vertical_data)[frame_idx];
+    uint8_t *entry = vertical_data + frame_idx * 4;
+    uint32_t v = (uint32_t)entry[0]
+        | ((uint32_t)entry[1] << 8)
+        | ((uint32_t)entry[2] << 16)
+        | ((uint32_t)entry[3] << 24);
+
+    return vertical_value_crop_x(v, scaled_width, crop_width);
+}
+
+int
+vertical_value_crop_x(
+    uint32_t v,
+    int scaled_width,
+    int crop_width)
+{
     int center_x = 0;
     if (v > 0) {
         uint64_t divisor = 1;

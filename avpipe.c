@@ -54,6 +54,7 @@ out_stat(
 int64_t AVPipeOpenInput(char *, int64_t *);
 int64_t AVPipeOpenMuxInput(char *, char *, int64_t *);
 int     AVPipeReadInput(int64_t, uint8_t *, int);
+int     AVPipeReadVerticalData(uintptr_t, uint32_t *);
 int64_t AVPipeSeekInput(int64_t, int64_t, int);
 int     AVPipeCloseInput(int64_t);
 int     AVPipeStatInput(int64_t, int, avp_stat_t, void *);
@@ -785,6 +786,15 @@ init_tx_module()
         return;
     srand(time(0));
     initialized = 1;
+}
+
+void
+init_vertical_data_reader(
+    xcparams_t *params,
+    uintptr_t handle)
+{
+    params->vertical_data_reader = AVPipeReadVerticalData;
+    params->vertical_data_reader_handle = handle;
 }
 
 /*

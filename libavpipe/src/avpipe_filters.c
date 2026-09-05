@@ -738,17 +738,19 @@ crop_calc_width(
     return w;
 }
 
-void
+int
 crop_send_command(
     coderctx_t *decoder_context,
     coderctx_t *encoder_context,
     xcparams_t *params)
 {
     if (!decoder_context->video_crop_ctx)
-        return;
+        return eav_success;
 
-    if (!params->vertical_data || params->vertical_data_len <= 0)
-        return;
+    int has_buffer = params->vertical_data && params->vertical_data_len > 0;
+    int has_reader = params->vertical_data_reader != NULL;
+    if (!has_buffer && !has_reader)
+        return eav_success;
 
     AVCodecContext *dec_ctx = decoder_context->codec_context[decoder_context->video_stream_index];
     int enc_height = encoder_context->codec_context[encoder_context->video_stream_index]->height;
@@ -761,7 +763,34 @@ crop_send_command(
     int crop_x = 0;
     int frame_idx = dec_ctx->frame_num - 1 - filter_frame_offset(encoder_context, params, NULL); /* frame_number is 1-based */
 
-    crop_x = vertical_data_crop_x(params->vertical_data, params->vertical_data_len, frame_idx, scaled_width, crop_width);
+    if (has_buffer) {
+        crop_x = vertical_data_crop_x(params->vertical_data, params->vertical_data_len, frame_idx, scaled_width, crop_width);
+    } else {
+        /* The streaming source starts at the first output frame. Do not consume
+         * records for decoded pre-roll frames in a partial transcode. */
+        if (frame_idx < 0)
+            return eav_success;
+
+        if (!decoder_context->vertical_data_eof) {
+            uint32_t value = 0;
+            int read_rc = params->vertical_data_reader(params->vertical_data_reader_handle, &value);
+            if (read_rc > 0) {
+                decoder_context->vertical_data_last = value;
+                decoder_context->vertical_data_has_last = 1;
+            } else if (read_rc == 0) {
+                decoder_context->vertical_data_eof = 1;
+            } else {
+                elv_err("Failed to read vertical data, url=%s", params->url);
+                return eav_read_input;
+            }
+        }
+
+        if (!decoder_context->vertical_data_has_last) {
+            elv_err("Vertical data reader reached EOF before its first value, url=%s", params->url);
+            return eav_read_input;
+        }
+        crop_x = vertical_value_crop_x(decoder_context->vertical_data_last, scaled_width, crop_width);
+    }
 
     snprintf(x_val, sizeof(x_val), "%d", crop_x);
     int ret = avfilter_graph_send_command(decoder_context->video_filter_graph,
@@ -769,6 +798,7 @@ crop_send_command(
     if (ret < 0) {
         elv_err("Failed to send crop x command, ret=%d, url=%s", ret, params->url);
     }
+    return eav_success;
 }
 
 /*

@@ -15,6 +15,7 @@
 #include <libavutil/opt.h>
 
 #include <pthread.h>
+#include <stdint.h>
 #include "elv_channel.h"
 
 #define MAX_STREAMS	        64
@@ -397,6 +398,9 @@ typedef struct coderctx_t {
     AVFilterContext *video_buffersrc_ctx;
     AVFilterGraph   *video_filter_graph;
     AVFilterContext *video_crop_ctx;            /* Crop filter context for send_command */
+    uint32_t         vertical_data_last;         /* Last crop value read from a streaming source */
+    int              vertical_data_has_last;
+    int              vertical_data_eof;
 
     /* Audio filter */
     AVFilterContext *audio_buffersink_ctx[MAX_STREAMS];
@@ -478,6 +482,12 @@ typedef enum vertical_type {
     vertical_none   = 0, // No vertical crop
     vertical_32bpf  = 1  // 32 bits per frame (uint32 LE per frame)
 } vertical_type;
+
+/* Returns 1 with the next value, 0 at EOF, or a negative value on error. */
+typedef int
+(*vertical_data_reader_f)(
+    uintptr_t handle,
+    uint32_t *value);
 
 // Video layout. Values align with ISO/IEC 23001-8 (CICP)
 typedef enum video_layout_t {
@@ -578,6 +588,8 @@ typedef struct xcparams_t {
     vertical_type vertical;                 // Vertical video crop type (9:16)
     uint8_t     *vertical_data;             // Per-frame crop data (opaque byte array, currently 4 bytes per frame uint32 LE)
     int         vertical_data_len;          // Length of vertical_data in bytes
+    vertical_data_reader_f vertical_data_reader; // Optional streaming source for per-frame crop data
+    uintptr_t   vertical_data_reader_handle; // Opaque handle passed to vertical_data_reader
     char        *fade;                      // Fade filter: "in" or "out"
     int         fade_start_frame;           // Fade start frame (used with blend filter)
     int         fade_end_frame;             // Fade end frame (used with blend filter)

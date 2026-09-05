@@ -124,3 +124,10 @@ vertical_data_crop_x(
     int frame_idx,
     int scaled_width,
     int crop_width);
+
+/** Calculate crop x from one decoded vertical data value. */
+int
+vertical_value_crop_x(
+    uint32_t value,
+    int scaled_width,
+    int crop_width);
