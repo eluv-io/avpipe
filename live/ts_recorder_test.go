@@ -24,6 +24,7 @@ func TestUdpToMp4(t *testing.T) {
 	setupOutDir(t, outputDir)
 
 	liveSource := NewLiveSource()
+	defer liveSource.Stop()
 	url := fmt.Sprintf("udp://127.0.0.1:%d", liveSource.Port)
 
 	done := make(chan bool, 1)
@@ -290,6 +291,7 @@ func TestUdpToMp4WithCancelling1(t *testing.T) {
 	log.Info("STARTING " + outputDir)
 
 	liveSource := NewLiveSource()
+	defer liveSource.Stop()
 	url := fmt.Sprintf("udp://127.0.0.1:%d", liveSource.Port)
 
 	err := liveSource.Start("udp")
@@ -350,6 +352,7 @@ func TestUdpToMp4WithCancelling2(t *testing.T) {
 	log.Info("STARTING " + outputDir)
 
 	liveSource := NewLiveSource()
+	defer liveSource.Stop()
 	url := fmt.Sprintf("udp://127.0.0.1:%d", liveSource.Port)
 	done := make(chan bool, 1)
 
@@ -425,6 +428,7 @@ func TestUdpToMp4WithCancelling3(t *testing.T) {
 	log.Info("STARTING " + outputDir)
 
 	liveSource := NewLiveSource()
+	defer liveSource.Stop()
 	url := fmt.Sprintf("udp://127.0.0.1:%d", liveSource.Port)
 	done := make(chan bool, 1)
 
@@ -497,6 +501,7 @@ func TestUdpToMp4WithCancelling4(t *testing.T) {
 	log.Info("STARTING " + outputDir)
 
 	liveSource := NewLiveSource()
+	defer liveSource.Stop() // safety net; the test also stops it mid-run on purpose
 	url := fmt.Sprintf("udp://127.0.0.1:%d", liveSource.Port)
 	done := make(chan bool, 1)
 

@@ -21,6 +21,7 @@ func TestSrtToMp4(t *testing.T) {
 	setupOutDir(t, outputDir)
 
 	liveSource := NewLiveSource()
+	defer liveSource.Stop()
 	url := fmt.Sprintf("srt://127.0.0.1:%d?mode=listener&recv_buffer_size=256000&ffs=256000", liveSource.Port)
 
 	done := make(chan bool, 1)
@@ -141,6 +142,7 @@ func TestSrtToMp4WithCancelling0(t *testing.T) {
 
 	done := make(chan bool, 1)
 	liveSource := NewLiveSource()
+	defer liveSource.Stop()
 	url := fmt.Sprintf("srt://127.0.0.1:%d?mode=listener&recv_buffer_size=256000&ffs=256000", liveSource.Port)
 
 	xcParams := &goavpipe.XcParams{
@@ -210,6 +212,7 @@ func TestSrtToMp4WithCancelling1(t *testing.T) {
 	log.Info("STARTING " + outputDir)
 
 	liveSource := NewLiveSource()
+	defer liveSource.Stop()
 	url := fmt.Sprintf("srt://127.0.0.1:%d?mode=listener&recv_buffer_size=256000&ffs=256000", liveSource.Port)
 
 	xcParams := &goavpipe.XcParams{
@@ -268,6 +271,7 @@ func TestSrtToMp4WithCancelling2(t *testing.T) {
 	log.Info("STARTING " + outputDir)
 
 	liveSource := NewLiveSource()
+	defer liveSource.Stop()
 	url := fmt.Sprintf("srt://127.0.0.1:%d?mode=listener&recv_buffer_size=256000&ffs=256000", liveSource.Port)
 	done := make(chan bool, 1)
 
@@ -341,6 +345,7 @@ func TestSrtToMp4WithCancelling3(t *testing.T) {
 	log.Info("STARTING " + outputDir)
 
 	liveSource := NewLiveSource()
+	defer liveSource.Stop()
 	url := fmt.Sprintf("srt://127.0.0.1:%d?mode=listener&recv_buffer_size=256000&ffs=256000", liveSource.Port)
 	done := make(chan bool, 1)
 
@@ -411,6 +416,7 @@ func TestSrtToMp4WithCancelling4(t *testing.T) {
 	log.Info("STARTING " + outputDir)
 
 	liveSource := NewLiveSource()
+	defer liveSource.Stop()
 	url := fmt.Sprintf("srt://127.0.0.1:%d?mode=listener&recv_buffer_size=256000&ffs=256000", liveSource.Port)
 	done := make(chan bool, 1)
 

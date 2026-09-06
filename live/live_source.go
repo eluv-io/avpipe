@@ -343,6 +343,12 @@ func (l *LiveSource) Stop() (err error) {
 		process = l.cmd.Process
 	}
 
+	if process == nil {
+		// Start() was never called or failed before spawning a process;
+		// nothing to kill. Safe to call Stop() (e.g. from a deferred cleanup).
+		return
+	}
+
 	err = process.Kill()
 	if err == nil {
 		err = process.Release()

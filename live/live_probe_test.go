@@ -16,6 +16,7 @@ func TestProbeRTMPConnect(t *testing.T) {
 	setupLogging()
 
 	liveSource := NewLiveSource()
+	defer liveSource.Stop()
 	url := fmt.Sprintf(RTMP_SOURCE, liveSource.Port)
 
 	// Start ffmpeg RTMP in listen mode
@@ -64,6 +65,7 @@ func TestProbeRTMPListen(t *testing.T) {
 	setupLogging()
 
 	liveSource := NewLiveSource()
+	defer liveSource.Stop()
 	url := fmt.Sprintf("rtmp://localhost:%d/rtmp/Doj1Nr3S", liveSource.Port)
 
 	XCParams := &goavpipe.XcParams{
@@ -118,6 +120,7 @@ func TestProbeRTMPNoStream(t *testing.T) {
 	setupLogging()
 
 	liveSource := NewLiveSource()
+	defer liveSource.Stop()
 	url := fmt.Sprintf("rtmp://localhost:%d/rtmp/Doj1Nr3S", liveSource.Port)
 
 	XCParams := &goavpipe.XcParams{
@@ -147,6 +150,7 @@ func TestProbeUDPConnect(t *testing.T) {
 	setupLogging()
 
 	liveSource := NewLiveSource()
+	defer liveSource.Stop()
 	url := fmt.Sprintf("udp://127.0.0.1:%d", liveSource.Port)
 
 	// Start ffmpeg UDP MPEGTS
@@ -197,6 +201,7 @@ func TestProbeUDPListen(t *testing.T) {
 	setupLogging()
 
 	liveSource := NewLiveSource()
+	defer liveSource.Stop()
 	url := fmt.Sprintf("udp://127.0.0.1:%d", liveSource.Port)
 
 	XCParams := &goavpipe.XcParams{
@@ -249,6 +254,7 @@ func TestProbeUDPNoStream(t *testing.T) {
 	setupLogging()
 
 	liveSource := NewLiveSource()
+	defer liveSource.Stop()
 	url := fmt.Sprintf("udp://127.0.0.1:%d", liveSource.Port)
 
 	XCParams := &goavpipe.XcParams{

@@ -21,6 +21,7 @@ func TestRtmpToMp4_1(t *testing.T) {
 	setupOutDir(t, outputDir)
 
 	liveSource := NewLiveSource()
+	defer liveSource.Stop()
 	url := fmt.Sprintf(RTMP_SOURCE, liveSource.Port)
 
 	done := make(chan bool, 1)
@@ -150,6 +151,7 @@ func TestRtmpToMp4WithCancelling0(t *testing.T) {
 
 	done := make(chan bool, 1)
 	liveSource := NewLiveSource()
+	defer liveSource.Stop()
 	url := fmt.Sprintf(RTMP_SOURCE, liveSource.Port)
 
 	xcParams := &goavpipe.XcParams{
@@ -228,6 +230,7 @@ func TestRtmpToMp4WithCancelling1(t *testing.T) {
 	log.Info("STARTING " + outputDir)
 
 	liveSource := NewLiveSource()
+	defer liveSource.Stop()
 	url := fmt.Sprintf(RTMP_SOURCE, liveSource.Port)
 
 	xcParams := &goavpipe.XcParams{
@@ -291,6 +294,7 @@ func TestRtmpToMp4WithCancelling2(t *testing.T) {
 	log.Info("STARTING " + outputDir)
 
 	liveSource := NewLiveSource()
+	defer liveSource.Stop()
 	url := fmt.Sprintf(RTMP_SOURCE, liveSource.Port)
 	done := make(chan bool, 1)
 
@@ -370,6 +374,7 @@ func TestRtmpToMp4WithCancelling3(t *testing.T) {
 	log.Info("STARTING " + outputDir)
 
 	liveSource := NewLiveSource()
+	defer liveSource.Stop()
 	url := fmt.Sprintf(RTMP_SOURCE, liveSource.Port)
 	done := make(chan bool, 1)
 
@@ -444,6 +449,7 @@ func TestRtmpToMp4WithCancelling4(t *testing.T) {
 	log.Info("STARTING " + outputDir)
 
 	liveSource := NewLiveSource()
+	defer liveSource.Stop()
 	url := fmt.Sprintf(RTMP_SOURCE, liveSource.Port)
 	done := make(chan bool, 1)
 
