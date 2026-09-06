@@ -5117,6 +5117,23 @@ avpipe_fini(
     if ((*xctx)->inctx && (*xctx)->inctx->url)
         elv_dbg("Releasing all the resources, url=%s", (*xctx)->inctx->url);
 
+    /*
+     * Stop and join the UDP reader thread before releasing any input resources.
+     * xc_table_cancel() only signals the thread (sets closed, closes the channel);
+     * avpipe_fini() is the single owner of the join and runs on every teardown
+     * path, cancelled or not. Without this join, the elv_channel_fini() and
+     * free(inctx) below could release inctx->udp_channel / inctx while
+     * udp_thread_func() is still calling elv_channel_send() on it - a
+     * use-after-free that glibc reports later as "corrupted size vs. prev_size".
+     */
+    if ((*xctx)->inctx && (*xctx)->inctx->utid) {
+        (*xctx)->inctx->closed = 1;
+        if ((*xctx)->inctx->udp_channel)
+            elv_channel_close((*xctx)->inctx->udp_channel, 1);
+        pthread_join((*xctx)->inctx->utid, NULL);
+        (*xctx)->inctx->utid = 0;
+    }
+
     /* Close input handler resources if it is not a muxing command */
     if (!(*xctx)->in_mux_ctx && (*xctx)->in_handlers) {
         if ((rc = (*xctx)->in_handlers->avpipe_closer((*xctx)->inctx)) < 0)

@@ -896,12 +896,12 @@ xc_table_cancel(
             if (xctx->index == i) {
                 xctx->decoder_ctx.cancelled = 1;
                 xctx->encoder_ctx.cancelled = 1;
-                /* If there is a UDP thread running wait for it to be finished */
+
                 if ( xctx->inctx && xctx->inctx->utid ) {
                     xctx->inctx->closed = 1;
-                    /* Close and purge the channel */
-                    elv_channel_close(xctx->inctx->udp_channel, 1);
-                    pthread_join(xctx->inctx->utid, NULL);
+                    /* Close and purge the channel to unblock the UDP thread */
+                    if (xctx->inctx->udp_channel)
+                        elv_channel_close(xctx->inctx->udp_channel, 1);
                 }
             } else {
                 elv_err("xc_table_cancel index=%d doesn't match with handle=%d at %d",
