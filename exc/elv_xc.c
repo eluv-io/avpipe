@@ -1115,6 +1115,7 @@ usage(
         "\t-copy-mpegts :           (optional) Default 0. Create a copy of the MPEGTS input (for MPEGTS, SRT, RTP)\n"
         "\t-video-bitrate :         (optional) Mutually exclusive with crf. Default: -1 (unused)\n"
         "\t-video-frame-duration-ts :  (optional) Frame duration of the output video in time base.\n"
+        "\t-video-fps :             (optional) RTMP-only FPS filter; must match the source nominal frame rate. Default: 0 (disabled).\n"
         "\t-video-layout :          (optional) Video layout, can be \"mono\"/0, \"sbs\"/3, \"tb\"/4, or \"mvhevc\"/10.\n"
         "\t-video-seg-duration-ts : (mandatory If format is not \"segment\" and transcoding video) video segment duration time base (positive integer).\n"
         "\t-video-time-base :       (optional) Video encoder timebase, must be > 0 (the actual timebase would be 1/video-time-base).\n"
@@ -1224,6 +1225,7 @@ main(
         .debug_frame_level = 0,
         .video_time_base = 0,
         .video_frame_duration_ts = 0,
+        .video_fps = 0,
     };
 
     i = 1;
@@ -1559,6 +1561,10 @@ main(
                 }
             } else if (!strcmp(argv[i], "-video-frame-duration-ts")) {
                 if (sscanf(argv[i+1], "%d", &p.video_frame_duration_ts) != 1) {
+                    usage(argv[0], argv[i], EXIT_FAILURE);
+                }
+            } else if (!strcmp(argv[i], "-video-fps")) {
+                if (sscanf(argv[i+1], "%d", &p.video_fps) != 1 || p.video_fps <= 0) {
                     usage(argv[0], argv[i], EXIT_FAILURE);
                 }
             } else if (!strcmp(argv[i], "-video-seg-duration-ts")) {
