@@ -5060,8 +5060,12 @@ avpipe_copy_xcparams(
     p2->vertical_data_len = 0;
     if (p->vertical_data != NULL && p->vertical_data_len > 0) {
         p2->vertical_data = (uint8_t *) calloc(1, p->vertical_data_len);
-        memcpy(p2->vertical_data, p->vertical_data, p->vertical_data_len);
-        p2->vertical_data_len = p->vertical_data_len;
+        if (p2->vertical_data != NULL) {
+            memcpy(p2->vertical_data, p->vertical_data, p->vertical_data_len);
+            p2->vertical_data_len = p->vertical_data_len;
+        } else {
+            elv_err("Failed to allocate %d bytes for vertical_data copy, url=%s", p->vertical_data_len, p2->url != NULL ? p2->url : "");
+        }
     }
 
     return p2;
@@ -5327,15 +5331,24 @@ set_extract_images(
     params->extract_images_ts[index] = value;
 }
 
-void
+int
 init_vertical_data(
     xcparams_t *params,
     const uint8_t *data,
     int len)
 {
+    if (len <= 0 || len > MAX_VERTICAL_DATA_LEN) {
+        elv_err("Invalid vertical_data length %d (max %d), url=%s", len, MAX_VERTICAL_DATA_LEN, params->url != NULL ? params->url : "");
+        return eav_param;
+    }
     params->vertical_data = malloc(len);
+    if (!params->vertical_data) {
+        elv_err("Failed to allocate %d bytes for vertical_data, url=%s", len, params->url != NULL ? params->url : "");
+        return eav_mem_alloc;
+    }
     memcpy(params->vertical_data, data, len);
     params->vertical_data_len = len;
+    return eav_success;
 }
 
 void

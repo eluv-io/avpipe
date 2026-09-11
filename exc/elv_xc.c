@@ -1616,8 +1616,19 @@ main(
                     fclose(vd_fp);
                     exit(EXIT_FAILURE);
                 }
+                if (vd_size > MAX_VERTICAL_DATA_LEN) {
+                    fprintf(stderr, "vertical-data file too large: %ld bytes (max %d): %s\n",
+                        vd_size, MAX_VERTICAL_DATA_LEN, vd_path);
+                    fclose(vd_fp);
+                    exit(EXIT_FAILURE);
+                }
                 p.vertical_data_len = (int)vd_size;
                 p.vertical_data = (uint8_t *)malloc(vd_size);
+                if (!p.vertical_data) {
+                    fprintf(stderr, "Failed to allocate %ld bytes for vertical-data: %s\n", vd_size, vd_path);
+                    fclose(vd_fp);
+                    exit(EXIT_FAILURE);
+                }
                 if (fread(p.vertical_data, 1, vd_size, vd_fp) != (size_t)vd_size) {
                     fprintf(stderr, "Failed to read vertical-data file: %s\n", vd_path);
                     fclose(vd_fp);

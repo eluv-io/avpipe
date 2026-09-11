@@ -479,6 +479,10 @@ typedef enum vertical_type {
     vertical_32bpf  = 1  // 32 bits per frame (uint32 LE per frame)
 } vertical_type;
 
+// Upper bound on a vertical_data buffer (4 bytes/frame => ~33M frames, ~155h at 60fps).
+// Sanity check for oversized/garbage vertical-data size
+#define MAX_VERTICAL_DATA_LEN   (128 * 1024 * 1024)
+
 // Video layout. Values align with ISO/IEC 23001-8 (CICP)
 typedef enum video_layout_t {
     video_layout_mono = 0, // Monoscopic
@@ -914,8 +918,10 @@ set_extract_images(
  * @param   params  Transcoding parameters
  * @param   data    Source byte buffer
  * @param   len     Length in bytes
+ * @return  eav_success on success, eav_param if len <= 0, eav_mem_alloc if the
+ *          buffer allocation fails.
  */
-void
+int
 init_vertical_data(
     xcparams_t *params,
     const uint8_t *data,
