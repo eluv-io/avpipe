@@ -4859,6 +4859,31 @@ check_params(
         return eav_param;
     }
 
+    /*
+     * get_filter_str() has mutually-exclusive branches: deinterlace, rotate and
+     * watermark each emit their own filter chain and return early, while the
+     * vertical crop and fade filters are only emitted from the final else branch.
+     * Combining them would silently drop the vertical/fade filters, so reject the
+     * combination here.
+     */
+    if (params->vertical || (params->fade && *params->fade != '\0')) {
+        const char *feature = params->vertical ? "vertical crop" : "fade";
+        if (params->deinterlace != dif_none) {
+            elv_err("Incompatible params - %s not supported with deinterlacing, url=%s", feature, params->url);
+            return eav_param;
+        }
+        if (params->rotate > 0) {
+            elv_err("Incompatible params - %s not supported with rotate, url=%s", feature, params->url);
+            return eav_param;
+        }
+        if ((params->watermark_text && *params->watermark_text != '\0') ||
+            (params->watermark_timecode && *params->watermark_timecode != '\0') ||
+            (params->watermark_overlay && params->watermark_overlay[0] != '\0')) {
+            elv_err("Incompatible params - %s not supported with watermark, url=%s", feature, params->url);
+            return eav_param;
+        }
+    }
+
     return eav_success;
 }
 
