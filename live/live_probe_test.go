@@ -19,6 +19,9 @@ func probeWithRetry(t *testing.T, params *goavpipe.XcParams, retryCount int) (pr
 		if err == nil {
 			return probeInfo, nil
 		}
+		if i == retryCount-1 {
+			break
+		}
 		tlog.Info("probe attempt failed, retrying", "attempt", i+1, "url", params.Url, "err", err)
 		time.Sleep(time.Second)
 	}
@@ -64,7 +67,7 @@ func TestProbeRTMPConnect(t *testing.T) {
 	goavpipe.InitIOHandler(&inputOpener{}, &outputOpener{})
 
 	tlog.Info("Probing RTMP stream start", "params", fmt.Sprintf("%+v", *XCParams))
-	probeInfo, err := probeWithRetry(t, XCParams, 2)
+	probeInfo, err := probeWithRetry(t, XCParams, 5)
 
 	requireProbe(t, probeInfo, err, 2)
 	assert.Equal(t, "h264", probeInfo.Streams[0].CodecName)
@@ -196,7 +199,7 @@ func TestProbeUDPConnect(t *testing.T) {
 	goavpipe.InitIOHandler(&inputOpener{}, &outputOpener{})
 
 	tlog.Info("Probing MPEGTS stream start", "params", fmt.Sprintf("%+v", *XCParams))
-	probeInfo, err := probeWithRetry(t, XCParams, 2)
+	probeInfo, err := probeWithRetry(t, XCParams, 5)
 
 	requireProbe(t, probeInfo, err, 2)
 	assert.Equal(t, "h264", probeInfo.Streams[0].CodecName)
