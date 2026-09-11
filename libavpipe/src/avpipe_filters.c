@@ -782,21 +782,25 @@ crop_send_command(
  *
  *   General formula:
  *     rate = (level2 - level1) / (end_frame - start_frame)
- *     blend expr: A * clip(level1 + rate * (N - start_frame), 0, 1)
+ *     blend expr: A * clip(level1 + rate * (min(N, end_frame) - start_frame), 0, 1)
+ *
+ *   The blend is enabled for every frame at or after start_frame, and N is clamped
+ *   to end_frame in the expression, so the fade holds level2 for all frames past end_frame.
+ *   Coefficients are emitted with 6 decimals so long fades still converge on the target level.
  *
  *   Example 1 (fade out from 1.0 to ~0.5, frames 30-59):
- *                                                                        start_frame
- *                                                                        |
- *     format=gbrp,split[a][b];[a][b]blend=all_expr='A*clip(1.000-0.017*(N-30),0,1)':enable='between(n,30,59)',format=yuv420p
- *                                                         |    |
- *                                                     level1   rate = (level2-level1)/(end_frame-start_frame)
+ *                                                                              start_frame
+ *                                                                              |
+ *     format=gbrp,split[a][b];[a][b]blend=all_expr='A*clip(1.000000-0.016667*(min(N,59)-30),0,1)':enable='gte(n,30)',format=yuv420p
+ *                                                         |         |
+ *                                                     level1        rate = (level2-level1)/(end_frame-start_frame)
  *
  *   Example 2 (fade out from ~0.5 to 0.0, frames 0-29):
- *                                                                       start_frame
- *                                                                       |
- *     format=gbrp,split[a][b];[a][b]blend=all_expr='A*clip(0.492-0.017*(N-0),0,1)':enable='between(n,0,29)',format=yuv420p
- *                                                         |    |
- *                                                     level1   rate = (level2-level1)/(end_frame-start_frame)
+ *                                                                             start_frame
+ *                                                                             |
+ *     format=gbrp,split[a][b];[a][b]blend=all_expr='A*clip(0.492000-0.016966*(min(N,29)-0),0,1)':enable='gte(n,0)',format=yuv420p
+ *                                                         |         |
+ *                                                     level1        rate = (level2-level1)/(end_frame-start_frame)
  */
 
 int
@@ -825,9 +829,11 @@ append_fade_filter(
         double L1 = params->fade_level_1;
         double L2 = params->fade_level_2;
         double rate = (L2 - L1) / (double)(E - S);
+        
+        // - N is clamped to E with min(N,E) so the blend holds level2 for every frame past the fade window
         snprintf(fade_buf, sizeof(fade_buf),
-            ",format=gbrp,split[a][b];[a][b]blend=all_expr='A*clip(%.3f%+.3f*(N-%d),0,1)':enable='between(n,%d,%d)',format=yuv420p",
-            L1, rate, S, S, E);
+            ",format=gbrp,split[a][b];[a][b]blend=all_expr='A*clip(%.6f%+.6f*(min(N,%d)-%d),0,1)':enable='gte(n,%d)',format=yuv420p",
+            L1, rate, E, S, S);
     } else if (!strcmp(params->fade, "in")) {
         if (params->fade_end_frame > params->fade_start_frame) {
             snprintf(fade_buf, sizeof(fade_buf), ",fade=t=in:s=%d:n=%d",
