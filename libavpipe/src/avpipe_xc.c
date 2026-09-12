@@ -3614,7 +3614,7 @@ get_filter_str(
             free(*filter_str);
             return ret;
         }
-        elv_log("FILTER str=%s", *filter_str);
+        elv_dbg("FILTER str=%s", *filter_str);
     }
 
     return 0;
