@@ -111,7 +111,7 @@ parse_duration(
  *          Returns the left edge, clamped left/right.
  *
  * @param   vertical_data   binary encoded array, 4 bytes per frame
- * @param   data_len        number of entries in vertical_data
+ * @param   data_len        length of vertical_data in bytes (4 * number of entries)
  * @param   frame_idx       frame index (0-based)
  * @param   scaled_width    width in pixels to scale the fraction into
  * @param   crop_width      crop window width in pixels
