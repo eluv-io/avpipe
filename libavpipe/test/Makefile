@@ -3,6 +3,10 @@ TOP_DIR ?= $(shell pwd)/../..
 FFMPEG_CFLAGS := $(shell pkg-config --cflags libavcodec libavformat libavutil)
 FFMPEG_LIBS   := $(shell pkg-config --libs   libavcodec libavformat libavutil)
 
+# avpipe_filters.c (included directly by test_fade_filter) pulls in libavfilter.
+# Only -l is needed: LIBS already supplies -L/-rpath for the same FFmpeg dist.
+AVFILTER_LIBS := $(shell pkg-config --libs-only-l libavfilter)
+
 CFLAGS := -O0 -ggdb -Wall \
 	$(FFMPEG_CFLAGS) \
 	-I$(TOP_DIR)/libavpipe/include \
@@ -12,7 +16,8 @@ CFLAGS := -O0 -ggdb -Wall \
 LIBS := $(FFMPEG_LIBS) \
 	-L$(TOP_DIR)/lib -lutils
 
-TESTS := test_color_defaults test_hdr_metadata test_pts_unwrap
+TESTS := test_color_defaults test_hdr_metadata test_pts_unwrap test_fade_filter \
+	test_vertical_crop
 OUT   := out
 BINS  := $(addprefix $(OUT)/,$(TESTS))
 
@@ -32,6 +37,12 @@ $(OUT)/test_hdr_metadata: test_hdr_metadata.c unity/unity.c | $(OUT)
 
 $(OUT)/test_pts_unwrap: test_pts_unwrap.c unity/unity.c | $(OUT)
 	gcc $(CFLAGS) $^ -o $@ $(LIBS)
+
+$(OUT)/test_fade_filter: test_fade_filter.c unity/unity.c | $(OUT)
+	gcc $(CFLAGS) $^ -o $@ $(LIBS) $(AVFILTER_LIBS)
+
+$(OUT)/test_vertical_crop: test_vertical_crop.c unity/unity.c | $(OUT)
+	gcc $(CFLAGS) $^ -o $@ $(LIBS) $(AVFILTER_LIBS)
 
 clean:
 	rm -rf out $(TESTS:=.dSYM)
