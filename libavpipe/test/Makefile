@@ -41,8 +41,10 @@ $(OUT)/test_pts_unwrap: test_pts_unwrap.c unity/unity.c | $(OUT)
 $(OUT)/test_fade_filter: test_fade_filter.c unity/unity.c | $(OUT)
 	gcc $(CFLAGS) $^ -o $@ $(LIBS) $(AVFILTER_LIBS)
 
+# -lm is required on glibc for sqrt/fabs/fmod; on macOS libm is part of libSystem
+# and links implicitly, so leaving it off builds there but fails on Linux.
 $(OUT)/test_vertical_crop: test_vertical_crop.c unity/unity.c | $(OUT)
-	gcc $(CFLAGS) $^ -o $@ $(LIBS) $(AVFILTER_LIBS)
+	gcc $(CFLAGS) $^ -o $@ $(LIBS) $(AVFILTER_LIBS) -lm
 
 clean:
 	rm -rf out $(TESTS:=.dSYM)
