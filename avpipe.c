@@ -614,7 +614,9 @@ out_opener(
     if (xcparams && xcparams->debug_frame_level)
         elv_dbg("OUT out_opener outctx=%p, fd=%"PRId64", url=%s", outctx, fd, inctx->url);
     if (fd < 0) {
-        elv_err("AVPIPE OUT OPEN failed stream_index=%d, seg_index=%d, type=%d, url=%s",
+        /* Logged as out_index, not stream_index: for an audio segment this is the
+         * output ordinal (see ioctx_t.stream_index). */
+        elv_err("AVPIPE OUT OPEN failed out_index=%d, seg_index=%d, type=%d, url=%s",
             outctx->stream_index, outctx->seg_index, outctx->type, inctx->url);
         return -1;
     }
@@ -658,12 +660,33 @@ out_write_packet(
         outctx->written_bytes - outctx->write_reported > VIDEO_BYTES_WRITE_REPORT) ||
         (outctx->type == avpipe_audio_fmp4_segment &&
         outctx->written_bytes - outctx->write_reported > AUDIO_BYTES_WRITE_REPORT)) {
-        out_stat(opaque, outctx->stream_index, out_stat_bytes_written);
+        /*
+         * Report the source stream index, the way out_stat_frame_written does.
+         * outctx->stream_index is an output ordinal here - elv_io_open parsed it
+         * out of the segment filename - so translate it through audio_index,
+         * which holds the selected source index for each audio output.
+         *
+         * Video keeps outctx->stream_index: the decoder's video stream index is
+         * not reachable from the output context, and no consumer reads the index
+         * for video.
+         *
+         * n_audio == 0 means no selection was made and every decoded audio
+         * stream is an output (num_audio_output), so audio_index carries no
+         * mapping and the ordinal stands. Unchanged from the behaviour before
+         * this translation existed.
+         */
+        int stat_stream_index = outctx->stream_index;
+        if (outctx->type == avpipe_audio_fmp4_segment && xcparams &&
+            outctx->stream_index >= 0 && outctx->stream_index < xcparams->n_audio)
+            stat_stream_index = xcparams->audio_index[outctx->stream_index];
+        out_stat(opaque, stat_stream_index, out_stat_bytes_written);
         outctx->write_reported = outctx->written_bytes;
     }
 
     if (xcparams && xcparams->debug_frame_level)
-        elv_dbg("OUT WRITE stream_index=%d, fd=%"PRId64", size=%d, written=%d, pos=%d, total=%d",
+        /* out_index, not stream_index: for an audio segment this is the output
+         * ordinal, which is not what the byte-written stat above reports. */
+        elv_dbg("OUT WRITE out_index=%d, fd=%"PRId64", size=%d, written=%d, pos=%d, total=%d",
             outctx->stream_index, fd, buf_size, bwritten, outctx->write_pos, outctx->written_bytes);
 
     return buf_size;
