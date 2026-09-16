@@ -408,14 +408,11 @@ vertical_data_crop_x(
         frame_idx = 0;
     if (frame_idx >= n_entries)
         frame_idx = n_entries - 1;
+
+    // The value is the window centre as a fraction of the scaled width, in units of 1/VERTICAL_DATA_SCALE
     uint32_t v = ((uint32_t *)vertical_data)[frame_idx];
-    int center_x = 0;
-    if (v > 0) {
-        uint64_t divisor = 1;
-        while (divisor <= v)
-            divisor *= 10;
-        center_x = (int)((uint64_t)v * scaled_width / divisor);
-    }
+    int center_x = (int)((uint64_t)v * scaled_width / VERTICAL_DATA_SCALE);
+
     int crop_x = center_x - crop_width / 2;
     int max_x = scaled_width - crop_width;
     if (crop_x < 0)

@@ -104,9 +104,19 @@ parse_duration(
     const char *duration_str,
     AVRational time_base);
 
+/*
+ * Denominator for vertical_data values. Each value is the crop window centre as
+ * a fraction of the scaled frame width, in units of 1/VERTICAL_DATA_SCALE:
+ *
+ *      0 = left edge      5000 = centre      10000 = right edge
+ *
+ */
+#define VERTICAL_DATA_SCALE     10000
+
 /**
  * @brief   Get the crop left edge x from vertical_data for a given frame.
- *          The vertical_data value represents the center of the crop window.
+ *          The vertical_data value represents the center of the crop window,
+ *          as a fraction of scaled_width with denominator VERTICAL_DATA_SCALE.
  *          If frame_idx is larger than the data set, use the last entry.
  *          Returns the left edge, clamped left/right.
  *

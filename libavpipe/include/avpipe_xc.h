@@ -580,7 +580,9 @@ typedef struct xcparams_t {
     dif_type    deinterlace;                // Deinterlacing filter
     char        *timecode;                  // Original timecode string
     vertical_type vertical;                 // Vertical video crop type (9:16)
-    uint8_t     *vertical_data;             // Per-frame crop data (opaque byte array, currently 4 bytes per frame uint32 LE)
+    uint8_t     *vertical_data;             // Per-frame crop data (opaque byte array, currently 4 bytes per frame uint32 LE).
+                                            //      Each value is the crop window centre as a fraction of the scaled frame width,
+                                            //      with denominator VERTICAL_DATA_SCALE (see avpipe_utils.h)
     int         vertical_data_len;          // Length of vertical_data in bytes
     char        *fade;                      // Fade filter: "in" or "out"
     int         fade_start_frame;           // Fade start frame (used with blend filter)
