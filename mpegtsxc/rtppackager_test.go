@@ -25,7 +25,7 @@ func packagerConfig() Config {
 
 func testClassifier(videoPID, pcrPID int) *Classifier {
 	c := NewClassifier()
-	c.videoPID = videoPID
+	c.videoPID.Store(int32(videoPID))
 	c.pcrPID = pcrPID
 	return c
 }
