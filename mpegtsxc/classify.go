@@ -5,6 +5,7 @@ import (
 
 	"github.com/Comcast/gots/v2/packet"
 	"github.com/Comcast/gots/v2/psi"
+	"go.uber.org/atomic"
 )
 
 // PacketClass is the basic packet classifier into video and 'other'
@@ -22,22 +23,28 @@ const (
 )
 
 // Classifier discovers the video PID from PAT/PMT and labels each TS packet
+//
+// Concurrency: all state is owned by the goroutine that calls Classify, except
+// videoPID, which the stats path reads through VideoPID while the packet path is
+// still parsing PMTs.
 type Classifier struct {
 	patSeen  bool
 	pmtPIDs  map[int]bool // PMT PIDs learned from the PAT
-	videoPID int
+	videoPID atomic.Int32 // -1 until resolved; read from the stats goroutine
 	pcrPID   int
 	// videoType is the PMT stream_type of the video ES (e.g. 0x1b H.264, 0x24 HEVC)
 	videoType uint8
 }
 
 func NewClassifier() *Classifier {
-	return &Classifier{pmtPIDs: map[int]bool{}, videoPID: -1, pcrPID: -1}
+	c := &Classifier{pmtPIDs: map[int]bool{}, pcrPID: -1}
+	c.videoPID.Store(-1)
+	return c
 }
 
-func (c *Classifier) VideoPID() int { return c.videoPID }
+func (c *Classifier) VideoPID() int { return int(c.videoPID.Load()) }
 func (c *Classifier) PcrPID() int   { return c.pcrPID }
-func (c *Classifier) Ready() bool   { return c.videoPID >= 0 }
+func (c *Classifier) Ready() bool   { return c.videoPID.Load() >= 0 }
 
 // SetSelection installs the already-resolved state of the shared MPEG-TS
 // selector. This avoids reparsing rewritten PAT/PMT tables in the transcode path.
@@ -47,7 +54,7 @@ func (c *Classifier) SetSelection(pmtPIDs []uint16, videoPID, pcrPID uint16) {
 	for _, pid := range pmtPIDs {
 		c.pmtPIDs[int(pid)] = true
 	}
-	c.videoPID = int(videoPID)
+	c.videoPID.Store(int32(videoPID))
 	c.pcrPID = int(pcrPID)
 }
 
@@ -66,13 +73,13 @@ func (c *Classifier) Classify(pkt packet.Packet) PacketClass {
 
 	// PMT: resolve the video PID and its stream type.
 	if c.pmtPIDs[pid] {
-		if c.videoPID == -1 && pkt.PayloadUnitStartIndicator() {
+		if c.videoPID.Load() == -1 && pkt.PayloadUnitStartIndicator() {
 			c.parsePMT(pkt)
 		}
 		return ClassPSI
 	}
 
-	if c.videoPID >= 0 && pid == c.videoPID {
+	if videoPID := c.videoPID.Load(); videoPID >= 0 && pid == int(videoPID) {
 		return ClassVideo
 	}
 
@@ -130,16 +137,16 @@ func (c *Classifier) parsePMT(pkt packet.Packet) {
 			log.Info("classifier: PMT descriptor",
 				"pid", es.ElementaryPid(), "tag", fmt.Sprintf("0x%02x", d.Tag()), "fmt", d.Format())
 		}
-		if c.videoPID == -1 && es.IsVideoContent() {
-			c.videoPID = es.ElementaryPid()
+		if c.videoPID.Load() == -1 && es.IsVideoContent() {
+			c.videoPID.Store(int32(es.ElementaryPid()))
 			c.videoType = es.StreamType()
 		}
 	}
 
-	if c.videoPID >= 0 {
+	if videoPID := int(c.videoPID.Load()); videoPID >= 0 {
 		log.Info("classifier: video PID resolved",
-			"videoPID", c.videoPID, "streamType", fmt.Sprintf("0x%02x", c.videoType),
-			"pcrOnVideoPID", pcrPID == c.videoPID)
+			"videoPID", videoPID, "streamType", fmt.Sprintf("0x%02x", c.videoType),
+			"pcrOnVideoPID", pcrPID == videoPID)
 	} else {
 		log.Warn("classifier: PMT had no video content stream")
 	}
