@@ -69,6 +69,19 @@ type CodecInfo struct {
 	// EnhancementProfileIDC is the enhancement-layer general_profile_idc.
 	// Only meaningful for VideoLayout == Mp4VideoLayoutMVHEVC.
 	EnhancementProfileIDC int `json:"enhancement_profile_idc,omitempty"`
+
+	// Refs is the reference frame count to pass as XcParams.VideoRefs when
+	// re-encoding a segment that has to play against this init segment. It is
+	// taken from the SPS as-is, for both codecs:
+	//  * H.264: max_num_ref_frames - a true reference count.
+	//  * HEVC: sps_max_dec_pic_buffering_minus1 - which is somewhat of a lie. HEVC
+	//    has no reference-count field, only the decoded picture buffer size, and
+	//    that size includes the picture being decoded. So the stored "minus 1"
+	//    value is the number of reference frames, and it is exactly what libx265
+	//    needs to reproduce the same buffer size. Other encoders may not map it
+	//    the same way.
+	// For HEVC the highest sub-layer's value is used.
+	Refs int `json:"refs,omitempty"`
 }
 
 // MarshalJSON adds additional profile_name and level_name fields alongside the
@@ -358,6 +371,11 @@ func parseVisualSampleEntryBox(se *mp4.VisualSampleEntryBox) (*CodecInfo, error)
 			Level:           int(sps.ProfileTierLevel.GeneralLevelIDC),
 			VideoLayout:     Mp4VideoLayoutMono,
 		}
+		// See CodecInfo.Refs. The last entry is always the highest sub-layer: mp4ff
+		// only records the lower ones when sub_layer_ordering_info_present_flag is set.
+		if n := len(sps.SubLayeringOrderingInfos); n > 0 {
+			info.Refs = int(sps.SubLayeringOrderingInfos[n-1].MaxDecPicBufferingMinus1)
+		}
 
 		// Look for Dolby Vision configuration box (dvvC, dvcC, or dvwC) in children.
 		for _, child := range se.Children {
@@ -407,12 +425,14 @@ func parseVisualSampleEntryBox(se *mp4.VisualSampleEntryBox) (*CodecInfo, error)
 		if err != nil {
 			return nil, e(err, "reason", "failed to parse AVC SPS")
 		}
-		return &CodecInfo{
+		info := &CodecInfo{
 			MimeCodecString: avc.CodecString(codecTag, sps),
 			CodecTagString:  codecTag,
 			ProfileIDC:      int(sps.Profile),
 			Level:           int(sps.Level),
-		}, nil
+			Refs:            int(sps.NumRefFrames),
+		}
+		return info, nil
 	default:
 		return &CodecInfo{CodecTagString: codecTag}, nil
 	}

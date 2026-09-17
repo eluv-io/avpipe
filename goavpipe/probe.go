@@ -250,6 +250,19 @@ type MP4Info struct {
 	// EnhancementProfileIDC is the MV-HEVC enhancement-layer general_profile_idc.
 	// Only meaningful for VideoLayout == VideoLayoutMVHEVC.
 	EnhancementProfileIDC int `json:"enhancement_profile_idc,omitempty"`
+
+	// Refs is the reference frame count to pass as XcParams.VideoRefs when
+	// re-encoding a segment that has to play against this init segment. It is
+	// taken from the SPS as-is, for both codecs:
+	//  * H.264: max_num_ref_frames - a true reference count.
+	//  * HEVC: sps_max_dec_pic_buffering_minus1 - which is somewhat of a lie. HEVC
+	//    has no reference-count field, only the decoded picture buffer size, and
+	//    that size includes the picture being decoded. So the stored "minus 1"
+	//    value is the number of reference frames, and it is exactly what libx265
+	//    needs to reproduce the same buffer size. Other encoders may not map it
+	//    the same way.
+	// Zero when not known, which XcParams.VideoRefs treats as "let the encoder decide".
+	Refs int `json:"refs,omitempty"`
 }
 
 // SideDataDisplayMatrix holds the display transformation matrix side data

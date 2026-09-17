@@ -135,6 +135,7 @@ func TestExtractCodecInfo(t *testing.T) {
 			"codec descriptor must include profile/level: %s", info.MimeCodecString)
 		require.Equal(t, 100, info.ProfileIDC)
 		require.Equal(t, 31, info.Level)
+		require.Equal(t, 4, info.Refs) // max_num_ref_frames
 		//t.Logf("AVC codec: %s (profile=%d level=%d → %.1f)",
 		//	info.MimeCodecString, info.ProfileIDC, info.Level, float64(info.Level)/10)
 	})
@@ -153,6 +154,7 @@ func TestExtractCodecInfo(t *testing.T) {
 		require.Equal(t, 120, info.Level)
 		require.Equal(t, Mp4VideoLayoutMono, info.VideoLayout)
 		require.Zero(t, info.EnhancementProfileIDC)
+		require.Equal(t, 3, info.Refs) // sps_max_dec_pic_buffering_minus1
 		//t.Logf("HEVC codec: %s (profile=%d level=%d → %.1f)",
 		//	info.MimeCodecString, info.ProfileIDC, info.Level, float64(info.Level)/30)
 	})
