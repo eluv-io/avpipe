@@ -2,7 +2,6 @@ package mp4e
 
 import (
 	"bytes"
-	"encoding/json"
 	"fmt"
 	"io"
 	"math/bits"
@@ -20,72 +19,6 @@ import (
 	"github.com/eluv-io/errors-go"
 )
 
-// Mp4VideoLayout describes the view layout detected from MP4 sample-entry
-// boxes and codec configuration metadata.
-type Mp4VideoLayout int
-
-const (
-	Mp4VideoLayoutMono   Mp4VideoLayout = 0
-	Mp4VideoLayoutSbs    Mp4VideoLayout = 3
-	Mp4VideoLayoutTb     Mp4VideoLayout = 4
-	Mp4VideoLayoutMVHEVC Mp4VideoLayout = 10
-)
-
-// CodecInfo contains information about a media stream's codecs
-type CodecInfo struct {
-	// CodecTagString is the sample description entry 4-character code (in the
-	// MP4 "stsd" box) as registered by the MP4RA; e.g. "hvc1", "avc1", "ec-3"
-	CodecTagString string `json:"codec_tag_string"`
-
-	// MimeCodecString is the RFC 6381 codec string for use in MIME type codecs
-	// parameters (e.g. "hvc1.2.4.L120.90", "avc1.640028", "mp4a.40.2").
-	MimeCodecString string `json:"mime_codec_string,omitempty"`
-
-	// ProfileIDC is the codec profile IDC. Each codec defines the value separately;
-	// e.g. 2 = HEVC Main 10, 100 = AVC High
-	ProfileIDC int `json:"profile_idc,omitempty"`
-
-	// Level is the codec level IDC. Each codec defines the value separately:
-	//  * Divide by 30 for HEVC, e.g. 120 → 4.0
-	//  * Divide by 10 for AVC, e.g. 40  → 4.0
-	Level int `json:"level,omitempty"`
-
-	// Channels is the number of audio channels.
-	Channels int `json:"channels,omitempty"`
-
-	// EC3 is set only when the codec is ec-3
-	EC3 *avdesc.EC3Info `json:"ec3,omitempty"`
-
-	// DOVI is set only when the codec entry contains a Dolby Vision configuration
-	// box (dvcC, dvvC, or dvwC). Common cases:
-	//   hvc1/hev1 with dvvC child — Profile 8.x (cross-compatible)
-	//   dvh1/dvhe with dvcC child — Profile 5 or Profile 20 (standalone DV)
-	// DOVI.BoxType records which of dvcC/dvvC/dvwC was found.
-	DOVI *avdesc.DOVIInfo `json:"dovi,omitempty"`
-
-	// VideoLayout describes the stereoscopic layout (mono, sbs, mvhevc).
-	VideoLayout Mp4VideoLayout `json:"video_layout,omitempty"`
-
-	// EnhancementProfileIDC is the enhancement-layer general_profile_idc.
-	// Only meaningful for VideoLayout == Mp4VideoLayoutMVHEVC.
-	EnhancementProfileIDC int `json:"enhancement_profile_idc,omitempty"`
-}
-
-// MarshalJSON adds additional profile_name and level_name fields alongside the
-// numeric profile_idc and level_idc
-func (c CodecInfo) MarshalJSON() ([]byte, error) {
-	type alias CodecInfo
-	return json.Marshal(&struct {
-		alias
-		ProfileName string `json:"profile_name,omitempty"`
-		LevelName   string `json:"level_name,omitempty"`
-	}{
-		alias:       alias(c),
-		ProfileName: ProfileName(c.CodecTagString, c.ProfileIDC),
-		LevelName:   LevelName(c.CodecTagString, c.Level),
-	})
-}
-
 // ExtractCodecInfo decodes an MP4 container and returns codec information for
 // all tracks. Supports AVC (avc1/avc3) and HEVC (hvc1/hev1) video tracks, and
 // E-AC-3 (ec-3) and AAC (mp4a) audio tracks.
@@ -93,7 +26,7 @@ func (c CodecInfo) MarshalJSON() ([]byte, error) {
 // PENDING(SS) This function is not used and is replaced by ExtractCodecInfoLazy
 // It reads the entire file into memory (including ProRes which will return no streams).
 // Remove once we know we don't need full parsing
-func ExtractCodecInfo(r io.Reader) (infos []*CodecInfo, err error) {
+func ExtractCodecInfo(r io.Reader) (infos []*avdesc.CodecInfo, err error) {
 	const op = "mp4e.ExtractCodecInfo"
 	e := errors.T(op, errors.K.Invalid.Default())
 
@@ -112,7 +45,7 @@ func ExtractCodecInfo(r io.Reader) (infos []*CodecInfo, err error) {
 //
 // PENDING(SS) It can't parse elementary stream info - if that's needed we need to
 // load 'some' media data to extract NAL info.
-func ExtractCodecInfoLazy(r io.ReadSeeker) (infos []*CodecInfo, err error) {
+func ExtractCodecInfoLazy(r io.ReadSeeker) (infos []*avdesc.CodecInfo, err error) {
 	const op = "mp4e.ExtractCodecInfoLazy"
 	e := errors.T(op, errors.K.Invalid.Default())
 
@@ -168,9 +101,9 @@ func (l *limitedReadSeeker) Seek(offset int64, whence int) (int64, error) {
 	return l.r.Seek(offset, whence)
 }
 
-// extractCodecInfoFromFile builds CodecInfo for every track of a decoded MP4.
+// extractCodecInfoFromFile builds avdesc.CodecInfo for every track of a decoded MP4.
 // It reads only moov-level boxes, so it is safe on a lazily decoded file
-func extractCodecInfoFromFile(mp4Data *mp4.File) (infos []*CodecInfo, err error) {
+func extractCodecInfoFromFile(mp4Data *mp4.File) (infos []*avdesc.CodecInfo, err error) {
 	e := errors.T("mp4e.extractCodecInfoFromFile", errors.K.Invalid.Default())
 
 	// Fragmented MP4 (fMP4 init segment): moov is under mp4Data.Init.
@@ -192,7 +125,7 @@ func extractCodecInfoFromFile(mp4Data *mp4.File) (infos []*CodecInfo, err error)
 		}
 		se := trak.Mdia.Minf.Stbl.Stsd.Children[0]
 
-		var info *CodecInfo
+		var info *avdesc.CodecInfo
 		if vse, ok := se.(*mp4.VisualSampleEntryBox); ok {
 			info, err = parseVisualSampleEntryBox(vse)
 		} else if ase, ok := se.(*mp4.AudioSampleEntryBox); ok {
@@ -211,18 +144,18 @@ func extractCodecInfoFromFile(mp4Data *mp4.File) (infos []*CodecInfo, err error)
 	return
 }
 
-func parseAudioSampleEntryBox(se *mp4.AudioSampleEntryBox) (*CodecInfo, error) {
+func parseAudioSampleEntryBox(se *mp4.AudioSampleEntryBox) (*avdesc.CodecInfo, error) {
 	switch se.Type() {
 	case "ec-3":
 		return parseEC3CodecInfo(se)
 	case "mp4a":
 		return parseMP4ACodecInfo(se)
 	default:
-		return &CodecInfo{CodecTagString: se.Type()}, nil
+		return &avdesc.CodecInfo{CodecTagString: se.Type()}, nil
 	}
 }
 
-func parseEC3CodecInfo(se *mp4.AudioSampleEntryBox) (*CodecInfo, error) {
+func parseEC3CodecInfo(se *mp4.AudioSampleEntryBox) (*avdesc.CodecInfo, error) {
 	e := errors.T("parseEC3CodecInfo", errors.K.Invalid.Default())
 	if se.Dec3 == nil {
 		return nil, e("reason", "ec3 sample entry box missing dec3 box")
@@ -244,7 +177,7 @@ func parseEC3CodecInfo(se *mp4.AudioSampleEntryBox) (*CodecInfo, error) {
 		}
 	}
 
-	return &CodecInfo{
+	return &avdesc.CodecInfo{
 		MimeCodecString: "ec-3",
 		CodecTagString:  "ec-3",
 		Channels:        nChannels,
@@ -256,7 +189,7 @@ func parseEC3CodecInfo(se *mp4.AudioSampleEntryBox) (*CodecInfo, error) {
 	}, nil
 }
 
-func parseMP4ACodecInfo(se *mp4.AudioSampleEntryBox) (*CodecInfo, error) {
+func parseMP4ACodecInfo(se *mp4.AudioSampleEntryBox) (*avdesc.CodecInfo, error) {
 	e := errors.T("parseMP4ACodecInfo", errors.K.Invalid.Default())
 	if se.Esds == nil {
 		return nil, e("reason", "esds box missing")
@@ -269,7 +202,7 @@ func parseMP4ACodecInfo(se *mp4.AudioSampleEntryBox) (*CodecInfo, error) {
 	if err != nil {
 		return nil, e("reason", "DecodeAudioSpecificConfig failed", err)
 	}
-	return &CodecInfo{
+	return &avdesc.CodecInfo{
 		// RFC 6381: mp4a.40.{AOT} where 0x40 = MPEG-4 Audio objectTypeIndication
 		MimeCodecString: fmt.Sprintf("mp4a.40.%d", asc.ObjectType),
 		CodecTagString:  "mp4a",
@@ -326,7 +259,7 @@ func IsDOVIBoxType(boxType string) bool {
 	return boxType == "dvvC" || boxType == "dvcC" || boxType == "dvwC"
 }
 
-func parseVisualSampleEntryBox(se *mp4.VisualSampleEntryBox) (*CodecInfo, error) {
+func parseVisualSampleEntryBox(se *mp4.VisualSampleEntryBox) (*avdesc.CodecInfo, error) {
 	codecTag := se.Type()
 	e := errors.T("parseVisualSampleEntryBox", errors.K.Invalid, "codecTag", codecTag)
 
@@ -351,12 +284,12 @@ func parseVisualSampleEntryBox(se *mp4.VisualSampleEntryBox) (*CodecInfo, error)
 			return nil, e("reason", "no SPS found in hvcC")
 		}
 
-		info := &CodecInfo{
+		info := &avdesc.CodecInfo{
 			MimeCodecString: hevc.CodecString(codecTag, sps),
 			CodecTagString:  codecTag,
 			ProfileIDC:      int(sps.ProfileTierLevel.GeneralProfileIDC),
 			Level:           int(sps.ProfileTierLevel.GeneralLevelIDC),
-			VideoLayout:     Mp4VideoLayoutMono,
+			VideoLayout:     avdesc.VideoLayoutMono,
 		}
 
 		// Look for Dolby Vision configuration box (dvvC, dvcC, or dvwC) in children.
@@ -381,7 +314,7 @@ func parseVisualSampleEntryBox(se *mp4.VisualSampleEntryBox) (*CodecInfo, error)
 		// matches the Apple format: `hvc1.<base>,hvc1.<enh>`
 		if vps := parseHvcCVPS(se.HvcC); vps != nil && vps.IsMultiLayer() {
 			if enhPTL := mvhevcEnhancementPTL(vps); enhPTL != nil {
-				info.VideoLayout = Mp4VideoLayoutMVHEVC
+				info.VideoLayout = avdesc.VideoLayoutMVHEVC
 				info.EnhancementProfileIDC = int(enhPTL.GeneralProfileIDC)
 				info.MimeCodecString = info.MimeCodecString + "," + hevcCodecStringFromPTL(codecTag, *enhPTL)
 				return info, nil
@@ -390,9 +323,9 @@ func parseVisualSampleEntryBox(se *mp4.VisualSampleEntryBox) (*CodecInfo, error)
 
 		// Check for frame-packed stereo (SBS): st3d or HEVC SEI 45 in hvcC
 		// PENDING(SS) if SEI 45 only in mdat and not hvcC, we don't see it from the moov - to test CPU/GPU outputs
-		if layout := detectStereoFromVse(se); layout != Mp4VideoLayoutMono {
+		if layout := detectStereoFromVse(se); layout != avdesc.VideoLayoutMono {
 			info.VideoLayout = layout
-		} else if layout := detectStereoFromSEI(se.HvcC); layout != Mp4VideoLayoutMono {
+		} else if layout := detectStereoFromSEI(se.HvcC); layout != avdesc.VideoLayoutMono {
 			info.VideoLayout = layout
 		}
 		return info, nil
@@ -407,14 +340,14 @@ func parseVisualSampleEntryBox(se *mp4.VisualSampleEntryBox) (*CodecInfo, error)
 		if err != nil {
 			return nil, e(err, "reason", "failed to parse AVC SPS")
 		}
-		return &CodecInfo{
+		return &avdesc.CodecInfo{
 			MimeCodecString: avc.CodecString(codecTag, sps),
 			CodecTagString:  codecTag,
 			ProfileIDC:      int(sps.Profile),
 			Level:           int(sps.Level),
 		}, nil
 	default:
-		return &CodecInfo{CodecTagString: codecTag}, nil
+		return &avdesc.CodecInfo{CodecTagString: codecTag}, nil
 	}
 }
 
@@ -453,39 +386,39 @@ func mvhevcEnhancementPTL(vps *hevc.VPS) *hevc.ProfileTierLevel {
 }
 
 // detectStereoFromVse looks for the `st3d` box
-// Returns Mp4VideoLayoutMono when absent or stereo_mode is monoscopic (0).
+// Returns avdesc.VideoLayoutMono when absent or stereo_mode is monoscopic (0).
 //
 //	stereo_mode == 1 → top-bottom
 //	stereo_mode == 2 → left-right (side-by-side)
 //	other values treated as mono
-func detectStereoFromVse(vse *mp4.VisualSampleEntryBox) Mp4VideoLayout {
+func detectStereoFromVse(vse *mp4.VisualSampleEntryBox) avdesc.VideoLayout {
 	for _, child := range vse.Children {
 		if child.Type() != "st3d" {
 			continue
 		}
 		raw, ok := child.(*mp4.UnknownBox)
 		if !ok {
-			return Mp4VideoLayoutMono
+			return avdesc.VideoLayoutMono
 		}
 		payload := raw.Payload()
 		// UnknownBox.Payload includes the FullBox version+flags (4 bytes); the
 		// next byte is stereo_mode.
 		if len(payload) < 5 {
-			return Mp4VideoLayoutMono
+			return avdesc.VideoLayoutMono
 		}
 		switch payload[4] {
 		case 1:
-			return Mp4VideoLayoutTb
+			return avdesc.VideoLayoutTb
 		case 2:
-			return Mp4VideoLayoutSbs
+			return avdesc.VideoLayoutSbs
 		}
-		return Mp4VideoLayoutMono
+		return avdesc.VideoLayoutMono
 	}
-	return Mp4VideoLayoutMono
+	return avdesc.VideoLayoutMono
 }
 
 // detectStereoFromSEI scans hvcC for SEI 45 (frame packing)
-// Returns Mp4VideoLayoutMono if no usable SEI 45 is present.
+// Returns avdesc.VideoLayoutMono if no usable SEI 45 is present.
 //
 // HEVC SEI 45 payload (D.2.16) starts with:
 //
@@ -497,7 +430,7 @@ func detectStereoFromVse(vse *mp4.VisualSampleEntryBox) Mp4VideoLayout {
 // frame_packing_arrangement_type values per HEVC D.2.16 Table D.6:
 //
 //	3 = side-by-side, 4 = top-bottom
-func detectStereoFromSEI(hvcC *mp4.HvcCBox) Mp4VideoLayout {
+func detectStereoFromSEI(hvcC *mp4.HvcCBox) avdesc.VideoLayout {
 	for _, arr := range hvcC.NaluArrays {
 		if arr.NaluType() != hevc.NALU_SEI_PREFIX {
 			continue
@@ -514,15 +447,15 @@ func detectStereoFromSEI(hvcC *mp4.HvcCBox) Mp4VideoLayout {
 				if t, ok := framePackingArrangementType(m.Payload()); ok {
 					switch t {
 					case 3:
-						return Mp4VideoLayoutSbs
+						return avdesc.VideoLayoutSbs
 					case 4:
-						return Mp4VideoLayoutTb
+						return avdesc.VideoLayoutTb
 					}
 				}
 			}
 		}
 	}
-	return Mp4VideoLayoutMono
+	return avdesc.VideoLayoutMono
 }
 
 // framePackingArrangementType extracts frame_packing_arrangement_type for SEI 45
