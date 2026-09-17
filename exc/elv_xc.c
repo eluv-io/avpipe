@@ -1098,6 +1098,8 @@ usage(
         "\t-rc-buffer-size :        (optional) Determines the interval used to limit bit rate\n"
         "\t-rc-max-rate :           (optional) Maximum encoding bit rate, used in conjuction with rc-buffer-size\n"
         "\t-rotate :                (optional) Rotate the input video. Default is 0 with no rotation, other values 90, 180, 270.\n"
+        "\t-video-refs :            (optional) Encoder reference frames (verified with libx264/libx265). Default 0 lets the encoder choose.\n"
+        "\t                         Set this to match an init segment the output must decode against.\n"
         "\t-sample-rate :           (optional) Default: -1. For aac output sample rate is set to input sample rate and this parameter is ignored.\n"
         "\t-seekable :              (optional) Seekable stream. Default is 0, must be 0 or 1\n"
         "\t-seg-duration :          (mandatory if format is \"segment\") segment duration secs (positive integer). It is used for making mp4 segments.\n"
@@ -1555,6 +1557,10 @@ main(
         case 'v':
             if (!strcmp(argv[i], "-video-bitrate")) {
                 if (sscanf(argv[i+1], "%d", &p.video_bitrate) != 1) {
+                    usage(argv[0], argv[i], EXIT_FAILURE);
+                }
+            } else if (!strcmp(argv[i], "-video-refs")) {
+                if (sscanf(argv[i+1], "%d", &p.video_refs) != 1) {
                     usage(argv[0], argv[i], EXIT_FAILURE);
                 }
             } else if (!strcmp(argv[i], "-video-frame-duration-ts")) {

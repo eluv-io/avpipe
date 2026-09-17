@@ -369,8 +369,12 @@ type XcParams struct {
 	Rotate                 int         `json:"rotate,omitempty"`
 	Profile                string      `json:"profile,omitempty"`
 	Level                  int         `json:"level,omitempty"`
-	Deinterlace            int         `json:"deinterlace,omitempty"`
-	Timecode               string      `json:"timecode,omitempty"`
+	// VideoRefs sets the encoder reference frame count. 0 = encoder
+	// default. To match an existing init segment, probe it and pass
+	// StreamInfo.MP4.Refs (and StreamInfo.MP4.Level as Level) unchanged.
+	VideoRefs   int    `json:"video_refs,omitempty"`
+	Deinterlace int    `json:"deinterlace,omitempty"`
+	Timecode    string `json:"timecode,omitempty"`
 }
 
 func (p *XcParams) String() string { return util.JSONString(p) }
