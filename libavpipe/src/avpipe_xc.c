@@ -796,8 +796,7 @@ set_encoder_options(
  * the reference count, which FFmpeg exposes generically as AVCodecContext.refs.
  * Every encoder wrapper reads it, so nothing codec-specific is needed here.
  *
- * What libx264 and libx265 then write into the SPS (from their sources, and
- * confirmed by measuring encoded output):
+ * What libx264 and libx265 then write:
  *
  *   libx264 - encoder/set.c
  *     num_ref_frames = max_dec_frame_buffering
@@ -810,7 +809,7 @@ set_encoder_options(
  *     i.e. refs + 1 once refs dominates, NOT refs.
  *
  * Other encoders accept AVCodecContext.refs too, but what they put in the SPS has
- * not been verified here, so they warn rather than being rejected.
+ * not been verified, so they warn rather than being rejected.
  */
 static void
 set_video_refs(
@@ -823,8 +822,7 @@ set_video_refs(
     encoder_codec_context->refs = params->video_refs;
 
     if (strcmp(params->ecodec, "libx264") && strcmp(params->ecodec, "libx265")) {
-        elv_warn("video_refs=%d applied to %s - only libx264 and libx265 are verified "
-            "to carry it into the SPS, url=%s",
+        elv_warn("video_refs=%d applied to %s - only libx264 and libx265 are verified to carry it into the SPS, url=%s",
             params->video_refs, params->ecodec, params->url);
     } else {
         elv_dbg("video_refs set from params refs=%d ecodec=%s url=%s",
@@ -974,18 +972,28 @@ set_h265_params(
             cr == AVCOL_RANGE_JPEG ? "full" : "limited");
     }
 
+    /*
+     * libx265 does not read AVCodecContext.level, so the level goes through
+     * x265-params. params->level uses HEVC's native units (30x the level number,
+     * 4.1 -> 123), the value Probe reports; x265's level-idc is 10x, so divide by 3.
+     *
+     * Without a level, x265 chooses one from the resolution, frame rate, bitrate and
+     * DPB size - so a re-encode can end up declaring a different level than the init
+     * segment it has to play against (more refs means a bigger DPB, which can push it
+     * up). With a level, x265 keeps that level and lowers the reference count if it
+     * does not fit, logging "Lowering max references ... to meet level requirement".
+     */
+    if (params->level > 0) {
+        off += snprintf(x265_params + off, sizeof(x265_params) - off,
+            "%slevel-idc=%d", off > 0 ? ":" : "", params->level / 3);
+    }
+
     if (off > 0)
         av_opt_set(encoder_codec_context->priv_data, "x265-params", x265_params, 0);
 
     /* Set the number of bframes to 0 and avoid having bframes */
     av_opt_set_int(encoder_codec_context->priv_data, "bframes", 0, 0);
 
-    /*
-     * These are set according to
-     * https://en.wikipedia.org/wiki/High_Efficiency_Video_Coding
-     * Let X265 encoder picks the level automatically. Setting the level based on
-     * resolution and framerate might pick higher level than what is needed.
-     */
     return 0;
 }
 
@@ -4876,7 +4884,26 @@ check_params(
         }
     }
 
-    if (avpipe_check_level(params->level) < 0) {
+    /*
+     * Levels are in each codec's native level_idc units, matching what Probe
+     * reports: H.264 is 10x the level number (4.1 -> 41), HEVC is 30x
+     * (4.1 -> 123). avpipe_check_level() knows the H.264 values, so libx265 is
+     * checked against the HEVC ones instead.
+     */
+    if (params->ecodec && !strcmp(params->ecodec, "libx265")) {
+        if (params->level > 0) {
+            static const int hevc_levels[] = {30, 60, 63, 90, 93, 120, 123, 150, 153, 156, 180, 183, 186};
+            int valid = 0;
+            for (int i = 0; i < sizeof(hevc_levels)/sizeof(hevc_levels[0]); i++)
+                if (hevc_levels[i] == params->level)
+                    valid = 1;
+            if (!valid) {
+                elv_err("Invalid level %d for libx265 - expected HEVC general_level_idc, "
+                    "30x the level number (e.g. 123 for 4.1), url=%s", params->level, params->url);
+                return eav_param;
+            }
+        }
+    } else if (avpipe_check_level(params->level) < 0) {
         elv_err("Invalid level %d", params->level);
         return eav_param;
     }

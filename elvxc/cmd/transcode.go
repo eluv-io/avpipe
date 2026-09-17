@@ -389,7 +389,7 @@ func InitTranscode(cmdRoot *cobra.Command) error {
 	cmdTranscode.PersistentFlags().BoolP("seekable", "", true, "seekable stream.")
 	cmdTranscode.PersistentFlags().Int32("rotate", 0, "Rotate the output video frame (valid values 0, 90, 180, 270).")
 	cmdTranscode.PersistentFlags().StringP("profile", "", "", "Encoding profile for video. If it is not determined, it will be set automatically.")
-	cmdTranscode.PersistentFlags().Int32("level", 0, "Encoding level for video. If it is not determined, it will be set automatically.")
+	cmdTranscode.PersistentFlags().Int32("level", 0, "Encoding level for video, as the codec's level_idc (the value probe reports): H.264 is 10x the level number (41 for 4.1), HEVC is 30x (123 for 4.1). If it is not determined, it will be set automatically. Applies to libx264 and libx265.")
 	cmdTranscode.PersistentFlags().Int32("video-refs", 0, "Encoder reference frames (verified with libx264/libx265). Default 0 lets the encoder choose. Set to match an init segment the output must decode against.")
 	cmdTranscode.PersistentFlags().Int32("deinterlace", 0, "Deinterlace filter (values 0 - none, 1 - bwdif_field, 2 - bwdif_frame send_frame).")
 	cmdTranscode.PersistentFlags().Bool("bypass-libav-reader", false, "Read live media input directly instead of using libavformat")
