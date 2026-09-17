@@ -119,8 +119,9 @@ mean_luma(const AVFrame *f)
  * frames. Continuous across the wrap, so the window moves at a constant speed
  * throughout and the residual below has no pattern-induced steps in it.
  *
- * Kept in sync with shape()'s "pingpong" case in cmd/vertical-pan/main.go, which
- * renders this same pattern onto real footage for visual inspection.
+ * Kept in sync with the "pingpong" case in scripts/gen-vertical-data.sh, which
+ * writes this same pattern as a vertical_data file for visual inspection with
+ * exc on real footage.
  *
  * Constant speed means a crop lagging the data by a
  * frame lands a fixed distance off the expected position on every frame, and the
