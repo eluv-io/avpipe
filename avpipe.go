@@ -57,7 +57,6 @@ import (
 	"github.com/eluv-io/avpipe/broadcastproto/mpegts"
 	"github.com/eluv-io/avpipe/goavpipe"
 	"github.com/eluv-io/avpipe/goavpipe/avdesc"
-	"github.com/eluv-io/avpipe/mp4e"
 	"github.com/eluv-io/errors-go"
 )
 
@@ -1134,7 +1133,7 @@ func Probe(params *goavpipe.XcParams) (*goavpipe.ProbeInfo, error) {
 	// - seek back to 0
 	// - invoke the C.Probe which opens its own handle then closes its own handle via callbacks
 	// - finally close the MP4 extraction handle
-	var codecInfos []*mp4e.CodecInfo
+	var codecInfos []*avdesc.CodecInfo
 	if params.Seekable {
 		inputOpener := goavpipe.GetInputOpener(params.Url)
 		if inputOpener == nil {

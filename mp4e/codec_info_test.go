@@ -151,7 +151,7 @@ func TestExtractCodecInfo(t *testing.T) {
 			"codec descriptor must include profile/level: %s", info.MimeCodecString)
 		require.Equal(t, 2, info.ProfileIDC)
 		require.Equal(t, 120, info.Level)
-		require.Equal(t, Mp4VideoLayoutMono, info.VideoLayout)
+		require.Equal(t, avdesc.VideoLayoutMono, info.VideoLayout)
 		require.Zero(t, info.EnhancementProfileIDC)
 		//t.Logf("HEVC codec: %s (profile=%d level=%d → %.1f)",
 		//	info.MimeCodecString, info.ProfileIDC, info.Level, float64(info.Level)/30)
@@ -186,7 +186,7 @@ func TestExtractCodecInfo(t *testing.T) {
 		require.Len(t, infos, 1)
 		info := infos[0]
 		assert.Equal(t, "hvc1", info.CodecTagString)
-		assert.Equal(t, Mp4VideoLayoutMVHEVC, info.VideoLayout, "expected MV-HEVC layout")
+		assert.Equal(t, avdesc.VideoLayoutMVHEVC, info.VideoLayout, "expected MV-HEVC layout")
 		assert.Equal(t, 1, info.ProfileIDC)            // Main (base)
 		assert.Equal(t, 6, info.EnhancementProfileIDC) // Multiview Main (enhancement)
 		assert.Equal(t, 150, info.Level)

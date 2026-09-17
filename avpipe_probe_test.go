@@ -198,7 +198,7 @@ func TestProbeMVHEVC_VideoLayout(t *testing.T) {
 }
 
 // TestProbeTS_NoMP4Info verifies that Probe succeeds for a non-MP4 container (MPEG-TS)
-// and that MP4Info is nil on all streams — extractCodecInfoForProbe fails gracefully when
+// and that the MP4 field is nil on all streams — extractCodecInfoForProbe fails gracefully when
 // mp4.DecodeFile cannot parse the container, leaving the probe result unaffected.
 func TestProbeTS_NoMP4Info(t *testing.T) {
 	url := "./media/bbb_sunflower_2160p_30fps_normal_2min.ts"

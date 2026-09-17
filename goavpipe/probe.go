@@ -167,13 +167,13 @@ type StreamInfo struct {
 	// headers during avformat_find_stream_info and propagates back to codecpar
 	// via avcodec_parameters_from_context. The dec3 box fields (ChanMap,
 	// ComplexityIndex) are not available here; For MP4 containers, look in
-	// MP4Info.EC3
+	// the MP4 field
 	DolbyAtmos bool `json:"dolby_atmos,omitempty"`
 
 	// DOVI holds the Dolby Vision decoder configuration from FFmpeg side data
 	// (AV_PKT_DATA_DOVI_CONF). FourCC is populated from CodecTagString when the
 	// stream is HEVC-based. May be nil if FFmpeg did not propagate the side data
-	// — in that case MP4Info.DOVI (parsed from the dvcC/dvvC/dvwC box) is the
+	// — in that case MP4.DOVI (parsed from the dvcC/dvvC/dvwC box) is the
 	// authoritative source. Use GetDOVI() to get the best available record from
 	// either source.
 	DOVI *avdesc.DOVIInfo `json:"dovi,omitempty"`
@@ -212,44 +212,11 @@ type StreamInfo struct {
 	//   chroma_location      string  chroma sample position (e.g. "left")
 	//   bits_per_sample      int     audio PCM bit depth; relevant for uncompressed/lossless audio (PCM, FLAC)
 
-	// MP4 contains codec details parsed from MP4 sample-entry boxes.
-	// This supplements, but does not replace, the FFmpeg-derived fields above.
-	MP4 *MP4Info `json:"mp4,omitempty"`
-}
-
-// MP4Info contains codec details parsed from MP4 sample-entry boxes.
-type MP4Info struct {
-	// CodecTagString is the sample description entry 4-character code.
-	CodecTagString string `json:"codec_tag_string,omitempty"`
-
-	// MimeCodecString is the RFC 6381 codec string.
-	MimeCodecString string `json:"mime_codec_string,omitempty"`
-
-	// ProfileIDC is the codec profile IDC from MP4 sample-entry parsing.
-	ProfileIDC int `json:"profile_idc,omitempty"`
-
-	// Level is the codec level IDC from MP4 sample-entry parsing.
-	Level int `json:"level,omitempty"`
-
-	// Channels is the number of audio channels from MP4 sample-entry parsing.
-	Channels int `json:"channels,omitempty"`
-
-	// EC3 holds E-AC-3-specific MP4 decoder configuration, when present.
-	EC3 *avdesc.EC3Info `json:"ec3,omitempty"`
-
-	// DOVI holds the Dolby Vision configuration parsed from the MP4 sample-entry
-	// box (dvcC, dvvC, or dvwC). Unlike StreamInfo.DOVI (which comes from FFmpeg
-	// side data and lacks BoxType/FourCC), this record includes the box type and
-	// the derived DV sample-entry FourCC (e.g. "dvh1"). Use StreamInfo.GetDOVI()
-	// to get the best available record from either source.
-	DOVI *avdesc.DOVIInfo `json:"dovi,omitempty"`
-
-	// VideoLayout describes how one or more views are encoded.
-	VideoLayout VideoLayout `json:"video_layout,omitempty"`
-
-	// EnhancementProfileIDC is the MV-HEVC enhancement-layer general_profile_idc.
-	// Only meaningful for VideoLayout == VideoLayoutMVHEVC.
-	EnhancementProfileIDC int `json:"enhancement_profile_idc,omitempty"`
+	// MP4 contains codec details parsed from MP4 sample-entry boxes, by mp4e
+	// rather than by FFmpeg. It supplements, but does not replace, the
+	// FFmpeg-derived fields above - and where the two disagree on a codec
+	// property the box is authoritative, which is why both are reported.
+	MP4 *avdesc.CodecInfo `json:"mp4,omitempty"`
 }
 
 // SideDataDisplayMatrix holds the display transformation matrix side data
@@ -267,11 +234,10 @@ type SideDataDisplayMatrix struct {
 func (p ProbeInfo) String() string             { return util.JSONString(p) }
 func (c FormatInfo) String() string            { return util.JSONString(c) }
 func (s StreamInfo) String() string            { return util.JSONString(s) }
-func (m MP4Info) String() string               { return util.JSONString(m) }
 func (s SideDataDisplayMatrix) String() string { return util.JSONString(s) }
 
 // GetDOVI returns the best available Dolby Vision configuration for the stream.
-// It prefers MP4Info.DOVI (parsed from the dvcC/dvvC/dvwC box, includes FourCC
+// It prefers MP4.DOVI (parsed from the dvcC/dvvC/dvwC box, includes FourCC
 // and BoxType) over DOVI (from FFmpeg side data, lacks those fields). Returns
 // nil if neither source has a DOVI record.
 func (s StreamInfo) GetDOVI() *avdesc.DOVIInfo {

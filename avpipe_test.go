@@ -2295,11 +2295,11 @@ func assertDOVIMVHEVCProfile(t *testing.T, mp4Path string, expectProfile int) {
 	assertDOVIMVHEVCCodecInfo(t, infos[0], expectProfile, mp4Path)
 }
 
-func assertDOVIMVHEVCCodecInfo(t *testing.T, info *mp4e.CodecInfo, expectProfile int, mp4Path string) {
+func assertDOVIMVHEVCCodecInfo(t *testing.T, info *avdesc.CodecInfo, expectProfile int, mp4Path string) {
 	t.Helper()
 	require.NotNil(t, info, "nil codec info for %s", mp4Path)
 	assert.Equal(t, "hvc1", info.CodecTagString, "codec tag in %s", mp4Path)
-	assert.Equal(t, mp4e.Mp4VideoLayoutMVHEVC, info.VideoLayout, "video layout in %s", mp4Path)
+	assert.Equal(t, avdesc.VideoLayoutMVHEVC, info.VideoLayout, "video layout in %s", mp4Path)
 	assert.Equal(t, 6, info.EnhancementProfileIDC, "MV-HEVC enhancement profile_idc in %s", mp4Path)
 	require.NotNil(t, info.DOVI, "Dolby Vision configuration missing from %s", mp4Path)
 	assert.Equal(t, expectProfile, info.DOVI.Profile, "DOVI profile in %s", mp4Path)
@@ -2334,7 +2334,7 @@ func assertDOVI81(t *testing.T, mp4Path string) {
 	defer func() { _ = f.Close() }()
 	infos, err := mp4e.ExtractCodecInfo(f)
 	require.NoError(t, err)
-	var info *mp4e.CodecInfo
+	var info *avdesc.CodecInfo
 	for _, ci := range infos {
 		if ci.DOVI != nil {
 			info = ci
@@ -2359,7 +2359,7 @@ func assertDOVI20(t *testing.T, mp4Path string) {
 	defer func() { _ = f.Close() }()
 	infos, err := mp4e.ExtractCodecInfo(f)
 	require.NoError(t, err)
-	var info *mp4e.CodecInfo
+	var info *avdesc.CodecInfo
 	for _, ci := range infos {
 		if ci.DOVI != nil {
 			info = ci
@@ -2367,7 +2367,7 @@ func assertDOVI20(t *testing.T, mp4Path string) {
 		}
 	}
 	require.NotNil(t, info, "dvcC/dvvC box missing from %s", mp4Path)
-	assert.Equal(t, mp4e.Mp4VideoLayoutMVHEVC, info.VideoLayout, "must be MV-HEVC in %s", mp4Path)
+	assert.Equal(t, avdesc.VideoLayoutMVHEVC, info.VideoLayout, "must be MV-HEVC in %s", mp4Path)
 	dovi := info.DOVI
 	assert.Equal(t, 20, dovi.Profile, "DOVI.Profile in %s", mp4Path)
 	assert.Equal(t, 0, dovi.BLSignalCompatibilityID, "DOVI.BLSignalCompatibilityID in %s", mp4Path)

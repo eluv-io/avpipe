@@ -13,7 +13,7 @@ import (
 // extractCodecInfoForProbe extracts MP4 codec info from input and seeks it back
 // to 0 so the caller can re-read from the beginning. The caller owns the handle
 // and is responsible for opening and closing it.
-func extractCodecInfoForProbe(input goavpipe.InputHandler) ([]*mp4e.CodecInfo, error) {
+func extractCodecInfoForProbe(input goavpipe.InputHandler) ([]*avdesc.CodecInfo, error) {
 	const op = "avpipe.extractCodecInfoForProbe"
 	e := errors.Template(op, errors.K.Invalid.Default())
 	infos, extractErr := mp4e.ExtractCodecInfoLazy(input) // Only loading MP4 box headers
@@ -26,7 +26,7 @@ func extractCodecInfoForProbe(input goavpipe.InputHandler) ([]*mp4e.CodecInfo, e
 	return infos, extractErr
 }
 
-func enhanceStreamInfo(streams []goavpipe.StreamInfo, codecInfos []*mp4e.CodecInfo) {
+func enhanceStreamInfo(streams []goavpipe.StreamInfo, codecInfos []*avdesc.CodecInfo) {
 	codecInfoIdx := 0
 	for i := range streams {
 		if streams[i].CodecType != "audio" && streams[i].CodecType != "video" {
@@ -53,7 +53,7 @@ func enhanceStreamInfo(streams []goavpipe.StreamInfo, codecInfos []*mp4e.CodecIn
 
 		warnDOVIMismatch(streams[i].StreamIndex, streams[i].DOVI, info.DOVI)
 
-		streams[i].MP4 = convertMP4Info(info)
+		streams[i].MP4 = info
 	}
 }
 
@@ -79,22 +79,5 @@ func warnDOVIMismatch(streamIndex int, probeDOVI, mp4DOVI *avdesc.DOVIInfo) {
 				"probe_dovi", probeDOVI,
 				"mp4_dovi", mp4DOVI)
 		}
-	}
-}
-
-func convertMP4Info(info *mp4e.CodecInfo) *goavpipe.MP4Info {
-	if info == nil {
-		return nil
-	}
-	return &goavpipe.MP4Info{
-		CodecTagString:        info.CodecTagString,
-		MimeCodecString:       info.MimeCodecString,
-		ProfileIDC:            info.ProfileIDC,
-		Level:                 info.Level,
-		Channels:              info.Channels,
-		EC3:                   info.EC3,
-		DOVI:                  info.DOVI,
-		VideoLayout:           goavpipe.VideoLayout(info.VideoLayout),
-		EnhancementProfileIDC: info.EnhancementProfileIDC,
 	}
 }

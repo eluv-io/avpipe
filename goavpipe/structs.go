@@ -7,6 +7,7 @@ import (
 	"strings"
 
 	"github.com/eluv-io/avpipe/broadcastproto/transport"
+	"github.com/eluv-io/avpipe/goavpipe/avdesc"
 	"github.com/eluv-io/avpipe/goavpipe/util"
 	"github.com/eluv-io/common-go/format/duration"
 	"github.com/eluv-io/common-go/media/rtp"
@@ -253,32 +254,20 @@ const (
 	GifImage
 )
 
-// VideoLayout describes how a video stream encodes one or more views.
-// Used by XcParams (input) and CodecInfo (decoded output)
-// Numeric values match libavpipe video_layout_t
-// TODO: consolidate VideoLayout and mp4e.Mp4VideoLayout (same constants 0/3/4/10)
-type VideoLayout int
+// Deprecated: use avdesc.VideoLayout. This alias remains because
+// legacy_imf_dash_extract types its persisted schemas with it -
+// media_struct.StreamVideoInfo.Layout, abr.MezPrepSpec.Layout,
+// legacy_dash.AbrSegment.Layout - and pins an older avpipe, so it cannot be
+// migrated in step with this repo. Remove once it has bumped.
+type VideoLayout = avdesc.VideoLayout
 
+// Deprecated: use the avdesc.VideoLayout* constants.
 const (
-	VideoLayoutMono   VideoLayout = 0
-	VideoLayoutSbs    VideoLayout = 3  // frame-packed side-by-side
-	VideoLayoutTb     VideoLayout = 4  // frame-packed top-bottom
-	VideoLayoutMVHEVC VideoLayout = 10 // multi-layer HEVC (MV-HEVC)
+	VideoLayoutMono   = avdesc.VideoLayoutMono
+	VideoLayoutSbs    = avdesc.VideoLayoutSbs
+	VideoLayoutTb     = avdesc.VideoLayoutTb
+	VideoLayoutMVHEVC = avdesc.VideoLayoutMVHEVC
 )
-
-func (l VideoLayout) String() string {
-	switch l {
-	case VideoLayoutMono:
-		return "mono"
-	case VideoLayoutSbs:
-		return "sbs"
-	case VideoLayoutTb:
-		return "tb"
-	case VideoLayoutMVHEVC:
-		return "mvhevc"
-	}
-	return fmt.Sprintf("unknown(%d)", int(l))
-}
 
 // CryptScheme is the content encryption scheme
 type CryptScheme int

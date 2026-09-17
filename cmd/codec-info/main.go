@@ -8,6 +8,7 @@ import (
 	"io"
 	"os"
 
+	"github.com/eluv-io/avpipe/goavpipe/avdesc"
 	"github.com/eluv-io/avpipe/mp4e"
 )
 
@@ -52,5 +53,30 @@ func run(args []string, w io.Writer) error {
 
 	enc := json.NewEncoder(w)
 	enc.SetIndent("", "  ")
-	return enc.Encode(infos)
+	return enc.Encode(render(infos))
+}
+
+// displayCodecInfo is avdesc.CodecInfo plus the human-readable names for its
+// two numeric codec fields.
+//
+// The names are rendered here rather than by a MarshalJSON on the shared type:
+// they are a display choice of this tool, they need mp4e's codec tables, and
+// avdesc.CodecInfo is also a probe result, whose JSON should not carry fields
+// the probe does not report.
+type displayCodecInfo struct {
+	*avdesc.CodecInfo
+	ProfileName string `json:"profile_name,omitempty"`
+	LevelName   string `json:"level_name,omitempty"`
+}
+
+func render(infos []*avdesc.CodecInfo) []displayCodecInfo {
+	out := make([]displayCodecInfo, 0, len(infos))
+	for _, info := range infos {
+		out = append(out, displayCodecInfo{
+			CodecInfo:   info,
+			ProfileName: mp4e.ProfileName(info.CodecTagString, info.ProfileIDC),
+			LevelName:   mp4e.LevelName(info.CodecTagString, info.Level),
+		})
+	}
+	return out
 }
