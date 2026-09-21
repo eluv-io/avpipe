@@ -9,6 +9,7 @@
 #include <unistd.h>
 #include <fcntl.h>
 #include <poll.h>
+#include <errno.h>
 
 
 #include "elv_sock.h"
@@ -72,6 +73,52 @@ udp_socket(
     freeaddrinfo(ressave);
 
     return(sockfd);
+}
+
+int
+udp_join_multicast(
+    int sockfd,
+    const struct sockaddr *group_addr,
+    socklen_t group_addr_len,
+    const char *local_addr)
+{
+    const struct sockaddr_in *group;
+    struct ip_mreq membership;
+
+    if (!group_addr || group_addr->sa_family != AF_INET ||
+        group_addr_len < sizeof(struct sockaddr_in)) {
+        return 0;
+    }
+
+    group = (const struct sockaddr_in *)group_addr;
+    if (!IN_MULTICAST(ntohl(group->sin_addr.s_addr))) {
+        return 0;
+    }
+
+#ifdef IP_MULTICAST_ALL
+    /*
+     * Linux otherwise delivers traffic for every group joined on this port
+     * to every socket bound to the port. Keep each live input scoped to the
+     * group it explicitly joined.
+     */
+    const int multicast_all = 0;
+    if (setsockopt(sockfd, IPPROTO_IP, IP_MULTICAST_ALL,
+            &multicast_all, sizeof(multicast_all)) < 0) {
+        return -1;
+    }
+#endif
+
+    memset(&membership, 0, sizeof(membership));
+    membership.imr_multiaddr = group->sin_addr;
+    membership.imr_interface.s_addr = htonl(INADDR_ANY);
+    if (local_addr && local_addr[0] != '\0' &&
+        inet_pton(AF_INET, local_addr, &membership.imr_interface) != 1) {
+        errno = EINVAL;
+        return -1;
+    }
+
+    return setsockopt(sockfd, IPPROTO_IP, IP_ADD_MEMBERSHIP,
+        &membership, sizeof(membership));
 }
 
 int

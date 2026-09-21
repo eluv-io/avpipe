@@ -13,6 +13,7 @@
 #include <stdio.h>
 #include <libavutil/log.h>
 #include <libavutil/pixdesc.h>
+#include <libavutil/parseutils.h>
 #include <errno.h>
 #include <pthread.h>
 
@@ -91,8 +92,28 @@ in_opener(
         if ((rc = bind(fd, sa, salen)) < 0) {
             /* Can not bind, fail and exit */
             elv_err("Failed to bind UDP socket, rc=%d", rc);
+            close(fd);
+            free(sa);
+            free_parsed_url(&url_parser);
             return -1;
         }
+
+        char localaddr[64] = {0};
+        const char *multicast_iface = NULL;
+        if (url_parser.query_string &&
+            av_find_info_tag(localaddr, sizeof(localaddr), "localaddr", url_parser.query_string)) {
+            multicast_iface = localaddr;
+        }
+        if (udp_join_multicast(fd, sa, salen, multicast_iface) < 0) {
+            elv_err("Failed to join UDP multicast group, url=%s, localaddr=%s, errno=%d",
+                url, multicast_iface ? multicast_iface : "", errno);
+            close(fd);
+            free(sa);
+            free_parsed_url(&url_parser);
+            return -1;
+        }
+        free(sa);
+        free_parsed_url(&url_parser);
 
         struct timeval tv;
         tv.tv_sec = UDP_PIPE_TIMEOUT;
