@@ -34,14 +34,19 @@ func ExtractCodecInfo(r io.Reader) (infos []*avdesc.CodecInfo, err error) {
 	if err != nil {
 		return nil, e("reason", "failed to parse MP4", "cause", sanitizeString(err.Error()))
 	}
-	return extractCodecInfoFromFile(mp4Data)
+	mov, err := extractMovInfoFromFile(mp4Data)
+	if err != nil {
+		return nil, e(err)
+	}
+	return codecInfos(mov), nil
 }
 
 // ExtractCodecInfoLazy decodes an MP4 container and returns codec information for
 // all tracks. Supports AVC (avc1/avc3) and HEVC (hvc1/hev1) video tracks, and
 // E-AC-3 (ec-3) and AAC (mp4a) audio tracks.
 //
-// Reads only the box headers and the moov box and seeks past media payload.
+// Reads box headers, the moov box and any fragment headers, seeking past media
+// payload rather than reading it.
 //
 // PENDING(SS) It can't parse elementary stream info - if that's needed we need to
 // load 'some' media data to extract NAL info.
@@ -63,13 +68,69 @@ func ExtractCodecInfoLazy(r io.ReadSeeker) (infos []*avdesc.CodecInfo, err error
 	// out-of-memory situations with unexpected file formats.
 	lr := newLimitedReadSeeker(r, maxLazyReadBytes)
 
+	mov, err := decodeMovInfoLazy(lr)
+	if err != nil {
+		return nil, e(err)
+	}
+	return codecInfos(mov), nil
+}
+
+// ExtractMovInfoLazy decodes an MP4 container and returns the container and
+// per-track description: codec identity as ExtractCodecInfoLazy reports it,
+// plus the layout the track boxes carry - dimensions, sample rate, timescale,
+// language - and the ftyp brands.
+//
+// Reads box headers, the moov box and any fragment headers, seeking past media
+// payload rather than reading it - about 1 KB for a buffer holding an init
+// segment and a few fragments. It is usable on an init segment alone, where
+// the only field it cannot fill is FrameRate.
+//
+// This is the one walk: ExtractCodecInfoLazy projects its result from this,
+// rather than traversing again, so the two cannot disagree.
+func ExtractMovInfoLazy(r io.ReadSeeker) (*avdesc.MP4MovInfo, error) {
+	e := errors.T("mp4e.ExtractMovInfoLazy", errors.K.Invalid.Default())
+
+	looksMP4, hdr := HasISOBMFFHeader(r)
+	if _, err := r.Seek(0, io.SeekStart); err != nil {
+		return nil, e("reason", "seek to start after header sniff", "error", err)
+	}
+	if !looksMP4 {
+		return nil, e("reason", "not an ISOBMFF/MP4 container", "header", fmt.Sprintf("%x", hdr))
+	}
+
+	mov, err := decodeMovInfoLazy(newLimitedReadSeeker(r, maxLazyReadBytes))
+	if err != nil {
+		return nil, e(err)
+	}
+	return mov, nil
+}
+
+// decodeMovInfoLazy is the shared body of the two lazy extractors, past the
+// header sniff.
+func decodeMovInfoLazy(lr *limitedReadSeeker) (*avdesc.MP4MovInfo, error) {
+	e := errors.T("mp4e.decodeMovInfoLazy", errors.K.Invalid.Default())
+
 	// PENDING(SS) We could make a SafeDecodeFile() wrapper that engages the bytes cap and
 	// suitable ISOBMFF checks.
 	mp4Data, err := mp4.DecodeFile(lr, mp4.WithDecodeMode(mp4.DecModeLazyMdat))
 	if err != nil {
 		return nil, e("reason", "failed to parse MP4", "cause", sanitizeString(err.Error()))
 	}
-	return extractCodecInfoFromFile(mp4Data)
+	return extractMovInfoFromFile(mp4Data)
+}
+
+// codecInfos projects the codec-identity half of a container description, for
+// callers that want only what CodecInfo carries.
+func codecInfos(mov *avdesc.MP4MovInfo) []*avdesc.CodecInfo {
+	if mov == nil {
+		return nil
+	}
+	infos := make([]*avdesc.CodecInfo, 0, len(mov.Tracks))
+	for _, t := range mov.Tracks {
+		info := t.CodecInfo
+		infos = append(infos, &info)
+	}
+	return infos
 }
 
 // maxLazyReadBytes bounds the cumulative bytes read into memory during a lazy MP4 parse
@@ -101,47 +162,96 @@ func (l *limitedReadSeeker) Seek(offset int64, whence int) (int64, error) {
 	return l.r.Seek(offset, whence)
 }
 
-// extractCodecInfoFromFile builds avdesc.CodecInfo for every track of a decoded MP4.
-// It reads only moov-level boxes, so it is safe on a lazily decoded file
-func extractCodecInfoFromFile(mp4Data *mp4.File) (infos []*avdesc.CodecInfo, err error) {
-	e := errors.T("mp4e.extractCodecInfoFromFile", errors.K.Invalid.Default())
+// extractMovInfoFromFile builds the container and per-track description of a
+// decoded MP4. It reads only moov-level boxes, so it is safe on a lazily
+// decoded file and on a buffer cut at the end of moov.
+func extractMovInfoFromFile(mp4Data *mp4.File) (*avdesc.MP4MovInfo, error) {
+	e := errors.T("mp4e.extractMovInfoFromFile", errors.K.Invalid.Default())
 
-	// Fragmented MP4 (fMP4 init segment): moov is under mp4Data.Init.
-	// Regular MP4: moov is directly under mp4Data.
-	var moov *mp4.MoovBox
+	// Fragmented MP4 (fMP4 init segment): ftyp and moov are under mp4Data.Init.
+	// Regular MP4: both are directly under mp4Data.
+	moov, ftyp := mp4Data.Moov, mp4Data.Ftyp
 	if mp4Data.Init != nil {
 		moov = mp4Data.Init.Moov
-	} else if mp4Data.Moov != nil {
-		moov = mp4Data.Moov
-	} else {
+		if mp4Data.Init.Ftyp != nil {
+			ftyp = mp4Data.Init.Ftyp
+		}
+	}
+	if moov == nil {
 		return nil, e("reason", "moov box not found")
 	}
 
+	mov := &avdesc.MP4MovInfo{Fragmented: moov.Mvex != nil}
+	if ftyp != nil {
+		mov.MajorBrand = ftyp.MajorBrand()
+		mov.CompatibleBrands = ftyp.CompatibleBrands()
+	}
+	if moov.Mvhd != nil {
+		mov.Timescale = int(moov.Mvhd.Timescale)
+		mov.DurationTs = int64(moov.Mvhd.Duration)
+	}
+
 	for _, trak := range moov.Traks {
-		if trak.Mdia == nil || trak.Mdia.Minf == nil ||
-			trak.Mdia.Minf.Stbl == nil || trak.Mdia.Minf.Stbl.Stsd == nil ||
-			len(trak.Mdia.Minf.Stbl.Stsd.Children) == 0 {
-			continue
-		}
-		se := trak.Mdia.Minf.Stbl.Stsd.Children[0]
-
-		var info *avdesc.CodecInfo
-		if vse, ok := se.(*mp4.VisualSampleEntryBox); ok {
-			info, err = parseVisualSampleEntryBox(vse)
-		} else if ase, ok := se.(*mp4.AudioSampleEntryBox); ok {
-			info, err = parseAudioSampleEntryBox(ase)
-		} else {
-			continue
-		}
-
+		track, err := trackInfo(mp4Data, trak)
 		if err != nil {
 			return nil, e("reason", "failed to parse MP4 sample entry box", err)
-		} else if info != nil {
-			infos = append(infos, info)
+		}
+		if track != nil {
+			mov.Tracks = append(mov.Tracks, track)
 		}
 	}
 
-	return
+	return mov, nil
+}
+
+// trackInfo describes one trak, or returns nil for a track this package does
+// not describe - a track with no sample entry, or one that is neither video
+// nor audio.
+func trackInfo(mp4Data *mp4.File, trak *mp4.TrakBox) (*avdesc.MP4TrackInfo, error) {
+	if trak.Mdia == nil || trak.Mdia.Minf == nil ||
+		trak.Mdia.Minf.Stbl == nil || trak.Mdia.Minf.Stbl.Stsd == nil ||
+		len(trak.Mdia.Minf.Stbl.Stsd.Children) == 0 {
+		return nil, nil
+	}
+	se := trak.Mdia.Minf.Stbl.Stsd.Children[0]
+
+	track := &avdesc.MP4TrackInfo{}
+	switch typed := se.(type) {
+	case *mp4.VisualSampleEntryBox:
+		info, err := parseVisualSampleEntryBox(typed)
+		if err != nil || info == nil {
+			return nil, err
+		}
+		track.CodecInfo = *info
+		track.MediaType = avdesc.MediaTypeVideo
+		track.Width = int(typed.Width)
+		track.Height = int(typed.Height)
+
+	case *mp4.AudioSampleEntryBox:
+		info, err := parseAudioSampleEntryBox(typed)
+		if err != nil || info == nil {
+			return nil, err
+		}
+		track.CodecInfo = *info
+		track.MediaType = avdesc.MediaTypeAudio
+		track.SampleRate = int(typed.SampleRate)
+		track.ChannelCount = int(typed.ChannelCount)
+
+	default:
+		return nil, nil
+	}
+
+	if trak.Tkhd != nil {
+		track.TrackID = int(trak.Tkhd.TrackID)
+	}
+	if trak.Mdia.Mdhd != nil {
+		track.Timescale = int(trak.Mdia.Mdhd.Timescale)
+		track.Language = trak.Mdia.Mdhd.GetLanguage()
+	}
+	if track.MediaType == avdesc.MediaTypeVideo {
+		track.FrameRate = trackFrameRate(mp4Data, track.TrackID, track.Timescale)
+	}
+	return track, nil
 }
 
 func parseAudioSampleEntryBox(se *mp4.AudioSampleEntryBox) (*avdesc.CodecInfo, error) {
