@@ -1133,7 +1133,7 @@ func Probe(params *goavpipe.XcParams) (*goavpipe.ProbeInfo, error) {
 	// - seek back to 0
 	// - invoke the C.Probe which opens its own handle then closes its own handle via callbacks
 	// - finally close the MP4 extraction handle
-	var codecInfos []*avdesc.CodecInfo
+	var movInfo *avdesc.MP4MovInfo
 	if params.Seekable {
 		inputOpener := goavpipe.GetInputOpener(params.Url)
 		if inputOpener == nil {
@@ -1142,7 +1142,7 @@ func Probe(params *goavpipe.XcParams) (*goavpipe.ProbeInfo, error) {
 			goavpipe.Log.Warn("input media open failed", "url", params.Url, "error", openErr, "op", op)
 		} else {
 			defer func() { _ = h.Close() }()
-			if codecInfos, err = extractCodecInfoForProbe(h); err != nil {
+			if movInfo, err = extractMovInfoForProbe(h); err != nil {
 				goavpipe.Log.Info("could not extract codec info (expected if input is not MP4)",
 					"url", params.Url, "reason", err.Error(), "op", op)
 			}
@@ -1277,8 +1277,8 @@ func Probe(params *goavpipe.XcParams) (*goavpipe.ProbeInfo, error) {
 	probeInfo.Format.FormatName = C.GoString((*C.char)(unsafe.Pointer(cprobe.container_info.format_name)))
 	probeInfo.Format.Duration = float64(cprobe.container_info.duration)
 
-	if codecInfos != nil {
-		enhanceStreamInfo(probeInfo.Streams, codecInfos)
+	if movInfo != nil {
+		enhanceStreamInfo(probeInfo.Streams, movInfo)
 	}
 
 	C.free(unsafe.Pointer(cprobe.stream_info))

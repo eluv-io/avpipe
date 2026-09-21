@@ -10,41 +10,54 @@ import (
 	"github.com/eluv-io/errors-go"
 )
 
-// extractCodecInfoForProbe extracts MP4 codec info from input and seeks it back
-// to 0 so the caller can re-read from the beginning. The caller owns the handle
-// and is responsible for opening and closing it.
-func extractCodecInfoForProbe(input goavpipe.InputHandler) ([]*avdesc.CodecInfo, error) {
-	const op = "avpipe.extractCodecInfoForProbe"
+// extractMovInfoForProbe extracts the MP4 track description from input and
+// seeks it back to 0 so the caller can re-read from the beginning. The caller
+// owns the handle and is responsible for opening and closing it.
+func extractMovInfoForProbe(input goavpipe.InputHandler) (*avdesc.MP4MovInfo, error) {
+	const op = "avpipe.extractMovInfoForProbe"
 	e := errors.Template(op, errors.K.Invalid.Default())
-	infos, extractErr := mp4e.ExtractCodecInfoLazy(input) // Only loading MP4 box headers
+	mov, extractErr := mp4e.ExtractMovInfoLazy(input) // Only loading MP4 box headers
 	if _, seekErr := input.Seek(0, io.SeekStart); seekErr != nil {
 		if extractErr != nil {
 			goavpipe.Log.Error("seek back failed after failed extraction", "extract_error", extractErr, "op", op)
 		}
 		return nil, e("reason", "seek back after pre-extraction", "error", seekErr)
 	}
-	return infos, extractErr
+	return mov, extractErr
 }
 
-func enhanceStreamInfo(streams []goavpipe.StreamInfo, codecInfos []*avdesc.CodecInfo) {
-	codecInfoIdx := 0
+// enhanceStreamInfo adds what the MP4 box layer knows to what FFmpeg reported.
+//
+// A stream is paired with its track by identity: StreamInfo.StreamId is the
+// container's own stream identifier, which for MP4 is the tkhd track ID that
+// MP4TrackInfo.TrackID carries. The two lists do not necessarily hold the same
+// tracks - mp4ff describes a track only for the codecs it decodes - so neither
+// order nor length can be relied on to line them up.
+func enhanceStreamInfo(streams []goavpipe.StreamInfo, mov *avdesc.MP4MovInfo) {
+	if mov == nil {
+		return
+	}
+	byTrackID := make(map[int]*avdesc.MP4TrackInfo, len(mov.Tracks))
+	for _, track := range mov.Tracks {
+		if track != nil {
+			byTrackID[track.TrackID] = track
+		}
+	}
+
 	for i := range streams {
-		if streams[i].CodecType != "audio" && streams[i].CodecType != "video" {
+		track, ok := byTrackID[streams[i].StreamId]
+		if !ok {
+			// Ordinary: a data track, or one whose sample entry the box parser
+			// does not decode. The stream keeps its FFmpeg-derived fields.
 			continue
 		}
-		if codecInfoIdx >= len(codecInfos) {
-			return
-		}
-		info := codecInfos[codecInfoIdx]
-		codecInfoIdx++
-		if info == nil {
-			continue
-		}
+		info := track.CodecInfo
 
 		if info.CodecTagString != "" {
 			if streams[i].CodecTagString != "" && streams[i].CodecTagString != info.CodecTagString {
 				goavpipe.Log.Warn("Probe codec tag differs from MP4 sample entry; using MP4 value",
 					"stream_index", streams[i].StreamIndex,
+					"track_id", track.TrackID,
 					"probe_codec_tag_string", streams[i].CodecTagString,
 					"codec_info_codec_tag_string", info.CodecTagString)
 			}
@@ -53,7 +66,7 @@ func enhanceStreamInfo(streams []goavpipe.StreamInfo, codecInfos []*avdesc.Codec
 
 		warnDOVIMismatch(streams[i].StreamIndex, streams[i].DOVI, info.DOVI)
 
-		streams[i].MP4 = info
+		streams[i].MP4 = &info
 	}
 }
 
