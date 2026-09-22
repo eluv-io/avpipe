@@ -418,6 +418,7 @@ typedef struct coderctx_t {
     int64_t first_read_packet_pts[MAX_STREAMS];         /* PTS of first packet read - which might not be decodable */
 
     int64_t video_encoder_prev_pts;     /* Previous pts for video output (encoder) */
+    int64_t audio_encoder_prev_pts[MAX_STREAMS]; /* Previous pts for audio output (encoder), per stream - diagnostic only */
     int64_t video_duration;             /* Duration/pts of original frame */
     int64_t audio_duration;             /* Audio duration/pts of original frame when tx_type == tx_all */
     int64_t first_key_frame_pts;        /* First video key frame pts, used to synchronize audio and video in UDP live streams */

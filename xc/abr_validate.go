@@ -28,6 +28,19 @@ type ABRSegmentResult struct {
 	DurProblems int    // unequal duration count
 	SeqFirst    uint32 // first mfhd sequence number
 	SeqLast     uint32 // last mfhd sequence number
+
+	// MaxDurDeviationFactor is the largest observed sample duration expressed as a
+	// multiple of SampleDur (1 = normal, no deviation seen). A live UDP source that
+	// loses N consecutive frames produces one legitimate sample of duration
+	// (N+1)*SampleDur - see avpipe's "GAP detected"/"AUDIO GAP detected" recovery
+	// logging in avpipe_xc.c, which logs the exact same value. This is not itself
+	// evidence of corruption; it bounds how large a single such gap was.
+	//
+	// Diagnostic only: it is informational and logged by callers that care about
+	// gap magnitude (e.g. live-source tests applying their own tolerance), but it
+	// does not affect Valid()/AllErrors() below, which still treat any DurProblems
+	// > 0 as invalid regardless of this value.
+	MaxDurDeviationFactor uint64
 }
 
 // Valid returns true if no errors were found.
@@ -136,6 +149,11 @@ func ValidateABRSegment(filename string) (*ABRSegmentResult, error) {
 		}
 		if samples[i].Dur != result.SampleDur {
 			result.DurProblems++
+			if result.SampleDur > 0 {
+				if factor := samples[i].Dur / result.SampleDur; factor > result.MaxDurDeviationFactor {
+					result.MaxDurDeviationFactor = factor
+				}
+			}
 			if result.DurProblems <= 5 {
 				result.Errors = append(result.Errors,
 					fmt.Sprintf("duration mismatch at sample %d: expected %d, got %d",
