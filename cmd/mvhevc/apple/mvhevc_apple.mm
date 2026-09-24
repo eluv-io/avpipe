@@ -70,7 +70,6 @@ typedef struct apple_params {
     uint32_t baseline_um;
     uint32_t hfov;
     int hero_eye;
-    int no_spatial;
     double duration_seconds;
     double quality;
     apple_output_config *outputs;
@@ -98,23 +97,6 @@ typedef struct apple_params {
         CFRelease(_transfer);
 }
 @end
-
-/* Full error description, including domain/code and the underlying error chain
- * (AVFoundation's localizedDescription alone is usually just "The operation could not be completed") */
-static const char *error_details(NSError *error)
-{
-    if (!error)
-        return "unknown writer error";
-    NSMutableString *s = [NSMutableString string];
-    for (NSError *e = error; e; e = e.userInfo[NSUnderlyingErrorKey]) {
-        if (s.length > 0)
-            [s appendString:@" <- "];
-        [s appendFormat:@"%@ (%@ %ld)", e.localizedDescription, e.domain, (long)e.code];
-        if (e.localizedFailureReason)
-            [s appendFormat:@" reason: %@", e.localizedFailureReason];
-    }
-    return s.UTF8String;
-}
 
 static void usage(const char *prog)
 {
@@ -154,7 +136,6 @@ static void usage(const char *prog)
         "  -baseline <um>      Camera baseline in micrometers (default 63500)\n"
         "  -hfov <val>         Horizontal FOV in 1/1000 degrees (default 63500)\n"
         "  -hero <eye>         Hero eye: left, right, or none (default left)\n"
-        "  -no-spatial         Don't write baseline/hero/hfov spatial metadata\n"
         "\n"
         "With -abr-profile, <output.mov|mp4> is used as a base/template. If it\n"
         "contains %%w, %%h, %%b, %%m, or %%n, those placeholders are expanded to\n"
@@ -541,8 +522,6 @@ static int parse_args(int argc, char **argv, apple_params *p)
                 return -1;
             }
             argi++;
-        } else if (!strcmp(opt, "-no-spatial")) {
-            p->no_spatial = 1;
         } else if (!strcmp(opt, "-hero") && argi < argc) {
             const char *eye = argv[argi++];
             if (!strcmp(eye, "left")) {
@@ -804,17 +783,15 @@ static AppleOutputContext *create_output_context(const apple_params *p,
     compression[(__bridge NSString *)kVTCompressionPropertyKey_HasLeftStereoEyeView] = @YES;
     compression[(__bridge NSString *)kVTCompressionPropertyKey_HasRightStereoEyeView] = @YES;
     /* Spatial metadata (vexu/eyes/cams/blin, vexu/eyes/hero, hfov) */
-    if (!p->no_spatial) {
-        compression[(__bridge NSString *)kVTCompressionPropertyKey_StereoCameraBaseline] = @(p->baseline_um);
-        if (p->hero_eye == HERO_EYE_LEFT)
-            compression[(__bridge NSString *)kVTCompressionPropertyKey_HeroEye] = (__bridge NSString *)kCMFormatDescriptionHeroEye_Left;
-        else if (p->hero_eye == HERO_EYE_RIGHT)
-            compression[(__bridge NSString *)kVTCompressionPropertyKey_HeroEye] = (__bridge NSString *)kCMFormatDescriptionHeroEye_Right;
-        if (@available(macOS 14.4, *))
-            compression[(__bridge NSString *)kVTCompressionPropertyKey_HorizontalFieldOfView] = @(p->hfov);
-        else
-            fprintf(stderr, "Warning: hfov requires macOS 14.4 or later; not written\n");
-    }
+    compression[(__bridge NSString *)kVTCompressionPropertyKey_StereoCameraBaseline] = @(p->baseline_um);
+    if (p->hero_eye == HERO_EYE_LEFT)
+        compression[(__bridge NSString *)kVTCompressionPropertyKey_HeroEye] = (__bridge NSString *)kCMFormatDescriptionHeroEye_Left;
+    else if (p->hero_eye == HERO_EYE_RIGHT)
+        compression[(__bridge NSString *)kVTCompressionPropertyKey_HeroEye] = (__bridge NSString *)kCMFormatDescriptionHeroEye_Right;
+    if (@available(macOS 14.4, *))
+        compression[(__bridge NSString *)kVTCompressionPropertyKey_HorizontalFieldOfView] = @(p->hfov);
+    else
+        fprintf(stderr, "Warning: hfov requires macOS 14.4 or later; not written\n");
     compression[AVVideoProfileLevelKey] = profile_level_for_output(cfg);
 
     int encoder_bitrate_kbps = adjusted_bitrate_kbps(cfg);
@@ -1017,7 +994,7 @@ static int encode_apple(const apple_params *p)
     for (AppleOutputContext *ctx in outputs) {
         if (![ctx.writer startWriting]) {
             fprintf(stderr, "Could not start writer for %s: %s\n",
-                    ctx.config->out_file, error_details(ctx.writer.error));
+                    ctx.config->out_file, ctx.writer.error.localizedDescription.UTF8String);
             return 1;
         }
         [ctx.writer startSessionAtSourceTime:kCMTimeZero];
@@ -1052,12 +1029,9 @@ static int encode_apple(const apple_params *p)
         fprintf(stderr, "  HDR10:       BT.2020/PQ + optional MDCV/CLLI\n");
     if (p->abr_profile_file)
         fprintf(stderr, "  ABR profile: %s\n", p->abr_profile_file);
-    if (p->no_spatial)
-        fprintf(stderr, "  Spatial:     disabled\n");
-    else
-        fprintf(stderr, "  Spatial:     baseline=%u um hfov=%u/1000 deg hero=%s\n",
-                p->baseline_um, p->hfov,
-                p->hero_eye == HERO_EYE_LEFT ? "left" : p->hero_eye == HERO_EYE_RIGHT ? "right" : "none");
+    fprintf(stderr, "  Spatial:     baseline=%u um hfov=%u/1000 deg hero=%s\n",
+            p->baseline_um, p->hfov,
+            p->hero_eye == HERO_EYE_LEFT ? "left" : p->hero_eye == HERO_EYE_RIGHT ? "right" : "none");
     if (p->no_upscale)
         fprintf(stderr, "  No upscale:  true\n");
     if (p->saw_x265_only)
@@ -1117,7 +1091,7 @@ static int encode_apple(const apple_params *p)
             if (!wait_until_ready(ctx.writerInput, ctx.writer)) {
                 fprintf(stderr, "Writer failed while waiting for %s: %s\n",
                         ctx.config->out_file,
-                        error_details(ctx.writer.error));
+                        ctx.writer.error.localizedDescription.UTF8String ?: "unknown writer error");
                 ok = NO;
                 break;
             }
@@ -1150,7 +1124,7 @@ static int encode_apple(const apple_params *p)
             if (!appended) {
                 fprintf(stderr, "appendTaggedPixelBufferGroup failed for %s: %s\n",
                         ctx.config->out_file,
-                        error_details(ctx.writer.error));
+                        ctx.writer.error.localizedDescription.UTF8String ?: "unknown writer error");
                 ok = NO;
                 break;
             }
@@ -1191,7 +1165,7 @@ static int encode_apple(const apple_params *p)
         if (!finished || !finish_ok) {
             fprintf(stderr, "finishWriting failed for %s: %s\n",
                     ctx.config->out_file,
-                    error_details(writer.error));
+                    writer.error.localizedDescription.UTF8String ?: "unknown writer error");
             return 1;
         }
     }
