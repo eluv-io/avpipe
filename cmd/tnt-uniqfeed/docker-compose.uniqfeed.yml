@@ -1,0 +1,21 @@
+services:
+  avpipe-tnt-uniqfeed:
+    image: ${UF_BASE_IMAGE:-uf_render_interface:ubuntu_22}
+    working_dir: /workspace/avpipe/cmd/tnt-uniqfeed
+    entrypoint:
+      - /bin/bash
+    stdin_open: true
+    tty: true
+    volumes:
+      - ../..:/workspace/avpipe
+    environment:
+      LD_LIBRARY_PATH: /runtime/lib:/runtime/lib/uf:/runtime/lib/3rdparty
+      NVIDIA_VISIBLE_DEVICES: all
+      NVIDIA_DRIVER_CAPABILITIES: all
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              capabilities: [gpu]
+              count: 1
