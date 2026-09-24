@@ -46,6 +46,7 @@ static inline uint64_t get_channel_layout_mask(const AVChannelLayout *layout) {
 */
 import "C"
 import (
+	"context"
 	"fmt"
 	"io"
 	"math/big"
@@ -1446,6 +1447,9 @@ func XcRun(handle int32) (runErr error) {
 		}
 		processor.Wait()
 		_, err = processor.Status()
+		if errors.Is(err, context.Canceled) {
+			return EAV_CANCELLED
+		}
 		return err
 	}
 

@@ -143,6 +143,17 @@ func TestNetReader_StatusDistinguishesSuccessFromCancellation(t *testing.T) {
 	require.NoError(t, err)
 }
 
+func TestNetReader_StatusReportsCancellation(t *testing.T) {
+	ctx, cancel := context.WithCancelCause(context.Background())
+	r := &NetReader{ctx: ctx, cancel: cancel}
+
+	r.Cancel()
+
+	running, err := r.Status()
+	require.False(t, running)
+	require.ErrorIs(t, err, context.Canceled)
+}
+
 // TestNetReader_StatusReportsFirstResultOnly verifies Status() reports the first cancellation cause, mirroring the
 // first-cancel-wins semantics of context.WithCancelCause.
 func TestNetReader_StatusReportsFirstResultOnly(t *testing.T) {
