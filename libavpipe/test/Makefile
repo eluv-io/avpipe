@@ -1,7 +1,7 @@
 TOP_DIR ?= $(shell pwd)/../..
 
-FFMPEG_CFLAGS := $(shell pkg-config --cflags libavcodec libavformat libavutil)
-FFMPEG_LIBS   := $(shell pkg-config --libs   libavcodec libavformat libavutil)
+FFMPEG_CFLAGS := $(shell pkg-config --cflags libavcodec libavfilter libavformat libavutil)
+FFMPEG_LIBS   := $(shell pkg-config --libs   libavcodec libavfilter libavformat libavutil)
 
 CFLAGS := -O0 -ggdb -Wall \
 	$(FFMPEG_CFLAGS) \
@@ -12,7 +12,7 @@ CFLAGS := -O0 -ggdb -Wall \
 LIBS := $(FFMPEG_LIBS) \
 	-L$(TOP_DIR)/lib -lutils
 
-TESTS := test_color_defaults test_hdr_metadata test_pts_unwrap
+TESTS := test_color_defaults test_hdr_metadata test_pts_unwrap test_video_fps
 OUT   := out
 BINS  := $(addprefix $(OUT)/,$(TESTS))
 
@@ -31,6 +31,9 @@ $(OUT)/test_hdr_metadata: test_hdr_metadata.c unity/unity.c | $(OUT)
 	gcc $(CFLAGS) $^ -o $@ $(LIBS)
 
 $(OUT)/test_pts_unwrap: test_pts_unwrap.c unity/unity.c | $(OUT)
+	gcc $(CFLAGS) $^ -o $@ $(LIBS)
+
+$(OUT)/test_video_fps: test_video_fps.c unity/unity.c | $(OUT)
 	gcc $(CFLAGS) $^ -o $@ $(LIBS)
 
 clean:
