@@ -193,6 +193,13 @@ typedef struct ioctx_t {
 
     /* Output handlers specific data */
     int64_t pts;                /* frame pts */
+    /* Set by elv_io_open from the output URL, so what it means depends on the
+     * output type. For an fmp4 audio segment it is the *output ordinal* - a
+     * position in xc_params->audio_index - because avpipe names those outputs
+     * "fsegment-audio<ordinal>-%05d.mp4". For other outputs it is a media stream
+     * index. Do not report it to a stater as a stream index without translating
+     * it first: see avpipe_stater_f below and out_write_packet in avpipe.c.
+     */
     int     stream_index;       /* usually (but not always) video=0 and audio=1 */
     int     seg_index;          /* segment index if this ioctx is a segment */
 
@@ -256,7 +263,13 @@ typedef int64_t
 typedef int
 (*avpipe_stater_f)(
     void *opaque,
-    int stream_index,           /* The stream_index is not valid for input stat in_stat_bytes_read. */
+    /*
+     * stream_index is a *source* media stream index - the same numbering as
+     * xc_params->audio_index and decoder_context->video_stream_index - for every
+     * stat that carries one. It is not an output ordinal, and it is not valid
+     * for input stat in_stat_bytes_read.
+     */
+    int stream_index,
     avp_stat_t stat_type);
 
 typedef struct avpipe_io_handler_t {
