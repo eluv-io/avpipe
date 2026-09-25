@@ -1,6 +1,7 @@
 package goavpipe
 
 import (
+	"fmt"
 	"sync"
 
 	"github.com/eluv-io/common-go/media/pktpool"
@@ -46,6 +47,16 @@ type OutputOpener interface {
 	// h determines uniquely opening input.
 	// fd determines uniquely opening output.
 	Open(h, fd int64, streamIndex, segIndex int, pts int64, outType AVType) (OutputHandler, error)
+}
+
+// NoopOutputOpener is the OutputOpener for transcodes that produce no output, such as XcAudioWaveform. An input can
+// only be opened when an output opener is registered for its URL, so an output-free job registers this one. Its
+// Open fails, which turns any unexpected output into an error instead of silently discarded data.
+type NoopOutputOpener struct{}
+
+func (NoopOutputOpener) Open(h, fd int64, streamIndex, segIndex int, pts int64, outType AVType) (OutputHandler, error) {
+	return nil, fmt.Errorf("no output expected: h=%d fd=%d stream_index=%d seg_index=%d pts=%d out_type=%d",
+		h, fd, streamIndex, segIndex, pts, outType)
 }
 
 type MuxOutputOpener interface {

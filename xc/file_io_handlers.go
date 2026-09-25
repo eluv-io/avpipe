@@ -29,6 +29,8 @@ type IOStats struct {
 	FirstKeyFramePTS        uint64
 	EncodingAudioFrameStats avpipe.EncodingFrameStats
 	EncodingVideoFrameStats avpipe.EncodingFrameStats
+	Waveform                goavpipe.WaveformCollector // batches of an XcAudioWaveform transcode
+	WaveformBatches         []*goavpipe.AudioWaveformStats
 }
 
 // FileInputOpener implements goavpipe.InputOpener for local files.
@@ -86,7 +88,7 @@ func (i *fileInput) Size() int64 {
 	return fi.Size()
 }
 
-func (i *fileInput) Stat(_ int, statType goavpipe.AVStatType, statArgs interface{}) error {
+func (i *fileInput) Stat(streamIndex int, statType goavpipe.AVStatType, statArgs interface{}) error {
 	if i.stats == nil {
 		return nil
 	}
@@ -97,6 +99,9 @@ func (i *fileInput) Stat(_ int, statType goavpipe.AVStatType, statArgs interface
 		i.stats.VideoFramesRead = *statArgs.(*uint64)
 	case goavpipe.AV_IN_STAT_FIRST_KEYFRAME_PTS:
 		i.stats.FirstKeyFramePTS = *statArgs.(*uint64)
+	case goavpipe.AV_IN_STAT_AUDIO_WAVEFORM:
+		i.stats.WaveformBatches = append(i.stats.WaveformBatches, statArgs.(*goavpipe.AudioWaveformStats))
+		return i.stats.Waveform.Stat(streamIndex, statType, statArgs)
 	}
 	return nil
 }
