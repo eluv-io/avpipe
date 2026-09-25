@@ -86,6 +86,10 @@ and `-scenecut` are currently accepted for compatibility and ignored.
 Use `-duration <seconds>` to encode only the first portion of the source.
 Use `-quality <0.0-1.0>` to pass a VideoToolbox compression quality hint; it is
 optional and defaults to VideoToolbox's native behavior.
+Spatial metadata (`vexu` baseline/hero and `hfov`) is always written, using the
+same options and defaults as `mvhevc add`: `-baseline 63500` (micrometers),
+`-hfov 63500` (1/1000 degrees) and `-hero left` (`left`, `right` or `none`).
+`hfov` requires macOS 14.4 or later.
 For `mvhevc_apple`, requested bitrates above 10 Mbps are automatically adjusted
 up before being passed to VideoToolbox: +10% above 10 Mbps, +20% above 25 Mbps,
 and +25% above 35 Mbps. If `-maxrate` is set, the adjusted bitrate is capped to
