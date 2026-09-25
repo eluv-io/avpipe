@@ -30,6 +30,7 @@
 #include "avpipe_version.h"
 #include "base64.h"
 #include "scte35.h"
+#include "avpipe_waveform.h"
 
 #include <stdio.h>
 #include <fcntl.h>
@@ -52,6 +53,18 @@
 
 #define DEFAULT_ACC_SAMPLE_RATE     48000
 #define MAX_FRAME_READ_RETRIES      300
+
+#define DEFAULT_WAVEFORM_SPP        256     /* Default waveform bucket size in samples, the BBC tool's default */
+#define DEFAULT_WAVEFORM_BATCH      256     /* Default waveform buckets per stat callback */
+#define MAX_WAVEFORM_SPP            65536
+
+/* xc_audio_waveform decodes audio only and delivers per-bucket min/max values; it builds no encoder, muxer or output */
+static inline int
+is_waveform_only(
+    const xcparams_t *params)
+{
+    return params->xc_type == xc_audio_waveform;
+}
 
 extern int
 init_video_filters(
@@ -2661,7 +2674,7 @@ transcode_audio(
         elv_dbg("DECODE stream_index=%d send_packet pts=%"PRId64" dts=%"PRId64
             " duration=%d, input frame_size=%d, output frame_size=%d, audio_output_pts=%"PRId64,
             stream_index, packet->pts, packet->dts, packet->duration, codec_context->frame_size,
-            enc_codec_context->frame_size, decoder_context->audio_output_pts);
+            enc_codec_context ? enc_codec_context->frame_size : -1, decoder_context->audio_output_pts);
 
     if (params->bypass_transcoding) {
         return do_bypass(1, decoder_context, encoder_context, packet, params, debug_frame_level);
@@ -2704,6 +2717,15 @@ transcode_audio(
         dump_frame(1, stream_index, "IN ", codec_context->frame_num, frame, debug_frame_level);
 
         decoder_context->audio_pts[stream_index] = packet->pts;
+
+        /* Waveform mode consumes the decoded frame at its native rate and layout; there is no filter or encoder */
+        if (is_waveform_only(params)) {
+            ret = waveform_acc_push(decoder_context, i, stream_index, frame, params);
+            av_frame_unref(frame);
+            if (ret != eav_success)
+                return ret;
+            continue;
+        }
 
         /* Rescale frame before sending to the filter (filter is initialized with the encoder timebase) */
         frame_rescale_time_base(frame, codec_context->time_base, enc_codec_context->time_base);
@@ -3133,6 +3155,18 @@ flush_decoder(
         dump_frame(i >= 0, stream_index,
             "IN FLUSH", codec_context->frame_num, frame, debug_frame_level);
 
+        /* Waveform mode has no filter or encoder to flush through */
+        if (is_waveform_only(p) && i >= 0) {
+            ret = waveform_acc_push(decoder_context, i, stream_index, frame, p);
+            av_frame_unref(frame);
+            if (ret != eav_success) {
+                av_frame_free(&filt_frame);
+                av_frame_free(&frame);
+                return ret;
+            }
+            continue;
+        }
+
         if (codec_context->codec_type == AVMEDIA_TYPE_VIDEO ||
             codec_context->codec_type == AVMEDIA_TYPE_AUDIO) {
 
@@ -3183,6 +3217,9 @@ flush_decoder(
 
     av_frame_free(&filt_frame);
     av_frame_free(&frame);
+
+    if (is_waveform_only(p) && i >= 0)
+        return waveform_acc_flush(decoder_context, i, stream_index);
     return eav_success;
 }
 
@@ -3696,7 +3733,8 @@ avpipe_xc(
         pthread_create(&cp_ctx->thread_id, NULL, copy_mpegts_func, xctx);
     }
 
-    if ((rc = prepare_encoder(&xctx->encoder_ctx,
+    if (!is_waveform_only(params) &&
+        (rc = prepare_encoder(&xctx->encoder_ctx,
         &xctx->decoder_ctx, out_handlers, inctx, params)) != eav_success) {
         elv_err("Failure in preparing encoder, url=%s, rc=%d", params->url, rc);
         return rc;
@@ -3728,6 +3766,7 @@ avpipe_xc(
         params->xc_type != xc_audio_join &&
         params->xc_type != xc_audio_pan &&
         params->xc_type != xc_audio_merge &&
+        !is_waveform_only(params) &&
         (rc = init_audio_filters(decoder_context, encoder_context, xctx->params)) != eav_success) {
         elv_err("Failed to initialize audio filter, url=%s", params->url);
         goto xc_done;
@@ -3761,7 +3800,7 @@ avpipe_xc(
         goto xc_done;
     }
 
-    if (params->xc_type & xc_audio) {
+    if ((params->xc_type & xc_audio) && !is_waveform_only(params)) {
         for (int i=0; i<encoder_context->n_audio_output; i++) {
             if (avformat_write_header(encoder_context->format_context2[i], NULL) != eav_success) {
                 elv_err("Failed to write audio output file header, url=%s", params->url);
@@ -4112,21 +4151,35 @@ xc_done:
     /*
      * Flush all frames, first flush decoder buffers, then encoder buffers by passing NULL frame.
      */
-    if (params->xc_type & xc_video && xctx->err != eav_write_frame)
-        flush_decoder(decoder_context, encoder_context, encoder_context->video_stream_index, params, debug_frame_level);
-    if (params->xc_type & xc_audio && xctx->err != eav_write_frame) {
-        for (int i=0; i<decoder_context->n_audio; i++)
-            flush_decoder(decoder_context, encoder_context, encoder_context->audio_stream_index[i], params, debug_frame_level);
-    }
-    if (params->xc_type & xc_audio_join || params->xc_type & xc_audio_merge) {
-        for (int i=0; i<decoder_context->n_audio; i++)
-            flush_decoder(decoder_context, encoder_context, decoder_context->audio_stream_index[i], params, debug_frame_level);
+    if (is_waveform_only(params)) {
+        /* No encoder exists, so index the decoder's own stream list. The flush also emits the terminal waveform
+         * batch, which must happen exactly once per stream. */
+        if (xctx->err != eav_write_frame) {
+            for (int i=0; i<decoder_context->n_audio; i++)
+                flush_decoder(decoder_context, encoder_context, decoder_context->audio_stream_index[i],
+                    params, debug_frame_level);
+        }
+    } else {
+        if (params->xc_type & xc_video && xctx->err != eav_write_frame)
+            flush_decoder(decoder_context, encoder_context, encoder_context->video_stream_index,
+                params, debug_frame_level);
+        if (params->xc_type & xc_audio && xctx->err != eav_write_frame) {
+            for (int i=0; i<decoder_context->n_audio; i++)
+                flush_decoder(decoder_context, encoder_context, encoder_context->audio_stream_index[i],
+                    params, debug_frame_level);
+        }
+        if (params->xc_type & xc_audio_join || params->xc_type & xc_audio_merge) {
+            for (int i=0; i<decoder_context->n_audio; i++)
+                flush_decoder(decoder_context, encoder_context, decoder_context->audio_stream_index[i],
+                    params, debug_frame_level);
+        }
     }
 
     if (!params->bypass_transcoding && (params->xc_type & xc_video) && xctx->err != eav_write_frame)
         encode_frame(decoder_context, encoder_context, NULL, decoder_context->video_stream_index, params, debug_frame_level);
     /* Loop through and flush all audio frames */
-    if (!params->bypass_transcoding && params->xc_type & xc_audio && xctx->err != eav_write_frame) {
+    if (!params->bypass_transcoding && params->xc_type & xc_audio && !is_waveform_only(params) &&
+        xctx->err != eav_write_frame) {
         for (int i=0; i<decoder_context->n_audio; i++)
             encode_frame(decoder_context, encoder_context, NULL, decoder_context->audio_stream_index[i], params, debug_frame_level);
     }
@@ -4135,7 +4188,7 @@ xc_done:
 
     if ((params->xc_type & xc_video) && rc == eav_success)
         av_write_trailer(encoder_context->format_context);
-    if ((params->xc_type & xc_audio) && rc == eav_success) {
+    if ((params->xc_type & xc_audio) && !is_waveform_only(params) && rc == eav_success) {
         for (int i=0; i<encoder_context->n_audio_output; i++)
             av_write_trailer(encoder_context->format_context2[i]);
     }
@@ -4365,6 +4418,8 @@ get_xc_type_name(
         return "xc_extract_all_images";
     case xc_probe:
         return "xc_probe";
+    case xc_audio_waveform:
+        return "xc_audio_waveform";
     default:
         return "none";
     }
@@ -4665,14 +4720,17 @@ static int
 check_params(
     xcparams_t *params)
 {
-    if (!params->format ||
+    int waveform = is_waveform_only(params);
+
+    if (!waveform &&
+        (!params->format ||
         (strcmp(params->format, "dash") &&
          strcmp(params->format, "hls") &&
          strcmp(params->format, "image2") &&
          strcmp(params->format, "mp4") &&
          strcmp(params->format, "fmp4") &&
          strcmp(params->format, "segment") &&
-         strcmp(params->format, "fmp4-segment"))) {
+         strcmp(params->format, "fmp4-segment")))) {
         elv_err("Output format can be only \"dash\", \"hls\", \"image2\", \"mp4\", \"fmp4\", \"segment\", or \"fmp4-segment\", url=%s", params->url);
         return eav_param;
     }
@@ -4680,6 +4738,28 @@ check_params(
     if (!params->url) {
         elv_err("Invalid params, url is null");
         return eav_param;
+    }
+
+    if (waveform) {
+        /* No output is produced, but the format string is read by logging and by skip_for_sync */
+        if (!params->format)
+            params->format = strdup("");
+        if (params->bypass_transcoding || params->copy_mpegts || params->skip_decoding) {
+            elv_err("Waveform needs decoding: bypass_transcoding, copy_mpegts and skip_decoding are not allowed, "
+                "url=%s", params->url);
+            return eav_param;
+        }
+        if (params->waveform_samples_per_pixel <= 0)
+            params->waveform_samples_per_pixel = DEFAULT_WAVEFORM_SPP;
+        if (params->waveform_samples_per_pixel > MAX_WAVEFORM_SPP) {
+            elv_err("Invalid waveform_samples_per_pixel=%d, max=%d, url=%s",
+                params->waveform_samples_per_pixel, MAX_WAVEFORM_SPP, params->url);
+            return eav_param;
+        }
+        if (params->waveform_batch_buckets <= 0)
+            params->waveform_batch_buckets = DEFAULT_WAVEFORM_BATCH;
+        /* Audio is never synced to a video stream here; the Go zero value 0 would otherwise match stream id 0 */
+        params->sync_audio_to_stream_id = -1;
     }
 
     if (params->stream_id >= 0 && (params->xc_type != xc_none || params->n_audio > 0)) {
@@ -4772,6 +4852,7 @@ check_params(
     }
 
     if (params->xc_type & xc_audio &&
+        !waveform &&
         params->sample_rate > 0 &&
         !strcmp(params->ecodec2, "aac") &&
         !is_valid_aac_sample_rate(params->sample_rate)) {
@@ -4780,6 +4861,7 @@ check_params(
     }
 
     if (params->xc_type & xc_audio &&
+        !waveform &&
         params->seg_duration <= 0 &&
         params->audio_seg_duration_ts <= 0 &&
         strcmp(params->format, "mp4")) {
@@ -4923,7 +5005,10 @@ log_params(
         "deinterlace=%d "
         "use_preprocessed_input=%d "
         "copy_mpegts=%d "
-        "timecode=%s",
+        "timecode=%s "
+        "waveform_spp=%d "
+        "waveform_batch=%d "
+        "waveform_start_sample=%"PRId64,
         params->stream_id, params->url,
         avpipe_version(),
         params->bypass_transcoding, params->skip_decoding,
@@ -4950,7 +5035,8 @@ log_params(
         1, params->video_time_base, params->video_frame_duration_ts, params->rotate,
         params->profile ? params->profile : "", params->level,  params->deinterlace,
         params->use_preprocessed_input, params->copy_mpegts,
-        params->timecode);
+        params->timecode,
+        params->waveform_samples_per_pixel, params->waveform_batch_buckets, params->waveform_start_sample);
     elv_log("AVPIPE XCPARAMS %s", buf);
 }
 
@@ -5148,6 +5234,8 @@ avpipe_fini(
         for (int i=0; i<decoder_context->n_audio; i++)
             avfilter_graph_free(&decoder_context->audio_filter_graph[i]);
     }
+    if (decoder_context)
+        waveform_acc_free(decoder_context);
 
     if (encoder_context && encoder_context->format_context) {
         void *avpipe_opaque = encoder_context->format_context->avpipe_opaque;

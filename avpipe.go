@@ -381,9 +381,38 @@ func (h *ioHandler) InStat(stream_index C.int, avp_stat C.avp_stat_t, stat_args 
 	case C.in_stat_mpegts:
 		statArgs := C.GoString((*C.char)(stat_args))
 		err = h.input.Stat(streamIndex, goavpipe.AV_IN_STAT_MPEGTS, statArgs)
+	case C.in_stat_audio_waveform:
+		err = h.input.Stat(streamIndex, goavpipe.AV_IN_STAT_AUDIO_WAVEFORM, audioWaveformStats(stat_args))
 	}
 
 	return err
+}
+
+// audioWaveformStats copies a C audio_waveform_stats_t into its Go form. The copy of minmax is mandatory: the C side
+// reuses the buffer for the next batch as soon as the stat callback returns.
+func audioWaveformStats(statArgs unsafe.Pointer) *goavpipe.AudioWaveformStats {
+	ws := (*C.audio_waveform_stats_t)(statArgs)
+	n := int(ws.n_buckets) * int(ws.channels) * 2
+	res := &goavpipe.AudioWaveformStats{
+		StreamIndex:       int(ws.stream_index),
+		SampleRate:        int(ws.sample_rate),
+		Channels:          int(ws.channels),
+		ChannelLayout:     uint64(ws.channel_layout),
+		SamplesPerPixel:   int(ws.samples_per_pixel),
+		TimeBaseNum:       int(ws.time_base.num),
+		TimeBaseDen:       int(ws.time_base.den),
+		StartPts:          int64(ws.start_pts),
+		FirstBucketIndex:  int64(ws.first_bucket_index),
+		TotalSamples:      int64(ws.total_samples),
+		NumBuckets:        int(ws.n_buckets),
+		LastBucketSamples: int(ws.last_bucket_samples),
+		IsLast:            ws.is_last != 0,
+		MinMax:            make([]int16, n),
+	}
+	if n > 0 && ws.minmax != nil {
+		copy(res.MinMax, unsafe.Slice((*int16)(unsafe.Pointer(ws.minmax)), n))
+	}
+	return res
 }
 
 func (h *ioHandler) putOutTable(fd int64, outHandler goavpipe.OutputHandler) {
@@ -924,6 +953,10 @@ func getCParams(params *goavpipe.XcParams) (*C.xcparams_t, error) {
 		level:                     C.int(params.Level),
 		deinterlace:               C.dif_type(params.Deinterlace),
 		timecode:                  C.CString(params.Timecode),
+
+		waveform_samples_per_pixel: C.int(params.WaveformSamplesPerPixel),
+		waveform_batch_buckets:     C.int(params.WaveformBatchBuckets),
+		waveform_start_sample:      C.int64_t(params.WaveformStartSample),
 
 		// All boolean params are handled below
 	}
