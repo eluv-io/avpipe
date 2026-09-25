@@ -32,6 +32,28 @@ Example: audio 2 mono to 1 stereo
 
 - output files: `./O/O1/`
 
+### Generate an audio waveform
+
+`xc_audio_waveform` (Go: `goavpipe.XcAudioWaveform`) decodes the selected audio streams and reports, per bucket of
+`waveform_samples_per_pixel` samples, the minimum and maximum sample value of every channel. It builds no encoder,
+muxer or output; the values arrive through the input handler's `Stat` callback as `AV_IN_STAT_AUDIO_WAVEFORM` with a
+`*goavpipe.AudioWaveformStats` payload, in batches of `waveform_batch_buckets` buckets plus a terminal batch with
+`IsLast` set. `goavpipe.WaveformCollector` assembles the batches of each stream.
+
+```
+./bin/elvxc transcode -f sample.mp4 --xc-type audio-waveform --audio-index 1 --waveform-spp 2400 --waveform-out sample.json
+```
+
+- `--waveform-out` writes the BBC waveform-data JSON form (version 2, 16-bit), as read by waveform-data.js and peaks.js
+- buckets lie on a global grid where bucket `i` covers samples `[i*spp, (i+1)*spp)` of the stream.
+  `--waveform-start-sample` places the input on that grid: `0` for a whole file, `-1` to derive it from the first
+  decoded pts (fMP4 segments whose `tfdt` carries the stream position), or the absolute sample index of the input's
+  first sample for a mezzanine part, whose timestamps restart at 0. A partial first or last bucket is reported as such
+  (`LastBucketSamples`) so a consumer can merge the two halves of a bucket split across two inputs by min/max
+- `AudioWaveformStats.MinMax` is a copy; on the C side the batch buffer is reused as soon as the stater returns
+- values are int16 whatever the source format, converted like ffmpeg converts to s16, so `ffmpeg -f s16le` bucketed
+  the same way is a bit-exact reference for integer sources and within one LSB for float sources
+
 ### Live Stream Ingest
 
 #### Generate timecoded live stream source
