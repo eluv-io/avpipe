@@ -152,7 +152,7 @@ func (r *NetReader) start() error {
 }
 
 func (r *NetReader) Cancel() {
-	cancelErr := errors.E("NetReader.Cancel", errors.K.Warn, "reason", "canceled by user request")
+	cancelErr := errors.E("NetReader.Cancel", errors.K.Warn, context.Canceled, "reason", "canceled by user request")
 	r.cancel(cancelErr)
 	reader := r.reader.Swap(nil)
 	if reader != nil {
