@@ -2457,6 +2457,33 @@ encode_frame(
             output_packet->pts != AV_NOPTS_VALUE)
             encoder_context->video_encoder_prev_pts = output_packet->pts;
 
+        // Diagnostic only - detect missing audio frames for UDP-based live sources, mirroring the video GAP detection, so
+        // packet-loss-caused audio duration anomalies can be correlated against a logged pts gap
+        {
+            int sel = selected_decoded_audio(decoder_context, stream_index);
+            int out_idx = (sel >= 0) ? audio_output_stream_index(decoder_context, params, sel) : -1;
+            AVCodecContext *audio_codec_ctx =
+                (out_idx >= 0) ? encoder_context->codec_context[out_idx] : NULL;
+
+            if (is_live_source_udp(decoder_context) &&
+                audio_codec_ctx != NULL &&
+                encoder_context->audio_encoder_prev_pts[stream_index] > 0 &&
+                audio_codec_ctx->frame_size > 0 &&
+                output_packet->pts != AV_NOPTS_VALUE &&
+                output_packet->pts - encoder_context->audio_encoder_prev_pts[stream_index] >=
+                    2*audio_codec_ctx->frame_size) {
+
+                int afc = (output_packet->pts - encoder_context->audio_encoder_prev_pts[stream_index]) /
+                    audio_codec_ctx->frame_size - 1;
+
+                elv_log("AUDIO GAP detected stream_index=%d packet->pts=%"PRId64" audio_encoder_prev_pts=%"PRId64" count=%d url=%s",
+                    stream_index, output_packet->pts, encoder_context->audio_encoder_prev_pts[stream_index], afc, params->url);
+            }
+
+            if (sel >= 0 && output_packet->pts != AV_NOPTS_VALUE)
+                encoder_context->audio_encoder_prev_pts[stream_index] = output_packet->pts;
+        }
+
         /*
          * Rescale video packets from encoder codec_context timebase to the output stream timebase.
          * The muxer may adjust stream timebase during avformat_write_header (e.g. from {1001,60000} to {1,60000}).
