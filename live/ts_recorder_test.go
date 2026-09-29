@@ -417,6 +417,8 @@ func TestUdpToMp4WithCancelling1(t *testing.T) {
 	}
 	err = runAndFiniXc(handle)
 	assert.Equal(t, avpipe.EAV_CANCELLED, err)
+	// A job cancelled before XcRun should never open its input
+	assert.Equal(t, 0, reqCtx.openCount, "input was opened despite cancel before XcRun")
 }
 
 // Cancels the live stream transcoding immediately after starting the transcoding (1 sec after XcRun).
@@ -489,6 +491,8 @@ func TestUdpToMp4WithCancelling2(t *testing.T) {
 	}
 
 	<-done
+	// Control for TestUdpToMp4WithCancelling1's openCount == 0: a run that did start opens the input once.
+	assert.Equal(t, 1, reqCtx.openCount, "input open count")
 }
 
 // Cancels the live stream transcoding some time after starting the transcoding (20 sec after XcRun).

@@ -58,6 +58,7 @@ type testCtx struct {
 	rwDiffMax    int
 	wc           io.WriteCloser
 	r            io.Reader
+	openCount    int // times inputOpener.Open ran for this url (avpipe actually opened the input)
 }
 
 // Implement AVPipeInputOpener
@@ -375,6 +376,7 @@ func (io *inputOpener) Open(fd int64, url string) (goavpipe.InputHandler, error)
 	if err != nil {
 		return nil, err
 	}
+	tc.openCount++
 
 	if (len(url) >= 4 && url[0:4] == "rtmp") || (len(url) >= 3 && url[0:3] == "udp") {
 		tc.fd = fd
