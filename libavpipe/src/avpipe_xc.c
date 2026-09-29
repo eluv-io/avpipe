@@ -5168,10 +5168,22 @@ avpipe_fini(
      * it is the inter-datagram gap.
      */
     if ((*xctx)->inctx && (*xctx)->inctx->utid) {
+        const char *url = (*xctx)->inctx->url ? (*xctx)->inctx->url : "";
+        struct timeval tv;
+        u_int64_t since = 0;
+
         (*xctx)->inctx->closed = 1;
         if ((*xctx)->inctx->udp_channel)
             elv_channel_close((*xctx)->inctx->udp_channel, 1);
+
+        elv_log("Joining UDP reader thread, url=%s", url);
+        elv_get_time(&tv);
         pthread_join((*xctx)->inctx->utid, NULL);
+        elv_since(&tv, &since);
+        if (since > 1500000)
+            elv_warn("Joined UDP reader thread after %"PRIu64" ms (expected <= 1000 ms), url=%s", since/1000, url);
+        else
+            elv_log("Joined UDP reader thread in %"PRIu64" ms, url=%s", since/1000, url);
         (*xctx)->inctx->utid = 0;
     }
 
