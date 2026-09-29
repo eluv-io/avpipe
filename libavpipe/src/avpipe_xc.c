@@ -3693,6 +3693,14 @@ avpipe_xc(
     int nretries = 0;
     AVPacket *input_packet = NULL;
 
+    /*
+     * Cancelled before the run started (XcCancel between XcInit and XcRun) - return before opening the input
+     */
+    if (decoder_context->cancelled) {
+        elv_dbg("avpipe_xc cancelled before start, url=%s", params->url ? params->url : "");
+        return eav_cancelled;
+    }
+
     if (!params->url || params->url[0] == '\0' ||
         in_handlers->avpipe_opener(params->url, inctx) < 0) {
         elv_err("Failed to open avpipe input \"%s\"", params->url != NULL ? params->url : "");
@@ -5152,6 +5160,12 @@ avpipe_fini(
      * free(inctx) below could release inctx->udp_channel / inctx while
      * udp_thread_func() is still calling elv_channel_send() on it - a
      * use-after-free that glibc reports later as "corrupted size vs. prev_size".
+     *
+     * The join is bounded: udp_thread_func() re-checks inctx->closed on every iteration
+     * and only ever blocks in readable_timeout() (poll with a 1s timeout), a non-blocking recvfrom(),
+     * or elv_channel_send() on a full channel - which elv_channel_close() wakes and turns into an immediate return.
+     * Worst case is one poll interval (1s) with a no-data source; with a live source
+     * it is the inter-datagram gap.
      */
     if ((*xctx)->inctx && (*xctx)->inctx->utid) {
         (*xctx)->inctx->closed = 1;
