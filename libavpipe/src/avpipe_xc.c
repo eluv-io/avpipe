@@ -3693,6 +3693,14 @@ avpipe_xc(
     int nretries = 0;
     AVPacket *input_packet = NULL;
 
+    /*
+     * Cancelled before the run started (XcCancel between XcInit and XcRun) - return before opening the input
+     */
+    if (decoder_context->cancelled) {
+        elv_dbg("avpipe_xc cancelled before start, url=%s", params->url ? params->url : "");
+        return eav_cancelled;
+    }
+
     if (!params->url || params->url[0] == '\0' ||
         in_handlers->avpipe_opener(params->url, inctx) < 0) {
         elv_err("Failed to open avpipe input \"%s\"", params->url != NULL ? params->url : "");
@@ -5143,6 +5151,41 @@ avpipe_fini(
 
     if ((*xctx)->inctx && (*xctx)->inctx->url)
         elv_dbg("Releasing all the resources, url=%s", (*xctx)->inctx->url);
+
+    /*
+     * Stop and join the UDP reader thread before releasing any input resources.
+     * xc_table_cancel() only signals the thread (sets closed, closes the channel);
+     * avpipe_fini() is the single owner of the join and runs on every teardown
+     * path, cancelled or not. Without this join, the elv_channel_fini() and
+     * free(inctx) below could release inctx->udp_channel / inctx while
+     * udp_thread_func() is still calling elv_channel_send() on it - a
+     * use-after-free that glibc reports later as "corrupted size vs. prev_size".
+     *
+     * The join is bounded: udp_thread_func() re-checks inctx->closed on every iteration
+     * and only ever blocks in readable_timeout() (poll with a 1s timeout), a non-blocking recvfrom(),
+     * or elv_channel_send() on a full channel - which elv_channel_close() wakes and turns into an immediate return.
+     * Worst case is one poll interval (1s) with a no-data source; with a live source
+     * it is the inter-datagram gap.
+     */
+    if ((*xctx)->inctx && (*xctx)->inctx->utid) {
+        const char *url = (*xctx)->inctx->url ? (*xctx)->inctx->url : "";
+        struct timeval tv;
+        u_int64_t since = 0;
+
+        (*xctx)->inctx->closed = 1;
+        if ((*xctx)->inctx->udp_channel)
+            elv_channel_close((*xctx)->inctx->udp_channel, 1);
+
+        elv_log("Joining UDP reader thread, url=%s", url);
+        elv_get_time(&tv);
+        pthread_join((*xctx)->inctx->utid, NULL);
+        elv_since(&tv, &since);
+        if (since > 1500000)
+            elv_warn("Joined UDP reader thread after %"PRIu64" ms (expected <= 1000 ms), url=%s", since/1000, url);
+        else
+            elv_log("Joined UDP reader thread in %"PRIu64" ms, url=%s", since/1000, url);
+        (*xctx)->inctx->utid = 0;
+    }
 
     /* Close input handler resources if it is not a muxing command */
     if (!(*xctx)->in_mux_ctx && (*xctx)->in_handlers) {
