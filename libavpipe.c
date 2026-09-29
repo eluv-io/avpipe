@@ -8,6 +8,7 @@
 #include "libavpipe/src/avpipe_codec.c"
 #include "libavpipe/src/avpipe_copy_mpegts.c"
 #include "libavpipe/src/avpipe_xc.c"
+#include "libavpipe/src/avpipe_waveform.c"
 #include "libavpipe/src/scte35.c"
 
 #include "utils/src/base64.c"

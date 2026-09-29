@@ -306,6 +306,10 @@ in_stat(
         rc = AVPipeStatInput(fd, stream_index, stat_type, c->data);
         break;
 
+    case in_stat_audio_waveform:
+        rc = AVPipeStatInput(fd, stream_index, stat_type, c->waveform);
+        break;
+
     default:
         rc = -1;
     }
@@ -609,6 +613,9 @@ udp_in_stat(
         if (debug_frame_level)
             elv_dbg("IN STAT UDP SCTE35 fd=%d, stat_type=%d, url=%s", fd, stat_type, c->url);
         rc = AVPipeStatInput(fd, stream_index, stat_type, c->data);
+        break;
+    case in_stat_audio_waveform:
+        rc = AVPipeStatInput(fd, stream_index, stat_type, c->waveform);
         break;
     default:
         elv_err("IN STAT UDP fd=%d, invalid input stat=%d, url=%s", stat_type, c->url);

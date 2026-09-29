@@ -1,10 +1,12 @@
 package cmd
 
 import (
+	"encoding/json"
 	"fmt"
 	"io"
 	"io/ioutil"
 	"os"
+	"path/filepath"
 	"strconv"
 	"strings"
 
@@ -68,8 +70,58 @@ func (i *noopElvxcInput) Stat(streamIndex int, statType goavpipe.AVStatType, sta
 		log.Info("AVCMD InputHandler.Stat", "scte35", statArgs, "streamIndex", streamIndex)
 	case goavpipe.AV_IN_STAT_MPEGTS:
 		log.Info("AVCMD InputHandler.Stat", "mpegts", statArgs, "streamIndex", streamIndex)
+	case goavpipe.AV_IN_STAT_AUDIO_WAVEFORM:
+		return waveformCollector.Stat(streamIndex, statType, statArgs)
 	}
 
+	return nil
+}
+
+// waveformCollector gathers the batches of an audio-waveform transcode for --waveform-out. One process runs one
+// transcode command, so a single collector suffices; with --threads > 1 the streams of the parallel runs collide.
+var waveformCollector goavpipe.WaveformCollector
+
+// waveformJSON is the BBC waveform-data JSON form of a collected stream, as read by waveform-data.js.
+type waveformJSON struct {
+	Version         int     `json:"version"`
+	Channels        int     `json:"channels"`
+	SampleRate      int     `json:"sample_rate"`
+	SamplesPerPixel int     `json:"samples_per_pixel"`
+	Bits            int     `json:"bits"`
+	Length          int     `json:"length"`
+	Data            []int16 `json:"data"`
+}
+
+// writeWaveformJSON writes every collected stream as a waveform-data JSON file. A single stream goes to path as
+// given; several streams get the stream index inserted before the extension.
+func writeWaveformJSON(path string) error {
+	streams := waveformCollector.Streams()
+	if len(streams) == 0 {
+		return fmt.Errorf("no waveform data collected")
+	}
+	for idx, w := range streams {
+		target := path
+		if len(streams) > 1 {
+			ext := filepath.Ext(path)
+			target = strings.TrimSuffix(path, ext) + "-" + strconv.Itoa(idx) + ext
+		}
+		bts, err := json.Marshal(waveformJSON{
+			Version:         2,
+			Channels:        w.Channels,
+			SampleRate:      w.SampleRate,
+			SamplesPerPixel: w.SamplesPerPixel,
+			Bits:            16,
+			Length:          w.Length(),
+			Data:            w.MinMax,
+		})
+		if err != nil {
+			return err
+		}
+		if err = os.WriteFile(target, bts, 0644); err != nil {
+			return err
+		}
+		fmt.Printf("wrote waveform stream=%d buckets=%d complete=%v to %s\n", idx, w.Length(), w.Complete, target)
+	}
 	return nil
 }
 
@@ -137,6 +189,8 @@ func (i *elvxcInput) Stat(streamIndex int, statType goavpipe.AVStatType, statArg
 		log.Info("AVCMD InputHandler.Stat", "scte35", statArgs, "streamIndex", streamIndex)
 	case goavpipe.AV_IN_STAT_MPEGTS:
 		log.Info("AVCMD InputHandler.Stat", "mpegts", statArgs, "streamIndex", streamIndex)
+	case goavpipe.AV_IN_STAT_AUDIO_WAVEFORM:
+		return waveformCollector.Stat(streamIndex, statType, statArgs)
 	}
 
 	return nil
@@ -341,7 +395,11 @@ func InitTranscode(cmdRoot *cobra.Command) error {
 	cmdTranscode.PersistentFlags().StringP("filter-descriptor", "", "", " Audio filter descriptor the same as ffmpeg format")
 	cmdTranscode.PersistentFlags().Int32P("force-keyint", "", 0, "force IDR key frame in this interval.")
 	cmdTranscode.PersistentFlags().BoolP("equal-fduration", "", false, "force equal frame duration. Must be 0 or 1 and only valid for 'fmp4-segment' format.")
-	cmdTranscode.PersistentFlags().StringP("xc-type", "", "", "transcoding type, can be 'all', 'video', 'audio', 'audio-join', 'audio-pan', 'audio-merge', 'extract-images' or 'extract-all-images'.")
+	cmdTranscode.PersistentFlags().StringP("xc-type", "", "", "transcoding type, can be 'all', 'video', 'audio', 'audio-join', 'audio-pan', 'audio-merge', 'extract-images', 'extract-all-images' or 'audio-waveform'.")
+	cmdTranscode.PersistentFlags().Int32P("waveform-spp", "", 256, "audio-waveform: samples per bucket.")
+	cmdTranscode.PersistentFlags().Int32P("waveform-batch", "", 256, "audio-waveform: buckets per stat callback.")
+	cmdTranscode.PersistentFlags().Int64P("waveform-start-sample", "", 0, "audio-waveform: absolute sample index of the first decoded sample, -1 to derive it from the first pts.")
+	cmdTranscode.PersistentFlags().StringP("waveform-out", "", "", "audio-waveform: write the collected waveform as BBC waveform-data JSON to this file.")
 	cmdTranscode.PersistentFlags().Int32P("crf", "", 23, "mutually exclusive with video-bitrate.")
 	cmdTranscode.PersistentFlags().StringP("preset", "", "medium", "Encoding speed/quality preset. Software encoders accept ultrafast..veryslow; NVIDIA accepts p1..p7 and maps the software preset names to p1..p7.")
 	cmdTranscode.PersistentFlags().Int64P("start-time-ts", "", 0, "offset to start transcoding")
@@ -543,8 +601,9 @@ func doTranscode(cmd *cobra.Command, args []string) error {
 		xcTypeStr != "audio-pan" &&
 		xcTypeStr != "audio-merge" &&
 		xcTypeStr != "extract-images" &&
-		xcTypeStr != "extract-all-images" {
-		return fmt.Errorf("Transcoding type is not valid, with no stream-id can be 'all', 'video', 'audio', 'audio-join', 'audio-pan', 'audio-merge', or 'extract-images'")
+		xcTypeStr != "extract-all-images" &&
+		xcTypeStr != "audio-waveform" {
+		return fmt.Errorf("Transcoding type is not valid, with no stream-id can be 'all', 'video', 'audio', 'audio-join', 'audio-pan', 'audio-merge', 'extract-images', 'extract-all-images' or 'audio-waveform'")
 	}
 	xcType := goavpipe.XcTypeFromString(xcTypeStr)
 	if xcType == goavpipe.XcAudio && len(encoder) == 0 {
@@ -770,6 +829,23 @@ func doTranscode(cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("extract-image-interval-ts is not valid")
 	}
 
+	waveformSpp, err := cmd.Flags().GetInt32("waveform-spp")
+	if err != nil || waveformSpp <= 0 {
+		return fmt.Errorf("waveform-spp is not valid, must be > 0")
+	}
+	waveformBatch, err := cmd.Flags().GetInt32("waveform-batch")
+	if err != nil || waveformBatch <= 0 {
+		return fmt.Errorf("waveform-batch is not valid, must be > 0")
+	}
+	waveformStartSample, err := cmd.Flags().GetInt64("waveform-start-sample")
+	if err != nil {
+		return fmt.Errorf("waveform-start-sample is not valid")
+	}
+	waveformOut := cmd.Flag("waveform-out").Value.String()
+	if len(waveformOut) > 0 && xcType != goavpipe.XcAudioWaveform {
+		return fmt.Errorf("waveform-out requires xc-type audio-waveform")
+	}
+
 	dir := "O"
 	if _, err := os.Stat(dir); os.IsNotExist(err) {
 		os.Mkdir(dir, 0755)
@@ -846,6 +922,10 @@ func doTranscode(cmd *cobra.Command, args []string) error {
 		Profile:                profile,
 		Level:                  int(level),
 		Deinterlace:            int(deinterlace),
+
+		WaveformSamplesPerPixel: waveformSpp,
+		WaveformBatchBuckets:    waveformBatch,
+		WaveformStartSample:     waveformStartSample,
 	}
 
 	err = getAudioIndexes(params, audioIndex)
@@ -887,6 +967,10 @@ func doTranscode(cmd *cobra.Command, args []string) error {
 			lastError = err.(error)
 			fmt.Println(err)
 		}
+	}
+
+	if lastError == nil && len(waveformOut) > 0 {
+		lastError = writeWaveformJSON(waveformOut)
 	}
 
 	return lastError

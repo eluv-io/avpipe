@@ -98,7 +98,9 @@ typedef enum avp_stat_t {
     out_stat_start_file = 10,               // Sent when a new file is opened and reports the segment index
     out_stat_end_file = 11,                 // Sent when a file is closed and reports the segment index
     in_stat_data_scte35 = 12,               // SCTE data arrived
-    in_stat_mpegts = 13                     // MPEGTS input stats (including RTP if applicable)
+    in_stat_mpegts = 13,                    // MPEGTS input stats (including RTP if applicable)
+                                            // 14 and 15 are used by the Go side only
+    in_stat_audio_waveform = 16             // Batch of per-bucket min/max audio sample values (audio_waveform_stats_t)
 } avp_stat_t;
 
 typedef enum avp_live_proto_t {
@@ -154,6 +156,32 @@ typedef struct io_mux_ctx_t {
 
 typedef struct xcparams_t xcparams_t;
 
+#define WAVEFORM_MAX_CHANNELS   16
+
+/*
+ * Payload of the in_stat_audio_waveform stat, produced by xc_audio_waveform: one batch of consecutive buckets, each
+ * holding the minimum and maximum decoded sample value of every channel over waveform_samples_per_pixel samples.
+ * Buckets lie on a global grid: bucket i covers samples [i*spp, (i+1)*spp) of the stream, so the first and the last
+ * bucket of an input that starts or ends mid-bucket cover fewer samples. The values are int16 regardless of the
+ * source sample format, converted like ffmpeg converts to s16. The stater must copy minmax before returning: the
+ * buffer is reused for the next batch.
+ */
+typedef struct audio_waveform_stats_t {
+    int         stream_index;           /* Source stream index */
+    int         sample_rate;            /* Source sample rate in Hz */
+    int         channels;               /* Source channel count, 1..WAVEFORM_MAX_CHANNELS */
+    uint64_t    channel_layout;         /* Native channel layout mask, 0 if not native */
+    int         samples_per_pixel;      /* Samples per bucket */
+    AVRational  time_base;              /* Time base of start_pts (the source stream time base) */
+    int64_t     start_pts;              /* pts of the first decoded sample of the first bucket in this batch */
+    int64_t     first_bucket_index;     /* Absolute index of the first bucket in this batch */
+    int64_t     total_samples;          /* Samples decoded so far, including this batch */
+    int         n_buckets;              /* Buckets in this batch, may be 0 for the terminal batch */
+    int         last_bucket_samples;    /* Decoded samples in the most recently closed bucket */
+    int         is_last;                /* 1 for the terminal batch emitted at end of stream or on cancel */
+    int16_t     *minmax;                /* n_buckets * channels * 2 values laid out [bucket][channel][min,max] */
+} audio_waveform_stats_t;
+
 typedef struct ioctx_t {
     /* Application specific IO context */
     void                *opaque;
@@ -197,6 +225,9 @@ typedef struct ioctx_t {
     int     seg_index;          /* segment index if this ioctx is a segment */
 
     uint8_t *data;  /* Data stream buffer (e.g. SCTE-35) */
+
+    /* Set by the audio decoding thread right before it fires in_stat_audio_waveform, NULL otherwise */
+    audio_waveform_stats_t *waveform;
 
     io_mux_ctx_t    *in_mux_ctx;   /* Input muxer context */
     int             in_mux_index;
@@ -403,6 +434,9 @@ typedef struct coderctx_t {
     AVFilterGraph   *audio_filter_graph[MAX_STREAMS];
     int     n_audio_filters;                            /* Number of initialized audio filters */
 
+    /* Waveform accumulators for xc_audio_waveform, indexed like audio_stream_index; decoder context only */
+    struct waveform_acc_t *waveform_acc[MAX_STREAMS];
+
     int64_t video_frames_written;                       /* Total video frames written so far */
     int64_t audio_frames_written[MAX_STREAMS];          /* Total audio frames written so far */
     int64_t video_pts;                                  /* Video decoder/encoder pts */
@@ -454,7 +488,8 @@ typedef enum xc_type_t {
     xc_mux                  = 32,
     xc_extract_images       = 65,   // 0x40 | xc_video
     xc_extract_all_images   = 129,  // 0x80 | xc_video
-    xc_probe                = 256
+    xc_probe                = 256,
+    xc_audio_waveform       = 514   // 0x200 | xc_audio: decode audio only and emit in_stat_audio_waveform, no output
 } xc_type_t;
 
 /* handled image types in get_overlay_filter_string*/
@@ -568,6 +603,11 @@ typedef struct xcparams_t {
     int         level;
     dif_type    deinterlace;                // Deinterlacing filter
     char        *timecode;                  // Original timecode string
+
+    int         waveform_samples_per_pixel; // xc_audio_waveform: samples per bucket, default 256
+    int         waveform_batch_buckets;     // xc_audio_waveform: buckets per in_stat_audio_waveform callback, default 256
+    int64_t     waveform_start_sample;      // xc_audio_waveform: absolute sample index of the first decoded sample, which
+                                            // aligns the bucket grid; -1 derives it from the first decoded pts
 } xcparams_t;
 
 #define MAX_CODEC_NAME  256

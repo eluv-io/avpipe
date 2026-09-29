@@ -30,6 +30,7 @@ const (
 	AV_IN_STAT_MPEGTS                   = 13
 	AV_IN_STAT_MPEGTS_START             = 14
 	AV_IN_STAT_MPEGTS_BYTES_WRITTEN     = 15
+	AV_IN_STAT_AUDIO_WAVEFORM           = 16 // statArgs is *AudioWaveformStats
 )
 
 func (a AVStatType) Name() string {
@@ -64,6 +65,8 @@ func (a AVStatType) Name() string {
 		return "AV_IN_STAT_MPEGTS_START"
 	case AV_IN_STAT_MPEGTS_BYTES_WRITTEN:
 		return "AV_IN_STAT_MPEGTS_BYTES_WRITTEN"
+	case AV_IN_STAT_AUDIO_WAVEFORM:
+		return "AV_IN_STAT_AUDIO_WAVEFORM"
 	default:
 		return fmt.Sprintf("Unknown(%d)", a)
 	}
@@ -205,6 +208,7 @@ const (
 	XcExtractImages    XcType = 65  // XcVideo | 2^6
 	XcExtractAllImages XcType = 129 // XcVideo | 2^7
 	Xcprobe            XcType = 256
+	XcAudioWaveform    XcType = 514 // XcAudio | 2^9: decode audio only and report AV_IN_STAT_AUDIO_WAVEFORM, no output
 )
 
 type XcProfile int
@@ -237,6 +241,8 @@ func XcTypeFromString(xcTypeStr string) XcType {
 		xcType = XcExtractImages
 	case "extract-all-images":
 		xcType = XcExtractAllImages
+	case "audio-waveform":
+		xcType = XcAudioWaveform
 	default:
 		xcType = XcNone
 	}
@@ -371,6 +377,14 @@ type XcParams struct {
 	Level                  int         `json:"level,omitempty"`
 	Deinterlace            int         `json:"deinterlace,omitempty"`
 	Timecode               string      `json:"timecode,omitempty"`
+
+	// XcAudioWaveform only. Buckets lie on a global grid where bucket i covers samples [i*spp, (i+1)*spp) of the
+	// stream; WaveformStartSample is the absolute index of the input's first decoded sample and places the input on
+	// that grid. 0 suits a whole file. -1 derives it from the first decoded pts, which suits an fMP4 segment whose
+	// tfdt carries the stream position.
+	WaveformSamplesPerPixel int32 `json:"waveform_samples_per_pixel,omitempty"` // samples per bucket, default 256
+	WaveformBatchBuckets    int32 `json:"waveform_batch_buckets,omitempty"`     // buckets per stat callback, default 256
+	WaveformStartSample     int64 `json:"waveform_start_sample,omitempty"`
 }
 
 func (p *XcParams) String() string { return util.JSONString(p) }
