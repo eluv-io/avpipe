@@ -109,7 +109,6 @@ parse_duration(
  * a fraction of the scaled frame width, in units of 1/VERTICAL_DATA_SCALE:
  *
  *      0 = left edge      5000 = centre      10000 = right edge
- *
  */
 #define VERTICAL_DATA_SCALE     10000
 
