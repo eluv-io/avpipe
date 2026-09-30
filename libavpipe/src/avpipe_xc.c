@@ -473,7 +473,7 @@ prepare_decoder(
                 return eav_codec_param;
             }
             char codec_tag[AV_FOURCC_MAX_STRING_SIZE];
-            elv_warn("No decoder for stream, it will not be decoded, stream_index=%d, stream_id=%d, codec_type=%s, "
+            elv_log("No decoder for stream, it will not be decoded, stream_index=%d, stream_id=%d, codec_type=%s, "
                 "codec_id=%d, codec_tag=%s, url=%s",
                 i, decoder_context->stream[i]->id,
                 av_get_media_type_string(decoder_context->codec_parameters[i]->codec_type),
