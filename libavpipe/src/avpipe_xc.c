@@ -457,9 +457,28 @@ prepare_decoder(
         }
 
         if (decoder_context->codec_parameters[i]->codec_type != AVMEDIA_TYPE_DATA && !decoder_context->codec[i]) {
-            elv_err("Unsupported decoder codec param=%s, codec_id=%d, url=%s",
-                params ? params->dcodec : "", decoder_context->codec_parameters[i]->codec_id, url);
-            return eav_codec_param;
+            /*
+             * No decoder is available for this stream
+             *
+             * This is only fatal if the stream is one we have to decode: the stream_id / audio_index
+             * selection or the auto-selected video stream. Any other stream (including the audio sync
+             * stream, which is only inspected at the packet level) is kept as an undecodable stream
+             * (codec[i] == NULL, like a data stream) so that probe can still report it and transcoding
+             * of the remaining streams proceeds; the read loop skips its packets.
+             */
+            int needs_decoder = selected_stream || i == decoder_context->video_stream_index;
+            if (needs_decoder) {
+                elv_err("Unsupported decoder codec param=%s, codec_id=%d, url=%s",
+                    params ? params->dcodec : "", decoder_context->codec_parameters[i]->codec_id, url);
+                return eav_codec_param;
+            }
+            char codec_tag[AV_FOURCC_MAX_STRING_SIZE];
+            elv_warn("No decoder for stream, it will not be decoded, stream_index=%d, stream_id=%d, codec_type=%s, "
+                "codec_id=%d, codec_tag=%s, url=%s",
+                i, decoder_context->stream[i]->id,
+                av_get_media_type_string(decoder_context->codec_parameters[i]->codec_type),
+                decoder_context->codec_parameters[i]->codec_id,
+                av_fourcc_make_string(codec_tag, decoder_context->codec_parameters[i]->codec_tag), url);
         }
 
         decoder_context->codec_context[i] = avcodec_alloc_context3(decoder_context->codec[i]);
@@ -484,8 +503,9 @@ prepare_decoder(
         else
             decoder_context->codec_context[i]->thread_count = DEFAULT_THREAD_COUNT;
 
-        /* Open the decoder (initialize the decoder codec_context[i] using given codec[i]). */
-        if (decoder_context->codec_parameters[i]->codec_type != AVMEDIA_TYPE_DATA &&
+        /* Open the decoder (initialize the decoder codec_context[i] using given codec[i]).
+         * codec[i] is NULL for data streams and for streams without a decoder, so don't open. */
+        if (decoder_context->codec[i] &&
              (rc = avcodec_open2(decoder_context->codec_context[i], decoder_context->codec[i], NULL)) < 0) {
             elv_err("Failed to open codec through avcodec_open2, err=%d, param=%s, codec_id=%s, url=%s",
                 rc, params->dcodec, avcodec_get_name(decoder_context->codec_parameters[i]->codec_id), url);
@@ -4465,6 +4485,10 @@ avpipe_probe(
         const AVCodec *codec = decoder_ctx.codec[i];
         AVRational sar, dar;
 
+        /* Subtitle/attachment/unknown streams have no codec context and are not reported. An audio or
+         * video stream with no decoder (see prepare_decoder) is reported like a data stream, with no
+         * codec id/name but with the container tag: clients map probe positions to stream indexes, so
+         * leaving it out would shift the streams after it. */
         if (!codec_context) {
             nb_skipped_streams++;
             continue;
@@ -4525,7 +4549,10 @@ avpipe_probe(
         stream_probes_ptr->has_b_frames = codec_context->has_b_frames;
         stream_probes_ptr->sample_rate = codec_context->sample_rate;
         stream_probes_ptr->channels = codec_context->ch_layout.nb_channels;
-        if (codec && codec->type == AVMEDIA_TYPE_AUDIO)
+        /* Gate on the codec_type reported above (codec->type when a decoder exists, the demuxer's
+         * codecpar->codec_type otherwise) so an audio stream without a decoder still reports the
+         * channel layout the demuxer found. */
+        if (stream_probes_ptr->codec_type == AVMEDIA_TYPE_AUDIO)
             stream_probes_ptr->channel_layout = codec_context->ch_layout.u.mask;
         else
             stream_probes_ptr->channel_layout = -1;
