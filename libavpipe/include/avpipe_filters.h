@@ -85,6 +85,7 @@ crop_calc_width(
  * @brief   Send crop x command to the filter graph for vertical video.
  *
  * @param   decoder_context  Decoder context with filter graph and crop filter ctx.
+ * @param   encoder_context  Encoder context (crop output height/width).
  * @param   params           Transcoding parameters (vertical data source, url).
  * @return  eav_success, or an input error when the streaming source fails.
  */

@@ -1,7 +1,9 @@
 package xc_test
 
 import (
+	"context"
 	"errors"
+	"fmt"
 	"io"
 	"testing"
 
@@ -22,6 +24,22 @@ func TestXcRunRawOnlyReturnsTerminalErrorAndClosesInput(t *testing.T) {
 	err := avpipe.XcRun(handle)
 
 	require.ErrorIs(t, err, terminalErr)
+	require.True(t, processor.waited)
+	require.Equal(t, 1, input.closes)
+	assertRawOnlyTestCleanedUp(t, handle, processor.fd)
+}
+
+func TestXcRunRawOnlyReturnsCancelledAndClosesInput(t *testing.T) {
+	input := &rawOnlyTestInput{}
+	processor := &rawOnlyTestProcessor{
+		params:    &goavpipe.XcParams{Url: "test://raw-only-cancelled"},
+		statusErr: fmt.Errorf("processor stopped: %w", context.Canceled),
+	}
+	handle := initRawOnlyTest(t, processor, input)
+
+	err := avpipe.XcRun(handle)
+
+	require.Equal(t, avpipe.EAV_CANCELLED, err)
 	require.True(t, processor.waited)
 	require.Equal(t, 1, input.closes)
 	assertRawOnlyTestCleanedUp(t, handle, processor.fd)

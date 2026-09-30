@@ -13,6 +13,7 @@
 #include <stdio.h>
 #include <libavutil/log.h>
 #include <libavutil/pixdesc.h>
+#include <libavutil/parseutils.h>
 #include <errno.h>
 #include <pthread.h>
 
@@ -91,8 +92,28 @@ in_opener(
         if ((rc = bind(fd, sa, salen)) < 0) {
             /* Can not bind, fail and exit */
             elv_err("Failed to bind UDP socket, rc=%d", rc);
+            close(fd);
+            free(sa);
+            free_parsed_url(&url_parser);
             return -1;
         }
+
+        char localaddr[64] = {0};
+        const char *multicast_iface = NULL;
+        if (url_parser.query_string &&
+            av_find_info_tag(localaddr, sizeof(localaddr), "localaddr", url_parser.query_string)) {
+            multicast_iface = localaddr;
+        }
+        if (udp_join_multicast(fd, sa, salen, multicast_iface) < 0) {
+            elv_err("Failed to join UDP multicast group, url=%s, localaddr=%s, errno=%d",
+                url, multicast_iface ? multicast_iface : "", errno);
+            close(fd);
+            free(sa);
+            free_parsed_url(&url_parser);
+            return -1;
+        }
+        free(sa);
+        free_parsed_url(&url_parser);
 
         struct timeval tv;
         tv.tv_sec = UDP_PIPE_TIMEOUT;
@@ -1616,8 +1637,19 @@ main(
                     fclose(vd_fp);
                     exit(EXIT_FAILURE);
                 }
+                if (vd_size > MAX_VERTICAL_DATA_LEN) {
+                    fprintf(stderr, "vertical-data file too large: %ld bytes (max %d): %s\n",
+                        vd_size, MAX_VERTICAL_DATA_LEN, vd_path);
+                    fclose(vd_fp);
+                    exit(EXIT_FAILURE);
+                }
                 p.vertical_data_len = (int)vd_size;
                 p.vertical_data = (uint8_t *)malloc(vd_size);
+                if (!p.vertical_data) {
+                    fprintf(stderr, "Failed to allocate %ld bytes for vertical-data: %s\n", vd_size, vd_path);
+                    fclose(vd_fp);
+                    exit(EXIT_FAILURE);
+                }
                 if (fread(p.vertical_data, 1, vd_size, vd_fp) != (size_t)vd_size) {
                     fprintf(stderr, "Failed to read vertical-data file: %s\n", vd_path);
                     fclose(vd_fp);

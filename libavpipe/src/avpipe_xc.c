@@ -2432,6 +2432,33 @@ encode_frame(
             output_packet->pts != AV_NOPTS_VALUE)
             encoder_context->video_encoder_prev_pts = output_packet->pts;
 
+        // Diagnostic only - detect missing audio frames for UDP-based live sources, mirroring the video GAP detection, so
+        // packet-loss-caused audio duration anomalies can be correlated against a logged pts gap
+        {
+            int sel = selected_decoded_audio(decoder_context, stream_index);
+            int out_idx = (sel >= 0) ? audio_output_stream_index(decoder_context, params, sel) : -1;
+            AVCodecContext *audio_codec_ctx =
+                (out_idx >= 0) ? encoder_context->codec_context[out_idx] : NULL;
+
+            if (is_live_source_udp(decoder_context) &&
+                audio_codec_ctx != NULL &&
+                encoder_context->audio_encoder_prev_pts[stream_index] > 0 &&
+                audio_codec_ctx->frame_size > 0 &&
+                output_packet->pts != AV_NOPTS_VALUE &&
+                output_packet->pts - encoder_context->audio_encoder_prev_pts[stream_index] >=
+                    2*audio_codec_ctx->frame_size) {
+
+                int afc = (output_packet->pts - encoder_context->audio_encoder_prev_pts[stream_index]) /
+                    audio_codec_ctx->frame_size - 1;
+
+                elv_log("AUDIO GAP detected stream_index=%d packet->pts=%"PRId64" audio_encoder_prev_pts=%"PRId64" count=%d url=%s",
+                    stream_index, output_packet->pts, encoder_context->audio_encoder_prev_pts[stream_index], afc, params->url);
+            }
+
+            if (sel >= 0 && output_packet->pts != AV_NOPTS_VALUE)
+                encoder_context->audio_encoder_prev_pts[stream_index] = output_packet->pts;
+        }
+
         /*
          * Rescale video packets from encoder codec_context timebase to the output stream timebase.
          * The muxer may adjust stream timebase during avformat_write_header (e.g. from {1001,60000} to {1,60000}).
@@ -3622,7 +3649,7 @@ get_filter_str(
             free(*filter_str);
             return ret;
         }
-        elv_log("FILTER str=%s", *filter_str);
+        elv_dbg("FILTER str=%s", *filter_str);
     }
 
     return 0;
@@ -3662,6 +3689,14 @@ avpipe_xc(
     int av_read_frame_rc = 0;
     int nretries = 0;
     AVPacket *input_packet = NULL;
+
+    /*
+     * Cancelled before the run started (XcCancel between XcInit and XcRun) - return before opening the input
+     */
+    if (decoder_context->cancelled) {
+        elv_dbg("avpipe_xc cancelled before start, url=%s", params->url ? params->url : "");
+        return eav_cancelled;
+    }
 
     if (!params->url || params->url[0] == '\0' ||
         in_handlers->avpipe_opener(params->url, inctx) < 0) {
@@ -4860,6 +4895,7 @@ check_params(
             elv_err("Unsupported vertical data type=%d url=%s", params->vertical, params->url);
             return eav_param;
         }
+
         int has_vertical_data = params->vertical_data != NULL && params->vertical_data_len > 0;
         int has_vertical_reader = params->vertical_data_reader != NULL;
         if (has_vertical_data && has_vertical_reader) {
@@ -4879,6 +4915,31 @@ check_params(
     if (params->fade && *params->fade != '\0' && params->bypass_transcoding) {
         elv_err("Incompatible params - fade requires transcoding (bypass must be disabled), url=%s", params->url);
         return eav_param;
+    }
+
+    /*
+     * get_filter_str() has mutually-exclusive branches: deinterlace, rotate and
+     * watermark each emit their own filter chain and return early, while the
+     * vertical crop and fade filters are only emitted from the final else branch.
+     * Combining them would silently drop the vertical/fade filters, so reject the
+     * combination here.
+     */
+    if (params->vertical || (params->fade && *params->fade != '\0')) {
+        const char *feature = params->vertical ? "vertical crop" : "fade";
+        if (params->deinterlace != dif_none) {
+            elv_err("Incompatible params - %s not supported with deinterlacing, url=%s", feature, params->url);
+            return eav_param;
+        }
+        if (params->rotate > 0) {
+            elv_err("Incompatible params - %s not supported with rotate, url=%s", feature, params->url);
+            return eav_param;
+        }
+        if ((params->watermark_text && *params->watermark_text != '\0') ||
+            (params->watermark_timecode && *params->watermark_timecode != '\0') ||
+            (params->watermark_overlay && params->watermark_overlay[0] != '\0')) {
+            elv_err("Incompatible params - %s not supported with watermark, url=%s", feature, params->url);
+            return eav_param;
+        }
     }
 
     return eav_success;
@@ -5058,8 +5119,12 @@ avpipe_copy_xcparams(
     p2->vertical_data_len = 0;
     if (p->vertical_data != NULL && p->vertical_data_len > 0) {
         p2->vertical_data = (uint8_t *) calloc(1, p->vertical_data_len);
-        memcpy(p2->vertical_data, p->vertical_data, p->vertical_data_len);
-        p2->vertical_data_len = p->vertical_data_len;
+        if (p2->vertical_data != NULL) {
+            memcpy(p2->vertical_data, p->vertical_data, p->vertical_data_len);
+            p2->vertical_data_len = p->vertical_data_len;
+        } else {
+            elv_err("Failed to allocate %d bytes for vertical_data copy, url=%s", p->vertical_data_len, p2->url != NULL ? p2->url : "");
+        }
     }
 
     return p2;
@@ -5177,6 +5242,41 @@ avpipe_fini(
 
     if ((*xctx)->inctx && (*xctx)->inctx->url)
         elv_dbg("Releasing all the resources, url=%s", (*xctx)->inctx->url);
+
+    /*
+     * Stop and join the UDP reader thread before releasing any input resources.
+     * xc_table_cancel() only signals the thread (sets closed, closes the channel);
+     * avpipe_fini() is the single owner of the join and runs on every teardown
+     * path, cancelled or not. Without this join, the elv_channel_fini() and
+     * free(inctx) below could release inctx->udp_channel / inctx while
+     * udp_thread_func() is still calling elv_channel_send() on it - a
+     * use-after-free that glibc reports later as "corrupted size vs. prev_size".
+     *
+     * The join is bounded: udp_thread_func() re-checks inctx->closed on every iteration
+     * and only ever blocks in readable_timeout() (poll with a 1s timeout), a non-blocking recvfrom(),
+     * or elv_channel_send() on a full channel - which elv_channel_close() wakes and turns into an immediate return.
+     * Worst case is one poll interval (1s) with a no-data source; with a live source
+     * it is the inter-datagram gap.
+     */
+    if ((*xctx)->inctx && (*xctx)->inctx->utid) {
+        const char *url = (*xctx)->inctx->url ? (*xctx)->inctx->url : "";
+        struct timeval tv;
+        u_int64_t since = 0;
+
+        (*xctx)->inctx->closed = 1;
+        if ((*xctx)->inctx->udp_channel)
+            elv_channel_close((*xctx)->inctx->udp_channel, 1);
+
+        elv_log("Joining UDP reader thread, url=%s", url);
+        elv_get_time(&tv);
+        pthread_join((*xctx)->inctx->utid, NULL);
+        elv_since(&tv, &since);
+        if (since > 1500000)
+            elv_warn("Joined UDP reader thread after %"PRIu64" ms (expected <= 1000 ms), url=%s", since/1000, url);
+        else
+            elv_log("Joined UDP reader thread in %"PRIu64" ms, url=%s", since/1000, url);
+        (*xctx)->inctx->utid = 0;
+    }
 
     /* Close input handler resources if it is not a muxing command */
     if (!(*xctx)->in_mux_ctx && (*xctx)->in_handlers) {
@@ -5325,15 +5425,24 @@ set_extract_images(
     params->extract_images_ts[index] = value;
 }
 
-void
+int
 init_vertical_data(
     xcparams_t *params,
     const uint8_t *data,
     int len)
 {
+    if (len <= 0 || len > MAX_VERTICAL_DATA_LEN) {
+        elv_err("Invalid vertical_data length %d (max %d), url=%s", len, MAX_VERTICAL_DATA_LEN, params->url != NULL ? params->url : "");
+        return eav_param;
+    }
     params->vertical_data = malloc(len);
+    if (!params->vertical_data) {
+        elv_err("Failed to allocate %d bytes for vertical_data, url=%s", len, params->url != NULL ? params->url : "");
+        return eav_mem_alloc;
+    }
     memcpy(params->vertical_data, data, len);
     params->vertical_data_len = len;
+    return eav_success;
 }
 
 void

@@ -46,6 +46,7 @@ static inline uint64_t get_channel_layout_mask(const AVChannelLayout *layout) {
 */
 import "C"
 import (
+	"context"
 	"encoding/binary"
 	"fmt"
 	"io"
@@ -1066,9 +1067,13 @@ func getCParams(params *goavpipe.XcParams) (*C.xcparams_t, error) {
 	}
 
 	if len(params.VerticalData) > 0 {
-		C.init_vertical_data((*C.xcparams_t)(unsafe.Pointer(cparams)),
+		rc := C.init_vertical_data((*C.xcparams_t)(unsafe.Pointer(cparams)),
 			(*C.uint8_t)(unsafe.Pointer(&params.VerticalData[0])),
 			C.int(len(params.VerticalData)))
+		if err := avpipeError(rc); err != nil {
+			return nil, fmt.Errorf("failed to copy vertical data (%d bytes): %w",
+				len(params.VerticalData), err)
+		}
 	}
 
 	return cparams, nil
@@ -1573,6 +1578,9 @@ func XcRun(handle int32) (runErr error) {
 		}
 		processor.Wait()
 		_, err = processor.Status()
+		if errors.Is(err, context.Canceled) {
+			return EAV_CANCELLED
+		}
 		return err
 	}
 

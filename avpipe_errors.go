@@ -13,9 +13,9 @@ package avpipe
 // #cgo pkg-config: libavutil
 // #cgo netint pkg-config: xcoder
 // #cgo pkg-config: srt
-// #cgo CFLAGS: -I${SRCDIR}/include
-// #cgo CFLAGS: -I${SRCDIR}/libavpipe/include
 // #cgo CFLAGS: -I${SRCDIR}/utils/include
+// #cgo CFLAGS: -I${SRCDIR}/libavpipe/include
+// #cgo CFLAGS: -I${SRCDIR}/include
 // #cgo LDFLAGS: -L${SRCDIR}
 // #cgo linux LDFLAGS: -Wl,-rpath,$ORIGIN/../lib
 // #include "avpipe.h"

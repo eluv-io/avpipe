@@ -8,7 +8,34 @@ import (
 	"github.com/eluv-io/avpipe"
 	"github.com/eluv-io/avpipe/goavpipe"
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 )
+
+// probeWithRetry probes params.Url, retrying transient failures.
+func probeWithRetry(t *testing.T, params *goavpipe.XcParams, retryCount int) (probeInfo *goavpipe.ProbeInfo, err error) {
+	t.Helper()
+	for i := 0; i < retryCount; i++ {
+		probeInfo, err = avpipe.Probe(params)
+		if err == nil {
+			return probeInfo, nil
+		}
+		if i == retryCount-1 {
+			break
+		}
+		tlog.Info("probe attempt failed, retrying", "attempt", i+1, "url", params.Url, "err", err)
+		time.Sleep(time.Second)
+	}
+	return probeInfo, err
+}
+
+// requireProbe fails unless the probe succeeded and returned at least minStreams streams.
+func requireProbe(t *testing.T, probeInfo *goavpipe.ProbeInfo, err error, minStreams int) {
+	t.Helper()
+	require.NoError(t, err)
+	require.NotNil(t, probeInfo)
+	require.GreaterOrEqualf(t, len(probeInfo.Streams), minStreams,
+		"probe returned %d streams, expected at least %d", len(probeInfo.Streams), minStreams)
+}
 
 // 1) Starts ffmpeg for streaming RTMP in listen mode
 // 2) avpipe probe connects to listening ffmpeg and probes the stream
@@ -40,9 +67,9 @@ func TestProbeRTMPConnect(t *testing.T) {
 	goavpipe.InitIOHandler(&inputOpener{}, &outputOpener{})
 
 	tlog.Info("Probing RTMP stream start", "params", fmt.Sprintf("%+v", *XCParams))
-	probeInfo, err := avpipe.Probe(XCParams)
+	probeInfo, err := probeWithRetry(t, XCParams, 5)
 
-	assert.NoError(t, err)
+	requireProbe(t, probeInfo, err, 2)
 	assert.Equal(t, "h264", probeInfo.Streams[0].CodecName)
 	assert.Equal(t, 1920, probeInfo.Streams[0].Width)
 	assert.Equal(t, 1080, probeInfo.Streams[0].Height)
@@ -98,7 +125,7 @@ func TestProbeRTMPListen(t *testing.T) {
 	}
 
 	<-done
-	assert.NoError(t, probeErr)
+	requireProbe(t, probeInfo, probeErr, 2)
 	tlog.Info("Probe done", "probeInfo", fmt.Sprintf("%+v", *probeInfo))
 	assert.Equal(t, "h264", probeInfo.Streams[0].CodecName)
 	assert.Equal(t, 1920, probeInfo.Streams[0].Width)
@@ -172,9 +199,9 @@ func TestProbeUDPConnect(t *testing.T) {
 	goavpipe.InitIOHandler(&inputOpener{}, &outputOpener{})
 
 	tlog.Info("Probing MPEGTS stream start", "params", fmt.Sprintf("%+v", *XCParams))
-	probeInfo, err := avpipe.Probe(XCParams)
+	probeInfo, err := probeWithRetry(t, XCParams, 5)
 
-	assert.NoError(t, err)
+	requireProbe(t, probeInfo, err, 2)
 	assert.Equal(t, "h264", probeInfo.Streams[0].CodecName)
 	assert.Equal(t, 1280, probeInfo.Streams[0].Width)
 	assert.Equal(t, 720, probeInfo.Streams[0].Height)
@@ -229,7 +256,7 @@ func TestProbeUDPListen(t *testing.T) {
 	}
 
 	<-done
-	assert.NoError(t, probeErr)
+	requireProbe(t, probeInfo, probeErr, 2)
 	assert.Equal(t, "h264", probeInfo.Streams[0].CodecName)
 	assert.Equal(t, 1280, probeInfo.Streams[0].Width)
 	assert.Equal(t, 720, probeInfo.Streams[0].Height)

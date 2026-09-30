@@ -13,6 +13,7 @@
 #include <pthread.h>
 #include <libavutil/log.h>
 #include <libavutil/pixdesc.h>
+#include <libavutil/parseutils.h>
 #include <errno.h>
 #include <pthread.h>
 #include <srt.h>
@@ -312,6 +313,10 @@ in_stat(
     return rc;
 }
 
+/*
+ * Open UDP URL (IPv4 unicast or multicast).
+ * For multicast, accept query parameter "localaddr"
+ */
 static int
 udp_in_opener(
     const char *url,
@@ -344,8 +349,28 @@ udp_in_opener(
     if ((rc = bind(sockfd, sa, salen)) < 0) {
         /* Can not bind, fail and exit */
         elv_err("Failed to bind UDP socket, rc=%d, url=%s, errno=%d", rc, url, errno);
+        close(sockfd);
+        free(sa);
+        free_parsed_url(&url_parser);
         return -1;
     }
+
+    char localaddr[64] = {0};
+    const char *multicast_iface = NULL;
+    if (url_parser.query_string &&
+        av_find_info_tag(localaddr, sizeof(localaddr), "localaddr", url_parser.query_string)) {
+        multicast_iface = localaddr;
+    }
+    if (udp_join_multicast(sockfd, sa, salen, multicast_iface) < 0) {
+        elv_err("Failed to join UDP multicast group, url=%s, localaddr=%s, errno=%d",
+            url, multicast_iface ? multicast_iface : "", errno);
+        close(sockfd);
+        free(sa);
+        free_parsed_url(&url_parser);
+        return -1;
+    }
+    free(sa);
+    free_parsed_url(&url_parser);
 
     struct timeval tv;
     tv.tv_sec = UDP_PIPE_TIMEOUT;
@@ -881,12 +906,12 @@ xc_table_cancel(
             if (xctx->index == i) {
                 xctx->decoder_ctx.cancelled = 1;
                 xctx->encoder_ctx.cancelled = 1;
-                /* If there is a UDP thread running wait for it to be finished */
+
                 if ( xctx->inctx && xctx->inctx->utid ) {
                     xctx->inctx->closed = 1;
-                    /* Close and purge the channel */
-                    elv_channel_close(xctx->inctx->udp_channel, 1);
-                    pthread_join(xctx->inctx->utid, NULL);
+                    /* Close and purge the channel to unblock the UDP thread */
+                    if (xctx->inctx->udp_channel)
+                        elv_channel_close(xctx->inctx->udp_channel, 1);
                 }
             } else {
                 elv_err("xc_table_cancel index=%d doesn't match with handle=%d at %d",

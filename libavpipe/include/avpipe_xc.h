@@ -423,6 +423,7 @@ typedef struct coderctx_t {
     int64_t first_read_packet_pts[MAX_STREAMS];         /* PTS of first packet read - which might not be decodable */
 
     int64_t video_encoder_prev_pts;     /* Previous pts for video output (encoder) */
+    int64_t audio_encoder_prev_pts[MAX_STREAMS]; /* Previous pts for audio output (encoder), per stream - diagnostic only */
     int64_t video_duration;             /* Duration/pts of original frame */
     int64_t audio_duration;             /* Audio duration/pts of original frame when tx_type == tx_all */
     int64_t first_key_frame_pts;        /* First video key frame pts, used to synchronize audio and video in UDP live streams */
@@ -483,11 +484,16 @@ typedef enum vertical_type {
     vertical_32bpf  = 1  // 32 bits per frame (uint32 LE per frame)
 } vertical_type;
 
+
 /* Returns 1 with the next value, 0 at EOF, or a negative value on error. */
 typedef int
 (*vertical_data_reader_f)(
     uintptr_t handle,
     uint32_t *value);
+
+// Upper bound on a vertical_data buffer (4 bytes/frame => ~33M frames, ~155h at 60fps).
+// Sanity check for oversized/garbage vertical-data size
+#define MAX_VERTICAL_DATA_LEN   (128 * 1024 * 1024)
 
 // Video layout. Values align with ISO/IEC 23001-8 (CICP)
 typedef enum video_layout_t {
@@ -586,7 +592,9 @@ typedef struct xcparams_t {
     dif_type    deinterlace;                // Deinterlacing filter
     char        *timecode;                  // Original timecode string
     vertical_type vertical;                 // Vertical video crop type (9:16)
-    uint8_t     *vertical_data;             // Per-frame crop data (opaque byte array, currently 4 bytes per frame uint32 LE)
+    uint8_t     *vertical_data;             // Per-frame crop data (opaque byte array, currently 4 bytes per frame uint32 LE).
+                                            //      Each value is the crop window centre as a fraction of the scaled frame width,
+                                            //      with denominator VERTICAL_DATA_SCALE (see avpipe_utils.h)
     int         vertical_data_len;          // Length of vertical_data in bytes
     vertical_data_reader_f vertical_data_reader; // Optional streaming source for per-frame crop data
     uintptr_t   vertical_data_reader_handle; // Opaque handle passed to vertical_data_reader
@@ -926,8 +934,10 @@ set_extract_images(
  * @param   params  Transcoding parameters
  * @param   data    Source byte buffer
  * @param   len     Length in bytes
+ * @return  eav_success on success, eav_param if len <= 0, eav_mem_alloc if the
+ *          buffer allocation fails.
  */
-void
+int
 init_vertical_data(
     xcparams_t *params,
     const uint8_t *data,
