@@ -19,6 +19,16 @@
 
 #define MAX_VIDEO_BITRATE_KBPS 400000
 
+/* Spatial metadata defaults, same as mvhevc add (mp4e/mvhevc/add.go) */
+#define DEFAULT_BASELINE_UM 63500
+#define DEFAULT_HFOV        63500
+
+enum {
+    HERO_EYE_NONE = 0,
+    HERO_EYE_LEFT,
+    HERO_EYE_RIGHT,
+};
+
 typedef struct apple_output_config {
     char *out_file;
     char *profile;
@@ -57,6 +67,9 @@ typedef struct apple_params {
     int fps_den;
     int saw_x265_only;
     int no_upscale;
+    uint32_t baseline_um;
+    uint32_t hfov;
+    int hero_eye;
     double duration_seconds;
     double quality;
     apple_output_config *outputs;
@@ -121,6 +134,9 @@ static void usage(const char *prog)
         "  -max-cll <val>      HDR MaxCLL/MaxFALL, e.g. \"1000,200\"\n"
         "  -master-display <v> HDR master display string\n"
         "  -abr-profile <json> Encode all video rungs from an ABR profile\n"
+        "  -baseline <um>      Camera baseline in micrometers (default 63500)\n"
+        "  -hfov <val>         Horizontal FOV in 1/1000 degrees (default 63500)\n"
+        "  -hero <eye>         Hero eye: left, right, or none (default left)\n"
         "\n"
         "With -abr-profile, <output.mov|mp4> is used as a base/template. If it\n"
         "contains %%w, %%h, %%b, %%m, or %%n, those placeholders are expanded to\n"
@@ -139,6 +155,19 @@ static void set_defaults(apple_params *p)
     p->bframes = -1;
     p->scenecut = 40;
     p->quality = -1.0;
+    p->baseline_um = DEFAULT_BASELINE_UM;
+    p->hfov = DEFAULT_HFOV;
+    p->hero_eye = HERO_EYE_LEFT;
+}
+
+static int parse_positive_uint32(const char *s, uint32_t *out)
+{
+    char *end = NULL;
+    unsigned long long v = strtoull(s, &end, 10);
+    if (end == s || !end || *end != '\0' || s[0] == '-' || v == 0 || v > UINT32_MAX)
+        return -1;
+    *out = (uint32_t)v;
+    return 0;
 }
 
 static int parse_positive_double(const char *s, double *out)
@@ -493,6 +522,30 @@ static int parse_args(int argc, char **argv, apple_params *p)
             p->bitdepth = atoi(argv[argi++]);
         } else if (!strcmp(opt, "-hdr")) {
             p->hdr = 1;
+        } else if (!strcmp(opt, "-baseline") && argi < argc) {
+            if (parse_positive_uint32(argv[argi], &p->baseline_um) < 0) {
+                fprintf(stderr, "Invalid baseline '%s', expected positive micrometers\n", argv[argi]);
+                return -1;
+            }
+            argi++;
+        } else if (!strcmp(opt, "-hfov") && argi < argc) {
+            if (parse_positive_uint32(argv[argi], &p->hfov) < 0) {
+                fprintf(stderr, "Invalid hfov '%s', expected positive 1/1000 degrees\n", argv[argi]);
+                return -1;
+            }
+            argi++;
+        } else if (!strcmp(opt, "-hero") && argi < argc) {
+            const char *eye = argv[argi++];
+            if (!strcmp(eye, "left")) {
+                p->hero_eye = HERO_EYE_LEFT;
+            } else if (!strcmp(eye, "right")) {
+                p->hero_eye = HERO_EYE_RIGHT;
+            } else if (!strcmp(eye, "none")) {
+                p->hero_eye = HERO_EYE_NONE;
+            } else {
+                fprintf(stderr, "Invalid hero eye '%s', expected left, right, or none\n", eye);
+                return -1;
+            }
         } else if (!strcmp(opt, "-scenecut") && argi < argc) {
             p->scenecut = atoi(argv[argi++]);
             p->saw_x265_only = 1;
@@ -824,6 +877,16 @@ static AppleOutputContext *create_output_context(const apple_params *p,
     compression[(__bridge NSString *)kVTCompressionPropertyKey_MVHEVCLeftAndRightViewIDs] = @[@0, @1];
     compression[(__bridge NSString *)kVTCompressionPropertyKey_HasLeftStereoEyeView] = @YES;
     compression[(__bridge NSString *)kVTCompressionPropertyKey_HasRightStereoEyeView] = @YES;
+    /* Spatial metadata (vexu/eyes/cams/blin, vexu/eyes/hero, hfov) */
+    compression[(__bridge NSString *)kVTCompressionPropertyKey_StereoCameraBaseline] = @(p->baseline_um);
+    if (p->hero_eye == HERO_EYE_LEFT)
+        compression[(__bridge NSString *)kVTCompressionPropertyKey_HeroEye] = (__bridge NSString *)kCMFormatDescriptionHeroEye_Left;
+    else if (p->hero_eye == HERO_EYE_RIGHT)
+        compression[(__bridge NSString *)kVTCompressionPropertyKey_HeroEye] = (__bridge NSString *)kCMFormatDescriptionHeroEye_Right;
+    if (@available(macOS 14.4, *))
+        compression[(__bridge NSString *)kVTCompressionPropertyKey_HorizontalFieldOfView] = @(p->hfov);
+    else
+        fprintf(stderr, "Warning: hfov requires macOS 14.4 or later; not written\n");
     compression[AVVideoProfileLevelKey] = profile_level_for_output(cfg);
 
     int encoder_bitrate_kbps = adjusted_bitrate_kbps(cfg);
@@ -1024,6 +1087,12 @@ static int encode_apple(const apple_params *p)
             p, &p->outputs[i], src_w, src_h, sdr_color_properties);
         if (!ctx)
             return 1;
+        /* The writer's default video timescale (600) can't represent 1001-based
+         * frame rates exactly (23.976 fps -> 25.025 ticks), so use the -fps
+         * numerator or the source track's timescale */
+        CMTimeScale media_timescale = p->fps_num > 0 ? p->fps_num : left_track.naturalTimeScale;
+        if (media_timescale > 0)
+            ctx.writerInput.mediaTimeScale = media_timescale;
         [outputs addObject:ctx];
     }
     if (outputs.count == 0) {
@@ -1080,6 +1149,9 @@ static int encode_apple(const apple_params *p)
                 [sdr_color_properties[AVVideoYCbCrMatrixKey] UTF8String]);
     if (p->abr_profile_file)
         fprintf(stderr, "  ABR profile: %s\n", p->abr_profile_file);
+    fprintf(stderr, "  Spatial:     baseline=%u um hfov=%u/1000 deg hero=%s\n",
+            p->baseline_um, p->hfov,
+            p->hero_eye == HERO_EYE_LEFT ? "left" : p->hero_eye == HERO_EYE_RIGHT ? "right" : "none");
     if (p->no_upscale)
         fprintf(stderr, "  No upscale:  true\n");
     BOOL has_maxrate = NO;
