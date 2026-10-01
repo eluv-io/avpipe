@@ -56,6 +56,10 @@ const audioDolbyAtmosPath = "media/Audio_ID_720p_50fps_h264_6ch_640kbps_ddp_joc.
 const dovi81TestSource = "./media/040_Escape_Frame_0_48_HD_P3D65_24Fps_v1_4444_dv81.mp4"
 const dovi20TestSource = "./media/sample_dv20.mp4"
 
+// 2s cut of an iPhone spatial-video capture: 90x160 H.264, stereo AAC, and a 4-channel Apple
+// Positional Audio Codec ('apac') track that ffmpeg demuxes but cannot decode.
+const apacTestSource = "./media/apac_2ch_aac_4ch_apac_2s.mov"
+
 // HDR10 test settings
 const (
 	hdr10TestSource     = "./media/hdr10-plus-injected.mp4"
@@ -2935,6 +2939,59 @@ func TestProbe(t *testing.T) {
 	assert.Equal(t, "h264", a[0].CodecName)
 	assert.Equal(t, "mp3float", a[1].CodecName)
 	assert.Equal(t, "ac3", a[2].CodecName)
+}
+
+// TestTranscodeWithUndecodableStream verifies that a stream ffmpeg has no decoder for (here the
+// Apple Positional Audio Codec 'apac' track) doesn't stop transcoding of the other streams when it
+// isn't selected: the video and the first (AAC) audio are transcoded and the apac packets are skipped.
+func TestTranscodeWithUndecodableStream(t *testing.T) {
+	url := apacTestSource
+	checkFileExists(t, url)
+
+	outputDir := path.Join(baseOutPath, fn())
+
+	params := goavpipe.NewXcParams()
+	params.Url = url
+	params.Format = "fmp4-segment"
+	params.SegDuration = "2"
+	params.XcType = goavpipe.XcAll
+	params.ForceKeyInt = 25
+	params.DebugFrameLevel = debugFrameLevel
+	setFastEncodeParams(params, false)
+
+	xcTestResult := &XcTestResult{
+		mezFile: []string{
+			fmt.Sprintf("%s/vsegment-1.mp4", outputDir),
+			fmt.Sprintf("%s/asegment0-1.mp4", outputDir),
+		},
+	}
+	xcTest(t, outputDir, params, xcTestResult, true)
+
+	assert.Equal(t, uint64(50), statsInfo.VideoFramesRead)
+	assert.Equal(t, int64(50), statsInfo.EncodingVideoFrameStats.TotalFramesWritten)
+	assert.Greater(t, statsInfo.AudioFramesRead, uint64(0))
+	assert.Greater(t, statsInfo.EncodingAudioFrameStats.TotalFramesWritten, int64(0))
+}
+
+// TestTranscodeSelectUndecodableStream verifies that explicitly selecting a stream without a decoder
+// still fails with EAV_CODEC_PARAM.
+func TestTranscodeSelectUndecodableStream(t *testing.T) {
+	url := apacTestSource
+	checkFileExists(t, url)
+
+	outputDir := path.Join(baseOutPath, fn())
+	boilerplate(t, outputDir, url)
+
+	params := goavpipe.NewXcParams()
+	params.Url = url
+	params.Format = "fmp4-segment"
+	params.SegDuration = "2"
+	params.XcType = goavpipe.XcAudio
+	params.AudioIndex = []int32{2} // the apac track
+	params.DebugFrameLevel = debugFrameLevel
+
+	err := avpipe.Xc(params)
+	assert.ErrorIs(t, err, avpipe.EAV_CODEC_PARAM)
 }
 
 func TestProbeWithData(t *testing.T) {
