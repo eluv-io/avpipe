@@ -74,6 +74,12 @@ int
 mux(
     xcparams_t *params);
 
+/** Configure a Go-backed streaming reader for vertical crop data. */
+void
+init_vertical_data_reader(
+    xcparams_t *params,
+    uintptr_t handle);
+
 /**
  * @brief   Returns pixel format name.
  *

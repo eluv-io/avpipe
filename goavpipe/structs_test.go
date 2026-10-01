@@ -1,6 +1,9 @@
 package goavpipe
 
 import (
+	"bytes"
+	"encoding/json"
+	"io"
 	"testing"
 
 	"github.com/stretchr/testify/require"
@@ -8,6 +11,18 @@ import (
 	"github.com/eluv-io/common-go/format/duration"
 	"github.com/eluv-io/common-go/media/rtp"
 )
+
+func TestXcParamsJSONOmitsVerticalDataReader(t *testing.T) {
+	p := XcParams{
+		Vertical:           1,
+		VerticalDataReader: io.NopCloser(bytes.NewReader([]byte{1, 2, 3, 4})),
+	}
+
+	data, err := json.Marshal(p)
+	require.NoError(t, err)
+	require.NotContains(t, string(data), "vertical_data_reader")
+	require.NotContains(t, string(data), "AQIDBA==")
+}
 
 // TestInputProcessorConfig_ApplyDefaults_ReorderBufferEnabled verifies that ApplyDefaults resolves ReorderBuffer's
 // own defaults too, when enabled - not just every other InputProcessorConfig field. Without this, anything
