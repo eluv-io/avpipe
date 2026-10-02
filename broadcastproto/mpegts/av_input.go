@@ -1,0 +1,359 @@
+package mpegts
+
+import (
+	"fmt"
+	"io"
+	"strings"
+	"sync"
+	"time"
+
+	"go.uber.org/atomic"
+
+	"github.com/eluv-io/avpipe/broadcastproto/transport"
+	"github.com/eluv-io/avpipe/goavpipe"
+	mio "github.com/eluv-io/common-go/media/io"
+	"github.com/eluv-io/common-go/media/pktpool"
+	"github.com/eluv-io/errors-go"
+)
+
+// inputPacketPoolCap upper-bounds the size of a single read handed to mpegtsInputHandler.Read: matches
+// AVIO_IN_BUF_SIZE (libavpipe/include/avpipe_xc.h), the largest buffer ffmpeg's custom I/O will ever request a read
+// into.
+const inputPacketPoolCap = 1024 * 1024
+
+/*
+
+TODO: Upon starting to read packets, check if it should use UDP/SRT/RTP.
+
+If UDP, read the first few packets to determine if it is RTP over UDP or just MPEGTS over UDP.
+
+If RTP, just strip the RTP headers and pass the payload to the MPEGTS handler.
+
+Then split the output out to a segmenter if configured on
+
+*/
+
+var _ goavpipe.InputOpener = (*mpegtsInputOpener)(nil)
+var _ goavpipe.PacketReader = (*mpegtsInputHandler)(nil)
+
+type SequentialOpenerFactory func(inFd int64) SequentialOpener
+
+// NewAutoInputOpener creates an InputOpener that automatically selects the transport based on the
+// URL scheme.
+func NewAutoInputOpener(cfg *goavpipe.XcParams, seqOpener SequentialOpenerFactory) (goavpipe.InputOpener, error) {
+	tp, err := createTransport(cfg.Url, &cfg.InputCfg)
+	if err != nil {
+		return nil, err
+	}
+
+	// ensure defaults are set
+	cfg.InputCfg.Processor = cfg.InputCfg.Processor.ApplyDefaults()
+
+	if cfg.InputCfg.CustomReadLoopEnabled {
+		return &customInputOpener{
+			transport: tp,
+			seqOpener: seqOpener,
+			cfg:       cfg,
+		}, nil
+	}
+
+	if cfg.InputCfg.Processor.ReorderBuffer.Enabled {
+		goavpipe.Log.Warn("reorder_buffer.enabled is set but the legacy (non-custom) read loop does not support "+
+			"it; reordering correction will not be applied",
+			"url", cfg.Url,
+		)
+	}
+
+	return &mpegtsInputOpener{
+		transport: tp,
+		seqOpener: seqOpener,
+		cfg:       &cfg.InputCfg,
+	}, nil
+}
+
+// createTransport creates an input transport instance based on the URL and input configuration.
+func createTransport(url string, cfg *goavpipe.InputConfig) (transport.Transport, error) {
+	var tp transport.Transport
+
+	scheme := strings.SplitN(url, "://", 2)[0]
+	if len(scheme) == 0 {
+		return nil, fmt.Errorf("invalid url: %s", url)
+	}
+
+	switch scheme {
+	case "rtp":
+		tp = transport.NewRTPTransport(url, cfg.CopyPackaging)
+	case "udp":
+		tp = transport.NewUDPTransport(url, cfg.CopyPackaging)
+	case "srt+rtp": // same as srt:// with RTP TS input packaging
+		cfg.InputPackaging = transport.RtpTs
+		fallthrough
+	case "srt":
+		tp = transport.NewSRTTransport(url, cfg.InputPackaging, cfg.CopyPackaging)
+	}
+
+	if tp == nil {
+		return nil, fmt.Errorf("unsupported transport protocol: %s", url)
+	}
+
+	goavpipe.Log.Info("input transport created",
+		"url", url,
+		"scheme", scheme,
+		"copy_mode", cfg.CopyMode,
+		"input_packaging", string(cfg.InputPackaging),
+		"copy_packaging", string(cfg.CopyPackaging),
+		"packaging_mode", string(tp.PackagingMode()))
+
+	return tp, nil
+}
+
+type mpegtsInputOpener struct {
+	transport transport.Transport
+
+	seqOpener SequentialOpenerFactory
+	cfg       *goavpipe.InputConfig
+
+	mu      sync.Mutex
+	handler *mpegtsInputHandler // the handler created by Open, tracked so CancelInput can unblock its read
+}
+
+func (mio *mpegtsInputOpener) Open(fd int64, url string) (goavpipe.InputHandler, error) {
+
+	goavpipe.Log.Debug("Calling global input opener to associated fd with recCtx", "fd", fd, "url", url)
+	gio := goavpipe.GetGlobalInputOpener()
+	if gio == nil {
+		return nil, errors.Str("global input opener is not set")
+	}
+	gih, err := gio.Open(fd, url)
+	if err != nil {
+		return nil, fmt.Errorf("failed to open global input opener: %w", err)
+	}
+
+	rc, err := mio.transport.Open()
+	if err != nil {
+		return nil, err
+	}
+
+	goavpipe.Log.Debug("MPEGTS custom input opener opened", "fd", fd, "url", url, "transport", mio.transport.Handler())
+
+	var ch chan pktpool.Resource
+
+	copyStream := mio.cfg.CopyMode == goavpipe.CopyModeRaw
+	if copyStream {
+		ch = make(chan pktpool.Resource, 20*1024)
+	}
+
+	mih := &mpegtsInputHandler{
+		rc:               rc,
+		transport:        mio.transport,
+		seqOpener:        mio.seqOpener(fd),
+		copyStream:       copyStream,
+		packetPool:       pktpool.NewPacketPool(outputTlvWrapCap, inputPacketPoolCap),
+		outputSplit:      ch,
+		readerLoopDoneCh: make(chan struct{}),
+		inFd:             fd,
+		gih:              gih,
+	}
+
+	mio.mu.Lock()
+	mio.handler = mih
+	mio.mu.Unlock()
+
+	if copyStream {
+		go func() {
+			handle, ok := goavpipe.GIDHandle()
+			if ok {
+				goavpipe.AssociateGIDWithHandle(handle)
+			}
+			goavpipe.Log.Debug("MPEGTS copy loop initiated")
+			mih.ReaderLoop(ch, &mih.packetsDropped)
+			close(mih.readerLoopDoneCh)
+		}()
+	} else {
+		close(mih.readerLoopDoneCh)
+	}
+
+	return mih, nil
+}
+
+// CancelInput unblocks a Read() parked on the transport (e.g. a dead source) by closing the underlying transport
+// reader, so the avpipe transcode read returns and the job can tear down. Called from XcCancel; full cleanup still
+// happens in the handler's Close(). Safe to call before Open (no-op) and concurrently with Close.
+func (mio *mpegtsInputOpener) CancelInput() {
+	mio.mu.Lock()
+	h := mio.handler
+	mio.mu.Unlock()
+	if h != nil {
+		h.cancel()
+	}
+}
+
+type mpegtsInputHandler struct {
+	rc        io.ReadCloser
+	transport transport.Transport
+	seqOpener SequentialOpener
+	inFd      int64
+
+	copyStream       bool
+	packetPool       *pktpool.Pool
+	outputSplit      chan<- pktpool.Resource
+	packetsDropped   atomic.Uint64
+	readerLoopDoneCh chan struct{}
+	rcCloseOnce      sync.Once // guards closing rc from both cancel() and Close()
+
+	// gih is the global input handler, used to pass input stats through to the normal live
+	gih goavpipe.InputHandler
+}
+
+// cancel closes the transport reader to unblock a blocked Read(). Idempotent; the remaining teardown (draining the copy
+// channel, waiting for the reader loop) is done by Close().
+func (mih *mpegtsInputHandler) cancel() {
+	mih.closeRC()
+}
+
+func (mih *mpegtsInputHandler) closeRC() (err error) {
+	mih.rcCloseOnce.Do(func() { err = mih.rc.Close() })
+	return err
+}
+
+// Read is called from ffmpeg. It should read from an internal channel that is fed by our own read loop.
+func (mih *mpegtsInputHandler) Read(buf []byte) (int, error) {
+	if len(buf) < 7*188 {
+		mpegtslog.Warn("buffer size smaller than 7 TS packets", "size", len(buf))
+	}
+
+	n, err := mih.rc.Read(buf)
+	if mih.outputSplit != nil && n > 0 {
+		res := mih.packetPool.Borrow()
+		if loadErr := res.T.From(buf[:n]); loadErr != nil {
+			res.Release()
+			goavpipe.Log.Error("MPEGTS Read", "reason", "failed to load packet into pool", "err", loadErr)
+		} else {
+			res.T.ReceivedAt = time.Now()
+			select {
+			case mih.outputSplit <- res:
+			default:
+				res.Release()
+				mih.packetsDropped.Inc()
+				goavpipe.Log.Throttle("split-channel-full", time.Second).Warn("Output split channel is full, dropping data", "size", n)
+			}
+		}
+	}
+	if err != nil {
+		// mark error as retryable to ffmpeg/avpipe
+		err = errors.E("read", errors.K.IO.Default(), err, goavpipe.ErrRetryField, true)
+		goavpipe.Log.Error("MPEGTS Read", err)
+		return n, err
+	}
+	return n, nil
+}
+
+// ReadPacket reads one datagram directly into a pooled packet, avoiding the extra copy Read() needs to satisfy its
+// plain []byte contract. Callers that can consume a *pktpool.Packet directly (e.g. AVPipeReadInput, when it detects
+// this interface) should prefer this over Read(). Like Read(), it fans the same read out to outputSplit (if set) via
+// the pool's reference counting - the underlying bytes are read exactly once regardless of how many consumers see
+// them. The returned Resource has exactly one outstanding reference belonging to the caller; release it when done.
+func (mih *mpegtsInputHandler) ReadPacket() (pktpool.Resource, error) {
+	res := mih.packetPool.Borrow()
+	err := res.T.FromReader(mih.rc)
+	if err != nil {
+		res.Release()
+		// mark error as retryable to ffmpeg/avpipe, matching Read()
+		return nil, errors.E("readPacket", errors.K.IO.Default(), err, goavpipe.ErrRetryField, true)
+	}
+
+	if mih.outputSplit != nil {
+		res.Reference() // second reference for the async consumer; this call's own reference is returned to the caller
+		select {
+		case mih.outputSplit <- res:
+		default:
+			res.Release()
+			mih.packetsDropped.Inc()
+			goavpipe.Log.Throttle("split-channel-full", time.Second).Warn(
+				"Output split channel is full, dropping data", "size", len(res.T.Data))
+		}
+	}
+
+	return res, nil
+}
+
+func (mih *mpegtsInputHandler) Close() error {
+	err := mih.closeRC()
+
+	if mih.outputSplit != nil {
+		ch := mih.outputSplit
+		mih.outputSplit = nil
+		initLen := len(ch)
+		close(ch)
+
+		fiveSecond := time.After(5 * time.Second)
+		select {
+		case <-fiveSecond:
+			goavpipe.Log.Warn("mpegts read loop still running 5 seconds after channel closure", "initLen", initLen, "curLen", len(ch))
+		case <-mih.readerLoopDoneCh:
+		}
+	}
+
+	return err
+}
+
+func (mih *mpegtsInputHandler) Seek(_ int64, _ int) (int64, error) {
+	return 0, errors.Str("not supported")
+}
+
+func (mih *mpegtsInputHandler) Size() int64 {
+	return -1
+}
+
+func (mih *mpegtsInputHandler) Stat(streamIndex int, statType goavpipe.AVStatType, statArgs any) error {
+	return mih.gih.Stat(streamIndex, statType, statArgs)
+}
+
+func (mih *mpegtsInputHandler) ReaderLoop(ch chan pktpool.Resource, packetsDropped *atomic.Uint64) {
+
+	tsCfg := TsConfig{
+		SegmentLengthSec: 30,
+		// Note: This isn't fully correct for future applications, because really the
+		// 'PackagingMode' of the config is about how the _output_ is packaged. When the CopyMode of
+		// 'repackage' is used, that will need to be handled
+		Packaging: mih.transport.PackagingMode(),
+	}
+
+	ts := NewMpegtsPacketProcessor(
+		tsCfg,
+		mih.seqOpener,
+		mih.inFd,
+	)
+	ts.RegisterPacketsDropped(packetsDropped)
+	ts.SetConnStatsSource(directConnStatsSource{mih.rc})
+
+	nPackets := 0
+	ts.StartReportingStats()
+	defer errors.Log(ts.Stop, goavpipe.Log.Error)
+	for res := range ch {
+		nPackets++
+
+		if nPackets%1000 == 0 {
+			ts.UpdateChannelSizeStats(len(ch))
+			goavpipe.Log.Trace("Processed packets", "count", nPackets, "chan size", len(ch), "chan cap", cap(ch))
+		}
+
+		ts.ProcessDatagramPacket(res.T.ReceivedAt, res.T)
+		res.Release()
+	}
+}
+
+// directConnStatsSource adapts an io.ReadCloser to connStatsSource, so ReaderLoop's MpegtsPacketProcessor can surface
+// ExportedStats.Srt the same way bypass.go/custom.go's NetReader-backed paths do. Unlike NetReader, mih.rc is a
+// single connection for this handler's whole lifetime (no reconnection), so a plain type assertion per call - rather
+// than NetReader's atomic-pointer/staleness handling - is enough.
+type directConnStatsSource struct{ rc io.ReadCloser }
+
+func (d directConnStatsSource) ConnStats(into *mio.ConnStats, details bool) bool {
+	reporter, ok := d.rc.(mio.StatsReporter)
+	if !ok {
+		return false
+	}
+	reporter.ConnStats(into, details)
+	return true
+}

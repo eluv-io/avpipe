@@ -201,19 +201,19 @@ avpipe_h264_guess_profile(
     if ((height <= 480 && width <= 720) ||
         (width <= 480 && height <= 720))
         /*
-         * FF_PROFILE_H264_BASELINE is primarily for lower-cost applications with limited computing resources,
+         * AV_PROFILE_H264_BASELINE is primarily for lower-cost applications with limited computing resources,
          * this profile is used widely in videoconferencing and mobile applications.
          * For low resolutions pick baseline profile, so it allows the video playout on most of the mobile devices.
          */
-        profile = FF_PROFILE_H264_BASELINE;
+        profile = AV_PROFILE_H264_BASELINE;
     else if (bitdepth == 8)
         /*
-         * FF_PROFILE_H264_HIGH is the primary profile for broadcast and disc storage applications,
+         * AV_PROFILE_H264_HIGH is the primary profile for broadcast and disc storage applications,
          * particularly for high-definition television applications.
          */
-        profile = FF_PROFILE_H264_HIGH;
+        profile = AV_PROFILE_H264_HIGH;
     else
-        profile = FF_PROFILE_H264_HIGH_10;
+        profile = AV_PROFILE_H264_HIGH_10;
 
     return profile;
 }
@@ -231,74 +231,25 @@ avpipe_h264_profile(
         return 0;
 
     if (!strcmp(profile_name, "baseline"))
-        return FF_PROFILE_H264_BASELINE;
+        return AV_PROFILE_H264_BASELINE;
 
     if (!strcmp(profile_name, "main"))
-        return FF_PROFILE_H264_MAIN;
+        return AV_PROFILE_H264_MAIN;
 
     if (!strcmp(profile_name, "extended"))
-        return FF_PROFILE_H264_EXTENDED;
+        return AV_PROFILE_H264_EXTENDED;
 
     if (!strcmp(profile_name, "high"))
-        return FF_PROFILE_H264_HIGH;
+        return AV_PROFILE_H264_HIGH;
 
     if (!strcmp(profile_name, "high10"))
-        return FF_PROFILE_H264_HIGH_10;
+        return AV_PROFILE_H264_HIGH_10;
 
     if (!strcmp(profile_name, "high422"))
-        return FF_PROFILE_H264_HIGH_422;
+        return AV_PROFILE_H264_HIGH_422;
 
     if (!strcmp(profile_name, "high444"))
-        return FF_PROFILE_H264_HIGH_444;
-
-    return -1;
-}
-
-
-/*
- * Returns corresponding h265 FFmpeg profile constant if it does exist.
- * Returns 0 if profile name is not set.
- * Returns -1 if the profile name is set but not supported.
- */
-int
-avpipe_h265_profile(
-    char *profile_name)
-{
-    if (!profile_name || strlen(profile_name) == 0)
-        return 0;
-
-    if (!strcmp(profile_name, "main"))
-        return FF_PROFILE_HEVC_MAIN;
-
-    if (!strcmp(profile_name, "main10"))
-        return FF_PROFILE_HEVC_MAIN_10;
-
-    return -1;
-}
-
-/*
- * Returns corresponding nvidia h264 FFmpeg profile constant if it does exist.
- * Returns 0 if profile name is not set.
- * Returns -1 if the profile name is set but not supported.
- */
-int
-avpipe_nvh264_profile(
-    char *profile_name)
-{
-    if (!profile_name || strlen(profile_name) == 0)
-        return 0;
-
-    if (!strcmp(profile_name, "baseline"))
-        return NV_ENC_H264_PROFILE_BASELINE;
-
-    if (!strcmp(profile_name, "main"))
-        return NV_ENC_H264_PROFILE_MAIN;
-
-    if (!strcmp(profile_name, "high"))
-        return NV_ENC_H264_PROFILE_HIGH;
-
-    if (!strcmp(profile_name, "high444p"))
-        return NV_ENC_H264_PROFILE_HIGH_444P;
+        return AV_PROFILE_H264_HIGH_444;
 
     return -1;
 }

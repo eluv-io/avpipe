@@ -23,6 +23,11 @@ dump_packet(
     int debug_frame_level);
 
 void
+dump_streams(
+    char *url,
+    AVFormatContext *fmt_ctx);
+
+void
 dump_decoder(
     char *url,
     coderctx_t *d);
@@ -44,6 +49,19 @@ dump_codec_parameters(
 void
 dump_stream(
     AVStream *s);
+
+/*
+ * Log color metadata (decode or encode)
+ */
+void
+log_color_metadata(
+    const char *stage,
+    int stream_index,
+    enum AVColorPrimaries pri,
+    enum AVColorTransferCharacteristic trc,
+    enum AVColorSpace spc,
+    enum AVColorRange rng,
+    const char *url);
 
 void
 save_gray_frame(
@@ -80,3 +98,38 @@ hex_encode(
     byte *buf,
     int sz,
     char *str);
+
+int64_t
+parse_duration(
+    const char *duration_str,
+    AVRational time_base);
+
+/*
+ * Denominator for vertical_data values. Each value is the crop window centre as
+ * a fraction of the scaled frame width, in units of 1/VERTICAL_DATA_SCALE:
+ *
+ *      0 = left edge      5000 = centre      10000 = right edge
+ */
+#define VERTICAL_DATA_SCALE     10000
+
+/**
+ * @brief   Get the crop left edge x from vertical_data for a given frame.
+ *          The vertical_data value represents the center of the crop window,
+ *          as a fraction of scaled_width with denominator VERTICAL_DATA_SCALE.
+ *          If frame_idx is larger than the data set, use the last entry.
+ *          Returns the left edge, clamped left/right.
+ *
+ * @param   vertical_data   binary encoded array, 4 bytes per frame
+ * @param   data_len        length of vertical_data in bytes (4 * number of entries)
+ * @param   frame_idx       frame index (0-based)
+ * @param   scaled_width    width in pixels to scale the fraction into
+ * @param   crop_width      crop window width in pixels
+ * @return  Crop left edge x in pixels, clamped to valid range.
+ */
+int
+vertical_data_crop_x(
+    uint8_t *vertical_data,
+    int data_len,
+    int frame_idx,
+    int scaled_width,
+    int crop_width);

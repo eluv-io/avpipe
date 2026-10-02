@@ -2,6 +2,7 @@ TOP_DIR ?= $(shell pwd)
 SRCS=avpipe_xc.c \
     avpipe_utils.c \
     avpipe_format.c \
+    avpipe_codec.c \
     avpipe_filters.c \
     avpipe_io.c \
     avpipe_mux.c \
@@ -30,6 +31,8 @@ endif
 
 FLAGS=-O0 -ggdb -Wall -fPIC -DVERSION=\"$(VERSION)\"
 
+.PHONY: all test clean
+
 all: avpipelib install
 
 install:
@@ -52,8 +55,12 @@ $(BINDIR)/%.o: src/%.c
 	@echo "Compiling " $<
 	gcc ${FLAGS} ${INCDIRS} -c $< -o $@
 
+test:
+	@$(MAKE) -C test
+
 clean:
 	@rm -rf $(BINDIR) $(LIBDIR)
+	@$(MAKE) -C test clean
 
 tags:
 	ctags -R . ../../elv-toolchain/FFmpeg/FFmpeg ../utils

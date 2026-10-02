@@ -1,16 +1,14 @@
 # avpipe
 
-## Introduction
+## Overview
 
-The avpipe library is basically a C/Go library on top of FFmpeg with very simple transcoding APIs.
-This library helps third party developers to develop server programs or apps for transcoding audio/video in C or Go.
-The avpipe library has the capability to transcode audio/video input files and produce MP4 or M4S (for HLS/DASH playout) segments on the fly.
-The source of input files for transcoding can be a file on disk, a network connection, or some objects on the cloud.
-Depending on the location of the source file, the input of avpipe library can be set via some handlers (callback functions) in both C or Go.
-Similarly the output of avpipe library can be set by some callback functions to send the result to a file on disk, a network connection or some objects on the cloud.
+A Go/CGO library for media transcoding and conditioning 
 
-Usually the media segments are either fragmented MP4 or TS segments.
-So far, the work on avpipe has been focused on generating fragmented MP4 segments (the TS format might be added later).
+The primary purpose is:
+- create conditioned mezzanine "parts" from source files or live streams (FMP4 or TS)
+- create ABR (DASH/HLS) segments from the pre-conditioned mezzanine "parts"
+
+Features include resizing, GPU/CPU encoding parameters, watermarking, splicing.
 
 ## Build
 
@@ -34,29 +32,50 @@ The following repositories can be checked out in any directory, but for better o
 
 ### Build FFmpeg and avpipe
 
-- Build eluv-io/FFmpeg: in FFmpeg directory `<ffmpeg-path>` run
-  - `./build.sh`
-- Build SRT: checkout SRT code `https://github.com/Haivision/srt` and build SRT
-- Set environment variables: in avpipe directory run
-  - `source init-env.sh <ffmpeg-path> <srt_path>`
-- Build avpipe: in avpipe directory run
-  - `make`
-- This installs the binaries under `<avpipe-path>/bin`
-- Note: avpipe has to be built and linked with eluv-io/FFmpeg to be functional.
+**Important: Build components in this exact order: FFmpeg → SRT → avpipe**
+
+1. **Build eluv-io/FFmpeg**: in FFmpeg directory run
+   ```bash
+   ./build.sh
+   ```
+
+2. **Build SRT library**: 
+   ```bash
+   git clone https://github.com/Haivision/srt
+   cd srt && mkdir build && cd build
+   cmake .. -DCMAKE_INSTALL_PREFIX=$(pwd)/../dist
+   make && make install
+   ```
+
+3. **Set environment variables**: in avpipe directory run
+   ```bash
+   source init-env.sh <ffmpeg-path> <srt-dist-path>
+   # Example: source init-env.sh ../FFmpeg ../srt/dist
+   ```
+
+4. **Build avpipe**: in avpipe directory run
+   ```bash
+   make
+   ```
+
+5. This installs the binaries under `<avpipe-path>/bin`
+
+**Notes:**
+- avpipe must be built and linked with eluv-io/FFmpeg to be functional
+- SRT must be built with a local install prefix (not system-wide) for pkg-config to work correctly
+- Always run `source init-env.sh` before building or running tests
 
 ### Test avpipe
 
-- Download media test files from https://console.cloud.google.com/storage/browser/eluvio-test-assets into `media` directory inside `<avpipe-path>`
-  - `cd avpipe`
-  - `mkdir ./media`
-  - `cd ./media`
-  - `gcloud auth login`
-  - `gsutil -m cp 'gs://eluvio-test-assets/*' .`
-- Inside `<avpipe-path>` run
-  - `go test -timeout 2000s`
-- Instead of the above commands, you can run the following scripts:
-  - `run_tests.sh` to run avpipe core functionality and transcoding tests.
+By script:
+  - `run_go_tests.sh` to run avpipe core functionality and transcoding tests.
   - `run_live_tests.sh`: to run avipe live-streaming functionality tests.
+
+Manual examples:
+
+  ```
+  go test ./xc/ -run TestEndToEnd
+  ```
 
 ### Run `exc` and `elvxc`
 
@@ -73,84 +92,12 @@ The following repositories can be checked out in any directory, but for better o
 
 ### Parameters
 
-```c
-typedef struct xcparams_t {
-    char    *url;                       // URL of the input for transcoding
-    int     bypass_transcoding;         // if 0 means do transcoding, otherwise bypass transcoding
-    char    *format;                    // Output format [Required, Values: dash, hls, mp4, fmp4]
-    int64_t start_time_ts;              // Transcode the source starting from this time
-    int64_t start_pts;                  // Starting PTS for output
-    int64_t duration_ts;                // Transcode time period from start_time_ts (-1 for entire source)
-    char    *start_segment_str;         // Specify index of the first segment  TODO: change type to int
-    int     video_bitrate;
-    int     audio_bitrate;
-    int     sample_rate;                // Audio sampling rate
-    int     channel_layout;             // Audio channel layout for output
-    char    *crf_str;
-    char    *preset;                    // Sets encoding speed to compression ratio
-    int     rc_max_rate;                // Maximum encoding bit rate, used in conjunction with rc_buffer_size
-    int     rc_buffer_size;             // Determines the interval used to limit bit rate [Default: 0]
-    int64_t     audio_seg_duration_ts;  // For transcoding and producing audio ABR/mez segments
-    int64_t     video_seg_duration_ts;  // For transcoding and producing video ABR/mez segments
-    char    *seg_duration;              // In sec units, can be used instead of ts units
-    int     seg_duration_fr;
-    int     start_fragment_index;
-    int     force_keyint;               // Force a key (IDR) frame at this interval
-    int     force_equal_fduration;      // Force all frames to have equal frame duration
-    char    *ecodec;                    // Video encoder
-    char    *ecodec2;                   // Audio encoder when xc_type & xc_audio
-    char    *dcodec;                    // Video decoder
-    char    *dcodec2;                   // Audio decoder when xc_type & xc_audio
-    int     gpu_index;                  // GPU index for transcoding, must be >= 0
-    int     enc_height;
-    int     enc_width;
-    char    *crypt_iv;                  // 16-byte AES IV in hex (Optional, Default: Generated)
-    char    *crypt_key;                 // 16-byte AES key in hex (Optional, Default: Generated)
-    char    *crypt_kid;                 // 16-byte UUID in hex (Optional, required for CENC)
-    char    *crypt_key_url;             // Specify a key URL in the manifest (Optional, Default: key.bin)
-    int     skip_decoding;              // If set, then skip the packets until start_time_ts without decoding
-
-    crypt_scheme_t  crypt_scheme;       // Content protection / DRM / encryption (Default: crypt_none)
-    xc_type_t       xc_type;            // Default: 0 means transcode 'everything'
-
-    int         seekable;               // Default: 0 means not seekable. A non seekable stream with moov box in
-                                            //          the end causes a lot of reads up to moov atom.
-    int         listen;                     // Default is 1, listen mode for RTMP
-    char        *watermark_text;            // Default: NULL or empty text means no watermark
-    char        *watermark_xloc;            // Default 0
-    char        *watermark_yloc;            // Default 0
-    float       watermark_relative_sz;      // Default 0
-    char        *watermark_font_color;      // black
-    int         watermark_shadow;           // Default 1, means shadow exist
-    char        *overlay_filename;          // Overlay file name
-    char        *watermark_overlay;         // Overlay image buffer, default is NULL
-    image_type  watermark_overlay_type;     // Overlay image type, default is png
-    int         watermark_overlay_len;      // Length of watermark_overlay if there is any
-    char        *watermark_shadow_color;    // Watermark shadow color
-    char        *watermark_timecode;        // Watermark timecode string (i.e 00\:00\:00\:00)
-    float       watermark_timecode_rate;    // Watermark timecode frame rate
-    int         audio_index[MAX_AUDIO_MUX]; // Audio index(s) for mez making
-    int         n_audio;                    // Number of entries in audio_index
-    int         audio_fill_gap;             // Audio only, fills the gap if there is a jump in PTS
-    int         sync_audio_to_stream_id;    // mpegts only, default is 0
-    int         bitdepth;                   // Can be 8, 10, 12
-    char        *max_cll;                   // Maximum Content Light Level (HDR only)
-    char        *master_display;            // Master display (HDR only)
-    int         stream_id;                  // Stream id to trasncode, should be >= 0
-    char        *filter_descriptor;         // Filter descriptor if tx-type == audio-merge
-    char        *mux_spec;
-    int64_t     extract_image_interval_ts;  // Write frames at this interval. Default: -1
-    int64_t     *extract_images_ts;         // Write frames at these timestamps.
-    int         extract_images_sz;          // Size of the array extract_images_ts
-
-    int         video_time_base;            // New video encoder time_base (1/video_time_base)
-    int         video_frame_duration_ts;    // Frame duration of the output video in time base
-
-    int         debug_frame_level;
-    int         connection_timeout;         // Connection timeout in sec for RTMP or MPEGTS protocols
-} xcparams_t;
-
-```
+The authoritative list of transcoding parameters — every field, its type, default,
+and constraints — is the `xcparams_t` struct in
+[`libavpipe/include/avpipe_xc.h`](libavpipe/include/avpipe_xc.h). That header is the
+single source of truth; this README intentionally does **not** duplicate the struct
+so the two cannot drift apart. The sections below explain how to combine those
+parameters to drive common use cases.
 
 - **Determining input:** the url parameter uniquely identifies the input source that will be transcoded. It can be a filename, a network URL that identifies a stream (i.e udp://localhost:22001), or another source that contains the input audio/video for transcoding.
 
@@ -241,6 +188,7 @@ All the APIs in the C/Go library can be categories as the following:
 - `XcInit(params *XcParams):` initializes a transcoding context in avpipe and returns its corresponding 32bit handle to the client code. This handle can be used to start or cancel the transcoding job.
 - `XcRun(handle int32):` starts the transcoding job that corresponds to the obtained handle by `XcInit()`.
 - `XcCancel(handle int32):` cancels or stops the transcoding job corresponding to the handle.
+- `XcFini(handle int32):` releases state for a job after `XcRun()` returns. Every successful `XcInit()` must be paired with `XcFini()`, including when `XcRun()` fails or is canceled with `XcCancel()`.
 
 ##### IO handler APIs
 

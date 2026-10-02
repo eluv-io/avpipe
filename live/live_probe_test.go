@@ -2,11 +2,40 @@ package live
 
 import (
 	"fmt"
-	"github.com/eluv-io/avpipe"
-	"github.com/stretchr/testify/assert"
 	"testing"
 	"time"
+
+	"github.com/eluv-io/avpipe"
+	"github.com/eluv-io/avpipe/goavpipe"
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 )
+
+// probeWithRetry probes params.Url, retrying transient failures.
+func probeWithRetry(t *testing.T, params *goavpipe.XcParams, retryCount int) (probeInfo *goavpipe.ProbeInfo, err error) {
+	t.Helper()
+	for i := 0; i < retryCount; i++ {
+		probeInfo, err = avpipe.Probe(params)
+		if err == nil {
+			return probeInfo, nil
+		}
+		if i == retryCount-1 {
+			break
+		}
+		tlog.Info("probe attempt failed, retrying", "attempt", i+1, "url", params.Url, "err", err)
+		time.Sleep(time.Second)
+	}
+	return probeInfo, err
+}
+
+// requireProbe fails unless the probe succeeded and returned at least minStreams streams.
+func requireProbe(t *testing.T, probeInfo *goavpipe.ProbeInfo, err error, minStreams int) {
+	t.Helper()
+	require.NoError(t, err)
+	require.NotNil(t, probeInfo)
+	require.GreaterOrEqualf(t, len(probeInfo.Streams), minStreams,
+		"probe returned %d streams, expected at least %d", len(probeInfo.Streams), minStreams)
+}
 
 // 1) Starts ffmpeg for streaming RTMP in listen mode
 // 2) avpipe probe connects to listening ffmpeg and probes the stream
@@ -24,9 +53,9 @@ func TestProbeRTMPConnect(t *testing.T) {
 
 	time.Sleep(2 * time.Second)
 
-	XCParams := &avpipe.XcParams{
+	XCParams := &goavpipe.XcParams{
 		Seekable:        false,
-		XcType:          avpipe.Xcprobe,
+		XcType:          goavpipe.Xcprobe,
 		StreamId:        -1,
 		Url:             url,
 		DebugFrameLevel: debugFrameLevel,
@@ -35,22 +64,22 @@ func TestProbeRTMPConnect(t *testing.T) {
 	reqCtx := &testCtx{url: url}
 	putReqCtxByURL(url, reqCtx)
 
-	avpipe.InitIOHandler(&inputOpener{}, &outputOpener{})
+	goavpipe.InitIOHandler(&inputOpener{}, &outputOpener{})
 
 	tlog.Info("Probing RTMP stream start", "params", fmt.Sprintf("%+v", *XCParams))
-	probeInfo, err := avpipe.Probe(XCParams)
+	probeInfo, err := probeWithRetry(t, XCParams, 5)
 
-	assert.NoError(t, err)
-	assert.Equal(t, "h264", probeInfo.StreamInfo[0].CodecName)
-	assert.Equal(t, 1920, probeInfo.StreamInfo[0].Width)
-	assert.Equal(t, 1080, probeInfo.StreamInfo[0].Height)
-	assert.Equal(t, 578, probeInfo.StreamInfo[0].Profile)
-	assert.Equal(t, 40, probeInfo.StreamInfo[0].Level)
+	requireProbe(t, probeInfo, err, 2)
+	assert.Equal(t, "h264", probeInfo.Streams[0].CodecName)
+	assert.Equal(t, 1920, probeInfo.Streams[0].Width)
+	assert.Equal(t, 1080, probeInfo.Streams[0].Height)
+	assert.Equal(t, 578, probeInfo.Streams[0].Profile)
+	assert.Equal(t, 40, probeInfo.Streams[0].Level)
 
-	assert.Equal(t, "aac", probeInfo.StreamInfo[1].CodecName)
-	assert.Equal(t, int64(55566), probeInfo.StreamInfo[1].BitRate)
-	assert.Equal(t, 2, probeInfo.StreamInfo[1].Channels)
-	assert.Equal(t, 3, probeInfo.StreamInfo[1].ChannelLayout)
+	assert.Equal(t, "aac", probeInfo.Streams[1].CodecName)
+	assert.Equal(t, int64(55566), probeInfo.Streams[1].BitRate)
+	assert.Equal(t, 2, probeInfo.Streams[1].Channels)
+	assert.Equal(t, 3, probeInfo.Streams[1].ChannelLayout)
 
 	liveSource.Stop()
 
@@ -64,9 +93,9 @@ func TestProbeRTMPListen(t *testing.T) {
 	liveSource := NewLiveSource()
 	url := fmt.Sprintf("rtmp://localhost:%d/rtmp/Doj1Nr3S", liveSource.Port)
 
-	XCParams := &avpipe.XcParams{
+	XCParams := &goavpipe.XcParams{
 		Seekable:          false,
-		XcType:            avpipe.Xcprobe,
+		XcType:            goavpipe.Xcprobe,
 		StreamId:          -1,
 		Url:               url,
 		DebugFrameLevel:   debugFrameLevel,
@@ -77,36 +106,37 @@ func TestProbeRTMPListen(t *testing.T) {
 	reqCtx := &testCtx{url: url}
 	putReqCtxByURL(url, reqCtx)
 
-	avpipe.InitIOHandler(&inputOpener{}, &outputOpener{})
+	goavpipe.InitIOHandler(&inputOpener{}, &outputOpener{})
 
 	done := make(chan bool, 1)
-	var probeInfo *avpipe.ProbeInfo
-	var err error
+	var probeInfo *goavpipe.ProbeInfo
+	var probeErr error
 
 	go func() {
 		tlog.Info("Probing RTMP stream start", "params", fmt.Sprintf("%+v", *XCParams))
-		probeInfo, err = avpipe.Probe(XCParams)
+		probeInfo, probeErr = avpipe.Probe(XCParams)
 		done <- true
 	}()
 
-	err = liveSource.Start("rtmp_connect")
+	time.Sleep(1 * time.Second)
+	err := liveSource.Start("rtmp_connect")
 	if err != nil {
 		t.Error(err)
 	}
 
 	<-done
-	assert.NoError(t, err)
+	requireProbe(t, probeInfo, probeErr, 2)
 	tlog.Info("Probe done", "probeInfo", fmt.Sprintf("%+v", *probeInfo))
-	assert.Equal(t, "h264", probeInfo.StreamInfo[0].CodecName)
-	assert.Equal(t, 1920, probeInfo.StreamInfo[0].Width)
-	assert.Equal(t, 1080, probeInfo.StreamInfo[0].Height)
-	assert.Equal(t, 578, probeInfo.StreamInfo[0].Profile)
-	assert.Equal(t, 40, probeInfo.StreamInfo[0].Level)
+	assert.Equal(t, "h264", probeInfo.Streams[0].CodecName)
+	assert.Equal(t, 1920, probeInfo.Streams[0].Width)
+	assert.Equal(t, 1080, probeInfo.Streams[0].Height)
+	assert.Equal(t, 578, probeInfo.Streams[0].Profile)
+	assert.Equal(t, 40, probeInfo.Streams[0].Level)
 
-	assert.Equal(t, "aac", probeInfo.StreamInfo[1].CodecName)
-	assert.Equal(t, int64(55566), probeInfo.StreamInfo[1].BitRate)
-	assert.Equal(t, 2, probeInfo.StreamInfo[1].Channels)
-	assert.Equal(t, 3, probeInfo.StreamInfo[1].ChannelLayout)
+	assert.Equal(t, "aac", probeInfo.Streams[1].CodecName)
+	assert.Equal(t, int64(55566), probeInfo.Streams[1].BitRate)
+	assert.Equal(t, 2, probeInfo.Streams[1].Channels)
+	assert.Equal(t, 3, probeInfo.Streams[1].ChannelLayout)
 
 	liveSource.Stop()
 }
@@ -117,9 +147,9 @@ func TestProbeRTMPNoStream(t *testing.T) {
 	liveSource := NewLiveSource()
 	url := fmt.Sprintf("rtmp://localhost:%d/rtmp/Doj1Nr3S", liveSource.Port)
 
-	XCParams := &avpipe.XcParams{
+	XCParams := &goavpipe.XcParams{
 		Seekable:          false,
-		XcType:            avpipe.Xcprobe,
+		XcType:            goavpipe.Xcprobe,
 		StreamId:          -1,
 		Url:               url,
 		DebugFrameLevel:   debugFrameLevel,
@@ -129,13 +159,13 @@ func TestProbeRTMPNoStream(t *testing.T) {
 	reqCtx := &testCtx{url: url}
 	putReqCtxByURL(url, reqCtx)
 
-	avpipe.InitIOHandler(&inputOpener{}, &outputOpener{})
+	goavpipe.InitIOHandler(&inputOpener{}, &outputOpener{})
 
 	tlog.Info("Probing RTMP stream start", "params", fmt.Sprintf("%+v", *XCParams))
 	probeInfo, err := avpipe.Probe(XCParams)
 
 	assert.Error(t, err)
-	assert.Equal(t, (*avpipe.ProbeInfo)(nil), probeInfo)
+	assert.Equal(t, (*goavpipe.ProbeInfo)(nil), probeInfo)
 }
 
 // 1) Starts ffmpeg for streaming UDP MPEGTS
@@ -144,7 +174,7 @@ func TestProbeUDPConnect(t *testing.T) {
 	setupLogging()
 
 	liveSource := NewLiveSource()
-	url := fmt.Sprintf("udp://localhost:%d", liveSource.Port)
+	url := fmt.Sprintf("udp://127.0.0.1:%d", liveSource.Port)
 
 	// Start ffmpeg UDP MPEGTS
 	err := liveSource.Start("udp")
@@ -154,9 +184,9 @@ func TestProbeUDPConnect(t *testing.T) {
 
 	time.Sleep(2 * time.Second)
 
-	XCParams := &avpipe.XcParams{
+	XCParams := &goavpipe.XcParams{
 		Seekable:          false,
-		XcType:            avpipe.Xcprobe,
+		XcType:            goavpipe.Xcprobe,
 		StreamId:          -1,
 		Url:               url,
 		DebugFrameLevel:   debugFrameLevel,
@@ -166,22 +196,22 @@ func TestProbeUDPConnect(t *testing.T) {
 	reqCtx := &testCtx{url: url}
 	putReqCtxByURL(url, reqCtx)
 
-	avpipe.InitIOHandler(&inputOpener{}, &outputOpener{})
+	goavpipe.InitIOHandler(&inputOpener{}, &outputOpener{})
 
 	tlog.Info("Probing MPEGTS stream start", "params", fmt.Sprintf("%+v", *XCParams))
-	probeInfo, err := avpipe.Probe(XCParams)
+	probeInfo, err := probeWithRetry(t, XCParams, 5)
 
-	assert.NoError(t, err)
-	assert.Equal(t, "h264", probeInfo.StreamInfo[0].CodecName)
-	assert.Equal(t, 1280, probeInfo.StreamInfo[0].Width)
-	assert.Equal(t, 720, probeInfo.StreamInfo[0].Height)
-	assert.Equal(t, 100, probeInfo.StreamInfo[0].Profile)
-	assert.Equal(t, 32, probeInfo.StreamInfo[0].Level)
+	requireProbe(t, probeInfo, err, 2)
+	assert.Equal(t, "h264", probeInfo.Streams[0].CodecName)
+	assert.Equal(t, 1280, probeInfo.Streams[0].Width)
+	assert.Equal(t, 720, probeInfo.Streams[0].Height)
+	assert.Equal(t, 100, probeInfo.Streams[0].Profile)
+	assert.Equal(t, 32, probeInfo.Streams[0].Level)
 
-	assert.Equal(t, "ac3", probeInfo.StreamInfo[1].CodecName)
-	assert.Equal(t, int64(384000), probeInfo.StreamInfo[1].BitRate)
-	assert.Equal(t, 6, probeInfo.StreamInfo[1].Channels)
-	assert.Equal(t, 1551, probeInfo.StreamInfo[1].ChannelLayout)
+	assert.Equal(t, "ac3", probeInfo.Streams[1].CodecName)
+	assert.Equal(t, int64(384000), probeInfo.Streams[1].BitRate)
+	assert.Equal(t, 6, probeInfo.Streams[1].Channels)
+	assert.Equal(t, 1551, probeInfo.Streams[1].ChannelLayout)
 
 	liveSource.Stop()
 
@@ -194,11 +224,11 @@ func TestProbeUDPListen(t *testing.T) {
 	setupLogging()
 
 	liveSource := NewLiveSource()
-	url := fmt.Sprintf("udp://localhost:%d", liveSource.Port)
+	url := fmt.Sprintf("udp://127.0.0.1:%d", liveSource.Port)
 
-	XCParams := &avpipe.XcParams{
+	XCParams := &goavpipe.XcParams{
 		Seekable:        false,
-		XcType:          avpipe.Xcprobe,
+		XcType:          goavpipe.Xcprobe,
 		StreamId:        -1,
 		Url:             url,
 		DebugFrameLevel: debugFrameLevel,
@@ -207,36 +237,36 @@ func TestProbeUDPListen(t *testing.T) {
 	reqCtx := &testCtx{url: url}
 	putReqCtxByURL(url, reqCtx)
 
-	avpipe.InitIOHandler(&inputOpener{}, &outputOpener{})
+	goavpipe.InitIOHandler(&inputOpener{}, &outputOpener{})
 
 	done := make(chan bool, 1)
-	var probeInfo *avpipe.ProbeInfo
-	var err error
+	var probeInfo *goavpipe.ProbeInfo
+	var probeErr error
 
 	go func() {
 		tlog.Info("Probing MPEGTS stream start", "params", fmt.Sprintf("%+v", *XCParams))
-		probeInfo, err = avpipe.Probe(XCParams)
+		probeInfo, probeErr = avpipe.Probe(XCParams)
 		done <- true
 	}()
 
 	// Start ffmpeg UDP MPEGTS
-	err = liveSource.Start("udp")
+	err := liveSource.Start("udp")
 	if err != nil {
 		t.Error(err)
 	}
 
 	<-done
-	assert.NoError(t, err)
-	assert.Equal(t, "h264", probeInfo.StreamInfo[0].CodecName)
-	assert.Equal(t, 1280, probeInfo.StreamInfo[0].Width)
-	assert.Equal(t, 720, probeInfo.StreamInfo[0].Height)
-	assert.Equal(t, 100, probeInfo.StreamInfo[0].Profile)
-	assert.Equal(t, 32, probeInfo.StreamInfo[0].Level)
+	requireProbe(t, probeInfo, probeErr, 2)
+	assert.Equal(t, "h264", probeInfo.Streams[0].CodecName)
+	assert.Equal(t, 1280, probeInfo.Streams[0].Width)
+	assert.Equal(t, 720, probeInfo.Streams[0].Height)
+	assert.Equal(t, 100, probeInfo.Streams[0].Profile)
+	assert.Equal(t, 32, probeInfo.Streams[0].Level)
 
-	assert.Equal(t, "ac3", probeInfo.StreamInfo[1].CodecName)
-	assert.Equal(t, int64(384000), probeInfo.StreamInfo[1].BitRate)
-	assert.Equal(t, 6, probeInfo.StreamInfo[1].Channels)
-	assert.Equal(t, 1551, probeInfo.StreamInfo[1].ChannelLayout)
+	assert.Equal(t, "ac3", probeInfo.Streams[1].CodecName)
+	assert.Equal(t, int64(384000), probeInfo.Streams[1].BitRate)
+	assert.Equal(t, 6, probeInfo.Streams[1].Channels)
+	assert.Equal(t, 1551, probeInfo.Streams[1].ChannelLayout)
 
 	liveSource.Stop()
 }
@@ -246,11 +276,11 @@ func TestProbeUDPNoStream(t *testing.T) {
 	setupLogging()
 
 	liveSource := NewLiveSource()
-	url := fmt.Sprintf("udp://localhost:%d", liveSource.Port)
+	url := fmt.Sprintf("udp://127.0.0.1:%d", liveSource.Port)
 
-	XCParams := &avpipe.XcParams{
+	XCParams := &goavpipe.XcParams{
 		Seekable:          false,
-		XcType:            avpipe.Xcprobe,
+		XcType:            goavpipe.Xcprobe,
 		StreamId:          -1,
 		Url:               url,
 		DebugFrameLevel:   debugFrameLevel,
@@ -260,11 +290,11 @@ func TestProbeUDPNoStream(t *testing.T) {
 	reqCtx := &testCtx{url: url}
 	putReqCtxByURL(url, reqCtx)
 
-	avpipe.InitIOHandler(&inputOpener{}, &outputOpener{})
+	goavpipe.InitIOHandler(&inputOpener{}, &outputOpener{})
 
 	tlog.Info("Probing MPEGTS stream start", "params", fmt.Sprintf("%+v", *XCParams))
 	probeInfo, err := avpipe.Probe(XCParams)
 
 	assert.Error(t, err)
-	assert.Equal(t, (*avpipe.ProbeInfo)(nil), probeInfo)
+	assert.Equal(t, (*goavpipe.ProbeInfo)(nil), probeInfo)
 }

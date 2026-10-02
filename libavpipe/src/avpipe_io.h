@@ -7,7 +7,7 @@ elv_io_open(
     int flags,
     AVDictionary **options);
 
-void
+int
 elv_io_close(
     struct AVFormatContext *s,
     AVIOContext *pb);

@@ -21,10 +21,10 @@ copy_mpegts_set_encoder_options(
     coderctx_t *decoder_context,
     xcparams_t *params,
     int stream_index,
-    int timebase)
+    int timebase /* PENDING(SS) should rename timescale */)
 {
     if (timebase <= 0) {
-        elv_err("Setting encoder options failed, invalid timebase=%d (check encoding params), url=%s",
+        elv_err("Setting mpegts encoder options failed, invalid timebase=%d (check encoding params), url=%s",
             timebase, params->url);
         return eav_timebase;
     }
@@ -35,14 +35,17 @@ copy_mpegts_set_encoder_options(
     /* Precalculate seg_duration_ts based on seg_duration if seg_duration is set */
     if (params->seg_duration) {
         seg_duration = atof(params->seg_duration);
-        if (stream_index == decoder_context->video_stream_index)
-            timebase = calc_timebase(params, 1, timebase);
-        seg_duration_ts = seg_duration * timebase;
     }
-    if (params->video_seg_duration_ts > 0)
-        seg_duration_ts = params->video_seg_duration_ts;
+    if (seg_duration <= 0) {
+        elv_err("Setting mpegts encoder options failed, invalid seg_duration=%f, url=%s", seg_duration, params->url);
+        return eav_param;
+    }
+    seg_duration_ts = seg_duration * timebase;
 
     av_opt_set_int(encoder_context->format_context->priv_data, "segment_duration_ts", seg_duration_ts, 0);
+
+    // For MPEGTS we want the continuity count to not reset at beginning of each segment (https://trac.ffmpeg.org/ticket/2828)
+    av_opt_set_int(encoder_context->format_context->priv_data, "individual_header_trailer", 0, 0);
 
     int64_t stream_start_time = decoder_context->stream[stream_index]->start_time;
     cp_ctx->stream_start_pts = stream_start_time;
@@ -50,11 +53,13 @@ copy_mpegts_set_encoder_options(
         // Initial offset needs to be in microseconds
         int64_t offset_microseconds = av_rescale_q(stream_start_time, (AVRational){1, timebase}, AV_TIME_BASE_Q);
         av_opt_set_int(encoder_context->format_context->priv_data, "initial_offset", offset_microseconds, 0);
+        // PENDING(SS) Should replace "initial_offset" (deprecated) with "output_ts_offset"
+        //av_opt_set_int(encoder_context->format_context->priv_data, "output_ts_offset", offset_microseconds, 0);
         elv_log("Set initial segment offset to %"PRId64" microseconds, based on stream start time of %"PRId64" and timebase %d", offset_microseconds, stream_start_time, timebase);
     }
 
-    elv_dbg("setting \"fmp4-segment\" video segment_time to %s, seg_duration_ts=%"PRId64", url=%s",
-    params->seg_duration, seg_duration_ts, params->url);
+    elv_dbg("setting \"fmp4-segment\" mpegts video timebase=%d segment_time to %s, seg_duration_ts=%"PRId64", url=%s",
+        timebase, params->seg_duration, seg_duration_ts, params->url);
 
     return eav_success;
 }
@@ -88,6 +93,7 @@ copy_mpegts_prepare_video_encoder(
 
     out_stream->time_base = in_stream->time_base;
     out_stream->avg_frame_rate = decoder_context->format_context->streams[decoder_context->video_stream_index]->avg_frame_rate;
+    out_stream->r_frame_rate = decoder_context->format_context->streams[decoder_context->video_stream_index]->r_frame_rate;
     // The codec tag is a hint for decoding the stream
     out_stream->codecpar->codec_tag = in_stream->codecpar->codec_tag;
 
@@ -98,7 +104,8 @@ copy_mpegts_prepare_video_encoder(
         return rc;
     }
 
-    elv_log("Prepared video encoder for stream index %d", stream_index);
+    elv_log("Prepared mpegts video encoder for stream index %d timebase=%d/%d avg=%d/%d r=%d/%d", stream_index,
+         out_stream->time_base.num, out_stream->time_base.den, out_stream->avg_frame_rate.num, out_stream->avg_frame_rate.den, out_stream->r_frame_rate.num, out_stream->r_frame_rate.den);
 
     return 0;
 }
@@ -110,6 +117,10 @@ copy_mpegts_prepare_audio_encoder(
     xcparams_t *params,
     int stream_index)
 {
+    int rc;
+    AVCodecContext *dec_codec_ctx, *enc_codec_ctx;
+    uint64_t channel_layout_mask;
+
     // This assignment helps to keep some of the code below more understandable
     // output stream index always equals input stream index for mpegts capture
     int output_stream_index = stream_index;
@@ -123,6 +134,7 @@ copy_mpegts_prepare_audio_encoder(
         elv_err("Decoder codec context is NULL! stream_index=%d, url=%s", stream_index, params->url);
         return eav_codec_context;
     }
+    dec_codec_ctx = decoder_context->codec_context[stream_index];
 
     encoder_context->audio_stream_index[output_stream_index] = output_stream_index;
 
@@ -133,7 +145,8 @@ copy_mpegts_prepare_audio_encoder(
         return eav_codec_context;
     }
 
-    encoder_context->codec_context[output_stream_index] = avcodec_alloc_context3(encoder_context->codec[output_stream_index]);
+    enc_codec_ctx = avcodec_alloc_context3(encoder_context->codec[output_stream_index]);
+    encoder_context->codec_context[output_stream_index] = enc_codec_ctx;
 
     /* By default use decoder parameters */
     encoder_context->codec_context[output_stream_index]->sample_rate = decoder_context->codec_context[stream_index]->sample_rate;
@@ -144,14 +157,17 @@ copy_mpegts_prepare_audio_encoder(
 
     encoder_context->codec_context[output_stream_index]->sample_fmt = decoder_context->codec_context[stream_index]->sample_fmt;
 
-    if (params->channel_layout > 0)
-        encoder_context->codec_context[output_stream_index]->channel_layout = params->channel_layout;
-    else
-        /* If the input stream is stereo the decoder_context->codec_context[index]->channel_layout is AV_CH_LAYOUT_STEREO */
-        encoder_context->codec_context[output_stream_index]->channel_layout =
-            get_channel_layout_for_encoder(decoder_context->codec_context[stream_index]->channel_layout);
-
-    encoder_context->codec_context[output_stream_index]->channels = av_get_channel_layout_nb_channels(encoder_context->codec_context[output_stream_index]->channel_layout);
+    if (params->channel_layout > 0) {
+        channel_layout_mask = params->channel_layout;
+    } else {
+        channel_layout_mask = get_channel_layout_for_encoder(dec_codec_ctx->ch_layout.u.mask);
+    }
+    rc = av_channel_layout_from_mask(&enc_codec_ctx->ch_layout, channel_layout_mask);
+    if (rc) {
+        elv_err("Invalid channel_layout, rc=%d, channel_layout=%llu, url=%s",
+            rc, channel_layout_mask, params->url);
+        return eav_param;
+    }
 
     encoder_context->codec_context[output_stream_index]->bit_rate = params->audio_bitrate;
 
@@ -161,7 +177,7 @@ copy_mpegts_prepare_audio_encoder(
     // If there are multiple channels, we need to do this conversion ourselves.
     // Sources: `libavcodec/{encode.c:ff_encode_preinit, mpegaudioenc.c, mpegaudioenc_fixed.c}`
     
-    if ((encoder_context->codec_context[output_stream_index]->channels > 1)
+    if ((encoder_context->codec_context[output_stream_index]->ch_layout.nb_channels > 1)
         && (encoder_context->codec_context[output_stream_index]->sample_fmt == AV_SAMPLE_FMT_S16P)
         && ((encoder_context->codec[output_stream_index]->id == AV_CODEC_ID_MP2) || (encoder_context->codec[output_stream_index]->id == AV_CODEC_ID_MP3))) {
         elv_dbg("Converting MP2/MP3 audio encoder to non-planar format, stream_index=%d", stream_index);
@@ -232,7 +248,7 @@ copy_mpegts_prepare_encoder(
 
     /* Custom output buffer */
     encoder_context->format_context->io_open = elv_io_open;
-    encoder_context->format_context->io_close = elv_io_close;
+    encoder_context->format_context->io_close2 = elv_io_close;
 
     encoder_context->n_audio_output = num_audio_output(decoder_context, params);
 
@@ -261,18 +277,9 @@ copy_mpegts_prepare_encoder(
 
         // out_stream->disposition = in_stream->disposition;
 
-        if (in_stream->nb_side_data) {
-            for (int i = 0; i < in_stream->nb_side_data; i++) {
-                const AVPacketSideData *sd_src = &in_stream->side_data[i];
-                uint8_t *out_data;
-
-                out_data = av_stream_new_side_data(out_stream, sd_src->type, sd_src->size);
-                if (!out_data) {
-                    elv_err("Failed to allocate side data, url=%s", params->url);
-                    return eav_mem_alloc;
-                }
-                memcpy(out_data, sd_src->data, sd_src->size);
-            }
+        if (copy_stream_side_data(out_stream, in_stream) < 0) {
+            elv_err("Failed to copy stream side data, url=%s", params->url);
+            return eav_mem_alloc;
         }
 
         // For audio/video, do more specific things. For subtitles/data/etc, just copy the stream
@@ -357,6 +364,11 @@ copy_mpegts_func(
     xc_frame_t *xc_frame;
     int err = 0;
 
+    AVFormatContext *format_context;
+    coderctx_t *encoder_context = &cp_ctx->encoder_ctx;
+
+    format_context = encoder_context->format_context;
+
     while (!xctx->stop || elv_channel_size(cp_ctx->ch) > 0) {
 
         // Retrieve MPEGTS packets from the dedicated "copy mpegts" channel
@@ -389,6 +401,7 @@ copy_mpegts_func(
             break;
         }
     }
+    av_interleaved_write_frame(format_context, NULL);
 
     if (!xctx->err)
         xctx->err = err;

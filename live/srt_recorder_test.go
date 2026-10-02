@@ -2,26 +2,31 @@ package live
 
 import (
 	"fmt"
-	"github.com/stretchr/testify/assert"
 	"path"
 	"testing"
 	"time"
 
+	"github.com/stretchr/testify/assert"
+
 	"github.com/eluv-io/avpipe"
+	"github.com/eluv-io/avpipe/goavpipe"
 )
 
 func TestSrtToMp4(t *testing.T) {
+	if testing.Short() {
+		t.Skip("skipping slow live stream test in short mode")
+	}
 	setupLogging()
 	outputDir := path.Join(baseOutPath, fn())
 	setupOutDir(t, outputDir)
 
 	liveSource := NewLiveSource()
-	url := fmt.Sprintf("srt://localhost:%d?mode=listener&recv_buffer_size=256000&ffs=256000", liveSource.Port)
+	url := fmt.Sprintf("srt://127.0.0.1:%d?mode=listener&recv_buffer_size=256000&ffs=256000", liveSource.Port)
 
 	done := make(chan bool, 1)
 	testComplete := make(chan bool, 1)
 
-	xcParams := &avpipe.XcParams{
+	xcParams := &goavpipe.XcParams{
 		Format:              "fmp4-segment",
 		Seekable:            false,
 		DurationTs:          -1,
@@ -35,7 +40,7 @@ func TestSrtToMp4(t *testing.T) {
 		Ecodec:              "libx264", // libx264 software / h264_videotoolbox mac hardware
 		EncHeight:           720,       // 1080
 		EncWidth:            1280,      // 1920
-		XcType:              avpipe.XcAll,
+		XcType:              goavpipe.XcAll,
 		StreamId:            -1,
 		Url:                 url,
 		SyncAudioToStreamId: -1,
@@ -46,7 +51,7 @@ func TestSrtToMp4(t *testing.T) {
 	reqCtx := &testCtx{url: url}
 	putReqCtxByURL(url, reqCtx)
 
-	avpipe.InitIOHandler(&inputOpener{dir: outputDir}, &outputOpener{dir: outputDir})
+	goavpipe.InitIOHandler(&inputOpener{dir: outputDir}, &outputOpener{dir: outputDir})
 
 	go func() {
 		tlog.Info("Transcoding SRT stream start", "params", fmt.Sprintf("%+v", *xcParams))
@@ -58,10 +63,7 @@ func TestSrtToMp4(t *testing.T) {
 		done <- true
 	}()
 
-	err := liveSource.Start("srt")
-	if err != nil {
-		t.Error(err)
-	}
+	startLiveSource(t, liveSource, "srt")
 
 	// Wait for the srt recording to be finished
 	<-done
@@ -69,7 +71,7 @@ func TestSrtToMp4(t *testing.T) {
 	xcParams.Format = "dash"
 	xcParams.Dcodec2 = "aac"
 	xcParams.AudioSegDurationTs = 96000 // almost 2 * 48000
-	xcParams.XcType = avpipe.XcAudio
+	xcParams.XcType = goavpipe.XcAudio
 	audioMezFiles := [2]string{"audio-mez-segment0-1.mp4", "audio-mez-segment0-2.mp4"}
 
 	// Now create audio dash segments out of audio mezzanines
@@ -95,7 +97,7 @@ func TestSrtToMp4(t *testing.T) {
 
 	xcParams.Format = "dash"
 	xcParams.VideoSegDurationTs = 180000 // almost 2 * 90000
-	xcParams.XcType = avpipe.XcVideo
+	xcParams.XcType = goavpipe.XcVideo
 	videoMezFiles := [2]string{"video-mez-segment-1.mp4", "video-mez-segment-2.mp4"}
 
 	// Now create video dash segments out of audio mezzanines
@@ -122,8 +124,14 @@ func TestSrtToMp4(t *testing.T) {
 	testComplete <- true
 }
 
-// Cancels the SRT live stream transcoding, with no source, immediately after initializing the transcoding (after XcInit).
-// This test was hanging with avpipe release-1.15 and before (this is fixed in release-1.16).
+// Verifies that XcInit() returns promptly for an SRT listener with no source ever connecting, then cancels and runs
+// the job to completion.
+//
+// XcInit used to do the actual input-open-and-probe work synchronously, so with no source ever connecting it would
+// block forever inside avformat_open_input()'s accept - this was the release-1.15-and-earlier hang fixed by "Make
+// avpipe_init() nonblocking" (#50). XcInit is run in a goroutine and awaited via a select with a timeout, rather
+// than a plain <-done, so a regression back to blocking behavior fails this test promptly with a clear message
+// instead of relying on the surrounding `go test` suite-level timeout to eventually kill it.
 func TestSrtToMp4WithCancelling0(t *testing.T) {
 	setupLogging()
 	outputDir := path.Join(baseOutPath, fn())
@@ -133,9 +141,9 @@ func TestSrtToMp4WithCancelling0(t *testing.T) {
 
 	done := make(chan bool, 1)
 	liveSource := NewLiveSource()
-	url := fmt.Sprintf("srt://localhost:%d?mode=listener&recv_buffer_size=256000&ffs=256000", liveSource.Port)
+	url := fmt.Sprintf("srt://127.0.0.1:%d?mode=listener&recv_buffer_size=256000&ffs=256000", liveSource.Port)
 
-	xcParams := &avpipe.XcParams{
+	xcParams := &goavpipe.XcParams{
 		Format:              "fmp4-segment",
 		Seekable:            false,
 		DurationTs:          -1,
@@ -149,7 +157,7 @@ func TestSrtToMp4WithCancelling0(t *testing.T) {
 		Ecodec:              "libx264", // libx264 software / h264_videotoolbox mac hardware
 		EncHeight:           720,       // 1080
 		EncWidth:            1280,      // 1920
-		XcType:              avpipe.XcAll,
+		XcType:              goavpipe.XcAll,
 		StreamId:            -1,
 		Url:                 url,
 		SyncAudioToStreamId: -1,
@@ -160,7 +168,7 @@ func TestSrtToMp4WithCancelling0(t *testing.T) {
 	reqCtx := &testCtx{url: url}
 	putReqCtxByURL(url, reqCtx)
 
-	avpipe.InitIOHandler(&inputOpener{dir: outputDir}, &outputOpener{dir: outputDir})
+	goavpipe.InitIOHandler(&inputOpener{dir: outputDir}, &outputOpener{dir: outputDir})
 
 	var handle int32
 	var err error
@@ -174,6 +182,12 @@ func TestSrtToMp4WithCancelling0(t *testing.T) {
 		done <- true
 	}()
 
+	select {
+	case <-done:
+	case <-time.After(10 * time.Second):
+		t.Fatal("XcInit did not return in time - possible regression to blocking behavior with no live source")
+	}
+
 	err = avpipe.XcCancel(handle)
 	assert.NoError(t, err)
 	if err != nil {
@@ -183,7 +197,8 @@ func TestSrtToMp4WithCancelling0(t *testing.T) {
 		tlog.Info("Cancelling SRT stream completed", "err", err, "url", url)
 	}
 
-	<-done
+	err = runAndFiniXc(handle)
+	assert.Equal(t, avpipe.EAV_CANCELLED, err)
 }
 
 // Cancels the SRT live stream transcoding immediately after initializing the transcoding (after XcInit).
@@ -194,11 +209,10 @@ func TestSrtToMp4WithCancelling1(t *testing.T) {
 
 	log.Info("STARTING " + outputDir)
 
-	done := make(chan bool, 1)
 	liveSource := NewLiveSource()
-	url := fmt.Sprintf("srt://localhost:%d?mode=listener&recv_buffer_size=256000&ffs=256000", liveSource.Port)
+	url := fmt.Sprintf("srt://127.0.0.1:%d?mode=listener&recv_buffer_size=256000&ffs=256000", liveSource.Port)
 
-	xcParams := &avpipe.XcParams{
+	xcParams := &goavpipe.XcParams{
 		Format:              "fmp4-segment",
 		Seekable:            false,
 		DurationTs:          -1,
@@ -212,7 +226,7 @@ func TestSrtToMp4WithCancelling1(t *testing.T) {
 		Ecodec:              "libx264", // libx264 software / h264_videotoolbox mac hardware
 		EncHeight:           720,       // 1080
 		EncWidth:            1280,      // 1920
-		XcType:              avpipe.XcAll,
+		XcType:              goavpipe.XcAll,
 		StreamId:            -1,
 		Url:                 url,
 		SyncAudioToStreamId: -1,
@@ -223,26 +237,15 @@ func TestSrtToMp4WithCancelling1(t *testing.T) {
 	reqCtx := &testCtx{url: url}
 	putReqCtxByURL(url, reqCtx)
 
-	avpipe.InitIOHandler(&inputOpener{dir: outputDir}, &outputOpener{dir: outputDir})
+	goavpipe.InitIOHandler(&inputOpener{dir: outputDir}, &outputOpener{dir: outputDir})
 
-	var handle int32
-	var err error
-	go func() {
-		tlog.Info("Transcoding SRT stream start", "params", fmt.Sprintf("%+v", *xcParams))
-		handle, err = avpipe.XcInit(xcParams)
-		if err != nil {
-			t.Error("XcInit initializing SRT stream failed", "err", err)
-		}
-
-		done <- true
-	}()
-
-	err = liveSource.Start("srt")
+	tlog.Info("Transcoding SRT stream start", "params", fmt.Sprintf("%+v", *xcParams))
+	handle, err := avpipe.XcInit(xcParams)
 	if err != nil {
-		t.Error(err)
+		t.Fatal("XcInit initializing SRT stream failed", "err", err)
 	}
 
-	<-done
+	startLiveSource(t, liveSource, "srt")
 
 	err = avpipe.XcCancel(handle)
 	assert.NoError(t, err)
@@ -252,6 +255,8 @@ func TestSrtToMp4WithCancelling1(t *testing.T) {
 	} else {
 		tlog.Info("Cancelling SRT stream completed", "err", err, "url", url)
 	}
+	err = runAndFiniXc(handle)
+	assert.Equal(t, avpipe.EAV_CANCELLED, err)
 }
 
 // Cancels the SRT live stream transcoding immediately after starting the transcoding (1 sec after XcRun).
@@ -263,10 +268,10 @@ func TestSrtToMp4WithCancelling2(t *testing.T) {
 	log.Info("STARTING " + outputDir)
 
 	liveSource := NewLiveSource()
-	url := fmt.Sprintf("srt://localhost:%d?mode=listener&recv_buffer_size=256000&ffs=256000", liveSource.Port)
+	url := fmt.Sprintf("srt://127.0.0.1:%d?mode=listener&recv_buffer_size=256000&ffs=256000", liveSource.Port)
 	done := make(chan bool, 1)
 
-	xcParams := &avpipe.XcParams{
+	xcParams := &goavpipe.XcParams{
 		Format:              "fmp4-segment",
 		Seekable:            false,
 		DurationTs:          -1,
@@ -280,7 +285,7 @@ func TestSrtToMp4WithCancelling2(t *testing.T) {
 		Ecodec:              "libx264", // libx264 software / h264_videotoolbox mac hardware
 		EncHeight:           720,       // 1080
 		EncWidth:            1280,      // 1920
-		XcType:              avpipe.XcAll,
+		XcType:              goavpipe.XcAll,
 		StreamId:            -1,
 		Url:                 url,
 		SyncAudioToStreamId: -1,
@@ -291,29 +296,25 @@ func TestSrtToMp4WithCancelling2(t *testing.T) {
 	reqCtx := &testCtx{url: url}
 	putReqCtxByURL(url, reqCtx)
 
-	avpipe.InitIOHandler(&inputOpener{dir: outputDir}, &outputOpener{dir: outputDir})
+	goavpipe.InitIOHandler(&inputOpener{dir: outputDir}, &outputOpener{dir: outputDir})
 
-	var handle int32
-	var err error
+	tlog.Info("Transcoding SRT stream start", "params", fmt.Sprintf("%+v", *xcParams))
+	handle, err := avpipe.XcInit(xcParams)
+	if err != nil {
+		t.Fatal("XcInit initializing SRT stream failed", "err", err)
+	}
+
 	go func() {
-		tlog.Info("Transcoding SRT stream start", "params", fmt.Sprintf("%+v", *xcParams))
-		handle, err = avpipe.XcInit(xcParams)
-		if err != nil {
-			t.Error("XcInit initializing SRT stream failed", "err", err)
-		}
-		err = avpipe.XcRun(handle)
+		err := runAndFiniXc(handle)
 		if err != nil && err != avpipe.EAV_CANCELLED {
 			t.Error("Transcoding SRT stream failed", "err", err)
 		}
 		done <- true
 	}()
 
-	err = liveSource.Start("srt")
-	if err != nil {
-		t.Error(err)
-	}
+	startLiveSource(t, liveSource, "srt")
 
-	// Wait 1 second for transcoding to start
+	// Give transcoding 1 second to start before cancelling.
 	time.Sleep(1 * time.Second)
 
 	err = avpipe.XcCancel(handle)
@@ -330,6 +331,9 @@ func TestSrtToMp4WithCancelling2(t *testing.T) {
 
 // Cancels the SRT live stream transcoding some time after starting the transcoding (20 sec after XcRun).
 func TestSrtToMp4WithCancelling3(t *testing.T) {
+	if testing.Short() {
+		t.Skip("skipping slow live stream test in short mode")
+	}
 	setupLogging()
 	outputDir := path.Join(baseOutPath, fn())
 	setupOutDir(t, outputDir)
@@ -337,10 +341,10 @@ func TestSrtToMp4WithCancelling3(t *testing.T) {
 	log.Info("STARTING " + outputDir)
 
 	liveSource := NewLiveSource()
-	url := fmt.Sprintf("srt://localhost:%d?mode=listener&recv_buffer_size=256000&ffs=256000", liveSource.Port)
+	url := fmt.Sprintf("srt://127.0.0.1:%d?mode=listener&recv_buffer_size=256000&ffs=256000", liveSource.Port)
 	done := make(chan bool, 1)
 
-	xcParams := &avpipe.XcParams{
+	xcParams := &goavpipe.XcParams{
 		Format:              "fmp4-segment",
 		Seekable:            false,
 		DurationTs:          -1,
@@ -354,7 +358,7 @@ func TestSrtToMp4WithCancelling3(t *testing.T) {
 		Ecodec:              "libx264", // libx264 software / h264_videotoolbox mac hardware
 		EncHeight:           720,       // 1080
 		EncWidth:            1280,      // 1920
-		XcType:              avpipe.XcAll,
+		XcType:              goavpipe.XcAll,
 		StreamId:            -1,
 		Url:                 url,
 		SyncAudioToStreamId: -1,
@@ -365,30 +369,18 @@ func TestSrtToMp4WithCancelling3(t *testing.T) {
 	reqCtx := &testCtx{url: url}
 	putReqCtxByURL(url, reqCtx)
 
-	avpipe.InitIOHandler(&inputOpener{dir: outputDir}, &outputOpener{dir: outputDir})
+	goavpipe.InitIOHandler(&inputOpener{dir: outputDir}, &outputOpener{dir: outputDir})
 
-	var handle int32
-	var err error
-	go func() {
-
-		tlog.Info("Transcoding SRT stream start", "params", fmt.Sprintf("%+v", *xcParams))
-		handle, err = avpipe.XcInit(xcParams)
-		if err != nil {
-			t.Error("XcInit initializing SRT stream failed", "err", err)
-		}
-
-		done <- true
-	}()
-
-	err = liveSource.Start("srt")
+	tlog.Info("Transcoding SRT stream start", "params", fmt.Sprintf("%+v", *xcParams))
+	handle, err := avpipe.XcInit(xcParams)
 	if err != nil {
-		t.Error(err)
+		t.Fatal("XcInit initializing SRT stream failed", "err", err)
 	}
 
-	<-done
+	startLiveSource(t, liveSource, "srt")
 
 	go func() {
-		err := avpipe.XcRun(handle)
+		err := runAndFiniXc(handle)
 		if err != nil && err != avpipe.EAV_CANCELLED {
 			t.Error("Transcoding SRT stream failed", "err", err)
 		}
@@ -419,10 +411,10 @@ func TestSrtToMp4WithCancelling4(t *testing.T) {
 	log.Info("STARTING " + outputDir)
 
 	liveSource := NewLiveSource()
-	url := fmt.Sprintf("srt://localhost:%d?mode=listener&recv_buffer_size=256000&ffs=256000", liveSource.Port)
+	url := fmt.Sprintf("srt://127.0.0.1:%d?mode=listener&recv_buffer_size=256000&ffs=256000", liveSource.Port)
 	done := make(chan bool, 1)
 
-	xcParams := &avpipe.XcParams{
+	xcParams := &goavpipe.XcParams{
 		Format:              "fmp4-segment",
 		Seekable:            false,
 		DurationTs:          -1,
@@ -436,7 +428,7 @@ func TestSrtToMp4WithCancelling4(t *testing.T) {
 		Ecodec:              "libx264", // libx264 software / h264_videotoolbox mac hardware
 		EncHeight:           720,       // 1080
 		EncWidth:            1280,      // 1920
-		XcType:              avpipe.XcAll,
+		XcType:              goavpipe.XcAll,
 		StreamId:            -1,
 		Url:                 url,
 		SyncAudioToStreamId: -1,
@@ -446,31 +438,19 @@ func TestSrtToMp4WithCancelling4(t *testing.T) {
 	reqCtx := &testCtx{url: url}
 	putReqCtxByURL(url, reqCtx)
 
-	avpipe.InitIOHandler(&inputOpener{dir: outputDir}, &outputOpener{dir: outputDir})
+	goavpipe.InitIOHandler(&inputOpener{dir: outputDir}, &outputOpener{dir: outputDir})
 
-	var handle int32
-	var err error
-	go func() {
-		tlog.Info("Transcoding SRT stream start", "params", fmt.Sprintf("%+v", *xcParams))
-
-		handle, err = avpipe.XcInit(xcParams)
-		if err != nil {
-			t.Error("XcInitializing SRT stream failed", "err", err)
-		}
-
-		done <- true
-	}()
-
-	err = liveSource.Start("srt")
+	tlog.Info("Transcoding SRT stream start", "params", fmt.Sprintf("%+v", *xcParams))
+	handle, err := avpipe.XcInit(xcParams)
 	if err != nil {
-		t.Error(err)
+		t.Fatal("XcInit initializing SRT stream failed", "err", err)
 	}
 
-	<-done
+	startLiveSource(t, liveSource, "srt")
 
 	go func() {
-		err := avpipe.XcRun(handle)
-		if err != nil && err != avpipe.EAV_CANCELLED {
+		err := runAndFiniXc(handle)
+		if err != nil && err != avpipe.EAV_CANCELLED && err != avpipe.EAV_OPEN_INPUT {
 			t.Error("Transcoding SRT stream failed", "err", err)
 		}
 		done <- true

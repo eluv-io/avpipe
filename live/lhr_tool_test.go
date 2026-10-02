@@ -15,12 +15,16 @@ import (
 	"runtime"
 	"strings"
 	"sync"
+	"syscall"
 	"testing"
+	"time"
+
+	"github.com/stretchr/testify/assert"
 
 	"github.com/eluv-io/avpipe"
+	"github.com/eluv-io/avpipe/goavpipe"
 	"github.com/eluv-io/errors-go"
 	elog "github.com/eluv-io/log-go"
-	"github.com/stretchr/testify/assert"
 )
 
 // Test Streams
@@ -54,6 +58,7 @@ type testCtx struct {
 	rwDiffMax    int
 	wc           io.WriteCloser
 	r            io.Reader
+	openCount    int // times inputOpener.Open ran for this url (avpipe actually opened the input)
 }
 
 // Implement AVPipeInputOpener
@@ -117,8 +122,9 @@ func putReqCtxByFD(fd int64, reqCtx *testCtx) {
 	requestFDTable[fd] = reqCtx
 }
 
-func TestHLSVideoOnly(t *testing.T) {
-	params := &avpipe.XcParams{
+// DisabledTestHLSVideoOnly is disabled because manifestURLStr seems to be down
+func DisabledTestHLSVideoOnly(t *testing.T) {
+	params := &goavpipe.XcParams{
 		Format:          "fmp4-segment",
 		DurationTs:      3 * 2700000,
 		StartSegmentStr: "1",
@@ -128,7 +134,7 @@ func TestHLSVideoOnly(t *testing.T) {
 		Ecodec:          defaultVideoEncoder(),
 		EncHeight:       720,
 		EncWidth:        1280,
-		XcType:          avpipe.XcVideo,
+		XcType:          goavpipe.XcVideo,
 		DebugFrameLevel: debugFrameLevel,
 		StreamId:        -1,
 	}
@@ -141,7 +147,7 @@ func TestHLSVideoOnly(t *testing.T) {
 	if err != nil {
 		t.Error(err)
 	}
-	readers, err := NewHLSReaders(manifestURL, avpipe.XcVideo) //readers, err := NewHLSReaders(manifestURL, STVideoOnly)
+	readers, err := NewHLSReaders(manifestURL, goavpipe.XcVideo) // readers, err := NewHLSReaders(manifestURL, STVideoOnly)
 	if err != nil {
 		t.Error(err)
 	}
@@ -150,7 +156,7 @@ func TestHLSVideoOnly(t *testing.T) {
 	reader.Start(endChan)
 
 	tlog.Info("Xc start", "params", fmt.Sprintf("%+v", *params))
-	avpipe.InitIOHandler(&inputOpener{}, &outputOpener{dir: outputDir})
+	goavpipe.InitIOHandler(&inputOpener{}, &outputOpener{dir: outputDir})
 	url := "video_hls"
 	params.Url = url
 	reqCtx := &testCtx{url: url, r: reader.Pipe}
@@ -169,8 +175,9 @@ func TestHLSVideoOnly(t *testing.T) {
 	}
 }
 
-func TestHLSAudioOnly(t *testing.T) {
-	params := &avpipe.XcParams{
+// DisabledTestHLSAudioOnly is disabled because manifestURLStr seems to be down
+func DisabledTestHLSAudioOnly(t *testing.T) {
+	params := &goavpipe.XcParams{
 		Format:          "fmp4-segment",
 		DurationTs:      3 * 2700000,
 		StartSegmentStr: "1",
@@ -178,7 +185,7 @@ func TestHLSAudioOnly(t *testing.T) {
 		SampleRate:      48000,
 		SegDuration:     "30",
 		Ecodec2:         "aac", // "ac3", "aac"
-		XcType:          avpipe.XcAudio,
+		XcType:          goavpipe.XcAudio,
 		DebugFrameLevel: debugFrameLevel,
 		StreamId:        -1,
 	}
@@ -193,7 +200,7 @@ func TestHLSAudioOnly(t *testing.T) {
 	if err != nil {
 		t.Error(err)
 	}
-	readers, err := NewHLSReaders(manifestURL, avpipe.XcAudio)
+	readers, err := NewHLSReaders(manifestURL, goavpipe.XcAudio)
 	if err != nil {
 		t.Error(err)
 	}
@@ -202,7 +209,7 @@ func TestHLSAudioOnly(t *testing.T) {
 	reader.Start(endChan)
 
 	tlog.Info("Xc start", "params", fmt.Sprintf("%+v", *params))
-	avpipe.InitIOHandler(&inputOpener{}, &outputOpener{dir: outputDir})
+	goavpipe.InitIOHandler(&inputOpener{}, &outputOpener{dir: outputDir})
 	url := "audio_hls"
 	params.Url = url
 	reqCtx := &testCtx{url: url, r: reader.Pipe}
@@ -221,10 +228,11 @@ func TestHLSAudioOnly(t *testing.T) {
 	}
 }
 
+// DisabledTestHLSAudioVideoLive is disabled because manifestURLStr seems to be down
 // Creates 3 audio and 3 video HLS mez files in "test_out/" (the source is a live hls stream)
 // Then creates DASH abr-segments for each generated audio/video mez file.
 // All the output files will be saved in directory determined by outputDir.
-func TestHLSAudioVideoLive(t *testing.T) {
+func DisabledTestHLSAudioVideoLive(t *testing.T) {
 	setupLogging()
 	outputDir := path.Join(baseOutPath, fn())
 	setupOutDir(t, outputDir)
@@ -233,7 +241,7 @@ func TestHLSAudioVideoLive(t *testing.T) {
 	if err != nil {
 		t.Error(err)
 	}
-	readers, err := NewHLSReaders(manifestURL, avpipe.XcNone)
+	readers, err := NewHLSReaders(manifestURL, goavpipe.XcNone)
 	if err != nil {
 		t.Error(err)
 	}
@@ -244,9 +252,9 @@ func TestHLSAudioVideoLive(t *testing.T) {
 	videoReader := io.TeeReader(reader.Pipe, audioReader)
 
 	done := make(chan bool, 2)
-	avpipe.InitIOHandler(&inputOpener{}, &outputOpener{dir: outputDir})
+	goavpipe.InitIOHandler(&inputOpener{}, &outputOpener{dir: outputDir})
 
-	audioParams := &avpipe.XcParams{
+	audioParams := &goavpipe.XcParams{
 		Format:          "fmp4-segment",
 		DurationTs:      3 * 2700000,
 		StartSegmentStr: "1",
@@ -254,7 +262,7 @@ func TestHLSAudioVideoLive(t *testing.T) {
 		SampleRate:      48000,
 		SegDuration:     "30",
 		Ecodec2:         "aac",
-		XcType:          avpipe.XcAudio,
+		XcType:          goavpipe.XcAudio,
 		DebugFrameLevel: debugFrameLevel,
 		StreamId:        -1,
 	}
@@ -275,7 +283,7 @@ func TestHLSAudioVideoLive(t *testing.T) {
 		done <- true
 	}(audioReader)
 
-	videoParams := &avpipe.XcParams{
+	videoParams := &goavpipe.XcParams{
 		Format:          "fmp4-segment",
 		DurationTs:      3 * 2700000,
 		StartSegmentStr: "1",
@@ -285,7 +293,7 @@ func TestHLSAudioVideoLive(t *testing.T) {
 		Ecodec:          defaultVideoEncoder(),
 		EncHeight:       720,
 		EncWidth:        1280,
-		XcType:          avpipe.XcVideo,
+		XcType:          goavpipe.XcVideo,
 		Url:             "video_mez_hls",
 		DebugFrameLevel: debugFrameLevel,
 		StreamId:        -1,
@@ -360,7 +368,7 @@ func TestHLSAudioVideoLive(t *testing.T) {
 	}
 }
 
-func (io *inputOpener) Open(fd int64, url string) (avpipe.InputHandler, error) {
+func (io *inputOpener) Open(fd int64, url string) (goavpipe.InputHandler, error) {
 	tlog.Debug("IN_OPEN", "fd", fd, "url", url)
 
 	io.url = url
@@ -368,6 +376,7 @@ func (io *inputOpener) Open(fd int64, url string) (avpipe.InputHandler, error) {
 	if err != nil {
 		return nil, err
 	}
+	tc.openCount++
 
 	if (len(url) >= 4 && url[0:4] == "rtmp") || (len(url) >= 3 && url[0:3] == "udp") {
 		tc.fd = fd
@@ -483,9 +492,9 @@ func (i *inputCtx) Size() int64 {
 	return -1
 }
 
-func (i *inputCtx) Stat(streamIndex int, statType avpipe.AVStatType, statArgs interface{}) error {
+func (i *inputCtx) Stat(streamIndex int, statType goavpipe.AVStatType, statArgs interface{}) error {
 	switch statType {
-	case avpipe.AV_IN_STAT_BYTES_READ:
+	case goavpipe.AV_IN_STAT_BYTES_READ:
 		readOffset := statArgs.(*uint64)
 		if debugFrameLevel {
 			log.Debug("STAT read offset", *readOffset, "streamIndex", streamIndex)
@@ -495,7 +504,7 @@ func (i *inputCtx) Stat(streamIndex int, statType avpipe.AVStatType, statArgs in
 }
 
 func (oo *outputOpener) Open(h, fd int64, streamIndex, segIndex int, _ int64,
-	outType avpipe.AVType) (avpipe.OutputHandler, error) {
+	outType goavpipe.AVType) (goavpipe.OutputHandler, error) {
 
 	tc, err := getReqCtxByFD(h)
 	if err != nil {
@@ -510,29 +519,29 @@ func (oo *outputOpener) Open(h, fd int64, streamIndex, segIndex int, _ int64,
 	var filename string
 
 	switch outType {
-	case avpipe.DASHVideoInit:
+	case goavpipe.DASHVideoInit:
 		fallthrough
-	case avpipe.DASHAudioInit:
+	case goavpipe.DASHAudioInit:
 		filename = fmt.Sprintf("./%s/video-init-stream%d.mp4", oo.dir, streamIndex)
-	case avpipe.DASHManifest:
+	case goavpipe.DASHManifest:
 		filename = fmt.Sprintf("./%s/dash.mpd", oo.dir)
-	case avpipe.DASHVideoSegment:
+	case goavpipe.DASHVideoSegment:
 		filename = fmt.Sprintf("./%s/video-chunk-stream%d-%05d.mp4", oo.dir, streamIndex, segIndex)
-	case avpipe.DASHAudioSegment:
+	case goavpipe.DASHAudioSegment:
 		filename = fmt.Sprintf("./%s/audio-chunk-stream%d-%05d.mp4", oo.dir, streamIndex, segIndex)
-	case avpipe.HLSMasterM3U:
+	case goavpipe.HLSMasterM3U:
 		filename = fmt.Sprintf("./%s/master.m3u8", oo.dir)
-	case avpipe.HLSVideoM3U:
+	case goavpipe.HLSVideoM3U:
 		filename = fmt.Sprintf("./%s/video-media_%d.m3u8", oo.dir, streamIndex)
-	case avpipe.HLSAudioM3U:
+	case goavpipe.HLSAudioM3U:
 		filename = fmt.Sprintf("./%s/audio-media_%d.m3u8", oo.dir, streamIndex)
-	case avpipe.AES128Key:
+	case goavpipe.AES128Key:
 		filename = fmt.Sprintf("./%s/%s-key.bin", oo.dir, url)
-	case avpipe.MP4Segment:
+	case goavpipe.MP4Segment:
 		filename = fmt.Sprintf("./%s/segment-%d.mp4", oo.dir, segIndex)
-	case avpipe.FMP4AudioSegment:
+	case goavpipe.FMP4AudioSegment:
 		filename = fmt.Sprintf("./%s/audio-mez-segment%d-%d.mp4", oo.dir, streamIndex, segIndex)
-	case avpipe.FMP4VideoSegment:
+	case goavpipe.FMP4VideoSegment:
 		filename = fmt.Sprintf("./%s/video-mez-segment-%d.mp4", oo.dir, segIndex)
 	}
 
@@ -572,7 +581,7 @@ func (o *outputCtx) Write(buf []byte) (int, error) {
 
 func (o *outputCtx) Seek(offset int64, whence int) (int64, error) {
 	tlog.Debug("OUT_SEEK", "url", o.tc.url)
-	//return o.file.Seek(offset, whence)
+	// return o.file.Seek(offset, whence)
 	return -1, fmt.Errorf("OUT_SEEK url=%s", o.tc.url)
 }
 
@@ -582,7 +591,7 @@ func (o *outputCtx) Close() error {
 	return nil
 }
 
-func (o *outputCtx) Stat(streamIndex int, avType avpipe.AVType, statType avpipe.AVStatType, statArgs interface{}) error {
+func (o *outputCtx) Stat(streamIndex int, avType goavpipe.AVType, statType goavpipe.AVStatType, statArgs interface{}) error {
 	doLog := func(args ...interface{}) {
 		if debugFrameLevel {
 			logArgs := []interface{}{"stat", statType.Name(), "avType", avType.Name(), "streamIndex", streamIndex}
@@ -592,16 +601,16 @@ func (o *outputCtx) Stat(streamIndex int, avType avpipe.AVType, statType avpipe.
 	}
 
 	switch statType {
-	case avpipe.AV_OUT_STAT_BYTES_WRITTEN:
+	case goavpipe.AV_OUT_STAT_BYTES_WRITTEN:
 		writeOffset := statArgs.(*uint64)
 		doLog("write offset", *writeOffset)
-	case avpipe.AV_OUT_STAT_ENCODING_END_PTS:
+	case goavpipe.AV_OUT_STAT_ENCODING_END_PTS:
 		endPTS := statArgs.(*uint64)
 		doLog("endPTS", *endPTS)
-	case avpipe.AV_OUT_STAT_START_FILE:
+	case goavpipe.AV_OUT_STAT_START_FILE:
 		segIdx := statArgs.(*int)
 		doLog("segIdx", *segIdx)
-	case avpipe.AV_OUT_STAT_END_FILE:
+	case goavpipe.AV_OUT_STAT_END_FILE:
 		segIdx := statArgs.(*int)
 		doLog("segIdx", *segIdx)
 	}
@@ -679,6 +688,13 @@ func failNowOnError(t *testing.T, err error) {
 	}
 }
 
+// runAndFiniXc is a one-shot invocation of both XcRun and XcFini
+func runAndFiniXc(handle int32) error {
+	runErr := avpipe.XcRun(handle)
+	finiErr := avpipe.XcFini(handle)
+	return errors.Append(runErr, finiErr)
+}
+
 func removeDirContents(dir string) error {
 	d, err := os.Open(dir)
 	if err != nil {
@@ -720,6 +736,20 @@ func setupOutDir(t *testing.T, dir string) {
 		err = removeDirContents(dir)
 	}
 	failNowOnError(t, err)
+}
+
+// startLiveSource starts the live source and fatally fails the test if ffmpeg
+// exits within 200ms (indicating missing protocol support or a bad media file).
+func startLiveSource(t *testing.T, ls *LiveSource, stream string) {
+	t.Helper()
+	if err := ls.Start(stream); err != nil {
+		t.Fatalf("failed to start live source: %v", err)
+	}
+	time.Sleep(200 * time.Millisecond)
+	p, err := os.FindProcess(ls.Pid)
+	if err != nil || p.Signal(syscall.Signal(0)) != nil {
+		t.Fatalf("live source exited immediately — ffmpeg may lack %s support or media file is missing (pid=%d)", stream, ls.Pid)
+	}
 }
 
 func setupLogging() {

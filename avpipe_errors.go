@@ -8,22 +8,24 @@ package avpipe
 // #cgo pkg-config: libavformat
 // #cgo pkg-config: libavutil
 // #cgo pkg-config: libswresample
-// #cgo pkg-config: libavresample
 // #cgo pkg-config: libavdevice
 // #cgo pkg-config: libswscale
 // #cgo pkg-config: libavutil
-// #cgo pkg-config: libpostproc
 // #cgo netint pkg-config: xcoder
 // #cgo pkg-config: srt
-// #cgo CFLAGS: -I${SRCDIR}/include
-// #cgo CFLAGS: -I${SRCDIR}/libavpipe/include
 // #cgo CFLAGS: -I${SRCDIR}/utils/include
+// #cgo CFLAGS: -I${SRCDIR}/libavpipe/include
+// #cgo CFLAGS: -I${SRCDIR}/include
 // #cgo LDFLAGS: -L${SRCDIR}
 // #cgo linux LDFLAGS: -Wl,-rpath,$ORIGIN/../lib
 // #include "avpipe.h"
 import "C"
 
-import "errors"
+import (
+	"errors"
+
+	"github.com/eluv-io/avpipe/goavpipe"
+)
 
 // EAV_FILTER_STRING_INIT is the error returned when avpipe fails to obtain filter string.
 var EAV_FILTER_STRING_INIT = errors.New("EAV_FILTER_STRING_INIT")
@@ -165,7 +167,7 @@ func avpipeError(code C.int) error {
 
 	err, ok := avpipeErrors[int(code)]
 	if !ok {
-		log.Debug("avpipeError unknown", "code", int(code))
+		goavpipe.Log.Debug("avpipeError unknown", "code", int(code))
 		return EAV_UNKNOWN
 	}
 

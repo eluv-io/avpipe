@@ -10,8 +10,10 @@
 #include <sys/stat.h>
 #include <unistd.h>
 #include <fcntl.h>
+#include <stdio.h>
 #include <libavutil/log.h>
 #include <libavutil/pixdesc.h>
+#include <libavutil/parseutils.h>
 #include <errno.h>
 #include <pthread.h>
 
@@ -90,8 +92,28 @@ in_opener(
         if ((rc = bind(fd, sa, salen)) < 0) {
             /* Can not bind, fail and exit */
             elv_err("Failed to bind UDP socket, rc=%d", rc);
+            close(fd);
+            free(sa);
+            free_parsed_url(&url_parser);
             return -1;
         }
+
+        char localaddr[64] = {0};
+        const char *multicast_iface = NULL;
+        if (url_parser.query_string &&
+            av_find_info_tag(localaddr, sizeof(localaddr), "localaddr", url_parser.query_string)) {
+            multicast_iface = localaddr;
+        }
+        if (udp_join_multicast(fd, sa, salen, multicast_iface) < 0) {
+            elv_err("Failed to join UDP multicast group, url=%s, localaddr=%s, errno=%d",
+                url, multicast_iface ? multicast_iface : "", errno);
+            close(fd);
+            free(sa);
+            free_parsed_url(&url_parser);
+            return -1;
+        }
+        free(sa);
+        free_parsed_url(&url_parser);
 
         struct timeval tv;
         tv.tv_sec = UDP_PIPE_TIMEOUT;
@@ -193,6 +215,7 @@ in_closer(
     int fd = *((int *)(inctx->opaque));
     elv_dbg("IN io_close custom writer fd=%d\n", fd);
     free(inctx->opaque);
+    inctx->opaque = NULL;
     close(fd);
     return 0;
 }
@@ -293,7 +316,7 @@ read_channel_again:
 int
 in_write_packet(
     void *opaque,
-    uint8_t *buf,
+    const uint8_t *buf,
     int buf_size)
 {
     elv_dbg("IN WRITE");
@@ -530,7 +553,7 @@ out_read_packet(
 int
 out_write_packet(
     void *opaque,
-    uint8_t *buf,
+    const uint8_t *buf,
     int buf_size)
 {
     ioctx_t *outctx = (ioctx_t *)opaque;
@@ -813,7 +836,6 @@ do_probe(
                 "\tsample_rate: %d\n"
                 "\tchannels: %d\n"
                 "\tchannel_layout: %s\n"
-                "\tticks_per_frame: %d\n"
                 "\tbit_rate: %"PRId64"\n"
                 "\twidth: %d\n"
                 "\theight: %d\n"
@@ -840,7 +862,6 @@ do_probe(
                 probe->stream_info[i].sample_rate,
                 probe->stream_info[i].channels,
                 channel_name != NULL ? channel_name : "-",
-                probe->stream_info[i].ticks_per_frame,
                 probe->stream_info[i].bit_rate,
                 probe->stream_info[i].width,
                 probe->stream_info[i].height,
@@ -947,7 +968,7 @@ get_image_type(
 
     if (strncmp(image_type_str, "jpg", 3) == 0 || strncmp(image_type_str, "JPG", 3) == 0)
         return jpg_image;
-    
+
     if (strncmp(image_type_str, "gif", 3) == 0 || strncmp(image_type_str, "GIF", 3) == 0)
         return gif_image;
 
@@ -1012,6 +1033,27 @@ static int get_extract_images_ts(char *s, xcparams_t *params) {
     return i;
 }
 
+static int
+get_video_layout(
+    const char *s,
+    int *video_layout
+)
+{
+    if (!strcmp(s, "mono") || !strcmp(s, "0")) {
+        *video_layout = video_layout_mono;
+    } else if (!strcmp(s, "sbs") || !strcmp(s, "side-by-side") || !strcmp(s, "3")) {
+        *video_layout = video_layout_sbs;
+    } else if (!strcmp(s, "tb") || !strcmp(s, "top-bottom") || !strcmp(s, "4")) {
+        *video_layout = video_layout_tb;
+    } else if (!strcmp(s, "mvhevc") || !strcmp(s, "mv-hevc") || !strcmp(s, "10")) {
+        *video_layout = video_layout_mvhevc;
+    } else {
+        return -1;
+    }
+
+    return 0;
+}
+
 static void
 usage(
     char *progname,
@@ -1023,8 +1065,8 @@ usage(
         "Invalid parameter: %s\n\n"
         "Usage: %s <params>\n"
         "\t-audio-bitrate :         (optional) Default: 128000\n"
-        "\t-audio-decoder :         (optional) Audio decoder name. For audio default is \"aac\", but for ts files should be set to \"ac3\"\n"
-        "\t-audio-encoder :         (optional) Audio encoder name. Default is \"aac\", can be \"ac3\", \"mp2\" or \"mp3\"\n"
+        "\t-audio-decoder :         (optional) Audio decoder name. For audio default is \"aac\", but for ts files should be set to \"ac3\" or \"eac3\"\n"
+        "\t-audio-encoder :         (optional) Audio encoder name. Default is \"aac\", can be \"ac3\", \"eac3\", \"mp2\" or \"mp3\"\n"
         "\t-audio-index :           (optional) Default: the indexes of audio stream (comma separated)\n"
         "\t-audio-seg-duration-ts : (mandatory If format is not \"segment\" and transcoding audio) audio segment duration time base (positive integer).\n"
         "\t-bitdepth :              (optional) Bitdepth of color space. Default is 8, can be 8, 10, or 12.\n"
@@ -1038,7 +1080,7 @@ usage(
         "\t-crypt-kid :             (optional) 16-byte key ID, as hex\n"
         "\t-crypt-scheme :          (optional) Encryption scheme. Default is \"none\", can be: \"aes-128\", \"cenc\", \"cbc1\", \"cens\", \"cbcs\"\n"
         "\t-crypt-url :             (optional) Specify a key URL in the HLS manifest\n"
-        "\t-d :                     (optional) Decoder name. For video default is \"h264\", can be: \"h264\", \"h264_cuvid\", \"jpeg2000\", \"hevc\"\n"
+        "\t-d :                     (optional) Decoder name. For video common values are: \"h264\", \"h264_cuvid\", \"jpeg2000\", \"hevc\", \"hevc_cuvid\"\n"
         "\t                                    For audio default is \"aac\", but for ts files should be set to \"ac3\"\n"
         "\t-debug-frame-level :     (optional) Enable/disable debug frame level. Default is 0, must be 0 or 1.\n"
         "\t-deinterlace :           (optional) Deinterlace filter. Default is 0 (none), can be: 1 (bwdif send_field), 2 (bwdif send_frame)\n"
@@ -1062,12 +1104,13 @@ usage(
         "\t-level:                  (optional) Encoding level for video. If it is not determined, it will be set automatically.\n"
         "\t-listen:                 (optional) Listen mode for RTMP. Must be 0 or 1, by default is on (value 1)\n"
         "\t-log-size:               (optional) Log size in MB. Default is 100MB.\n"
-        "\t-master-display :        (optional) Master display, only valid if encoder is libx265.\n"
-        "\t-max-cll :               (optional) Maximum Content Light Level and Maximum Frame Average Light Level, only valid if encoder is libx265.\n"
-        "\t                                    This parameter is a comma separated of max-cll and max-fall (i.e \"1514,172\").\n"
+        "\t-master-display :        (optional) HDR10 mastering-display override for libx265 or hevc_nvenc. If omitted, valid input metadata is copied.\n"
+        "\t-max-cll :               (optional) HDR10 Maximum Content Light Level and Maximum Frame Average Light Level override for libx265 or hevc_nvenc.\n"
+        "\t                                    This parameter is a comma separated max-cll and max-fall (i.e. \"1514,172\"); \"0,0\" suppresses input CLL metadata.\n"
         "\t-mux-spec :              (optional) Muxing spec file.\n"
-        "\t-preset :                (optional) Preset string to determine compression speed. Default is \"medium\". Valid values are: \"ultrafast\", \"superfast\",\n"
-        "\t                                    \"veryfast\", \"faster\", \"fast\", \"medium\", \"slow\", \"slower\", \"veryslow\".\n"
+        "\t-preset :                (optional) Preset string to determine compression speed. Default is \"medium\". Software encoders accept \"ultrafast\" through\n"
+        "\t                                    \"veryslow\". NVIDIA accepts p1 through p7 and maps software preset names to p1 through p7.\n"
+        "\t-preserve-dolby-vision : (optional) Preserve Dolby Vision RPU metadata. Default is 0, must be 0 or 1. Requires libx265, bitdepth 10, and profile main10.\n"
         "\t-profile :               (optional) Encoding profile for video. If it is not determined, it will be set automatically.\n"
         "\t                                    Valid H264 profiles: \"baseline\", \"main\", \"extended\", \"high\", \"high10\", \"high422\", \"high444\"\n"
         "\t                                    Valid H265 profiles: \"main\", \"main10\"\n"
@@ -1076,6 +1119,15 @@ usage(
         "\t-rc-buffer-size :        (optional) Determines the interval used to limit bit rate\n"
         "\t-rc-max-rate :           (optional) Maximum encoding bit rate, used in conjuction with rc-buffer-size\n"
         "\t-rotate :                (optional) Rotate the input video. Default is 0 with no rotation, other values 90, 180, 270.\n"
+        "\t-fade :                  (optional) Fade filter ('in' or 'out').\n"
+        "\t-fade-start-frame :      (optional) Fade start frame for blend-based fade.\n"
+        "\t-fade-end-frame :        (optional) Fade end frame for blend-based fade.\n"
+        "\t-fade-level-1 :          (optional) Fade blend start level (e.g. 1.0).\n"
+        "\t-fade-level-2 :          (optional) Fade blend end level (e.g. 0.0).\n"
+        "\t-vertical :              (optional) Vertical video crop type. Default is 0 (none), 1 (32bpf).\n"
+        "\t-vertical-data :         (optional) Path to binary file with per-frame crop data (4 bytes per frame, uint32 LE).\n"
+        "\t                         Each value is the crop window centre as a fraction of the scaled frame\n"
+        "\t                         width, denominator 10000 (0=left, 5000=centre, 10000=right).\n"
         "\t-sample-rate :           (optional) Default: -1. For aac output sample rate is set to input sample rate and this parameter is ignored.\n"
         "\t-seekable :              (optional) Seekable stream. Default is 0, must be 0 or 1\n"
         "\t-seg-duration :          (mandatory if format is \"segment\") segment duration secs (positive integer). It is used for making mp4 segments.\n"
@@ -1087,11 +1139,13 @@ usage(
         "\t-stream-id :             (optional) Default: -1, if it is valid it will be used to transcode elementary stream with that stream-id.\n"
         "\t-sync-audio-to-stream-id:(optional) Default: -1, sync audio to video iframe of specific stream-id when input stream is mpegts.\n"
         "\t-t :                     (optional) Transcoding threads. Default is 1 thread, must be bigger than 1\n"
+        "\t-timecode :              (optional) Timecode string (eg. 01:00:00:00)\n"
         "\t-xc-type :               (optional) Transcoding type. Default is \"all\", can be \"video\", \"audio\", \"audio-merge\", \"audio-join\", \"audio-pan\", \"all\", \"extract-images\"\n"
         "\t                                    or \"extract-all-images\". \"all\" means transcoding video and audio together.\n"
         "\t-copy-mpegts :           (optional) Default 0. Create a copy of the MPEGTS input (for MPEGTS, SRT, RTP)\n"
         "\t-video-bitrate :         (optional) Mutually exclusive with crf. Default: -1 (unused)\n"
         "\t-video-frame-duration-ts :  (optional) Frame duration of the output video in time base.\n"
+        "\t-video-layout :          (optional) Video layout, can be \"mono\"/0, \"sbs\"/3, \"tb\"/4, or \"mvhevc\"/10.\n"
         "\t-video-seg-duration-ts : (mandatory If format is not \"segment\" and transcoding video) video segment duration time base (positive integer).\n"
         "\t-video-time-base :       (optional) Video encoder timebase, must be > 0 (the actual timebase would be 1/video-time-base).\n"
         "\t-wm-text :               (optional) Watermark text that will be presented in every video frame if it exist. It has higher priority than overlay watermark.\n"
@@ -1136,6 +1190,7 @@ main(
     url_parser_t url_parser;
     u_int64_t log_size = 100;
     int rc = 0;
+    AVChannelLayout channel_layout;
 
     /* Parameters */
     xcparams_t p = {
@@ -1183,6 +1238,7 @@ main(
         .sync_audio_to_stream_id = -1,      /* Default -1 (no sync to a video stream) */
         .rotate = 0,                        /* Default 0 (means no transpose/rotation) */
         .deinterlace = 0,                   /* Default 0 (no deinterlacing) */
+        .vertical = 0,                      /* Default 0 (no vertical crop) */
         .xc_type = xc_none,
         .video_bitrate = -1,                /* not used if using CRF */
         .watermark_text = NULL,
@@ -1264,10 +1320,13 @@ main(
                 if (sscanf(argv[i+1], "%d", &p.connection_timeout) != 1) {
                     usage(argv[0], argv[i], EXIT_FAILURE);
                 }
-            } else if (!strcmp(argv[i], "-channel-layout")) {
-                p.channel_layout = av_get_channel_layout(argv[i+1]);
-                if (p.channel_layout == 0)
+            } else if (!strcmp(argv[i], "-channel-layout")) {              
+                rc = av_channel_layout_from_string(&channel_layout, argv[i+1]);
+                if (rc < 0) {
                     usage(argv[0], argv[i], EXIT_FAILURE);
+                } else {
+                    p.channel_layout = channel_layout.u.mask;
+                }
             } else if (strcmp(argv[i], "-crypt-iv") == 0) {
                 p.crypt_iv = strdup(argv[i+1]);
             } else if (strcmp(argv[i], "-crypt-key") == 0) {
@@ -1307,8 +1366,11 @@ main(
                     usage(argv[0], argv[i], EXIT_FAILURE);
                 }
             } else if (!strcmp(argv[i], "-deinterlace")) {
-                if (sscanf(argv[i+1], "%d", &p.deinterlace) != 1) {
+                int deinterlace;
+                if (sscanf(argv[i+1], "%d", &deinterlace) != 1) {
                     usage(argv[0], argv[i], EXIT_FAILURE);
+                } else {
+                    p.deinterlace = deinterlace;
                 }
             }
             else if (strlen(argv[i]) > 2) {
@@ -1370,6 +1432,24 @@ main(
                 } else {
                     usage(argv[0], argv[i], EXIT_FAILURE);
                 }
+            } else if (!strcmp(argv[i], "-fade")) {
+                p.fade = strdup(argv[i+1]);
+            } else if (!strcmp(argv[i], "-fade-start-frame")) {
+                if (sscanf(argv[i+1], "%d", &p.fade_start_frame) != 1) {
+                    usage(argv[0], argv[i], EXIT_FAILURE);
+                }
+            } else if (!strcmp(argv[i], "-fade-end-frame")) {
+                if (sscanf(argv[i+1], "%d", &p.fade_end_frame) != 1) {
+                    usage(argv[0], argv[i], EXIT_FAILURE);
+                }
+            } else if (!strcmp(argv[i], "-fade-level-1")) {
+                if (sscanf(argv[i+1], "%lf", &p.fade_level_1) != 1) {
+                    usage(argv[0], argv[i], EXIT_FAILURE);
+                }
+            } else if (!strcmp(argv[i], "-fade-level-2")) {
+                if (sscanf(argv[i+1], "%lf", &p.fade_level_2) != 1) {
+                    usage(argv[0], argv[i], EXIT_FAILURE);
+                }
             } else if (!strcmp(argv[i], "-filter-descriptor")) {
                 p.filter_descriptor = strdup(argv[i+1]);
             } else if (strlen(argv[i]) > 2) {
@@ -1424,6 +1504,11 @@ main(
         case 'p':
             if (!strcmp(argv[i], "-preset")) {
                 p.preset = strdup(argv[i+1]);
+            } else if (!strcmp(argv[i], "-preserve-dolby-vision")) {
+                if (sscanf(argv[i+1], "%d", &p.preserve_dolby_vision) != 1 ||
+                    (p.preserve_dolby_vision != 0 && p.preserve_dolby_vision != 1)) {
+                    usage(argv[0], argv[i], EXIT_FAILURE);
+                }
             } else if (!strcmp(argv[i], "-profile")) {
                 p.profile = strdup(argv[i+1]);
             } else {
@@ -1512,6 +1597,10 @@ main(
                     usage(argv[0], argv[i], EXIT_FAILURE);
                 }
                 if ( n_threads < 1 ) usage(argv[0], argv[i], EXIT_FAILURE);
+            } else if (!strcmp(argv[i], "-timecode")) {
+                p.timecode = strdup(argv[i+1]);
+            } else {
+                usage(argv[0], argv[i], EXIT_FAILURE);
             }
             break;
         case 'v':
@@ -1533,6 +1622,48 @@ main(
                 }
                 if (p.video_time_base <= 0)
                     usage(argv[0], argv[i], EXIT_FAILURE);
+            } else if (!strcmp(argv[i], "-vertical")) {
+                if (sscanf(argv[i+1], "%d", &p.vertical) != 1) {
+                    usage(argv[0], argv[i], EXIT_FAILURE);
+                }
+            } else if (!strcmp(argv[i], "-vertical-data")) {
+                const char *vd_path = argv[i+1];
+                FILE *vd_fp = fopen(vd_path, "rb");
+                if (!vd_fp) {
+                    fprintf(stderr, "Failed to open vertical-data file: %s\n", vd_path);
+                    exit(EXIT_FAILURE);
+                }
+                fseek(vd_fp, 0, SEEK_END);
+                long vd_size = ftell(vd_fp);
+                fseek(vd_fp, 0, SEEK_SET);
+                if (vd_size <= 0) {
+                    fprintf(stderr, "vertical-data file is empty: %s\n", vd_path);
+                    fclose(vd_fp);
+                    exit(EXIT_FAILURE);
+                }
+                if (vd_size > MAX_VERTICAL_DATA_LEN) {
+                    fprintf(stderr, "vertical-data file too large: %ld bytes (max %d): %s\n",
+                        vd_size, MAX_VERTICAL_DATA_LEN, vd_path);
+                    fclose(vd_fp);
+                    exit(EXIT_FAILURE);
+                }
+                p.vertical_data_len = (int)vd_size;
+                p.vertical_data = (uint8_t *)malloc(vd_size);
+                if (!p.vertical_data) {
+                    fprintf(stderr, "Failed to allocate %ld bytes for vertical-data: %s\n", vd_size, vd_path);
+                    fclose(vd_fp);
+                    exit(EXIT_FAILURE);
+                }
+                if (fread(p.vertical_data, 1, vd_size, vd_fp) != (size_t)vd_size) {
+                    fprintf(stderr, "Failed to read vertical-data file: %s\n", vd_path);
+                    fclose(vd_fp);
+                    exit(EXIT_FAILURE);
+                }
+                fclose(vd_fp);
+            } else if (!strcmp(argv[i], "-video-layout")) {
+                if (get_video_layout(argv[i+1], &p.video_layout) < 0) {
+                    usage(argv[0], argv[i], EXIT_FAILURE);
+                }
             } else {
                 usage(argv[0], argv[i], EXIT_FAILURE);
             }
@@ -1617,6 +1748,12 @@ main(
 
     elv_logger_open(NULL, "exc", 10, log_size*1024*1024, elv_log_file);
     elv_set_log_level(elv_log_debug);
+
+    if (p.video_layout == video_layout_mvhevc) {
+        fprintf(stderr, "Error: MVHEVC restore output handler is not available\n");
+        elv_err("MVHEVC restore output handler is not available");
+        return EXIT_FAILURE;
+    }
 
     if (!strcmp(command, "probe")) {
         p.xc_type = xc_probe;

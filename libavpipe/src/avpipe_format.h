@@ -1,5 +1,7 @@
 /*
- * avpipe_format.c
+ * avpipe_format.h
+ *
+ * Container-specific helpers.
  */
 
 #include <libavcodec/avcodec.h>
@@ -26,8 +28,15 @@ is_live_source_udp(
 );
 
 int
-is_live_source_custom_reader(
+is_custom_input(
     coderctx_t *ctx
+);
+
+int
+is_bypass_bframes(
+    coderctx_t *decoder_context,
+    xcparams_t *params,
+    int stream_index
 );
 
 int
@@ -48,6 +57,13 @@ selected_decoded_audio(
 );
 
 int
+audio_output_stream_index(
+    coderctx_t *decoder_context,
+    xcparams_t* params,
+    int audio_stream_index
+);
+
+int
 get_channel_layout_for_encoder(
     int channel_layout
 );
@@ -64,3 +80,64 @@ packet_clone(
     AVPacket *src,
     AVPacket **dst
 );
+
+int segmentation_tolerance(
+    coderctx_t *decoder_context,
+    int stream_index);
+
+void frame_rescale_time_base(
+    AVFrame *frame,
+    AVRational src_time_base,
+    AVRational dst_time_base);
+
+int
+pts_unwrap_init(
+    coderctx_t *ctx);
+
+int64_t
+pts_unwrap(
+    pts_unwrapper_t *u,
+    int64_t ts);
+
+int
+copy_stream_side_data(
+    AVStream *out_stream,
+    const AVStream *in_stream);
+
+int
+is_mvhevc(
+    const AVStream *stream);
+
+int
+is_dolby_atmos(
+    const AVStream *stream);
+
+int
+is_dovi(
+    const AVStream *stream);
+
+void
+verify_hdr_source_color(
+    coderctx_t *decoder_context,
+    xcparams_t *params);
+
+void
+copy_source_color_to_output(
+    coderctx_t *encoder_context,
+    coderctx_t *decoder_context);
+
+void
+reconcile_decoder_video_color(
+    coderctx_t *decoder_context,
+    int stream_index,
+    const char *url);
+
+void
+fix_video_frame_color(
+    coderctx_t *decoder_context,
+    AVFrame *frame);
+
+void
+dash_synthesize_color_defaults(
+    xcparams_t *params,
+    AVCodecParameters *codecpar);

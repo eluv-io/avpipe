@@ -1,0 +1,299 @@
+package mpegts
+
+import (
+	"context"
+	"io"
+	"sync"
+	"sync/atomic"
+	"time"
+
+	"github.com/eluv-io/avpipe/broadcastproto/transport"
+	"github.com/eluv-io/avpipe/goavpipe"
+	"github.com/eluv-io/common-go/format/duration"
+	"github.com/eluv-io/common-go/media"
+	mio "github.com/eluv-io/common-go/media/io"
+	"github.com/eluv-io/common-go/media/pktpool"
+	"github.com/eluv-io/common-go/util/timeutil"
+	"github.com/eluv-io/errors-go"
+	elog "github.com/eluv-io/log-go"
+)
+
+var logNetReader = elog.Get("avpipe/broadcastproto/netreader")
+
+// errNetReaderCleanStop is the sentinel cancellation cause used for a clean stop (no error). It exists because
+// context.WithCancelCause records context.Canceled as the cause when its CancelCauseFunc is invoked with a nil cause,
+// so Status() could not otherwise distinguish "stopped, no error" from an explicit Cancel() or a real failure.
+var errNetReaderCleanStop = errors.Str("NetReader: clean stop")
+
+// Consumer is a consumer of packets from the NetReader. Packets are delivered as reference-counted pktpool.Resource
+// handles; a consumer must call Release() on each handle it receives once done with it (see pktpool for the ownership
+// contract).
+type Consumer interface {
+	// Name returns the name of this consumer
+	Name() string
+	// Chan returns the channel on which packets are sent
+	Chan() chan<- pktpool.Resource
+	// PacketDropped is called when a packet is dropped because the consumer's channel is full. This call must not
+	// block!
+	PacketDropped()
+}
+
+// StartNetReader creates and starts a NetReader that reads packets from the given transport and forwards them to the
+// provided consumers.
+func StartNetReader(
+	url string,
+	connectionTimeout time.Duration,
+	config goavpipe.InputProcessorConfig,
+	tp transport.Transport,
+	consumers []Consumer,
+) *NetReader {
+
+	ctx, cancel := context.WithCancelCause(context.Background())
+	transformer := media.NewNoopTransformer()
+
+	config = config.ApplyDefaults()
+	nr := &NetReader{
+		url:               url,
+		connectionTimeout: connectionTimeout,
+		config:            config,
+		transport:         tp,
+		consumers:         consumers,
+		transformer:       transformer,
+		packetPool:        pktpool.NewPacketPool(outputTlvWrapCap, config.MaxPacketSize),
+		ctx:               ctx,
+		cancel:            cancel,
+	}
+
+	_ = nr.start() // cannot error, since it was just created...
+	return nr
+}
+
+// NetReader reads packets from a network source and forwards them to consumers. It uses a pool of packets to avoid
+// allocations. Consumers must call Release() on each pktpool.Resource they receive when done with it.
+type NetReader struct {
+	url               string
+	connectionTimeout time.Duration
+	config            goavpipe.InputProcessorConfig
+	transport         transport.Transport
+	consumers         []Consumer
+
+	transformer media.Transformer
+	packetPool  *pktpool.Pool
+	ctx         context.Context
+	cancel      context.CancelCauseFunc
+
+	running   atomic.Bool
+	waitGroup sync.WaitGroup
+	reader    atomic.Pointer[io.ReadCloser] // the current reader, used for closing when the NetReader is canceled
+}
+
+// ConnStats copies the current connection's statistics into the given mio.ConnStats instance (if there is an active
+// reader and the reader supports statistics, e.g. an SRT connection - see mio.StatsReporter). It returns false without
+// touching the ConnStats instance if there's no active reader yet (not yet connected, or between reconnect attempts) or
+// the reader doesn't implement mio.StatsReporter (e.g. a plain UDP socket).
+func (r *NetReader) ConnStats(into *mio.ConnStats, details bool) bool {
+	reader := r.reader.Load()
+	if reader == nil {
+		return false
+	}
+	reporter, ok := (*reader).(mio.StatsReporter)
+	if !ok {
+		return false
+	}
+	reporter.ConnStats(into, details)
+	return true
+}
+
+func (r *NetReader) Status() (running bool, err error) {
+	cause := context.Cause(r.ctx)
+	if cause == nil {
+		return true, nil
+	}
+	if errors.Is(cause, errNetReaderCleanStop) {
+		return false, nil
+	}
+	return false, cause
+}
+
+func (r *NetReader) start() error {
+	e := errors.Template("NetReader.Start", errors.K.Invalid.Default(), "url", r.url)
+
+	if !r.running.CompareAndSwap(false, true) {
+		return e("reason", "already started")
+	}
+
+	r.waitGroup.Add(1)
+	go func() {
+		defer r.waitGroup.Done()
+		defer func() {
+			for _, consumer := range r.consumers {
+				close(consumer.Chan())
+			}
+		}()
+		err := r.process()
+		if err != nil {
+			err = e(err)
+			if errors.Is(err, io.EOF) {
+				logNetReader.Info("netreader terminated with EOF", err)
+			} else {
+				logNetReader.Warn("netreader failed", err)
+			}
+			r.cancel(e.IfNotNil(err))
+		} else {
+			// Unreachable today: isRecoverable() always returns true, so readLoop/process only ever return via a
+			// real error or an explicit Cancel(); process() cannot currently return nil. Handled anyway so a future
+			// change to isRecoverable (e.g. treating some read errors as terminal) reports a clean stop correctly
+			// via errNetReaderCleanStop instead of the ambiguous context.Canceled that cancel(nil) would record.
+			r.cancel(errNetReaderCleanStop)
+		}
+	}()
+
+	return nil
+}
+
+func (r *NetReader) Cancel() {
+	cancelErr := errors.E("NetReader.Cancel", errors.K.Warn, context.Canceled, "reason", "canceled by user request")
+	r.cancel(cancelErr)
+	reader := r.reader.Swap(nil)
+	if reader != nil {
+		errors.Log((*reader).Close, logNetReader.Info)
+	}
+	r.waitGroup.Wait()
+}
+
+func (r *NetReader) process() error {
+	e := errors.Template("process", errors.K.IO.Default())
+
+	logNetReader.Debug("starting processor", e.Fields()...)
+	for i := 0; ; i++ {
+		reader, err := r.connect()
+		if err != nil {
+			return e(err)
+		}
+		r.reader.Store(&reader)
+
+		// Re-check for cancellation after storing the reader: if Cancel ran between connect() returning
+		// and the Store above, its reader.Swap may have missed this reader and would leave a blocked Read
+		// (e.g. a pending SRT Accept) hanging. Close the reader ourselves so the read is interrupted and
+		// the connection is not leaked, then stop.
+		if r.ctx.Err() != nil {
+			if stored := r.reader.Swap(nil); stored != nil {
+				errors.Log((*stored).Close, logNetReader.Info)
+			}
+			return e(context.Cause(r.ctx))
+		}
+
+		cont, err := r.readLoop(reader) // readLoop closes reader!
+		// Clear the now-closed reader immediately, rather than leaving it in place until the next successful
+		// connect()'s Store below: ConnStats documents "between reconnect attempts" as no active reader (ok=false),
+		// but without this, a closed reader from the previous connection would still satisfy Load() != nil and, if
+		// it implements mio.StatsReporter, report stale stats throughout the reconnect window. Harmless if Cancel
+		// runs concurrently: its own Swap(nil) becomes a no-op on an already-nil/already-closed reader either way.
+		r.reader.Store(nil)
+		if cont {
+			if r.config.MaxRecoverAttempts <= 0 || i < r.config.MaxRecoverAttempts {
+				logNetReader.Info("recoverable processor error, will retry", e(err))
+				continue
+			}
+			return e("reason", "max recovery attempts reached", "attempts", r.config.MaxRecoverAttempts).WithCause(err)
+		}
+		if err != nil {
+			return e(err)
+		}
+		return nil
+	}
+
+}
+
+func (r *NetReader) connect() (io.ReadCloser, error) {
+	attempts := 0
+	watch := timeutil.StartWatch()
+
+	logNetReader.Debug("connecting to source", "url", r.transport.URL(), "timeout", r.connectionTimeout)
+
+	for {
+		if r.ctx.Err() != nil {
+			return nil, context.Cause(r.ctx)
+		}
+
+		// PENDING(LUK): add timeout to transport.Open()
+		//               bp.cfg.ConnectionTimeout
+		attempts++
+		reader, err := r.transport.Open()
+		if err != nil {
+			logNetReader.Debug("failed to connect to source", err,
+				"attempt", attempts,
+				"max_attempts", r.config.MaxConnectAttempts,
+				"after", duration.Rounded(watch.Duration()))
+			if attempts > r.config.MaxConnectAttempts || watch.Duration() > r.connectionTimeout {
+				return nil, errors.E("connect", err,
+					"reason", "failed to connect to transport",
+					"attempts", attempts,
+					"after", duration.Rounded(watch.Duration()))
+			}
+			select {
+			case <-time.After(r.config.ReconnectDelay.Duration()):
+			case <-r.ctx.Done():
+				return nil, errors.E("connect", r.ctx.Err())
+			}
+			continue
+		}
+		logNetReader.Debug("source connected",
+			"url", r.transport.URL(),
+			"attempts", attempts,
+			"after", duration.Rounded(watch.Duration()))
+		return reader, nil
+	}
+}
+
+func (r *NetReader) readLoop(reader io.ReadCloser) (cont bool, err error) {
+	defer errors.Log(reader.Close, logNetReader.Info)
+	throttledLog := logNetReader.Throttle("net-reader-dropped-packet", 100*time.Millisecond)
+	for {
+		res := r.packetPool.Borrow()
+		pkt := res.T
+		err := pkt.FromReader(reader)
+		if err != nil {
+			res.Release()
+			return r.isRecoverable(err), errors.E("readLoop", errors.K.IO.Default(), err)
+		}
+		pkt.Data, err = r.transformer.Transform(pkt.Data)
+		if err != nil {
+			res.Release()
+			return r.isRecoverable(err), errors.E("readLoop", errors.K.IO.Default(), err)
+		}
+
+		for _, consumer := range r.consumers {
+			res.Reference()
+			select {
+			case consumer.Chan() <- res:
+			case <-r.ctx.Done():
+				res.ReleaseN(2) // release both the packet and the reference to it since we return
+				return false, r.ctx.Err()
+			default:
+				// consumer busy: drop packet
+				res.Release()
+				consumer.PacketDropped()
+				throttledLog.Warn("packet dropped",
+					"reason", "consumer channel full",
+					"consumer", consumer.Name(),
+					"channel_size", len(consumer.Chan()),
+					"channel_cap", cap(consumer.Chan()))
+			}
+		}
+		res.Release()
+	}
+}
+
+func (r *NetReader) isRecoverable(_ error) bool {
+	// All read errors are treated as recoverable, including io.EOF: a live source (UDP/RTP/SRT) may momentarily close
+	// or hit end-of-stream and later resume, so the NetReader reconnects rather than abandoning the source. Shutdown is
+	// driven by Cancel(), not by the source returning EOF. Retries are bounded by MaxRecoverAttempts (and connection
+	// attempts by connect()).
+	return true
+}
+
+func (r *NetReader) Close() error {
+	r.Cancel()
+	return nil
+}

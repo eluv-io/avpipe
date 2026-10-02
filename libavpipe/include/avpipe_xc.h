@@ -22,16 +22,9 @@
 
 #define AVIO_OUT_BUF_SIZE   (1*1024*1024)   // avio output buffer size
 #define AVIO_IN_BUF_SIZE    (1*1024*1024)   // avio input buffer size
+#define MAX_URL_SIZE        1024            // Maximum URL size
 
 //#define DEBUG_UDP_PACKET  // Uncomment for development, debugging and testing
-
-/* Borrowed from libavcodec/nvenc.h since it is not exposed */
-enum {
-    NV_ENC_H264_PROFILE_BASELINE,
-    NV_ENC_H264_PROFILE_MAIN,
-    NV_ENC_H264_PROFILE_HIGH,
-    NV_ENC_H264_PROFILE_HIGH_444P,
-};
 
 /*
  * Adding/deleting an error code needs adding/deleting corresponding GO
@@ -104,7 +97,8 @@ typedef enum avp_stat_t {
     out_stat_encoding_end_pts = 9,          // The last PTS encoded. This stat is recorded when a file is closed
     out_stat_start_file = 10,               // Sent when a new file is opened and reports the segment index
     out_stat_end_file = 11,                 // Sent when a file is closed and reports the segment index
-    in_stat_data_scte35 = 12               // SCTE data arrived
+    in_stat_data_scte35 = 12,               // SCTE data arrived
+    in_stat_mpegts = 13                     // MPEGTS input stats (including RTP if applicable)
 } avp_stat_t;
 
 typedef enum avp_live_proto_t {
@@ -141,15 +135,20 @@ typedef struct mux_input_ctx_t {
     int     header_size;
 } mux_input_ctx_t;
 
+/*
+io_mux_ctx_t is used for handling input streams for muxing. It assumes that all input streams, as
+ordered by the muxing spec, have the ordering video -> audio(s) -> caption(s). It stores an input
+context for each of the input streams, as well as the number of each.
+*/
 typedef struct io_mux_ctx_t {
     char            *out_filename;              /* Output filename/url for this muxing */
     char            *mux_type;                  /* "mux-mez" or "mux-abr" */
     mux_input_ctx_t video;
     int64_t         last_video_pts;
-    int             last_audio_index;
+    int             audio_count;
     mux_input_ctx_t audios[MAX_STREAMS];
     int64_t         last_audio_pts;
-    int             last_caption_index;
+    int             caption_count;
     mux_input_ctx_t captions[MAX_STREAMS];
 } io_mux_ctx_t;
 
@@ -167,6 +166,7 @@ typedef struct ioctx_t {
 
     /* Input filename or url */
     char                *url;
+    char                *alt_url;   /* Alternate URL for ffmpeg (e.g. rtp:// rewritten as udp://) */
 
     avpipe_buftype_t    type;
     unsigned char*      buf;
@@ -244,7 +244,7 @@ typedef int
 typedef int
 (*avpipe_writer_f)(
     void *opaque,
-    uint8_t *buf,
+    const uint8_t *buf,
     int buf_size);
 
 typedef int64_t
@@ -268,17 +268,92 @@ typedef struct avpipe_io_handler_t {
     avpipe_stater_f avpipe_stater;
 } avpipe_io_handler_t;
 
-#define MAX_WRAP_PTS        ((int64_t)8589000000)
 #define MAX_AVFILENAME_LEN  128
 
-/* Decoder/encoder context, keeps both video and audio stream ffmpeg contexts */
+/*
+ * PTS/DTS unwrapper state for one input stream
+ *
+ * MPEGTS timestamps wrap every 2^33/90000 ~= 26.5 hours
+ * Unwrapping converts timestamps to monotonic int64. PTS and DTS are unwrapped independently.
+ */
+typedef struct pts_unwrapper_t {
+    const char *url;            /* input url */
+    int         stream_index;   /* input stream index */
+    int64_t     wrap_modulus;   /* 2^pts_wrap_bits, or 0 to disable unwrapping */
+    int         has_last;       /* set once the first timestamp is seen */
+    int64_t     last;           /* last raw (wrapped) input timestamp */
+    int64_t     offset;         /* accumulated wrap offset (added to raw timestamps) */
+    char        kind;           /* 'P' (PTS) or 'T' (DTS) */
+} pts_unwrapper_t;
+
+/*
+ * Decoder/encoder context, keeps both video and audio stream ffmpeg contexts
+ *
+ * This structure supports:
+ *   - one video stream (at most) - video_stream_index
+ *   - one or more audio streams - audio_stream_index[]
+ *   - one SCTE-35 data stream    - data_scte35_stream_index
+ *   - one arbitrary data stream  - data_stream_index (not used currently)
+ *
+ * The caller specifies which source media audio streams to encode, using xc_params->audio_index, eg.
+ *   - audio_index[0] = 1;
+ *   - audio_index[1] = 3;
+ *   - audio_index[2] = 4;
+ *   (and xc->params->n_audio is 3)
+ *
+ * Audio stream index mapping is stored as follows:
+ *
+ * - decoder
+ *   - the audio_stream_index array stores the selected stream index values the same way as xc_params
+ *     - audio_stream_index[0] = 1;
+ *     - audio_stream_index[1] = 3;
+ *     - audio_stream_index[2] = 4;
+ *     (and the number of streams is stored in 'n_audio')
+ *
+ * - encoder
+ *   - if the encoding operation is audio join, merge or pan (which effectively takes multiple input steams and makes one output stream)
+ *      - audio_stream_index[0] = 0; (output stream index is considered 0 and nb_audio_output is 1)
+ *   - otherwise it uses a strange convention (needs fixed - this is impossible to traverse)
+ *      - audio_stream_index[0] unset
+ *      - audio_stream_index[1] = 1
+ *      - audio_stream_index[2] unset
+ *      - audio_stream_index[3] = 3
+ *      - audio_stream_index[4] = 4
+ *
+ * The video format context is stored in 'format_context'
+ * Audio format contexts for each audio output is stored in 'format_context2[]'
+ *   - this array is contiguous and has 'n_audio' elements eg. for the xc_params above
+ *     - format_context2[0] is the context for audio stream index 1
+ *     - format_context2[1] is the context for audio stream index 3
+ *     - format_context2[2] is the context for audio stream index 4
+ *
+ * Codec contexts (AVCodecContext) are stored in 'codec_context[]' as follows:
+ *
+ * - decoder
+ *   - the codec_context array is indexed using the source media stream index values, eg. for the xc_params above
+ *     - codec_context[0]  video  (if the source has video on stream_index 0, for example)
+ *     - codec_context[1]  audio stream index 1
+ *     - codec_context[2]  audio stream index 2 (not selected, per xc_params->audio_index)
+ *     - codec_context[3]  audio stream index 3
+ *     - codec_context[4]  audio stream index 4
+ *
+ * - encoder
+ *   - if the encoding operation is audio join, merge or pan
+ *     - codec_context[0]  is the codec context for the one output audio stream
+ *   - otherwise the array is indexed the same way as the encoder 'audio_stream_index' array, eg.
+ *      - codec_context[0] codec context for the video stream
+ *      - codec_context[1] codec context for audio stream index 1
+ *      - codec_context[2] unset
+ *      - codec_context[3] codec context for audio stream index 3
+ *      - codec_context[4] codec context for audio stream index 4
+ */
 typedef struct coderctx_t {
     AVFormatContext     *format_context;                                /* Input format context or video output format context */
     AVFormatContext     *format_context2[MAX_STREAMS];                  /* Audio output format context, indexed by audio index */
     char                filename2[MAX_STREAMS][MAX_AVFILENAME_LEN];     /* Audio filename formats */
     int                 n_audio_output;                                 /* Number of audio output streams, it is set for encoder */
 
-    AVCodec             *codec[MAX_STREAMS];
+    const AVCodec       *codec[MAX_STREAMS];
     AVStream            *stream[MAX_STREAMS];
     AVCodecParameters   *codec_parameters[MAX_STREAMS];
     AVCodecContext      *codec_context[MAX_STREAMS];    /* Audio/video AVCodecContext, indexed by stream_index */
@@ -296,10 +371,8 @@ typedef struct coderctx_t {
     int data_scte35_stream_index;                       /* Index of SCTE-35 data stream */
     int data_stream_index;                              /* Index of an unrecognized data stream */
 
-    int64_t video_last_wrapped_pts;                     /* Video last wrapped pts */
-    int64_t video_last_input_pts;                       /* Video last input pts */
-    int64_t audio_last_wrapped_pts[MAX_STREAMS];        /* Audio last wrapped pts */
-    int64_t audio_last_input_pts[MAX_STREAMS];          /* Audio last input pts */
+    pts_unwrapper_t pts_unwrapper[MAX_STREAMS];         /* PTS unwrap state (per stream)*/
+    pts_unwrapper_t dts_unwrapper[MAX_STREAMS];         /* DTS unwrap state (per stream)*/
     int64_t video_last_dts;
     int64_t audio_last_dts[MAX_STREAMS];
     int64_t last_key_frame;                             /* pts of last key frame */
@@ -313,10 +386,17 @@ typedef struct coderctx_t {
 
     int64_t audio_output_pts;                           /* Used to set PTS directly when using audio FIFO */
 
+    /* Video color metadata reconciled values - used for fixing frame color metadata */
+    enum AVColorPrimaries              video_color_primaries;
+    enum AVColorTransferCharacteristic video_color_trc;
+    enum AVColorSpace                  video_colorspace;
+    enum AVColorRange                  video_color_range;
+
     /* Video filter */
     AVFilterContext *video_buffersink_ctx;
     AVFilterContext *video_buffersrc_ctx;
     AVFilterGraph   *video_filter_graph;
+    AVFilterContext *video_crop_ctx;            /* Crop filter context for send_command */
 
     /* Audio filter */
     AVFilterContext *audio_buffersink_ctx[MAX_STREAMS];
@@ -339,6 +419,7 @@ typedef struct coderctx_t {
     int64_t first_read_packet_pts[MAX_STREAMS];         /* PTS of first packet read - which might not be decodable */
 
     int64_t video_encoder_prev_pts;     /* Previous pts for video output (encoder) */
+    int64_t audio_encoder_prev_pts[MAX_STREAMS]; /* Previous pts for audio output (encoder), per stream - diagnostic only */
     int64_t video_duration;             /* Duration/pts of original frame */
     int64_t audio_duration;             /* Audio duration/pts of original frame when tx_type == tx_all */
     int64_t first_key_frame_pts;        /* First video key frame pts, used to synchronize audio and video in UDP live streams */
@@ -393,6 +474,24 @@ typedef enum dif_type {
     dif_bwdif_frame = 2  // Use filter bwdif mode 'send_frame' (one frame per input frame)
 } dif_type;
 
+// vertical data types
+typedef enum vertical_type {
+    vertical_none   = 0, // No vertical crop
+    vertical_32bpf  = 1  // 32 bits per frame (uint32 LE per frame)
+} vertical_type;
+
+// Upper bound on a vertical_data buffer (4 bytes/frame => ~33M frames, ~155h at 60fps).
+// Sanity check for oversized/garbage vertical-data size
+#define MAX_VERTICAL_DATA_LEN   (128 * 1024 * 1024)
+
+// Video layout. Values align with ISO/IEC 23001-8 (CICP)
+typedef enum video_layout_t {
+    video_layout_mono = 0, // Monoscopic
+    video_layout_sbs  = 3, // Stereoscopic side-by-side
+    video_layout_tb   = 4, // Stereoscopic top-bottom
+    video_layout_mvhevc = 10 // Multi-layer HEVC (MV-HEVC)
+} video_layout_t;
+
 #define DRAW_TEXT_SHADOW_OFFSET     0.075
 #define MAX_EXTRACT_IMAGES_SZ       100
 
@@ -438,7 +537,7 @@ typedef struct xcparams_t {
     crypt_scheme_t  crypt_scheme;   // Content protection / DRM / encryption [Optional, Default: crypt_none]
     xc_type_t       xc_type;        // Default: 0 means transcode 'everything'
     int             copy_mpegts;    // Create a copy of the input stream (only MPEGTS and SRT)
-
+    int         use_preprocessed_input;     // Use custom UDP handler
     int         seekable;                   // Default: 0 means not seekable. A non seekable stream with moov box in
                                             //          the end causes a lot of reads up to moov atom.
     int         listen;                     // Default is 1, listen mode for RTMP
@@ -446,8 +545,8 @@ typedef struct xcparams_t {
     char        *watermark_xloc;            // Default 0
     char        *watermark_yloc;            // Default 0
     float       watermark_relative_sz;      // Default 0
-    char        *watermark_font_color;      // black
-    int         watermark_shadow;           // Default 1, means shadow exist 
+    char        *watermark_font_color;      // Default: white. Must be non-empty when watermark_text is set
+    int         watermark_shadow;           // Default: 0 (no shadow)
     char        *overlay_filename;          // Overlay file name
     char        *mov_overlay_path;          // MEDIA FELIZ: Path to overlay ProRes 4444 with alpha
     char        *png_sequence_path;         // MEDIA FELIZ: Path template for PNG sequence (ex. /frames/frame_%06d.png)
@@ -462,8 +561,10 @@ typedef struct xcparams_t {
     int         n_audio;                    // Number of entries in audio_index
     int         sync_audio_to_stream_id;    // mpegts only, default is 0
     int         bitdepth;                   // Can be 8, 10, 12
+    int         preserve_dolby_vision;      // Preserve Dolby Vision RPU metadata while transcoding
     char        *max_cll;                   // Maximum Content Light Level (HDR only)
     char        *master_display;            // Master display (HDR only)
+    int         video_layout;               // Video layout (eg. stereoscopic SBS)
     int         stream_id;                  // Stream id to trasncode, should be >= 0
     char        *filter_descriptor;         // Filter descriptor if tx-type == audio-merge
     char        *mux_spec;
@@ -480,6 +581,17 @@ typedef struct xcparams_t {
     char        *profile;
     int         level;
     dif_type    deinterlace;                // Deinterlacing filter
+    char        *timecode;                  // Original timecode string
+    vertical_type vertical;                 // Vertical video crop type (9:16)
+    uint8_t     *vertical_data;             // Per-frame crop data (opaque byte array, currently 4 bytes per frame uint32 LE).
+                                            //      Each value is the crop window centre as a fraction of the scaled frame width,
+                                            //      with denominator VERTICAL_DATA_SCALE (see avpipe_utils.h)
+    int         vertical_data_len;          // Length of vertical_data in bytes
+    char        *fade;                      // Fade filter: "in" or "out"
+    int         fade_start_frame;           // Fade start frame (used with blend filter)
+    int         fade_end_frame;             // Fade end frame (used with blend filter)
+    double      fade_level_1;               // Fade blend start level (e.g. 1.0)
+    double      fade_level_2;               // Fade blend end level (e.g. 0.0)
 } xcparams_t;
 
 #define MAX_CODEC_NAME  256
@@ -493,12 +605,25 @@ typedef struct side_data_t {
     side_data_display_matrix_t display_matrix;
 } side_data_t;
 
+typedef struct dovi_info_t {
+    uint8_t present;                         // 1 if AV_PKT_DATA_DOVI_CONF side data found
+    uint8_t dv_version_major;
+    uint8_t dv_version_minor;
+    uint8_t dv_profile;
+    uint8_t dv_level;
+    uint8_t rpu_present_flag;
+    uint8_t el_present_flag;
+    uint8_t bl_present_flag;
+    uint8_t dv_bl_signal_compatibility_id;
+} dovi_info_t;
+
 typedef struct stream_info_t {
     int         stream_index;       // Stream index in AVFormatContext
     int         stream_id;          // Format-specific stream ID, set by libavformat during decoding
     int         codec_type;         // Audio or Video
     int         codec_id;
     char        codec_name[MAX_CODEC_NAME+1];
+    char        codec_tag_string[AV_FOURCC_MAX_STRING_SIZE]; // 4CC string, e.g. "avc1", "ec-3"
     int64_t     duration_ts;
     AVRational  time_base;
     int64_t     nb_frames;
@@ -508,7 +633,6 @@ typedef struct stream_info_t {
     int         sample_rate;        // Audio only, samples per second
     int         channels;           // Audio only, number of audio channels
     int         channel_layout;     // Audio channel layout
-    int         ticks_per_frame;
     int64_t     bit_rate;
     int         has_b_frames;
     int         width, height;       // Video only
@@ -520,6 +644,19 @@ typedef struct stream_info_t {
     enum AVFieldOrder   field_order;
     int                 profile;
     int                 level;
+
+    char                color_primaries[16];      // e.g. "bt2020", "bt709"
+    char                color_transfer[24];       // e.g. "smpte2084" (PQ), "arib-std-b67" (HLG)
+    char                color_space[16];          // e.g. "bt2020nc"
+    char                color_range[8];           // "tv" (limited) or "pc" (full)
+
+    char                mastering_display[128];   // AV_PKT_DATA_MASTERING_DISPLAY_METADATA
+    char                max_cll[32];              // AV_PKT_DATA_CONTENT_LIGHT_LEVEL
+    char                stereo3d_type[32];        // AV_PKT_DATA_STEREO3D
+
+    dovi_info_t         dovi;                    // AV_PKT_DATA_DOVI_CONF
+    int                 ec3_joc;                 // 1 if Dolby Atmos (JOC); set when codec_context->profile == AV_PROFILE_EAC3_DDP_ATMOS
+
     side_data_t         side_data;
     AVDictionary        *tags;
 } stream_info_t;
@@ -781,6 +918,30 @@ set_extract_images(
     int64_t value);
 
 /**
+ * @brief   Allocate and copy vertical_data from a byte buffer.
+ *
+ * @param   params  Transcoding parameters
+ * @param   data    Source byte buffer
+ * @param   len     Length in bytes
+ * @return  eav_success on success, eav_param if len <= 0, eav_mem_alloc if the
+ *          buffer allocation fails.
+ */
+int
+init_vertical_data(
+    xcparams_t *params,
+    const uint8_t *data,
+    int len);
+
+/**
+ * @brief   Free vertical_data memory
+ *
+ * @param   params  Transcoding parameters
+ */
+void
+free_vertical_data(
+    xcparams_t *params);
+
+/**
  * @brief   Returns the level based on the input values
  *
  * @param   profile_idc     Profile of the video.
@@ -823,29 +984,6 @@ avpipe_h264_guess_profile(
  */
 int
 avpipe_h264_profile(
-    char *profile_name);
-
-
-/**
- * @brief   Helper function to obtain FFmpeg constant for an h265 profile name. 
- * 
- * @param   profile_name  A pointer to the profile name.
- * @return  Returns the FFmpeg constant if profile name is valid.
- *          Returns 0 if profile name is NULL. For invalid profile name return -1.
- */
-int
-avpipe_h265_profile(
-    char *profile_name);
-
-/**
- * @brief   Helper function to obtain FFmpeg constant for an nvidia h264 profile name. 
- * 
- * @param   profile_name  A pointer to the profile name.
- * @return  Returns the FFmpeg constant if profile name is valid.
- *          Returns 0 if profile name is NULL. For invalid profile name return -1.
- */
-int
-avpipe_nvh264_profile(
     char *profile_name);
 
 /**

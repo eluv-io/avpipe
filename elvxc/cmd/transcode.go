@@ -9,15 +9,17 @@ import (
 	"strings"
 
 	"github.com/eluv-io/avpipe"
+	"github.com/eluv-io/avpipe/broadcastproto/transport"
+	"github.com/eluv-io/avpipe/goavpipe"
 	"github.com/spf13/cobra"
 )
 
-// elvxcInputOpener implements avpipe.InputOpener
+// elvxcInputOpener implements goavpipe.InputOpener
 type elvxcInputOpener struct {
 	url string
 }
 
-func (io *elvxcInputOpener) Open(fd int64, url string) (avpipe.InputHandler, error) {
+func (io *elvxcInputOpener) Open(fd int64, url string) (goavpipe.InputHandler, error) {
 	log.Debug("AVCMD InputOpener.Open", "fd", fd, "url", url)
 
 	switch {
@@ -45,31 +47,33 @@ func (io *noopElvxcInput) Read(buf []byte) (int, error)                 { return
 func (io *noopElvxcInput) Seek(offset int64, whence int) (int64, error) { return 0, nil }
 func (io *noopElvxcInput) Close() error                                 { return nil }
 func (io *noopElvxcInput) Size() int64                                  { return 0 }
-func (i *noopElvxcInput) Stat(streamIndex int, statType avpipe.AVStatType, statArgs interface{}) error {
+func (i *noopElvxcInput) Stat(streamIndex int, statType goavpipe.AVStatType, statArgs interface{}) error {
 	switch statType {
-	case avpipe.AV_IN_STAT_BYTES_READ:
+	case goavpipe.AV_IN_STAT_BYTES_READ:
 		readOffset := statArgs.(*uint64)
 		log.Info("AVCMD InputHandler.Stat", "read offset", *readOffset, "streamIndex", streamIndex)
-	case avpipe.AV_IN_STAT_AUDIO_FRAME_READ:
+	case goavpipe.AV_IN_STAT_AUDIO_FRAME_READ:
 		audioFrameRead := statArgs.(*uint64)
 		log.Info("AVCMD InputHandler.Stat", "audioFrameRead", *audioFrameRead, "streamIndex", streamIndex)
-	case avpipe.AV_IN_STAT_VIDEO_FRAME_READ:
+	case goavpipe.AV_IN_STAT_VIDEO_FRAME_READ:
 		videoFrameRead := statArgs.(*uint64)
 		log.Info("AVCMD InputHandler.Stat", "videoFrameRead", *videoFrameRead, "streamIndex", streamIndex)
-	case avpipe.AV_IN_STAT_DECODING_AUDIO_START_PTS:
+	case goavpipe.AV_IN_STAT_DECODING_AUDIO_START_PTS:
 		startPTS := statArgs.(*uint64)
 		log.Info("AVCMD InputHandler.Stat", "audio start PTS", *startPTS, "streamIndex", streamIndex)
-	case avpipe.AV_IN_STAT_DECODING_VIDEO_START_PTS:
+	case goavpipe.AV_IN_STAT_DECODING_VIDEO_START_PTS:
 		startPTS := statArgs.(*uint64)
 		log.Info("AVCMD InputHandler.Stat", "video start PTS", *startPTS, "streamIndex", streamIndex)
-	case avpipe.AV_IN_STAT_DATA_SCTE35:
+	case goavpipe.AV_IN_STAT_DATA_SCTE35:
 		log.Info("AVCMD InputHandler.Stat", "scte35", statArgs, "streamIndex", streamIndex)
+	case goavpipe.AV_IN_STAT_MPEGTS:
+		log.Info("AVCMD InputHandler.Stat", "mpegts", statArgs, "streamIndex", streamIndex)
 	}
 
 	return nil
 }
 
-// elvxcInput implements avpipe.InputHandler
+// elvxcInput implements goavpipe.InputHandler
 type elvxcInput struct {
 	url  string
 	file *os.File // Input file
@@ -112,25 +116,27 @@ func (i *elvxcInput) Size() int64 {
 	return fi.Size()
 }
 
-func (i *elvxcInput) Stat(streamIndex int, statType avpipe.AVStatType, statArgs interface{}) error {
+func (i *elvxcInput) Stat(streamIndex int, statType goavpipe.AVStatType, statArgs interface{}) error {
 	switch statType {
-	case avpipe.AV_IN_STAT_BYTES_READ:
+	case goavpipe.AV_IN_STAT_BYTES_READ:
 		readOffset := statArgs.(*uint64)
 		log.Info("AVCMD InputHandler.Stat", "read offset", *readOffset, "streamIndex", streamIndex)
-	case avpipe.AV_IN_STAT_AUDIO_FRAME_READ:
+	case goavpipe.AV_IN_STAT_AUDIO_FRAME_READ:
 		audioFrameRead := statArgs.(*uint64)
 		log.Info("AVCMD InputHandler.Stat", "audioFrameRead", *audioFrameRead, "streamIndex", streamIndex)
-	case avpipe.AV_IN_STAT_VIDEO_FRAME_READ:
+	case goavpipe.AV_IN_STAT_VIDEO_FRAME_READ:
 		videoFrameRead := statArgs.(*uint64)
 		log.Info("AVCMD InputHandler.Stat", "videoFrameRead", *videoFrameRead, "streamIndex", streamIndex)
-	case avpipe.AV_IN_STAT_DECODING_AUDIO_START_PTS:
+	case goavpipe.AV_IN_STAT_DECODING_AUDIO_START_PTS:
 		startPTS := statArgs.(*uint64)
 		log.Info("AVCMD InputHandler.Stat", "audio start PTS", *startPTS, "streamIndex", streamIndex)
-	case avpipe.AV_IN_STAT_DECODING_VIDEO_START_PTS:
+	case goavpipe.AV_IN_STAT_DECODING_VIDEO_START_PTS:
 		startPTS := statArgs.(*uint64)
 		log.Info("AVCMD InputHandler.Stat", "video start PTS", *startPTS, "streamIndex", streamIndex)
-	case avpipe.AV_IN_STAT_DATA_SCTE35:
+	case goavpipe.AV_IN_STAT_DATA_SCTE35:
 		log.Info("AVCMD InputHandler.Stat", "scte35", statArgs, "streamIndex", streamIndex)
+	case goavpipe.AV_IN_STAT_MPEGTS:
+		log.Info("AVCMD InputHandler.Stat", "mpegts", statArgs, "streamIndex", streamIndex)
 	}
 
 	return nil
@@ -142,7 +148,7 @@ type elvxcOutputOpener struct {
 }
 
 func (oo *elvxcOutputOpener) Open(h, fd int64, stream_index, seg_index int,
-	pts int64, out_type avpipe.AVType) (avpipe.OutputHandler, error) {
+	pts int64, out_type goavpipe.AVType) (goavpipe.OutputHandler, error) {
 
 	log.Debug("AVCMD OutputOpener.Open", "h", h, "fd", fd,
 		"stream_index", stream_index, "seg_index", seg_index, "pts", pts, "out_type", out_type)
@@ -157,37 +163,37 @@ func (oo *elvxcOutputOpener) Open(h, fd int64, stream_index, seg_index int,
 	}
 
 	switch out_type {
-	case avpipe.DASHVideoInit:
+	case goavpipe.DASHVideoInit:
 		fallthrough
-	case avpipe.DASHAudioInit:
+	case goavpipe.DASHAudioInit:
 		filename = fmt.Sprintf("./%s/init-stream%d.m4s", dir, stream_index)
-	case avpipe.DASHManifest:
+	case goavpipe.DASHManifest:
 		filename = fmt.Sprintf("./%s/dash.mpd", dir)
-	case avpipe.DASHVideoSegment:
+	case goavpipe.DASHVideoSegment:
 		fallthrough
-	case avpipe.DASHAudioSegment:
+	case goavpipe.DASHAudioSegment:
 		filename = fmt.Sprintf("./%s/chunk-stream%d-%05d.m4s", dir, stream_index, seg_index)
-	case avpipe.HLSMasterM3U:
+	case goavpipe.HLSMasterM3U:
 		filename = fmt.Sprintf("./%s/master.m3u8", dir)
-	case avpipe.HLSVideoM3U:
+	case goavpipe.HLSVideoM3U:
 		fallthrough
-	case avpipe.HLSAudioM3U:
+	case goavpipe.HLSAudioM3U:
 		filename = fmt.Sprintf("./%s/media_%d.m3u8", dir, stream_index)
-	case avpipe.AES128Key:
+	case goavpipe.AES128Key:
 		filename = fmt.Sprintf("./%s/key.bin", dir)
-	case avpipe.MP4Stream:
+	case goavpipe.MP4Stream:
 		filename = fmt.Sprintf("%s/mp4-stream.mp4", dir)
-	case avpipe.FMP4Stream:
+	case goavpipe.FMP4Stream:
 		filename = fmt.Sprintf("%s/fmp4-stream.mp4", dir)
-	case avpipe.MP4Segment:
+	case goavpipe.MP4Segment:
 		filename = fmt.Sprintf("%s/segment%d-%05d.mp4", dir, stream_index, seg_index)
-	case avpipe.FMP4VideoSegment:
+	case goavpipe.FMP4VideoSegment:
 		filename = fmt.Sprintf("%s/fmp4-vsegment%d-%05d.mp4", dir, stream_index, seg_index)
-	case avpipe.FMP4AudioSegment:
+	case goavpipe.FMP4AudioSegment:
 		filename = fmt.Sprintf("%s/fmp4-asegment%d-%05d.mp4", dir, stream_index, seg_index)
-	case avpipe.FrameImage:
+	case goavpipe.FrameImage:
 		filename = fmt.Sprintf("%s/%d.jpeg", dir, pts)
-	case avpipe.MpegtsSegment:
+	case goavpipe.MpegtsSegment:
 		filename = fmt.Sprintf("%s/ts-segment-%05d.ts", dir, seg_index)
 	}
 
@@ -228,7 +234,7 @@ func (o *elvxcOutput) Close() error {
 	return err
 }
 
-func (o *elvxcOutput) Stat(streamIndex int, avType avpipe.AVType, statType avpipe.AVStatType, statArgs interface{}) error {
+func (o *elvxcOutput) Stat(streamIndex int, avType goavpipe.AVType, statType goavpipe.AVStatType, statArgs interface{}) error {
 	doLog := func(args ...interface{}) {
 		logArgs := []interface{}{"stat", statType.Name(), "avType", avType.Name(), "streamIndex", streamIndex}
 		logArgs = append(logArgs, args...)
@@ -236,26 +242,26 @@ func (o *elvxcOutput) Stat(streamIndex int, avType avpipe.AVType, statType avpip
 	}
 
 	switch statType {
-	case avpipe.AV_OUT_STAT_BYTES_WRITTEN:
+	case goavpipe.AV_OUT_STAT_BYTES_WRITTEN:
 		writeOffset := statArgs.(*uint64)
 		doLog("write offset", *writeOffset)
-	case avpipe.AV_OUT_STAT_ENCODING_END_PTS:
+	case goavpipe.AV_OUT_STAT_ENCODING_END_PTS:
 		endPTS := statArgs.(*uint64)
 		doLog("endPTS", *endPTS)
-	case avpipe.AV_OUT_STAT_START_FILE:
+	case goavpipe.AV_OUT_STAT_START_FILE:
 		segIdx := statArgs.(*int)
 		doLog("segIdx", *segIdx)
-	case avpipe.AV_OUT_STAT_END_FILE:
+	case goavpipe.AV_OUT_STAT_END_FILE:
 		segIdx := statArgs.(*int)
 		doLog("segIdx", *segIdx)
-	case avpipe.AV_OUT_STAT_FRAME_WRITTEN:
+	case goavpipe.AV_OUT_STAT_FRAME_WRITTEN:
 		encodingStats := statArgs.(*avpipe.EncodingFrameStats)
 		doLog("encodingStats", encodingStats)
 	}
 	return nil
 }
 
-func getAudioIndexes(params *avpipe.XcParams, audioIndexes string) (err error) {
+func getAudioIndexes(params *goavpipe.XcParams, audioIndexes string) (err error) {
 	if len(audioIndexes) == 0 {
 		return
 	}
@@ -272,9 +278,24 @@ func getAudioIndexes(params *avpipe.XcParams, audioIndexes string) (err error) {
 	return nil
 }
 
+func getVideoLayout(layout string) (int32, error) {
+	switch strings.ToLower(strings.TrimSpace(layout)) {
+	case "", "mono", "0":
+		return int32(goavpipe.VideoLayoutMono), nil
+	case "sbs", "side-by-side", "3":
+		return int32(goavpipe.VideoLayoutSbs), nil
+	case "tb", "top-bottom", "4":
+		return int32(goavpipe.VideoLayoutTb), nil
+	case "mvhevc", "mv-hevc", "10":
+		return int32(goavpipe.VideoLayoutMVHEVC), nil
+	default:
+		return 0, fmt.Errorf("Invalid video-layout: %s", layout)
+	}
+}
+
 // parseExtractImagesTs converts the extract-images-ts string parameter, e.g.
-// "0,64000,128000,1152000", to an int64 array in avpipe.XcParams
-func parseExtractImagesTs(params *avpipe.XcParams, s string) (err error) {
+// "0,64000,128000,1152000", to an int64 array in goavpipe.XcParams
+func parseExtractImagesTs(params *goavpipe.XcParams, s string) (err error) {
 	if len(s) == 0 {
 		return
 	}
@@ -312,9 +333,9 @@ func InitTranscode(cmdRoot *cobra.Command) error {
 	cmdTranscode.PersistentFlags().StringP("channel-layout", "", "", "audio channel layout.")
 	cmdTranscode.PersistentFlags().Int32P("gpu-index", "", -1, "Use the GPU with specified index for transcoding (export CUDA_DEVICE_ORDER=PCI_BUS_ID would use smi index).")
 	cmdTranscode.PersistentFlags().Int32P("sync-audio-to-stream-id", "", -1, "sync audio to video iframe of specific stream-id when input stream is mpegts")
-	cmdTranscode.PersistentFlags().StringP("encoder", "e", "libx264", "encoder codec, default is 'libx264', can be: 'libx264', 'libx265', 'h264_nvenc', 'h264_videotoolbox', or 'mjpeg'.")
+	cmdTranscode.PersistentFlags().StringP("encoder", "e", "libx264", "encoder codec, default is 'libx264', can be: 'libx264', 'libx265', 'h264_nvenc', 'hevc_nvenc', 'h264_videotoolbox', or 'mjpeg'.")
 	cmdTranscode.PersistentFlags().StringP("audio-encoder", "", "aac", "audio encoder, default is 'aac', can be: 'aac', 'ac3', 'mp2', 'mp3'.")
-	cmdTranscode.PersistentFlags().StringP("decoder", "d", "", "video decoder, default is 'h264', can be: 'h264', 'h264_cuvid', 'jpeg2000', 'hevc'.")
+	cmdTranscode.PersistentFlags().StringP("decoder", "d", "", "video decoder, automatically selected when empty; common values include 'h264', 'h264_cuvid', 'jpeg2000', 'hevc', and 'hevc_cuvid'.")
 	cmdTranscode.PersistentFlags().StringP("audio-decoder", "", "", "audio decoder, default is '' and will be automatically chosen.")
 	cmdTranscode.PersistentFlags().StringP("format", "", "dash", "package format, can be 'dash', 'hls', 'mp4', 'fmp4', 'segment', 'fmp4-segment', or 'image2'.")
 	cmdTranscode.PersistentFlags().StringP("filter-descriptor", "", "", " Audio filter descriptor the same as ffmpeg format")
@@ -322,7 +343,7 @@ func InitTranscode(cmdRoot *cobra.Command) error {
 	cmdTranscode.PersistentFlags().BoolP("equal-fduration", "", false, "force equal frame duration. Must be 0 or 1 and only valid for 'fmp4-segment' format.")
 	cmdTranscode.PersistentFlags().StringP("xc-type", "", "", "transcoding type, can be 'all', 'video', 'audio', 'audio-join', 'audio-pan', 'audio-merge', 'extract-images' or 'extract-all-images'.")
 	cmdTranscode.PersistentFlags().Int32P("crf", "", 23, "mutually exclusive with video-bitrate.")
-	cmdTranscode.PersistentFlags().StringP("preset", "", "medium", "Preset string to determine compression speed, can be: 'ultrafast', 'superfast', 'veryfast', 'faster', 'fast', 'medium', 'slow', 'slower', 'veryslow'")
+	cmdTranscode.PersistentFlags().StringP("preset", "", "medium", "Encoding speed/quality preset. Software encoders accept ultrafast..veryslow; NVIDIA accepts p1..p7 and maps the software preset names to p1..p7.")
 	cmdTranscode.PersistentFlags().Int64P("start-time-ts", "", 0, "offset to start transcoding")
 	cmdTranscode.PersistentFlags().Int32P("stream-id", "", -1, "if it is valid it will be used to transcode elementary stream with that stream-id")
 	cmdTranscode.PersistentFlags().Int64P("start-pts", "", 0, "starting PTS for output.")
@@ -337,6 +358,7 @@ func InitTranscode(cmdRoot *cobra.Command) error {
 	cmdTranscode.PersistentFlags().Int32P("enc-width", "", -1, "default -1 means use source width.")
 	cmdTranscode.PersistentFlags().Int32P("video-time-base", "", 0, "Video encoder timebase, must be > 0 (the actual timebase would be 1/video-time-base).")
 	cmdTranscode.PersistentFlags().Int32P("video-frame-duration-ts", "", 0, "Frame duration of the output video in time base.")
+	cmdTranscode.PersistentFlags().String("video-layout", "", "Video layout, can be 'mono'/0, 'sbs'/3, 'tb'/4, or 'mvhevc'/10.")
 	cmdTranscode.PersistentFlags().Int64P("duration-ts", "", -1, "default -1 means entire stream.")
 	cmdTranscode.PersistentFlags().Int64P("audio-seg-duration-ts", "", 0, "(mandatory if format is not 'segment' and transcoding audio) audio segment duration time base (positive integer).")
 	cmdTranscode.PersistentFlags().Int64P("video-seg-duration-ts", "", 0, "(mandatory if format is not 'segment' and transcoding video) video segment duration time base (positive integer).")
@@ -358,9 +380,10 @@ func InitTranscode(cmdRoot *cobra.Command) error {
 	cmdTranscode.PersistentFlags().String("wm-shadow-color", "white", "watermark shadow color.")
 	cmdTranscode.PersistentFlags().String("wm-overlay", "", "watermark overlay image file.")
 	cmdTranscode.PersistentFlags().String("wm-overlay-type", "png", "watermark overlay image file type, can be 'png', 'jpg', 'gif'.")
-	cmdTranscode.PersistentFlags().String("max-cll", "", "Maximum Content Light Level and Maximum Frame Average Light Level, only valid if encoder is libx265.")
-	cmdTranscode.PersistentFlags().String("master-display", "", "Master display, only valid if encoder is libx265.")
+	cmdTranscode.PersistentFlags().String("max-cll", "", "HDR10 MaxCLL,MaxFALL override for libx265 or hevc_nvenc. When empty, valid input metadata is copied; 0,0 suppresses it.")
+	cmdTranscode.PersistentFlags().String("master-display", "", "HDR10 mastering-display override for libx265 or hevc_nvenc. When empty, valid input metadata is copied.")
 	cmdTranscode.PersistentFlags().Int32("bitdepth", 8, "Refers to number of colors each pixel can have, can be 8, 10, 12.")
+	cmdTranscode.PersistentFlags().Bool("preserve-dolby-vision", false, "Preserve Dolby Vision RPU metadata. Requires libx265, bitdepth 10, and profile main10.")
 	cmdTranscode.PersistentFlags().Int64P("extract-image-interval-ts", "", -1, "extract frames at this interval.")
 	cmdTranscode.PersistentFlags().StringP("extract-images-ts", "", "", "the frames to extract (PTS, comma separated).")
 	cmdTranscode.PersistentFlags().BoolP("seekable", "", true, "seekable stream.")
@@ -368,7 +391,19 @@ func InitTranscode(cmdRoot *cobra.Command) error {
 	cmdTranscode.PersistentFlags().StringP("profile", "", "", "Encoding profile for video. If it is not determined, it will be set automatically.")
 	cmdTranscode.PersistentFlags().Int32("level", 0, "Encoding level for video. If it is not determined, it will be set automatically.")
 	cmdTranscode.PersistentFlags().Int32("deinterlace", 0, "Deinterlace filter (values 0 - none, 1 - bwdif_field, 2 - bwdif_frame send_frame).")
-	cmdTranscode.PersistentFlags().Bool("copy-mpegts", false, "Create a copy of the MPEGTS input (for MPEGTS, SRT, RTP)")
+	cmdTranscode.PersistentFlags().Int32("vertical", 0, "Vertical video crop type (0 - none, 1 - 32bpf).")
+	cmdTranscode.PersistentFlags().StringP("vertical-data", "", "", "Path to binary file with per-frame crop data (4 bytes per frame, uint32 LE). Each value is the crop window centre as a fraction of the scaled frame width, denominator 10000 (0=left, 5000=centre, 10000=right).")
+	cmdTranscode.PersistentFlags().StringP("fade", "", "", "Fade filter ('in' or 'out').")
+	cmdTranscode.PersistentFlags().Int32("fade-start-frame", 0, "Fade start frame (used with blend-based fade).")
+	cmdTranscode.PersistentFlags().Int32("fade-end-frame", 0, "Fade end frame (used with blend-based fade).")
+	cmdTranscode.PersistentFlags().Float64("fade-level-1", 0, "Fade blend start level (e.g. 1.0).")
+	cmdTranscode.PersistentFlags().Float64("fade-level-2", 0, "Fade blend end level (e.g. 0.0).")
+	cmdTranscode.PersistentFlags().Bool("use-custom-live-reader", false, "Read live media via a custom reader instead of using libavformat")
+	cmdTranscode.PersistentFlags().Bool("copy-mpegts", false, "Create an MPEGTS output (for MPEGTS, SRT, RTP)")
+	cmdTranscode.PersistentFlags().Bool("copy-mpegts-from-input", false, "Create a copy of the MPEGTS input (for MPEGTS, SRT, RTP)")
+	cmdTranscode.PersistentFlags().Bool("bypass-libav-reader", false, "Read live media input directly instead of using libavformat")
+	cmdTranscode.PersistentFlags().String("copy-mode", "none", "Create a copy of the input: 'none' 'raw' 'remuxed'")
+	cmdTranscode.PersistentFlags().String("copy-packaging", "", "Format of the copy of the input: 'raw_ts' 'rtp_ts'")
 
 	return nil
 }
@@ -475,25 +510,25 @@ func doTranscode(cmd *cobra.Command, args []string) error {
 	watermarkShadowColor := cmd.Flag("wm-shadow-color").Value.String()
 	watermarkOverlay := cmd.Flag("wm-overlay").Value.String()
 
-	var watermarkOverlayType avpipe.ImageType
+	var watermarkOverlayType goavpipe.ImageType
 	watermarkOverlayTypeStr := cmd.Flag("wm-overlay-type").Value.String()
 	switch watermarkOverlayTypeStr {
 	case "png":
 		fallthrough
 	case "PNG":
-		watermarkOverlayType = avpipe.PngImage
+		watermarkOverlayType = goavpipe.PngImage
 	case "jpg":
 		fallthrough
 	case "JPG":
-		watermarkOverlayType = avpipe.JpgImage
+		watermarkOverlayType = goavpipe.JpgImage
 	case "gif":
 		fallthrough
 	case "GIF":
-		watermarkOverlayType = avpipe.GifImage
+		watermarkOverlayType = goavpipe.GifImage
 	default:
-		watermarkOverlayType = avpipe.UnknownImage
+		watermarkOverlayType = goavpipe.UnknownImage
 	}
-	if len(watermarkOverlay) > 0 && watermarkOverlayType == avpipe.UnknownImage {
+	if len(watermarkOverlay) > 0 && watermarkOverlayType == goavpipe.UnknownImage {
 		return fmt.Errorf("Watermark overlay type is not valid, can be 'png', 'jpg', 'gif'")
 	}
 
@@ -521,8 +556,8 @@ func doTranscode(cmd *cobra.Command, args []string) error {
 		xcTypeStr != "extract-all-images" {
 		return fmt.Errorf("Transcoding type is not valid, with no stream-id can be 'all', 'video', 'audio', 'audio-join', 'audio-pan', 'audio-merge', or 'extract-images'")
 	}
-	xcType := avpipe.XcTypeFromString(xcTypeStr)
-	if xcType == avpipe.XcAudio && len(encoder) == 0 {
+	xcType := goavpipe.XcTypeFromString(xcTypeStr)
+	if xcType == goavpipe.XcAudio && len(encoder) == 0 {
 		encoder = "aac"
 	}
 
@@ -532,6 +567,10 @@ func doTranscode(cmd *cobra.Command, args []string) error {
 	if err != nil {
 		return fmt.Errorf("bitdepth is not valid, should be 8, 10, or 12")
 	}
+	preserveDolbyVision, err := cmd.Flags().GetBool("preserve-dolby-vision")
+	if err != nil {
+		return fmt.Errorf("preserve-dolby-vision is not valid")
+	}
 
 	crf, err := cmd.Flags().GetInt32("crf")
 	if err != nil || crf < 0 || crf > 51 {
@@ -539,8 +578,16 @@ func doTranscode(cmd *cobra.Command, args []string) error {
 	}
 
 	preset := cmd.Flag("preset").Value.String()
-	if preset != "ultrafast" && preset != "superfast" && preset != "veryfast" && preset != "faster" &&
-		preset != "fast" && preset != "medium" && preset != "slow" && preset != "slower" && preset != "veryslow" {
+	softwarePreset := preset == "ultrafast" || preset == "superfast" || preset == "veryfast" ||
+		preset == "faster" || preset == "fast" || preset == "medium" || preset == "slow" ||
+		preset == "slower" || preset == "veryslow"
+	nvencPreset := preset == "p1" || preset == "p2" || preset == "p3" || preset == "p4" ||
+		preset == "p5" || preset == "p6" || preset == "p7"
+	if strings.HasSuffix(encoder, "_nvenc") {
+		if !softwarePreset && !nvencPreset {
+			return fmt.Errorf("NVIDIA preset is not valid, should be p1..p7 or one of the software speed presets")
+		}
+	} else if !softwarePreset {
 		return fmt.Errorf("preset is not valid, should be one of: 'ultrafast', 'superfast', 'veryfast', 'faster', 'fast', 'medium', 'slow', 'slower', 'veryslow'")
 	}
 
@@ -614,6 +661,11 @@ func doTranscode(cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("video-frame-duration-ts is not valid")
 	}
 
+	videoLayout, err := getVideoLayout(cmd.Flag("video-layout").Value.String())
+	if err != nil {
+		return err
+	}
+
 	durationTs, err := cmd.Flags().GetInt64("duration-ts")
 	if err != nil {
 		return fmt.Errorf("Duration ts is not valid")
@@ -623,14 +675,14 @@ func doTranscode(cmd *cobra.Command, args []string) error {
 	if err != nil ||
 		(format != "segment" && format != "fmp4-segment" &&
 			audioSegDurationTs == 0 &&
-			(xcType == avpipe.XcAll || xcType == avpipe.XcAudio ||
-				xcType == avpipe.XcAudioJoin || xcType == avpipe.XcAudioMerge)) {
+			(xcType == goavpipe.XcAll || xcType == goavpipe.XcAudio ||
+				xcType == goavpipe.XcAudioJoin || xcType == goavpipe.XcAudioMerge)) {
 		return fmt.Errorf("Audio seg duration ts is not valid")
 	}
 
 	videoSegDurationTs, err := cmd.Flags().GetInt64("video-seg-duration-ts")
 	if err != nil || (format != "segment" && format != "fmp4-segment" && format != "mp4" &&
-		videoSegDurationTs == 0 && (xcType == avpipe.XcAll || xcType == avpipe.XcVideo)) {
+		videoSegDurationTs == 0 && (xcType == goavpipe.XcAll || xcType == goavpipe.XcVideo)) {
 		return fmt.Errorf("Video seg duration ts is not valid")
 	}
 
@@ -659,25 +711,92 @@ func doTranscode(cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("Invalid deinterlace value")
 	}
 
-	copyMpegts, err := cmd.Flags().GetBool("copy-mpegts")
+	vertical, err := cmd.Flags().GetInt32("vertical")
 	if err != nil {
-		return fmt.Errorf("Invalid copy-mpegts value")
+		return fmt.Errorf("Invalid vertical value")
 	}
 
-	cryptScheme := avpipe.CryptNone
+	verticalDataFile := cmd.Flag("vertical-data").Value.String()
+	var verticalData []byte
+	if verticalDataFile != "" {
+		verticalData, err = os.ReadFile(verticalDataFile)
+		if err != nil {
+			return fmt.Errorf("Failed to read vertical-data file: %v", err)
+		}
+	}
+
+	fade := cmd.Flag("fade").Value.String()
+
+	fadeStartFrame, err := cmd.Flags().GetInt32("fade-start-frame")
+	if err != nil {
+		return fmt.Errorf("Invalid fade-start-frame value")
+	}
+	fadeEndFrame, err := cmd.Flags().GetInt32("fade-end-frame")
+	if err != nil {
+		return fmt.Errorf("Invalid fade-end-frame value")
+	}
+	fadeLevel1, err := cmd.Flags().GetFloat64("fade-level-1")
+	if err != nil {
+		return fmt.Errorf("Invalid fade-level-1 value")
+	}
+	fadeLevel2, err := cmd.Flags().GetFloat64("fade-level-2")
+	if err != nil {
+		return fmt.Errorf("Invalid fade-level-2 value")
+	}
+
+	bypassLibavReader, err := cmd.Flags().GetBool("bypass-libav-reader")
+	if err != nil {
+		return fmt.Errorf("Invalid bypass-libav-reader value")
+	}
+
+	copyModeStr, err := cmd.Flags().GetString("copy-mode")
+	if err != nil {
+		return fmt.Errorf("Invalid copy-mode value")
+	}
+	copyMode := goavpipe.CopyModeUnknown
+	switch copyModeStr {
+	case "", "none":
+		copyMode = goavpipe.CopyModeNone
+	case "raw":
+		copyMode = goavpipe.CopyModeRaw
+	case "raw_only":
+		copyMode = goavpipe.CopyModeRawOnly
+	case "remuxed":
+		copyMode = goavpipe.CopyModeRemuxed
+	default:
+		return fmt.Errorf("Unsupported copy-mode value")
+	}
+
+	copyPackagingStr, err := cmd.Flags().GetString("copy-packaging")
+	if err != nil {
+		return fmt.Errorf("Invalid copy-packaging value")
+	}
+	copyPackaging := transport.UnknownPackagingMode
+	switch copyPackagingStr {
+	case "raw_ts":
+		copyPackaging = transport.RawTs
+	case "rtp_ts":
+		copyPackaging = transport.RtpTs
+	case "ats_ts":
+		copyPackaging = transport.AtsTs
+	default:
+		return fmt.Errorf("Unsupported copy-packaging value")
+	}
+
+	cryptScheme := goavpipe.CryptNone
 	val := cmd.Flag("crypt-scheme").Value.String()
 	if len(val) > 0 {
 		switch val {
 		case "aes-128":
-			cryptScheme = avpipe.CryptAES128
+			cryptScheme = goavpipe.CryptAES128
 		case "cenc":
-			cryptScheme = avpipe.CryptCENC
+			cryptScheme = goavpipe.CryptCENC
 		case "cbc1":
-			cryptScheme = avpipe.CryptCBC1
+			cryptScheme = goavpipe.CryptCBC1
 		case "cens":
-			cryptScheme = avpipe.CryptCENS
+			cryptScheme = goavpipe.CryptCENS
 		case "cbcs":
-			cryptScheme = avpipe.CryptCBCS
+			cryptScheme = goavpipe.CryptCBCS
 		case "none":
 			break
 		default:
@@ -699,8 +818,13 @@ func doTranscode(cmd *cobra.Command, args []string) error {
 		os.Mkdir(dir, 0755)
 	}
 
-	params := &avpipe.XcParams{
-		Url:                    filename,
+	params := &goavpipe.XcParams{
+		Url: filename,
+		InputCfg: goavpipe.InputConfig{
+			CopyMode:          copyMode,
+			CopyPackaging:     copyPackaging,
+			BypassLibavReader: bypassLibavReader,
+		},
 		BypassTranscoding:      bypass,
 		Format:                 format,
 		StartTimeTs:            startTimeTs,
@@ -728,7 +852,6 @@ func doTranscode(cmd *cobra.Command, args []string) error {
 		CryptKeyURL:            cryptKeyURL,
 		CryptScheme:            cryptScheme,
 		XcType:                 xcType,
-		CopyMpegts:             copyMpegts,
 		WatermarkTimecode:      watermarkTimecode,
 		WatermarkTimecodeRate:  watermarkTimecodeRate,
 		WatermarkText:          watermarkText,
@@ -747,6 +870,7 @@ func doTranscode(cmd *cobra.Command, args []string) error {
 		MaxCLL:                 maxCLL,
 		MasterDisplay:          masterDisplay,
 		BitDepth:               bitDepth,
+		PreserveDolbyVision:    preserveDolbyVision,
 		ForceEqualFDuration:    forceEqualFrameDuration,
 		SyncAudioToStreamId:    int(syncAudioToStreamId),
 		StreamId:               streamId,
@@ -759,11 +883,19 @@ func doTranscode(cmd *cobra.Command, args []string) error {
 		DebugFrameLevel:        debugFrameLevel,
 		VideoTimeBase:          int(videoTimeBase),
 		VideoFrameDurationTs:   int(videoFrameDurationTs),
+		VideoLayout:            videoLayout,
 		Seekable:               seekable,
 		Rotate:                 int(rotate),
 		Profile:                profile,
 		Level:                  int(level),
 		Deinterlace:            int(deinterlace),
+		Vertical:               int(vertical),
+		VerticalData:           verticalData,
+		Fade:                   fade,
+		FadeStartFrame:         int(fadeStartFrame),
+		FadeEndFrame:           int(fadeEndFrame),
+		FadeLevel1:             fadeLevel1,
+		FadeLevel2:             fadeLevel2,
 	}
 
 	err = getAudioIndexes(params, audioIndex)
@@ -778,16 +910,20 @@ func doTranscode(cmd *cobra.Command, args []string) error {
 		return err
 	}
 
-	avpipe.InitIOHandler(&elvxcInputOpener{url: filename}, &elvxcOutputOpener{dir: dir})
+	// The global input opener is used for stats - if not set, some handlers will fail (eg. mpegts Open)
+	goavpipe.InitIOHandler(&elvxcInputOpener{url: filename}, nil)
 
+	outOpener := &elvxcOutputOpener{dir: dir}
 	done := make(chan interface{})
 
 	for i := 0; i < int(nThreads); i++ {
-		go func(params *avpipe.XcParams, filename string) {
+		go func(params *goavpipe.XcParams, filename string) {
+
+			goavpipe.InitUrlIOHandlerIfNotPresent(filename, nil, outOpener)
 
 			err := avpipe.Xc(params)
 			if err != nil {
-				done <- fmt.Errorf("Failed transcoding %s, err=%v", filename, err)
+				done <- fmt.Errorf("failed transcoding %s, err=%v", filename, err)
 			} else {
 				done <- nil
 			}

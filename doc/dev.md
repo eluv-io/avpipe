@@ -4,6 +4,14 @@
 
 ## HOW TO
 
+### Ingest source file into mez parts
+
+
+Example: audio 2 mono to 1 stereo
+```
+./bin/exc -f sample.mxf -xc-type audio-join   -format fmp4-segment -seg-duration 30.080 -audio-index 1,2 -channel-layout 3 -audio-bitrate 128000
+```
+
 ### Transcode Mez Parts into ABR segments
 
 #### Transcode a "mez part" into ABR segments
@@ -26,12 +34,24 @@
 
 ### Live Stream Ingest
 
+#### Generate timecoded live stream source
+
+```
+ffmpeg  -re   -f lavfi -i testsrc=size=1920x1080:rate=50   -f lavfi -i anullsrc=channel_layout=stereo:sample_rate=48000   -vf "drawtext=fontfile=/Library/Fonts/Arial.ttf:fontsize=32:fontcolor=white:x=20:y=20:box=1:boxcolor=0x000000AA:text='%{pts\:hms}.%{eif\:n\:d}'"   -c:v libx264 -preset veryfast -tune zerolatency -g 100 -keyint_min 100   -c:a aac -b:a 128k   -f mpegts udp://127.0.0.1:9000
+```
+
 #### MPEGTS (aka UDP)
 
 ```
 ffmpeg -re -i test.mp4 -map 0 -c copy -f mpegts udp://127.0.0.1:9000
 
 ./bin/exc -f udp://127.0.0.1:9000 -xc-type all -format fmp4-segment -seg-duration 30
+```
+
+A more complex example - as called by the content fabric (source 50 fps):
+
+```
+./bin/exc -f udp://127.0.0.1:9000 -xc-type all -format fmp4-segment -video-bitrate 9500000 -audio-bitrate 192000 -sample-rate 48000  -video-seg-duration-ts 2700000  -audio-seg-duration-ts 1428480   -force-keyint 100 -enc-height 1080 -enc-width 1920 -sync-audio-to-stream-id 512   -audio-index 1,2  -copy-mpegts 1
 ```
 
 #### SRT
@@ -41,6 +61,27 @@ ffmpeg -re -i test.mp4 -map 0 -c copy -f mpegts srt://127.0.0.1:9000
 
 ./bin/exc -f srt://127.0.0.1:9000?mode=listener -xc-type all -format fmp4-segment -seg-duration 30
 ```
+
+#### SRT Disconnections
+
+Use two terminals
+
+1. Live stream source
+
+```
+ffmpeg  -re   -f lavfi -i testsrc=size=1920x1080:rate=50   -f lavfi -i anullsrc=channel_layout=stereo:sample_rate=48000   -vf "drawtext=fontfile=/Library/Fonts/Arial.ttf:fontsize=32:fontcolor=white:x=20:y=20:box=1:boxcolor=0x000000AA:text='%{pts\:hms}.%{eif\:n\:d}'"   -c:v libx264 -preset veryfast -tune zerolatency -g 100 -keyint_min 100   -c:a aac -b:a 128k   -f mpegts udp://127.0.0.1:7000
+```
+
+2. SRT transmitter
+
+Sart / stop / restart this command to simulate SRT disconnections.
+
+```
+ffmpeg -i udp://127.0.0.1:9000 -c copy -map 0 -f mpegts  srt://127.0.0.1:9001?linger=600000&latency=250
+```
+
+
+
 
 #### RTP
 
@@ -59,6 +100,8 @@ ffmpeg -re -i test.mp4 -map 0 -c copy -f flv rtmp://127.0.0.1:9000
 ./bin/exc -f rtmp://127.0.0.1:9000 -xc-type all -format fmp4-segment -seg-duration 30
 
 ```
+
+
 
 
 ## Special Use Cases

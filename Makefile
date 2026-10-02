@@ -1,12 +1,12 @@
 include ./rules.make
 
 TOP_DIR ?= $(shell pwd)
-SUBDIRS=utils libavpipe exc elvxc
+SUBDIRS=utils libavpipe exc elvxc cmd/mvhevc
 
 SRCS=avpipe_handler.c
 OBJS=$(SRCS:%.c=$(BINDIR)/%.o)
 
-.PHONY: all test clean
+.PHONY: all test gotest ctest clean
 
 .DEFAULT_GOAL := dynamic
 
@@ -17,6 +17,12 @@ all install: check-env
 	done
 
 dynamic: all
+
+# goclean: nuclear option to reset all caches. Normally not needed — the C sources
+# compiled by cgo are embedded via //go:embed in avpipe_cgo_sources.go, so editing
+# any of them triggers an automatic Go rebuild (no `make` or cache clean required).
+goclean: clean
+	@go clean -cache -testcache -modcache -i -r
 
 clean: lclean
 	@for dir in $(SUBDIRS); do \
@@ -49,5 +55,10 @@ ifndef FFMPEG_DIST
   $(error FFMPEG_DIST is undefined)
 endif
 
-test:
-	@./run_tests.sh
+test: ctest gotest
+
+gotest:
+	@./run_go_tests.sh
+
+ctest:
+	@$(MAKE) -C libavpipe test

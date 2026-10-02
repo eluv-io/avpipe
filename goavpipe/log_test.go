@@ -1,4 +1,4 @@
-package avpipe
+package goavpipe
 
 import (
 	"fmt"
@@ -18,6 +18,7 @@ func TestGIDAssociation(t *testing.T) {
 		wg.Add(1)
 		go func() {
 			AssociateGIDWithHandle(handle)
+			defer DissociateGIDFromHandle()
 			// Randomize scheduling a bit
 			time.Sleep(time.Millisecond*20 + time.Millisecond*time.Duration(rand.IntN(10)))
 			rHandle, ok := GIDHandle()
@@ -53,10 +54,10 @@ func TestErrorCapturing(t *testing.T) {
 			AssociateGIDWithHandle(handle)
 		}
 
-		log.Error(fmt.Sprintf("Error %d", errUniq1))
-		log.Error(fmt.Sprintf("Error %d", errUniq2))
-		log.Warn(fmt.Sprintf("Warn %d", warnUniq1))
-		log.Warn(fmt.Sprintf("Warn %d", warnUniq2))
+		Log.Error(fmt.Sprintf("Error %d", errUniq1))
+		Log.Error(fmt.Sprintf("Error %d", errUniq2))
+		Log.Warn(fmt.Sprintf("Warn %d", warnUniq1))
+		Log.Warn(fmt.Sprintf("Warn %d", warnUniq2))
 		///// EXIT C CODE /////
 
 		XCEnded()

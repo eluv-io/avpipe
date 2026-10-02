@@ -10,6 +10,8 @@ Package avpipe has four main interfaces that has to be implemented by the client
 
  4. OutputHandler: is the output handler with Write/Seek/Close methods. An implementation of this
     interface is needed by ffmpeg to write encoded streams properly.
+
+TODO: Call C.free for every C.CString to not leak memory.
 */
 package avpipe
 
@@ -18,11 +20,9 @@ package avpipe
 // #cgo pkg-config: libavformat
 // #cgo pkg-config: libavutil
 // #cgo pkg-config: libswresample
-// #cgo pkg-config: libavresample
 // #cgo pkg-config: libavdevice
 // #cgo pkg-config: libswscale
 // #cgo pkg-config: libavutil
-// #cgo pkg-config: libpostproc
 // #cgo netint pkg-config: xcoder
 // #cgo pkg-config: srt
 // #cgo CFLAGS: -I${SRCDIR}/libavpipe/include
@@ -30,169 +30,48 @@ package avpipe
 // #cgo LDFLAGS: -L${SRCDIR}
 // #cgo linux LDFLAGS: -Wl,-rpath,$ORIGIN/../lib
 
-// #include <string.h>
-// #include <stdlib.h>
-// #include "avpipe_xc.h"
-// #include "avpipe.h"
-// #include "elv_log.h"
+/*
+#include <string.h>
+#include <stdlib.h>
+#include "avpipe_xc.h"
+#include "avpipe.h"
+#include "elv_log.h"
+#include <libavutil/channel_layout.h>
+
+// Helper function to safely access the union member. When cgo encounters a
+// C union, it cannot map it to a specific Go type.
+static inline uint64_t get_channel_layout_mask(const AVChannelLayout *layout) {
+    return layout->u.mask;
+}
+*/
 import "C"
 import (
-	"encoding/json"
+	"context"
 	"fmt"
 	"io"
 	"math/big"
 	"math/rand"
 	"sync"
+	"syscall"
 	"unsafe"
+
+	"github.com/eluv-io/avpipe/broadcastproto/mpegts"
+	"github.com/eluv-io/avpipe/goavpipe"
+	"github.com/eluv-io/avpipe/goavpipe/avdesc"
+	"github.com/eluv-io/avpipe/mp4e"
+	"github.com/eluv-io/errors-go"
 )
+
+func init() {
+	goavpipe.SetXcFn(Xc)
+	goavpipe.SetMuxFn(Mux)
+	goavpipe.SetXcInitFn(XcInit)
+	goavpipe.SetXcRunFn(XcRun)
+	goavpipe.SetXcCancelFn(XcCancel)
+	goavpipe.SetXcFiniFn(XcFini)
+}
 
 const traceIo bool = false
-
-// AVType ...
-type AVType int
-
-const (
-	// Unknown 0
-	Unknown AVType = iota
-	// DASHManifest 1
-	DASHManifest
-	// DASHVideoInit 2
-	DASHVideoInit
-	// DASHVideoSegment 3
-	DASHVideoSegment
-	// DASHAudioInit 4
-	DASHAudioInit
-	// DASHAudioSegment 5
-	DASHAudioSegment
-	// HLSMasterM3U 6
-	HLSMasterM3U
-	// HLSVideoM3U 7
-	HLSVideoM3U
-	// HLSAudioM3U 8
-	HLSAudioM3U
-	// AES128Key 9
-	AES128Key
-	// MP4Stream 10
-	MP4Stream
-	// FMP4Stream 11 (Fragmented MP4)
-	FMP4Stream
-	// MP4Segment 12
-	MP4Segment
-	// FMP4VideoSegment 13
-	FMP4VideoSegment
-	// FMP4AudioSegment 14
-	FMP4AudioSegment
-	// MuxSegment 15
-	MuxSegment
-	// FrameImage 16
-	FrameImage
-	// MpegtsSegment 17
-	MpegtsSegment
-)
-
-func (a AVType) Name() string {
-	switch a {
-	case DASHManifest:
-		return "DASHManifest"
-	case DASHVideoInit:
-		return "DASHVideoInit"
-	case DASHVideoSegment:
-		return "DASHVideoSegment"
-	case DASHAudioInit:
-		return "DASHAudioInit"
-	case DASHAudioSegment:
-		return "DASHAudioSegment"
-	case HLSMasterM3U:
-		return "HLSMasterM3U"
-	case HLSVideoM3U:
-		return "HLSVideoM3U"
-	case HLSAudioM3U:
-		return "HLSAudioM3U"
-	case AES128Key:
-		return "AES128Key"
-	case MP4Stream:
-		return "MP4Stream"
-	case FMP4Stream:
-		return "FMP4Stream"
-	case MP4Segment:
-		return "MP4Segment"
-	case FMP4VideoSegment:
-		return "FMP4VideoSegment"
-	case FMP4AudioSegment:
-		return "FMP4AudioSegment"
-	case MuxSegment:
-		return "MuxSegment"
-	case FrameImage:
-		return "FrameImage"
-	case MpegtsSegment:
-		return "MpegtsSegment"
-	default:
-		return fmt.Sprintf("Unknown(%d)", a)
-	}
-}
-
-type AVClass = string
-
-var AVClassE = struct {
-	Mez      AVClass
-	Abr      AVClass
-	Manifest AVClass
-	Mux      AVClass
-	Frame    AVClass
-	Unknown  AVClass
-}{
-	Mez:      "mez",
-	Abr:      "abr",
-	Manifest: "manifest",
-	Mux:      "mux",
-	Frame:    "frame",
-	Unknown:  "unknown",
-}
-
-func (a AVType) AVClass() AVClass {
-	switch a {
-	case FMP4AudioSegment, FMP4VideoSegment, MP4Segment:
-		return AVClassE.Mez
-	case DASHAudioInit, DASHAudioSegment, DASHVideoInit, DASHVideoSegment:
-		return AVClassE.Abr
-	case HLSAudioM3U, HLSMasterM3U, HLSVideoM3U, DASHManifest:
-		return AVClassE.Manifest
-	case FrameImage:
-		return AVClassE.Frame
-	case MuxSegment, MP4Stream, FMP4Stream:
-		return AVClassE.Mux
-	default:
-		return AVClassE.Unknown
-	}
-}
-
-// This is corresponding to AV_NOPTS_VALUE
-const AvNoPtsValue = uint64(C.uint64_t(0x8000000000000000))
-
-type XcType int
-
-const (
-	XcNone             XcType = iota
-	XcVideo                   = 1
-	XcAudio                   = 2
-	XcAll                     = 3  // XcAudio | XcVideo
-	XcAudioMerge              = 6  // XcAudio | 0x04
-	XcAudioJoin               = 10 // XcAudio | 0x08
-	XcAudioPan                = 18 // XcAudio | 0x10
-	XcMux                     = 32
-	XcExtractImages           = 65  // XcVideo | 2^6
-	XcExtractAllImages        = 129 // XcVideo | 2^7
-	Xcprobe                   = 256
-)
-
-type XcProfile int
-
-const (
-	XcProfileNone         XcProfile = iota
-	XcProfileH264BaseLine           = C.FF_PROFILE_H264_BASELINE // 66
-	XcProfileH264Heigh              = C.FF_PROFILE_H264_HIGH     // 100
-	XcProfileH264Heigh10            = C.FF_PROFILE_H264_HIGH_10  // 110
-)
 
 type SeekReadWriteCloser interface {
 	io.Seeker
@@ -201,344 +80,7 @@ type SeekReadWriteCloser interface {
 	io.Closer
 }
 
-func XcTypeFromString(xcTypeStr string) XcType {
-	var xcType XcType
-	switch xcTypeStr {
-	case "all":
-		xcType = XcAll
-	case "video":
-		xcType = XcVideo
-	case "audio":
-		xcType = XcAudio
-	case "audio-join":
-		xcType = XcAudioJoin
-	case "audio-merge":
-		xcType = XcAudioMerge
-	case "audio-pan":
-		xcType = XcAudioPan
-	case "mux":
-		xcType = XcMux
-	case "extract-images":
-		xcType = XcExtractImages
-	case "extract-all-images":
-		xcType = XcExtractAllImages
-	default:
-		xcType = XcNone
-	}
-
-	return xcType
-}
-
-type ImageType int
-
-const (
-	UnknownImage = iota
-	PngImage
-	JpgImage
-	GifImage
-)
-
-// CryptScheme is the content encryption scheme
-type CryptScheme int
-
-const (
-	// CryptNone - clear
-	CryptNone CryptScheme = iota
-	// CryptAES128 - AES-128
-	CryptAES128
-	// CryptCENC - CENC AES-CTR
-	CryptCENC
-	// CryptCBC1 - CENC AES-CBC
-	CryptCBC1
-	// CryptCENS - CENC AES-CTR Pattern
-	CryptCENS
-	// CryptCBCS - CENC AES-CBC Pattern
-	CryptCBCS
-)
-
 const MaxAudioMux = C.MAX_STREAMS
-
-// XcParams should match with txparams_t in avpipe_xc.h
-type XcParams struct {
-	Url                    string      `json:"url"`
-	BypassTranscoding      bool        `json:"bypass,omitempty"`
-	Format                 string      `json:"format,omitempty"`
-	StartTimeTs            int64       `json:"start_time_ts,omitempty"`
-	StartPts               int64       `json:"start_pts,omitempty"` // Start PTS for output
-	DurationTs             int64       `json:"duration_ts,omitempty"`
-	StartSegmentStr        string      `json:"start_segment_str,omitempty"`
-	VideoBitrate           int32       `json:"video_bitrate,omitempty"`
-	AudioBitrate           int32       `json:"audio_bitrate,omitempty"`
-	SampleRate             int32       `json:"sample_rate,omitempty"` // Audio sampling rate
-	RcMaxRate              int32       `json:"rc_max_rate,omitempty"`
-	RcBufferSize           int32       `json:"rc_buffer_size,omitempty"`
-	CrfStr                 string      `json:"crf_str,omitempty"`
-	Preset                 string      `json:"preset,omitempty"`
-	AudioSegDurationTs     int64       `json:"audio_seg_duration_ts,omitempty"`
-	VideoSegDurationTs     int64       `json:"video_seg_duration_ts,omitempty"`
-	SegDuration            string      `json:"seg_duration,omitempty"`
-	StartFragmentIndex     int32       `json:"start_fragment_index,omitempty"`
-	ForceKeyInt            int32       `json:"force_keyint,omitempty"`
-	Ecodec                 string      `json:"ecodec,omitempty"`    // Video encoder
-	Ecodec2                string      `json:"ecodec2,omitempty"`   // Audio encoder
-	Dcodec                 string      `json:"dcodec,omitempty"`    // Video decoder
-	Dcodec2                string      `json:"dcodec2,omitempty"`   // Audio decoder
-	GPUIndex               int32       `json:"gpu_index,omitempty"` // GPU index if encoder/decoder is GPU (nvidia)
-	EncHeight              int32       `json:"enc_height,omitempty"`
-	EncWidth               int32       `json:"enc_width,omitempty"`
-	CryptIV                string      `json:"crypt_iv,omitempty"`
-	CryptKey               string      `json:"crypt_key,omitempty"`
-	CryptKID               string      `json:"crypt_kid,omitempty"`
-	CryptKeyURL            string      `json:"crypt_key_url,omitempty"`
-	CryptScheme            CryptScheme `json:"crypt_scheme,omitempty"`
-	XcType                 XcType      `json:"xc_type,omitempty"`
-	CopyMpegts             bool        `json:"copy_mpegts,omitempty"`
-	Seekable               bool        `json:"seekable,omitempty"`
-	WatermarkText          string      `json:"watermark_text,omitempty"`
-	WatermarkTimecode      string      `json:"watermark_timecode,omitempty"`
-	WatermarkTimecodeRate  float32     `json:"watermark_timecode_rate,omitempty"`
-	WatermarkXLoc          string      `json:"watermark_xloc,omitempty"`
-	WatermarkYLoc          string      `json:"watermark_yloc,omitempty"`
-	WatermarkRelativeSize  float32     `json:"watermark_relative_size,omitempty"`
-	WatermarkFontColor     string      `json:"watermark_font_color,omitempty"`
-	WatermarkShadow        bool        `json:"watermark_shadow,omitempty"`
-	WatermarkShadowColor   string      `json:"watermark_shadow_color,omitempty"`
-	WatermarkOverlay       string      `json:"watermark_overlay,omitempty"`      // Buffer containing overlay image
-	WatermarkOverlayLen    int         `json:"watermark_overlay_len,omitempty"`  // Length of overlay image
-	WatermarkOverlayType   ImageType   `json:"watermark_overlay_type,omitempty"` // Type of overlay image (i.e PngImage, ...)
-	StreamId               int32       `json:"stream_id"`                        // Specify stream by ID (instead of index)
-	AudioIndex             []int32     `json:"audio_index"`                      // the length of this is equal to the number of audios
-	ChannelLayout          int         `json:"channel_layout"`                   // Audio channel layout
-	MaxCLL                 string      `json:"max_cll,omitempty"`
-	MasterDisplay          string      `json:"master_display,omitempty"`
-	BitDepth               int32       `json:"bitdepth,omitempty"`
-	SyncAudioToStreamId    int         `json:"sync_audio_to_stream_id"`
-	ForceEqualFDuration    bool        `json:"force_equal_frame_duration,omitempty"`
-	MuxingSpec             string      `json:"muxing_spec,omitempty"`
-	Listen                 bool        `json:"listen"`
-	ConnectionTimeout      int         `json:"connection_timeout"`
-	FilterDescriptor       string      `json:"filter_descriptor"`
-	SkipDecoding           bool        `json:"skip_decoding"`
-	DebugFrameLevel        bool        `json:"debug_frame_level"`
-	ExtractImageIntervalTs int64       `json:"extract_image_interval_ts,omitempty"`
-	ExtractImagesTs        []int64     `json:"extract_images_ts,omitempty"`
-	VideoTimeBase          int         `json:"video_time_base,omitempty"`
-	VideoFrameDurationTs   int         `json:"video_frame_duration_ts,omitempty"`
-	Rotate                 int         `json:"rotate,omitempty"`
-	Profile                string      `json:"profile,omitempty"`
-	Level                  int         `json:"level,omitempty"`
-	Deinterlace            int         `json:"deinterlace,omitempty"`
-}
-
-// NewXcParams initializes a XcParams struct with unset/default values
-func NewXcParams() *XcParams {
-	return &XcParams{
-		AudioBitrate:           128000,
-		AudioSegDurationTs:     -1,
-		BitDepth:               8,
-		CrfStr:                 "23",
-		DurationTs:             -1,
-		Ecodec:                 "libx264",
-		Ecodec2:                "aac",
-		EncHeight:              -1,
-		EncWidth:               -1,
-		ExtractImageIntervalTs: -1,
-		GPUIndex:               -1,
-		SampleRate:             -1,
-		SegDuration:            "30",
-		StartFragmentIndex:     1,
-		StartSegmentStr:        "1",
-		StreamId:               -1,
-		SyncAudioToStreamId:    -1,
-		VideoBitrate:           -1,
-		VideoSegDurationTs:     -1,
-		WatermarkFontColor:     "white",
-		WatermarkOverlayType:   JpgImage,
-		WatermarkRelativeSize:  0.05,
-		WatermarkShadow:        false,
-		WatermarkShadowColor:   "black",
-		WatermarkTimecodeRate:  -1,
-		WatermarkXLoc:          "W*0.05",
-		WatermarkYLoc:          "H*0.9",
-	}
-}
-
-// Custom unmarshalJSON for XcParams to make things backwards compatible with prior serialization
-//
-// Explanations of backwards compatible serializations:
-//  1. NEW: The number of audios is specified by the length of the `AudioIndex` slice.
-//     OLD: The number of audios was specified by a larger `AudioIndex` array and a `n_audio` field specifying the number.
-//     CONVERSION: If a `n_audio` field exists, the `AudioIndex` slice is shortened to be that length.
-func (p *XcParams) UnmarshalJSON(data []byte) error {
-	// The alias does not have the problematic unmarshal JSON that makes embedding XcParams into xcParamsDecoder bad
-	type xcpAlias XcParams
-
-	type xcParamsDecoder struct {
-		xcpAlias
-		NumAudio int32 `json:"n_audio"`
-	}
-
-	var xcpd xcParamsDecoder
-	xcpd.xcpAlias = xcpAlias(*p)
-	if err := json.Unmarshal(data, &xcpd); err != nil {
-		return err
-	}
-
-	*p = XcParams(xcpd.xcpAlias)
-
-	if xcpd.NumAudio != 0 && len(p.AudioIndex) > int(xcpd.NumAudio) {
-		p.AudioIndex = p.AudioIndex[:xcpd.NumAudio]
-	}
-
-	return nil
-}
-
-func (p *XcParams) UnmarshalMap(m map[string]interface{}) error {
-	// Pass through JSON unmarshalling for centralization of unmarshalling
-	b, err := json.Marshal(m)
-	if err != nil {
-		return err
-	}
-	return p.UnmarshalJSON(b)
-}
-
-type AVMediaType int
-
-const (
-	AVMEDIA_TYPE_UNKNOWN    = -1
-	AVMEDIA_TYPE_VIDEO      = 0
-	AVMEDIA_TYPE_AUDIO      = 1
-	AVMEDIA_TYPE_DATA       = 2 ///< Opaque data information usually continuous
-	AVMEDIA_TYPE_SUBTITLE   = 3
-	AVMEDIA_TYPE_ATTACHMENT = 4 ///< Opaque data information usually sparse
-	AVMEDIA_TYPE_NB         = 5
-)
-
-var AVMediaTypeNames = map[AVMediaType]string{
-	AVMEDIA_TYPE_UNKNOWN:    "unknown",
-	AVMEDIA_TYPE_VIDEO:      "video",
-	AVMEDIA_TYPE_AUDIO:      "audio",
-	AVMEDIA_TYPE_DATA:       "data",
-	AVMEDIA_TYPE_SUBTITLE:   "subtitle",
-	AVMEDIA_TYPE_ATTACHMENT: "attachment",
-	AVMEDIA_TYPE_NB:         "nb",
-}
-
-type AVFieldOrder int
-
-const (
-	AV_FIELD_UNKNOWN     = 0
-	AV_FIELD_PROGRESSIVE = 1
-	AV_FIELD_TT          = 2 //< Top coded_first, top displayed first
-	AV_FIELD_BB          = 3 //< Bottom coded first, bottom displayed first
-	AV_FIELD_TB          = 4 //< Top coded first, bottom displayed first
-	AV_FIELD_BT          = 5 //< Bottom coded first, top displayed first
-)
-
-var AVFieldOrderNames = map[AVFieldOrder]string{
-	AV_FIELD_UNKNOWN:     "",
-	AV_FIELD_PROGRESSIVE: "progressive",
-	AV_FIELD_TT:          "tt",
-	AV_FIELD_BB:          "bb",
-	AV_FIELD_TB:          "tb",
-	AV_FIELD_BT:          "bt",
-}
-
-type AVStatType int
-
-const (
-	AV_IN_STAT_BYTES_READ               = 1
-	AV_IN_STAT_AUDIO_FRAME_READ         = 2
-	AV_IN_STAT_VIDEO_FRAME_READ         = 3
-	AV_IN_STAT_DECODING_AUDIO_START_PTS = 4
-	AV_IN_STAT_DECODING_VIDEO_START_PTS = 5
-	AV_OUT_STAT_BYTES_WRITTEN           = 6
-	AV_OUT_STAT_FRAME_WRITTEN           = 7
-	AV_IN_STAT_FIRST_KEYFRAME_PTS       = 8
-	AV_OUT_STAT_ENCODING_END_PTS        = 9
-	AV_OUT_STAT_START_FILE              = 10
-	AV_OUT_STAT_END_FILE                = 11
-	AV_IN_STAT_DATA_SCTE35              = 12
-)
-
-func (a AVStatType) Name() string {
-	switch a {
-	case AV_IN_STAT_BYTES_READ:
-		return "AV_IN_STAT_BYTES_READ"
-	case AV_IN_STAT_AUDIO_FRAME_READ:
-		return "AV_IN_STAT_AUDIO_FRAME_READ"
-	case AV_IN_STAT_VIDEO_FRAME_READ:
-		return "AV_IN_STAT_VIDEO_FRAME_READ"
-	case AV_IN_STAT_DECODING_AUDIO_START_PTS:
-		return "AV_IN_STAT_DECODING_AUDIO_START_PTS"
-	case AV_IN_STAT_DECODING_VIDEO_START_PTS:
-		return "AV_IN_STAT_DECODING_VIDEO_START_PTS"
-	case AV_IN_STAT_FIRST_KEYFRAME_PTS:
-		return "AV_IN_STAT_FIRST_KEYFRAME_PTS"
-	case AV_OUT_STAT_BYTES_WRITTEN:
-		return "AV_OUT_STAT_BYTES_WRITTEN"
-	case AV_OUT_STAT_FRAME_WRITTEN:
-		return "AV_OUT_STAT_FRAME_WRITTEN"
-	case AV_OUT_STAT_ENCODING_END_PTS:
-		return "AV_OUT_STAT_ENCODING_END_PTS"
-	case AV_OUT_STAT_START_FILE:
-		return "AV_OUT_STAT_START_FILE"
-	case AV_OUT_STAT_END_FILE:
-		return "AV_OUT_STAT_END_FILE"
-	case AV_IN_STAT_DATA_SCTE35:
-		return "AV_IN_STAT_DATA_SCTE35"
-	default:
-		return fmt.Sprintf("Unknown(%d)", a)
-	}
-
-}
-
-type SideDataDisplayMatrix struct {
-	Type       string  `json:"side_data_type"`
-	Rotation   float64 `json:"rotation"`
-	RotationCw float64 `json:"rotation_cw"`
-}
-
-type StreamInfo struct {
-	StreamIndex        int               `json:"stream_index"`
-	StreamId           int32             `json:"stream_id"`
-	CodecType          string            `json:"codec_type"`
-	CodecID            int               `json:"codec_id,omitempty"`
-	CodecName          string            `json:"codec_name,omitempty"`
-	DurationTs         int64             `json:"duration_ts,omitempty"`
-	TimeBase           *big.Rat          `json:"time_base,omitempty"`
-	NBFrames           int64             `json:"nb_frames,omitempty"`
-	StartTime          int64             `json:"start_time"` // in TS unit
-	AvgFrameRate       *big.Rat          `json:"avg_frame_rate,omitempty"`
-	FrameRate          *big.Rat          `json:"frame_rate,omitempty"`
-	SampleRate         int               `json:"sample_rate,omitempty"`
-	Channels           int               `json:"channels,omitempty"`
-	ChannelLayout      int               `json:"channel_layout,omitempty"`
-	TicksPerFrame      int               `json:"ticks_per_frame,omitempty"`
-	BitRate            int64             `json:"bit_rate,omitempty"`
-	Has_B_Frames       bool              `json:"has_b_frame"`
-	Width              int               `json:"width,omitempty"`  // Video only
-	Height             int               `json:"height,omitempty"` // Video only
-	PixFmt             int               `json:"pix_fmt"`          // Video only, it matches with enum AVPixelFormat in FFmpeg
-	SampleAspectRatio  *big.Rat          `json:"sample_aspect_ratio,omitempty"`
-	DisplayAspectRatio *big.Rat          `json:"display_aspect_ratio,omitempty"`
-	FieldOrder         string            `json:"field_order,omitempty"`
-	Profile            int               `json:"profile,omitempty"`
-	Level              int               `json:"level,omitempty"`
-	SideData           []interface{}     `json:"side_data,omitempty"`
-	Tags               map[string]string `json:"tags,omitempty"`
-}
-
-type ContainerInfo struct {
-	Duration   float64 `json:"duration"`
-	FormatName string  `json:"format_name"`
-}
-
-// PENDING: use legacy_imf_dash_extract/media.Probe?
-type ProbeInfo struct {
-	ContainerInfo ContainerInfo `json:"format"`
-	StreamInfo    []StreamInfo  `json:"streams"`
-}
 
 // IOHandler defines handlers that will be called from the C interface functions
 type IOHandler interface {
@@ -552,222 +94,80 @@ type IOHandler interface {
 	OutStat(stream_index C.int, avp_stat C.avp_stat_t, stat_args *C.void) error
 }
 
-type InputOpener interface {
-	// fd determines uniquely opening input.
-	// url determines input string for transcoding
-	Open(fd int64, url string) (InputHandler, error)
-}
-
-type InputHandler interface {
-	// Reads from input stream into buf.
-	// Returns (0, nil) to indicate EOF.
-	Read(buf []byte) (int, error)
-
-	// Seeks to specific offset of the input.
-	Seek(offset int64, whence int) (int64, error)
-
-	// Closes the input.
-	Close() error
-
-	// Returns the size of input, if the size is not known returns 0 or -1.
-	Size() int64
-
-	// Reports some stats
-	Stat(streamIndex int, statType AVStatType, statArgs interface{}) error
-}
-
-type OutputOpener interface {
-	// h determines uniquely opening input.
-	// fd determines uniquely opening output.
-	Open(h, fd int64, stream_index, seg_index int, pts int64, out_type AVType) (OutputHandler, error)
-}
-
-type MuxOutputOpener interface {
-	// url and fd determines uniquely opening output.
-	Open(url string, fd int64, out_type AVType) (OutputHandler, error)
-}
-
-type OutputHandler interface {
-	// Writes encoded stream to the output.
-	Write(buf []byte) (int, error)
-
-	// Seeks to specific offset of the output.
-	Seek(offset int64, whence int) (int64, error)
-
-	// Closes the output.
-	Close() error
-
-	// Reports some stats
-	Stat(streamIndex int, avType AVType, statType AVStatType, statArgs interface{}) error
-}
-
 // Implement IOHandler
 type ioHandler struct {
-	input    InputHandler // Input file
-	mutex    *sync.Mutex
-	outTable map[int64]OutputHandler // Map of integer handle to output interfaces
+	input         goavpipe.InputHandler // Input file
+	mutex         *sync.Mutex
+	outTable      map[int64]goavpipe.OutputHandler // Map of integer handle to output interfaces
+	restoreMvhevc bool
 }
 
-// Global table of handlers
-var gHandlers map[int64]*ioHandler = make(map[int64]*ioHandler)
-var gMuxHandlers map[int64]OutputHandler = make(map[int64]OutputHandler)
-var gURLInputOpeners map[string]InputOpener = make(map[string]InputOpener)             // Keeps InputOpener for specific URL
-var gURLOutputOpeners map[string]OutputOpener = make(map[string]OutputOpener)          // Keeps OutputOpener for specific URL
-var gURLMuxOutputOpeners map[string]MuxOutputOpener = make(map[string]MuxOutputOpener) // Keeps MuxOutputOpener for specific URL
-var gURLOutputOpenersByHandler map[int64]OutputOpener = make(map[int64]OutputOpener)   // Keeps OutputOpener for specific URL
-var gHandleNum int64
-var gFd int64
-var gMutex sync.Mutex
-var gInputOpener InputOpener
-var gOutputOpener OutputOpener
-var gMuxOutputOpener MuxOutputOpener
-
-// This is used to set global input/output opener for avpipe
-// If there is no specific input/output opener for a URL, the global
-// input/output opener will be used.
-func InitIOHandler(inputOpener InputOpener, outputOpener OutputOpener) {
-	gInputOpener = inputOpener
-	gOutputOpener = outputOpener
-}
-
-// Sets the global handlers for muxing (similar to InitIOHandler for transcoding)
-func InitMuxIOHandler(inputOpener InputOpener, muxOutputOpener MuxOutputOpener) {
-	gInputOpener = inputOpener
-	gMuxOutputOpener = muxOutputOpener
-}
-
-// This is used to set input/output opener specific to a URL.
-// The input/output opener set by this function, is only valid for the URL and will be unset after
-// Xc() or Probe() is complete.
-func InitUrlIOHandler(url string, inputOpener InputOpener, outputOpener OutputOpener) {
-	if inputOpener != nil {
-		gMutex.Lock()
-		gURLInputOpeners[url] = inputOpener
-		gMutex.Unlock()
+func getCIOHandler(fd int64) *ioHandler {
+	h, ok := goavpipe.Globals.GetCIOHandler(fd)
+	if !ok {
+		return nil
 	}
-
-	if outputOpener != nil {
-		gMutex.Lock()
-		gURLOutputOpeners[url] = outputOpener
-		gMutex.Unlock()
+	ioh, ok := h.(*ioHandler)
+	if !ok {
+		return nil
 	}
-}
-
-// Sets specific IO handler for muxing a url/file (similar to InitUrlIOHandler)
-func InitUrlMuxIOHandler(url string, inputOpener InputOpener, muxOutputOpener MuxOutputOpener) {
-	if inputOpener != nil {
-		gMutex.Lock()
-		gURLInputOpeners[url] = inputOpener
-		gMutex.Unlock()
-	}
-
-	if muxOutputOpener != nil {
-		gMutex.Lock()
-		gURLMuxOutputOpeners[url] = muxOutputOpener
-		gMutex.Unlock()
-	}
-	log.Debug("InitUrlMuxIOHandler", "url", url, "urlInputOpener", inputOpener == nil, "urlOutputOpener", muxOutputOpener == nil)
-}
-
-func getInputOpener(url string) InputOpener {
-	gMutex.Lock()
-	defer gMutex.Unlock()
-	if inputOpener, ok := gURLInputOpeners[url]; ok {
-		return inputOpener
-	}
-
-	return gInputOpener
-}
-
-func getOutputOpener(url string) OutputOpener {
-	gMutex.Lock()
-	defer gMutex.Unlock()
-	if outputOpener, ok := gURLOutputOpeners[url]; ok {
-		return outputOpener
-	}
-
-	return gOutputOpener
-}
-
-func getMuxOutputOpener(url string) MuxOutputOpener {
-	log.Debug("getMuxOutputOpener", "url", url)
-	gMutex.Lock()
-	defer gMutex.Unlock()
-	if muxOutputOpener, ok := gURLMuxOutputOpeners[url]; ok {
-		return muxOutputOpener
-	}
-
-	return gMuxOutputOpener
-}
-
-func putMuxOutputOpener(fd int64, muxOutputHandler OutputHandler) {
-	gMutex.Lock()
-	gMuxHandlers[fd] = muxOutputHandler
-	gMutex.Unlock()
-}
-
-func getOutputOpenerByHandler(h int64) OutputOpener {
-	gMutex.Lock()
-	defer gMutex.Unlock()
-	if outputOpener, ok := gURLOutputOpenersByHandler[h]; ok {
-		return outputOpener
-	}
-
-	return gOutputOpener
+	return ioh
 }
 
 //export AVPipeOpenInput
 func AVPipeOpenInput(url *C.char, size *C.int64_t) C.int64_t {
-	filename := C.GoString((*C.char)(unsafe.Pointer(url)))
-	urlInputOpener := getInputOpener(filename)
-	urlOutputOpener := getOutputOpener(filename)
+	fd, s := AVPipeOpenInputGo(C.GoString((*C.char)(unsafe.Pointer(url))))
+	*size = C.int64_t(s)
+	return C.int64_t(fd)
+}
+
+func AVPipeOpenInputGo(url string) (fd, size int64) {
+	urlInputOpener := goavpipe.GetInputOpener(url)
+	urlOutputOpener := goavpipe.GetOutputOpener(url)
 
 	if urlInputOpener == nil || urlOutputOpener == nil {
-		log.Error("Input or output opener(s) are not set", "urlInputOpener", urlInputOpener, "urlOutputOpener", urlOutputOpener)
-		return C.int64_t(-1)
+		goavpipe.Log.Error("Input or output opener(s) are not set", "urlInputOpener", urlInputOpener, "urlOutputOpener", urlOutputOpener)
+		return -1, 0
 	}
-	log.Debug("AVPipeOpenInput()", "url", filename)
+	goavpipe.Log.Debug("AVPipeOpenInput()", "url", url)
 
-	gMutex.Lock()
-	gHandleNum++
-	fd := gHandleNum
-	gURLOutputOpenersByHandler[fd] = urlOutputOpener
-	gMutex.Unlock()
+	fd = goavpipe.Globals.AssignOutputOpener(urlOutputOpener)
 
-	input, err := urlInputOpener.Open(fd, filename)
+	input, err := urlInputOpener.Open(fd, url)
 	if err != nil {
-		return C.int64_t(-1)
+		goavpipe.Globals.DeleteCIOHandlerAndOutputOpeners(fd)
+		goavpipe.Log.Debug("AVPipeOpenInput()", err, "url", url)
+		return -1, 0
 	}
 
-	*size = C.int64_t(input.Size())
+	size = input.Size()
 
-	h := &ioHandler{input: input, outTable: make(map[int64]OutputHandler), mutex: &sync.Mutex{}}
-	log.Debug("AVPipeOpenInput()", "url", filename, "size", *size, "fd", fd)
-
-	gMutex.Lock()
-	defer gMutex.Unlock()
-	gHandlers[fd] = h
-	return C.int64_t(fd)
+	h := &ioHandler{
+		input:         input,
+		outTable:      make(map[int64]goavpipe.OutputHandler),
+		mutex:         &sync.Mutex{},
+		restoreMvhevc: shouldRestoreMvhevcForURL(url),
+	}
+	goavpipe.Log.Debug("AVPipeOpenInput()", "url", url, "size", size, "fd", fd)
+	goavpipe.Globals.PutCIOHandler(fd, h)
+	return fd, size
 }
 
 //export AVPipeOpenMuxInput
 func AVPipeOpenMuxInput(out_url, url *C.char, size *C.int64_t) C.int64_t {
 	filename := C.GoString((*C.char)(unsafe.Pointer(url)))
 	out_filename := C.GoString((*C.char)(unsafe.Pointer(out_url)))
-	urlInputOpener := getInputOpener(out_filename)
-	urlOutputOpener := getMuxOutputOpener(out_filename)
+	urlInputOpener := goavpipe.GetInputOpener(out_filename)
+	urlOutputOpener := goavpipe.GetMuxOutputOpener(out_filename)
 
-	log.Debug("AVPipeOpenMuxInput()", "url", filename, "out_filename", out_filename)
+	goavpipe.Log.Debug("AVPipeOpenMuxInput()", "url", filename, "out_filename", out_filename)
 
 	if urlInputOpener == nil || urlOutputOpener == nil {
-		log.Error("Input or output opener(s) are not set", "urlInputOpener", urlInputOpener, "urlOutputOpener", urlOutputOpener)
+		goavpipe.Log.Error("Input or output opener(s) are not set", "urlInputOpener", urlInputOpener, "urlOutputOpener", urlOutputOpener)
 		return C.int64_t(-1)
 	}
 
-	gMutex.Lock()
-	gHandleNum++
-	fd := gHandleNum
-	gMutex.Unlock()
+	fd := goavpipe.Globals.GetNextFD()
 
 	input, err := urlInputOpener.Open(fd, filename)
 	if err != nil {
@@ -776,30 +176,27 @@ func AVPipeOpenMuxInput(out_url, url *C.char, size *C.int64_t) C.int64_t {
 
 	*size = C.int64_t(input.Size())
 
-	h := &ioHandler{input: input, outTable: make(map[int64]OutputHandler), mutex: &sync.Mutex{}}
-	log.Debug("AVPipeOpenMuxInput()", "url", filename, "size", *size)
-
-	gMutex.Lock()
-	defer gMutex.Unlock()
-	gHandlers[fd] = h
+	h := &ioHandler{input: input, outTable: make(map[int64]goavpipe.OutputHandler), mutex: &sync.Mutex{}}
+	goavpipe.Log.Debug("AVPipeOpenMuxInput()", "url", filename, "size", *size)
+	goavpipe.Globals.PutCIOHandler(fd, h)
 	return C.int64_t(fd)
 }
 
 //export AVPipeReadInput
 func AVPipeReadInput(fd C.int64_t, buf *C.uint8_t, sz C.int) C.int {
-	gMutex.Lock()
-	h := gHandlers[int64(fd)]
+	h := getCIOHandler(int64(fd))
 	if h == nil {
-		gMutex.Unlock()
 		return C.int(-1)
 	}
-	gMutex.Unlock()
 
 	if traceIo {
-		log.Debug("AVPipeReadInput()", "fd", fd, "buf", buf, "sz", sz)
+		goavpipe.Log.Debug("AVPipeReadInput()", "fd", fd, "buf", buf, "sz", sz)
 	}
 
-	//gobuf := C.GoBytes(unsafe.Pointer(buf), sz)
+	if pr, ok := h.input.(goavpipe.PacketReader); ok {
+		return avPipeReadInputPacket(pr, fd, buf, sz)
+	}
+
 	gobuf := make([]byte, sz)
 
 	n, err := h.InReader(gobuf)
@@ -807,7 +204,51 @@ func AVPipeReadInput(fd C.int64_t, buf *C.uint8_t, sz C.int) C.int {
 		C.memcpy(unsafe.Pointer(buf), unsafe.Pointer(&gobuf[0]), C.size_t(n))
 	}
 
+	return avPipeReadInputResult(n, err, fd, buf, sz)
+}
+
+// avPipeReadInputPacket implements AVPipeReadInput for InputHandlers that support reading directly into a pooled
+// packet, saving the copy into an intermediate gobuf that the plain-[]byte InReader path needs.
+func avPipeReadInputPacket(pr goavpipe.PacketReader, fd C.int64_t, buf *C.uint8_t, sz C.int) C.int {
+	res, err := pr.ReadPacket()
 	if err != nil {
+		return avPipeReadInputResult(0, err, fd, buf, sz)
+	}
+	defer res.Release()
+
+	data := truncateToRequestedSize(res.T.Data, int(sz))
+	n := len(data)
+	if n > 0 {
+		C.memcpy(unsafe.Pointer(buf), unsafe.Pointer(&data[0]), C.size_t(n))
+	}
+	return avPipeReadInputResult(n, nil, fd, buf, sz)
+}
+
+// truncateToRequestedSize bounds data to at most sz bytes, logging a warning when truncation is necessary. ffmpeg
+// only ever asked for sz bytes; the plain-[]byte read path can't over-read (its destination buffer is exactly sz
+// bytes), but a pooled packet read isn't bounded that way, so this makes the same silent-OS-truncation behavior the
+// plain path already has explicit and visible.
+func truncateToRequestedSize(data []byte, sz int) []byte {
+	if len(data) <= sz {
+		return data
+	}
+	goavpipe.Log.Warn("AVPipeReadInput() packet larger than requested read size, truncating", "len", len(data), "sz", sz)
+	return data[:sz]
+}
+
+// avPipeReadInputResult applies AVPipeReadInput's error-to-return-code convention, shared by the plain-[]byte and
+// PacketReader read paths.
+func avPipeReadInputResult(n int, err error, fd C.int64_t, buf *C.uint8_t, sz C.int) C.int {
+	if err != nil {
+		goavpipe.Log.Warn("AVPipeReadInput()", err, "fd", fd, "buf", buf, "sz", sz)
+		if _, ok := errors.GetField(err, goavpipe.ErrRetryField); ok {
+			// By convention a return code -1 is considered graceful termination and the avpipe job completes with no error
+			// A return code of -EIO is interpreted as a read failure and the avpipe job exits with eav_read_input
+			return C.int(-int(syscall.EIO))
+		}
+		if err == io.EOF {
+			return C.int(n)
+		}
 		return C.int(-1)
 	}
 
@@ -818,22 +259,19 @@ func (h *ioHandler) InReader(buf []byte) (int, error) {
 	n, err := h.input.Read(buf)
 
 	if traceIo {
-		log.Debug("InReader()", "buf_size", len(buf), "n", n, "error", err)
+		goavpipe.Log.Debug("InReader()", "buf_size", len(buf), "n", n, "error", err)
 	}
 	return n, err
 }
 
 //export AVPipeSeekInput
 func AVPipeSeekInput(fd C.int64_t, offset C.int64_t, whence C.int) C.int64_t {
-	gMutex.Lock()
-	h := gHandlers[int64(fd)]
+	h := getCIOHandler(int64(fd))
 	if h == nil {
-		gMutex.Unlock()
 		return C.int64_t(-1)
 	}
-	gMutex.Unlock()
 	if traceIo {
-		log.Debug("AVPipeSeekInput()", "h", h)
+		goavpipe.Log.Debug("AVPipeSeekInput()", "h", h)
 	}
 
 	n, err := h.InSeeker(offset, whence)
@@ -844,49 +282,56 @@ func AVPipeSeekInput(fd C.int64_t, offset C.int64_t, whence C.int) C.int64_t {
 }
 
 func (h *ioHandler) InSeeker(offset C.int64_t, whence C.int) (int64, error) {
+	// Enhanced debugging for FFmpeg 7.1 SEEK_END issue
+	if int(whence) == 2 { // io.SeekEnd
+		goavpipe.Log.Debug("InSeeker SEEK_END", "offset", offset, "whence", whence, "input_size", h.input.Size(), "about_to_call_seek", true)
+	}
+
+	// FFmpeg 8.0.1: Handle AVSEEK_SIZE - return file size directly without seeking
+	if int(whence) == C.AVSEEK_SIZE { // AVSEEK_SIZE
+		size := h.input.Size()
+		goavpipe.Log.Debug("InSeeker AVSEEK_SIZE", "offset", offset, "whence", whence, "returning_size", size)
+		return size, nil
+	}
+
 	n, err := h.input.Seek(int64(offset), int(whence))
-	log.Debug("InSeeker()", "offset", offset, "whence", whence, "n", n)
+	if int(whence) == 2 { // io.SeekEnd
+		goavpipe.Log.Debug("InSeeker SEEK_END result", "offset", offset, "whence", whence, "returned_pos", n, "error", err)
+	}
+	goavpipe.Log.Debug("InSeeker()", "offset", offset, "whence", whence, "n", n)
 	return n, err
 }
 
 //export AVPipeCloseInput
 func AVPipeCloseInput(fd C.int64_t) C.int {
-	gMutex.Lock()
-	h := gHandlers[int64(fd)]
+	h := getCIOHandler(int64(fd))
 	if h == nil {
-		gMutex.Unlock()
 		return C.int(-1)
 	}
 	err := h.InCloser()
 
-	// Remove the handler from global table
-	delete(gHandlers, int64(fd))
-	delete(gURLOutputOpenersByHandler, int64(fd))
-	gMutex.Unlock()
+	goavpipe.Globals.DeleteCIOHandlerAndOutputOpeners(int64(fd))
 	if err != nil {
 		return C.int(-1)
 	}
 
-	log.Debug("AVPipeCloseInput()", "fd", fd)
+	goavpipe.Log.Debug("AVPipeCloseInput()", "fd", fd)
 
 	return C.int(0)
 }
 
 func (h *ioHandler) InCloser() error {
 	err := h.input.Close()
-	log.Debug("InCloser()", "error", err)
+	goavpipe.Log.Debug("InCloser()", "error", err)
 	return err
 }
 
 //export AVPipeStatInput
 func AVPipeStatInput(fd C.int64_t, stream_index C.int, avp_stat C.avp_stat_t, stat_args unsafe.Pointer) C.int {
-	gMutex.Lock()
-	h := gHandlers[int64(fd)]
+	h := getCIOHandler(int64(fd))
 	if h == nil {
-		gMutex.Unlock()
 		return C.int(-1)
 	}
-	gMutex.Unlock()
 
 	err := h.InStat(stream_index, avp_stat, stat_args)
 	if err != nil {
@@ -896,6 +341,18 @@ func AVPipeStatInput(fd C.int64_t, stream_index C.int, avp_stat C.avp_stat_t, st
 	return C.int(0)
 }
 
+func AVPipeStatInputGo(fd int64, streamIndex int, t goavpipe.AVStatType, args any) (err error) {
+	h := getCIOHandler(int64(fd))
+	if h == nil {
+		return fmt.Errorf("input stats - failed to find input handler (fd=%d)", fd)
+	}
+	err = h.input.Stat(streamIndex, t, args)
+	if err != nil {
+		err = fmt.Errorf("input stats - failed to forward (%v)", err)
+	}
+	return err
+}
+
 func (h *ioHandler) InStat(stream_index C.int, avp_stat C.avp_stat_t, stat_args unsafe.Pointer) error {
 	var err error
 
@@ -903,31 +360,34 @@ func (h *ioHandler) InStat(stream_index C.int, avp_stat C.avp_stat_t, stat_args 
 	switch avp_stat {
 	case C.in_stat_bytes_read:
 		statArgs := *(*uint64)(stat_args)
-		err = h.input.Stat(streamIndex, AV_IN_STAT_BYTES_READ, &statArgs)
+		err = h.input.Stat(streamIndex, goavpipe.AV_IN_STAT_BYTES_READ, &statArgs)
 	case C.in_stat_decoding_audio_start_pts:
 		statArgs := *(*uint64)(stat_args)
-		err = h.input.Stat(streamIndex, AV_IN_STAT_DECODING_AUDIO_START_PTS, &statArgs)
+		err = h.input.Stat(streamIndex, goavpipe.AV_IN_STAT_DECODING_AUDIO_START_PTS, &statArgs)
 	case C.in_stat_decoding_video_start_pts:
 		statArgs := *(*uint64)(stat_args)
-		err = h.input.Stat(streamIndex, AV_IN_STAT_DECODING_VIDEO_START_PTS, &statArgs)
+		err = h.input.Stat(streamIndex, goavpipe.AV_IN_STAT_DECODING_VIDEO_START_PTS, &statArgs)
 	case C.in_stat_audio_frame_read:
 		statArgs := *(*uint64)(stat_args)
-		err = h.input.Stat(streamIndex, AV_IN_STAT_AUDIO_FRAME_READ, &statArgs)
+		err = h.input.Stat(streamIndex, goavpipe.AV_IN_STAT_AUDIO_FRAME_READ, &statArgs)
 	case C.in_stat_video_frame_read:
 		statArgs := *(*uint64)(stat_args)
-		err = h.input.Stat(streamIndex, AV_IN_STAT_VIDEO_FRAME_READ, &statArgs)
+		err = h.input.Stat(streamIndex, goavpipe.AV_IN_STAT_VIDEO_FRAME_READ, &statArgs)
 	case C.in_stat_first_keyframe_pts:
 		statArgs := *(*uint64)(stat_args)
-		err = h.input.Stat(streamIndex, AV_IN_STAT_FIRST_KEYFRAME_PTS, &statArgs)
+		err = h.input.Stat(streamIndex, goavpipe.AV_IN_STAT_FIRST_KEYFRAME_PTS, &statArgs)
 	case C.in_stat_data_scte35:
 		statArgs := C.GoString((*C.char)(stat_args))
-		err = h.input.Stat(streamIndex, AV_IN_STAT_DATA_SCTE35, statArgs)
+		err = h.input.Stat(streamIndex, goavpipe.AV_IN_STAT_DATA_SCTE35, statArgs)
+	case C.in_stat_mpegts:
+		statArgs := C.GoString((*C.char)(stat_args))
+		err = h.input.Stat(streamIndex, goavpipe.AV_IN_STAT_MPEGTS, statArgs)
 	}
 
 	return err
 }
 
-func (h *ioHandler) putOutTable(fd int64, outHandler OutputHandler) {
+func (h *ioHandler) putOutTable(fd int64, outHandler goavpipe.OutputHandler) {
 	h.mutex.Lock()
 	defer h.mutex.Unlock()
 
@@ -938,123 +398,125 @@ func (h *ioHandler) putOutTable(fd int64, outHandler OutputHandler) {
 	}
 }
 
-func (h *ioHandler) getOutTable(fd int64) OutputHandler {
+func (h *ioHandler) getOutTable(fd int64) goavpipe.OutputHandler {
 	h.mutex.Lock()
 	defer h.mutex.Unlock()
 
 	return h.outTable[fd]
 }
 
-func getAVType(av_type C.int) AVType {
+func getAVType(av_type C.int) goavpipe.AVType {
 	switch av_type {
 	case C.avpipe_video_init_stream:
-		return DASHVideoInit
+		return goavpipe.DASHVideoInit
 	case C.avpipe_audio_init_stream:
-		return DASHAudioInit
+		return goavpipe.DASHAudioInit
 	case C.avpipe_manifest:
-		return DASHManifest
+		return goavpipe.DASHManifest
 	case C.avpipe_video_segment:
-		return DASHVideoSegment
+		return goavpipe.DASHVideoSegment
 	case C.avpipe_audio_segment:
-		return DASHAudioSegment
+		return goavpipe.DASHAudioSegment
 	case C.avpipe_master_m3u:
-		return HLSMasterM3U
+		return goavpipe.HLSMasterM3U
 	case C.avpipe_video_m3u:
-		return HLSVideoM3U
+		return goavpipe.HLSVideoM3U
 	case C.avpipe_audio_m3u:
-		return HLSAudioM3U
+		return goavpipe.HLSAudioM3U
 	case C.avpipe_aes_128_key:
-		return AES128Key
+		return goavpipe.AES128Key
 	case C.avpipe_mp4_stream:
-		return MP4Stream
+		return goavpipe.MP4Stream
 	case C.avpipe_fmp4_stream:
-		return FMP4Stream
+		return goavpipe.FMP4Stream
 	case C.avpipe_mp4_segment:
-		return MP4Segment
+		return goavpipe.MP4Segment
 	case C.avpipe_video_fmp4_segment:
-		return FMP4VideoSegment
+		return goavpipe.FMP4VideoSegment
 	case C.avpipe_audio_fmp4_segment:
-		return FMP4AudioSegment
+		return goavpipe.FMP4AudioSegment
 	case C.avpipe_mux_segment:
-		return MuxSegment
+		return goavpipe.MuxSegment
 	case C.avpipe_image:
-		return FrameImage
+		return goavpipe.FrameImage
 	case C.avpipe_mpegts_segment:
-		return MpegtsSegment
+		return goavpipe.MpegtsSegment
 	default:
-		return Unknown
+		return goavpipe.Unknown
 	}
 }
 
+// TODO(Nate): Standardize all of these handler functions to be a type conversion wrapper around a
+// Go function to have as thin a surface as possible of C functions. This lets these be called
+// easily from other code.
+
 //export AVPipeOpenOutput
 func AVPipeOpenOutput(handler C.int64_t, stream_index, seg_index C.int, pts C.int64_t, stream_type C.int) C.int64_t {
+	return C.int64_t(AVPipeOpenOutputGo(int64(handler), int(stream_index), int(seg_index), int64(pts), getAVType(stream_type)))
+}
 
-	gMutex.Lock()
-	h := gHandlers[int64(handler)]
+func AVPipeOpenOutputGo(handler int64, stream_index, seg_index int, pts int64, stream_type goavpipe.AVType) int64 {
+	h := getCIOHandler(handler)
 	if h == nil {
-		gMutex.Unlock()
-		return C.int64_t(-1)
+		goavpipe.Log.Error("AVPipeOpenOutput()", "reason", "handler not found", "handler", handler)
+		return -1
 	}
-	gFd++
-	fd := gFd
-	gMutex.Unlock()
-	out_type := getAVType(stream_type)
-	if out_type == Unknown {
-		log.Error("AVPipeOpenOutput()", "invalid stream type", stream_type)
-		return C.int64_t(-1)
+	fd := goavpipe.Globals.GetNextFD()
+	if stream_type == goavpipe.Unknown {
+		goavpipe.Log.Error("AVPipeOpenOutput()", "invalid stream type", stream_type)
+		return -1
 	}
 
-	outputOpener := getOutputOpenerByHandler(int64(handler))
+	outputOpener := goavpipe.GetOutputOpenerByHandler(int64(handler))
 	if outputOpener == nil {
-		log.Error("AVPipeOpenOutput() nil outputOpener", "handler", handler)
-		return C.int64_t(-1)
+		goavpipe.Log.Error("AVPipeOpenOutput() nil outputOpener", "handler", handler)
+		return -1
 	}
-	outHandler, err := outputOpener.Open(int64(handler), fd, int(stream_index), int(seg_index), int64(pts), out_type)
+	outHandler, err := outputOpener.Open(int64(handler), fd, int(stream_index), int(seg_index), int64(pts), stream_type)
 	if err != nil {
-		log.Error("AVPipeOpenOutput()", "out_type", out_type, "error", err)
-		return C.int64_t(-1)
+		goavpipe.Log.Error("AVPipeOpenOutput()", "out_type", stream_type, "error", err)
+		return -1
 	}
 
-	log.Debug("AVPipeOpenOutput()", "fd", fd, "stream_index", stream_index, "seg_index", seg_index, "pts", pts, "out_type", out_type)
+	outHandler = maybeWrapMvhevcOutputHandler(outHandler, h.restoreMvhevc, stream_type)
+
+	goavpipe.Log.Debug("AVPipeOpenOutput()", "fd", fd, "stream_index", stream_index, "seg_index", seg_index, "pts", pts, "out_type", stream_type)
 	h.putOutTable(fd, outHandler)
 
-	return C.int64_t(fd)
+	return fd
 }
 
 //export AVPipeOpenMuxOutput
 func AVPipeOpenMuxOutput(url *C.char, stream_type C.int) C.int64_t {
-	var out_type AVType
+	var out_type goavpipe.AVType
 
-	gMutex.Lock()
-	gFd++
-	fd := gFd
-	gMutex.Unlock()
+	fd := goavpipe.Globals.GetNextFD()
 	switch stream_type {
 	case C.avpipe_mp4_segment:
-		out_type = MP4Segment
+		out_type = goavpipe.MP4Segment
 	case C.avpipe_video_fmp4_segment:
-		out_type = FMP4VideoSegment
+		out_type = goavpipe.FMP4VideoSegment
 	case C.avpipe_audio_fmp4_segment:
-		out_type = FMP4AudioSegment
+		out_type = goavpipe.FMP4AudioSegment
 	default:
-		log.Error("AVPipeOpenOutput()", "invalid stream type", stream_type)
+		goavpipe.Log.Error("AVPipeOpenOutput()", "invalid stream type", stream_type)
 		return C.int64_t(-1)
 	}
 
 	filename := C.GoString((*C.char)(unsafe.Pointer(url)))
-	muxOutputOpener := getMuxOutputOpener(filename)
+	muxOutputOpener := goavpipe.GetMuxOutputOpener(filename)
 	if muxOutputOpener == nil {
-		log.Error("AVPipeOpenMuxOutput() nil muxOutputOpener", "url", filename)
+		goavpipe.Log.Error("AVPipeOpenMuxOutput() nil muxOutputOpener", "url", filename)
 		return C.int64_t(-1)
 	}
 	outHandler, err := muxOutputOpener.Open(filename, fd, out_type)
 	if err != nil {
-		log.Error("AVPipeOpenOutput()", "out_type", out_type, "error", err)
+		goavpipe.Log.Error("AVPipeOpenOutput()", "out_type", out_type, "error", err)
 		return C.int64_t(-1)
 	}
 
-	log.Debug("AVPipeOpenOutput()", "fd", fd, "out_type", out_type)
-	putMuxOutputOpener(fd, outHandler)
+	goavpipe.Log.Debug("AVPipeOpenOutput()", "fd", fd, "out_type", out_type)
+	goavpipe.PutMuxOutputOpener(fd, outHandler)
 
 	return C.int64_t(fd)
 }
@@ -1065,49 +527,51 @@ func AVPipeWriteOutput(handler C.int64_t, fd C.int64_t, buf *C.uint8_t, sz C.int
 		return C.int(0)
 	}
 
-	gMutex.Lock()
-	h := gHandlers[int64(handler)]
-	if h == nil {
-		gMutex.Unlock()
-		return C.int(-1)
-	}
-	gMutex.Unlock()
-	if traceIo {
-		log.Debug("AVPipeWriteOutput", "fd", fd, "sz", sz)
-	}
-
-	if h.getOutTable(int64(fd)) == nil {
-		msg := fmt.Sprintf("OutWriterX outTable entry is NULL, fd=%d", fd)
-		panic(msg)
-	}
-
-	//gobuf := C.GoBytes(unsafe.Pointer(buf), sz)
+	// gobuf := C.GoBytes(unsafe.Pointer(buf), sz)
 	// This should be the equivalent of using GoBytes() but safer if the
 	// Go implementation uses C pointer to wrap a slice.
 	gobuf := make([]byte, sz)
 	C.memcpy(unsafe.Pointer(&gobuf[0]), unsafe.Pointer(buf), C.size_t(sz))
 
-	n, err := h.OutWriter(fd, gobuf)
-	if err != nil {
-		return C.int(-1)
+	return C.int(AVPipeWriteOutputGo(int64(handler), int64(fd), gobuf, true))
+}
+
+// AVPipeWriteOutputGo writes the given buffer to the goavpipe.OutputHandler
+// pointed to by fd in the table of handler.
+// The allowTake parameter when true commits the caller to no modification of
+// the buffer thus allowing the callee to take ownership of the buffer.
+func AVPipeWriteOutputGo(handler int64, fd int64, buf []byte, allowTake bool) int {
+	if len(buf) == 0 {
+		return 0
 	}
 
-	return C.int(n)
+	h := getCIOHandler(handler)
+	if h == nil {
+		goavpipe.Log.Error("AVPipeWriteOutputGo()", "handler not found", "handler", handler)
+		return -1
+	}
+
+	if traceIo {
+		goavpipe.Log.Debug("AVPipeWriteOutputGo", "fd", fd, "buf_size", len(buf))
+	}
+
+	n, err := h.OutWriter(C.int64_t(fd), buf, allowTake)
+	if err != nil {
+		return -1
+	}
+	return n
 }
 
 //export AVPipeWriteMuxOutput
 func AVPipeWriteMuxOutput(fd C.int64_t, buf *C.uint8_t, sz C.int) C.int {
 	if traceIo {
-		log.Debug("AVPipeWriteMuxOutput", "fd", fd, "sz", sz)
+		goavpipe.Log.Debug("AVPipeWriteMuxOutput", "fd", fd, "sz", sz)
 	}
 
-	gMutex.Lock()
-	outHandler := gMuxHandlers[int64(fd)]
+	outHandler := goavpipe.Globals.GetMuxOutputHandler(int64(fd))
 	if outHandler == nil {
-		gMutex.Unlock()
 		return C.int(-1)
 	}
-	gMutex.Unlock()
 
 	gobuf := C.GoBytes(unsafe.Pointer(buf), sz)
 	n, err := outHandler.Write(gobuf)
@@ -1118,24 +582,50 @@ func AVPipeWriteMuxOutput(fd C.int64_t, buf *C.uint8_t, sz C.int) C.int {
 	return C.int(n)
 }
 
-func (h *ioHandler) OutWriter(fd C.int64_t, buf []byte) (int, error) {
+func (h *ioHandler) OutWriter(fd C.int64_t, buf []byte, canTake bool) (int, error) {
+	// Taker is an optional interface of OutputHandler where 'buf' is taken by
+	// the receiver which then assumes the ownership of that buffer (as opposed
+	// to the io.Writer where the caller keeps the ownership of the buffer).
+	// NOTE:
+	// * after calling 'Take' the caller must not modify the passed in buffer.
+	// * the Taker interface is defined and used in avcache-go/cache for page segments
+	type Taker interface {
+		Take(b []byte) error
+	}
+
 	outHandler := h.getOutTable(int64(fd))
-	n, err := outHandler.Write(buf)
+	if outHandler == nil {
+		msg := fmt.Sprintf("OutWriter outTable entry is nil, fd=%d", fd)
+		goavpipe.Log.Error(msg)
+		return -1, errors.Str(msg)
+	}
+
+	var taker Taker
+	if canTake {
+		taker, _ = outHandler.(Taker)
+	}
+
+	var n int
+	var err error
+	if taker != nil {
+		n = len(buf)
+		err = taker.Take(buf)
+	} else {
+		n, err = outHandler.Write(buf)
+	}
+
 	if traceIo {
-		log.Debug("OutWriter written", "n", n, "error", err)
+		goavpipe.Log.Debug("OutWriter written", "n", n, "error", err)
 	}
 	return n, err
 }
 
 //export AVPipeSeekOutput
 func AVPipeSeekOutput(handler C.int64_t, fd C.int64_t, offset C.int64_t, whence C.int) C.int64_t {
-	gMutex.Lock()
-	h := gHandlers[int64(handler)]
+	h := getCIOHandler(int64(handler))
 	if h == nil {
-		gMutex.Unlock()
 		return C.int64_t(-1)
 	}
-	gMutex.Unlock()
 	n, err := h.OutSeeker(fd, offset, whence)
 	if err != nil {
 		return C.int64_t(-1)
@@ -1145,13 +635,10 @@ func AVPipeSeekOutput(handler C.int64_t, fd C.int64_t, offset C.int64_t, whence 
 
 //export AVPipeSeekMuxOutput
 func AVPipeSeekMuxOutput(fd C.int64_t, offset C.int64_t, whence C.int) C.int64_t {
-	gMutex.Lock()
-	outHandler := gMuxHandlers[int64(fd)]
+	outHandler := goavpipe.Globals.GetMuxOutputHandler(int64(fd))
 	if outHandler == nil {
-		gMutex.Unlock()
 		return C.int64_t(-1)
 	}
-	gMutex.Unlock()
 
 	n, err := outHandler.Seek(int64(offset), int(whence))
 	if err != nil {
@@ -1163,39 +650,38 @@ func AVPipeSeekMuxOutput(fd C.int64_t, offset C.int64_t, whence C.int) C.int64_t
 func (h *ioHandler) OutSeeker(fd C.int64_t, offset C.int64_t, whence C.int) (int64, error) {
 	outHandler := h.getOutTable(int64(fd))
 	n, err := outHandler.Seek(int64(offset), int(whence))
-	log.Debug("OutSeeker", "err", err)
+	goavpipe.Log.Debug("OutSeeker", "err", err)
 	return n, err
 }
 
 //export AVPipeCloseOutput
 func AVPipeCloseOutput(handler C.int64_t, fd C.int64_t) C.int {
-	gMutex.Lock()
-	h := gHandlers[int64(handler)]
+	return C.int(AVPipeCloseOutputGo(int64(handler), int64(fd)))
+}
+
+func AVPipeCloseOutputGo(handler int64, fd int64) int {
+	h := getCIOHandler(handler)
 	if h == nil {
-		gMutex.Unlock()
-		return C.int(-1)
+		return -1
 	}
-	gMutex.Unlock()
-	defer h.putOutTable(int64(fd), nil)
-	err := h.OutCloser(fd)
+	defer h.putOutTable(fd, nil)
+	err := h.OutCloser(C.int64_t(fd))
 	if err != nil {
-		return C.int(-1)
+		return -1
 	}
 
-	log.Debug("AVPipeCloseOutput()", "fd", fd)
+	goavpipe.Log.Debug("AVPipeCloseOutput()", "fd", fd)
 
-	return C.int(0)
+	return 0
 }
 
 //export AVPipeCloseMuxOutput
 func AVPipeCloseMuxOutput(fd C.int64_t) C.int {
-	gMutex.Lock()
-	outHandler := gMuxHandlers[int64(fd)]
+	outHandler := goavpipe.Globals.GetMuxOutputHandler(int64(fd))
 	if outHandler == nil {
-		gMutex.Unlock()
 		return C.int(-1)
 	}
-	gMutex.Unlock()
+	defer goavpipe.DeleteMuxOutputHandler(int64(fd))
 
 	err := outHandler.Close()
 	if err != nil {
@@ -1208,11 +694,11 @@ func AVPipeCloseMuxOutput(fd C.int64_t) C.int {
 func (h *ioHandler) OutCloser(fd C.int64_t) error {
 	outHandler := h.getOutTable(int64(fd))
 	if outHandler == nil {
-		log.Warn("OutCloser() outHandler already closed", "fd", int64(fd))
+		goavpipe.Log.Warn("OutCloser() outHandler already closed", "fd", int64(fd))
 		return nil
 	}
 	err := outHandler.Close()
-	log.Debug("OutCloser()", "fd", int64(fd), "error", err)
+	goavpipe.Log.Debug("OutCloser()", "fd", int64(fd), "error", err)
 	return err
 }
 
@@ -1224,13 +710,10 @@ func AVPipeStatOutput(handler C.int64_t,
 	avp_stat C.avp_stat_t,
 	stat_args unsafe.Pointer) C.int {
 
-	gMutex.Lock()
-	h := gHandlers[int64(handler)]
+	h := getCIOHandler(int64(handler))
 	if h == nil {
-		gMutex.Unlock()
 		return C.int(-1)
 	}
-	gMutex.Unlock()
 
 	err := h.OutStat(fd, stream_index, buf_type, avp_stat, stat_args)
 	if err != nil {
@@ -1242,23 +725,20 @@ func AVPipeStatOutput(handler C.int64_t,
 
 //export AVPipeStatMuxOutput
 func AVPipeStatMuxOutput(fd C.int64_t, stream_index C.int, avp_stat C.avp_stat_t, stat_args unsafe.Pointer) C.int {
-	gMutex.Lock()
-	outHandler := gMuxHandlers[int64(fd)]
+	outHandler := goavpipe.Globals.GetMuxOutputHandler(int64(fd))
 	if outHandler == nil {
-		gMutex.Unlock()
 		return C.int(-1)
 	}
-	gMutex.Unlock()
 
 	streamIndex := (int)(stream_index)
 	var err error
 	switch avp_stat {
 	case C.out_stat_bytes_written:
 		statArgs := *(*uint64)(stat_args)
-		err = outHandler.Stat(streamIndex, MuxSegment, AV_OUT_STAT_BYTES_WRITTEN, &statArgs)
+		err = outHandler.Stat(streamIndex, goavpipe.MuxSegment, goavpipe.AV_OUT_STAT_BYTES_WRITTEN, &statArgs)
 	case C.out_stat_encoding_end_pts:
 		statArgs := *(*uint64)(stat_args)
-		err = outHandler.Stat(streamIndex, MuxSegment, AV_OUT_STAT_ENCODING_END_PTS, &statArgs)
+		err = outHandler.Stat(streamIndex, goavpipe.MuxSegment, goavpipe.AV_OUT_STAT_ENCODING_END_PTS, &statArgs)
 	}
 
 	if err != nil {
@@ -1290,23 +770,23 @@ func (h *ioHandler) OutStat(fd C.int64_t,
 	switch avp_stat {
 	case C.out_stat_bytes_written:
 		statArgs := *(*uint64)(stat_args)
-		err = outHandler.Stat(streamIndex, avType, AV_OUT_STAT_BYTES_WRITTEN, &statArgs)
+		err = outHandler.Stat(streamIndex, avType, goavpipe.AV_OUT_STAT_BYTES_WRITTEN, &statArgs)
 	case C.out_stat_encoding_end_pts:
 		statArgs := *(*uint64)(stat_args)
-		err = outHandler.Stat(streamIndex, avType, AV_OUT_STAT_ENCODING_END_PTS, &statArgs)
+		err = outHandler.Stat(streamIndex, avType, goavpipe.AV_OUT_STAT_ENCODING_END_PTS, &statArgs)
 	case C.out_stat_start_file:
 		statArgs := *(*int)(stat_args)
-		err = outHandler.Stat(streamIndex, avType, AV_OUT_STAT_START_FILE, &statArgs)
+		err = outHandler.Stat(streamIndex, avType, goavpipe.AV_OUT_STAT_START_FILE, &statArgs)
 	case C.out_stat_end_file:
 		statArgs := *(*int)(stat_args)
-		err = outHandler.Stat(streamIndex, avType, AV_OUT_STAT_END_FILE, &statArgs)
+		err = outHandler.Stat(streamIndex, avType, goavpipe.AV_OUT_STAT_END_FILE, &statArgs)
 	case C.out_stat_frame_written:
 		encodingFramesStats := (*C.encoding_frame_stats_t)(stat_args)
 		statArgs := &EncodingFrameStats{
 			TotalFramesWritten: int64(encodingFramesStats.total_frames_written),
 			FramesWritten:      int64(encodingFramesStats.frames_written),
 		}
-		err = outHandler.Stat(streamIndex, avType, AV_OUT_STAT_FRAME_WRITTEN, statArgs)
+		err = outHandler.Stat(streamIndex, avType, goavpipe.AV_OUT_STAT_FRAME_WRITTEN, statArgs)
 	}
 
 	return err
@@ -1315,7 +795,7 @@ func (h *ioHandler) OutStat(fd C.int64_t,
 //export GenerateAndRegisterHandle
 func GenerateAndRegisterHandle() C.int32_t {
 	handle := generateI32Handle()
-	AssociateGIDWithHandle(handle)
+	goavpipe.AssociateGIDWithHandle(handle)
 	return C.int32_t(handle)
 }
 
@@ -1324,42 +804,42 @@ func AssociateCThreadWithHandle(handle C.int32_t) C.int {
 	if int32(handle) == 0 {
 		return C.int(0)
 	}
-	AssociateGIDWithHandle(int32(handle))
+	goavpipe.AssociateGIDWithHandle(int32(handle))
 	return C.int(0)
 }
 
 //export CLog
 func CLog(msg *C.char) C.int {
 	m := C.GoString((*C.char)(unsafe.Pointer(msg)))
-	log.Info(m)
+	goavpipe.Log.Info(m)
 	return C.int(0)
 }
 
 //export CDebug
 func CDebug(msg *C.char) C.int {
 	m := C.GoString((*C.char)(unsafe.Pointer(msg)))
-	log.Debug(m)
+	goavpipe.Log.Debug(m)
 	return C.int(len(m))
 }
 
 //export CInfo
 func CInfo(msg *C.char) C.int {
 	m := C.GoString((*C.char)(unsafe.Pointer(msg)))
-	log.Info(m)
+	goavpipe.Log.Info(m)
 	return C.int(len(m))
 }
 
 //export CWarn
 func CWarn(msg *C.char) C.int {
 	m := C.GoString((*C.char)(unsafe.Pointer(msg)))
-	log.Warn(m)
+	goavpipe.Log.Warn(m)
 	return C.int(len(m))
 }
 
 //export CError
 func CError(msg *C.char) C.int {
 	m := C.GoString((*C.char)(unsafe.Pointer(msg)))
-	log.Error(m)
+	goavpipe.Log.Error(m)
 	return C.int(len(m))
 }
 
@@ -1372,7 +852,7 @@ func Version() string {
 	return C.GoString((*C.char)(unsafe.Pointer(C.avpipe_version())))
 }
 
-func getCParams(params *XcParams) (*C.xcparams_t, error) {
+func getCParams(params *goavpipe.XcParams) (*C.xcparams_t, error) {
 	extractImagesSize := len(params.ExtractImagesTs)
 
 	// same field order as avpipe_xc.h
@@ -1426,6 +906,7 @@ func getCParams(params *XcParams) (*C.xcparams_t, error) {
 		seekable:                  C.int(0),
 		max_cll:                   C.CString(params.MaxCLL),
 		master_display:            C.CString(params.MasterDisplay),
+		video_layout:              C.int(params.VideoLayout),
 		bitdepth:                  C.int(params.BitDepth),
 		mux_spec:                  C.CString(params.MuxingSpec),
 		sync_audio_to_stream_id:   C.int(params.SyncAudioToStreamId),
@@ -1434,6 +915,7 @@ func getCParams(params *XcParams) (*C.xcparams_t, error) {
 		connection_timeout:        C.int(params.ConnectionTimeout),
 		filter_descriptor:         C.CString(params.FilterDescriptor),
 		skip_decoding:             C.int(0),
+		use_preprocessed_input:    C.int(0),
 		extract_image_interval_ts: C.int64_t(params.ExtractImageIntervalTs),
 		extract_images_sz:         C.int(extractImagesSize),
 		video_time_base:           C.int(params.VideoTimeBase),
@@ -1442,6 +924,13 @@ func getCParams(params *XcParams) (*C.xcparams_t, error) {
 		profile:                   C.CString(params.Profile),
 		level:                     C.int(params.Level),
 		deinterlace:               C.dif_type(params.Deinterlace),
+		timecode:                  C.CString(params.Timecode),
+		vertical:                  C.vertical_type(params.Vertical),
+		fade:                      C.CString(params.Fade),
+		fade_start_frame:          C.int(params.FadeStartFrame),
+		fade_end_frame:            C.int(params.FadeEndFrame),
+		fade_level_1:              C.double(params.FadeLevel1),
+		fade_level_2:              C.double(params.FadeLevel2),
 
 		// All boolean params are handled below
 	}
@@ -1462,8 +951,16 @@ func getCParams(params *XcParams) (*C.xcparams_t, error) {
 		cparams.force_equal_fduration = C.int(1)
 	}
 
-	if params.CopyMpegts {
+	if params.PreserveDolbyVision {
+		cparams.preserve_dolby_vision = C.int(1)
+	}
+
+	if params.InputCfg.CopyMode == goavpipe.CopyModeRemuxed {
 		cparams.copy_mpegts = C.int(1)
+	}
+
+	if params.InputCfg.BypassLibavReader {
+		cparams.use_preprocessed_input = C.int(1)
 	}
 
 	if params.SkipDecoding {
@@ -1495,6 +992,16 @@ func getCParams(params *XcParams) (*C.xcparams_t, error) {
 		}
 	}
 
+	if len(params.VerticalData) > 0 {
+		rc := C.init_vertical_data((*C.xcparams_t)(unsafe.Pointer(cparams)),
+			(*C.uint8_t)(unsafe.Pointer(&params.VerticalData[0])),
+			C.int(len(params.VerticalData)))
+		if err := avpipeError(rc); err != nil {
+			return nil, fmt.Errorf("failed to copy vertical data (%d bytes): %w",
+				len(params.VerticalData), err)
+		}
+	}
+
 	return cparams, nil
 }
 
@@ -1503,52 +1010,70 @@ func generateI32Handle() int32 {
 	return rand.Int31()
 }
 
-// params: transcoding parameters
-func Xc(params *XcParams) error {
-	defer XCEnded()
+// Xc runs a one-shot transcode job and blocks until it completes. Use this for
+// short-lived or non-cancellable operations such as DASH/HLS segment serving
+// and image extraction. For long-running jobs that need mid-flight cancellation
+// (e.g. mezzanine creation), use XcInit + XcRun + XcCancel instead.
+func Xc(params *goavpipe.XcParams) error {
+	const op = "avpipe.Xc"
+	defer goavpipe.XCEnded()
+
 	if params == nil {
-		log.Error("Failed transcoding, params are not set.")
+		goavpipe.Log.Error(op, "reason", "nil params")
 		return EAV_PARAM
 	}
+	goavpipe.Log.Debug(op, "XcParams", params)
+	defer goavpipe.Globals.RemoveURLHandlers(params.Url)
 
-	// Convert XcParams to C.txparams_t
+	cleanupMvhevcRestore := func() {}
+	if isMvhevcLayout(params) {
+		cleanupMvhevcRestore = registerMvhevcRestoreURL(params.Url)
+	}
+	defer cleanupMvhevcRestore()
+
 	cparams, err := getCParams(params)
 	if err != nil {
-		log.Error("Transcoding failed", err, "url", params.Url)
+		goavpipe.Log.Error(op, err, "reason", "bad params", "XcParams", params)
+		return EAV_PARAM
 	}
 
 	rc := C.xc((*C.xcparams_t)(unsafe.Pointer(cparams)))
 
-	gMutex.Lock()
-	defer gMutex.Unlock()
-	delete(gURLInputOpeners, params.Url)
-	delete(gURLOutputOpeners, params.Url)
-
-	return avpipeError(rc)
+	err = avpipeError(rc)
+	if err != nil {
+		goavpipe.Log.Error(op, err, "reason", "xc failed", "rc", rc, "XcParams", params)
+	}
+	return err
 }
 
-func Mux(params *XcParams) error {
-	defer XCEnded()
+// Mux remuxes/packages an already-encoded stream into a container format.
+// Equivalent to Xc but forces XcType = XcMux and calls C.mux instead of C.xc.
+// Not cancellable.
+func Mux(params *goavpipe.XcParams) error {
+	const op = "avpipe.Mux"
+	defer goavpipe.XCEnded()
+
 	if params == nil {
-		log.Error("Failed muxing, params are not set")
+		goavpipe.Log.Error(op, "reason", "nil params")
 		return EAV_PARAM
 	}
+	params.XcType = goavpipe.XcMux
+	goavpipe.Log.Debug(op, "XcParams", params)
+	defer goavpipe.Globals.RemoveURLHandlers(params.Url)
 
-	params.XcType = XcMux
 	cparams, err := getCParams(params)
 	if err != nil {
-		log.Error("Muxing failed", err, "url", params.Url)
+		goavpipe.Log.Error(op, err, "reason", "bad params", "XcParams", params)
+		return EAV_PARAM
 	}
 
 	rc := C.mux((*C.xcparams_t)(unsafe.Pointer(cparams)))
 
-	gMutex.Lock()
-	defer gMutex.Unlock()
-	delete(gURLInputOpeners, params.Url)
-	delete(gURLOutputOpeners, params.Url)
-
-	return avpipeError(rc)
-
+	err = avpipeError(rc)
+	if err != nil {
+		goavpipe.Log.Error(op, "reason", "mux failed", "rc", rc, "XcParams", params)
+	}
+	return err
 }
 
 func ChannelLayoutName(nbChannels, channelLayout int) string {
@@ -1561,9 +1086,17 @@ func ChannelLayoutName(nbChannels, channelLayout int) string {
 	return ""
 }
 
-func ChannelLayout(name string) int {
-	channelLayout := C.av_get_channel_layout(C.CString(name))
-	return int(channelLayout)
+func ChannelLayout(name string) (mask int) {
+	var channelLayout C.AVChannelLayout
+	cName := C.CString(name)
+	defer C.free(unsafe.Pointer(cName))
+
+	if rc := C.av_channel_layout_from_string(&channelLayout, cName); rc != 0 {
+		goavpipe.Log.Error("ChannelLayout()", "reason", "av_channel_layout_from_string failed", "rc", rc, "name", name)
+	} else {
+		mask = int(C.get_channel_layout_mask(&channelLayout))
+	}
+	return
 }
 
 func GetPixelFormatName(pixFmt int) string {
@@ -1586,144 +1119,362 @@ func GetProfileName(codecId int, profile int) string {
 	return ""
 }
 
-func Probe(params *XcParams) (*ProbeInfo, error) {
-	var cprobe *C.xcprobe_t
-	var n_streams C.int
+// Probe runs the C libavformat probe and optionally enhances the output with mp4 specific codec info
+// PENDING(SS) Should move this function to avpipe_probe.go
+func Probe(params *goavpipe.XcParams) (*goavpipe.ProbeInfo, error) {
+	const op = "avpipe.Probe"
 
 	if params == nil {
-		log.Error("Failed probing, params are not set.")
+		goavpipe.Log.Error(op, "reason", "nil params")
 		return nil, EAV_PARAM
 	}
+	goavpipe.Log.Debug(op, "XcParams", params)
+	defer goavpipe.Globals.RemoveURLHandlers(params.Url)
 
 	cparams, err := getCParams(params)
 	if err != nil {
-		log.Error("Probing failed", err, "url", params.Url)
+		goavpipe.Log.Error(op, err, "reason", "bad params", "XcParams", params)
+		return nil, EAV_PARAM
 	}
 
-	rc := C.probe((*C.xcparams_t)(unsafe.Pointer(cparams)), (**C.xcprobe_t)(unsafe.Pointer(&cprobe)), (*C.int)(unsafe.Pointer(&n_streams)))
-	if int(rc) != 0 {
-		return nil, avpipeError(rc)
+	// Extract MP4 codec info before the C probe while the input opener is still accessible.
+	// After C.probe returns, InCloser has already fired and cleared the URL table entry, so
+	// extractCodecInfoForProbe would fail to re-open. The handle is kept open so that C.probe can
+	// open the same resource concurrently; it is closed via defer when Probe returns.
+	//
+	// This sequence is designed to work in the Content Fabric context:
+	// - we have one req context per URL and one part reader
+	// - we create two 'input contexts' pointing to the same reader
+	//
+	// In order to make this work we implement this sequence:
+	// - open the handler for the MP4 extraction first (don't close)
+	// - seek back to 0
+	// - invoke the C.Probe which opens its own handle then closes its own handle via callbacks
+	// - finally close the MP4 extraction handle
+	var codecInfos []*mp4e.CodecInfo
+	if params.Seekable {
+		inputOpener := goavpipe.GetInputOpener(params.Url)
+		if inputOpener == nil {
+			goavpipe.Log.Debug("MP4 parsing skipped: no input opener", "url", params.Url, "op", op)
+		} else if h, openErr := inputOpener.Open(goavpipe.Globals.GetNextFD(), params.Url); openErr != nil {
+			goavpipe.Log.Warn("input media open failed", "url", params.Url, "error", openErr, "op", op)
+		} else {
+			defer func() { _ = h.Close() }()
+			if codecInfos, err = extractCodecInfoForProbe(h); err != nil {
+				goavpipe.Log.Info("could not extract codec info (expected if input is not MP4)",
+					"url", params.Url, "reason", err.Error(), "op", op)
+			}
+		}
 	}
 
-	probeInfo := &ProbeInfo{}
-	probeInfo.StreamInfo = make([]StreamInfo, int(n_streams))
+	var cprobe *C.xcprobe_t
+	var nStreams C.int
+
+	rc := C.probe((*C.xcparams_t)(unsafe.Pointer(cparams)), (**C.xcprobe_t)(unsafe.Pointer(&cprobe)), (*C.int)(unsafe.Pointer(&nStreams)))
+	err = avpipeError(rc)
+	if err != nil {
+		goavpipe.Log.Error(op, "reason", "probe failed", "rc", rc, "XcParams", params)
+		return nil, err
+	}
+
+	probeInfo := &goavpipe.ProbeInfo{}
+	probeInfo.Streams = make([]goavpipe.StreamInfo, int(nStreams))
 	probeArray := (*[1 << 10]C.stream_info_t)(unsafe.Pointer(cprobe.stream_info))
-	for i := 0; i < int(n_streams); i++ {
-		probeInfo.StreamInfo[i].StreamIndex = int(probeArray[i].stream_index)
-		probeInfo.StreamInfo[i].StreamId = int32(probeArray[i].stream_id)
-		probeInfo.StreamInfo[i].CodecType = AVMediaTypeNames[AVMediaType(probeArray[i].codec_type)]
-		probeInfo.StreamInfo[i].CodecID = int(probeArray[i].codec_id)
-		probeInfo.StreamInfo[i].CodecName = C.GoString((*C.char)(unsafe.Pointer(&probeArray[i].codec_name)))
-		probeInfo.StreamInfo[i].DurationTs = int64(probeArray[i].duration_ts)
-		probeInfo.StreamInfo[i].TimeBase = big.NewRat(int64(probeArray[i].time_base.num), int64(probeArray[i].time_base.den))
-		probeInfo.StreamInfo[i].NBFrames = int64(probeArray[i].nb_frames)
-		probeInfo.StreamInfo[i].StartTime = int64(probeArray[i].start_time)
-		if int64(probeArray[i].avg_frame_rate.den) != 0 {
-			probeInfo.StreamInfo[i].AvgFrameRate = big.NewRat(int64(probeArray[i].avg_frame_rate.num), int64(probeArray[i].avg_frame_rate.den))
+	for i := 0; i < int(nStreams); i++ {
+		stream := &probeInfo.Streams[i]
+		cs := &probeArray[i]
+		stream.StreamIndex = int(cs.stream_index)
+		stream.StreamId = int(cs.stream_id)
+		stream.CodecType = goavpipe.AVMediaTypeNames[goavpipe.AVMediaType(cs.codec_type)]
+		stream.CodecID = int(cs.codec_id)
+		stream.CodecName = C.GoString((*C.char)(unsafe.Pointer(&cs.codec_name)))
+		stream.CodecTagString = C.GoString((*C.char)(unsafe.Pointer(&cs.codec_tag_string)))
+		stream.DurationTs = int64(cs.duration_ts)
+		stream.TimeBase = big.NewRat(int64(cs.time_base.num), int64(cs.time_base.den))
+		stream.NBFrames = int64(cs.nb_frames)
+		stream.StartTime = int64(cs.start_time)
+		if int64(cs.avg_frame_rate.den) != 0 {
+			stream.AvgFrameRate = big.NewRat(int64(cs.avg_frame_rate.num), int64(cs.avg_frame_rate.den))
 		} else {
-			probeInfo.StreamInfo[i].AvgFrameRate = big.NewRat(int64(probeArray[i].avg_frame_rate.num), int64(1))
+			stream.AvgFrameRate = big.NewRat(int64(cs.avg_frame_rate.num), int64(1))
 		}
-		if int64(probeArray[i].frame_rate.den) != 0 {
-			probeInfo.StreamInfo[i].FrameRate = big.NewRat(int64(probeArray[i].frame_rate.num), int64(probeArray[i].frame_rate.den))
+		if int64(cs.frame_rate.den) != 0 {
+			stream.FrameRate = big.NewRat(int64(cs.frame_rate.num), int64(cs.frame_rate.den))
 		} else {
-			probeInfo.StreamInfo[i].FrameRate = big.NewRat(int64(probeArray[i].frame_rate.num), int64(1))
+			stream.FrameRate = big.NewRat(int64(cs.frame_rate.num), int64(1))
 		}
-		probeInfo.StreamInfo[i].SampleRate = int(probeArray[i].sample_rate)
-		probeInfo.StreamInfo[i].Channels = int(probeArray[i].channels)
-		probeInfo.StreamInfo[i].ChannelLayout = int(probeArray[i].channel_layout)
-		probeInfo.StreamInfo[i].TicksPerFrame = int(probeArray[i].ticks_per_frame)
-		probeInfo.StreamInfo[i].BitRate = int64(probeArray[i].bit_rate)
-		if probeArray[i].has_b_frames > 0 {
-			probeInfo.StreamInfo[i].Has_B_Frames = true
+		stream.SampleRate = int(cs.sample_rate)
+		stream.Channels = int(cs.channels)
+		if stream.CodecType == "audio" {
+			stream.ChannelLayout = int(cs.channel_layout)
+			stream.ChannelLayoutName = ChannelLayoutName(stream.Channels, stream.ChannelLayout)
+		}
+		stream.BitRate = int64(cs.bit_rate)
+		stream.HasBFrames = cs.has_b_frames > 0
+		stream.Width = int(cs.width)
+		stream.Height = int(cs.height)
+		if stream.CodecType == "video" {
+			pixFmt := int(cs.pix_fmt)
+			stream.PixFmt = &pixFmt
+		}
+		if int64(cs.sample_aspect_ratio.den) != 0 {
+			stream.SampleAspectRatio = big.NewRat(int64(cs.sample_aspect_ratio.num), int64(cs.sample_aspect_ratio.den))
 		} else {
-			probeInfo.StreamInfo[i].Has_B_Frames = false
+			stream.SampleAspectRatio = big.NewRat(int64(cs.sample_aspect_ratio.num), int64(1))
 		}
-		probeInfo.StreamInfo[i].Width = int(probeArray[i].width)
-		probeInfo.StreamInfo[i].Height = int(probeArray[i].height)
-		probeInfo.StreamInfo[i].PixFmt = int(probeArray[i].pix_fmt)
-		if int64(probeArray[i].sample_aspect_ratio.den) != 0 {
-			probeInfo.StreamInfo[i].SampleAspectRatio = big.NewRat(int64(probeArray[i].sample_aspect_ratio.num), int64(probeArray[i].sample_aspect_ratio.den))
+		if int64(cs.display_aspect_ratio.den) != 0 {
+			stream.DisplayAspectRatio = big.NewRat(int64(cs.display_aspect_ratio.num), int64(cs.display_aspect_ratio.den))
 		} else {
-			probeInfo.StreamInfo[i].SampleAspectRatio = big.NewRat(int64(probeArray[i].sample_aspect_ratio.num), int64(1))
+			stream.DisplayAspectRatio = big.NewRat(int64(cs.display_aspect_ratio.num), int64(1))
 		}
-		if int64(probeArray[i].display_aspect_ratio.den) != 0 {
-			probeInfo.StreamInfo[i].DisplayAspectRatio = big.NewRat(int64(probeArray[i].display_aspect_ratio.num), int64(probeArray[i].display_aspect_ratio.den))
-		} else {
-			probeInfo.StreamInfo[i].DisplayAspectRatio = big.NewRat(int64(probeArray[i].display_aspect_ratio.num), int64(1))
+		stream.FieldOrder = goavpipe.AVFieldOrderNames[goavpipe.AVFieldOrder(cs.field_order)]
+		// AV_PROFILE_UNKNOWN = AV_LEVEL_UNKNOWN = -99; normalize to 0 so
+		// the omitempty tag on Profile/Level actually omits unknown values.
+		// Use the raw value for GetProfileName so FFmpeg sees the real sentinel.
+		rawProfile := int(cs.profile)
+		if rawProfile != -99 {
+			stream.Profile = rawProfile
 		}
-		probeInfo.StreamInfo[i].FieldOrder = AVFieldOrderNames[AVFieldOrder(probeArray[i].field_order)]
-		probeInfo.StreamInfo[i].Profile = int(probeArray[i].profile)
-		probeInfo.StreamInfo[i].Level = int(probeArray[i].level)
+		if l := int(cs.level); l != -99 {
+			stream.Level = l
+		}
+		stream.ProfileName = GetProfileName(stream.CodecID, rawProfile)
 
-		rot := float64(probeArray[i].side_data.display_matrix.rotation)
+		stream.ColorPrimaries = C.GoString((*C.char)(unsafe.Pointer(&cs.color_primaries)))
+		stream.ColorTransfer = C.GoString((*C.char)(unsafe.Pointer(&cs.color_transfer)))
+		stream.ColorSpace = C.GoString((*C.char)(unsafe.Pointer(&cs.color_space)))
+		stream.ColorRange = C.GoString((*C.char)(unsafe.Pointer(&cs.color_range)))
+		stream.MasteringDisplay = C.GoString((*C.char)(unsafe.Pointer(&cs.mastering_display)))
+		stream.MaxCLL = C.GoString((*C.char)(unsafe.Pointer(&cs.max_cll)))
+		stream.Stereo3DType = C.GoString((*C.char)(unsafe.Pointer(&cs.stereo3d_type)))
+
+		rot := float64(cs.side_data.display_matrix.rotation)
 		if rot != 0.0 {
-			probeInfo.StreamInfo[i].SideData = make([]interface{}, 1)
-			displayMatrix := SideDataDisplayMatrix{
+			stream.SideData = make([]interface{}, 1)
+			stream.SideData[0] = goavpipe.SideDataDisplayMatrix{
 				Type:       "Display Matrix",
 				Rotation:   rot,
-				RotationCw: float64(probeArray[i].side_data.display_matrix.rotation_cw),
+				RotationCw: float64(cs.side_data.display_matrix.rotation_cw),
 			}
-			probeInfo.StreamInfo[i].SideData[0] = displayMatrix
-		} else {
-			probeInfo.StreamInfo[i].SideData = make([]interface{}, 0)
+		}
+
+		if cs.dovi.present != 0 {
+			dovi := &avdesc.DOVIInfo{
+				VersionMajor:            int(cs.dovi.dv_version_major),
+				VersionMinor:            int(cs.dovi.dv_version_minor),
+				Profile:                 int(cs.dovi.dv_profile),
+				Level:                   int(cs.dovi.dv_level),
+				RPUPresent:              cs.dovi.rpu_present_flag != 0,
+				ELPresent:               cs.dovi.el_present_flag != 0,
+				BLPresent:               cs.dovi.bl_present_flag != 0,
+				BLSignalCompatibilityID: int(cs.dovi.dv_bl_signal_compatibility_id),
+			}
+			dovi.FourCC = avdesc.DOVIFourCC(stream.CodecTagString)
+			stream.DOVI = dovi
+		}
+
+		if cs.ec3_joc != 0 {
+			stream.DolbyAtmos = true
 		}
 
 		// Convert AVDictionary data to Tags of type map[string]string using the built in av_dict_get() iterator
-		dict := (*C.AVDictionary)(unsafe.Pointer((probeArray[i].tags)))
-		var tag *C.AVDictionaryEntry = (*C.AVDictionaryEntry)(unsafe.Pointer(C.av_dict_get(dict, (*C.char)(C.CString("")), (*C.AVDictionaryEntry)(nil), C.AV_DICT_IGNORE_SUFFIX)))
+		dict := (*C.AVDictionary)(unsafe.Pointer(cs.tags))
+		emptyKey := C.CString("")
+		var tag *C.AVDictionaryEntry = (*C.AVDictionaryEntry)(unsafe.Pointer(C.av_dict_get(dict, emptyKey, (*C.AVDictionaryEntry)(nil), C.AV_DICT_IGNORE_SUFFIX)))
 		if tag != nil {
-			probeInfo.StreamInfo[i].Tags = map[string]string{}
+			stream.Tags = map[string]string{}
 			for tag != nil {
-				probeInfo.StreamInfo[i].Tags[C.GoString((*C.char)(unsafe.Pointer(tag.key)))] = C.GoString((*C.char)(unsafe.Pointer(tag.value)))
-				tag = (*C.AVDictionaryEntry)(unsafe.Pointer(C.av_dict_get(dict, (*C.char)(C.CString("")), tag, C.AV_DICT_IGNORE_SUFFIX)))
+				stream.Tags[C.GoString((*C.char)(unsafe.Pointer(tag.key)))] = C.GoString((*C.char)(unsafe.Pointer(tag.value)))
+				tag = (*C.AVDictionaryEntry)(unsafe.Pointer(C.av_dict_get(dict, emptyKey, tag, C.AV_DICT_IGNORE_SUFFIX)))
 			}
 		}
+		C.free(unsafe.Pointer(emptyKey))
 		C.av_dict_free(&dict)
 	}
 
-	probeInfo.ContainerInfo.FormatName = C.GoString((*C.char)(unsafe.Pointer(cprobe.container_info.format_name)))
-	probeInfo.ContainerInfo.Duration = float64(cprobe.container_info.duration)
+	probeInfo.Format.FormatName = C.GoString((*C.char)(unsafe.Pointer(cprobe.container_info.format_name)))
+	probeInfo.Format.Duration = float64(cprobe.container_info.duration)
+
+	if codecInfos != nil {
+		enhanceStreamInfo(probeInfo.Streams, codecInfos)
+	}
 
 	C.free(unsafe.Pointer(cprobe.stream_info))
 	C.free(unsafe.Pointer(cprobe))
 
-	gMutex.Lock()
-	defer gMutex.Unlock()
-	delete(gURLInputOpeners, params.Url)
-	delete(gURLOutputOpeners, params.Url)
-
 	return probeInfo, nil
 }
 
-// Returns a handle and error (if there is any error)
-// In case of error the handle would be zero
-func XcInit(params *XcParams) (int32, error) {
-	// Convert XcParams to C.txparams_t
+// cancelableInputOpener is implemented by BypassLibavReader input openers that run their own Go network read loop
+// (mpegts/custom). XcCancel uses it to unblock a read that is parked on a dead source: C.xc_cancel only cancels the
+// ffmpeg/libav side, so without this the Go read loop stays blocked until it times out on its own and live/stop hangs.
+type cancelableInputOpener interface {
+	CancelInput()
+}
+
+// cancelableInputOpeners maps a live transcode handle to its cancelable input opener. Registered by XcInit when
+// BypassLibavReader is set, removed when XcRun completes.
+var cancelableInputOpeners sync.Map // int32 handle -> cancelableInputOpener
+
+// xcJob represents the state of an avpipe 'xc' job
+// PENDING(SS) - currently only URL mapping but planning to consolidate all job state here
+type xcJob struct {
+	url string
+}
+
+var (
+	xcJobsMu sync.Mutex
+	xcJobs   = make(map[int32]*xcJob)
+)
+
+// putXCJob stores the xcJob in the global map keyed by handle. It is used to track jobs for cancellation and cleanup.
+func putXCJob(handle int32, job *xcJob) {
+	xcJobsMu.Lock()
+	xcJobs[handle] = job
+	xcJobsMu.Unlock()
+}
+
+// takeXCJob removes the xcJob from the global map keyed by handle and returns it. It is used to retrieve jobs for
+// cancellation and cleanup.
+func takeXCJob(handle int32) (*xcJob, bool) {
+	xcJobsMu.Lock()
+	defer xcJobsMu.Unlock()
+
+	job, ok := xcJobs[handle]
+	if ok {
+		delete(xcJobs, handle)
+	}
+	return job, ok
+}
+
+// XcInit initializes a transcode job and returns a handle for it. The actual
+// transcoding is started by XcRun(handle) and can be interrupted at any time
+// via XcCancel(handle). Every successful XcInit must be paired with XcFini
+// after XcRun returns. Use this two-phase form instead of Xc when the caller
+// needs cancellation support (e.g. mezzanine creation driven by an LRO).
+// Also sets up the MPEGTS sequential opener for live-stream inputs when
+// params.UseCustomLiveReader is set.
+func XcInit(params *goavpipe.XcParams) (handle int32, retErr error) {
+	const op = "avpipe.XcInit"
+
 	if params == nil {
-		log.Error("Failed transcoding, params are not set.")
+		goavpipe.Log.Error(op, "reason", "nil params")
 		return -1, EAV_PARAM
+	}
+	goavpipe.Log.Debug(op, "XcParams", params)
+
+	job := &xcJob{url: params.Url}
+	defer func() {
+		if retErr != nil {
+			// Failures don't return a handle so XcFini cannot be called
+			goavpipe.Globals.RemoveURLHandlers(job.url)
+		}
+	}()
+
+	seqOpenerF := func(inFd int64) mpegts.SequentialOpener {
+		// We use 99 as the streamID for mpegts output to avoid collisions with other streams
+		// In theory, this writer should not need a streamID, as the mpegts segments are actually a
+		// mux of all streams, but the Writing interface requires a streamID.
+		return NewAVPipeSequentialOutWriter(inFd, 99, goavpipe.MpegtsSegment)
+	}
+
+	if params.InputCfg.CopyMode == goavpipe.CopyModeRawOnly {
+		goavpipe.Log.Info("initializing bypass processor", "copy_mode", params.InputCfg.CopyMode)
+		// Bypass ffmpeg completely and copy the stream verbatim to parts
+		bypassProcessor, err := mpegts.NewBypassProcessor(params, seqOpenerF)
+		if err != nil {
+			return -1, errors.E("XcInit", errors.K.Invalid.Default(), err)
+		}
+		handle = goavpipe.Globals.InitBypassProcessor(bypassProcessor)
+		putXCJob(handle, job)
+		return handle, nil
+	}
+
+	var bypassOpener goavpipe.InputOpener
+	if params.InputCfg.BypassLibavReader {
+		var err error
+		bypassOpener, err = mpegts.NewAutoInputOpener(params, seqOpenerF)
+		if err != nil {
+			goavpipe.Log.Error(op, err, "XcParams", params)
+			return -1, EAV_PARAM
+		}
+		goavpipe.InitUrlIOHandlerIfNotPresent(params.Url, bypassOpener, nil)
 	}
 
 	cparams, err := getCParams(params)
 	if err != nil {
-		log.Error("Initializing transcoder failed", err, "url", params.Url)
+		goavpipe.Log.Error(op, err, "reason", "bad params", "XcParams", params)
+		return -1, EAV_PARAM
 	}
 
-	var handle C.int32_t
-	rc := C.xc_init((*C.xcparams_t)(unsafe.Pointer(cparams)), (*C.int32_t)(unsafe.Pointer(&handle)))
-	if rc != C.eav_success {
-		return -1, avpipeError(rc)
+	var cHandle C.int32_t
+	rc := C.xc_init((*C.xcparams_t)(unsafe.Pointer(cparams)), (*C.int32_t)(unsafe.Pointer(&cHandle)))
+	err = avpipeError(rc)
+	if err != nil {
+		goavpipe.Log.Error(op, "reason", "xc_init failed", "rc", rc, "XcParams", params)
+		return -1, err
+	}
+	handle = int32(cHandle)
+
+	// Track the input opener by handle so XcCancel can unblock its Go read loop (see cancelableInputOpener).
+	if c, ok := bypassOpener.(cancelableInputOpener); ok {
+		cancelableInputOpeners.Store(handle, c)
 	}
 
-	return int32(handle), nil
+	if isMvhevcLayout(params) {
+		registerMvhevcRestoreHandle(handle, params.Url)
+	}
+
+	putXCJob(handle, job)
+	return handle, nil
 }
 
-func XcRun(handle int32) error {
-	defer XCEnded()
+// XcRun starts the transcode job previously initialized by XcInit and blocks
+// until it completes or is cancelled via XcCancel.
+func XcRun(handle int32) (runErr error) {
+	defer goavpipe.XCEnded()
+
+	if handle < -1 {
+		processor, ok := goavpipe.Globals.GetBypassProcessor(handle)
+		if !ok {
+			return EAV_BAD_HANDLE
+		}
+		defer func() {
+			goavpipe.Globals.DeleteBypassProcessor(handle)
+		}()
+		fd, _ := AVPipeOpenInputGo(processor.XcParams().Url)
+		if fd < 0 {
+			return EAV_OPEN_INPUT
+		}
+		defer func() {
+			if rc := AVPipeCloseInput(C.int64_t(fd)); rc != 0 {
+				closeErr := errors.E(
+					"XcRun",
+					errors.K.IO.Default(),
+					"reason", "failed to close raw-only input",
+					"fd", fd,
+				)
+				runErr = errors.Append(runErr, closeErr)
+			}
+		}()
+		err := processor.Start(fd)
+		if err != nil {
+			return err
+		}
+		processor.Wait()
+		_, err = processor.Status()
+		if errors.Is(err, context.Canceled) {
+			return EAV_CANCELLED
+		}
+		return err
+	}
+
+	defer unregisterMvhevcRestoreHandle(handle)
 	if handle < 0 {
 		return EAV_BAD_HANDLE
 	}
-	AssociateGIDWithHandle(handle)
+	defer cancelableInputOpeners.Delete(handle)
+	goavpipe.AssociateGIDWithHandle(handle)
 	rc := C.xc_run(C.int32_t(handle))
 	if rc == 0 {
 		return nil
@@ -1732,33 +1483,44 @@ func XcRun(handle int32) error {
 	return avpipeError(rc)
 }
 
+// XcFini releases job state for jobs created with XcInit. Every successful XcInit must be paired with XcFini, including
+// when XcRun fails or is cancelled with XcCancel.
+func XcFini(handle int32) error {
+	job, ok := takeXCJob(handle)
+	if !ok {
+		return EAV_BAD_HANDLE
+	}
+
+	goavpipe.Globals.RemoveURLHandlers(job.url)
+	return nil
+}
+
+// XcCancel interrupts a transcode job started with XcInit + XcRun.
+// Safe to call from a different goroutine while XcRun is blocking.
 func XcCancel(handle int32) error {
+	if handle < -1 {
+		processor, ok := goavpipe.Globals.GetBypassProcessor(handle)
+		if !ok {
+			return EAV_BAD_HANDLE
+		}
+		processor.Cancel()
+		return nil
+	}
+
+	defer unregisterMvhevcRestoreHandle(handle)
+
+	// Cancel the ffmpeg/libav side first (sets the cancel flag), then unblock the Go input read loop if this job uses a
+	// BypassLibavReader opener. Without the latter, a read parked on a dead source (custom/mpegts input opener) keeps
+	// xc_run blocked until the source read times out on its own, so XcCancel (and live/stop) would hang.
 	rc := C.xc_cancel(C.int32_t(handle))
+	if v, ok := cancelableInputOpeners.Load(handle); ok {
+		v.(cancelableInputOpener).CancelInput()
+	}
 	if rc == 0 {
 		return nil
 	}
 
 	return EAV_CANCEL_FAILED
-}
-
-// StreamInfoAsArray builds an array where each stream is at its corresponsing index
-// by filling in non-existing index positions with codec type "unknown"
-func StreamInfoAsArray(s []StreamInfo) []StreamInfo {
-	maxIdx := 0
-	for _, v := range s {
-		if v.StreamIndex > maxIdx {
-			maxIdx = v.StreamIndex
-		}
-	}
-	a := make([]StreamInfo, maxIdx+1)
-	for i := range a {
-		a[i].StreamIndex = i
-		a[i].CodecType = AVMediaTypeNames[AVMediaType(AVMEDIA_TYPE_UNKNOWN)]
-	}
-	for _, v := range s {
-		a[v.StreamIndex] = v
-	}
-	return a
 }
 
 func H264GuessLevel(profile int, bitrate int64, framerate, width, height int) int {

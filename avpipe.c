@@ -13,6 +13,7 @@
 #include <pthread.h>
 #include <libavutil/log.h>
 #include <libavutil/pixdesc.h>
+#include <libavutil/parseutils.h>
 #include <errno.h>
 #include <pthread.h>
 #include <srt.h>
@@ -59,8 +60,8 @@ int     AVPipeCloseInput(int64_t);
 int     AVPipeStatInput(int64_t, int, avp_stat_t, void *);
 int64_t AVPipeOpenOutput(int64_t, int, int, int64_t, int);
 int64_t AVPipeOpenMuxOutput(char *, int);
-int     AVPipeWriteOutput(int64_t, int64_t, uint8_t *, int);
-int     AVPipeWriteMuxOutput(int64_t, uint8_t *, int);
+int     AVPipeWriteOutput(int64_t, int64_t, const uint8_t *, int);
+int     AVPipeWriteMuxOutput(int64_t, const uint8_t *, int);
 int64_t AVPipeSeekOutput(int64_t, int64_t, int64_t, int);
 int64_t AVPipeSeekMuxOutput(int64_t, int64_t, int);
 int     AVPipeCloseOutput(int64_t, int64_t);
@@ -212,13 +213,17 @@ in_read_packet(
     if (xcparams && xcparams->debug_frame_level)
         elv_dbg("IN READ read=%d pos=%"PRId64" total=%"PRId64", checksum=%u",
             r, inctx->read_pos, inctx->read_bytes, r > 0 ? checksum(buf, r) : 0);
-    return r > 0 ? r : -1;
+    /*
+     * AVIO read callback contract requires return >0 (bytes read), or a
+     * negative AVERROR code (0 is invalid).
+     */
+    return r != 0 ? r : AVERROR_EOF;
 }
 
 static int
 in_write_packet(
     void *opaque,
-    uint8_t *buf,
+    const uint8_t *buf,
     int buf_size)
 {
     elv_err("IN WRITE");
@@ -307,6 +312,10 @@ in_stat(
     return rc;
 }
 
+/*
+ * Open UDP URL (IPv4 unicast or multicast).
+ * For multicast, accept query parameter "localaddr"
+ */
 static int
 udp_in_opener(
     const char *url,
@@ -339,8 +348,28 @@ udp_in_opener(
     if ((rc = bind(sockfd, sa, salen)) < 0) {
         /* Can not bind, fail and exit */
         elv_err("Failed to bind UDP socket, rc=%d, url=%s, errno=%d", rc, url, errno);
+        close(sockfd);
+        free(sa);
+        free_parsed_url(&url_parser);
         return -1;
     }
+
+    char localaddr[64] = {0};
+    const char *multicast_iface = NULL;
+    if (url_parser.query_string &&
+        av_find_info_tag(localaddr, sizeof(localaddr), "localaddr", url_parser.query_string)) {
+        multicast_iface = localaddr;
+    }
+    if (udp_join_multicast(sockfd, sa, salen, multicast_iface) < 0) {
+        elv_err("Failed to join UDP multicast group, url=%s, localaddr=%s, errno=%d",
+            url, multicast_iface ? multicast_iface : "", errno);
+        close(sockfd);
+        free(sa);
+        free_parsed_url(&url_parser);
+        return -1;
+    }
+    free(sa);
+    free_parsed_url(&url_parser);
 
     struct timeval tv;
     tv.tv_sec = UDP_PIPE_TIMEOUT;
@@ -355,11 +384,17 @@ udp_in_opener(
         elv_warn("Failed to set UDP socket buf size to=%"PRId64", url=%s, errno=%d", bufsz, url, errno);
     }
 
+    socklen_t optlen = sizeof(bufsz);
+    if (getsockopt(sockfd, SOL_SOCKET, SO_RCVBUF, &bufsz, &optlen) < 0) {
+        elv_warn("Failed to get UDP socket buf size to=%"PRId64", url=%s, errno=%d", bufsz, url, errno);
+    } else if (bufsz < UDP_PIPE_BUFSIZE) {
+        elv_warn("Failed to set desired UDP socket buf size expect=%"PRId64" actual=%"PRId64, UDP_PIPE_BUFSIZE, bufsz);
+    }
+
     if (set_sock_nonblocking(sockfd) < 0) {
         elv_err("Failed to make UDP socket nonblocking, errno=%d", errno);
         return -1;
     }
-
 
     elv_channel_init(&inctx->udp_channel, MAX_UDP_CHANNEL, NULL);
     inctx->opaque = (int *) calloc(1, sizeof(int)+sizeof(int64_t));
@@ -398,7 +433,6 @@ udp_in_closer(
     int fd = *((int64_t *)inctx->opaque);
     int sockfd = *((int *)((int64_t *)inctx->opaque+1));
     elv_dbg("IN CLOSE UDP fd=%d, sockfd=%d, url=%s\n", fd, sockfd, inctx->url ? inctx->url : "bogus.mp4");
-    free(inctx->opaque);
     close(sockfd);
     return 0;
 }
@@ -485,7 +519,7 @@ read_channel_again:
 static int
 udp_in_write_packet(
     void *opaque,
-    uint8_t *buf,
+    const uint8_t *buf,
     int buf_size)
 {
     ioctx_t *inctx = (ioctx_t *)opaque;
@@ -631,7 +665,7 @@ out_read_packet(
 static int
 out_write_packet(
     void *opaque,
-    uint8_t *buf,
+    const uint8_t *buf,
     int buf_size)
 {
     ioctx_t *outctx = (ioctx_t *)opaque;
@@ -645,7 +679,7 @@ out_write_packet(
         outctx->write_pos += bwritten;
     }
 
-    if ((outctx->type == avpipe_video_fmp4_segment && 
+    if ((outctx->type == avpipe_video_fmp4_segment &&
         outctx->written_bytes - outctx->write_reported > VIDEO_BYTES_WRITE_REPORT) ||
         (outctx->type == avpipe_audio_fmp4_segment &&
         outctx->written_bytes - outctx->write_reported > AUDIO_BYTES_WRITE_REPORT)) {
@@ -764,6 +798,7 @@ set_loggers()
     elv_set_log_func(elv_log_debug, CDebug);
     elv_set_log_func(elv_log_warning, CWarn);
     elv_set_log_func(elv_log_error, CError);
+    connect_ffmpeg_log();
 }
 
 static void
@@ -861,13 +896,13 @@ xc_table_cancel(
             if (xctx->index == i) {
                 xctx->decoder_ctx.cancelled = 1;
                 xctx->encoder_ctx.cancelled = 1;
-                /* If there is a UDP thread running wait for it to be finished */
+
                 if ( xctx->inctx && xctx->inctx->utid ) {
                     xctx->inctx->closed = 1;
-                    /* Close and purge the channel */
-                    elv_channel_close(xctx->inctx->udp_channel, 1);
-                    pthread_join(xctx->inctx->utid, NULL);
-                } 
+                    /* Close and purge the channel to unblock the UDP thread */
+                    if (xctx->inctx->udp_channel)
+                        elv_channel_close(xctx->inctx->udp_channel, 1);
+                }
             } else {
                 elv_err("xc_table_cancel index=%d doesn't match with handle=%d at %d",
                     xc_table[i]->xctx->index, handle, i);
@@ -886,6 +921,7 @@ xc_table_cancel(
 static int
 set_handlers(
     char *url,
+    int32_t use_custom_input_handler,
     avpipe_io_handler_t **p_in_handlers,
     avpipe_io_handler_t **p_out_handlers)
 {
@@ -900,7 +936,7 @@ set_handlers(
      * If input url is a UDP set/overwrite the default UDP input handlers.
      * No need for the client code to set/specify the input handlers when the input is UDP.
      */
-    if (!strcmp(url_parser.protocol, "udp") && p_in_handlers) {
+    if (!use_custom_input_handler && !strcmp(url_parser.protocol, "udp") && p_in_handlers) {
         avpipe_io_handler_t *in_handlers = (avpipe_io_handler_t *)calloc(1, sizeof(avpipe_io_handler_t));
         in_handlers->avpipe_opener = udp_in_opener;
         in_handlers->avpipe_closer = udp_in_closer;
@@ -909,6 +945,7 @@ set_handlers(
         in_handlers->avpipe_seeker = udp_in_seek;
         in_handlers->avpipe_stater = udp_in_stat;
         *p_in_handlers = in_handlers;
+
     } else if (p_in_handlers) {
         avpipe_io_handler_t *in_handlers = (avpipe_io_handler_t *)calloc(1, sizeof(avpipe_io_handler_t));
         in_handlers->avpipe_opener = in_opener;
@@ -958,7 +995,7 @@ xc_init(
     init_tx_module();
 
     connect_ffmpeg_log();
-    if ((rc = set_handlers(params->url, &in_handlers, &out_handlers)) != eav_success) {
+    if ((rc = set_handlers(params->url, params->use_preprocessed_input, &in_handlers, &out_handlers)) != eav_success) {
         goto end_tx_init;
     }
 
@@ -1014,7 +1051,7 @@ end_tx:
 int
 xc_cancel(
     int32_t handle)
-{ 
+{
     return xc_table_cancel(handle);
 }
 
@@ -1041,7 +1078,7 @@ xc(
     connect_ffmpeg_log();
     //elv_set_log_level(elv_log_debug);
 
-    set_handlers(params->url, &in_handlers, &out_handlers);
+    set_handlers(params->url, params->use_preprocessed_input, &in_handlers, &out_handlers);
 
     if ((rc = avpipe_init(&xctx, in_handlers, out_handlers, params)) != eav_success) {
         goto end_tx;
@@ -1116,13 +1153,13 @@ read_next_input:
                 return AVERROR_EOF;
             filepath = in_mux_ctx->video.parts[in_mux_ctx->video.index];
             in_mux_ctx->video.index++;
-        } else if (index <= in_mux_ctx->last_audio_index) {
+        } else if (index <= in_mux_ctx->audio_count) {
             if (in_mux_ctx->audios[index-1].index >= in_mux_ctx->audios[index-1].n_parts)
                 return AVERROR_EOF;
             filepath = in_mux_ctx->audios[index-1].parts[in_mux_ctx->audios[index-1].index];
             in_mux_ctx->audios[index-1].index++;
-        } else if (index <= in_mux_ctx->last_audio_index+in_mux_ctx->last_caption_index) {
-            i = index - in_mux_ctx->last_audio_index - 1;
+        } else if (index <= in_mux_ctx->audio_count+in_mux_ctx->caption_count) {
+            i = index - in_mux_ctx->audio_count - 1;
             if (in_mux_ctx->captions[i].index >= in_mux_ctx->captions[i].n_parts)
                 return AVERROR_EOF;
             filepath = in_mux_ctx->captions[i].parts[in_mux_ctx->captions[i].index];
@@ -1140,15 +1177,20 @@ read_next_input:
         fd = *((int64_t *)(c->opaque));
 
 #if 0
-        /* PENDING(RM) complete this for multiple mez inputs */ 
+        /* PENDING(RM) complete this for multiple mez inputs */
         if (new_video)
             in_mux_ctx->video.header_size = read_header(fd, in_mux_ctx->mux_type);
         else if (new_audio)
             in_mux_ctx->audios[index-1].header_size = read_header(fd, in_mux_ctx->mux_type);
 #endif
 
-        if (debug_frame_level)
+        if (debug_frame_level) {
             elv_dbg("IN MUX READ opened new file filepath=%s, fd=%d", filepath, fd);
+            if (strstr(filepath, "init")) {
+                // The read in which this log happens only contains data from new continuity
+                elv_dbg("IN MUX READ INIT open filepath=%s, pos=%d", filepath, c->read_bytes);
+            }
+        }
     }
 
     fd = *((int64_t *)(c->opaque));
@@ -1238,7 +1280,7 @@ out_mux_closer(
 static int
 out_mux_write_packet(
     void *opaque,
-    uint8_t *buf,
+    const uint8_t *buf,
     int buf_size)
 {
     ioctx_t *outctx = (ioctx_t *)opaque;
@@ -1398,7 +1440,7 @@ probe(
     if (!params || !params->url || params->url[0] == '\0' )
         return eav_param;
 
-    rc = set_handlers(params->url, &in_handlers, NULL);
+    rc = set_handlers(params->url, params->use_preprocessed_input, &in_handlers, NULL);
     if (rc != eav_success)
         goto end_probe;
 
