@@ -2,6 +2,8 @@ github.com/Comcast/gots v0.0.0-20200213175321-9799558ed3e2 h1:zMuszK7xNca8fNxQ4n
 github.com/Comcast/gots v0.0.0-20200213175321-9799558ed3e2/go.mod h1:Mk3QwecRoaG2Qh+uiS8t8IOd7QlKl7Xp1ujNRn/zJxw=
 github.com/Comcast/gots/v2 v2.2.1 h1:LU/SRg7p2KQqVkNqInV7I4MOQKAqvWQP/PSSLtygP2s=
 github.com/Comcast/gots/v2 v2.2.1/go.mod h1:firJ11on3eUiGHAhbY5cZNqG0OqhQ1+nSZHfsEEzVVU=
+github.com/Eyevinn/mp4ff v0.56.0 h1:K81hqadHOLqQP+Rr610dwy7Cn3tLLEejCljzIfcNo+k=
+github.com/Eyevinn/mp4ff v0.56.0/go.mod h1:AhC+bOI7GSZmzuN4zFY9U76qMedbHI+8BdQXWrC9+8U=
 github.com/HdrHistogram/hdrhistogram-go v1.2.0 h1:XMJkDWuz6bM9Fzy7zORuVFKH7ZJY41G2q8KWhVGkNiY=
 github.com/HdrHistogram/hdrhistogram-go v1.2.0/go.mod h1:CiIeGiHSd06zjX+FypuEJ5EQ07KKtxZ+8J6hszwVQig=
 github.com/PaesslerAG/gval v1.0.0/go.mod h1:y/nm5yEyTeX6av0OfKJNp9rBNj2XrGhAf5+v24IBN1I=
@@ -46,8 +48,6 @@ github.com/eluv-io/log-go v1.0.10 h1:/fjLjiBXwy5ocJXuzneRVzvUalIeTPSH6jAdFiaWN+Y
 github.com/eluv-io/log-go v1.0.10/go.mod h1:TvBaLIOvcrBpmgMaewgyZQSVY056WIfdCIliuGou+iw=
 github.com/eluv-io/mapstructure v1.5.1 h1:yxilnJ5GN6K2Kn1tEEuWJcVmONEMNso1uNJkJYIWQbQ=
 github.com/eluv-io/mapstructure v1.5.1/go.mod h1:HGl3bHmRju3DIQnCWotnLvMLhiTrYCLR9fOKtK8W5uQ=
-github.com/eluv-io/mp4ff v0.47.1-0.20260603013458-2403cac8f06c h1:MuqTJa23RhKhk8GFFfjU6vR5zD7j0Fe9x6A9n6WDogg=
-github.com/eluv-io/mp4ff v0.47.1-0.20260603013458-2403cac8f06c/go.mod h1:hJNUUqOBryLAzUW9wpCJyw2HaI+TCd2rUPhafoS5lgg=
 github.com/eluv-io/stack v1.8.2 h1:yocCvAcPy9vW5iBdNnig5Tem8LgOTT8JrOLvDcacnEQ=
 github.com/eluv-io/stack v1.8.2/go.mod h1:MIN/UfmiJlJUFpglnJCj+7DR5sDBUuvQRTENHm1F310=
 github.com/eluv-io/utc-go v1.0.1 h1:bFE8CFQT+ln8A8QK5SDBdUKtUfeOFnPF50c+Npz3pv0=

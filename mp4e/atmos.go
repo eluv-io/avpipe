@@ -1,6 +1,7 @@
 package mp4e
 
 import (
+	"bytes"
 	"fmt"
 	"strings"
 
@@ -44,7 +45,10 @@ type AtmosEC3Info struct {
 	ChanMap         uint16
 	JOC             bool
 	ComplexityIndex int
-	ReservedBytes   int
+	// ReservedBytes holds the dec3 trailing bytes that mp4ff did not consume.
+	// When JOC is signaled, the two extension bytes are decoded into
+	// JOCComplexity and are therefore not included here.
+	ReservedBytes []byte
 }
 
 type AtmosEC3Substream struct {
@@ -199,7 +203,7 @@ func (a *AtmosInfo) validateEC3(ase *mp4.AudioSampleEntryBox) {
 		NumSubstreams: len(d.EC3Subs),
 		NrChannels:    nrChannels,
 		ChanMap:       chanMap,
-		ReservedBytes: len(d.Reserved),
+		ReservedBytes: bytes.Clone(d.Reserved),
 	}
 	for _, sub := range d.EC3Subs {
 		ec3.Substreams = append(ec3.Substreams, AtmosEC3Substream{
@@ -213,16 +217,11 @@ func (a *AtmosInfo) validateEC3(ase *mp4.AudioSampleEntryBox) {
 		})
 	}
 
-	// JOC extension (ETSI TS 103 420):
-	//   bits[7:1] reserved (7 bits, all zero)
-	//   bits[0]   flag_ec3_extension_type_a (1 bit, LSB of first byte)
-	//   bits[15:8] complexity_index_type_a (8 bits, present iff flag==1)
-	if len(d.Reserved) >= 1 && d.Reserved[0]&0x01 == 1 {
-		ec3.JOC = true
-		if len(d.Reserved) >= 2 {
-			ec3.ComplexityIndex = int(d.Reserved[1])
-		}
-	}
+	// mp4ff decodes the JOC extension (ETSI TS 103 420) into Dec3Box.JOCComplexity,
+	// which is non-zero only when flag_ec3_extension_type_a is set. The two extension
+	// bytes are consumed by that parse, so Reserved holds only what follows them.
+	ec3.JOC = d.JOCComplexity > 0
+	ec3.ComplexityIndex = int(d.JOCComplexity)
 
 	a.EC3 = ec3
 
@@ -233,7 +232,7 @@ func (a *AtmosInfo) validateEC3(ase *mp4.AudioSampleEntryBox) {
 		a.addCheck("joc", true, "flag_ec3_extension_type_a=1 complexity_index=%d",
 			ec3.ComplexityIndex)
 	} else {
-		a.addCheck("joc", false, "flag_ec3_extension_type_a not set (reservedBytes=%d) - not Atmos",
+		a.addCheck("joc", false, "flag_ec3_extension_type_a not set (reservedBytes=%#x) - not Atmos",
 			ec3.ReservedBytes)
 	}
 }
