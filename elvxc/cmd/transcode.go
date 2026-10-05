@@ -720,8 +720,27 @@ func doTranscode(cmd *cobra.Command, args []string) error {
 	if verticalDataFile != "" && vertical == 0 {
 		return fmt.Errorf("vertical-data requires vertical cropping to be enabled")
 	}
-	if verticalDataFile != "" && nThreads != 1 {
-		return fmt.Errorf("vertical-data streaming requires exactly one transcoding thread")
+	// A regular file is loaded whole: check_params validates it before the job
+	// starts and the read-only buffer can be shared by all transcoding threads.
+	// Anything else (FIFO, pipe, socket) is streamed one record per frame, and a
+	// stream can back only one job.
+	var verticalData []byte
+	verticalDataStream := false
+	if verticalDataFile != "" {
+		fi, statErr := os.Stat(verticalDataFile)
+		if statErr != nil {
+			return fmt.Errorf("vertical-data: %w", statErr)
+		}
+		verticalDataStream = !fi.Mode().IsRegular()
+		if verticalDataStream && nThreads != 1 {
+			return fmt.Errorf("vertical-data streaming requires exactly one transcoding thread")
+		}
+		if !verticalDataStream {
+			var readErr error
+			if verticalData, readErr = os.ReadFile(verticalDataFile); readErr != nil {
+				return fmt.Errorf("failed to read vertical-data file: %w", readErr)
+			}
+		}
 	}
 
 	fade := cmd.Flag("fade").Value.String()
@@ -772,6 +791,8 @@ func doTranscode(cmd *cobra.Command, args []string) error {
 	}
 	copyPackaging := transport.UnknownPackagingMode
 	switch copyPackagingStr {
+	case "":
+		// Unset: the transport applies its own default - RtpTs for RTP, RawTs for UDP.
 	case "raw_ts":
 		copyPackaging = transport.RawTs
 	case "rtp_ts":
@@ -889,6 +910,7 @@ func doTranscode(cmd *cobra.Command, args []string) error {
 		Level:                  int(level),
 		Deinterlace:            int(deinterlace),
 		Vertical:               int(vertical),
+		VerticalData:           verticalData,
 		Fade:                   fade,
 		FadeStartFrame:         int(fadeStartFrame),
 		FadeEndFrame:           int(fadeEndFrame),
@@ -908,7 +930,10 @@ func doTranscode(cmd *cobra.Command, args []string) error {
 		return err
 	}
 
-	if verticalDataFile != "" {
+	if verticalDataStream {
+		// Opening a FIFO blocks until the producer opens its end; say so, or an
+		// elvxc started before its crop tracker looks hung.
+		fmt.Printf("Opening vertical-data stream %s (waits for a writer)\n", verticalDataFile)
 		verticalDataReader, openErr := os.Open(verticalDataFile)
 		if openErr != nil {
 			return fmt.Errorf("failed to open vertical-data stream: %w", openErr)

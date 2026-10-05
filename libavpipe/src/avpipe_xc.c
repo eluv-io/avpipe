@@ -3102,6 +3102,7 @@ flush_decoder(
     int debug_frame_level)
 {
     int ret;
+    int crop_rc = eav_success;  /* first vertical-data failure during the flush, reported once drained */
     int i = selected_decoded_audio(decoder_context, stream_index);
     AVFrame *frame, *filt_frame;
     AVFilterContext *buffersink_ctx = decoder_context->video_buffersink_ctx;
@@ -3137,9 +3138,22 @@ flush_decoder(
             fix_video_frame_color(decoder_context, frame);
             ret = crop_send_command(decoder_context, encoder_context, p);
             if (ret != eav_success) {
-                av_frame_free(&filt_frame);
-                av_frame_free(&frame);
-                return ret;
+                /* Only a streaming vertical-data source fails here: its reader errored, or
+                 * hit EOF before delivering any value (the buffer path never fails, and a
+                 * rejected filter command is swallowed inside crop_send_command). With a
+                 * last value in hand, finish the frames still in the decoder's reorder
+                 * window at that position instead of dropping them, and report the error
+                 * once the flush is drained - xc_done records it and still writes the
+                 * trailer. Without a value there is nothing sensible to encode them at. */
+                if (!decoder_context->vertical_data_has_last) {
+                    av_frame_free(&filt_frame);
+                    av_frame_free(&frame);
+                    return ret;
+                }
+                if (crop_rc == eav_success)
+                    elv_warn("Failed to read vertical data while flushing, keeping last crop position, ret=%d, url=%s",
+                        ret, p->url);
+                crop_rc = ret;
             }
         }
 
@@ -3196,7 +3210,7 @@ flush_decoder(
 
     av_frame_free(&filt_frame);
     av_frame_free(&frame);
-    return eav_success;
+    return crop_rc;
 }
 
 int
