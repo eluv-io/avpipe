@@ -193,14 +193,29 @@ typedef struct ioctx_t {
 
     /* Output handlers specific data */
     int64_t pts;                /* frame pts */
-    /* Set by elv_io_open from the output URL, so what it means depends on the
-     * output type. For an fmp4 audio segment it is the *output ordinal* - a
-     * position in xc_params->audio_index - because avpipe names those outputs
-     * "fsegment-audio<ordinal>-%05d.mp4". For other outputs it is a media stream
-     * index. Do not report it to a stater as a stream index without translating
-     * it first: see avpipe_stater_f below and out_write_packet in avpipe.c.
+    /* An output identifier, never a source media stream index. elv_io_open sets
+     * it per output type:
+     *   - DASH/HLS chunk: the muxer's "stream_index" option (0 or 1).
+     *   - fmp4 audio segment ("fsegment-audio<ordinal>-%05d.mp4"): the audio
+     *     output ordinal - the index into encoder format_context2 and decoder
+     *     audio_stream_index, which is in source stream order, not
+     *     xc_params->audio_index order.
+     *   - any other URL: the first digit in the URL, or 0 if there is none or
+     *     the URL is a manifest/image. For "fsegment-video-%05d.mp4" and
+     *     "segment-%05d.mp4" that is the leading digit of the segment number,
+     *     so it is incidental.
+     * Only the first digit is parsed, so audio ordinals >= 10 are truncated.
+     * The output opener receives it as is. Do not report it to a stater as a
+     * stream index: report out_stat_stream_index() instead.
      */
-    int     stream_index;       /* usually (but not always) video=0 and audio=1 */
+    int     stream_index;
+    /* The source media stream this output carries, or -1 if unknown. Set by
+     * elv_io_open from the out_tracker: the decoder's video stream index for the
+     * video output, decoder audio_stream_index[ordinal] for an audio output (the
+     * first selected source for audio merge/join). Stays -1 for outputs whose
+     * tracker is neither video nor audio (copy_mpegts).
+     */
+    int     source_stream_index;
     int     seg_index;          /* segment index if this ioctx is a segment */
 
     uint8_t *data;  /* Data stream buffer (e.g. SCTE-35) */
@@ -268,9 +283,23 @@ typedef int
      * xc_params->audio_index and decoder_context->video_stream_index - for every
      * stat that carries one. It is not an output ordinal, and it is not valid
      * for input stat in_stat_bytes_read.
+     *
+     * Output stats get it from out_stat_stream_index(). out_stat_frame_written
+     * does not, and differs in two cases:
+     *   - bypass reports the output packet's stream index (0);
+     *   - audio merge/join reports whichever source stream's packet pushed the
+     *     mixed frame out of the filter graph, so it varies per frame.
      */
     int stream_index,
     avp_stat_t stat_type);
+
+/*
+ * The stream index to report to an output stater for outctx: its
+ * source_stream_index, or its stream_index when the source is unknown (-1).
+ */
+int
+out_stat_stream_index(
+    ioctx_t *outctx);
 
 typedef struct avpipe_io_handler_t {
     avpipe_opener_f avpipe_opener;
@@ -317,7 +346,9 @@ typedef struct pts_unwrapper_t {
  * Audio stream index mapping is stored as follows:
  *
  * - decoder
- *   - the audio_stream_index array stores the selected stream index values the same way as xc_params
+ *   - the audio_stream_index array stores the selected stream index values in source stream order,
+ *     not in xc_params->audio_index order (audio_index [4,1,3] gives the same array as below).
+ *     Audio output i (format_context2[i], "fsegment-audio<i>") carries audio_stream_index[i].
  *     - audio_stream_index[0] = 1;
  *     - audio_stream_index[1] = 3;
  *     - audio_stream_index[2] = 4;
