@@ -779,6 +779,11 @@ crop_send_command(
                 decoder_context->vertical_data_has_last = 1;
             } else if (read_rc == 0) {
                 decoder_context->vertical_data_eof = 1;
+                /* From here on every frame reuses the last value. For a live stream that
+                 * is a frozen crop until the recording ends, so say so once. */
+                if (decoder_context->vertical_data_has_last)
+                    elv_warn("Vertical data reached EOF at frame %d, holding crop value %u for the rest of the stream, url=%s",
+                        frame_idx, (unsigned)decoder_context->vertical_data_last, params->url);
             } else {
                 elv_err("Failed to read vertical data, url=%s", params->url);
                 return eav_read_input;
