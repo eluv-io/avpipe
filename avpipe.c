@@ -49,7 +49,7 @@ typedef struct udp_thread_params_t {
 static int
 out_stat(
     void *opaque,
-    int stream_index,
+    int src_stream_index,
     avp_stat_t stat_type);
 
 int64_t AVPipeOpenInput(char *, int64_t *);
@@ -91,7 +91,7 @@ static pthread_mutex_t tx_mutex = PTHREAD_MUTEX_INITIALIZER;
 static int
 in_stat(
     void *opaque,
-    int stream_index,
+    int src_stream_index,
     avp_stat_t stat_type);
 
 static int
@@ -267,7 +267,7 @@ in_seek(
 static int
 in_stat(
     void *opaque,
-    int stream_index,
+    int src_stream_index,
     avp_stat_t stat_type)
 {
     int64_t fd;
@@ -282,28 +282,28 @@ in_stat(
 
     switch (stat_type) {
     case in_stat_bytes_read:
-        rc = AVPipeStatInput(fd, stream_index, stat_type, &c->read_bytes);
+        rc = AVPipeStatInput(fd, src_stream_index, stat_type, &c->read_bytes);
         break;
 
     case in_stat_decoding_audio_start_pts:
     case in_stat_decoding_video_start_pts:
-        rc = AVPipeStatInput(fd, stream_index, stat_type, &c->decoding_start_pts);
+        rc = AVPipeStatInput(fd, src_stream_index, stat_type, &c->decoding_start_pts);
         break;
 
     case in_stat_audio_frame_read:
-        rc = AVPipeStatInput(fd, stream_index, stat_type, &c->audio_frames_read);
+        rc = AVPipeStatInput(fd, src_stream_index, stat_type, &c->audio_frames_read);
         break;
 
     case in_stat_video_frame_read:
-        rc = AVPipeStatInput(fd, stream_index, stat_type, &c->video_frames_read);
+        rc = AVPipeStatInput(fd, src_stream_index, stat_type, &c->video_frames_read);
         break;
 
     case in_stat_first_keyframe_pts:
-        rc = AVPipeStatInput(fd, stream_index, stat_type, &c->first_key_frame_pts);
+        rc = AVPipeStatInput(fd, src_stream_index, stat_type, &c->first_key_frame_pts);
         break;
 
     case in_stat_data_scte35:
-        rc = AVPipeStatInput(fd, stream_index, stat_type, c->data);
+        rc = AVPipeStatInput(fd, src_stream_index, stat_type, c->data);
         break;
 
     default:
@@ -562,7 +562,7 @@ udp_in_seek(
 static int
 udp_in_stat(
     void *opaque,
-    int stream_index,
+    int src_stream_index,
     avp_stat_t stat_type)
 {
     int64_t fd;
@@ -583,32 +583,32 @@ udp_in_stat(
     case in_stat_decoding_audio_start_pts:
         if (debug_frame_level)
             elv_dbg("IN STAT UDP fd=%d, audio start PTS=%"PRId64", url=%s", fd, c->decoding_start_pts, c->url);
-        rc = AVPipeStatInput(fd, stream_index, stat_type, &c->decoding_start_pts);
+        rc = AVPipeStatInput(fd, src_stream_index, stat_type, &c->decoding_start_pts);
         break;
     case in_stat_decoding_video_start_pts:
         if (debug_frame_level)
             elv_dbg("IN STAT UDP fd=%d, video start PTS=%"PRId64", url=%s", fd, c->decoding_start_pts, c->url);
-        rc = AVPipeStatInput(fd, stream_index, stat_type, &c->decoding_start_pts);
+        rc = AVPipeStatInput(fd, src_stream_index, stat_type, &c->decoding_start_pts);
         break;
     case in_stat_audio_frame_read:
         if (debug_frame_level)
             elv_dbg("IN STAT UDP fd=%d, audio frame read=%"PRId64", url=%s", fd, c->audio_frames_read, c->url);
-        rc = AVPipeStatInput(fd, stream_index, stat_type, &c->audio_frames_read);
+        rc = AVPipeStatInput(fd, src_stream_index, stat_type, &c->audio_frames_read);
         break;
     case in_stat_video_frame_read:
         if (debug_frame_level)
             elv_dbg("IN STAT UDP fd=%d, video frame read=%"PRId64", url=%s", fd, c->video_frames_read, c->url);
-        rc = AVPipeStatInput(fd, stream_index, stat_type, &c->video_frames_read);
+        rc = AVPipeStatInput(fd, src_stream_index, stat_type, &c->video_frames_read);
         break;
     case in_stat_first_keyframe_pts:
         if (debug_frame_level)
             elv_dbg("IN STAT UDP fd=%d, first keyframe PTS=%"PRId64", url=%s", fd, c->first_key_frame_pts, c->url);
-        rc = AVPipeStatInput(fd, stream_index, stat_type, &c->first_key_frame_pts);
+        rc = AVPipeStatInput(fd, src_stream_index, stat_type, &c->first_key_frame_pts);
         break;
     case in_stat_data_scte35:
         if (debug_frame_level)
             elv_dbg("IN STAT UDP SCTE35 fd=%d, stat_type=%d, url=%s", fd, stat_type, c->url);
-        rc = AVPipeStatInput(fd, stream_index, stat_type, c->data);
+        rc = AVPipeStatInput(fd, src_stream_index, stat_type, c->data);
         break;
     default:
         elv_err("IN STAT UDP fd=%d, invalid input stat=%d, url=%s", stat_type, c->url);
@@ -683,7 +683,7 @@ out_write_packet(
         outctx->written_bytes - outctx->write_reported > VIDEO_BYTES_WRITE_REPORT) ||
         (outctx->type == avpipe_audio_fmp4_segment &&
         outctx->written_bytes - outctx->write_reported > AUDIO_BYTES_WRITE_REPORT)) {
-        out_stat(opaque, out_stat_stream_index(outctx), out_stat_bytes_written);
+        out_stat(opaque, out_stat_src_stream_index(outctx), out_stat_bytes_written);
         outctx->write_reported = outctx->written_bytes;
     }
 
@@ -740,7 +740,7 @@ out_closer(
 static int
 out_stat(
     void *opaque,
-    int stream_index,
+    int src_stream_index,
     avp_stat_t stat_type)
 {
     ioctx_t *outctx = (ioctx_t *)opaque;
@@ -761,20 +761,20 @@ out_stat(
     fd = *((int64_t *)(outctx->opaque));
     switch (stat_type) {
     case out_stat_bytes_written:
-        rc = AVPipeStatOutput(h, fd, stream_index, buftype, stat_type, &outctx->written_bytes);
+        rc = AVPipeStatOutput(h, fd, src_stream_index, buftype, stat_type, &outctx->written_bytes);
         break;
     case out_stat_encoding_end_pts:
         if (buftype == avpipe_audio_segment ||
             buftype == avpipe_audio_fmp4_segment)
-            rc = AVPipeStatOutput(h, fd, stream_index, buftype, stat_type, &outctx->encoder_ctx->audio_last_pts_sent_encode);
+            rc = AVPipeStatOutput(h, fd, src_stream_index, buftype, stat_type, &outctx->encoder_ctx->audio_last_pts_sent_encode);
         else
-            rc = AVPipeStatOutput(h, fd, stream_index, buftype, stat_type, &outctx->encoder_ctx->video_last_pts_sent_encode);
+            rc = AVPipeStatOutput(h, fd, src_stream_index, buftype, stat_type, &outctx->encoder_ctx->video_last_pts_sent_encode);
         break;
     case out_stat_start_file:
-        rc = AVPipeStatOutput(h, fd, stream_index, buftype, stat_type, &outctx->seg_index);
+        rc = AVPipeStatOutput(h, fd, src_stream_index, buftype, stat_type, &outctx->seg_index);
         break;
     case out_stat_end_file:
-        rc = AVPipeStatOutput(h, fd, stream_index, buftype, stat_type, &outctx->seg_index);
+        rc = AVPipeStatOutput(h, fd, src_stream_index, buftype, stat_type, &outctx->seg_index);
         break;
     case out_stat_frame_written:
         {
@@ -782,7 +782,7 @@ out_stat(
                 .total_frames_written = outctx->total_frames_written,
                 .frames_written = outctx->frames_written,
             };
-            rc = AVPipeStatOutput(h, fd, stream_index, buftype, stat_type, &encoding_frame_stats);
+            rc = AVPipeStatOutput(h, fd, src_stream_index, buftype, stat_type, &encoding_frame_stats);
         }
         break;
     default:
@@ -1319,7 +1319,7 @@ out_mux_seek(
 static int
 out_mux_stat(
     void *opaque,
-    int stream_index,
+    int src_stream_index,
     avp_stat_t stat_type)
 {
     ioctx_t *outctx = (ioctx_t *)opaque;
@@ -1329,10 +1329,10 @@ out_mux_stat(
 
     switch (stat_type) {
     case out_stat_bytes_written:
-        rc = AVPipeStatMuxOutput(fd, stream_index, stat_type, &outctx->written_bytes);
+        rc = AVPipeStatMuxOutput(fd, src_stream_index, stat_type, &outctx->written_bytes);
         break;
     case out_stat_encoding_end_pts:
-        rc = AVPipeStatMuxOutput(fd, stream_index, stat_type, &outctx->encoder_ctx->video_last_pts_sent_encode);
+        rc = AVPipeStatMuxOutput(fd, src_stream_index, stat_type, &outctx->encoder_ctx->video_last_pts_sent_encode);
         break;
     default:
         break;

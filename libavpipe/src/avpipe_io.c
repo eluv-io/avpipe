@@ -25,13 +25,13 @@
 
 
 int
-out_stat_stream_index(
+out_stat_src_stream_index(
     ioctx_t *outctx)
 {
     if (!outctx)
         return -1;
-    if (outctx->source_stream_index >= 0)
-        return outctx->source_stream_index;
+    if (outctx->src_stream_index >= 0)
+        return outctx->src_stream_index;
     return outctx->stream_index;
 }
 
@@ -56,11 +56,11 @@ elv_io_open(
 
     /* The tracker knows which source stream this output carries; the URL does not. */
     if (out_tracker->xc_type == xc_video)
-        outctx->source_stream_index = out_tracker->video_stream_index;
+        outctx->src_stream_index = out_tracker->video_stream_index;
     else if (out_tracker->xc_type == xc_audio)
-        outctx->source_stream_index = out_tracker->audio_stream_index;
+        outctx->src_stream_index = out_tracker->audio_stream_index;
     else
-        outctx->source_stream_index = -1;
+        outctx->src_stream_index = -1;
 
     if (strstr(url, "chunk")) {
         /* Regular segment */
@@ -219,7 +219,7 @@ elv_io_open(
         (*pb) = avioctx;
     }
 
-    out_handlers->avpipe_stater(outctx, out_stat_stream_index(outctx), out_stat_start_file);
+    out_handlers->avpipe_stater(outctx, out_stat_src_stream_index(outctx), out_stat_start_file);
 
     return ret;
 }
@@ -247,8 +247,8 @@ elv_io_close(
         // For now, this double-stat is fine because the 'out_stat_encoding_end_pts' is also used
         // for muxing, which doesn't have a meaningful value of 'seg_index'. Additionally, ABR and
         // mez should be pretty separate. But that can be done later.
-        out_handlers->avpipe_stater(outctx, out_stat_stream_index(outctx), out_stat_encoding_end_pts);
-        out_handlers->avpipe_stater(outctx, out_stat_stream_index(outctx), out_stat_end_file);
+        out_handlers->avpipe_stater(outctx, out_stat_src_stream_index(outctx), out_stat_encoding_end_pts);
+        out_handlers->avpipe_stater(outctx, out_stat_src_stream_index(outctx), out_stat_end_file);
         out_handlers->avpipe_closer(outctx);
     }
     if (outctx)

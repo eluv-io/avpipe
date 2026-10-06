@@ -30,7 +30,7 @@ type InputHandler interface {
 	Size() int64
 
 	// Stat reports some stats
-	Stat(streamIndex int, statType AVStatType, statArgs interface{}) error
+	Stat(srcStreamIndex int, statType AVStatType, statArgs interface{}) error
 }
 
 // PacketReader is an optional capability that an InputHandler may implement to read directly into a pooled packet
@@ -65,7 +65,7 @@ type OutputHandler interface {
 	Close() error
 
 	// Stat reports some stats
-	Stat(streamIndex int, avType AVType, statType AVStatType, statArgs interface{}) error
+	Stat(srcStreamIndex int, avType AVType, statType AVStatType, statArgs interface{}) error
 }
 
 type BypassProcessor interface {

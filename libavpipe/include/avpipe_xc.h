@@ -206,7 +206,7 @@ typedef struct ioctx_t {
      *     so it is incidental.
      * Only the first digit is parsed, so audio ordinals >= 10 are truncated.
      * The output opener receives it as is. Do not report it to a stater as a
-     * stream index: report out_stat_stream_index() instead.
+     * stream index: report out_stat_src_stream_index() instead.
      */
     int     stream_index;
     /* The source media stream this output carries, or -1 if unknown. Set by
@@ -215,7 +215,7 @@ typedef struct ioctx_t {
      * first selected source for audio merge/join). Stays -1 for outputs whose
      * tracker is neither video nor audio (copy_mpegts).
      */
-    int     source_stream_index;
+    int     src_stream_index;
     int     seg_index;          /* segment index if this ioctx is a segment */
 
     uint8_t *data;  /* Data stream buffer (e.g. SCTE-35) */
@@ -279,26 +279,32 @@ typedef int
 (*avpipe_stater_f)(
     void *opaque,
     /*
-     * stream_index is a *source* media stream index - the same numbering as
+     * src_stream_index is a *source* media stream index - the same numbering as
      * xc_params->audio_index and decoder_context->video_stream_index - for every
      * stat that carries one. It is not an output ordinal, and it is not valid
      * for input stat in_stat_bytes_read.
      *
-     * Output stats get it from out_stat_stream_index(). out_stat_frame_written
-     * does not, and differs in two cases:
+     * Output stats get it from out_stat_src_stream_index().
+     * out_stat_frame_written does not, and differs in two cases:
      *   - bypass reports the output packet's stream index (0);
      *   - audio merge/join reports whichever source stream's packet pushed the
      *     mixed frame out of the filter graph, so it varies per frame.
+     *
+     * Where an output has no single source stream:
+     *   - audio merge/join outputs report their first selected source;
+     *   - copy_mpegts outputs report their ioctx_t.stream_index (an output
+     *     identifier), since their tracker is neither video nor audio;
+     *   - the mux path reports 0 for video and 1 for audio.
      */
-    int stream_index,
+    int src_stream_index,
     avp_stat_t stat_type);
 
 /*
  * The stream index to report to an output stater for outctx: its
- * source_stream_index, or its stream_index when the source is unknown (-1).
+ * src_stream_index, or its stream_index when the source is unknown (-1).
  */
 int
-out_stat_stream_index(
+out_stat_src_stream_index(
     ioctx_t *outctx);
 
 typedef struct avpipe_io_handler_t {
