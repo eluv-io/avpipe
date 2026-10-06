@@ -6,6 +6,7 @@ import (
 	"sync"
 	"testing"
 
+	"github.com/eluv-io/avpipe"
 	"github.com/eluv-io/avpipe/goavpipe"
 	"github.com/eluv-io/avpipe/xc"
 	"github.com/stretchr/testify/assert"
@@ -72,12 +73,13 @@ func TestOutStatsReportSourceStreamIndex(t *testing.T) {
 	if testing.Short() {
 		t.Skip("skipping slow transcoding test in short mode")
 	}
-	url := videoBigBuckBunny3AudioPath // video 0, audio 1-4
-	checkFileExists(t, url)
-
 	tests := []struct {
-		name       string
-		audioIndex []int32
+		name   string
+		url    string // default videoBigBuckBunny3AudioPath: video 0, audio 1-4
+		xcType goavpipe.XcType
+		// channelLayout is the encoder's channel layout, if not the source's.
+		channelLayout string
+		audioIndex    []int32
 		// sources[ordinal] is the source stream that audio output must report.
 		sources []int
 		bypass  bool
@@ -88,6 +90,10 @@ func TestOutStatsReportSourceStreamIndex(t *testing.T) {
 		{name: "no audio_index", audioIndex: nil, sources: []int{1}},
 		// Bypass writes packets through do_bypass, not encode_frame.
 		{name: "bypass", audioIndex: []int32{2}, sources: []int{2}, bypass: true},
+		// One output mixed from audio 0 and 1 reports its first selected source.
+		{name: "audio join", url: "./media/gabby_shading_2mono_1080p.mp4",
+			xcType: goavpipe.XcAudioJoin, channelLayout: "stereo", audioIndex: []int32{0, 1},
+			sources: []int{0}},
 	}
 
 	outStats := []goavpipe.AVStatType{
@@ -100,6 +106,16 @@ func TestOutStatsReportSourceStreamIndex(t *testing.T) {
 
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
+			url := tc.url
+			if url == "" {
+				url = videoBigBuckBunny3AudioPath
+			}
+			checkFileExists(t, url)
+			xcType := tc.xcType
+			if xcType == goavpipe.XcNone {
+				xcType = goavpipe.XcAll
+			}
+
 			outputDir := path.Join(baseOutPath, fn(), tc.name)
 			setupOutDir(t, outputDir)
 
@@ -115,7 +131,7 @@ func TestOutStatsReportSourceStreamIndex(t *testing.T) {
 				Ecodec2:             "aac",
 				EncHeight:           720,
 				EncWidth:            1280,
-				XcType:              goavpipe.XcAll,
+				XcType:              xcType,
 				StreamId:            -1,
 				SyncAudioToStreamId: -1,
 				ForceKeyInt:         48,
@@ -130,6 +146,10 @@ func TestOutStatsReportSourceStreamIndex(t *testing.T) {
 			defer goavpipe.InitIOHandler(
 				&xc.FileInputOpener{URL: url, Stats: &statsInfo},
 				&xc.FileOutputOpener{Dir: outputDir, Stats: &statsInfo})
+
+			if tc.channelLayout != "" {
+				params.ChannelLayout = avpipe.ChannelLayout(tc.channelLayout)
+			}
 
 			boilerXc(t, params)
 
@@ -156,7 +176,10 @@ func TestOutStatsReportSourceStreamIndex(t *testing.T) {
 				reported[k][r.statType][r.streamIndex] = true
 			}
 
-			want := map[outKey]int{{goavpipe.FMP4VideoSegment, 0}: 0}
+			want := map[outKey]int{}
+			if xcType&goavpipe.XcVideo != 0 {
+				want[outKey{goavpipe.FMP4VideoSegment, 0}] = 0
+			}
 			for ordinal, src := range tc.sources {
 				want[outKey{goavpipe.FMP4AudioSegment, ordinal}] = src
 			}

@@ -2552,7 +2552,7 @@ encode_frame(
             else
                 outctx->total_frames_written = encoder_context->audio_frames_written[stream_index];
             outctx->frames_written++;
-            out_handlers->avpipe_stater(outctx, stream_index, out_stat_frame_written);
+            out_handlers->avpipe_stater(outctx, out_stat_src_stream_index(outctx), out_stat_frame_written);
         }
 
         /* mux encoded frame */
