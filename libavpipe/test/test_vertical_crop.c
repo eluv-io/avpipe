@@ -2,7 +2,8 @@
  * test_vertical_crop.c
  *
  * Verifies that the vertical (9:16) crop window follows the per-frame
- * vertical_data, frame by frame.
+ * vertical_data, frame by frame - from the in-memory buffer and from a streaming
+ * reader (vertical_data_reader), including the hold once the stream ends.
  *
  * Rather than transcoding a fixture, this drives the production filter path
  * directly on synthesized frames:
@@ -34,6 +35,7 @@
 #include "unity/unity.h"
 
 #include <math.h>
+#include <stdint.h>
 #include <string.h>
 #include <libavcodec/avcodec.h>
 #include <libavformat/avformat.h>
@@ -220,19 +222,24 @@ test_crop_width_is_9_16_of_height(void)
     TEST_ASSERT_EQUAL_INT(0, crop_calc_width(1080) % 2);
 }
 
+/* Position the crop should land on for frame n, given the fixture's data source. */
+typedef int (*expected_crop_x_f)(crop_fixture_t *f, int n, int crop_w);
+
 /* Push the gradient through the real filter path once per frame, updating the
- * crop via crop_send_command(), and check the cropped output lands where the
- * frame's vertical_data value asked for. */
-void
-test_crop_tracks_vertical_data_per_frame(void)
+ * crop via crop_send_command(), and collect the per-frame residual between the
+ * measured mean luma and the ramp value at the expected window's midpoint.
+ * Returns the number of frames measured. */
+static int
+measure_tracking(
+    crop_fixture_t *f,
+    expected_crop_x_f expected_crop_x,
+    double *mean_out,
+    double *std_out)
 {
-    crop_fixture_t f;
     char filter_str[256];
     AVFrame *src = NULL, *filt = NULL;
     double residuals[N_FRAMES];
     int n_checked = 0;
-
-    fixture_init(&f);
     const int crop_w = crop_calc_width(ENC_H);
 
     /* Mirrors the vertical branch of get_filter_str(). That function is static in
@@ -241,8 +248,8 @@ test_crop_tracks_vertical_data_per_frame(void)
         ENC_H, crop_w);
 
     TEST_ASSERT_EQUAL_INT(0,
-        init_video_filters(filter_str, &f.decoder, &f.encoder, &f.params));
-    TEST_ASSERT_EQUAL_INT(0, crop_get_context(&f.decoder, &f.params));
+        init_video_filters(filter_str, &f->decoder, &f->encoder, &f->params));
+    TEST_ASSERT_EQUAL_INT(0, crop_get_context(&f->decoder, &f->params));
 
     src  = make_gradient_frame();
     filt = av_frame_alloc();
@@ -251,14 +258,15 @@ test_crop_tracks_vertical_data_per_frame(void)
 
     for (int n = 0; n < N_FRAMES; n++) {
         /* The decoder's 1-based frame counter is what crop_send_command() reads. */
-        f.dec_codec.frame_num = n + 1;
-        crop_send_command(&f.decoder, &f.encoder, &f.params);
+        f->dec_codec.frame_num = n + 1;
+        TEST_ASSERT_EQUAL_INT(eav_success,
+            crop_send_command(&f->decoder, &f->encoder, &f->params));
 
         src->pts = n;
         TEST_ASSERT_TRUE(av_buffersrc_add_frame_flags(
-            f.decoder.video_buffersrc_ctx, src, AV_BUFFERSRC_FLAG_KEEP_REF) >= 0);
+            f->decoder.video_buffersrc_ctx, src, AV_BUFFERSRC_FLAG_KEEP_REF) >= 0);
 
-        int ret = av_buffersink_get_frame(f.decoder.video_buffersink_ctx, filt);
+        int ret = av_buffersink_get_frame(f->decoder.video_buffersink_ctx, filt);
         if (ret == AVERROR(EAGAIN))
             continue;
         TEST_ASSERT_TRUE(ret >= 0);
@@ -267,9 +275,7 @@ test_crop_tracks_vertical_data_per_frame(void)
         TEST_ASSERT_EQUAL_INT(ENC_H, filt->height);   /* full height, never cropped */
 
         /* Expected: the ramp value at the crop window's midpoint. */
-        int crop_x = vertical_data_crop_x(f.params.vertical_data,
-            f.params.vertical_data_len, n, SCALED_W, crop_w);
-        double mid  = crop_x + crop_w / 2.0;
+        double mid  = expected_crop_x(f, n, crop_w) + crop_w / 2.0;
         double want = ramp_luma(mid / (SCALED_W - 1));
 
         residuals[n_checked++] = mean_luma(filt) - want;
@@ -284,7 +290,30 @@ test_crop_tracks_vertical_data_per_frame(void)
     mean /= n_checked;
     for (int i = 0; i < n_checked; i++)
         var += (residuals[i] - mean) * (residuals[i] - mean);
-    double std = sqrt(var / n_checked);
+    *mean_out = mean;
+    *std_out  = sqrt(var / n_checked);
+
+    av_frame_free(&src);
+    av_frame_free(&filt);
+    return n_checked;
+}
+
+static int
+expected_from_buffer(crop_fixture_t *f, int n, int crop_w)
+{
+    return vertical_data_crop_x(f->params.vertical_data, f->params.vertical_data_len,
+        n, SCALED_W, crop_w);
+}
+
+/* Check the cropped output lands where the frame's vertical_data value asked for. */
+void
+test_crop_tracks_vertical_data_per_frame(void)
+{
+    crop_fixture_t f;
+    double mean, std;
+
+    fixture_init(&f);
+    int n_checked = measure_tracking(&f, expected_from_buffer, &mean, &std);
 
     printf("  crop-tracking residual: mean=%.3f stddev=%.3f over %d frames\n",
         mean, std, n_checked);
@@ -295,8 +324,71 @@ test_crop_tracks_vertical_data_per_frame(void)
     TEST_ASSERT_TRUE(std < 2.0);
     TEST_ASSERT_TRUE(fabs(mean) < 2.0);
 
-    av_frame_free(&src);
-    av_frame_free(&filt);
+    fixture_free(&f);
+}
+
+/* ---------------------------------------------------------------------------
+ * Streaming source: stands in for the Go reader behind vertical_data_reader,
+ * serving the same pan pattern one record per call and reporting EOF after
+ * STREAM_RECORDS of them, so the tail of the run exercises the hold.
+ * ---------------------------------------------------------------------------*/
+#define STREAM_RECORDS 120   /* < N_FRAMES: the remaining frames must hold the last value */
+
+typedef struct stream_source_t {
+    int next;    /* index of the next record to serve */
+    int calls;   /* how many times the reader was invoked */
+} stream_source_t;
+
+static int
+stream_read(uintptr_t handle, uint32_t *value)
+{
+    stream_source_t *s = (stream_source_t *)handle;
+    s->calls++;
+    if (s->next >= STREAM_RECORDS)
+        return 0;   /* EOF */
+    *value = pan_value(s->next++);
+    return 1;
+}
+
+static int
+expected_from_stream(crop_fixture_t *f, int n, int crop_w)
+{
+    (void)f;
+    /* Frames past the end of the stream keep the last value served. */
+    int last = n < STREAM_RECORDS ? n : STREAM_RECORDS - 1;
+    return vertical_value_crop_x(pan_value(last), SCALED_W, crop_w);
+}
+
+/* The same measurement over the streaming branch of crop_send_command(): one
+ * record consumed per frame, and the last value held after EOF. */
+void
+test_crop_tracks_streamed_vertical_data(void)
+{
+    crop_fixture_t f;
+    stream_source_t source = { 0, 0 };
+    double mean, std;
+
+    fixture_init(&f);
+    /* Swap the buffer for the reader: with both set crop_send_command() uses the buffer. */
+    f.params.vertical_data               = NULL;
+    f.params.vertical_data_len           = 0;
+    f.params.vertical_data_reader        = stream_read;
+    f.params.vertical_data_reader_handle = (uintptr_t)&source;
+
+    int n_checked = measure_tracking(&f, expected_from_stream, &mean, &std);
+
+    printf("  streamed crop-tracking residual: mean=%.3f stddev=%.3f over %d frames\n",
+        mean, std, n_checked);
+
+    TEST_ASSERT_TRUE(std < 2.0);
+    TEST_ASSERT_TRUE(fabs(mean) < 2.0);
+
+    /* Cadence: exactly one read per frame until the EOF read, and none after it. */
+    TEST_ASSERT_EQUAL_INT(STREAM_RECORDS + 1, source.calls);
+    TEST_ASSERT_EQUAL_INT(1, f.decoder.vertical_data_eof);
+    TEST_ASSERT_EQUAL_INT(1, f.decoder.vertical_data_has_last);
+    TEST_ASSERT_EQUAL_UINT32(pan_value(STREAM_RECORDS - 1), f.decoder.vertical_data_last);
+
     fixture_free(&f);
 }
 
@@ -310,6 +402,7 @@ main(void)
 
     RUN_TEST(test_crop_width_is_9_16_of_height);
     RUN_TEST(test_crop_tracks_vertical_data_per_frame);
+    RUN_TEST(test_crop_tracks_streamed_vertical_data);
 
     return UNITY_END();
 }
