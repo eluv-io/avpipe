@@ -2,6 +2,8 @@ package goavpipe
 
 import (
 	"sync"
+
+	"github.com/eluv-io/common-go/media/pktpool"
 )
 
 const traceIo bool = false
@@ -29,6 +31,14 @@ type InputHandler interface {
 
 	// Stat reports some stats
 	Stat(streamIndex int, statType AVStatType, statArgs interface{}) error
+}
+
+// PacketReader is an optional capability that an InputHandler may implement to read directly into a pooled packet
+// instead of a plain []byte. A caller that detects this (e.g. AVPipeReadInput) can read the payload once, into
+// memory it can also hand off elsewhere via the pool's reference counting, instead of reading into a throwaway
+// buffer and copying it a second time.
+type PacketReader interface {
+	ReadPacket() (pktpool.Resource, error)
 }
 
 type OutputOpener interface {
@@ -291,6 +301,15 @@ func GetGlobalInputOpener() InputOpener {
 	return gInputOpener
 }
 
+// GetURLInputOpener returns the input opener registered for url by
+// InitUrlIOHandler, or nil if none is registered. Does not fall back to
+// the global opener.
+func GetURLInputOpener(url string) InputOpener {
+	gMutex.Lock()
+	defer gMutex.Unlock()
+	return gURLInputOpeners[url]
+}
+
 func GetOutputOpener(url string) OutputOpener {
 	gMutex.Lock()
 	defer gMutex.Unlock()
@@ -298,6 +317,23 @@ func GetOutputOpener(url string) OutputOpener {
 		return outputOpener
 	}
 
+	return gOutputOpener
+}
+
+// GetURLOutputOpener returns the output opener registered for url by
+// InitUrlIOHandler, or nil if none is registered. Does not fall back
+// to the global opener.
+func GetURLOutputOpener(url string) OutputOpener {
+	gMutex.Lock()
+	defer gMutex.Unlock()
+	return gURLOutputOpeners[url]
+}
+
+// GetGlobalOutputOpener returns the global output opener set by InitIOHandler,
+// or nil if none is set.
+func GetGlobalOutputOpener() OutputOpener {
+	gMutex.Lock()
+	defer gMutex.Unlock()
 	return gOutputOpener
 }
 

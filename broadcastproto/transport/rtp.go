@@ -1,11 +1,12 @@
 package transport
 
 import (
-	"encoding/binary"
 	"errors"
 	"fmt"
 	"io"
 	"net"
+
+	"github.com/eluv-io/common-go/media/pktpool"
 )
 
 const maxUDPPacketSize = 1<<16 - 1
@@ -55,11 +56,17 @@ func (r *rtpProto) Open() (io.ReadCloser, error) {
 		return nil, errors.New("underlying connection is not a UDP connection")
 	}
 
-	return &rtpHandler{
+	h := &rtpHandler{
 		buf:     make([]byte, maxUDPPacketSize),
 		Mode:    r.Mode,
 		udpConn: udpConn,
-	}, nil
+	}
+	if h.Mode != RtpTs {
+		// Stripping is needed: own a scratch packet, reused across reads via repeated From() calls, to decode the RTP
+		// header via the same lazy decoder as the rest of the codebase instead of a bespoke parser.
+		h.stripPkt = pktpool.NewPacket(0, maxUDPPacketSize)
+	}
+	return h, nil
 }
 
 type rtpHandler struct {
@@ -70,6 +77,8 @@ type rtpHandler struct {
 	Mode TsPackagingMode
 
 	udpConn *net.UDPConn
+
+	stripPkt *pktpool.Packet // non-nil only when Mode != RtpTs (stripping is needed)
 }
 
 func (h *rtpHandler) Close() error {
@@ -108,14 +117,27 @@ func (h *rtpHandler) readNewPacket() error {
 
 	// Strip the RTP header for any packaging that does not retain RTP framing (RawTs, AtsTs), leaving the delivered
 	// datagram as raw TS.
-	if h.Mode != RtpTs {
-		headerEnd, err := StripRTP(h.buf[:h.bufEnd])
-		if err != nil {
+	if h.stripPkt != nil {
+		if err := h.stripPkt.From(h.buf[:h.bufEnd]); err != nil {
 			// TODO(Nate): Is this the best resolution here? Should we just try again at this layer? Or rely on caller to do so?
+			log.Warn("Failed to load RTP packet for stripping", "err", err)
+			return err
+		}
+		rtpLayer, err := h.stripPkt.Rtp()
+		if err != nil {
 			log.Warn("Failed to strip RTP header", "err", err)
 			return err
 		}
-		h.bufStart = headerEnd
+		if rtpLayer.Packet().Header.Version != 2 {
+			err := fmt.Errorf("unsupported RTP version: %d", rtpLayer.Packet().Header.Version)
+			log.Warn("Failed to strip RTP header", "err", err)
+			return err
+		}
+		// Normalize to start at 0 instead of tracking a separate header-length offset: rtpLayer.Payload excludes any
+		// RTP padding too, unlike the previous header-length-only offset.
+		copy(h.buf, rtpLayer.Payload)
+		h.bufStart = 0
+		h.bufEnd = len(rtpLayer.Payload)
 	}
 
 	return nil
@@ -123,80 +145,4 @@ func (h *rtpHandler) readNewPacket() error {
 
 func (h *rtpHandler) bufLen() int {
 	return h.bufEnd - h.bufStart
-}
-
-func StripRTP(data []byte) (int, error) {
-	hdr, err := ParseRTPHeader(data)
-	if err != nil {
-		return 0, err
-	}
-	if len(data) < hdr.ByteLength()+188 {
-		return 0, fmt.Errorf("packet too short for RTP and TS")
-	}
-	return hdr.ByteLength(), nil
-}
-
-var ErrShortRTP = errors.New("RTP packet too short")
-
-type RTPHeader struct {
-	Version        uint8
-	Padding        bool
-	Extension      bool
-	CSRCCount      uint8
-	Marker         bool
-	PayloadType    uint8
-	SequenceNumber uint16
-	Timestamp      uint32
-	SSRC           uint32
-	// PENDING(SS) CSRCs and extension not included
-	ExtensionByteCount int // Number of bytes in the extension (header + payload), if present
-}
-
-func (h *RTPHeader) ByteLength() int {
-	length := 12 // Base RTP header length
-	if h.CSRCCount > 0 {
-		length += int(h.CSRCCount) * 4
-	}
-	if h.Extension {
-		length += h.ExtensionByteCount
-	}
-	return length
-}
-
-func ParseRTPHeader(data []byte) (*RTPHeader, error) {
-	baseHeaderSize := 12 // Minimum size of RTP header
-	if len(data) < baseHeaderSize {
-		return nil, ErrShortRTP
-	}
-
-	b0 := data[0]
-	b1 := data[1]
-
-	header := &RTPHeader{
-		Version:        b0 >> 6,
-		Padding:        (b0>>5)&0x01 == 1,
-		Extension:      (b0>>4)&0x01 == 1,
-		CSRCCount:      b0 & 0x0F,
-		Marker:         (b1>>7)&0x01 == 1,
-		PayloadType:    b1 & 0x7F,
-		SequenceNumber: binary.BigEndian.Uint16(data[2:4]),
-		Timestamp:      binary.BigEndian.Uint32(data[4:8]),
-		SSRC:           binary.BigEndian.Uint32(data[8:12]),
-	}
-	lenCSRC := 4 * int(header.CSRCCount)
-	if len(data) < baseHeaderSize+lenCSRC {
-		return nil, fmt.Errorf("RTP packet too short for CSRCs: expected at least %d bytes, got %d", baseHeaderSize+lenCSRC, len(data))
-	}
-	if header.Version != 2 {
-		return nil, fmt.Errorf("unsupported RTP version: %d", header.Version)
-	}
-	if header.Extension {
-		extLen := binary.BigEndian.Uint16(data[baseHeaderSize+lenCSRC+2 : baseHeaderSize+lenCSRC+4]) // Read extension length
-		header.ExtensionByteCount = (int(extLen) * 4) + 4                                            // 4 bytes for the extension header
-		if len(data) < baseHeaderSize+lenCSRC+header.ExtensionByteCount {
-			return nil, fmt.Errorf("RTP packet too short for extension: expected at least %d bytes, got %d", baseHeaderSize+lenCSRC+header.ExtensionByteCount, len(data))
-		}
-	}
-
-	return header, nil
 }

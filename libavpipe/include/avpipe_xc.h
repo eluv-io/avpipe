@@ -397,6 +397,7 @@ typedef struct coderctx_t {
     AVFilterContext *video_buffersink_ctx;
     AVFilterContext *video_buffersrc_ctx;
     AVFilterGraph   *video_filter_graph;
+    AVFilterContext *video_crop_ctx;            /* Crop filter context for send_command */
 
     /* Audio filter */
     AVFilterContext *audio_buffersink_ctx[MAX_STREAMS];
@@ -419,6 +420,7 @@ typedef struct coderctx_t {
     int64_t first_read_packet_pts[MAX_STREAMS];         /* PTS of first packet read - which might not be decodable */
 
     int64_t video_encoder_prev_pts;     /* Previous pts for video output (encoder) */
+    int64_t audio_encoder_prev_pts[MAX_STREAMS]; /* Previous pts for audio output (encoder), per stream - diagnostic only */
     int64_t video_duration;             /* Duration/pts of original frame */
     int64_t audio_duration;             /* Audio duration/pts of original frame when tx_type == tx_all */
     int64_t first_key_frame_pts;        /* First video key frame pts, used to synchronize audio and video in UDP live streams */
@@ -472,6 +474,16 @@ typedef enum dif_type {
     dif_bwdif       = 1, // Use filter bwdif mode 'send_field' (two frames per input frame)
     dif_bwdif_frame = 2  // Use filter bwdif mode 'send_frame' (one frame per input frame)
 } dif_type;
+
+// vertical data types
+typedef enum vertical_type {
+    vertical_none   = 0, // No vertical crop
+    vertical_32bpf  = 1  // 32 bits per frame (uint32 LE per frame)
+} vertical_type;
+
+// Upper bound on a vertical_data buffer (4 bytes/frame => ~33M frames, ~155h at 60fps).
+// Sanity check for oversized/garbage vertical-data size
+#define MAX_VERTICAL_DATA_LEN   (128 * 1024 * 1024)
 
 // Video layout. Values align with ISO/IEC 23001-8 (CICP)
 typedef enum video_layout_t {
@@ -570,6 +582,16 @@ typedef struct xcparams_t {
     int         level;
     dif_type    deinterlace;                // Deinterlacing filter
     char        *timecode;                  // Original timecode string
+    vertical_type vertical;                 // Vertical video crop type (9:16)
+    uint8_t     *vertical_data;             // Per-frame crop data (opaque byte array, currently 4 bytes per frame uint32 LE).
+                                            //      Each value is the crop window centre as a fraction of the scaled frame width,
+                                            //      with denominator VERTICAL_DATA_SCALE (see avpipe_utils.h)
+    int         vertical_data_len;          // Length of vertical_data in bytes
+    char        *fade;                      // Fade filter: "in" or "out"
+    int         fade_start_frame;           // Fade start frame (used with blend filter)
+    int         fade_end_frame;             // Fade end frame (used with blend filter)
+    double      fade_level_1;               // Fade blend start level (e.g. 1.0)
+    double      fade_level_2;               // Fade blend end level (e.g. 0.0)
 } xcparams_t;
 
 #define MAX_CODEC_NAME  256
@@ -894,6 +916,30 @@ set_extract_images(
     xcparams_t *params,
     int index,
     int64_t value);
+
+/**
+ * @brief   Allocate and copy vertical_data from a byte buffer.
+ *
+ * @param   params  Transcoding parameters
+ * @param   data    Source byte buffer
+ * @param   len     Length in bytes
+ * @return  eav_success on success, eav_param if len <= 0, eav_mem_alloc if the
+ *          buffer allocation fails.
+ */
+int
+init_vertical_data(
+    xcparams_t *params,
+    const uint8_t *data,
+    int len);
+
+/**
+ * @brief   Free vertical_data memory
+ *
+ * @param   params  Transcoding parameters
+ */
+void
+free_vertical_data(
+    xcparams_t *params);
 
 /**
  * @brief   Returns the level based on the input values

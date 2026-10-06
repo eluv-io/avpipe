@@ -56,6 +56,10 @@ const audioDolbyAtmosPath = "media/Audio_ID_720p_50fps_h264_6ch_640kbps_ddp_joc.
 const dovi81TestSource = "./media/040_Escape_Frame_0_48_HD_P3D65_24Fps_v1_4444_dv81.mp4"
 const dovi20TestSource = "./media/sample_dv20.mp4"
 
+// 2s cut of an iPhone spatial-video capture: 90x160 H.264, stereo AAC, and a 4-channel Apple
+// Positional Audio Codec ('apac') track that ffmpeg demuxes but cannot decode.
+const apacTestSource = "./media/apac_2ch_aac_4ch_apac_2s.mov"
+
 // HDR10 test settings
 const (
 	hdr10TestSource     = "./media/hdr10-plus-injected.mp4"
@@ -428,6 +432,75 @@ func TestSingleABRTranscodeWithOverlayWatermark(t *testing.T) {
 	}
 	setFastEncodeParams(params, false)
 	xcTest(t, outputDir, params, nil, true)
+}
+
+// Generate partial segment from 3rd ABR segment with fade variants.
+// 30fps, timebase=30000, 60 frames/segment (VideoSegDurationTs=60000).
+// 3rd segment starts at PTS 120000, StartSegmentStr is 1-based.
+// Each variant runs with and without SkipDecoding.
+func TestSingleABRFade(t *testing.T) {
+	url := videoBigBuckBunnyPath
+	checkFileExists(t, url);
+
+	fadeVariants := []struct {
+		name           string
+		fade           string
+		fadeStartFrame int
+		fadeEndFrame   int
+		fadeLevel1     float64
+		fadeLevel2     float64
+	}{
+		{"FadeIn", "in", 0, 0, 0.0, 0.0},
+		{"FadeOut", "out", 0, 0, 0.0, 0.0},
+		{"FadeBlendIn", "in", 0, 39, 0.0, 1.0},
+		{"FadeBlendOut", "out", 20, 59, 1.0, 0.0},
+	}
+
+	skipModes := []struct {
+		name         string
+		skipDecoding bool
+	}{
+		{"Decode", false},
+		{"SkipDecode", true},
+	}
+
+	for _, sv := range fadeVariants {
+		for _, sm := range skipModes {
+			testName := sv.name + "_" + sm.name
+			t.Run(testName, func(t *testing.T) {
+				outputDir := path.Join(baseOutPath, fn(), testName)
+				params := &goavpipe.XcParams{
+					BypassTranscoding:  false,
+					Format:             "hls",
+					StartTimeTs:        120000,
+					StartPts:           120000,
+					DurationTs:         60000,
+					StartSegmentStr:    "3",
+					VideoBitrate:       2560000,
+					AudioBitrate:       64000,
+					SampleRate:         44100,
+					VideoSegDurationTs: 60000,
+					AudioSegDurationTs: 96000,
+					Ecodec:             h264Codec,
+					Ecodec2:            "aac",
+					EncHeight:          720,
+					EncWidth:           1280,
+					XcType:             goavpipe.XcVideo,
+					StreamId:           -1,
+					Url:                url,
+					DebugFrameLevel:    debugFrameLevel,
+					SkipDecoding:       sm.skipDecoding,
+					Fade:               sv.fade,
+					FadeStartFrame:     sv.fadeStartFrame,
+					FadeEndFrame:       sv.fadeEndFrame,
+					FadeLevel1:         sv.fadeLevel1,
+					FadeLevel2:         sv.fadeLevel2,
+				}
+				setFastEncodeParams(params, false)
+				xcTest(t, outputDir, params, nil, true)
+			})
+		}
+	}
 }
 
 func TestV2SingleABRTranscode(t *testing.T) {
@@ -2866,6 +2939,59 @@ func TestProbe(t *testing.T) {
 	assert.Equal(t, "h264", a[0].CodecName)
 	assert.Equal(t, "mp3float", a[1].CodecName)
 	assert.Equal(t, "ac3", a[2].CodecName)
+}
+
+// TestTranscodeWithUndecodableStream verifies that a stream ffmpeg has no decoder for (here the
+// Apple Positional Audio Codec 'apac' track) doesn't stop transcoding of the other streams when it
+// isn't selected: the video and the first (AAC) audio are transcoded and the apac packets are skipped.
+func TestTranscodeWithUndecodableStream(t *testing.T) {
+	url := apacTestSource
+	checkFileExists(t, url)
+
+	outputDir := path.Join(baseOutPath, fn())
+
+	params := goavpipe.NewXcParams()
+	params.Url = url
+	params.Format = "fmp4-segment"
+	params.SegDuration = "2"
+	params.XcType = goavpipe.XcAll
+	params.ForceKeyInt = 25
+	params.DebugFrameLevel = debugFrameLevel
+	setFastEncodeParams(params, false)
+
+	xcTestResult := &XcTestResult{
+		mezFile: []string{
+			fmt.Sprintf("%s/vsegment-1.mp4", outputDir),
+			fmt.Sprintf("%s/asegment0-1.mp4", outputDir),
+		},
+	}
+	xcTest(t, outputDir, params, xcTestResult, true)
+
+	assert.Equal(t, uint64(50), statsInfo.VideoFramesRead)
+	assert.Equal(t, int64(50), statsInfo.EncodingVideoFrameStats.TotalFramesWritten)
+	assert.Greater(t, statsInfo.AudioFramesRead, uint64(0))
+	assert.Greater(t, statsInfo.EncodingAudioFrameStats.TotalFramesWritten, int64(0))
+}
+
+// TestTranscodeSelectUndecodableStream verifies that explicitly selecting a stream without a decoder
+// still fails with EAV_CODEC_PARAM.
+func TestTranscodeSelectUndecodableStream(t *testing.T) {
+	url := apacTestSource
+	checkFileExists(t, url)
+
+	outputDir := path.Join(baseOutPath, fn())
+	boilerplate(t, outputDir, url)
+
+	params := goavpipe.NewXcParams()
+	params.Url = url
+	params.Format = "fmp4-segment"
+	params.SegDuration = "2"
+	params.XcType = goavpipe.XcAudio
+	params.AudioIndex = []int32{2} // the apac track
+	params.DebugFrameLevel = debugFrameLevel
+
+	err := avpipe.Xc(params)
+	assert.ErrorIs(t, err, avpipe.EAV_CODEC_PARAM)
 }
 
 func TestProbeWithData(t *testing.T) {

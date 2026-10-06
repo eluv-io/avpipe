@@ -4,6 +4,7 @@ import (
 	"encoding/binary"
 	"testing"
 
+	pionrtp "github.com/pion/rtp"
 	"github.com/stretchr/testify/require"
 )
 
@@ -78,6 +79,71 @@ func TestAtsTs_ValidateTooShortForTimestamp(t *testing.T) {
 func TestAtsTs_ValidateBadTSData(t *testing.T) {
 	// Timestamp present, but the TS payload is not a multiple of 188 bytes.
 	part := buildAtsTs(t, 1, []byte{0x47, 0x00, 0x00})
+	_, err := ValidateTLV(part)
+	require.Error(t, err)
+}
+
+// buildRtpTs builds an RTP-TS (or RTP-TS-NoPad) TLV part: TLV header followed by an RTP-marshaled datagram carrying
+// the given raw TS payload.
+func buildRtpTs(t *testing.T, tlvType TlvType, hdr pionrtp.Header, tsData []byte) []byte {
+	t.Helper()
+	rtpPkt := pionrtp.Packet{Header: hdr, Payload: tsData}
+	rtpDatagram, err := rtpPkt.Marshal()
+	require.NoError(t, err)
+
+	header, err := TlvHeader(len(rtpDatagram), tlvType)
+	require.NoError(t, err)
+
+	return append(append([]byte{}, header...), rtpDatagram...)
+}
+
+func TestRtpTs_ValidateRoundTrip(t *testing.T) {
+	for _, tlvType := range []TlvType{TlvTypeRtpTs, TlvTypeRtpTsNoPad} {
+		t.Run(tlvType.String(), func(t *testing.T) {
+			datagram := makeTSDatagram(3)
+			part := buildRtpTs(t, tlvType, pionrtp.Header{Version: 2, SequenceNumber: 1, Timestamp: 1}, datagram)
+
+			gotType, err := ValidateTLV(part)
+			require.NoError(t, err)
+			require.Equal(t, tlvType, gotType)
+		})
+	}
+}
+
+func TestRtpTs_ValidateExcludesRTPPadding(t *testing.T) {
+	// RTP padding must not be treated as part of the TS payload - a 200-byte padding block (not a multiple of 188)
+	// would otherwise make validateRawTS reject an otherwise-valid datagram.
+	datagram := makeTSDatagram(1)
+	hdr := pionrtp.Header{Version: 2, SequenceNumber: 1, Timestamp: 1, Padding: true, PaddingSize: 200}
+	part := buildRtpTs(t, TlvTypeRtpTs, hdr, datagram)
+
+	_, err := ValidateTLV(part)
+	require.NoError(t, err)
+}
+
+func TestRtpTs_ValidateRejectsMalformedPacket(t *testing.T) {
+	value := []byte{0x01, 0x02} // too short to be a valid RTP header
+	part := make([]byte, TLV_HEADER_LEN+len(value))
+	part[0] = byte(TlvTypeRtpTs)
+	binary.BigEndian.PutUint16(part[1:3], uint16(len(value)))
+	copy(part[TLV_HEADER_LEN:], value)
+
+	_, err := ValidateTLV(part)
+	require.Error(t, err)
+}
+
+func TestRtpTs_ValidateRejectsNonVersion2Packet(t *testing.T) {
+	datagram := makeTSDatagram(1)
+	part := buildRtpTs(t, TlvTypeRtpTs, pionrtp.Header{Version: 1, SequenceNumber: 1, Timestamp: 1}, datagram)
+
+	_, err := ValidateTLV(part)
+	require.Error(t, err)
+}
+
+func TestRtpTs_ValidateBadTSData(t *testing.T) {
+	// Valid RTP header, but the TS payload is not a multiple of 188 bytes.
+	part := buildRtpTs(t, TlvTypeRtpTs, pionrtp.Header{Version: 2, SequenceNumber: 1, Timestamp: 1}, []byte{0x47, 0x00, 0x00})
+
 	_, err := ValidateTLV(part)
 	require.Error(t, err)
 }

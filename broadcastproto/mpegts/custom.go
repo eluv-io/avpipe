@@ -53,7 +53,7 @@ func (c *customInputOpener) Open(fd int64, url string) (goavpipe.InputHandler, e
 	var mpegTsConsumer *MpegTsConsumer
 
 	fmp4Consumer = &Fmp4Consumer{
-		pktChan: make(chan *pktpool.Packet, c.cfg.InputCfg.Processor.ChannelCap),
+		pktChan: make(chan pktpool.Resource, c.cfg.InputCfg.Processor.ChannelCap),
 	}
 	consumers = append(consumers, fmp4Consumer)
 
@@ -71,10 +71,13 @@ func (c *customInputOpener) Open(fd int64, url string) (goavpipe.InputHandler, e
 			fd,
 		)
 		mpegTsConsumer = &MpegTsConsumer{
-			pktChan: make(chan *pktpool.Packet, c.cfg.InputCfg.Processor.ChannelCap),
+			pktChan: make(chan pktpool.Resource, c.cfg.InputCfg.Processor.ChannelCap),
 			pp:      processor,
 		}
-		consumers = append(consumers, mpegTsConsumer)
+
+		consumers = append(consumers, reorderingConsumerFor(
+			mpegTsConsumer, c.transport.PackagingMode(), c.cfg.InputCfg.Processor.ReorderBuffer, fd, url,
+		))
 	}
 
 	netReader := StartNetReader(
@@ -84,6 +87,9 @@ func (c *customInputOpener) Open(fd int64, url string) (goavpipe.InputHandler, e
 		c.transport,
 		consumers,
 	)
+	if mpegTsConsumer != nil {
+		mpegTsConsumer.pp.SetConnStatsSource(netReader)
+	}
 
 	handler := &customInputHandler{
 		netReader:      netReader,
@@ -163,7 +169,7 @@ func (h *customInputHandler) Stat(streamIndex int, statType goavpipe.AVStatType,
 // ---------------------------------------------------------------------------------------------------------------------
 
 type Fmp4Consumer struct {
-	pktChan        chan *pktpool.Packet
+	pktChan        chan pktpool.Resource
 	packetsDropped atomic.Uint64
 }
 
@@ -175,19 +181,19 @@ func (f *Fmp4Consumer) Name() string {
 	return "fmp4"
 }
 
-func (f *Fmp4Consumer) Chan() chan<- *pktpool.Packet {
+func (f *Fmp4Consumer) Chan() chan<- pktpool.Resource {
 	return f.pktChan
 }
 
 // Read reads the next packet and is called from ffmpeg.
 func (f *Fmp4Consumer) Read(buf []byte) (int, error) {
 	select {
-	case pkt := <-f.pktChan:
-		if pkt == nil {
+	case res := <-f.pktChan:
+		if res == nil {
 			return 0, errors.E("read", errors.K.IO.Default(), io.EOF, goavpipe.ErrRetryField, true)
 		}
-		n := copy(buf, pkt.Data)
-		pkt.Release()
+		n := copy(buf, res.T.Data)
+		res.Release()
 		return n, nil
 	}
 }
@@ -195,7 +201,7 @@ func (f *Fmp4Consumer) Read(buf []byte) (int, error) {
 // ---------------------------------------------------------------------------------------------------------------------
 
 type MpegTsConsumer struct {
-	pktChan        chan *pktpool.Packet
+	pktChan        chan pktpool.Resource
 	packetsDropped atomic.Uint64
 	pp             *MpegtsPacketProcessor
 	onFirstPacket  func()
@@ -209,7 +215,7 @@ func (f *MpegTsConsumer) Name() string {
 	return "mpegts"
 }
 
-func (f *MpegTsConsumer) Chan() chan<- *pktpool.Packet {
+func (f *MpegTsConsumer) Chan() chan<- pktpool.Resource {
 	return f.pktChan
 }
 
@@ -221,7 +227,7 @@ func (f *MpegTsConsumer) ReaderLoop() (err error) {
 	defer func() {
 		err = errors.Append(err, f.pp.Stop())
 	}()
-	for pkt := range f.pktChan {
+	for res := range f.pktChan {
 		if nPackets == 0 {
 			if f.onFirstPacket != nil {
 				f.onFirstPacket()
@@ -239,8 +245,10 @@ func (f *MpegTsConsumer) ReaderLoop() (err error) {
 
 		// Use the packet's network arrival time (recorded by the NetReader) rather than the current time: this drives
 		// both wall-clock segmentation and, for ATS-TS packaging, the arrival timestamp written to the output.
-		f.pp.ProcessDatagram(pkt.ReceivedAt, pkt.Data)
-		pkt.Release()
+		// ProcessDatagramPacket frames the TLV output zero-copy into the packet's head room without mutating it, so it
+		// is safe even when the packet is also being read by another consumer (e.g. the fmp4 consumer).
+		f.pp.ProcessDatagramPacket(res.T.ReceivedAt, res.T)
+		res.Release()
 	}
 	return nil
 }

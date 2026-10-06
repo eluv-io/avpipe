@@ -24,16 +24,16 @@ func TestXcFiniRemovesJobAndURLHandlers(t *testing.T) {
 
 	putXCJob(handle, &xcJob{url: url})
 
-	require.Same(t, inputOpener, goavpipe.GetInputOpener(url))
-	require.Same(t, outputOpener, goavpipe.GetOutputOpener(url))
+	require.Same(t, inputOpener, goavpipe.GetURLInputOpener(url))
+	require.Same(t, outputOpener, goavpipe.GetURLOutputOpener(url))
 	require.NoError(t, XcFini(handle))
 
 	xcJobsMu.Lock()
 	_, jobExists := xcJobs[handle]
 	xcJobsMu.Unlock()
 	require.False(t, jobExists)
-	require.NotSame(t, inputOpener, goavpipe.GetInputOpener(url))
-	require.NotSame(t, outputOpener, goavpipe.GetOutputOpener(url))
+	require.Nil(t, goavpipe.GetURLInputOpener(url))
+	require.Nil(t, goavpipe.GetURLOutputOpener(url))
 	require.ErrorIs(t, XcFini(handle), EAV_BAD_HANDLE)
 }
 
@@ -47,6 +47,10 @@ func TestXcInitFailureRollsBackURLHandlersAndDoesNotCreateJob(t *testing.T) {
 		goavpipe.Globals.RemoveURLHandlers(url)
 	})
 
+	// verify registration before cleanup
+	require.Same(t, inputOpener, goavpipe.GetURLInputOpener(url))
+	require.Same(t, outputOpener, goavpipe.GetURLOutputOpener(url))
+
 	xcJobsMu.Lock()
 	jobsBefore := len(xcJobs)
 	xcJobsMu.Unlock()
@@ -59,13 +63,36 @@ func TestXcInitFailureRollsBackURLHandlersAndDoesNotCreateJob(t *testing.T) {
 
 	require.Error(t, err)
 	require.Equal(t, int32(-1), handle)
-	require.NotSame(t, inputOpener, goavpipe.GetInputOpener(url))
-	require.NotSame(t, outputOpener, goavpipe.GetOutputOpener(url))
+
+	require.Nil(t, goavpipe.GetURLInputOpener(url))
+	require.Nil(t, goavpipe.GetURLOutputOpener(url))
 
 	xcJobsMu.Lock()
 	jobsAfter := len(xcJobs)
 	xcJobsMu.Unlock()
 	require.Equal(t, jobsBefore, jobsAfter)
+}
+
+func TestTruncateToRequestedSize(t *testing.T) {
+	t.Run("shorter than sz returned as-is", func(t *testing.T) {
+		data := []byte{1, 2, 3}
+		require.Equal(t, data, truncateToRequestedSize(data, 10))
+	})
+
+	t.Run("exactly sz returned as-is", func(t *testing.T) {
+		data := []byte{1, 2, 3}
+		require.Equal(t, data, truncateToRequestedSize(data, 3))
+	})
+
+	t.Run("longer than sz truncated", func(t *testing.T) {
+		data := []byte{1, 2, 3, 4, 5}
+		require.Equal(t, []byte{1, 2, 3}, truncateToRequestedSize(data, 3))
+	})
+
+	t.Run("zero sz truncates to empty", func(t *testing.T) {
+		data := []byte{1, 2, 3}
+		require.Empty(t, truncateToRequestedSize(data, 0))
+	})
 }
 
 type xcJobTestInputOpener struct{}

@@ -6,7 +6,7 @@ import (
 
 	"github.com/Comcast/gots/v2/packet"
 
-	"github.com/eluv-io/avpipe/broadcastproto/transport"
+	ccrtp "github.com/eluv-io/common-go/media/rtp"
 )
 
 // TLV (Type Length Value) definitions for MPEGTS over various transports.
@@ -115,13 +115,15 @@ func validateAtsTS(data []byte) error {
 }
 
 func validateRtpTS(data []byte) error {
-	rtpOffset, err := transport.StripRTP(data)
+	rtpPkt, err := ccrtp.ParsePacket(data)
 	if err != nil {
 		return err
 	}
+	if rtpPkt.Header.Version != 2 {
+		return fmt.Errorf("unsupported RTP version: %d", rtpPkt.Header.Version)
+	}
 
-	mpegtsData := data[rtpOffset:]
-	return validateRawTS(mpegtsData)
+	return validateRawTS(rtpPkt.Payload)
 }
 
 func validateRawTS(data []byte) error {
