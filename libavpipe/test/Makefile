@@ -1,7 +1,7 @@
 TOP_DIR ?= $(shell pwd)/../..
 
-FFMPEG_CFLAGS := $(shell pkg-config --cflags libavcodec libavformat libavutil)
-FFMPEG_LIBS   := $(shell pkg-config --libs   libavcodec libavformat libavutil)
+FFMPEG_CFLAGS := $(shell pkg-config --cflags libavcodec libavfilter libavformat libavutil)
+FFMPEG_LIBS   := $(shell pkg-config --libs   libavcodec libavfilter libavformat libavutil)
 
 # avpipe_filters.c (included directly by test_fade_filter) pulls in libavfilter.
 # Only -l is needed: LIBS already supplies -L/-rpath for the same FFmpeg dist.
@@ -17,7 +17,8 @@ LIBS := $(FFMPEG_LIBS) \
 	-L$(TOP_DIR)/lib -lutils
 
 TESTS := test_color_defaults test_hdr_metadata test_pts_unwrap test_fade_filter \
-	test_vertical_crop
+	test_vertical_crop test_video_fps
+
 OUT   := out
 BINS  := $(addprefix $(OUT)/,$(TESTS))
 
@@ -65,6 +66,9 @@ $(OUT)/test_fade_filter: test_fade_filter.c unity/unity.c \
 $(OUT)/test_vertical_crop: test_vertical_crop.c unity/unity.c \
 		$(SRC_DIR)/avpipe_filters.c $(SRC_DIR)/avpipe_utils.c $(PROD_HDRS) | $(OUT)
 	gcc $(CFLAGS) $< unity/unity.c -o $@ $(LIBS) $(AVFILTER_LIBS) -lm
+
+$(OUT)/test_video_fps: test_video_fps.c unity/unity.c | $(OUT)
+	gcc $(CFLAGS) $^ -o $@ $(LIBS)
 
 clean:
 	rm -rf out $(TESTS:=.dSYM)
