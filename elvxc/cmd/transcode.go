@@ -720,26 +720,11 @@ func doTranscode(cmd *cobra.Command, args []string) error {
 	if verticalDataFile != "" && vertical == 0 {
 		return fmt.Errorf("vertical-data requires vertical cropping to be enabled")
 	}
-	// A regular file is loaded whole: check_params validates it before the job
-	// starts and the read-only buffer can be shared by all transcoding threads.
-	// Anything else (FIFO, pipe, socket) is streamed one record per frame, and a
-	// stream can back only one job.
 	var verticalData []byte
 	verticalDataStream := false
 	if verticalDataFile != "" {
-		fi, statErr := os.Stat(verticalDataFile)
-		if statErr != nil {
-			return fmt.Errorf("vertical-data: %w", statErr)
-		}
-		verticalDataStream = !fi.Mode().IsRegular()
-		if verticalDataStream && nThreads != 1 {
-			return fmt.Errorf("vertical-data streaming requires exactly one transcoding thread")
-		}
-		if !verticalDataStream {
-			var readErr error
-			if verticalData, readErr = os.ReadFile(verticalDataFile); readErr != nil {
-				return fmt.Errorf("failed to read vertical-data file: %w", readErr)
-			}
+		if verticalData, verticalDataStream, err = verticalDataSource(verticalDataFile, nThreads); err != nil {
+			return err
 		}
 	}
 
@@ -789,18 +774,9 @@ func doTranscode(cmd *cobra.Command, args []string) error {
 	if err != nil {
 		return fmt.Errorf("Invalid copy-packaging value")
 	}
-	copyPackaging := transport.UnknownPackagingMode
-	switch copyPackagingStr {
-	case "":
-		// Unset: the transport applies its own default - RtpTs for RTP, RawTs for UDP.
-	case "raw_ts":
-		copyPackaging = transport.RawTs
-	case "rtp_ts":
-		copyPackaging = transport.RtpTs
-	case "ats_ts":
-		copyPackaging = transport.AtsTs
-	default:
-		return fmt.Errorf("Unsupported copy-packaging value")
+	copyPackaging, err := copyPackagingMode(copyPackagingStr)
+	if err != nil {
+		return err
 	}
 
 	cryptScheme := goavpipe.CryptNone
@@ -971,4 +947,44 @@ func doTranscode(cmd *cobra.Command, args []string) error {
 	}
 
 	return lastError
+}
+
+// verticalDataSource decides how --vertical-data is consumed. A regular file is
+// loaded whole: check_params validates it before the job starts and the
+// read-only buffer can be shared by all transcoding threads. Anything else
+// (FIFO, pipe, socket) is streamed one record per frame, so stream is returned
+// for the caller to open it as VerticalDataReader, and since a stream can back
+// only one job it is refused with more than one thread. Deciding never opens
+// the path: opening a FIFO blocks until its producer connects.
+func verticalDataSource(path string, nThreads int32) (buf []byte, stream bool, err error) {
+	fi, err := os.Stat(path)
+	if err != nil {
+		return nil, false, fmt.Errorf("vertical-data: %w", err)
+	}
+	if !fi.Mode().IsRegular() {
+		if nThreads != 1 {
+			return nil, false, fmt.Errorf("vertical-data streaming requires exactly one transcoding thread")
+		}
+		return nil, true, nil
+	}
+	if buf, err = os.ReadFile(path); err != nil {
+		return nil, false, fmt.Errorf("failed to read vertical-data file: %w", err)
+	}
+	return buf, false, nil
+}
+
+// copyPackagingMode parses --copy-packaging. Unset means the transport applies
+// its own default - RtpTs for RTP, RawTs for UDP.
+func copyPackagingMode(s string) (transport.TsPackagingMode, error) {
+	switch s {
+	case "":
+		return transport.UnknownPackagingMode, nil
+	case "raw_ts":
+		return transport.RawTs, nil
+	case "rtp_ts":
+		return transport.RtpTs, nil
+	case "ats_ts":
+		return transport.AtsTs, nil
+	}
+	return transport.UnknownPackagingMode, fmt.Errorf("Unsupported copy-packaging value %q", s)
 }
