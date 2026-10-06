@@ -374,7 +374,7 @@ type XcParams struct {
 	Timecode               string        `json:"timecode,omitempty"`
 	Vertical               int           `json:"vertical,omitempty"` // vertical_type: 0=none, 1=32bpf
 	VerticalData           []byte        `json:"vertical_data,omitempty"`
-	VerticalDataReader     io.ReadCloser `json:"-"` // Streaming version of VerticalData
+	VerticalDataReader     io.ReadCloser `json:"-"` // Streaming version of VerticalData, one 4-byte LE uint32 record per output frame; Read may block. EOF after the first record holds the last value; EOF before any record, a short record or any other error fails the job with EAV_READ_INPUT (decoded frames are still encoded at the last position). Close must unblock a pending Read - XcCancel relies on it; FIFOs on macOS do not. One reader backs exactly one job: sharing is not detected and would interleave reads. See doc/dev_live.md.
 	Fade                   string        `json:"fade,omitempty"`
 	FadeStartFrame         int           `json:"fade_start_frame,omitempty"`
 	FadeEndFrame           int           `json:"fade_end_frame,omitempty"`
