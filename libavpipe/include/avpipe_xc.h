@@ -290,7 +290,7 @@ typedef int
      *   - audio merge/join outputs report their first selected source;
      *   - copy_mpegts outputs report their ioctx_t.stream_index (an output
      *     identifier), since their tracker is neither video nor audio;
-     *   - the mux path reports 0 for video and 1 for audio.
+     *   - the mux path reports no output stats.
      */
     int src_stream_index,
     avp_stat_t stat_type);
