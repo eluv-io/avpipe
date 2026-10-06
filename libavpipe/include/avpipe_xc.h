@@ -284,11 +284,11 @@ typedef int
      * stat that carries one. It is not an output ordinal, and it is not valid
      * for input stat in_stat_bytes_read.
      *
-     * Output stats get it from out_stat_src_stream_index().
-     * out_stat_frame_written does not, and differs in two cases:
-     *   - bypass reports the output packet's stream index (0);
-     *   - audio merge/join reports whichever source stream's packet pushed the
-     *     mixed frame out of the filter graph, so it varies per frame.
+     * Output stats get it from out_stat_src_stream_index(), except
+     * out_stat_frame_written when transcoding: it reports the stream index of
+     * the packet being encoded, which differs only for audio merge/join, where
+     * it is whichever source stream's packet pushed the mixed frame out of the
+     * filter graph, so it varies per frame.
      *
      * Where an output has no single source stream:
      *   - audio merge/join outputs report their first selected source;

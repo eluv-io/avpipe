@@ -2646,7 +2646,7 @@ do_bypass(
                 outctx->total_frames_written = encoder_context->video_frames_written;
             }
             outctx->frames_written++;
-            out_handlers->avpipe_stater(outctx, packet->stream_index, out_stat_frame_written);
+            out_handlers->avpipe_stater(outctx, out_stat_src_stream_index(outctx), out_stat_frame_written);
         }
     }
 

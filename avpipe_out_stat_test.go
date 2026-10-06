@@ -80,11 +80,14 @@ func TestOutStatsReportSourceStreamIndex(t *testing.T) {
 		audioIndex []int32
 		// sources[ordinal] is the source stream that audio output must report.
 		sources []int
+		bypass  bool
 	}{
 		{name: "ascending", audioIndex: []int32{1, 2, 3}, sources: []int{1, 2, 3}},
 		{name: "unordered", audioIndex: []int32{3, 1, 2}, sources: []int{1, 2, 3}},
 		// With no selection the decoder picks the first audio stream.
 		{name: "no audio_index", audioIndex: nil, sources: []int{1}},
+		// Bypass writes packets through do_bypass, not encode_frame.
+		{name: "bypass", audioIndex: []int32{2}, sources: []int{2}, bypass: true},
 	}
 
 	outStats := []goavpipe.AVStatType{
@@ -101,7 +104,7 @@ func TestOutStatsReportSourceStreamIndex(t *testing.T) {
 			setupOutDir(t, outputDir)
 
 			params := &goavpipe.XcParams{
-				BypassTranscoding:   false,
+				BypassTranscoding:   tc.bypass,
 				Format:              "fmp4-segment",
 				StartTimeTs:         0,
 				DurationTs:          -1,
