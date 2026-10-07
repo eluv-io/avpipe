@@ -744,7 +744,7 @@ out_stat(
     avp_stat_t stat_type)
 {
     ioctx_t *outctx = (ioctx_t *)opaque;
-    ioctx_t *inctx = outctx->inctx;
+    ioctx_t *inctx = outctx ? outctx->inctx : NULL;
     int64_t h;
     int64_t fd;
     int64_t rc = 0;
