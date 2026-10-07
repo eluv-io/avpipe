@@ -14,6 +14,8 @@ elvxc transcode \
   --threads 1
 ```
 
+To test with media, `scripts/stream-vertical-data.sh -f clip.mp4 -d crop.bin` exercises the vertical streaming path - FIFO, a producer feeding one record per frame at live rate, elvxc - and prints where the output landed; crop data comes from `scripts/gen-vertical-data.sh`.
+
 The stream format and behavior are:
 
 - One 4-byte little-endian `uint32` record per decoded video frame.
