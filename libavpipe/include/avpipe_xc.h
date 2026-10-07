@@ -350,33 +350,43 @@ typedef struct pts_unwrapper_t {
  * - decoder
  *   - the audio_stream_index array stores the selected stream index values in source stream order,
  *     not in xc_params->audio_index order (audio_index [4,1,3] gives the same array as below).
- *     Audio output i (format_context2[i], "fsegment-audio<i>") carries audio_stream_index[i].
  *     - audio_stream_index[0] = 1;
  *     - audio_stream_index[1] = 3;
  *     - audio_stream_index[2] = 4;
  *     (and the number of streams is stored in 'n_audio')
+ *   - with no audio_index it holds only the first audio stream of the source, and with
+ *     xc_params->stream_id only that stream (n_audio is 1)
  *
  * - encoder
- *   - if the encoding operation is audio join, merge or pan (which effectively takes multiple input steams and makes one output stream)
- *      - audio_stream_index[0] = 0; (output stream index is considered 0 and nb_audio_output is 1)
+ *   - if the encoding operation is audio join or merge (several input streams mixed into one output
+ *     stream) or pan (one input stream with its channels remapped)
+ *      - audio_stream_index[0] = 0; (output stream index is considered 0 and n_audio_output is 1)
  *   - otherwise it uses a strange convention (needs fixed - this is impossible to traverse)
  *      - audio_stream_index[0] unset
  *      - audio_stream_index[1] = 1
  *      - audio_stream_index[2] unset
  *      - audio_stream_index[3] = 3
  *      - audio_stream_index[4] = 4
+ *     "unset" slots read 0, not -1 (the context is zero-initialized), so 0 is not a usable
+ *     "no stream" marker; iterate the decoder audio_stream_index array instead.
+ *   - n_audio is set to 1 whatever the number of outputs; use n_audio_output.
  *
  * The video format context is stored in 'format_context'
  * Audio format contexts for each audio output is stored in 'format_context2[]'
- *   - this array is contiguous and has 'n_audio' elements eg. for the xc_params above
+ *   - this array is contiguous, indexed by audio output ordinal, and has 'n_audio_output' elements
+ *     (num_audio_output(): the number of selected streams, or 1 for audio join, merge and pan
+ *     and when no audio_index is given), eg. for the xc_params above
  *     - format_context2[0] is the context for audio stream index 1
  *     - format_context2[1] is the context for audio stream index 3
  *     - format_context2[2] is the context for audio stream index 4
+ *   - audio output i (format_context2[i], "fsegment-audio<i>") carries decoder audio_stream_index[i];
+ *     for audio join and merge its one output carries all selected streams, mixed
  *
  * Codec contexts (AVCodecContext) are stored in 'codec_context[]' as follows:
  *
  * - decoder
- *   - the codec_context array is indexed using the source media stream index values, eg. for the xc_params above
+ *   - the codec_context array is indexed using the source media stream index values, with a context
+ *     for every source stream, selected or not, eg. for the xc_params above
  *     - codec_context[0]  video  (if the source has video on stream_index 0, for example)
  *     - codec_context[1]  audio stream index 1
  *     - codec_context[2]  audio stream index 2 (not selected, per xc_params->audio_index)
@@ -395,7 +405,7 @@ typedef struct pts_unwrapper_t {
  */
 typedef struct coderctx_t {
     AVFormatContext     *format_context;                                /* Input format context or video output format context */
-    AVFormatContext     *format_context2[MAX_STREAMS];                  /* Audio output format context, indexed by audio index */
+    AVFormatContext     *format_context2[MAX_STREAMS];                  /* Audio output format context, indexed by audio output ordinal */
     char                filename2[MAX_STREAMS][MAX_AVFILENAME_LEN];     /* Audio filename formats */
     int                 n_audio_output;                                 /* Number of audio output streams, it is set for encoder */
 
