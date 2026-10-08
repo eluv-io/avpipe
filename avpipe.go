@@ -46,6 +46,7 @@ static inline uint64_t get_channel_layout_mask(const AVChannelLayout *layout) {
 */
 import "C"
 import (
+	"context"
 	"fmt"
 	"io"
 	"math/big"
@@ -192,7 +193,10 @@ func AVPipeReadInput(fd C.int64_t, buf *C.uint8_t, sz C.int) C.int {
 		goavpipe.Log.Debug("AVPipeReadInput()", "fd", fd, "buf", buf, "sz", sz)
 	}
 
-	// gobuf := C.GoBytes(unsafe.Pointer(buf), sz)
+	if pr, ok := h.input.(goavpipe.PacketReader); ok {
+		return avPipeReadInputPacket(pr, fd, buf, sz)
+	}
+
 	gobuf := make([]byte, sz)
 
 	n, err := h.InReader(gobuf)
@@ -200,6 +204,41 @@ func AVPipeReadInput(fd C.int64_t, buf *C.uint8_t, sz C.int) C.int {
 		C.memcpy(unsafe.Pointer(buf), unsafe.Pointer(&gobuf[0]), C.size_t(n))
 	}
 
+	return avPipeReadInputResult(n, err, fd, buf, sz)
+}
+
+// avPipeReadInputPacket implements AVPipeReadInput for InputHandlers that support reading directly into a pooled
+// packet, saving the copy into an intermediate gobuf that the plain-[]byte InReader path needs.
+func avPipeReadInputPacket(pr goavpipe.PacketReader, fd C.int64_t, buf *C.uint8_t, sz C.int) C.int {
+	res, err := pr.ReadPacket()
+	if err != nil {
+		return avPipeReadInputResult(0, err, fd, buf, sz)
+	}
+	defer res.Release()
+
+	data := truncateToRequestedSize(res.T.Data, int(sz))
+	n := len(data)
+	if n > 0 {
+		C.memcpy(unsafe.Pointer(buf), unsafe.Pointer(&data[0]), C.size_t(n))
+	}
+	return avPipeReadInputResult(n, nil, fd, buf, sz)
+}
+
+// truncateToRequestedSize bounds data to at most sz bytes, logging a warning when truncation is necessary. ffmpeg
+// only ever asked for sz bytes; the plain-[]byte read path can't over-read (its destination buffer is exactly sz
+// bytes), but a pooled packet read isn't bounded that way, so this makes the same silent-OS-truncation behavior the
+// plain path already has explicit and visible.
+func truncateToRequestedSize(data []byte, sz int) []byte {
+	if len(data) <= sz {
+		return data
+	}
+	goavpipe.Log.Warn("AVPipeReadInput() packet larger than requested read size, truncating", "len", len(data), "sz", sz)
+	return data[:sz]
+}
+
+// avPipeReadInputResult applies AVPipeReadInput's error-to-return-code convention, shared by the plain-[]byte and
+// PacketReader read paths.
+func avPipeReadInputResult(n int, err error, fd C.int64_t, buf *C.uint8_t, sz C.int) C.int {
 	if err != nil {
 		goavpipe.Log.Warn("AVPipeReadInput()", err, "fd", fd, "buf", buf, "sz", sz)
 		if _, ok := errors.GetField(err, goavpipe.ErrRetryField); ok {
@@ -516,12 +555,6 @@ func AVPipeWriteOutputGo(handler int64, fd int64, buf []byte, allowTake bool) in
 		goavpipe.Log.Debug("AVPipeWriteOutputGo", "fd", fd, "buf_size", len(buf))
 	}
 
-	if h.getOutTable(fd) == nil {
-		msg := fmt.Sprintf("OutWriterX outTable entry is NULL, fd=%d", fd)
-		goavpipe.Log.Error(msg)
-		return -1
-	}
-
 	n, err := h.OutWriter(C.int64_t(fd), buf, allowTake)
 	if err != nil {
 		return -1
@@ -561,6 +594,11 @@ func (h *ioHandler) OutWriter(fd C.int64_t, buf []byte, canTake bool) (int, erro
 	}
 
 	outHandler := h.getOutTable(int64(fd))
+	if outHandler == nil {
+		msg := fmt.Sprintf("OutWriter outTable entry is nil, fd=%d", fd)
+		goavpipe.Log.Error(msg)
+		return -1, errors.Str(msg)
+	}
 
 	var taker Taker
 	if canTake {
@@ -887,6 +925,12 @@ func getCParams(params *goavpipe.XcParams) (*C.xcparams_t, error) {
 		level:                     C.int(params.Level),
 		deinterlace:               C.dif_type(params.Deinterlace),
 		timecode:                  C.CString(params.Timecode),
+		vertical:                  C.vertical_type(params.Vertical),
+		fade:                      C.CString(params.Fade),
+		fade_start_frame:          C.int(params.FadeStartFrame),
+		fade_end_frame:            C.int(params.FadeEndFrame),
+		fade_level_1:              C.double(params.FadeLevel1),
+		fade_level_2:              C.double(params.FadeLevel2),
 
 		// All boolean params are handled below
 	}
@@ -945,6 +989,16 @@ func getCParams(params *goavpipe.XcParams) (*C.xcparams_t, error) {
 		for i := 0; i < extractImagesSize; i++ {
 			C.set_extract_images((*C.xcparams_t)(unsafe.Pointer(cparams)),
 				C.int(i), C.int64_t(params.ExtractImagesTs[i]))
+		}
+	}
+
+	if len(params.VerticalData) > 0 {
+		rc := C.init_vertical_data((*C.xcparams_t)(unsafe.Pointer(cparams)),
+			(*C.uint8_t)(unsafe.Pointer(&params.VerticalData[0])),
+			C.int(len(params.VerticalData)))
+		if err := avpipeError(rc); err != nil {
+			return nil, fmt.Errorf("failed to copy vertical data (%d bytes): %w",
+				len(params.VerticalData), err)
 		}
 	}
 
@@ -1409,6 +1463,9 @@ func XcRun(handle int32) (runErr error) {
 		}
 		processor.Wait()
 		_, err = processor.Status()
+		if errors.Is(err, context.Canceled) {
+			return EAV_CANCELLED
+		}
 		return err
 	}
 

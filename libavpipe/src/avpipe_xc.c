@@ -53,36 +53,7 @@
 #define DEFAULT_ACC_SAMPLE_RATE     48000
 #define MAX_FRAME_READ_RETRIES      300
 
-extern int
-init_video_filters(
-    const char *filters_descr,
-    coderctx_t *decoder_context,
-    coderctx_t *encoder_context,
-    xcparams_t *params);
-
-extern int
-init_audio_filters(
-    coderctx_t *decoder_context,
-    coderctx_t *encoder_context,
-    xcparams_t *params);
-
-int
-init_audio_pan_filters(
-    const char *filters_descr,
-    coderctx_t *decoder_context,
-    coderctx_t *encoder_context);
-
-int
-init_audio_merge_pan_filters(
-    const char *filters_descr,
-    coderctx_t *decoder_context,
-    coderctx_t *encoder_context);
-
-extern int
-init_audio_join_filters(
-    coderctx_t *decoder_context,
-    coderctx_t *encoder_context,
-    xcparams_t *params);
+#include "avpipe_filters.h"
 
 extern const char *
 av_get_pix_fmt_name(
@@ -486,9 +457,28 @@ prepare_decoder(
         }
 
         if (decoder_context->codec_parameters[i]->codec_type != AVMEDIA_TYPE_DATA && !decoder_context->codec[i]) {
-            elv_err("Unsupported decoder codec param=%s, codec_id=%d, url=%s",
-                params ? params->dcodec : "", decoder_context->codec_parameters[i]->codec_id, url);
-            return eav_codec_param;
+            /*
+             * No decoder is available for this stream
+             *
+             * This is only fatal if the stream is one we have to decode: the stream_id / audio_index
+             * selection or the auto-selected video stream. Any other stream (including the audio sync
+             * stream, which is only inspected at the packet level) is kept as an undecodable stream
+             * (codec[i] == NULL, like a data stream) so that probe can still report it and transcoding
+             * of the remaining streams proceeds; the read loop skips its packets.
+             */
+            int needs_decoder = selected_stream || i == decoder_context->video_stream_index;
+            if (needs_decoder) {
+                elv_err("Unsupported decoder codec param=%s, codec_id=%d, url=%s",
+                    params ? params->dcodec : "", decoder_context->codec_parameters[i]->codec_id, url);
+                return eav_codec_param;
+            }
+            char codec_tag[AV_FOURCC_MAX_STRING_SIZE];
+            elv_log("No decoder for stream, it will not be decoded, stream_index=%d, stream_id=%d, codec_type=%s, "
+                "codec_id=%d, codec_tag=%s, url=%s",
+                i, decoder_context->stream[i]->id,
+                av_get_media_type_string(decoder_context->codec_parameters[i]->codec_type),
+                decoder_context->codec_parameters[i]->codec_id,
+                av_fourcc_make_string(codec_tag, decoder_context->codec_parameters[i]->codec_tag), url);
         }
 
         decoder_context->codec_context[i] = avcodec_alloc_context3(decoder_context->codec[i]);
@@ -513,8 +503,9 @@ prepare_decoder(
         else
             decoder_context->codec_context[i]->thread_count = DEFAULT_THREAD_COUNT;
 
-        /* Open the decoder (initialize the decoder codec_context[i] using given codec[i]). */
-        if (decoder_context->codec_parameters[i]->codec_type != AVMEDIA_TYPE_DATA &&
+        /* Open the decoder (initialize the decoder codec_context[i] using given codec[i]).
+         * codec[i] is NULL for data streams and for streams without a decoder, so don't open. */
+        if (decoder_context->codec[i] &&
              (rc = avcodec_open2(decoder_context->codec_context[i], decoder_context->codec[i], NULL)) < 0) {
             elv_err("Failed to open codec through avcodec_open2, err=%d, param=%s, codec_id=%s, url=%s",
                 rc, params->dcodec, avcodec_get_name(decoder_context->codec_parameters[i]->codec_id), url);
@@ -1376,6 +1367,10 @@ prepare_video_encoder(
     if (params->rotate == 90 || params->rotate == 270) {
         encoder_codec_context->height = params->enc_height != -1 ? params->enc_height : decoder_context->codec_context[index]->width;
         encoder_codec_context->width = params->enc_width != -1 ? params->enc_width : decoder_context->codec_context[index]->height;
+    }
+    /* If vertical crop is set, encoder width must match crop output */
+    if (params->vertical) {
+        encoder_codec_context->width = crop_calc_width(encoder_codec_context->height);
     }
     if (params->video_time_base > 0) {
         encoder_codec_context->time_base = (AVRational) {1, params->video_time_base};
@@ -2460,6 +2455,33 @@ encode_frame(
             output_packet->pts != AV_NOPTS_VALUE)
             encoder_context->video_encoder_prev_pts = output_packet->pts;
 
+        // Diagnostic only - detect missing audio frames for UDP-based live sources, mirroring the video GAP detection, so
+        // packet-loss-caused audio duration anomalies can be correlated against a logged pts gap
+        {
+            int sel = selected_decoded_audio(decoder_context, stream_index);
+            int out_idx = (sel >= 0) ? audio_output_stream_index(decoder_context, params, sel) : -1;
+            AVCodecContext *audio_codec_ctx =
+                (out_idx >= 0) ? encoder_context->codec_context[out_idx] : NULL;
+
+            if (is_live_source_udp(decoder_context) &&
+                audio_codec_ctx != NULL &&
+                encoder_context->audio_encoder_prev_pts[stream_index] > 0 &&
+                audio_codec_ctx->frame_size > 0 &&
+                output_packet->pts != AV_NOPTS_VALUE &&
+                output_packet->pts - encoder_context->audio_encoder_prev_pts[stream_index] >=
+                    2*audio_codec_ctx->frame_size) {
+
+                int afc = (output_packet->pts - encoder_context->audio_encoder_prev_pts[stream_index]) /
+                    audio_codec_ctx->frame_size - 1;
+
+                elv_log("AUDIO GAP detected stream_index=%d packet->pts=%"PRId64" audio_encoder_prev_pts=%"PRId64" count=%d url=%s",
+                    stream_index, output_packet->pts, encoder_context->audio_encoder_prev_pts[stream_index], afc, params->url);
+            }
+
+            if (sel >= 0 && output_packet->pts != AV_NOPTS_VALUE)
+                encoder_context->audio_encoder_prev_pts[stream_index] = output_packet->pts;
+        }
+
         /*
          * Rescale video packets from encoder codec_context timebase to the output stream timebase.
          * The muxer may adjust stream timebase during avformat_write_header (e.g. from {1001,60000} to {1,60000}).
@@ -2867,6 +2889,9 @@ transcode_video(
         }
 
         decoder_context->video_pts = packet->pts;
+
+        /* Send crop x command per frame for vertical video */
+        crop_send_command(decoder_context, encoder_context, p);
 
         /* Rescale video frame to encoder timebase before sending to the filter
          * (filter is initialized with the encoder timebase).
@@ -3633,10 +3658,21 @@ get_filter_str(
             return eav_filter_string_init;
         }
         *filter_str = (char *) calloc(FILTER_STRING_SZ, 1);
-        sprintf(*filter_str, "scale=%d:%d",
-            encoder_context->codec_context[encoder_context->video_stream_index]->width,
-            encoder_context->codec_context[encoder_context->video_stream_index]->height);
-            elv_dbg("FILTER scale=%s", *filter_str);
+        if (params->vertical) {
+            int enc_height = encoder_context->codec_context[encoder_context->video_stream_index]->height;
+            sprintf(*filter_str, "scale=-2:%d,crop=%d:ih:200:0",
+                enc_height, crop_calc_width(enc_height));
+        } else {
+            sprintf(*filter_str, "scale=%d:%d",
+                encoder_context->codec_context[encoder_context->video_stream_index]->width,
+                encoder_context->codec_context[encoder_context->video_stream_index]->height);
+        }
+        int ret = append_fade_filter(*filter_str, FILTER_STRING_SZ, encoder_context, params);
+        if (ret != 0) {
+            free(*filter_str);
+            return ret;
+        }
+        elv_dbg("FILTER str=%s", *filter_str);
     }
 
     return 0;
@@ -3676,6 +3712,14 @@ avpipe_xc(
     int av_read_frame_rc = 0;
     int nretries = 0;
     AVPacket *input_packet = NULL;
+
+    /*
+     * Cancelled before the run started (XcCancel between XcInit and XcRun) - return before opening the input
+     */
+    if (decoder_context->cancelled) {
+        elv_dbg("avpipe_xc cancelled before start, url=%s", params->url ? params->url : "");
+        return eav_cancelled;
+    }
 
     if (!params->url || params->url[0] == '\0' ||
         in_handlers->avpipe_opener(params->url, inctx) < 0) {
@@ -3732,6 +3776,13 @@ avpipe_xc(
             goto xc_done;
         }
         free(filter_str);
+
+        /* Find and store crop filter context for per-frame send_command */
+        if (params->vertical) {
+            if ((rc = crop_get_context(decoder_context, params)) != 0) {
+                goto xc_done;
+            }
+        }
     }
 
     if (!params->bypass_transcoding &&
@@ -4470,6 +4521,10 @@ avpipe_probe(
         const AVCodec *codec = decoder_ctx.codec[i];
         AVRational sar, dar;
 
+        /* Subtitle/attachment/unknown streams have no codec context and are not reported. An audio or
+         * video stream with no decoder (see prepare_decoder) is reported like a data stream, with no
+         * codec id/name but with the container tag: clients map probe positions to stream indexes, so
+         * leaving it out would shift the streams after it. */
         if (!codec_context) {
             nb_skipped_streams++;
             continue;
@@ -4530,7 +4585,10 @@ avpipe_probe(
         stream_probes_ptr->has_b_frames = codec_context->has_b_frames;
         stream_probes_ptr->sample_rate = codec_context->sample_rate;
         stream_probes_ptr->channels = codec_context->ch_layout.nb_channels;
-        if (codec && codec->type == AVMEDIA_TYPE_AUDIO)
+        /* Gate on the codec_type reported above (codec->type when a decoder exists, the demuxer's
+         * codecpar->codec_type otherwise) so an audio stream without a decoder still reports the
+         * channel layout the demuxer found. */
+        if (stream_probes_ptr->codec_type == AVMEDIA_TYPE_AUDIO)
             stream_probes_ptr->channel_layout = codec_context->ch_layout.u.mask;
         else
             stream_probes_ptr->channel_layout = -1;
@@ -4879,6 +4937,52 @@ check_params(
             return eav_param;
         }
     }
+
+    if (params->vertical) {
+        if (params->bypass_transcoding) {
+            elv_err("Incompatible params - vertical crop requires transcoding (bypass must be disabled), url=%s", params->url);
+            return eav_param;
+        }
+        if (params->vertical != vertical_32bpf) {
+            elv_err("Unsupported vertical data type=%d url=%s", params->vertical, params->url);
+            return eav_param;
+        }
+        if (params->vertical_data == NULL || params->vertical_data_len < 4 || params->vertical_data_len % 4 > 0) {
+            elv_err("Bad vertical data - missing or too short url=%s", params->url);
+            return eav_param;
+        }
+    }
+
+    if (params->fade && *params->fade != '\0' && params->bypass_transcoding) {
+        elv_err("Incompatible params - fade requires transcoding (bypass must be disabled), url=%s", params->url);
+        return eav_param;
+    }
+
+    /*
+     * get_filter_str() has mutually-exclusive branches: deinterlace, rotate and
+     * watermark each emit their own filter chain and return early, while the
+     * vertical crop and fade filters are only emitted from the final else branch.
+     * Combining them would silently drop the vertical/fade filters, so reject the
+     * combination here.
+     */
+    if (params->vertical || (params->fade && *params->fade != '\0')) {
+        const char *feature = params->vertical ? "vertical crop" : "fade";
+        if (params->deinterlace != dif_none) {
+            elv_err("Incompatible params - %s not supported with deinterlacing, url=%s", feature, params->url);
+            return eav_param;
+        }
+        if (params->rotate > 0) {
+            elv_err("Incompatible params - %s not supported with rotate, url=%s", feature, params->url);
+            return eav_param;
+        }
+        if ((params->watermark_text && *params->watermark_text != '\0') ||
+            (params->watermark_timecode && *params->watermark_timecode != '\0') ||
+            (params->watermark_overlay && params->watermark_overlay[0] != '\0')) {
+            elv_err("Incompatible params - %s not supported with watermark, url=%s", feature, params->url);
+            return eav_param;
+        }
+    }
+
     return eav_success;
 }
 
@@ -4960,7 +5064,14 @@ log_params(
         "deinterlace=%d "
         "use_preprocessed_input=%d "
         "copy_mpegts=%d "
-        "timecode=%s",
+        "timecode=%s "
+        "vertical=%d "
+        "vertical_data_len=%d "
+        "fade=%s "
+        "fade_start_frame=%d "
+        "fade_end_frame=%d "
+        "fade_level_1=%.3f "
+        "fade_level_2=%.3f",
         params->stream_id, params->url,
         avpipe_version(),
         params->bypass_transcoding, params->skip_decoding,
@@ -4987,7 +5098,11 @@ log_params(
         1, params->video_time_base, params->video_frame_duration_ts, params->rotate,
         params->profile ? params->profile : "", params->level,  params->deinterlace,
         params->use_preprocessed_input, params->copy_mpegts,
-        params->timecode);
+        params->timecode,
+        params->vertical, params->vertical_data_len,
+        params->fade ? params->fade : "(null)",
+        params->fade_start_frame, params->fade_end_frame,
+        params->fade_level_1, params->fade_level_2);
     elv_log("AVPIPE XCPARAMS %s", buf);
 }
 
@@ -5039,6 +5154,18 @@ avpipe_copy_xcparams(
         memcpy(p2->extract_images_ts, p->extract_images_ts, size);
     }
     p2->seg_duration = safe_strdup(p->seg_duration);
+    p2->fade = safe_strdup(p->fade);
+    p2->vertical_data = NULL;
+    p2->vertical_data_len = 0;
+    if (p->vertical_data != NULL && p->vertical_data_len > 0) {
+        p2->vertical_data = (uint8_t *) calloc(1, p->vertical_data_len);
+        if (p2->vertical_data != NULL) {
+            memcpy(p2->vertical_data, p->vertical_data, p->vertical_data_len);
+            p2->vertical_data_len = p->vertical_data_len;
+        } else {
+            elv_err("Failed to allocate %d bytes for vertical_data copy, url=%s", p->vertical_data_len, p2->url != NULL ? p2->url : "");
+        }
+    }
 
     return p2;
 }
@@ -5136,6 +5263,8 @@ avpipe_free_params(
     free(params->filter_descriptor);
     free(params->mux_spec);
     free(params->extract_images_ts);
+    free_vertical_data(params);
+    free(params->fade);
     free(params);
     xctx->params = NULL;
 }
@@ -5153,6 +5282,41 @@ avpipe_fini(
 
     if ((*xctx)->inctx && (*xctx)->inctx->url)
         elv_dbg("Releasing all the resources, url=%s", (*xctx)->inctx->url);
+
+    /*
+     * Stop and join the UDP reader thread before releasing any input resources.
+     * xc_table_cancel() only signals the thread (sets closed, closes the channel);
+     * avpipe_fini() is the single owner of the join and runs on every teardown
+     * path, cancelled or not. Without this join, the elv_channel_fini() and
+     * free(inctx) below could release inctx->udp_channel / inctx while
+     * udp_thread_func() is still calling elv_channel_send() on it - a
+     * use-after-free that glibc reports later as "corrupted size vs. prev_size".
+     *
+     * The join is bounded: udp_thread_func() re-checks inctx->closed on every iteration
+     * and only ever blocks in readable_timeout() (poll with a 1s timeout), a non-blocking recvfrom(),
+     * or elv_channel_send() on a full channel - which elv_channel_close() wakes and turns into an immediate return.
+     * Worst case is one poll interval (1s) with a no-data source; with a live source
+     * it is the inter-datagram gap.
+     */
+    if ((*xctx)->inctx && (*xctx)->inctx->utid) {
+        const char *url = (*xctx)->inctx->url ? (*xctx)->inctx->url : "";
+        struct timeval tv;
+        u_int64_t since = 0;
+
+        (*xctx)->inctx->closed = 1;
+        if ((*xctx)->inctx->udp_channel)
+            elv_channel_close((*xctx)->inctx->udp_channel, 1);
+
+        elv_log("Joining UDP reader thread, url=%s", url);
+        elv_get_time(&tv);
+        pthread_join((*xctx)->inctx->utid, NULL);
+        elv_since(&tv, &since);
+        if (since > 1500000)
+            elv_warn("Joined UDP reader thread after %"PRIu64" ms (expected <= 1000 ms), url=%s", since/1000, url);
+        else
+            elv_log("Joined UDP reader thread in %"PRIu64" ms, url=%s", since/1000, url);
+        (*xctx)->inctx->utid = 0;
+    }
 
     /* Close input handler resources if it is not a muxing command */
     if (!(*xctx)->in_mux_ctx && (*xctx)->in_handlers) {
@@ -5299,4 +5463,33 @@ set_extract_images(
         return;
     }
     params->extract_images_ts[index] = value;
+}
+
+int
+init_vertical_data(
+    xcparams_t *params,
+    const uint8_t *data,
+    int len)
+{
+    if (len <= 0 || len > MAX_VERTICAL_DATA_LEN) {
+        elv_err("Invalid vertical_data length %d (max %d), url=%s", len, MAX_VERTICAL_DATA_LEN, params->url != NULL ? params->url : "");
+        return eav_param;
+    }
+    params->vertical_data = malloc(len);
+    if (!params->vertical_data) {
+        elv_err("Failed to allocate %d bytes for vertical_data, url=%s", len, params->url != NULL ? params->url : "");
+        return eav_mem_alloc;
+    }
+    memcpy(params->vertical_data, data, len);
+    params->vertical_data_len = len;
+    return eav_success;
+}
+
+void
+free_vertical_data(
+    xcparams_t *params)
+{
+    free(params->vertical_data);
+    params->vertical_data = NULL;
+    params->vertical_data_len = 0;
 }

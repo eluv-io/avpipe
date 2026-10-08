@@ -14,15 +14,13 @@ all install: check-env
 	@for dir in $(SUBDIRS); do \
 	echo "Making $@ in $$dir..."; \
 	(cd $$dir; make $@) || exit 1; \
-	if [ "$$dir" = "libavpipe" ]; then \
-		openssl dgst -md5 lib/libavpipe.a | awk '{print $$NF}' > lib/libavpipe.hash; \
-	fi; \
 	done
 
 dynamic: all
 
-# goclean: nuclear option to reset all caches. Normally not needed — `make`
-# updates lib/libavpipe.hash which triggers automatic Go rebuild via //go:embed.
+# goclean: nuclear option to reset all caches. Normally not needed — the C sources
+# compiled by cgo are embedded via //go:embed in avpipe_cgo_sources.go, so editing
+# any of them triggers an automatic Go rebuild (no `make` or cache clean required).
 goclean: clean
 	@go clean -cache -testcache -modcache -i -r
 
