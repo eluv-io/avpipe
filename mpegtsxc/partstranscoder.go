@@ -5,10 +5,10 @@ import (
 	"fmt"
 	"sync"
 
+	"github.com/pion/rtp"
 	"go.uber.org/atomic"
 
 	"github.com/eluv-io/avpipe/broadcastproto/mpegts"
-	"github.com/eluv-io/avpipe/broadcastproto/transport"
 )
 
 // PartsTranscoder transcodes the video PID of an RTP-encapsulated MPEGTS stream in a
@@ -169,7 +169,8 @@ func (t *PartsTranscoder) Feed(rtpDatagram []byte) error {
 		return err
 	}
 
-	hdr, err := transport.ParseRTPHeader(rtpDatagram)
+	var hdr rtp.Header
+	hdrLen, err := hdr.Unmarshal(rtpDatagram)
 	if err != nil {
 		n := t.badDatagrams.Inc()
 		if n%1000 == 1 {
@@ -186,7 +187,7 @@ func (t *PartsTranscoder) Feed(rtpDatagram []byte) error {
 	}
 
 	// Passthrough pushes inside may block until the merge drains them.
-	forward, err := t.proc.handleDatagram(rtpDatagram[hdr.ByteLength():])
+	forward, err := t.proc.handleDatagram(rtpDatagram[hdrLen:])
 	if err != nil {
 		return err
 	}

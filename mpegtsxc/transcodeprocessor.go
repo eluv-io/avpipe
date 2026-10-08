@@ -9,8 +9,10 @@ import (
 
 	"github.com/eluv-io/avpipe"
 	"github.com/eluv-io/avpipe/broadcastproto/mpegts"
+	"github.com/eluv-io/avpipe/broadcastproto/tlv"
 	"github.com/eluv-io/avpipe/broadcastproto/transport"
 	"github.com/eluv-io/avpipe/goavpipe"
+	"github.com/eluv-io/common-go/media/pktpool"
 	"github.com/eluv-io/common-go/media/rtp"
 )
 
@@ -33,6 +35,14 @@ func InitTranscodeProcessor(params *goavpipe.XcParams) (*TranscodeProcessor, int
 	return p, goavpipe.Globals.InitBypassProcessor(p), nil
 }
 
+const (
+	// outputTlvWrapCap is the head room the packet processor frames its TLV output
+	// into (TLV header plus the ATS arrival-timestamp prefix) - same as mpegts' own.
+	outputTlvWrapCap = tlv.TLV_HEADER_LEN + tlv.AtsTimestampLen
+	// rtpHeaderLen is the fixed RTP header of an emitted datagram.
+	rtpHeaderLen = 12
+)
+
 // TranscodeProcessor adapts PartsTranscoder to goavpipe.BypassProcessor so a host
 // (the content fabric) can drive the parts-mode transcode through the standard
 // XcInit/XcRun/XcCancel flow: input RTP datagrams are pushed via WriteDatagram, and
@@ -40,7 +50,7 @@ func InitTranscodeProcessor(params *goavpipe.XcParams) (*TranscodeProcessor, int
 // mpegts.MpegtsPacketProcessor through the sequential opener — exactly like the
 // raw_only bypass path, so the host's output plumbing works verbatim.
 //
-// Part rotation runs on media time: the "now" passed to ProcessDatagram advances
+// Part rotation runs on media time: the "now" passed to ProcessDatagramPacket advances
 // with the output RTP timestamps (anchored to the wall clock at the first output
 // datagram), so each part holds ~PartDuration of media regardless of how bursty the
 // input feed is.
@@ -69,6 +79,11 @@ type TranscodeProcessor struct {
 	refWall      time.Time
 	lastRtpTs    uint32
 	rtpUnwrapped int64
+
+	// outPkt carries each output datagram into the packet processor. emit runs on a
+	// single goroutine and ProcessDatagramPacket does not retain the packet, so one
+	// instance is reused (no pool needed).
+	outPkt *pktpool.Packet
 
 	dropped atomic.Uint64 // never incremented (blocking pipeline); see Start
 
@@ -184,7 +199,15 @@ func (p *TranscodeProcessor) emit(d OutputDatagram) error {
 	if wall := time.Since(p.refWall); wall < elapsed {
 		elapsed = wall
 	}
-	p.pp.ProcessDatagram(p.refWall.Add(elapsed), d.Data)
+	now := p.refWall.Add(elapsed)
+	if p.outPkt == nil {
+		p.outPkt = pktpool.NewPacket(outputTlvWrapCap, rtpHeaderLen+p.cfg.DatagramPackets*tsPacketSize)
+	}
+	if err := p.outPkt.From(d.Data); err != nil {
+		return err
+	}
+	p.outPkt.ReceivedAt = now
+	p.pp.ProcessDatagramPacket(now, p.outPkt)
 	return nil
 }
 
