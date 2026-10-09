@@ -80,7 +80,9 @@ func TestOutStatsReportSourceStreamIndex(t *testing.T) {
 		xcType goavpipe.XcType
 		// channelLayout is the encoder's channel layout, if not the source's.
 		channelLayout string
-		audioIndex    []int32
+		// filterDescriptor is the audio filter graph, for merge.
+		filterDescriptor string
+		audioIndex       []int32
 		// sources[ordinal] is the source stream that audio output must report.
 		sources []int
 		bypass  bool
@@ -91,10 +93,15 @@ func TestOutStatsReportSourceStreamIndex(t *testing.T) {
 		{name: "no audio_index", audioIndex: nil, sources: []int{1}},
 		// Bypass writes packets through do_bypass, not encode_frame.
 		{name: "bypass", audioIndex: []int32{2}, sources: []int{2}, bypass: true},
-		// One output mixed from audio 0 and 1 reports its first selected source.
+		// One output mixed from audio 0 and 1 has no single source: -1.
 		{name: "audio join", url: "./media/gabby_shading_2mono_1080p.mp4",
 			xcType: goavpipe.XcAudioJoin, channelLayout: "stereo", audioIndex: []int32{0, 1},
-			sources: []int{0}},
+			sources: []int{-1}},
+		// Merge mixes audio 0 and 1 into one output, likewise with no single source.
+		{name: "audio merge", url: "./media/gabby_shading_2mono_1080p.mp4",
+			xcType: goavpipe.XcAudioMerge, channelLayout: "stereo", audioIndex: []int32{0, 1},
+			filterDescriptor: "[0:0][0:1]amerge=inputs=2,pan=stereo|c0=c0|c1=c1[aout]",
+			sources:          []int{-1}},
 	}
 
 	outStats := []goavpipe.AVStatType{
@@ -138,6 +145,7 @@ func TestOutStatsReportSourceStreamIndex(t *testing.T) {
 				ForceKeyInt:         48,
 				Url:                 url,
 				AudioIndex:          tc.audioIndex,
+				FilterDescriptor:    tc.filterDescriptor,
 				DebugFrameLevel:     debugFrameLevel,
 			}
 

@@ -212,9 +212,9 @@ typedef struct ioctx_t {
     /* The source media stream this output carries, or -1 if there is no single
      * one. Set by elv_io_open from the out_tracker: the decoder's video stream
      * index for the video output, decoder audio_stream_index[ordinal] for an
-     * audio output (the first selected source for audio merge/join). -1 for
-     * outputs whose tracker is neither video nor audio (copy_mpegts, whose
-     * segments carry every stream).
+     * audio output. -1 for audio merge/join outputs, which are mixed from
+     * several sources, and for outputs whose tracker is neither video nor audio
+     * (copy_mpegts, whose segments carry every stream).
      */
     int     src_stream_index;
     int     seg_index;          /* segment index if this ioctx is a segment */
@@ -287,10 +287,10 @@ typedef int
      *
      * Output stats get it from out_stat_src_stream_index().
      *
-     * Where an output has no single source stream:
-     *   - audio merge/join outputs report their first selected source;
-     *   - copy_mpegts outputs report -1: each segment carries every stream;
-     *   - the mux path reports no output stats.
+     * Where an output has no single source stream, its stats report -1:
+     *   - audio merge/join outputs, which are mixed from several sources;
+     *   - copy_mpegts outputs, since each segment carries every stream.
+     * The mux path reports no output stats.
      */
     int src_stream_index,
     avp_stat_t stat_type);
@@ -808,7 +808,7 @@ typedef struct out_tracker_t {
 
     /** Needed to detect type of encoding frame */
     int video_stream_index;
-    int audio_stream_index;
+    int audio_stream_index;     /* source stream of this audio output; -1 for merge/join */
 
     int output_stream_index;
 } out_tracker_t;

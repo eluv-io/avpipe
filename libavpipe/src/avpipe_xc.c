@@ -2010,7 +2010,11 @@ prepare_encoder(
             out_tracker->out_handlers = out_handlers;
             out_tracker->inctx = inctx;
             out_tracker->video_stream_index = decoder_context->video_stream_index;
-            out_tracker->audio_stream_index = decoder_context->audio_stream_index[j];
+            /* A merge/join output is mixed from several sources: there is no single one */
+            if (params->xc_type == xc_audio_merge || params->xc_type == xc_audio_join)
+                out_tracker->audio_stream_index = -1;
+            else
+                out_tracker->audio_stream_index = decoder_context->audio_stream_index[j];
             out_tracker->seg_index = atoi(params->start_segment_str);
             out_tracker->encoder_ctx = encoder_context;
             out_tracker->xc_type = xc_audio;
