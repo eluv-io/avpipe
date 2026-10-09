@@ -62,6 +62,14 @@ func (o *recordingOutput) Stat(streamIndex int, avType goavpipe.AVType,
 	return o.OutputHandler.Stat(streamIndex, avType, statType, statArgs)
 }
 
+// useIOHandler installs the global input and output openers for the rest of
+// t, then restores the ones that were installed before.
+func useIOHandler(t *testing.T, in goavpipe.InputOpener, out goavpipe.OutputOpener) {
+	prevIn, prevOut := goavpipe.GetGlobalInputOpener(), goavpipe.GetGlobalOutputOpener()
+	goavpipe.InitIOHandler(in, out)
+	t.Cleanup(func() { goavpipe.InitIOHandler(prevIn, prevOut) })
+}
+
 // TestOutStatsReportSourceStreamIndex pins the contract documented on
 // avpipe_stater_f: every output stat reports the source media stream index of
 // the output it belongs to, not the output's ordinal.
@@ -150,11 +158,7 @@ func TestOutStatsReportSourceStreamIndex(t *testing.T) {
 			}
 
 			opener := &recordingOutputOpener{inner: &xc.FileOutputOpener{Dir: outputDir, Stats: &statsInfo}}
-			goavpipe.InitIOHandler(&xc.FileInputOpener{URL: url, Stats: &statsInfo}, opener)
-			// Leave the shared handlers as the other tests expect to find them.
-			defer goavpipe.InitIOHandler(
-				&xc.FileInputOpener{URL: url, Stats: &statsInfo},
-				&xc.FileOutputOpener{Dir: outputDir, Stats: &statsInfo})
+			useIOHandler(t, &xc.FileInputOpener{URL: url, Stats: &statsInfo}, opener)
 
 			if tc.channelLayout != "" {
 				params.ChannelLayout = avpipe.ChannelLayout(tc.channelLayout)
@@ -248,10 +252,7 @@ func TestOutStatsCopyMpegtsReportNoSourceStreamIndex(t *testing.T) {
 	}
 
 	opener := &recordingOutputOpener{inner: &xc.FileOutputOpener{Dir: outputDir, Stats: &statsInfo}}
-	goavpipe.InitIOHandler(&xc.FileInputOpener{URL: url, Stats: &statsInfo}, opener)
-	defer goavpipe.InitIOHandler(
-		&xc.FileInputOpener{URL: url, Stats: &statsInfo},
-		&xc.FileOutputOpener{Dir: outputDir, Stats: &statsInfo})
+	useIOHandler(t, &xc.FileInputOpener{URL: url, Stats: &statsInfo}, opener)
 
 	boilerXc(t, params)
 
