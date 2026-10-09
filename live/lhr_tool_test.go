@@ -492,12 +492,12 @@ func (i *inputCtx) Size() int64 {
 	return -1
 }
 
-func (i *inputCtx) Stat(streamIndex int, statType goavpipe.AVStatType, statArgs interface{}) error {
+func (i *inputCtx) Stat(srcStreamIndex int, statType goavpipe.AVStatType, statArgs interface{}) error {
 	switch statType {
 	case goavpipe.AV_IN_STAT_BYTES_READ:
 		readOffset := statArgs.(*uint64)
 		if debugFrameLevel {
-			log.Debug("STAT read offset", *readOffset, "streamIndex", streamIndex)
+			log.Debug("STAT read offset", *readOffset, "srcStreamIndex", srcStreamIndex)
 		}
 	}
 	return nil
@@ -591,10 +591,10 @@ func (o *outputCtx) Close() error {
 	return nil
 }
 
-func (o *outputCtx) Stat(streamIndex int, avType goavpipe.AVType, statType goavpipe.AVStatType, statArgs interface{}) error {
+func (o *outputCtx) Stat(srcStreamIndex int, avType goavpipe.AVType, statType goavpipe.AVStatType, statArgs interface{}) error {
 	doLog := func(args ...interface{}) {
 		if debugFrameLevel {
-			logArgs := []interface{}{"stat", statType.Name(), "avType", avType.Name(), "streamIndex", streamIndex}
+			logArgs := []interface{}{"stat", statType.Name(), "avType", avType.Name(), "srcStreamIndex", srcStreamIndex}
 			logArgs = append(logArgs, args...)
 			log.Debug("STAT", logArgs...)
 		}

@@ -92,8 +92,8 @@ elv_io_open(
         (*pb) = avioctx;
         out_tracker->last_outctx = outctx;
 
-        elv_dbg("OUT elv_io_open stream_index=%d, seg_index=%d avioctx=%p, avioctx->opaque=%p, buf=%p, outctx=%p, outtracker->last_outctx=%p, outtracker->last_outctx=%p",
-            outctx->stream_index, outctx->seg_index, avioctx, avioctx->opaque, avioctx->buffer, outctx, out_tracker->last_outctx, out_tracker->last_outctx);
+        elv_dbg("OUT elv_io_open out_index=%d, src_stream_index=%d, seg_index=%d avioctx=%p, avioctx->opaque=%p, buf=%p, outctx=%p, outtracker->last_outctx=%p, outtracker->last_outctx=%p",
+            outctx->stream_index, outctx->src_stream_index, outctx->seg_index, avioctx, avioctx->opaque, avioctx->buffer, outctx, out_tracker->last_outctx, out_tracker->last_outctx);
     } else {
         outctx->stream_index = 0;
         outctx->encoder_ctx = out_tracker->encoder_ctx;
@@ -125,7 +125,6 @@ elv_io_open(
             }
             outctx->encoder_ctx = out_tracker->encoder_ctx;
             outctx->inctx = out_tracker->inctx;
-            //elv_dbg("XXX stream_index=%d", outctx->stream_index);
             if (!strncmp(url + strlen(url) - 3, "mpd", 3)) {
                 outctx->type = avpipe_manifest;
                 outctx->seg_index = -1;     // Special index for manifest
@@ -198,8 +197,8 @@ elv_io_open(
         AVIOContext *avioctx = avio_alloc_context(outctx->buf, outctx->bufsz, AVIO_FLAG_WRITE, (void *)outctx,
             out_handlers->avpipe_reader, out_handlers->avpipe_writer, out_handlers->avpipe_seeker);
 
-        elv_dbg("OUT elv_io_open url=%s, type=%d, stream_index=%d, seg_index=%d, last_outctx=%p, buf=%p",
-            url, outctx->type, outctx->stream_index, outctx->seg_index, out_tracker->last_outctx, avioctx->buffer);
+        elv_dbg("OUT elv_io_open url=%s, type=%d, out_index=%d, src_stream_index=%d, seg_index=%d, last_outctx=%p, buf=%p",
+            url, outctx->type, outctx->stream_index, outctx->src_stream_index, outctx->seg_index, out_tracker->last_outctx, avioctx->buffer);
 
         /* libavformat expects seekable streams for mp4 */
         if (outctx->type == avpipe_mp4_stream || outctx->type == avpipe_mp4_segment)
@@ -237,8 +236,8 @@ elv_io_close(
         out_handlers = out_tracker->out_handlers;
     }
 
-    elv_dbg("OUT elv_io_close url=%s, stream_index=%d, seg_index=%d avioctx=%p, avioctx->opaque=%p buf=%p outtracker->last_outctx=%p, outhandlers=%p",
-        outctx != NULL ? outctx->url : "", outctx != NULL ? outctx->stream_index : -1, outctx != NULL ? outctx->seg_index : -1, pb, pb->opaque, avioctx->buffer,
+    elv_dbg("OUT elv_io_close url=%s, out_index=%d, src_stream_index=%d, seg_index=%d avioctx=%p, avioctx->opaque=%p buf=%p outtracker->last_outctx=%p, outhandlers=%p",
+        outctx != NULL ? outctx->url : "", outctx != NULL ? outctx->stream_index : -1, outctx != NULL ? outctx->src_stream_index : -1, outctx != NULL ? outctx->seg_index : -1, pb, pb->opaque, avioctx->buffer,
 	    out_tracker != NULL ? out_tracker->last_outctx : 0, out_handlers);
     if (out_handlers) {
         // TODO(Nate): Separate out this stat into something more descriptive of the particular case

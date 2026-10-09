@@ -16,10 +16,10 @@ import (
 
 // outStatRecord is one call to OutputHandler.Stat.
 type outStatRecord struct {
-	ordinal     int // the stream index the output was opened with: its ordinal
-	streamIndex int // the stream index reported with the stat
-	avType      goavpipe.AVType
-	statType    goavpipe.AVStatType
+	ordinal        int // the stream index the output was opened with: its ordinal
+	srcStreamIndex int // the source stream index reported with the stat
+	avType         goavpipe.AVType
+	statType       goavpipe.AVStatType
 }
 
 // recordingOutputOpener wraps xc.FileOutputOpener and records every Stat call,
@@ -53,13 +53,13 @@ type recordingOutput struct {
 	ordinal int
 }
 
-func (o *recordingOutput) Stat(streamIndex int, avType goavpipe.AVType,
+func (o *recordingOutput) Stat(srcStreamIndex int, avType goavpipe.AVType,
 	statType goavpipe.AVStatType, statArgs interface{}) error {
 
 	o.oo.m.Lock()
-	o.oo.seen = append(o.oo.seen, outStatRecord{o.ordinal, streamIndex, avType, statType})
+	o.oo.seen = append(o.oo.seen, outStatRecord{o.ordinal, srcStreamIndex, avType, statType})
 	o.oo.m.Unlock()
-	return o.OutputHandler.Stat(streamIndex, avType, statType, statArgs)
+	return o.OutputHandler.Stat(srcStreamIndex, avType, statType, statArgs)
 }
 
 // useIOHandler installs the global input and output openers for the rest of
@@ -186,7 +186,7 @@ func TestOutStatsReportSourceStreamIndex(t *testing.T) {
 				if reported[k][r.statType] == nil {
 					reported[k][r.statType] = map[int]bool{}
 				}
-				reported[k][r.statType][r.streamIndex] = true
+				reported[k][r.statType][r.srcStreamIndex] = true
 			}
 
 			want := map[outKey]int{}
@@ -268,7 +268,7 @@ func TestOutStatsCopyMpegtsReportNoSourceStreamIndex(t *testing.T) {
 		if reported[r.avType][r.statType] == nil {
 			reported[r.avType][r.statType] = map[int]bool{}
 		}
-		reported[r.avType][r.statType][r.streamIndex] = true
+		reported[r.avType][r.statType][r.srcStreamIndex] = true
 	}
 
 	ts := reported[goavpipe.MpegtsSegment]
