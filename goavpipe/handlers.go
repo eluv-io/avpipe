@@ -64,7 +64,9 @@ type OutputHandler interface {
 	// Close the output.
 	Close() error
 
-	// Stat reports some stats
+	// Stat reports some stats. srcStreamIndex is the source media stream the
+	// output carries, or -1 when it has no single one (copy_mpegts segments);
+	// see avpipe_stater_f in avpipe_xc.h.
 	Stat(srcStreamIndex int, avType AVType, statType AVStatType, statArgs interface{}) error
 }
 

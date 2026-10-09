@@ -7,6 +7,7 @@ import (
 	"testing"
 
 	"github.com/eluv-io/avpipe"
+	"github.com/eluv-io/avpipe/broadcastproto/transport"
 	"github.com/eluv-io/avpipe/goavpipe"
 	"github.com/eluv-io/avpipe/xc"
 	"github.com/stretchr/testify/assert"
@@ -200,5 +201,81 @@ func TestOutStatsReportSourceStreamIndex(t *testing.T) {
 				}
 			}
 		})
+	}
+}
+
+// TestOutStatsCopyMpegtsReportNoSourceStreamIndex pins the copy_mpegts case of
+// avpipe_stater_f: a copy_mpegts segment carries every stream, so its stats
+// report -1, not an index derived from the output URL. The transcoded outputs
+// beside it still report their source stream.
+func TestOutStatsCopyMpegtsReportNoSourceStreamIndex(t *testing.T) {
+	if testing.Short() {
+		t.Skip("skipping slow transcoding test in short mode")
+	}
+	url := "./media/bbb_sunflower_2160p_30fps_normal_2min.ts"
+	checkFileExists(t, url)
+
+	outputDir := path.Join(baseOutPath, fn())
+	setupOutDir(t, outputDir)
+
+	params := &goavpipe.XcParams{
+		InputCfg: goavpipe.InputConfig{
+			CopyMode:      goavpipe.CopyModeRemuxed,
+			CopyPackaging: transport.RawTs,
+		},
+		Format:              "fmp4-segment",
+		StartTimeTs:         0,
+		DurationTs:          -1,
+		StartSegmentStr:     "1",
+		SegDuration:         "30",
+		Ecodec2:             "aac",
+		EncHeight:           -1,
+		EncWidth:            -1,
+		XcType:              goavpipe.XcAudio,
+		StreamId:            -1,
+		SyncAudioToStreamId: -1,
+		Url:                 url,
+		AudioIndex:          []int32{2},
+		DebugFrameLevel:     debugFrameLevel,
+	}
+
+	opener := &recordingOutputOpener{inner: &xc.FileOutputOpener{Dir: outputDir, Stats: &statsInfo}}
+	goavpipe.InitIOHandler(&xc.FileInputOpener{URL: url, Stats: &statsInfo}, opener)
+	defer goavpipe.InitIOHandler(
+		&xc.FileInputOpener{URL: url, Stats: &statsInfo},
+		&xc.FileOutputOpener{Dir: outputDir, Stats: &statsInfo})
+
+	boilerXc(t, params)
+
+	// reported[avType][stat] is the set of stream indices reported.
+	reported := map[goavpipe.AVType]map[goavpipe.AVStatType]map[int]bool{}
+	for _, r := range opener.records() {
+		if r.avType != goavpipe.MpegtsSegment && r.avType != goavpipe.FMP4AudioSegment {
+			continue
+		}
+		if reported[r.avType] == nil {
+			reported[r.avType] = map[goavpipe.AVStatType]map[int]bool{}
+		}
+		if reported[r.avType][r.statType] == nil {
+			reported[r.avType][r.statType] = map[int]bool{}
+		}
+		reported[r.avType][r.statType][r.streamIndex] = true
+	}
+
+	ts := reported[goavpipe.MpegtsSegment]
+	require.NotNil(t, ts, "no stats for copy_mpegts segments")
+	for _, st := range []goavpipe.AVStatType{goavpipe.AV_OUT_STAT_START_FILE, goavpipe.AV_OUT_STAT_END_FILE} {
+		require.NotEmpty(t, ts[st], "copy_mpegts segments: no %s", st.Name())
+	}
+	for st, indices := range ts {
+		assert.Equal(t, map[int]bool{-1: true}, indices,
+			"copy_mpegts segments: %s must report -1", st.Name())
+	}
+
+	audio := reported[goavpipe.FMP4AudioSegment]
+	require.NotNil(t, audio, "no stats for the audio output")
+	for st, indices := range audio {
+		assert.Equal(t, map[int]bool{2: true}, indices,
+			"audio output: %s must report source stream 2", st.Name())
 	}
 }

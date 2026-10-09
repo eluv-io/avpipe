@@ -209,11 +209,12 @@ typedef struct ioctx_t {
      * stream index: report out_stat_src_stream_index() instead.
      */
     int     stream_index;
-    /* The source media stream this output carries, or -1 if unknown. Set by
-     * elv_io_open from the out_tracker: the decoder's video stream index for the
-     * video output, decoder audio_stream_index[ordinal] for an audio output (the
-     * first selected source for audio merge/join). Stays -1 for outputs whose
-     * tracker is neither video nor audio (copy_mpegts).
+    /* The source media stream this output carries, or -1 if there is no single
+     * one. Set by elv_io_open from the out_tracker: the decoder's video stream
+     * index for the video output, decoder audio_stream_index[ordinal] for an
+     * audio output (the first selected source for audio merge/join). -1 for
+     * outputs whose tracker is neither video nor audio (copy_mpegts, whose
+     * segments carry every stream).
      */
     int     src_stream_index;
     int     seg_index;          /* segment index if this ioctx is a segment */
@@ -281,15 +282,14 @@ typedef int
     /*
      * src_stream_index is a *source* media stream index - the same numbering as
      * xc_params->audio_index and decoder_context->video_stream_index - for every
-     * stat that carries one. It is not an output ordinal, and it is not valid
-     * for input stat in_stat_bytes_read.
+     * stat that carries one, or -1 when there is none. It is never an output
+     * ordinal, and it is not valid for input stat in_stat_bytes_read.
      *
      * Output stats get it from out_stat_src_stream_index().
      *
      * Where an output has no single source stream:
      *   - audio merge/join outputs report their first selected source;
-     *   - copy_mpegts outputs report their ioctx_t.stream_index (an output
-     *     identifier), since their tracker is neither video nor audio;
+     *   - copy_mpegts outputs report -1: each segment carries every stream;
      *   - the mux path reports no output stats.
      */
     int src_stream_index,
@@ -297,7 +297,7 @@ typedef int
 
 /*
  * The stream index to report to an output stater for outctx: its
- * src_stream_index, or its stream_index when the source is unknown (-1).
+ * src_stream_index, which is -1 when the output has no single source stream.
  */
 int
 out_stat_src_stream_index(

@@ -30,9 +30,7 @@ out_stat_src_stream_index(
 {
     if (!outctx)
         return -1;
-    if (outctx->src_stream_index >= 0)
-        return outctx->src_stream_index;
-    return outctx->stream_index;
+    return outctx->src_stream_index;
 }
 
 /*

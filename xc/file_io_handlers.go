@@ -135,6 +135,8 @@ func (oo *FileOutputOpener) Open(_, _ int64, streamIndex, segIndex int,
 		filename = fmt.Sprintf("./%s/vsegment-%d.mp4", oo.Dir, segIndex)
 	case goavpipe.FMP4AudioSegment:
 		filename = fmt.Sprintf("./%s/asegment%d-%d.mp4", oo.Dir, streamIndex, segIndex)
+	case goavpipe.MpegtsSegment:
+		filename = fmt.Sprintf("./%s/ts-segment-%d.ts", oo.Dir, segIndex)
 	case goavpipe.FrameImage:
 		filename = fmt.Sprintf("./%s/%d.jpeg", oo.Dir, pts)
 	}
