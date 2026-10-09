@@ -2018,7 +2018,6 @@ prepare_encoder(
             out_tracker->seg_index = atoi(params->start_segment_str);
             out_tracker->encoder_ctx = encoder_context;
             out_tracker->xc_type = xc_audio;
-            out_tracker->output_stream_index = j;
             encoder_context->format_context2[j]->avpipe_opaque = out_tracker;
         }
     }

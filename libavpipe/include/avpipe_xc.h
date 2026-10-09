@@ -809,8 +809,6 @@ typedef struct out_tracker_t {
     /** Needed to detect type of encoding frame */
     int video_stream_index;
     int audio_stream_index;     /* source stream of this audio output; -1 for merge/join */
-
-    int output_stream_index;
 } out_tracker_t;
 
 typedef struct encoding_frame_stats_t {
