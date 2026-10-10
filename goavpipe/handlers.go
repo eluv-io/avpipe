@@ -45,7 +45,14 @@ type OutputOpener interface {
 	// Open returns an OutputHandler or an error
 	// h determines uniquely opening input.
 	// fd determines uniquely opening output.
-	Open(h, fd int64, streamIndex, segIndex int, pts int64, outType AVType) (OutputHandler, error)
+	// ordinal identifies the output, not a source media stream: the audio
+	// output ordinal for an fmp4 audio segment (audio outputs are in source
+	// stream order, not XcParams.AudioIndex order), the muxer's stream index
+	// for a DASH/HLS chunk, and incidental for other outputs. Outside DASH/HLS
+	// chunks it is parsed from a single digit of the output URL, so ordinals
+	// >= 10 are truncated. For the source stream, use the srcStreamIndex
+	// reported to OutputHandler.Stat; see ioctx_t.stream_index in avpipe_xc.h.
+	Open(h, fd int64, ordinal, segIndex int, pts int64, outType AVType) (OutputHandler, error)
 }
 
 type MuxOutputOpener interface {

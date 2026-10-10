@@ -451,11 +451,11 @@ func getAVType(av_type C.int) goavpipe.AVType {
 // easily from other code.
 
 //export AVPipeOpenOutput
-func AVPipeOpenOutput(handler C.int64_t, stream_index, seg_index C.int, pts C.int64_t, stream_type C.int) C.int64_t {
-	return C.int64_t(AVPipeOpenOutputGo(int64(handler), int(stream_index), int(seg_index), int64(pts), getAVType(stream_type)))
+func AVPipeOpenOutput(handler C.int64_t, ordinal, seg_index C.int, pts C.int64_t, stream_type C.int) C.int64_t {
+	return C.int64_t(AVPipeOpenOutputGo(int64(handler), int(ordinal), int(seg_index), int64(pts), getAVType(stream_type)))
 }
 
-func AVPipeOpenOutputGo(handler int64, stream_index, seg_index int, pts int64, stream_type goavpipe.AVType) int64 {
+func AVPipeOpenOutputGo(handler int64, ordinal, seg_index int, pts int64, stream_type goavpipe.AVType) int64 {
 	h := getCIOHandler(handler)
 	if h == nil {
 		goavpipe.Log.Error("AVPipeOpenOutput()", "reason", "handler not found", "handler", handler)
@@ -472,7 +472,7 @@ func AVPipeOpenOutputGo(handler int64, stream_index, seg_index int, pts int64, s
 		goavpipe.Log.Error("AVPipeOpenOutput() nil outputOpener", "handler", handler)
 		return -1
 	}
-	outHandler, err := outputOpener.Open(int64(handler), fd, int(stream_index), int(seg_index), int64(pts), stream_type)
+	outHandler, err := outputOpener.Open(int64(handler), fd, int(ordinal), int(seg_index), int64(pts), stream_type)
 	if err != nil {
 		goavpipe.Log.Error("AVPipeOpenOutput()", "out_type", stream_type, "error", err)
 		return -1
@@ -480,7 +480,7 @@ func AVPipeOpenOutputGo(handler int64, stream_index, seg_index int, pts int64, s
 
 	outHandler = maybeWrapMvhevcOutputHandler(outHandler, h.restoreMvhevc, stream_type)
 
-	goavpipe.Log.Debug("AVPipeOpenOutput()", "fd", fd, "stream_index", stream_index, "seg_index", seg_index, "pts", pts, "out_type", stream_type)
+	goavpipe.Log.Debug("AVPipeOpenOutput()", "fd", fd, "ordinal", ordinal, "seg_index", seg_index, "pts", pts, "out_type", stream_type)
 	h.putOutTable(fd, outHandler)
 
 	return fd

@@ -16,7 +16,7 @@ import (
 
 // outStatRecord is one call to OutputHandler.Stat.
 type outStatRecord struct {
-	ordinal        int // the stream index the output was opened with: its ordinal
+	ordinal        int // the ordinal the output was opened with
 	srcStreamIndex int // the source stream index reported with the stat
 	avType         goavpipe.AVType
 	statType       goavpipe.AVStatType
@@ -31,14 +31,14 @@ type recordingOutputOpener struct {
 	seen []outStatRecord
 }
 
-func (oo *recordingOutputOpener) Open(h, fd int64, streamIndex, segIndex int,
+func (oo *recordingOutputOpener) Open(h, fd int64, ordinal, segIndex int,
 	pts int64, outType goavpipe.AVType) (goavpipe.OutputHandler, error) {
 
-	inner, err := oo.inner.Open(h, fd, streamIndex, segIndex, pts, outType)
+	inner, err := oo.inner.Open(h, fd, ordinal, segIndex, pts, outType)
 	if err != nil {
 		return nil, err
 	}
-	return &recordingOutput{OutputHandler: inner, oo: oo, ordinal: streamIndex}, nil
+	return &recordingOutput{OutputHandler: inner, oo: oo, ordinal: ordinal}, nil
 }
 
 func (oo *recordingOutputOpener) records() []outStatRecord {

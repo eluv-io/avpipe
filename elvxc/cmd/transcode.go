@@ -147,11 +147,11 @@ type elvxcOutputOpener struct {
 	dir string
 }
 
-func (oo *elvxcOutputOpener) Open(h, fd int64, stream_index, seg_index int,
+func (oo *elvxcOutputOpener) Open(h, fd int64, ordinal, seg_index int,
 	pts int64, out_type goavpipe.AVType) (goavpipe.OutputHandler, error) {
 
 	log.Debug("AVCMD OutputOpener.Open", "h", h, "fd", fd,
-		"stream_index", stream_index, "seg_index", seg_index, "pts", pts, "out_type", out_type)
+		"ordinal", ordinal, "seg_index", seg_index, "pts", pts, "out_type", out_type)
 
 	var filename string
 	dir := fmt.Sprintf("%s/O%d", oo.dir, h)
@@ -166,19 +166,19 @@ func (oo *elvxcOutputOpener) Open(h, fd int64, stream_index, seg_index int,
 	case goavpipe.DASHVideoInit:
 		fallthrough
 	case goavpipe.DASHAudioInit:
-		filename = fmt.Sprintf("./%s/init-stream%d.m4s", dir, stream_index)
+		filename = fmt.Sprintf("./%s/init-stream%d.m4s", dir, ordinal)
 	case goavpipe.DASHManifest:
 		filename = fmt.Sprintf("./%s/dash.mpd", dir)
 	case goavpipe.DASHVideoSegment:
 		fallthrough
 	case goavpipe.DASHAudioSegment:
-		filename = fmt.Sprintf("./%s/chunk-stream%d-%05d.m4s", dir, stream_index, seg_index)
+		filename = fmt.Sprintf("./%s/chunk-stream%d-%05d.m4s", dir, ordinal, seg_index)
 	case goavpipe.HLSMasterM3U:
 		filename = fmt.Sprintf("./%s/master.m3u8", dir)
 	case goavpipe.HLSVideoM3U:
 		fallthrough
 	case goavpipe.HLSAudioM3U:
-		filename = fmt.Sprintf("./%s/media_%d.m3u8", dir, stream_index)
+		filename = fmt.Sprintf("./%s/media_%d.m3u8", dir, ordinal)
 	case goavpipe.AES128Key:
 		filename = fmt.Sprintf("./%s/key.bin", dir)
 	case goavpipe.MP4Stream:
@@ -186,11 +186,11 @@ func (oo *elvxcOutputOpener) Open(h, fd int64, stream_index, seg_index int,
 	case goavpipe.FMP4Stream:
 		filename = fmt.Sprintf("%s/fmp4-stream.mp4", dir)
 	case goavpipe.MP4Segment:
-		filename = fmt.Sprintf("%s/segment%d-%05d.mp4", dir, stream_index, seg_index)
+		filename = fmt.Sprintf("%s/segment%d-%05d.mp4", dir, ordinal, seg_index)
 	case goavpipe.FMP4VideoSegment:
-		filename = fmt.Sprintf("%s/fmp4-vsegment%d-%05d.mp4", dir, stream_index, seg_index)
+		filename = fmt.Sprintf("%s/fmp4-vsegment%d-%05d.mp4", dir, ordinal, seg_index)
 	case goavpipe.FMP4AudioSegment:
-		filename = fmt.Sprintf("%s/fmp4-asegment%d-%05d.mp4", dir, stream_index, seg_index)
+		filename = fmt.Sprintf("%s/fmp4-asegment%d-%05d.mp4", dir, ordinal, seg_index)
 	case goavpipe.FrameImage:
 		filename = fmt.Sprintf("%s/%d.jpeg", dir, pts)
 	case goavpipe.MpegtsSegment:
@@ -203,20 +203,20 @@ func (oo *elvxcOutputOpener) Open(h, fd int64, stream_index, seg_index int,
 	}
 
 	oh := &elvxcOutput{
-		url:          filename,
-		stream_index: stream_index,
-		seg_index:    seg_index,
-		file:         f}
+		url:       filename,
+		ordinal:   ordinal,
+		seg_index: seg_index,
+		file:      f}
 
 	return oh, nil
 }
 
 // elvxcOutput implement avpipe.OutputHandler
 type elvxcOutput struct {
-	url          string
-	stream_index int
-	seg_index    int
-	file         *os.File
+	url       string
+	ordinal   int
+	seg_index int
+	file      *os.File
 }
 
 func (o *elvxcOutput) Write(buf []byte) (int, error) {

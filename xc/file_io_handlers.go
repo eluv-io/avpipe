@@ -107,26 +107,26 @@ type FileOutputOpener struct {
 	Stats *IOStats // optional stats collector
 }
 
-func (oo *FileOutputOpener) Open(_, _ int64, streamIndex, segIndex int,
+func (oo *FileOutputOpener) Open(_, _ int64, ordinal, segIndex int,
 	pts int64, outType goavpipe.AVType) (goavpipe.OutputHandler, error) {
 
 	var filename string
 
 	switch outType {
 	case goavpipe.DASHVideoInit:
-		filename = fmt.Sprintf("./%s/vinit-stream%d.m4s", oo.Dir, streamIndex)
+		filename = fmt.Sprintf("./%s/vinit-stream%d.m4s", oo.Dir, ordinal)
 	case goavpipe.DASHAudioInit:
-		filename = fmt.Sprintf("./%s/ainit-stream%d.m4s", oo.Dir, streamIndex)
+		filename = fmt.Sprintf("./%s/ainit-stream%d.m4s", oo.Dir, ordinal)
 	case goavpipe.DASHManifest:
 		filename = fmt.Sprintf("./%s/dash.mpd", oo.Dir)
 	case goavpipe.DASHVideoSegment:
-		filename = fmt.Sprintf("./%s/vchunk-stream%d-%05d.m4s", oo.Dir, streamIndex, segIndex)
+		filename = fmt.Sprintf("./%s/vchunk-stream%d-%05d.m4s", oo.Dir, ordinal, segIndex)
 	case goavpipe.DASHAudioSegment:
-		filename = fmt.Sprintf("./%s/achunk-stream%d-%05d.m4s", oo.Dir, streamIndex, segIndex)
+		filename = fmt.Sprintf("./%s/achunk-stream%d-%05d.m4s", oo.Dir, ordinal, segIndex)
 	case goavpipe.HLSMasterM3U:
 		filename = fmt.Sprintf("./%s/master.m3u8", oo.Dir)
 	case goavpipe.HLSVideoM3U, goavpipe.HLSAudioM3U:
-		filename = fmt.Sprintf("./%s/media_%d.m3u8", oo.Dir, streamIndex)
+		filename = fmt.Sprintf("./%s/media_%d.m3u8", oo.Dir, ordinal)
 	case goavpipe.AES128Key:
 		filename = fmt.Sprintf("./%s/key.bin", oo.Dir)
 	case goavpipe.MP4Segment:
@@ -134,7 +134,7 @@ func (oo *FileOutputOpener) Open(_, _ int64, streamIndex, segIndex int,
 	case goavpipe.FMP4VideoSegment:
 		filename = fmt.Sprintf("./%s/vsegment-%d.mp4", oo.Dir, segIndex)
 	case goavpipe.FMP4AudioSegment:
-		filename = fmt.Sprintf("./%s/asegment%d-%d.mp4", oo.Dir, streamIndex, segIndex)
+		filename = fmt.Sprintf("./%s/asegment%d-%d.mp4", oo.Dir, ordinal, segIndex)
 	case goavpipe.MpegtsSegment:
 		filename = fmt.Sprintf("./%s/ts-segment-%d.ts", oo.Dir, segIndex)
 	case goavpipe.FrameImage:
