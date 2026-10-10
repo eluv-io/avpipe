@@ -2010,11 +2010,14 @@ prepare_encoder(
             out_tracker->out_handlers = out_handlers;
             out_tracker->inctx = inctx;
             out_tracker->video_stream_index = decoder_context->video_stream_index;
-            out_tracker->audio_stream_index = decoder_context->audio_stream_index[j];
+            /* A merge/join output is mixed from several sources: there is no single one */
+            if (params->xc_type == xc_audio_merge || params->xc_type == xc_audio_join)
+                out_tracker->audio_stream_index = -1;
+            else
+                out_tracker->audio_stream_index = decoder_context->audio_stream_index[j];
             out_tracker->seg_index = atoi(params->start_segment_str);
             out_tracker->encoder_ctx = encoder_context;
             out_tracker->xc_type = xc_audio;
-            out_tracker->output_stream_index = j;
             encoder_context->format_context2[j]->avpipe_opaque = out_tracker;
         }
     }
@@ -2552,7 +2555,7 @@ encode_frame(
             else
                 outctx->total_frames_written = encoder_context->audio_frames_written[stream_index];
             outctx->frames_written++;
-            out_handlers->avpipe_stater(outctx, stream_index, out_stat_frame_written);
+            out_handlers->avpipe_stater(outctx, out_stat_src_stream_index(outctx), out_stat_frame_written);
         }
 
         /* mux encoded frame */
@@ -2646,7 +2649,7 @@ do_bypass(
                 outctx->total_frames_written = encoder_context->video_frames_written;
             }
             outctx->frames_written++;
-            out_handlers->avpipe_stater(outctx, packet->stream_index, out_stat_frame_written);
+            out_handlers->avpipe_stater(outctx, out_stat_src_stream_index(outctx), out_stat_frame_written);
         }
     }
 

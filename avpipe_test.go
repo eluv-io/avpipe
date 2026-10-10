@@ -88,7 +88,7 @@ type concurrentOutputOpener struct {
 	dir string
 }
 
-func (coo *concurrentOutputOpener) Open(h, _ int64, streamIndex, segIndex int,
+func (coo *concurrentOutputOpener) Open(h, _ int64, ordinal, segIndex int,
 	pts int64, outType goavpipe.AVType) (goavpipe.OutputHandler, error) {
 
 	dir := fmt.Sprintf("%s/O%d", coo.dir, h)
@@ -99,7 +99,7 @@ func (coo *concurrentOutputOpener) Open(h, _ int64, streamIndex, segIndex int,
 	}
 
 	oo := &xc.FileOutputOpener{Dir: dir}
-	return oo.Open(h, 0, streamIndex, segIndex, pts, outType)
+	return oo.Open(h, 0, ordinal, segIndex, pts, outType)
 }
 
 func TestAudioSeg(t *testing.T) {
