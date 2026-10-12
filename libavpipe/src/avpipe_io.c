@@ -34,6 +34,23 @@ out_stat_src_stream_index(
 }
 
 /*
+ * Frees what elv_io_open allocated (url and the struct). opaque and buf belong
+ * to the handler's opener/closer and the AVIOContext, so they are not freed here.
+ */
+static void
+free_outctx(
+    out_tracker_t *out_tracker,
+    ioctx_t *outctx)
+{
+    if (!outctx)
+        return;
+    if (out_tracker && out_tracker->last_outctx == outctx)
+        out_tracker->last_outctx = NULL;
+    free(outctx->url);
+    free(outctx);
+}
+
+/*
  * Returns the AVIOContext as output argument 'pb'
  */
 int
@@ -80,7 +97,7 @@ elv_io_open(
         outctx->inctx = out_tracker->inctx;
 
         if (out_handlers->avpipe_opener(url, outctx) < 0) {
-            free(outctx);
+            free_outctx(out_tracker, outctx);
             return -1;
         }
 
@@ -108,7 +125,7 @@ elv_io_open(
             outctx->type = avpipe_image;
             if (sscanf(url, "%"PRId64".jp%*s", &outctx->pts) != 1) {
                 elv_dbg("Invalid out url=%s", url);
-                free(outctx);
+                free_outctx(out_tracker, outctx);
                 return -1;
             }
         } else {
@@ -159,7 +176,7 @@ elv_io_open(
                     outctx->type = avpipe_audio_fmp4_segment;
                 else {
                     elv_dbg("Invalid out url=%s", url);
-                    free(outctx);
+                    free_outctx(out_tracker, outctx);
                     return -1;
                 }
                 outctx->seg_index = out_tracker->seg_index;
@@ -179,7 +196,14 @@ elv_io_open(
                 outctx->inctx = out_tracker->inctx;
             }
         }
- 
+
+        /* Manifest or init segments */
+        if (out_handlers->avpipe_opener(url, outctx) < 0) {
+            free_outctx(out_tracker, outctx);
+            return -1;
+        }
+
+        /* Set only after a successful open, so last_outctx never points at a freed outctx */
         if (outctx->type == avpipe_mp4_segment ||
             outctx->type == avpipe_fmp4_stream ||
             outctx->type == avpipe_mp4_stream ||
@@ -188,11 +212,6 @@ elv_io_open(
             outctx->type == avpipe_mpegts_segment)
             // not set for outctx->type == avpipe_image because elv_io_close will free outctx for each frame extracted
             out_tracker->last_outctx = outctx;
-        /* Manifest or init segments */
-        if (out_handlers->avpipe_opener(url, outctx) < 0) {
-            free(outctx);
-            return -1;
-        }
 
         AVIOContext *avioctx = avio_alloc_context(outctx->buf, outctx->bufsz, AVIO_FLAG_WRITE, (void *)outctx,
             out_handlers->avpipe_reader, out_handlers->avpipe_writer, out_handlers->avpipe_seeker);
@@ -248,9 +267,7 @@ elv_io_close(
         out_handlers->avpipe_stater(outctx, out_stat_src_stream_index(outctx), out_stat_end_file);
         out_handlers->avpipe_closer(outctx);
     }
-    if (outctx)
-        free(outctx->url);
-    free(outctx);
+    free_outctx(out_tracker, outctx);
     pb->opaque = NULL;
     if (out_tracker)
         out_tracker->last_outctx = NULL;

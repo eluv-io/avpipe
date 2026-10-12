@@ -641,6 +641,7 @@ out_opener(
     if (fd < 0) {
         elv_err("AVPIPE OUT OPEN failed out_index=%d, seg_index=%d, type=%d, url=%s",
             outctx->stream_index, outctx->seg_index, outctx->type, inctx->url);
+        av_freep(&outctx->buf);
         return -1;
     }
 
