@@ -193,7 +193,30 @@ typedef struct ioctx_t {
 
     /* Output handlers specific data */
     int64_t pts;                /* frame pts */
-    int     stream_index;       /* usually (but not always) video=0 and audio=1 */
+    /* An output identifier, never a source media stream index. elv_io_open sets
+     * it per output type:
+     *   - DASH/HLS chunk: the muxer's "stream_index" option (0 or 1).
+     *   - fmp4 audio segment ("fsegment-audio<ordinal>-%05d.mp4"): the audio
+     *     output ordinal - the index into encoder format_context2 and decoder
+     *     audio_stream_index, which is in source stream order, not
+     *     xc_params->audio_index order.
+     *   - any other URL: the first digit in the URL, or 0 if there is none or
+     *     the URL is a manifest/image. For "fsegment-video-%05d.mp4" and
+     *     "segment-%05d.mp4" that is the leading digit of the segment number,
+     *     so it is incidental.
+     * Only the first digit is parsed, so audio ordinals >= 10 are truncated.
+     * The output opener receives it as is. Do not report it to a stater as a
+     * stream index: report out_stat_src_stream_index() instead.
+     */
+    int     stream_index;
+    /* The source media stream this output carries, or -1 if there is no single
+     * one. Set by elv_io_open from the out_tracker: the decoder's video stream
+     * index for the video output, decoder audio_stream_index[ordinal] for an
+     * audio output. -1 for audio merge/join outputs, which are mixed from
+     * several sources, and for outputs whose tracker is neither video nor audio
+     * (copy_mpegts, whose segments carry every stream).
+     */
+    int     src_stream_index;
     int     seg_index;          /* segment index if this ioctx is a segment */
 
     uint8_t *data;  /* Data stream buffer (e.g. SCTE-35) */
@@ -256,8 +279,29 @@ typedef int64_t
 typedef int
 (*avpipe_stater_f)(
     void *opaque,
-    int stream_index,           /* The stream_index is not valid for input stat in_stat_bytes_read. */
+    /*
+     * src_stream_index is a *source* media stream index - the same numbering as
+     * xc_params->audio_index and decoder_context->video_stream_index - for every
+     * stat that carries one, or -1 when there is none. It is never an output
+     * ordinal, and it is not valid for input stat in_stat_bytes_read.
+     *
+     * Output stats get it from out_stat_src_stream_index().
+     *
+     * Where an output has no single source stream, its stats report -1:
+     *   - audio merge/join outputs, which are mixed from several sources;
+     *   - copy_mpegts outputs, since each segment carries every stream.
+     * The mux path reports no output stats.
+     */
+    int src_stream_index,
     avp_stat_t stat_type);
+
+/*
+ * The stream index to report to an output stater for outctx: its
+ * src_stream_index, which is -1 when the output has no single source stream.
+ */
+int
+out_stat_src_stream_index(
+    ioctx_t *outctx);
 
 typedef struct avpipe_io_handler_t {
     avpipe_opener_f avpipe_opener;
@@ -304,33 +348,45 @@ typedef struct pts_unwrapper_t {
  * Audio stream index mapping is stored as follows:
  *
  * - decoder
- *   - the audio_stream_index array stores the selected stream index values the same way as xc_params
+ *   - the audio_stream_index array stores the selected stream index values in source stream order,
+ *     not in xc_params->audio_index order (audio_index [4,1,3] gives the same array as below).
  *     - audio_stream_index[0] = 1;
  *     - audio_stream_index[1] = 3;
  *     - audio_stream_index[2] = 4;
  *     (and the number of streams is stored in 'n_audio')
+ *   - with no audio_index it holds only the first audio stream of the source, and with
+ *     xc_params->stream_id only that stream (n_audio is 1)
  *
  * - encoder
- *   - if the encoding operation is audio join, merge or pan (which effectively takes multiple input steams and makes one output stream)
- *      - audio_stream_index[0] = 0; (output stream index is considered 0 and nb_audio_output is 1)
+ *   - if the encoding operation is audio join or merge (several input streams mixed into one output
+ *     stream) or pan (one input stream with its channels remapped)
+ *      - audio_stream_index[0] = 0; (output stream index is considered 0 and n_audio_output is 1)
  *   - otherwise it uses a strange convention (needs fixed - this is impossible to traverse)
  *      - audio_stream_index[0] unset
  *      - audio_stream_index[1] = 1
  *      - audio_stream_index[2] unset
  *      - audio_stream_index[3] = 3
  *      - audio_stream_index[4] = 4
+ *     "unset" slots read 0, not -1 (the context is zero-initialized), so 0 is not a usable
+ *     "no stream" marker; iterate the decoder audio_stream_index array instead.
+ *   - n_audio is set to 1 whatever the number of outputs; use n_audio_output.
  *
  * The video format context is stored in 'format_context'
  * Audio format contexts for each audio output is stored in 'format_context2[]'
- *   - this array is contiguous and has 'n_audio' elements eg. for the xc_params above
+ *   - this array is contiguous, indexed by audio output ordinal, and has 'n_audio_output' elements
+ *     (num_audio_output(): the number of selected streams, or 1 for audio join, merge and pan
+ *     and when no audio_index is given), eg. for the xc_params above
  *     - format_context2[0] is the context for audio stream index 1
  *     - format_context2[1] is the context for audio stream index 3
  *     - format_context2[2] is the context for audio stream index 4
+ *   - audio output i (format_context2[i], "fsegment-audio<i>") carries decoder audio_stream_index[i];
+ *     for audio join and merge its one output carries all selected streams, mixed
  *
  * Codec contexts (AVCodecContext) are stored in 'codec_context[]' as follows:
  *
  * - decoder
- *   - the codec_context array is indexed using the source media stream index values, eg. for the xc_params above
+ *   - the codec_context array is indexed using the source media stream index values, with a context
+ *     for every source stream, selected or not, eg. for the xc_params above
  *     - codec_context[0]  video  (if the source has video on stream_index 0, for example)
  *     - codec_context[1]  audio stream index 1
  *     - codec_context[2]  audio stream index 2 (not selected, per xc_params->audio_index)
@@ -349,7 +405,7 @@ typedef struct pts_unwrapper_t {
  */
 typedef struct coderctx_t {
     AVFormatContext     *format_context;                                /* Input format context or video output format context */
-    AVFormatContext     *format_context2[MAX_STREAMS];                  /* Audio output format context, indexed by audio index */
+    AVFormatContext     *format_context2[MAX_STREAMS];                  /* Audio output format context, indexed by audio output ordinal */
     char                filename2[MAX_STREAMS][MAX_AVFILENAME_LEN];     /* Audio filename formats */
     int                 n_audio_output;                                 /* Number of audio output streams, it is set for encoder */
 
@@ -752,9 +808,7 @@ typedef struct out_tracker_t {
 
     /** Needed to detect type of encoding frame */
     int video_stream_index;
-    int audio_stream_index;
-
-    int output_stream_index;
+    int audio_stream_index;     /* source stream of this audio output; -1 for merge/join */
 } out_tracker_t;
 
 typedef struct encoding_frame_stats_t {

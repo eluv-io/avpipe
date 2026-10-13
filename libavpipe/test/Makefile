@@ -17,7 +17,7 @@ LIBS := $(FFMPEG_LIBS) \
 	-L$(TOP_DIR)/lib -lutils
 
 TESTS := test_color_defaults test_hdr_metadata test_pts_unwrap test_fade_filter \
-	test_vertical_crop
+	test_vertical_crop test_io_open
 OUT   := out
 BINS  := $(addprefix $(OUT)/,$(TESTS))
 
@@ -65,6 +65,10 @@ $(OUT)/test_fade_filter: test_fade_filter.c unity/unity.c \
 $(OUT)/test_vertical_crop: test_vertical_crop.c unity/unity.c \
 		$(SRC_DIR)/avpipe_filters.c $(SRC_DIR)/avpipe_utils.c $(PROD_HDRS) | $(OUT)
 	gcc $(CFLAGS) $< unity/unity.c -o $@ $(LIBS) $(AVFILTER_LIBS) -lm
+
+$(OUT)/test_io_open: test_io_open.c unity/unity.c \
+		$(SRC_DIR)/avpipe_io.c $(PROD_HDRS) | $(OUT)
+	gcc $(CFLAGS) $< unity/unity.c -o $@ $(LIBS)
 
 clean:
 	rm -rf out $(TESTS:=.dSYM)

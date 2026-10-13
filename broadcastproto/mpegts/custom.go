@@ -162,8 +162,8 @@ func (h *customInputHandler) Size() int64 {
 	return -1
 }
 
-func (h *customInputHandler) Stat(streamIndex int, statType goavpipe.AVStatType, statArgs any) error {
-	return h.gih.Stat(streamIndex, statType, statArgs)
+func (h *customInputHandler) Stat(srcStreamIndex int, statType goavpipe.AVStatType, statArgs any) error {
+	return h.gih.Stat(srcStreamIndex, statType, statArgs)
 }
 
 // ---------------------------------------------------------------------------------------------------------------------

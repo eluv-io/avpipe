@@ -305,8 +305,8 @@ func (mih *mpegtsInputHandler) Size() int64 {
 	return -1
 }
 
-func (mih *mpegtsInputHandler) Stat(streamIndex int, statType goavpipe.AVStatType, statArgs any) error {
-	return mih.gih.Stat(streamIndex, statType, statArgs)
+func (mih *mpegtsInputHandler) Stat(srcStreamIndex int, statType goavpipe.AVStatType, statArgs any) error {
+	return mih.gih.Stat(srcStreamIndex, statType, statArgs)
 }
 
 func (mih *mpegtsInputHandler) ReaderLoop(ch chan pktpool.Resource, packetsDropped *atomic.Uint64) {
