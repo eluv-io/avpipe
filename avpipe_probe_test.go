@@ -216,3 +216,47 @@ func TestProbeTS_NoMP4Info(t *testing.T) {
 	require.NotNil(t, video, "expected a video stream")
 	assert.Nil(t, video.MP4, "MP4 must be nil for TS container")
 }
+
+// TestProbeUndecodableAudioStream verifies that Probe succeeds for a file with a stream that
+// ffmpeg can demux but has no decoder for. The clip is cut from an iPhone spatial-video capture
+// (video re-encoded to 90x160 H.264): a stereo AAC track plus a 4-channel Apple Positional Audio
+// Codec ('apac') track, which ffmpeg demuxes with codec_id AV_CODEC_ID_NONE. Probing used to fail
+// with EAV_CODEC_PARAM on such files. The undecodable track is still listed, in its ffmpeg stream
+// position, so that clients mapping probe positions to stream indexes are not shifted; it is reported
+// like a data stream (no codec id/name) with the container tag and the audio parameters the demuxer
+// found.
+func TestProbeUndecodableAudioStream(t *testing.T) {
+	url := apacTestSource
+	checkFileExists(t, url)
+
+	goavpipe.InitIOHandler(&xc.FileInputOpener{URL: url}, &concurrentOutputOpener{dir: "test_out/probe_apac"})
+
+	probe, err := avpipe.Probe(&goavpipe.XcParams{Url: url, Seekable: true})
+	require.NoError(t, err)
+	require.Equal(t, 3, len(probe.Streams))
+
+	assert.Equal(t, 0, probe.Streams[0].StreamIndex)
+	assert.Equal(t, "video", probe.Streams[0].CodecType)
+	assert.Equal(t, "h264", probe.Streams[0].CodecName)
+
+	aac := probe.Streams[1]
+	assert.Equal(t, 1, aac.StreamIndex)
+	assert.Equal(t, "audio", aac.CodecType)
+	assert.Equal(t, "aac", aac.CodecName)
+	assert.Equal(t, "mp4a", aac.CodecTagString)
+	assert.Equal(t, 2, aac.Channels)
+	assert.Equal(t, "stereo", aac.ChannelLayoutName)
+
+	apac := probe.Streams[2]
+	assert.Equal(t, 2, apac.StreamIndex)
+	assert.Equal(t, "audio", apac.CodecType)
+	assert.Equal(t, 0, apac.CodecID)
+	assert.Equal(t, "", apac.CodecName)
+	assert.Equal(t, "apac", apac.CodecTagString)
+	assert.Equal(t, 48000, apac.SampleRate)
+	assert.Equal(t, 4, apac.Channels)
+	assert.Equal(t, "4.0", apac.ChannelLayoutName)
+	assert.Equal(t, int64(48000), apac.TimeBase.Denom().Int64())
+	assert.Greater(t, apac.NBFrames, int64(0))
+	assert.Greater(t, apac.DurationTs, int64(0))
+}
