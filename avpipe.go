@@ -1099,6 +1099,8 @@ func generateI32Handle() int32 {
 // short-lived or non-cancellable operations such as DASH/HLS segment serving
 // and image extraction. For long-running jobs that need mid-flight cancellation
 // (e.g. mezzanine creation), use XcInit + XcRun + XcCancel instead.
+// Takes ownership of params.VerticalDataReader, if set: it is closed before
+// Xc returns, whatever the outcome.
 func Xc(params *goavpipe.XcParams) error {
 	const op = "avpipe.Xc"
 	defer goavpipe.XCEnded()
@@ -1459,6 +1461,8 @@ func getXCJob(handle int32) (*xcJob, bool) {
 // needs cancellation support (e.g. mezzanine creation driven by an LRO).
 // Also sets up the MPEGTS sequential opener for live-stream inputs when
 // params.UseCustomLiveReader is set.
+// Takes ownership of params.VerticalDataReader, if set: it is closed when
+// XcInit fails, by XcCancel, and by XcFini.
 func XcInit(params *goavpipe.XcParams) (handle int32, retErr error) {
 	const op = "avpipe.XcInit"
 

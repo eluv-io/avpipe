@@ -23,6 +23,7 @@ The stream format and behavior are:
   - the few frames decoded past `duration_ts` to absorb reordering (five today) consume one record each;
   - the frames flushed from the decoder when the input ends consume one record each.
 - Vertical crop cannot be combined with deinterlacing, rotation or watermarks; `check_params` rejects the job, so none of those change the frame count.
+- avpipe takes ownership of the reader when `Xc` or `XcInit` is called with it, and closes it when the job ends - on success, on failure, on cancel, and when the params are rejected. Do not close or reuse it. Give each job its own reader; a connection shared across jobs must be wrapped so that `Close` ends this job's use of it without closing the connection (and still unblocks a pending `Read`, see below).
 - Each value is the crop window centre as a fraction of the scaled frame width, with denominator `VERTICAL_DATA_SCALE` (10000): `0` = left edge, `5000` = centre, `10000` = right edge.
 - Reads block until a complete record is available.
 - EOF after at least one complete record holds the last value for all remaining frames. This is logged once as a warning; for a live stream it means the crop stays frozen until the recording ends.
