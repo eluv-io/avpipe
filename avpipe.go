@@ -150,23 +150,43 @@ func (h *verticalDataReaderHandle) release() error {
 
 //export AVPipeReadVerticalData
 func AVPipeReadVerticalData(handle C.uintptr_t, value *C.uint32_t) C.int {
+	var v uint32
+	rc := readVerticalData(uintptr(handle), &v)
+	if rc > 0 {
+		*value = C.uint32_t(v)
+	}
+	return C.int(rc)
+}
+
+// readVerticalData is AVPipeReadVerticalData with Go types: 1 with the next
+// value, 0 at EOF, -1 on error. A handle that XcFini has already deleted is an
+// error too: cgo.Handle reports it with a panic, which must not reach the C
+// caller, so it is recovered here.
+func readVerticalData(handle uintptr, value *uint32) (rc int) {
+	defer func() {
+		if r := recover(); r != nil {
+			goavpipe.Log.Error("AVPipeReadVerticalData()", "reason", "reader handle no longer valid", "panic", r)
+			rc = -1
+		}
+	}()
+
 	h, ok := cgo.Handle(handle).Value().(*verticalDataReaderHandle)
 	if !ok {
-		goavpipe.Log.Error("AVPipeReadVerticalData()", "reason", "invalid reader handle")
-		return C.int(-1)
+		goavpipe.Log.Error("AVPipeReadVerticalData()", "reason", "not a vertical data reader handle")
+		return -1
 	}
 
 	v, hasValue, err := h.readValue()
 	if err != nil {
 		goavpipe.Log.Error("AVPipeReadVerticalData()", "reason", "failed to read 4-byte record", "err", err)
-		return C.int(-1)
+		return -1
 	}
 	if !hasValue {
-		return C.int(0)
+		return 0
 	}
 
-	*value = C.uint32_t(v)
-	return C.int(1)
+	*value = v
+	return 1
 }
 
 func getCIOHandler(fd int64) *ioHandler {
@@ -1603,7 +1623,10 @@ func XcRun(handle int32) (runErr error) {
 }
 
 // XcFini releases job state for jobs created with XcInit. Every successful XcInit must be paired with XcFini, including
-// when XcRun fails or is cancelled with XcCancel.
+// when XcRun fails or is cancelled with XcCancel. Call it only once XcRun has returned (or without running at all):
+// it frees state the running job still uses - the job's output handlers and the VerticalDataReader handle the C
+// side reads through. A read through a handle XcFini has already released fails rather than crashing, but the job's
+// outputs are gone with the handlers.
 func XcFini(handle int32) error {
 	job, ok := takeXCJob(handle)
 	if !ok {

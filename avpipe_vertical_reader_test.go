@@ -52,6 +52,20 @@ func TestVerticalDataReaderReleaseClosesOnce(t *testing.T) {
 	require.Equal(t, 1, r.closeCount)
 }
 
+func TestReadVerticalDataAfterReleaseReturnsError(t *testing.T) {
+	h := newVerticalDataReaderHandle(&trackingReadCloser{Reader: bytes.NewReader([]byte{1, 0, 0, 0})})
+	handle := uintptr(h.handle)
+
+	var v uint32
+	require.Equal(t, 1, readVerticalData(handle, &v))
+	require.Equal(t, uint32(1), v)
+
+	// After XcFini has deleted the handle, a late callback from the C side must
+	// read as an error, not panic through the cgo boundary.
+	require.NoError(t, h.release())
+	require.Equal(t, -1, readVerticalData(handle, &v))
+}
+
 func TestGetCParamsRejectsAmbiguousVerticalDataSource(t *testing.T) {
 	r := &trackingReadCloser{Reader: bytes.NewReader(nil)}
 	_, err := getCParams(&goavpipe.XcParams{
