@@ -81,7 +81,8 @@
         "codec_tag_string": "avc1",
         "mime_codec_string": "avc1.4D4028",
         "profile_idc": 77,
-        "level": 40
+        "level": 40,
+        "refs": 3 // SPS max_num_ref_frames
       }
     }
   ]

@@ -790,6 +790,62 @@ func TestSettingProfileLevel(t *testing.T) {
 	xcTest(t, outputDir, params, xcTestResult, true)
 }
 
+// TestVideoRefsLevelRoundTrip encodes with an explicit VideoRefs and Level and
+// probes the output: MP4.Refs and MP4.Level must come back as the values passed
+// in, in the codec's own units. That is the contract a partial-segment re-encode
+// relies on - probe the init segment, pass StreamInfo.MP4.Refs and .Level through
+// unchanged - so it is pinned here. The refs value differs from every x264 preset
+// default, so a silently ignored parameter cannot pass by accident.
+func TestVideoRefsLevelRoundTrip(t *testing.T) {
+	url := videoBigBuckBunnyPath
+	checkFileExists(t, url)
+
+	cases := []struct {
+		ecodec string
+		refs   int
+		level  int
+	}{
+		// H.264: SPS max_num_ref_frames == refs; level_idc 31 == 3.1.
+		{"libx264", 6, 31},
+	}
+	for _, c := range cases {
+		t.Run(c.ecodec, func(t *testing.T) {
+			outputDir := path.Join(baseOutPath, strings.ReplaceAll(t.Name(), "/", "_"))
+			boilerplate(t, outputDir, url)
+
+			params := &goavpipe.XcParams{
+				Format:             "fmp4-segment",
+				StartTimeTs:        0,
+				DurationTs:         -1,
+				StartSegmentStr:    "1",
+				VideoBitrate:       2560000,
+				VideoSegDurationTs: 900000,
+				Ecodec:             c.ecodec,
+				EncHeight:          480,
+				EncWidth:           720,
+				XcType:             goavpipe.XcVideo,
+				StreamId:           -1,
+				Url:                url,
+				DebugFrameLevel:    debugFrameLevel,
+				Level:              c.level,
+				VideoRefs:          c.refs,
+			}
+			boilerXc(t, params)
+
+			// boilerProbe also asserts the FFmpeg-side stream level (same units).
+			probes := boilerProbe(t, &XcTestResult{
+				mezFile: []string{fmt.Sprintf("%s/vsegment-1.mp4", outputDir)},
+				level:   c.level,
+			})
+			require.Len(t, probes, 1)
+			mp4 := probes[0].Streams[0].MP4
+			require.NotNil(t, mp4, "MP4 codec info must be present for the output mezzanine")
+			assert.Equal(t, c.refs, mp4.Refs, "MP4.Refs must round-trip VideoRefs")
+			assert.Equal(t, c.level, mp4.Level, "MP4.Level must round-trip Level")
+		})
+	}
+}
+
 // TestVideoRefsParamValidation pins the check_params rejections that came with
 // video_refs: each fails XcInit with EAV_PARAM before anything is opened. The last
 // case is the positive control - the same job with a valid video_refs initializes
