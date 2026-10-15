@@ -794,29 +794,39 @@ func TestSettingProfileLevel(t *testing.T) {
 // probes the output: MP4.Refs and MP4.Level must come back as the values passed
 // in, in the codec's own units. That is the contract a partial-segment re-encode
 // relies on - probe the init segment, pass StreamInfo.MP4.Refs and .Level through
-// unchanged - so it is pinned here. The refs value differs from every x264 preset
-// default, so a silently ignored parameter cannot pass by accident.
+// unchanged - so it is pinned here. The first case pins the encoder defaults, so
+// no other case can pass by coincidence.
 func TestVideoRefsLevelRoundTrip(t *testing.T) {
 	url := videoBigBuckBunnyPath
 	checkFileExists(t, url)
 
 	cases := []struct {
-		ecodec string
-		refs   int
-		level  int
+		name      string
+		ecodec    string
+		refs      int
+		level     int
+		wantRefs  int // in the output SPS
+		wantLevel int
 	}{
+		// 0 leaves the encoder's choice: x264 medium uses 3 refs, and avpipe guesses
+		// level 3.0 for 720x480.
+		{"libx264_defaults", "libx264", 0, 0, 3, 30},
 		// H.264: SPS max_num_ref_frames == refs; level_idc 31 == 3.1.
-		{"libx264", 6, 31},
+		{"libx264", "libx264", 6, 31, 6, 31},
+		// Both ends of the accepted range. x264 writes 16 refs under level 3.1 without
+		// lowering either value: on H.264 the level does not constrain refs.
+		{"libx264_min_refs", "libx264", 1, 31, 1, 31},
+		{"libx264_max_refs", "libx264", 16, 31, 16, 31},
 	}
 	for _, c := range cases {
-		t.Run(c.ecodec, func(t *testing.T) {
+		t.Run(c.name, func(t *testing.T) {
 			outputDir := path.Join(baseOutPath, strings.ReplaceAll(t.Name(), "/", "_"))
 			boilerplate(t, outputDir, url)
 
 			params := &goavpipe.XcParams{
 				Format:             "fmp4-segment",
 				StartTimeTs:        0,
-				DurationTs:         -1,
+				DurationTs:         90000, // 3 s: the SPS is all that is probed
 				StartSegmentStr:    "1",
 				VideoBitrate:       2560000,
 				VideoSegDurationTs: 900000,
@@ -835,21 +845,21 @@ func TestVideoRefsLevelRoundTrip(t *testing.T) {
 			// boilerProbe also asserts the FFmpeg-side stream level (same units).
 			probes := boilerProbe(t, &XcTestResult{
 				mezFile: []string{fmt.Sprintf("%s/vsegment-1.mp4", outputDir)},
-				level:   c.level,
+				level:   c.wantLevel,
 			})
 			require.Len(t, probes, 1)
 			mp4 := probes[0].Streams[0].MP4
 			require.NotNil(t, mp4, "MP4 codec info must be present for the output mezzanine")
-			assert.Equal(t, c.refs, mp4.Refs, "MP4.Refs must round-trip VideoRefs")
-			assert.Equal(t, c.level, mp4.Level, "MP4.Level must round-trip Level")
+			assert.Equal(t, c.wantRefs, mp4.Refs, "MP4.Refs must be the expected SPS reference count")
+			assert.Equal(t, c.wantLevel, mp4.Level, "MP4.Level must be the expected output level")
 		})
 	}
 }
 
 // TestVideoRefsParamValidation pins the check_params rejections that came with
 // video_refs: each fails XcInit with EAV_PARAM before anything is opened. The last
-// case is the positive control - the same job with a valid video_refs initializes
-// (and is cancelled before it runs).
+// case is the positive control - the same job with the largest accepted video_refs
+// initializes (and is cancelled before it runs).
 func TestVideoRefsParamValidation(t *testing.T) {
 	url := videoBigBuckBunnyPath
 	checkFileExists(t, url)
@@ -877,6 +887,7 @@ func TestVideoRefsParamValidation(t *testing.T) {
 		name string
 		mod  func(p *goavpipe.XcParams)
 	}{
+		{"video_refs below the minimum", func(p *goavpipe.XcParams) { p.VideoRefs = -1 }},
 		{"video_refs above the encoder maximum", func(p *goavpipe.XcParams) { p.VideoRefs = 17 }},
 		{"video_refs requires transcoding", func(p *goavpipe.XcParams) { p.VideoRefs = 3; p.BypassTranscoding = true }},
 	}
@@ -890,9 +901,9 @@ func TestVideoRefsParamValidation(t *testing.T) {
 		})
 	}
 
-	t.Run("libx264 initializes with video_refs", func(t *testing.T) {
+	t.Run("libx264 initializes with the maximum video_refs", func(t *testing.T) {
 		p := base()
-		p.VideoRefs = 3
+		p.VideoRefs = 16
 		handle, err := avpipe.XcInit(p)
 		require.NoError(t, err)
 		require.NoError(t, avpipe.XcCancel(handle))
