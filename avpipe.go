@@ -54,6 +54,7 @@ import (
 	"math/rand"
 	"runtime/cgo"
 	"sync"
+	"sync/atomic"
 	"syscall"
 	"unsafe"
 
@@ -113,6 +114,7 @@ type verticalDataReaderHandle struct {
 	closeOnce   sync.Once
 	releaseOnce sync.Once
 	closeErr    error
+	cancelled   atomic.Bool // set before a cancel closes the reader, so the read that fails as a result is expected
 }
 
 func newVerticalDataReaderHandle(reader io.ReadCloser) *verticalDataReaderHandle {
@@ -138,6 +140,13 @@ func (h *verticalDataReaderHandle) close() error {
 		h.closeErr = h.reader.Close()
 	})
 	return h.closeErr
+}
+
+// cancel closes the reader to unblock a pending read, marking the failure that
+// read is about to report as expected rather than an error.
+func (h *verticalDataReaderHandle) cancel() error {
+	h.cancelled.Store(true)
+	return h.close()
 }
 
 func (h *verticalDataReaderHandle) release() error {
@@ -178,7 +187,11 @@ func readVerticalData(handle uintptr, value *uint32) (rc int) {
 
 	v, hasValue, err := h.readValue()
 	if err != nil {
-		goavpipe.Log.Error("AVPipeReadVerticalData()", "reason", "failed to read 4-byte record", "err", err)
+		if h.cancelled.Load() {
+			goavpipe.Log.Debug("AVPipeReadVerticalData()", "reason", "read interrupted by cancel", "err", err)
+		} else {
+			goavpipe.Log.Error("AVPipeReadVerticalData()", "reason", "failed to read 4-byte record", "err", err)
+		}
 		return -1
 	}
 	if !hasValue {
@@ -1664,7 +1677,7 @@ func XcCancel(handle int32) error {
 		v.(cancelableInputOpener).CancelInput()
 	}
 	if job, ok := getXCJob(handle); ok && job.verticalDataReader != nil {
-		_ = job.verticalDataReader.close()
+		_ = job.verticalDataReader.cancel()
 	}
 	if rc == 0 {
 		return nil

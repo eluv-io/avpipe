@@ -402,6 +402,7 @@ typedef struct coderctx_t {
     int              vertical_data_has_last;
     int              vertical_data_eof;
     int              vertical_data_read;         /* Records consumed from the streaming source */
+    int              vertical_data_failed;       /* Streaming source failed: latched, the reader is not called again */
 
     /* Audio filter */
     AVFilterContext *audio_buffersink_ctx[MAX_STREAMS];

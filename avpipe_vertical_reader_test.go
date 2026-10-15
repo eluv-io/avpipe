@@ -42,6 +42,16 @@ func TestVerticalDataReaderRejectsPartialRecord(t *testing.T) {
 	require.False(t, ok)
 }
 
+func TestVerticalDataReaderCancelClosesAndMarks(t *testing.T) {
+	r := &trackingReadCloser{Reader: bytes.NewReader(nil)}
+	h := newVerticalDataReaderHandle(r)
+	t.Cleanup(func() { require.NoError(t, h.release()) })
+
+	require.NoError(t, h.cancel())
+	require.Equal(t, 1, r.closeCount)
+	require.True(t, h.cancelled.Load())
+}
+
 func TestVerticalDataReaderReleaseClosesOnce(t *testing.T) {
 	r := &trackingReadCloser{Reader: bytes.NewReader(nil)}
 	h := newVerticalDataReaderHandle(r)

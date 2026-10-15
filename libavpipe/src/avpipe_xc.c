@@ -3170,7 +3170,7 @@ flush_decoder(
                     av_frame_free(&frame);
                     return ret;
                 }
-                if (crop_rc == eav_success)
+                if (crop_rc == eav_success && !decoder_context->cancelled)
                     elv_warn("Failed to read vertical data while flushing, keeping last crop position, ret=%d, url=%s",
                         ret, p->url);
                 crop_rc = ret;

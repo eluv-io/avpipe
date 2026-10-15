@@ -766,6 +766,11 @@ crop_send_command(
     if (has_buffer) {
         crop_x = vertical_data_crop_x(params->vertical_data, params->vertical_data_len, frame_idx, scaled_width, crop_width);
     } else {
+        /* Latched on the first failure: the reader is dead (or closed by a cancel), so
+         * the frames still flushed afterwards neither call it nor log again. */
+        if (decoder_context->vertical_data_failed)
+            return eav_read_input;
+
         /* Record n belongs to frame index n, as entry n does on the buffer path, so
          * read up to it: one record per frame in steady state, and record 0 - read
          * once, not re-consumed - for pre-roll frames whose index is negative. The
@@ -787,12 +792,18 @@ crop_send_command(
                     elv_warn("Vertical data reached EOF at frame %d, holding crop value %u for the rest of the stream, url=%s",
                         frame_idx, (unsigned)decoder_context->vertical_data_last, params->url);
             } else {
-                elv_err("Failed to read vertical data, url=%s", params->url);
+                decoder_context->vertical_data_failed = 1;
+                /* A cancel closes the reader under the read; that failure is expected. */
+                if (decoder_context->cancelled)
+                    elv_dbg("Vertical data read interrupted by cancel, url=%s", params->url);
+                else
+                    elv_err("Failed to read vertical data, url=%s", params->url);
                 return eav_read_input;
             }
         }
 
         if (!decoder_context->vertical_data_has_last) {
+            decoder_context->vertical_data_failed = 1;
             elv_err("Vertical data reader reached EOF before its first value, url=%s", params->url);
             return eav_read_input;
         }

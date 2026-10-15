@@ -353,8 +353,9 @@ test_crop_tracks_vertical_data_per_frame(void)
 #define STREAM_RECORDS 120   /* < N_FRAMES: the remaining frames must hold the last value */
 
 typedef struct stream_source_t {
-    int next;    /* index of the next record to serve */
-    int calls;   /* how many times the reader was invoked */
+    int next;      /* index of the next record to serve */
+    int calls;     /* how many times the reader was invoked */
+    int fail_from; /* fail every call from this one on (1-based); 0 never fails */
 } stream_source_t;
 
 static int
@@ -362,10 +363,69 @@ stream_read(uintptr_t handle, uint32_t *value)
 {
     stream_source_t *s = (stream_source_t *)handle;
     s->calls++;
+    if (s->fail_from > 0 && s->calls >= s->fail_from)
+        return -1;  /* read error */
     if (s->next >= STREAM_RECORDS)
         return 0;   /* EOF */
     *value = pan_value(s->next++);
     return 1;
+}
+
+/* Build the production filter graph for a fixture that streams from source. */
+static void
+fixture_stream_graph(crop_fixture_t *f, stream_source_t *source)
+{
+    char filter_str[256];
+    const int crop_w = crop_calc_width(ENC_H);
+
+    f->params.vertical_data               = NULL;
+    f->params.vertical_data_len           = 0;
+    f->params.vertical_data_reader        = stream_read;
+    f->params.vertical_data_reader_handle = (uintptr_t)source;
+
+    snprintf(filter_str, sizeof(filter_str), "scale=-2:%d,crop=%d:ih:200:0", ENC_H, crop_w);
+    TEST_ASSERT_EQUAL_INT(0,
+        init_video_filters(filter_str, &f->decoder, &f->encoder, &f->params));
+    TEST_ASSERT_EQUAL_INT(0, crop_get_context(&f->decoder, &f->params));
+}
+
+/* A reader failure is latched: the failing frame reports the error, and every frame
+ * after it - the flush keeps asking for the frames still in the reorder window -
+ * gets the same error without the dead reader being called again. EOF before any
+ * value latches the same way. */
+void
+test_crop_stream_read_error_is_latched(void)
+{
+    crop_fixture_t f;
+    stream_source_t source = { 0, 0, 3 };   /* the third read fails */
+
+    fixture_init(&f);
+    fixture_stream_graph(&f, &source);
+    f.dec_codec.frame_num = 1;
+    TEST_ASSERT_EQUAL_INT(eav_success, crop_send_command(&f.decoder, &f.encoder, &f.params));
+    f.dec_codec.frame_num = 2;
+    TEST_ASSERT_EQUAL_INT(eav_success, crop_send_command(&f.decoder, &f.encoder, &f.params));
+    f.dec_codec.frame_num = 3;
+    TEST_ASSERT_EQUAL_INT(eav_read_input, crop_send_command(&f.decoder, &f.encoder, &f.params));
+    TEST_ASSERT_EQUAL_INT(3, source.calls);
+    for (int n = 4; n <= 8; n++) {
+        f.dec_codec.frame_num = n;
+        TEST_ASSERT_EQUAL_INT(eav_read_input, crop_send_command(&f.decoder, &f.encoder, &f.params));
+    }
+    TEST_ASSERT_EQUAL_INT(3, source.calls);
+    TEST_ASSERT_EQUAL_INT(1, f.decoder.vertical_data_has_last);   /* the flush can still hold the last value */
+    fixture_free(&f);
+
+    stream_source_t empty = { STREAM_RECORDS, 0, 0 };   /* EOF on the first read */
+    fixture_init(&f);
+    fixture_stream_graph(&f, &empty);
+    f.dec_codec.frame_num = 1;
+    TEST_ASSERT_EQUAL_INT(eav_read_input, crop_send_command(&f.decoder, &f.encoder, &f.params));
+    f.dec_codec.frame_num = 2;
+    TEST_ASSERT_EQUAL_INT(eav_read_input, crop_send_command(&f.decoder, &f.encoder, &f.params));
+    TEST_ASSERT_EQUAL_INT(1, empty.calls);
+    TEST_ASSERT_EQUAL_INT(0, f.decoder.vertical_data_has_last);
+    fixture_free(&f);
 }
 
 static int
@@ -469,6 +529,7 @@ main(void)
     RUN_TEST(test_crop_tracks_vertical_data_per_frame);
     RUN_TEST(test_crop_tracks_streamed_vertical_data);
     RUN_TEST(test_crop_pre_roll_frames_use_first_record);
+    RUN_TEST(test_crop_stream_read_error_is_latched);
 
     return UNITY_END();
 }
