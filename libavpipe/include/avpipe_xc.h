@@ -401,6 +401,7 @@ typedef struct coderctx_t {
     uint32_t         vertical_data_last;         /* Last crop value read from a streaming source */
     int              vertical_data_has_last;
     int              vertical_data_eof;
+    int              vertical_data_read;         /* Records consumed from the streaming source */
 
     /* Audio filter */
     AVFilterContext *audio_buffersink_ctx[MAX_STREAMS];

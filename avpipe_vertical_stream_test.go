@@ -212,22 +212,31 @@ func requireVideoSize(t *testing.T, outDir string, width, height int) {
 // returns its output directory. First it proves the encode is deterministic (a
 // second identical run must match) and that the data has an effect (a run with
 // the crop held at centre must differ) - otherwise an equivalence check against
-// the oracle could pass vacuously, or a mismatch would be ambiguous.
-func verticalBufferOracle(t *testing.T, url, base string, sweep []uint32) string {
+// the oracle could pass vacuously, or a mismatch would be ambiguous. adjust, if
+// set, is applied to every run's params.
+func verticalBufferOracle(t *testing.T, url, base string, sweep []uint32, adjust func(*goavpipe.XcParams)) string {
 	t.Helper()
+	newParams := func() *goavpipe.XcParams {
+		params := verticalStreamParams(url)
+		if adjust != nil {
+			adjust(params)
+		}
+		return params
+	}
+
 	bufferDir := path.Join(base, "buffer")
-	params := verticalStreamParams(url)
+	params := newParams()
 	params.VerticalData = encodeVerticalData(sweep)
 	xcTest(t, bufferDir, params, nil, true)
 
 	bufferDir2 := path.Join(base, "buffer2")
-	params = verticalStreamParams(url)
+	params = newParams()
 	params.VerticalData = encodeVerticalData(sweep)
 	xcTest(t, bufferDir2, params, nil, true)
 	requireSameOutput(t, bufferDir, bufferDir2)
 
 	holdDir := path.Join(base, "hold")
-	params = verticalStreamParams(url)
+	params = newParams()
 	hold := make([]uint32, len(sweep))
 	for i := range hold {
 		hold[i] = verticalDataScale / 2
@@ -248,11 +257,35 @@ func TestVerticalStreamMatchesBufferEndToEnd(t *testing.T) {
 	// ignores the tail, the stream path consumes one per decoded frame and leaves
 	// the rest unread. Both must land on the same values.
 	sweep := verticalSweep(verticalStreamFrames + 30)
-	bufferDir := verticalBufferOracle(t, url, base, sweep)
+	bufferDir := verticalBufferOracle(t, url, base, sweep, nil)
 
 	streamDir := path.Join(base, "stream")
 	params := verticalStreamParams(url)
 	reader, done := streamVerticalData(sweep, 2*time.Millisecond, nil)
+	params.VerticalDataReader = reader
+	xcTest(t, streamDir, params, nil, true)
+	<-done
+
+	requireSameOutput(t, bufferDir, streamDir)
+}
+
+func TestVerticalStreamMatchesBufferWithStartTime(t *testing.T) {
+	url := videoBigBuckBunnyPath
+	checkFileExists(t, url)
+	base := path.Join(baseOutPath, fn())
+
+	// A partial transcode: decoding starts at the beginning of the file and the
+	// pre-roll before start_time_ts is dropped at the encoder. The stream path has
+	// to index records exactly as the buffer path indexes entries across that
+	// pre-roll, or the two outputs diverge from the first frame.
+	startTime := func(p *goavpipe.XcParams) { p.StartTimeTs = 30000 } // 1s in
+	sweep := verticalSweep(verticalStreamFrames + 30)
+	bufferDir := verticalBufferOracle(t, url, base, sweep, startTime)
+
+	streamDir := path.Join(base, "stream")
+	params := verticalStreamParams(url)
+	startTime(params)
+	reader, done := streamVerticalData(sweep, 0, nil)
 	params.VerticalDataReader = reader
 	xcTest(t, streamDir, params, nil, true)
 	<-done
@@ -267,7 +300,7 @@ func TestVerticalStreamFIFOMatchesBuffer(t *testing.T) {
 	setupOutDir(t, base) // a FIFO left behind by an earlier run would fail Mkfifo
 
 	sweep := verticalSweep(verticalStreamFrames + 30)
-	bufferDir := verticalBufferOracle(t, url, base, sweep)
+	bufferDir := verticalBufferOracle(t, url, base, sweep, nil)
 
 	// A real named pipe, as a crop tracker feeds elvxc --vertical-data. Unlike
 	// io.Pipe this goes through the kernel's FIFO semantics: the open rendezvous,

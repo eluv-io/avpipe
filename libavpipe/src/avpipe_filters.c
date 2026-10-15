@@ -766,17 +766,19 @@ crop_send_command(
     if (has_buffer) {
         crop_x = vertical_data_crop_x(params->vertical_data, params->vertical_data_len, frame_idx, scaled_width, crop_width);
     } else {
-        /* The streaming source starts at the first output frame. Do not consume
-         * records for decoded pre-roll frames in a partial transcode. */
-        if (frame_idx < 0)
-            return eav_success;
-
-        if (!decoder_context->vertical_data_eof) {
+        /* Record n belongs to frame index n, as entry n does on the buffer path, so
+         * read up to it: one record per frame in steady state, and record 0 - read
+         * once, not re-consumed - for pre-roll frames whose index is negative. The
+         * buffer path clamps those to entry 0, and since filter_frame_offset() is an
+         * estimate some of them may reach the encoder. */
+        int want = frame_idx < 0 ? 0 : frame_idx;
+        while (!decoder_context->vertical_data_eof && decoder_context->vertical_data_read <= want) {
             uint32_t value = 0;
             int read_rc = params->vertical_data_reader(params->vertical_data_reader_handle, &value);
             if (read_rc > 0) {
                 decoder_context->vertical_data_last = value;
                 decoder_context->vertical_data_has_last = 1;
+                decoder_context->vertical_data_read++;
             } else if (read_rc == 0) {
                 decoder_context->vertical_data_eof = 1;
                 /* From here on every frame reuses the last value. For a live stream that
