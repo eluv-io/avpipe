@@ -787,13 +787,17 @@ set_encoder_options(
  * the reference count, which FFmpeg exposes generically as AVCodecContext.refs.
  * Every encoder wrapper reads it, so nothing codec-specific is needed here.
  *
- * What libx264 then writes:
+ * What libx264 and libx265 then write:
  *
  *   libx264 - encoder/set.c
  *     num_ref_frames = max_dec_frame_buffering
  *                    = MAX(refs, 1 + num_reorder_frames, pyramid ? 4 : 1, dpb_size)
  *     Both SPS fields come from the same expression, so refs maps straight
  *     through: refs=N gives num_ref_frames=N.
+ *
+ *   libx265 - encoder/level.cpp
+ *     maxDecPicBuffering = MIN(MAX_NUM_REF, MAX(numReorderPics + 2, refs) + 1)
+ *     i.e. refs + 1 once refs dominates, NOT refs.
  *
  * Other encoders accept AVCodecContext.refs too, but what they put in the SPS has
  * not been verified, so they warn rather than being rejected.
@@ -808,8 +812,8 @@ set_video_refs(
 
     encoder_codec_context->refs = params->video_refs;
 
-    if (strcmp(params->ecodec, "libx264")) {
-        elv_warn("video_refs=%d applied to %s - only libx264 is verified to carry it into the SPS, url=%s",
+    if (strcmp(params->ecodec, "libx264") && strcmp(params->ecodec, "libx265")) {
+        elv_warn("video_refs=%d applied to %s - only libx264 and libx265 are verified to carry it into the SPS, url=%s",
             params->video_refs, params->ecodec, params->url);
     } else {
         elv_dbg("video_refs set from params refs=%d ecodec=%s url=%s",

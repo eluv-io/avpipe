@@ -794,8 +794,10 @@ func TestSettingProfileLevel(t *testing.T) {
 // probes the output: MP4.Refs and MP4.Level must come back as the values passed
 // in, in the codec's own units. That is the contract a partial-segment re-encode
 // relies on - probe the init segment, pass StreamInfo.MP4.Refs and .Level through
-// unchanged - so it is pinned here. The first case pins the encoder defaults, so
-// no other case can pass by coincidence.
+// unchanged - so it is pinned here for both encoders. The first case pins the
+// encoder defaults, so no other case can pass by coincidence; the last case pins
+// the compatibility path instead: an H.264-style level given to libx265 is
+// dropped, not applied or converted.
 func TestVideoRefsLevelRoundTrip(t *testing.T) {
 	url := videoBigBuckBunnyPath
 	checkFileExists(t, url)
@@ -817,6 +819,14 @@ func TestVideoRefsLevelRoundTrip(t *testing.T) {
 		// lowering either value: on H.264 the level does not constrain refs.
 		{"libx264_min_refs", "libx264", 1, 31, 1, 31},
 		{"libx264_max_refs", "libx264", 16, 31, 16, 31},
+		// HEVC: sps_max_dec_pic_buffering_minus1 == max(numReorderPics+2, refs). avpipe
+		// encodes with bframes=0, so numReorderPics is 0 and refs >= 2 round-trips
+		// exactly; general_level_idc 93 == 3.1.
+		{"libx265", "libx265", 6, 93, 6, 93},
+		// An H.264-style 10x level (what callers sent before libx265 honored the level)
+		// is dropped with a warning and x265 picks the level itself: 3.0 (90) for
+		// 720x480 at 30 fps with a 7-picture DPB.
+		{"libx265_h264_level_ignored", "libx265", 6, 41, 6, 90},
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {

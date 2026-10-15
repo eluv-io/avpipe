@@ -1130,7 +1130,7 @@ usage(
         "\t-vertical-data :         (optional) Path to binary file with per-frame crop data (4 bytes per frame, uint32 LE).\n"
         "\t                         Each value is the crop window centre as a fraction of the scaled frame\n"
         "\t                         width, denominator 10000 (0=left, 5000=centre, 10000=right).\n"
-        "\t-video-refs :            (optional) Encoder reference frames (verified with libx264). Default 0 lets the encoder choose.\n"
+        "\t-video-refs :            (optional) Encoder reference frames (verified with libx264/libx265). Default 0 lets the encoder choose.\n"
         "\t                         Set this to match an init segment the output must decode against.\n"
         "\t-sample-rate :           (optional) Default: -1. For aac output sample rate is set to input sample rate and this parameter is ignored.\n"
         "\t-seekable :              (optional) Seekable stream. Default is 0, must be 0 or 1\n"
