@@ -18,7 +18,11 @@ To test with media, `scripts/stream-vertical-data.sh -f clip.mp4 -d crop.bin` ex
 
 The stream format and behavior are:
 
-- One 4-byte little-endian `uint32` record per decoded video frame.
+- One 4-byte little-endian `uint32` record per **decoded** video frame, consumed as the frame leaves the decoder. That is not exactly the number of output frames:
+  - the pre-roll of a partial transcode (frames decoded before `start_time_ts`) consumes no records;
+  - the few frames decoded past `duration_ts` to absorb reordering (five today) consume one record each;
+  - the frames flushed from the decoder when the input ends consume one record each.
+- Vertical crop cannot be combined with deinterlacing, rotation or watermarks; `check_params` rejects the job, so none of those change the frame count.
 - Each value is the crop window centre as a fraction of the scaled frame width, with denominator `VERTICAL_DATA_SCALE` (10000): `0` = left edge, `5000` = centre, `10000` = right edge.
 - Reads block until a complete record is available.
 - EOF after at least one complete record holds the last value for all remaining frames. This is logged once as a warning; for a live stream it means the crop stays frozen until the recording ends.
