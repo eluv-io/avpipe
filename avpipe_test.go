@@ -440,7 +440,7 @@ func TestSingleABRTranscodeWithOverlayWatermark(t *testing.T) {
 // Each variant runs with and without SkipDecoding.
 func TestSingleABRFade(t *testing.T) {
 	url := videoBigBuckBunnyPath
-	checkFileExists(t, url);
+	checkFileExists(t, url)
 
 	fadeVariants := []struct {
 		name           string
@@ -788,6 +788,62 @@ func TestSettingProfileLevel(t *testing.T) {
 		pixelFmt: "yuv420p",
 	}
 	xcTest(t, outputDir, params, xcTestResult, true)
+}
+
+// TestVideoRefsParamValidation pins the check_params rejections that came with
+// video_refs: each fails XcInit with EAV_PARAM before anything is opened. The last
+// case is the positive control - the same job with a valid video_refs initializes
+// (and is cancelled before it runs).
+func TestVideoRefsParamValidation(t *testing.T) {
+	url := videoBigBuckBunnyPath
+	checkFileExists(t, url)
+	outputDir := path.Join(baseOutPath, fn())
+	boilerplate(t, outputDir, url)
+
+	base := func() *goavpipe.XcParams {
+		return &goavpipe.XcParams{
+			Format:             "fmp4-segment",
+			DurationTs:         -1,
+			StartSegmentStr:    "1",
+			VideoBitrate:       2560000,
+			VideoSegDurationTs: 900000,
+			Ecodec:             h264Codec,
+			EncHeight:          480,
+			EncWidth:           720,
+			XcType:             goavpipe.XcVideo,
+			StreamId:           -1,
+			Url:                url,
+			DebugFrameLevel:    debugFrameLevel,
+		}
+	}
+
+	rejected := []struct {
+		name string
+		mod  func(p *goavpipe.XcParams)
+	}{
+		{"video_refs above the encoder maximum", func(p *goavpipe.XcParams) { p.VideoRefs = 17 }},
+		{"video_refs requires transcoding", func(p *goavpipe.XcParams) { p.VideoRefs = 3; p.BypassTranscoding = true }},
+	}
+	for _, c := range rejected {
+		t.Run(c.name, func(t *testing.T) {
+			p := base()
+			c.mod(p)
+			handle, err := avpipe.XcInit(p)
+			assert.ErrorIs(t, err, avpipe.EAV_PARAM)
+			assert.Equal(t, int32(-1), handle)
+		})
+	}
+
+	t.Run("libx264 initializes with video_refs", func(t *testing.T) {
+		p := base()
+		p.VideoRefs = 3
+		handle, err := avpipe.XcInit(p)
+		require.NoError(t, err)
+		require.NoError(t, avpipe.XcCancel(handle))
+		runErr := avpipe.XcRun(handle)
+		require.NoError(t, avpipe.XcFini(handle))
+		assert.ErrorIs(t, runErr, avpipe.EAV_CANCELLED)
+	})
 }
 
 func TestStartTimeTsWithSkipDecoding(t *testing.T) {
