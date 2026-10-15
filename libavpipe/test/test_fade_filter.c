@@ -23,9 +23,10 @@
 #include "../src/avpipe_filters.c"
 
 /*
- * avpipe_filters.c references vertical_data_crop_x() (defined in avpipe_utils.c)
- * from crop_send_command(). These tests exercise neither, so stub it rather than
- * drag the whole avpipe_utils.c dependency chain into the test binary.
+ * avpipe_filters.c references vertical_data_crop_x() and vertical_value_crop_x()
+ * (defined in avpipe_utils.c) from crop_send_command(). These tests exercise
+ * none of them, so stub them rather than drag the whole avpipe_utils.c
+ * dependency chain into the test binary.
  */
 int
 vertical_data_crop_x(uint8_t *vertical_data, int data_len, int frame_idx,
@@ -33,6 +34,13 @@ vertical_data_crop_x(uint8_t *vertical_data, int data_len, int frame_idx,
 {
     (void)vertical_data; (void)data_len; (void)frame_idx;
     (void)scaled_width; (void)crop_width;
+    return 0;
+}
+
+int
+vertical_value_crop_x(uint32_t value, int scaled_width, int crop_width)
+{
+    (void)value; (void)scaled_width; (void)crop_width;
     return 0;
 }
 

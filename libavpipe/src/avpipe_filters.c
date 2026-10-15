@@ -738,17 +738,19 @@ crop_calc_width(
     return w;
 }
 
-void
+int
 crop_send_command(
     coderctx_t *decoder_context,
     coderctx_t *encoder_context,
     xcparams_t *params)
 {
     if (!decoder_context->video_crop_ctx)
-        return;
+        return eav_success;
 
-    if (!params->vertical_data || params->vertical_data_len <= 0)
-        return;
+    int has_buffer = params->vertical_data && params->vertical_data_len > 0;
+    int has_reader = params->vertical_data_reader != NULL;
+    if (!has_buffer && !has_reader)
+        return eav_success;
 
     AVCodecContext *dec_ctx = decoder_context->codec_context[decoder_context->video_stream_index];
     int enc_height = encoder_context->codec_context[encoder_context->video_stream_index]->height;
@@ -761,7 +763,52 @@ crop_send_command(
     int crop_x = 0;
     int frame_idx = dec_ctx->frame_num - 1 - filter_frame_offset(encoder_context, params, NULL); /* frame_number is 1-based */
 
-    crop_x = vertical_data_crop_x(params->vertical_data, params->vertical_data_len, frame_idx, scaled_width, crop_width);
+    if (has_buffer) {
+        crop_x = vertical_data_crop_x(params->vertical_data, params->vertical_data_len, frame_idx, scaled_width, crop_width);
+    } else {
+        /* Latched on the first failure: the reader is dead (or closed by a cancel), so
+         * the frames still flushed afterwards neither call it nor log again. */
+        if (decoder_context->vertical_data_failed)
+            return eav_read_input;
+
+        /* Record n belongs to frame index n, as entry n does on the buffer path, so
+         * read up to it: one record per frame in steady state, and record 0 - read
+         * once, not re-consumed - for pre-roll frames whose index is negative. The
+         * buffer path clamps those to entry 0, and since filter_frame_offset() is an
+         * estimate some of them may reach the encoder. */
+        int want = frame_idx < 0 ? 0 : frame_idx;
+        while (!decoder_context->vertical_data_eof && decoder_context->vertical_data_read <= want) {
+            uint32_t value = 0;
+            int read_rc = params->vertical_data_reader(params->vertical_data_reader_handle, &value);
+            if (read_rc > 0) {
+                decoder_context->vertical_data_last = value;
+                decoder_context->vertical_data_has_last = 1;
+                decoder_context->vertical_data_read++;
+            } else if (read_rc == 0) {
+                decoder_context->vertical_data_eof = 1;
+                /* From here on every frame reuses the last value. For a live stream that
+                 * is a frozen crop until the recording ends, so say so once. */
+                if (decoder_context->vertical_data_has_last)
+                    elv_warn("Vertical data reached EOF at frame %d, holding crop value %u for the rest of the stream, url=%s",
+                        frame_idx, (unsigned)decoder_context->vertical_data_last, params->url);
+            } else {
+                decoder_context->vertical_data_failed = 1;
+                /* A cancel closes the reader under the read; that failure is expected. */
+                if (decoder_context->cancelled)
+                    elv_dbg("Vertical data read interrupted by cancel, url=%s", params->url);
+                else
+                    elv_err("Failed to read vertical data, url=%s", params->url);
+                return eav_read_input;
+            }
+        }
+
+        if (!decoder_context->vertical_data_has_last) {
+            decoder_context->vertical_data_failed = 1;
+            elv_err("Vertical data reader reached EOF before its first value, url=%s", params->url);
+            return eav_read_input;
+        }
+        crop_x = vertical_value_crop_x(decoder_context->vertical_data_last, scaled_width, crop_width);
+    }
 
     snprintf(x_val, sizeof(x_val), "%d", crop_x);
     int ret = avfilter_graph_send_command(decoder_context->video_filter_graph,
@@ -769,6 +816,8 @@ crop_send_command(
     if (ret < 0) {
         elv_err("Failed to send crop x command, ret=%d, url=%s", ret, params->url);
     }
+
+    return eav_success;
 }
 
 /*

@@ -47,11 +47,14 @@ static inline uint64_t get_channel_layout_mask(const AVChannelLayout *layout) {
 import "C"
 import (
 	"context"
+	"encoding/binary"
 	"fmt"
 	"io"
 	"math/big"
 	"math/rand"
+	"runtime/cgo"
 	"sync"
+	"sync/atomic"
 	"syscall"
 	"unsafe"
 
@@ -100,6 +103,103 @@ type ioHandler struct {
 	mutex         *sync.Mutex
 	outTable      map[int64]goavpipe.OutputHandler // Map of integer handle to output interfaces
 	restoreMvhevc bool
+}
+
+// verticalDataReaderHandle owns the Go value referenced by C while a transcode
+// is active. Close is separate from release so cancellation can unblock Read
+// without invalidating a handle that an in-flight C callback may still use.
+type verticalDataReaderHandle struct {
+	reader      io.ReadCloser
+	handle      cgo.Handle
+	closeOnce   sync.Once
+	releaseOnce sync.Once
+	closeErr    error
+	cancelled   atomic.Bool // set before a cancel closes the reader, so the read that fails as a result is expected
+}
+
+func newVerticalDataReaderHandle(reader io.ReadCloser) *verticalDataReaderHandle {
+	h := &verticalDataReaderHandle{reader: reader}
+	h.handle = cgo.NewHandle(h)
+	return h
+}
+
+func (h *verticalDataReaderHandle) readValue() (uint32, bool, error) {
+	var data [4]byte
+	_, err := io.ReadFull(h.reader, data[:])
+	if err == io.EOF {
+		return 0, false, nil
+	}
+	if err != nil {
+		return 0, false, err
+	}
+	return binary.LittleEndian.Uint32(data[:]), true, nil
+}
+
+func (h *verticalDataReaderHandle) close() error {
+	h.closeOnce.Do(func() {
+		h.closeErr = h.reader.Close()
+	})
+	return h.closeErr
+}
+
+// cancel closes the reader to unblock a pending read, marking the failure that
+// read is about to report as expected rather than an error.
+func (h *verticalDataReaderHandle) cancel() error {
+	h.cancelled.Store(true)
+	return h.close()
+}
+
+func (h *verticalDataReaderHandle) release() error {
+	h.releaseOnce.Do(func() {
+		_ = h.close()
+		h.handle.Delete()
+	})
+	return h.closeErr
+}
+
+//export AVPipeReadVerticalData
+func AVPipeReadVerticalData(handle C.uintptr_t, value *C.uint32_t) C.int {
+	var v uint32
+	rc := readVerticalData(uintptr(handle), &v)
+	if rc > 0 {
+		*value = C.uint32_t(v)
+	}
+	return C.int(rc)
+}
+
+// readVerticalData is AVPipeReadVerticalData with Go types: 1 with the next
+// value, 0 at EOF, -1 on error. A handle that XcFini has already deleted is an
+// error too: cgo.Handle reports it with a panic, which must not reach the C
+// caller, so it is recovered here.
+func readVerticalData(handle uintptr, value *uint32) (rc int) {
+	defer func() {
+		if r := recover(); r != nil {
+			goavpipe.Log.Error("AVPipeReadVerticalData()", "reason", "reader handle no longer valid", "panic", r)
+			rc = -1
+		}
+	}()
+
+	h, ok := cgo.Handle(handle).Value().(*verticalDataReaderHandle)
+	if !ok {
+		goavpipe.Log.Error("AVPipeReadVerticalData()", "reason", "not a vertical data reader handle")
+		return -1
+	}
+
+	v, hasValue, err := h.readValue()
+	if err != nil {
+		if h.cancelled.Load() {
+			goavpipe.Log.Debug("AVPipeReadVerticalData()", "reason", "read interrupted by cancel", "err", err)
+		} else {
+			goavpipe.Log.Error("AVPipeReadVerticalData()", "reason", "failed to read 4-byte record", "err", err)
+		}
+		return -1
+	}
+	if !hasValue {
+		return 0
+	}
+
+	*value = v
+	return 1
 }
 
 func getCIOHandler(fd int64) *ioHandler {
@@ -853,6 +953,13 @@ func Version() string {
 }
 
 func getCParams(params *goavpipe.XcParams) (*C.xcparams_t, error) {
+	if len(params.VerticalData) > 0 && params.VerticalDataReader != nil {
+		return nil, fmt.Errorf("VerticalData and VerticalDataReader are mutually exclusive")
+	}
+	if params.VerticalDataReader != nil && params.Vertical == 0 {
+		return nil, fmt.Errorf("VerticalDataReader requires vertical cropping to be enabled")
+	}
+
 	extractImagesSize := len(params.ExtractImagesTs)
 
 	// same field order as avpipe_xc.h
@@ -1005,6 +1112,17 @@ func getCParams(params *goavpipe.XcParams) (*C.xcparams_t, error) {
 	return cparams, nil
 }
 
+func initCVerticalDataReader(cparams *C.xcparams_t, h *verticalDataReaderHandle) {
+	if h == nil {
+		return
+	}
+
+	C.init_vertical_data_reader(
+		(*C.xcparams_t)(unsafe.Pointer(cparams)),
+		C.uintptr_t(h.handle),
+	)
+}
+
 func generateI32Handle() int32 {
 	// avpipe treats negative handles as evidence of an error, so we generate a non-negative handle
 	return rand.Int31()
@@ -1014,6 +1132,8 @@ func generateI32Handle() int32 {
 // short-lived or non-cancellable operations such as DASH/HLS segment serving
 // and image extraction. For long-running jobs that need mid-flight cancellation
 // (e.g. mezzanine creation), use XcInit + XcRun + XcCancel instead.
+// Takes ownership of params.VerticalDataReader, if set: it is closed before
+// Xc returns, whatever the outcome.
 func Xc(params *goavpipe.XcParams) error {
 	const op = "avpipe.Xc"
 	defer goavpipe.XCEnded()
@@ -1024,6 +1144,16 @@ func Xc(params *goavpipe.XcParams) error {
 	}
 	goavpipe.Log.Debug(op, "XcParams", params)
 	defer goavpipe.Globals.RemoveURLHandlers(params.Url)
+
+	var verticalDataReader *verticalDataReaderHandle
+	if params.VerticalDataReader != nil {
+		verticalDataReader = newVerticalDataReaderHandle(params.VerticalDataReader)
+		defer func() {
+			if closeErr := verticalDataReader.release(); closeErr != nil {
+				goavpipe.Log.Warn(op, "reason", "failed to close vertical data reader", "err", closeErr)
+			}
+		}()
+	}
 
 	cleanupMvhevcRestore := func() {}
 	if isMvhevcLayout(params) {
@@ -1036,6 +1166,7 @@ func Xc(params *goavpipe.XcParams) error {
 		goavpipe.Log.Error(op, err, "reason", "bad params", "XcParams", params)
 		return EAV_PARAM
 	}
+	initCVerticalDataReader(cparams, verticalDataReader)
 
 	rc := C.xc((*C.xcparams_t)(unsafe.Pointer(cparams)))
 
@@ -1319,7 +1450,8 @@ var cancelableInputOpeners sync.Map // int32 handle -> cancelableInputOpener
 // xcJob represents the state of an avpipe 'xc' job
 // PENDING(SS) - currently only URL mapping but planning to consolidate all job state here
 type xcJob struct {
-	url string
+	url                string
+	verticalDataReader *verticalDataReaderHandle
 }
 
 var (
@@ -1347,6 +1479,14 @@ func takeXCJob(handle int32) (*xcJob, bool) {
 	return job, ok
 }
 
+func getXCJob(handle int32) (*xcJob, bool) {
+	xcJobsMu.Lock()
+	defer xcJobsMu.Unlock()
+
+	job, ok := xcJobs[handle]
+	return job, ok
+}
+
 // XcInit initializes a transcode job and returns a handle for it. The actual
 // transcoding is started by XcRun(handle) and can be interrupted at any time
 // via XcCancel(handle). Every successful XcInit must be paired with XcFini
@@ -1354,6 +1494,8 @@ func takeXCJob(handle int32) (*xcJob, bool) {
 // needs cancellation support (e.g. mezzanine creation driven by an LRO).
 // Also sets up the MPEGTS sequential opener for live-stream inputs when
 // params.UseCustomLiveReader is set.
+// Takes ownership of params.VerticalDataReader, if set: it is closed when
+// XcInit fails, by XcCancel, and by XcFini.
 func XcInit(params *goavpipe.XcParams) (handle int32, retErr error) {
 	const op = "avpipe.XcInit"
 
@@ -1364,9 +1506,15 @@ func XcInit(params *goavpipe.XcParams) (handle int32, retErr error) {
 	goavpipe.Log.Debug(op, "XcParams", params)
 
 	job := &xcJob{url: params.Url}
+	if params.VerticalDataReader != nil {
+		job.verticalDataReader = newVerticalDataReaderHandle(params.VerticalDataReader)
+	}
 	defer func() {
 		if retErr != nil {
 			// Failures don't return a handle so XcFini cannot be called
+			if job.verticalDataReader != nil {
+				_ = job.verticalDataReader.release()
+			}
 			goavpipe.Globals.RemoveURLHandlers(job.url)
 		}
 	}()
@@ -1379,6 +1527,9 @@ func XcInit(params *goavpipe.XcParams) (handle int32, retErr error) {
 	}
 
 	if params.InputCfg.CopyMode == goavpipe.CopyModeRawOnly {
+		if params.Vertical != 0 || params.VerticalDataReader != nil {
+			return -1, errors.E("XcInit", errors.K.Invalid.Default(), "vertical crop requires transcoding")
+		}
 		goavpipe.Log.Info("initializing bypass processor", "copy_mode", params.InputCfg.CopyMode)
 		// Bypass ffmpeg completely and copy the stream verbatim to parts
 		bypassProcessor, err := mpegts.NewBypassProcessor(params, seqOpenerF)
@@ -1406,6 +1557,7 @@ func XcInit(params *goavpipe.XcParams) (handle int32, retErr error) {
 		goavpipe.Log.Error(op, err, "reason", "bad params", "XcParams", params)
 		return -1, EAV_PARAM
 	}
+	initCVerticalDataReader(cparams, job.verticalDataReader)
 
 	var cHandle C.int32_t
 	rc := C.xc_init((*C.xcparams_t)(unsafe.Pointer(cparams)), (*C.int32_t)(unsafe.Pointer(&cHandle)))
@@ -1484,7 +1636,10 @@ func XcRun(handle int32) (runErr error) {
 }
 
 // XcFini releases job state for jobs created with XcInit. Every successful XcInit must be paired with XcFini, including
-// when XcRun fails or is cancelled with XcCancel.
+// when XcRun fails or is cancelled with XcCancel. Call it only once XcRun has returned (or without running at all):
+// it frees state the running job still uses - the job's output handlers and the VerticalDataReader handle the C
+// side reads through. A read through a handle XcFini has already released fails rather than crashing, but the job's
+// outputs are gone with the handlers.
 func XcFini(handle int32) error {
 	job, ok := takeXCJob(handle)
 	if !ok {
@@ -1492,6 +1647,11 @@ func XcFini(handle int32) error {
 	}
 
 	goavpipe.Globals.RemoveURLHandlers(job.url)
+	if job.verticalDataReader != nil {
+		if err := job.verticalDataReader.release(); err != nil {
+			goavpipe.Log.Warn("XcFini", "reason", "failed to close vertical data reader", "err", err)
+		}
+	}
 	return nil
 }
 
@@ -1515,6 +1675,9 @@ func XcCancel(handle int32) error {
 	rc := C.xc_cancel(C.int32_t(handle))
 	if v, ok := cancelableInputOpeners.Load(handle); ok {
 		v.(cancelableInputOpener).CancelInput()
+	}
+	if job, ok := getXCJob(handle); ok && job.verticalDataReader != nil {
+		_ = job.verticalDataReader.cancel()
 	}
 	if rc == 0 {
 		return nil

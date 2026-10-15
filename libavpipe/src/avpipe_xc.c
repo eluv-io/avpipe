@@ -2880,7 +2880,9 @@ transcode_video(
         decoder_context->video_pts = packet->pts;
 
         /* Send crop x command per frame for vertical video */
-        crop_send_command(decoder_context, encoder_context, p);
+        ret = crop_send_command(decoder_context, encoder_context, p);
+        if (ret != eav_success)
+            return ret;
 
         /* Rescale video frame to encoder timebase before sending to the filter
          * (filter is initialized with the encoder timebase).
@@ -3120,6 +3122,7 @@ flush_decoder(
     int debug_frame_level)
 {
     int ret;
+    int crop_rc = eav_success;  /* first vertical-data failure during the flush, reported once drained */
     int i = selected_decoded_audio(decoder_context, stream_index);
     AVFrame *frame, *filt_frame;
     AVFilterContext *buffersink_ctx = decoder_context->video_buffersink_ctx;
@@ -3153,6 +3156,25 @@ flush_decoder(
 
         if (codec_context->codec_type == AVMEDIA_TYPE_VIDEO) {
             fix_video_frame_color(decoder_context, frame);
+            ret = crop_send_command(decoder_context, encoder_context, p);
+            if (ret != eav_success) {
+                /* Only a streaming vertical-data source fails here: its reader errored, or
+                 * hit EOF before delivering any value (the buffer path never fails, and a
+                 * rejected filter command is swallowed inside crop_send_command). With a
+                 * last value in hand, finish the frames still in the decoder's reorder
+                 * window at that position instead of dropping them, and report the error
+                 * once the flush is drained - xc_done records it and still writes the
+                 * trailer. Without a value there is nothing sensible to encode them at. */
+                if (!decoder_context->vertical_data_has_last) {
+                    av_frame_free(&filt_frame);
+                    av_frame_free(&frame);
+                    return ret;
+                }
+                if (crop_rc == eav_success && !decoder_context->cancelled)
+                    elv_warn("Failed to read vertical data while flushing, keeping last crop position, ret=%d, url=%s",
+                        ret, p->url);
+                crop_rc = ret;
+            }
         }
 
         dump_frame(i >= 0, stream_index,
@@ -3208,7 +3230,7 @@ flush_decoder(
 
     av_frame_free(&filt_frame);
     av_frame_free(&frame);
-    return eav_success;
+    return crop_rc;
 }
 
 int
@@ -4163,8 +4185,12 @@ xc_done:
     /*
      * Flush all frames, first flush decoder buffers, then encoder buffers by passing NULL frame.
      */
-    if (params->xc_type & xc_video && xctx->err != eav_write_frame)
-        flush_decoder(decoder_context, encoder_context, encoder_context->video_stream_index, params, debug_frame_level);
+    if (params->xc_type & xc_video && xctx->err != eav_write_frame) {
+        int flush_rc = flush_decoder(decoder_context, encoder_context,
+            encoder_context->video_stream_index, params, debug_frame_level);
+        if (!xctx->err && flush_rc != eav_success)
+            xctx->err = flush_rc;
+    }
     if (params->xc_type & xc_audio && xctx->err != eav_write_frame) {
         for (int i=0; i<decoder_context->n_audio; i++)
             flush_decoder(decoder_context, encoder_context, encoder_context->audio_stream_index[i], params, debug_frame_level);
@@ -4910,8 +4936,19 @@ check_params(
             elv_err("Unsupported vertical data type=%d url=%s", params->vertical, params->url);
             return eav_param;
         }
-        if (params->vertical_data == NULL || params->vertical_data_len < 4 || params->vertical_data_len % 4 > 0) {
+
+        int has_vertical_data = params->vertical_data != NULL && params->vertical_data_len > 0;
+        int has_vertical_reader = params->vertical_data_reader != NULL;
+        if (has_vertical_data && has_vertical_reader) {
+            elv_err("Bad vertical data - buffer and reader are mutually exclusive, url=%s", params->url);
+            return eav_param;
+        }
+        if (!has_vertical_data && !has_vertical_reader) {
             elv_err("Bad vertical data - missing or too short url=%s", params->url);
+            return eav_param;
+        }
+        if (has_vertical_data && (params->vertical_data_len < 4 || params->vertical_data_len % 4 > 0)) {
+            elv_err("Bad vertical data - buffer is too short or not aligned to 4 bytes, url=%s", params->url);
             return eav_param;
         }
     }
@@ -5030,6 +5067,7 @@ log_params(
         "timecode=%s "
         "vertical=%d "
         "vertical_data_len=%d "
+        "vertical_data_reader=%d "
         "fade=%s "
         "fade_start_frame=%d "
         "fade_end_frame=%d "
@@ -5062,7 +5100,7 @@ log_params(
         params->profile ? params->profile : "", params->level,  params->deinterlace,
         params->use_preprocessed_input, params->copy_mpegts,
         params->timecode,
-        params->vertical, params->vertical_data_len,
+        params->vertical, params->vertical_data_len, params->vertical_data_reader != NULL,
         params->fade ? params->fade : "(null)",
         params->fade_start_frame, params->fade_end_frame,
         params->fade_level_1, params->fade_level_2);
