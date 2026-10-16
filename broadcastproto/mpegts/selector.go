@@ -5,6 +5,7 @@ import (
 	"encoding/binary"
 	"fmt"
 	"sort"
+	"sync/atomic"
 
 	"github.com/Comcast/gots/v2"
 	"github.com/Comcast/gots/v2/packet"
@@ -45,6 +46,13 @@ type programTable struct {
 // stream containing only the configured programs/PIDs. It is packaging agnostic:
 // callers feed individual 188-byte TS packets and decide whether omitted packets
 // are dropped or replaced with null packets.
+//
+// Concurrency: every field below is plain single-goroutine state owned by the
+// goroutine that calls Push, with the sole exception of resolved. Stats readers on
+// other goroutines must go through Snapshot, which only loads resolved. Do not read
+// the maps from anywhere but the Push goroutine: recompute reallocates and refills
+// them on every PSI section, so a concurrent range over one is a fatal
+// "concurrent map iteration and map write".
 type Selector struct {
 	cfg goavpipe.MPEGTSSelection
 
@@ -63,6 +71,10 @@ type Selector struct {
 	selectedPIDs     map[uint16]bool
 	videoPIDs        map[uint16]bool
 	psiCC            map[uint16]uint8
+
+	// resolved is the immutable projection of the state above, republished by
+	// recompute. It is the only field safe to touch from another goroutine.
+	resolved atomic.Pointer[SelectionSnapshot]
 }
 
 // NewSelector constructs an MPEG-TS selector. A nil selection disables filtering
@@ -141,11 +153,24 @@ func (s *Selector) Push(pkt *packet.Packet) ([]packet.Packet, error) {
 	return nil, nil
 }
 
-// Snapshot returns a copy of the selector's currently resolved state.
+// Snapshot returns the most recently resolved selection state. It is safe to call
+// from any goroutine and costs an atomic load, so callers on the packet path may
+// call it per packet. The returned slices are shared with every other caller and
+// must not be modified.
 func (s *Selector) Snapshot() SelectionSnapshot {
 	if s == nil {
 		return SelectionSnapshot{}
 	}
+	if resolved := s.resolved.Load(); resolved != nil {
+		return *resolved
+	}
+	return SelectionSnapshot{}
+}
+
+// publishResolved projects the mutable selection state into an immutable snapshot
+// and publishes it for concurrent readers. Called only from the Push goroutine, on
+// every recompute, so Snapshot never has to touch the maps.
+func (s *Selector) publishResolved() {
 	res := SelectionSnapshot{Ready: s.ready}
 	for id, p := range s.selectedPrograms {
 		res.ProgramIDs = append(res.ProgramIDs, id)
@@ -167,7 +192,7 @@ func (s *Selector) Snapshot() SelectionSnapshot {
 	sortUint16s(res.SelectedPIDs)
 	res.PMTPIDs = compactUint16s(res.PMTPIDs)
 	res.PCRPIDs = compactUint16s(res.PCRPIDs)
-	return res
+	s.resolved.Store(&res)
 }
 
 func (s *Selector) consumePAT(section []byte) (bool, error) {
@@ -276,6 +301,10 @@ func (s *Selector) consumePMT(pid uint16, section []byte) ([]packet.Packet, erro
 }
 
 func (s *Selector) recompute() {
+	// Deferred so every exit republishes, including the two that bail out with the
+	// selection cleared.
+	defer s.publishResolved()
+
 	s.clearResolved()
 	if len(s.cfg.ProgramIDs) > 0 {
 		for _, id := range s.cfg.ProgramIDs {
@@ -344,6 +373,9 @@ func (s *Selector) recompute() {
 	s.ready = true
 }
 
+// clearResolved drops the resolved selection without publishing. Every caller goes
+// on to recompute, which republishes; leaving the last snapshot in place until then
+// keeps readers on a stale but coherent selection instead of flickering to empty.
 func (s *Selector) clearResolved() {
 	s.ready = false
 	s.selectedPrograms = make(map[uint16]*programTable)

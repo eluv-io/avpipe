@@ -173,6 +173,70 @@ func TestSelectorRejectsUnknownProgramAndPID(t *testing.T) {
 	})
 }
 
+// TestSelectorSnapshotConcurrentWithPush drives Snapshot from a second goroutine
+// while the packet path keeps parsing PSI, the way the LRO status handler polls a
+// running transcode. recompute reallocates and refills the selection maps on every
+// PSI section, so when Snapshot still ranged over those maps this aborted the
+// process with "concurrent map iteration and map write" - a fatal error no recover
+// can catch. Run under -race to also catch the unsynchronized access itself.
+func TestSelectorSnapshotConcurrentWithPush(t *testing.T) {
+	selector, err := NewSelector(&goavpipe.MPEGTSSelection{ProgramIDs: []uint16{101}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	patPackets := testPacketize(0, testPAT(map[uint16]uint16{101: 0x100, 102: 0x101}))
+	pmtPackets := testPacketize(0x100, testPMT(101, 0x21, []testES{
+		{streamType: 0x24, pid: 0x21},
+		{streamType: 0x81, pid: 0x22},
+		{streamType: 0x86, pid: 0x60},
+	}))
+
+	const iterations = 5000
+	var pushErr error
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		for i := 0; i < iterations; i++ {
+			for _, section := range [][]packet.Packet{patPackets, pmtPackets} {
+				for j := range section {
+					if _, pushErr = selector.Push(&section[j]); pushErr != nil {
+						return
+					}
+				}
+			}
+		}
+	}()
+
+	// Poll until the writer is finished. A reader must never observe a partially
+	// rebuilt selection, only the previous one or the next complete one.
+	polls := 0
+	for polling := true; polling; {
+		select {
+		case <-done:
+			polling = false
+		default:
+			if sn := selector.Snapshot(); sn.Ready && len(sn.ProgramIDs) != 1 {
+				t.Fatalf("reader observed a half-built selection: %+v", sn)
+			}
+			polls++
+		}
+	}
+	if pushErr != nil {
+		t.Fatalf("push: %v", pushErr)
+	}
+	if polls == 0 {
+		t.Fatal("reader never ran concurrently with the writer")
+	}
+	assertSnapshot(t, selector.Snapshot(), SelectionSnapshot{
+		Ready:        true,
+		ProgramIDs:   []uint16{101},
+		PMTPIDs:      []uint16{0x100},
+		PCRPIDs:      []uint16{0x21},
+		VideoPIDs:    []uint16{0x21},
+		SelectedPIDs: []uint16{0x21, 0x22, 0x60},
+	})
+}
+
 func assertSnapshot(t *testing.T, got, want SelectionSnapshot) {
 	t.Helper()
 	if !reflect.DeepEqual(got, want) {

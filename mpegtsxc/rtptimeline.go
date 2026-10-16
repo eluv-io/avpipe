@@ -1,5 +1,9 @@
 package mpegtsxc
 
+import (
+	"go.uber.org/atomic"
+)
+
 // rtpGapDetector flags input discontinuities from RTP header sequence/timestamp
 // jumps (dropped datagrams, recorder gaps, source restarts). The RTP timestamps are
 // not used for anything else: an RTP timestamp counter has an arbitrary offset from
@@ -13,7 +17,9 @@ type rtpGapDetector struct {
 	lastSeq     uint16
 	lastTs      uint32
 
-	discCount uint64
+	// discCount is read by Discontinuities from the stats goroutine while Update
+	// keeps incrementing it on the packet path.
+	discCount atomic.Uint64
 }
 
 func newRtpGapDetector(seqGapThreshold int, tsGapThreshold90k int64) *rtpGapDetector {
@@ -46,12 +52,12 @@ func (r *rtpGapDetector) Update(seq uint16, ts uint32) (discontinuity bool) {
 		tsDelta = -tsDelta
 	}
 	if seqDelta > r.seqGapThreshold || tsDelta > r.tsGapThreshold {
-		r.discCount++
+		count := r.discCount.Inc()
 		log.Info("mpegts-xc: input discontinuity detected",
-			"seqDelta", seqDelta, "tsDelta90k", tsDelta, "count", r.discCount)
+			"seqDelta", seqDelta, "tsDelta90k", tsDelta, "count", count)
 		return true
 	}
 	return false
 }
 
-func (r *rtpGapDetector) Discontinuities() uint64 { return r.discCount }
+func (r *rtpGapDetector) Discontinuities() uint64 { return r.discCount.Load() }
