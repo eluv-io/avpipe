@@ -814,10 +814,21 @@ func TestVideoRefsLevelRoundTrip(t *testing.T) {
 		// lowering either value: on H.264 the level does not constrain refs.
 		{"libx264_min_refs", "libx264", 1, 31, 1, 31},
 		{"libx264_max_refs", "libx264", 16, 31, 16, 31},
+		// HEVC defaults: x265 medium uses 3 refs and picks level 3.0 (90) for 720x480
+		// at 30 fps - the same level the dropped-level case below ends up with.
+		{"libx265_defaults", "libx265", 0, 0, 3, 90},
 		// HEVC: sps_max_dec_pic_buffering_minus1 == max(numReorderPics+2, refs). avpipe
 		// encodes with bframes=0, so numReorderPics is 0 and refs >= 2 round-trips
 		// exactly; general_level_idc 93 == 3.1.
 		{"libx265", "libx265", 6, 93, 6, 93},
+		// Below that floor, refs 1 comes back as 2.
+		{"libx265_min_refs", "libx265", 1, 93, 2, 93},
+		// Refs and level are coupled in x265. Without a level, more refs push the level
+		// it picks: 8 refs need a 9-picture DPB, more than 3.0 allows at 720x480, so it
+		// declares 3.1. With a level, x265 keeps it and lowers refs to fit: 3.1 allows a
+		// 12-picture DPB at 720x480, so 16 refs become 11.
+		{"libx265_refs_raise_level", "libx265", 8, 0, 8, 93},
+		{"libx265_level_caps_refs", "libx265", 16, 93, 11, 93},
 		// An H.264-style 10x level (what callers sent before libx265 honored the level)
 		// is dropped with a warning and x265 picks the level itself: 3.0 (90) for
 		// 720x480 at 30 fps with a 7-picture DPB.
@@ -863,12 +874,12 @@ func TestVideoRefsLevelRoundTrip(t *testing.T) {
 
 // TestVideoRefsLevelParamValidation pins the check_params rejections that came
 // with video_refs and the libx265 level: each fails XcInit with EAV_PARAM before
-// anything is opened. A libx265 level that is an H.264 value is not among them -
-// it is dropped with a warning (see TestVideoRefsLevelRoundTrip); only a value
-// that is neither codec's level is rejected. The last two cases are the positive
-// controls - libx264 with the largest accepted video_refs, and libx265 with
-// video_refs and a valid HEVC level - which initialize (and are cancelled before
-// they run).
+// anything is opened. Levels are checked in the encoder's own units, so an
+// HEVC-style value is rejected for libx264, while an H.264-style value for libx265
+// is not among the rejections - it is dropped with a warning (see
+// TestVideoRefsLevelRoundTrip); only a value in neither codec's level set fails.
+// The accepted cases are the positive controls: they initialize, and are cancelled
+// before they run.
 func TestVideoRefsLevelParamValidation(t *testing.T) {
 	url := videoBigBuckBunnyPath
 	checkFileExists(t, url)
@@ -897,6 +908,7 @@ func TestVideoRefsLevelParamValidation(t *testing.T) {
 		mod  func(p *goavpipe.XcParams)
 	}{
 		{"libx265 rejects a level that is neither H.264 nor HEVC", func(p *goavpipe.XcParams) { p.Ecodec = "libx265"; p.Level = 45 }},
+		{"libx264 rejects an HEVC-style 30x level", func(p *goavpipe.XcParams) { p.Level = 93 }},
 		{"video_refs below the minimum", func(p *goavpipe.XcParams) { p.VideoRefs = -1 }},
 		{"video_refs above the encoder maximum", func(p *goavpipe.XcParams) { p.VideoRefs = 17 }},
 		{"video_refs requires transcoding", func(p *goavpipe.XcParams) { p.VideoRefs = 3; p.BypassTranscoding = true }},
@@ -911,29 +923,71 @@ func TestVideoRefsLevelParamValidation(t *testing.T) {
 		})
 	}
 
-	t.Run("libx264 initializes with the maximum video_refs", func(t *testing.T) {
-		p := base()
-		p.VideoRefs = 16
-		handle, err := avpipe.XcInit(p)
-		require.NoError(t, err)
-		require.NoError(t, avpipe.XcCancel(handle))
-		runErr := avpipe.XcRun(handle)
-		require.NoError(t, avpipe.XcFini(handle))
-		assert.ErrorIs(t, runErr, avpipe.EAV_CANCELLED)
-	})
+	accepted := []struct {
+		name string
+		mod  func(p *goavpipe.XcParams)
+	}{
+		{"libx264 with the maximum video_refs", func(p *goavpipe.XcParams) { p.VideoRefs = 16 }},
+		{"libx265 with video_refs and an HEVC general_level_idc", func(p *goavpipe.XcParams) { p.Ecodec = "libx265"; p.Level = 93; p.VideoRefs = 3 }},
+		{"libx265 with an H.264-style level that has no HEVC equivalent", func(p *goavpipe.XcParams) { p.Ecodec = "libx265"; p.Level = 32 }},
+	}
+	for _, c := range accepted {
+		t.Run(c.name, func(t *testing.T) {
+			p := base()
+			c.mod(p)
+			handle, err := avpipe.XcInit(p)
+			require.NoError(t, err)
+			require.NoError(t, avpipe.XcCancel(handle))
+			runErr := avpipe.XcRun(handle)
+			require.NoError(t, avpipe.XcFini(handle))
+			assert.ErrorIs(t, runErr, avpipe.EAV_CANCELLED)
+		})
+	}
+}
 
-	t.Run("libx265 accepts an HEVC general_level_idc", func(t *testing.T) {
-		p := base()
-		p.Ecodec = "libx265"
-		p.Level = 93
-		p.VideoRefs = 3
-		handle, err := avpipe.XcInit(p)
-		require.NoError(t, err)
-		require.NoError(t, avpipe.XcCancel(handle))
-		runErr := avpipe.XcRun(handle)
-		require.NoError(t, avpipe.XcFini(handle))
-		assert.ErrorIs(t, runErr, avpipe.EAV_CANCELLED)
-	})
+// TestVideoRefsLevelEncoderOpen pins two libx265 combinations that pass
+// check_params and then fail when x265 opens, so XcRun returns EAV_OPEN_CODEC: a
+// level too small for the picture (60 is HEVC 2.0, 352x288 - and also what an
+// H.264-style caller means by 6.0), and video_refs 16 without a level, where x265
+// picks the level itself and rejects the reference count as non-compliant instead
+// of lowering it the way it does when a level is given.
+func TestVideoRefsLevelEncoderOpen(t *testing.T) {
+	url := videoBigBuckBunnyPath
+	checkFileExists(t, url)
+	outputDir := path.Join(baseOutPath, fn())
+	boilerplate(t, outputDir, url)
+
+	cases := []struct {
+		name string
+		mod  func(p *goavpipe.XcParams)
+	}{
+		{"level too small for the picture", func(p *goavpipe.XcParams) { p.Level = 60 }},
+		{"video_refs 16 without a level", func(p *goavpipe.XcParams) { p.VideoRefs = 16 }},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			p := &goavpipe.XcParams{
+				Format:             "fmp4-segment",
+				DurationTs:         90000,
+				StartSegmentStr:    "1",
+				VideoBitrate:       2560000,
+				VideoSegDurationTs: 900000,
+				Ecodec:             "libx265",
+				EncHeight:          480,
+				EncWidth:           720,
+				XcType:             goavpipe.XcVideo,
+				StreamId:           -1,
+				Url:                url,
+				DebugFrameLevel:    debugFrameLevel,
+			}
+			c.mod(p)
+			handle, err := avpipe.XcInit(p)
+			require.NoError(t, err)
+			runErr := avpipe.XcRun(handle)
+			require.NoError(t, avpipe.XcFini(handle))
+			assert.ErrorIs(t, runErr, avpipe.EAV_OPEN_CODEC)
+		})
+	}
 }
 
 func TestStartTimeTsWithSkipDecoding(t *testing.T) {
