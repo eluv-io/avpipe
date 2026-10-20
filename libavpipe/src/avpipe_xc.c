@@ -948,18 +948,28 @@ set_h265_params(
             cr == AVCOL_RANGE_JPEG ? "full" : "limited");
     }
 
+    /*
+     * libx265 does not read AVCodecContext.level, so the level goes through
+     * x265-params. params->level uses HEVC's native units (30x the level number,
+     * 4.1 -> 123), the value Probe reports; x265's level-idc is 10x, so divide by 3.
+     *
+     * Without a level, x265 chooses one from the resolution, frame rate, bitrate and
+     * DPB size - so a re-encode can end up declaring a different level than the init
+     * segment it has to play against (more refs means a bigger DPB, which can push it
+     * up). With a level, x265 keeps that level and lowers the reference count if it
+     * does not fit, logging "Lowering max references ... to meet level requirement".
+     */
+    if (params->level > 0) {
+        off += snprintf(x265_params + off, sizeof(x265_params) - off,
+            "%slevel-idc=%d", off > 0 ? ":" : "", params->level / 3);
+    }
+
     if (off > 0)
         av_opt_set(encoder_codec_context->priv_data, "x265-params", x265_params, 0);
 
     /* Set the number of bframes to 0 and avoid having bframes */
     av_opt_set_int(encoder_codec_context->priv_data, "bframes", 0, 0);
 
-    /*
-     * These are set according to
-     * https://en.wikipedia.org/wiki/High_Efficiency_Video_Coding
-     * Let X265 encoder picks the level automatically. Setting the level based on
-     * resolution and framerate might pick higher level than what is needed.
-     */
     return 0;
 }
 
@@ -4917,7 +4927,48 @@ check_params(
         }
     }
 
-    if (avpipe_check_level(params->level) < 0) {
+    /*
+     * Levels are in each codec's native level_idc units, matching what Probe
+     * reports: H.264 is 10x the level number (4.1 -> 41), HEVC is 30x
+     * (4.1 -> 123). avpipe_check_level() knows the H.264 values, so libx265 is
+     * checked against the HEVC ones instead.
+     *
+     * An H.264-style value for libx265 (41 for 4.1) used to pass this check and be
+     * ignored by x265. Existing callers send those, so they are still accepted: warn
+     * and drop the level, and x265 picks one as before. 30 and 60 are both H.264
+     * 3.0/6.0 and HEVC 1.0/2.0, so they cannot be told apart and are taken as HEVC
+     * (x265 then refuses to open if the picture does not fit the level).
+     */
+    if (params->ecodec && !strcmp(params->ecodec, "libx265")) {
+        if (params->level > 0) {
+            static const int hevc_levels[] = {30, 60, 63, 90, 93, 120, 123, 150, 153, 156, 180, 183, 186};
+            int valid = 0;
+            int has_equiv = 0;  // level * 3 is an HEVC level (HEVC has no 1.1/1.2/1.3/2.2/3.2/4.2)
+            for (int i = 0; i < sizeof(hevc_levels)/sizeof(hevc_levels[0]); i++) {
+                if (hevc_levels[i] == params->level)
+                    valid = 1;
+                if (hevc_levels[i] == params->level * 3)
+                    has_equiv = 1;
+            }
+            if (!valid) {
+                if (avpipe_check_level(params->level) < 0) {
+                    elv_err("Invalid level %d for libx265 - expected HEVC general_level_idc, "
+                        "30x the level number (e.g. 123 for 4.1), url=%s", params->level, params->url);
+                    return eav_param;
+                }
+                if (has_equiv) {
+                    elv_warn("Ignoring level %d for libx265 - an H.264-style 10x level; libx265 takes HEVC "
+                        "general_level_idc, 30x the level number (use %d). Letting x265 pick the level, url=%s",
+                        params->level, params->level * 3, params->url);
+                } else {
+                    elv_warn("Ignoring level %d for libx265 - an H.264-style 10x level with no HEVC "
+                        "equivalent; libx265 takes HEVC general_level_idc, 30x the level number. "
+                        "Letting x265 pick the level, url=%s", params->level, params->url);
+                }
+                params->level = 0;
+            }
+        }
+    } else if (avpipe_check_level(params->level) < 0) {
         elv_err("Invalid level %d", params->level);
         return eav_param;
     }

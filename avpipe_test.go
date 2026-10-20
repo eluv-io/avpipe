@@ -853,11 +853,15 @@ func TestVideoRefsLevelRoundTrip(t *testing.T) {
 	}
 }
 
-// TestVideoRefsParamValidation pins the check_params rejections that came with
-// video_refs: each fails XcInit with EAV_PARAM before anything is opened. The last
-// case is the positive control - the same job with the largest accepted video_refs
-// initializes (and is cancelled before it runs).
-func TestVideoRefsParamValidation(t *testing.T) {
+// TestVideoRefsLevelParamValidation pins the check_params rejections that came
+// with video_refs and the libx265 level: each fails XcInit with EAV_PARAM before
+// anything is opened. A libx265 level that is an H.264 value is not among them -
+// it is dropped with a warning (see TestVideoRefsLevelRoundTrip); only a value
+// that is neither codec's level is rejected. The last two cases are the positive
+// controls - libx264 with the largest accepted video_refs, and libx265 with
+// video_refs and a valid HEVC level - which initialize (and are cancelled before
+// they run).
+func TestVideoRefsLevelParamValidation(t *testing.T) {
 	url := videoBigBuckBunnyPath
 	checkFileExists(t, url)
 	outputDir := path.Join(baseOutPath, fn())
@@ -884,6 +888,7 @@ func TestVideoRefsParamValidation(t *testing.T) {
 		name string
 		mod  func(p *goavpipe.XcParams)
 	}{
+		{"libx265 rejects a level that is neither H.264 nor HEVC", func(p *goavpipe.XcParams) { p.Ecodec = "libx265"; p.Level = 45 }},
 		{"video_refs below the minimum", func(p *goavpipe.XcParams) { p.VideoRefs = -1 }},
 		{"video_refs above the encoder maximum", func(p *goavpipe.XcParams) { p.VideoRefs = 17 }},
 		{"video_refs requires transcoding", func(p *goavpipe.XcParams) { p.VideoRefs = 3; p.BypassTranscoding = true }},
@@ -901,6 +906,19 @@ func TestVideoRefsParamValidation(t *testing.T) {
 	t.Run("libx264 initializes with the maximum video_refs", func(t *testing.T) {
 		p := base()
 		p.VideoRefs = 16
+		handle, err := avpipe.XcInit(p)
+		require.NoError(t, err)
+		require.NoError(t, avpipe.XcCancel(handle))
+		runErr := avpipe.XcRun(handle)
+		require.NoError(t, avpipe.XcFini(handle))
+		assert.ErrorIs(t, runErr, avpipe.EAV_CANCELLED)
+	})
+
+	t.Run("libx265 accepts an HEVC general_level_idc", func(t *testing.T) {
+		p := base()
+		p.Ecodec = "libx265"
+		p.Level = 93
+		p.VideoRefs = 3
 		handle, err := avpipe.XcInit(p)
 		require.NoError(t, err)
 		require.NoError(t, avpipe.XcCancel(handle))
