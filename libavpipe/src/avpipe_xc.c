@@ -961,10 +961,23 @@ set_h265_params(
      * segment it has to play against (more refs means a bigger DPB, which can push it
      * up). With a level, x265 keeps that level and lowers the reference count if it
      * does not fit, logging "Lowering max references ... to meet level requirement".
+     *
+     * Don't want to fail previously un-validated profiles, so an unsupported combination
+     * is dropped with a warning and x265 will pick the level.
      */
     if (params->level > 0) {
-        off += snprintf(x265_params + off, sizeof(x265_params) - off,
-            "%slevel-idc=%d", off > 0 ? ":" : "", params->level / 3);
+        double fps = encoder_codec_context->framerate.den > 0
+            ? av_q2d(encoder_codec_context->framerate) : 0;
+        if (avpipe_hevc_level_fits(params->level, encoder_codec_context->width,
+                encoder_codec_context->height, fps) == 0) {
+            elv_warn("Ignoring level %d for libx265 - %dx%d at %.3g fps does not fit HEVC level %d.%d; "
+                "x265 picks the level, url=%s",
+                params->level, encoder_codec_context->width, encoder_codec_context->height, fps,
+                params->level / 30, (params->level % 30) / 3, params->url);
+        } else {
+            off += snprintf(x265_params + off, sizeof(x265_params) - off,
+                "%slevel-idc=%d", off > 0 ? ":" : "", params->level / 3);
+        }
     }
 
     if (off > 0)
@@ -4934,8 +4947,8 @@ check_params(
      * Levels are each codec's level_idc, as Probe reports them: H.264 10x the level
      * number (41), HEVC 30x (123). Callers still send H.264-style values for
      * libx265, so an invalid level is dropped there with a warning instead of
-     * rejected. 30 and 60 are valid in both sets and are taken as HEVC 1.0/2.0
-     * (x265 then refuses to open if the picture does not fit the level).
+     * rejected. 30 and 60 are valid in both sets and are taken as HEVC 1.0/2.0;
+     * set_h265_params drops them when the picture does not fit.
      */
     if (params->ecodec && !strcmp(params->ecodec, "libx265")) {
         if (avpipe_check_hevc_level(params->level) < 0) {
