@@ -833,6 +833,10 @@ func TestVideoRefsLevelRoundTrip(t *testing.T) {
 		// is dropped with a warning and x265 picks the level itself: 3.0 (90) for
 		// 720x480 at 30 fps with a 7-picture DPB.
 		{"libx265_h264_level_ignored", "libx265", 6, 41, 6, 90},
+		// A level the picture cannot satisfy (60 is HEVC 2.0, 352x288 - and what an
+		// H.264-style caller means by 6.0) is dropped the same way instead of making
+		// x265 refuse to open.
+		{"libx265_level_too_small_dropped", "libx265", 6, 60, 6, 90},
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
@@ -944,12 +948,11 @@ func TestVideoRefsLevelParamValidation(t *testing.T) {
 	}
 }
 
-// TestVideoRefsLevelEncoderOpen pins two libx265 combinations that pass
-// check_params and then fail when x265 opens, so XcRun returns EAV_OPEN_CODEC: a
-// level too small for the picture (60 is HEVC 2.0, 352x288 - and also what an
-// H.264-style caller means by 6.0), and video_refs 16 without a level, where x265
-// picks the level itself and rejects the reference count as non-compliant instead
-// of lowering it the way it does when a level is given.
+// TestVideoRefsLevelEncoderOpen pins a libx265 combination that passes
+// check_params and then fails when x265 opens, so XcRun returns EAV_OPEN_CODEC:
+// video_refs 16 without a level, where x265 picks the level itself and rejects
+// the reference count as non-compliant instead of lowering it the way it does
+// when a level is given.
 func TestVideoRefsLevelEncoderOpen(t *testing.T) {
 	url := videoBigBuckBunnyPath
 	checkFileExists(t, url)
@@ -960,7 +963,6 @@ func TestVideoRefsLevelEncoderOpen(t *testing.T) {
 		name string
 		mod  func(p *goavpipe.XcParams)
 	}{
-		{"level too small for the picture", func(p *goavpipe.XcParams) { p.Level = 60 }},
 		{"video_refs 16 without a level", func(p *goavpipe.XcParams) { p.VideoRefs = 16 }},
 	}
 	for _, c := range cases {

@@ -271,18 +271,62 @@ avpipe_check_level(
     return -1;
 }
 
+/*
+ * HEVC level limits, H.265 Table A.8: general_level_idc, MaxLumaPs (luma samples
+ * per picture) and MaxLumaSr (luma samples per second).
+ */
+static const struct {
+    int      level;
+    uint64_t max_luma_ps;
+    uint64_t max_luma_sr;
+} hevc_level_limits[] = {
+    {30,     36864,     552960},
+    {60,    122880,    3686400},
+    {63,    245760,    7372800},
+    {90,    552960,   16588800},
+    {93,    983040,   33177600},
+    {120,  2228224,   66846720},
+    {123,  2228224,  133693440},
+    {150,  8912896,  267386880},
+    {153,  8912896,  534773760},
+    {156,  8912896, 1069547520ULL},
+    {180, 35651584, 1069547520ULL},
+    {183, 35651584, 2139095040ULL},
+    {186, 35651584, 4278190080ULL},
+};
+
 int
 avpipe_check_hevc_level(
     int level)
 {
-    static int levels[] = {30, 60, 63, 90, 93, 120, 123, 150, 153, 156, 180, 183, 186};
-
     if (level <= 0)
         return 1;
 
-    for (int i=0; i<sizeof(levels)/sizeof(int); i++) {
-        if (levels[i] == level)
+    for (int i=0; i<sizeof(hevc_level_limits)/sizeof(hevc_level_limits[0]); i++) {
+        if (hevc_level_limits[i].level == level)
             return 1;
+    }
+
+    return -1;
+}
+
+int
+avpipe_hevc_level_fits(
+    int level,
+    int width,
+    int height,
+    double fps)
+{
+    double ps = (double)width * height;
+
+    for (int i=0; i<sizeof(hevc_level_limits)/sizeof(hevc_level_limits[0]); i++) {
+        if (hevc_level_limits[i].level != level)
+            continue;
+        if (ps > hevc_level_limits[i].max_luma_ps)
+            return 0;
+        if (fps > 0 && ps * fps > hevc_level_limits[i].max_luma_sr)
+            return 0;
+        return 1;
     }
 
     return -1;
