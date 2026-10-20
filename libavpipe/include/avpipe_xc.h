@@ -1001,6 +1001,17 @@ avpipe_check_level(
     int level);
 
 /**
+ * @brief   Helper function to check an HEVC level, given as general_level_idc
+ *          (30x the level number, 123 for 4.1).
+ *
+ * @param   level
+ * @return  Returns 1 if the level is valid, otherwise return -1 for an invalid level.
+ */
+int
+avpipe_check_hevc_level(
+    int level);
+
+/**
  * @brief   Helper function to deep copy an xc_params. In the case of OOM, may fail to initialize
  *          all fields.
  * 

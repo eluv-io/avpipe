@@ -270,3 +270,20 @@ avpipe_check_level(
 
     return -1;
 }
+
+int
+avpipe_check_hevc_level(
+    int level)
+{
+    static int levels[] = {30, 60, 63, 90, 93, 120, 123, 150, 153, 156, 180, 183, 186};
+
+    if (level <= 0)
+        return 1;
+
+    for (int i=0; i<sizeof(levels)/sizeof(int); i++) {
+        if (levels[i] == level)
+            return 1;
+    }
+
+    return -1;
+}
