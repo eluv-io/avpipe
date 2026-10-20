@@ -785,6 +785,9 @@ set_encoder_options(
  *   libx264 (encoder/set.c): num_ref_frames = max_dec_frame_buffering
  *       = MAX(refs, 1 + num_reorder_frames, pyramid ? 4 : 1, dpb_size),
  *       i.e. refs for avpipe's bframes=0 encodes.
+ *   libx265 (encoder/level.cpp): maxDecPicBuffering = MIN(MAX_NUM_REF,
+ *       MAX(numReorderPics + 2, refs) + 1), so sps_max_dec_pic_buffering_minus1
+ *       is refs once refs >= 2.
  * Other encoders are unverified, hence the warning.
  */
 static void
@@ -797,8 +800,8 @@ set_video_refs(
 
     encoder_codec_context->refs = params->video_refs;
 
-    if (strcmp(params->ecodec, "libx264")) {
-        elv_warn("video_refs=%d applied to %s - only libx264 is verified to carry it into the SPS, url=%s",
+    if (strcmp(params->ecodec, "libx264") && strcmp(params->ecodec, "libx265")) {
+        elv_warn("video_refs=%d applied to %s - only libx264 and libx265 are verified to carry it into the SPS, url=%s",
             params->video_refs, params->ecodec, params->url);
     } else {
         elv_dbg("video_refs set from params refs=%d ecodec=%s url=%s",
