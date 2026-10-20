@@ -4931,45 +4931,17 @@ check_params(
     }
 
     /*
-     * Levels are in each codec's native level_idc units, matching what Probe
-     * reports: H.264 is 10x the level number (4.1 -> 41), HEVC is 30x
-     * (4.1 -> 123). avpipe_check_level() knows the H.264 values, so libx265 is
-     * checked against the HEVC ones instead.
-     *
-     * An H.264-style value for libx265 (41 for 4.1) used to pass this check and be
-     * ignored by x265. Existing callers send those, so they are still accepted: warn
-     * and drop the level, and x265 picks one as before. 30 and 60 are both H.264
-     * 3.0/6.0 and HEVC 1.0/2.0, so they cannot be told apart and are taken as HEVC
+     * Levels are each codec's level_idc, as Probe reports them: H.264 10x the level
+     * number (41), HEVC 30x (123). Callers still send H.264-style values for
+     * libx265, so an invalid level is dropped there with a warning instead of
+     * rejected. 30 and 60 are valid in both sets and are taken as HEVC 1.0/2.0
      * (x265 then refuses to open if the picture does not fit the level).
      */
     if (params->ecodec && !strcmp(params->ecodec, "libx265")) {
-        if (params->level > 0) {
-            static const int hevc_levels[] = {30, 60, 63, 90, 93, 120, 123, 150, 153, 156, 180, 183, 186};
-            int valid = 0;
-            int has_equiv = 0;  // level * 3 is an HEVC level (HEVC has no 1.1/1.2/1.3/2.2/3.2/4.2)
-            for (int i = 0; i < sizeof(hevc_levels)/sizeof(hevc_levels[0]); i++) {
-                if (hevc_levels[i] == params->level)
-                    valid = 1;
-                if (hevc_levels[i] == params->level * 3)
-                    has_equiv = 1;
-            }
-            if (!valid) {
-                if (avpipe_check_level(params->level) < 0) {
-                    elv_err("Invalid level %d for libx265 - expected HEVC general_level_idc, "
-                        "30x the level number (e.g. 123 for 4.1), url=%s", params->level, params->url);
-                    return eav_param;
-                }
-                if (has_equiv) {
-                    elv_warn("Ignoring level %d for libx265 - an H.264-style 10x level; libx265 takes HEVC "
-                        "general_level_idc, 30x the level number (use %d). Letting x265 pick the level, url=%s",
-                        params->level, params->level * 3, params->url);
-                } else {
-                    elv_warn("Ignoring level %d for libx265 - an H.264-style 10x level with no HEVC "
-                        "equivalent; libx265 takes HEVC general_level_idc, 30x the level number. "
-                        "Letting x265 pick the level, url=%s", params->level, params->url);
-                }
-                params->level = 0;
-            }
+        if (avpipe_check_hevc_level(params->level) < 0) {
+            elv_warn("Invalid level %d for libx265 - expected HEVC general_level_idc (30x the level number, "
+                "e.g. 123 for 4.1); ignoring it, x265 picks the level, url=%s", params->level, params->url);
+            params->level = 0;
         }
     } else if (avpipe_check_level(params->level) < 0) {
         elv_err("Invalid level %d", params->level);

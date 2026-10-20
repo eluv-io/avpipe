@@ -874,12 +874,11 @@ func TestVideoRefsLevelRoundTrip(t *testing.T) {
 
 // TestVideoRefsLevelParamValidation pins the check_params rejections that came
 // with video_refs and the libx265 level: each fails XcInit with EAV_PARAM before
-// anything is opened. Levels are checked in the encoder's own units, so an
-// HEVC-style value is rejected for libx264, while an H.264-style value for libx265
-// is not among the rejections - it is dropped with a warning (see
-// TestVideoRefsLevelRoundTrip); only a value in neither codec's level set fails.
-// The accepted cases are the positive controls: they initialize, and are cancelled
-// before they run.
+// anything is opened. Levels are checked in the encoder's own units: libx264
+// rejects an HEVC-style value, while libx265 drops anything that is not an HEVC
+// level with a warning (see TestVideoRefsLevelRoundTrip) rather than rejecting
+// it. The accepted cases are the positive controls: they initialize, and are
+// cancelled before they run.
 func TestVideoRefsLevelParamValidation(t *testing.T) {
 	url := videoBigBuckBunnyPath
 	checkFileExists(t, url)
@@ -907,7 +906,6 @@ func TestVideoRefsLevelParamValidation(t *testing.T) {
 		name string
 		mod  func(p *goavpipe.XcParams)
 	}{
-		{"libx265 rejects a level that is neither H.264 nor HEVC", func(p *goavpipe.XcParams) { p.Ecodec = "libx265"; p.Level = 45 }},
 		{"libx264 rejects an HEVC-style 30x level", func(p *goavpipe.XcParams) { p.Level = 93 }},
 		{"video_refs below the minimum", func(p *goavpipe.XcParams) { p.VideoRefs = -1 }},
 		{"video_refs above the encoder maximum", func(p *goavpipe.XcParams) { p.VideoRefs = 17 }},
@@ -930,6 +928,7 @@ func TestVideoRefsLevelParamValidation(t *testing.T) {
 		{"libx264 with the maximum video_refs", func(p *goavpipe.XcParams) { p.VideoRefs = 16 }},
 		{"libx265 with video_refs and an HEVC general_level_idc", func(p *goavpipe.XcParams) { p.Ecodec = "libx265"; p.Level = 93; p.VideoRefs = 3 }},
 		{"libx265 with an H.264-style level that has no HEVC equivalent", func(p *goavpipe.XcParams) { p.Ecodec = "libx265"; p.Level = 32 }},
+		{"libx265 with a level that is no level at all", func(p *goavpipe.XcParams) { p.Ecodec = "libx265"; p.Level = 45 }},
 	}
 	for _, c := range accepted {
 		t.Run(c.name, func(t *testing.T) {
