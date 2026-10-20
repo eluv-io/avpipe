@@ -369,7 +369,7 @@ type XcParams struct {
 	Rotate                 int         `json:"rotate,omitempty"`
 	Profile                string      `json:"profile,omitempty"`
 	Level                  int         `json:"level,omitempty"`
-	VideoRefs              int         `json:"video_refs,omitempty"` // reference frames, 0 = encoder default; to match an init segment use StreamInfo.MP4.Refs
+	VideoRefs              int         `json:"video_refs,omitempty"` // reference frames, 0 = encoder default
 	Deinterlace            int         `json:"deinterlace,omitempty"`
 	Timecode               string      `json:"timecode,omitempty"`
 	Vertical               int         `json:"vertical,omitempty"` // vertical_type: 0=none, 1=32bpf

@@ -23,9 +23,7 @@
 #define AVIO_OUT_BUF_SIZE   (1*1024*1024)   // avio output buffer size
 #define AVIO_IN_BUF_SIZE    (1*1024*1024)   // avio input buffer size
 #define MAX_URL_SIZE        1024            // Maximum URL size
-// Upper bound on video_refs. Both encoders cap the reference list at 16
-// (x264 X264_REF_MAX, x265 MAX_NUM_REF), so anything larger is silently clamped.
-#define MAX_VIDEO_REFS      16
+#define MAX_VIDEO_REFS      16 // x264 X264_REF_MAX and x265 MAX_NUM_REF; both clamp above it
 
 //#define DEBUG_UDP_PACKET  // Uncomment for development, debugging and testing
 
@@ -501,6 +499,10 @@ typedef enum video_layout_t {
 // Notes:
 //   * rc_max_rate and rc_buffer_size must be set together or not at all; they correspond to ffmpeg's bufsize and maxrate
 //   * setting video_bitrate clobbers rc_max_rate and rc_buffer_size
+//   * video that must play against an existing init segment (moov) has to reproduce its SPS/PPS, so ecodec,
+//     enc_width, enc_height, bitdepth, profile, level and video_refs must match the stream it describes; B-frames
+//     follow the format (off for fmp4-segment, fmp4, dash and hls). Probe reports profile, level and refs in the
+//     units these fields take.
 typedef struct xcparams_t {
     char    *url;                   // URL of the input for transcoding
     int     bypass_transcoding;     // if 0 means do transcoding, otherwise bypass transcoding (only copy)
@@ -581,17 +583,7 @@ typedef struct xcparams_t {
     int         rotate;                     // For video transpose or rotation
     char        *profile;
     int         level;
-    /*
-     * Reference frame count, for re-encoding a segment that has to decode
-     * against an init segment (moov) produced by an earlier encode. The SPS and
-     * PPS in that init segment describe the reference configuration, and a
-     * re-encode that disagrees will not play back correctly against it.
-     *
-     * This is the encoder input, not an SPS field - no encoder accepts the SPS
-     * values directly. See set_video_refs() for what each encoder derives from
-     * it. 0 means "let the encoder decide", the historical behaviour.
-     */
-    int         video_refs;                 // Reference frames (AVCodecContext.refs)
+    int         video_refs;                 // Encoder reference frames. Default: 0 (encoder chooses based on other parameters)
     dif_type    deinterlace;                // Deinterlacing filter
     char        *timecode;                  // Original timecode string
     vertical_type vertical;                 // Vertical video crop type (9:16)

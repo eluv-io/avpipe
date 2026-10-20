@@ -251,10 +251,8 @@ type MP4Info struct {
 	// Only meaningful for VideoLayout == VideoLayoutMVHEVC.
 	EnhancementProfileIDC int `json:"enhancement_profile_idc,omitempty"`
 
-	// Refs is the reference frame count to pass as XcParams.VideoRefs when
-	// re-encoding a segment that has to play against this init segment: the SPS
-	// max_num_ref_frames (H.264). Zero when not known, which XcParams.VideoRefs
-	// treats as "let the encoder decide".
+	// Refs is the reference frame count declared in the SPS, when the SPS is parsed
+	// and carries one: max_num_ref_frames for H.264. Zero otherwise.
 	Refs int `json:"refs,omitempty"`
 }
 

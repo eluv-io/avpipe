@@ -781,22 +781,11 @@ set_encoder_options(
 }
 
 /*
- * Apply the reference frame count.
- *
- * No encoder accepts the SPS/PPS reference fields directly; they derive them from
- * the reference count, which FFmpeg exposes generically as AVCodecContext.refs.
- * Every encoder wrapper reads it, so nothing codec-specific is needed here.
- *
- * What libx264 then writes:
- *
- *   libx264 - encoder/set.c
- *     num_ref_frames = max_dec_frame_buffering
- *                    = MAX(refs, 1 + num_reorder_frames, pyramid ? 4 : 1, dpb_size)
- *     Both SPS fields come from the same expression, so refs maps straight
- *     through: refs=N gives num_ref_frames=N.
- *
- * Other encoders accept AVCodecContext.refs too, but what they put in the SPS has
- * not been verified, so they warn rather than being rejected.
+ * AVCodecContext.refs is read by every encoder wrapper. What reaches the SPS:
+ *   libx264 (encoder/set.c): num_ref_frames = max_dec_frame_buffering
+ *       = MAX(refs, 1 + num_reorder_frames, pyramid ? 4 : 1, dpb_size),
+ *       i.e. refs for avpipe's bframes=0 encodes.
+ * Other encoders are unverified, hence the warning.
  */
 static void
 set_video_refs(

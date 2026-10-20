@@ -792,10 +792,7 @@ func TestSettingProfileLevel(t *testing.T) {
 
 // TestVideoRefsLevelRoundTrip encodes with an explicit VideoRefs and Level and
 // probes the output: MP4.Refs and MP4.Level must come back as the values passed
-// in, in the codec's own units. That is the contract a partial-segment re-encode
-// relies on - probe the init segment, pass StreamInfo.MP4.Refs and .Level through
-// unchanged - so it is pinned here. The first case pins the encoder defaults, so
-// no other case can pass by coincidence.
+// in, in the codec's own units.
 func TestVideoRefsLevelRoundTrip(t *testing.T) {
 	url := videoBigBuckBunnyPath
 	checkFileExists(t, url)

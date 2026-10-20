@@ -70,9 +70,7 @@ type CodecInfo struct {
 	// Only meaningful for VideoLayout == Mp4VideoLayoutMVHEVC.
 	EnhancementProfileIDC int `json:"enhancement_profile_idc,omitempty"`
 
-	// Refs is the SPS reference count to pass as XcParams.VideoRefs when re-encoding
-	// a segment that has to play against this init segment: H.264 max_num_ref_frames.
-	// Zero for other codecs.
+	// Refs is the SPS max_num_ref_frames; set for H.264 only.
 	Refs int `json:"refs,omitempty"`
 }
 
