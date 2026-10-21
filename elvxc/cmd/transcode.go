@@ -390,6 +390,7 @@ func InitTranscode(cmdRoot *cobra.Command) error {
 	cmdTranscode.PersistentFlags().Int32("rotate", 0, "Rotate the output video frame (valid values 0, 90, 180, 270).")
 	cmdTranscode.PersistentFlags().StringP("profile", "", "", "Encoding profile for video. If it is not determined, it will be set automatically.")
 	cmdTranscode.PersistentFlags().Int32("level", 0, "Encoding level for video. If it is not determined, it will be set automatically.")
+	cmdTranscode.PersistentFlags().Int32("video-refs", 0, "Encoder reference frames (verified with libx264). Default 0 lets the encoder choose.")
 	cmdTranscode.PersistentFlags().Int32("deinterlace", 0, "Deinterlace filter (values 0 - none, 1 - bwdif_field, 2 - bwdif_frame send_frame).")
 	cmdTranscode.PersistentFlags().Int32("vertical", 0, "Vertical video crop type (0 - none, 1 - 32bpf).")
 	cmdTranscode.PersistentFlags().StringP("vertical-data", "", "", "Path to binary file with per-frame crop data (4 bytes per frame, uint32 LE). Each value is the crop window centre as a fraction of the scaled frame width, denominator 10000 (0=left, 5000=centre, 10000=right).")
@@ -704,6 +705,11 @@ func doTranscode(cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("Invalid level value")
 	}
 
+	videoRefs, err := cmd.Flags().GetInt32("video-refs")
+	if err != nil {
+		return fmt.Errorf("Invalid video-refs value")
+	}
+
 	profile := cmd.Flag("profile").Value.String()
 
 	deinterlace, err := cmd.Flags().GetInt32("deinterlace")
@@ -888,6 +894,7 @@ func doTranscode(cmd *cobra.Command, args []string) error {
 		Rotate:                 int(rotate),
 		Profile:                profile,
 		Level:                  int(level),
+		VideoRefs:              int(videoRefs),
 		Deinterlace:            int(deinterlace),
 		Vertical:               int(vertical),
 		VerticalData:           verticalData,

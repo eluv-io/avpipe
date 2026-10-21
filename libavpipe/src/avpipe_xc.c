@@ -781,6 +781,32 @@ set_encoder_options(
 }
 
 /*
+ * AVCodecContext.refs is read by every encoder wrapper. What reaches the SPS:
+ *   libx264 (encoder/set.c): num_ref_frames = max_dec_frame_buffering
+ *       = MAX(refs, 1 + num_reorder_frames, pyramid ? 4 : 1, dpb_size),
+ *       i.e. refs for avpipe's bframes=0 encodes.
+ * Other encoders are unverified, hence the warning.
+ */
+static void
+set_video_refs(
+    AVCodecContext *encoder_codec_context,
+    xcparams_t *params)
+{
+    if (params->video_refs <= 0)
+        return;
+
+    encoder_codec_context->refs = params->video_refs;
+
+    if (strcmp(params->ecodec, "libx264")) {
+        elv_warn("video_refs=%d applied to %s - only libx264 is verified to carry it into the SPS, url=%s",
+            params->video_refs, params->ecodec, params->url);
+    } else {
+        elv_dbg("video_refs set from params refs=%d ecodec=%s url=%s",
+            params->video_refs, params->ecodec, params->url);
+    }
+}
+
+/*
  * Set H264 specific params profile, and level based on encoding height.
  * Called only from prepare_video_encoder, which has already validated that
  * video_stream_index >= 0 and that decoder_context->stream[index] and
@@ -1354,6 +1380,8 @@ prepare_video_encoder(
         !strcmp(params->format, "dash") || !strcmp(params->format, "hls")) {
         encoder_codec_context->max_b_frames = 0;
     }
+
+    set_video_refs(encoder_codec_context, params);
 
     if (params->force_keyint > 0) {
         encoder_codec_context->gop_size = params->force_keyint;
@@ -4894,6 +4922,23 @@ check_params(
         return eav_param;
     }
 
+    /*
+     * video_refs is passed through to any encoder (set_video_refs warns for ones
+     * whose SPS output is unverified), but it always requires an encode.
+     */
+    if (params->video_refs != 0) {
+        if (params->video_refs < 0 || params->video_refs > MAX_VIDEO_REFS) {
+            elv_err("Invalid video_refs %d - must be 0 (encoder default) or 1..%d, url=%s",
+                params->video_refs, MAX_VIDEO_REFS, params->url);
+            return eav_param;
+        }
+        if (params->bypass_transcoding) {
+            elv_err("Incompatible params - video_refs requires transcoding "
+                "(bypass must be disabled), url=%s", params->url);
+            return eav_param;
+        }
+    }
+
     if (params->copy_mpegts) {
         if (strcmp(params->format, "fmp4-segment")) {
             elv_err("Invalid copy MPEGTS - only valid for fmp4 mez segment");
@@ -5024,6 +5069,7 @@ log_params(
         "rotate=%d "
         "profile=%s "
         "level=%d "
+        "video_refs=%d "
         "deinterlace=%d "
         "use_preprocessed_input=%d "
         "copy_mpegts=%d "
@@ -5059,7 +5105,8 @@ log_params(
         params->filter_descriptor,
         params->extract_image_interval_ts, params->extract_images_sz,
         1, params->video_time_base, params->video_frame_duration_ts, params->rotate,
-        params->profile ? params->profile : "", params->level,  params->deinterlace,
+        params->profile ? params->profile : "", params->level, params->video_refs,
+        params->deinterlace,
         params->use_preprocessed_input, params->copy_mpegts,
         params->timecode,
         params->vertical, params->vertical_data_len,

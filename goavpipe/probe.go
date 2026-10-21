@@ -250,6 +250,10 @@ type MP4Info struct {
 	// EnhancementProfileIDC is the MV-HEVC enhancement-layer general_profile_idc.
 	// Only meaningful for VideoLayout == VideoLayoutMVHEVC.
 	EnhancementProfileIDC int `json:"enhancement_profile_idc,omitempty"`
+
+	// Refs is the reference frame count declared in the SPS, when the SPS is parsed
+	// and carries one: max_num_ref_frames for H.264. Zero otherwise.
+	Refs int `json:"refs,omitempty"`
 }
 
 // SideDataDisplayMatrix holds the display transformation matrix side data

@@ -69,6 +69,9 @@ type CodecInfo struct {
 	// EnhancementProfileIDC is the enhancement-layer general_profile_idc.
 	// Only meaningful for VideoLayout == Mp4VideoLayoutMVHEVC.
 	EnhancementProfileIDC int `json:"enhancement_profile_idc,omitempty"`
+
+	// Refs is the SPS max_num_ref_frames; set for H.264 only.
+	Refs int `json:"refs,omitempty"`
 }
 
 // MarshalJSON adds additional profile_name and level_name fields alongside the
@@ -407,12 +410,14 @@ func parseVisualSampleEntryBox(se *mp4.VisualSampleEntryBox) (*CodecInfo, error)
 		if err != nil {
 			return nil, e(err, "reason", "failed to parse AVC SPS")
 		}
-		return &CodecInfo{
+		info := &CodecInfo{
 			MimeCodecString: avc.CodecString(codecTag, sps),
 			CodecTagString:  codecTag,
 			ProfileIDC:      int(sps.Profile),
 			Level:           int(sps.Level),
-		}, nil
+			Refs:            int(sps.NumRefFrames),
+		}
+		return info, nil
 	default:
 		return &CodecInfo{CodecTagString: codecTag}, nil
 	}

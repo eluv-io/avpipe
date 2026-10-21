@@ -440,7 +440,7 @@ func TestSingleABRTranscodeWithOverlayWatermark(t *testing.T) {
 // Each variant runs with and without SkipDecoding.
 func TestSingleABRFade(t *testing.T) {
 	url := videoBigBuckBunnyPath
-	checkFileExists(t, url);
+	checkFileExists(t, url)
 
 	fadeVariants := []struct {
 		name           string
@@ -788,6 +788,126 @@ func TestSettingProfileLevel(t *testing.T) {
 		pixelFmt: "yuv420p",
 	}
 	xcTest(t, outputDir, params, xcTestResult, true)
+}
+
+// TestVideoRefsLevelRoundTrip encodes with an explicit VideoRefs and Level and
+// probes the output: MP4.Refs and MP4.Level must come back as the values passed
+// in, in the codec's own units.
+func TestVideoRefsLevelRoundTrip(t *testing.T) {
+	url := videoBigBuckBunnyPath
+	checkFileExists(t, url)
+
+	cases := []struct {
+		name      string
+		ecodec    string
+		refs      int
+		level     int
+		wantRefs  int // in the output SPS
+		wantLevel int
+	}{
+		// 0 leaves the encoder's choice: x264 medium uses 3 refs, and avpipe guesses
+		// level 3.0 for 720x480.
+		{"libx264_defaults", "libx264", 0, 0, 3, 30},
+		// H.264: SPS max_num_ref_frames == refs; level_idc 31 == 3.1.
+		{"libx264", "libx264", 6, 31, 6, 31},
+		// Both ends of the accepted range. x264 writes 16 refs under level 3.1 without
+		// lowering either value: on H.264 the level does not constrain refs.
+		{"libx264_min_refs", "libx264", 1, 31, 1, 31},
+		{"libx264_max_refs", "libx264", 16, 31, 16, 31},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			outputDir := path.Join(baseOutPath, strings.ReplaceAll(t.Name(), "/", "_"))
+			boilerplate(t, outputDir, url)
+
+			params := &goavpipe.XcParams{
+				Format:             "fmp4-segment",
+				StartTimeTs:        0,
+				DurationTs:         90000, // 3 s: the SPS is all that is probed
+				StartSegmentStr:    "1",
+				VideoBitrate:       2560000,
+				VideoSegDurationTs: 900000,
+				Ecodec:             c.ecodec,
+				EncHeight:          480,
+				EncWidth:           720,
+				XcType:             goavpipe.XcVideo,
+				StreamId:           -1,
+				Url:                url,
+				DebugFrameLevel:    debugFrameLevel,
+				Level:              c.level,
+				VideoRefs:          c.refs,
+			}
+			boilerXc(t, params)
+
+			// boilerProbe also asserts the FFmpeg-side stream level (same units).
+			probes := boilerProbe(t, &XcTestResult{
+				mezFile: []string{fmt.Sprintf("%s/vsegment-1.mp4", outputDir)},
+				level:   c.wantLevel,
+			})
+			require.Len(t, probes, 1)
+			mp4 := probes[0].Streams[0].MP4
+			require.NotNil(t, mp4, "MP4 codec info must be present for the output mezzanine")
+			assert.Equal(t, c.wantRefs, mp4.Refs, "MP4.Refs must be the expected SPS reference count")
+			assert.Equal(t, c.wantLevel, mp4.Level, "MP4.Level must be the expected output level")
+		})
+	}
+}
+
+// TestVideoRefsParamValidation pins the check_params rejections that came with
+// video_refs: each fails XcInit with EAV_PARAM before anything is opened. The last
+// case is the positive control - the same job with the largest accepted video_refs
+// initializes (and is cancelled before it runs).
+func TestVideoRefsParamValidation(t *testing.T) {
+	url := videoBigBuckBunnyPath
+	checkFileExists(t, url)
+	outputDir := path.Join(baseOutPath, fn())
+	boilerplate(t, outputDir, url)
+
+	base := func() *goavpipe.XcParams {
+		return &goavpipe.XcParams{
+			Format:             "fmp4-segment",
+			DurationTs:         -1,
+			StartSegmentStr:    "1",
+			VideoBitrate:       2560000,
+			VideoSegDurationTs: 900000,
+			Ecodec:             h264Codec,
+			EncHeight:          480,
+			EncWidth:           720,
+			XcType:             goavpipe.XcVideo,
+			StreamId:           -1,
+			Url:                url,
+			DebugFrameLevel:    debugFrameLevel,
+		}
+	}
+
+	rejected := []struct {
+		name string
+		mod  func(p *goavpipe.XcParams)
+	}{
+		{"video_refs below the minimum", func(p *goavpipe.XcParams) { p.VideoRefs = -1 }},
+		{"video_refs above the encoder maximum", func(p *goavpipe.XcParams) { p.VideoRefs = 17 }},
+		{"video_refs requires transcoding", func(p *goavpipe.XcParams) { p.VideoRefs = 3; p.BypassTranscoding = true }},
+	}
+	for _, c := range rejected {
+		t.Run(c.name, func(t *testing.T) {
+			p := base()
+			c.mod(p)
+			handle, err := avpipe.XcInit(p)
+			assert.ErrorIs(t, err, avpipe.EAV_PARAM)
+			assert.Equal(t, int32(-1), handle)
+		})
+	}
+
+	t.Run("libx264 initializes with the maximum video_refs", func(t *testing.T) {
+		p := base()
+		p.VideoRefs = 16
+		handle, err := avpipe.XcInit(p)
+		require.NoError(t, err)
+		require.NoError(t, avpipe.XcCancel(handle))
+		runErr := avpipe.XcRun(handle)
+		require.NoError(t, avpipe.XcFini(handle))
+		assert.ErrorIs(t, runErr, avpipe.EAV_CANCELLED)
+	})
 }
 
 func TestStartTimeTsWithSkipDecoding(t *testing.T) {
