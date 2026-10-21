@@ -785,6 +785,9 @@ set_encoder_options(
  *   libx264 (encoder/set.c): num_ref_frames = max_dec_frame_buffering
  *       = MAX(refs, 1 + num_reorder_frames, pyramid ? 4 : 1, dpb_size),
  *       i.e. refs for avpipe's bframes=0 encodes.
+ *   libx265 (encoder/level.cpp): maxDecPicBuffering = MIN(MAX_NUM_REF,
+ *       MAX(numReorderPics + 2, refs) + 1), so sps_max_dec_pic_buffering_minus1
+ *       is refs once refs >= 2.
  * Other encoders are unverified, hence the warning.
  */
 static void
@@ -797,8 +800,8 @@ set_video_refs(
 
     encoder_codec_context->refs = params->video_refs;
 
-    if (strcmp(params->ecodec, "libx264")) {
-        elv_warn("video_refs=%d applied to %s - only libx264 is verified to carry it into the SPS, url=%s",
+    if (strcmp(params->ecodec, "libx264") && strcmp(params->ecodec, "libx265")) {
+        elv_warn("video_refs=%d applied to %s - only libx264 and libx265 are verified to carry it into the SPS, url=%s",
             params->video_refs, params->ecodec, params->url);
     } else {
         elv_dbg("video_refs set from params refs=%d ecodec=%s url=%s",
@@ -948,18 +951,41 @@ set_h265_params(
             cr == AVCOL_RANGE_JPEG ? "full" : "limited");
     }
 
+    /*
+     * libx265 does not read AVCodecContext.level, so the level goes through
+     * x265-params. params->level uses HEVC's native units (30x the level number,
+     * 4.1 -> 123), the value Probe reports; x265's level-idc is 10x, so divide by 3.
+     *
+     * Without a level, x265 chooses one from the resolution, frame rate, bitrate and
+     * DPB size - so a re-encode can end up declaring a different level than the init
+     * segment it has to play against (more refs means a bigger DPB, which can push it
+     * up). With a level, x265 keeps that level and lowers the reference count if it
+     * does not fit, logging "Lowering max references ... to meet level requirement".
+     *
+     * Don't want to fail previously un-validated profiles, so an unsupported combination
+     * is dropped with a warning and x265 will pick the level.
+     */
+    if (params->level > 0) {
+        double fps = encoder_codec_context->framerate.den > 0
+            ? av_q2d(encoder_codec_context->framerate) : 0;
+        if (avpipe_hevc_level_fits(params->level, encoder_codec_context->width,
+                encoder_codec_context->height, fps) == 0) {
+            elv_warn("Ignoring level %d for libx265 - %dx%d at %.3g fps does not fit HEVC level %d.%d; "
+                "x265 picks the level, url=%s",
+                params->level, encoder_codec_context->width, encoder_codec_context->height, fps,
+                params->level / 30, (params->level % 30) / 3, params->url);
+        } else {
+            off += snprintf(x265_params + off, sizeof(x265_params) - off,
+                "%slevel-idc=%d", off > 0 ? ":" : "", params->level / 3);
+        }
+    }
+
     if (off > 0)
         av_opt_set(encoder_codec_context->priv_data, "x265-params", x265_params, 0);
 
     /* Set the number of bframes to 0 and avoid having bframes */
     av_opt_set_int(encoder_codec_context->priv_data, "bframes", 0, 0);
 
-    /*
-     * These are set according to
-     * https://en.wikipedia.org/wiki/High_Efficiency_Video_Coding
-     * Let X265 encoder picks the level automatically. Setting the level based on
-     * resolution and framerate might pick higher level than what is needed.
-     */
     return 0;
 }
 
@@ -4917,7 +4943,20 @@ check_params(
         }
     }
 
-    if (avpipe_check_level(params->level) < 0) {
+    /*
+     * Levels are each codec's level_idc, as Probe reports them: H.264 10x the level
+     * number (41), HEVC 30x (123). Callers still send H.264-style values for
+     * libx265, so an invalid level is dropped there with a warning instead of
+     * rejected. 30 and 60 are valid in both sets and are taken as HEVC 1.0/2.0;
+     * set_h265_params drops them when the picture does not fit.
+     */
+    if (params->ecodec && !strcmp(params->ecodec, "libx265")) {
+        if (avpipe_check_hevc_level(params->level) < 0) {
+            elv_warn("Invalid level %d for libx265 - expected HEVC general_level_idc (30x the level number, "
+                "e.g. 123 for 4.1); ignoring it, x265 picks the level, url=%s", params->level, params->url);
+            params->level = 0;
+        }
+    } else if (avpipe_check_level(params->level) < 0) {
         elv_err("Invalid level %d", params->level);
         return eav_param;
     }

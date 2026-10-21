@@ -53,6 +53,7 @@
         "mime_codec_string": "hvc1.2.4.L93.90",
         "profile_idc": 2,
         "level": 93,
+        "refs": 4, // sps_max_dec_pic_buffering_minus1
         "dovi": {
           "version_major": 1,
           "version_minor": 0,

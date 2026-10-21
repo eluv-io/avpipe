@@ -1001,6 +1001,34 @@ avpipe_check_level(
     int level);
 
 /**
+ * @brief   Helper function to check an HEVC level, given as general_level_idc
+ *          (30x the level number, 123 for 4.1).
+ *
+ * @param   level
+ * @return  Returns 1 if the level is valid, otherwise return -1 for an invalid level.
+ */
+int
+avpipe_check_hevc_level(
+    int level);
+
+/**
+ * @brief   Helper function to check whether a picture fits an HEVC level (H.265
+ *          Table A.8: luma samples per picture and per second).
+ *
+ * @param   level   HEVC general_level_idc (30x the level number)
+ * @param   width   Picture width in luma samples
+ * @param   height  Picture height in luma samples
+ * @param   fps     Frame rate, or 0 if unknown (skips the per-second check)
+ * @return  Returns 1 if the picture fits, 0 if it does not, -1 if the level is unknown.
+ */
+int
+avpipe_hevc_level_fits(
+    int level,
+    int width,
+    int height,
+    double fps);
+
+/**
  * @brief   Helper function to deep copy an xc_params. In the case of OOM, may fail to initialize
  *          all fields.
  * 

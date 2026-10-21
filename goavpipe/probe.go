@@ -252,7 +252,10 @@ type MP4Info struct {
 	EnhancementProfileIDC int `json:"enhancement_profile_idc,omitempty"`
 
 	// Refs is the reference frame count declared in the SPS, when the SPS is parsed
-	// and carries one: max_num_ref_frames for H.264. Zero otherwise.
+	// and carries one: max_num_ref_frames for H.264; for HEVC,
+	// sps_max_dec_pic_buffering_minus1 of the highest sub-layer, since HEVC declares
+	// the decoded picture buffer size (which includes the picture being decoded)
+	// rather than a reference count. Zero otherwise.
 	Refs int `json:"refs,omitempty"`
 }
 
