@@ -492,18 +492,18 @@ func (i *inputCtx) Size() int64 {
 	return -1
 }
 
-func (i *inputCtx) Stat(streamIndex int, statType goavpipe.AVStatType, statArgs interface{}) error {
+func (i *inputCtx) Stat(srcStreamIndex int, statType goavpipe.AVStatType, statArgs interface{}) error {
 	switch statType {
 	case goavpipe.AV_IN_STAT_BYTES_READ:
 		readOffset := statArgs.(*uint64)
 		if debugFrameLevel {
-			log.Debug("STAT read offset", *readOffset, "streamIndex", streamIndex)
+			log.Debug("STAT read offset", *readOffset, "srcStreamIndex", srcStreamIndex)
 		}
 	}
 	return nil
 }
 
-func (oo *outputOpener) Open(h, fd int64, streamIndex, segIndex int, _ int64,
+func (oo *outputOpener) Open(h, fd int64, ordinal, segIndex int, _ int64,
 	outType goavpipe.AVType) (goavpipe.OutputHandler, error) {
 
 	tc, err := getReqCtxByFD(h)
@@ -522,30 +522,30 @@ func (oo *outputOpener) Open(h, fd int64, streamIndex, segIndex int, _ int64,
 	case goavpipe.DASHVideoInit:
 		fallthrough
 	case goavpipe.DASHAudioInit:
-		filename = fmt.Sprintf("./%s/video-init-stream%d.mp4", oo.dir, streamIndex)
+		filename = fmt.Sprintf("./%s/video-init-stream%d.mp4", oo.dir, ordinal)
 	case goavpipe.DASHManifest:
 		filename = fmt.Sprintf("./%s/dash.mpd", oo.dir)
 	case goavpipe.DASHVideoSegment:
-		filename = fmt.Sprintf("./%s/video-chunk-stream%d-%05d.mp4", oo.dir, streamIndex, segIndex)
+		filename = fmt.Sprintf("./%s/video-chunk-stream%d-%05d.mp4", oo.dir, ordinal, segIndex)
 	case goavpipe.DASHAudioSegment:
-		filename = fmt.Sprintf("./%s/audio-chunk-stream%d-%05d.mp4", oo.dir, streamIndex, segIndex)
+		filename = fmt.Sprintf("./%s/audio-chunk-stream%d-%05d.mp4", oo.dir, ordinal, segIndex)
 	case goavpipe.HLSMasterM3U:
 		filename = fmt.Sprintf("./%s/master.m3u8", oo.dir)
 	case goavpipe.HLSVideoM3U:
-		filename = fmt.Sprintf("./%s/video-media_%d.m3u8", oo.dir, streamIndex)
+		filename = fmt.Sprintf("./%s/video-media_%d.m3u8", oo.dir, ordinal)
 	case goavpipe.HLSAudioM3U:
-		filename = fmt.Sprintf("./%s/audio-media_%d.m3u8", oo.dir, streamIndex)
+		filename = fmt.Sprintf("./%s/audio-media_%d.m3u8", oo.dir, ordinal)
 	case goavpipe.AES128Key:
 		filename = fmt.Sprintf("./%s/%s-key.bin", oo.dir, url)
 	case goavpipe.MP4Segment:
 		filename = fmt.Sprintf("./%s/segment-%d.mp4", oo.dir, segIndex)
 	case goavpipe.FMP4AudioSegment:
-		filename = fmt.Sprintf("./%s/audio-mez-segment%d-%d.mp4", oo.dir, streamIndex, segIndex)
+		filename = fmt.Sprintf("./%s/audio-mez-segment%d-%d.mp4", oo.dir, ordinal, segIndex)
 	case goavpipe.FMP4VideoSegment:
 		filename = fmt.Sprintf("./%s/video-mez-segment-%d.mp4", oo.dir, segIndex)
 	}
 
-	tlog.Debug("OUT_OPEN", "url", tc.url, "h", h, "streamIndex", streamIndex, "segIndex", segIndex, "filename", filename, "outType", outType)
+	tlog.Debug("OUT_OPEN", "url", tc.url, "h", h, "ordinal", ordinal, "segIndex", segIndex, "filename", filename, "outType", outType)
 
 	file, err := os.Create(filename)
 	if err != nil {
@@ -591,10 +591,10 @@ func (o *outputCtx) Close() error {
 	return nil
 }
 
-func (o *outputCtx) Stat(streamIndex int, avType goavpipe.AVType, statType goavpipe.AVStatType, statArgs interface{}) error {
+func (o *outputCtx) Stat(srcStreamIndex int, avType goavpipe.AVType, statType goavpipe.AVStatType, statArgs interface{}) error {
 	doLog := func(args ...interface{}) {
 		if debugFrameLevel {
-			logArgs := []interface{}{"stat", statType.Name(), "avType", avType.Name(), "streamIndex", streamIndex}
+			logArgs := []interface{}{"stat", statType.Name(), "avType", avType.Name(), "srcStreamIndex", srcStreamIndex}
 			logArgs = append(logArgs, args...)
 			log.Debug("STAT", logArgs...)
 		}

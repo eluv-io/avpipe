@@ -137,8 +137,8 @@ func (h *mvhevcOutputHandler) Close() error {
 	return h.inner.Close()
 }
 
-func (h *mvhevcOutputHandler) Stat(streamIndex int, avType goavpipe.AVType, statType goavpipe.AVStatType, statArgs interface{}) error {
-	return h.inner.Stat(streamIndex, avType, statType, statArgs)
+func (h *mvhevcOutputHandler) Stat(srcStreamIndex int, avType goavpipe.AVType, statType goavpipe.AVStatType, statArgs interface{}) error {
+	return h.inner.Stat(srcStreamIndex, avType, statType, statArgs)
 }
 
 // writerAdapter exposes a goavpipe.OutputHandler's Write as a plain io.Writer
