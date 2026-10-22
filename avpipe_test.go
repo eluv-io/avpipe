@@ -886,7 +886,6 @@ func TestVideoRefsParamValidation(t *testing.T) {
 	}{
 		{"video_refs below the minimum", func(p *goavpipe.XcParams) { p.VideoRefs = -1 }},
 		{"video_refs above the encoder maximum", func(p *goavpipe.XcParams) { p.VideoRefs = 17 }},
-		{"video_refs requires transcoding", func(p *goavpipe.XcParams) { p.VideoRefs = 3; p.BypassTranscoding = true }},
 	}
 	for _, c := range rejected {
 		t.Run(c.name, func(t *testing.T) {
@@ -901,6 +900,18 @@ func TestVideoRefsParamValidation(t *testing.T) {
 	t.Run("libx264 initializes with the maximum video_refs", func(t *testing.T) {
 		p := base()
 		p.VideoRefs = 16
+		handle, err := avpipe.XcInit(p)
+		require.NoError(t, err)
+		require.NoError(t, avpipe.XcCancel(handle))
+		runErr := avpipe.XcRun(handle)
+		require.NoError(t, avpipe.XcFini(handle))
+		assert.ErrorIs(t, runErr, avpipe.EAV_CANCELLED)
+	})
+
+	t.Run("video_refs with bypass is ignored", func(t *testing.T) {
+		p := base()
+		p.VideoRefs = 3
+		p.BypassTranscoding = true
 		handle, err := avpipe.XcInit(p)
 		require.NoError(t, err)
 		require.NoError(t, avpipe.XcCancel(handle))
