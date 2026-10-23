@@ -17,7 +17,7 @@ LIBS := $(FFMPEG_LIBS) \
 	-L$(TOP_DIR)/lib -lutils
 
 TESTS := test_color_defaults test_hdr_metadata test_pts_unwrap test_fade_filter \
-	test_vertical_crop
+	test_vertical_crop test_level_fits
 OUT   := out
 BINS  := $(addprefix $(OUT)/,$(TESTS))
 
@@ -59,6 +59,10 @@ $(OUT)/test_pts_unwrap: test_pts_unwrap.c unity/unity.c \
 $(OUT)/test_fade_filter: test_fade_filter.c unity/unity.c \
 		$(SRC_DIR)/avpipe_filters.c $(PROD_HDRS) | $(OUT)
 	gcc $(CFLAGS) $< unity/unity.c -o $@ $(LIBS) $(AVFILTER_LIBS)
+
+$(OUT)/test_level_fits: test_level_fits.c unity/unity.c \
+		$(SRC_DIR)/avpipe_level.c $(PROD_HDRS) | $(OUT)
+	gcc $(CFLAGS) $< unity/unity.c -o $@ $(LIBS)
 
 # -lm is required on glibc for sqrt/fabs/fmod; on macOS libm is part of libSystem
 # and links implicitly, so leaving it off builds there but fails on Linux.

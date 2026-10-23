@@ -271,6 +271,33 @@ avpipe_check_level(
     return -1;
 }
 
+int
+avpipe_h264_level_fits(
+    int level,
+    int width,
+    int height,
+    double fps,
+    int dpb_frames)
+{
+    int64_t fs = (int64_t)((width + 15) / 16) * ((height + 15) / 16);
+
+    for (int i=0; i<sizeof(h264_levels)/sizeof(h264_levels[0]); i++) {
+        const h264_level_descriptor *l = &h264_levels[i];
+        /* 1b is also listed as 11 with constraint_set3_flag; 11 means 1.1 here. */
+        if (l->level_idc != level || l->constraint_set3_flag)
+            continue;
+        if (fs > l->max_fs)
+            return 0;
+        if (fps > 0 && fs * fps > l->max_mbps)
+            return 0;
+        if (dpb_frames > 0 && fs * dpb_frames > l->max_dpb_mbs)
+            return 0;
+        return 1;
+    }
+
+    return -1;
+}
+
 /*
  * HEVC level limits, H.265 Table A.8: general_level_idc, MaxLumaPs (luma samples
  * per picture) and MaxLumaSr (luma samples per second).

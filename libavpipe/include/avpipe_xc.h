@@ -1001,6 +1001,25 @@ avpipe_check_level(
     int level);
 
 /**
+ * @brief   Helper function to check whether a picture fits an H.264 level (H.264
+ *          Table A-1: macroblocks per picture, per second and in the DPB).
+ *
+ * @param   level       H.264 level_idc (10x the level number)
+ * @param   width       Picture width in luma samples
+ * @param   height      Picture height in luma samples
+ * @param   fps         Frame rate, or 0 if unknown (skips the per-second check)
+ * @param   dpb_frames  Reference frames the DPB must hold, or 0 if unknown (skips the DPB check)
+ * @return  Returns 1 if the picture fits, 0 if it does not, -1 if the level is unknown.
+ */
+int
+avpipe_h264_level_fits(
+    int level,
+    int width,
+    int height,
+    double fps,
+    int dpb_frames);
+
+/**
  * @brief   Helper function to check an HEVC level, given as general_level_idc
  *          (30x the level number, 123 for 4.1).
  *

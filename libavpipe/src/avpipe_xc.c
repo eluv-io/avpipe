@@ -780,6 +780,13 @@ set_encoder_options(
     return 0;
 }
 
+static int
+is_nvenc_encoder(
+    const char *ecodec)
+{
+    return ecodec && (!strcmp(ecodec, "h264_nvenc") || !strcmp(ecodec, "hevc_nvenc"));
+}
+
 /*
  * AVCodecContext.refs is read by every encoder wrapper. What reaches the SPS:
  *   libx264 (encoder/set.c): num_ref_frames = max_dec_frame_buffering
@@ -788,6 +795,13 @@ set_encoder_options(
  *   libx265 (encoder/level.cpp): maxDecPicBuffering = MIN(MAX_NUM_REF,
  *       MAX(numReorderPics + 2, refs) + 1), so sps_max_dec_pic_buffering_minus1
  *       is refs once refs >= 2.
+ *   h264_nvenc, hevc_nvenc (libavcodec/nvenc.c): refs becomes numRefL0 and numRefL1,
+ *       the active references per list, and the driver sizes the DPB for both lists:
+ *       max_num_ref_frames = 2 * refs, with the auto level rising to hold it. The
+ *       SPS DPB is the private dpb_size option (maxNumRefFrames, HEVC
+ *       maxNumRefFramesInDPB), which lands one to one in max_num_ref_frames and
+ *       sps_max_dec_pic_buffering_minus1, so nvenc gets dpb_size and refs stays at
+ *       the driver's choice.
  * Other encoders are unverified, hence the warning.
  */
 static void
@@ -798,10 +812,21 @@ set_video_refs(
     if (params->video_refs <= 0)
         return;
 
+    if (is_nvenc_encoder(params->ecodec)) {
+        int rc = av_opt_set_int(encoder_codec_context->priv_data, "dpb_size", params->video_refs, 0);
+        if (rc < 0)
+            elv_warn("Failed to set dpb_size=%d for %s, err=%s (%d), url=%s",
+                params->video_refs, params->ecodec, av_err2str(rc), rc, params->url);
+        else
+            elv_dbg("video_refs set from params dpb_size=%d ecodec=%s url=%s",
+                params->video_refs, params->ecodec, params->url);
+        return;
+    }
+
     encoder_codec_context->refs = params->video_refs;
 
     if (strcmp(params->ecodec, "libx264") && strcmp(params->ecodec, "libx265")) {
-        elv_warn("video_refs=%d applied to %s - only libx264 and libx265 are verified to carry it into the SPS, url=%s",
+        elv_warn("video_refs=%d applied to %s - only libx264, libx265 and nvenc are verified to carry it into the SPS, url=%s",
             params->video_refs, params->ecodec, params->url);
     } else {
         elv_dbg("video_refs set from params refs=%d ecodec=%s url=%s",
@@ -1148,21 +1173,27 @@ set_nvidia_h264_params(
         av_opt_set(encoder_codec_context->priv_data, "profile", params->profile, 0);
     }
 
-/*
-    For nvidia let the encoder to pick the level, in some cases level is different from h264 encoder and
-    avpipe_h264_guess_level() function would not pick the right level for nvidia.
-
-    if (encoder_codec_context->framerate.den != 0)
-        framerate = encoder_codec_context->framerate.num/encoder_codec_context->framerate.den;
-
-    encoder_codec_context->level = avpipe_h264_guess_level(
-                                                encoder_codec_context->profile,
-                                                encoder_codec_context->bit_rate,
-                                                framerate,
-                                                encoder_codec_context->width,
-                                                encoder_codec_context->height);
-    av_opt_set_int(encoder_codec_context->priv_data, "level", encoder_codec_context->level, 0);
-*/
+    /*
+     * nvenc ignores AVCodecContext.level; its private level option takes NV_ENC_LEVEL
+     * values, which are H.264's level_idc (41 for 4.1), as Probe reports them. The
+     * driver writes the level as given and refuses to open ("Invalid Level") when the
+     * picture does not fit it, so an unfit level is dropped with a warning and the
+     * driver picks the level, as set_h265_params does for libx265. Without a level the
+     * driver chooses one from the resolution, frame rate and DPB size.
+     */
+    if (params->level > 0) {
+        double fps = encoder_codec_context->framerate.den > 0
+            ? av_q2d(encoder_codec_context->framerate) : 0;
+        if (avpipe_h264_level_fits(params->level, encoder_codec_context->width,
+                encoder_codec_context->height, fps, params->video_refs) == 0) {
+            elv_warn("Ignoring level %d for h264_nvenc - %dx%d at %.3g fps with video_refs=%d exceeds it; "
+                "the driver picks the level, url=%s",
+                params->level, encoder_codec_context->width, encoder_codec_context->height, fps,
+                params->video_refs, params->url);
+        } else {
+            av_opt_set_int(encoder_codec_context->priv_data, "level", params->level, 0);
+        }
+    }
 
     if (set_nvidia_quality_params(encoder_codec_context, params) != eav_success)
         return eav_param;
@@ -1216,6 +1247,26 @@ set_nvidia_hevc_params(
         } else if (params->bitdepth >= 10) {
             av_opt_set(encoder_codec_context->priv_data, "profile", "main10", 0);
             av_opt_set(encoder_codec_context->priv_data, "tier", "high", 0);
+        }
+    }
+
+    /*
+     * The private level option takes HEVC's general_level_idc (123 for 4.1), as Probe
+     * reports it; an unfit level is dropped as in set_nvidia_h264_params. With an
+     * explicit level the driver also writes the tier requested above into
+     * general_tier_flag, which it leaves 0 under an auto level.
+     */
+    if (params->level > 0) {
+        double fps = encoder_codec_context->framerate.den > 0
+            ? av_q2d(encoder_codec_context->framerate) : 0;
+        if (avpipe_hevc_level_fits(params->level, encoder_codec_context->width,
+                encoder_codec_context->height, fps) == 0) {
+            elv_warn("Ignoring level %d for hevc_nvenc - %dx%d at %.3g fps does not fit HEVC level %d.%d; "
+                "the driver picks the level, url=%s",
+                params->level, encoder_codec_context->width, encoder_codec_context->height, fps,
+                params->level / 30, (params->level % 30) / 3, params->url);
+        } else {
+            av_opt_set_int(encoder_codec_context->priv_data, "level", params->level, 0);
         }
     }
 
@@ -4945,15 +4996,16 @@ check_params(
 
     /*
      * Levels are each codec's level_idc, as Probe reports them: H.264 10x the level
-     * number (41), HEVC 30x (123). Callers still send H.264-style values for
-     * libx265, so an invalid level is dropped there with a warning instead of
-     * rejected. 30 and 60 are valid in both sets and are taken as HEVC 1.0/2.0;
-     * set_h265_params drops them when the picture does not fit.
+     * number (41), HEVC 30x (123). Callers still send H.264-style values for the
+     * HEVC encoders, so an invalid level is dropped there with a warning instead of
+     * rejected. 30 and 60 are valid in both sets and are taken as HEVC 1.0/2.0; the
+     * encoder setup drops them when the picture does not fit.
      */
-    if (params->ecodec && !strcmp(params->ecodec, "libx265")) {
+    if (params->ecodec && (!strcmp(params->ecodec, "libx265") || !strcmp(params->ecodec, "hevc_nvenc"))) {
         if (avpipe_check_hevc_level(params->level) < 0) {
-            elv_warn("Invalid level %d for libx265 - expected HEVC general_level_idc (30x the level number, "
-                "e.g. 123 for 4.1); ignoring it, x265 picks the level, url=%s", params->level, params->url);
+            elv_warn("Invalid level %d for %s - expected HEVC general_level_idc (30x the level number, "
+                "e.g. 123 for 4.1); ignoring it, the encoder picks the level, url=%s",
+                params->level, params->ecodec, params->url);
             params->level = 0;
         }
     } else if (avpipe_check_level(params->level) < 0) {

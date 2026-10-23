@@ -797,14 +797,15 @@ func TestVideoRefsLevelRoundTrip(t *testing.T) {
 	url := videoBigBuckBunnyPath
 	checkFileExists(t, url)
 
-	cases := []struct {
+	type refsLevelCase struct {
 		name      string
 		ecodec    string
 		refs      int
 		level     int
 		wantRefs  int // in the output SPS
 		wantLevel int
-	}{
+	}
+	cases := []refsLevelCase{
 		// 0 leaves the encoder's choice: x264 medium uses 3 refs, and avpipe guesses
 		// level 3.0 for 720x480.
 		{"libx264_defaults", "libx264", 0, 0, 3, 30},
@@ -837,6 +838,27 @@ func TestVideoRefsLevelRoundTrip(t *testing.T) {
 		// H.264-style caller means by 6.0) is dropped the same way instead of making
 		// x265 refuse to open.
 		{"libx265_level_too_small_dropped", "libx265", 6, 60, 6, 90},
+	}
+	// nvenc, with a GPU present: dpb_size lands one to one in max_num_ref_frames and
+	// sps_max_dec_pic_buffering_minus1, and an explicit level is written as given. An
+	// unfit level is dropped and the driver picks the smallest level that holds the
+	// picture and the DPB. The defaults row pins the driver's own choices (DPB 3,
+	// level 3.0 for 720x480; measured on driver 610.88).
+	if testutil.NvidiaExist() {
+		cases = append(cases, []refsLevelCase{
+			{"h264_nvenc_defaults", "h264_nvenc", 0, 0, 3, 30},
+			{"h264_nvenc", "h264_nvenc", 6, 31, 6, 31},
+			{"h264_nvenc_min_refs", "h264_nvenc", 1, 31, 1, 31},
+			// A 16-frame DPB of 720x480 needs level 4.x's MaxDpbMbs.
+			{"h264_nvenc_max_refs", "h264_nvenc", 16, 41, 16, 41},
+			// 1.0 cannot hold 720x480: dropped, the driver picks 3.0.
+			{"h264_nvenc_level_too_small_dropped", "h264_nvenc", 3, 10, 3, 30},
+			{"hevc_nvenc", "hevc_nvenc", 6, 93, 6, 93},
+			// No x265-style floor: 1 round-trips.
+			{"hevc_nvenc_min_refs", "hevc_nvenc", 1, 93, 1, 93},
+			// HEVC 1.0 (30) cannot hold 720x480: dropped, the driver picks 3.0 (90).
+			{"hevc_nvenc_level_too_small_dropped", "hevc_nvenc", 3, 30, 3, 90},
+		}...)
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
@@ -878,16 +900,21 @@ func TestVideoRefsLevelRoundTrip(t *testing.T) {
 
 // TestVideoRefsLevelParamValidation pins the check_params rejections that came
 // with video_refs and the libx265 level: each fails XcInit with EAV_PARAM before
-// anything is opened. Levels are checked in the encoder's own units: libx264
-// rejects an HEVC-style value, while libx265 drops anything that is not an HEVC
-// level with a warning (see TestVideoRefsLevelRoundTrip) rather than rejecting
-// it. The accepted cases are the positive controls: they initialize, and are
-// cancelled before they run.
+// anything is opened. Levels are checked in the encoder's own units: the H.264
+// encoders reject an HEVC-style value, while the HEVC encoders drop anything that
+// is not an HEVC level with a warning (see TestVideoRefsLevelRoundTrip) rather
+// than rejecting it. The accepted cases are the positive controls: they
+// initialize, and are cancelled before they run.
 func TestVideoRefsLevelParamValidation(t *testing.T) {
 	url := videoBigBuckBunnyPath
 	checkFileExists(t, url)
 	outputDir := path.Join(baseOutPath, fn())
 	boilerplate(t, outputDir, url)
+
+	type paramCase struct {
+		name string
+		mod  func(p *goavpipe.XcParams)
+	}
 
 	base := func() *goavpipe.XcParams {
 		return &goavpipe.XcParams{
@@ -906,11 +933,10 @@ func TestVideoRefsLevelParamValidation(t *testing.T) {
 		}
 	}
 
-	rejected := []struct {
-		name string
-		mod  func(p *goavpipe.XcParams)
-	}{
+	rejected := []paramCase{
 		{"libx264 rejects an HEVC-style 30x level", func(p *goavpipe.XcParams) { p.Level = 93 }},
+		// check_params runs before the encoder lookup, so this needs no GPU.
+		{"h264_nvenc rejects an HEVC-style 30x level", func(p *goavpipe.XcParams) { p.Ecodec = "h264_nvenc"; p.Level = 93 }},
 		{"video_refs below the minimum", func(p *goavpipe.XcParams) { p.VideoRefs = -1 }},
 		{"video_refs above the encoder maximum", func(p *goavpipe.XcParams) { p.VideoRefs = 17 }},
 		{"video_refs requires transcoding", func(p *goavpipe.XcParams) { p.VideoRefs = 3; p.BypassTranscoding = true }},
@@ -925,14 +951,18 @@ func TestVideoRefsLevelParamValidation(t *testing.T) {
 		})
 	}
 
-	accepted := []struct {
-		name string
-		mod  func(p *goavpipe.XcParams)
-	}{
+	accepted := []paramCase{
 		{"libx264 with the maximum video_refs", func(p *goavpipe.XcParams) { p.VideoRefs = 16 }},
 		{"libx265 with video_refs and an HEVC general_level_idc", func(p *goavpipe.XcParams) { p.Ecodec = "libx265"; p.Level = 93; p.VideoRefs = 3 }},
 		{"libx265 with an H.264-style level that has no HEVC equivalent", func(p *goavpipe.XcParams) { p.Ecodec = "libx265"; p.Level = 32 }},
 		{"libx265 with a level that is no level at all", func(p *goavpipe.XcParams) { p.Ecodec = "libx265"; p.Level = 45 }},
+	}
+	// The positive controls open the encoder, so the nvenc ones need the GPU.
+	if testutil.NvidiaExist() {
+		accepted = append(accepted, []paramCase{
+			{"hevc_nvenc with video_refs and an HEVC general_level_idc", func(p *goavpipe.XcParams) { p.Ecodec = "hevc_nvenc"; p.Level = 123; p.VideoRefs = 3 }},
+			{"hevc_nvenc with an H.264-style level that has no HEVC equivalent", func(p *goavpipe.XcParams) { p.Ecodec = "hevc_nvenc"; p.Level = 41 }},
+		}...)
 	}
 	for _, c := range accepted {
 		t.Run(c.name, func(t *testing.T) {
