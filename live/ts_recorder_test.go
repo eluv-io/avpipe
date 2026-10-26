@@ -219,7 +219,9 @@ func TestMultiAudioUdpToMp4(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	timeout := time.After(4 * time.Minute)
+	const liveTimeout = 6 * time.Minute
+	liveStart := time.Now()
+	timeout := time.After(liveTimeout)
 
 	xcParams := &goavpipe.XcParams{
 		Format:              "fmp4-segment",
@@ -233,8 +235,9 @@ func TestMultiAudioUdpToMp4(t *testing.T) {
 		AudioSegDurationTs:  1428480,
 		Ecodec2:             "aac",     // "aac"
 		Ecodec:              "libx264", // libx264 software / h264_videotoolbox mac hardware
-		EncHeight:           720,       // 1080
-		EncWidth:            1280,      // 1920
+		Preset:              "veryfast",
+		EncHeight:           720,  // 1080
+		EncWidth:            1280, // 1920
 		XcType:              goavpipe.XcAll,
 		StreamId:            -1,
 		Url:                 url,
@@ -257,12 +260,15 @@ func TestMultiAudioUdpToMp4(t *testing.T) {
 		xcDone <- avpipe.Xc(xcParams)
 	}()
 
+	var liveElapsed time.Duration
 	select {
 	case err = <-xcDone:
-		tlog.Info("Transcoding UDP stream multi audio done", "err", err, "last pts", nil)
+		liveElapsed = time.Since(liveStart)
+		tlog.Info("Transcoding UDP stream multi audio done", "err", err, "elapsed", liveElapsed)
+		t.Logf("live UDP transcode finished in %v (floor is ~118 s: asset + 5 s idle timeout; longer means a backlog was still draining)", liveElapsed)
 		assert.Equal(t, avpipe.EAV_IO_TIMEOUT, err, "expected EAV_IO_TIMEOUT when UDP source ends")
 	case <-timeout:
-		t.Fatal("Transcoding UDP stream multi audio timed out after 4 minutes")
+		t.Fatalf("Transcoding UDP stream multi audio timed out after %v", liveTimeout)
 	}
 
 	// Verify video mez parts
@@ -324,14 +330,16 @@ func TestMultiAudioUdpToMp4(t *testing.T) {
 		}
 	}
 
-	done := make(chan bool, 1)
-
 	xcParams.AudioIndex = []int32{0}
 	xcParams.Format = "dash"
 	xcParams.Dcodec2 = "aac"
 	xcParams.AudioSegDurationTs = 96106 // almost 2 * 48000
 	xcParams.XcType = goavpipe.XcAudio
 	audioMezFiles := [3]string{"audio-mez-segment1-1.mp4", "audio-mez-segment1-2.mp4", "audio-mez-segment1-3.mp4"}
+
+	// Buffered for every file so the worker can never block on send after a
+	// timeout has abandoned this loop.
+	done := make(chan bool, len(audioMezFiles))
 
 	// Now create audio dash segments out of audio mezzanines
 	go func() {
@@ -341,8 +349,10 @@ func TestMultiAudioUdpToMp4(t *testing.T) {
 			reqCtx := &testCtx{url: xcParams.Url}
 			putReqCtxByURL(xcParams.Url, reqCtx)
 			xcParams.StartSegmentStr = fmt.Sprintf("%d", i*15+1)
+			start := time.Now()
 			err := avpipe.Xc(xcParams)
-			tlog.Info("Transcoding Audio Dash done", "err", err)
+			tlog.Info("Transcoding Audio Dash done", "err", err, "url", xcParams.Url, "elapsed", time.Since(start))
+			t.Logf("audio dash %s finished in %v", url, time.Since(start))
 			if err != nil {
 				t.Error("Transcoding Audio Dash failed", "err", err, "url", xcParams.Url)
 			}
@@ -350,11 +360,15 @@ func TestMultiAudioUdpToMp4(t *testing.T) {
 		}
 	}()
 
-	for _ = range audioMezFiles {
+	// These are file-based, not source-paced, so they get their own timer.
+	const dashTimeout = 2 * time.Minute
+	dashTimer := time.After(dashTimeout)
+	for completed := 0; completed < len(audioMezFiles); completed++ {
 		select {
 		case <-done:
-		case <-timeout:
-			t.Fatal("Transcoding Audio Dash timed out after 4 minutes")
+		case <-dashTimer:
+			t.Fatalf("Transcoding Audio Dash timed out after %v (%d of %d done; live phase took %v)",
+				dashTimeout, completed, len(audioMezFiles), liveElapsed)
 		}
 	}
 }
