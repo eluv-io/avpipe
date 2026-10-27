@@ -56,6 +56,7 @@ import (
 	"sync"
 	"sync/atomic"
 	"syscall"
+	"time"
 	"unsafe"
 
 	"github.com/eluv-io/avpipe/broadcastproto/mpegts"
@@ -110,15 +111,95 @@ type ioHandler struct {
 // without invalidating a handle that an in-flight C callback may still use.
 type verticalDataReaderHandle struct {
 	reader      io.ReadCloser
+	url         string // the transcode's URL, for the log lines
 	handle      cgo.Handle
 	closeOnce   sync.Once
 	releaseOnce sync.Once
 	closeErr    error
 	cancelled   atomic.Bool // set before a cancel closes the reader, so the read that fails as a result is expected
+	stats       verticalReadStats
 }
 
-func newVerticalDataReaderHandle(reader io.ReadCloser) *verticalDataReaderHandle {
-	h := &verticalDataReaderHandle{reader: reader}
+const (
+	// Slow producer threshold
+	verticalSlowReadThreshold   = 500 * time.Millisecond
+	verticalSlowReadLogInterval = time.Second
+	// Frame interval to emit log lines
+	verticalReadLogInterval = 300
+)
+
+// verticalReadStats is what readVerticalData saw over one transcode, logged when the handle is released.
+type verticalReadStats struct {
+	mu             sync.Mutex
+	records        int64
+	first          uint32
+	last           uint32
+	readTotal      time.Duration
+	readMax        time.Duration
+	slowReads      int64
+	slowSuppressed int64     // slow reads without a line since the last one that got one
+	lastSlowLog    time.Time // when the last slow read got a line
+	errors         int64
+	eof            bool
+	cancelled      bool
+}
+
+// record accounts one read and returns the record count, whether this slow read gets a line, and the suppressed count
+func (s *verticalReadStats) record(value uint32, hasValue bool, d time.Duration, err error, cancelled bool) (n int64, logSlow bool, suppressed int64) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.readTotal += d
+	if d > s.readMax {
+		s.readMax = d
+	}
+	if d >= verticalSlowReadThreshold {
+		s.slowReads++
+		now := time.Now()
+		if s.lastSlowLog.IsZero() || now.Sub(s.lastSlowLog) >= verticalSlowReadLogInterval {
+			s.lastSlowLog = now
+			logSlow = true
+			suppressed = s.slowSuppressed
+			s.slowSuppressed = 0
+		} else {
+			s.slowSuppressed++
+		}
+	}
+	switch {
+	case err != nil && cancelled:
+		s.cancelled = true
+	case err != nil:
+		s.errors++
+	case !hasValue:
+		s.eof = true
+	default:
+		if s.records == 0 {
+			s.first = value
+		}
+		s.last = value
+		s.records++
+	}
+	return s.records, logSlow, suppressed
+}
+
+func (s *verticalReadStats) fields() []interface{} {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return []interface{}{
+		"records", s.records,
+		"first_value", s.first,
+		"last_value", s.last,
+		"read_total", s.readTotal,
+		"read_max", s.readMax,
+		"slow_reads", s.slowReads,
+		"slow_threshold", verticalSlowReadThreshold,
+		"eof", s.eof,
+		"errors", s.errors,
+		"cancelled", s.cancelled,
+	}
+}
+
+func newVerticalDataReaderHandle(reader io.ReadCloser, url string) *verticalDataReaderHandle {
+	h := &verticalDataReaderHandle{reader: reader, url: url}
 	h.handle = cgo.NewHandle(h)
 	return h
 }
@@ -153,6 +234,7 @@ func (h *verticalDataReaderHandle) release() error {
 	h.releaseOnce.Do(func() {
 		_ = h.close()
 		h.handle.Delete()
+		goavpipe.Log.Info("vertical data reader stats", append([]interface{}{"url", h.url}, h.stats.fields()...)...)
 	})
 	return h.closeErr
 }
@@ -185,17 +267,31 @@ func readVerticalData(handle uintptr, value *uint32) (rc int) {
 		return -1
 	}
 
+	start := time.Now()
 	v, hasValue, err := h.readValue()
+	d := time.Since(start)
+	cancelled := err != nil && h.cancelled.Load()
+	n, logSlow, suppressed := h.stats.record(v, hasValue, d, err, cancelled)
 	if err != nil {
-		if h.cancelled.Load() {
-			goavpipe.Log.Debug("AVPipeReadVerticalData()", "reason", "read interrupted by cancel", "err", err)
+		if cancelled {
+			goavpipe.Log.Debug("AVPipeReadVerticalData()", "reason", "read interrupted by cancel", "err", err,
+				"url", h.url, "records", n, "read", d)
 		} else {
-			goavpipe.Log.Error("AVPipeReadVerticalData()", "reason", "failed to read 4-byte record", "err", err)
+			goavpipe.Log.Error("AVPipeReadVerticalData()", "reason", "failed to read 4-byte record", "err", err,
+				"url", h.url, "records", n, "read", d)
 		}
 		return -1
 	}
 	if !hasValue {
+		goavpipe.Log.Info("AVPipeReadVerticalData() eof", "url", h.url, "records", n, "read", d)
 		return 0
+	}
+	if n == 1 || n%verticalReadLogInterval == 0 || logSlow {
+		fields := []interface{}{"url", h.url, "record", n, "value", v, "read", d}
+		if logSlow {
+			fields = append(fields, "slow_suppressed", suppressed)
+		}
+		goavpipe.Log.Info("AVPipeReadVerticalData() progress", fields...)
 	}
 
 	*value = v
@@ -1147,7 +1243,7 @@ func Xc(params *goavpipe.XcParams) error {
 
 	var verticalDataReader *verticalDataReaderHandle
 	if params.VerticalDataReader != nil {
-		verticalDataReader = newVerticalDataReaderHandle(params.VerticalDataReader)
+		verticalDataReader = newVerticalDataReaderHandle(params.VerticalDataReader, params.Url)
 		defer func() {
 			if closeErr := verticalDataReader.release(); closeErr != nil {
 				goavpipe.Log.Warn(op, "reason", "failed to close vertical data reader", "err", closeErr)
@@ -1507,7 +1603,7 @@ func XcInit(params *goavpipe.XcParams) (handle int32, retErr error) {
 
 	job := &xcJob{url: params.Url}
 	if params.VerticalDataReader != nil {
-		job.verticalDataReader = newVerticalDataReaderHandle(params.VerticalDataReader)
+		job.verticalDataReader = newVerticalDataReaderHandle(params.VerticalDataReader, params.Url)
 	}
 	defer func() {
 		if retErr != nil {

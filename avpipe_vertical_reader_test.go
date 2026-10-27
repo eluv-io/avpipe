@@ -15,7 +15,7 @@ func TestVerticalDataReaderReadsLittleEndianRecordsAcrossShortReads(t *testing.T
 		0x78, 0x56, 0x34, 0x12,
 		0xef, 0xcd, 0xab, 0x90,
 	}))}
-	h := newVerticalDataReaderHandle(r)
+	h := newVerticalDataReaderHandle(r, "test")
 	t.Cleanup(func() { require.NoError(t, h.release()) })
 
 	value, ok, err := h.readValue()
@@ -34,7 +34,7 @@ func TestVerticalDataReaderReadsLittleEndianRecordsAcrossShortReads(t *testing.T
 }
 
 func TestVerticalDataReaderRejectsPartialRecord(t *testing.T) {
-	h := newVerticalDataReaderHandle(&trackingReadCloser{Reader: bytes.NewReader([]byte{1, 2, 3})})
+	h := newVerticalDataReaderHandle(&trackingReadCloser{Reader: bytes.NewReader([]byte{1, 2, 3})}, "test")
 	t.Cleanup(func() { require.NoError(t, h.release()) })
 
 	_, ok, err := h.readValue()
@@ -44,7 +44,7 @@ func TestVerticalDataReaderRejectsPartialRecord(t *testing.T) {
 
 func TestVerticalDataReaderCancelClosesAndMarks(t *testing.T) {
 	r := &trackingReadCloser{Reader: bytes.NewReader(nil)}
-	h := newVerticalDataReaderHandle(r)
+	h := newVerticalDataReaderHandle(r, "test")
 	t.Cleanup(func() { require.NoError(t, h.release()) })
 
 	require.NoError(t, h.cancel())
@@ -54,7 +54,7 @@ func TestVerticalDataReaderCancelClosesAndMarks(t *testing.T) {
 
 func TestVerticalDataReaderReleaseClosesOnce(t *testing.T) {
 	r := &trackingReadCloser{Reader: bytes.NewReader(nil)}
-	h := newVerticalDataReaderHandle(r)
+	h := newVerticalDataReaderHandle(r, "test")
 
 	require.NoError(t, h.close())
 	require.NoError(t, h.release())
@@ -63,7 +63,7 @@ func TestVerticalDataReaderReleaseClosesOnce(t *testing.T) {
 }
 
 func TestReadVerticalDataAfterReleaseReturnsError(t *testing.T) {
-	h := newVerticalDataReaderHandle(&trackingReadCloser{Reader: bytes.NewReader([]byte{1, 0, 0, 0})})
+	h := newVerticalDataReaderHandle(&trackingReadCloser{Reader: bytes.NewReader([]byte{1, 0, 0, 0})}, "test")
 	handle := uintptr(h.handle)
 
 	var v uint32
@@ -89,7 +89,7 @@ func TestGetCParamsRejectsAmbiguousVerticalDataSource(t *testing.T) {
 func TestXcFiniReleasesVerticalDataReader(t *testing.T) {
 	const handle = int32(-2_000_000_001)
 	r := &trackingReadCloser{Reader: bytes.NewReader(nil)}
-	readerHandle := newVerticalDataReaderHandle(r)
+	readerHandle := newVerticalDataReaderHandle(r, "test")
 	putXCJob(handle, &xcJob{verticalDataReader: readerHandle})
 	t.Cleanup(func() {
 		if job, ok := takeXCJob(handle); ok && job.verticalDataReader != nil {

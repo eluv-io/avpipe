@@ -738,6 +738,8 @@ crop_calc_width(
     return w;
 }
 
+#define VERTICAL_CROP_LOG_INTERVAL 300
+
 int
 crop_send_command(
     coderctx_t *decoder_context,
@@ -815,6 +817,18 @@ crop_send_command(
         decoder_context->video_crop_ctx->name, "x", x_val, cmd_res, sizeof(cmd_res), 0);
     if (ret < 0) {
         elv_err("Failed to send crop x command, ret=%d, url=%s", ret, params->url);
+    }
+
+    /* One line in VERTICAL_CROP_LOG_INTERVAL frames */
+    if (frame_idx >= 0 && frame_idx % VERTICAL_CROP_LOG_INTERVAL == 0) {
+        uint32_t value = decoder_context->vertical_data_last;
+        if (has_buffer) {
+            int n_entries = params->vertical_data_len / 4;
+            int i = frame_idx < n_entries ? frame_idx : n_entries - 1;
+            value = n_entries > 0 ? ((uint32_t *)params->vertical_data)[i] : 0;
+        }
+        elv_log("Vertical crop applied frame_idx=%d value=%u crop_x=%d scaled_width=%d crop_width=%d source=%s url=%s",
+            frame_idx, (unsigned)value, crop_x, scaled_width, crop_width, has_buffer ? "buffer" : "reader", params->url);
     }
 
     return eav_success;
