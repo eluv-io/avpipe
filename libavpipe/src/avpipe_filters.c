@@ -4,6 +4,7 @@
 
 #include "avpipe_xc.h"
 #include "avpipe_filters.h"
+#include "avpipe_overlay.h"
 #include "avpipe_utils.h"
 #include "avpipe_format.h"
 #include "elv_log.h"
@@ -108,6 +109,11 @@ init_video_filters(
     outputs->filter_ctx = decoder_context->video_buffersrc_ctx;
     outputs->pad_idx    = 0;
     outputs->next       = NULL;
+
+    /* The overlay canvas, when there are image slots, is a second open output named "ov" */
+    if ((ret = overlay_add_canvas_source(decoder_context, encoder_context, outputs)) < 0) {
+        goto end;
+    }
 
     /*
      * The buffer sink input must be connected to the output pad of

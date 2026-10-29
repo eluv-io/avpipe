@@ -1,4 +1,5 @@
 #include "libavpipe/src/avpipe_filters.c"
+#include "libavpipe/src/avpipe_overlay.c"
 #include "libavpipe/src/avpipe_io.c"
 #include "libavpipe/src/avpipe_level.c"
 #include "libavpipe/src/avpipe_mux.c"

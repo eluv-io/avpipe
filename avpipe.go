@@ -34,6 +34,7 @@ package avpipe
 #include <string.h>
 #include <stdlib.h>
 #include "avpipe_xc.h"
+#include "avpipe_overlay.h"
 #include "avpipe.h"
 #include "elv_log.h"
 #include <libavutil/channel_layout.h>
@@ -1026,6 +1027,12 @@ func getCParams(params *goavpipe.XcParams) (*C.xcparams_t, error) {
 		}
 	}
 
+	if params.Overlay != nil {
+		if err := setCOverlay(cparams, params.Overlay); err != nil {
+			return nil, fmt.Errorf("overlay: %w", err)
+		}
+	}
+
 	return cparams, nil
 }
 
@@ -1059,6 +1066,13 @@ func Xc(params *goavpipe.XcParams) error {
 	if err != nil {
 		goavpipe.Log.Error(op, err, "reason", "bad params", "XcParams", params)
 		return EAV_PARAM
+	}
+
+	// The overlay event source is owned here: closed and its handle deleted once xc returns
+	overlaySource := newOverlaySource(params)
+	if overlaySource != nil {
+		initCOverlaySource(cparams, overlaySource)
+		defer overlaySource.release()
 	}
 
 	rc := C.xc((*C.xcparams_t)(unsafe.Pointer(cparams)))
@@ -1343,7 +1357,8 @@ var cancelableInputOpeners sync.Map // int32 handle -> cancelableInputOpener
 // xcJob represents the state of an avpipe 'xc' job
 // PENDING(SS) - currently only URL mapping but planning to consolidate all job state here
 type xcJob struct {
-	url string
+	url           string
+	overlaySource *overlaySourceHandle // closed by XcCancel, released by XcFini
 }
 
 var (
@@ -1371,6 +1386,14 @@ func takeXCJob(handle int32) (*xcJob, bool) {
 	return job, ok
 }
 
+func getXCJob(handle int32) (*xcJob, bool) {
+	xcJobsMu.Lock()
+	defer xcJobsMu.Unlock()
+
+	job, ok := xcJobs[handle]
+	return job, ok
+}
+
 // XcInit initializes a transcode job and returns a handle for it. The actual
 // transcoding is started by XcRun(handle) and can be interrupted at any time
 // via XcCancel(handle). Every successful XcInit must be paired with XcFini
@@ -1387,10 +1410,13 @@ func XcInit(params *goavpipe.XcParams) (handle int32, retErr error) {
 	}
 	goavpipe.Log.Debug(op, "XcParams", params)
 
-	job := &xcJob{url: params.Url}
+	job := &xcJob{url: params.Url, overlaySource: newOverlaySource(params)}
 	defer func() {
 		if retErr != nil {
 			// Failures don't return a handle so XcFini cannot be called
+			if job.overlaySource != nil {
+				job.overlaySource.release()
+			}
 			goavpipe.Globals.RemoveURLHandlers(job.url)
 		}
 	}()
@@ -1430,6 +1456,7 @@ func XcInit(params *goavpipe.XcParams) (handle int32, retErr error) {
 		goavpipe.Log.Error(op, err, "reason", "bad params", "XcParams", params)
 		return -1, EAV_PARAM
 	}
+	initCOverlaySource(cparams, job.overlaySource)
 
 	var cHandle C.int32_t
 	rc := C.xc_init((*C.xcparams_t)(unsafe.Pointer(cparams)), (*C.int32_t)(unsafe.Pointer(&cHandle)))
@@ -1516,6 +1543,9 @@ func XcFini(handle int32) error {
 	}
 
 	goavpipe.Globals.RemoveURLHandlers(job.url)
+	if job.overlaySource != nil {
+		job.overlaySource.release()
+	}
 	return nil
 }
 
@@ -1539,6 +1569,9 @@ func XcCancel(handle int32) error {
 	rc := C.xc_cancel(C.int32_t(handle))
 	if v, ok := cancelableInputOpeners.Load(handle); ok {
 		v.(cancelableInputOpener).CancelInput()
+	}
+	if job, ok := getXCJob(handle); ok && job.overlaySource != nil {
+		job.overlaySource.cancel()
 	}
 	if rc == 0 {
 		return nil

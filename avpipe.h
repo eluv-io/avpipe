@@ -74,6 +74,12 @@ int
 mux(
     xcparams_t *params);
 
+/** Configure the Go-backed overlay event source: AVPipeOverlayEvents with this handle. No-op without an overlay. */
+void
+init_overlay_reader(
+    xcparams_t *params,
+    uintptr_t handle);
+
 /**
  * @brief   Returns pixel format name.
  *

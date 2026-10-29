@@ -58,7 +58,8 @@ typedef enum avpipe_error_t {
     eav_xc_table                = 23,   // Error in trancoding table
     eav_pts_wrapped             = 24,   // PTS wrapped error
     eav_io_timeout              = 25,   // IO timeout
-    eav_bad_handle              = 26    // Bad handle
+    eav_bad_handle              = 26,   // Bad handle
+    eav_overlay                 = 27    // Overlay event source failed or a slot update was rejected
 } avpipe_error_t;
 
 typedef enum avpipe_buftype_t {
@@ -168,6 +169,116 @@ typedef struct io_mux_ctx_t {
 } io_mux_ctx_t;
 
 typedef struct xcparams_t xcparams_t;
+
+/*
+ * Overlay: a graphic burned into the output video, driven by timed events. The layout is a list of slots; each
+ * event is the complete state of every slot from its pts on. See avpipe_overlay.c.
+ */
+typedef enum ov_slot_type {
+    ov_slot_text  = 0,
+    ov_slot_clock = 1,
+    ov_slot_image = 2
+} ov_slot_type;
+
+typedef enum ov_align {
+    ov_align_left   = 0,
+    ov_align_center = 1,
+    ov_align_right  = 2
+} ov_align;
+
+typedef enum ov_clock_format {
+    ov_clock_mmss  = 0,         // 02:05
+    ov_clock_hmmss = 1          // 1:02:05
+} ov_clock_format;
+
+typedef struct ov_slot_t {
+    ov_slot_type type;
+    float       x;              // Anchor as a fraction of the output width (which text edge depends on align)
+    float       y;              // Top edge as a fraction of the output height
+    float       size;           // text/clock: font size as a fraction of the output height; image: width fraction
+    ov_align    align;
+    char        *font_file;     // text/clock
+    char        *color;         // text/clock, ffmpeg colour syntax
+    ov_clock_format clock_format;
+    int         default_image;  // image: library index shown when an event names none, -1 for none
+} ov_slot_t;
+
+typedef struct ov_image_t {
+    uint8_t     *png;
+    int         png_len;
+} ov_image_t;
+
+/* A clock slot's value: ms at the event's pts, then advancing with media time while running */
+typedef struct ov_clock_t {
+    int         set;            // 0 = no value (blank)
+    int64_t     ms;
+    int         running;
+    int         up;             // Counts up; the default counts down and stops at 0
+} ov_clock_t;
+
+typedef struct ov_event_t {
+    int64_t     seq;            // The producer's sequence number, what an event source is asked for events after
+    int64_t     pts;            // In 1/timescale units on the input's own timeline
+    int         hidden;         // Hide the whole overlay
+    char        **text;         // [nslots] value per text slot, NULL for no value or a non-text slot
+    ov_clock_t  *clock;         // [nslots] value per clock slot
+    int         *image;         // [nslots] library index per image slot, -1 hidden, -2 the slot's default
+} ov_event_t;
+
+#define OV_IMAGE_HIDDEN     (-1)
+#define OV_IMAGE_DEFAULT    (-2)
+
+/*
+ * Fetches the events after after_seq once the recording's through pts reaches at_least (1/timescale units):
+ * appends them with overlay_append_event() and sets the new through pts with overlay_set_through(). May block.
+ * Returns 0, OV_READER_CANCELLED when the job was cancelled, or another negative value on failure.
+ */
+typedef int
+(*ov_reader_f)(
+    uintptr_t handle,
+    xcparams_t *params,
+    int64_t after_seq,
+    int64_t at_least);
+
+#define OV_READER_CANCELLED (-2)
+
+typedef struct ov_params_t {
+    int64_t     timescale;
+    int         nslots;
+    int         nimages;
+    int         nevents;
+    ov_slot_t   *slots;
+    ov_image_t  *images;        // The library, PNG bytes
+    ov_event_t  *events;        // Sorted by pts
+    int64_t     through_pts;    // events is complete up to this pts; only read when there is a reader
+    ov_reader_f reader;         // Supplies events past through_pts, NULL when events is final
+    uintptr_t   reader_handle;
+} ov_params_t;
+
+/* Per-transcode overlay state, owned by the decoder context */
+typedef struct ov_state_t {
+    int         nslots;
+    AVRational  tb;             // Input video stream time base
+    int64_t     *event_pts;     // [nevents] event pts in the input video stream time base
+    int         nbound;         // Events rescaled into event_pts so far
+    int64_t     through_pts_tb; // The reader's through pts in the stream time base; INT64_MAX without a reader
+    int         fetches;        // Reader calls made
+    int         cursor;         // Index of the event in effect, -1 before the first
+    struct AVFilterContext **text_ctx;  // [nslots] drawtext filter of each text/clock slot, NULL otherwise
+    char        **text_sent;    // [nslots] text last sent to each drawtext
+    int         commands;       // send_command calls made
+
+    /* Image slots are drawn into one RGBA canvas, the bounding box of their rects, fed to an overlay filter */
+    int         nimages;
+    int         *slot_rect;     // [nslots*4] x, y, w, h of each image slot at output size; h fits the tallest library image
+    int         canvas_x, canvas_y, canvas_w, canvas_h;  // w == 0 when there are no image slots
+    AVFrame     **images;       // [nimages] decoded RGBA at native size
+    AVFrame     **slot_images;  // [nslots*nimages] scaled to the slot width, made on first use
+    struct AVFilterContext *canvas_src;
+    int         *canvas_row;    // [nslots] library index drawn in each image slot, OV_IMAGE_HIDDEN for none
+    AVFrame     *canvas;        // Replaced, never edited in place: the filter may still hold references
+    int         canvas_stale;   // The row changed since the canvas was drawn
+} ov_state_t;
 
 typedef struct ioctx_t {
     /* Application specific IO context */
@@ -415,6 +526,7 @@ typedef struct coderctx_t {
     AVFilterContext *video_buffersrc_ctx;
     AVFilterGraph   *video_filter_graph;
     AVFilterContext *video_crop_ctx;            /* Crop filter context for send_command */
+    ov_state_t      *overlay;                   /* Overlay state, NULL when params->overlay is NULL */
 
     /* Audio filter */
     AVFilterContext *audio_buffersink_ctx[MAX_STREAMS];
@@ -615,6 +727,7 @@ typedef struct xcparams_t {
     int         fade_end_frame;             // Fade end frame (used with blend filter)
     double      fade_level_1;               // Fade blend start level (e.g. 1.0)
     double      fade_level_2;               // Fade blend end level (e.g. 0.0)
+    ov_params_t *overlay;                   // Burned-in graphics driven by timed events, NULL for none
 } xcparams_t;
 
 #define MAX_CODEC_NAME  256

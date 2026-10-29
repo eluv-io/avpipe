@@ -399,6 +399,9 @@ func InitTranscode(cmdRoot *cobra.Command) error {
 	cmdTranscode.PersistentFlags().Int32("level", 0, "Encoding level for video. If it is not determined, it will be set automatically.")
 	cmdTranscode.PersistentFlags().Int32("video-refs", 0, "Encoder reference frames (verified with libx264). Default 0 lets the encoder choose.")
 	cmdTranscode.PersistentFlags().Int32("deinterlace", 0, "Deinterlace filter (values 0 - none, 1 - bwdif_field, 2 - bwdif_frame send_frame).")
+	cmdTranscode.PersistentFlags().String("overlay", "", "Overlay spec (JSON): image library, slots and events with times in seconds. Image and font paths are relative to the spec file.")
+	cmdTranscode.PersistentFlags().String("overlay-events", "", "File or FIFO of JSON-line patches ({\"data\": {...}, \"hidden\": bool}) applied to the overlay as they arrive, each stamped at the frame being transcoded.")
+	cmdTranscode.PersistentFlags().String("overlay-log", "", "Write every stamped overlay event to this file as JSON lines.")
 	cmdTranscode.PersistentFlags().Int32("vertical", 0, "Vertical video crop type (0 - none, 1 - 32bpf).")
 	cmdTranscode.PersistentFlags().StringP("vertical-data", "", "", "Path to binary file with per-frame crop data (4 bytes per frame, uint32 LE). Each value is the crop window centre as a fraction of the scaled frame width, denominator 10000 (0=left, 5000=centre, 10000=right).")
 	cmdTranscode.PersistentFlags().StringP("fade", "", "", "Fade filter ('in' or 'out').")
@@ -930,6 +933,34 @@ func doTranscode(cmd *cobra.Command, args []string) error {
 		return err
 	}
 
+	// Overlay: the spec gives the layout and any fixed events; with --overlay-events the events come from a
+	// stamper that every job of this run shares, so they all switch on the same frame.
+	var stamper *overlayStamper
+	if specPath := cmd.Flag("overlay").Value.String(); specPath != "" {
+		ov, spec, err := loadOverlaySpec(specPath)
+		if err != nil {
+			return err
+		}
+		params.Overlay = ov
+		if eventsPath := cmd.Flag("overlay-events").Value.String(); eventsPath != "" {
+			src, err := openOverlayEvents(eventsPath)
+			if err != nil {
+				return fmt.Errorf("overlay events: %w", err)
+			}
+			var eventLog io.Writer
+			if logPath := cmd.Flag("overlay-log").Value.String(); logPath != "" {
+				f, err := os.Create(logPath)
+				if err != nil {
+					return fmt.Errorf("overlay log: %w", err)
+				}
+				defer f.Close()
+				eventLog = f
+			}
+			stamper = newOverlayStamper(ov.Events, spec.DelayMs, src, eventLog)
+			params.Overlay.Events = nil
+		}
+	}
+
 	// The global input opener is used for stats - if not set, some handlers will fail (eg. mpegts Open)
 	goavpipe.InitIOHandler(&elvxcInputOpener{url: filename}, nil)
 
@@ -937,6 +968,15 @@ func doTranscode(cmd *cobra.Command, args []string) error {
 	done := make(chan interface{})
 
 	for i := 0; i < int(nThreads); i++ {
+		jobParams := params
+		if stamper != nil {
+			// Each job owns its source handle: avpipe closes it when the job ends
+			p := *params
+			ov := *params.Overlay
+			ov.Source = stamper.handle()
+			p.Overlay = &ov
+			jobParams = &p
+		}
 		go func(params *goavpipe.XcParams, filename string) {
 
 			goavpipe.InitUrlIOHandlerIfNotPresent(filename, nil, outOpener)
@@ -947,7 +987,7 @@ func doTranscode(cmd *cobra.Command, args []string) error {
 			} else {
 				done <- nil
 			}
-		}(params, filename)
+		}(jobParams, filename)
 	}
 
 	var lastError error

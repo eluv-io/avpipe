@@ -4,6 +4,7 @@ SRCS=avpipe_xc.c \
     avpipe_format.c \
     avpipe_codec.c \
     avpipe_filters.c \
+    avpipe_overlay.c \
     avpipe_io.c \
     avpipe_mux.c \
     avpipe_level.c \

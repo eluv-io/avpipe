@@ -399,9 +399,67 @@ type XcParams struct {
 	FadeEndFrame           int         `json:"fade_end_frame,omitempty"`
 	FadeLevel1             float64     `json:"fade_level_1,omitempty"`
 	FadeLevel2             float64     `json:"fade_level_2,omitempty"`
+
+	Overlay *OverlayParams `json:"overlay,omitempty"` // Burned-in graphics driven by timed events
 }
 
 func (p *XcParams) String() string { return util.JSONString(p) }
+
+// Overlay slot types
+const (
+	OverlaySlotText  = "text"  // A string drawn with the slot's font
+	OverlaySlotClock = "clock" // A clock that runs on media time
+	OverlaySlotImage = "image" // An image from the overlay's library
+)
+
+// OverlaySlot is one drawable element of an overlay. Positions and sizes are fractions of the output frame, so one
+// layout fits every rendition.
+type OverlaySlot struct {
+	Name    string  `json:"name"`
+	Type    string  `json:"type"`              // OverlaySlotText, OverlaySlotClock or OverlaySlotImage
+	X       float64 `json:"x"`                 // Anchor as a fraction of the output width (0..1); see Align
+	Y       float64 `json:"y"`                 // Top edge as a fraction of the output height (0..1)
+	Size    float64 `json:"size"`              // text/clock: font size as a fraction of the output height; image: width as a fraction of the output width
+	Font    string  `json:"font,omitempty"`    // text/clock: path to a font file
+	Color   string  `json:"color,omitempty"`   // text/clock: ffmpeg colour name or 0xRRGGBB[AA], default white
+	Align   string  `json:"align,omitempty"`   // text/clock: left (default), center or right - which edge of the text X anchors
+	Format  string  `json:"format,omitempty"`  // clock: mm:ss (default) or h:mm:ss
+	Default string  `json:"default,omitempty"` // image: library image shown when no event names one
+}
+
+// OverlayEvent is the complete state of the overlay from Pts on, so a job can start from any single event. Data
+// holds one value per slot name: a string for a text slot, a library image name (nil hides it) for an image slot,
+// and {"ms", "running", "dir"} for a clock slot. A slot missing from Data is blank, hidden or showing its default.
+type OverlayEvent struct {
+	Seq    int64          `json:"seq"`
+	Pts    int64          `json:"pts"`              // In OverlayParams.Timescale units, on the input's own timeline
+	Hidden bool           `json:"hidden,omitempty"` // Hides the whole overlay
+	Data   map[string]any `json:"data"`
+}
+
+// OverlayParams describes a graphic burned into the output video: a static layout of slots, an image library and
+// the events that set the slots' values. On each decoded frame the latest event with Pts <= the frame's pts is in
+// effect, so every rendition of the same input switches on the same frame.
+type OverlayParams struct {
+	Timescale  int64              `json:"timescale"` // Units of OverlayEvent.Pts and ThroughPts
+	Slots      []OverlaySlot      `json:"slots"`
+	Images     map[string][]byte  `json:"images,omitempty"`      // PNG bytes by library name
+	Events     []OverlayEvent     `json:"events"`                // Sorted by Pts; the first may precede the first frame
+	ThroughPts int64              `json:"through_pts,omitempty"` // Events is complete up to this pts; only read with a Source
+	Source     OverlayEventSource `json:"-"`                     // Supplies the events past ThroughPts; nil when Events is final
+}
+
+// OverlayEventSource supplies the events of an input that is still being recorded. Before drawing the first frame
+// whose pts is past the through pts it holds, avpipe calls EventsThrough and applies the events returned, so a
+// frame is never drawn with events that may still change. The call may block; an error fails the transcode with
+// EAV_OVERLAY. avpipe closes the source when the job ends (Xc returns, XcFini) and on XcCancel, which must
+// unblock a pending call: that call then fails the job with EAV_CANCELLED.
+type OverlayEventSource interface {
+	// EventsThrough returns the events with Seq > afterSeq, sorted by Pts, once the recording's through pts has
+	// reached atLeast (in OverlayParams.Timescale units), and that through pts.
+	EventsThrough(afterSeq int64, atLeast int64) (events []OverlayEvent, throughPts int64, err error)
+	Close() error
+}
 
 // NewXcParams initializes a XcParams struct with unset/default values
 func NewXcParams() *XcParams {

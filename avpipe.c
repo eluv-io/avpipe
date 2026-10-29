@@ -55,6 +55,7 @@ out_stat(
 int64_t AVPipeOpenInput(char *, int64_t *);
 int64_t AVPipeOpenMuxInput(char *, char *, int64_t *);
 int     AVPipeReadInput(int64_t, uint8_t *, int);
+int     AVPipeOverlayEvents(uintptr_t, xcparams_t *, int64_t, int64_t);
 int64_t AVPipeSeekInput(int64_t, int64_t, int);
 int     AVPipeCloseInput(int64_t);
 int     AVPipeStatInput(int64_t, int, avp_stat_t, void *);
@@ -806,6 +807,17 @@ set_loggers()
     elv_set_log_func(elv_log_warning, CWarn);
     elv_set_log_func(elv_log_error, CError);
     connect_ffmpeg_log();
+}
+
+void
+init_overlay_reader(
+    xcparams_t *params,
+    uintptr_t handle)
+{
+    if (!params->overlay)
+        return;
+    params->overlay->reader = AVPipeOverlayEvents;
+    params->overlay->reader_handle = handle;
 }
 
 static void
