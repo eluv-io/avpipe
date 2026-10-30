@@ -20,13 +20,15 @@ overlay_alloc(
     xcparams_t *params,
     int64_t timescale,
     int nslots,
-    int nimages,
     int nevents);
 
+/**
+ * @brief   Append a PNG to the image library, at job start or from a reader while the job runs.
+ * @return  The image's index, or -1 on a bad argument or when memory runs out.
+ */
 int
-overlay_set_image(
+overlay_add_image(
     xcparams_t *params,
-    int index,
     const uint8_t *png,
     int png_len);
 
@@ -38,11 +40,13 @@ overlay_set_slot(
     float x,
     float y,
     float size,
+    float h,
     int align,
     const char *font_file,
     const char *color,
     int clock_format,
-    int default_image);
+    int default_image,
+    int fade_ms);
 
 int
 overlay_set_event(
@@ -108,8 +112,9 @@ overlay_validate(
     xcparams_t *params);
 
 /**
- * @brief   Allocate the per-transcode state before the filter graph is built: decodes the image library and lays
- *          out the image slots at the output size, which the filter string needs.
+ * @brief   Allocate the per-transcode state before the filter graph is built and lay out the image slots at the
+ *          output size, which the filter string needs. A slot without a height is sized to the images it can show
+ *          at start, which are decoded here for that; everything else is decoded when first shown.
  */
 int
 overlay_prepare(

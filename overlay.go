@@ -9,7 +9,10 @@ package avpipe
 import "C"
 
 import (
+	"bytes"
+	"encoding/base64"
 	"fmt"
+	"image/png"
 	"math"
 	"runtime/cgo"
 	"sort"
@@ -23,6 +26,7 @@ import (
 const (
 	overlayImageHidden  = -1 // C OV_IMAGE_HIDDEN
 	overlayImageDefault = -2 // C OV_IMAGE_DEFAULT
+	overlayImageInline  = -3 // the event brings the PNG (overlayRow.png); added to the C library when the event is set
 )
 
 var overlaySlotTypes = map[string]C.int{
@@ -54,7 +58,36 @@ type overlayClock struct {
 type overlayRow struct {
 	text  []*string       // nil = no value
 	clock []*overlayClock // nil = no value
-	image []int           // library index, overlayImageHidden or overlayImageDefault
+	image []int           // library index, overlayImageHidden, overlayImageDefault or overlayImageInline
+	png   [][]byte        // the PNG of an overlayImageInline slot
+}
+
+// overlayInlinePNG recognizes an image slot value that carries the picture itself: PNG bytes, or {"png": base64}
+// as the value reads back from JSON. It returns nil for a library name.
+func overlayInlinePNG(v any) ([]byte, error) {
+	var b []byte
+	switch x := v.(type) {
+	case []byte:
+		b = x
+	case map[string]any:
+		s, ok := x["png"].(string)
+		if !ok || len(x) != 1 {
+			return nil, fmt.Errorf("wants {\"png\": base64}")
+		}
+		var err error
+		if b, err = base64.StdEncoding.DecodeString(s); err != nil {
+			return nil, fmt.Errorf("png is not base64: %w", err)
+		}
+	default:
+		return nil, nil
+	}
+	if len(b) == 0 {
+		return nil, fmt.Errorf("empty png")
+	}
+	if _, err := png.DecodeConfig(bytes.NewReader(b)); err != nil {
+		return nil, fmt.Errorf("not a PNG: %w", err)
+	}
+	return b, nil
 }
 
 // overlayImageNames gives the library a fixed order: the C side addresses images by index.
@@ -167,10 +200,10 @@ func overlayRows(p *goavpipe.OverlayParams) ([]overlayRow, error) {
 		if s.Size <= 0 || s.Size > 1 {
 			return nil, fmt.Errorf("slot %q: size must be within 0..1", s.Name)
 		}
+		if s.Fade < 0 || s.Fade > math.MaxInt32 {
+			return nil, fmt.Errorf("slot %q: invalid fade %d", s.Name, s.Fade)
+		}
 		if s.Type == goavpipe.OverlaySlotImage {
-			if len(images) == 0 {
-				return nil, fmt.Errorf("slot %q: the image library is empty", s.Name)
-			}
 			if _, ok := images[s.Default]; s.Default != "" && !ok {
 				return nil, fmt.Errorf("slot %q: default image %q is not in the library", s.Name, s.Default)
 			}
@@ -193,6 +226,7 @@ func overlayRows(p *goavpipe.OverlayParams) ([]overlayRow, error) {
 		rows[i].text = make([]*string, len(p.Slots))
 		rows[i].clock = make([]*overlayClock, len(p.Slots))
 		rows[i].image = make([]int, len(p.Slots))
+		rows[i].png = make([][]byte, len(p.Slots))
 		for j := range rows[i].image {
 			rows[i].image[j] = overlayImageDefault
 		}
@@ -209,9 +243,16 @@ func overlayRows(p *goavpipe.OverlayParams) ([]overlayRow, error) {
 			}
 			switch p.Slots[j].Type {
 			case goavpipe.OverlaySlotImage:
+				if b, err := overlayInlinePNG(v); err != nil {
+					return nil, fmt.Errorf("event %d: slot %q: %w", i, name, err)
+				} else if b != nil {
+					rows[i].image[j] = overlayImageInline
+					rows[i].png[j] = b
+					continue
+				}
 				name, ok := v.(string)
 				if !ok {
-					return nil, fmt.Errorf("event %d: slot %q wants an image name, got %T", i, name, v)
+					return nil, fmt.Errorf("event %d: slot %q wants an image name or PNG, got %T", i, name, v)
 				}
 				k, ok := images[name]
 				if !ok {
@@ -245,18 +286,17 @@ func setCOverlay(cparams *C.xcparams_t, p *goavpipe.OverlayParams) error {
 	}
 
 	names := overlayImageNames(p)
-	if C.overlay_alloc(cparams, C.int64_t(p.Timescale), C.int(len(p.Slots)), C.int(len(names)),
-		C.int(len(p.Events))) == nil {
+	if C.overlay_alloc(cparams, C.int64_t(p.Timescale), C.int(len(p.Slots)), C.int(len(p.Events))) == nil {
 		return EAV_MEM_ALLOC
 	}
 	images := make(map[string]int, len(names))
 	for i, name := range names {
-		images[name] = i
-		png := p.Images[name]
-		rc := C.overlay_set_image(cparams, C.int(i), (*C.uint8_t)(unsafe.Pointer(&png[0])), C.int(len(png)))
-		if err := avpipeError(rc); err != nil {
-			return err
+		b := p.Images[name]
+		idx := C.overlay_add_image(cparams, (*C.uint8_t)(unsafe.Pointer(&b[0])), C.int(len(b)))
+		if int(idx) != i {
+			return EAV_MEM_ALLOC
 		}
+		images[name] = i
 	}
 	for i, s := range p.Slots {
 		font := C.CString(s.Font)
@@ -266,8 +306,8 @@ func setCOverlay(cparams *C.xcparams_t, p *goavpipe.OverlayParams) error {
 			defaultImage = images[s.Default]
 		}
 		rc := C.overlay_set_slot(cparams, C.int(i), overlaySlotTypes[s.Type],
-			C.float(s.X), C.float(s.Y), C.float(s.Size), overlayAligns[s.Align], font, color,
-			overlayClockFormats[s.Format], C.int(defaultImage))
+			C.float(s.X), C.float(s.Y), C.float(s.Size), C.float(s.H), overlayAligns[s.Align], font, color,
+			overlayClockFormats[s.Format], C.int(defaultImage), C.int(s.Fade))
 		C.free(unsafe.Pointer(font))
 		C.free(unsafe.Pointer(color))
 		if err := avpipeError(rc); err != nil {
@@ -313,6 +353,14 @@ func setCOverlayValues(cparams *C.xcparams_t, i int, row overlayRow) error {
 	for j, k := range row.image {
 		if k == overlayImageDefault {
 			continue
+		}
+		if k == overlayImageInline {
+			b := row.png[j]
+			idx := C.overlay_add_image(cparams, (*C.uint8_t)(unsafe.Pointer(&b[0])), C.int(len(b)))
+			if idx < 0 {
+				return EAV_MEM_ALLOC
+			}
+			k = int(idx)
 		}
 		if err := avpipeError(C.overlay_set_event_image(cparams, C.int(i), C.int(j), C.int(k))); err != nil {
 			return err

@@ -71,13 +71,20 @@ func TestLoadOverlaySpecErrors(t *testing.T) {
 	}
 }
 
+var testStamperSlots = []goavpipe.OverlaySlot{
+	{Name: "score", Type: goavpipe.OverlaySlotText},
+	{Name: "home", Type: goavpipe.OverlaySlotText},
+	{Name: "poss", Type: goavpipe.OverlaySlotImage},
+	{Name: "clock", Type: goavpipe.OverlaySlotClock},
+}
+
 func TestOverlayStamper(t *testing.T) {
 	initial := []goavpipe.OverlayEvent{
 		{Seq: 1, Pts: 0, Data: map[string]any{"score": "0 - 0", "home": "HOME"}},
 	}
 	pr, pw := io.Pipe()
 	var logBuf bytes.Buffer
-	s := newOverlayStamper(initial, 200, pr, &logBuf)
+	s := newOverlayStamper(initial, 200, pr, &logBuf, testStamperSlots)
 	job := s.handle()
 
 	// First call: nothing new has arrived; through runs delay ahead of the frame
@@ -134,7 +141,7 @@ func TestOverlayStamperFifo(t *testing.T) {
 	require.NoError(t, syscall.Mkfifo(fifo, 0600))
 	src, err := openOverlayEvents(fifo)
 	require.NoError(t, err)
-	s := newOverlayStamper(nil, 0, src, nil)
+	s := newOverlayStamper(nil, 0, src, nil, testStamperSlots)
 	job := s.handle()
 	defer job.Close()
 
@@ -180,11 +187,74 @@ func TestOverlayStamperFifo(t *testing.T) {
 
 func TestOverlayStamperBadPatch(t *testing.T) {
 	pr, pw := io.Pipe()
-	s := newOverlayStamper(nil, 0, pr, nil)
+	s := newOverlayStamper(nil, 0, pr, nil, testStamperSlots)
 	job := s.handle()
 	_, _ = pw.Write([]byte("not json\n"))
 	<-s.done
 	_, _, err := job.EventsThrough(0, 0)
 	assert.Error(t, err)
 	require.NoError(t, job.Close())
+}
+
+// TestOverlayStamperClockCarry checks that a running clock carried into a later snapshot is re-anchored to that
+// snapshot's pts, so a score change does not reset the clock, while a clock the patch sets is taken as it is.
+func TestOverlayStamperClockCarry(t *testing.T) {
+	pr, pw := io.Pipe()
+	s := newOverlayStamper(nil, 0, pr, nil, testStamperSlots)
+	job := s.handle()
+	defer job.Close()
+
+	write := func(line string, atLeast int64) []goavpipe.OverlayEvent {
+		n := len(s.events)
+		_, err := pw.Write([]byte(line + "\n"))
+		require.NoError(t, err)
+		require.Eventually(t, func() bool { return len(s.patches) > 0 }, time.Second, time.Millisecond)
+		events, _, err := job.EventsThrough(int64(n), atLeast)
+		require.NoError(t, err)
+		require.Len(t, events, 1)
+		return events
+	}
+	clockMs := func(ev goavpipe.OverlayEvent) int64 { // float64 as the patch had it, int64 once carried
+		switch n := ev.Data["clock"].(map[string]any)["ms"].(type) {
+		case float64:
+			return int64(n)
+		case int64:
+			return n
+		}
+		t.Fatal("no clock ms")
+		return 0
+	}
+
+	// A patch is stamped just past the through pts of the previous call, then through moves to atLeast
+	ev := write(`{"data":{"clock":{"ms":720000,"running":true}}}`, 1000)
+	assert.Equal(t, int64(1), ev[0].Pts)
+
+	ev = write(`{"data":{"score":"1 - 0"}}`, 6000) // stamped at 1001: 1 s after the clock event
+	assert.Equal(t, int64(1001), ev[0].Pts)
+	assert.Equal(t, int64(719000), clockMs(ev[0]), "the carried clock moved on by the time between the events")
+	assert.Equal(t, true, ev[0].Data["clock"].(map[string]any)["running"])
+
+	ev = write(`{"data":{"clock":{"ms":600000,"running":false}}}`, 9000) // stamped at 6001
+	assert.Equal(t, int64(600000), clockMs(ev[0]), "a clock the patch sets is not adjusted")
+
+	ev = write(`{"data":{"score":"2 - 0"}}`, 20000) // stamped at 9001
+	assert.Equal(t, int64(600000), clockMs(ev[0]), "a stopped clock is carried as it is")
+}
+
+// TestOverlayStamperUnknownSlot checks that a patch naming a slot the layout does not have is refused, the way
+// the recorder would answer 400, and the following patches still go through.
+func TestOverlayStamperUnknownSlot(t *testing.T) {
+	pr, pw := io.Pipe()
+	s := newOverlayStamper(nil, 0, pr, nil, testStamperSlots)
+	job := s.handle()
+	defer job.Close()
+
+	_, err := pw.Write([]byte(`{"data":{"away":"AWAY","score":"0 - 0"}}` + "\n" + `{"data":{"score":"1 - 0"}}` + "\n"))
+	require.NoError(t, err)
+	require.Eventually(t, func() bool { return len(s.patches) > 0 }, time.Second, time.Millisecond)
+	events, _, err := job.EventsThrough(0, 100)
+	require.NoError(t, err)
+	require.Len(t, events, 1, "only the valid patch is stamped")
+	assert.Equal(t, "1 - 0", events[0].Data["score"])
+	assert.NotContains(t, events[0].Data, "away")
 }

@@ -118,6 +118,7 @@ type overlayStamper struct {
 	state   goavpipe.OverlayEvent   // the last full state, which patches merge into
 	through int64                   // the events are final up to here
 	delay   int64
+	slots   map[string]bool // slot names a patch may set; a patch with another key is refused, as the recorder would
 	patches chan overlayPatch
 	src     io.ReadCloser
 	log     io.Writer
@@ -128,14 +129,19 @@ type overlayStamper struct {
 
 // newOverlayStamper starts reading JSON-line patches from src. The initial events are served as they are; the
 // last one is the state patches merge into. Every stamped event is written to log as a JSON line, when set.
-func newOverlayStamper(initial []goavpipe.OverlayEvent, delayMs int64, src io.ReadCloser, log io.Writer) *overlayStamper {
+func newOverlayStamper(initial []goavpipe.OverlayEvent, delayMs int64, src io.ReadCloser, log io.Writer,
+	slots []goavpipe.OverlaySlot) *overlayStamper {
 	s := &overlayStamper{
 		events:  append([]goavpipe.OverlayEvent(nil), initial...),
 		delay:   delayMs,
+		slots:   make(map[string]bool, len(slots)),
 		patches: make(chan overlayPatch, 64),
 		src:     src,
 		log:     log,
 		done:    make(chan struct{}),
+	}
+	for _, slot := range slots {
+		s.slots[slot.Name] = true
 	}
 	if len(initial) > 0 {
 		s.state = initial[len(initial)-1]
@@ -167,6 +173,10 @@ func (s *overlayStamper) read() {
 			s.mu.Unlock()
 			return
 		}
+		if bad := s.unknownSlot(p); bad != "" {
+			fmt.Fprintf(os.Stderr, "overlay patch refused: %q is not a slot of this layout: %s\n", bad, line)
+			continue
+		}
 		s.patches <- p
 	}
 	if err := scanner.Err(); err != nil {
@@ -176,29 +186,91 @@ func (s *overlayStamper) read() {
 	}
 }
 
+// overlayCarryClock returns v advanced by elapsed ms when it is a running clock value, else v unchanged. A
+// countdown stops at 0.
+func overlayCarryClock(v any, elapsedMs int64) any {
+	m, ok := v.(map[string]any)
+	if !ok || m["running"] != true {
+		return v
+	}
+	var ms int64
+	switch n := m["ms"].(type) {
+	case float64:
+		ms = int64(n)
+	case int64:
+		ms = n
+	case int:
+		ms = int64(n)
+	default:
+		return v
+	}
+	if m["dir"] == "up" {
+		ms += elapsedMs
+	} else if ms -= elapsedMs; ms < 0 {
+		ms = 0
+	}
+	out := make(map[string]any, len(m))
+	for k, x := range m {
+		out[k] = x
+	}
+	out["ms"] = ms
+	return out
+}
+
+// unknownSlot returns the first key of the patch that is not a slot, or "".
+func (s *overlayStamper) unknownSlot(p overlayPatch) string {
+	for k := range p.Data {
+		if !s.slots[k] {
+			return k
+		}
+	}
+	return ""
+}
+
 // apply merges a patch into the state and stamps it just past the through pts. Caller holds mu.
 func (s *overlayStamper) apply(p overlayPatch) {
-	data := make(map[string]any, len(s.state.Data)+len(p.Data))
-	for k, v := range s.state.Data {
-		data[k] = v
-	}
-	for k, v := range p.Data {
-		data[k] = v
-	}
-	ev := goavpipe.OverlayEvent{Seq: s.state.Seq + 1, Pts: s.through + 1, Hidden: s.state.Hidden, Data: data}
+	ev := goavpipe.OverlayEvent{Seq: s.state.Seq + 1, Pts: s.through + 1, Hidden: s.state.Hidden}
 	if p.Hidden != nil {
 		ev.Hidden = *p.Hidden
 	}
 	if n := len(s.events); n > 0 && s.events[n-1].Pts >= ev.Pts {
 		ev.Pts = s.events[n-1].Pts + 1
 	}
+	// A clock value means "ms at the event's pts", so a running clock carried into the new snapshot is moved
+	// forward by the time between the two events; one the patch sets is taken as it is
+	data := make(map[string]any, len(s.state.Data)+len(p.Data))
+	for k, v := range s.state.Data {
+		if _, patched := p.Data[k]; !patched {
+			v = overlayCarryClock(v, (ev.Pts-s.state.Pts)*1000/overlayTimescale)
+		}
+		data[k] = v
+	}
+	for k, v := range p.Data {
+		data[k] = v
+	}
+	ev.Data = data
 	s.state = ev
 	s.events = append(s.events, ev)
 	if s.log != nil {
-		if b, err := json.Marshal(ev); err == nil {
+		if b, err := json.Marshal(overlayLogEvent(ev)); err == nil {
 			_, _ = fmt.Fprintf(s.log, "%s\n", b)
 		}
 	}
+}
+
+// overlayLogEvent is the event with an inline picture ({"png": base64}) replaced by its size, for the log.
+func overlayLogEvent(ev goavpipe.OverlayEvent) goavpipe.OverlayEvent {
+	out := ev
+	out.Data = make(map[string]any, len(ev.Data))
+	for k, v := range ev.Data {
+		if m, ok := v.(map[string]any); ok {
+			if s, ok := m["png"].(string); ok && len(m) == 1 {
+				v = map[string]any{"png_bytes": len(s) * 3 / 4}
+			}
+		}
+		out.Data[k] = v
+	}
+	return out
 }
 
 // eventsThrough takes the patches that have arrived, advances the through pts and returns the events after

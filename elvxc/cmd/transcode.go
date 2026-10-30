@@ -956,7 +956,7 @@ func doTranscode(cmd *cobra.Command, args []string) error {
 				defer f.Close()
 				eventLog = f
 			}
-			stamper = newOverlayStamper(ov.Events, spec.DelayMs, src, eventLog)
+			stamper = newOverlayStamper(ov.Events, spec.DelayMs, src, eventLog, ov.Slots)
 			params.Overlay.Events = nil
 		}
 	}

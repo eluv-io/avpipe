@@ -196,11 +196,13 @@ typedef struct ov_slot_t {
     float       x;              // Anchor as a fraction of the output width (which text edge depends on align)
     float       y;              // Top edge as a fraction of the output height
     float       size;           // text/clock: font size as a fraction of the output height; image: width fraction
+    float       h;              // image: height as a fraction of the output height; 0 fits the images known at start
     ov_align    align;
     char        *font_file;     // text/clock
     char        *color;         // text/clock, ffmpeg colour syntax
     ov_clock_format clock_format;
     int         default_image;  // image: library index shown when an event names none, -1 for none
+    int         fade_ms;        // image: every change of the slot cross-fades over this time, 0 switches at once
 } ov_slot_t;
 
 typedef struct ov_image_t {
@@ -268,17 +270,28 @@ typedef struct ov_state_t {
     char        **text_sent;    // [nslots] text last sent to each drawtext
     int         commands;       // send_command calls made
 
-    /* Image slots are drawn into one RGBA canvas, the bounding box of their rects, fed to an overlay filter */
-    int         nimages;
-    int         *slot_rect;     // [nslots*4] x, y, w, h of each image slot at output size; h fits the tallest library image
+    /* Image slots are drawn into one RGBA canvas, the bounding box of their rects, fed to an overlay filter.
+     * Images are decoded when a slot first shows them and kept only scaled to that slot, since the library can
+     * grow while the job runs (a reader may append events that bring their own image). */
+    int         *slot_rect;     // [nslots*4] x, y, w, h of each image slot at output size
     int         canvas_x, canvas_y, canvas_w, canvas_h;  // w == 0 when there are no image slots
-    AVFrame     **images;       // [nimages] decoded RGBA at native size
-    AVFrame     **slot_images;  // [nslots*nimages] scaled to the slot width, made on first use
+    AVFrame     **slot_scaled;  // [nslots] the image each slot shows, scaled to fit its rect
+    int         *slot_scaled_for;   // [nslots] library index slot_scaled holds, -1 for none
     struct AVFilterContext *canvas_src;
     int         *canvas_row;    // [nslots] library index drawn in each image slot, OV_IMAGE_HIDDEN for none
     AVFrame     *canvas;        // Replaced, never edited in place: the filter may still hold references
     int         canvas_stale;   // The row changed since the canvas was drawn
+
+    /* A slot with fade_ms cross-fades from the image it showed to the new one, timed from the event's pts so
+     * every job computes the same alpha for the same frame */
+    int64_t     *fade_tb;       // [nslots] fade_ms in the stream time base, 0 for none
+    int         *fade_from;     // [nslots] library index faded out (OV_IMAGE_HIDDEN from nothing), OV_FADE_NONE idle
+    int64_t     *fade_start;    // [nslots] pts of the event that started the fade
+    AVFrame     **fade_scaled;  // [nslots] the image fading out, scaled; cached like slot_scaled
+    int         *fade_scaled_for;
 } ov_state_t;
+
+#define OV_FADE_NONE        (-100)
 
 typedef struct ioctx_t {
     /* Application specific IO context */

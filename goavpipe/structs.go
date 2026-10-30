@@ -420,16 +420,20 @@ type OverlaySlot struct {
 	X       float64 `json:"x"`                 // Anchor as a fraction of the output width (0..1); see Align
 	Y       float64 `json:"y"`                 // Top edge as a fraction of the output height (0..1)
 	Size    float64 `json:"size"`              // text/clock: font size as a fraction of the output height; image: width as a fraction of the output width
+	H       float64 `json:"h,omitempty"`       // image: height as a fraction of the output height; images are scaled to fit the rect. 0 fits the tallest image the slot can show at start
 	Font    string  `json:"font,omitempty"`    // text/clock: path to a font file
 	Color   string  `json:"color,omitempty"`   // text/clock: ffmpeg colour name or 0xRRGGBB[AA], default white
 	Align   string  `json:"align,omitempty"`   // text/clock: left (default), center or right - which edge of the text X anchors
 	Format  string  `json:"format,omitempty"`  // clock: mm:ss (default) or h:mm:ss
 	Default string  `json:"default,omitempty"` // image: library image shown when no event names one
+	Fade    int64   `json:"fade,omitempty"`    // image: every change of the slot (including to or from hidden) cross-fades over this many ms, timed from the event's pts
 }
 
 // OverlayEvent is the complete state of the overlay from Pts on, so a job can start from any single event. Data
-// holds one value per slot name: a string for a text slot, a library image name (nil hides it) for an image slot,
-// and {"ms", "running", "dir"} for a clock slot. A slot missing from Data is blank, hidden or showing its default.
+// holds one value per slot name: a string for a text slot; for an image slot a library image name, nil to hide it,
+// or the picture itself as PNG bytes ([]byte, or {"png": "<base64>"} as it reads back from JSON), which lets a
+// renderer deliver a new image with the event; and {"ms", "running", "dir"} for a clock slot. A slot missing from
+// Data is blank, hidden or showing its default. Every picture delivered this way is kept for the rest of the job.
 type OverlayEvent struct {
 	Seq    int64          `json:"seq"`
 	Pts    int64          `json:"pts"`              // In OverlayParams.Timescale units, on the input's own timeline
