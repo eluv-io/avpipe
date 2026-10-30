@@ -373,6 +373,10 @@ overlay_validate(
             }
             break;
         case ov_slot_image:
+            if (slot->h <= 0) {
+                elv_err("Overlay: slot=%d is an image slot and needs a height, url=%s", i, url);
+                return eav_param;
+            }
             if (slot->default_image < OV_IMAGE_HIDDEN || slot->default_image >= ov->nimages) {
                 elv_err("Overlay: slot=%d invalid default image=%d, url=%s", i, slot->default_image, url);
                 return eav_param;
@@ -400,6 +404,17 @@ overlay_validate(
 }
 
 /* Images */
+
+/* The library index an event shows in an image slot, with hidden and the slot default resolved */
+static int
+ov_event_image(
+    const ov_event_t *ev,
+    const ov_slot_t *slot,
+    int i)
+{
+    int want = ev->hidden ? OV_IMAGE_HIDDEN : ev->image[i];
+    return want == OV_IMAGE_DEFAULT ? slot->default_image : want;
+}
 
 static AVFrame *
 ov_alloc_rgba(
@@ -486,7 +501,10 @@ done:
     return rgba;
 }
 
-/* Straight-alpha "over" of src onto dst at (x0, y0), clipped to dst, with src's alpha scaled by mul/255 */
+/*
+ * Straight-alpha "over" of src onto dst at (x0, y0), clipped to dst, with src's alpha scaled by mul/255. Both
+ * frames hold straight (un-premultiplied) colour, so the result colour is divided by the result alpha.
+ */
 static void
 ov_blit(
     AVFrame *dst,
@@ -509,28 +527,59 @@ ov_blit(
             int a = mul == 255 ? s[3] : s[3] * mul / 255;
             if (a == 0)
                 continue;
-            if (a == 255) {
-                memcpy(p, s, 4);
+            if (a == 255 || p[3] == 0) {
+                memcpy(p, s, 3);
+                p[3] = a;
                 continue;
             }
-            int ia = 255 - a;
+            int db = p[3] * (255 - a);              // destination weight, x255
+            int oa = a * 255 + db;                  // out alpha, x255
             for (int c = 0; c < 3; c++)
-                p[c] = (s[c] * a + p[c] * ia + 127) / 255;
-            p[3] = a + (p[3] * ia + 127) / 255;
+                p[c] = (s[c] * a * 255 + p[c] * db + oa / 2) / oa;
+            p[3] = (oa + 127) / 255;
         }
     }
 }
 
-/* Scale img to the rect's width, keeping its aspect ratio; with fit_height also inside the rect's height */
+/*
+ * Cross-fade: dst = (1 - t) * old + t * new, in premultiplied terms, written back as straight alpha. Either
+ * image may be NULL (nothing). Both are placed at the rect's top left; dst is the rect's size and is overwritten.
+ */
+static void
+ov_lerp(
+    AVFrame *dst,
+    const AVFrame *old,
+    const AVFrame *new,
+    int t)
+{
+    for (int y = 0; y < dst->height; y++) {
+        const uint8_t *o = old && y < old->height ? old->data[0] + y * old->linesize[0] : NULL;
+        const uint8_t *n = new && y < new->height ? new->data[0] + y * new->linesize[0] : NULL;
+        uint8_t *d = dst->data[0] + y * dst->linesize[0];
+        for (int x = 0; x < dst->width; x++, d += 4) {
+            int oa = o && x < old->width ? o[x * 4 + 3] * (255 - t) : 0;   // x255
+            int na = n && x < new->width ? n[x * 4 + 3] * t : 0;
+            int a = oa + na;
+            if (a == 0) {
+                memset(d, 0, 4);
+                continue;
+            }
+            for (int c = 0; c < 3; c++)
+                d[c] = ((oa ? o[x * 4 + c] * oa : 0) + (na ? n[x * 4 + c] * na : 0) + a / 2) / a;
+            d[3] = (a + 127) / 255;
+        }
+    }
+}
+
+/* Scale img to the largest size that fits inside the rect, keeping its aspect ratio */
 static AVFrame *
 ov_scale_to_rect(
     const AVFrame *img,
-    const int *rect,
-    int fit_height)
+    const int *rect)
 {
     int w = rect[2];
     int h = img->height * rect[2] / img->width;
-    if (fit_height && h > rect[3]) {
+    if (h > rect[3]) {
         h = rect[3];
         w = img->width * rect[3] / img->height;
     }
@@ -553,63 +602,107 @@ ov_scaled_image(
         if (!img)
             return NULL;
         av_frame_free(cache);
-        *cache = ov_scale_to_rect(img, &st->slot_rect[i * 4], ov->slots[i].h > 0);
+        *cache = ov_scale_to_rect(img, &st->slot_rect[i * 4]);
         av_frame_free(&img);
         *cache_for = *cache ? j : -1;
     }
     return *cache;
 }
 
-/* Draw a new canvas for the current row at pts. The old one may still be referenced by the filter, so it is
- * replaced. A fading slot draws the old image at 1-t and the new at t; two opaque images dip a little in the
- * middle of a cross-fade, which is fine for a scoreboard. */
+/*
+ * Draw the canvas for the current row at ts (overlay timescale) and convert it to the frame the filter takes.
+ * The pushed frame is replaced, never edited in place: the filter may still hold the previous one. A fading
+ * slot is the cross-fade of what it showed and what it shows, composed as one layer.
+ */
 static int
 ov_draw_canvas(
     ov_state_t *st,
     ov_params_t *ov,
     const char *url,
-    int64_t pts)
+    int64_t ts)
 {
-    AVFrame *canvas = ov_alloc_rgba(st->canvas_w, st->canvas_h);
-    if (!canvas)
-        return eav_mem_alloc;
-    for (int y = 0; y < canvas->height; y++)
-        memset(canvas->data[0] + y * canvas->linesize[0], 0, (size_t) canvas->width * 4);
+    AVFrame *rgba = st->canvas_rgba;
+    for (int y = 0; y < rgba->height; y++)
+        memset(rgba->data[0] + y * rgba->linesize[0], 0, (size_t) rgba->width * 4);
 
     for (int i = 0; i < ov->nslots; i++) {
         if (ov->slots[i].type != ov_slot_image)
             continue;
         int *rect = &st->slot_rect[i * 4];
         int x = rect[0] - st->canvas_x, y = rect[1] - st->canvas_y;
-        int mul = 255;
-        if (st->fade_from[i] != OV_FADE_NONE && pts - st->fade_start[i] < st->fade_tb[i]) {
-            mul = (int) ((pts - st->fade_start[i]) * 255 / st->fade_tb[i]);
-            if (st->fade_from[i] >= 0) {
-                AVFrame *f = ov_scaled_image(st, ov, i, st->fade_from[i], &st->fade_scaled[i],
-                    &st->fade_scaled_for[i], url);
-                if (!f) {
-                    av_frame_free(&canvas);
-                    return eav_overlay;
-                }
-                ov_blit(canvas, f, x, y, 255 - mul);
-            }
-        }
         int j = st->canvas_row[i];
-        if (j < 0 || mul == 0)
-            continue;
-        AVFrame *f = ov_scaled_image(st, ov, i, j, &st->slot_scaled[i], &st->slot_scaled_for[i], url);
-        if (!f) {
-            av_frame_free(&canvas);
+        AVFrame *new = NULL, *old = NULL;
+        if (j >= 0 && !(new = ov_scaled_image(st, ov, i, j, &st->slot_scaled[i], &st->slot_scaled_for[i], url)))
             return eav_overlay;
+
+        if (st->fade_from[i] != OV_FADE_NONE && ts - st->fade_start[i] < st->fade_ts[i]) {
+            int t = (int) ((ts - st->fade_start[i]) * 255 / st->fade_ts[i]);
+            if (st->fade_from[i] >= 0 && !(old = ov_scaled_image(st, ov, i, st->fade_from[i],
+                    &st->fade_scaled[i], &st->fade_scaled_for[i], url)))
+                return eav_overlay;
+            if (old && new) {
+                AVFrame *mix = ov_alloc_rgba(rect[2], rect[3]);
+                if (!mix)
+                    return eav_mem_alloc;
+                ov_lerp(mix, old, new, t);
+                ov_blit(rgba, mix, x, y, 255);
+                av_frame_free(&mix);
+            } else if (old) {
+                ov_blit(rgba, old, x, y, 255 - t);
+            } else if (new) {
+                ov_blit(rgba, new, x, y, t);
+            }
+            continue;
         }
-        ov_blit(canvas, f, x, y, mul);
+        if (new)
+            ov_blit(rgba, new, x, y, 255);
     }
 
+    AVFrame *out = av_frame_alloc();
+    if (!out)
+        return eav_mem_alloc;
+    out->format = st->canvas_fmt;
+    out->width = rgba->width;
+    out->height = rgba->height;
+    if (av_frame_get_buffer(out, 0) < 0) {
+        av_frame_free(&out);
+        return eav_mem_alloc;
+    }
+    if (st->canvas_fmt == AV_PIX_FMT_RGBA) {
+        av_frame_copy(out, rgba);
+    } else {
+        st->canvas_sws = sws_getCachedContext(st->canvas_sws, rgba->width, rgba->height, AV_PIX_FMT_RGBA,
+            out->width, out->height, st->canvas_fmt, SWS_BILINEAR, NULL, NULL, NULL);
+        if (!st->canvas_sws) {
+            av_frame_free(&out);
+            return eav_mem_alloc;
+        }
+        sws_scale(st->canvas_sws, (const uint8_t * const *) rgba->data, rgba->linesize, 0, rgba->height,
+            out->data, out->linesize);
+    }
     av_frame_free(&st->canvas);
-    st->canvas = canvas;
+    st->canvas = out;
     st->canvas_stale = 0;
-    elv_dbg("Overlay: canvas drawn %dx%d url=%s", canvas->width, canvas->height, url);
+    elv_dbg("Overlay: canvas drawn %dx%d ts=%"PRId64" url=%s", out->width, out->height, ts, url);
     return eav_success;
+}
+
+/* The overlay filter's blend format for the encoder's pixel format, and the canvas format that goes with it.
+ * Under "auto" the whole main frame would be converted to RGBA and back on every frame. */
+static const char *
+ov_blend_format(
+    enum AVPixelFormat enc_fmt,
+    enum AVPixelFormat *canvas_fmt)
+{
+    switch (enc_fmt) {
+    case AV_PIX_FMT_YUV420P:    *canvas_fmt = AV_PIX_FMT_YUVA420P;   return "yuv420";
+    case AV_PIX_FMT_YUV420P10:  *canvas_fmt = AV_PIX_FMT_YUVA420P10; return "yuv420p10";
+    case AV_PIX_FMT_YUV422P:    *canvas_fmt = AV_PIX_FMT_YUVA422P;   return "yuv422";
+    case AV_PIX_FMT_YUV422P10:  *canvas_fmt = AV_PIX_FMT_YUVA422P10; return "yuv422p10";
+    case AV_PIX_FMT_YUV444P:    *canvas_fmt = AV_PIX_FMT_YUVA444P;   return "yuv444";
+    case AV_PIX_FMT_YUV444P10:  *canvas_fmt = AV_PIX_FMT_YUVA444P10; return "yuv444p10";
+    default:                    *canvas_fmt = AV_PIX_FMT_RGBA;       return "auto";
+    }
 }
 
 int
@@ -629,26 +722,36 @@ overlay_prepare(
     st->cursor = -1;
     st->nslots = ov->nslots;
     st->canvas_stale = 1;
-    st->event_pts = calloc(ov->nevents > 0 ? ov->nevents : 1, sizeof(int64_t));
     st->text_ctx = calloc(ov->nslots, sizeof(AVFilterContext *));
     st->text_sent = calloc(ov->nslots, sizeof(char *));
     st->slot_rect = calloc((size_t) ov->nslots * 4, sizeof(int));
     st->canvas_row = calloc(ov->nslots, sizeof(int));
     st->slot_scaled = calloc(ov->nslots, sizeof(AVFrame *));
     st->slot_scaled_for = calloc(ov->nslots, sizeof(int));
-    st->fade_tb = calloc(ov->nslots, sizeof(int64_t));
+    st->fade_ts = calloc(ov->nslots, sizeof(int64_t));
     st->fade_from = calloc(ov->nslots, sizeof(int));
     st->fade_start = calloc(ov->nslots, sizeof(int64_t));
     st->fade_scaled = calloc(ov->nslots, sizeof(AVFrame *));
     st->fade_scaled_for = calloc(ov->nslots, sizeof(int));
-    if (!st->event_pts || !st->text_ctx || !st->text_sent || !st->slot_rect || !st->canvas_row ||
-        !st->slot_scaled || !st->slot_scaled_for || !st->fade_tb || !st->fade_from || !st->fade_start ||
+    if (!st->text_ctx || !st->text_sent || !st->slot_rect || !st->canvas_row ||
+        !st->slot_scaled || !st->slot_scaled_for || !st->fade_ts || !st->fade_from || !st->fade_start ||
         !st->fade_scaled || !st->fade_scaled_for) {
         overlay_free_state(decoder_context);
         return eav_mem_alloc;
     }
 
-    /* Lay out the image slots at the output size; the canvas is their bounding box, even-sized */
+    /* Every image known at start must decode, so a bad one fails the job before any output */
+    for (int j = 0; j < ov->nimages; j++) {
+        AVFrame *img = ov_decode_png(ov->images[j].png, ov->images[j].png_len, j, params->url);
+        if (!img) {
+            overlay_free_state(decoder_context);
+            return eav_param;
+        }
+        av_frame_free(&img);
+    }
+
+    /* Lay out the image slots at the output size from the layout alone; the canvas is their bounding box,
+     * even-sized. Nothing here depends on which images the events name. */
     AVCodecContext *enc = encoder_context->codec_context[encoder_context->video_stream_index];
     int x0 = INT_MAX, y0 = INT_MAX, x1 = 0, y1 = 0;
     for (int i = 0; i < ov->nslots; i++) {
@@ -659,35 +762,15 @@ overlay_prepare(
         st->fade_scaled_for[i] = -1;
         if (slot->type != ov_slot_image)
             continue;
+        if (slot->fade_ms > 0)
+            st->fade_ts[i] = slot->fade_ms * ov->timescale / 1000;
         int *rect = &st->slot_rect[i * 4];
         rect[0] = (int) (slot->x * enc->width);
         rect[1] = (int) (slot->y * enc->height);
         rect[2] = (int) (slot->size * enc->width);
+        rect[3] = (int) (slot->h * enc->height);
         if (rect[2] < 1)
             rect[2] = 1;
-        if (slot->h > 0) {
-            rect[3] = (int) (slot->h * enc->height);
-        } else {
-            /* No height given: as tall as the tallest image the slot can show at start, its default and the
-             * ones the start events name. An image delivered later is fitted into that rect. */
-            rect[3] = 1;
-            for (int j = 0; j < ov->nimages; j++) {
-                int shown = slot->default_image == j;
-                for (int k = 0; k < ov->nevents && !shown; k++)
-                    shown = ov->events[k].image[i] == j;
-                if (!shown)
-                    continue;
-                AVFrame *img = ov_decode_png(ov->images[j].png, ov->images[j].png_len, j, params->url);
-                if (!img) {
-                    overlay_free_state(decoder_context);
-                    return eav_param;
-                }
-                int h = rect[2] * img->height / img->width;
-                av_frame_free(&img);
-                if (h > rect[3])
-                    rect[3] = h;
-            }
-        }
         if (rect[3] < 1)
             rect[3] = 1;
         if (rect[0] < x0) x0 = rect[0];
@@ -700,10 +783,17 @@ overlay_prepare(
         st->canvas_y = y0 & ~1;
         st->canvas_w = (x1 - st->canvas_x + 1) & ~1;
         st->canvas_h = (y1 - st->canvas_y + 1) & ~1;
+        st->canvas_rgba = ov_alloc_rgba(st->canvas_w, st->canvas_h);
+        if (!st->canvas_rgba) {
+            overlay_free_state(decoder_context);
+            return eav_mem_alloc;
+        }
     }
+    ov_blend_format(enc->pix_fmt, &st->canvas_fmt);
 
-    elv_log("Overlay: slots=%d images=%d events=%d canvas=%dx%d at %d,%d url=%s",
-        ov->nslots, ov->nimages, ov->nevents, st->canvas_w, st->canvas_h, st->canvas_x, st->canvas_y, params->url);
+    elv_log("Overlay: slots=%d images=%d events=%d canvas=%dx%d at %d,%d fmt=%s url=%s",
+        ov->nslots, ov->nimages, ov->nevents, st->canvas_w, st->canvas_h, st->canvas_x, st->canvas_y,
+        av_get_pix_fmt_name(st->canvas_fmt), params->url);
     return eav_success;
 }
 
@@ -720,7 +810,7 @@ overlay_add_canvas_source(
     AVRational tb = encoder_context->codec_context[decoder_context->video_stream_index]->time_base;
     char args[256];
     snprintf(args, sizeof(args), "video_size=%dx%d:pix_fmt=%d:time_base=%d/%d:pixel_aspect=1/1",
-        st->canvas_w, st->canvas_h, AV_PIX_FMT_RGBA, tb.num, tb.den);
+        st->canvas_w, st->canvas_h, st->canvas_fmt, tb.num, tb.den);
     int ret = avfilter_graph_create_filter(&st->canvas_src, avfilter_get_by_name("buffer"), "ov",
         args, NULL, decoder_context->video_filter_graph);
     if (ret < 0) {
@@ -800,10 +890,13 @@ overlay_append_filter(
     char buf[1536];
     int rc;
 
-    /* The chain so far ends unlabelled; [m] names it so the overlay can take the canvas [ov] as its second input */
+    /* The chain so far ends unlabelled; [m] names it so the overlay can take the canvas [ov] as its second input.
+     * The blend runs in the encoder's own pixel format, so the main frame is never converted. */
     if (st->canvas_w > 0) {
-        snprintf(buf, sizeof(buf), "[m];[m][ov]overlay=x=%d:y=%d:format=auto:eof_action=repeat:repeatlast=1",
-            st->canvas_x, st->canvas_y);
+        enum AVPixelFormat canvas_fmt;
+        const char *blend = ov_blend_format(enc->pix_fmt, &canvas_fmt);
+        snprintf(buf, sizeof(buf), "[m];[m][ov]overlay=x=%d:y=%d:format=%s:eof_action=repeat:repeatlast=1",
+            st->canvas_x, st->canvas_y, blend);
         if ((rc = ov_append(filter_str, filter_str_sz, buf, params->url)) != eav_success)
             return rc;
     }
@@ -851,57 +944,32 @@ overlay_append_filter(
     return eav_success;
 }
 
-/* A through pts near INT64_MAX means final; rescaling it would overflow */
-static int64_t
-ov_rescale_through(
-    int64_t through_pts,
-    AVRational from,
-    AVRational to)
-{
-    if (through_pts >= INT64_MAX / 4)
-        return INT64_MAX;
-    return av_rescale_q(through_pts, from, to);
-}
-
 /*
- * Ask the reader for the events up to frame_pts, then rescale what it appended. The reader blocks until the
- * recording's through pts covers the frame, or fails; a frame is never drawn with events that may be incomplete.
+ * Ask the reader for the events up to ts (overlay timescale). The reader blocks until the recording's through
+ * pts covers the frame, or fails; a frame is never drawn with events that may be incomplete.
  */
 static int
 ov_fetch(
     ov_state_t *st,
     ov_params_t *ov,
     xcparams_t *params,
-    int64_t frame_pts)
+    int64_t ts)
 {
-    AVRational ov_tb = { 1, (int) ov->timescale };
-    int64_t at_least = av_rescale_q_rnd(frame_pts, st->tb, ov_tb, AV_ROUND_UP);
     int64_t after_seq = ov->nevents > 0 ? ov->events[ov->nevents - 1].seq : 0;
 
     st->fetches++;
-    int rc = ov->reader(ov->reader_handle, params, after_seq, at_least);
+    int rc = ov->reader(ov->reader_handle, params, after_seq, ts);
     if (rc < 0) {
-        elv_err("Overlay: event source failed rc=%d after_seq=%"PRId64" at_least=%"PRId64" frame_pts=%"PRId64" url=%s",
-            rc, after_seq, at_least, frame_pts, params->url);
+        elv_err("Overlay: event source failed rc=%d after_seq=%"PRId64" at_least=%"PRId64" url=%s",
+            rc, after_seq, ts, params->url);
         return rc == OV_READER_CANCELLED ? eav_cancelled : eav_overlay;
     }
-
-    if (ov->nevents > st->nbound) {
-        int64_t *event_pts = realloc(st->event_pts, (size_t) ov->nevents * sizeof(int64_t));
-        if (!event_pts)
-            return eav_mem_alloc;
-        st->event_pts = event_pts;
-        for (int i = st->nbound; i < ov->nevents; i++)
-            st->event_pts[i] = av_rescale_q(ov->events[i].pts, ov_tb, st->tb);
-        st->nbound = ov->nevents;
-    }
-    st->through_pts_tb = ov_rescale_through(ov->through_pts, ov_tb, st->tb);
     elv_log("Overlay: fetched events=%d through_pts=%"PRId64" after_seq=%"PRId64" at_least=%"PRId64" url=%s",
-        ov->nevents, ov->through_pts, after_seq, at_least, params->url);
+        ov->nevents, ov->through_pts, after_seq, ts, params->url);
 
-    if (frame_pts > st->through_pts_tb) {
-        elv_err("Overlay: event source stopped short, through_pts=%"PRId64" frame_pts=%"PRId64" url=%s",
-            st->through_pts_tb, frame_pts, params->url);
+    if (ts > ov->through_pts) {
+        elv_err("Overlay: event source stopped short, through_pts=%"PRId64" frame_ts=%"PRId64" url=%s",
+            ov->through_pts, ts, params->url);
         return eav_overlay;
     }
     return eav_success;
@@ -917,17 +985,9 @@ overlay_bind(
     if (!ov || !st)
         return eav_success;
 
-    AVRational tb = decoder_context->stream[decoder_context->video_stream_index]->time_base;
-    AVRational ov_tb = { 1, (int) ov->timescale };
-    st->tb = tb;
-    for (int i = 0; i < ov->nevents; i++)
-        st->event_pts[i] = av_rescale_q(ov->events[i].pts, ov_tb, tb);
-    st->nbound = ov->nevents;
-    for (int i = 0; i < ov->nslots; i++) {
-        if (ov->slots[i].type == ov_slot_image && ov->slots[i].fade_ms > 0)
-            st->fade_tb[i] = av_rescale_q(ov->slots[i].fade_ms, (AVRational) { 1, 1000 }, tb);
-    }
-    st->through_pts_tb = ov->reader ? ov_rescale_through(ov->through_pts, ov_tb, tb) : INT64_MAX;
+    st->tb = decoder_context->stream[decoder_context->video_stream_index]->time_base;
+    if (!ov->reader)
+        ov->through_pts = INT64_MAX;
 
     AVFilterGraph *graph = decoder_context->video_filter_graph;
     for (int i = 0; i < ov->nslots; i++) {
@@ -948,7 +1008,7 @@ overlay_bind(
     }
 
     elv_log("Overlay: bound timescale=%"PRId64" stream_tb=%d/%d reader=%d through_pts=%"PRId64" url=%s",
-        ov->timescale, tb.num, tb.den, ov->reader != NULL, ov->through_pts, params->url);
+        ov->timescale, st->tb.num, st->tb.den, ov->reader != NULL, ov->through_pts, params->url);
     return eav_success;
 }
 
@@ -987,42 +1047,51 @@ overlay_apply(
     if (!st || !ov || frame->pts == AV_NOPTS_VALUE)
         return eav_success;
 
-    if (ov->reader && frame->pts > st->through_pts_tb) {
-        int rc = ov_fetch(st, ov, params, frame->pts);
+    /* The frame's time in the overlay timescale, floored: the one number every comparison below uses */
+    AVRational ov_tb = { 1, (int) ov->timescale };
+    int64_t ts = av_rescale_q_rnd(frame->pts, st->tb, ov_tb, AV_ROUND_DOWN);
+    st->frame_ts = ts;
+
+    if (ov->reader && ts > ov->through_pts) {
+        int rc = ov_fetch(st, ov, params, ts);
         if (rc != eav_success)
             return rc;
     }
 
-    while (st->cursor + 1 < ov->nevents && st->event_pts[st->cursor + 1] <= frame->pts)
+    while (st->cursor + 1 < ov->nevents && ov->events[st->cursor + 1].pts <= ts)
         st->cursor++;
     if (st->cursor < 0)
         return eav_success;
 
     ov_event_t *ev = &ov->events[st->cursor];
-    int64_t elapsed_ms = av_rescale_q(frame->pts - st->event_pts[st->cursor], st->tb, (AVRational) { 1, 1000 });
+    int64_t elapsed_ms = (ts - ev->pts) * 1000 / ov->timescale;
 
     /* Every slot's wanted value is recomputed per frame (clocks tick); only a change costs anything */
     for (int i = 0; i < ov->nslots; i++) {
         ov_slot_t *slot = &ov->slots[i];
 
         if (slot->type == ov_slot_image) {
-            int want = ev->hidden ? OV_IMAGE_HIDDEN : ev->image[i];
-            if (want == OV_IMAGE_DEFAULT)
-                want = slot->default_image;
+            int want = ov_event_image(ev, slot, i);
             if (want != st->canvas_row[i]) {
-                if (st->fade_tb[i] > 0) {
-                    st->fade_from[i] = st->canvas_row[i];
-                    st->fade_start[i] = st->event_pts[st->cursor];
+                /* A transition runs from what the previous event showed, whether or not this job drew it, so a
+                 * job that starts inside one draws the same frames as a job that ran through it */
+                if (st->fade_ts[i] > 0) {
+                    int from = st->cursor > 0 ? ov_event_image(&ov->events[st->cursor - 1], slot, i)
+                                              : OV_IMAGE_HIDDEN;
+                    if (from != want) {
+                        st->fade_from[i] = from;
+                        st->fade_start[i] = ev->pts;
+                    }
                 }
                 st->canvas_row[i] = want;
                 st->canvas_stale = 1;
-                elv_log("Overlay: event=%d event_pts=%"PRId64" frame_pts=%"PRId64" slot=%d image=%d fade=%d url=%s",
-                    st->cursor, ev->pts, frame->pts, i, want, st->fade_tb[i] > 0, params->url);
+                elv_log("Overlay: event=%d event_pts=%"PRId64" frame_ts=%"PRId64" slot=%d image=%d fade=%d url=%s",
+                    st->cursor, ev->pts, ts, i, want, st->fade_from[i] != OV_FADE_NONE, params->url);
             }
             if (st->fade_from[i] != OV_FADE_NONE) {
                 /* Redrawn on every frame of the fade, and once more with the fade over */
                 st->canvas_stale = 1;
-                if (frame->pts - st->fade_start[i] >= st->fade_tb[i])
+                if (ts - st->fade_start[i] >= st->fade_ts[i])
                     st->fade_from[i] = OV_FADE_NONE;
             }
             continue;
@@ -1058,11 +1127,11 @@ overlay_apply(
         st->text_sent[i] = strdup(want);
         st->commands++;
         if (slot->type == ov_slot_clock)
-            elv_dbg("Overlay: event=%d frame_pts=%"PRId64" slot=%d clock='%s' url=%s",
-                st->cursor, frame->pts, i, want, params->url);
+            elv_dbg("Overlay: event=%d frame_ts=%"PRId64" slot=%d clock='%s' url=%s",
+                st->cursor, ts, i, want, params->url);
         else
-            elv_log("Overlay: event=%d event_pts=%"PRId64" frame_pts=%"PRId64" slot=%d text='%s' url=%s",
-                st->cursor, ev->pts, frame->pts, i, want, params->url);
+            elv_log("Overlay: event=%d event_pts=%"PRId64" frame_ts=%"PRId64" slot=%d text='%s' url=%s",
+                st->cursor, ev->pts, ts, i, want, params->url);
     }
     return eav_success;
 }
@@ -1077,8 +1146,9 @@ overlay_push_canvas(
     if (!st || st->canvas_w <= 0)
         return eav_success;
 
+    /* frame->pts is in the encoder time base by now; the canvas is timed from frame_ts, set by overlay_apply */
     if (st->canvas_stale || !st->canvas) {
-        int rc = ov_draw_canvas(st, params->overlay, params->url, frame->pts);
+        int rc = ov_draw_canvas(st, params->overlay, params->url, st->frame_ts);
         if (rc != eav_success)
             return rc;
     }
@@ -1124,18 +1194,19 @@ overlay_free_state(
             av_frame_free(&st->fade_scaled[i]);
     }
     av_frame_free(&st->canvas);
+    av_frame_free(&st->canvas_rgba);
+    sws_freeContext(st->canvas_sws);
     free(st->fade_scaled_for);
     free(st->fade_scaled);
     free(st->fade_start);
     free(st->fade_from);
-    free(st->fade_tb);
+    free(st->fade_ts);
     free(st->slot_scaled_for);
     free(st->slot_scaled);
     free(st->canvas_row);
     free(st->slot_rect);
     free(st->text_sent);
     free(st->text_ctx);
-    free(st->event_pts);
     free(st);
     decoder_context->overlay = NULL;
 }

@@ -204,6 +204,9 @@ func overlayRows(p *goavpipe.OverlayParams) ([]overlayRow, error) {
 			return nil, fmt.Errorf("slot %q: invalid fade %d", s.Name, s.Fade)
 		}
 		if s.Type == goavpipe.OverlaySlotImage {
+			if s.H <= 0 || s.H > 1 {
+				return nil, fmt.Errorf("slot %q: an image slot needs h within 0..1", s.Name)
+			}
 			if _, ok := images[s.Default]; s.Default != "" && !ok {
 				return nil, fmt.Errorf("slot %q: default image %q is not in the library", s.Name, s.Default)
 			}

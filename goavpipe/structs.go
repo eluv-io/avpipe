@@ -420,7 +420,7 @@ type OverlaySlot struct {
 	X       float64 `json:"x"`                 // Anchor as a fraction of the output width (0..1); see Align
 	Y       float64 `json:"y"`                 // Top edge as a fraction of the output height (0..1)
 	Size    float64 `json:"size"`              // text/clock: font size as a fraction of the output height; image: width as a fraction of the output width
-	H       float64 `json:"h,omitempty"`       // image: height as a fraction of the output height; images are scaled to fit the rect. 0 fits the tallest image the slot can show at start
+	H       float64 `json:"h,omitempty"`       // image: height as a fraction of the output height (required); images are scaled to fit inside the rect, keeping their aspect
 	Font    string  `json:"font,omitempty"`    // text/clock: path to a font file
 	Color   string  `json:"color,omitempty"`   // text/clock: ffmpeg colour name or 0xRRGGBB[AA], default white
 	Align   string  `json:"align,omitempty"`   // text/clock: left (default), center or right - which edge of the text X anchors

@@ -40,10 +40,13 @@ func overlayTestImages(t *testing.T) map[string][]byte {
 		}
 		return buf.Bytes()
 	}
+	// green is taller than the slot it goes into, so it is fitted by height, and than red, so a rect that
+	// depended on the images known at start would differ between jobs
 	return map[string][]byte{
 		"bg":    solid(400, 100, color.NRGBA{0, 0, 0, 160}),
 		"red":   solid(60, 60, color.NRGBA{220, 30, 30, 255}),
-		"green": solid(60, 60, color.NRGBA{30, 200, 30, 255}),
+		"green": solid(60, 120, color.NRGBA{30, 200, 30, 255}),
+		"half":  solid(60, 60, color.NRGBA{255, 255, 255, 128}), // half-transparent white, for the blend test
 	}
 }
 
@@ -86,8 +89,8 @@ func overlayTextParams(url, font string, images map[string][]byte) *goavpipe.XcP
 			Timescale: 30000,
 			Images:    images,
 			Slots: []goavpipe.OverlaySlot{
-				{Name: "bg", Type: goavpipe.OverlaySlotImage, X: 0.03, Y: 0.03, Size: 0.94, Default: "bg"},
-				{Name: "poss", Type: goavpipe.OverlaySlotImage, X: 0.36, Y: 0.06, Size: 0.05, Fade: 1000},
+				{Name: "bg", Type: goavpipe.OverlaySlotImage, X: 0.03, Y: 0.03, Size: 0.94, H: 0.42, Default: "bg"},
+				{Name: "poss", Type: goavpipe.OverlaySlotImage, X: 0.36, Y: 0.06, Size: 0.05, H: 0.089, Fade: 1000},
 				{Name: "score", Type: goavpipe.OverlaySlotText, X: 0.5, Y: 0.05, Size: 0.12, Font: font, Color: "white", Align: "center"},
 				{Name: "home", Type: goavpipe.OverlaySlotText, X: 0.05, Y: 0.05, Size: 0.08, Font: font, Color: "yellow"},
 				{Name: "clock", Type: goavpipe.OverlaySlotClock, X: 0.95, Y: 0.05, Size: 0.08, Font: font, Color: "white", Align: "right"},
@@ -247,17 +250,9 @@ func TestOverlayInlineImages(t *testing.T) {
 	assertSameMedia(t, refDir, srcDir)
 }
 
-// TestOverlayFadeFrames extracts frames before and halfway through the possession marker's 1 s cross-fade from
-// red to green (the event is at 2 s) and checks the marker is red first and a mix of both in the middle.
-func TestOverlayFadeFrames(t *testing.T) {
-	url := videoBigBuckBunnyPath
-	checkFileExists(t, url)
-	font := overlayTestFont(t)
-
-	// The clip's video time base is 1/30000 with the first frame at 1980, which is also the overlay timescale
-	const frame1 = 1980 + 45*1000 // 1.5 s: 46980
-	const frame2 = 1980 + 75*1000 // 2.5 s: 76980
-	outPath := path.Join(baseOutPath, fn())
+// overlayExtractParams extracts single frames of the clip (mjpeg, native size unless the fast params shrink it)
+// with the given overlay.
+func overlayExtractParams(url string, overlay *goavpipe.OverlayParams, pts ...int64) *goavpipe.XcParams {
 	params := &goavpipe.XcParams{
 		Format:                 "image2",
 		AudioBitrate:           128000,
@@ -282,39 +277,102 @@ func TestOverlayFadeFrames(t *testing.T) {
 		XcType:                 goavpipe.XcExtractImages,
 		Url:                    url,
 		DebugFrameLevel:        debugFrameLevel,
-		Overlay:                overlayTextParams(url, font, overlayTestImages(t)).Overlay,
+		Overlay:                overlay,
 	}
-	params.ExtractImagesTs = []int64{frame1, frame2}
+	params.ExtractImagesTs = pts
 	setFastEncodeParams(params, true)
-	xcTest2(t, outPath, params, nil)
+	return params
+}
 
-	// The marker's centre: the slot is at x 0.36, y 0.06, a square 0.05 of the width (the fast encode params
-	// shrink the output, so it is measured from the image)
-	marker := func(pts int64) color.RGBA {
-		files, err := os.ReadDir(outPath)
-		require.NoError(t, err)
-		for _, f := range files {
-			if !strings.HasPrefix(f.Name(), strconv.FormatInt(pts, 10)+".") {
-				continue
-			}
-			fh, err := os.Open(path.Join(outPath, f.Name()))
-			require.NoError(t, err)
-			defer fh.Close()
-			img, _, err := image.Decode(fh)
-			require.NoError(t, err)
-			w, h := float64(img.Bounds().Dx()), float64(img.Bounds().Dy())
-			return color.RGBAModel.Convert(img.At(int(0.36*w+0.025*w), int(0.06*h+0.025*w))).(color.RGBA)
+// The clip's video time base is 1/30000 with the first frame at 1980, which is also the overlay timescale
+const (
+	overlayFrame15  = 1980 + 45*1000  // 1.5 s: 46980
+	overlayFrame25  = 1980 + 75*1000  // 2.5 s: 76980
+	overlayFrame12s = 1980 + 360*1000 // 12 s: 361980, scenery rather than the white title card
+)
+
+// overlayMarker reads the extracted frame for pts and samples a point inside the possession marker: the slot rect
+// is at x 0.36, y 0.06, 0.05 of the width by 0.089 of the height; red fills it, the taller green is fitted to its
+// height and covers the left half (the fast encode params shrink the output, so it is measured from the image).
+func overlayMarker(t *testing.T, outPath string, pts int64) color.RGBA {
+	t.Helper()
+	files, err := os.ReadDir(outPath)
+	require.NoError(t, err)
+	for _, f := range files {
+		// Files are named by the output pts; with pts < 0 take the only frame extracted, whatever its name
+		if pts >= 0 && !strings.HasPrefix(f.Name(), strconv.FormatInt(pts, 10)+".") {
+			continue
 		}
-		t.Fatalf("no image for pts %d", pts)
-		return color.RGBA{}
+		fh, err := os.Open(path.Join(outPath, f.Name()))
+		require.NoError(t, err)
+		defer fh.Close()
+		img, _, err := image.Decode(fh)
+		require.NoError(t, err)
+		w, h := float64(img.Bounds().Dx()), float64(img.Bounds().Dy())
+		return color.RGBAModel.Convert(img.At(int(0.36*w+0.012*w), int(0.06*h+0.044*h))).(color.RGBA)
 	}
-	before := marker(frame1)
-	mid := marker(frame2)
+	t.Fatalf("no image for pts %d", pts)
+	return color.RGBA{}
+}
+
+// TestOverlayFadeFrames extracts frames before and halfway through the possession marker's 1 s cross-fade from
+// red to green (the event is at 2 s) and checks the marker is red first and a mix of both in the middle, and that
+// the result does not depend on the encoder time base.
+func TestOverlayFadeFrames(t *testing.T) {
+	url := videoBigBuckBunnyPath
+	checkFileExists(t, url)
+	font := overlayTestFont(t)
+	images := overlayTestImages(t)
+
+	outPath := path.Join(baseOutPath, fn(), "default")
+	params := overlayExtractParams(url, overlayTextParams(url, font, images).Overlay, overlayFrame15, overlayFrame25)
+	xcTest2(t, outPath, params, nil)
+	before := overlayMarker(t, outPath, overlayFrame15)
+	mid := overlayMarker(t, outPath, overlayFrame25)
 	t.Logf("marker before %v, mid-fade %v", before, mid)
 	assert.Greater(t, int(before.R), 150, "red before the fade")
 	assert.Less(t, int(before.G), 80)
 	assert.Less(t, int(mid.R), int(before.R)-40, "red fading out halfway")
 	assert.Greater(t, int(mid.G), int(before.G)+40, "green fading in halfway")
+
+	// Transition timing comes from the overlay timescale, not the encoder time base
+	tbPath := path.Join(baseOutPath, fn(), "tb")
+	// Extract pts are in the output time base: 2.5 s is 2566 at 1/1000 (the clip starts at 66 ms)
+	params = overlayExtractParams(url, overlayTextParams(url, font, images).Overlay, 2566)
+	params.VideoTimeBase = 1000
+	xcTest2(t, tbPath, params, nil)
+	midTb := overlayMarker(t, tbPath, -1) // named by its pts in the 1/1000 output base
+	assert.InDelta(t, int(mid.R), int(midTb.R), 3, "mid-fade with a coarse encoder time base: %v vs %v", mid, midTb)
+	assert.InDelta(t, int(mid.G), int(midTb.G), 3)
+}
+
+// TestOverlayAlphaBlend checks the blend: a half-transparent white marker over the video reads as the average of
+// white and the pixel underneath, so straight alpha is handled right end to end (blit, canvas conversion, filter).
+func TestOverlayAlphaBlend(t *testing.T) {
+	url := videoBigBuckBunnyPath
+	checkFileExists(t, url)
+	font := overlayTestFont(t)
+	images := overlayTestImages(t)
+
+	plainPath := path.Join(baseOutPath, fn(), "plain")
+	xcTest2(t, plainPath, overlayExtractParams(url, nil, overlayFrame12s), nil)
+	under := overlayMarker(t, plainPath, overlayFrame12s)
+
+	overlay := overlayTextParams(url, font, images).Overlay
+	overlay.Slots[0].Default = "" // no background bar under the marker: the video is what is underneath
+	overlay.Events = []goavpipe.OverlayEvent{{Seq: 1, Pts: 0, Data: map[string]any{"poss": "half"}}}
+	overPath := path.Join(baseOutPath, fn(), "half")
+	xcTest2(t, overPath, overlayExtractParams(url, overlay, overlayFrame12s), nil)
+	over := overlayMarker(t, overPath, overlayFrame12s)
+
+	t.Logf("under %v, with half-white %v", under, over)
+	for _, c := range []struct {
+		name string
+		u, o uint8
+	}{{"R", under.R, over.R}, {"G", under.G, over.G}, {"B", under.B, over.B}} {
+		want := (int(c.u) + 255) / 2
+		assert.InDelta(t, want, int(c.o), 8, "%s: expected about (%d+255)/2", c.name, c.u)
+	}
 }
 
 // TestOverlayInlineImageBad checks that a picture that is not a PNG is rejected before any output.

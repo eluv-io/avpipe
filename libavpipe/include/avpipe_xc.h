@@ -257,34 +257,38 @@ typedef struct ov_params_t {
     uintptr_t   reader_handle;
 } ov_params_t;
 
-/* Per-transcode overlay state, owned by the decoder context */
+/* Per-transcode overlay state, owned by the decoder context. All timing is in the overlay's own timescale: a
+ * frame's pts is floored into it once per frame (frame_ts), events are compared and transitions timed in it, so
+ * the result does not depend on the input or encoder time base. */
 typedef struct ov_state_t {
     int         nslots;
-    AVRational  tb;             // Input video stream time base
-    int64_t     *event_pts;     // [nevents] event pts in the input video stream time base
-    int         nbound;         // Events rescaled into event_pts so far
-    int64_t     through_pts_tb; // The reader's through pts in the stream time base; INT64_MAX without a reader
+    AVRational  tb;             // Input video stream time base, the base frame->pts arrives in
+    int64_t     frame_ts;       // The current frame's pts in the overlay timescale
     int         fetches;        // Reader calls made
     int         cursor;         // Index of the event in effect, -1 before the first
     struct AVFilterContext **text_ctx;  // [nslots] drawtext filter of each text/clock slot, NULL otherwise
     char        **text_sent;    // [nslots] text last sent to each drawtext
     int         commands;       // send_command calls made
 
-    /* Image slots are drawn into one RGBA canvas, the bounding box of their rects, fed to an overlay filter.
-     * Images are decoded when a slot first shows them and kept only scaled to that slot, since the library can
-     * grow while the job runs (a reader may append events that bring their own image). */
+    /* Image slots are drawn into one straight-alpha RGBA canvas, the bounding box of their rects, converted to the
+     * encoder's pixel format with alpha and fed to an overlay filter. Images are decoded when a slot first shows
+     * them and kept only scaled to that slot, since the library can grow while the job runs. */
     int         *slot_rect;     // [nslots*4] x, y, w, h of each image slot at output size
     int         canvas_x, canvas_y, canvas_w, canvas_h;  // w == 0 when there are no image slots
+    enum AVPixelFormat canvas_fmt;  // What the filter takes: yuva* matching the encoder, or RGBA under format=auto
     AVFrame     **slot_scaled;  // [nslots] the image each slot shows, scaled to fit its rect
     int         *slot_scaled_for;   // [nslots] library index slot_scaled holds, -1 for none
     struct AVFilterContext *canvas_src;
     int         *canvas_row;    // [nslots] library index drawn in each image slot, OV_IMAGE_HIDDEN for none
-    AVFrame     *canvas;        // Replaced, never edited in place: the filter may still hold references
+    AVFrame     *canvas_rgba;   // The drawing surface
+    AVFrame     *canvas;        // What is pushed: canvas_rgba converted to canvas_fmt. Replaced, never edited in
+                                // place: the filter may still hold references
+    struct SwsContext *canvas_sws;
     int         canvas_stale;   // The row changed since the canvas was drawn
 
     /* A slot with fade_ms cross-fades from the image it showed to the new one, timed from the event's pts so
      * every job computes the same alpha for the same frame */
-    int64_t     *fade_tb;       // [nslots] fade_ms in the stream time base, 0 for none
+    int64_t     *fade_ts;       // [nslots] fade_ms in the overlay timescale, 0 for none
     int         *fade_from;     // [nslots] library index faded out (OV_IMAGE_HIDDEN from nothing), OV_FADE_NONE idle
     int64_t     *fade_start;    // [nslots] pts of the event that started the fade
     AVFrame     **fade_scaled;  // [nslots] the image fading out, scaled; cached like slot_scaled
