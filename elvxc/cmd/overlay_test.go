@@ -87,13 +87,13 @@ func TestOverlayStamper(t *testing.T) {
 	s := newOverlayStamper(initial, 200, pr, &logBuf, testStamperSlots)
 	job := s.handle()
 
-	// First call: nothing new has arrived; through runs delay ahead of the frame
+	// First call: nothing new has arrived; through is the frame asked for
 	events, through, err := job.EventsThrough(0, 1000)
 	require.NoError(t, err)
 	assert.Len(t, events, 1)
-	assert.Equal(t, int64(1200), through)
+	assert.Equal(t, int64(1000), through)
 
-	// A patch arrives: it is stamped just past the through pts and merged into the state
+	// A patch arrives: it is stamped delay past the through pts and merged into the state
 	_, err = pw.Write([]byte(`{"data": {"score": "1 - 0"}}` + "\n"))
 	require.NoError(t, err)
 	queued := func() bool { return len(s.patches) > 0 }
@@ -105,7 +105,7 @@ func TestOverlayStamper(t *testing.T) {
 	assert.Equal(t, int64(1201), events[0].Pts)
 	assert.Equal(t, "1 - 0", events[0].Data["score"])
 	assert.Equal(t, "HOME", events[0].Data["home"], "the patch merges into the last state")
-	assert.Equal(t, int64(1700), through)
+	assert.Equal(t, int64(1500), through)
 	assert.Contains(t, logBuf.String(), `"score":"1 - 0"`)
 
 	// A second job that is behind gets the same events and the shared through pts
@@ -113,7 +113,7 @@ func TestOverlayStamper(t *testing.T) {
 	events, through, err = job2.EventsThrough(0, 500)
 	require.NoError(t, err)
 	assert.Len(t, events, 2)
-	assert.Equal(t, int64(1700), through, "through never goes backwards")
+	assert.Equal(t, int64(1500), through, "through never goes backwards")
 
 	// Hidden is part of the state too
 	_, err = pw.Write([]byte(`{"hidden": true}` + "\n"))
@@ -170,7 +170,7 @@ func TestOverlayStamperFifo(t *testing.T) {
 	assert.Equal(t, "1 - 1", events[0].Data["score"])
 	assert.Equal(t, "red", events[0].Data["poss"])
 
-	// Two patches queued before one call are stamped in order, one pts apart
+	// Two patches queued before one call are stamped at the same pts, in seq order: the second is in effect
 	write(`{"data":{"score":"2 - 1"}}`)
 	_, err = w.Write([]byte(`{"hidden":true}` + "\n"))
 	require.NoError(t, err)
@@ -182,7 +182,34 @@ func TestOverlayStamperFifo(t *testing.T) {
 	assert.False(t, events[0].Hidden)
 	assert.Equal(t, "2 - 1", events[1].Data["score"])
 	assert.True(t, events[1].Hidden)
-	assert.Equal(t, events[0].Pts+1, events[1].Pts)
+	assert.Equal(t, events[0].Pts, events[1].Pts)
+}
+
+// TestOverlayStamperSealedOnly checks that a job only receives events at or below the through pts of its call:
+// an event stamped delay past the head waits with the stamper until a job asks for a frame past it.
+func TestOverlayStamperSealedOnly(t *testing.T) {
+	pr, pw := io.Pipe()
+	s := newOverlayStamper(nil, 2000, pr, nil, testStamperSlots)
+	job := s.handle()
+	defer job.Close()
+
+	_, err := pw.Write([]byte(`{"data":{"score":"1 - 0"}}` + "\n"))
+	require.NoError(t, err)
+	require.Eventually(t, func() bool { return len(s.patches) > 0 }, time.Second, time.Millisecond)
+	events, through, err := job.EventsThrough(0, 1000) // stamped at 2001, above the seal
+	require.NoError(t, err)
+	assert.Empty(t, events)
+	assert.Equal(t, int64(1000), through)
+
+	events, through, err = job.EventsThrough(0, 2000) // still above
+	require.NoError(t, err)
+	assert.Empty(t, events)
+	assert.Equal(t, int64(2000), through)
+
+	events, _, err = job.EventsThrough(0, 2001)
+	require.NoError(t, err)
+	require.Len(t, events, 1)
+	assert.Equal(t, int64(2001), events[0].Pts)
 }
 
 func TestOverlayStamperBadPatch(t *testing.T) {

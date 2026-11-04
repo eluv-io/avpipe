@@ -459,8 +459,11 @@ type OverlayParams struct {
 // EAV_OVERLAY. avpipe closes the source when the job ends (Xc returns, XcFini) and on XcCancel, which must
 // unblock a pending call: that call then fails the job with EAV_CANCELLED.
 type OverlayEventSource interface {
-	// EventsThrough returns the events with Seq > afterSeq, sorted by Pts, once the recording's through pts has
-	// reached atLeast (in OverlayParams.Timescale units), and that through pts.
+	// EventsThrough returns, once the recording's through pts has reached atLeast (in OverlayParams.Timescale
+	// units), that through pts and the sealed events the job does not hold yet: those with Pts at or below it and
+	// above the through pts of the previous call, sorted by Pts. Events above the through pts are never returned;
+	// the recorder may still move them. afterSeq is the highest Seq the job holds, a hint only, since an event
+	// placed ahead of time can be sealed after one with a higher Seq.
 	EventsThrough(afterSeq int64, atLeast int64) (events []OverlayEvent, throughPts int64, err error)
 	Close() error
 }

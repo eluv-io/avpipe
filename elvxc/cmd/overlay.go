@@ -19,7 +19,7 @@ const overlayTimescale = 1000
 // overlaySpec is the --overlay file: the layout with image and font paths relative to the file, and optional
 // events with times in seconds on the input's own timeline.
 type overlaySpec struct {
-	DelayMs int64                  `json:"delay_ms"` // How far the stamper's through pts runs ahead of the frames
+	DelayMs int64                  `json:"delay_ms"` // Added when a patch is stamped: how far past the through pts it lands
 	Images  map[string]string      `json:"images"`   // Library name -> PNG path
 	Slots   []goavpipe.OverlaySlot `json:"slots"`
 	Events  []overlaySpecEvent     `json:"events"`
@@ -109,15 +109,16 @@ type overlayPatch struct {
 	Data   map[string]any `json:"data"`
 }
 
-// overlayStamper stands in for the recorder: it reads patches as they arrive, stamps each one just past the
-// through pts, and serves every job that asks. The through pts advances with the job furthest ahead, so the jobs
-// of one run all see the same event at the same frame however fast each one runs.
+// overlayStamper stands in for the recorder: it reads patches as they arrive, stamps each one delay past the
+// through pts, and serves every job that asks. The recorder's through pts is the last written frame; here it is
+// the last frame any job asked for, so the jobs of one run all see the same event at the same frame however fast
+// each one runs.
 type overlayStamper struct {
 	mu      sync.Mutex
 	events  []goavpipe.OverlayEvent // every event stamped so far, sorted
 	state   goavpipe.OverlayEvent   // the last full state, which patches merge into
 	through int64                   // the events are final up to here
-	delay   int64
+	delay   int64                   // ms, which is the overlay timescale
 	slots   map[string]bool // slot names a patch may set; a patch with another key is refused, as the recorder would
 	patches chan overlayPatch
 	src     io.ReadCloser
@@ -227,14 +228,12 @@ func (s *overlayStamper) unknownSlot(p overlayPatch) string {
 	return ""
 }
 
-// apply merges a patch into the state and stamps it just past the through pts. Caller holds mu.
+// apply merges a patch into the state and stamps it delay past the through pts. Caller holds mu.
 func (s *overlayStamper) apply(p overlayPatch) {
-	ev := goavpipe.OverlayEvent{Seq: s.state.Seq + 1, Pts: s.through + 1, Hidden: s.state.Hidden}
+	// Patches stamped within one frame share a pts and apply in seq order: the later one is in effect from there
+	ev := goavpipe.OverlayEvent{Seq: s.state.Seq + 1, Pts: s.through + 1 + s.delay, Hidden: s.state.Hidden}
 	if p.Hidden != nil {
 		ev.Hidden = *p.Hidden
-	}
-	if n := len(s.events); n > 0 && s.events[n-1].Pts >= ev.Pts {
-		ev.Pts = s.events[n-1].Pts + 1
 	}
 	// A clock value means "ms at the event's pts", so a running clock carried into the new snapshot is moved
 	// forward by the time between the two events; one the patch sets is taken as it is
@@ -273,8 +272,10 @@ func overlayLogEvent(ev goavpipe.OverlayEvent) goavpipe.OverlayEvent {
 	return out
 }
 
-// eventsThrough takes the patches that have arrived, advances the through pts and returns the events after
-// afterSeq. It never blocks: in a single process the recorder is never behind the frames.
+// eventsThrough stamps the patches that have arrived against the current through pts, then advances it to
+// atLeast and returns the sealed events after afterSeq: those at or below the new through pts. An event stamped
+// above it stays here until a job asks for a frame past it, as the recorder's do. It never blocks: in a single
+// process the recorder is never behind the frames.
 func (s *overlayStamper) eventsThrough(afterSeq, atLeast int64) ([]goavpipe.OverlayEvent, int64, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -291,12 +292,12 @@ func (s *overlayStamper) eventsThrough(afterSeq, atLeast int64) ([]goavpipe.Over
 	if s.readErr != nil {
 		return nil, 0, s.readErr
 	}
-	if atLeast+s.delay > s.through {
-		s.through = atLeast + s.delay
+	if atLeast > s.through {
+		s.through = atLeast
 	}
 	var out []goavpipe.OverlayEvent
 	for _, e := range s.events {
-		if e.Seq > afterSeq {
+		if e.Seq > afterSeq && e.Pts <= s.through {
 			out = append(out, e)
 		}
 	}
