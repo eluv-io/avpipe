@@ -4924,19 +4924,12 @@ check_params(
 
     /*
      * video_refs is passed through to any encoder (set_video_refs warns for ones
-     * whose SPS output is unverified), but it always requires an encode.
+     * whose SPS output is unverified). Ignored in bypass mode.
      */
-    if (params->video_refs != 0) {
-        if (params->video_refs < 0 || params->video_refs > MAX_VIDEO_REFS) {
-            elv_err("Invalid video_refs %d - must be 0 (encoder default) or 1..%d, url=%s",
-                params->video_refs, MAX_VIDEO_REFS, params->url);
-            return eav_param;
-        }
-        if (params->bypass_transcoding) {
-            elv_err("Incompatible params - video_refs requires transcoding "
-                "(bypass must be disabled), url=%s", params->url);
-            return eav_param;
-        }
+    if (params->video_refs < 0 || params->video_refs > MAX_VIDEO_REFS) {
+        elv_err("Invalid video_refs %d - must be 0 (encoder default) or 1..%d, url=%s",
+            params->video_refs, MAX_VIDEO_REFS, params->url);
+        return eav_param;
     }
 
     if (params->copy_mpegts) {
