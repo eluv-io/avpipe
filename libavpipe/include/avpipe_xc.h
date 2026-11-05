@@ -582,7 +582,7 @@ typedef struct xcparams_t {
     int         connection_timeout;         // Connection timeout in sec for RTMP or MPEGTS protocols
     int         rotate;                     // For video transpose or rotation
     char        *profile;
-    int         level;
+    int         level;                      // Codec level_idc: H.264 level x10 (4.1 = 41), HEVC x30 (4.1 = 123). Default: 0 (encoder chooses)
     int         video_refs;                 // Encoder reference frames. Default: 0 (encoder chooses based on other parameters)
     dif_type    deinterlace;                // Deinterlacing filter
     char        *timecode;                  // Original timecode string
@@ -999,6 +999,34 @@ avpipe_h264_profile(
 int
 avpipe_check_level(
     int level);
+
+/**
+ * @brief   Helper function to check an HEVC level, given as general_level_idc
+ *          (30x the level number, 123 for 4.1).
+ *
+ * @param   level
+ * @return  Returns 1 if the level is valid, otherwise return -1 for an invalid level.
+ */
+int
+avpipe_check_hevc_level(
+    int level);
+
+/**
+ * @brief   Helper function to check whether a picture fits an HEVC level (H.265
+ *          Table A.8: luma samples per picture and per second).
+ *
+ * @param   level   HEVC general_level_idc (30x the level number)
+ * @param   width   Picture width in luma samples
+ * @param   height  Picture height in luma samples
+ * @param   fps     Frame rate, or 0 if unknown (skips the per-second check)
+ * @return  Returns 1 if the picture fits, 0 if it does not, -1 if the level is unknown.
+ */
+int
+avpipe_hevc_level_fits(
+    int level,
+    int width,
+    int height,
+    double fps);
 
 /**
  * @brief   Helper function to deep copy an xc_params. In the case of OOM, may fail to initialize
