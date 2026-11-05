@@ -368,7 +368,7 @@ type XcParams struct {
 	VideoFrameDurationTs   int         `json:"video_frame_duration_ts,omitempty"`
 	Rotate                 int         `json:"rotate,omitempty"`
 	Profile                string      `json:"profile,omitempty"`
-	Level                  int         `json:"level,omitempty"`
+	Level                  int         `json:"level,omitempty"`      // codec level_idc: H.264 level x10 (4.1 = 41), HEVC x30 (4.1 = 123); 0 = encoder default
 	VideoRefs              int         `json:"video_refs,omitempty"` // reference frames, 0 = encoder default
 	Deinterlace            int         `json:"deinterlace,omitempty"`
 	Timecode               string      `json:"timecode,omitempty"`

@@ -81,7 +81,8 @@ type StreamInfo struct {
 	// non-video streams. 0 means AV_PIX_FMT_YUV420P.
 	PixFmt *int `json:"pix_fmt,omitempty"` // ffprobe: string value
 
-	// Level is the codec level IDC (e.g. 40 = H.264 level 4.0).
+	// Level is the codec level IDC: H.264 is 10x the level (40 = 4.0), HEVC's
+	// general_level_idc is 30x (120 = 4.0).
 	// 0 (omitted) when FFmpeg reports AV_LEVEL_UNKNOWN.
 	Level int `json:"level,omitempty"`
 

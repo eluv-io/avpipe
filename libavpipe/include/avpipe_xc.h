@@ -582,7 +582,7 @@ typedef struct xcparams_t {
     int         connection_timeout;         // Connection timeout in sec for RTMP or MPEGTS protocols
     int         rotate;                     // For video transpose or rotation
     char        *profile;
-    int         level;
+    int         level;                      // Codec level_idc: H.264 level x10 (4.1 = 41), HEVC x30 (4.1 = 123). Default: 0 (encoder chooses)
     int         video_refs;                 // Encoder reference frames. Default: 0 (encoder chooses based on other parameters)
     dif_type    deinterlace;                // Deinterlacing filter
     char        *timecode;                  // Original timecode string
