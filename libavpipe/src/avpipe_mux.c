@@ -483,10 +483,7 @@ avpipe_mux(
             set_pts_per_frame_from_streaminfo(pts_estimator, i, av_rescale_q(1, av_inv_q(time_base), avg_frame_rate));
             break;
         case AVMEDIA_TYPE_AUDIO:
-            if (xctx->in_muxer_ctx[i].format_context->streams[0]->codecpar->codec_id == AV_CODEC_ID_AAC) {
-                const int64_t aac_frame_duration = 1024;
-                set_pts_per_frame_from_streaminfo(pts_estimator, i, aac_frame_duration);
-            }
+            // AAC is set below, from the duration of its first packet
             break;
         }
     }
@@ -496,6 +493,19 @@ avpipe_mux(
         if (ret >= 0) {
             valid_pkts[i] = 1;
         }
+    }
+
+    // An AAC frame holds 1024 samples, but 2048 at the output sample rate with SBR (HE-AAC). The codec parameters
+    // do not tell SBR apart reliably, since it may be signaled implicitly. The container's sample duration does, so
+    // it is taken from the first packet, with 1024 for a container that has none.
+    for (int i=0; i < stream_count; i++) {
+        AVCodecParameters *codecpar = xctx->in_muxer_ctx[i].format_context->streams[0]->codecpar;
+        if (codecpar->codec_type != AVMEDIA_TYPE_AUDIO || codecpar->codec_id != AV_CODEC_ID_AAC)
+            continue;
+        int64_t aac_frame_duration = 1024;
+        if (valid_pkts[i] && pkts[i].duration > 0)
+            aac_frame_duration = pkts[i].duration;
+        set_pts_per_frame_from_streaminfo(pts_estimator, i, aac_frame_duration);
     }
 
     while (1) {
