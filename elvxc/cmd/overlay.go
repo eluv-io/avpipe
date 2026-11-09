@@ -2,15 +2,21 @@ package cmd
 
 import (
 	"bufio"
+	"crypto/sha256"
+	"encoding/base64"
+	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"io"
 	"math"
 	"os"
 	"path/filepath"
+	"sort"
+	"strings"
 	"sync"
 
 	"github.com/eluv-io/avpipe/goavpipe"
+	"github.com/eluv-io/avpipe/goavpipe/stamp"
 )
 
 // overlayTimescale is the unit of event pts in the spec and the stamper: milliseconds.
@@ -25,23 +31,108 @@ type overlaySpec struct {
 	Events  []overlaySpecEvent     `json:"events"`
 }
 
+// overlaySpecEvent is one event of the spec. Slot values take the forms overlaySlotValue accepts.
 type overlaySpecEvent struct {
-	Seq    int64          `json:"seq,omitempty"` // Default: position, from 1
-	T      *float64       `json:"t,omitempty"`   // Seconds
-	Pts    *int64         `json:"pts,omitempty"` // Milliseconds, instead of t
-	Hidden bool           `json:"hidden,omitempty"`
-	Data   map[string]any `json:"data"`
+	Seq    int64                      `json:"seq,omitempty"` // Default: position, from 1
+	T      *float64                   `json:"t,omitempty"`   // Seconds
+	Pts    *int64                     `json:"pts,omitempty"` // Milliseconds, instead of t
+	Hidden bool                       `json:"hidden,omitempty"`
+	Slots  map[string]json.RawMessage `json:"slots"`
+	Data   map[string]json.RawMessage `json:"data"` // The older spelling of slots
 }
 
-// loadOverlaySpec reads the spec, loads the images and resolves the font paths.
-func loadOverlaySpec(path string) (*goavpipe.OverlayParams, *overlaySpec, error) {
+// overlaySlotValue decodes one spec or patch value for the slot called name. Besides the canonical SlotValue
+// forms it accepts the short ones hand-written specs and the demo helpers use: null hides; a plain string is text
+// for a text slot and a library name for an image slot; a bare {"ms", "running", "dir"} object is a clock;
+// {"png": base64} is a picture, stored in assets under its hash and named by it. Pictures need assets; the spec
+// loader passes nil, since its images come from files.
+func overlaySlotValue(layout *goavpipe.OverlayParams, name string, raw json.RawMessage,
+	assets map[string][]byte) (goavpipe.SlotValue, error) {
+	slot := layout.Slot(name)
+	if slot == nil {
+		return goavpipe.SlotValue{}, fmt.Errorf("unknown slot %q", name)
+	}
+	text := strings.TrimSpace(string(raw))
+	switch {
+	case text == "null":
+		return goavpipe.HideValue(), nil
+	case strings.HasPrefix(text, `"`):
+		var s string
+		if err := json.Unmarshal(raw, &s); err != nil {
+			return goavpipe.SlotValue{}, err
+		}
+		if slot.Type == goavpipe.OverlaySlotImage {
+			return goavpipe.ImageValue(s), nil
+		}
+		return goavpipe.TextValue(s), nil
+	}
+	var probe map[string]json.RawMessage
+	if err := json.Unmarshal(raw, &probe); err != nil {
+		return goavpipe.SlotValue{}, err
+	}
+	if pic, ok := probe["png"]; ok {
+		if assets == nil {
+			return goavpipe.SlotValue{}, fmt.Errorf("a picture can only come with a patch")
+		}
+		var b64 string
+		if err := json.Unmarshal(pic, &b64); err != nil {
+			return goavpipe.SlotValue{}, fmt.Errorf("png must be a base64 string")
+		}
+		b, err := base64.StdEncoding.DecodeString(b64)
+		if err != nil {
+			return goavpipe.SlotValue{}, fmt.Errorf("png is not base64: %w", err)
+		}
+		sum := sha256.Sum256(b)
+		hash := hex.EncodeToString(sum[:])
+		assets[hash] = b
+		return goavpipe.ImageHashValue(hash), nil
+	}
+	if _, canonical := probe["clock"]; slot.Type == goavpipe.OverlaySlotClock && !canonical {
+		var c struct {
+			Ms      int64  `json:"ms"`
+			Running bool   `json:"running"`
+			Dir     string `json:"dir"`
+			Up      bool   `json:"up"`
+		}
+		if err := json.Unmarshal(raw, &c); err != nil {
+			return goavpipe.SlotValue{}, err
+		}
+		if c.Ms < 0 {
+			return goavpipe.SlotValue{}, fmt.Errorf("clock ms must not be negative")
+		}
+		return goavpipe.SlotValue{Clock: &goavpipe.ClockState{Ms: c.Ms, Running: c.Running, Up: c.Up || c.Dir == "up"}}, nil
+	}
+	var v goavpipe.SlotValue
+	if err := json.Unmarshal(raw, &v); err != nil {
+		return goavpipe.SlotValue{}, err
+	}
+	return v, nil
+}
+
+// overlaySlotValues decodes every value of a spec event or patch against the layout.
+func overlaySlotValues(layout *goavpipe.OverlayParams, raw map[string]json.RawMessage,
+	assets map[string][]byte) (map[string]goavpipe.SlotValue, error) {
+	out := make(map[string]goavpipe.SlotValue, len(raw))
+	for name, r := range raw {
+		v, err := overlaySlotValue(layout, name, r, assets)
+		if err != nil {
+			return nil, fmt.Errorf("slot %q: %w", name, err)
+		}
+		out[name] = v
+	}
+	return out, nil
+}
+
+// loadOverlaySpec reads the spec, loads the images and resolves the font paths. The events come back separately
+// from the layout: the job's EventSource serves them.
+func loadOverlaySpec(path string) (*goavpipe.OverlayParams, []goavpipe.OverlayEvent, *overlaySpec, error) {
 	b, err := os.ReadFile(path)
 	if err != nil {
-		return nil, nil, err
+		return nil, nil, nil, err
 	}
 	var spec overlaySpec
 	if err := json.Unmarshal(b, &spec); err != nil {
-		return nil, nil, fmt.Errorf("overlay spec %s: %w", path, err)
+		return nil, nil, nil, fmt.Errorf("overlay spec %s: %w", path, err)
 	}
 	dir := filepath.Dir(path)
 	resolve := func(p string) string {
@@ -55,7 +146,7 @@ func loadOverlaySpec(path string) (*goavpipe.OverlayParams, *overlaySpec, error)
 	for name, p := range spec.Images {
 		png, err := os.ReadFile(resolve(p))
 		if err != nil {
-			return nil, nil, fmt.Errorf("overlay image %q: %w", name, err)
+			return nil, nil, nil, fmt.Errorf("overlay image %q: %w", name, err)
 		}
 		ov.Images[name] = png
 	}
@@ -63,29 +154,33 @@ func loadOverlaySpec(path string) (*goavpipe.OverlayParams, *overlaySpec, error)
 		if s.Font != "" {
 			s.Font = resolve(s.Font)
 			if _, err := os.Stat(s.Font); err != nil {
-				return nil, nil, fmt.Errorf("overlay slot %q font: %w", s.Name, err)
+				return nil, nil, nil, fmt.Errorf("overlay slot %q font: %w", s.Name, err)
 			}
 		}
 		ov.Slots = append(ov.Slots, s)
 	}
+	var events []goavpipe.OverlayEvent
 	for i, e := range spec.Events {
-		ev, err := overlaySpecEventToEvent(e, int64(i)+1)
+		ev, err := overlaySpecEventToEvent(ov, e, int64(i)+1)
 		if err != nil {
-			return nil, nil, fmt.Errorf("overlay event %d: %w", i, err)
+			return nil, nil, nil, fmt.Errorf("overlay event %d: %w", i, err)
+		}
+		if err := ov.ValidateEvent(&ev); err != nil {
+			return nil, nil, nil, fmt.Errorf("overlay event %d: %w", i, err)
 		}
 		if i > 0 {
-			prev := ov.Events[i-1]
+			prev := events[i-1]
 			if ev.Seq <= prev.Seq || ev.Pts < prev.Pts {
-				return nil, nil, fmt.Errorf("overlay event %d: seq and pts must increase", i)
+				return nil, nil, nil, fmt.Errorf("overlay event %d: seq and pts must increase", i)
 			}
 		}
-		ov.Events = append(ov.Events, ev)
+		events = append(events, ev)
 	}
-	return ov, &spec, nil
+	return ov, events, &spec, nil
 }
 
-func overlaySpecEventToEvent(e overlaySpecEvent, defaultSeq int64) (goavpipe.OverlayEvent, error) {
-	ev := goavpipe.OverlayEvent{Seq: e.Seq, Hidden: e.Hidden, Data: e.Data}
+func overlaySpecEventToEvent(layout *goavpipe.OverlayParams, e overlaySpecEvent, defaultSeq int64) (goavpipe.OverlayEvent, error) {
+	ev := goavpipe.OverlayEvent{TimedEvent: goavpipe.TimedEvent{Seq: e.Seq, Kind: goavpipe.KindOverlay}, Hidden: e.Hidden}
 	if ev.Seq == 0 {
 		ev.Seq = defaultSeq
 	}
@@ -97,29 +192,55 @@ func overlaySpecEventToEvent(e overlaySpecEvent, defaultSeq int64) (goavpipe.Ove
 	case e.Pts != nil:
 		ev.Pts = *e.Pts
 	}
-	if ev.Data == nil {
-		ev.Data = map[string]any{}
+	raw := e.Slots
+	if raw == nil {
+		raw = e.Data
 	}
+	slots, err := overlaySlotValues(layout, raw, nil)
+	if err != nil {
+		return ev, err
+	}
+	ev.Slots = slots
 	return ev, nil
 }
 
-// overlayPatch is one line of --overlay-events: a partial state merged into the last one.
+// overlayTimed is the events as the EventSource hands them out.
+func overlayTimed(events []goavpipe.OverlayEvent) []goavpipe.Timed {
+	out := make([]goavpipe.Timed, len(events))
+	for i := range events {
+		out[i] = events[i]
+	}
+	return out
+}
+
+// overlayPatch is one line of --overlay-events: a partial state merged into the last one. A slot value takes the
+// SlotValue forms, or {"png": "<base64>"} for a picture delivered with the patch, which the stamper stores as an
+// asset and names by hash.
 type overlayPatch struct {
-	Hidden *bool          `json:"hidden,omitempty"`
-	Data   map[string]any `json:"data"`
+	Hidden *bool                      `json:"hidden,omitempty"`
+	Slots  map[string]json.RawMessage `json:"slots"`
+	Data   map[string]json.RawMessage `json:"data"` // The older spelling of slots
+}
+
+func (p overlayPatch) values() map[string]json.RawMessage {
+	if p.Slots != nil {
+		return p.Slots
+	}
+	return p.Data
 }
 
 // overlayStamper stands in for the recorder: it reads patches as they arrive, stamps each one delay past the
 // through pts, and serves every job that asks. The recorder's through pts is the last written frame; here it is
 // the last frame any job asked for, so the jobs of one run all see the same event at the same frame however fast
-// each one runs.
+// each one runs. Each job gets its own EventSource from handle().
 type overlayStamper struct {
 	mu      sync.Mutex
-	events  []goavpipe.OverlayEvent // every event stamped so far, sorted
+	layout  *goavpipe.OverlayParams
+	events  []goavpipe.OverlayEvent // every event stamped so far, sorted by pts then seq
 	state   goavpipe.OverlayEvent   // the last full state, which patches merge into
 	through int64                   // the events are final up to here
 	delay   int64                   // ms, which is the overlay timescale
-	slots   map[string]bool // slot names a patch may set; a patch with another key is refused, as the recorder would
+	assets  map[string][]byte       // pictures delivered with patches, by hash
 	patches chan overlayPatch
 	src     io.ReadCloser
 	log     io.Writer
@@ -130,25 +251,24 @@ type overlayStamper struct {
 
 // newOverlayStamper starts reading JSON-line patches from src. The initial events are served as they are; the
 // last one is the state patches merge into. Every stamped event is written to log as a JSON line, when set.
-func newOverlayStamper(initial []goavpipe.OverlayEvent, delayMs int64, src io.ReadCloser, log io.Writer,
-	slots []goavpipe.OverlaySlot) *overlayStamper {
+func newOverlayStamper(layout *goavpipe.OverlayParams, initial []goavpipe.OverlayEvent, delayMs int64,
+	src io.ReadCloser, log io.Writer) *overlayStamper {
 	s := &overlayStamper{
+		layout:  layout,
 		events:  append([]goavpipe.OverlayEvent(nil), initial...),
 		delay:   delayMs,
-		slots:   make(map[string]bool, len(slots)),
+		assets:  map[string][]byte{},
 		patches: make(chan overlayPatch, 64),
 		src:     src,
 		log:     log,
 		done:    make(chan struct{}),
 	}
-	for _, slot := range slots {
-		s.slots[slot.Name] = true
-	}
 	if len(initial) > 0 {
 		s.state = initial[len(initial)-1]
 	}
-	if s.state.Data == nil {
-		s.state.Data = map[string]any{}
+	s.state.Kind = goavpipe.KindOverlay
+	if s.state.Slots == nil {
+		s.state.Slots = map[string]goavpipe.SlotValue{}
 	}
 	if src != nil {
 		go s.read()
@@ -161,7 +281,7 @@ func newOverlayStamper(initial []goavpipe.OverlayEvent, delayMs int64, src io.Re
 func (s *overlayStamper) read() {
 	defer close(s.done)
 	scanner := bufio.NewScanner(s.src)
-	scanner.Buffer(make([]byte, 64*1024), 1024*1024)
+	scanner.Buffer(make([]byte, 64*1024), 16*1024*1024)
 	for scanner.Scan() {
 		line := scanner.Bytes()
 		if len(line) == 0 {
@@ -187,96 +307,83 @@ func (s *overlayStamper) read() {
 	}
 }
 
-// overlayCarryClock returns v advanced by elapsed ms when it is a running clock value, else v unchanged. A
-// countdown stops at 0.
-func overlayCarryClock(v any, elapsedMs int64) any {
-	m, ok := v.(map[string]any)
-	if !ok || m["running"] != true {
-		return v
+// overlayCarryClock returns c advanced by elapsed ms when it is running, else c unchanged. A countdown stops at 0.
+func overlayCarryClock(c goavpipe.ClockState, elapsedMs int64) goavpipe.ClockState {
+	if !c.Running {
+		return c
 	}
-	var ms int64
-	switch n := m["ms"].(type) {
-	case float64:
-		ms = int64(n)
-	case int64:
-		ms = n
-	case int:
-		ms = int64(n)
-	default:
-		return v
+	if c.Up {
+		c.Ms += elapsedMs
+	} else if c.Ms -= elapsedMs; c.Ms < 0 {
+		c.Ms = 0
 	}
-	if m["dir"] == "up" {
-		ms += elapsedMs
-	} else if ms -= elapsedMs; ms < 0 {
-		ms = 0
-	}
-	out := make(map[string]any, len(m))
-	for k, x := range m {
-		out[k] = x
-	}
-	out["ms"] = ms
-	return out
+	return c
 }
 
 // unknownSlot returns the first key of the patch that is not a slot, or "".
 func (s *overlayStamper) unknownSlot(p overlayPatch) string {
-	for k := range p.Data {
-		if !s.slots[k] {
+	keys := make([]string, 0, len(p.values()))
+	for k := range p.values() {
+		keys = append(keys, k)
+	}
+	sort.Strings(keys)
+	for _, k := range keys {
+		if s.layout.Slot(k) == nil {
 			return k
 		}
 	}
 	return ""
 }
 
-// apply merges a patch into the state and stamps it delay past the through pts. Caller holds mu.
+// apply merges a patch into the state and stamps it delay past the through pts. A patch that does not fit the
+// layout is refused and reported, as the recorder would answer 400. Caller holds mu.
 func (s *overlayStamper) apply(p overlayPatch) {
 	// Patches stamped within one frame share a pts and apply in seq order: the later one is in effect from there
-	ev := goavpipe.OverlayEvent{Seq: s.state.Seq + 1, Pts: s.through + 1 + s.delay, Hidden: s.state.Hidden}
+	ev := goavpipe.OverlayEvent{
+		TimedEvent: goavpipe.TimedEvent{Seq: s.state.Seq + 1, Pts: s.through + 1 + s.delay, Kind: goavpipe.KindOverlay},
+		Hidden:     s.state.Hidden,
+	}
 	if p.Hidden != nil {
 		ev.Hidden = *p.Hidden
 	}
 	// A clock value means "ms at the event's pts", so a running clock carried into the new snapshot is moved
 	// forward by the time between the two events; one the patch sets is taken as it is
-	data := make(map[string]any, len(s.state.Data)+len(p.Data))
-	for k, v := range s.state.Data {
-		if _, patched := p.Data[k]; !patched {
-			v = overlayCarryClock(v, (ev.Pts-s.state.Pts)*1000/overlayTimescale)
+	values := p.values()
+	slots := make(map[string]goavpipe.SlotValue, len(s.state.Slots)+len(values))
+	for k, v := range s.state.Slots {
+		if _, patched := values[k]; !patched && v.Clock != nil {
+			c := overlayCarryClock(*v.Clock, (ev.Pts-s.state.Pts)*1000/overlayTimescale)
+			v = goavpipe.SlotValue{Clock: &c}
 		}
-		data[k] = v
+		slots[k] = v
 	}
-	for k, v := range p.Data {
-		data[k] = v
+	patched, err := overlaySlotValues(s.layout, values, s.assets)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "overlay patch refused: %v\n", err)
+		return
 	}
-	ev.Data = data
+	for k, v := range patched {
+		slots[k] = v
+	}
+	ev.Slots = slots
+	if err := s.layout.ValidateEvent(&ev); err != nil {
+		fmt.Fprintf(os.Stderr, "overlay patch refused: %v\n", err)
+		return
+	}
 	s.state = ev
 	s.events = append(s.events, ev)
 	if s.log != nil {
-		if b, err := json.Marshal(overlayLogEvent(ev)); err == nil {
+		if b, err := json.Marshal(ev); err == nil {
 			_, _ = fmt.Fprintf(s.log, "%s\n", b)
 		}
 	}
 }
 
-// overlayLogEvent is the event with an inline picture ({"png": base64}) replaced by its size, for the log.
-func overlayLogEvent(ev goavpipe.OverlayEvent) goavpipe.OverlayEvent {
-	out := ev
-	out.Data = make(map[string]any, len(ev.Data))
-	for k, v := range ev.Data {
-		if m, ok := v.(map[string]any); ok {
-			if s, ok := m["png"].(string); ok && len(m) == 1 {
-				v = map[string]any{"png_bytes": len(s) * 3 / 4}
-			}
-		}
-		out.Data[k] = v
-	}
-	return out
-}
-
-// eventsThrough stamps the patches that have arrived against the current through pts, then advances it to
-// atLeast and returns the sealed events after afterSeq: those at or below the new through pts. An event stamped
-// above it stays here until a job asks for a frame past it, as the recorder's do. It never blocks: in a single
-// process the recorder is never behind the frames.
-func (s *overlayStamper) eventsThrough(afterSeq, atLeast int64) ([]goavpipe.OverlayEvent, int64, error) {
+// at stamps the patches that have arrived against the current through pts, advances it to pts and returns the
+// latest event at or before pts. An event stamped above the through pts stays here until a job asks for a frame
+// past it, as the recorder's do. It never answers not yet: in a single process the recorder is never behind the
+// frames.
+func (s *overlayStamper) at(pts int64) (goavpipe.Timed, goavpipe.Status, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
@@ -290,23 +397,36 @@ func (s *overlayStamper) eventsThrough(afterSeq, atLeast int64) ([]goavpipe.Over
 		break
 	}
 	if s.readErr != nil {
-		return nil, 0, s.readErr
+		return nil, goavpipe.StatusReady, s.readErr
 	}
-	if atLeast > s.through {
-		s.through = atLeast
+	if pts > s.through {
+		s.through = pts
 	}
-	var out []goavpipe.OverlayEvent
-	for _, e := range s.events {
-		if e.Seq > afterSeq && e.Pts <= s.through {
-			out = append(out, e)
+	var latest *goavpipe.OverlayEvent
+	for i := range s.events {
+		if s.events[i].Pts <= pts {
+			latest = &s.events[i]
 		}
 	}
-	return out, s.through, nil
+	if latest == nil {
+		return nil, goavpipe.StatusReady, nil
+	}
+	return *latest, goavpipe.StatusReady, nil
 }
 
-// handle gives one job its own OverlayEventSource. avpipe closes the source when the job ends; the stamper
-// itself stops reading once every job has closed its handle.
-func (s *overlayStamper) handle() goavpipe.OverlayEventSource {
+func (s *overlayStamper) asset(hash string) ([]byte, goavpipe.Status, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	b, ok := s.assets[hash]
+	if !ok {
+		return nil, goavpipe.StatusReady, fmt.Errorf("unknown asset %q", hash)
+	}
+	return b, goavpipe.StatusReady, nil
+}
+
+// handle gives one job its own EventSource. avpipe closes the source when the job ends; the stamper itself stops
+// reading once every job has closed its handle.
+func (s *overlayStamper) handle() goavpipe.EventSource {
 	s.mu.Lock()
 	s.refs++
 	s.mu.Unlock()
@@ -330,13 +450,40 @@ type overlayStamperHandle struct {
 	err    error
 }
 
-func (h *overlayStamperHandle) EventsThrough(afterSeq, atLeast int64) ([]goavpipe.OverlayEvent, int64, error) {
-	return h.s.eventsThrough(afterSeq, atLeast)
+func (h *overlayStamperHandle) Kinds() []string { return []string{goavpipe.KindOverlay} }
+
+func (h *overlayStamperHandle) At(kind string, pts int64) (goavpipe.Timed, goavpipe.Status, error) {
+	if kind != goavpipe.KindOverlay {
+		return nil, goavpipe.StatusEnded, nil
+	}
+	return h.s.at(pts)
+}
+
+func (h *overlayStamperHandle) Asset(hash string) ([]byte, goavpipe.Status, error) {
+	return h.s.asset(hash)
 }
 
 func (h *overlayStamperHandle) Close() error {
 	h.closed.Do(func() { h.err = h.s.release() })
 	return h.err
+}
+
+// venueMappingFor is the default venue mapping with the slots the layout does not have left out, so a spec with
+// only a score and a clock still works with --overlay-anc.
+func venueMappingFor(layout *goavpipe.OverlayParams) stamp.VenueMapping {
+	m := stamp.DefaultVenueMapping()
+	keep := func(name *string) {
+		if layout.Slot(*name) == nil {
+			*name = ""
+		}
+	}
+	keep(&m.Home)
+	keep(&m.Away)
+	keep(&m.Score)
+	keep(&m.Period)
+	keep(&m.Clock)
+	keep(&m.ShotClock)
+	return m
 }
 
 // openOverlayEvents opens the patch source. A FIFO is opened read-write so the open does not wait for a writer

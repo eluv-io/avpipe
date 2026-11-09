@@ -188,8 +188,15 @@ typedef enum ov_align {
 
 typedef enum ov_clock_format {
     ov_clock_mmss  = 0,         // 02:05
-    ov_clock_hmmss = 1          // 1:02:05
+    ov_clock_hmmss = 1,         // 1:02:05
+    ov_clock_game  = 2,         // 2:05 above a minute, 59.9 below: a venue game clock
+    ov_clock_shot  = 3          // 23 above five seconds, 4.7 below: a shot clock
 } ov_clock_format;
+
+typedef enum ov_timeout {
+    ov_timeout_fail = 0,        // The job fails with eav_overlay when a frame's event is not there within wait_ms
+    ov_timeout_hold = 1         // The previous event stays in effect
+} ov_timeout;
 
 typedef struct ov_slot_t {
     ov_slot_type type;
@@ -218,8 +225,10 @@ typedef struct ov_clock_t {
     int         up;             // Counts up; the default counts down and stops at 0
 } ov_clock_t;
 
+/* One overlay event: the complete state of every slot from pts on. The source fills one through the
+ * overlay_event_set_* builders. */
 typedef struct ov_event_t {
-    int64_t     seq;            // The producer's sequence number, what an event source is asked for events after
+    int64_t     seq;            // The source's sequence number for this kind; unchanged means nothing to apply
     int64_t     pts;            // In 1/timescale units on the input's own timeline
     int         hidden;         // Hide the whole overlay
     char        **text;         // [nslots] value per text slot, NULL for no value or a non-text slot
@@ -230,32 +239,39 @@ typedef struct ov_event_t {
 #define OV_IMAGE_HIDDEN     (-1)
 #define OV_IMAGE_DEFAULT    (-2)
 
-/*
- * Fetches the events after after_seq once the recording's through pts reaches at_least (1/timescale units):
- * appends them with overlay_append_event() and sets the new through pts with overlay_set_through(). May block.
- * Returns 0, OV_READER_CANCELLED when the job was cancelled, or another negative value on failure.
- */
-typedef int
-(*ov_reader_f)(
-    uintptr_t handle,
-    xcparams_t *params,
-    int64_t after_seq,
-    int64_t at_least);
-
-#define OV_READER_CANCELLED (-2)
-
 typedef struct ov_params_t {
     int64_t     timescale;
     int         nslots;
     int         nimages;
-    int         nevents;
     ov_slot_t   *slots;
-    ov_image_t  *images;        // The library, PNG bytes
-    ov_event_t  *events;        // Sorted by pts
-    int64_t     through_pts;    // events is complete up to this pts; only read when there is a reader
-    ov_reader_f reader;         // Supplies events past through_pts, NULL when events is final
-    uintptr_t   reader_handle;
+    ov_image_t  *images;        // The library, PNG bytes; grows when the source brings images by hash
+    int64_t     wait_ms;        // How long a frame waits for its event before on_timeout applies
+    ov_timeout  on_timeout;
 } ov_params_t;
+
+/*
+ * The job's event source, on the Go side: asks for the event of kind in effect at pts (in the consumer's own
+ * timescale). have_seq is the seq the consumer holds, -1 for none; out is the consumer's event struct, which the
+ * source fills when it returns EV_AT_NEW. Never blocks: EV_AT_NOT_YET says ask again. The consumer waits in
+ * short slices, checking the cancel flag, up to its wait budget.
+ */
+#define EV_AT_UNCHANGED     0   // The same seq is still in effect, out untouched
+#define EV_AT_NEW           1   // A new event, out filled
+#define EV_AT_NOT_YET       2   // Not sealed or not fetched yet
+#define EV_AT_ENDED         3   // No event of this kind will apply at or after pts: keep what is in effect
+#define EV_AT_CANCELLED     (-2)
+#define EV_AT_FAILED        (-1)
+
+#define EV_KIND_OVERLAY     "overlay"
+
+typedef int
+(*ev_at_f)(
+    uintptr_t source,
+    xcparams_t *params,
+    const char *kind,
+    int64_t pts,
+    int64_t have_seq,
+    void *out);
 
 /* Per-transcode overlay state, owned by the decoder context. All timing is in the overlay's own timescale: a
  * frame's pts is floored into it once per frame (frame_ts), events are compared and transitions timed in it, so
@@ -264,8 +280,14 @@ typedef struct ov_state_t {
     int         nslots;
     AVRational  tb;             // Input video stream time base, the base frame->pts arrives in
     int64_t     frame_ts;       // The current frame's pts in the overlay timescale
-    int         fetches;        // Reader calls made
-    int         cursor;         // Index of the event in effect, -1 before the first
+    ov_event_t  *cur;           // The event in effect, NULL before the first
+    ov_event_t  *prev;          // The event before it, for transitions; NULL when this job never saw one
+    ov_event_t  *next;          // The buffer the source fills on the next ask
+    int         asks;           // Source calls made
+    int         waits;          // Frames that waited for their event
+    int64_t     wait_start_us;  // When the current frame started waiting, 0 when not waiting
+    int         ended;          // The source said no more events: cur stays and it is not asked again
+    int         holding;        // ov_timeout_hold ran out once: frames no longer wait, they ask and move on
     struct AVFilterContext **text_ctx;  // [nslots] drawtext filter of each text/clock slot, NULL otherwise
     char        **text_sent;    // [nslots] text last sent to each drawtext
     int         commands;       // send_command calls made
@@ -745,6 +767,8 @@ typedef struct xcparams_t {
     double      fade_level_1;               // Fade blend start level (e.g. 1.0)
     double      fade_level_2;               // Fade blend end level (e.g. 0.0)
     ov_params_t *overlay;                   // Burned-in graphics driven by timed events, NULL for none
+    ev_at_f     event_at;                   // The job's event source, set by init_event_source(); NULL for none
+    uintptr_t   event_source;
 } xcparams_t;
 
 #define MAX_CODEC_NAME  256

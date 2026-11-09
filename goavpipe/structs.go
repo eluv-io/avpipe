@@ -401,6 +401,7 @@ type XcParams struct {
 	FadeLevel2             float64     `json:"fade_level_2,omitempty"`
 
 	Overlay *OverlayParams `json:"overlay,omitempty"` // Burned-in graphics driven by timed events
+	Events  EventSource    `json:"-"`                 // The job's source of timed events; required with Overlay
 }
 
 func (p *XcParams) String() string { return util.JSONString(p) }
@@ -424,48 +425,21 @@ type OverlaySlot struct {
 	Font    string  `json:"font,omitempty"`    // text/clock: path to a font file
 	Color   string  `json:"color,omitempty"`   // text/clock: ffmpeg colour name or 0xRRGGBB[AA], default white
 	Align   string  `json:"align,omitempty"`   // text/clock: left (default), center or right - which edge of the text X anchors
-	Format  string  `json:"format,omitempty"`  // clock: mm:ss (default) or h:mm:ss
+	Format  string  `json:"format,omitempty"`  // clock: mm:ss (default), h:mm:ss, game (m:ss above a minute, s.t below) or shot (s above five seconds, s.t below)
 	Default string  `json:"default,omitempty"` // image: library image shown when no event names one
 	Fade    int64   `json:"fade,omitempty"`    // image: every change of the slot (including to or from hidden) cross-fades over this many ms, timed from the event's pts
 }
 
-// OverlayEvent is the complete state of the overlay from Pts on, so a job can start from any single event. Data
-// holds one value per slot name: a string for a text slot; for an image slot a library image name, nil to hide it,
-// or the picture itself as PNG bytes ([]byte, or {"png": "<base64>"} as it reads back from JSON), which lets a
-// renderer deliver a new image with the event; and {"ms", "running", "dir"} for a clock slot. A slot missing from
-// Data is blank, hidden or showing its default. Every picture delivered this way is kept for the rest of the job.
-type OverlayEvent struct {
-	Seq    int64          `json:"seq"`
-	Pts    int64          `json:"pts"`              // In OverlayParams.Timescale units, on the input's own timeline
-	Hidden bool           `json:"hidden,omitempty"` // Hides the whole overlay
-	Data   map[string]any `json:"data"`
-}
-
 // OverlayParams describes a graphic burned into the output video: a static layout of slots, an image library and
-// the events that set the slots' values. On each decoded frame the latest event with Pts <= the frame's pts is in
-// effect, so every rendition of the same input switches on the same frame.
+// the timing policy. The slots' values come from the job's EventSource (XcParams.Events) as OverlayEvents of
+// KindOverlay: on each decoded frame the latest event with Pts <= the frame's pts is in effect, so every rendition
+// of the same input switches on the same frame.
 type OverlayParams struct {
-	Timescale  int64              `json:"timescale"` // Units of OverlayEvent.Pts and ThroughPts
-	Slots      []OverlaySlot      `json:"slots"`
-	Images     map[string][]byte  `json:"images,omitempty"`      // PNG bytes by library name
-	Events     []OverlayEvent     `json:"events"`                // Sorted by Pts; the first may precede the first frame
-	ThroughPts int64              `json:"through_pts,omitempty"` // Events is complete up to this pts; only read with a Source
-	Source     OverlayEventSource `json:"-"`                     // Supplies the events past ThroughPts; nil when Events is final
-}
-
-// OverlayEventSource supplies the events of an input that is still being recorded. Before drawing the first frame
-// whose pts is past the through pts it holds, avpipe calls EventsThrough and applies the events returned, so a
-// frame is never drawn with events that may still change. The call may block; an error fails the transcode with
-// EAV_OVERLAY. avpipe closes the source when the job ends (Xc returns, XcFini) and on XcCancel, which must
-// unblock a pending call: that call then fails the job with EAV_CANCELLED.
-type OverlayEventSource interface {
-	// EventsThrough returns, once the recording's through pts has reached atLeast (in OverlayParams.Timescale
-	// units), that through pts and the sealed events the job does not hold yet: those with Pts at or below it and
-	// above the through pts of the previous call, sorted by Pts. Events above the through pts are never returned;
-	// the recorder may still move them. afterSeq is the highest Seq the job holds, a hint only, since an event
-	// placed ahead of time can be sealed after one with a higher Seq.
-	EventsThrough(afterSeq int64, atLeast int64) (events []OverlayEvent, throughPts int64, err error)
-	Close() error
+	Timescale int64             `json:"timescale"` // Units of OverlayEvent.Pts; OverlayDefaultTimescale when 0
+	Slots     []OverlaySlot     `json:"slots"`
+	Images    map[string][]byte `json:"images,omitempty"`     // PNG bytes by library name
+	WaitMs    int64             `json:"wait_ms,omitempty"`    // How long a frame waits for its event or image; OverlayDefaultWaitMs when 0
+	OnTimeout string            `json:"on_timeout,omitempty"` // OverlayTimeoutFail (default) or OverlayTimeoutHold
 }
 
 // NewXcParams initializes a XcParams struct with unset/default values

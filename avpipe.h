@@ -74,9 +74,9 @@ int
 mux(
     xcparams_t *params);
 
-/** Configure the Go-backed overlay event source: AVPipeOverlayEvents with this handle. No-op without an overlay. */
+/** Point the job at its Go event source: AVPipeEventAt with this handle answers every consumer's per-frame ask. */
 void
-init_overlay_reader(
+init_event_source(
     xcparams_t *params,
     uintptr_t handle);
 

@@ -12,18 +12,19 @@
 #include "avpipe_xc.h"
 
 /*
- * Builders for the Go side, which validates and flattens the params: every event carries a value for every slot
- * index. The strings are copied.
+ * Builders for the Go side, which validates the layout and resolves events against it. The strings are copied.
  */
 ov_params_t *
 overlay_alloc(
     xcparams_t *params,
     int64_t timescale,
     int nslots,
-    int nevents);
+    int64_t wait_ms,
+    int on_timeout);
 
 /**
- * @brief   Append a PNG to the image library, at job start or from a reader while the job runs.
+ * @brief   Append a PNG to the image library, at job start or when the source brings one while the job runs.
+ *          The same bytes are not added twice.
  * @return  The image's index, or -1 on a bad argument or when memory runs out.
  */
 int
@@ -48,50 +49,52 @@ overlay_set_slot(
     int default_image,
     int fade_ms);
 
-int
-overlay_set_event(
-    xcparams_t *params,
-    int index,
-    int64_t seq,
-    int64_t pts,
-    int hidden);
-
-/**
- * @brief   Append an event, for a reader. Its slot values are set with the overlay_set_event_* functions.
- * @return  The new event's index, or -1 when pts is before the last event or memory runs out.
+/*
+ * Events. The source fills the ov_event_t the consumer hands it: header, then a value per slot it sets; a slot it
+ * does not set is blank, hidden or the slot's default.
  */
-int
-overlay_append_event(
-    xcparams_t *params,
-    int64_t seq,
-    int64_t pts,
-    int hidden);
+ov_event_t *
+overlay_event_alloc(
+    int nslots);
 
 void
-overlay_set_through(
-    xcparams_t *params,
-    int64_t through_pts);
+overlay_event_free(
+    ov_event_t **ev,
+    int nslots);
+
+/* Reset ev for reuse: no values, images at the slot default */
+void
+overlay_event_clear(
+    ov_event_t *ev,
+    int nslots);
+
+void
+overlay_event_set(
+    ov_event_t *ev,
+    int64_t seq,
+    int64_t pts,
+    int hidden);
 
 int
-overlay_set_event_text(
-    xcparams_t *params,
-    int event,
+overlay_event_set_text(
+    ov_event_t *ev,
+    int nslots,
     int slot,
     const char *text);
 
 int
-overlay_set_event_clock(
-    xcparams_t *params,
-    int event,
+overlay_event_set_clock(
+    ov_event_t *ev,
+    int nslots,
     int slot,
     int64_t ms,
     int running,
     int up);
 
 int
-overlay_set_event_image(
-    xcparams_t *params,
-    int event,
+overlay_event_set_image(
+    ov_event_t *ev,
+    int nslots,
     int slot,
     int image);
 
@@ -113,8 +116,8 @@ overlay_validate(
 
 /**
  * @brief   Allocate the per-transcode state before the filter graph is built and lay out the image slots at the
- *          output size, which the filter string needs. A slot without a height is sized to the images it can show
- *          at start, which are decoded here for that; everything else is decoded when first shown.
+ *          output size, which the filter string needs. Every library image is decoded once here, so a bad one
+ *          fails the job before any output.
  */
 int
 overlay_prepare(
@@ -146,8 +149,8 @@ overlay_append_filter(
     xcparams_t *params);
 
 /**
- * @brief   Bind the state to the configured filter graph: finds the drawtext filters and rescales the event pts
- *          to the input video stream time base.
+ * @brief   Bind the state to the configured filter graph: finds the drawtext filters and takes the input video
+ *          stream time base the frame pts arrive in.
  */
 int
 overlay_bind(
@@ -166,17 +169,12 @@ overlay_push_canvas(
     AVFrame *frame);
 
 /**
- * @brief   At EOF, close the main and canvas buffer sources so the overlay filter releases the frame it holds.
- * @return  1 when the sources were closed and the sink must be drained, 0 when there is no canvas.
- */
-int
-overlay_close_sources(
-    coderctx_t *decoder_context);
-
-/**
- * @brief   Apply the latest event with pts <= frame->pts. Call once per decoded video frame, before the frame is
- *          rescaled to the encoder time base. Only slots whose value changed get a send_command.
- * @return  eav_success, or eav_overlay when a slot update is rejected.
+ * @brief   Ask the source for the event in effect at frame->pts and apply it. Call once per decoded video frame,
+ *          before the frame is rescaled to the encoder time base. Waits for an event that is not there yet, in
+ *          short slices with the cancel flag checked, up to the overlay's wait_ms; then on_timeout decides. Only
+ *          slots whose value changed get a send_command.
+ * @return  eav_success; eav_overlay when the source failed, the event was bad or the wait ran out with
+ *          ov_timeout_fail; eav_cancelled when the job was cancelled during a wait.
  */
 int
 overlay_apply(

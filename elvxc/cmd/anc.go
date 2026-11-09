@@ -2,6 +2,7 @@ package cmd
 
 import (
 	"encoding/hex"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
@@ -12,6 +13,9 @@ import (
 	"github.com/eluv-io/avpipe/broadcastproto/anc"
 	"github.com/eluv-io/avpipe/broadcastproto/anc/venueclock"
 	"github.com/eluv-io/avpipe/goavpipe"
+	"github.com/eluv-io/avpipe/goavpipe/stamp"
+	"github.com/eluv-io/common-go/media/anc"
+	"github.com/eluv-io/common-go/media/anc/venueclock"
 	"github.com/spf13/cobra"
 )
 
@@ -32,6 +36,7 @@ func Anc(cmdRoot *cobra.Command) error {
 	cmdAnc.PersistentFlags().Int("max", 0, "(optional) stop after this many PES packets")
 	cmdAnc.PersistentFlags().Bool("raw", false, "(optional) print the user data words of every packet in hex")
 	cmdAnc.PersistentFlags().Bool("clock", false, "(optional) reassemble the venue clock feed (DID 0x50/0x01) and print its messages and the clock state they change")
+	cmdAnc.PersistentFlags().String("events-out", "", "(optional) with --clock: write the overlay events the venue clock feed makes (slots home, away, score, period, clock, shot; pts in ms) to this JSON file, for a transcode --overlay spec")
 	cmdAnc.PersistentFlags().Bool("quiet", false, "(optional) print the summary only (with --clock: the clock messages and the summary)")
 	return nil
 }
@@ -58,8 +63,14 @@ func doAnc(cmd *cobra.Command, args []string) error {
 	if opts.clock, err = cmd.Flags().GetBool("clock"); err != nil {
 		return err
 	}
+	if opts.eventsOut, err = cmd.Flags().GetString("events-out"); err != nil {
+		return err
+	}
 	if opts.quiet, err = cmd.Flags().GetBool("quiet"); err != nil {
 		return err
+	}
+	if opts.eventsOut != "" && !opts.clock {
+		return fmt.Errorf("--events-out needs --clock")
 	}
 	return runAnc(os.Stdout, filename, opts)
 }
@@ -69,6 +80,7 @@ type ancOpts struct {
 	max         int
 	raw         bool
 	clock       bool
+	eventsOut   string
 	quiet       bool
 }
 
@@ -86,8 +98,17 @@ func runAnc(w io.Writer, url string, opts ancOpts) error {
 		clock                      venueclock.Stream
 		clockState                 venueclock.State
 		nClockMsgs, nClockBadCRC   int
+		eventLog                   *stamp.Log
+		stamper                    *stamp.ANC
 	)
+	if opts.eventsOut != "" {
+		eventLog = stamp.NewLog(goavpipe.KindOverlay)
+		stamper = stamp.NewANC(eventLog, overlayTimescale, stamp.DefaultVenueMapping())
+	}
 	stream, err := avpipe.ScanANC(url, opts.ancStreamID, func(p *goavpipe.AncPacket) error {
+		if stamper != nil {
+			stamper.Feed(p)
+		}
 		nPES++
 		if firstPts < 0 {
 			firstPts = p.Pts
@@ -172,6 +193,18 @@ func runAnc(w io.Writer, url string, opts ancOpts) error {
 		if nClockMsgs > 0 {
 			fmt.Fprintf(w, "clock state: %s\n", &clockState)
 		}
+	}
+	if stamper != nil {
+		events := eventLog.Events(goavpipe.KindOverlay)
+		b, err := json.MarshalIndent(events, "", "  ")
+		if err != nil {
+			return err
+		}
+		if err := os.WriteFile(opts.eventsOut, append(b, '\n'), 0644); err != nil {
+			return err
+		}
+		fmt.Fprintf(w, "overlay events: %d written to %s (venue clock messages %d, events %d, bad crc %d)\n",
+			len(events), opts.eventsOut, stamper.Stats.Messages, stamper.Stats.Events, stamper.Stats.BadCRC)
 	}
 	keys := make([]key, 0, len(byKind))
 	for k := range byKind {

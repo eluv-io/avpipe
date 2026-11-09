@@ -5278,6 +5278,8 @@ avpipe_copy_xcparams(
         }
     }
     p2->overlay = overlay_copy(p->overlay);
+    p2->event_at = p->event_at;
+    p2->event_source = p->event_source;
 
     return p2;
 }

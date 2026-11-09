@@ -2,6 +2,7 @@ package cmd
 
 import (
 	"bytes"
+	"encoding/json"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -11,6 +12,9 @@ import (
 	"github.com/eluv-io/avpipe/broadcastproto/anc"
 	"github.com/eluv-io/avpipe/broadcastproto/anc/venueclock"
 	"github.com/eluv-io/avpipe/broadcastproto/anctest"
+	"github.com/eluv-io/avpipe/goavpipe"
+	"github.com/eluv-io/common-go/media/anc"
+	"github.com/eluv-io/common-go/media/anc/venueclock"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -55,6 +59,21 @@ func TestRunAnc(t *testing.T) {
 	assert.Contains(t, s, "      state:   0-0  clock 11:52 shot - STOPPED\n")
 	assert.Contains(t, s, "clock messages: 1, bad crc: 0, aborted: 0, malformed: 0\n")
 	assert.Contains(t, s, "clock state:   0-0  clock 11:52 shot - STOPPED\n")
+
+	// --events-out: the message becomes one overlay event at the frame that completed it, in ms
+	eventsPath := filepath.Join(t.TempDir(), "events.json")
+	out.Reset()
+	require.NoError(t, runAnc(&out, ts, ancOpts{max: 3, clock: true, quiet: true, eventsOut: eventsPath}))
+	assert.Contains(t, out.String(), "overlay events: 1 written to")
+	var events []goavpipe.OverlayEvent
+	b, err := os.ReadFile(eventsPath)
+	require.NoError(t, err)
+	require.NoError(t, json.Unmarshal(b, &events))
+	require.Len(t, events, 1)
+	assert.Equal(t, int64(3000*1000/90000), events[0].Pts)
+	assert.Equal(t, goavpipe.ClockState{Ms: 712000, Running: false}, *events[0].Slots["clock"].Clock)
+	assert.True(t, events[0].Slots["score"].Hide, "no teams and no score yet")
+	assert.True(t, events[0].Slots["home"].Hide, "no teams yet")
 
 	out.Reset()
 	require.NoError(t, runAnc(&out, ts, ancOpts{max: 2, raw: true}))

@@ -22,10 +22,14 @@
 #include <libavcodec/avcodec.h>
 #include <libavfilter/avfilter.h>
 #include <libavfilter/buffersrc.h>
+#include <libavutil/time.h>
 #include <libswscale/swscale.h>
 
 #include "avpipe_overlay.h"
 #include "elv_log.h"
+
+/* A frame that waits for its event asks the source again after this long */
+#define OV_WAIT_SLICE_US    10000
 
 static char *
 ov_strdup(
@@ -39,7 +43,8 @@ overlay_alloc(
     xcparams_t *params,
     int64_t timescale,
     int nslots,
-    int nevents)
+    int64_t wait_ms,
+    int on_timeout)
 {
     overlay_free(&params->overlay);
 
@@ -48,27 +53,15 @@ overlay_alloc(
         return NULL;
     ov->timescale = timescale;
     ov->nslots = nslots;
-    ov->nevents = nevents;
+    ov->wait_ms = wait_ms;
+    ov->on_timeout = (ov_timeout) on_timeout;
     ov->slots = calloc(nslots > 0 ? nslots : 1, sizeof(ov_slot_t));
-    ov->events = calloc(nevents > 0 ? nevents : 1, sizeof(ov_event_t));
-    if (!ov->slots || !ov->events) {
+    if (!ov->slots) {
         overlay_free(&ov);
         return NULL;
     }
     for (int i = 0; i < nslots; i++)
         ov->slots[i].default_image = OV_IMAGE_HIDDEN;
-    for (int i = 0; i < nevents; i++) {
-        ov_event_t *ev = &ov->events[i];
-        ev->text = calloc(nslots > 0 ? nslots : 1, sizeof(char *));
-        ev->clock = calloc(nslots > 0 ? nslots : 1, sizeof(ov_clock_t));
-        ev->image = calloc(nslots > 0 ? nslots : 1, sizeof(int));
-        if (!ev->text || !ev->clock || !ev->image) {
-            overlay_free(&ov);
-            return NULL;
-        }
-        for (int j = 0; j < nslots; j++)
-            ev->image[j] = OV_IMAGE_DEFAULT;
-    }
     params->overlay = ov;
     return ov;
 }
@@ -136,99 +129,98 @@ overlay_set_slot(
     return eav_success;
 }
 
-int
-overlay_set_event(
-    xcparams_t *params,
-    int index,
-    int64_t seq,
-    int64_t pts,
-    int hidden)
+ov_event_t *
+overlay_event_alloc(
+    int nslots)
 {
-    ov_params_t *ov = params->overlay;
-    if (!ov || index < 0 || index >= ov->nevents)
-        return eav_param;
-    ov->events[index].seq = seq;
-    ov->events[index].pts = pts;
-    ov->events[index].hidden = hidden;
-    return eav_success;
-}
-
-int
-overlay_append_event(
-    xcparams_t *params,
-    int64_t seq,
-    int64_t pts,
-    int hidden)
-{
-    ov_params_t *ov = params->overlay;
-    if (!ov)
-        return -1;
-    if (ov->nevents > 0 && pts < ov->events[ov->nevents - 1].pts) {
-        elv_err("Overlay: appended event seq=%"PRId64" pts=%"PRId64" is before the last event, url=%s",
-            seq, pts, params->url);
-        return -1;
-    }
-    ov_event_t *events = realloc(ov->events, (size_t) (ov->nevents + 1) * sizeof(ov_event_t));
-    if (!events)
-        return -1;
-    ov->events = events;
-
-    ov_event_t *ev = &ov->events[ov->nevents];
-    memset(ev, 0, sizeof(*ev));
-    ev->seq = seq;
-    ev->pts = pts;
-    ev->hidden = hidden;
-    ev->text = calloc(ov->nslots, sizeof(char *));
-    ev->clock = calloc(ov->nslots, sizeof(ov_clock_t));
-    ev->image = calloc(ov->nslots, sizeof(int));
+    ov_event_t *ev = calloc(1, sizeof(*ev));
+    if (!ev)
+        return NULL;
+    int n = nslots > 0 ? nslots : 1;
+    ev->text = calloc(n, sizeof(char *));
+    ev->clock = calloc(n, sizeof(ov_clock_t));
+    ev->image = calloc(n, sizeof(int));
     if (!ev->text || !ev->clock || !ev->image) {
-        free(ev->text);
-        free(ev->clock);
-        free(ev->image);
-        return -1;
+        overlay_event_free(&ev, nslots);
+        return NULL;
     }
-    for (int j = 0; j < ov->nslots; j++)
-        ev->image[j] = OV_IMAGE_DEFAULT;
-    return ov->nevents++;
+    overlay_event_clear(ev, nslots);
+    return ev;
 }
 
 void
-overlay_set_through(
-    xcparams_t *params,
-    int64_t through_pts)
+overlay_event_free(
+    ov_event_t **evp,
+    int nslots)
 {
-    if (params->overlay)
-        params->overlay->through_pts = through_pts;
+    ov_event_t *ev = evp ? *evp : NULL;
+    if (!ev)
+        return;
+    if (ev->text) {
+        for (int j = 0; j < nslots; j++)
+            free(ev->text[j]);
+    }
+    free(ev->text);
+    free(ev->clock);
+    free(ev->image);
+    free(ev);
+    *evp = NULL;
+}
+
+void
+overlay_event_clear(
+    ov_event_t *ev,
+    int nslots)
+{
+    ev->seq = -1;
+    ev->pts = 0;
+    ev->hidden = 0;
+    for (int j = 0; j < nslots; j++) {
+        free(ev->text[j]);
+        ev->text[j] = NULL;
+        ev->clock[j].set = 0;
+        ev->image[j] = OV_IMAGE_DEFAULT;
+    }
+}
+
+void
+overlay_event_set(
+    ov_event_t *ev,
+    int64_t seq,
+    int64_t pts,
+    int hidden)
+{
+    ev->seq = seq;
+    ev->pts = pts;
+    ev->hidden = hidden;
 }
 
 int
-overlay_set_event_text(
-    xcparams_t *params,
-    int event,
+overlay_event_set_text(
+    ov_event_t *ev,
+    int nslots,
     int slot,
     const char *text)
 {
-    ov_params_t *ov = params->overlay;
-    if (!ov || event < 0 || event >= ov->nevents || slot < 0 || slot >= ov->nslots)
+    if (!ev || slot < 0 || slot >= nslots)
         return eav_param;
-    free(ov->events[event].text[slot]);
-    ov->events[event].text[slot] = ov_strdup(text);
+    free(ev->text[slot]);
+    ev->text[slot] = ov_strdup(text);
     return eav_success;
 }
 
 int
-overlay_set_event_clock(
-    xcparams_t *params,
-    int event,
+overlay_event_set_clock(
+    ov_event_t *ev,
+    int nslots,
     int slot,
     int64_t ms,
     int running,
     int up)
 {
-    ov_params_t *ov = params->overlay;
-    if (!ov || event < 0 || event >= ov->nevents || slot < 0 || slot >= ov->nslots)
+    if (!ev || slot < 0 || slot >= nslots)
         return eav_param;
-    ov_clock_t *clock = &ov->events[event].clock[slot];
+    ov_clock_t *clock = &ev->clock[slot];
     clock->set = 1;
     clock->ms = ms;
     clock->running = running;
@@ -237,16 +229,15 @@ overlay_set_event_clock(
 }
 
 int
-overlay_set_event_image(
-    xcparams_t *params,
-    int event,
+overlay_event_set_image(
+    ov_event_t *ev,
+    int nslots,
     int slot,
     int image)
 {
-    ov_params_t *ov = params->overlay;
-    if (!ov || event < 0 || event >= ov->nevents || slot < 0 || slot >= ov->nslots)
+    if (!ev || slot < 0 || slot >= nslots)
         return eav_param;
-    ov->events[event].image[slot] = image;
+    ev->image[slot] = image;
     return eav_success;
 }
 
@@ -258,12 +249,9 @@ overlay_copy(
         return NULL;
 
     xcparams_t tmp = { 0 };
-    ov_params_t *ov = overlay_alloc(&tmp, src->timescale, src->nslots, src->nevents);
+    ov_params_t *ov = overlay_alloc(&tmp, src->timescale, src->nslots, src->wait_ms, src->on_timeout);
     if (!ov)
         return NULL;
-    ov->through_pts = src->through_pts;
-    ov->reader = src->reader;
-    ov->reader_handle = src->reader_handle;
     for (int i = 0; i < src->nslots; i++) {
         ov->slots[i] = src->slots[i];
         ov->slots[i].font_file = ov_strdup(src->slots[i].font_file);
@@ -273,16 +261,6 @@ overlay_copy(
         if (overlay_add_image(&tmp, src->images[i].png, src->images[i].png_len) < 0) {
             overlay_free(&ov);
             return NULL;
-        }
-    }
-    for (int i = 0; i < src->nevents; i++) {
-        ov->events[i].seq = src->events[i].seq;
-        ov->events[i].pts = src->events[i].pts;
-        ov->events[i].hidden = src->events[i].hidden;
-        for (int j = 0; j < src->nslots; j++) {
-            ov->events[i].text[j] = ov_strdup(src->events[i].text[j]);
-            ov->events[i].clock[j] = src->events[i].clock[j];
-            ov->events[i].image[j] = src->events[i].image[j];
         }
     }
     return ov;
@@ -301,18 +279,8 @@ overlay_free(
     }
     for (int i = 0; i < ov->nimages; i++)
         free(ov->images[i].png);
-    for (int i = 0; i < ov->nevents; i++) {
-        if (ov->events[i].text) {
-            for (int j = 0; j < ov->nslots; j++)
-                free(ov->events[i].text[j]);
-            free(ov->events[i].text);
-        }
-        free(ov->events[i].clock);
-        free(ov->events[i].image);
-    }
     free(ov->slots);
     free(ov->images);
-    free(ov->events);
     free(ov);
     *ovp = NULL;
 }
@@ -348,6 +316,14 @@ overlay_validate(
         elv_err("Overlay: no slots, url=%s", url);
         return eav_param;
     }
+    if (!params->event_at) {
+        elv_err("Overlay: no event source, url=%s", url);
+        return eav_param;
+    }
+    if (ov->wait_ms < 0 || (ov->on_timeout != ov_timeout_fail && ov->on_timeout != ov_timeout_hold)) {
+        elv_err("Overlay: invalid wait_ms=%"PRId64" or on_timeout=%d, url=%s", ov->wait_ms, ov->on_timeout, url);
+        return eav_param;
+    }
     for (int i = 0; i < ov->nimages; i++) {
         if (!ov->images[i].png || ov->images[i].png_len <= 0) {
             elv_err("Overlay: image=%d is empty, url=%s", i, url);
@@ -367,7 +343,8 @@ overlay_validate(
                 elv_err("Overlay: slot=%d needs a font file, url=%s", i, url);
                 return eav_param;
             }
-            if (slot->clock_format != ov_clock_mmss && slot->clock_format != ov_clock_hmmss) {
+            if (slot->clock_format != ov_clock_mmss && slot->clock_format != ov_clock_hmmss &&
+                slot->clock_format != ov_clock_game && slot->clock_format != ov_clock_shot) {
                 elv_err("Overlay: slot=%d invalid clock format=%d, url=%s", i, slot->clock_format, url);
                 return eav_param;
             }
@@ -385,19 +362,6 @@ overlay_validate(
         default:
             elv_err("Overlay: slot=%d unknown type=%d, url=%s", i, slot->type, url);
             return eav_param;
-        }
-    }
-    for (int i = 0; i < ov->nevents; i++) {
-        if (i > 0 && ov->events[i].pts < ov->events[i-1].pts) {
-            elv_err("Overlay: events not sorted at index=%d, url=%s", i, url);
-            return eav_param;
-        }
-        for (int j = 0; j < ov->nslots; j++) {
-            int img = ov->events[i].image[j];
-            if (img < OV_IMAGE_DEFAULT || img >= ov->nimages) {
-                elv_err("Overlay: event=%d slot=%d invalid image=%d, url=%s", i, j, img, url);
-                return eav_param;
-            }
         }
     }
     return eav_success;
@@ -719,9 +683,9 @@ overlay_prepare(
     if (!st)
         return eav_mem_alloc;
     decoder_context->overlay = st;
-    st->cursor = -1;
     st->nslots = ov->nslots;
     st->canvas_stale = 1;
+    st->next = overlay_event_alloc(ov->nslots);
     st->text_ctx = calloc(ov->nslots, sizeof(AVFilterContext *));
     st->text_sent = calloc(ov->nslots, sizeof(char *));
     st->slot_rect = calloc((size_t) ov->nslots * 4, sizeof(int));
@@ -733,7 +697,7 @@ overlay_prepare(
     st->fade_start = calloc(ov->nslots, sizeof(int64_t));
     st->fade_scaled = calloc(ov->nslots, sizeof(AVFrame *));
     st->fade_scaled_for = calloc(ov->nslots, sizeof(int));
-    if (!st->text_ctx || !st->text_sent || !st->slot_rect || !st->canvas_row ||
+    if (!st->next || !st->text_ctx || !st->text_sent || !st->slot_rect || !st->canvas_row ||
         !st->slot_scaled || !st->slot_scaled_for || !st->fade_ts || !st->fade_from || !st->fade_start ||
         !st->fade_scaled || !st->fade_scaled_for) {
         overlay_free_state(decoder_context);
@@ -791,9 +755,9 @@ overlay_prepare(
     }
     ov_blend_format(enc->pix_fmt, &st->canvas_fmt);
 
-    elv_log("Overlay: slots=%d images=%d events=%d canvas=%dx%d at %d,%d fmt=%s url=%s",
-        ov->nslots, ov->nimages, ov->nevents, st->canvas_w, st->canvas_h, st->canvas_x, st->canvas_y,
-        av_get_pix_fmt_name(st->canvas_fmt), params->url);
+    elv_log("Overlay: slots=%d images=%d wait_ms=%"PRId64" on_timeout=%s canvas=%dx%d at %d,%d fmt=%s url=%s",
+        ov->nslots, ov->nimages, ov->wait_ms, ov->on_timeout == ov_timeout_hold ? "hold" : "fail",
+        st->canvas_w, st->canvas_h, st->canvas_x, st->canvas_y, av_get_pix_fmt_name(st->canvas_fmt), params->url);
     return eav_success;
 }
 
@@ -945,34 +909,84 @@ overlay_append_filter(
 }
 
 /*
- * Ask the reader for the events up to ts (overlay timescale). The reader blocks until the recording's through
- * pts covers the frame, or fails; a frame is never drawn with events that may be incomplete.
+ * Ask the source for the event in effect at ts (overlay timescale) and make it current. A frame whose event is
+ * not there yet waits in slices, checking the cancel flag, up to wait_ms; then on_timeout decides: fail ends the
+ * job, hold keeps the current event and stops waiting for the rest of the job (frames still ask, and apply an
+ * event once it is there). A frame is never drawn with an event that may still change.
  */
 static int
-ov_fetch(
+ov_ask(
     ov_state_t *st,
     ov_params_t *ov,
     xcparams_t *params,
+    coderctx_t *decoder_context,
     int64_t ts)
 {
-    int64_t after_seq = ov->nevents > 0 ? ov->events[ov->nevents - 1].seq : 0;
+    if (st->ended)
+        return eav_success;
+    int64_t have_seq = st->cur ? st->cur->seq : -1;
 
-    st->fetches++;
-    int rc = ov->reader(ov->reader_handle, params, after_seq, ts);
-    if (rc < 0) {
-        elv_err("Overlay: event source failed rc=%d after_seq=%"PRId64" at_least=%"PRId64" url=%s",
-            rc, after_seq, ts, params->url);
-        return rc == OV_READER_CANCELLED ? eav_cancelled : eav_overlay;
-    }
-    elv_log("Overlay: fetched events=%d through_pts=%"PRId64" after_seq=%"PRId64" at_least=%"PRId64" url=%s",
-        ov->nevents, ov->through_pts, after_seq, ts, params->url);
+    for (;;) {
+        st->asks++;
+        overlay_event_clear(st->next, ov->nslots);
+        int rc = params->event_at(params->event_source, params, EV_KIND_OVERLAY, ts, have_seq, st->next);
+        switch (rc) {
+        case EV_AT_UNCHANGED:
+            st->wait_start_us = 0;
+            st->holding = 0;
+            return eav_success;
+        case EV_AT_NEW: {
+            /* The event before the new one is kept for transitions; its buffer is refilled on the next ask */
+            ov_event_t *spare = st->prev;
+            st->prev = st->cur;
+            st->cur = st->next;
+            st->next = spare ? spare : overlay_event_alloc(ov->nslots);
+            if (!st->next)
+                return eav_mem_alloc;
+            st->wait_start_us = 0;
+            st->holding = 0;
+            elv_log("Overlay: event seq=%"PRId64" pts=%"PRId64" hidden=%d frame_ts=%"PRId64" asks=%d url=%s",
+                st->cur->seq, st->cur->pts, st->cur->hidden, ts, st->asks, params->url);
+            return eav_success;
+        }
+        case EV_AT_ENDED:
+            st->ended = 1;
+            st->wait_start_us = 0;
+            elv_log("Overlay: event source ended at frame_ts=%"PRId64" url=%s", ts, params->url);
+            return eav_success;
+        case EV_AT_NOT_YET:
+            break;
+        case EV_AT_CANCELLED:
+            return eav_cancelled;
+        default:
+            elv_err("Overlay: event source failed rc=%d frame_ts=%"PRId64" have_seq=%"PRId64" url=%s",
+                rc, ts, have_seq, params->url);
+            return eav_overlay;
+        }
 
-    if (ts > ov->through_pts) {
-        elv_err("Overlay: event source stopped short, through_pts=%"PRId64" frame_ts=%"PRId64" url=%s",
-            ov->through_pts, ts, params->url);
-        return eav_overlay;
+        if (st->holding)
+            return eav_success;
+        if (decoder_context->cancelled)
+            return eav_cancelled;
+        int64_t now = av_gettime_relative();
+        if (!st->wait_start_us) {
+            st->wait_start_us = now;
+            st->waits++;
+        }
+        if (now - st->wait_start_us >= ov->wait_ms * 1000) {
+            st->wait_start_us = 0;
+            if (ov->on_timeout == ov_timeout_hold) {
+                elv_warn("Overlay: no event within %"PRId64" ms, holding seq=%"PRId64" frame_ts=%"PRId64" url=%s",
+                    ov->wait_ms, have_seq, ts, params->url);
+                st->holding = 1;
+                return eav_success;
+            }
+            elv_err("Overlay: no event within %"PRId64" ms, frame_ts=%"PRId64" have_seq=%"PRId64" url=%s",
+                ov->wait_ms, ts, have_seq, params->url);
+            return eav_overlay;
+        }
+        av_usleep(OV_WAIT_SLICE_US);
     }
-    return eav_success;
 }
 
 int
@@ -986,8 +1000,6 @@ overlay_bind(
         return eav_success;
 
     st->tb = decoder_context->stream[decoder_context->video_stream_index]->time_base;
-    if (!ov->reader)
-        ov->through_pts = INT64_MAX;
 
     AVFilterGraph *graph = decoder_context->video_filter_graph;
     for (int i = 0; i < ov->nslots; i++) {
@@ -1007,14 +1019,16 @@ overlay_bind(
         }
     }
 
-    elv_log("Overlay: bound timescale=%"PRId64" stream_tb=%d/%d reader=%d through_pts=%"PRId64" url=%s",
-        ov->timescale, st->tb.num, st->tb.den, ov->reader != NULL, ov->through_pts, params->url);
+    elv_log("Overlay: bound timescale=%"PRId64" stream_tb=%d/%d url=%s",
+        ov->timescale, st->tb.num, st->tb.den, params->url);
     return eav_success;
 }
 
 /*
  * The clock's text at elapsed_ms after its event. A countdown shows the second it is in (2.3 s left reads 00:03)
- * and stops at zero; a count-up shows the seconds completed.
+ * and stops at zero; a count-up shows the seconds completed. The game format shows tenths under a minute
+ * (59.9 .. 0.0) and m:ss above, as a venue game clock does; the shot format shows tenths under five seconds and
+ * whole seconds above, as a shot clock does.
  */
 static void
 ov_clock_text(
@@ -1029,9 +1043,20 @@ ov_clock_text(
         ms += clock->up ? elapsed_ms : -elapsed_ms;
     if (ms < 0)
         ms = 0;
+    if ((slot->clock_format == ov_clock_game && ms < 60000) || (slot->clock_format == ov_clock_shot && ms < 5000)) {
+        int64_t tenths = clock->up ? ms / 100 : (ms + 99) / 100;
+        snprintf(buf, buf_sz, "%"PRId64".%"PRId64, tenths / 10, tenths % 10);
+        return;
+    }
     int64_t s = clock->up ? ms / 1000 : (ms + 999) / 1000;
+    if (slot->clock_format == ov_clock_shot) {
+        snprintf(buf, buf_sz, "%"PRId64, s);
+        return;
+    }
     if (slot->clock_format == ov_clock_hmmss)
         snprintf(buf, buf_sz, "%"PRId64":%02"PRId64":%02"PRId64, s / 3600, (s / 60) % 60, s % 60);
+    else if (slot->clock_format == ov_clock_game)
+        snprintf(buf, buf_sz, "%"PRId64":%02"PRId64, s / 60, s % 60);
     else
         snprintf(buf, buf_sz, "%02"PRId64":%02"PRId64, s / 60, s % 60);
 }
@@ -1052,18 +1077,12 @@ overlay_apply(
     int64_t ts = av_rescale_q_rnd(frame->pts, st->tb, ov_tb, AV_ROUND_DOWN);
     st->frame_ts = ts;
 
-    if (ov->reader && ts > ov->through_pts) {
-        int rc = ov_fetch(st, ov, params, ts);
-        if (rc != eav_success)
-            return rc;
-    }
-
-    while (st->cursor + 1 < ov->nevents && ov->events[st->cursor + 1].pts <= ts)
-        st->cursor++;
-    if (st->cursor < 0)
+    int rc = ov_ask(st, ov, params, decoder_context, ts);
+    if (rc != eav_success)
+        return rc;
+    ov_event_t *ev = st->cur;
+    if (!ev)
         return eav_success;
-
-    ov_event_t *ev = &ov->events[st->cursor];
     int64_t elapsed_ms = (ts - ev->pts) * 1000 / ov->timescale;
 
     /* Every slot's wanted value is recomputed per frame (clocks tick); only a change costs anything */
@@ -1076,8 +1095,7 @@ overlay_apply(
                 /* A transition runs from what the previous event showed, whether or not this job drew it, so a
                  * job that starts inside one draws the same frames as a job that ran through it */
                 if (st->fade_ts[i] > 0) {
-                    int from = st->cursor > 0 ? ov_event_image(&ov->events[st->cursor - 1], slot, i)
-                                              : OV_IMAGE_HIDDEN;
+                    int from = st->prev ? ov_event_image(st->prev, slot, i) : OV_IMAGE_HIDDEN;
                     if (from != want) {
                         st->fade_from[i] = from;
                         st->fade_start[i] = ev->pts;
@@ -1085,8 +1103,8 @@ overlay_apply(
                 }
                 st->canvas_row[i] = want;
                 st->canvas_stale = 1;
-                elv_log("Overlay: event=%d event_pts=%"PRId64" frame_ts=%"PRId64" slot=%d image=%d fade=%d url=%s",
-                    st->cursor, ev->pts, ts, i, want, st->fade_from[i] != OV_FADE_NONE, params->url);
+                elv_log("Overlay: seq=%"PRId64" event_pts=%"PRId64" frame_ts=%"PRId64" slot=%d image=%d fade=%d url=%s",
+                    ev->seq, ev->pts, ts, i, want, st->fade_from[i] != OV_FADE_NONE, params->url);
             }
             if (st->fade_from[i] != OV_FADE_NONE) {
                 /* Redrawn on every frame of the fade, and once more with the fade over */
@@ -1119,19 +1137,19 @@ overlay_apply(
         int ret = avfilter_graph_send_command(decoder_context->video_filter_graph,
             st->text_ctx[i]->name, "text", want, res, sizeof(res), 0);
         if (ret < 0) {
-            elv_err("Overlay: failed to set text, event=%d slot=%d ret=%d url=%s",
-                st->cursor, i, ret, params->url);
+            elv_err("Overlay: failed to set text, seq=%"PRId64" slot=%d ret=%d url=%s",
+                ev->seq, i, ret, params->url);
             return eav_overlay;
         }
         free(st->text_sent[i]);
         st->text_sent[i] = strdup(want);
         st->commands++;
         if (slot->type == ov_slot_clock)
-            elv_dbg("Overlay: event=%d frame_ts=%"PRId64" slot=%d clock='%s' url=%s",
-                st->cursor, ts, i, want, params->url);
+            elv_dbg("Overlay: seq=%"PRId64" frame_ts=%"PRId64" slot=%d clock='%s' url=%s",
+                ev->seq, ts, i, want, params->url);
         else
-            elv_log("Overlay: event=%d event_pts=%"PRId64" frame_ts=%"PRId64" slot=%d text='%s' url=%s",
-                st->cursor, ev->pts, ts, i, want, params->url);
+            elv_log("Overlay: seq=%"PRId64" event_pts=%"PRId64" frame_ts=%"PRId64" slot=%d text='%s' url=%s",
+                ev->seq, ev->pts, ts, i, want, params->url);
     }
     return eav_success;
 }
@@ -1193,6 +1211,9 @@ overlay_free_state(
         if (st->fade_scaled)
             av_frame_free(&st->fade_scaled[i]);
     }
+    overlay_event_free(&st->cur, st->nslots);
+    overlay_event_free(&st->prev, st->nslots);
+    overlay_event_free(&st->next, st->nslots);
     av_frame_free(&st->canvas);
     av_frame_free(&st->canvas_rgba);
     sws_freeContext(st->canvas_sws);

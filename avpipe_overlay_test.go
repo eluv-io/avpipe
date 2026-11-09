@@ -2,7 +2,6 @@ package avpipe_test
 
 import (
 	"bytes"
-	"encoding/base64"
 	"errors"
 	"image"
 	"image/color"
@@ -12,6 +11,7 @@ import (
 	"path"
 	"strconv"
 	"strings"
+	"sync"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -66,9 +66,37 @@ func overlayTestFont(t *testing.T) string {
 	return ""
 }
 
+func overlayEvent(seq, pts int64, hidden bool, slots map[string]goavpipe.SlotValue) goavpipe.OverlayEvent {
+	return goavpipe.OverlayEvent{TimedEvent: goavpipe.TimedEvent{Seq: seq, Pts: pts, Kind: goavpipe.KindOverlay},
+		Hidden: hidden, Slots: slots}
+}
+
+func overlayTimed(events []goavpipe.OverlayEvent) []goavpipe.Timed {
+	out := make([]goavpipe.Timed, len(events))
+	for i := range events {
+		out[i] = events[i]
+	}
+	return out
+}
+
+// overlayTextEvents: the clock counts down from 2:00 and stops at 2 s when the score and the marker change, and
+// the overlay is hidden from 3 s. The timescale is the clip's 1/30000.
+func overlayTextEvents() []goavpipe.OverlayEvent {
+	return []goavpipe.OverlayEvent{
+		overlayEvent(1, 0, false, map[string]goavpipe.SlotValue{"score": goavpipe.TextValue("0 - 0"),
+			"home": goavpipe.TextValue("HOME"), "poss": goavpipe.ImageValue("red"),
+			"clock": goavpipe.ClockValue(120000, true)}),
+		overlayEvent(2, 60000, false, map[string]goavpipe.SlotValue{"score": goavpipe.TextValue("1 - 0"),
+			"home": goavpipe.TextValue("HOME"), "poss": goavpipe.ImageValue("green"),
+			"clock": goavpipe.ClockValue(118000, false)}),
+		overlayEvent(3, 90000, true, map[string]goavpipe.SlotValue{"score": goavpipe.TextValue("1 - 0"),
+			"home": goavpipe.TextValue("HOME"), "poss": goavpipe.ImageValue("green"),
+			"clock": goavpipe.ClockValue(118000, false)}),
+	}
+}
+
 // overlayTextParams transcodes the first 4 s of the input with a background image, a possession marker, two
-// text slots and a clock: the clock counts down from 2:00 and stops at 2 s when the score and the marker change,
-// and the overlay is hidden from 3 s.
+// text slots and a clock, the events coming from a static source.
 func overlayTextParams(url, font string, images map[string][]byte) *goavpipe.XcParams {
 	return &goavpipe.XcParams{
 		Format:             "hls",
@@ -95,15 +123,8 @@ func overlayTextParams(url, font string, images map[string][]byte) *goavpipe.XcP
 				{Name: "home", Type: goavpipe.OverlaySlotText, X: 0.05, Y: 0.05, Size: 0.08, Font: font, Color: "yellow"},
 				{Name: "clock", Type: goavpipe.OverlaySlotClock, X: 0.95, Y: 0.05, Size: 0.08, Font: font, Color: "white", Align: "right"},
 			},
-			Events: []goavpipe.OverlayEvent{
-				{Seq: 1, Pts: 0, Data: map[string]any{"score": "0 - 0", "home": "HOME", "poss": "red",
-					"clock": map[string]any{"ms": 120000, "running": true}}},
-				{Seq: 2, Pts: 60000, Data: map[string]any{"score": "1 - 0", "home": "HOME", "poss": "green",
-					"clock": map[string]any{"ms": 118000, "running": false}}},
-				{Seq: 3, Pts: 90000, Hidden: true, Data: map[string]any{"score": "1 - 0", "home": "HOME", "poss": "green",
-					"clock": map[string]any{"ms": 118000, "running": false}}},
-			},
 		},
+		Events: goavpipe.StaticSource(overlayTimed(overlayTextEvents()), nil),
 	}
 }
 
@@ -117,33 +138,59 @@ func TestOverlayTextSlots(t *testing.T) {
 	xcTest(t, path.Join(baseOutPath, fn()), params, nil, true)
 }
 
-// windowSource hands events out a window of media time at a time, after a short wait, the way a source at the
-// live edge would: each call covers atLeast + window.
-type windowSource struct {
+// sealedSource behaves like a source at the live edge: events are sealed up to a pts that advances by window
+// every time a frame past it asks, so the first ask for such a frame is "not yet" and the next succeeds. Assets
+// are served from a map. err, when set, fails every call.
+type sealedSource struct {
+	mu     sync.Mutex
 	events []goavpipe.OverlayEvent
+	assets map[string][]byte
+	seal   int64
 	window int64
-	err    error // returned by every call when set
+	err    error
+	stuck  bool // never seals: every ask past seal is not yet
 	calls  atomic.Int32
+	notYet atomic.Int32
 	closed atomic.Bool
 }
 
-func (s *windowSource) EventsThrough(afterSeq, atLeast int64) ([]goavpipe.OverlayEvent, int64, error) {
+func (s *sealedSource) Kinds() []string { return []string{goavpipe.KindOverlay} }
+
+func (s *sealedSource) At(kind string, pts int64) (goavpipe.Timed, goavpipe.Status, error) {
 	s.calls.Add(1)
 	if s.err != nil {
-		return nil, 0, s.err
+		return nil, goavpipe.StatusReady, s.err
 	}
-	time.Sleep(2 * time.Millisecond)
-	through := atLeast + s.window
-	var out []goavpipe.OverlayEvent
-	for _, e := range s.events {
-		if e.Seq > afterSeq && e.Pts <= through {
-			out = append(out, e)
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if pts > s.seal {
+		s.notYet.Add(1)
+		if !s.stuck {
+			s.seal += s.window
+		}
+		return nil, goavpipe.StatusNotYet, nil
+	}
+	var latest *goavpipe.OverlayEvent
+	for i := range s.events {
+		if s.events[i].Pts <= pts {
+			latest = &s.events[i]
 		}
 	}
-	return out, through, nil
+	if latest == nil {
+		return nil, goavpipe.StatusReady, nil
+	}
+	return *latest, goavpipe.StatusReady, nil
 }
 
-func (s *windowSource) Close() error {
+func (s *sealedSource) Asset(hash string) ([]byte, goavpipe.Status, error) {
+	b, ok := s.assets[hash]
+	if !ok {
+		return nil, goavpipe.StatusReady, errors.New("unknown asset " + hash)
+	}
+	return b, goavpipe.StatusReady, nil
+}
+
+func (s *sealedSource) Close() error {
 	s.closed.Store(true)
 	return nil
 }
@@ -180,8 +227,8 @@ func readDirFiles(t *testing.T, dir string) map[string][]byte {
 	return files
 }
 
-// TestOverlayEventSource checks that events fetched piecemeal through a source while the transcode runs give the
-// same output as the same events given up front.
+// TestOverlayEventSource checks that events that become sealed while the transcode runs, with frames waiting for
+// them, give the same output as the same events known up front.
 func TestOverlayEventSource(t *testing.T) {
 	url := videoBigBuckBunnyPath
 	checkFileExists(t, url)
@@ -193,66 +240,64 @@ func TestOverlayEventSource(t *testing.T) {
 	setFastEncodeParams(ref, true)
 	xcTest(t, refDir, ref, nil, true)
 
-	srcDir := path.Join(baseOutPath, fn(), "source")
+	srcDir := path.Join(baseOutPath, fn(), "sealed")
 	params := overlayTextParams(url, font, images)
 	setFastEncodeParams(params, true)
-	source := &windowSource{events: params.Overlay.Events, window: 15000} // half a second of media per call
-	params.Overlay.Events = nil
-	params.Overlay.ThroughPts = 0
-	params.Overlay.Source = source
+	source := &sealedSource{events: overlayTextEvents(), window: 15000} // half a second of media per seal
+	params.Events = source
 	xcTest(t, srcDir, params, nil, true)
 
-	assert.Greater(t, source.calls.Load(), int32(3), "the source should have been asked several times")
-	assert.True(t, source.closed.Load(), "the source should be closed when Xc returns")
+	assert.Greater(t, source.notYet.Load(), int32(3), "frames waited for the seal several times")
+	assert.True(t, source.closed.Load(), "the source is closed when Xc returns")
 	assertSameMedia(t, refDir, srcDir)
 }
 
-// overlayInlineParams is overlayTextParams with the possession marker delivered as PNG bytes in the events, in
-// both forms a value can take, and a library that holds only the background.
-func overlayInlineParams(url, font string, images map[string][]byte) *goavpipe.XcParams {
-	params := overlayTextParams(url, font, map[string][]byte{"bg": images["bg"]})
-	events := params.Overlay.Events
-	events[0].Data["poss"] = images["red"]
-	events[1].Data["poss"] = map[string]any{"png": base64.StdEncoding.EncodeToString(images["green"])}
-	events[2].Data["poss"] = map[string]any{"png": base64.StdEncoding.EncodeToString(images["green"])}
-	return params
+// overlayHashEvents is overlayTextEvents with the possession marker named by hash, and the assets to go with it.
+func overlayHashEvents(images map[string][]byte) ([]goavpipe.OverlayEvent, map[string][]byte) {
+	events := overlayTextEvents()
+	events[0].Slots["poss"] = goavpipe.ImageHashValue("hash-red")
+	events[1].Slots["poss"] = goavpipe.ImageHashValue("hash-green")
+	events[2].Slots["poss"] = goavpipe.ImageHashValue("hash-green")
+	return events, map[string][]byte{"hash-red": images["red"], "hash-green": images["green"]}
 }
 
-// TestOverlayInlineImages checks that pictures delivered with the events, up front or through a source while the
-// transcode runs, give the same output as the same pictures named from the library.
-func TestOverlayInlineImages(t *testing.T) {
+// TestOverlayHashImages checks that images fetched by hash from the source, up front or at the live edge, give the
+// same output as the same images named from the library.
+func TestOverlayHashImages(t *testing.T) {
 	url := videoBigBuckBunnyPath
 	checkFileExists(t, url)
 	font := overlayTestFont(t)
 	images := overlayTestImages(t)
+	library := map[string][]byte{"bg": images["bg"]}
 
 	refDir := path.Join(baseOutPath, fn(), "library")
 	ref := overlayTextParams(url, font, images)
 	setFastEncodeParams(ref, true)
 	xcTest(t, refDir, ref, nil, true)
 
-	inlineDir := path.Join(baseOutPath, fn(), "inline")
-	params := overlayInlineParams(url, font, images)
+	staticDir := path.Join(baseOutPath, fn(), "static")
+	params := overlayTextParams(url, font, library)
 	setFastEncodeParams(params, true)
-	xcTest(t, inlineDir, params, nil, true)
+	events, assets := overlayHashEvents(images)
+	params.Events = goavpipe.StaticSource(overlayTimed(events), assets)
+	xcTest(t, staticDir, params, nil, true)
 
-	srcDir := path.Join(baseOutPath, fn(), "source")
-	params = overlayInlineParams(url, font, images)
+	srcDir := path.Join(baseOutPath, fn(), "sealed")
+	params = overlayTextParams(url, font, library)
 	setFastEncodeParams(params, true)
-	source := &windowSource{events: params.Overlay.Events, window: 15000}
-	params.Overlay.Events = nil
-	params.Overlay.ThroughPts = 0
-	params.Overlay.Source = source
+	source := &sealedSource{events: events, assets: assets, window: 15000}
+	params.Events = source
 	xcTest(t, srcDir, params, nil, true)
-	assert.Greater(t, source.calls.Load(), int32(3))
+	assert.Greater(t, source.notYet.Load(), int32(3))
 
-	assertSameMedia(t, refDir, inlineDir)
+	assertSameMedia(t, refDir, staticDir)
 	assertSameMedia(t, refDir, srcDir)
 }
 
 // overlayExtractParams extracts single frames of the clip (mjpeg, native size unless the fast params shrink it)
-// with the given overlay.
-func overlayExtractParams(url string, overlay *goavpipe.OverlayParams, pts ...int64) *goavpipe.XcParams {
+// with the given overlay and events.
+func overlayExtractParams(url string, overlay *goavpipe.OverlayParams, events []goavpipe.OverlayEvent,
+	pts ...int64) *goavpipe.XcParams {
 	params := &goavpipe.XcParams{
 		Format:                 "image2",
 		AudioBitrate:           128000,
@@ -278,6 +323,9 @@ func overlayExtractParams(url string, overlay *goavpipe.OverlayParams, pts ...in
 		Url:                    url,
 		DebugFrameLevel:        debugFrameLevel,
 		Overlay:                overlay,
+	}
+	if overlay != nil {
+		params.Events = goavpipe.StaticSource(overlayTimed(events), nil, goavpipe.KindOverlay)
 	}
 	params.ExtractImagesTs = pts
 	setFastEncodeParams(params, true)
@@ -325,7 +373,8 @@ func TestOverlayFadeFrames(t *testing.T) {
 	images := overlayTestImages(t)
 
 	outPath := path.Join(baseOutPath, fn(), "default")
-	params := overlayExtractParams(url, overlayTextParams(url, font, images).Overlay, overlayFrame15, overlayFrame25)
+	overlay := overlayTextParams(url, font, images).Overlay
+	params := overlayExtractParams(url, overlay, overlayTextEvents(), overlayFrame15, overlayFrame25)
 	xcTest2(t, outPath, params, nil)
 	before := overlayMarker(t, outPath, overlayFrame15)
 	mid := overlayMarker(t, outPath, overlayFrame25)
@@ -338,7 +387,7 @@ func TestOverlayFadeFrames(t *testing.T) {
 	// Transition timing comes from the overlay timescale, not the encoder time base
 	tbPath := path.Join(baseOutPath, fn(), "tb")
 	// Extract pts are in the output time base: 2.5 s is 2566 at 1/1000 (the clip starts at 66 ms)
-	params = overlayExtractParams(url, overlayTextParams(url, font, images).Overlay, 2566)
+	params = overlayExtractParams(url, overlayTextParams(url, font, images).Overlay, overlayTextEvents(), 2566)
 	params.VideoTimeBase = 1000
 	xcTest2(t, tbPath, params, nil)
 	midTb := overlayMarker(t, tbPath, -1) // named by its pts in the 1/1000 output base
@@ -355,14 +404,15 @@ func TestOverlayAlphaBlend(t *testing.T) {
 	images := overlayTestImages(t)
 
 	plainPath := path.Join(baseOutPath, fn(), "plain")
-	xcTest2(t, plainPath, overlayExtractParams(url, nil, overlayFrame12s), nil)
+	xcTest2(t, plainPath, overlayExtractParams(url, nil, nil, overlayFrame12s), nil)
 	under := overlayMarker(t, plainPath, overlayFrame12s)
 
 	overlay := overlayTextParams(url, font, images).Overlay
 	overlay.Slots[0].Default = "" // no background bar under the marker: the video is what is underneath
-	overlay.Events = []goavpipe.OverlayEvent{{Seq: 1, Pts: 0, Data: map[string]any{"poss": "half"}}}
+	events := []goavpipe.OverlayEvent{overlayEvent(1, 0, false,
+		map[string]goavpipe.SlotValue{"poss": goavpipe.ImageValue("half")})}
 	overPath := path.Join(baseOutPath, fn(), "half")
-	xcTest2(t, overPath, overlayExtractParams(url, overlay, overlayFrame12s), nil)
+	xcTest2(t, overPath, overlayExtractParams(url, overlay, events, overlayFrame12s), nil)
 	over := overlayMarker(t, overPath, overlayFrame12s)
 
 	t.Logf("under %v, with half-white %v", under, over)
@@ -375,21 +425,55 @@ func TestOverlayAlphaBlend(t *testing.T) {
 	}
 }
 
-// TestOverlayInlineImageBad checks that a picture that is not a PNG is rejected before any output.
-func TestOverlayInlineImageBad(t *testing.T) {
+// TestOverlayBadEvents checks that an event that does not fit the layout, or an asset that is not a PNG, fails the
+// job with EAV_OVERLAY, and that the layout itself is checked before any output.
+func TestOverlayBadEvents(t *testing.T) {
 	url := videoBigBuckBunnyPath
 	checkFileExists(t, url)
 	font := overlayTestFont(t)
+	images := overlayTestImages(t)
 
-	outDir := path.Join(baseOutPath, fn())
-	params := overlayInlineParams(url, font, overlayTestImages(t))
-	params.Overlay.Events[0].Data["poss"] = []byte("not a png")
-	setFastEncodeParams(params, true)
+	run := func(name string, change func(p *goavpipe.XcParams)) error {
+		outDir := path.Join(baseOutPath, fn(), name)
+		params := overlayTextParams(url, font, images)
+		setFastEncodeParams(params, true)
+		change(params)
+		boilerplate(t, outDir, url)
+		return avpipe.Xc(params)
+	}
 
-	boilerplate(t, outDir, url)
-	err := avpipe.Xc(params)
-	require.Error(t, err)
-	assert.True(t, errors.Is(err, avpipe.EAV_PARAM), "got %v", err)
+	err := run("unknown-slot", func(p *goavpipe.XcParams) {
+		events := overlayTextEvents()
+		events[0].Slots["away"] = goavpipe.TextValue("AWAY")
+		p.Events = goavpipe.StaticSource(overlayTimed(events), nil)
+	})
+	assert.True(t, errors.Is(err, avpipe.EAV_OVERLAY), "unknown slot: got %v", err)
+
+	err = run("bad-asset", func(p *goavpipe.XcParams) {
+		events, assets := overlayHashEvents(images)
+		assets["hash-red"] = []byte("not a png")
+		p.Events = goavpipe.StaticSource(overlayTimed(events), assets)
+	})
+	assert.True(t, errors.Is(err, avpipe.EAV_OVERLAY), "bad asset: got %v", err)
+
+	err = run("missing-asset", func(p *goavpipe.XcParams) {
+		events, _ := overlayHashEvents(images)
+		p.Events = goavpipe.StaticSource(overlayTimed(events), nil)
+	})
+	assert.True(t, errors.Is(err, avpipe.EAV_OVERLAY), "missing asset: got %v", err)
+
+	err = run("bad-library-image", func(p *goavpipe.XcParams) {
+		p.Overlay.Images = map[string][]byte{"bg": []byte("not a png")}
+	})
+	assert.True(t, errors.Is(err, avpipe.EAV_PARAM), "bad library image: got %v", err)
+
+	err = run("no-source", func(p *goavpipe.XcParams) { p.Events = nil })
+	assert.True(t, errors.Is(err, avpipe.EAV_PARAM), "no source: got %v", err)
+
+	err = run("wrong-kind", func(p *goavpipe.XcParams) {
+		p.Events = goavpipe.StaticSource(nil, nil, goavpipe.KindVerticalCrop)
+	})
+	assert.True(t, errors.Is(err, avpipe.EAV_PARAM), "source without the overlay kind: got %v", err)
 }
 
 // TestOverlayEventSourceError checks that a failing source fails the transcode with EAV_OVERLAY.
@@ -401,13 +485,74 @@ func TestOverlayEventSourceError(t *testing.T) {
 	outDir := path.Join(baseOutPath, fn())
 	params := overlayTextParams(url, font, overlayTestImages(t))
 	setFastEncodeParams(params, true)
-	source := &windowSource{err: errors.New("source down")}
-	params.Overlay.Events = nil
-	params.Overlay.Source = source
+	source := &sealedSource{err: errors.New("source down")}
+	params.Events = source
 
 	boilerplate(t, outDir, url)
 	err := avpipe.Xc(params)
 	require.Error(t, err)
 	assert.True(t, errors.Is(err, avpipe.EAV_OVERLAY), "got %v", err)
+	assert.True(t, source.closed.Load())
+}
+
+// TestOverlayTimeout: a source that never seals fails the job after WaitMs with the default policy, and with
+// OnTimeout hold the job runs through with the event it has.
+func TestOverlayTimeout(t *testing.T) {
+	url := videoBigBuckBunnyPath
+	checkFileExists(t, url)
+	font := overlayTestFont(t)
+	images := overlayTestImages(t)
+
+	failDir := path.Join(baseOutPath, fn(), "fail")
+	params := overlayTextParams(url, font, images)
+	setFastEncodeParams(params, true)
+	params.Overlay.WaitMs = 300
+	// Sealed through the first event only: the frame after 1 s waits for the second and gives up
+	source := &sealedSource{events: overlayTextEvents(), seal: 30000, stuck: true}
+	params.Events = source
+	boilerplate(t, failDir, url)
+	start := time.Now()
+	err := avpipe.Xc(params)
+	assert.True(t, errors.Is(err, avpipe.EAV_OVERLAY), "got %v", err)
+	assert.Less(t, time.Since(start), 10*time.Second, "gave up after the wait budget")
+	assert.Greater(t, source.notYet.Load(), int32(5), "asked again in slices while waiting")
+
+	holdDir := path.Join(baseOutPath, fn(), "hold")
+	params = overlayTextParams(url, font, images)
+	setFastEncodeParams(params, true)
+	params.Overlay.WaitMs = 300
+	params.Overlay.OnTimeout = goavpipe.OverlayTimeoutHold
+	source = &sealedSource{events: overlayTextEvents(), seal: 30000, stuck: true}
+	params.Events = source
+	xcTest(t, holdDir, params, nil, true)
+	assert.True(t, source.closed.Load())
+}
+
+// TestOverlayCancelWhileWaiting: XcCancel ends a job that is waiting for an event, with EAV_CANCELLED, well before
+// the wait budget.
+func TestOverlayCancelWhileWaiting(t *testing.T) {
+	url := videoBigBuckBunnyPath
+	checkFileExists(t, url)
+	font := overlayTestFont(t)
+
+	outDir := path.Join(baseOutPath, fn())
+	params := overlayTextParams(url, font, overlayTestImages(t))
+	setFastEncodeParams(params, true)
+	params.Overlay.WaitMs = 60000
+	source := &sealedSource{events: overlayTextEvents(), seal: 30000, stuck: true}
+	params.Events = source
+	boilerplate(t, outDir, url)
+
+	handle, err := avpipe.XcInit(params)
+	require.NoError(t, err)
+	go func() {
+		time.Sleep(500 * time.Millisecond)
+		assert.NoError(t, avpipe.XcCancel(handle))
+	}()
+	start := time.Now()
+	err = avpipe.XcRun(handle)
+	assert.True(t, errors.Is(err, avpipe.EAV_CANCELLED), "got %v", err)
+	assert.Less(t, time.Since(start), 10*time.Second)
+	require.NoError(t, avpipe.XcFini(handle))
 	assert.True(t, source.closed.Load())
 }

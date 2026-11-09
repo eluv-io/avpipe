@@ -7,16 +7,59 @@ import (
 	"os"
 	"strconv"
 	"strings"
+	"sync"
 
 	"github.com/eluv-io/avpipe"
 	"github.com/eluv-io/avpipe/broadcastproto/transport"
 	"github.com/eluv-io/avpipe/goavpipe"
+	"github.com/eluv-io/avpipe/goavpipe/stamp"
 	"github.com/spf13/cobra"
 )
 
 // elvxcInputOpener implements goavpipe.InputOpener
 type elvxcInputOpener struct {
 	url string
+	anc *ancFeed // with --overlay-anc: the first input opened feeds its ancillary data to the overlay stamper
+}
+
+// ancFeed is the in-process stamper of --overlay-anc: the ST 2038 stats of one input become overlay events in a
+// log every job of the run reads. With --threads the inputs all carry the same feed, so the first one opened is
+// the one that stamps; its close ends the log, so no job waits past the last frame.
+type ancFeed struct {
+	stamper *stamp.ANC
+	log     *stamp.Log
+	mu      sync.Mutex
+	claimed bool
+}
+
+// claim gives the feed to the first caller and nil to the rest.
+func (a *ancFeed) claim() *ancFeed {
+	if a == nil {
+		return nil
+	}
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	if a.claimed {
+		return nil
+	}
+	a.claimed = true
+	return a
+}
+
+func (a *ancFeed) stat(statArgs interface{}) {
+	if a != nil {
+		a.stamper.Feed(statArgs.(*goavpipe.AncPacket))
+	}
+}
+
+func (a *ancFeed) end() {
+	if a != nil {
+		a.log.End(goavpipe.KindOverlay)
+		s := a.stamper.Stats
+		st := a.stamper.State()
+		log.Info("AVCMD overlay-anc done", "packets", s.Packets, "dropped", s.Dropped, "messages", s.Messages,
+			"events", s.Events, "bad_crc", s.BadCRC, "errors", s.Errors, "state", st.String())
+	}
 }
 
 func (io *elvxcInputOpener) Open(fd int64, url string) (goavpipe.InputHandler, error) {
@@ -24,7 +67,7 @@ func (io *elvxcInputOpener) Open(fd int64, url string) (goavpipe.InputHandler, e
 
 	switch {
 	case strings.HasPrefix(url, "rtmp://"), strings.HasPrefix(url, "udp://"), strings.HasPrefix(url, "srt://"), strings.HasPrefix(url, "rtp://"):
-		return &noopElvxcInput{}, nil
+		return &noopElvxcInput{anc: io.anc.claim()}, nil
 	}
 
 	f, err := os.OpenFile(url, os.O_RDONLY, 0755)
@@ -36,16 +79,19 @@ func (io *elvxcInputOpener) Open(fd int64, url string) (goavpipe.InputHandler, e
 	excInput := &elvxcInput{
 		file: f,
 		url:  url,
+		anc:  io.anc.claim(),
 	}
 
 	return excInput, nil
 }
 
-type noopElvxcInput struct{}
+type noopElvxcInput struct {
+	anc *ancFeed
+}
 
 func (io *noopElvxcInput) Read(buf []byte) (int, error)                 { return 0, nil }
 func (io *noopElvxcInput) Seek(offset int64, whence int) (int64, error) { return 0, nil }
-func (io *noopElvxcInput) Close() error                                 { return nil }
+func (io *noopElvxcInput) Close() error                                 { io.anc.end(); return nil }
 func (io *noopElvxcInput) Size() int64                                  { return 0 }
 func (i *noopElvxcInput) Stat(streamIndex int, statType goavpipe.AVStatType, statArgs interface{}) error {
 	switch statType {
@@ -71,6 +117,7 @@ func (i *noopElvxcInput) Stat(streamIndex int, statType goavpipe.AVStatType, sta
 	case goavpipe.AV_IN_STAT_DATA_ANC:
 		anc := statArgs.(*goavpipe.AncPacket)
 		log.Debug("AVCMD InputHandler.Stat", "anc pts", anc.Pts, "size", len(anc.Payload), "streamIndex", streamIndex)
+		i.anc.stat(statArgs)
 	}
 
 	return nil
@@ -80,6 +127,7 @@ func (i *noopElvxcInput) Stat(streamIndex int, statType goavpipe.AVStatType, sta
 type elvxcInput struct {
 	url  string
 	file *os.File // Input file
+	anc  *ancFeed
 }
 
 func (i *elvxcInput) Read(buf []byte) (int, error) {
@@ -103,6 +151,7 @@ func (i *elvxcInput) Seek(offset int64, whence int) (int64, error) {
 }
 
 func (i *elvxcInput) Close() error {
+	i.anc.end()
 	if i.url[0:4] == "rtmp" {
 		return nil
 	}
@@ -143,6 +192,7 @@ func (i *elvxcInput) Stat(streamIndex int, statType goavpipe.AVStatType, statArg
 	case goavpipe.AV_IN_STAT_DATA_ANC:
 		anc := statArgs.(*goavpipe.AncPacket)
 		log.Debug("AVCMD InputHandler.Stat", "anc pts", anc.Pts, "size", len(anc.Payload), "streamIndex", streamIndex)
+		i.anc.stat(statArgs)
 	}
 
 	return nil
@@ -402,6 +452,8 @@ func InitTranscode(cmdRoot *cobra.Command) error {
 	cmdTranscode.PersistentFlags().String("overlay", "", "Overlay spec (JSON): image library, slots and events with times in seconds. Image and font paths are relative to the spec file.")
 	cmdTranscode.PersistentFlags().String("overlay-events", "", "File or FIFO of JSON-line patches ({\"data\": {...}, \"hidden\": bool}) applied to the overlay as they arrive, each stamped at the frame being transcoded.")
 	cmdTranscode.PersistentFlags().String("overlay-log", "", "Write every stamped overlay event to this file as JSON lines.")
+	cmdTranscode.PersistentFlags().Bool("overlay-anc", false, "Drive the overlay from the input's ST 2038 venue clock feed: slots named home, away, score, period, clock (a clock slot) and shot are filled from it, stamped at the frame that carried each message.")
+	cmdTranscode.PersistentFlags().String("overlay-render", "", "With --overlay-anc: render the board as one picture through an external renderer, request-fifo,result-fifo (JSON lines {hash, state} out, {hash, png} back); the layout's board image slot shows it and the clock slot is drawn beside it.")
 	cmdTranscode.PersistentFlags().Int32("vertical", 0, "Vertical video crop type (0 - none, 1 - 32bpf).")
 	cmdTranscode.PersistentFlags().StringP("vertical-data", "", "", "Path to binary file with per-frame crop data (4 bytes per frame, uint32 LE). Each value is the crop window centre as a fraction of the scaled frame width, denominator 10000 (0=left, 5000=centre, 10000=right).")
 	cmdTranscode.PersistentFlags().StringP("fade", "", "", "Fade filter ('in' or 'out').")
@@ -933,16 +985,44 @@ func doTranscode(cmd *cobra.Command, args []string) error {
 		return err
 	}
 
-	// Overlay: the spec gives the layout and any fixed events; with --overlay-events the events come from a
-	// stamper that every job of this run shares, so they all switch on the same frame.
+	// Overlay: the spec gives the layout and any fixed events, served by a static source; with --overlay-events
+	// the events come from a stamper that every job of this run shares, so they all switch on the same frame;
+	// with --overlay-anc they come from the input's own venue clock feed.
 	var stamper *overlayStamper
+	var feed *ancFeed
+	overlayANC, _ := cmd.Flags().GetBool("overlay-anc")
 	if specPath := cmd.Flag("overlay").Value.String(); specPath != "" {
-		ov, spec, err := loadOverlaySpec(specPath)
+		ov, events, spec, err := loadOverlaySpec(specPath)
 		if err != nil {
 			return err
 		}
 		params.Overlay = ov
-		if eventsPath := cmd.Flag("overlay-events").Value.String(); eventsPath != "" {
+		if eventsPath := cmd.Flag("overlay-events").Value.String(); overlayANC && eventsPath != "" {
+			return fmt.Errorf("--overlay-anc and --overlay-events are exclusive")
+		} else if overlayANC {
+			eventLog := stamp.NewLog(goavpipe.KindOverlay)
+			var lastSeq int64
+			for _, e := range events {
+				if err := eventLog.Append(e); err != nil {
+					return fmt.Errorf("overlay events: %w", err)
+				}
+				lastSeq = e.Seq
+			}
+			var mapping stamp.Mapper = venueMappingFor(ov)
+			if renderSpec := cmd.Flag("overlay-render").Value.String(); renderSpec != "" {
+				client, err := openRenderClient(renderSpec, eventLog)
+				if err != nil {
+					return err
+				}
+				defer client.close()
+				if mapping, err = renderMappingFor(ov, client.render); err != nil {
+					return err
+				}
+			}
+			ancStamper := stamp.NewANC(eventLog, overlayTimescale, mapping)
+			ancStamper.SetSeq(lastSeq)
+			feed = &ancFeed{stamper: ancStamper, log: eventLog}
+		} else if eventsPath != "" {
 			src, err := openOverlayEvents(eventsPath)
 			if err != nil {
 				return fmt.Errorf("overlay events: %w", err)
@@ -956,25 +1036,28 @@ func doTranscode(cmd *cobra.Command, args []string) error {
 				defer f.Close()
 				eventLog = f
 			}
-			stamper = newOverlayStamper(ov.Events, spec.DelayMs, src, eventLog, ov.Slots)
-			params.Overlay.Events = nil
+			stamper = newOverlayStamper(ov, events, spec.DelayMs, src, eventLog)
+		} else {
+			params.Events = goavpipe.StaticSource(overlayTimed(events), nil, goavpipe.KindOverlay)
 		}
 	}
 
 	// The global input opener is used for stats - if not set, some handlers will fail (eg. mpegts Open)
-	goavpipe.InitIOHandler(&elvxcInputOpener{url: filename}, nil)
+	goavpipe.InitIOHandler(&elvxcInputOpener{url: filename, anc: feed}, nil)
 
 	outOpener := &elvxcOutputOpener{dir: dir}
 	done := make(chan interface{})
 
 	for i := 0; i < int(nThreads); i++ {
 		jobParams := params
-		if stamper != nil {
+		if stamper != nil || feed != nil {
 			// Each job owns its source handle: avpipe closes it when the job ends
 			p := *params
-			ov := *params.Overlay
-			ov.Source = stamper.handle()
-			p.Overlay = &ov
+			if stamper != nil {
+				p.Events = stamper.handle()
+			} else {
+				p.Events = feed.log.Source(0)
+			}
 			jobParams = &p
 		}
 		go func(params *goavpipe.XcParams, filename string) {

@@ -1068,11 +1068,15 @@ func Xc(params *goavpipe.XcParams) error {
 		return EAV_PARAM
 	}
 
-	// The overlay event source is owned here: closed and its handle deleted once xc returns
-	overlaySource := newOverlaySource(params)
-	if overlaySource != nil {
-		initCOverlaySource(cparams, overlaySource)
-		defer overlaySource.release()
+	// The event source is owned here: closed and its handle deleted once xc returns
+	eventSource, err := newEventSource(params)
+	if err != nil {
+		goavpipe.Log.Error(op, err, "reason", "bad params", "XcParams", params)
+		return EAV_PARAM
+	}
+	if eventSource != nil {
+		initCEventSource(cparams, eventSource)
+		defer eventSource.release()
 	}
 
 	rc := C.xc((*C.xcparams_t)(unsafe.Pointer(cparams)))
@@ -1357,8 +1361,8 @@ var cancelableInputOpeners sync.Map // int32 handle -> cancelableInputOpener
 // xcJob represents the state of an avpipe 'xc' job
 // PENDING(SS) - currently only URL mapping but planning to consolidate all job state here
 type xcJob struct {
-	url           string
-	overlaySource *overlaySourceHandle // closed by XcCancel, released by XcFini
+	url         string
+	eventSource *eventSourceHandle // closed by XcCancel, released by XcFini
 }
 
 var (
@@ -1410,12 +1414,17 @@ func XcInit(params *goavpipe.XcParams) (handle int32, retErr error) {
 	}
 	goavpipe.Log.Debug(op, "XcParams", params)
 
-	job := &xcJob{url: params.Url, overlaySource: newOverlaySource(params)}
+	eventSource, err := newEventSource(params)
+	if err != nil {
+		goavpipe.Log.Error(op, err, "reason", "bad params", "XcParams", params)
+		return -1, EAV_PARAM
+	}
+	job := &xcJob{url: params.Url, eventSource: eventSource}
 	defer func() {
 		if retErr != nil {
 			// Failures don't return a handle so XcFini cannot be called
-			if job.overlaySource != nil {
-				job.overlaySource.release()
+			if job.eventSource != nil {
+				job.eventSource.release()
 			}
 			goavpipe.Globals.RemoveURLHandlers(job.url)
 		}
@@ -1456,7 +1465,7 @@ func XcInit(params *goavpipe.XcParams) (handle int32, retErr error) {
 		goavpipe.Log.Error(op, err, "reason", "bad params", "XcParams", params)
 		return -1, EAV_PARAM
 	}
-	initCOverlaySource(cparams, job.overlaySource)
+	initCEventSource(cparams, job.eventSource)
 
 	var cHandle C.int32_t
 	rc := C.xc_init((*C.xcparams_t)(unsafe.Pointer(cparams)), (*C.int32_t)(unsafe.Pointer(&cHandle)))
@@ -1543,8 +1552,8 @@ func XcFini(handle int32) error {
 	}
 
 	goavpipe.Globals.RemoveURLHandlers(job.url)
-	if job.overlaySource != nil {
-		job.overlaySource.release()
+	if job.eventSource != nil {
+		job.eventSource.release()
 	}
 	return nil
 }
@@ -1570,8 +1579,8 @@ func XcCancel(handle int32) error {
 	if v, ok := cancelableInputOpeners.Load(handle); ok {
 		v.(cancelableInputOpener).CancelInput()
 	}
-	if job, ok := getXCJob(handle); ok && job.overlaySource != nil {
-		job.overlaySource.cancel()
+	if job, ok := getXCJob(handle); ok && job.eventSource != nil {
+		job.eventSource.cancel()
 	}
 	if rc == 0 {
 		return nil
