@@ -30,7 +30,24 @@ const (
 	AV_IN_STAT_MPEGTS                   = 13
 	AV_IN_STAT_MPEGTS_START             = 14
 	AV_IN_STAT_MPEGTS_BYTES_WRITTEN     = 15
+	AV_IN_STAT_DATA_ANC                 = 16 // in_stat_data_anc in avpipe_xc.h; the argument is *AncPacket
 )
+
+// AncPacket is the argument of AV_IN_STAT_DATA_ANC: one SMPTE ST 2038 PES packet from the input, carrying the
+// ancillary data packets of one video frame bit-packed as the standard lays them out. avpipe does not parse the
+// payload. The stat fires once per PES packet, in input order, from a delivery goroutine that is fed by the read
+// loop through a bounded queue, so it may arrive after other stats of later frames. On a live input (udp, srt,
+// rtp, rtmp) a consumer that falls behind loses packets rather than stalling the input: Dropped counts the packets
+// dropped between the previous delivered one and this one. On a file input the read loop waits instead and
+// Dropped is always 0. Pts and Dts are in the data stream's time base, which is 1/90000 for an MPEG-TS input.
+type AncPacket struct {
+	Pts         int64
+	Dts         int64
+	TimeBaseNum int
+	TimeBaseDen int
+	Payload     []byte
+	Dropped     int
+}
 
 func (a AVStatType) Name() string {
 	switch a {
@@ -64,6 +81,8 @@ func (a AVStatType) Name() string {
 		return "AV_IN_STAT_MPEGTS_START"
 	case AV_IN_STAT_MPEGTS_BYTES_WRITTEN:
 		return "AV_IN_STAT_MPEGTS_BYTES_WRITTEN"
+	case AV_IN_STAT_DATA_ANC:
+		return "AV_IN_STAT_DATA_ANC"
 	default:
 		return fmt.Sprintf("Unknown(%d)", a)
 	}
@@ -355,6 +374,7 @@ type XcParams struct {
 	BitDepth               int32       `json:"bitdepth,omitempty"`
 	PreserveDolbyVision    bool        `json:"preserve_dolby_vision,omitempty"`
 	SyncAudioToStreamId    int         `json:"sync_audio_to_stream_id"`
+	AncStreamId            int         `json:"anc_stream_id,omitempty"` // Stream id (TS PID) of the SMPTE ST 2038 data stream when the PMT does not mark it; 0 = the smpte_2038 stream
 	ForceEqualFDuration    bool        `json:"force_equal_frame_duration,omitempty"`
 	MuxingSpec             string      `json:"muxing_spec,omitempty"`
 	Listen                 bool        `json:"listen"`

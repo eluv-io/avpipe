@@ -68,6 +68,9 @@ func (i *noopElvxcInput) Stat(streamIndex int, statType goavpipe.AVStatType, sta
 		log.Info("AVCMD InputHandler.Stat", "scte35", statArgs, "streamIndex", streamIndex)
 	case goavpipe.AV_IN_STAT_MPEGTS:
 		log.Info("AVCMD InputHandler.Stat", "mpegts", statArgs, "streamIndex", streamIndex)
+	case goavpipe.AV_IN_STAT_DATA_ANC:
+		anc := statArgs.(*goavpipe.AncPacket)
+		log.Debug("AVCMD InputHandler.Stat", "anc pts", anc.Pts, "size", len(anc.Payload), "streamIndex", streamIndex)
 	}
 
 	return nil
@@ -137,6 +140,9 @@ func (i *elvxcInput) Stat(streamIndex int, statType goavpipe.AVStatType, statArg
 		log.Info("AVCMD InputHandler.Stat", "scte35", statArgs, "streamIndex", streamIndex)
 	case goavpipe.AV_IN_STAT_MPEGTS:
 		log.Info("AVCMD InputHandler.Stat", "mpegts", statArgs, "streamIndex", streamIndex)
+	case goavpipe.AV_IN_STAT_DATA_ANC:
+		anc := statArgs.(*goavpipe.AncPacket)
+		log.Debug("AVCMD InputHandler.Stat", "anc pts", anc.Pts, "size", len(anc.Payload), "streamIndex", streamIndex)
 	}
 
 	return nil
@@ -346,6 +352,7 @@ func InitTranscode(cmdRoot *cobra.Command) error {
 	cmdTranscode.PersistentFlags().StringP("preset", "", "medium", "Encoding speed/quality preset. Software encoders accept ultrafast..veryslow; NVIDIA accepts p1..p7 and maps the software preset names to p1..p7.")
 	cmdTranscode.PersistentFlags().Int64P("start-time-ts", "", 0, "offset to start transcoding")
 	cmdTranscode.PersistentFlags().Int32P("stream-id", "", -1, "if it is valid it will be used to transcode elementary stream with that stream-id")
+	cmdTranscode.PersistentFlags().Int("anc-stream-id", 0, "stream id (TS PID) of the SMPTE ST 2038 data stream when the PMT does not mark it; 0 = the smpte_2038 stream")
 	cmdTranscode.PersistentFlags().Int64P("start-pts", "", 0, "starting PTS for output.")
 	cmdTranscode.PersistentFlags().Int32P("sample-rate", "", -1, "For aac output sample rate is set to input sample rate and this parameter is ignored.")
 	cmdTranscode.PersistentFlags().Int32P("start-segment", "", 1, "start segment number >= 1.")
@@ -544,6 +551,11 @@ func doTranscode(cmd *cobra.Command, args []string) error {
 	streamId, err := cmd.Flags().GetInt32("stream-id")
 	if err != nil {
 		return fmt.Errorf("stream-id is not valid, must be >= 0")
+	}
+
+	ancStreamId, err := cmd.Flags().GetInt("anc-stream-id")
+	if err != nil {
+		return fmt.Errorf("anc-stream-id is not valid")
 	}
 
 	xcTypeStr := cmd.Flag("xc-type").Value.String()
@@ -879,6 +891,7 @@ func doTranscode(cmd *cobra.Command, args []string) error {
 		PreserveDolbyVision:    preserveDolbyVision,
 		ForceEqualFDuration:    forceEqualFrameDuration,
 		SyncAudioToStreamId:    int(syncAudioToStreamId),
+		AncStreamId:            ancStreamId,
 		StreamId:               streamId,
 		Listen:                 listen,
 		ConnectionTimeout:      int(connectionTimeout),

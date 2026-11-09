@@ -134,6 +134,8 @@ check_stream_index(
         return eav_param;
     if (selected_audio_index(params, decoder_context->data_scte35_stream_index) >= 0)
         return eav_param;
+    if (selected_audio_index(params, decoder_context->data_anc_stream_index) >= 0)
+        return eav_param;
     if (selected_audio_index(params, decoder_context->data_stream_index) >= 0)
         return eav_param;
 
@@ -198,6 +200,7 @@ prepare_decoder(
     decoder_context->inctx = inctx;
     decoder_context->video_stream_index = -1;
     decoder_context->data_scte35_stream_index = -1;
+    decoder_context->data_anc_stream_index = -1;
     decoder_context->data_stream_index = -1;
     for (int j=0; j<MAX_STREAMS; j++) {
         decoder_context->audio_stream_index[j] = -1;
@@ -389,12 +392,28 @@ prepare_decoder(
                 if (check_stream_index(params, decoder_context) != eav_success)
                     return eav_param;
                 break;
-            default:
-                // Unrecognized data stream
-                decoder_context->data_stream_index = i;
-                elv_dbg("DATA STREAM UNRECOGNIZED %d, codec_id=%s, stream_id=%d, url=%s",
+            case AV_CODEC_ID_SMPTE_2038:
+                decoder_context->data_anc_stream_index = i;
+                elv_dbg("DATA STREAM ST 2038 ANC %d, codec_id=%s, stream_id=%d, url=%s",
                     i, avcodec_get_name(decoder_context->codec_parameters[i]->codec_id),
                     decoder_context->stream[i]->id, url);
+                if (check_stream_index(params, decoder_context) != eav_success)
+                    return eav_param;
+                break;
+            default:
+                if (params && params->anc_stream_id > 0 && decoder_context->stream[i]->id == params->anc_stream_id) {
+                    // ST 2038 stream the PMT does not mark as such, named by the caller
+                    decoder_context->data_anc_stream_index = i;
+                    elv_dbg("DATA STREAM ST 2038 ANC BY ID %d, codec_id=%s, stream_id=%d, url=%s",
+                        i, avcodec_get_name(decoder_context->codec_parameters[i]->codec_id),
+                        decoder_context->stream[i]->id, url);
+                } else {
+                    // Unrecognized data stream
+                    decoder_context->data_stream_index = i;
+                    elv_dbg("DATA STREAM UNRECOGNIZED %d, codec_id=%s, stream_id=%d, url=%s",
+                        i, avcodec_get_name(decoder_context->codec_parameters[i]->codec_id),
+                        decoder_context->stream[i]->id, url);
+                }
                 if (check_stream_index(params, decoder_context) != eav_success)
                     return eav_param;
                 break;
@@ -4162,6 +4181,23 @@ avpipe_xc(
                         }
                         break;
                     }
+                }
+            } else if (stream_index == decoder_context->data_anc_stream_index) {
+                if (debug_frame_level)
+                    elv_dbg("ANC [%d] pts=%"PRId64" dts=%"PRId64" size=%d url=%s",
+                        stream_index, input_packet->pts, input_packet->dts, input_packet->size, params->url);
+                if (in_handlers->avpipe_stater) {
+                    AVRational tb = decoder_context->stream[stream_index]->time_base;
+                    inctx->anc = (anc_packet_t){
+                        .pts = input_packet->pts,
+                        .dts = input_packet->dts,
+                        .time_base_num = tb.num,
+                        .time_base_den = tb.den,
+                        .data = input_packet->data,
+                        .size = input_packet->size,
+                    };
+                    in_handlers->avpipe_stater(inctx, stream_index, in_stat_data_anc);
+                    inctx->anc = (anc_packet_t){0};  // the packet is freed below
                 }
             } else {
                 if (debug_frame_level)

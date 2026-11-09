@@ -7,6 +7,7 @@
 #include "libavpipe/src/avpipe_format.c"
 #include "libavpipe/src/avpipe_codec.c"
 #include "libavpipe/src/avpipe_copy_mpegts.c"
+#include "libavpipe/src/avpipe_anc.c"
 #include "libavpipe/src/avpipe_xc.c"
 #include "libavpipe/src/scte35.c"
 

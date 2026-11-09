@@ -99,8 +99,22 @@ typedef enum avp_stat_t {
     out_stat_start_file = 10,               // Sent when a new file is opened and reports the segment index
     out_stat_end_file = 11,                 // Sent when a file is closed and reports the segment index
     in_stat_data_scte35 = 12,               // SCTE data arrived
-    in_stat_mpegts = 13                     // MPEGTS input stats (including RTP if applicable)
+    in_stat_mpegts = 13,                    // MPEGTS input stats (including RTP if applicable)
+                                            // 14 and 15 are raised on the Go side only (AV_IN_STAT_MPEGTS_*)
+    in_stat_data_anc = 16                   // SMPTE ST 2038 ancillary data PES packet arrived (anc_packet_t)
 } avp_stat_t;
+
+/* One SMPTE ST 2038 PES packet, the argument of in_stat_data_anc: the ancillary data packets of one video frame,
+ * bit-packed as the standard lays them out. Not parsed here. The data is the demuxer's and is valid for the
+ * duration of the stat call only. pts and dts are in the data stream's time base. */
+typedef struct anc_packet_t {
+    int64_t         pts;
+    int64_t         dts;
+    int             time_base_num;
+    int             time_base_den;
+    const uint8_t   *data;
+    int             size;
+} anc_packet_t;
 
 typedef enum avp_live_proto_t {
     avp_proto_none   = 0,
@@ -198,6 +212,7 @@ typedef struct ioctx_t {
     int     seg_index;          /* segment index if this ioctx is a segment */
 
     uint8_t *data;  /* Data stream buffer (e.g. SCTE-35) */
+    anc_packet_t anc;   /* The ST 2038 packet being reported by in_stat_data_anc */
 
     io_mux_ctx_t    *in_mux_ctx;   /* Input muxer context */
     int             in_mux_index;
@@ -294,6 +309,7 @@ typedef struct pts_unwrapper_t {
  *   - one video stream (at most) - video_stream_index
  *   - one or more audio streams - audio_stream_index[]
  *   - one SCTE-35 data stream    - data_scte35_stream_index
+ *   - one ST 2038 ANC data stream - data_anc_stream_index
  *   - one arbitrary data stream  - data_stream_index (not used currently)
  *
  * The caller specifies which source media audio streams to encode, using xc_params->audio_index, eg.
@@ -370,6 +386,7 @@ typedef struct coderctx_t {
     int n_audio;                                        /* Number of audio streams that will be decoded */
 
     int data_scte35_stream_index;                       /* Index of SCTE-35 data stream */
+    int data_anc_stream_index;                          /* Index of the SMPTE ST 2038 ancillary data stream */
     int data_stream_index;                              /* Index of an unrecognized data stream */
 
     pts_unwrapper_t pts_unwrapper[MAX_STREAMS];         /* PTS unwrap state (per stream)*/
@@ -542,6 +559,8 @@ typedef struct xcparams_t {
     crypt_scheme_t  crypt_scheme;   // Content protection / DRM / encryption [Optional, Default: crypt_none]
     xc_type_t       xc_type;        // Default: 0 means transcode 'everything'
     int             copy_mpegts;    // Create a copy of the input stream (only MPEGTS and SRT)
+    int             anc_stream_id;  // Stream id (TS PID) of the SMPTE ST 2038 data stream when the PMT does not
+                                    // mark it (vendor descriptors instead of the VANC registration); 0 = by codec
     int         use_preprocessed_input;     // Use custom UDP handler
     int         seekable;                   // Default: 0 means not seekable. A non seekable stream with moov box in
                                             //          the end causes a lot of reads up to moov atom.

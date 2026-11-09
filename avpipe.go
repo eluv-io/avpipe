@@ -100,6 +100,8 @@ type ioHandler struct {
 	mutex         *sync.Mutex
 	outTable      map[int64]goavpipe.OutputHandler // Map of integer handle to output interfaces
 	restoreMvhevc bool
+	live          bool          // the input is a live source (udp, srt, rtp, rtmp)
+	anc           *ancStatQueue // delivers AV_IN_STAT_DATA_ANC off the demux thread; created on the first one
 }
 
 func getCIOHandler(fd int64) *ioHandler {
@@ -147,6 +149,7 @@ func AVPipeOpenInputGo(url string) (fd, size int64) {
 		outTable:      make(map[int64]goavpipe.OutputHandler),
 		mutex:         &sync.Mutex{},
 		restoreMvhevc: shouldRestoreMvhevcForURL(url),
+		live:          isLiveURL(url),
 	}
 	goavpipe.Log.Debug("AVPipeOpenInput()", "url", url, "size", size, "fd", fd)
 	goavpipe.Globals.PutCIOHandler(fd, h)
@@ -321,6 +324,9 @@ func AVPipeCloseInput(fd C.int64_t) C.int {
 }
 
 func (h *ioHandler) InCloser() error {
+	if h.anc != nil {
+		h.anc.close() // deliver what is queued while the input is still open
+	}
 	err := h.input.Close()
 	goavpipe.Log.Debug("InCloser()", "error", err)
 	return err
@@ -382,6 +388,21 @@ func (h *ioHandler) InStat(stream_index C.int, avp_stat C.avp_stat_t, stat_args 
 	case C.in_stat_mpegts:
 		statArgs := C.GoString((*C.char)(stat_args))
 		err = h.input.Stat(streamIndex, goavpipe.AV_IN_STAT_MPEGTS, statArgs)
+	case C.in_stat_data_anc:
+		a := (*C.anc_packet_t)(stat_args)
+		pkt := &goavpipe.AncPacket{
+			Pts:         int64(a.pts),
+			Dts:         int64(a.dts),
+			TimeBaseNum: int(a.time_base_num),
+			TimeBaseDen: int(a.time_base_den),
+			Payload:     C.GoBytes(unsafe.Pointer(a.data), a.size),
+		}
+		if h.anc == nil {
+			h.anc = newAncStatQueue(h.live, func(si int, p *goavpipe.AncPacket) error {
+				return h.input.Stat(si, goavpipe.AV_IN_STAT_DATA_ANC, p)
+			})
+		}
+		h.anc.push(streamIndex, pkt)
 	}
 
 	return err
@@ -959,6 +980,8 @@ func getCParams(params *goavpipe.XcParams) (*C.xcparams_t, error) {
 	if params.InputCfg.CopyMode == goavpipe.CopyModeRemuxed {
 		cparams.copy_mpegts = C.int(1)
 	}
+
+	cparams.anc_stream_id = C.int(params.AncStreamId)
 
 	if params.InputCfg.BypassLibavReader {
 		cparams.use_preprocessed_input = C.int(1)
