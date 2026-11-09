@@ -399,6 +399,51 @@ void frame_rescale_time_base(
 }
 
 /*
+ * Check encoder timebase suitability for output frame durations (used in deinterlacing or explicit timebase changes)
+ */
+int
+check_video_timebase(
+    const AVCodecContext *encoder_codec_context,
+    const coderctx_t *decoder_context,
+    const xcparams_t *params)
+{
+    AVRational time_base = encoder_codec_context->time_base;
+    AVRational frame_rate = encoder_codec_context->framerate;
+    const char *url = params->url;
+
+    /* The encoder rate already includes deinterlacing adjustment.
+     * Some codecs leave it unset so we are only using it for validation.
+     */
+    if (frame_rate.num <= 0 || frame_rate.den <= 0) {
+        const AVStream *stream = decoder_context->stream[decoder_context->video_stream_index];
+        frame_rate = stream->avg_frame_rate;
+        if (frame_rate.num <= 0 || frame_rate.den <= 0)
+            frame_rate = stream->r_frame_rate;
+        if (params->deinterlace == dif_bwdif)
+            frame_rate = av_mul_q(frame_rate, (AVRational){2, 1});
+    }
+
+    if (time_base.num <= 0 || time_base.den <= 0 || frame_rate.num <= 0 || frame_rate.den <= 0) {
+        elv_err("Invalid encoder video timebase=%d/%d or output frame_rate=%d/%d, url=%s",
+            time_base.num, time_base.den, frame_rate.num, frame_rate.den, url);
+        return eav_timebase;
+    }
+
+    int64_t ticks_num = (int64_t)time_base.den * frame_rate.den;
+    int64_t ticks_den = (int64_t)time_base.num * frame_rate.num;
+    /* Fractional frame rates use adjacent integer durations (e.g. 416/417 or
+     * 1501/1502 ticks) so we can't check for strict integer durations.
+     */
+    if (ticks_num < ticks_den) {
+        elv_err("Encoder video timebase=%d/%d is too coarse for output frame_rate=%d/%d "
+            "(frame duration=%"PRId64"/%"PRId64" ticks) url=%s",
+            time_base.num, time_base.den, frame_rate.num, frame_rate.den, ticks_num, ticks_den, url);
+        return eav_timebase;
+    }
+    return eav_success;
+}
+
+/*
  * Initialize the PTS/DTS unwrap state.
  * Compute wrap modulus once per stream (modulus is 0 for streams that don't need unwrap).
  */
