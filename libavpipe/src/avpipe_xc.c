@@ -2600,6 +2600,8 @@ encode_frame(
             else
                 outctx->total_frames_written = encoder_context->audio_frames_written[stream_index];
             outctx->frames_written++;
+            outctx->last_pts = output_packet->pts;
+            outctx->last_time_base = format_context->streams[output_packet->stream_index]->time_base;
             out_handlers->avpipe_stater(outctx, stream_index, out_stat_frame_written);
         }
 
@@ -2694,6 +2696,8 @@ do_bypass(
                 outctx->total_frames_written = encoder_context->video_frames_written;
             }
             outctx->frames_written++;
+            outctx->last_pts = packet->pts;
+            outctx->last_time_base = format_context->streams[packet->stream_index]->time_base;
             out_handlers->avpipe_stater(outctx, packet->stream_index, out_stat_frame_written);
         }
     }

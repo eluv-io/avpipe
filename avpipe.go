@@ -773,6 +773,12 @@ func AVPipeStatMuxOutput(fd C.int64_t, stream_index C.int, avp_stat C.avp_stat_t
 type EncodingFrameStats struct {
 	TotalFramesWritten int64 `json:"total_frames_written"`   // Total number of frames encoded in xc session
 	FramesWritten      int64 `json:"segment_frames_written"` // Number of frames encoded in current segment
+	// LastPts is the pts of the frame this stat reports, as handed to the muxer, in TimeBaseNum/TimeBaseDen
+	// (the output stream's time base). Frames are written in decode order, so with B-frames it is not
+	// monotonic: the written head is the maximum seen.
+	LastPts     int64 `json:"last_pts"`
+	TimeBaseNum int   `json:"time_base_num"`
+	TimeBaseDen int   `json:"time_base_den"`
 }
 
 func (h *ioHandler) OutStat(fd C.int64_t,
@@ -807,6 +813,9 @@ func (h *ioHandler) OutStat(fd C.int64_t,
 		statArgs := &EncodingFrameStats{
 			TotalFramesWritten: int64(encodingFramesStats.total_frames_written),
 			FramesWritten:      int64(encodingFramesStats.frames_written),
+			LastPts:            int64(encodingFramesStats.last_pts),
+			TimeBaseNum:        int(encodingFramesStats.time_base_num),
+			TimeBaseDen:        int(encodingFramesStats.time_base_den),
 		}
 		err = outHandler.Stat(streamIndex, avType, goavpipe.AV_OUT_STAT_FRAME_WRITTEN, statArgs)
 	}

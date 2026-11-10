@@ -15,6 +15,7 @@ service, or testing it. The design notes behind it are outside the repo.
 | Compositor | `libavpipe/src/avpipe_overlay.c`, bridge `events.go` and `overlay.go` | Holds one current event per kind, asks the source once per decoded frame, waits in 10 ms slices for *not yet* up to `WaitMs`, then fails (`EAV_OVERLAY`) or holds; draws image slots into one canvas blended in the encoder's pixel format and text and clocks through `drawtext` |
 | Stamper core | `goavpipe/stamp` | `Log`: the stamped events of a stream with a seal per kind, per-job views with a pts offset, assets by hash, an event hook for persistence. `ANC`: the ST 2038 venue clock feed (common-go `media/anc/venueclock`) decoded from the `AV_IN_STAT_DATA_ANC` stat into events, with a text mapping (`VenueMapping`) or a rendered-board mapping (`RenderMapping`) |
 | ANC stat | `AV_IN_STAT_DATA_ANC`, `goavpipe.AncPacket` | Every ST 2038 PES packet of the input, delivered off the demux thread through a bounded queue; on a live input a consumer that falls behind loses packets and `Dropped` says how many |
+| Frame-written stat | `AV_OUT_STAT_FRAME_WRITTEN`, `avpipe.EncodingFrameStats` | Every encoded frame as it is handed to the muxer: the counts, and `LastPts` with the output stream's time base. The written head is the maximum seen; it is the seal for API-fed events and a safe seal for in-band ones when the ancillary stream pauses |
 
 Events carry a `Kind`. The overlay is `overlay`; `vertical_crop` is defined (`CropEvent`) for the crop filter to
 move onto the same channel.
@@ -48,9 +49,10 @@ A recorder or playout service does three things:
    // on close:            log.End(goavpipe.KindOverlay)
    ```
 
-   From an API, append snapshots and move the seal yourself: `log.Append(ev)`, `log.Seal(kind, writtenPts)`.
-   The seal is your promise that nothing will be appended at or below it; the log does not check, it only
-   answers *not yet* for a frame past it. For a rendered board the log needs an asset fetcher, a no-op when the
+   From an API, append snapshots and move the seal yourself: `log.Append(ev)`, `log.Seal(kind, writtenPts)`,
+   with `writtenPts` the frame-written stat's `LastPts` converted to the overlay timescale (`Seal` only moves
+   forward, so the raw per-frame value is fine). The seal is your promise that nothing will be appended at or
+   below it; the log does not check, it only answers *not yet* for a frame past it. For a rendered board the log needs an asset fetcher, a no-op when the
    renderer pushes pictures in with `PutAsset`, or an unknown hash is an error rather than a wait.
 
 3. Validate what you store. `layout.ValidateEvent(&ev)` refuses a value that does not fit a slot, so a bad event

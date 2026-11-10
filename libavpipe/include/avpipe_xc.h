@@ -349,6 +349,8 @@ typedef struct ioctx_t {
     int64_t write_reported;
     int64_t frames_written;         /* Frames written in current segment */
     int64_t total_frames_written;   /* Total frames written */
+    int64_t last_pts;               /* pts of the last frame handed to the muxer, in last_time_base */
+    AVRational last_time_base;
     int64_t audio_frames_read;      /* Total audio frames read from input */
     int64_t video_frames_read;      /* Total video frames read from input */
 
@@ -939,6 +941,9 @@ typedef struct out_tracker_t {
 typedef struct encoding_frame_stats_t {
     int64_t total_frames_written;   /* Total frames encoded in the xc session */
     int64_t frames_written;         /* Frames encoded in the current segment */
+    int64_t last_pts;               /* pts of the frame reported, as handed to the muxer, in time_base; decode order */
+    int     time_base_num;          /* The output stream's time base */
+    int     time_base_den;
 } encoding_frame_stats_t;
 
 /**

@@ -789,6 +789,9 @@ out_stat(
             encoding_frame_stats_t encoding_frame_stats = {
                 .total_frames_written = outctx->total_frames_written,
                 .frames_written = outctx->frames_written,
+                .last_pts = outctx->last_pts,
+                .time_base_num = outctx->last_time_base.num,
+                .time_base_den = outctx->last_time_base.den,
             };
             rc = AVPipeStatOutput(h, fd, stream_index, buftype, stat_type, &encoding_frame_stats);
         }
