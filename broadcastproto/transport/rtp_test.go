@@ -9,7 +9,6 @@ import (
 	pionrtp "github.com/pion/rtp"
 	"github.com/stretchr/testify/require"
 
-	"github.com/eluv-io/common-go/media/pktpool"
 	"github.com/eluv-io/common-go/util/testutil"
 )
 
@@ -45,6 +44,7 @@ func TestRtpHandlerDropsADatagramThatIsNotRTP(t *testing.T) {
 		{0x01, 0x02, 0x03}, // too short to be a valid RTP header
 		mustRTPDatagram(t, pionrtp.Header{Version: 1, SequenceNumber: 1, Timestamp: 1}, mustTestTSPacket(7)),
 		mustTestTSPacket(7), // plain MPEG-TS
+		mustRTPDatagramWithOversizedExtension(mustTestTSPacket(7)),
 	} {
 		rc, port := openRTPHandler(t, RawTs)
 
@@ -61,29 +61,34 @@ func TestRtpHandlerDropsADatagramThatIsNotRTP(t *testing.T) {
 }
 
 func TestRtpHandlerFailsASourceThatDoesNotSendRTP(t *testing.T) {
-	for _, packaging := range []TsPackagingMode{RawTs, AtsTs, RtpTs} {
-		t.Run(string(packaging), func(t *testing.T) {
-			rc, port := openRTPHandler(t, packaging)
-			defer rc.Close()
-			rc.(*rtpHandler).guard.max = 3
+	for name, bad := range map[string][]byte{
+		"plain MPEG-TS": mustTestTSPacket(7),
+		// version 2, but the header extension it announces is longer than the datagram
+		"extension past the end": mustRTPDatagramWithOversizedExtension(mustTestTSPacket(7)),
+	} {
+		for _, packaging := range []TsPackagingMode{RawTs, AtsTs, RtpTs} {
+			t.Run(name+"/"+string(packaging), func(t *testing.T) {
+				rc, port := openRTPHandler(t, packaging)
+				defer rc.Close()
+				rc.(*rtpHandler).guard.max = 3
 
-			tsPkt := mustTestTSPacket(7)
-			for range 3 {
-				sendUDPDatagram(t, port, tsPkt)
-			}
-
-			buf := make([]byte, 1500)
-			if packaging == RtpTs {
-				// RtpTs passes on what it receives, so that the stream's statistics count it, until the guard trips.
-				for range 2 {
-					n, err := rc.Read(buf)
-					require.NoError(t, err)
-					require.Equal(t, tsPkt, buf[:n])
+				for range 3 {
+					sendUDPDatagram(t, port, bad)
 				}
-			}
-			_, err := rc.Read(buf)
-			require.ErrorIs(t, err, ErrNotRtp)
-		})
+
+				buf := make([]byte, 1500)
+				if packaging == RtpTs {
+					// RtpTs passes on what it receives, so that the stream's statistics count it, until the guard trips.
+					for range 2 {
+						n, err := rc.Read(buf)
+						require.NoError(t, err)
+						require.Equal(t, bad, buf[:n])
+					}
+				}
+				_, err := rc.Read(buf)
+				require.ErrorIs(t, err, ErrNotRtp)
+			})
+		}
 	}
 }
 
@@ -160,7 +165,7 @@ func TestRtpHandlerStripsAcrossRepeatedReads(t *testing.T) {
 // newTestStripHandler returns an rtpHandler that strips the RTP header (RawTs) and has no socket, for driving prepare
 // directly on a datagram copied into its buf.
 func newTestStripHandler() *rtpHandler {
-	return &rtpHandler{buf: make([]byte, maxUDPPacketSize), Mode: RawTs, strip: new(pktpool.RawPacket)}
+	return &rtpHandler{buf: make([]byte, maxUDPPacketSize), Mode: RawTs, strip: true}
 }
 
 // openRTPHandler opens an RTP transport listening on a free loopback port with the given output packaging, returning
@@ -194,6 +199,18 @@ func mustRTPDatagram(t *testing.T, hdr pionrtp.Header, payload []byte) []byte {
 	data, err := pkt.Marshal()
 	require.NoError(t, err)
 	return data
+}
+
+// mustRTPDatagramWithOversizedExtension returns an RTP version 2 datagram whose header announces an extension of 1020
+// bytes, more than the datagram holds. Its first byte is valid, but its header does not decode.
+func mustRTPDatagramWithOversizedExtension(payload []byte) []byte {
+	datagram := []byte{
+		0x90, 33, 0, 1, // version 2, extension bit, payload type MP2T, sequence 1
+		0, 0, 0, 1, // timestamp
+		0, 0, 0, 1, // SSRC
+		0xbe, 0xde, 0x00, 0xff, // extension profile, length in 32-bit words: 255
+	}
+	return append(datagram, payload...)
 }
 
 // mustTestTSPacket returns a well-formed, single 188-byte TS packet (valid sync byte, given PID, no payload content

@@ -11,9 +11,6 @@ import (
 
 const maxUDPPacketSize = 1<<16 - 1
 
-// rtpHeaderLen is the length of the fixed RTP header.
-const rtpHeaderLen = 12
-
 type rtpProto struct {
 	Url  string
 	Mode TsPackagingMode
@@ -63,11 +60,7 @@ func (r *rtpProto) Open() (io.ReadCloser, error) {
 		buf:     make([]byte, maxUDPPacketSize),
 		Mode:    r.Mode,
 		udpConn: udpConn,
-	}
-	if h.Mode != RtpTs {
-		// Stripping is needed: decode the RTP header in place in h.buf, via the same lazy decoder as the rest of the
-		// codebase instead of a bespoke parser.
-		h.strip = new(pktpool.RawPacket)
+		strip:   r.Mode != RtpTs,
 	}
 	return h, nil
 }
@@ -81,8 +74,11 @@ type rtpHandler struct {
 
 	udpConn *net.UDPConn
 
-	strip *pktpool.RawPacket // decodes h.buf in place, non-nil only when Mode != RtpTs (stripping is needed)
-	guard rtpGuard           // drops datagrams that are not RTP, and fails the source after a run of them
+	// rtp decodes the RTP header in place in h.buf, via the same lazy decoder as the rest of the codebase instead of a
+	// bespoke parser.
+	rtp   pktpool.RawPacket
+	strip bool     // whether the RTP header is stripped, for any packaging but RtpTs
+	guard rtpGuard // drops datagrams that are not RTP, and fails the source after a run of them
 }
 
 func (h *rtpHandler) Close() error {
@@ -124,7 +120,7 @@ func (h *rtpHandler) readNewPacket() error {
 			return err
 		}
 
-		delivered, notRtp := h.prepare()
+		deliver, notRtp := h.prepare()
 		if notRtp == nil {
 			h.guard.accept()
 			return nil
@@ -133,7 +129,7 @@ func (h *rtpHandler) readNewPacket() error {
 		if err = h.guard.reject(h.buf[:n], notRtp); err != nil {
 			return err
 		}
-		if delivered {
+		if deliver {
 			// RtpTs passes the datagram on as it is, see prepare.
 			h.bufEnd = n
 			return nil
@@ -141,29 +137,24 @@ func (h *rtpHandler) readNewPacket() error {
 	}
 }
 
-// prepare checks the datagram in h.buf and returns why it is not RTP, or nil. For any packaging that does not retain
-// RTP framing (RawTs, AtsTs), it strips the RTP header, leaving the delivered datagram as raw TS. delivered reports
-// whether a datagram that is not RTP is passed on anyway. RtpTs passes it on, so that the stream's statistics count it
-// as they count any other malformed datagram.
-func (h *rtpHandler) prepare() (delivered bool, notRtp error) {
-	if h.strip == nil {
-		switch {
-		case h.bufEnd < rtpHeaderLen:
-			return true, fmt.Errorf("datagram shorter than an RTP header: %d bytes", h.bufEnd)
-		case h.buf[0]>>6 != 2:
-			return true, fmt.Errorf("unsupported RTP version: %d", h.buf[0]>>6)
-		}
+// prepare checks the datagram in h.buf and returns why it is not RTP, or nil. The whole RTP header is decoded, as the
+// packet processor decodes it, so a datagram passes only if its CSRC list, extension and padding fit. For any packaging
+// that does not retain RTP framing (RawTs, AtsTs), prepare strips the RTP header, leaving the delivered datagram as raw
+// TS. deliver tells the caller to pass on a datagram that is not RTP anyway. RtpTs passes it on, so that the stream's
+// statistics count it as they count any other malformed datagram.
+func (h *rtpHandler) prepare() (deliver bool, notRtp error) {
+	rtpLayer, err := h.rtp.Reset(h.buf[:h.bufEnd]).Rtp()
+	if err == nil && rtpLayer.Packet().Header.Version != 2 {
+		err = fmt.Errorf("unsupported RTP version: %d", rtpLayer.Packet().Header.Version)
+	}
+	if err != nil {
+		return !h.strip, err
+	}
+	if !h.strip {
 		return false, nil
 	}
 
-	rtpLayer, err := h.strip.Reset(h.buf[:h.bufEnd]).Rtp()
-	if err != nil {
-		return false, err
-	}
 	hdr := rtpLayer.Packet().Header
-	if hdr.Version != 2 {
-		return false, fmt.Errorf("unsupported RTP version: %d", hdr.Version)
-	}
 	// The payload aliases h.buf, so the read window is moved onto it rather than the payload copied. The header length
 	// is derived from where the payload actually lies, which also excludes any RTP padding at the end.
 	payloadLen := len(rtpLayer.Payload)

@@ -33,6 +33,21 @@ func BenchmarkRtpHandlerStrip(b *testing.B) {
 	}
 }
 
+// BenchmarkRtpHandlerCheck measures the RTP handler checking the RTP header of one datagram it passes on unchanged
+// (RtpTs). Every iteration also copies the datagram into the handler's buffer, standing in for the socket read.
+func BenchmarkRtpHandlerCheck(b *testing.B) {
+	datagram := benchDatagram(b)
+	h := newTestStripHandler()
+	h.Mode, h.strip = RtpTs, false
+	b.ReportAllocs()
+	for b.Loop() {
+		h.bufEnd = copy(h.buf, datagram)
+		if _, err := h.prepare(); err != nil {
+			b.Fatal(err)
+		}
+	}
+}
+
 // BenchmarkRtpDecapsulatorStrip measures the RTP decapsulator reading one datagram and stripping its RTP header.
 func BenchmarkRtpDecapsulatorStrip(b *testing.B) {
 	datagram := benchDatagram(b)
