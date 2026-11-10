@@ -142,16 +142,18 @@ func TestOverlayTextSlots(t *testing.T) {
 // every time a frame past it asks, so the first ask for such a frame is "not yet" and the next succeeds. Assets
 // are served from a map. err, when set, fails every call.
 type sealedSource struct {
-	mu     sync.Mutex
-	events []goavpipe.OverlayEvent
-	assets map[string][]byte
-	seal   int64
-	window int64
-	err    error
-	stuck  bool // never seals: every ask past seal is not yet
-	calls  atomic.Int32
-	notYet atomic.Int32
-	closed atomic.Bool
+	mu        sync.Mutex
+	events    []goavpipe.OverlayEvent
+	assets    map[string][]byte
+	seal      int64
+	window    int64
+	err       error
+	stuck     bool             // never seals: every ask past seal is not yet
+	stall     func(int64) bool // when set, asks for these pts are not yet, whatever the seal
+	notYetPts []int64          // the pts of every not-yet answer
+	calls     atomic.Int32
+	notYet    atomic.Int32
+	closed    atomic.Bool
 }
 
 func (s *sealedSource) Kinds() []string { return []string{goavpipe.KindOverlay} }
@@ -163,6 +165,11 @@ func (s *sealedSource) At(kind string, pts int64) (goavpipe.Timed, goavpipe.Stat
 	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	if s.stall != nil && s.stall(pts) {
+		s.notYet.Add(1)
+		s.notYetPts = append(s.notYetPts, pts)
+		return nil, goavpipe.StatusNotYet, nil
+	}
 	if pts > s.seal {
 		s.notYet.Add(1)
 		if !s.stuck {
@@ -526,6 +533,91 @@ func TestOverlayTimeout(t *testing.T) {
 	params.Events = source
 	xcTest(t, holdDir, params, nil, true)
 	assert.True(t, source.closed.Load())
+}
+
+// TestOverlayHoldOnce: with on_timeout hold, the first stall costs one wait budget and later stalls none: every
+// frame of a second stall asks the source exactly once and moves on with the event it has.
+func TestOverlayHoldOnce(t *testing.T) {
+	url := videoBigBuckBunnyPath
+	checkFileExists(t, url)
+	font := overlayTestFont(t)
+
+	outDir := path.Join(baseOutPath, fn())
+	params := overlayTextParams(url, font, overlayTestImages(t))
+	setFastEncodeParams(params, true)
+	params.Overlay.WaitMs = 300
+	params.Overlay.OnTimeout = goavpipe.OverlayTimeoutHold
+	first := func(pts int64) bool { return pts >= 30000 && pts < 45000 }  // 1.0 to 1.5 s
+	second := func(pts int64) bool { return pts >= 75000 && pts < 90000 } // 2.5 to 3.0 s
+	source := &sealedSource{events: overlayTextEvents(), seal: 1 << 40,
+		stall: func(pts int64) bool { return first(pts) || second(pts) }}
+	params.Events = source
+	xcTest(t, outDir, params, nil, true)
+
+	source.mu.Lock()
+	defer source.mu.Unlock()
+	var firstAsks, secondAsks int
+	secondFrames := map[int64]bool{}
+	for _, pts := range source.notYetPts {
+		switch {
+		case first(pts):
+			firstAsks++
+		case second(pts):
+			secondAsks++
+			secondFrames[pts] = true
+		}
+	}
+	assert.GreaterOrEqual(t, firstAsks, 20, "the first stall was waited out in slices before holding")
+	assert.NotEmpty(t, secondFrames)
+	assert.Equal(t, len(secondFrames), secondAsks, "holding: every frame of the second stall asked once, no retries")
+}
+
+// TestOverlayDefaultBeforeFirstEvent: an image slot shows its default from the first frame, before any event.
+func TestOverlayDefaultBeforeFirstEvent(t *testing.T) {
+	url := videoBigBuckBunnyPath
+	checkFileExists(t, url)
+	font := overlayTestFont(t)
+	images := overlayTestImages(t)
+
+	plainPath := path.Join(baseOutPath, fn(), "plain")
+	xcTest2(t, plainPath, overlayExtractParams(url, nil, nil, overlayFrame15), nil)
+	under := overlayBar(t, plainPath, overlayFrame15)
+
+	// The first event is at 2 s; the bg bar (dark, alpha 160) is the slot's default and must be there at 1.5 s
+	events := overlayTextEvents()
+	for i := range events {
+		events[i].Pts += 60000
+	}
+	overlay := overlayTextParams(url, font, images).Overlay
+	withPath := path.Join(baseOutPath, fn(), "default")
+	xcTest2(t, withPath, overlayExtractParams(url, overlay, events, overlayFrame15), nil)
+	with := overlayBar(t, withPath, overlayFrame15)
+
+	t.Logf("under the bar %v, with the default bar %v", under, with)
+	assert.Less(t, int(with.R)+int(with.G)+int(with.B), int(under.R)+int(under.G)+int(under.B)-60,
+		"the default background bar darkens the picture before the first event")
+}
+
+// overlayBar samples a point inside the background bar's rect (x 0.03..0.97, y 0.03..0.45) away from the marker
+// and the text.
+func overlayBar(t *testing.T, outPath string, pts int64) color.RGBA {
+	t.Helper()
+	files, err := os.ReadDir(outPath)
+	require.NoError(t, err)
+	for _, f := range files {
+		if !strings.HasPrefix(f.Name(), strconv.FormatInt(pts, 10)+".") {
+			continue
+		}
+		fh, err := os.Open(path.Join(outPath, f.Name()))
+		require.NoError(t, err)
+		defer fh.Close()
+		img, _, err := image.Decode(fh)
+		require.NoError(t, err)
+		w, h := float64(img.Bounds().Dx()), float64(img.Bounds().Dy())
+		return color.RGBAModel.Convert(img.At(int(0.2*w), int(0.35*h))).(color.RGBA)
+	}
+	t.Fatalf("no image for pts %d", pts)
+	return color.RGBA{}
 }
 
 // TestOverlayCancelWhileWaiting: XcCancel ends a job that is waiting for an event, with EAV_CANCELLED, well before

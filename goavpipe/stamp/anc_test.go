@@ -118,33 +118,47 @@ func TestANCStamper(t *testing.T) {
 	assert.Equal(t, predicted, *ev.Slots["clock"].Clock)
 	assert.True(t, ev.Slots["clock"].Clock.Running)
 
-	// A sample 200 ms off the prediction is a correction; a stop is an event
-	f.frame(ancFrame(next("30", "11:50", "", "", "0", "0", "0")...))
+	// A score message half a second after the last clock sample: the snapshot carries the clock forward from the
+	// sample's frame, so the stamped value is the prediction, not the stale sample
+	for k := 0; k < 30; k++ {
+		f.frame(ancFrame())
+	}
+	p = f.frame(ancFrame(next("1", "5", "0")...))
 	events = log.Events(goavpipe.KindOverlay)
 	require.Len(t, events, 8)
-	assert.Equal(t, int64(710000), events[7].(goavpipe.OverlayEvent).Slots["clock"].Clock.Ms)
-	f.frame(ancFrame(next("30", "11:50", "", "", "0", "0", "1")...))
+	ev = events[7].(goavpipe.OverlayEvent)
+	assert.Equal(t, "5 - 0", *ev.Slots["score"].Text)
+	predicted = carryClock(*start.Slots["clock"].Clock, ev.Pts-start.Pts)
+	assert.Equal(t, predicted, *ev.Slots["clock"].Clock, "carried from the sample's frame, not stamped as current")
+	assert.Less(t, predicted.Ms, int64(715000), "the carry moved it by the half second")
+
+	// A sample well off the prediction is a correction; a stop is an event
+	f.frame(ancFrame(next("30", "11:50", "", "", "0", "0", "0")...))
 	events = log.Events(goavpipe.KindOverlay)
 	require.Len(t, events, 9)
-	assert.False(t, events[8].(goavpipe.OverlayEvent).Slots["clock"].Clock.Running)
+	assert.Equal(t, int64(710000), events[8].(goavpipe.OverlayEvent).Slots["clock"].Clock.Ms)
+	f.frame(ancFrame(next("30", "11:50", "", "", "0", "0", "1")...))
+	events = log.Events(goavpipe.KindOverlay)
+	require.Len(t, events, 10)
+	assert.False(t, events[9].(goavpipe.OverlayEvent).Slots["clock"].Clock.Running)
 
 	// Repeats change nothing
 	f.frame(ancFrame(next("17", "Home", "Visitor", "HOM", "VIS")...))
 	f.frame(ancFrame(next("31", "24", "0", "0", "0")...))
-	assert.Len(t, log.Events(goavpipe.KindOverlay), 9)
+	assert.Len(t, log.Events(goavpipe.KindOverlay), 10)
 
 	// A bad CRC is counted and ignored; a dropped-packet count is carried
 	bad := next("1", "9", "9")
 	bad[len(bad)-2] ^= 0x01
 	f.frame(ancFrame(bad...))
 	a.Feed(&goavpipe.AncPacket{Pts: f.pts + 10*1501, TimeBaseNum: 1, TimeBaseDen: 90000, Payload: ancFrame(), Dropped: 3})
-	assert.Len(t, log.Events(goavpipe.KindOverlay), 9)
+	assert.Len(t, log.Events(goavpipe.KindOverlay), 10)
 	assert.Equal(t, 1, a.Stats.BadCRC)
 	assert.Equal(t, 3, a.Stats.Dropped)
-	assert.Equal(t, 9, a.Stats.Events)
+	assert.Equal(t, 10, a.Stats.Events)
 	assert.Equal(t, 0, a.Stats.Errors)
-	assert.Equal(t, "4 - 0", fmt.Sprintf("%d - %d", a.State().Score[0], a.State().Score[1]))
-	assert.Equal(t, int64(9), a.Last().Seq)
+	assert.Equal(t, "5 - 0", fmt.Sprintf("%d - %d", a.State().Score[0], a.State().Score[1]))
+	assert.Equal(t, int64(10), a.Last().Seq)
 
 	// Every event validates against a layout with these slots
 	layout := &goavpipe.OverlayParams{Slots: []goavpipe.OverlaySlot{

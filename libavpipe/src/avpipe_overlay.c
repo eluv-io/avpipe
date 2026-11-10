@@ -726,6 +726,8 @@ overlay_prepare(
         st->fade_scaled_for[i] = -1;
         if (slot->type != ov_slot_image)
             continue;
+        /* Until the first event, an image slot shows its default, as an event that names none would */
+        st->canvas_row[i] = slot->default_image;
         if (slot->fade_ms > 0)
             st->fade_ts[i] = slot->fade_ms * ov->timescale / 1000;
         int *rect = &st->slot_rect[i * 4];
@@ -911,8 +913,9 @@ overlay_append_filter(
 /*
  * Ask the source for the event in effect at ts (overlay timescale) and make it current. A frame whose event is
  * not there yet waits in slices, checking the cancel flag, up to wait_ms; then on_timeout decides: fail ends the
- * job, hold keeps the current event and stops waiting for the rest of the job (frames still ask, and apply an
- * event once it is there). A frame is never drawn with an event that may still change.
+ * job, hold keeps the current event and stops waiting for the rest of the job: frames still ask once each and
+ * apply an event when it is there, but a source that stalls again costs no second wait, so a live job's total
+ * stall is bounded by one wait_ms. A frame is never drawn with an event that may still change.
  */
 static int
 ov_ask(
@@ -933,7 +936,6 @@ ov_ask(
         switch (rc) {
         case EV_AT_UNCHANGED:
             st->wait_start_us = 0;
-            st->holding = 0;
             return eav_success;
         case EV_AT_NEW: {
             /* The event before the new one is kept for transitions; its buffer is refilled on the next ask */
@@ -944,7 +946,6 @@ ov_ask(
             if (!st->next)
                 return eav_mem_alloc;
             st->wait_start_us = 0;
-            st->holding = 0;
             elv_log("Overlay: event seq=%"PRId64" pts=%"PRId64" hidden=%d frame_ts=%"PRId64" asks=%d url=%s",
                 st->cur->seq, st->cur->pts, st->cur->hidden, ts, st->asks, params->url);
             return eav_success;

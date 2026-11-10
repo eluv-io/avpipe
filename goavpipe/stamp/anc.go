@@ -27,7 +27,15 @@ type ANC struct {
 	last   *goavpipe.OverlayEvent // the last event appended
 	sample clockSample            // the previous game clock sample, to tell a held clock from a running one
 	held   bool                   // the game clock is held although the flags say it runs
+	raw    map[string]rawClock    // per clock slot, the venue's last sample and when it was taken
 	Stats  ANCStats
+}
+
+// rawClock is a clock value as the venue sent it, with the pts of the frame it was sampled on. A snapshot made
+// later for another message must carry it forward from there, not treat it as current.
+type rawClock struct {
+	c   goavpipe.ClockState
+	pts int64
 }
 
 // clockSample is one game clock value as the venue sent it.
@@ -59,7 +67,7 @@ func NewANC(log *Log, timescale int64, m Mapper) *ANC {
 	if vm, ok := m.(VenueMapping); ok {
 		tol = vm.tolerance()
 	}
-	return &ANC{log: log, timescale: timescale, mapping: m, tolerance: tol}
+	return &ANC{log: log, timescale: timescale, mapping: m, tolerance: tol, raw: map[string]rawClock{}}
 }
 
 // kindMake registers a kind so Kinds() lists it before the first event.
@@ -150,6 +158,22 @@ func (a *ANC) emit(pts int64) {
 				slots[name] = goavpipe.SlotValue{Clock: &c}
 			}
 		}
+	}
+	// A clock value in the mapping is the venue's last sample, taken on an earlier frame. A snapshot made now
+	// (for a score, say) must carry it forward to pts, or it would stamp a clock up to a second behind.
+	for _, name := range a.mapping.ClockSlots() {
+		v, ok := slots[name]
+		if !ok || v.Clock == nil {
+			delete(a.raw, name)
+			continue
+		}
+		r, seen := a.raw[name]
+		if !seen || r.c != *v.Clock {
+			r = rawClock{c: *v.Clock, pts: pts}
+			a.raw[name] = r
+		}
+		carried := carryClock(r.c, (pts-r.pts)*1000/a.timescale)
+		slots[name] = goavpipe.SlotValue{Clock: &carried}
 	}
 	changed := a.last == nil
 	if a.last != nil {

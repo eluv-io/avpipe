@@ -198,7 +198,7 @@ func TestOverlayFromANC(t *testing.T) {
 	goavpipe.InitIOHandler(opener, &xc.FileOutputOpener{Dir: renderDir})
 	params = venueOverlayParams(tsPath, font)
 	params.Overlay.Slots = []goavpipe.OverlaySlot{
-		{Name: "board", Type: goavpipe.OverlaySlotImage, X: 0.02, Y: 0.04, Size: 0.4, H: 0.222},
+		{Name: "board", Type: goavpipe.OverlaySlotImage, X: 0.02, Y: 0.04, Size: 0.4, H: 0.2223}, // 160 px of 720
 		{Name: "clock", Type: goavpipe.OverlaySlotClock, X: 0.22, Y: 0.155, Size: 0.045, Font: font, Color: "yellow", Align: "center", Format: "game"},
 		{Name: "shot", Type: goavpipe.OverlaySlotClock, X: 0.395, Y: 0.205, Size: 0.04, Font: font, Color: "red", Align: "right", Format: "shot"},
 	}
