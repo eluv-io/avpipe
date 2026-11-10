@@ -51,7 +51,7 @@ func (s *srtProto) Open() (reader io.ReadCloser, err error) {
 
 	if s.StripRtp {
 		// strip RTP headers if the source actually contains them
-		return &RtpDecapsulator{reader: reader, pkt: pktpool.NewPacket(0, maxUDPPacketSize)}, nil
+		return &RtpDecapsulator{reader: reader}, nil
 	}
 
 	return reader, nil
@@ -65,8 +65,8 @@ func (s *srtProto) PackagingMode() TsPackagingMode {
 
 type RtpDecapsulator struct {
 	reader io.ReadCloser
-	pkt    *pktpool.Packet // scratch packet reused across reads via repeated From() calls
-	guard  rtpGuard        // drops datagrams that are not RTP, and fails the source after a run of them
+	pkt    pktpool.RawPacket // decodes the datagram in place in the caller's buffer, re-pointed by every read
+	guard  rtpGuard          // drops datagrams that are not RTP, and fails the source after a run of them
 }
 
 // Read reads the next datagram into p and strips its RTP header. A datagram that is not RTP is dropped and the next one
@@ -94,17 +94,14 @@ func (r *RtpDecapsulator) Read(p []byte) (n int, err error) {
 // strip replaces the RTP datagram at the start of p with its payload and returns the payload's length, or why the
 // datagram is not RTP.
 func (r *RtpDecapsulator) strip(p []byte) (int, error) {
-	if err := r.pkt.From(p); err != nil {
-		return 0, err
-	}
-	rtpLayer, err := r.pkt.Rtp()
+	rtpLayer, err := r.pkt.Reset(p).Rtp()
 	if err != nil {
 		return 0, err
 	}
 	if rtpLayer.Packet().Header.Version != 2 {
 		return 0, errors.Str("unsupported RTP version")
 	}
-	// payload aliases r.pkt's own buffer (not p), so this is a plain forward copy, not an overlap concern.
+	// The payload aliases p behind the header. copy handles the overlap, moving the payload to the start of p.
 	return copy(p, rtpLayer.Payload), nil
 }
 

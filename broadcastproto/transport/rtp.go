@@ -65,9 +65,9 @@ func (r *rtpProto) Open() (io.ReadCloser, error) {
 		udpConn: udpConn,
 	}
 	if h.Mode != RtpTs {
-		// Stripping is needed: own a scratch packet, reused across reads via repeated From() calls, to decode the RTP
-		// header via the same lazy decoder as the rest of the codebase instead of a bespoke parser.
-		h.stripPkt = pktpool.NewPacket(0, maxUDPPacketSize)
+		// Stripping is needed: decode the RTP header in place in h.buf, via the same lazy decoder as the rest of the
+		// codebase instead of a bespoke parser.
+		h.strip = new(pktpool.RawPacket)
 	}
 	return h, nil
 }
@@ -81,8 +81,8 @@ type rtpHandler struct {
 
 	udpConn *net.UDPConn
 
-	stripPkt *pktpool.Packet // non-nil only when Mode != RtpTs (stripping is needed)
-	guard    rtpGuard        // drops datagrams that are not RTP, and fails the source after a run of them
+	strip *pktpool.RawPacket // decodes h.buf in place, non-nil only when Mode != RtpTs (stripping is needed)
+	guard rtpGuard           // drops datagrams that are not RTP, and fails the source after a run of them
 }
 
 func (h *rtpHandler) Close() error {
@@ -146,7 +146,7 @@ func (h *rtpHandler) readNewPacket() error {
 // whether a datagram that is not RTP is passed on anyway. RtpTs passes it on, so that the stream's statistics count it
 // as they count any other malformed datagram.
 func (h *rtpHandler) prepare() (delivered bool, notRtp error) {
-	if h.stripPkt == nil {
+	if h.strip == nil {
 		switch {
 		case h.bufEnd < rtpHeaderLen:
 			return true, fmt.Errorf("datagram shorter than an RTP header: %d bytes", h.bufEnd)
@@ -156,21 +156,19 @@ func (h *rtpHandler) prepare() (delivered bool, notRtp error) {
 		return false, nil
 	}
 
-	if err := h.stripPkt.From(h.buf[:h.bufEnd]); err != nil {
-		return false, err
-	}
-	rtpLayer, err := h.stripPkt.Rtp()
+	rtpLayer, err := h.strip.Reset(h.buf[:h.bufEnd]).Rtp()
 	if err != nil {
 		return false, err
 	}
-	if rtpLayer.Packet().Header.Version != 2 {
-		return false, fmt.Errorf("unsupported RTP version: %d", rtpLayer.Packet().Header.Version)
+	hdr := rtpLayer.Packet().Header
+	if hdr.Version != 2 {
+		return false, fmt.Errorf("unsupported RTP version: %d", hdr.Version)
 	}
-	// Normalize to start at 0 instead of tracking a separate header-length offset: rtpLayer.Payload excludes any RTP
-	// padding too, unlike the previous header-length-only offset.
-	copy(h.buf, rtpLayer.Payload)
-	h.bufStart = 0
-	h.bufEnd = len(rtpLayer.Payload)
+	// The payload aliases h.buf, so the read window is moved onto it rather than the payload copied. The header length
+	// is derived from where the payload actually lies, which also excludes any RTP padding at the end.
+	payloadLen := len(rtpLayer.Payload)
+	h.bufStart = h.bufEnd - payloadLen - int(hdr.PaddingSize)
+	h.bufEnd = h.bufStart + payloadLen
 	return false, nil
 }
 

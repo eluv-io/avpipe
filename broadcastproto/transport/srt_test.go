@@ -8,7 +8,6 @@ import (
 	"github.com/stretchr/testify/require"
 
 	mio "github.com/eluv-io/common-go/media/io"
-	"github.com/eluv-io/common-go/media/pktpool"
 )
 
 func TestRtpDecapsulatorStripsRTPHeader(t *testing.T) {
@@ -141,7 +140,7 @@ func (f *fakeStatsReporter) ConnStats(into *mio.ConnStats, details bool) {
 }
 
 func newTestRtpDecapsulator(reader io.ReadCloser) *RtpDecapsulator {
-	return &RtpDecapsulator{reader: reader, pkt: pktpool.NewPacket(0, maxUDPPacketSize)}
+	return &RtpDecapsulator{reader: reader}
 }
 
 // fakeReadCloser returns data (and err, if set) from a single Read call, then io.EOF on any subsequent call.

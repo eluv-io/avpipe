@@ -160,7 +160,7 @@ func TestRtpHandlerStripsAcrossRepeatedReads(t *testing.T) {
 // newTestStripHandler returns an rtpHandler that strips the RTP header (RawTs) and has no socket, for driving prepare
 // directly on a datagram copied into its buf.
 func newTestStripHandler() *rtpHandler {
-	return &rtpHandler{buf: make([]byte, maxUDPPacketSize), Mode: RawTs, stripPkt: pktpool.NewPacket(0, maxUDPPacketSize)}
+	return &rtpHandler{buf: make([]byte, maxUDPPacketSize), Mode: RawTs, strip: new(pktpool.RawPacket)}
 }
 
 // openRTPHandler opens an RTP transport listening on a free loopback port with the given output packaging, returning
