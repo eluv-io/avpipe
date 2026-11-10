@@ -60,11 +60,7 @@ func (r *rtpProto) Open() (io.ReadCloser, error) {
 		buf:     make([]byte, maxUDPPacketSize),
 		Mode:    r.Mode,
 		udpConn: udpConn,
-	}
-	if h.Mode != RtpTs {
-		// Stripping is needed: own a scratch packet, reused across reads via repeated From() calls, to decode the RTP
-		// header via the same lazy decoder as the rest of the codebase instead of a bespoke parser.
-		h.stripPkt = pktpool.NewPacket(0, maxUDPPacketSize)
+		strip:   r.Mode != RtpTs,
 	}
 	return h, nil
 }
@@ -78,7 +74,11 @@ type rtpHandler struct {
 
 	udpConn *net.UDPConn
 
-	stripPkt *pktpool.Packet // non-nil only when Mode != RtpTs (stripping is needed)
+	// rtp decodes the RTP header in place in h.buf, via the same lazy decoder as the rest of the codebase instead of a
+	// bespoke parser.
+	rtp   pktpool.RawPacket
+	strip bool     // whether the RTP header is stripped, for any packaging but RtpTs
+	guard rtpGuard // drops datagrams that are not RTP, and fails the source after a run of them
 }
 
 func (h *rtpHandler) Close() error {
@@ -88,10 +88,12 @@ func (h *rtpHandler) Close() error {
 	return nil
 }
 
-// Read reads precisely one datagram and returns it fully if it fits in the requesting buffer,
-// or else partially, and returns the remainder in the next Read() call(s).  It only reads a new
-// datagram from the network once it has fully return the previous datagram.
-// SS thinking we might discard the rest of the datagram instead which is the standard OS behavior for datagrams
+// Read reads precisely one datagram and returns it fully if it fits in the requesting buffer, or else partially, and
+// returns the remainder in the next Read() call(s).  It only reads a new datagram from the network once it has fully
+// returned the previous datagram.
+//
+// PENDING(LUK): SS suggested that we might discard the rest of the datagram instead, which is the standard OS
+// behavior for datagrams.
 func (h *rtpHandler) Read(p []byte) (int, error) {
 	if h.bufStart >= h.bufEnd {
 		err := h.readNewPacket()
@@ -107,40 +109,58 @@ func (h *rtpHandler) Read(p []byte) (int, error) {
 	return n, nil
 }
 
+// readNewPacket reads the next datagram into h.buf. A datagram that is not RTP is dropped and the next one read, until
+// the guard fails the source.
 func (h *rtpHandler) readNewPacket() error {
-	n, _, err := h.udpConn.ReadFrom(h.buf)
-	h.bufStart = 0
-	h.bufEnd = n
-	if err != nil {
-		return err
-	}
-
-	// Strip the RTP header for any packaging that does not retain RTP framing (RawTs, AtsTs), leaving the delivered
-	// datagram as raw TS.
-	if h.stripPkt != nil {
-		if err := h.stripPkt.From(h.buf[:h.bufEnd]); err != nil {
-			// TODO(Nate): Is this the best resolution here? Should we just try again at this layer? Or rely on caller to do so?
-			log.Warn("Failed to load RTP packet for stripping", "err", err)
-			return err
-		}
-		rtpLayer, err := h.stripPkt.Rtp()
-		if err != nil {
-			log.Warn("Failed to strip RTP header", "err", err)
-			return err
-		}
-		if rtpLayer.Packet().Header.Version != 2 {
-			err := fmt.Errorf("unsupported RTP version: %d", rtpLayer.Packet().Header.Version)
-			log.Warn("Failed to strip RTP header", "err", err)
-			return err
-		}
-		// Normalize to start at 0 instead of tracking a separate header-length offset: rtpLayer.Payload excludes any
-		// RTP padding too, unlike the previous header-length-only offset.
-		copy(h.buf, rtpLayer.Payload)
+	for {
+		n, _, err := h.udpConn.ReadFrom(h.buf)
 		h.bufStart = 0
-		h.bufEnd = len(rtpLayer.Payload)
+		h.bufEnd = n
+		if err != nil {
+			return err
+		}
+
+		deliver, notRtp := h.prepare()
+		if notRtp == nil {
+			h.guard.accept()
+			return nil
+		}
+		h.bufEnd = 0
+		if err = h.guard.reject(h.buf[:n], notRtp); err != nil {
+			return err
+		}
+		if deliver {
+			// RtpTs passes the datagram on as it is, see prepare.
+			h.bufEnd = n
+			return nil
+		}
+	}
+}
+
+// prepare checks the datagram in h.buf and returns why it is not RTP, or nil. The whole RTP header is decoded, as the
+// packet processor decodes it, so a datagram passes only if its CSRC list, extension and padding fit. For any packaging
+// that does not retain RTP framing (RawTs, AtsTs), prepare strips the RTP header, leaving the delivered datagram as raw
+// TS. deliver tells the caller to pass on a datagram that is not RTP anyway. RtpTs passes it on, so that the stream's
+// statistics count it as they count any other malformed datagram.
+func (h *rtpHandler) prepare() (deliver bool, notRtp error) {
+	rtpLayer, err := h.rtp.Reset(h.buf[:h.bufEnd]).Rtp()
+	if err == nil && rtpLayer.Packet().Header.Version != 2 {
+		err = fmt.Errorf("unsupported RTP version: %d", rtpLayer.Packet().Header.Version)
+	}
+	if err != nil {
+		return !h.strip, err
+	}
+	if !h.strip {
+		return false, nil
 	}
 
-	return nil
+	hdr := rtpLayer.Packet().Header
+	// The payload aliases h.buf, so the read window is moved onto it rather than the payload copied. The header length
+	// is derived from where the payload actually lies, which also excludes any RTP padding at the end.
+	payloadLen := len(rtpLayer.Payload)
+	h.bufStart = h.bufEnd - payloadLen - int(hdr.PaddingSize)
+	h.bufEnd = h.bufStart + payloadLen
+	return false, nil
 }
 
 func (h *rtpHandler) bufLen() int {

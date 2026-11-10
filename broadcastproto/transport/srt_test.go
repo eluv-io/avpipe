@@ -8,7 +8,6 @@ import (
 	"github.com/stretchr/testify/require"
 
 	mio "github.com/eluv-io/common-go/media/io"
-	"github.com/eluv-io/common-go/media/pktpool"
 )
 
 func TestRtpDecapsulatorStripsRTPHeader(t *testing.T) {
@@ -36,24 +35,41 @@ func TestRtpDecapsulatorExcludesRTPPadding(t *testing.T) {
 	require.Equal(t, tsPkt, buf[:n])
 }
 
-func TestRtpDecapsulatorRejectsMalformedPacket(t *testing.T) {
-	dec := newTestRtpDecapsulator(&fakeReadCloser{data: []byte{0x01, 0x02, 0x03}})
+func TestRtpDecapsulatorDropsADatagramThatIsNotRTP(t *testing.T) {
+	tsPkt := mustTestTSPacket(42)
+	good := mustRTPDatagram(t, pionrtp.Header{Version: 2, SequenceNumber: 2, Timestamp: 2}, tsPkt)
+	for _, bad := range [][]byte{
+		{0x01, 0x02, 0x03}, // too short to be a valid RTP header
+		mustRTPDatagram(t, pionrtp.Header{Version: 1, SequenceNumber: 1, Timestamp: 1}, mustTestTSPacket(7)),
+		mustTestTSPacket(7), // plain MPEG-TS
+	} {
+		dec := newTestRtpDecapsulator(&datagramsReadCloser{datagrams: [][]byte{bad, good}})
 
-	buf := make([]byte, 1500)
-	_, err := dec.Read(buf)
-
-	require.Error(t, err)
+		buf := make([]byte, 1500)
+		n, err := dec.Read(buf)
+		require.NoError(t, err)
+		require.Equal(t, tsPkt, buf[:n], "the datagram that is not RTP is dropped, the next one delivered")
+	}
 }
 
-func TestRtpDecapsulatorRejectsNonVersion2Packet(t *testing.T) {
+func TestRtpDecapsulatorFailsASourceThatDoesNotSendRTP(t *testing.T) {
 	tsPkt := mustTestTSPacket(7)
-	datagram := mustRTPDatagram(t, pionrtp.Header{Version: 1, SequenceNumber: 1, Timestamp: 1}, tsPkt)
-	dec := newTestRtpDecapsulator(&fakeReadCloser{data: datagram})
+	dec := newTestRtpDecapsulator(&datagramsReadCloser{datagrams: [][]byte{tsPkt, tsPkt, tsPkt}})
+	dec.guard.max = 3
 
 	buf := make([]byte, 1500)
 	_, err := dec.Read(buf)
+	require.ErrorIs(t, err, ErrNotRtp)
+}
 
-	require.Error(t, err)
+func TestRtpDecapsulatorReturnsTheErrorOfADatagramThatIsNotRTP(t *testing.T) {
+	// A read error that comes with a datagram that is not RTP is returned rather than retried, so that the end of the
+	// stream is not lost.
+	dec := newTestRtpDecapsulator(&fakeReadCloser{data: mustTestTSPacket(7), err: io.EOF})
+
+	buf := make([]byte, 1500)
+	_, err := dec.Read(buf)
+	require.ErrorIs(t, err, io.EOF)
 }
 
 func TestRtpDecapsulatorPreservesUnderlyingEOF(t *testing.T) {
@@ -124,7 +140,7 @@ func (f *fakeStatsReporter) ConnStats(into *mio.ConnStats, details bool) {
 }
 
 func newTestRtpDecapsulator(reader io.ReadCloser) *RtpDecapsulator {
-	return &RtpDecapsulator{reader: reader, pkt: pktpool.NewPacket(0, maxUDPPacketSize)}
+	return &RtpDecapsulator{reader: reader}
 }
 
 // fakeReadCloser returns data (and err, if set) from a single Read call, then io.EOF on any subsequent call.
@@ -147,5 +163,23 @@ func (f *fakeReadCloser) Read(p []byte) (int, error) {
 }
 
 func (f *fakeReadCloser) Close() error {
+	return nil
+}
+
+// datagramsReadCloser returns one of its datagrams per Read call, in order, then io.EOF.
+type datagramsReadCloser struct {
+	datagrams [][]byte
+}
+
+func (d *datagramsReadCloser) Read(p []byte) (int, error) {
+	if len(d.datagrams) == 0 {
+		return 0, io.EOF
+	}
+	n := copy(p, d.datagrams[0])
+	d.datagrams = d.datagrams[1:]
+	return n, nil
+}
+
+func (d *datagramsReadCloser) Close() error {
 	return nil
 }
