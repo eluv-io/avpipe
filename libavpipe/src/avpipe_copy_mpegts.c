@@ -92,8 +92,8 @@ copy_mpegts_prepare_video_encoder(
     }
 
     out_stream->time_base = in_stream->time_base;
-    out_stream->avg_frame_rate = decoder_context->format_context->streams[decoder_context->video_stream_index]->avg_frame_rate;
-    out_stream->r_frame_rate = decoder_context->format_context->streams[decoder_context->video_stream_index]->r_frame_rate;
+    out_stream->avg_frame_rate = in_stream->avg_frame_rate;
+    out_stream->r_frame_rate = in_stream->r_frame_rate;
     // The codec tag is a hint for decoding the stream
     out_stream->codecpar->codec_tag = in_stream->codecpar->codec_tag;
 

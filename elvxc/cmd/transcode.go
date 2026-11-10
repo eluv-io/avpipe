@@ -47,27 +47,27 @@ func (io *noopElvxcInput) Read(buf []byte) (int, error)                 { return
 func (io *noopElvxcInput) Seek(offset int64, whence int) (int64, error) { return 0, nil }
 func (io *noopElvxcInput) Close() error                                 { return nil }
 func (io *noopElvxcInput) Size() int64                                  { return 0 }
-func (i *noopElvxcInput) Stat(streamIndex int, statType goavpipe.AVStatType, statArgs interface{}) error {
+func (i *noopElvxcInput) Stat(srcStreamIndex int, statType goavpipe.AVStatType, statArgs interface{}) error {
 	switch statType {
 	case goavpipe.AV_IN_STAT_BYTES_READ:
 		readOffset := statArgs.(*uint64)
-		log.Info("AVCMD InputHandler.Stat", "read offset", *readOffset, "streamIndex", streamIndex)
+		log.Info("AVCMD InputHandler.Stat", "read offset", *readOffset, "srcStreamIndex", srcStreamIndex)
 	case goavpipe.AV_IN_STAT_AUDIO_FRAME_READ:
 		audioFrameRead := statArgs.(*uint64)
-		log.Info("AVCMD InputHandler.Stat", "audioFrameRead", *audioFrameRead, "streamIndex", streamIndex)
+		log.Info("AVCMD InputHandler.Stat", "audioFrameRead", *audioFrameRead, "srcStreamIndex", srcStreamIndex)
 	case goavpipe.AV_IN_STAT_VIDEO_FRAME_READ:
 		videoFrameRead := statArgs.(*uint64)
-		log.Info("AVCMD InputHandler.Stat", "videoFrameRead", *videoFrameRead, "streamIndex", streamIndex)
+		log.Info("AVCMD InputHandler.Stat", "videoFrameRead", *videoFrameRead, "srcStreamIndex", srcStreamIndex)
 	case goavpipe.AV_IN_STAT_DECODING_AUDIO_START_PTS:
 		startPTS := statArgs.(*uint64)
-		log.Info("AVCMD InputHandler.Stat", "audio start PTS", *startPTS, "streamIndex", streamIndex)
+		log.Info("AVCMD InputHandler.Stat", "audio start PTS", *startPTS, "srcStreamIndex", srcStreamIndex)
 	case goavpipe.AV_IN_STAT_DECODING_VIDEO_START_PTS:
 		startPTS := statArgs.(*uint64)
-		log.Info("AVCMD InputHandler.Stat", "video start PTS", *startPTS, "streamIndex", streamIndex)
+		log.Info("AVCMD InputHandler.Stat", "video start PTS", *startPTS, "srcStreamIndex", srcStreamIndex)
 	case goavpipe.AV_IN_STAT_DATA_SCTE35:
-		log.Info("AVCMD InputHandler.Stat", "scte35", statArgs, "streamIndex", streamIndex)
+		log.Info("AVCMD InputHandler.Stat", "scte35", statArgs, "srcStreamIndex", srcStreamIndex)
 	case goavpipe.AV_IN_STAT_MPEGTS:
-		log.Info("AVCMD InputHandler.Stat", "mpegts", statArgs, "streamIndex", streamIndex)
+		log.Info("AVCMD InputHandler.Stat", "mpegts", statArgs, "srcStreamIndex", srcStreamIndex)
 	}
 
 	return nil
@@ -116,27 +116,27 @@ func (i *elvxcInput) Size() int64 {
 	return fi.Size()
 }
 
-func (i *elvxcInput) Stat(streamIndex int, statType goavpipe.AVStatType, statArgs interface{}) error {
+func (i *elvxcInput) Stat(srcStreamIndex int, statType goavpipe.AVStatType, statArgs interface{}) error {
 	switch statType {
 	case goavpipe.AV_IN_STAT_BYTES_READ:
 		readOffset := statArgs.(*uint64)
-		log.Info("AVCMD InputHandler.Stat", "read offset", *readOffset, "streamIndex", streamIndex)
+		log.Info("AVCMD InputHandler.Stat", "read offset", *readOffset, "srcStreamIndex", srcStreamIndex)
 	case goavpipe.AV_IN_STAT_AUDIO_FRAME_READ:
 		audioFrameRead := statArgs.(*uint64)
-		log.Info("AVCMD InputHandler.Stat", "audioFrameRead", *audioFrameRead, "streamIndex", streamIndex)
+		log.Info("AVCMD InputHandler.Stat", "audioFrameRead", *audioFrameRead, "srcStreamIndex", srcStreamIndex)
 	case goavpipe.AV_IN_STAT_VIDEO_FRAME_READ:
 		videoFrameRead := statArgs.(*uint64)
-		log.Info("AVCMD InputHandler.Stat", "videoFrameRead", *videoFrameRead, "streamIndex", streamIndex)
+		log.Info("AVCMD InputHandler.Stat", "videoFrameRead", *videoFrameRead, "srcStreamIndex", srcStreamIndex)
 	case goavpipe.AV_IN_STAT_DECODING_AUDIO_START_PTS:
 		startPTS := statArgs.(*uint64)
-		log.Info("AVCMD InputHandler.Stat", "audio start PTS", *startPTS, "streamIndex", streamIndex)
+		log.Info("AVCMD InputHandler.Stat", "audio start PTS", *startPTS, "srcStreamIndex", srcStreamIndex)
 	case goavpipe.AV_IN_STAT_DECODING_VIDEO_START_PTS:
 		startPTS := statArgs.(*uint64)
-		log.Info("AVCMD InputHandler.Stat", "video start PTS", *startPTS, "streamIndex", streamIndex)
+		log.Info("AVCMD InputHandler.Stat", "video start PTS", *startPTS, "srcStreamIndex", srcStreamIndex)
 	case goavpipe.AV_IN_STAT_DATA_SCTE35:
-		log.Info("AVCMD InputHandler.Stat", "scte35", statArgs, "streamIndex", streamIndex)
+		log.Info("AVCMD InputHandler.Stat", "scte35", statArgs, "srcStreamIndex", srcStreamIndex)
 	case goavpipe.AV_IN_STAT_MPEGTS:
-		log.Info("AVCMD InputHandler.Stat", "mpegts", statArgs, "streamIndex", streamIndex)
+		log.Info("AVCMD InputHandler.Stat", "mpegts", statArgs, "srcStreamIndex", srcStreamIndex)
 	}
 
 	return nil
@@ -147,11 +147,11 @@ type elvxcOutputOpener struct {
 	dir string
 }
 
-func (oo *elvxcOutputOpener) Open(h, fd int64, stream_index, seg_index int,
+func (oo *elvxcOutputOpener) Open(h, fd int64, ordinal, seg_index int,
 	pts int64, out_type goavpipe.AVType) (goavpipe.OutputHandler, error) {
 
 	log.Debug("AVCMD OutputOpener.Open", "h", h, "fd", fd,
-		"stream_index", stream_index, "seg_index", seg_index, "pts", pts, "out_type", out_type)
+		"ordinal", ordinal, "seg_index", seg_index, "pts", pts, "out_type", out_type)
 
 	var filename string
 	dir := fmt.Sprintf("%s/O%d", oo.dir, h)
@@ -166,19 +166,19 @@ func (oo *elvxcOutputOpener) Open(h, fd int64, stream_index, seg_index int,
 	case goavpipe.DASHVideoInit:
 		fallthrough
 	case goavpipe.DASHAudioInit:
-		filename = fmt.Sprintf("./%s/init-stream%d.m4s", dir, stream_index)
+		filename = fmt.Sprintf("./%s/init-stream%d.m4s", dir, ordinal)
 	case goavpipe.DASHManifest:
 		filename = fmt.Sprintf("./%s/dash.mpd", dir)
 	case goavpipe.DASHVideoSegment:
 		fallthrough
 	case goavpipe.DASHAudioSegment:
-		filename = fmt.Sprintf("./%s/chunk-stream%d-%05d.m4s", dir, stream_index, seg_index)
+		filename = fmt.Sprintf("./%s/chunk-stream%d-%05d.m4s", dir, ordinal, seg_index)
 	case goavpipe.HLSMasterM3U:
 		filename = fmt.Sprintf("./%s/master.m3u8", dir)
 	case goavpipe.HLSVideoM3U:
 		fallthrough
 	case goavpipe.HLSAudioM3U:
-		filename = fmt.Sprintf("./%s/media_%d.m3u8", dir, stream_index)
+		filename = fmt.Sprintf("./%s/media_%d.m3u8", dir, ordinal)
 	case goavpipe.AES128Key:
 		filename = fmt.Sprintf("./%s/key.bin", dir)
 	case goavpipe.MP4Stream:
@@ -186,11 +186,11 @@ func (oo *elvxcOutputOpener) Open(h, fd int64, stream_index, seg_index int,
 	case goavpipe.FMP4Stream:
 		filename = fmt.Sprintf("%s/fmp4-stream.mp4", dir)
 	case goavpipe.MP4Segment:
-		filename = fmt.Sprintf("%s/segment%d-%05d.mp4", dir, stream_index, seg_index)
+		filename = fmt.Sprintf("%s/segment%d-%05d.mp4", dir, ordinal, seg_index)
 	case goavpipe.FMP4VideoSegment:
-		filename = fmt.Sprintf("%s/fmp4-vsegment%d-%05d.mp4", dir, stream_index, seg_index)
+		filename = fmt.Sprintf("%s/fmp4-vsegment%d-%05d.mp4", dir, ordinal, seg_index)
 	case goavpipe.FMP4AudioSegment:
-		filename = fmt.Sprintf("%s/fmp4-asegment%d-%05d.mp4", dir, stream_index, seg_index)
+		filename = fmt.Sprintf("%s/fmp4-asegment%d-%05d.mp4", dir, ordinal, seg_index)
 	case goavpipe.FrameImage:
 		filename = fmt.Sprintf("%s/%d.jpeg", dir, pts)
 	case goavpipe.MpegtsSegment:
@@ -203,20 +203,20 @@ func (oo *elvxcOutputOpener) Open(h, fd int64, stream_index, seg_index int,
 	}
 
 	oh := &elvxcOutput{
-		url:          filename,
-		stream_index: stream_index,
-		seg_index:    seg_index,
-		file:         f}
+		url:       filename,
+		ordinal:   ordinal,
+		seg_index: seg_index,
+		file:      f}
 
 	return oh, nil
 }
 
 // elvxcOutput implement avpipe.OutputHandler
 type elvxcOutput struct {
-	url          string
-	stream_index int
-	seg_index    int
-	file         *os.File
+	url       string
+	ordinal   int
+	seg_index int
+	file      *os.File
 }
 
 func (o *elvxcOutput) Write(buf []byte) (int, error) {
@@ -234,9 +234,9 @@ func (o *elvxcOutput) Close() error {
 	return err
 }
 
-func (o *elvxcOutput) Stat(streamIndex int, avType goavpipe.AVType, statType goavpipe.AVStatType, statArgs interface{}) error {
+func (o *elvxcOutput) Stat(srcStreamIndex int, avType goavpipe.AVType, statType goavpipe.AVStatType, statArgs interface{}) error {
 	doLog := func(args ...interface{}) {
-		logArgs := []interface{}{"stat", statType.Name(), "avType", avType.Name(), "streamIndex", streamIndex}
+		logArgs := []interface{}{"stat", statType.Name(), "avType", avType.Name(), "srcStreamIndex", srcStreamIndex}
 		logArgs = append(logArgs, args...)
 		log.Info("AVCMD Outhandler.Stat", logArgs...)
 	}

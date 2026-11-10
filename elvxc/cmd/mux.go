@@ -104,17 +104,17 @@ func (muxInput *elvxcMuxInput) Size() int64 {
 	return fi.Size()
 }
 
-func (muxInput *elvxcMuxInput) Stat(streamIndex int, statType goavpipe.AVStatType, statArgs interface{}) error {
+func (muxInput *elvxcMuxInput) Stat(srcStreamIndex int, statType goavpipe.AVStatType, statArgs interface{}) error {
 	switch statType {
 	case goavpipe.AV_IN_STAT_BYTES_READ:
 		readOffset := statArgs.(*uint64)
-		log.Info("elvxcMuxInput", "stat read offset", *readOffset, "streamIndex", streamIndex)
+		log.Info("elvxcMuxInput", "stat read offset", *readOffset, "srcStreamIndex", srcStreamIndex)
 	case goavpipe.AV_IN_STAT_DECODING_AUDIO_START_PTS:
 		startPTS := statArgs.(*uint64)
-		log.Info("elvxcMuxInput", "audio start PTS", *startPTS, "streamIndex", streamIndex)
+		log.Info("elvxcMuxInput", "audio start PTS", *startPTS, "srcStreamIndex", srcStreamIndex)
 	case goavpipe.AV_IN_STAT_DECODING_VIDEO_START_PTS:
 		startPTS := statArgs.(*uint64)
-		log.Info("elvxcMuxInput", "video start PTS", *startPTS, "streamIndex", streamIndex)
+		log.Info("elvxcMuxInput", "video start PTS", *startPTS, "srcStreamIndex", srcStreamIndex)
 	}
 
 	return nil
@@ -168,14 +168,14 @@ func (muxOutput *elvxcMuxOutput) Close() error {
 	return err
 }
 
-func (muxOutput *elvxcMuxOutput) Stat(streamIndex int, avType goavpipe.AVType, statType goavpipe.AVStatType, statArgs interface{}) error {
+func (muxOutput *elvxcMuxOutput) Stat(srcStreamIndex int, avType goavpipe.AVType, statType goavpipe.AVStatType, statArgs interface{}) error {
 	switch statType {
 	case goavpipe.AV_OUT_STAT_BYTES_WRITTEN:
 		writeOffset := statArgs.(*uint64)
-		log.Info("elvxcMuxOutput", "STAT, write offset", *writeOffset, "streamIndex", streamIndex)
+		log.Info("elvxcMuxOutput", "STAT, write offset", *writeOffset, "srcStreamIndex", srcStreamIndex)
 	case goavpipe.AV_OUT_STAT_ENCODING_END_PTS:
 		endPTS := statArgs.(*uint64)
-		log.Info("elvxcMuxOutput", "STAT, endPTS", *endPTS, "streamIndex", streamIndex)
+		log.Info("elvxcMuxOutput", "STAT, endPTS", *endPTS, "srcStreamIndex", srcStreamIndex)
 
 	}
 
