@@ -11,6 +11,9 @@ import (
 
 const maxUDPPacketSize = 1<<16 - 1
 
+// rtpHeaderLen is the length of the fixed RTP header.
+const rtpHeaderLen = 12
+
 type rtpProto struct {
 	Url  string
 	Mode TsPackagingMode
@@ -79,6 +82,7 @@ type rtpHandler struct {
 	udpConn *net.UDPConn
 
 	stripPkt *pktpool.Packet // non-nil only when Mode != RtpTs (stripping is needed)
+	guard    rtpGuard        // drops datagrams that are not RTP, and fails the source after a run of them
 }
 
 func (h *rtpHandler) Close() error {
@@ -88,10 +92,12 @@ func (h *rtpHandler) Close() error {
 	return nil
 }
 
-// Read reads precisely one datagram and returns it fully if it fits in the requesting buffer,
-// or else partially, and returns the remainder in the next Read() call(s).  It only reads a new
-// datagram from the network once it has fully return the previous datagram.
-// SS thinking we might discard the rest of the datagram instead which is the standard OS behavior for datagrams
+// Read reads precisely one datagram and returns it fully if it fits in the requesting buffer, or else partially, and
+// returns the remainder in the next Read() call(s).  It only reads a new datagram from the network once it has fully
+// returned the previous datagram.
+//
+// PENDING(LUK): SS suggested that we might discard the rest of the datagram instead, which is the standard OS
+// behavior for datagrams.
 func (h *rtpHandler) Read(p []byte) (int, error) {
 	if h.bufStart >= h.bufEnd {
 		err := h.readNewPacket()
@@ -107,40 +113,65 @@ func (h *rtpHandler) Read(p []byte) (int, error) {
 	return n, nil
 }
 
+// readNewPacket reads the next datagram into h.buf. A datagram that is not RTP is dropped and the next one read, until
+// the guard fails the source.
 func (h *rtpHandler) readNewPacket() error {
-	n, _, err := h.udpConn.ReadFrom(h.buf)
-	h.bufStart = 0
-	h.bufEnd = n
-	if err != nil {
-		return err
-	}
-
-	// Strip the RTP header for any packaging that does not retain RTP framing (RawTs, AtsTs), leaving the delivered
-	// datagram as raw TS.
-	if h.stripPkt != nil {
-		if err := h.stripPkt.From(h.buf[:h.bufEnd]); err != nil {
-			// TODO(Nate): Is this the best resolution here? Should we just try again at this layer? Or rely on caller to do so?
-			log.Warn("Failed to load RTP packet for stripping", "err", err)
-			return err
-		}
-		rtpLayer, err := h.stripPkt.Rtp()
-		if err != nil {
-			log.Warn("Failed to strip RTP header", "err", err)
-			return err
-		}
-		if rtpLayer.Packet().Header.Version != 2 {
-			err := fmt.Errorf("unsupported RTP version: %d", rtpLayer.Packet().Header.Version)
-			log.Warn("Failed to strip RTP header", "err", err)
-			return err
-		}
-		// Normalize to start at 0 instead of tracking a separate header-length offset: rtpLayer.Payload excludes any
-		// RTP padding too, unlike the previous header-length-only offset.
-		copy(h.buf, rtpLayer.Payload)
+	for {
+		n, _, err := h.udpConn.ReadFrom(h.buf)
 		h.bufStart = 0
-		h.bufEnd = len(rtpLayer.Payload)
+		h.bufEnd = n
+		if err != nil {
+			return err
+		}
+
+		delivered, notRtp := h.prepare()
+		if notRtp == nil {
+			h.guard.accept()
+			return nil
+		}
+		h.bufEnd = 0
+		if err = h.guard.reject(h.buf[:n], notRtp); err != nil {
+			return err
+		}
+		if delivered {
+			// RtpTs passes the datagram on as it is, see prepare.
+			h.bufEnd = n
+			return nil
+		}
+	}
+}
+
+// prepare checks the datagram in h.buf and returns why it is not RTP, or nil. For any packaging that does not retain
+// RTP framing (RawTs, AtsTs), it strips the RTP header, leaving the delivered datagram as raw TS. delivered reports
+// whether a datagram that is not RTP is passed on anyway. RtpTs passes it on, so that the stream's statistics count it
+// as they count any other malformed datagram.
+func (h *rtpHandler) prepare() (delivered bool, notRtp error) {
+	if h.stripPkt == nil {
+		switch {
+		case h.bufEnd < rtpHeaderLen:
+			return true, fmt.Errorf("datagram shorter than an RTP header: %d bytes", h.bufEnd)
+		case h.buf[0]>>6 != 2:
+			return true, fmt.Errorf("unsupported RTP version: %d", h.buf[0]>>6)
+		}
+		return false, nil
 	}
 
-	return nil
+	if err := h.stripPkt.From(h.buf[:h.bufEnd]); err != nil {
+		return false, err
+	}
+	rtpLayer, err := h.stripPkt.Rtp()
+	if err != nil {
+		return false, err
+	}
+	if rtpLayer.Packet().Header.Version != 2 {
+		return false, fmt.Errorf("unsupported RTP version: %d", rtpLayer.Packet().Header.Version)
+	}
+	// Normalize to start at 0 instead of tracking a separate header-length offset: rtpLayer.Payload excludes any RTP
+	// padding too, unlike the previous header-length-only offset.
+	copy(h.buf, rtpLayer.Payload)
+	h.bufStart = 0
+	h.bufEnd = len(rtpLayer.Payload)
+	return false, nil
 }
 
 func (h *rtpHandler) bufLen() int {
