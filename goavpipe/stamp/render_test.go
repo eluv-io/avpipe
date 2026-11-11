@@ -19,7 +19,7 @@ func TestBoardState(t *testing.T) {
 		FoulsHome: 3, FoulsAway: 5, BonusAway: 1, TOHome: 6, TOAway: 5, Teams: true}, b)
 	shot, ok := ShotClock(&venueclock.State{ShotClock: venueclock.Value{Text: "4.7", Ms: 4700, Valid: true}, ShotRunning: true})
 	assert.True(t, ok)
-	assert.Equal(t, goavpipe.ClockState{Ms: 4700, Running: true}, shot)
+	assert.Equal(t, goavpipe.ClockState{Ms: 4700}, shot, "the reading as a held clock, whatever the running flag says")
 	_, ok = ShotClock(&st)
 	assert.False(t, ok, "blank shot clock")
 	assert.Len(t, b.Hash(), 64)
@@ -63,10 +63,11 @@ func TestANCRenderMapping(t *testing.T) {
 	mu.Unlock()
 	assert.True(t, ev.Slots["shot"].Hide, "no shot clock yet")
 
-	// The shot clock is a clock slot of its own: a sample changes it, the board is not re-rendered
+	// The shot clock is a clock slot of its own: a sample changes it, the board is not re-rendered. It holds at
+	// the value it was set to whatever the running flag says
 	f.frame(ancFrame(next("31", "24", "0", "0", "1")...))
 	ev = log.Latest(goavpipe.KindOverlay).(goavpipe.OverlayEvent)
-	assert.Equal(t, goavpipe.ClockState{Ms: 24000, Running: true}, *ev.Slots["shot"].Clock)
+	assert.Equal(t, goavpipe.ClockState{Ms: 24000}, *ev.Slots["shot"].Clock)
 	assert.Equal(t, hash, ev.Slots["board"].Image.Hash)
 	mu.Lock()
 	assert.Len(t, rendered, 2)
@@ -91,4 +92,5 @@ func TestANCRenderMapping(t *testing.T) {
 	last := log.Latest(goavpipe.KindOverlay).(goavpipe.OverlayEvent)
 	assert.NotEqual(t, hash, last.Slots["board"].Image.Hash)
 	assert.Equal(t, []string{"clock", "shot"}, m.ClockSlots())
+	assert.Equal(t, "shot", m.ShotClockSlot())
 }

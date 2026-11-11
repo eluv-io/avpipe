@@ -36,7 +36,7 @@ func Anc(cmdRoot *cobra.Command) error {
 	cmdAnc.PersistentFlags().Int("max", 0, "(optional) stop after this many PES packets")
 	cmdAnc.PersistentFlags().Bool("raw", false, "(optional) print the user data words of every packet in hex")
 	cmdAnc.PersistentFlags().Bool("clock", false, "(optional) reassemble the venue clock feed (DID 0x50/0x01) and print its messages and the clock state they change")
-	cmdAnc.PersistentFlags().String("events-out", "", "(optional) with --clock: write the overlay events the venue clock feed makes (slots home, away, score, period, clock, shot; pts in ms) to this JSON file, for a transcode --overlay spec")
+	cmdAnc.PersistentFlags().String("events-out", "", "(optional) with --clock: write the overlay events the venue clock feed makes (text slots home, away, score, period; clock slots clock and shot; pts in ms) to this JSON file, for a transcode --overlay spec")
 	cmdAnc.PersistentFlags().Bool("quiet", false, "(optional) print the summary only (with --clock: the clock messages and the summary)")
 	return nil
 }

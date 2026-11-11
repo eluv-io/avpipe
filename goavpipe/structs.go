@@ -425,7 +425,7 @@ type OverlaySlot struct {
 	Font    string  `json:"font,omitempty"`    // text/clock: path to a font file
 	Color   string  `json:"color,omitempty"`   // text/clock: ffmpeg colour name or 0xRRGGBB[AA], default white
 	Align   string  `json:"align,omitempty"`   // text/clock: left (default), center or right - which edge of the text X anchors
-	Format  string  `json:"format,omitempty"`  // clock: mm:ss (default), h:mm:ss, game (m:ss above a minute, s.t below) or shot (s above five seconds, s.t below)
+	Format  string  `json:"format,omitempty"`  // clock: mm:ss (default), h:mm:ss, game (m:ss above a minute, s.t below) or shot (s above five seconds, s.t below; a countdown is cut off as a shot clock is, 5.9 s left reads 5 and 4.99 s reads 4.9)
 	Default string  `json:"default,omitempty"` // image: library image shown when no event names one
 	Fade    int64   `json:"fade,omitempty"`    // image: every change of the slot (including to or from hidden) cross-fades over this many ms, timed from the event's pts
 }

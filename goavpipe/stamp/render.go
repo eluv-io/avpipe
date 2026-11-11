@@ -47,12 +47,13 @@ func BoardStateOf(st *venueclock.State, scoreFormat string) BoardState {
 	return b
 }
 
-// ShotClock is the shot clock as a clock state, running as the venue's flag says. Invalid when blank.
+// ShotClock is the shot clock's last reading as a held clock. Whether it runs is not in the state: the venue's
+// running flag stays on while the clock sits at 24, so ANC follows the readings instead. Invalid when blank.
 func ShotClock(st *venueclock.State) (goavpipe.ClockState, bool) {
 	if !st.ShotClock.Valid {
 		return goavpipe.ClockState{}, false
 	}
-	return goavpipe.ClockState{Ms: int64(st.ShotClock.Ms), Running: st.ShotRunning}, true
+	return goavpipe.ClockState{Ms: int64(st.ShotClock.Ms)}, true
 }
 
 // Hash names a board state: the hash of its JSON, so the same picture is rendered and fetched once.
@@ -128,3 +129,5 @@ func (m *RenderMapping) ClockSlots() []string {
 	}
 	return slots
 }
+
+func (m *RenderMapping) ShotClockSlot() string { return m.ShotClock }

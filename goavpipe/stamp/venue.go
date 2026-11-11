@@ -7,11 +7,14 @@ import (
 	"github.com/eluv-io/common-go/media/anc/venueclock"
 )
 
-// Mapper turns the venue clock state into the overlay's slot values. ANC calls it on every state change; the
-// clock slots it names get the sample tolerance and the held-clock rule.
+// Mapper turns the venue clock state into the overlay's slot values. ANC calls it on every state change.
 type Mapper interface {
 	Slots(st *venueclock.State) map[string]goavpipe.SlotValue
+	// ClockSlots lists the slots whose value is a clock state. They get the sample tolerance.
 	ClockSlots() []string
+	// ShotClockSlot names the clock slot that shows the shot clock, "" when none does. ANC replaces the value Slots
+	// gives it with the clock it follows from the samples.
+	ShotClockSlot() string
 }
 
 // GameClock is the game clock as a clock state: the value the venue sent, running while the "time stopped" stripe
@@ -25,20 +28,20 @@ func GameClock(st *venueclock.State) (goavpipe.ClockState, bool) {
 	return goavpipe.ClockState{Ms: int64(st.Clock.Ms), Running: running}, true
 }
 
-// VenueMapping says which overlay slots show which parts of the venue clock state, as text and a clock. A slot
-// name left empty is not shown. The game clock is GameClock; the shot clock is text as the venue sends it, since
-// it reads in whole seconds until the last five. The JSON form is how a configuration stores it.
+// VenueMapping says which overlay slots show which parts of the venue clock state, as text and two clocks. A slot
+// name left empty is not shown. The game clock is GameClock; the shot clock is the one ANC follows, for a clock
+// slot of format shot. The JSON form is how a configuration stores it.
 type VenueMapping struct {
 	Home      string `json:"home,omitempty"`       // home team's short name, a text slot
 	Away      string `json:"away,omitempty"`       // visitor's short name, a text slot
 	Score     string `json:"score,omitempty"`      // ScoreFormat with the home and visitor scores, a text slot
 	Period    string `json:"period,omitempty"`     // the period name as sent ("1st", "OVT1"), a text slot
 	Clock     string `json:"clock,omitempty"`      // the game clock, a clock slot
-	ShotClock string `json:"shot_clock,omitempty"` // the shot clock, a text slot
+	ShotClock string `json:"shot_clock,omitempty"` // the shot clock, a clock slot of format shot
 
 	ScoreFormat string `json:"score_format,omitempty"` // default "%d - %d"
-	// ClockToleranceMs: a game clock sample within this of what the running clock already predicts does not make a
-	// new event; the compositor keeps extrapolating. Start, stop and a larger drift do. Default 50.
+	// ClockToleranceMs: a clock sample within this of what the running clock already predicts does not make a new
+	// event; the compositor keeps extrapolating. Start, stop and a larger drift do. Default 50.
 	ClockToleranceMs int64 `json:"clock_tolerance_ms,omitempty"`
 }
 
@@ -113,8 +116,8 @@ func (m VenueMapping) Slots(st *venueclock.State) map[string]goavpipe.SlotValue 
 		}
 	}
 	if m.ShotClock != "" {
-		if st.ShotClock.Valid {
-			out[m.ShotClock] = goavpipe.TextValue(st.ShotClock.Text)
+		if c, ok := ShotClock(st); ok {
+			out[m.ShotClock] = goavpipe.SlotValue{Clock: &c}
 		} else {
 			out[m.ShotClock] = goavpipe.HideValue()
 		}
@@ -124,8 +127,13 @@ func (m VenueMapping) Slots(st *venueclock.State) map[string]goavpipe.SlotValue 
 
 // ClockSlots lists the slots whose value is a clock state, for the tolerance rule.
 func (m VenueMapping) ClockSlots() []string {
-	if m.Clock == "" {
-		return nil
+	var slots []string
+	for _, name := range []string{m.Clock, m.ShotClock} {
+		if name != "" {
+			slots = append(slots, name)
+		}
 	}
-	return []string{m.Clock}
+	return slots
 }
+
+func (m VenueMapping) ShotClockSlot() string { return m.ShotClock }

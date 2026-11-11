@@ -83,7 +83,7 @@ func TestANCStamper(t *testing.T) {
 	ev = events[3].(goavpipe.OverlayEvent)
 	assert.Equal(t, "1st", *ev.Slots["period"].Text)
 	assert.Equal(t, goavpipe.ClockState{Ms: 720000, Running: false}, *ev.Slots["clock"].Clock)
-	assert.Equal(t, "24", *ev.Slots["shot"].Text)
+	assert.Equal(t, goavpipe.ClockState{Ms: 24000}, *ev.Slots["shot"].Clock)
 
 	// A message split over two frames lands on the frame that completed it
 	msg := next("1", "2", "0")
@@ -166,11 +166,117 @@ func TestANCStamper(t *testing.T) {
 	layout := &goavpipe.OverlayParams{Slots: []goavpipe.OverlaySlot{
 		{Name: "home", Type: goavpipe.OverlaySlotText}, {Name: "away", Type: goavpipe.OverlaySlotText},
 		{Name: "score", Type: goavpipe.OverlaySlotText}, {Name: "period", Type: goavpipe.OverlaySlotText},
-		{Name: "clock", Type: goavpipe.OverlaySlotClock}, {Name: "shot", Type: goavpipe.OverlaySlotText}}}
+		{Name: "clock", Type: goavpipe.OverlaySlotClock}, {Name: "shot", Type: goavpipe.OverlaySlotClock}}}
 	for _, e := range log.Events(goavpipe.KindOverlay) {
 		oe := e.(goavpipe.OverlayEvent)
 		assert.NoError(t, layout.ValidateEvent(&oe))
 	}
+}
+
+// TestANCStamperShotClock: the shot clock is followed from its readings, since the venue's running flag stays on
+// while the clock sits. A reading is the time left cut off, so a step down means just under the next step up.
+// Readings that follow the running clock make no event, in whole seconds, across the change to tenths at five
+// seconds, and in tenths.
+func TestANCStamperShotClock(t *testing.T) {
+	log := NewLog()
+	a := NewANC(log, 1000, DefaultVenueMapping())
+	f := &feeder{a: a, pts: 1800000000}
+	seq := 0
+	next := func(id string, fields ...string) []byte { seq++; return venueMessage(seq, id, fields...) }
+	latest := func() goavpipe.OverlayEvent { return log.Latest(goavpipe.KindOverlay).(goavpipe.OverlayEvent) }
+	shot := func() goavpipe.ClockState { return *latest().Slots["shot"].Clock }
+	count := func() int { return len(log.Events(goavpipe.KindOverlay)) }
+	idle := func(frames int) {
+		for i := 0; i < frames; i++ {
+			f.frame(ancFrame())
+		}
+	}
+	// shotAt is the shot clock of the event in effect, carried to the frame at pts (90 kHz)
+	shotAt := func(pts int64) goavpipe.ClockState {
+		ev := latest()
+		return carryClock(*ev.Slots["shot"].Clock, pts*1000/90000-ev.Pts)
+	}
+
+	// The game clock runs; the shot clock is set to 24 and sits there with the running flag on
+	f.frame(ancFrame(next("30", "12:00", "", "", "0", "0", "1")...))
+	f.frame(ancFrame(next("30", "12:00", "", "", "0", "0", "0")...))
+	f.frame(ancFrame(next("31", "24", "0", "0", "1")...))
+	assert.Equal(t, goavpipe.ClockState{Ms: 24000}, shot(), "set: held at the value")
+	idle(120)
+	f.frame(ancFrame(next("31", "24", "0", "0", "1")...))
+	n := count()
+	assert.Equal(t, goavpipe.ClockState{Ms: 24000}, shot(), "a repeat two seconds on: still held")
+
+	// It starts: the first step down is the start, with just under 24 s left
+	p := f.frame(ancFrame(next("31", "23", "0", "0", "1")...))
+	require.Equal(t, n+1, count())
+	assert.Equal(t, goavpipe.ClockState{Ms: 23999, Running: true}, shot())
+	assert.Equal(t, p*1000/90000, latest().Pts)
+
+	// Whole seconds down to 5, a second apart: no event
+	n = count()
+	for s := 22; s >= 5; s-- {
+		idle(59)
+		f.frame(ancFrame(next("31", fmt.Sprint(s), "0", "0", "1")...))
+	}
+	assert.Equal(t, n, count(), "readings that follow the running clock make no event")
+	// 5 stays up for a second, then tenths: 4.9 a second after 5, then every tenth
+	idle(59)
+	p = f.frame(ancFrame(next("31", "4.9", "0", "0", "1")...))
+	assert.Equal(t, n, count(), "the change to tenths follows the running clock")
+	assert.InDelta(t, 4999, shotAt(p).Ms, 50)
+	for d := 48; d >= 30; d-- {
+		idle(5)
+		f.frame(ancFrame(next("31", fmt.Sprintf("%d.%d", d/10, d%10), "0", "0", "1")...))
+	}
+	assert.Equal(t, n, count(), "tenths follow the running clock")
+
+	// A reset: held at 24 again, then started by its first step down
+	f.frame(ancFrame(next("31", "24", "0", "0", "1")...))
+	require.Equal(t, n+1, count())
+	assert.Equal(t, goavpipe.ClockState{Ms: 24000}, shot())
+	idle(40)
+	f.frame(ancFrame(next("31", "23", "0", "0", "1")...))
+	idle(59)
+	f.frame(ancFrame(next("31", "22", "0", "0", "1")...))
+	require.Equal(t, n+2, count())
+	assert.True(t, shot().Running)
+
+	// The game clock stops half a second after a reading: the shot clock stops with it, still reading 22
+	idle(29)
+	p = f.frame(ancFrame(next("30", "11:30", "", "", "0", "0", "1")...))
+	require.Equal(t, n+3, count())
+	assert.False(t, shot().Running)
+	assert.InDelta(t, 22500, shot().Ms, 50)
+	assert.Equal(t, p*1000/90000, latest().Pts)
+	// Play goes on: the game clock starts, the shot clock with its next step down
+	idle(120)
+	f.frame(ancFrame(next("30", "11:30", "", "", "0", "0", "0")...))
+	assert.False(t, shot().Running, "held until a reading moves")
+	idle(29)
+	f.frame(ancFrame(next("31", "21", "0", "0", "1")...))
+	assert.Equal(t, goavpipe.ClockState{Ms: 21999, Running: true}, shot())
+
+	// The readings stop coming with the game clock running: stopped on the reading it shows, a quarter second late
+	n = count()
+	idle(74)
+	assert.Equal(t, n, count(), "not overdue yet")
+	idle(2)
+	require.Equal(t, n+1, count())
+	assert.Equal(t, goavpipe.ClockState{Ms: 21000}, shot())
+
+	// The operator sets it lower: not a step and not the time that passed, so held there
+	idle(60)
+	f.frame(ancFrame(next("31", "14", "0", "0", "1")...))
+	assert.Equal(t, goavpipe.ClockState{Ms: 14000}, shot())
+	// A step down while the game clock is stopped is a new held value
+	f.frame(ancFrame(next("30", "11:28", "", "", "0", "0", "1")...))
+	f.frame(ancFrame(next("31", "13", "0", "0", "1")...))
+	assert.Equal(t, goavpipe.ClockState{Ms: 13000}, shot())
+	// Blank: hidden
+	f.frame(ancFrame(next("31", "", "0", "0", "1")...))
+	assert.True(t, latest().Slots["shot"].Hide)
+	assert.Equal(t, 0, a.Stats.Errors)
 }
 
 // TestANCStamperBreakClock: in a break the venue sends the game clock as 12:00 with the stripe off while the break

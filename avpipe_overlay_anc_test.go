@@ -77,8 +77,8 @@ func (i *ancFeedInput) Close() error {
 	return i.f.Close()
 }
 
-// venueOverlayParams is the layout the venue mapping fills: team short names, score, period, the game clock in
-// the venue format and the shot clock as text.
+// venueOverlayParams is the layout the venue mapping fills: team short names, score, period, and the game clock
+// and the shot clock in their venue formats.
 func venueOverlayParams(url, font string) *goavpipe.XcParams {
 	return &goavpipe.XcParams{
 		Format:              "fmp4-segment",
@@ -103,7 +103,7 @@ func venueOverlayParams(url, font string) *goavpipe.XcParams {
 				{Name: "score", Type: goavpipe.OverlaySlotText, X: 0.5, Y: 0.05, Size: 0.1, Font: font, Color: "yellow", Align: "center"},
 				{Name: "period", Type: goavpipe.OverlaySlotText, X: 0.5, Y: 0.16, Size: 0.06, Font: font, Color: "white", Align: "center"},
 				{Name: "clock", Type: goavpipe.OverlaySlotClock, X: 0.5, Y: 0.24, Size: 0.08, Font: font, Color: "white", Align: "center", Format: "game"},
-				{Name: "shot", Type: goavpipe.OverlaySlotText, X: 0.5, Y: 0.34, Size: 0.06, Font: font, Color: "red", Align: "center"},
+				{Name: "shot", Type: goavpipe.OverlaySlotClock, X: 0.5, Y: 0.34, Size: 0.06, Font: font, Color: "red", Align: "center", Format: "shot"},
 			},
 		},
 	}
@@ -142,7 +142,7 @@ func TestOverlayFromANC(t *testing.T) {
 	assert.Greater(t, opener.stats, 250, "one stat per frame")
 
 	events := log.Events(goavpipe.KindOverlay)
-	require.Len(t, events, len(venueFeed)-1, "every message changed the state except the repeated shot clock running flag")
+	require.Len(t, events, len(venueFeed)-1, "every message made an event except the game clock sample that follows the running clock")
 	st := stamper.State()
 	assert.Equal(t, [2]int{2, 3}, st.Score)
 	assert.True(t, st.Stopped)

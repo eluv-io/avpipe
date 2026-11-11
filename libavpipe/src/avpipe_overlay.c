@@ -1029,7 +1029,8 @@ overlay_bind(
  * The clock's text at elapsed_ms after its event. A countdown shows the second it is in (2.3 s left reads 00:03)
  * and stops at zero; a count-up shows the seconds completed. The game format shows tenths under a minute
  * (59.9 .. 0.0) and m:ss above, as a venue game clock does; the shot format shows tenths under five seconds and
- * whole seconds above, as a shot clock does.
+ * whole seconds above, as a shot clock does. A shot clock counting down shows the time left cut off, not the
+ * second it is in: 5.9 s left reads 5 and 4.99 s reads 4.9, so the reading changes to tenths as 5.0 passes.
  */
 static void
 ov_clock_text(
@@ -1044,6 +1045,13 @@ ov_clock_text(
         ms += clock->up ? elapsed_ms : -elapsed_ms;
     if (ms < 0)
         ms = 0;
+    if (slot->clock_format == ov_clock_shot && !clock->up) {
+        if (ms < 5000)
+            snprintf(buf, buf_sz, "%"PRId64".%"PRId64, ms / 1000, (ms / 100) % 10);
+        else
+            snprintf(buf, buf_sz, "%"PRId64, ms / 1000);
+        return;
+    }
     if ((slot->clock_format == ov_clock_game && ms < 60000) || (slot->clock_format == ov_clock_shot && ms < 5000)) {
         int64_t tenths = clock->up ? ms / 100 : (ms + 99) / 100;
         snprintf(buf, buf_sz, "%"PRId64".%"PRId64, tenths / 10, tenths % 10);
