@@ -2673,6 +2673,10 @@ do_bypass(
             packet->pos, packet->size, packet->stream_index,
             packet->flags, packet->data);
     } else {
+        /* The write takes the packet and leaves it blank: keep what the stat reports */
+        const int64_t written_pts = packet->pts;
+        const AVRational written_time_base = format_context->streams[packet->stream_index]->time_base;
+
         int rc = av_interleaved_write_frame(format_context, packet);
         if (rc < 0) {
             elv_err("Failure in copying bypass packet xc_type=%d error=%s (%d) url=%s", p->xc_type, av_err2str(rc), rc, p->url);
@@ -2696,8 +2700,8 @@ do_bypass(
                 outctx->total_frames_written = encoder_context->video_frames_written;
             }
             outctx->frames_written++;
-            outctx->last_pts = packet->pts;
-            outctx->last_time_base = format_context->streams[packet->stream_index]->time_base;
+            outctx->last_pts = written_pts;
+            outctx->last_time_base = written_time_base;
             out_handlers->avpipe_stater(outctx, packet->stream_index, out_stat_frame_written);
         }
     }

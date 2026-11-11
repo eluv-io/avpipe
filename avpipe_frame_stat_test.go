@@ -118,3 +118,58 @@ func TestFrameWrittenLastPts(t *testing.T) {
 		t.Errorf("written span %.4f s in time base %d/%d, want 4 s", seconds, last.TimeBaseNum, last.TimeBaseDen)
 	}
 }
+
+// A passthrough reports the pts of every copied packet too. The muxer takes the packet, so the pts has to be read
+// before the write.
+func TestFrameWrittenLastPtsBypass(t *testing.T) {
+	url := videoBigBuckBunnyPath
+	checkFileExists(t, url)
+	outPath := path.Join(baseOutPath, fn())
+	setupOutDir(t, outPath)
+
+	foo := &frameStatOpener{FileOutputOpener: xc.FileOutputOpener{Dir: outPath}}
+	goavpipe.InitIOHandler(&xc.FileInputOpener{URL: url}, foo)
+
+	params := &goavpipe.XcParams{
+		BypassTranscoding:  true,
+		Format:             "hls",
+		DurationTs:         120000, // 4 s of the 30 fps, 1/30000 clip
+		StartSegmentStr:    "1",
+		VideoSegDurationTs: 60000,
+		Ecodec:             h264Codec,
+		XcType:             goavpipe.XcVideo,
+		StreamId:           -1,
+		Url:                url,
+	}
+	if err := avpipe.Xc(params); err != nil {
+		t.Fatal(err)
+	}
+
+	foo.mu.Lock()
+	stats := foo.stats
+	foo.mu.Unlock()
+	if len(stats) < 100 {
+		t.Fatalf("frame-written stats: got %d, want about 120", len(stats))
+	}
+	// Packets are copied in decode order, so the pts are sorted before they are compared
+	pts := make([]int64, len(stats))
+	for i, s := range stats {
+		if s.LastPts < 0 {
+			t.Fatalf("stat %d (frame %d): LastPts=%d, want the packet's pts", i, s.TotalFramesWritten, s.LastPts)
+		}
+		if s.TimeBaseNum <= 0 || s.TimeBaseDen <= 0 {
+			t.Fatalf("stat %d: time base %d/%d", i, s.TimeBaseNum, s.TimeBaseDen)
+		}
+		pts[i] = s.LastPts
+	}
+	sort.Slice(pts, func(i, j int) bool { return pts[i] < pts[j] })
+	d := pts[1] - pts[0]
+	if d <= 0 {
+		t.Fatalf("frame duration %d from pts %v", d, pts[:2])
+	}
+	for i := 1; i < len(pts); i++ {
+		if pts[i]-pts[i-1] != d {
+			t.Fatalf("pts[%d]-pts[%d] = %d, want the frame duration %d", i, i-1, pts[i]-pts[i-1], d)
+		}
+	}
+}
