@@ -784,7 +784,7 @@ set_encoder_options(
  * AVCodecContext.refs is read by every encoder wrapper. What reaches the SPS:
  *   libx264 (encoder/set.c): num_ref_frames = max_dec_frame_buffering
  *       = MAX(refs, 1 + num_reorder_frames, pyramid ? 4 : 1, dpb_size),
- *       i.e. refs for avpipe's bframes=0 encodes.
+ *       i.e. refs when bframes=0 (B-frames may increase SPS reference count)
  * Other encoders are unverified, hence the warning.
  */
 static void
@@ -845,11 +845,20 @@ set_h264_params(
                                                 encoder_codec_context->height);
     }
 
-    char x264_params[128];
+    char x264_params[256];
     int off = snprintf(x264_params, sizeof(x264_params), "stitchable=1");
     if (params->video_layout == video_layout_sbs)
         off += snprintf(x264_params + off, sizeof(x264_params) - off,
             ":frame-packing=%d", video_layout_sbs);
+    /* MP4 doesn't allow x264's nal-hrd=cbr so we use ABR + matched VBV + filler */
+    if (params->cbr)
+        off += snprintf(x264_params + off, sizeof(x264_params) - off, ":nal-hrd=vbr:filler=1");
+    if (params->weighted_pred_p)
+        off += snprintf(x264_params + off, sizeof(x264_params) - off,
+            ":weightp=%d", params->weighted_pred_p > 0 ? 2 : 0);
+    if (params->weighted_pred_b)
+        off += snprintf(x264_params + off, sizeof(x264_params) - off,
+            ":weightb=%d", params->weighted_pred_b > 0);
     /* Color metadata (range/primaries/trc/matrix) is already set on the encoder
      * context by copy_source_color_to_output(), so no x264-params fullrange option is needed. */
     av_opt_set(encoder_codec_context->priv_data, "x264-params", x264_params, 0);
@@ -948,11 +957,20 @@ set_h265_params(
             cr == AVCOL_RANGE_JPEG ? "full" : "limited");
     }
 
-    if (off > 0)
-        av_opt_set(encoder_codec_context->priv_data, "x265-params", x265_params, 0);
-
-    /* Set the number of bframes to 0 and avoid having bframes */
-    av_opt_set_int(encoder_codec_context->priv_data, "bframes", 0, 0);
+    /* Use regular x265-params */
+    off += snprintf(x265_params + off, sizeof(x265_params) - off,
+        "%sbframes=%d", off > 0 ? ":" : "", params->bframes);
+    if (params->cbr)
+        off += snprintf(x265_params + off, sizeof(x265_params) - off, ":strict-cbr=1");
+    if (params->weighted_pred_p)
+        off += snprintf(x265_params + off, sizeof(x265_params) - off,
+            ":weightp=%d", params->weighted_pred_p > 0);
+    if (params->weighted_pred_b)
+        off += snprintf(x265_params + off, sizeof(x265_params) - off,
+            ":weightb=%d", params->weighted_pred_b > 0);
+    rc = av_opt_set(encoder_codec_context->priv_data, "x265-params", x265_params, 0);
+    if (rc < 0)
+        return eav_param;
 
     /*
      * These are set according to
@@ -1363,7 +1381,7 @@ prepare_video_encoder(
     /* Set encoder parameters (directly in the coder context priv_data dictionary) */
 
     /* Added to fix/improve encoding quality of the first frame - PENDING(SSS) research */
-    if ( params->crf_str && strlen(params->crf_str) > 0 ) {
+    if (!params->cbr && params->crf_str && strlen(params->crf_str) > 0) {
         /* The 'crf' option may be overriden by rate control options - 'crf_max' is used as a safety net */
         av_opt_set(encoder_codec_context->priv_data, "crf", params->crf_str, AV_OPT_FLAG_ENCODING_PARAM | AV_OPT_SEARCH_CHILDREN);
         // av_opt_set(encoder_codec_context->priv_data, "crf_max", params->crf_str, AV_OPT_FLAG_ENCODING_PARAM | AV_OPT_SEARCH_CHILDREN);
@@ -1375,11 +1393,11 @@ prepare_video_encoder(
         av_opt_set(encoder_codec_context->priv_data, "preset", params->preset, AV_OPT_FLAG_ENCODING_PARAM | AV_OPT_SEARCH_CHILDREN);
     }
 
-    // TODO: Add a parameter for b-frames instead of using format
-    if (!strcmp(params->format, "fmp4-segment") || !strcmp(params->format, "fmp4") ||
-        !strcmp(params->format, "dash") || !strcmp(params->format, "hls")) {
-        encoder_codec_context->max_b_frames = 0;
-    }
+    /* Default no B-frames for segmented output. */
+    if (params->bframes > 0 || !strcmp(params->format, "fmp4-segment") ||
+        !strcmp(params->format, "fmp4") || !strcmp(params->format, "dash") ||
+        !strcmp(params->format, "hls"))
+        encoder_codec_context->max_b_frames = params->bframes;
 
     set_video_refs(encoder_codec_context, params);
 
@@ -1519,6 +1537,30 @@ prepare_video_encoder(
     if (rc < 0) {
         elv_err("Failed to set video encoder options, url=%s", params->url);
         return rc;
+    }
+
+    if (params->closed_gop) {
+        encoder_codec_context->flags |= AV_CODEC_FLAG_CLOSED_GOP;
+        rc = av_opt_set_int(encoder_codec_context->priv_data, "forced-idr", 1, 0);
+        if (rc < 0) {
+            elv_err("Encoder %s cannot force IDR for closed_gop, err=%s, url=%s",
+                params->ecodec, av_err2str(rc), params->url);
+            return eav_param;
+        }
+    }
+    if (params->cbr) {
+        encoder_codec_context->bit_rate = params->video_bitrate;
+        encoder_codec_context->rc_min_rate = params->video_bitrate;
+        encoder_codec_context->rc_max_rate = params->video_bitrate;
+        if (!strcmp(params->ecodec, "h264_nvenc") || !strcmp(params->ecodec, "hevc_nvenc")) {
+            rc = av_opt_set(encoder_codec_context->priv_data, "rc", "cbr", 0);
+            if (rc >= 0)
+                rc = av_opt_set_int(encoder_codec_context->priv_data, "cbr_padding", 1, 0);
+            if (rc < 0) {
+                elv_err("Failed to enable NVENC CBR/padding, err=%s, url=%s", av_err2str(rc), params->url);
+                return eav_param;
+            }
+        }
     }
 
     /* Open video encoder (initialize the encoder codec_context[i] using given codec[i]). */
@@ -2459,7 +2501,8 @@ encode_frame(
         output_packet->dts += params->start_pts;
 
         // Detect missing frames for UDP-based live sources
-        if ((is_live_source_udp(decoder_context)) &&
+        // (disable if we have B-frames - this logic incorrect for B-frames)
+        if (params->bframes == 0 && is_live_source_udp(decoder_context) &&
             encoder_context->video_encoder_prev_pts > 0 &&
             stream_index == decoder_context->video_stream_index &&
             encoder_context->calculated_frame_duration > 0 &&
@@ -4803,7 +4846,7 @@ check_params(
      *   - https://trac.ffmpeg.org/wiki/Encode/H.264
      */
     if (params->video_bitrate > 0) {
-        if (params->video_bitrate > params->rc_max_rate) {
+        if (!params->cbr && params->video_bitrate > params->rc_max_rate) {
             elv_log("Replacing rc_max_rate %d with video_bitrate %d, url=%s",
                 params->rc_max_rate, params->video_bitrate, params->url);
             params->rc_max_rate = params->video_bitrate;
@@ -4920,6 +4963,43 @@ check_params(
     if (avpipe_check_level(params->level) < 0) {
         elv_err("Invalid level %d", params->level);
         return eav_param;
+    }
+
+    if (params->bframes < 0 || params->bframes > 16) {
+        elv_err("Invalid bframes %d - must be 0..16, url=%s", params->bframes, params->url);
+        return eav_param;
+    }
+    if (params->weighted_pred_p < -1 || params->weighted_pred_p > 1 ||
+        params->weighted_pred_b < -1 || params->weighted_pred_b > 1) {
+        elv_err("Invalid weighted prediction p=%d b=%d - must be -1/0/1, url=%s",
+            params->weighted_pred_p, params->weighted_pred_b, params->url);
+        return eav_param;
+    }
+    if (params->cbr != 0 && params->cbr != 1) {
+        elv_err("Invalid cbr %d - must be 0/1, url=%s", params->cbr, params->url);
+        return eav_param;
+    }
+    if (params->closed_gop != 0 && params->closed_gop != 1) {
+        elv_err("Invalid closed_gop %d - must be 0/1, url=%s", params->closed_gop, params->url);
+        return eav_param;
+    }
+
+    /* Ensure encoding options are supported by the requested encoder.
+     * Ignore (allow) for bypass and audio-only jobs.
+     */
+    if (!params->bypass_transcoding && (params->xc_type & xc_video)) {
+        int software = params->ecodec && (!strcmp(params->ecodec, "libx264") || !strcmp(params->ecodec, "libx265"));
+        int nvenc = params->ecodec && (!strcmp(params->ecodec, "h264_nvenc") || !strcmp(params->ecodec, "hevc_nvenc"));
+        if (((params->bframes || params->cbr || params->closed_gop) && !software && !nvenc) ||
+            ((params->weighted_pred_p || params->weighted_pred_b) && !software)) {
+            elv_err("Requested encoder controls unsupported for ecodec=%s, url=%s", params->ecodec ? params->ecodec : "", params->url);
+            return eav_param;
+        }
+        if (params->cbr && (params->video_bitrate < 1000 ||
+            (params->rc_max_rate > 0 && params->rc_max_rate != params->video_bitrate))) {
+            elv_err("CBR requires video_bitrate >= 1000 and rc_max_rate equal to video_bitrate, url=%s", params->url);
+            return eav_param;
+        }
     }
 
     /*
@@ -5062,7 +5142,7 @@ log_params(
         "rotate=%d "
         "profile=%s "
         "level=%d "
-        "video_refs=%d "
+        "video_refs=%d bframes=%d cbr=%d weighted_pred_p=%d weighted_pred_b=%d closed_gop=%d "
         "deinterlace=%d "
         "use_preprocessed_input=%d "
         "copy_mpegts=%d "
@@ -5099,6 +5179,7 @@ log_params(
         params->extract_image_interval_ts, params->extract_images_sz,
         1, params->video_time_base, params->video_frame_duration_ts, params->rotate,
         params->profile ? params->profile : "", params->level, params->video_refs,
+        params->bframes, params->cbr, params->weighted_pred_p, params->weighted_pred_b, params->closed_gop,
         params->deinterlace,
         params->use_preprocessed_input, params->copy_mpegts,
         params->timecode,

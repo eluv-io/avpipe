@@ -596,6 +596,11 @@ typedef struct xcparams_t {
     int         fade_end_frame;             // Fade end frame (used with blend filter)
     double      fade_level_1;               // Fade blend start level (e.g. 1.0)
     double      fade_level_2;               // Fade blend end level (e.g. 0.0)
+    int         bframes;                   // Max consecutive B-frames, 0..16; default 0 (no B-frames)
+    int         cbr;                       // CBR bitrate/VBV mode; ignores crf_str, requires video_bitrate
+    int         weighted_pred_p;           // 0 = preset default, -1 = disabled, 1 = enabled (libx264/libx265)
+    int         weighted_pred_b;           // 0 = preset default, -1 = disabled, 1 = enabled (libx264/libx265)
+    int         closed_gop;                // Closed GOP and forced IDR keyframes (does not set or imply an interval)
 } xcparams_t;
 
 #define MAX_CODEC_NAME  256

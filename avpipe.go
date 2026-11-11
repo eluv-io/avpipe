@@ -924,6 +924,9 @@ func getCParams(params *goavpipe.XcParams) (*C.xcparams_t, error) {
 		profile:                   C.CString(params.Profile),
 		level:                     C.int(params.Level),
 		video_refs:                C.int(params.VideoRefs),
+		bframes:                   C.int(params.BFrames),
+		weighted_pred_p:           C.int(params.WeightedPredP),
+		weighted_pred_b:           C.int(params.WeightedPredB),
 		deinterlace:               C.dif_type(params.Deinterlace),
 		timecode:                  C.CString(params.Timecode),
 		vertical:                  C.vertical_type(params.Vertical),
@@ -934,6 +937,13 @@ func getCParams(params *goavpipe.XcParams) (*C.xcparams_t, error) {
 		fade_level_2:              C.double(params.FadeLevel2),
 
 		// All boolean params are handled below
+	}
+
+	if params.CBR {
+		cparams.cbr = C.int(1)
+	}
+	if params.ClosedGOP {
+		cparams.closed_gop = C.int(1)
 	}
 
 	if params.BypassTranscoding {

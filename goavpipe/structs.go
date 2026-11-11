@@ -369,7 +369,12 @@ type XcParams struct {
 	Rotate                 int         `json:"rotate,omitempty"`
 	Profile                string      `json:"profile,omitempty"`
 	Level                  int         `json:"level,omitempty"`
-	VideoRefs              int         `json:"video_refs,omitempty"` // reference frames, 0 = encoder default
+	BFrames                int         `json:"bframes,omitempty"`         // max consecutive B-frames; 0 keeps legacy defaults (disabled for segmented output)
+	CBR                    bool        `json:"cbr,omitempty"`             // bitrate/VBV mode; overrides CRF
+	WeightedPredP          int         `json:"weighted_pred_p,omitempty"` // 0 = preset default, -1 = disabled, 1 = enabled
+	WeightedPredB          int         `json:"weighted_pred_b,omitempty"` // 0 = preset default, -1 = disabled, 1 = enabled
+	ClosedGOP              bool        `json:"closed_gop,omitempty"`      // require IDR at forced keyframes
+	VideoRefs              int         `json:"video_refs,omitempty"`      // reference frames, 0 = encoder default
 	Deinterlace            int         `json:"deinterlace,omitempty"`
 	Timecode               string      `json:"timecode,omitempty"`
 	Vertical               int         `json:"vertical,omitempty"` // vertical_type: 0=none, 1=32bpf

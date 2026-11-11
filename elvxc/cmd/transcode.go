@@ -390,6 +390,11 @@ func InitTranscode(cmdRoot *cobra.Command) error {
 	cmdTranscode.PersistentFlags().Int32("rotate", 0, "Rotate the output video frame (valid values 0, 90, 180, 270).")
 	cmdTranscode.PersistentFlags().StringP("profile", "", "", "Encoding profile for video. If it is not determined, it will be set automatically.")
 	cmdTranscode.PersistentFlags().Int32("level", 0, "Encoding level for video. If it is not determined, it will be set automatically.")
+	cmdTranscode.PersistentFlags().Int("bframes", 0, "Max consecutive B-frames (0 disables, max 16; codec/GPU limits apply)")
+	cmdTranscode.PersistentFlags().Bool("cbr", false, "Enable CBR with video-bitrate (overrides CRF; x264/x265/NVENC)")
+	cmdTranscode.PersistentFlags().Int("weighted-pred-p", 0, "P-frame weighted prediction: 0 preset default, -1 off, 1 on (x264/x265)")
+	cmdTranscode.PersistentFlags().Int("weighted-pred-b", 0, "B-frame weighted prediction: 0 preset default, -1 off, 1 on (x264/x265)")
+	cmdTranscode.PersistentFlags().Bool("closed-gop", false, "Require closed GOP and forced IDR keyframes (x264/x265/NVENC)")
 	cmdTranscode.PersistentFlags().Int32("video-refs", 0, "Encoder reference frames (verified with libx264). Default 0 lets the encoder choose.")
 	cmdTranscode.PersistentFlags().Int32("deinterlace", 0, "Deinterlace filter (values 0 - none, 1 - bwdif_field, 2 - bwdif_frame send_frame).")
 	cmdTranscode.PersistentFlags().Int32("vertical", 0, "Vertical video crop type (0 - none, 1 - 32bpf).")
@@ -705,6 +710,27 @@ func doTranscode(cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("Invalid level value")
 	}
 
+	bframes, err := cmd.Flags().GetInt("bframes")
+	if err != nil {
+		return err
+	}
+	cbr, err := cmd.Flags().GetBool("cbr")
+	if err != nil {
+		return err
+	}
+	weightedPredP, err := cmd.Flags().GetInt("weighted-pred-p")
+	if err != nil {
+		return err
+	}
+	weightedPredB, err := cmd.Flags().GetInt("weighted-pred-b")
+	if err != nil {
+		return err
+	}
+	closedGOP, err := cmd.Flags().GetBool("closed-gop")
+	if err != nil {
+		return err
+	}
+
 	videoRefs, err := cmd.Flags().GetInt32("video-refs")
 	if err != nil {
 		return fmt.Errorf("Invalid video-refs value")
@@ -895,6 +921,11 @@ func doTranscode(cmd *cobra.Command, args []string) error {
 		Profile:                profile,
 		Level:                  int(level),
 		VideoRefs:              int(videoRefs),
+		BFrames:                bframes,
+		CBR:                    cbr,
+		WeightedPredP:          weightedPredP,
+		WeightedPredB:          weightedPredB,
+		ClosedGOP:              closedGOP,
 		Deinterlace:            int(deinterlace),
 		Vertical:               int(vertical),
 		VerticalData:           verticalData,
