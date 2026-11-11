@@ -49,8 +49,17 @@ tsgen_open(const char *src, const char *dst, int unmarked)
         g->map[i] = -1;
     if ((rc = avformat_open_input(&g->in, src, NULL, NULL)) < 0 ||
         (rc = avformat_find_stream_info(g->in, NULL)) < 0 ||
-        (rc = g->vin = av_find_best_stream(g->in, AVMEDIA_TYPE_VIDEO, -1, -1, NULL, 0)) < 0 ||
-        (rc = avformat_alloc_output_context2(&g->out, NULL, "mpegts", dst)) < 0)
+        (rc = g->vin = av_find_best_stream(g->in, AVMEDIA_TYPE_VIDEO, -1, -1, NULL, 0)) < 0)
+        goto fail;
+    if (!dst) {
+        /* Scan only: tsgen_next_video reports the video's timestamps and nothing is written */
+        if (!(g->pkt = av_packet_alloc())) {
+            rc = AVERROR(ENOMEM);
+            goto fail;
+        }
+        return g;
+    }
+    if ((rc = avformat_alloc_output_context2(&g->out, NULL, "mpegts", dst)) < 0)
         goto fail;
 
     /* Every video and audio stream is copied, in input order, so the TS has the same stream layout as the clip */
@@ -81,9 +90,6 @@ tsgen_open(const char *src, const char *dst, int unmarked)
     g->dout->codecpar->codec_id = unmarked ? AV_CODEC_ID_BIN_DATA : AV_CODEC_ID_SMPTE_2038;
     g->dout->time_base = tb90k;
 
-    /* No interleave limit: the media is held until the data stream has packets, which come after all of it */
-    g->out->max_interleave_delta = 0;
-
     if ((rc = avio_open(&g->out->pb, dst, AVIO_FLAG_WRITE)) < 0 ||
         (rc = avformat_write_header(g->out, NULL)) < 0)
         goto fail;
@@ -108,21 +114,32 @@ tsgen_next_video(tsgen_t *g, int64_t *pts, int64_t *dts)
             return rc;
         }
         int in_index = g->pkt->stream_index;
-        int out_index = in_index < TSGEN_MAX_STREAMS ? g->map[in_index] : -1;
-        if (out_index < 0) {
+        int is_video = in_index == g->vin;
+        int out_index = g->out && in_index < TSGEN_MAX_STREAMS ? g->map[in_index] : -1;
+        /* A scan looks at the video only; a copy takes every mapped stream */
+        int skip = g->out ? out_index < 0 : !is_video;
+        if (skip) {
             av_packet_unref(g->pkt);
             continue;
         }
-        int is_video = in_index == g->vin;
-        av_packet_rescale_ts(g->pkt, g->in->streams[in_index]->time_base, g->out->streams[out_index]->time_base);
-        g->pkt->stream_index = out_index;
-        g->pkt->pos = -1;
+        av_packet_rescale_ts(g->pkt, g->in->streams[in_index]->time_base, tb90k);
         if (is_video) {
             *pts = g->pkt->pts;
             *dts = g->pkt->dts;
         }
-        /* The muxer converts avcC extradata to Annex B itself (its bitstream check) */
-        rc = av_interleaved_write_frame(g->out, g->pkt);
+        if (!g->out) {
+            av_packet_unref(g->pkt);
+            return 1;
+        }
+        g->pkt->stream_index = out_index;
+        g->pkt->pos = -1;
+        /*
+         * Written in the order given, not through the interleaver: libavformat does not wait for an ST 2038
+         * stream when it interleaves, which would leave the data packets behind all of the media.
+         * The muxer converts avcC extradata to Annex B itself (its bitstream check).
+         */
+        rc = av_write_frame(g->out, g->pkt);
+        av_packet_unref(g->pkt);
         if (rc < 0) {
             fprintf(stderr, "tsgen_next_video: write: %s\n", av_err2str(rc));
             return rc;
@@ -155,7 +172,7 @@ tsgen_write_anc(tsgen_t *g, int64_t pts, const uint8_t *data, int size)
         return AVERROR(ENOMEM);
     }
     sd[0] = 0xbd;
-    rc = av_interleaved_write_frame(g->out, p);
+    rc = g->out ? av_write_frame(g->out, p) : AVERROR(EINVAL);
     av_packet_free(&p);
     if (rc < 0)
         fprintf(stderr, "tsgen_write_anc: pts=%lld: %s\n", (long long)pts, av_err2str(rc));

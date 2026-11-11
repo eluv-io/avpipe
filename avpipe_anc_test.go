@@ -59,6 +59,38 @@ func (i *ancInput) Stat(_ int, statType goavpipe.AVStatType, args interface{}) e
 	return nil
 }
 
+// tsPesStarts returns the file offsets at which the PES packets of the video and of the data stream start in a TS
+// written by anctest. The video is the stream with the most TS packets; the data stream is the last one the muxer
+// adds, so it has the highest elementary PID.
+func tsPesStarts(t *testing.T, tsPath string) (video, data []int) {
+	b, err := os.ReadFile(tsPath)
+	require.NoError(t, err)
+	packets := map[int]int{}
+	starts := map[int][]int{}
+	for off := 0; off+188 <= len(b); off += 188 {
+		require.Equal(t, byte(0x47), b[off], "sync byte at %d", off)
+		pid := int(b[off+1]&0x1f)<<8 | int(b[off+2])
+		if pid < 0x100 || pid >= 0x1000 { // the muxer's elementary streams; the PMT is at 0x1000
+			continue
+		}
+		packets[pid]++
+		if b[off+1]&0x40 != 0 { // payload unit start
+			starts[pid] = append(starts[pid], off)
+		}
+	}
+	videoPid, dataPid := -1, -1
+	for pid, n := range packets {
+		if videoPid < 0 || n > packets[videoPid] {
+			videoPid = pid
+		}
+		if pid > dataPid {
+			dataPid = pid
+		}
+	}
+	require.NotEqual(t, videoPid, dataPid, "no data stream next to the video in %s", tsPath)
+	return starts[videoPid], starts[dataPid]
+}
+
 // TestAncStat builds a TS with an ST 2038 stream next to the video, checks that probe lists the stream, and that
 // a transcode reports every ANC PES packet with its pts and payload through AV_IN_STAT_DATA_ANC.
 func TestAncStat(t *testing.T) {
@@ -80,6 +112,19 @@ func TestAncStat(t *testing.T) {
 	})
 	require.NoError(t, err)
 	require.Greater(t, len(written), 250, "expected one ANC packet per frame of the 10 s clip")
+
+	// The packets sit next to their frames, as an encoder muxes them, not behind all of the video: the k-th ANC
+	// packet lies within a few frames of the k-th video frame, the slack being the B-frame reorder
+	videoAt, ancAt := tsPesStarts(t, tsPath)
+	require.Equal(t, len(written), len(ancAt), "one PES packet per ANC packet written")
+	require.GreaterOrEqual(t, len(videoAt), len(ancAt))
+	const slack = 6
+	for k := slack; k+slack < len(ancAt); k++ {
+		if ancAt[k] < videoAt[k-slack] || ancAt[k] > videoAt[k+slack] {
+			t.Fatalf("ANC packet %d at offset %d is not next to its frame: video frames %d..%d span offsets %d..%d",
+				k, ancAt[k], k-slack, k+slack, videoAt[k-slack], videoAt[k+slack])
+		}
+	}
 
 	// Probe lists the stream as data with the VANC registration tag; it has no decoder, so no codec name
 	goavpipe.InitIOHandler(&xc.FileInputOpener{URL: tsPath}, &xc.FileOutputOpener{Dir: outputDir})

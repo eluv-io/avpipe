@@ -24,10 +24,12 @@ type Written struct {
 	Payload []byte
 }
 
-// WriteTS copies the first video stream of src into dst as MPEG-TS and adds an ST 2038 data stream (PES
+// WriteTS copies the video and audio streams of src into dst as MPEG-TS and adds an ST 2038 data stream (PES
 // stream_id 0xBD). payload is called once per video frame, in presentation order, with the frame's index and its
-// pts in 90 kHz units, and returns the PES payload to carry at that pts, or nil for none. The packets written are
-// returned in pts order, which is also the order a demuxer delivers them in.
+// pts in 90 kHz units, and returns the PES payload to carry at that pts, or nil for none. Each packet is written
+// next to its frame, as an encoder muxes it: right after the frame's video packet, or with B-frames once the
+// video's dts has reached the frame's pts. The packets written are returned in pts order, which is also the order
+// a demuxer delivers them in.
 func WriteTS(src, dst string, payload func(i int, pts int64) []byte) ([]Written, error) {
 	return writeTS(src, dst, false, payload)
 }
@@ -48,16 +50,17 @@ func writeTS(src, dst string, unmarked bool, payload func(i int, pts int64) []by
 	if unmarked {
 		cUnmarked = 1
 	}
-	g := C.tsgen_open(csrc, cdst, cUnmarked)
-	if g == nil {
-		return nil, fmt.Errorf("anctest: cannot open %s or %s", src, dst)
+	// First pass: the video's pts, to number the frames in presentation order
+	scan := C.tsgen_open(csrc, nil, 0)
+	if scan == nil {
+		return nil, fmt.Errorf("anctest: cannot open %s", src)
 	}
 	var ptss []int64
 	for {
 		var pts, dts C.int64_t
-		rc := C.tsgen_next_video(g, &pts, &dts)
+		rc := C.tsgen_next_video(scan, &pts, &dts)
 		if rc < 0 {
-			C.tsgen_close(g)
+			C.tsgen_close(scan)
 			return nil, errors.New("anctest: reading the video")
 		}
 		if rc == 0 {
@@ -67,22 +70,68 @@ func writeTS(src, dst string, unmarked bool, payload func(i int, pts int64) []by
 			ptss = append(ptss, int64(pts))
 		}
 	}
-	// The video came in decode order; the data stream needs its packets in pts order (monotonic dts). The muxer
-	// holds the video until the data stream has packets and interleaves the two by dts at the end.
+	C.tsgen_close(scan)
 	sort.Slice(ptss, func(a, b int) bool { return ptss[a] < ptss[b] })
-
-	var out []Written
+	index := make(map[int64]int, len(ptss))
 	for i, pts := range ptss {
-		p := payload(i, pts)
+		index[pts] = i
+	}
+
+	g := C.tsgen_open(csrc, cdst, cUnmarked)
+	if g == nil {
+		return nil, fmt.Errorf("anctest: cannot open %s or %s", src, dst)
+	}
+	var out []Written
+	write := func(pts int64) error {
+		p := payload(index[pts], pts)
 		if len(p) == 0 {
-			continue
+			return nil
 		}
-		rc := C.tsgen_write_anc(g, C.int64_t(pts), (*C.uint8_t)(unsafe.Pointer(&p[0])), C.int(len(p)))
-		if rc < 0 {
-			C.tsgen_close(g)
-			return nil, fmt.Errorf("anctest: writing the ANC packet at pts %d", pts)
+		if C.tsgen_write_anc(g, C.int64_t(pts), (*C.uint8_t)(unsafe.Pointer(&p[0])), C.int(len(p))) < 0 {
+			return fmt.Errorf("anctest: writing the ANC packet at pts %d", pts)
 		}
 		out = append(out, Written{Pts: pts, Payload: p})
+		return nil
+	}
+
+	// Second pass: copy the media, which comes in decode order. A frame's packet is written once the video's dts
+	// has reached the frame's pts: at once without B-frames, a frame or two later with them. That keeps the data
+	// stream in pts order, which the muxer needs, and every packet next to its frame.
+	var pending []int64 // pts of the frames whose packet is not written yet, ascending
+	for {
+		var cpts, cdts C.int64_t
+		rc := C.tsgen_next_video(g, &cpts, &cdts)
+		if rc < 0 {
+			C.tsgen_close(g)
+			return nil, errors.New("anctest: copying the video")
+		}
+		if rc == 0 {
+			break
+		}
+		pts, dts := int64(cpts), int64(cdts)
+		if pts == math.MinInt64 {
+			continue
+		}
+		if dts == math.MinInt64 {
+			dts = pts
+		}
+		at := sort.Search(len(pending), func(k int) bool { return pending[k] >= pts })
+		pending = append(pending, 0)
+		copy(pending[at+1:], pending[at:])
+		pending[at] = pts
+		for len(pending) > 0 && pending[0] <= dts {
+			if err := write(pending[0]); err != nil {
+				C.tsgen_close(g)
+				return nil, err
+			}
+			pending = pending[1:]
+		}
+	}
+	for _, pts := range pending {
+		if err := write(pts); err != nil {
+			C.tsgen_close(g)
+			return nil, err
+		}
 	}
 	if C.tsgen_close(g) < 0 {
 		return nil, errors.New("anctest: closing the output")
