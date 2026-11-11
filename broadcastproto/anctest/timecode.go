@@ -1,6 +1,6 @@
 package anctest
 
-import "github.com/eluv-io/common-go/media/anc"
+import "github.com/eluv-io/avpipe/broadcastproto/anc"
 
 // TimecodeUDW returns the 16 user data words of an ST 12-2 time code packet (DID 0x60 / SDID 0x60) for the
 // given time, with payload type dbb1 (0 LTC, 1 VITC field 1, 2 VITC field 2), no binary groups and no flags

@@ -9,9 +9,9 @@ import (
 	"sort"
 
 	"github.com/eluv-io/avpipe"
+	"github.com/eluv-io/avpipe/broadcastproto/anc"
+	"github.com/eluv-io/avpipe/broadcastproto/anc/venueclock"
 	"github.com/eluv-io/avpipe/goavpipe"
-	"github.com/eluv-io/common-go/media/anc"
-	"github.com/eluv-io/common-go/media/anc/venueclock"
 	"github.com/spf13/cobra"
 )
 
