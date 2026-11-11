@@ -4,8 +4,8 @@ import (
 	"sync"
 	"testing"
 
+	"github.com/eluv-io/avpipe/broadcastproto/anc/venueclock"
 	"github.com/eluv-io/avpipe/goavpipe"
-	"github.com/eluv-io/common-go/media/anc/venueclock"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )

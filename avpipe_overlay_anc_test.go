@@ -17,11 +17,11 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/eluv-io/avpipe"
+	"github.com/eluv-io/avpipe/broadcastproto/anc"
 	"github.com/eluv-io/avpipe/broadcastproto/anctest"
 	"github.com/eluv-io/avpipe/goavpipe"
 	"github.com/eluv-io/avpipe/goavpipe/stamp"
 	"github.com/eluv-io/avpipe/xc"
-	"github.com/eluv-io/common-go/media/anc"
 )
 
 // venueFeed is the venue clock feed of the test clip, message by frame index: teams and a held clock before the

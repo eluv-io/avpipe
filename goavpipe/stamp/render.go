@@ -6,8 +6,8 @@ import (
 	"encoding/json"
 	"sync"
 
+	"github.com/eluv-io/avpipe/broadcastproto/anc/venueclock"
 	"github.com/eluv-io/avpipe/goavpipe"
-	"github.com/eluv-io/common-go/media/anc/venueclock"
 )
 
 // BoardState is what a rendered scoreboard shows: the template's input, everything of the venue state that

@@ -3,8 +3,8 @@ package anctest
 import (
 	"fmt"
 
-	"github.com/eluv-io/common-go/media/anc"
-	"github.com/eluv-io/common-go/media/anc/venueclock"
+	"github.com/eluv-io/avpipe/broadcastproto/anc"
+	"github.com/eluv-io/avpipe/broadcastproto/anc/venueclock"
 )
 
 // VenueMessage frames one message of the venue clock feed the way the feed sends it: SOH, then the version,

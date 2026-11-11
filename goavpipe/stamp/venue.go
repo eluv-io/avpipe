@@ -3,8 +3,8 @@ package stamp
 import (
 	"fmt"
 
+	"github.com/eluv-io/avpipe/broadcastproto/anc/venueclock"
 	"github.com/eluv-io/avpipe/goavpipe"
-	"github.com/eluv-io/common-go/media/anc/venueclock"
 )
 
 // Mapper turns the venue clock state into the overlay's slot values. ANC calls it on every state change.
