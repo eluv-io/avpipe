@@ -3,7 +3,6 @@ package avpipe_test
 import (
 	"bytes"
 	"crypto/sha256"
-	"fmt"
 	"image"
 	"image/color"
 	"image/png"
@@ -23,31 +22,21 @@ import (
 	"github.com/eluv-io/avpipe/goavpipe/stamp"
 	"github.com/eluv-io/avpipe/xc"
 	"github.com/eluv-io/common-go/media/anc"
-	"github.com/eluv-io/common-go/media/anc/venueclock"
 )
-
-// venueMessage frames one venue clock message, CRC included.
-func venueMessage(seq int, msgID string, fields ...string) []byte {
-	body := "4|6|" + msgID + "|" + fmt.Sprint(seq) + "|"
-	for _, f := range fields {
-		body += f + "|"
-	}
-	return append(append([]byte{0x01}, []byte(fmt.Sprintf("%s%02X", body, venueclock.CRC([]byte(body))))...), 0x04)
-}
 
 // venueFeed is the venue clock feed of the test clip, message by frame index: teams and a held clock before the
 // tip-off at frame 60, a score at 120, the clock stopped at 210 with a correction, hidden text slots never used.
 var venueFeed = map[int][]byte{
-	5:   venueMessage(1, "17", "Home", "Visitor", "HOM", "VIS"),
-	6:   venueMessage(2, "4", "3", "1", "1st"),
-	7:   venueMessage(3, "30", "12:00", "", "", "0", "0", "1"),
-	8:   venueMessage(4, "31", "24", "0", "0", "0"),
-	60:  venueMessage(5, "30", "12:00", "", "", "0", "0", "0"),
-	90:  venueMessage(6, "30", "11:59", "", "", "0", "0", "0"),
-	120: venueMessage(7, "1", "2", "0"),
-	150: venueMessage(8, "31", "14", "0", "0", "1"),
-	210: venueMessage(9, "30", "11:54", "", "", "0", "0", "1"),
-	240: venueMessage(10, "1", "2", "3"),
+	5:   anctest.VenueMessage(1, "17", "Home", "Visitor", "HOM", "VIS"),
+	6:   anctest.VenueMessage(2, "4", "3", "1", "1st"),
+	7:   anctest.VenueMessage(3, "30", "12:00", "", "", "0", "0", "1"),
+	8:   anctest.VenueMessage(4, "31", "24", "0", "0", "0"),
+	60:  anctest.VenueMessage(5, "30", "12:00", "", "", "0", "0", "0"),
+	90:  anctest.VenueMessage(6, "30", "11:59", "", "", "0", "0", "0"),
+	120: anctest.VenueMessage(7, "1", "2", "0"),
+	150: anctest.VenueMessage(8, "31", "14", "0", "0", "1"),
+	210: anctest.VenueMessage(9, "30", "11:54", "", "", "0", "0", "1"),
+	240: anctest.VenueMessage(10, "1", "2", "3"),
 }
 
 // ancFeedInputOpener opens the TS file and feeds its ancillary stats to a stamper, the way elvxc --overlay-anc and
@@ -134,11 +123,7 @@ func TestOverlayFromANC(t *testing.T) {
 	_, err := anctest.WriteTS(src, tsPath, func(i int, pts int64) []byte {
 		h, m, s, f := anctest.TimecodeAt(i, 30)
 		pkts := []anc.Packet{{Line: 9, DID: 0x60, SDID: 0x60, UDW: anctest.TimecodeUDW(h, m, s, f, false, 0)}}
-		udw := append([]byte{}, venueclock.Header...)
-		if msg, ok := venueFeed[i]; ok {
-			udw = append(udw, msg...)
-		}
-		pkts = append(pkts, anc.Packet{Line: 14, DID: 0x50, SDID: 0x01, UDW: udw})
+		pkts = append(pkts, anctest.VenuePacket(venueFeed[i]...))
 		return anc.EncodePES(pkts)
 	})
 	require.NoError(t, err)

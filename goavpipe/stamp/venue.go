@@ -27,25 +27,42 @@ func GameClock(st *venueclock.State) (goavpipe.ClockState, bool) {
 
 // VenueMapping says which overlay slots show which parts of the venue clock state, as text and a clock. A slot
 // name left empty is not shown. The game clock is GameClock; the shot clock is text as the venue sends it, since
-// it reads in whole seconds until the last five.
+// it reads in whole seconds until the last five. The JSON form is how a configuration stores it.
 type VenueMapping struct {
-	Home      string // home team's short name
-	Away      string // visitor's short name
-	Score     string // ScoreFormat with the home and visitor scores
-	Period    string // the period name as sent ("1st", "OVT1")
-	Clock     string // the game clock, a clock slot
-	ShotClock string // the shot clock, a text slot
+	Home      string `json:"home,omitempty"`       // home team's short name, a text slot
+	Away      string `json:"away,omitempty"`       // visitor's short name, a text slot
+	Score     string `json:"score,omitempty"`      // ScoreFormat with the home and visitor scores, a text slot
+	Period    string `json:"period,omitempty"`     // the period name as sent ("1st", "OVT1"), a text slot
+	Clock     string `json:"clock,omitempty"`      // the game clock, a clock slot
+	ShotClock string `json:"shot_clock,omitempty"` // the shot clock, a text slot
 
-	ScoreFormat string // default "%d - %d"
+	ScoreFormat string `json:"score_format,omitempty"` // default "%d - %d"
 	// ClockToleranceMs: a game clock sample within this of what the running clock already predicts does not make a
 	// new event; the compositor keeps extrapolating. Start, stop and a larger drift do. Default 50.
-	ClockToleranceMs int64
+	ClockToleranceMs int64 `json:"clock_tolerance_ms,omitempty"`
 }
 
 // DefaultVenueMapping uses the slot names home, away, score, period, clock and shot.
 func DefaultVenueMapping() VenueMapping {
 	return VenueMapping{Home: "home", Away: "away", Score: "score", Period: "period", Clock: "clock",
 		ShotClock: "shot", ScoreFormat: "%d - %d", ClockToleranceMs: 50}
+}
+
+// ForLayout returns m with every slot the layout does not have left out. An event may only name slots of the
+// layout it is drawn with, so this is what makes a mapping that covers more than a layout draws usable with it:
+// the default mapping with a layout of only a score and a clock, for example. Only the slot's name is looked at.
+// A slot of the wrong type, such as the game clock mapped to a text slot, stays in and is rejected when the
+// event is validated. A nil layout leaves m unchanged.
+func (m VenueMapping) ForLayout(layout *goavpipe.OverlayParams) VenueMapping {
+	if layout == nil {
+		return m
+	}
+	for _, name := range []*string{&m.Home, &m.Away, &m.Score, &m.Period, &m.Clock, &m.ShotClock} {
+		if *name != "" && layout.Slot(*name) == nil {
+			*name = ""
+		}
+	}
+	return m
 }
 
 // sprintScore formats a score with format, "%d - %d" when empty.

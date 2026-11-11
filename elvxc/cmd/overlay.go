@@ -16,7 +16,6 @@ import (
 	"sync"
 
 	"github.com/eluv-io/avpipe/goavpipe"
-	"github.com/eluv-io/avpipe/goavpipe/stamp"
 )
 
 // overlayTimescale is the unit of event pts in the spec and the stamper: milliseconds.
@@ -466,24 +465,6 @@ func (h *overlayStamperHandle) Asset(hash string) ([]byte, goavpipe.Status, erro
 func (h *overlayStamperHandle) Close() error {
 	h.closed.Do(func() { h.err = h.s.release() })
 	return h.err
-}
-
-// venueMappingFor is the default venue mapping with the slots the layout does not have left out, so a spec with
-// only a score and a clock still works with --overlay-anc.
-func venueMappingFor(layout *goavpipe.OverlayParams) stamp.VenueMapping {
-	m := stamp.DefaultVenueMapping()
-	keep := func(name *string) {
-		if layout.Slot(*name) == nil {
-			*name = ""
-		}
-	}
-	keep(&m.Home)
-	keep(&m.Away)
-	keep(&m.Score)
-	keep(&m.Period)
-	keep(&m.Clock)
-	keep(&m.ShotClock)
-	return m
 }
 
 // openOverlayEvents opens the patch source. A FIFO is opened read-write so the open does not wait for a writer

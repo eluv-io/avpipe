@@ -1,6 +1,7 @@
 package stamp
 
 import (
+	"encoding/json"
 	"fmt"
 	"testing"
 
@@ -11,7 +12,8 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-// venueMessage frames one venue clock message, CRC included.
+// venueMessage frames one venue clock message, CRC included. It is anctest.VenueMessage again: anctest links
+// libavformat, and this package's tests stay free of cgo.
 func venueMessage(seq int, msgID string, fields ...string) []byte {
 	body := "4|6|" + msgID + "|" + fmt.Sprint(seq) + "|"
 	for _, f := range fields {
@@ -237,4 +239,43 @@ func TestVenueMappingPartial(t *testing.T) {
 	assert.Len(t, slots, 2)
 	assert.Equal(t, "3:7", *slots["s"].Text)
 	assert.Equal(t, goavpipe.ClockState{Ms: 500}, *slots["c"].Clock)
+}
+
+// TestVenueMappingForLayout: a mapping fitted to a layout names only that layout's slots, so every event it makes
+// passes the layout's own validation.
+func TestVenueMappingForLayout(t *testing.T) {
+	layout := &goavpipe.OverlayParams{Slots: []goavpipe.OverlaySlot{
+		{Name: "score", Type: goavpipe.OverlaySlotText},
+		{Name: "clock", Type: goavpipe.OverlaySlotClock},
+	}}
+	m := DefaultVenueMapping().ForLayout(layout)
+	assert.Equal(t, VenueMapping{Score: "score", Clock: "clock", ScoreFormat: "%d - %d", ClockToleranceMs: 50}, m)
+	assert.Equal(t, DefaultVenueMapping(), DefaultVenueMapping().ForLayout(nil), "no layout, nothing to leave out")
+
+	st := venueclock.State{PeriodName: "1st", Score: [2]int{3, 7}, Clock: venueclock.Value{Ms: 500, Valid: true}}
+	st.Abbrevs[venueclock.Home], st.Abbrevs[venueclock.Visitor] = "HOM", "VIS"
+	fitted := &goavpipe.OverlayEvent{TimedEvent: goavpipe.TimedEvent{Kind: goavpipe.KindOverlay}, Slots: m.Slots(&st)}
+	assert.Len(t, fitted.Slots, 2)
+	require.NoError(t, layout.ValidateEvent(fitted))
+
+	// the default mapping as it is names slots this layout lacks, which the layout rejects
+	all := &goavpipe.OverlayEvent{TimedEvent: goavpipe.TimedEvent{Kind: goavpipe.KindOverlay},
+		Slots: DefaultVenueMapping().Slots(&st)}
+	assert.Error(t, layout.ValidateEvent(all))
+
+	// a slot of the wrong type stays in: the fit goes by name only
+	wrong := VenueMapping{Clock: "score"}.ForLayout(layout)
+	assert.Equal(t, "score", wrong.Clock)
+}
+
+// TestVenueMappingJSON: the form a configuration stores.
+func TestVenueMappingJSON(t *testing.T) {
+	var m VenueMapping
+	require.NoError(t, json.Unmarshal([]byte(
+		`{"home":"h","away":"a","score":"s","period":"p","clock":"c","shot_clock":"sc","score_format":"%d:%d","clock_tolerance_ms":80}`), &m))
+	assert.Equal(t, VenueMapping{Home: "h", Away: "a", Score: "s", Period: "p", Clock: "c", ShotClock: "sc",
+		ScoreFormat: "%d:%d", ClockToleranceMs: 80}, m)
+	b, err := json.Marshal(VenueMapping{Score: "s"})
+	require.NoError(t, err)
+	assert.JSONEq(t, `{"score":"s"}`, string(b), "a slot not named is left out")
 }

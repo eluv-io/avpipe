@@ -3,7 +3,6 @@ package cmd
 import (
 	"bytes"
 	"encoding/json"
-	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -14,7 +13,6 @@ import (
 	"github.com/eluv-io/avpipe/broadcastproto/anctest"
 	"github.com/eluv-io/avpipe/goavpipe"
 	"github.com/eluv-io/common-go/media/anc"
-	"github.com/eluv-io/common-go/media/anc/venueclock"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -25,12 +23,8 @@ func TestRunAnc(t *testing.T) {
 		t.Skipf("no test media: %v", err)
 	}
 	// One clock message, split over the first two frames behind the encoder's header
-	clockBody := "4|6|30|1|11:52|||0|0|1|"
-	clockMsg := append(append([]byte{0x01}, []byte(fmt.Sprintf("%s%02X", clockBody, venueclock.CRC([]byte(clockBody))))...), 0x04)
-	clockFrames := [][]byte{
-		append(append([]byte{}, venueclock.Header...), clockMsg[:7]...),
-		append(append([]byte{}, venueclock.Header...), clockMsg[7:]...),
-	}
+	clockMsg := anctest.VenueMessage(1, "30", "11:52", "", "", "0", "0", "1")
+	clockPackets := []anc.Packet{anctest.VenuePacket(clockMsg[:7]...), anctest.VenuePacket(clockMsg[7:]...)}
 	ts := filepath.Join(t.TempDir(), "anc.ts")
 	_, err := anctest.WriteTS(src, ts, func(i int, pts int64) []byte {
 		h, m, s, f := anctest.TimecodeAt(i, 30)
@@ -38,8 +32,8 @@ func TestRunAnc(t *testing.T) {
 		if i == 0 {
 			pkts = append(pkts, anc.Packet{Line: 12, DID: 0x41, SDID: 0x07, UDW: []byte{1, 2, 3}})
 		}
-		if i < len(clockFrames) {
-			pkts = append(pkts, anc.Packet{Line: 14, DID: 0x50, SDID: 0x01, UDW: clockFrames[i]})
+		if i < len(clockPackets) {
+			pkts = append(pkts, clockPackets[i])
 		}
 		return anc.EncodePES(pkts)
 	})

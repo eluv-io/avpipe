@@ -1008,7 +1008,8 @@ func doTranscode(cmd *cobra.Command, args []string) error {
 				}
 				lastSeq = e.Seq
 			}
-			var mapping stamp.Mapper = venueMappingFor(ov)
+			// only the slots the spec has, so a spec with just a score and a clock works too
+			var mapping stamp.Mapper = stamp.DefaultVenueMapping().ForLayout(ov)
 			if renderSpec := cmd.Flag("overlay-render").Value.String(); renderSpec != "" {
 				client, err := openRenderClient(renderSpec, eventLog)
 				if err != nil {
