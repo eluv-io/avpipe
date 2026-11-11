@@ -4249,11 +4249,8 @@ xc_done:
     /*
      * Flush all frames, first flush decoder buffers, then encoder buffers by passing NULL frame.
      */
-    if (params->xc_type & xc_video && xctx->err != eav_write_frame) {
-        int flush_rc = flush_decoder(decoder_context, encoder_context, encoder_context->video_stream_index, params, debug_frame_level);
-        if (flush_rc != eav_success && xctx->err == eav_success)
-            xctx->err = flush_rc;
-    }
+    if (params->xc_type & xc_video && xctx->err != eav_write_frame)
+        flush_decoder(decoder_context, encoder_context, encoder_context->video_stream_index, params, debug_frame_level);
     if (params->xc_type & xc_audio && xctx->err != eav_write_frame) {
         for (int i=0; i<decoder_context->n_audio; i++)
             flush_decoder(decoder_context, encoder_context, encoder_context->audio_stream_index[i], params, debug_frame_level);
