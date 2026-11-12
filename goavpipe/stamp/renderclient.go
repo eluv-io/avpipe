@@ -1,0 +1,122 @@
+package stamp
+
+import (
+	"bufio"
+	"encoding/base64"
+	"encoding/json"
+	"fmt"
+	"os"
+	"sync"
+
+	"github.com/eluv-io/avpipe/goavpipe"
+)
+
+// RenderClient asks an external board renderer for pictures. A request is one JSON line {"hash", "state"} on the
+// request file; the renderer answers on the result file with {"hash", "png"} lines, the picture base64-encoded, or
+// {"hash", "error"}. The two files are usually FIFOs and are opened read-write, so neither side waits for the
+// other to start. The renderer is a process of its own, which keeps the browser that draws the template out of
+// the caller.
+type RenderClient struct {
+	deliver func(hash string, png []byte, err error)
+	mu      sync.Mutex
+	req     *os.File
+	res     *os.File
+}
+
+type renderRequest struct {
+	Hash  string     `json:"hash"`
+	State BoardState `json:"state"`
+}
+
+type renderResult struct {
+	Hash string `json:"hash"`
+	PNG  string `json:"png"`
+	Err  string `json:"error,omitempty"`
+}
+
+// OpenRenderClient opens the request and result files and starts reading results. deliver is called for every
+// answer, from one goroutine: with the picture, or with the error the renderer reported for the hash. An answer
+// that cannot be read is delivered with an empty hash and the error. deliver must not block for long.
+func OpenRenderClient(requests, results string, deliver func(hash string, png []byte, err error)) (*RenderClient, error) {
+	req, err := os.OpenFile(requests, os.O_RDWR, 0)
+	if err != nil {
+		return nil, fmt.Errorf("render requests %s: %w", requests, err)
+	}
+	res, err := os.OpenFile(results, os.O_RDWR, 0)
+	if err != nil {
+		req.Close()
+		return nil, fmt.Errorf("render results %s: %w", results, err)
+	}
+	c := &RenderClient{deliver: deliver, req: req, res: res}
+	go c.read()
+	return c, nil
+}
+
+// Render asks for the picture of state, named hash. The answer arrives through deliver. Safe from any goroutine.
+func (c *RenderClient) Render(hash string, state BoardState) error {
+	b, err := json.Marshal(renderRequest{Hash: hash, State: state})
+	if err != nil {
+		return err
+	}
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	_, err = fmt.Fprintf(c.req, "%s\n", b)
+	return err
+}
+
+func (c *RenderClient) read() {
+	scanner := bufio.NewScanner(c.res)
+	scanner.Buffer(make([]byte, 64*1024), 16*1024*1024)
+	for scanner.Scan() {
+		line := scanner.Bytes()
+		if len(line) == 0 {
+			continue
+		}
+		var r renderResult
+		if err := json.Unmarshal(line, &r); err != nil {
+			c.deliver("", nil, fmt.Errorf("render result: %w", err))
+			continue
+		}
+		if r.Err != "" {
+			c.deliver(r.Hash, nil, fmt.Errorf("render failed: %s", r.Err))
+			continue
+		}
+		png, err := base64.StdEncoding.DecodeString(r.PNG)
+		if err != nil {
+			c.deliver(r.Hash, nil, fmt.Errorf("render result is not base64: %w", err))
+			continue
+		}
+		c.deliver(r.Hash, png, nil)
+	}
+}
+
+// Close closes both files, which ends the reading goroutine.
+func (c *RenderClient) Close() error {
+	err := c.req.Close()
+	if err2 := c.res.Close(); err == nil {
+		err = err2
+	}
+	return err
+}
+
+// RenderMappingForLayout makes the RenderMapping a layout is drawn with: the board goes to the image slot named
+// board, or else to the first image slot without a default picture, and the game and shot clocks to the clock
+// slots named clock and shot when the layout has them. A layout without an image slot for the board is an error.
+func RenderMappingForLayout(layout *goavpipe.OverlayParams, render func(hash string, state BoardState)) (*RenderMapping, error) {
+	board := ""
+	for _, s := range layout.Slots {
+		if s.Type == goavpipe.OverlaySlotImage && (s.Name == "board" || board == "" && s.Default == "") {
+			board = s.Name
+		}
+	}
+	if board == "" {
+		return nil, fmt.Errorf("stamp: the layout has no image slot for the board (named board, or without a default)")
+	}
+	clockSlot := func(name string) string {
+		if s := layout.Slot(name); s != nil && s.Type == goavpipe.OverlaySlotClock {
+			return name
+		}
+		return ""
+	}
+	return NewRenderMapping(board, clockSlot("clock"), clockSlot("shot"), render), nil
+}

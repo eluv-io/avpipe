@@ -1,7 +1,14 @@
 package stamp
 
 import (
+	"bufio"
+	"encoding/base64"
+	"encoding/json"
+	"fmt"
+	"os"
+	"path/filepath"
 	"sync"
+	"syscall"
 	"testing"
 
 	"github.com/eluv-io/avpipe/broadcastproto/anc/venueclock"
@@ -93,4 +100,79 @@ func TestANCRenderMapping(t *testing.T) {
 	assert.NotEqual(t, hash, last.Slots["board"].Image.Hash)
 	assert.Equal(t, []string{"clock", "shot"}, m.ClockSlots())
 	assert.Equal(t, "shot", m.ShotClockSlot())
+}
+
+// TestRenderClient: a request is one JSON line with the hash and the state; the renderer's answers come back
+// through deliver, a picture, an error it reported, and a line that is not an answer.
+func TestRenderClient(t *testing.T) {
+	dir := t.TempDir()
+	reqPath, resPath := filepath.Join(dir, "req.fifo"), filepath.Join(dir, "res.fifo")
+	require.NoError(t, syscall.Mkfifo(reqPath, 0o600))
+	require.NoError(t, syscall.Mkfifo(resPath, 0o600))
+
+	type answer struct {
+		hash string
+		png  []byte
+		err  error
+	}
+	answers := make(chan answer, 4)
+	c, err := OpenRenderClient(reqPath, resPath, func(hash string, png []byte, err error) {
+		answers <- answer{hash, png, err}
+	})
+	require.NoError(t, err)
+	defer c.Close()
+
+	// The renderer's side: read the request, answer it
+	req, err := os.OpenFile(reqPath, os.O_RDWR, 0)
+	require.NoError(t, err)
+	defer req.Close()
+	res, err := os.OpenFile(resPath, os.O_RDWR, 0)
+	require.NoError(t, err)
+	defer res.Close()
+
+	state := BoardState{Home: "HOM", Away: "VIS", Score: "2 - 0", Teams: true}
+	require.NoError(t, c.Render(state.Hash(), state))
+	line, err := bufio.NewReader(req).ReadBytes('\n')
+	require.NoError(t, err)
+	var got struct {
+		Hash  string     `json:"hash"`
+		State BoardState `json:"state"`
+	}
+	require.NoError(t, json.Unmarshal(line, &got))
+	assert.Equal(t, state.Hash(), got.Hash)
+	assert.Equal(t, state, got.State)
+
+	fmt.Fprintf(res, "{\"hash\":%q,\"png\":%q}\n", got.Hash, base64.StdEncoding.EncodeToString([]byte("png bytes")))
+	fmt.Fprintf(res, "{\"hash\":\"abc\",\"error\":\"template threw\"}\n")
+	fmt.Fprintf(res, "not json\n")
+	a := <-answers
+	assert.Equal(t, answer{hash: state.Hash(), png: []byte("png bytes")}, a)
+	a = <-answers
+	assert.Equal(t, "abc", a.hash)
+	assert.ErrorContains(t, a.err, "template threw")
+	a = <-answers
+	assert.Equal(t, "", a.hash)
+	assert.Error(t, a.err)
+}
+
+func TestRenderMappingForLayout(t *testing.T) {
+	layout := &goavpipe.OverlayParams{Slots: []goavpipe.OverlaySlot{
+		{Name: "bg", Type: goavpipe.OverlaySlotImage, Default: "bg"},
+		{Name: "panel", Type: goavpipe.OverlaySlotImage},
+		{Name: "clock", Type: goavpipe.OverlaySlotClock},
+		{Name: "shot", Type: goavpipe.OverlaySlotText},
+	}}
+	m, err := RenderMappingForLayout(layout, nil)
+	require.NoError(t, err)
+	assert.Equal(t, "panel", m.Board, "the first image slot without a default")
+	assert.Equal(t, "clock", m.Clock)
+	assert.Equal(t, "", m.ShotClock, "a text slot named shot is not the shot clock")
+
+	layout.Slots = append(layout.Slots, goavpipe.OverlaySlot{Name: "board", Type: goavpipe.OverlaySlotImage})
+	m, err = RenderMappingForLayout(layout, nil)
+	require.NoError(t, err)
+	assert.Equal(t, "board", m.Board, "a slot named board wins")
+
+	_, err = RenderMappingForLayout(&goavpipe.OverlayParams{Slots: layout.Slots[:1]}, nil)
+	assert.Error(t, err, "no image slot for the board")
 }

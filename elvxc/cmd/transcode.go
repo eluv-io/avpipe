@@ -1015,10 +1015,17 @@ func doTranscode(cmd *cobra.Command, args []string) error {
 				if err != nil {
 					return err
 				}
-				defer client.close()
-				if mapping, err = renderMappingFor(ov, client.render); err != nil {
-					return err
+				defer client.Close()
+				render := func(hash string, state stamp.BoardState) {
+					if err := client.Render(hash, state); err != nil {
+						log.Error("overlay render request failed", "err", err, "hash", hash)
+					}
 				}
+				rendered, err := stamp.RenderMappingForLayout(ov, render)
+				if err != nil {
+					return fmt.Errorf("--overlay-render: %w", err)
+				}
+				mapping = rendered
 			}
 			ancStamper := stamp.NewANC(eventLog, overlayTimescale, mapping)
 			ancStamper.SetSeq(lastSeq)
