@@ -3365,7 +3365,30 @@ func TestDOVI20_MVHEVC_ExtractImagesFails(t *testing.T) {
 
 	files, err := os.ReadDir(outPath)
 	failNowOnError(t, err)
-	assert.Empty(t, files)
+	assert.Zero(t, len(files), "files written")
+}
+
+// TestExtractImagesBypassFails checks that avpipe rejects image extraction with
+// bypass set, before writing any output, instead of writing compressed packets
+// as "<pts>.jpeg".
+func TestExtractImagesBypassFails(t *testing.T) {
+	url := videoBigBuckBunnyPath
+	checkFileExists(t, url)
+	outPath := path.Join(baseOutPath, fn())
+	boilerplate(t, outPath, url)
+
+	params := extractImagesParams(url, []int64{1980, 2980})
+	params.BypassTranscoding = true
+	handle, err := avpipe.XcInit(params)
+	if err == nil {
+		err = avpipe.XcRun(handle)
+		_ = avpipe.XcFini(handle)
+	}
+	assert.Error(t, err)
+
+	files, err := os.ReadDir(outPath)
+	failNowOnError(t, err)
+	assert.Zero(t, len(files), "files written")
 }
 
 // Should exit after extracting the first frame

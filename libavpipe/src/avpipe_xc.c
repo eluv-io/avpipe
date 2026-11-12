@@ -1294,6 +1294,16 @@ prepare_video_encoder(
         params->bypass_transcoding = 1;
     }
 
+    /*
+     * Checked here rather than in check_params() so it also catches bypass
+     * forced above: bypass would write compressed packets as the "images".
+     */
+    if (params->bypass_transcoding && is_image_extraction(params)) {
+        elv_err("Incompatible params - image extraction requires transcoding (bypass must be disabled), url=%s",
+            params->url);
+        return eav_param;
+    }
+
     if (params->bypass_transcoding) {
         AVStream *in_stream = decoder_context->stream[index];
         AVStream *out_stream = encoder_context->stream[index];
