@@ -115,6 +115,15 @@ selected_audio_index(
     return -1;
 }
 
+/* Returns 1 if the job extracts images (thumbnails) rather than transcoding. */
+static int
+is_image_extraction(
+    const xcparams_t *params)
+{
+    return params && (params->xc_type == xc_extract_images ||
+        params->xc_type == xc_extract_all_images);
+}
+
 static int
 decode_interrupt_cb(
     void *ctx)
@@ -1265,8 +1274,15 @@ prepare_video_encoder(
     }
     elv_log("Found encoder index=%d, %s", index, params->ecodec);
 
-    /* PENDING(SS) WIP hack to force bypass transcode for MV-HEVC inputs */
-    if (is_mvhevc(decoder_context->stream[index])) {
+    /*
+     * PENDING(SS) WIP hack to force bypass transcode for MV-HEVC inputs.
+     *
+     * Image extraction is exempt: it must decode and encode to images, and
+     * bypass would instead write compressed HEVC packets as the "images". The
+     * HEVC decoder outputs only the base view by default, which is what a
+     * thumbnail needs, so video_layout is irrelevant there.
+     */
+    if (is_mvhevc(decoder_context->stream[index]) && !is_image_extraction(params)) {
         if (params->video_layout != video_layout_mvhevc) {
             elv_err("MV-HEVC input detected but video_layout is not mvhevc; set video_layout=%d, url=%s",
                 video_layout_mvhevc, params->url);
@@ -1862,7 +1878,7 @@ prepare_encoder(
         }
     }
 
-    if (params->xc_type == xc_extract_images || params->xc_type == xc_extract_all_images) {
+    if (is_image_extraction(params)) {
         // Tell the image2 muxer to expand the filename with PTS instead of sequential numbering
         av_opt_set(encoder_context->format_context->priv_data, "frame_pts", "true", 0);
     }
@@ -2127,7 +2143,7 @@ static int
 is_frame_extraction_done(coderctx_t *encoder_context,
     xcparams_t *p)
 {
-    if (p->xc_type != xc_extract_images && p->xc_type != xc_extract_all_images)
+    if (!is_image_extraction(p))
         return 1;
 
     if (p->extract_images_sz > 0) {
@@ -2252,7 +2268,7 @@ should_skip_encoding(
         }
     }
 
-    if (p->xc_type == xc_extract_images || p->xc_type == xc_extract_all_images) {
+    if (is_image_extraction(p)) {
         return !should_extract_frame(decoder_context, encoder_context, p, frame);
     }
 
@@ -2466,8 +2482,7 @@ encode_frame(
             output_packet->pts != AV_NOPTS_VALUE &&
             output_packet->pts - encoder_context->video_encoder_prev_pts >=
                 2*encoder_context->calculated_frame_duration &&
-            params->xc_type != xc_extract_images &&
-            params->xc_type != xc_extract_all_images) {
+            !is_image_extraction(params)) {
 
             int fc = (output_packet->pts - encoder_context->video_encoder_prev_pts)/encoder_context->calculated_frame_duration - 1;
             encoder_context->forced_keyint_countdown -= fc;
@@ -3026,7 +3041,7 @@ transcode_video_func(
         // else if (!(packet->flags & AV_PKT_FLAG_KEY) ...) {
         //     continue;
         // }
-        if (params->xc_type == xc_extract_images || params->xc_type == xc_extract_all_images) {
+        if (is_image_extraction(params)) {
             if (is_frame_extraction_done(encoder_context, params)) {
                 elv_dbg("all frames already extracted, url=%s", params->url);
                 av_packet_free(&packet);
@@ -4874,8 +4889,7 @@ check_params(
     }
 
     if (params->xc_type & xc_video &&
-        params->xc_type != xc_extract_images &&
-        params->xc_type != xc_extract_all_images &&
+        !is_image_extraction(params) &&
         params->seg_duration <= 0 &&
         params->video_seg_duration_ts <= 0 &&
         strcmp(params->format, "mp4")) {
