@@ -195,8 +195,9 @@ func (l *Log) asset(hash string) ([]byte, goavpipe.Status, error) {
 }
 
 // Source gives a job its EventSource view of the log. offset is added to the job's pts to reach the log's
-// timeline: a playout job on part n of a recording passes the part's start pts. Closing the view does not touch
-// the log.
+// timeline: a playout job on part n of a recording passes the part's start pts. The view hands events out on
+// the job's timeline, their pts moved back by offset, so an event from before the part has a negative pts.
+// Closing the view does not touch the log.
 func (l *Log) Source(offset int64) goavpipe.EventSource {
 	return &logView{log: l, offset: offset}
 }
@@ -214,7 +215,34 @@ func (v *logView) At(kind string, pts int64) (goavpipe.Timed, goavpipe.Status, e
 	if v.isClosed() {
 		return nil, goavpipe.StatusEnded, fmt.Errorf("stamp: source is closed")
 	}
-	return v.log.at(kind, pts+v.offset)
+	ev, status, err := v.log.at(kind, pts+v.offset)
+	if ev == nil || v.offset == 0 || err != nil {
+		return ev, status, err
+	}
+	// The consumer measures a clock and a fade from the event's pts against its own frames
+	moved, err := moveEvent(ev, -v.offset)
+	return moved, status, err
+}
+
+// moveEvent returns a copy of ev with its pts moved by delta. The log's event is not changed.
+func moveEvent(ev goavpipe.Timed, delta int64) (goavpipe.Timed, error) {
+	switch e := ev.(type) {
+	case goavpipe.OverlayEvent:
+		e.Pts += delta
+		return e, nil
+	case *goavpipe.OverlayEvent:
+		c := *e
+		c.Pts += delta
+		return &c, nil
+	case goavpipe.CropEvent:
+		e.Pts += delta
+		return e, nil
+	case *goavpipe.CropEvent:
+		c := *e
+		c.Pts += delta
+		return &c, nil
+	}
+	return nil, fmt.Errorf("stamp: cannot move an event of type %T to the job's timeline", ev)
 }
 
 func (v *logView) Asset(hash string) ([]byte, goavpipe.Status, error) {

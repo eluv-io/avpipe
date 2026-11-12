@@ -168,6 +168,26 @@ func TestOverlayFromANC(t *testing.T) {
 	require.NoError(t, avpipe.Xc(params))
 	assertSameMedia(t, liveDir, staticDir)
 
+	// A part's view: the same events on a timeline that began 100 s before this clip, read through a view with
+	// that offset, draw the same picture. The game clock runs in it, so an event handed out with a pts off the
+	// job's timeline shows as a wrong clock.
+	const partStart = 100000
+	recording := stamp.NewLog(goavpipe.KindOverlay)
+	for _, e := range events {
+		oe := e.(goavpipe.OverlayEvent)
+		oe.Pts += partStart
+		require.NoError(t, recording.Append(oe))
+	}
+	recording.End(goavpipe.KindOverlay)
+	viewDir := path.Join(outDir, "view")
+	setupOutDir(t, viewDir)
+	goavpipe.InitIOHandler(&ancInputOpener{}, &xc.FileOutputOpener{Dir: viewDir})
+	params = venueOverlayParams(tsPath, font)
+	setFastEncodeParams(params, true)
+	params.Events = recording.Source(partStart)
+	require.NoError(t, avpipe.Xc(params))
+	assertSameMedia(t, staticDir, viewDir)
+
 	// Rendered board: the same feed with the board bound to a template, the pictures made by a fake renderer on
 	// its own goroutine and put in the log as assets while the job waits for them
 	renderDir := path.Join(outDir, "render")

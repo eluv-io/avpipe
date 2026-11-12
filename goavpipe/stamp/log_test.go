@@ -100,6 +100,40 @@ func TestLogSourceOffset(t *testing.T) {
 	assert.Equal(t, int64(2), seq)
 	_, status := seqAt(t, part, 20001)
 	assert.Equal(t, goavpipe.StatusNotYet, status)
+
+	// The event comes back on the job's timeline too: the compositor runs a clock and times a fade from the
+	// event's pts against the frame's, so an event from before the part has a negative pts
+	e, _, err := part.At(goavpipe.KindOverlay, 0)
+	require.NoError(t, err)
+	assert.Equal(t, int64(-20000), e.Timing().Pts)
+	assert.Equal(t, "a", *e.(goavpipe.OverlayEvent).Slots["score"].Text)
+	e, _, err = part.At(goavpipe.KindOverlay, 15000)
+	require.NoError(t, err)
+	assert.Equal(t, int64(10000), e.Timing().Pts)
+	assert.LessOrEqual(t, e.Timing().Pts, int64(15000), "At's own contract: the event's pts is at or before the pts asked")
+
+	// The log keeps its own timeline, and a view without an offset hands events out as they are
+	assert.Equal(t, int64(130000), l.Latest(goavpipe.KindOverlay).Timing().Pts)
+	e, _, err = l.Source(0).At(goavpipe.KindOverlay, 135000)
+	require.NoError(t, err)
+	assert.Equal(t, int64(130000), e.Timing().Pts)
+
+	// Events by pointer and crop events move the same way
+	l2 := NewLog()
+	p := ev(1, 100000, "a")
+	require.NoError(t, l2.Append(&p))
+	require.NoError(t, l2.Append(goavpipe.CropEvent{TimedEvent: goavpipe.TimedEvent{Seq: 1, Pts: 110000, Kind: goavpipe.KindVerticalCrop}, Center: 5000}))
+	l2.Seal(goavpipe.KindOverlay, 140000)
+	l2.Seal(goavpipe.KindVerticalCrop, 140000)
+	view := l2.Source(120000)
+	e, _, err = view.At(goavpipe.KindOverlay, 0)
+	require.NoError(t, err)
+	assert.Equal(t, int64(-20000), e.Timing().Pts)
+	assert.Equal(t, int64(100000), p.Pts, "the log's event is not touched")
+	e, _, err = view.At(goavpipe.KindVerticalCrop, 0)
+	require.NoError(t, err)
+	assert.Equal(t, int64(-10000), e.Timing().Pts)
+	assert.Equal(t, int32(5000), e.(goavpipe.CropEvent).Center)
 }
 
 func TestLogAssets(t *testing.T) {
