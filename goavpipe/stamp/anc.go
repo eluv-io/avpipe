@@ -1,91 +1,48 @@
 package stamp
 
 import (
-	"strings"
 	"sync"
 
 	"github.com/eluv-io/avpipe/broadcastproto/anc"
-	"github.com/eluv-io/avpipe/broadcastproto/anc/venueclock"
 	"github.com/eluv-io/avpipe/goavpipe"
 )
 
 // ANC turns the ST 2038 packets a transcode reports through AV_IN_STAT_DATA_ANC into overlay events in a Log. Each
-// packet's ancillary data is parsed, the venue clock feed in it reassembled and decoded, and every change of the
-// venue state becomes an OverlayEvent snapshot at the pts of the frame that completed the message, in the
-// overlay's timescale. After each packet the log is sealed at that frame, so a job asking for a later frame waits
-// until its ancillary data has been seen. Feed is called from one goroutine, the stat's; the other methods may be
-// called from any.
+// packet's ancillary data is parsed and handed to the feed, which publishes what it decodes as keys. Every change
+// of what the bindings show of the keys becomes an OverlayEvent snapshot at the pts of the frame that completed
+// the change, in the overlay's timescale; a key no slot is bound to makes no event. After each packet the log is
+// sealed at that frame, so a job asking for a later frame waits until its ancillary data has been seen. Feed is
+// called from one goroutine, the stat's; the other methods may be called from any.
 type ANC struct {
 	log       *Log
 	timescale int64
-	mapping   Mapper
-	tolerance int64 // ms: a clock sample this close to the prediction is no correction
+	feed      Feed
+	bindings  *Bindings
 
-	mu      sync.Mutex
-	stream  venueclock.Stream
-	state   venueclock.State
-	seq     int64
-	last    *goavpipe.OverlayEvent // the last event appended
-	sample  clockSample            // the previous game clock sample, to tell a held clock from a running one
-	held    bool                   // the game clock is held although the flags say it runs
-	gameRan bool                   // the game clock ran as of the last message, to see it stop
-	shot    shotTrack              // the shot clock as followed from its readings
-	raw     map[string]rawClock    // per clock slot, the venue's last sample and when it was taken
-	Stats   ANCStats
-}
-
-// shotTrack follows the shot clock. The venue shows it cut off, not rounded up (5.9 s left reads 5, 4.99 s reads
-// 4.9), and sends a reading when it changes. Its running flag stays on while the clock sits at 24, so whether
-// the clock runs is told from the readings.
-type shotTrack struct {
-	valid     bool                // the venue shows a shot clock
-	c         goavpipe.ClockState // the time left as of pts
-	pts       int64               // overlay timescale
-	reading   int64               // the last reading, ms
-	unit      int64               // step of the last reading: 1000 in whole seconds, 100 in tenths
-	changedAt int64               // pts at which the reading last changed
-}
-
-// shotOverdueMs: a running shot clock whose next reading is this late has stopped.
-const shotOverdueMs = 250
-
-// rawClock is a clock value as the venue sent it, with the pts of the frame it was sampled on. A snapshot made
-// later for another message must carry it forward from there, not treat it as current.
-type rawClock struct {
-	c   goavpipe.ClockState
-	pts int64
-}
-
-// clockSample is one game clock value as the venue sent it.
-type clockSample struct {
-	ms      int64
-	pts     int64 // overlay timescale
-	valid   bool
-	stopped bool // the "time stopped" stripe was on
+	mu    sync.Mutex
+	keys  Keys
+	seq   int64
+	last  *goavpipe.OverlayEvent // the last event appended
+	Stats ANCStats
 }
 
 // ANCStats counts what went through.
 type ANCStats struct {
 	Packets  int // ancillary PES packets fed
 	Dropped  int // packets the stat path dropped before delivery (AncPacket.Dropped)
-	Messages int // venue clock messages decoded
-	BadCRC   int
+	Messages int // messages the feed decoded
+	BadCRC   int // of them, damaged ones, which are left out
 	Events   int // overlay events appended
-	Errors   int // packets whose ancillary data or clock messages did not parse
+	Errors   int // packets whose ancillary data or feed did not parse
 }
 
-// NewANC makes a stamper writing KindOverlay events of timescale into log, mapped by m. The clock tolerance is
-// VenueMapping.ClockToleranceMs when m is one, 50 ms otherwise.
-func NewANC(log *Log, timescale int64, m Mapper) *ANC {
+// NewANC makes a stamper writing KindOverlay events of timescale into log: what feed decodes, as bindings show it.
+func NewANC(log *Log, timescale int64, feed Feed, bindings *Bindings) *ANC {
 	if timescale <= 0 {
 		timescale = goavpipe.OverlayDefaultTimescale
 	}
 	log.kindMake(goavpipe.KindOverlay)
-	tol := int64(50)
-	if vm, ok := m.(VenueMapping); ok {
-		tol = vm.tolerance()
-	}
-	return &ANC{log: log, timescale: timescale, mapping: m, tolerance: tol, raw: map[string]rawClock{}}
+	return &ANC{log: log, timescale: timescale, feed: feed, bindings: bindings, keys: Keys{}}
 }
 
 // kindMake registers a kind so Kinds() lists it before the first event.
@@ -97,12 +54,12 @@ func (l *Log) kindMake(kind string) {
 
 // ts converts a pts in the packet's time base to the overlay timescale, rounded down as the compositor rounds
 // the frame pts, so a message completed on a frame applies on that frame.
-func (a *ANC) ts(p *goavpipe.AncPacket) int64 {
+func (a *ANC) ts(p *goavpipe.AncPacket, pts int64) int64 {
 	num, den := int64(p.TimeBaseNum), int64(p.TimeBaseDen)
 	if num <= 0 || den <= 0 {
 		num, den = 1, 90000
 	}
-	return p.Pts * num * a.timescale / den
+	return pts * num * a.timescale / den
 }
 
 // Feed takes one ancillary packet. Parse errors are counted, not returned: the feed goes on with the next packet.
@@ -118,172 +75,30 @@ func (a *ANC) Feed(p *goavpipe.AncPacket) {
 	if err != nil {
 		a.Stats.Errors++
 	}
-	msgs, err := a.stream.FeedPackets(pkts, p.Pts)
+	messages, damaged, err := a.feed.Decode(pkts, p.Pts, &FeedContext{
+		Keys:      a.keys,
+		Timescale: a.timescale,
+		Pts:       func(srcPts int64) int64 { return a.ts(p, srcPts) },
+		Emit:      a.emit,
+	})
+	a.Stats.Messages += messages
+	a.Stats.BadCRC += damaged
 	if err != nil {
 		a.Stats.Errors++
 	}
-	for _, m := range msgs {
-		a.Stats.Messages++
-		if !m.ChecksumOK {
-			a.Stats.BadCRC++
-			continue
-		}
-		changed := a.state.Apply(m)
-		pts := a.ts(&goavpipe.AncPacket{Pts: m.Pts, TimeBaseNum: p.TimeBaseNum, TimeBaseDen: p.TimeBaseDen})
-		switch m.MessageID {
-		case venueclock.MsgGameTime:
-			changed = a.noteSample(pts) || changed
-		case venueclock.MsgShotClock:
-			changed = a.noteShot(pts) || changed
-		}
-		changed = a.followGame(pts) || changed
-		if changed {
-			a.emit(pts)
-		}
-	}
-	pts := a.ts(p)
-	if a.shotOverdue(pts) {
-		a.emit(pts)
-	}
-	a.log.Seal(goavpipe.KindOverlay, pts)
+	a.log.Seal(goavpipe.KindOverlay, a.ts(p, p.Pts))
 }
 
-// gameRunning is whether the game clock runs as the stamper follows it; true when the venue shows no game clock.
-// Caller holds mu.
-func (a *ANC) gameRunning() bool {
-	g, ok := GameClock(&a.state)
-	return !ok || (g.Running && !a.held)
-}
-
-// noteShot takes the shot clock reading of a message at pts. A reading one step below the last, or lower by the
-// time that passed, is the clock running: the time left is then just under the next step up, since the venue cuts
-// the value off. A higher reading or any other jump is the operator setting the clock, and it holds there until it
-// steps down. With the game clock stopped a step down is taken as a new held value. A repeat says nothing.
-// Returns whether the followed clock changed. Caller holds mu.
-func (a *ANC) noteShot(pts int64) bool {
-	v, prev := a.state.ShotClock, a.shot
-	if !v.Valid {
-		a.shot = shotTrack{}
-		return prev.valid
-	}
-	reading, unit := int64(v.Ms), int64(1000)
-	if strings.Contains(v.Text, ".") {
-		unit = 100
-	}
-	if prev.valid && reading == prev.reading {
-		return false
-	}
-	t := shotTrack{valid: true, pts: pts, reading: reading, unit: unit, changedAt: pts,
-		c: goavpipe.ClockState{Ms: reading}}
-	step := prev.reading - reading
-	elapsed := (pts - prev.changedAt) * 1000 / a.timescale
-	if prev.valid && step > 0 && (step <= prev.unit || abs64(step-elapsed) <= prev.unit) && a.gameRunning() {
-		t.c = goavpipe.ClockState{Ms: reading + unit - 1, Running: true}
-	}
-	a.shot = t
-	return true
-}
-
-// followGame stops the followed shot clock when the game clock stops. The shot clock does not run while the game
-// time is held, and the game clock's stop is in the feed at once, while a stopped shot clock just sends no more
-// readings. Returns whether the shot clock changed. Caller holds mu.
-func (a *ANC) followGame(pts int64) bool {
-	g, ok := GameClock(&a.state)
-	running := ok && g.Running && !a.held
-	stopped := a.gameRan && !running
-	a.gameRan = running
-	if !stopped || !a.shot.c.Running {
-		return false
-	}
-	a.stopShot(pts, carryClock(a.shot.c, (pts-a.shot.pts)*1000/a.timescale).Ms)
-	return true
-}
-
-// shotOverdue stops the followed shot clock when its next reading is overdue: a running clock reads differently
-// every step, so it stopped on the reading it shows. Returns whether it did. Caller holds mu.
-func (a *ANC) shotOverdue(pts int64) bool {
-	if !a.shot.c.Running || (pts-a.shot.changedAt)*1000/a.timescale <= a.shot.unit+shotOverdueMs {
-		return false
-	}
-	a.stopShot(pts, a.shot.reading)
-	return true
-}
-
-// stopShot holds the followed shot clock at ms from pts on. Caller holds mu.
-func (a *ANC) stopShot(pts, ms int64) {
-	a.shot.c = goavpipe.ClockState{Ms: ms}
-	a.shot.pts = pts
-}
-
-// noteSample records the game clock sample of a message at pts and keeps held up to date: the clock is held when
-// a sample repeats the previous value although time passed, since a running clock reads differently every second,
-// and runs again when a sample moves or the "time stopped" stripe goes from on to off, which is the operator
-// starting it. The venue's flags alone do not say: a break shows 12:00 with the stripe off. Returns whether held
-// changed. Caller holds mu.
-func (a *ANC) noteSample(pts int64) bool {
-	prev := a.sample
-	a.sample = clockSample{ms: int64(a.state.Clock.Ms), pts: pts, valid: a.state.Clock.Valid, stopped: a.state.Stopped}
-	was := a.held
-	switch {
-	case !prev.valid || !a.sample.valid:
-		a.held = false
-	case prev.stopped && !a.sample.stopped:
-		a.held = false
-	case a.sample.ms != prev.ms:
-		a.held = false
-	case (pts-prev.pts)*1000/a.timescale >= 500:
-		a.held = true
-	}
-	return a.held != was
-}
-
-// emit appends a snapshot at pts when what the mapping shows changed. A running clock sample within the
-// tolerance of what the previous event already predicts for pts is replaced by that prediction, so a snapshot
-// made for a score change does not also nudge the clock, and a sample alone makes no event. While held, the game
-// clock is written stopped whatever the flags say. The shot clock slot shows the followed clock. Caller holds mu.
+// emit appends a snapshot at pts when what the bindings show changed. A running clock within the tolerance of
+// what the previous event already predicts for pts is replaced by that prediction, so a snapshot made for a score
+// change does not also nudge the clock, and a sample alone makes no event. Caller holds mu.
 func (a *ANC) emit(pts int64) {
-	slots := a.mapping.Slots(&a.state)
-	shot := a.mapping.ShotClockSlot()
-	if shot != "" {
-		if a.shot.valid {
-			c := a.shot.c
-			slots[shot] = goavpipe.SlotValue{Clock: &c}
-		} else {
-			slots[shot] = goavpipe.HideValue()
-		}
-	}
-	if a.held {
-		for _, name := range a.mapping.ClockSlots() {
-			if v, ok := slots[name]; ok && name != shot && v.Clock != nil && v.Clock.Running {
-				c := *v.Clock
-				c.Running = false
-				slots[name] = goavpipe.SlotValue{Clock: &c}
-			}
-		}
-	}
-	// A clock value in the mapping is the venue's last sample, taken on an earlier frame. A snapshot made now
-	// (for a score, say) must carry it forward to pts, or it would stamp a clock up to a second behind.
-	for _, name := range a.mapping.ClockSlots() {
-		v, ok := slots[name]
-		if !ok || v.Clock == nil {
-			delete(a.raw, name)
-			continue
-		}
-		r := rawClock{c: *v.Clock, pts: a.shot.pts}
-		if name != shot {
-			var seen bool
-			if r, seen = a.raw[name]; !seen || r.c != *v.Clock {
-				r = rawClock{c: *v.Clock, pts: pts}
-				a.raw[name] = r
-			}
-		}
-		carried := carryClock(r.c, (pts-r.pts)*1000/a.timescale)
-		slots[name] = goavpipe.SlotValue{Clock: &carried}
-	}
+	slots := a.bindings.Slots(a.keys, pts, a.timescale)
+	clocks := a.bindings.ClockSlots()
 	changed := a.last == nil
 	if a.last != nil {
 		dt := (pts - a.last.Pts) * 1000 / a.timescale
-		for _, name := range a.mapping.ClockSlots() {
+		for _, name := range clocks {
 			nv, hasNew := slots[name]
 			lv, hasLast := a.last.Slots[name]
 			if !hasNew || !hasLast || nv.Clock == nil || lv.Clock == nil {
@@ -296,14 +111,14 @@ func (a *ANC) emit(pts int64) {
 			// The tolerance is for a running clock; a held one shows its value, so any difference counts
 			predicted := carryClock(*lv.Clock, dt)
 			if predicted == *nv.Clock || (predicted.Running && nv.Clock.Running && predicted.Up == nv.Clock.Up &&
-				abs64(predicted.Ms-nv.Clock.Ms) <= a.tolerance) {
+				abs64(predicted.Ms-nv.Clock.Ms) <= a.bindings.tolerance()) {
 				slots[name] = goavpipe.SlotValue{Clock: &predicted}
 			} else {
 				changed = true
 			}
 		}
 		if !changed {
-			changed = !sameSlots(slots, a.last.Slots, a.mapping.ClockSlots())
+			changed = !sameSlots(slots, a.last.Slots, clocks)
 		}
 	}
 	if !changed {
@@ -329,11 +144,15 @@ func (a *ANC) SetSeq(n int64) {
 	a.mu.Unlock()
 }
 
-// State returns a copy of the venue state as last decoded.
-func (a *ANC) State() venueclock.State {
+// Keys returns a copy of the keys as last published.
+func (a *ANC) Keys() Keys {
 	a.mu.Lock()
 	defer a.mu.Unlock()
-	return a.state
+	out := make(Keys, len(a.keys))
+	for k, v := range a.keys {
+		out[k] = v
+	}
+	return out
 }
 
 // Last returns the last event appended, or nil.

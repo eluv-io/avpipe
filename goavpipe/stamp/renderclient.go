@@ -7,8 +7,6 @@ import (
 	"fmt"
 	"os"
 	"sync"
-
-	"github.com/eluv-io/avpipe/goavpipe"
 )
 
 // RenderClient asks an external board renderer for pictures. A request is one JSON line {"hash", "state"} on the
@@ -24,8 +22,8 @@ type RenderClient struct {
 }
 
 type renderRequest struct {
-	Hash  string     `json:"hash"`
-	State BoardState `json:"state"`
+	Hash  string         `json:"hash"`
+	State map[string]any `json:"state"`
 }
 
 type renderResult struct {
@@ -52,8 +50,9 @@ func OpenRenderClient(requests, results string, deliver func(hash string, png []
 	return c, nil
 }
 
-// Render asks for the picture of state, named hash. The answer arrives through deliver. Safe from any goroutine.
-func (c *RenderClient) Render(hash string, state BoardState) error {
+// Render asks for the picture of state, the keys a template binding shows, named hash (Bindings.Render gives
+// both). The answer arrives through deliver. Safe from any goroutine.
+func (c *RenderClient) Render(hash string, state map[string]any) error {
 	b, err := json.Marshal(renderRequest{Hash: hash, State: state})
 	if err != nil {
 		return err
@@ -97,26 +96,4 @@ func (c *RenderClient) Close() error {
 		err = err2
 	}
 	return err
-}
-
-// RenderMappingForLayout makes the RenderMapping a layout is drawn with: the board goes to the image slot named
-// board, or else to the first image slot without a default picture, and the game and shot clocks to the clock
-// slots named clock and shot when the layout has them. A layout without an image slot for the board is an error.
-func RenderMappingForLayout(layout *goavpipe.OverlayParams, render func(hash string, state BoardState)) (*RenderMapping, error) {
-	board := ""
-	for _, s := range layout.Slots {
-		if s.Type == goavpipe.OverlaySlotImage && (s.Name == "board" || board == "" && s.Default == "") {
-			board = s.Name
-		}
-	}
-	if board == "" {
-		return nil, fmt.Errorf("stamp: the layout has no image slot for the board (named board, or without a default)")
-	}
-	clockSlot := func(name string) string {
-		if s := layout.Slot(name); s != nil && s.Type == goavpipe.OverlaySlotClock {
-			return name
-		}
-		return ""
-	}
-	return NewRenderMapping(board, clockSlot("clock"), clockSlot("shot"), render), nil
 }

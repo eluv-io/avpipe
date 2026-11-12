@@ -27,6 +27,7 @@ type elvxcInputOpener struct {
 // the one that stamps; its close ends the log, so no job waits past the last frame.
 type ancFeed struct {
 	stamper *stamp.ANC
+	venue   *stamp.VenueFeed
 	log     *stamp.Log
 	mu      sync.Mutex
 	claimed bool
@@ -56,7 +57,7 @@ func (a *ancFeed) end() {
 	if a != nil {
 		a.log.End(goavpipe.KindOverlay)
 		s := a.stamper.Stats
-		st := a.stamper.State()
+		st := a.venue.State()
 		log.Info("AVCMD overlay-anc done", "packets", s.Packets, "dropped", s.Dropped, "messages", s.Messages,
 			"events", s.Events, "bad_crc", s.BadCRC, "errors", s.Errors, "state", st.String())
 	}
@@ -452,8 +453,8 @@ func InitTranscode(cmdRoot *cobra.Command) error {
 	cmdTranscode.PersistentFlags().String("overlay", "", "Overlay spec (JSON): image library, slots and events with times in seconds. Image and font paths are relative to the spec file.")
 	cmdTranscode.PersistentFlags().String("overlay-events", "", "File or FIFO of JSON-line patches ({\"data\": {...}, \"hidden\": bool}) applied to the overlay as they arrive, each stamped at the frame being transcoded.")
 	cmdTranscode.PersistentFlags().String("overlay-log", "", "Write every stamped overlay event to this file as JSON lines.")
-	cmdTranscode.PersistentFlags().Bool("overlay-anc", false, "Drive the overlay from the input's ST 2038 venue clock feed: text slots named home, away, score and period and clock slots named clock (format game) and shot (format shot) are filled from it, stamped at the frame that carried each message.")
-	cmdTranscode.PersistentFlags().String("overlay-render", "", "With --overlay-anc: render the board as one picture through an external renderer, request-fifo,result-fifo (JSON lines {hash, state} out, {hash, png} back); the layout's board image slot shows it and the clock slot is drawn beside it.")
+	cmdTranscode.PersistentFlags().Bool("overlay-anc", false, "Drive the overlay from the input's ST 2038 venue clock feed, stamped at the frame that carried each message. A slot of the spec shows the feed's key its binding names (from: key, text with {key} placeholders, timer, or a template with keys); without a binding, text slots named home, away, score and period, clock slots named clock (format game) and shot (format shot), and any text or clock slot named like a key are filled.")
+	cmdTranscode.PersistentFlags().String("overlay-render", "", "With --overlay-anc: the external renderer of the spec's template bindings, request-fifo,result-fifo (JSON lines {hash, state} out, {hash, png} back). A spec that binds no template gets the board's on its image slot named board (or its first image slot without a default), with the clock slots drawn beside it.")
 	cmdTranscode.PersistentFlags().Int32("vertical", 0, "Vertical video crop type (0 - none, 1 - 32bpf).")
 	cmdTranscode.PersistentFlags().StringP("vertical-data", "", "", "Path to binary file with per-frame crop data (4 bytes per frame, uint32 LE). Each value is the crop window centre as a fraction of the scaled frame width, denominator 10000 (0=left, 5000=centre, 10000=right).")
 	cmdTranscode.PersistentFlags().StringP("fade", "", "", "Fade filter ('in' or 'out').")
@@ -1008,28 +1009,38 @@ func doTranscode(cmd *cobra.Command, args []string) error {
 				}
 				lastSeq = e.Seq
 			}
-			// only the slots the spec has, so a spec with just a score and a clock works too
-			var mapping stamp.Mapper = stamp.DefaultVenueMapping().ForLayout(ov)
+			// The spec's slots show the venue feed's keys: each by its own binding (from), or else by name, so a
+			// spec with just a score and a clock works too
+			layout := ov
+			var client *stamp.RenderClient
 			if renderSpec := cmd.Flag("overlay-render").Value.String(); renderSpec != "" {
-				client, err := openRenderClient(renderSpec, eventLog)
-				if err != nil {
+				if client, err = openRenderClient(renderSpec, eventLog); err != nil {
 					return err
 				}
 				defer client.Close()
-				render := func(hash string, state stamp.BoardState) {
+				// the short form of a rendered board, for a spec that binds no template itself
+				if layout, err = stamp.WithBoard(ov); err != nil {
+					return fmt.Errorf("--overlay-render: %w", err)
+				}
+			}
+			venue := stamp.NewVenueFeed()
+			bindings, err := stamp.NewBindings(venue, layout, nil)
+			if err != nil {
+				return fmt.Errorf("--overlay-anc: %w", err)
+			}
+			if bindings.Rendered() {
+				if client == nil {
+					return fmt.Errorf("--overlay-anc: the spec binds a slot to a template, which needs --overlay-render")
+				}
+				bindings.Render = func(hash string, state map[string]any) {
 					if err := client.Render(hash, state); err != nil {
 						log.Error("overlay render request failed", "err", err, "hash", hash)
 					}
 				}
-				rendered, err := stamp.RenderMappingForLayout(ov, render)
-				if err != nil {
-					return fmt.Errorf("--overlay-render: %w", err)
-				}
-				mapping = rendered
 			}
-			ancStamper := stamp.NewANC(eventLog, overlayTimescale, mapping)
+			ancStamper := stamp.NewANC(eventLog, overlayTimescale, venue, bindings)
 			ancStamper.SetSeq(lastSeq)
-			feed = &ancFeed{stamper: ancStamper, log: eventLog}
+			feed = &ancFeed{stamper: ancStamper, venue: venue, log: eventLog}
 		} else if eventsPath != "" {
 			src, err := openOverlayEvents(eventsPath)
 			if err != nil {

@@ -100,8 +100,14 @@ func runAnc(w io.Writer, url string, opts ancOpts) error {
 		stamper                    *stamp.ANC
 	)
 	if opts.eventsOut != "" {
+		// the six slots a venue board has always had: home, away, score, period, clock and shot
+		feed := stamp.NewVenueFeed()
+		bindings, err := stamp.NewBindings(feed, nil, nil)
+		if err != nil {
+			return err
+		}
 		eventLog = stamp.NewLog(goavpipe.KindOverlay)
-		stamper = stamp.NewANC(eventLog, overlayTimescale, stamp.DefaultVenueMapping())
+		stamper = stamp.NewANC(eventLog, overlayTimescale, feed, bindings)
 	}
 	stream, err := avpipe.ScanANC(url, opts.ancStreamID, func(p *goavpipe.AncPacket) error {
 		if stamper != nil {

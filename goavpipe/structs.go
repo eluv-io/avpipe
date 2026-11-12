@@ -428,6 +428,36 @@ type OverlaySlot struct {
 	Format  string  `json:"format,omitempty"`  // clock: mm:ss (default), h:mm:ss, game (m:ss above a minute, s.t below) or shot (s above five seconds, s.t below; a countdown is cut off as a shot clock is, 5.9 s left reads 5 and 4.99 s reads 4.9)
 	Default string  `json:"default,omitempty"` // image: library image shown when no event names one
 	Fade    int64   `json:"fade,omitempty"`    // image: every change of the slot (including to or from hidden) cross-fades over this many ms, timed from the event's pts
+	// From says which part of the stream's overlay state the slot shows, for a stamper that turns that state into
+	// events (package stamp). The compositor does not read it: it draws what the events say.
+	From *OverlayBinding `json:"from,omitempty"`
+}
+
+// OverlayRendererTemplate is the OverlayBinding.Renderer of a picture drawn from a template outside avpipe.
+const OverlayRendererTemplate = "template"
+
+// OverlayBinding binds a slot to keys of the stream's overlay state, the named values a feed publishes (package
+// stamp). Exactly one form is set, and it must fit the slot's type:
+//
+//   - Key on a text slot: the key's value as text. The slot is hidden while the key is unset.
+//   - Text on a text slot: the string with every {key} replaced by that key's value. The slot is hidden while
+//     every key in it is unset; an unset key among set ones reads as empty.
+//   - Timer on a clock slot: the timer key. The slot is hidden while the key is unset.
+//   - Key on an image slot: the library image named by the key's value, or with Images the image Images names
+//     for that value. The slot is hidden while the key is unset, and with Images for a value it has no entry for.
+//   - Renderer OverlayRendererTemplate with Keys on an image slot: one picture of those keys, named by the hash
+//     of their values and drawn once per distinct set of values. The slot is hidden while every key is unset.
+//
+// A text or clock slot without a binding takes the feed's default for its name, or else the key of its own name
+// when the feed publishes one (a text slot named period shows the key period). An image slot without a binding,
+// and any slot the feed has nothing for, is not driven by the state.
+type OverlayBinding struct {
+	Key      string            `json:"key,omitempty"`
+	Text     string            `json:"text,omitempty"`
+	Timer    string            `json:"timer,omitempty"`
+	Images   map[string]string `json:"images,omitempty"`   // with Key on an image slot: key value -> library image name
+	Renderer string            `json:"renderer,omitempty"` // OverlayRendererTemplate, or empty
+	Keys     []string          `json:"keys,omitempty"`     // with Renderer: the keys the picture shows
 }
 
 // OverlayParams describes a graphic burned into the output video: a static layout of slots, an image library and

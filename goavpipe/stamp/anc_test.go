@@ -44,9 +44,19 @@ func (f *feeder) frame(payload []byte) int64 {
 	return pts
 }
 
+// venueStamper is a stamper of the venue feed drawn with layout; nil is the six default slots. named replaces the
+// feed's default bindings.
+func venueStamper(t *testing.T, log *Log, layout *goavpipe.OverlayParams, named map[string]goavpipe.OverlayBinding) (*ANC, *VenueFeed) {
+	t.Helper()
+	feed := NewVenueFeed()
+	b, err := NewBindings(feed, layout, named)
+	require.NoError(t, err)
+	return NewANC(log, 1000, feed, b), feed
+}
+
 func TestANCStamper(t *testing.T) {
 	log := NewLog()
-	a := NewANC(log, 1000, DefaultVenueMapping())
+	a, feed := venueStamper(t, log, nil, nil)
 	assert.Equal(t, []string{goavpipe.KindOverlay}, log.Kinds(), "the kind is known before any event")
 	f := &feeder{a: a, pts: 1800000000}
 	src := log.Source(0)
@@ -159,7 +169,7 @@ func TestANCStamper(t *testing.T) {
 	assert.Equal(t, 3, a.Stats.Dropped)
 	assert.Equal(t, 10, a.Stats.Events)
 	assert.Equal(t, 0, a.Stats.Errors)
-	assert.Equal(t, "5 - 0", fmt.Sprintf("%d - %d", a.State().Score[0], a.State().Score[1]))
+	assert.Equal(t, "5 - 0", fmt.Sprintf("%d - %d", feed.State().Score[0], feed.State().Score[1]))
 	assert.Equal(t, int64(10), a.Last().Seq)
 
 	// Every event validates against a layout with these slots
@@ -179,7 +189,7 @@ func TestANCStamper(t *testing.T) {
 // seconds, and in tenths.
 func TestANCStamperShotClock(t *testing.T) {
 	log := NewLog()
-	a := NewANC(log, 1000, DefaultVenueMapping())
+	a, _ := venueStamper(t, log, nil, nil)
 	f := &feeder{a: a, pts: 1800000000}
 	seq := 0
 	next := func(id string, fields ...string) []byte { seq++; return venueMessage(seq, id, fields...) }
@@ -284,7 +294,7 @@ func TestANCStamperShotClock(t *testing.T) {
 // say, until a sample moves again.
 func TestANCStamperBreakClock(t *testing.T) {
 	log := NewLog()
-	a := NewANC(log, 1000, DefaultVenueMapping())
+	a, _ := venueStamper(t, log, nil, nil)
 	f := &feeder{a: a, pts: 1800000000}
 	seq := 0
 	next := func(id string, fields ...string) []byte { seq++; return venueMessage(seq, id, fields...) }
@@ -338,40 +348,233 @@ func TestANCStamperBreakClock(t *testing.T) {
 	assert.False(t, clockOf().Running)
 }
 
-func TestVenueMappingPartial(t *testing.T) {
+// TestVenueMappingBindings: the short form names a slot per value; what it stands for are bindings.
+func TestVenueMappingBindings(t *testing.T) {
 	m := VenueMapping{Score: "s", Clock: "c", ScoreFormat: "%d:%d"}
-	st := venueclock.State{Score: [2]int{3, 7}, Clock: venueclock.Value{Text: "0.5", Ms: 500, Valid: true}, Stopped: true}
-	slots := m.Slots(&st)
+	assert.Equal(t, map[string]goavpipe.OverlayBinding{
+		"s": {Text: "{score_home}:{score_away}"},
+		"c": {Timer: "clock"},
+	}, m.Bindings())
+	assert.Equal(t, "{score_home} - {score_away}", VenueMapping{Score: "s"}.Bindings()["s"].Text, "the default format")
+	assert.Len(t, DefaultVenueMapping().Bindings(), 6)
+
+	b, err := NewBindings(NewVenueFeed(), nil, m.Bindings())
+	require.NoError(t, err)
+	assert.Equal(t, []string{"c", "s"}, b.SlotNames())
+	keys := Keys{"score_home": 3, "score_away": 7, "clock": Timer{ClockState: goavpipe.ClockState{Ms: 500}, Pts: 10}}
+	slots := b.Slots(keys, 400, 1000)
 	assert.Len(t, slots, 2)
 	assert.Equal(t, "3:7", *slots["s"].Text)
 	assert.Equal(t, goavpipe.ClockState{Ms: 500}, *slots["c"].Clock)
 }
 
-// TestVenueMappingForLayout: a mapping fitted to a layout names only that layout's slots, so every event it makes
-// passes the layout's own validation.
-func TestVenueMappingForLayout(t *testing.T) {
+// TestBindingsForLayout: only the layout's slots are bound, so every event passes the layout's own validation.
+func TestBindingsForLayout(t *testing.T) {
 	layout := &goavpipe.OverlayParams{Slots: []goavpipe.OverlaySlot{
+		{Name: "bg", Type: goavpipe.OverlaySlotImage, Default: "bg"},
+		{Name: "home", Type: goavpipe.OverlaySlotImage},
 		{Name: "score", Type: goavpipe.OverlaySlotText},
 		{Name: "clock", Type: goavpipe.OverlaySlotClock},
+		{Name: "fouls_home", Type: goavpipe.OverlaySlotText},
 	}}
-	m := DefaultVenueMapping().ForLayout(layout)
-	assert.Equal(t, VenueMapping{Score: "score", Clock: "clock", ScoreFormat: "%d - %d", ClockToleranceMs: 50}, m)
-	assert.Equal(t, DefaultVenueMapping(), DefaultVenueMapping().ForLayout(nil), "no layout, nothing to leave out")
+	feed := NewVenueFeed()
+	b, err := NewBindings(feed, layout, nil)
+	require.NoError(t, err)
+	assert.Equal(t, []string{"score", "clock", "fouls_home"}, b.SlotNames(),
+		"the feed's default for score, the keys named like the slots, and no image slot")
+	assert.Equal(t, []string{"clock"}, b.ClockSlots())
+	assert.False(t, b.Rendered())
 
-	st := venueclock.State{PeriodName: "1st", Score: [2]int{3, 7}, Clock: venueclock.Value{Ms: 500, Valid: true}}
-	st.Abbrevs[venueclock.Home], st.Abbrevs[venueclock.Visitor] = "HOM", "VIS"
-	fitted := &goavpipe.OverlayEvent{TimedEvent: goavpipe.TimedEvent{Kind: goavpipe.KindOverlay}, Slots: m.Slots(&st)}
-	assert.Len(t, fitted.Slots, 2)
-	require.NoError(t, layout.ValidateEvent(fitted))
+	keys := Keys{"home": "HOM", "score_home": 3, "score_away": 7, "fouls_home": 4,
+		"clock": Timer{ClockState: goavpipe.ClockState{Ms: 9000, Running: true}, Pts: 1000}}
+	ev := &goavpipe.OverlayEvent{TimedEvent: goavpipe.TimedEvent{Kind: goavpipe.KindOverlay}, Slots: b.Slots(keys, 3000, 1000)}
+	require.NoError(t, layout.ValidateEvent(ev))
+	assert.Equal(t, "3 - 7", *ev.Slots["score"].Text)
+	assert.Equal(t, "4", *ev.Slots["fouls_home"].Text)
+	assert.Equal(t, goavpipe.ClockState{Ms: 7000, Running: true}, *ev.Slots["clock"].Clock, "carried from its sample")
 
-	// the default mapping as it is names slots this layout lacks, which the layout rejects
-	all := &goavpipe.OverlayEvent{TimedEvent: goavpipe.TimedEvent{Kind: goavpipe.KindOverlay},
-		Slots: DefaultVenueMapping().Slots(&st)}
-	assert.Error(t, layout.ValidateEvent(all))
+	// The short form: its slots only, and those the layout lacks are left out
+	short := VenueMapping{Score: "score", Home: "nosuch"}.Bindings()
+	b, err = NewBindings(feed, layout, short)
+	require.NoError(t, err)
+	assert.Equal(t, []string{"score"}, b.SlotNames())
 
-	// a slot of the wrong type stays in: the fit goes by name only
-	wrong := VenueMapping{Clock: "score"}.ForLayout(layout)
-	assert.Equal(t, "score", wrong.Clock)
+	// A binding that does not fit its slot is refused, by name as well as spelled out
+	_, err = NewBindings(feed, layout, VenueMapping{Clock: "score"}.Bindings())
+	assert.ErrorContains(t, err, `slot "score"`)
+	_, err = NewBindings(feed, &goavpipe.OverlayParams{Slots: []goavpipe.OverlaySlot{
+		{Name: "shot", Type: goavpipe.OverlaySlotText}}}, nil)
+	assert.ErrorContains(t, err, "does not fit a text slot", "the shot clock is a timer")
+}
+
+// TestBindingForms: each form of a binding, and what is refused.
+func TestBindingForms(t *testing.T) {
+	arrows := map[string]string{"home": "left", "away": "right"}
+	layout := &goavpipe.OverlayParams{
+		Images: map[string][]byte{"left": {1}, "right": {1}},
+		Slots: []goavpipe.OverlaySlot{
+			{Name: "name", Type: goavpipe.OverlaySlotText, From: &goavpipe.OverlayBinding{Key: "home_name"}},
+			{Name: "fouls", Type: goavpipe.OverlaySlotText, From: &goavpipe.OverlayBinding{Text: "FOULS {fouls_home}/{fouls_away}"}},
+			{Name: "arrow", Type: goavpipe.OverlaySlotImage, From: &goavpipe.OverlayBinding{Key: "poss", Images: arrows}},
+			{Name: "who", Type: goavpipe.OverlaySlotImage, From: &goavpipe.OverlayBinding{Key: "timeout"}},
+			{Name: "rest", Type: goavpipe.OverlaySlotClock, From: &goavpipe.OverlayBinding{Timer: "break_clock"}},
+			{Name: "horn", Type: goavpipe.OverlaySlotText, From: &goavpipe.OverlayBinding{Key: "horn"}},
+			{Name: "board", Type: goavpipe.OverlaySlotImage, From: &goavpipe.OverlayBinding{
+				Renderer: goavpipe.OverlayRendererTemplate, Keys: []string{"home", "poss"}}},
+		},
+	}
+	feed := NewVenueFeed()
+	b, err := NewBindings(feed, layout, nil)
+	require.NoError(t, err)
+	assert.True(t, b.Rendered())
+	var rendered []map[string]any
+	b.Render = func(hash string, state map[string]any) {
+		assert.Equal(t, StateHash(state), hash)
+		rendered = append(rendered, state)
+	}
+
+	// Nothing published: every slot hidden, nothing rendered
+	slots := b.Slots(Keys{}, 0, 1000)
+	assert.Len(t, slots, 7)
+	for name, v := range slots {
+		assert.True(t, v.Hide, name)
+	}
+	assert.Empty(t, rendered)
+
+	keys := Keys{"home_name": "Home", "fouls_home": 2, "poss": "away", "timeout": "home", "horn": true,
+		"break_clock": Timer{ClockState: goavpipe.ClockState{Ms: 90000}, Pts: 5}}
+	slots = b.Slots(keys, 100, 1000)
+	assert.Equal(t, "Home", *slots["name"].Text)
+	assert.Equal(t, "FOULS 2/", *slots["fouls"].Text, "an unset key among set ones reads as empty")
+	assert.Equal(t, goavpipe.ImageRef{Name: "right"}, *slots["arrow"].Image)
+	assert.Equal(t, goavpipe.ImageRef{Name: "home"}, *slots["who"].Image, "without a table the value names the image")
+	assert.Equal(t, goavpipe.ClockState{Ms: 90000}, *slots["rest"].Clock)
+	assert.Equal(t, "true", *slots["horn"].Text)
+	require.Len(t, rendered, 1)
+	assert.Equal(t, map[string]any{"poss": "away"}, rendered[0], "the keys of the binding that are set")
+	assert.Equal(t, StateHash(rendered[0]), slots["board"].Image.Hash)
+	b.Slots(keys, 200, 1000)
+	assert.Len(t, rendered, 1, "the same picture is asked for once")
+
+	keys["poss"] = "both"
+	assert.True(t, b.Slots(keys, 300, 1000)["arrow"].Hide, "a value the table has no entry for")
+	assert.Len(t, rendered, 2)
+
+	bad := func(typ string, from goavpipe.OverlayBinding, want string) {
+		t.Helper()
+		_, err := NewBindings(feed, &goavpipe.OverlayParams{Images: layout.Images,
+			Slots: []goavpipe.OverlaySlot{{Name: "x", Type: typ, From: &from}}}, nil)
+		assert.ErrorContains(t, err, want)
+	}
+	bad(goavpipe.OverlaySlotText, goavpipe.OverlayBinding{Key: "fouls_hme"}, `does not publish key "fouls_hme"`)
+	bad(goavpipe.OverlaySlotText, goavpipe.OverlayBinding{Text: "{score_home} {nosuch}"}, `does not publish key "nosuch"`)
+	bad(goavpipe.OverlaySlotText, goavpipe.OverlayBinding{Text: "{score_home"}, "placeholder")
+	bad(goavpipe.OverlaySlotText, goavpipe.OverlayBinding{Text: "score_home}"}, "} without {")
+	bad(goavpipe.OverlaySlotText, goavpipe.OverlayBinding{Key: "clock"}, "is a timer")
+	bad(goavpipe.OverlaySlotText, goavpipe.OverlayBinding{Key: "home", Text: "{away}"}, "one of")
+	bad(goavpipe.OverlaySlotText, goavpipe.OverlayBinding{}, "one of")
+	bad(goavpipe.OverlaySlotClock, goavpipe.OverlayBinding{Timer: "period"}, "is not a timer")
+	bad(goavpipe.OverlaySlotClock, goavpipe.OverlayBinding{Key: "period"}, "does not fit a clock slot")
+	bad(goavpipe.OverlaySlotImage, goavpipe.OverlayBinding{Key: "score_home"}, "not a string")
+	bad(goavpipe.OverlaySlotImage, goavpipe.OverlayBinding{Key: "poss", Images: map[string]string{"home": "nosuch"}}, "library")
+	bad(goavpipe.OverlaySlotImage, goavpipe.OverlayBinding{Renderer: goavpipe.OverlayRendererTemplate}, "lists the keys")
+	bad(goavpipe.OverlaySlotImage, goavpipe.OverlayBinding{Renderer: goavpipe.OverlayRendererTemplate, Keys: []string{"shot"}}, "is a timer")
+	bad(goavpipe.OverlaySlotImage, goavpipe.OverlayBinding{Renderer: "chrome", Keys: []string{"home"}}, "unknown renderer")
+}
+
+// TestVenueFeedKeys: what the venue feed publishes of each message.
+func TestVenueFeedKeys(t *testing.T) {
+	log := NewLog()
+	a, _ := venueStamper(t, log, nil, nil)
+	f := &feeder{a: a, pts: 1800000000}
+	seq := 0
+	send := func(id string, fields ...string) { seq++; f.frame(ancFrame(venueMessage(seq, id, fields...)...)) }
+
+	// Before the teams a number of 0 says nothing; one that is not 0 publishes its pair
+	send("2", "0", "0", "0", "0")
+	send("1", "0", "0")
+	assert.Empty(t, a.Keys())
+	send("1", "0", "2")
+	assert.Equal(t, Keys{"score_home": 0, "score_away": 2}, a.Keys())
+
+	send("17", "Home", "Visitor", "HOM", "VIS")
+	send("2", "3", "5", "0", "1")
+	send("4", "3", "2", "2nd")
+	send("5", "2")
+	send("32", "A", "1", "0", "5", "6", "0", "0", "1", "2")
+	send("33", "7:15 PM", "19:15:40")
+	send("30", "8:55", "", "0:45", "1", "1", "1")
+	send("31", "0.0", "1", "1", "0")
+	keys := a.Keys()
+	clock, shot, timeout := keys["clock"].(Timer), keys["shot"].(Timer), keys["timeout_clock"].(Timer)
+	for _, name := range []string{"clock", "shot", "timeout_clock"} {
+		delete(keys, name)
+	}
+	assert.Equal(t, Keys{
+		"home": "HOM", "away": "VIS", "home_name": "Home", "away_name": "Visitor",
+		"score_home": 0, "score_away": 2,
+		"fouls_home": 3, "fouls_away": 5, "bonus_home": 0, "bonus_away": 1,
+		"period": "2nd", "period_type": "play", "period_number": 2,
+		"poss": "away", "timeout": "home",
+		"to_home": 5, "to_away": 6, "to_short_home": 1, "to_short_away": 2,
+		"time_of_day": "19:15:40",
+		"horn":        true, "period_end": true, "shot_horn": true, "shot_expired": true,
+	}, keys)
+	assert.Equal(t, goavpipe.ClockState{Ms: 535000}, clock.ClockState, "held: a timeout clock shows")
+	assert.Equal(t, goavpipe.ClockState{Ms: 45000}, timeout.ClockState)
+	assert.Equal(t, goavpipe.ClockState{}, shot.ClockState)
+	for name, kind := range NewVenueFeed().KeyKinds() {
+		if v, ok := a.Keys()[name]; ok {
+			switch v.(type) {
+			case string:
+				assert.Equal(t, KeyString, kind, name)
+			case int:
+				assert.Equal(t, KeyNumber, kind, name)
+			case bool:
+				assert.Equal(t, KeyBool, kind, name)
+			case Timer:
+				assert.Equal(t, KeyTimer, kind, name)
+			}
+		}
+	}
+	for name := range a.Keys() {
+		assert.NotZero(t, NewVenueFeed().KeyKinds()[name], "published key %s is declared", name)
+	}
+
+	// Cleared again: empty strings and a blank clock unset their keys
+	send("5", "")
+	send("32", " ", "1", "0", "5", "6", "0", "0", "1", "2")
+	send("30", "", "", "", "0", "0", "0")
+	send("31", "", "0", "0", "0")
+	keys = a.Keys()
+	for _, name := range []string{"poss", "timeout", "clock", "shot", "timeout_clock", "horn", "period_end", "shot_horn"} {
+		assert.NotContains(t, keys, name)
+	}
+}
+
+// TestANCUnboundKeys: a key no slot is bound to makes no event, however often it changes.
+func TestANCUnboundKeys(t *testing.T) {
+	layout := &goavpipe.OverlayParams{Slots: []goavpipe.OverlaySlot{{Name: "score", Type: goavpipe.OverlaySlotText}}}
+	log := NewLog()
+	a, _ := venueStamper(t, log, layout, nil)
+	f := &feeder{a: a, pts: 1800000000}
+	seq := 0
+	send := func(id string, fields ...string) { seq++; f.frame(ancFrame(venueMessage(seq, id, fields...)...)) }
+
+	send("17", "Home", "Visitor", "HOM", "VIS")
+	require.Len(t, log.Events(goavpipe.KindOverlay), 1, "the score shows once the teams are known")
+	for i := 0; i < 5; i++ {
+		send("33", "7:15 PM", fmt.Sprintf("19:15:%02d", i))
+		send("2", fmt.Sprint(i), "0", "0", "0")
+		send("30", fmt.Sprintf("11:%02d", 59-i), "", "", "0", "0", "0")
+	}
+	assert.Len(t, log.Events(goavpipe.KindOverlay), 1)
+	assert.Equal(t, 4, a.Keys()["fouls_home"], "published all the same")
+	send("1", "2", "0")
+	events := log.Events(goavpipe.KindOverlay)
+	require.Len(t, events, 2)
+	ev := events[1].(goavpipe.OverlayEvent)
+	assert.Equal(t, map[string]goavpipe.SlotValue{"score": goavpipe.TextValue("2 - 0")}, ev.Slots)
 }
 
 // TestVenueMappingJSON: the form a configuration stores.
@@ -384,4 +587,15 @@ func TestVenueMappingJSON(t *testing.T) {
 	b, err := json.Marshal(VenueMapping{Score: "s"})
 	require.NoError(t, err)
 	assert.JSONEq(t, `{"score":"s"}`, string(b), "a slot not named is left out")
+}
+
+// TestOverlayBindingJSON: a binding as a layout stores it.
+func TestOverlayBindingJSON(t *testing.T) {
+	var slot goavpipe.OverlaySlot
+	require.NoError(t, json.Unmarshal([]byte(
+		`{"name":"poss","type":"image","from":{"key":"poss","images":{"home":"left"}}}`), &slot))
+	assert.Equal(t, &goavpipe.OverlayBinding{Key: "poss", Images: map[string]string{"home": "left"}}, slot.From)
+	b, err := json.Marshal(goavpipe.OverlaySlot{Name: "score", Type: goavpipe.OverlaySlotText})
+	require.NoError(t, err)
+	assert.NotContains(t, string(b), "from", "a slot without a binding stores none")
 }

@@ -3,6 +3,7 @@ package avpipe_test
 import (
 	"bytes"
 	"crypto/sha256"
+	"fmt"
 	"image"
 	"image/color"
 	"image/png"
@@ -132,7 +133,10 @@ func TestOverlayFromANC(t *testing.T) {
 	liveDir := path.Join(outDir, "live")
 	setupOutDir(t, liveDir)
 	log := stamp.NewLog(goavpipe.KindOverlay)
-	stamper := stamp.NewANC(log, 1000, stamp.DefaultVenueMapping())
+	feed := stamp.NewVenueFeed()
+	bindings, err := stamp.NewBindings(feed, nil, nil)
+	require.NoError(t, err)
+	stamper := stamp.NewANC(log, 1000, feed, bindings)
 	opener := &ancFeedInputOpener{stamper: stamper, log: log}
 	goavpipe.InitIOHandler(opener, &xc.FileOutputOpener{Dir: liveDir})
 	params := venueOverlayParams(tsPath, font)
@@ -143,7 +147,7 @@ func TestOverlayFromANC(t *testing.T) {
 
 	events := log.Events(goavpipe.KindOverlay)
 	require.Len(t, events, len(venueFeed)-1, "every message made an event except the game clock sample that follows the running clock")
-	st := stamper.State()
+	st := feed.State()
 	assert.Equal(t, [2]int{2, 3}, st.Score)
 	assert.True(t, st.Stopped)
 	assert.Equal(t, 0, stamper.Stats.BadCRC)
@@ -164,36 +168,48 @@ func TestOverlayFromANC(t *testing.T) {
 	require.NoError(t, avpipe.Xc(params))
 	assertSameMedia(t, liveDir, staticDir)
 
-	// Rendered board: the same feed through a RenderMapping, the pictures made by a fake renderer on its own
-	// goroutine and put in the log as assets while the job waits for them
+	// Rendered board: the same feed with the board bound to a template, the pictures made by a fake renderer on
+	// its own goroutine and put in the log as assets while the job waits for them
 	renderDir := path.Join(outDir, "render")
 	setupOutDir(t, renderDir)
 	log = stamp.NewLog(goavpipe.KindOverlay)
 	log.SetAssetFetcher(func(string) {})
-	var renders atomic.Int32
-	mapping := stamp.NewRenderMapping("board", "clock", "shot", func(hash string, b stamp.BoardState) {
-		renders.Add(1)
-		go func() {
-			time.Sleep(30 * time.Millisecond) // a Chrome render takes about this long
-			log.PutAsset(hash, boardPNG(t, b))
-		}()
-	})
-	stamper = stamp.NewANC(log, 1000, mapping)
-	opener = &ancFeedInputOpener{stamper: stamper, log: log}
-	goavpipe.InitIOHandler(opener, &xc.FileOutputOpener{Dir: renderDir})
 	params = venueOverlayParams(tsPath, font)
 	params.Overlay.Slots = []goavpipe.OverlaySlot{
 		{Name: "board", Type: goavpipe.OverlaySlotImage, X: 0.02, Y: 0.04, Size: 0.4, H: 0.2223}, // 160 px of 720
 		{Name: "clock", Type: goavpipe.OverlaySlotClock, X: 0.22, Y: 0.155, Size: 0.045, Font: font, Color: "yellow", Align: "center", Format: "game"},
 		{Name: "shot", Type: goavpipe.OverlaySlotClock, X: 0.395, Y: 0.205, Size: 0.04, Font: font, Color: "red", Align: "right", Format: "shot"},
 	}
+	board, err := stamp.WithBoard(params.Overlay)
+	require.NoError(t, err)
+	feed = stamp.NewVenueFeed()
+	bindings, err = stamp.NewBindings(feed, board, nil)
+	require.NoError(t, err)
+	var renders atomic.Int32
+	bindings.Render = func(hash string, state map[string]any) {
+		renders.Add(1)
+		go func() {
+			time.Sleep(30 * time.Millisecond) // a Chrome render takes about this long
+			log.PutAsset(hash, boardPNG(t, state))
+		}()
+	}
+	stamper = stamp.NewANC(log, 1000, feed, bindings)
+	opener = &ancFeedInputOpener{stamper: stamper, log: log}
+	goavpipe.InitIOHandler(opener, &xc.FileOutputOpener{Dir: renderDir})
 	setFastEncodeParams(params, true)
 	params.Events = log.Source(0)
 	require.NoError(t, avpipe.Xc(params))
 	assert.GreaterOrEqual(t, renders.Load(), int32(4), "teams, period, two scores")
 	renderEvents := log.Events(goavpipe.KindOverlay)
 	last := renderEvents[len(renderEvents)-1].(goavpipe.OverlayEvent)
-	assert.Equal(t, stamp.BoardStateOf(&st, "").Hash(), last.Slots["board"].Image.Hash)
+	final := map[string]any{}
+	for _, key := range stamp.BoardKeys {
+		if v, ok := stamper.Keys()[key]; ok {
+			final[key] = v
+		}
+	}
+	assert.Equal(t, 2, final["score_home"])
+	assert.Equal(t, stamp.StateHash(final), last.Slots["board"].Image.Hash, "the board as the feed left it")
 
 	// And the rendered run equals a static run with the same events and pictures
 	assets := map[string][]byte{}
@@ -215,9 +231,9 @@ func TestOverlayFromANC(t *testing.T) {
 
 // boardPNG stands in for the template renderer: a bar whose colour depends on the state, so different boards are
 // different pictures.
-func boardPNG(t *testing.T, b stamp.BoardState) []byte {
+func boardPNG(t *testing.T, state map[string]any) []byte {
 	t.Helper()
-	sum := sha256.Sum256([]byte(b.Score + b.Period + b.Home))
+	sum := sha256.Sum256([]byte(fmt.Sprint(state["score_home"], state["score_away"], state["period"], state["home"])))
 	img := image.NewNRGBA(image.Rect(0, 0, 512, 128))
 	c := color.NRGBA{sum[0], sum[1], sum[2], 200}
 	for y := 0; y < 128; y++ {
