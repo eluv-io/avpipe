@@ -12,12 +12,94 @@
 
 #include <string.h>
 #include <inttypes.h>
+#include <limits.h>
 
 #include "avpipe_utils.h"
 #include "avpipe_xc.h"
+#include "avpipe_format.h"
 #include "elv_log.h"
 
 #include <sys/time.h>
+
+/* Product policy for live encoding, not a restriction imposed by MPEG-TS.
+ * Keep NTSC rates exact; never round a guessed rate onto this list. */
+static int
+supported_live_frame_rate(AVRational rate)
+{
+    static const AVRational supported[] = {
+        {24000, 1001}, {24, 1}, {25, 1}, {30000, 1001}, {30, 1},
+        {50, 1}, {60000, 1001}, {60, 1}
+    };
+    for (unsigned int i = 0; i < sizeof(supported) / sizeof(supported[0]); i++) {
+        if (av_cmp_q(rate, supported[i]) == 0)
+            return 1;
+    }
+    return 0;
+}
+
+int
+validate_probed_video_stream(
+    coderctx_t *decoder_context,
+    const xcparams_t *params)
+{
+    decoder_context->nominal_frame_rate = (AVRational){0, 1};
+    /* Probe-only and audio-only operations do not require a video cadence. */
+    if (!params || !(params->xc_type & xc_video))
+        return eav_success;
+
+    int index = decoder_context->video_stream_index;
+    AVFormatContext *format = decoder_context->format_context;
+    const char *url = params->url ? params->url : "";
+    if (!format || index < 0 || index >= MAX_STREAMS ||
+        index >= format->nb_streams || !format->streams[index] ||
+        format->streams[index]->codecpar->codec_type != AVMEDIA_TYPE_VIDEO) {
+        elv_err("Invalid selected video stream after probing index=%d, url=%s", index, url);
+        return eav_stream_info;
+    }
+
+    AVStream *stream = format->streams[index];
+    AVRational rate = stream->r_frame_rate;
+    AVCodecContext *codec = decoder_context->codec_context[index];
+    AVRational codec_rate = codec ? codec->framerate : (AVRational){0, 1};
+    const char *reason = NULL;
+    int live = is_live_source(decoder_context);
+    int valid_rate = rate.num > 0 && rate.den > 0;
+
+    if (stream->time_base.num <= 0 || stream->time_base.den <= 0)
+        reason = "invalid video time base";
+    else if (live && is_live_container_mpegts(decoder_context) &&
+        av_cmp_q(stream->time_base, (AVRational){1, 90000}) != 0)
+        reason = "live MPEG-TS video time base must be 1/90000";
+    else if (!valid_rate)
+        reason = "missing or invalid nominal r_frame_rate";
+    else if (live && !supported_live_frame_rate(rate))
+        reason = "unsupported live nominal frame rate";
+    else if (live && (codec_rate.num <= 0 || codec_rate.den <= 0 ||
+        av_cmp_q(rate, codec_rate) != 0))
+        reason = "live nominal frame rate lacks agreeing decoder timing";
+
+    if (reason) {
+        elv_err("Invalid probed video: %s, stream_index=%d time_base=%d/%d "
+            "r_frame_rate=%d/%d avg_frame_rate=%d/%d decoder_frame_rate=%d/%d url=%s",
+            reason, index, stream->time_base.num, stream->time_base.den,
+            rate.num, rate.den, stream->avg_frame_rate.num, stream->avg_frame_rate.den,
+            codec_rate.num, codec_rate.den, url);
+        return eav_stream_info;
+    }
+
+    /* Use nominal cadence, not a part's measured average. In particular a
+     * 50 fps mezzanine with missing frames can report avg_frame_rate=130/3,
+     * while its VFR SPS exposes decoder framerate=90000/1 (timing resolution).
+     * Neither value may replace the stream's nominal 50/1 here. */
+    av_reduce(&rate.num, &rate.den, rate.num, rate.den, INT_MAX);
+    decoder_context->nominal_frame_rate = rate;
+    elv_log("Validated nominal video frame rate=%d/%d source=r_frame_rate live=%d "
+        "stream_index=%d time_base=%d/%d avg_frame_rate=%d/%d decoder_frame_rate=%d/%d url=%s",
+        rate.num, rate.den, live, index, stream->time_base.num, stream->time_base.den,
+        stream->avg_frame_rate.num, stream->avg_frame_rate.den,
+        codec_rate.num, codec_rate.den, url);
+    return eav_success;
+}
 
 
 avp_live_proto_t

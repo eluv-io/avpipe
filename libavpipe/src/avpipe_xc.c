@@ -581,6 +581,11 @@ prepare_decoder(
 
     dump_decoder(inctx->url, decoder_context);
 
+    /* All stream selection and probing is complete. Validate before preparing
+     * any encoder or writing headers. The saved nominal rate is not used yet. */
+    if ((rc = validate_probed_video_stream(decoder_context, params)) != eav_success)
+        return rc;
+
     /*
      * If params->force_equal_fduration is set, then initialize decoder_context->frame_duration.
      * This only applies to transcoding frames with format fmp4-segment (creating mezzanines).
@@ -2483,16 +2488,22 @@ encode_frame(
          * always ends up one packet short and then all rate and duration calculcations are slightly skewed.
          * See get_cluster_duration()
          */
-        if (params->xc_type == xc_video)
-            assert(output_packet->duration == 0); /* Only to notice if this ever gets set */
         if (selected_decoded_audio(decoder_context, stream_index) >= 0 && params->xc_type == xc_all) {
             if (!output_packet->duration && encoder_context->audio_last_dts[stream_index] != AV_NOPTS_VALUE)
                 output_packet->duration = output_packet->dts - encoder_context->audio_last_dts[stream_index];
             encoder_context->audio_last_dts[stream_index] = output_packet->dts;
             encoder_context->audio_last_pts_encoded[stream_index] = output_packet->pts;
         } else {
-            if (!output_packet->duration && encoder_context->video_last_dts != AV_NOPTS_VALUE)
-                output_packet->duration = output_packet->dts - encoder_context->video_last_dts;
+            /* Preserve an encoder-provided duration. Otherwise use decoding
+             * order: B-frame packet PTS can go backwards while DTS advances.
+             * Leave the duration unset when no positive DTS interval exists. */
+            if (output_packet->duration <= 0) {
+                output_packet->duration = 0;
+                if (output_packet->dts != AV_NOPTS_VALUE &&
+                    encoder_context->video_last_dts != AV_NOPTS_VALUE &&
+                    output_packet->dts > encoder_context->video_last_dts)
+                    output_packet->duration = output_packet->dts - encoder_context->video_last_dts;
+            }
             encoder_context->video_last_dts = output_packet->dts;
             encoder_context->video_last_pts_encoded = output_packet->pts;
         }
@@ -2574,10 +2585,8 @@ encode_frame(
             encoder_context->audio_pts[stream_index] = output_packet->pts;
             encoder_context->audio_frames_written[stream_index]++;
         } else {
-            if (encoder_context->video_pts != AV_NOPTS_VALUE)
-                output_packet->duration = output_packet->pts - encoder_context->video_pts;
-            else
-                output_packet->duration = 0;
+            /* Duration was set in encoder time base above and rescaled with
+             * the packet. Never overwrite it with a reordered PTS delta. */
             encoder_context->video_pts = output_packet->pts;
             encoder_context->video_frames_written++;
         }
