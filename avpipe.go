@@ -34,6 +34,7 @@ package avpipe
 #include <string.h>
 #include <stdlib.h>
 #include "avpipe_xc.h"
+#include "avpipe_overlay.h"
 #include "avpipe.h"
 #include "elv_log.h"
 #include <libavutil/channel_layout.h>
@@ -104,6 +105,8 @@ type ioHandler struct {
 	mutex         *sync.Mutex
 	outTable      map[int64]goavpipe.OutputHandler // Map of integer handle to output interfaces
 	restoreMvhevc bool
+	live          bool          // the input is a live source (udp, srt, rtp, rtmp)
+	anc           *ancStatQueue // delivers AV_IN_STAT_DATA_ANC off the demux thread; created on the first one
 }
 
 // verticalDataReaderHandle owns the Go value referenced by C while a transcode
@@ -343,6 +346,7 @@ func AVPipeOpenInputGo(url string) (fd, size int64) {
 		outTable:      make(map[int64]goavpipe.OutputHandler),
 		mutex:         &sync.Mutex{},
 		restoreMvhevc: shouldRestoreMvhevcForURL(url),
+		live:          isLiveURL(url),
 	}
 	goavpipe.Log.Debug("AVPipeOpenInput()", "url", url, "size", size, "fd", fd)
 	goavpipe.Globals.PutCIOHandler(fd, h)
@@ -517,6 +521,9 @@ func AVPipeCloseInput(fd C.int64_t) C.int {
 }
 
 func (h *ioHandler) InCloser() error {
+	if h.anc != nil {
+		h.anc.close() // deliver what is queued while the input is still open
+	}
 	err := h.input.Close()
 	goavpipe.Log.Debug("InCloser()", "error", err)
 	return err
@@ -578,6 +585,21 @@ func (h *ioHandler) InStat(stream_index C.int, avp_stat C.avp_stat_t, stat_args 
 	case C.in_stat_mpegts:
 		statArgs := C.GoString((*C.char)(stat_args))
 		err = h.input.Stat(streamIndex, goavpipe.AV_IN_STAT_MPEGTS, statArgs)
+	case C.in_stat_data_anc:
+		a := (*C.anc_packet_t)(stat_args)
+		pkt := &goavpipe.AncPacket{
+			Pts:         int64(a.pts),
+			Dts:         int64(a.dts),
+			TimeBaseNum: int(a.time_base_num),
+			TimeBaseDen: int(a.time_base_den),
+			Payload:     C.GoBytes(unsafe.Pointer(a.data), a.size),
+		}
+		if h.anc == nil {
+			h.anc = newAncStatQueue(h.live, func(si int, p *goavpipe.AncPacket) error {
+				return h.input.Stat(si, goavpipe.AV_IN_STAT_DATA_ANC, p)
+			})
+		}
+		h.anc.push(streamIndex, pkt)
 	}
 
 	return err
@@ -947,6 +969,12 @@ func AVPipeStatMuxOutput(fd C.int64_t, stream_index C.int, avp_stat C.avp_stat_t
 type EncodingFrameStats struct {
 	TotalFramesWritten int64 `json:"total_frames_written"`   // Total number of frames encoded in xc session
 	FramesWritten      int64 `json:"segment_frames_written"` // Number of frames encoded in current segment
+	// LastPts is the pts of the frame this stat reports, as handed to the muxer, in TimeBaseNum/TimeBaseDen
+	// (the output stream's time base). Frames are written in decode order, so with B-frames it is not
+	// monotonic: the written head is the maximum seen.
+	LastPts     int64 `json:"last_pts"`
+	TimeBaseNum int   `json:"time_base_num"`
+	TimeBaseDen int   `json:"time_base_den"`
 }
 
 func (h *ioHandler) OutStat(fd C.int64_t,
@@ -981,6 +1009,9 @@ func (h *ioHandler) OutStat(fd C.int64_t,
 		statArgs := &EncodingFrameStats{
 			TotalFramesWritten: int64(encodingFramesStats.total_frames_written),
 			FramesWritten:      int64(encodingFramesStats.frames_written),
+			LastPts:            int64(encodingFramesStats.last_pts),
+			TimeBaseNum:        int(encodingFramesStats.time_base_num),
+			TimeBaseDen:        int(encodingFramesStats.time_base_den),
 		}
 		err = outHandler.Stat(streamIndex, avType, goavpipe.AV_OUT_STAT_FRAME_WRITTEN, statArgs)
 	}
@@ -1162,6 +1193,8 @@ func getCParams(params *goavpipe.XcParams) (*C.xcparams_t, error) {
 		cparams.copy_mpegts = C.int(1)
 	}
 
+	cparams.anc_stream_id = C.int(params.AncStreamId)
+
 	if params.InputCfg.BypassLibavReader {
 		cparams.use_preprocessed_input = C.int(1)
 	}
@@ -1202,6 +1235,12 @@ func getCParams(params *goavpipe.XcParams) (*C.xcparams_t, error) {
 		if err := avpipeError(rc); err != nil {
 			return nil, fmt.Errorf("failed to copy vertical data (%d bytes): %w",
 				len(params.VerticalData), err)
+		}
+	}
+
+	if params.Overlay != nil {
+		if err := setCOverlay(cparams, params.Overlay); err != nil {
+			return nil, fmt.Errorf("overlay: %w", err)
 		}
 	}
 
@@ -1263,6 +1302,17 @@ func Xc(params *goavpipe.XcParams) error {
 		return EAV_PARAM
 	}
 	initCVerticalDataReader(cparams, verticalDataReader)
+
+	// The event source is owned here: closed and its handle deleted once xc returns
+	eventSource, err := newEventSource(params)
+	if err != nil {
+		goavpipe.Log.Error(op, err, "reason", "bad params", "XcParams", params)
+		return EAV_PARAM
+	}
+	if eventSource != nil {
+		initCEventSource(cparams, eventSource)
+		defer eventSource.release()
+	}
 
 	rc := C.xc((*C.xcparams_t)(unsafe.Pointer(cparams)))
 
@@ -1548,6 +1598,7 @@ var cancelableInputOpeners sync.Map // int32 handle -> cancelableInputOpener
 type xcJob struct {
 	url                string
 	verticalDataReader *verticalDataReaderHandle
+	eventSource        *eventSourceHandle // closed by XcCancel, released by XcFini
 }
 
 var (
@@ -1601,7 +1652,12 @@ func XcInit(params *goavpipe.XcParams) (handle int32, retErr error) {
 	}
 	goavpipe.Log.Debug(op, "XcParams", params)
 
-	job := &xcJob{url: params.Url}
+	eventSource, err := newEventSource(params)
+	if err != nil {
+		goavpipe.Log.Error(op, err, "reason", "bad params", "XcParams", params)
+		return -1, EAV_PARAM
+	}
+	job := &xcJob{url: params.Url, eventSource: eventSource}
 	if params.VerticalDataReader != nil {
 		job.verticalDataReader = newVerticalDataReaderHandle(params.VerticalDataReader, params.Url)
 	}
@@ -1610,6 +1666,9 @@ func XcInit(params *goavpipe.XcParams) (handle int32, retErr error) {
 			// Failures don't return a handle so XcFini cannot be called
 			if job.verticalDataReader != nil {
 				_ = job.verticalDataReader.release()
+			}
+			if job.eventSource != nil {
+				job.eventSource.release()
 			}
 			goavpipe.Globals.RemoveURLHandlers(job.url)
 		}
@@ -1654,6 +1713,7 @@ func XcInit(params *goavpipe.XcParams) (handle int32, retErr error) {
 		return -1, EAV_PARAM
 	}
 	initCVerticalDataReader(cparams, job.verticalDataReader)
+	initCEventSource(cparams, job.eventSource)
 
 	var cHandle C.int32_t
 	rc := C.xc_init((*C.xcparams_t)(unsafe.Pointer(cparams)), (*C.int32_t)(unsafe.Pointer(&cHandle)))
@@ -1748,6 +1808,9 @@ func XcFini(handle int32) error {
 			goavpipe.Log.Warn("XcFini", "reason", "failed to close vertical data reader", "err", err)
 		}
 	}
+	if job.eventSource != nil {
+		job.eventSource.release()
+	}
 	return nil
 }
 
@@ -1774,6 +1837,9 @@ func XcCancel(handle int32) error {
 	}
 	if job, ok := getXCJob(handle); ok && job.verticalDataReader != nil {
 		_ = job.verticalDataReader.cancel()
+	}
+	if job, ok := getXCJob(handle); ok && job.eventSource != nil {
+		job.eventSource.cancel()
 	}
 	if rc == 0 {
 		return nil

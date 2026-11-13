@@ -54,6 +54,7 @@
 #define MAX_FRAME_READ_RETRIES      300
 
 #include "avpipe_filters.h"
+#include "avpipe_overlay.h"
 
 extern const char *
 av_get_pix_fmt_name(
@@ -134,6 +135,8 @@ check_stream_index(
         return eav_param;
     if (selected_audio_index(params, decoder_context->data_scte35_stream_index) >= 0)
         return eav_param;
+    if (selected_audio_index(params, decoder_context->data_anc_stream_index) >= 0)
+        return eav_param;
     if (selected_audio_index(params, decoder_context->data_stream_index) >= 0)
         return eav_param;
 
@@ -198,6 +201,7 @@ prepare_decoder(
     decoder_context->inctx = inctx;
     decoder_context->video_stream_index = -1;
     decoder_context->data_scte35_stream_index = -1;
+    decoder_context->data_anc_stream_index = -1;
     decoder_context->data_stream_index = -1;
     for (int j=0; j<MAX_STREAMS; j++) {
         decoder_context->audio_stream_index[j] = -1;
@@ -389,12 +393,28 @@ prepare_decoder(
                 if (check_stream_index(params, decoder_context) != eav_success)
                     return eav_param;
                 break;
-            default:
-                // Unrecognized data stream
-                decoder_context->data_stream_index = i;
-                elv_dbg("DATA STREAM UNRECOGNIZED %d, codec_id=%s, stream_id=%d, url=%s",
+            case AV_CODEC_ID_SMPTE_2038:
+                decoder_context->data_anc_stream_index = i;
+                elv_dbg("DATA STREAM ST 2038 ANC %d, codec_id=%s, stream_id=%d, url=%s",
                     i, avcodec_get_name(decoder_context->codec_parameters[i]->codec_id),
                     decoder_context->stream[i]->id, url);
+                if (check_stream_index(params, decoder_context) != eav_success)
+                    return eav_param;
+                break;
+            default:
+                if (params && params->anc_stream_id > 0 && decoder_context->stream[i]->id == params->anc_stream_id) {
+                    // ST 2038 stream the PMT does not mark as such, named by the caller
+                    decoder_context->data_anc_stream_index = i;
+                    elv_dbg("DATA STREAM ST 2038 ANC BY ID %d, codec_id=%s, stream_id=%d, url=%s",
+                        i, avcodec_get_name(decoder_context->codec_parameters[i]->codec_id),
+                        decoder_context->stream[i]->id, url);
+                } else {
+                    // Unrecognized data stream
+                    decoder_context->data_stream_index = i;
+                    elv_dbg("DATA STREAM UNRECOGNIZED %d, codec_id=%s, stream_id=%d, url=%s",
+                        i, avcodec_get_name(decoder_context->codec_parameters[i]->codec_id),
+                        decoder_context->stream[i]->id, url);
+                }
                 if (check_stream_index(params, decoder_context) != eav_success)
                     return eav_param;
                 break;
@@ -2552,6 +2572,8 @@ encode_frame(
             else
                 outctx->total_frames_written = encoder_context->audio_frames_written[stream_index];
             outctx->frames_written++;
+            outctx->last_pts = output_packet->pts;
+            outctx->last_time_base = format_context->streams[output_packet->stream_index]->time_base;
             out_handlers->avpipe_stater(outctx, stream_index, out_stat_frame_written);
         }
 
@@ -2623,6 +2645,10 @@ do_bypass(
             packet->pos, packet->size, packet->stream_index,
             packet->flags, packet->data);
     } else {
+        /* The write takes the packet and leaves it blank: keep what the stat reports */
+        const int64_t written_pts = packet->pts;
+        const AVRational written_time_base = format_context->streams[packet->stream_index]->time_base;
+
         int rc = av_interleaved_write_frame(format_context, packet);
         if (rc < 0) {
             elv_err("Failure in copying bypass packet xc_type=%d error=%s (%d) url=%s", p->xc_type, av_err2str(rc), rc, p->url);
@@ -2646,6 +2672,8 @@ do_bypass(
                 outctx->total_frames_written = encoder_context->video_frames_written;
             }
             outctx->frames_written++;
+            outctx->last_pts = written_pts;
+            outctx->last_time_base = written_time_base;
             out_handlers->avpipe_stater(outctx, packet->stream_index, out_stat_frame_written);
         }
     }
@@ -2884,6 +2912,13 @@ transcode_video(
         if (ret != eav_success)
             return ret;
 
+        /* The overlay matches events to the frame pts in the stream time base, so apply before rescaling */
+        ret = overlay_apply(decoder_context, p, frame);
+        if (ret != eav_success) {
+            av_frame_unref(frame);
+            return ret;
+        }
+
         /* Rescale video frame to encoder timebase before sending to the filter
          * (filter is initialized with the encoder timebase).
          * Use stream time_base (not codec_context time_base) because in ffmpeg 8.x
@@ -2897,6 +2932,12 @@ transcode_video(
         if (av_buffersrc_add_frame_flags(decoder_context->video_buffersrc_ctx, frame, AV_BUFFERSRC_FLAG_KEEP_REF) < 0) {
             elv_err("Failure in feeding the filtergraph, url=%s", p->url);
             break;
+        }
+
+        ret = overlay_push_canvas(decoder_context, p, frame);
+        if (ret != eav_success) {
+            av_frame_unref(frame);
+            return ret;
         }
 
         if (do_instrument) {
@@ -3190,6 +3231,12 @@ flush_decoder(
                 AVCodecContext *enc_codec_context = encoder_context->codec_context[output_stream_index];
                 frame_rescale_time_base(frame, codec_context->time_base, enc_codec_context->time_base);
             } else {
+                ret = overlay_apply(decoder_context, p, frame);
+                if (ret != eav_success) {
+                    av_frame_free(&filt_frame);
+                    av_frame_free(&frame);
+                    return ret;
+                }
                 AVRational dec_tb = decoder_context->stream[stream_index]->time_base;
                 AVRational enc_tb = encoder_context->codec_context[stream_index]->time_base;
                 frame_rescale_time_base(frame, dec_tb, enc_tb);
@@ -3199,6 +3246,15 @@ flush_decoder(
             if (av_buffersrc_add_frame_flags(buffersrc_ctx, frame, AV_BUFFERSRC_FLAG_KEEP_REF) < 0) {
                 elv_err("Failure in feeding the filtergraph, url=%s", p->url);
                 break;
+            }
+
+            if (i < 0) {
+                ret = overlay_push_canvas(decoder_context, p, frame);
+                if (ret != eav_success) {
+                    av_frame_free(&filt_frame);
+                    av_frame_free(&frame);
+                    return ret;
+                }
             }
 
             /* pull filtered frames from the filtergraph */
@@ -3226,6 +3282,29 @@ flush_decoder(
             }
         }
         av_frame_unref(frame);
+    }
+
+    /*
+     * A two-input overlay holds the last frame until it knows the canvas has no later frame, so with an overlay
+     * canvas both sources are closed here and the graph drained. Other graphs are left open, as before.
+     */
+    if (i < 0 && overlay_close_sources(decoder_context)) {
+        while (1) {
+            ret = av_buffersink_get_frame(buffersink_ctx, filt_frame);
+            if (ret < 0) {
+                if (ret != AVERROR_EOF && ret != AVERROR(EAGAIN))
+                    elv_err("Failed to drain the filter graph ret=%d url=%s", ret, p->url);
+                break;
+            }
+            dump_frame(0, stream_index, "FILT DRAIN", codec_context->frame_num, filt_frame, debug_frame_level);
+            ret = encode_frame(decoder_context, encoder_context, filt_frame, stream_index, p, debug_frame_level);
+            av_frame_unref(filt_frame);
+            if (ret == eav_write_frame) {
+                av_frame_free(&filt_frame);
+                av_frame_free(&frame);
+                return ret;
+            }
+        }
     }
 
     av_frame_free(&filt_frame);
@@ -3488,6 +3567,7 @@ cleanup:
 static int
 get_filter_str(
     char **filter_str,
+    coderctx_t *decoder_context,
     coderctx_t *encoder_context,
     xcparams_t *params)
 {
@@ -3683,6 +3763,11 @@ get_filter_str(
             free(*filter_str);
             return ret;
         }
+        ret = overlay_append_filter(*filter_str, FILTER_STRING_SZ, decoder_context, encoder_context, params);
+        if (ret != 0) {
+            free(*filter_str);
+            return ret;
+        }
         elv_dbg("FILTER str=%s", *filter_str);
     }
 
@@ -3777,7 +3862,11 @@ avpipe_xc(
 
     if (!params->bypass_transcoding &&
         (params->xc_type & xc_video)) {
-        if ((rc = get_filter_str(&filter_str, encoder_context, params)) != eav_success) {
+        if ((rc = overlay_prepare(decoder_context, encoder_context, params)) != eav_success) {
+            goto xc_done;
+        }
+
+        if ((rc = get_filter_str(&filter_str, decoder_context, encoder_context, params)) != eav_success) {
             goto xc_done;
         }
 
@@ -3793,6 +3882,10 @@ avpipe_xc(
             if ((rc = crop_get_context(decoder_context, params)) != 0) {
                 goto xc_done;
             }
+        }
+
+        if ((rc = overlay_bind(decoder_context, params)) != eav_success) {
+            goto xc_done;
         }
     }
 
@@ -4156,6 +4249,23 @@ avpipe_xc(
                         }
                         break;
                     }
+                }
+            } else if (stream_index == decoder_context->data_anc_stream_index) {
+                if (debug_frame_level)
+                    elv_dbg("ANC [%d] pts=%"PRId64" dts=%"PRId64" size=%d url=%s",
+                        stream_index, input_packet->pts, input_packet->dts, input_packet->size, params->url);
+                if (in_handlers->avpipe_stater) {
+                    AVRational tb = decoder_context->stream[stream_index]->time_base;
+                    inctx->anc = (anc_packet_t){
+                        .pts = input_packet->pts,
+                        .dts = input_packet->dts,
+                        .time_base_num = tb.num,
+                        .time_base_den = tb.den,
+                        .data = input_packet->data,
+                        .size = input_packet->size,
+                    };
+                    in_handlers->avpipe_stater(inctx, stream_index, in_stat_data_anc);
+                    inctx->anc = (anc_packet_t){0};  // the packet is freed below
                 }
             } else {
                 if (debug_frame_level)
@@ -4958,6 +5068,12 @@ check_params(
         return eav_param;
     }
 
+    {
+        int ov_rc = overlay_validate(params);
+        if (ov_rc != eav_success)
+            return ov_rc;
+    }
+
     /*
      * get_filter_str() has mutually-exclusive branches: deinterlace, rotate and
      * watermark each emit their own filter chain and return early, while the
@@ -5167,6 +5283,9 @@ avpipe_copy_xcparams(
             elv_err("Failed to allocate %d bytes for vertical_data copy, url=%s", p->vertical_data_len, p2->url != NULL ? p2->url : "");
         }
     }
+    p2->overlay = overlay_copy(p->overlay);
+    p2->event_at = p->event_at;
+    p2->event_source = p->event_source;
 
     return p2;
 }
@@ -5266,6 +5385,7 @@ avpipe_free_params(
     free(params->extract_images_ts);
     free_vertical_data(params);
     free(params->fade);
+    overlay_free(&params->overlay);
     free(params);
     xctx->params = NULL;
 }
@@ -5346,6 +5466,8 @@ avpipe_fini(
     /* Free filter graph resources */
     if (decoder_context && decoder_context->video_filter_graph)
         avfilter_graph_free(&decoder_context->video_filter_graph);
+    if (decoder_context)
+        overlay_free_state(decoder_context);
     if (decoder_context && decoder_context->n_audio > 0) {
         for (int i=0; i<decoder_context->n_audio; i++)
             avfilter_graph_free(&decoder_context->audio_filter_graph[i]);

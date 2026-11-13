@@ -6,6 +6,7 @@ FFMPEG_LIBS   := $(shell pkg-config --libs   libavcodec libavformat libavutil)
 # avpipe_filters.c (included directly by test_fade_filter) pulls in libavfilter.
 # Only -l is needed: LIBS already supplies -L/-rpath for the same FFmpeg dist.
 AVFILTER_LIBS := $(shell pkg-config --libs-only-l libavfilter)
+SWSCALE_LIBS  := $(shell pkg-config --libs-only-l libswscale)
 
 CFLAGS := -O0 -ggdb -Wall \
 	$(FFMPEG_CFLAGS) \
@@ -17,7 +18,7 @@ LIBS := $(FFMPEG_LIBS) \
 	-L$(TOP_DIR)/lib -lutils
 
 TESTS := test_color_defaults test_hdr_metadata test_pts_unwrap test_fade_filter \
-	test_vertical_crop
+	test_vertical_crop test_overlay_clock
 OUT   := out
 BINS  := $(addprefix $(OUT)/,$(TESTS))
 
@@ -65,6 +66,11 @@ $(OUT)/test_fade_filter: test_fade_filter.c unity/unity.c \
 $(OUT)/test_vertical_crop: test_vertical_crop.c unity/unity.c \
 		$(SRC_DIR)/avpipe_filters.c $(SRC_DIR)/avpipe_utils.c $(PROD_HDRS) | $(OUT)
 	gcc $(CFLAGS) $< unity/unity.c -o $@ $(LIBS) $(AVFILTER_LIBS) -lm
+
+# avpipe_overlay.c draws through libavfilter and converts through libswscale.
+$(OUT)/test_overlay_clock: test_overlay_clock.c unity/unity.c \
+		$(SRC_DIR)/avpipe_overlay.c $(PROD_HDRS) | $(OUT)
+	gcc $(CFLAGS) $< unity/unity.c -o $@ $(LIBS) $(AVFILTER_LIBS) $(SWSCALE_LIBS) -lm
 
 clean:
 	rm -rf out $(TESTS:=.dSYM)

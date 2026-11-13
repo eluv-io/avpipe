@@ -80,6 +80,12 @@ init_vertical_data_reader(
     xcparams_t *params,
     uintptr_t handle);
 
+/** Point the job at its Go event source: AVPipeEventAt with this handle answers every consumer's per-frame ask. */
+void
+init_event_source(
+    xcparams_t *params,
+    uintptr_t handle);
+
 /**
  * @brief   Returns pixel format name.
  *

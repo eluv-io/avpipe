@@ -56,6 +56,7 @@ int64_t AVPipeOpenInput(char *, int64_t *);
 int64_t AVPipeOpenMuxInput(char *, char *, int64_t *);
 int     AVPipeReadInput(int64_t, uint8_t *, int);
 int     AVPipeReadVerticalData(uintptr_t, uint32_t *);
+int     AVPipeEventAt(uintptr_t, xcparams_t *, const char *, int64_t, int64_t, void *);
 int64_t AVPipeSeekInput(int64_t, int64_t, int);
 int     AVPipeCloseInput(int64_t);
 int     AVPipeStatInput(int64_t, int, avp_stat_t, void *);
@@ -305,6 +306,10 @@ in_stat(
 
     case in_stat_data_scte35:
         rc = AVPipeStatInput(fd, stream_index, stat_type, c->data);
+        break;
+
+    case in_stat_data_anc:
+        rc = AVPipeStatInput(fd, stream_index, stat_type, &c->anc);
         break;
 
     default:
@@ -611,6 +616,9 @@ udp_in_stat(
             elv_dbg("IN STAT UDP SCTE35 fd=%d, stat_type=%d, url=%s", fd, stat_type, c->url);
         rc = AVPipeStatInput(fd, stream_index, stat_type, c->data);
         break;
+    case in_stat_data_anc:
+        rc = AVPipeStatInput(fd, stream_index, stat_type, &c->anc);
+        break;
     default:
         elv_err("IN STAT UDP fd=%d, invalid input stat=%d, url=%s", stat_type, c->url);
         return 1;
@@ -782,6 +790,9 @@ out_stat(
             encoding_frame_stats_t encoding_frame_stats = {
                 .total_frames_written = outctx->total_frames_written,
                 .frames_written = outctx->frames_written,
+                .last_pts = outctx->last_pts,
+                .time_base_num = outctx->last_time_base.num,
+                .time_base_den = outctx->last_time_base.den,
             };
             rc = AVPipeStatOutput(h, fd, stream_index, buftype, stat_type, &encoding_frame_stats);
         }
@@ -800,6 +811,15 @@ set_loggers()
     elv_set_log_func(elv_log_warning, CWarn);
     elv_set_log_func(elv_log_error, CError);
     connect_ffmpeg_log();
+}
+
+void
+init_event_source(
+    xcparams_t *params,
+    uintptr_t handle)
+{
+    params->event_at = AVPipeEventAt;
+    params->event_source = handle;
 }
 
 static void

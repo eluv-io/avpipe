@@ -58,7 +58,8 @@ typedef enum avpipe_error_t {
     eav_xc_table                = 23,   // Error in trancoding table
     eav_pts_wrapped             = 24,   // PTS wrapped error
     eav_io_timeout              = 25,   // IO timeout
-    eav_bad_handle              = 26    // Bad handle
+    eav_bad_handle              = 26,   // Bad handle
+    eav_overlay                 = 27    // Overlay event source failed or a slot update was rejected
 } avpipe_error_t;
 
 typedef enum avpipe_buftype_t {
@@ -99,8 +100,22 @@ typedef enum avp_stat_t {
     out_stat_start_file = 10,               // Sent when a new file is opened and reports the segment index
     out_stat_end_file = 11,                 // Sent when a file is closed and reports the segment index
     in_stat_data_scte35 = 12,               // SCTE data arrived
-    in_stat_mpegts = 13                     // MPEGTS input stats (including RTP if applicable)
+    in_stat_mpegts = 13,                    // MPEGTS input stats (including RTP if applicable)
+                                            // 14 and 15 are raised on the Go side only (AV_IN_STAT_MPEGTS_*)
+    in_stat_data_anc = 16                   // SMPTE ST 2038 ancillary data PES packet arrived (anc_packet_t)
 } avp_stat_t;
+
+/* One SMPTE ST 2038 PES packet, the argument of in_stat_data_anc: the ancillary data packets of one video frame,
+ * bit-packed as the standard lays them out. Not parsed here. The data is the demuxer's and is valid for the
+ * duration of the stat call only. pts and dts are in the data stream's time base. */
+typedef struct anc_packet_t {
+    int64_t         pts;
+    int64_t         dts;
+    int             time_base_num;
+    int             time_base_den;
+    const uint8_t   *data;
+    int             size;
+} anc_packet_t;
 
 typedef enum avp_live_proto_t {
     avp_proto_none   = 0,
@@ -155,6 +170,155 @@ typedef struct io_mux_ctx_t {
 
 typedef struct xcparams_t xcparams_t;
 
+/*
+ * Overlay: a graphic burned into the output video, driven by timed events. The layout is a list of slots; each
+ * event is the complete state of every slot from its pts on. See avpipe_overlay.c.
+ */
+typedef enum ov_slot_type {
+    ov_slot_text  = 0,
+    ov_slot_clock = 1,
+    ov_slot_image = 2
+} ov_slot_type;
+
+typedef enum ov_align {
+    ov_align_left   = 0,
+    ov_align_center = 1,
+    ov_align_right  = 2
+} ov_align;
+
+typedef enum ov_clock_format {
+    ov_clock_mmss  = 0,         // 02:05
+    ov_clock_hmmss = 1,         // 1:02:05
+    ov_clock_game  = 2,         // 2:05 above a minute, 59.9 below: a venue game clock
+    ov_clock_shot  = 3          // 23 above five seconds, 4.7 below: a shot clock
+} ov_clock_format;
+
+typedef enum ov_timeout {
+    ov_timeout_fail = 0,        // The job fails with eav_overlay when a frame's event is not there within wait_ms
+    ov_timeout_hold = 1         // The previous event stays in effect
+} ov_timeout;
+
+typedef struct ov_slot_t {
+    ov_slot_type type;
+    float       x;              // Anchor as a fraction of the output width (which text edge depends on align)
+    float       y;              // Top edge as a fraction of the output height
+    float       size;           // text/clock: font size as a fraction of the output height; image: width fraction
+    float       h;              // image: height as a fraction of the output height; 0 fits the images known at start
+    ov_align    align;
+    char        *font_file;     // text/clock
+    char        *color;         // text/clock, ffmpeg colour syntax
+    ov_clock_format clock_format;
+    int         default_image;  // image: library index shown when an event names none, -1 for none
+    int         fade_ms;        // image: every change of the slot cross-fades over this time, 0 switches at once
+} ov_slot_t;
+
+typedef struct ov_image_t {
+    uint8_t     *png;
+    int         png_len;
+} ov_image_t;
+
+/* A clock slot's value: ms at the event's pts, then advancing with media time while running */
+typedef struct ov_clock_t {
+    int         set;            // 0 = no value (blank)
+    int64_t     ms;
+    int         running;
+    int         up;             // Counts up; the default counts down and stops at 0
+} ov_clock_t;
+
+/* One overlay event: the complete state of every slot from pts on. The source fills one through the
+ * overlay_event_set_* builders. */
+typedef struct ov_event_t {
+    int64_t     seq;            // The source's sequence number for this kind; unchanged means nothing to apply
+    int64_t     pts;            // In 1/timescale units on the input's own timeline
+    int         hidden;         // Hide the whole overlay
+    char        **text;         // [nslots] value per text slot, NULL for no value or a non-text slot
+    ov_clock_t  *clock;         // [nslots] value per clock slot
+    int         *image;         // [nslots] library index per image slot, -1 hidden, -2 the slot's default
+} ov_event_t;
+
+#define OV_IMAGE_HIDDEN     (-1)
+#define OV_IMAGE_DEFAULT    (-2)
+
+typedef struct ov_params_t {
+    int64_t     timescale;
+    int         nslots;
+    int         nimages;
+    ov_slot_t   *slots;
+    ov_image_t  *images;        // The library, PNG bytes; grows when the source brings images by hash
+    int64_t     wait_ms;        // How long a frame waits for its event before on_timeout applies
+    ov_timeout  on_timeout;
+} ov_params_t;
+
+/*
+ * The job's event source, on the Go side: asks for the event of kind in effect at pts (in the consumer's own
+ * timescale). have_seq is the seq the consumer holds, -1 for none; out is the consumer's event struct, which the
+ * source fills when it returns EV_AT_NEW. Never blocks: EV_AT_NOT_YET says ask again. The consumer waits in
+ * short slices, checking the cancel flag, up to its wait budget.
+ */
+#define EV_AT_UNCHANGED     0   // The same seq is still in effect, out untouched
+#define EV_AT_NEW           1   // A new event, out filled
+#define EV_AT_NOT_YET       2   // Not sealed or not fetched yet
+#define EV_AT_ENDED         3   // No event of this kind will apply at or after pts: keep what is in effect
+#define EV_AT_CANCELLED     (-2)
+#define EV_AT_FAILED        (-1)
+
+#define EV_KIND_OVERLAY     "overlay"
+
+typedef int
+(*ev_at_f)(
+    uintptr_t source,
+    xcparams_t *params,
+    const char *kind,
+    int64_t pts,
+    int64_t have_seq,
+    void *out);
+
+/* Per-transcode overlay state, owned by the decoder context. All timing is in the overlay's own timescale: a
+ * frame's pts is floored into it once per frame (frame_ts), events are compared and transitions timed in it, so
+ * the result does not depend on the input or encoder time base. */
+typedef struct ov_state_t {
+    int         nslots;
+    AVRational  tb;             // Input video stream time base, the base frame->pts arrives in
+    int64_t     frame_ts;       // The current frame's pts in the overlay timescale
+    ov_event_t  *cur;           // The event in effect, NULL before the first
+    ov_event_t  *prev;          // The event before it, for transitions; NULL when this job never saw one
+    ov_event_t  *next;          // The buffer the source fills on the next ask
+    int         asks;           // Source calls made
+    int         waits;          // Frames that waited for their event
+    int64_t     wait_start_us;  // When the current frame started waiting, 0 when not waiting
+    int         ended;          // The source said no more events: cur stays and it is not asked again
+    int         holding;        // ov_timeout_hold ran out once: frames no longer wait, they ask and move on
+    struct AVFilterContext **text_ctx;  // [nslots] drawtext filter of each text/clock slot, NULL otherwise
+    char        **text_sent;    // [nslots] text last sent to each drawtext
+    int         commands;       // send_command calls made
+
+    /* Image slots are drawn into one straight-alpha RGBA canvas, the bounding box of their rects, converted to the
+     * encoder's pixel format with alpha and fed to an overlay filter. Images are decoded when a slot first shows
+     * them and kept only scaled to that slot, since the library can grow while the job runs. */
+    int         *slot_rect;     // [nslots*4] x, y, w, h of each image slot at output size
+    int         canvas_x, canvas_y, canvas_w, canvas_h;  // w == 0 when there are no image slots
+    enum AVPixelFormat canvas_fmt;  // What the filter takes: yuva* matching the encoder, or RGBA under format=auto
+    AVFrame     **slot_scaled;  // [nslots] the image each slot shows, scaled to fit its rect
+    int         *slot_scaled_for;   // [nslots] library index slot_scaled holds, -1 for none
+    struct AVFilterContext *canvas_src;
+    int         *canvas_row;    // [nslots] library index drawn in each image slot, OV_IMAGE_HIDDEN for none
+    AVFrame     *canvas_rgba;   // The drawing surface
+    AVFrame     *canvas;        // What is pushed: canvas_rgba converted to canvas_fmt. Replaced, never edited in
+                                // place: the filter may still hold references
+    struct SwsContext *canvas_sws;
+    int         canvas_stale;   // The row changed since the canvas was drawn
+
+    /* A slot with fade_ms cross-fades from the image it showed to the new one, timed from the event's pts so
+     * every job computes the same alpha for the same frame */
+    int64_t     *fade_ts;       // [nslots] fade_ms in the overlay timescale, 0 for none
+    int         *fade_from;     // [nslots] library index faded out (OV_IMAGE_HIDDEN from nothing), OV_FADE_NONE idle
+    int64_t     *fade_start;    // [nslots] pts of the event that started the fade
+    AVFrame     **fade_scaled;  // [nslots] the image fading out, scaled; cached like slot_scaled
+    int         *fade_scaled_for;
+} ov_state_t;
+
+#define OV_FADE_NONE        (-100)
+
 typedef struct ioctx_t {
     /* Application specific IO context */
     void                *opaque;
@@ -185,6 +349,8 @@ typedef struct ioctx_t {
     int64_t write_reported;
     int64_t frames_written;         /* Frames written in current segment */
     int64_t total_frames_written;   /* Total frames written */
+    int64_t last_pts;               /* pts of the last frame handed to the muxer, in last_time_base */
+    AVRational last_time_base;
     int64_t audio_frames_read;      /* Total audio frames read from input */
     int64_t video_frames_read;      /* Total video frames read from input */
 
@@ -198,6 +364,7 @@ typedef struct ioctx_t {
     int     seg_index;          /* segment index if this ioctx is a segment */
 
     uint8_t *data;  /* Data stream buffer (e.g. SCTE-35) */
+    anc_packet_t anc;   /* The ST 2038 packet being reported by in_stat_data_anc */
 
     io_mux_ctx_t    *in_mux_ctx;   /* Input muxer context */
     int             in_mux_index;
@@ -294,6 +461,7 @@ typedef struct pts_unwrapper_t {
  *   - one video stream (at most) - video_stream_index
  *   - one or more audio streams - audio_stream_index[]
  *   - one SCTE-35 data stream    - data_scte35_stream_index
+ *   - one ST 2038 ANC data stream - data_anc_stream_index
  *   - one arbitrary data stream  - data_stream_index (not used currently)
  *
  * The caller specifies which source media audio streams to encode, using xc_params->audio_index, eg.
@@ -370,6 +538,7 @@ typedef struct coderctx_t {
     int n_audio;                                        /* Number of audio streams that will be decoded */
 
     int data_scte35_stream_index;                       /* Index of SCTE-35 data stream */
+    int data_anc_stream_index;                          /* Index of the SMPTE ST 2038 ancillary data stream */
     int data_stream_index;                              /* Index of an unrecognized data stream */
 
     pts_unwrapper_t pts_unwrapper[MAX_STREAMS];         /* PTS unwrap state (per stream)*/
@@ -403,6 +572,7 @@ typedef struct coderctx_t {
     int              vertical_data_eof;
     int              vertical_data_read;         /* Records consumed from the streaming source */
     int              vertical_data_failed;       /* Streaming source failed: latched, the reader is not called again */
+    ov_state_t      *overlay;                   /* Overlay state, NULL when params->overlay is NULL */
 
     /* Audio filter */
     AVFilterContext *audio_buffersink_ctx[MAX_STREAMS];
@@ -550,6 +720,8 @@ typedef struct xcparams_t {
     crypt_scheme_t  crypt_scheme;   // Content protection / DRM / encryption [Optional, Default: crypt_none]
     xc_type_t       xc_type;        // Default: 0 means transcode 'everything'
     int             copy_mpegts;    // Create a copy of the input stream (only MPEGTS and SRT)
+    int             anc_stream_id;  // Stream id (TS PID) of the SMPTE ST 2038 data stream when the PMT does not
+                                    // mark it (vendor descriptors instead of the VANC registration); 0 = by codec
     int         use_preprocessed_input;     // Use custom UDP handler
     int         seekable;                   // Default: 0 means not seekable. A non seekable stream with moov box in
                                             //          the end causes a lot of reads up to moov atom.
@@ -605,6 +777,9 @@ typedef struct xcparams_t {
     int         fade_end_frame;             // Fade end frame (used with blend filter)
     double      fade_level_1;               // Fade blend start level (e.g. 1.0)
     double      fade_level_2;               // Fade blend end level (e.g. 0.0)
+    ov_params_t *overlay;                   // Burned-in graphics driven by timed events, NULL for none
+    ev_at_f     event_at;                   // The job's event source, set by init_event_source(); NULL for none
+    uintptr_t   event_source;
 } xcparams_t;
 
 #define MAX_CODEC_NAME  256
@@ -775,6 +950,9 @@ typedef struct out_tracker_t {
 typedef struct encoding_frame_stats_t {
     int64_t total_frames_written;   /* Total frames encoded in the xc session */
     int64_t frames_written;         /* Frames encoded in the current segment */
+    int64_t last_pts;               /* pts of the frame reported, as handed to the muxer, in time_base; decode order */
+    int     time_base_num;          /* The output stream's time base */
+    int     time_base_den;
 } encoding_frame_stats_t;
 
 /**

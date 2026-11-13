@@ -31,7 +31,24 @@ const (
 	AV_IN_STAT_MPEGTS                   = 13
 	AV_IN_STAT_MPEGTS_START             = 14
 	AV_IN_STAT_MPEGTS_BYTES_WRITTEN     = 15
+	AV_IN_STAT_DATA_ANC                 = 16 // in_stat_data_anc in avpipe_xc.h; the argument is *AncPacket
 )
+
+// AncPacket is the argument of AV_IN_STAT_DATA_ANC: one SMPTE ST 2038 PES packet from the input, carrying the
+// ancillary data packets of one video frame bit-packed as the standard lays them out. avpipe does not parse the
+// payload. The stat fires once per PES packet, in input order, from a delivery goroutine that is fed by the read
+// loop through a bounded queue, so it may arrive after other stats of later frames. On a live input (udp, srt,
+// rtp, rtmp) a consumer that falls behind loses packets rather than stalling the input: Dropped counts the packets
+// dropped between the previous delivered one and this one. On a file input the read loop waits instead and
+// Dropped is always 0. Pts and Dts are in the data stream's time base, which is 1/90000 for an MPEG-TS input.
+type AncPacket struct {
+	Pts         int64
+	Dts         int64
+	TimeBaseNum int
+	TimeBaseDen int
+	Payload     []byte
+	Dropped     int
+}
 
 func (a AVStatType) Name() string {
 	switch a {
@@ -65,6 +82,8 @@ func (a AVStatType) Name() string {
 		return "AV_IN_STAT_MPEGTS_START"
 	case AV_IN_STAT_MPEGTS_BYTES_WRITTEN:
 		return "AV_IN_STAT_MPEGTS_BYTES_WRITTEN"
+	case AV_IN_STAT_DATA_ANC:
+		return "AV_IN_STAT_DATA_ANC"
 	default:
 		return fmt.Sprintf("Unknown(%d)", a)
 	}
@@ -301,88 +320,157 @@ const (
 
 // XcParams should match with xcparams_t in avpipe_xc.h
 type XcParams struct {
-	Url                    string        `json:"url"`
-	InputCfg               InputConfig   `json:"input_cfg"`
-	BypassTranscoding      bool          `json:"bypass,omitempty"`
-	Format                 string        `json:"format,omitempty"`
-	StartTimeTs            int64         `json:"start_time_ts,omitempty"`
-	StartPts               int64         `json:"start_pts,omitempty"` // Start PTS for output
-	DurationTs             int64         `json:"duration_ts,omitempty"`
-	StartSegmentStr        string        `json:"start_segment_str,omitempty"`
-	VideoBitrate           int32         `json:"video_bitrate,omitempty"`
-	AudioBitrate           int32         `json:"audio_bitrate,omitempty"`
-	SampleRate             int32         `json:"sample_rate,omitempty"` // Audio sampling rate
-	RcMaxRate              int32         `json:"rc_max_rate,omitempty"`
-	RcBufferSize           int32         `json:"rc_buffer_size,omitempty"`
-	CrfStr                 string        `json:"crf_str,omitempty"`
-	Preset                 string        `json:"preset,omitempty"`
-	AudioSegDurationTs     int64         `json:"audio_seg_duration_ts,omitempty"`
-	VideoSegDurationTs     int64         `json:"video_seg_duration_ts,omitempty"`
-	SegDuration            string        `json:"seg_duration,omitempty"`
-	StartFragmentIndex     int32         `json:"start_fragment_index,omitempty"`
-	ForceKeyInt            int32         `json:"force_keyint,omitempty"`
-	Ecodec                 string        `json:"ecodec,omitempty"`    // Video encoder
-	Ecodec2                string        `json:"ecodec2,omitempty"`   // Audio encoder
-	Dcodec                 string        `json:"dcodec,omitempty"`    // Video decoder
-	Dcodec2                string        `json:"dcodec2,omitempty"`   // Audio decoder
-	GPUIndex               int32         `json:"gpu_index,omitempty"` // GPU index if encoder/decoder is GPU (nvidia)
-	EncHeight              int32         `json:"enc_height,omitempty"`
-	EncWidth               int32         `json:"enc_width,omitempty"`
-	CryptIV                string        `json:"crypt_iv,omitempty"`
-	CryptKey               string        `json:"crypt_key,omitempty"`
-	CryptKID               string        `json:"crypt_kid,omitempty"`
-	CryptKeyURL            string        `json:"crypt_key_url,omitempty"`
-	CryptScheme            CryptScheme   `json:"crypt_scheme,omitempty"`
-	XcType                 XcType        `json:"xc_type,omitempty"`
-	Seekable               bool          `json:"seekable,omitempty"`
-	WatermarkText          string        `json:"watermark_text,omitempty"`
-	WatermarkTimecode      string        `json:"watermark_timecode,omitempty"`
-	WatermarkTimecodeRate  float32       `json:"watermark_timecode_rate,omitempty"`
-	WatermarkXLoc          string        `json:"watermark_xloc,omitempty"`
-	WatermarkYLoc          string        `json:"watermark_yloc,omitempty"`
-	WatermarkRelativeSize  float32       `json:"watermark_relative_size,omitempty"`
-	WatermarkFontColor     string        `json:"watermark_font_color,omitempty"`
-	WatermarkShadow        bool          `json:"watermark_shadow,omitempty"`
-	WatermarkShadowColor   string        `json:"watermark_shadow_color,omitempty"`
-	WatermarkOverlay       string        `json:"watermark_overlay,omitempty"`      // Buffer containing overlay image
-	WatermarkOverlayLen    int           `json:"watermark_overlay_len,omitempty"`  // Length of overlay image
-	WatermarkOverlayType   ImageType     `json:"watermark_overlay_type,omitempty"` // Type of overlay image (i.e PngImage, ...)
-	StreamId               int32         `json:"stream_id"`                        // Specify stream by ID (instead of index)
-	AudioIndex             []int32       `json:"audio_index"`                      // the length of this is equal to the number of audios
-	ChannelLayout          int           `json:"channel_layout"`                   // Audio channel layout
-	MaxCLL                 string        `json:"max_cll,omitempty"`
-	MasterDisplay          string        `json:"master_display,omitempty"`
-	VideoLayout            int32         `json:"video_layout,omitempty"`
-	BitDepth               int32         `json:"bitdepth,omitempty"`
-	PreserveDolbyVision    bool          `json:"preserve_dolby_vision,omitempty"`
-	SyncAudioToStreamId    int           `json:"sync_audio_to_stream_id"`
-	ForceEqualFDuration    bool          `json:"force_equal_frame_duration,omitempty"`
-	MuxingSpec             string        `json:"muxing_spec,omitempty"`
-	Listen                 bool          `json:"listen"`
-	ConnectionTimeout      int           `json:"connection_timeout"`
-	FilterDescriptor       string        `json:"filter_descriptor"`
-	SkipDecoding           bool          `json:"skip_decoding"`
-	DebugFrameLevel        bool          `json:"debug_frame_level"`
-	ExtractImageIntervalTs int64         `json:"extract_image_interval_ts,omitempty"`
-	ExtractImagesTs        []int64       `json:"extract_images_ts,omitempty"`
-	VideoTimeBase          int           `json:"video_time_base,omitempty"`
-	VideoFrameDurationTs   int           `json:"video_frame_duration_ts,omitempty"`
-	Rotate                 int           `json:"rotate,omitempty"`
-	Profile                string        `json:"profile,omitempty"`
-	Level                  int           `json:"level,omitempty"`
-	Deinterlace            int           `json:"deinterlace,omitempty"`
-	Timecode               string        `json:"timecode,omitempty"`
-	Vertical               int           `json:"vertical,omitempty"` // vertical_type: 0=none, 1=32bpf
-	VerticalData           []byte        `json:"vertical_data,omitempty"`
-	VerticalDataReader     io.ReadCloser `json:"-"` // Streaming version of VerticalData
-	Fade                   string        `json:"fade,omitempty"`
-	FadeStartFrame         int           `json:"fade_start_frame,omitempty"`
-	FadeEndFrame           int           `json:"fade_end_frame,omitempty"`
-	FadeLevel1             float64       `json:"fade_level_1,omitempty"`
-	FadeLevel2             float64       `json:"fade_level_2,omitempty"`
+	Url                    string         `json:"url"`
+	InputCfg               InputConfig    `json:"input_cfg"`
+	BypassTranscoding      bool           `json:"bypass,omitempty"`
+	Format                 string         `json:"format,omitempty"`
+	StartTimeTs            int64          `json:"start_time_ts,omitempty"`
+	StartPts               int64          `json:"start_pts,omitempty"` // Start PTS for output
+	DurationTs             int64          `json:"duration_ts,omitempty"`
+	StartSegmentStr        string         `json:"start_segment_str,omitempty"`
+	VideoBitrate           int32          `json:"video_bitrate,omitempty"`
+	AudioBitrate           int32          `json:"audio_bitrate,omitempty"`
+	SampleRate             int32          `json:"sample_rate,omitempty"` // Audio sampling rate
+	RcMaxRate              int32          `json:"rc_max_rate,omitempty"`
+	RcBufferSize           int32          `json:"rc_buffer_size,omitempty"`
+	CrfStr                 string         `json:"crf_str,omitempty"`
+	Preset                 string         `json:"preset,omitempty"`
+	AudioSegDurationTs     int64          `json:"audio_seg_duration_ts,omitempty"`
+	VideoSegDurationTs     int64          `json:"video_seg_duration_ts,omitempty"`
+	SegDuration            string         `json:"seg_duration,omitempty"`
+	StartFragmentIndex     int32          `json:"start_fragment_index,omitempty"`
+	ForceKeyInt            int32          `json:"force_keyint,omitempty"`
+	Ecodec                 string         `json:"ecodec,omitempty"`    // Video encoder
+	Ecodec2                string         `json:"ecodec2,omitempty"`   // Audio encoder
+	Dcodec                 string         `json:"dcodec,omitempty"`    // Video decoder
+	Dcodec2                string         `json:"dcodec2,omitempty"`   // Audio decoder
+	GPUIndex               int32          `json:"gpu_index,omitempty"` // GPU index if encoder/decoder is GPU (nvidia)
+	EncHeight              int32          `json:"enc_height,omitempty"`
+	EncWidth               int32          `json:"enc_width,omitempty"`
+	CryptIV                string         `json:"crypt_iv,omitempty"`
+	CryptKey               string         `json:"crypt_key,omitempty"`
+	CryptKID               string         `json:"crypt_kid,omitempty"`
+	CryptKeyURL            string         `json:"crypt_key_url,omitempty"`
+	CryptScheme            CryptScheme    `json:"crypt_scheme,omitempty"`
+	XcType                 XcType         `json:"xc_type,omitempty"`
+	Seekable               bool           `json:"seekable,omitempty"`
+	WatermarkText          string         `json:"watermark_text,omitempty"`
+	WatermarkTimecode      string         `json:"watermark_timecode,omitempty"`
+	WatermarkTimecodeRate  float32        `json:"watermark_timecode_rate,omitempty"`
+	WatermarkXLoc          string         `json:"watermark_xloc,omitempty"`
+	WatermarkYLoc          string         `json:"watermark_yloc,omitempty"`
+	WatermarkRelativeSize  float32        `json:"watermark_relative_size,omitempty"`
+	WatermarkFontColor     string         `json:"watermark_font_color,omitempty"`
+	WatermarkShadow        bool           `json:"watermark_shadow,omitempty"`
+	WatermarkShadowColor   string         `json:"watermark_shadow_color,omitempty"`
+	WatermarkOverlay       string         `json:"watermark_overlay,omitempty"`      // Buffer containing overlay image
+	WatermarkOverlayLen    int            `json:"watermark_overlay_len,omitempty"`  // Length of overlay image
+	WatermarkOverlayType   ImageType      `json:"watermark_overlay_type,omitempty"` // Type of overlay image (i.e PngImage, ...)
+	StreamId               int32          `json:"stream_id"`                        // Specify stream by ID (instead of index)
+	AudioIndex             []int32        `json:"audio_index"`                      // the length of this is equal to the number of audios
+	ChannelLayout          int            `json:"channel_layout"`                   // Audio channel layout
+	MaxCLL                 string         `json:"max_cll,omitempty"`
+	MasterDisplay          string         `json:"master_display,omitempty"`
+	VideoLayout            int32          `json:"video_layout,omitempty"`
+	BitDepth               int32          `json:"bitdepth,omitempty"`
+	PreserveDolbyVision    bool           `json:"preserve_dolby_vision,omitempty"`
+	SyncAudioToStreamId    int            `json:"sync_audio_to_stream_id"`
+	ForceEqualFDuration    bool           `json:"force_equal_frame_duration,omitempty"`
+	MuxingSpec             string         `json:"muxing_spec,omitempty"`
+	Listen                 bool           `json:"listen"`
+	ConnectionTimeout      int            `json:"connection_timeout"`
+	FilterDescriptor       string         `json:"filter_descriptor"`
+	SkipDecoding           bool           `json:"skip_decoding"`
+	DebugFrameLevel        bool           `json:"debug_frame_level"`
+	ExtractImageIntervalTs int64          `json:"extract_image_interval_ts,omitempty"`
+	ExtractImagesTs        []int64        `json:"extract_images_ts,omitempty"`
+	VideoTimeBase          int            `json:"video_time_base,omitempty"`
+	VideoFrameDurationTs   int            `json:"video_frame_duration_ts,omitempty"`
+	Rotate                 int            `json:"rotate,omitempty"`
+	Profile                string         `json:"profile,omitempty"`
+	Level                  int            `json:"level,omitempty"`
+	Deinterlace            int            `json:"deinterlace,omitempty"`
+	Timecode               string         `json:"timecode,omitempty"`
+	Vertical               int            `json:"vertical,omitempty"` // vertical_type: 0=none, 1=32bpf
+	VerticalData           []byte         `json:"vertical_data,omitempty"`
+	VerticalDataReader     io.ReadCloser  `json:"-"` // Streaming version of VerticalData
+	Fade                   string         `json:"fade,omitempty"`
+	FadeStartFrame         int            `json:"fade_start_frame,omitempty"`
+	FadeEndFrame           int            `json:"fade_end_frame,omitempty"`
+	FadeLevel1             float64        `json:"fade_level_1,omitempty"`
+	FadeLevel2             float64        `json:"fade_level_2,omitempty"`
+	AncStreamId            int            `json:"anc_stream_id,omitempty"` // Stream id (TS PID) of the SMPTE ST 2038 data stream when the PMT does not mark it; 0 = the smpte_2038 stream
+	Overlay                *OverlayParams `json:"overlay,omitempty"`       // Burned-in graphics driven by timed events
+	Events                 EventSource    `json:"-"`                       // The job's source of timed events; required with Overlay
 }
 
 func (p *XcParams) String() string { return util.JSONString(p) }
+
+// Overlay slot types
+const (
+	OverlaySlotText  = "text"  // A string drawn with the slot's font
+	OverlaySlotClock = "clock" // A clock that runs on media time
+	OverlaySlotImage = "image" // An image from the overlay's library
+)
+
+// OverlaySlot is one drawable element of an overlay. Positions and sizes are fractions of the output frame, so one
+// layout fits every rendition.
+type OverlaySlot struct {
+	Name    string  `json:"name"`
+	Type    string  `json:"type"`              // OverlaySlotText, OverlaySlotClock or OverlaySlotImage
+	X       float64 `json:"x"`                 // Anchor as a fraction of the output width (0..1); see Align
+	Y       float64 `json:"y"`                 // Top edge as a fraction of the output height (0..1)
+	Size    float64 `json:"size"`              // text/clock: font size as a fraction of the output height; image: width as a fraction of the output width
+	H       float64 `json:"h,omitempty"`       // image: height as a fraction of the output height (required); images are scaled to fit inside the rect, keeping their aspect
+	Font    string  `json:"font,omitempty"`    // text/clock: path to a font file
+	Color   string  `json:"color,omitempty"`   // text/clock: ffmpeg colour name or 0xRRGGBB[AA], default white
+	Align   string  `json:"align,omitempty"`   // text/clock: left (default), center or right - which edge of the text X anchors
+	Format  string  `json:"format,omitempty"`  // clock: mm:ss (default), h:mm:ss, game (m:ss above a minute, s.t below) or shot (s above five seconds, s.t below; a countdown is cut off as a shot clock is, 5.9 s left reads 5 and 4.99 s reads 4.9)
+	Default string  `json:"default,omitempty"` // image: library image shown when no event names one
+	Fade    int64   `json:"fade,omitempty"`    // image: every change of the slot (including to or from hidden) cross-fades over this many ms, timed from the event's pts
+	// From says which part of the stream's overlay state the slot shows, for a stamper that turns that state into
+	// events (package stamp). The compositor does not read it: it draws what the events say.
+	From *OverlayBinding `json:"from,omitempty"`
+}
+
+// OverlayRendererTemplate is the OverlayBinding.Renderer of a picture drawn from a template outside avpipe.
+const OverlayRendererTemplate = "template"
+
+// OverlayBinding binds a slot to keys of the stream's overlay state, the named values a feed publishes (package
+// stamp). Exactly one form is set, and it must fit the slot's type:
+//
+//   - Key on a text slot: the key's value as text. The slot is hidden while the key is unset.
+//   - Text on a text slot: the string with every {key} replaced by that key's value. The slot is hidden while
+//     every key in it is unset; an unset key among set ones reads as empty.
+//   - Timer on a clock slot: the timer key. The slot is hidden while the key is unset.
+//   - Key on an image slot: the library image named by the key's value, or with Images the image Images names
+//     for that value. The slot is hidden while the key is unset, and with Images for a value it has no entry for.
+//   - Renderer OverlayRendererTemplate with Keys on an image slot: one picture of those keys, named by the hash
+//     of their values and drawn once per distinct set of values. The slot is hidden while every key is unset.
+//
+// A text or clock slot without a binding takes the feed's default for its name, or else the key of its own name
+// when the feed publishes one (a text slot named period shows the key period). An image slot without a binding,
+// and any slot the feed has nothing for, is not driven by the state.
+type OverlayBinding struct {
+	Key      string            `json:"key,omitempty"`
+	Text     string            `json:"text,omitempty"`
+	Timer    string            `json:"timer,omitempty"`
+	Images   map[string]string `json:"images,omitempty"`   // with Key on an image slot: key value -> library image name
+	Renderer string            `json:"renderer,omitempty"` // OverlayRendererTemplate, or empty
+	Keys     []string          `json:"keys,omitempty"`     // with Renderer: the keys the picture shows
+}
+
+// OverlayParams describes a graphic burned into the output video: a static layout of slots, an image library and
+// the timing policy. The slots' values come from the job's EventSource (XcParams.Events) as OverlayEvents of
+// KindOverlay: on each decoded frame the latest event with Pts <= the frame's pts is in effect, so every rendition
+// of the same input switches on the same frame.
+type OverlayParams struct {
+	Timescale int64             `json:"timescale"` // Units of OverlayEvent.Pts; OverlayDefaultTimescale when 0
+	Slots     []OverlaySlot     `json:"slots"`
+	Images    map[string][]byte `json:"images,omitempty"`     // PNG bytes by library name
+	WaitMs    int64             `json:"wait_ms,omitempty"`    // How long a frame waits for its event or image; OverlayDefaultWaitMs when 0
+	OnTimeout string            `json:"on_timeout,omitempty"` // OverlayTimeoutFail (default) or OverlayTimeoutHold
+}
 
 // NewXcParams initializes a XcParams struct with unset/default values
 func NewXcParams() *XcParams {
