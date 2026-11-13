@@ -79,6 +79,7 @@ func TestDeinterlaceMez(t *testing.T) {
 						}
 						params.ForceKeyInt = rate.keyint
 						params.VideoSegDurationTs = int64(15 * rate.keyint * rate.duration)
+						params.SegDuration = ""
 						params.Preset = "ultrafast"
 						if live {
 							params.Url = "udp://deinterlace-test:1234"
@@ -159,6 +160,54 @@ func TestDeinterlaceMez(t *testing.T) {
 
 // Validate encoder timebase before encoding, including alternating 1501/1502
 // ticks for 59.94p with the inherited MPEG-TS 1/90000 timebase.
+func TestVideoSegmentGOPAlignment(t *testing.T) {
+	ffmpeg, err := exec.LookPath("ffmpeg")
+	if err != nil {
+		t.Skip("ffmpeg is required to generate interlaced test media")
+	}
+	dir, err := os.MkdirTemp(".", "segment-alignment-test-")
+	require.NoError(t, err)
+	t.Cleanup(func() { os.RemoveAll(dir) })
+	source := filepath.Join(dir, "input.ts")
+	output, err := exec.Command(ffmpeg, "-hide_banner", "-loglevel", "error", "-f", "lavfi",
+		"-i", "testsrc2=size=320x180:rate=60000/1001,interlace=scan=tff", "-frames:v", "30",
+		"-c:v", "mpeg2video", "-flags", "+ilme+ildct", "-top", "1", "-bf", "0", "-f", "mpegts", source).CombinedOutput()
+	require.NoError(t, err, "%s", output)
+	previousInput, previousOutput := goavpipe.GetGlobalInputOpener(), goavpipe.GetGlobalOutputOpener()
+	t.Cleanup(func() { goavpipe.InitIOHandler(previousInput, previousOutput) })
+	for _, tc := range []struct {
+		name      string
+		timescale int
+		ticks     int64
+		seconds   string
+		invalid   bool
+	}{
+		{"explicit_misaligned", 60000, 2702700, "45.045", true},
+		{"explicit_aligned", 60000, 1801800, "30.03", false},
+		{"ticks_override_misaligned_seconds", 60000, 1801800, "45.045", false},
+		{"ticks_override_aligned_seconds", 60000, 2702700, "30.03", true},
+		{"inherited_misaligned", 0, 4054050, "", true},
+		{"inherited_aligned", 0, 2702700, "", false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			outputDir := filepath.Join(dir, tc.name)
+			require.NoError(t, os.Mkdir(outputDir, 0755))
+			params := goavpipe.NewXcParams()
+			params.Url, params.Format, params.XcType = source, "fmp4-segment", goavpipe.XcVideo
+			params.Deinterlace, params.ForceKeyInt = 1, 120
+			params.VideoTimeBase, params.VideoSegDurationTs = tc.timescale, tc.ticks
+			params.SegDuration, params.Preset = tc.seconds, "ultrafast"
+			goavpipe.InitIOHandler(deinterlaceInput{source}, &xc.FileOutputOpener{Dir: outputDir})
+			err := avpipe.Xc(params)
+			if tc.invalid {
+				require.ErrorIs(t, err, avpipe.EAV_PARAM)
+			} else {
+				require.NoError(t, err)
+			}
+		})
+	}
+}
+
 func TestVideoEncoderTimebase(t *testing.T) {
 	ffmpeg, err := exec.LookPath("ffmpeg")
 	if err != nil {

@@ -431,14 +431,38 @@ check_video_timebase(
 
     int64_t ticks_num = (int64_t)time_base.den * frame_rate.den;
     int64_t ticks_den = (int64_t)time_base.num * frame_rate.num;
-    /* Fractional frame rates use adjacent integer durations (e.g. 416/417 or
-     * 1501/1502 ticks) so we can't check for strict integer durations.
+    /* Fractional frame rates use adjacent integer durations (e.g. 416/417 or 1501/1502 )
+     * so we can't check for strict integer durations.
      */
     if (ticks_num < ticks_den) {
         elv_err("Encoder video timebase=%d/%d is too coarse for output frame_rate=%d/%d "
             "(frame duration=%"PRId64"/%"PRId64" ticks) url=%s",
             time_base.num, time_base.den, frame_rate.num, frame_rate.den, ticks_num, ticks_den, url);
         return eav_timebase;
+    }
+
+    /* Ensure our keyframe interval produces a whole number of segments (GOPs) for the specified
+     * video segment duration.
+     */
+    if (!params->bypass_transcoding && params->force_keyint > 0 && params->format &&
+        (!strcmp(params->format, "fmp4-segment") || !strcmp(params->format, "segment"))) {
+        int timescale = params->video_time_base > 0 ? params->video_time_base : time_base.den;
+        while (timescale < TIMEBASE_THRESHOLD)
+            timescale *= 2;
+        int64_t duration = params->video_seg_duration_ts;
+        if (duration <= 0 && params->seg_duration)
+            duration = (float)atof(params->seg_duration) * timescale;
+        AVRational segment_timebase = {1, timescale};
+        AVRational gop_time = av_mul_q(av_inv_q(frame_rate), (AVRational){params->force_keyint, 1});
+        int64_t gops = av_rescale_q(duration, segment_timebase, gop_time);
+        int64_t aligned_duration = av_rescale_q(gops, gop_time, segment_timebase);
+        /* Allow one tick for integer timestamp rounding. */
+        if (duration > 0 && (gops <= 0 || llabs(duration - aligned_duration) > 1)) {
+            elv_err("Bad key frame interval - video segment duration=%"PRId64" not whole number of segs "
+                "(timescale=%d output frame_rate=%d/%d, force_keyint=%d), url=%s", duration, timescale,
+                frame_rate.num, frame_rate.den, params->force_keyint, url);
+            return eav_param;
+        }
     }
     return eav_success;
 }
