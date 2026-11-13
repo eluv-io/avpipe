@@ -36,7 +36,8 @@ func TestLoadOverlaySpec(t *testing.T) {
 		"slots": [
 			{"name": "bg", "type": "image", "x": 0, "y": 0, "size": 0.5, "h": 0.2, "default": "bg"},
 			{"name": "score", "type": "text", "x": 0.5, "y": 0.1, "size": 0.1, "font": "font.ttf"},
-			{"name": "clock", "type": "clock", "x": 0.9, "y": 0.1, "size": 0.1, "font": "font.ttf", "format": "game"}
+			{"name": "clock", "type": "clock", "x": 0.9, "y": 0.1, "size": 0.1, "font": "font.ttf", "format": "game"},
+			{"name": "period", "type": "text", "x": 0.1, "y": 0.1, "size": 0.1, "font": "Arial:bold"}
 		],
 		"events": [
 			{"t": 0, "slots": {"score": "0 - 0", "clock": {"clock": {"ms": 720000, "running": true}}, "bg": "bg"}},
@@ -51,6 +52,7 @@ func TestLoadOverlaySpec(t *testing.T) {
 	assert.Equal(t, int64(overlayTimescale), ov.Timescale)
 	assert.NotEmpty(t, ov.Images["bg"])
 	assert.Equal(t, filepath.Join(dir, "font.ttf"), ov.Slots[1].Font)
+	assert.Equal(t, "Arial:bold", ov.Slots[3].Font, "not a file: a fontconfig pattern, passed on as it is")
 	require.Len(t, events, 3)
 	assert.Equal(t, []int64{1, 2, 10}, []int64{events[0].Seq, events[1].Seq, events[2].Seq})
 	assert.Equal(t, []int64{0, 2500, 4000}, []int64{events[0].Pts, events[1].Pts, events[2].Pts})
@@ -85,6 +87,7 @@ func TestLoadOverlaySpecErrors(t *testing.T) {
 		"missing image": `{"images": {"bg": "nope.png"}, "slots": []}`,
 		"not a png":     `{"images": {"bg": "` + notPNG + `"}, "slots": []}`,
 		"missing font":  `{"slots": [{"name": "a", "type": "text", "font": "nope.ttf"}]}`,
+		"missing path":  `{"slots": [{"name": "a", "type": "text", "font": "fonts/nope"}]}`,
 		"t and pts":     `{"slots": [], "events": [{"t": 1, "pts": 1000}]}`,
 		"unsorted":      `{"slots": [], "events": [{"t": 2}, {"t": 1}]}`,
 		"unknown slot":  `{"slots": [{"name": "a", "type": "text", "font": "font.ttf"}], "events": [{"t": 0, "slots": {"b": "x"}}]}`,
