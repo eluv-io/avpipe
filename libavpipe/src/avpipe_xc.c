@@ -3188,6 +3188,13 @@ flush_decoder(
     if (codec_context == NULL)
         return eav_success;
 
+    /* Discard delayed video if no frame decoded before flush (teardown will still happen correctly) */
+    if (codec_context->codec_type == AVMEDIA_TYPE_VIDEO &&
+        decoder_context->first_decoding_video_pts == AV_NOPTS_VALUE) {
+        elv_warn("Skipping video decoder flush: no video frame decoded, url=%s", p->url);
+        return eav_success;
+    }
+
     response = avcodec_send_packet(codec_context, NULL);    /* Passing NULL means flush the decoder buffers */
     frame = av_frame_alloc();
     filt_frame = av_frame_alloc();
@@ -3206,6 +3213,12 @@ flush_decoder(
         if (response == AVERROR_EOF) {
             elv_log("GOT EOF url=%s, xc_type=%d, format=%s", p->url, p->xc_type, p->format);
             continue; // PENDING(SSS) why continue and not break?
+        }
+
+        if (response < 0) {
+            elv_warn("Failed to receive frame during decoder flush: %s, url=%s",
+                av_err2str(response), p->url);
+            break;
         }
 
         if (codec_context->codec_type == AVMEDIA_TYPE_VIDEO) {
@@ -4827,8 +4840,8 @@ check_params(
     }
 
     if (!strcmp(params->format, "dash") || !strcmp(params->format, "hls")) {
-        if (params->deinterlace != dif_none && params->video_time_base > 0) {
-            elv_err("Incompatible params - deinterlacing with an explicit video timebase is not supported for %s, url=%s",
+        if (params->deinterlace != dif_none || params->video_time_base > 0) {
+            elv_err("Incompatible params - deinterlacing or an explicit video timebase is not supported for %s, url=%s",
                 params->format, params->url);
             return eav_param;
         }

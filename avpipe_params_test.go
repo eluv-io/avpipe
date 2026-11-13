@@ -20,7 +20,7 @@ func TestDeinterlaceOutputParams(t *testing.T) {
 
 				// XcInit must validate without opening or decoding the missing input.
 				handle, err := XcInit(params)
-				if format != "fmp4-segment" && mode != 0 && timescale > 0 {
+				if format != "fmp4-segment" && (mode != 0 || timescale > 0) {
 					require.ErrorIs(t, err, EAV_PARAM, "format=%s mode=%d timescale=%d", format, mode, timescale)
 					require.Equal(t, int32(-1), handle)
 					continue

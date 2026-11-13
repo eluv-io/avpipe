@@ -416,14 +416,15 @@ check_video_timebase(
      */
     if (frame_rate.num <= 0 || frame_rate.den <= 0) {
         const AVStream *stream = decoder_context->stream[decoder_context->video_stream_index];
-        frame_rate = stream->avg_frame_rate;
+        frame_rate = stream->r_frame_rate;
         if (frame_rate.num <= 0 || frame_rate.den <= 0)
-            frame_rate = stream->r_frame_rate;
+            frame_rate = stream->avg_frame_rate;
         if (params->deinterlace == dif_bwdif)
             frame_rate = av_mul_q(frame_rate, (AVRational){2, 1});
     }
 
     if (time_base.num <= 0 || time_base.den <= 0 || frame_rate.num <= 0 || frame_rate.den <= 0) {
+        // Deliberate - incorrect frame rate will cause bad output (may change in the future)
         elv_err("Invalid encoder video timebase=%d/%d or output frame_rate=%d/%d, url=%s",
             time_base.num, time_base.den, frame_rate.num, frame_rate.den, url);
         return eav_timebase;

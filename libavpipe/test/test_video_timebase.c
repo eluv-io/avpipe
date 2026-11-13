@@ -18,7 +18,7 @@ static int check_rates(AVRational time_base, AVRational frame_rate)
 static void test_frame_rate_precedence_and_deinterlacing(void)
 {
     AVCodecContext encoder = {.time_base = {1, 25}, .framerate = {25, 1}};
-    AVStream stream = {.avg_frame_rate = {25, 1}, .r_frame_rate = {30, 1}};
+    AVStream stream = {.avg_frame_rate = {30, 1}, .r_frame_rate = {25, 1}};
     coderctx_t decoder = {.video_stream_index = 0, .stream = {&stream}};
     xcparams_t params = {.url = "test", .deinterlace = dif_bwdif};
 
@@ -29,11 +29,11 @@ static void test_frame_rate_precedence_and_deinterlacing(void)
     /* Fallback source rate 25 becomes 50: 1/25 is now too coarse. */
     TEST_ASSERT_EQUAL(eav_timebase, check_video_timebase(&encoder, &decoder, &params));
     encoder.time_base = (AVRational){1, 50};
-    /* avg_frame_rate takes precedence over r_frame_rate (30 -> 60 would fail). */
+    /* r_frame_rate takes precedence over avg_frame_rate (30 -> 60 would fail). */
     TEST_ASSERT_EQUAL(eav_success, check_video_timebase(&encoder, &decoder, &params));
 
-    stream.avg_frame_rate = (AVRational){0, 1};
-    stream.r_frame_rate = (AVRational){25, 1};
+    stream.r_frame_rate = (AVRational){0, 1};
+    stream.avg_frame_rate = (AVRational){25, 1};
     encoder.time_base = (AVRational){1, 25};
     TEST_ASSERT_EQUAL(eav_timebase, check_video_timebase(&encoder, &decoder, &params));
     params.deinterlace = dif_bwdif_frame;
