@@ -8,6 +8,7 @@ import (
 	_ "image/jpeg"
 	"image/png"
 	"os"
+	"os/exec"
 	"path"
 	"strconv"
 	"strings"
@@ -257,6 +258,37 @@ func TestOverlayEventSource(t *testing.T) {
 	assert.Greater(t, source.notYet.Load(), int32(3), "frames waited for the seal several times")
 	assert.True(t, source.closed.Load(), "the source is closed when Xc returns")
 	assertSameMedia(t, refDir, srcDir)
+}
+
+// TestOverlayFontByName: a slot's font can be a fontconfig pattern in place of a file. The pattern's colon has to
+// pass both parsers of the filter string, and the text must be drawn with the file fontconfig resolves the
+// pattern to: the output is byte for byte that of naming the file.
+func TestOverlayFontByName(t *testing.T) {
+	url := videoBigBuckBunnyPath
+	checkFileExists(t, url)
+	const pattern = "Sans:bold"
+	out, err := exec.Command("fc-match", "-f", "%{index} %{file}", pattern).Output()
+	index, file, found := strings.Cut(string(out), " ")
+	if err != nil || !found || file == "" {
+		t.Skip("no fc-match to tell which file fontconfig resolves the pattern to")
+	}
+	if index != "0" {
+		t.Skipf("%s resolves to face %s of a collection, which a file name alone does not select", pattern, index)
+	}
+	t.Logf("%s resolves to %s", pattern, file)
+	images := overlayTestImages(t)
+
+	refDir := path.Join(baseOutPath, fn(), "file")
+	ref := overlayTextParams(url, file, images)
+	setFastEncodeParams(ref, true)
+	xcTest(t, refDir, ref, nil, true)
+
+	dir := path.Join(baseOutPath, fn(), "pattern")
+	params := overlayTextParams(url, pattern, images)
+	setFastEncodeParams(params, true)
+	xcTest(t, dir, params, nil, true)
+
+	assertSameMedia(t, refDir, dir)
 }
 
 // overlayHashEvents is overlayTextEvents with the possession marker named by hash, and the assets to go with it.

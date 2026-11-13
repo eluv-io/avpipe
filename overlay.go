@@ -146,7 +146,7 @@ func overlayCheckLayout(p *goavpipe.OverlayParams) (map[string]int, error) {
 				return nil, fmt.Errorf("slot %q: default image %q is not in the library", s.Name, s.Default)
 			}
 		} else if s.Font == "" {
-			return nil, fmt.Errorf("slot %q: a font file is required", s.Name)
+			return nil, fmt.Errorf("slot %q: a font is required", s.Name)
 		}
 		if !overlayColorOK(s.Color) {
 			return nil, fmt.Errorf("slot %q: invalid color %q", s.Name, s.Color)
