@@ -2,6 +2,7 @@ package cmd
 
 import (
 	"bufio"
+	"bytes"
 	"crypto/sha256"
 	"encoding/base64"
 	"encoding/hex"
@@ -25,7 +26,7 @@ const overlayTimescale = 1000
 // events with times in seconds on the input's own timeline.
 type overlaySpec struct {
 	DelayMs int64                  `json:"delay_ms"` // Added when a patch is stamped: how far past the through pts it lands
-	Images  map[string]string      `json:"images"`   // Library name -> PNG path
+	Images  map[string]string      `json:"images"`   // Library name -> PNG path, or the PNG itself in base64
 	Slots   []goavpipe.OverlaySlot `json:"slots"`
 	Events  []overlaySpecEvent     `json:"events"`
 }
@@ -122,6 +123,41 @@ func overlaySlotValues(layout *goavpipe.OverlayParams, raw map[string]json.RawMe
 	return out, nil
 }
 
+// overlayPNGMagic is how every PNG file starts.
+var overlayPNGMagic = []byte("\x89PNG\r\n\x1a\n")
+
+// overlaySpecImage returns the PNG of one image entry of the spec: the picture itself in base64, as a layout in
+// the fabric's recording config carries it, or the path of a PNG file.
+func overlaySpecImage(v string, resolve func(string) string) ([]byte, error) {
+	b, err := base64.StdEncoding.DecodeString(v)
+	if err == nil && bytes.HasPrefix(b, overlayPNGMagic) {
+		return b, nil
+	}
+	// Too long for a path: say what it is not, instead of "file name too long"
+	if len(v) > 1024 {
+		return nil, fmt.Errorf("neither a PNG in base64 nor a path")
+	}
+	return os.ReadFile(resolve(v))
+}
+
+// overlayFontExts are the file name endings that make a spec's font a file, present or not.
+var overlayFontExts = map[string]bool{".ttf": true, ".otf": true, ".ttc": true, ".otc": true, ".pfb": true}
+
+// overlaySpecFont returns the font of one slot of the spec for the job: the path of the file it names, relative
+// to the spec or absolute, and otherwise the value as it is, a fontconfig pattern such as "Arial:bold". A value
+// that reads as a file, by a path separator or a font file ending, and is not there is an error.
+func overlaySpecFont(v string, resolve func(string) string) (string, error) {
+	p := resolve(v)
+	_, err := os.Stat(p)
+	if err == nil {
+		return p, nil
+	}
+	if strings.ContainsRune(v, filepath.Separator) || overlayFontExts[strings.ToLower(filepath.Ext(v))] {
+		return "", err
+	}
+	return v, nil
+}
+
 // loadOverlaySpec reads the spec, loads the images and resolves the font paths. The events come back separately
 // from the layout: the job's EventSource serves them.
 func loadOverlaySpec(path string) (*goavpipe.OverlayParams, []goavpipe.OverlayEvent, *overlaySpec, error) {
@@ -142,8 +178,8 @@ func loadOverlaySpec(path string) (*goavpipe.OverlayParams, []goavpipe.OverlayEv
 	}
 
 	ov := &goavpipe.OverlayParams{Timescale: overlayTimescale, Images: map[string][]byte{}}
-	for name, p := range spec.Images {
-		png, err := os.ReadFile(resolve(p))
+	for name, v := range spec.Images {
+		png, err := overlaySpecImage(v, resolve)
 		if err != nil {
 			return nil, nil, nil, fmt.Errorf("overlay image %q: %w", name, err)
 		}
@@ -151,8 +187,7 @@ func loadOverlaySpec(path string) (*goavpipe.OverlayParams, []goavpipe.OverlayEv
 	}
 	for _, s := range spec.Slots {
 		if s.Font != "" {
-			s.Font = resolve(s.Font)
-			if _, err := os.Stat(s.Font); err != nil {
+			if s.Font, err = overlaySpecFont(s.Font, resolve); err != nil {
 				return nil, nil, nil, fmt.Errorf("overlay slot %q font: %w", s.Name, err)
 			}
 		}

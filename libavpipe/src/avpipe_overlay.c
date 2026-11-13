@@ -340,7 +340,7 @@ overlay_validate(
         case ov_slot_text:
         case ov_slot_clock:
             if (!slot->font_file || !*slot->font_file) {
-                elv_err("Overlay: slot=%d needs a font file, url=%s", i, url);
+                elv_err("Overlay: slot=%d needs a font, url=%s", i, url);
                 return eav_param;
             }
             if (slot->clock_format != ov_clock_mmss && slot->clock_format != ov_clock_hmmss &&
@@ -797,7 +797,11 @@ overlay_add_canvas_source(
     return 0;
 }
 
-/* Quote s for the filter graph parser: inside '...' only the quote itself needs escaping */
+/*
+ * Quote an option value for the filter graph string, to go between '...'. The value is parsed twice: the graph
+ * parser takes it out of the quotes, where only the quote itself needs care, and the filter's option parser then
+ * splits on ':' and unescapes a backslash. So those two are escaped for the option parser, and a quote for both.
+ */
 static int
 ov_quote(
     char *dst,
@@ -806,7 +810,12 @@ ov_quote(
 {
     size_t n = 0;
     for (; *s; s++) {
-        const char *rep = (*s == '\'') ? "'\\''" : NULL;
+        char esc[3] = { '\\', *s, '\0' };
+        const char *rep = NULL;
+        if (*s == '\'')
+            rep = "\\'\\''";    /* \ for the option parser, then '\'' leaves and re-enters the quotes */
+        else if (*s == ':' || *s == '\\')
+            rep = esc;
         size_t len = rep ? strlen(rep) : 1;
         if (n + len + 1 > dst_sz)
             return -1;
@@ -881,7 +890,7 @@ overlay_append_filter(
         if (font_size < 1)
             font_size = 1;
         if (ov_quote(font, sizeof(font), slot->font_file) < 0) {
-            elv_err("Overlay: font path too long, slot=%d, url=%s", i, params->url);
+            elv_err("Overlay: font too long, slot=%d, url=%s", i, params->url);
             return eav_filter_string_init;
         }
         switch (slot->align) {

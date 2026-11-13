@@ -449,7 +449,7 @@ func InitTranscode(cmdRoot *cobra.Command) error {
 	cmdTranscode.PersistentFlags().StringP("profile", "", "", "Encoding profile for video. If it is not determined, it will be set automatically.")
 	cmdTranscode.PersistentFlags().Int32("level", 0, "Encoding level for video. If it is not determined, it will be set automatically.")
 	cmdTranscode.PersistentFlags().Int32("deinterlace", 0, "Deinterlace filter (values 0 - none, 1 - bwdif_field, 2 - bwdif_frame send_frame).")
-	cmdTranscode.PersistentFlags().String("overlay", "", "Overlay spec (JSON): image library, slots and events with times in seconds. Image and font paths are relative to the spec file.")
+	cmdTranscode.PersistentFlags().String("overlay", "", "Overlay spec (JSON): image library, slots and events with times in seconds. Image and font paths are relative to the spec file; an image can also be the PNG itself in base64, and a font a fontconfig pattern such as Arial:bold.")
 	cmdTranscode.PersistentFlags().String("overlay-events", "", "File or FIFO of JSON-line patches ({\"data\": {...}, \"hidden\": bool}) applied to the overlay as they arrive, each stamped at the frame being transcoded.")
 	cmdTranscode.PersistentFlags().String("overlay-log", "", "Write every stamped overlay event to this file as JSON lines.")
 	cmdTranscode.PersistentFlags().Bool("overlay-anc", false, "Drive the overlay from the input's ST 2038 venue clock feed, stamped at the frame that carried each message. A slot of the spec shows the feed's key its binding names (from: key, text with {key} placeholders, timer, or a template with keys); without a binding, text slots named home, away, score and period, clock slots named clock (format game) and shot (format shot), and any text or clock slot named like a key are filled.")

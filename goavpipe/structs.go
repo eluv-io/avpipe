@@ -422,7 +422,7 @@ type OverlaySlot struct {
 	Y       float64 `json:"y"`                 // Top edge as a fraction of the output height (0..1)
 	Size    float64 `json:"size"`              // text/clock: font size as a fraction of the output height; image: width as a fraction of the output width
 	H       float64 `json:"h,omitempty"`       // image: height as a fraction of the output height (required); images are scaled to fit inside the rect, keeping their aspect
-	Font    string  `json:"font,omitempty"`    // text/clock: path to a font file
+	Font    string  `json:"font,omitempty"`    // text/clock: a font file, or when it names no file a fontconfig pattern such as "Arial:bold" (needs an ffmpeg built with fontconfig). fontconfig always answers with some font: a pattern that matches nothing, and a file that is missing, are drawn in its default font without an error
 	Color   string  `json:"color,omitempty"`   // text/clock: ffmpeg colour name or 0xRRGGBB[AA], default white
 	Align   string  `json:"align,omitempty"`   // text/clock: left (default), center or right - which edge of the text X anchors
 	Format  string  `json:"format,omitempty"`  // clock: mm:ss (default), h:mm:ss, game (m:ss above a minute, s.t below) or shot (s above five seconds, s.t below; a countdown is cut off as a shot clock is, 5.9 s left reads 5 and 4.99 s reads 4.9)
