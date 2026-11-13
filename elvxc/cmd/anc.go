@@ -15,9 +15,8 @@ import (
 	"github.com/spf13/cobra"
 )
 
-// Anc adds the anc command: a dump of the SMPTE ST 2038 ancillary data in a transport stream, for looking at a
-// capture from a contribution encoder. It reads the stream through avpipe's own demuxer, so it shows what a
-// transcode would report in AV_IN_STAT_DATA_ANC.
+// Anc adds the anc command: a dump of the SMPTE ST 2038 ancillary data in a transport stream. It reads the stream
+// through avpipe's own demuxer, so it shows what a transcode would report in AV_IN_STAT_DATA_ANC.
 func Anc(cmdRoot *cobra.Command) error {
 	cmdAnc := &cobra.Command{
 		Use:   "anc",

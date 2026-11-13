@@ -9,10 +9,9 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-// capturedPES are whole PES packets (header included) of an ST 2038 stream from a broadcast encoder: DID 0x50 /
-// SDID 0x01 packets on line 14, one CEA-708 caption packet, and ST 352 payload identifiers with ST 12-2 time code
-// on lines 9 and 10.
-var capturedPES = []string{
+// samplePES are whole PES packets (header included) of an ST 2038 stream: DID 0x50 / SDID 0x01 packets on line 14,
+// one CEA-708 caption packet, and ST 352 payload identifiers with ST 12-2 time code on lines 9 and 10.
+var samplePES = []string{
 	"000001bd0016858005231a339e4d0003800250405048620071e008d3",
 	"000001bd0016858005231a3392930003800250405048620071e008d3",
 	"000001bd004a858005231a33929300030001614062ba5a698ad7f50d9b8f2727aafc60180bea00802fa80200bea00802fa80200bea00802fa80200bea00802fa80200bea008027466e3c7418dfffffff",
@@ -27,12 +26,12 @@ var capturedPES = []string{
 	"000001bd0036858005231a392f3500029e224140504626ca6010146b00029e4e60981108020050200942008c200982004820080200982005c3ffffff",
 }
 
-// TestParsePESCaptured runs the parser over packets a real encoder produced: every packet must parse with its
-// parity and checksum intact, and the time codes must read as the 29.97 drop-frame sequence they are.
-func TestParsePESCaptured(t *testing.T) {
+// TestParsePESSamples runs the parser over the sample packets: every packet must parse with its parity and
+// checksum intact, and the time codes must read as the 29.97 drop-frame sequence they are.
+func TestParsePESSamples(t *testing.T) {
 	kinds := map[anc.Kind]int{}
 	var timecodes []anc.Timecode
-	for i, s := range capturedPES {
+	for i, s := range samplePES {
 		b, err := hex.DecodeString(s)
 		require.NoError(t, err)
 		headerLen := int(b[8])
