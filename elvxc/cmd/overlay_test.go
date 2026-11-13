@@ -65,9 +65,25 @@ func TestLoadOverlaySpec(t *testing.T) {
 	assert.True(t, events[2].Hidden)
 }
 
+// TestLoadOverlaySpecEmbeddedImage: an image entry that is the PNG itself in base64, the form a layout in the
+// fabric's recording config has, loads as the same bytes as the file does.
+func TestLoadOverlaySpecEmbeddedImage(t *testing.T) {
+	dir := writeOverlaySpecDir(t, `{"images": {"bg": "bg.png"}, "slots": []}`)
+	fromFile, _, _, err := loadOverlaySpec(filepath.Join(dir, "spec.json"))
+	require.NoError(t, err)
+
+	embedded := `{"images": {"bg": "` + base64.StdEncoding.EncodeToString(fromFile.Images["bg"]) + `"}, "slots": []}`
+	require.NoError(t, os.WriteFile(filepath.Join(dir, "spec.json"), []byte(embedded), 0644))
+	ov, _, _, err := loadOverlaySpec(filepath.Join(dir, "spec.json"))
+	require.NoError(t, err)
+	assert.Equal(t, fromFile.Images["bg"], ov.Images["bg"])
+}
+
 func TestLoadOverlaySpecErrors(t *testing.T) {
+	notPNG := base64.StdEncoding.EncodeToString(bytes.Repeat([]byte("x"), 2000))
 	for name, spec := range map[string]string{
 		"missing image": `{"images": {"bg": "nope.png"}, "slots": []}`,
+		"not a png":     `{"images": {"bg": "` + notPNG + `"}, "slots": []}`,
 		"missing font":  `{"slots": [{"name": "a", "type": "text", "font": "nope.ttf"}]}`,
 		"t and pts":     `{"slots": [], "events": [{"t": 1, "pts": 1000}]}`,
 		"unsorted":      `{"slots": [], "events": [{"t": 2}, {"t": 1}]}`,

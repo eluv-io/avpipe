@@ -99,7 +99,7 @@ timer.
 
 | Flag | Does |
 |---|---|
-| `transcode --overlay spec.json` | Layout, images and fonts from a spec file, with optional events (`t` seconds or `pts`) served by a static source |
+| `transcode --overlay spec.json` | Layout, images and fonts from a spec file, with optional events (`t` seconds or `pts`) served by a static source. An image is a PNG path relative to the spec, or the PNG itself in base64 as a layout in the fabric's recording config carries it; a font is a path, relative to the spec or absolute |
 | `--overlay-events fifo` | JSON-line patches merged into the state and stamped on the next frame by an in-process stamper; a `{"png": base64}` value becomes an asset by hash |
 | `--overlay-anc` | The overlay driven by the input's ST 2038 venue clock feed: each slot of the spec by its `from`, or by name (`home`, `away`, `score`, `period`, `clock`, `shot`, or any key) |
 | `--overlay-render req.fifo,res.fifo` | With `--overlay-anc`: the external renderer of the spec's template bindings, `{"hash","state"}` lines out, `{"hash","png"}` back; a spec that binds no template gets the board's on its board slot |
