@@ -129,4 +129,10 @@ configure_hdr10_encoder_context(
     xcparams_t *params,
     const hdr10_metadata_t *metadata);
 
+void
+strip_disabled_nvenc_zero_cll(
+    AVCodecContext *ctx,
+    AVFrame *frame,
+    const xcparams_t *params);
+
 #endif /* AVPIPE_CODEC_H */

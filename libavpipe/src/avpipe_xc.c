@@ -2374,6 +2374,8 @@ encode_frame(
     }
 
     // Send the frame to the encoder
+    if (stream_index == decoder_context->video_stream_index)
+        strip_disabled_nvenc_zero_cll(codec_context, frame, params);
     ret = avcodec_send_frame(codec_context, frame);
     if (ret < 0) {
         elv_err("Failed to send frame for encoding err=%d, url=%s", ret, params->url);

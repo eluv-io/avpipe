@@ -313,6 +313,43 @@ is_dovi_hdr10_compatible(
     return dovi->bl_present_flag && dovi->dv_bl_signal_compatibility_id == 1;
 }
 
+void
+strip_disabled_nvenc_zero_cll(
+    AVCodecContext *ctx,
+    AVFrame *frame,
+    const xcparams_t *params)
+{
+    const AVFrameSideData *sd;
+
+    if (!ctx || !frame || !params || params->bypass_transcoding ||
+        !params->ecodec || strcmp(params->ecodec, "hevc_nvenc") != 0 ||
+        !params->max_cll || strcmp(params->max_cll, "0,0") != 0)
+        return;
+
+    sd = av_frame_get_side_data(frame, AV_FRAME_DATA_MASTERING_DISPLAY_METADATA);
+    if (!sd)
+        sd = av_frame_side_data_get(ctx->decoded_side_data,
+            ctx->nb_decoded_side_data, AV_FRAME_DATA_MASTERING_DISPLAY_METADATA);
+    if (!sd)
+        return;
+
+    sd = av_frame_get_side_data(frame, AV_FRAME_DATA_CONTENT_LIGHT_LEVEL);
+    if (sd && sd->size >= sizeof(AVContentLightMetadata)) {
+        const AVContentLightMetadata *cll = (const AVContentLightMetadata *)sd->data;
+        if (cll->MaxCLL == 0 && cll->MaxFALL == 0)
+            av_frame_remove_side_data(frame, AV_FRAME_DATA_CONTENT_LIGHT_LEVEL);
+    }
+
+    sd = av_frame_side_data_get(ctx->decoded_side_data,
+        ctx->nb_decoded_side_data, AV_FRAME_DATA_CONTENT_LIGHT_LEVEL);
+    if (sd && sd->size >= sizeof(AVContentLightMetadata)) {
+        const AVContentLightMetadata *cll = (const AVContentLightMetadata *)sd->data;
+        if (cll->MaxCLL == 0 && cll->MaxFALL == 0)
+            av_frame_side_data_remove(&ctx->decoded_side_data,
+                &ctx->nb_decoded_side_data, AV_FRAME_DATA_CONTENT_LIGHT_LEVEL);
+    }
+}
+
 const char *
 hdr10_metadata_source_name(
     hdr10_metadata_source_t source)
