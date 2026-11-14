@@ -982,6 +982,8 @@ set_netint_h264_params(
     int index = decoder_context->video_stream_index;
     AVCodecContext *encoder_codec_context = encoder_context->codec_context[index];
     AVStream *s = decoder_context->stream[decoder_context->video_stream_index];
+    AVRational frame_rate = params->deinterlace != dif_none
+        ? encoder_codec_context->framerate : s->avg_frame_rate;
     int max_frame_size = 1554000; /* Some constant that is big enough for most of the cases */
 
     if (s->codecpar)
@@ -991,17 +993,17 @@ set_netint_h264_params(
         if (!strcmp(params->ecodec, "h264_ni_quadra_enc"))
             /* gopPresetIdx=9 is recommended by Netint when encoding using h264_ni_quadra_enc */
             sprintf(enc_params, "gopPresetIdx=9:lowDelay=1:frameRate=%d:frameRateDenom=%d:intraPeriod=%d:maxFrameSize=%d",
-                s->avg_frame_rate.num, s->avg_frame_rate.den, params->force_keyint, max_frame_size);
+                frame_rate.num, frame_rate.den, params->force_keyint, max_frame_size);
         else
             sprintf(enc_params, "gopPresetIdx=2:lowDelay=1:frameRate=%d:frameRateDenom=%d:intraPeriod=%d",
-                s->avg_frame_rate.num, s->avg_frame_rate.den, params->force_keyint);
+                frame_rate.num, frame_rate.den, params->force_keyint);
     } else {
         if (!strcmp(params->ecodec, "h264_ni_quadra_enc"))
             sprintf(enc_params, "gopPresetIdx=9:lowDelay=1:frameRate=%d:frameRateDenom=%d:maxFrameSize=%d",
-                s->avg_frame_rate.num, s->avg_frame_rate.den, max_frame_size);
+                frame_rate.num, frame_rate.den, max_frame_size);
         else
             sprintf(enc_params, "gopPresetIdx=2:lowDelay=1:frameRate=%d:frameRateDenom=%d",
-                s->avg_frame_rate.num, s->avg_frame_rate.den);
+                frame_rate.num, frame_rate.den);
     }
     elv_dbg("set_netint_h264_params encoding params=%s, url=%s", enc_params, params->url);
     av_opt_set(encoder_codec_context->priv_data, "xcoder-params", enc_params, 0);
@@ -1018,6 +1020,8 @@ set_netint_h265_params(
     int index = decoder_context->video_stream_index;
     AVCodecContext *encoder_codec_context = encoder_context->codec_context[index];
     AVStream *s = decoder_context->stream[decoder_context->video_stream_index];
+    AVRational frame_rate = params->deinterlace != dif_none
+        ? encoder_codec_context->framerate : s->avg_frame_rate;
 
     /*
      * netint only supports bitdepth of 8 and 10 for h265.
@@ -1029,7 +1033,7 @@ set_netint_h265_params(
     else
         profile = 2;
     sprintf(enc_params, "gopPresetIdx=2:lowDelay=1:profile=%d:frameRate=%d:frameRateDenom=%d",
-        profile, s->avg_frame_rate.num, s->avg_frame_rate.den);
+        profile, frame_rate.num, frame_rate.den);
     elv_dbg("set_netint_h265_params encoding params=%s, url=%s", enc_params, params->url);
     av_opt_set(encoder_codec_context->priv_data, "xcoder-params", enc_params, 0);
 }
@@ -1446,6 +1450,15 @@ prepare_video_encoder(
         encoder_codec_context->rc_max_rate = params->rc_max_rate;
 
     encoder_codec_context->framerate = decoder_context->codec_context[index]->framerate;
+    /* Might be safer to use av_guess_frame_rate when decoder framerate is not explicit:
+     * encoder_codec_context->framerate = av_guess_frame_rate(
+     *     decoder_context->format_context, decoder_context->stream[index], NULL);
+     */
+    if (params->deinterlace == dif_bwdif)
+        encoder_codec_context->framerate = av_mul_q(encoder_codec_context->framerate, (AVRational){2, 1});
+
+    if ((rc = check_video_timebase(encoder_codec_context, decoder_context, params)) != eav_success)
+        return rc;
 
     // This needs to be set before open (ffmpeg samples have it wrong)
     if (encoder_context->format_context->oformat->flags & AVFMT_GLOBALHEADER) {
@@ -1591,6 +1604,8 @@ prepare_video_encoder(
 
     encoder_context->stream[index]->time_base = encoder_codec_context->time_base;
     encoder_context->stream[index]->avg_frame_rate = decoder_context->stream[decoder_context->video_stream_index]->avg_frame_rate;
+    if (params->deinterlace != dif_none)
+        encoder_context->stream[index]->avg_frame_rate = encoder_codec_context->framerate;
 
     return 0;
 }
@@ -2484,17 +2499,25 @@ encode_frame(
         output_packet->pts += params->start_pts;
         output_packet->dts += params->start_pts;
 
+        /* calculated_frame_duration uses muxer timebase and packets here use encoder timebase
+         * These differ for small values when ffmpeg translates to >10,000 so translate expected 'gap'
+         */
+        int64_t gap_frame_duration = 0;
+        if (stream_index == decoder_context->video_stream_index)
+            gap_frame_duration = av_rescale_q(encoder_context->calculated_frame_duration,
+                encoder_context->stream[index]->time_base, codec_context->time_base);
+
         // Detect missing frames for UDP-based live sources
         if ((is_live_source_udp(decoder_context)) &&
             encoder_context->video_encoder_prev_pts > 0 &&
             stream_index == decoder_context->video_stream_index &&
-            encoder_context->calculated_frame_duration > 0 &&
+            gap_frame_duration > 0 &&
             output_packet->pts != AV_NOPTS_VALUE &&
             output_packet->pts - encoder_context->video_encoder_prev_pts >=
-                2*encoder_context->calculated_frame_duration &&
+                2*gap_frame_duration &&
             !is_image_extraction(params)) {
 
-            int fc = (output_packet->pts - encoder_context->video_encoder_prev_pts)/encoder_context->calculated_frame_duration - 1;
+            int fc = (output_packet->pts - encoder_context->video_encoder_prev_pts)/gap_frame_duration - 1;
             encoder_context->forced_keyint_countdown -= fc;
 
             elv_log("GAP detected packet->pts=%"PRId64" video_encoder_prev_pts=%"PRId64" count=%d keying_count=%d url=%s",
@@ -2980,6 +3003,10 @@ transcode_video(
             "frame-filt", codec_context->frame_num);
 #endif
 
+            /* Filters such as bwdif change output timebase. */
+            frame_rescale_time_base(filt_frame,
+                av_buffersink_get_time_base(decoder_context->video_buffersink_ctx),
+                encoder_context->codec_context[stream_index]->time_base);
             dump_frame(0, stream_index, "FILT ", codec_context->frame_num, filt_frame, debug_frame_level);
             filt_frame->pkt_dts = filt_frame->pts;
 
@@ -3184,6 +3211,13 @@ flush_decoder(
     if (codec_context == NULL)
         return eav_success;
 
+    /* Discard delayed video if no frame decoded before flush (teardown will still happen correctly) */
+    if (codec_context->codec_type == AVMEDIA_TYPE_VIDEO &&
+        decoder_context->first_decoding_video_pts == AV_NOPTS_VALUE) {
+        elv_warn("Skipping video decoder flush: no video frame decoded, url=%s", p->url);
+        return eav_success;
+    }
+
     response = avcodec_send_packet(codec_context, NULL);    /* Passing NULL means flush the decoder buffers */
     frame = av_frame_alloc();
     filt_frame = av_frame_alloc();
@@ -3204,7 +3238,18 @@ flush_decoder(
             continue; // PENDING(SSS) why continue and not break?
         }
 
+        if (response < 0) {
+            elv_warn("Failed to receive frame during decoder flush: %s, url=%s",
+                av_err2str(response), p->url);
+            break;
+        }
+
         if (codec_context->codec_type == AVMEDIA_TYPE_VIDEO) {
+            if (decoder_context->frame_duration > 0) {
+                frame->pts = decoder_context->first_decoding_video_pts +
+                    decoder_context->frame_duration * (codec_context->frame_num - 1);
+                frame->pkt_dts = frame->pts;
+            }
             fix_video_frame_color(decoder_context, frame);
         }
 
@@ -3243,6 +3288,15 @@ flush_decoder(
                     elv_log("GOT EOF buffersink url=%s, xc_type=%d, format=%s", p->url, p->xc_type, p->format);
                     break;
                 }
+                if (ret < 0) {
+                    av_frame_free(&filt_frame);
+                    av_frame_free(&frame);
+                    return eav_receive_filter_frame;
+                }
+
+                if (i < 0)
+                    frame_rescale_time_base(filt_frame, av_buffersink_get_time_base(buffersink_ctx),
+                        encoder_context->codec_context[stream_index]->time_base);
 
                 dump_frame(i >= 0, stream_index,
                     "FILT ", codec_context->frame_num, filt_frame, debug_frame_level);
@@ -3257,6 +3311,29 @@ flush_decoder(
             }
         }
         av_frame_unref(frame);
+    }
+
+    /* Specific draining for bwdif which still retains frames at EOF. */
+    if (i < 0 && !p->bypass_transcoding && p->deinterlace != dif_none) {
+        ret = av_buffersrc_add_frame_flags(buffersrc_ctx, NULL, 0);
+        if (ret >= 0) {
+            while ((ret = av_buffersink_get_frame(buffersink_ctx, filt_frame)) >= 0) {
+                frame_rescale_time_base(filt_frame, av_buffersink_get_time_base(buffersink_ctx),
+                    encoder_context->codec_context[stream_index]->time_base);
+                ret = encode_frame(decoder_context, encoder_context, filt_frame, stream_index, p, debug_frame_level);
+                av_frame_unref(filt_frame);
+                if (ret != eav_success) {
+                    av_frame_free(&filt_frame);
+                    av_frame_free(&frame);
+                    return ret;
+                }
+            }
+        }
+        if (ret < 0 && ret != AVERROR_EOF && ret != AVERROR(EAGAIN)) {
+            av_frame_free(&filt_frame);
+            av_frame_free(&frame);
+            return eav_receive_filter_frame;
+        }
     }
 
     av_frame_free(&filt_frame);
@@ -3535,14 +3612,6 @@ get_filter_str(
         if (params->rotate > 0 && params->deinterlace != dif_none) {
             elv_err("Incompatible filter parameters - both rotate and deinterlacing");
             return eav_param;
-        }
-        if (params->deinterlace == dif_bwdif) {
-            // This filter needs to create two output frames for each input frame and
-            // requires the caller to specify the new frame duration (1/2 of input frame duration)
-            if (params->video_frame_duration_ts == 0) {
-                elv_err("Incorrect filter spec - deinterlacing requires frame duration");
-                return eav_param;
-            }
         }
     }
 
@@ -4791,6 +4860,14 @@ check_params(
     if (!params->url) {
         elv_err("Invalid params, url is null");
         return eav_param;
+    }
+
+    if (!strcmp(params->format, "dash") || !strcmp(params->format, "hls")) {
+        if (params->deinterlace != dif_none || params->video_time_base > 0) {
+            elv_err("Incompatible params - deinterlacing or an explicit video timebase is not supported for %s, url=%s",
+                params->format, params->url);
+            return eav_param;
+        }
     }
 
     if (params->stream_id >= 0 && (params->xc_type != xc_none || params->n_audio > 0)) {

@@ -1,0 +1,11 @@
+{
+  "source": "live_tv_20261021.cap",
+  "fixture": "live_tv_20261021_5min.cap",
+  "window_seconds": 300,
+  "packets": 142489,
+  "bytes": 195779910,
+  "first_timestamp_us": 1792638976638878,
+  "last_timestamp_us": 1792639276633290,
+  "link_type": 1,
+  "sha256": "a719e2c9f1bdfd2da06a9697df3a20ebeac36c40f1e29938557dc90b1ae37e6d"
+}

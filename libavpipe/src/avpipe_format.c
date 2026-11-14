@@ -399,6 +399,76 @@ void frame_rescale_time_base(
 }
 
 /*
+ * Check encoder timebase suitability for output frame durations
+ */
+int
+check_video_timebase(
+    const AVCodecContext *encoder_codec_context,
+    const coderctx_t *decoder_context,
+    const xcparams_t *params)
+{
+    AVRational time_base = encoder_codec_context->time_base;
+    AVRational frame_rate = encoder_codec_context->framerate;
+    const char *url = params->url;
+
+    /* The encoder rate already includes deinterlacing adjustment.
+     * Some codecs leave it unset so we are only using it for validation.
+     */
+    if (frame_rate.num <= 0 || frame_rate.den <= 0) {
+        const AVStream *stream = decoder_context->stream[decoder_context->video_stream_index];
+        frame_rate = stream->r_frame_rate;
+        if (frame_rate.num <= 0 || frame_rate.den <= 0)
+            frame_rate = stream->avg_frame_rate;
+        if (params->deinterlace == dif_bwdif)
+            frame_rate = av_mul_q(frame_rate, (AVRational){2, 1});
+    }
+
+    if (time_base.num <= 0 || time_base.den <= 0 || frame_rate.num <= 0 || frame_rate.den <= 0) {
+        // Deliberate - incorrect frame rate will cause bad output (may change in the future)
+        elv_err("Invalid encoder video timebase=%d/%d or output frame_rate=%d/%d, url=%s",
+            time_base.num, time_base.den, frame_rate.num, frame_rate.den, url);
+        return eav_timebase;
+    }
+
+    int64_t ticks_num = (int64_t)time_base.den * frame_rate.den;
+    int64_t ticks_den = (int64_t)time_base.num * frame_rate.num;
+    /* Fractional frame rates use adjacent integer durations (e.g. 416/417 or 1501/1502 )
+     * so we can't check for strict integer durations.
+     */
+    if (ticks_num < ticks_den) {
+        elv_err("Encoder video timebase=%d/%d is too coarse for output frame_rate=%d/%d "
+            "(frame duration=%"PRId64"/%"PRId64" ticks) url=%s",
+            time_base.num, time_base.den, frame_rate.num, frame_rate.den, ticks_num, ticks_den, url);
+        return eav_timebase;
+    }
+
+    /* Ensure our keyframe interval produces a whole number of segments (GOPs) for the specified
+     * video segment duration.
+     */
+    if (!params->bypass_transcoding && params->force_keyint > 0 && params->format &&
+        (!strcmp(params->format, "fmp4-segment") || !strcmp(params->format, "segment"))) {
+        int timescale = params->video_time_base > 0 ? params->video_time_base : time_base.den;
+        while (timescale < TIMEBASE_THRESHOLD)
+            timescale *= 2;
+        int64_t duration = params->video_seg_duration_ts;
+        if (duration <= 0 && params->seg_duration)
+            duration = (float)atof(params->seg_duration) * timescale;
+        AVRational segment_timebase = {1, timescale};
+        AVRational gop_time = av_mul_q(av_inv_q(frame_rate), (AVRational){params->force_keyint, 1});
+        int64_t gops = av_rescale_q(duration, segment_timebase, gop_time);
+        int64_t aligned_duration = av_rescale_q(gops, gop_time, segment_timebase);
+        /* Allow one tick for integer timestamp rounding. */
+        if (duration > 0 && (gops <= 0 || llabs(duration - aligned_duration) > 1)) {
+            elv_err("Bad key frame interval - video segment duration=%"PRId64" not whole number of segs "
+                "(timescale=%d output frame_rate=%d/%d, force_keyint=%d), url=%s", duration, timescale,
+                frame_rate.num, frame_rate.den, params->force_keyint, url);
+            return eav_param;
+        }
+    }
+    return eav_success;
+}
+
+/*
  * Initialize the PTS/DTS unwrap state.
  * Compute wrap modulus once per stream (modulus is 0 for streams that don't need unwrap).
  */

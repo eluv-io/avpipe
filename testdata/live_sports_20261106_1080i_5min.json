@@ -1,0 +1,11 @@
+{
+  "source": "live_sports_20261106_1080i.cap",
+  "fixture": "live_sports_20261106_1080i_5min.cap",
+  "window_seconds": 300,
+  "packets": 356185,
+  "bytes": 489398214,
+  "first_timestamp_us": 1794021094470613,
+  "last_timestamp_us": 1794021394470205,
+  "link_type": 1,
+  "sha256": "ad9fe643db306bfda72da94ceb797eb50065c562c7e61d656f53eed41af7d5c2"
+}
