@@ -1428,10 +1428,8 @@ prepare_video_encoder(
      * encoder_codec_context->framerate = av_guess_frame_rate(
      *     decoder_context->format_context, decoder_context->stream[index], NULL);
      */
-    if (params->deinterlace != dif_none) {
-        if (params->deinterlace == dif_bwdif)
-            encoder_codec_context->framerate = av_mul_q(encoder_codec_context->framerate, (AVRational){2, 1});
-    }
+    if (params->deinterlace == dif_bwdif)
+        encoder_codec_context->framerate = av_mul_q(encoder_codec_context->framerate, (AVRational){2, 1});
 
     if ((rc = check_video_timebase(encoder_codec_context, decoder_context, params)) != eav_success)
         return rc;

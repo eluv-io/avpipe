@@ -399,7 +399,7 @@ void frame_rescale_time_base(
 }
 
 /*
- * Check encoder timebase suitability for output frame durations (used in deinterlacing or explicit timebase changes)
+ * Check encoder timebase suitability for output frame durations
  */
 int
 check_video_timebase(
