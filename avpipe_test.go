@@ -10,6 +10,7 @@ import (
 	"path"
 	"path/filepath"
 	"runtime"
+	"slices"
 	"strconv"
 	"strings"
 	"testing"
@@ -3189,11 +3190,9 @@ func TestProbeWithData(t *testing.T) {
 	assert.Equal(t, "pcm_s24le", a[2].CodecName)
 }
 
-func TestExtractImagesInterval(t *testing.T) {
-	url := videoBigBuckBunnyPath
-	checkFileExists(t, url)
-
-	outPath := path.Join(baseOutPath, fn())
+// extractImagesParams returns fast-encode mjpeg params that extract the frames
+// at ts from url, or one frame per interval when ts is nil.
+func extractImagesParams(url string, ts []int64) *goavpipe.XcParams {
 	params := &goavpipe.XcParams{
 		Format:                 "image2",
 		AudioBitrate:           128000,
@@ -3206,6 +3205,7 @@ func TestExtractImagesInterval(t *testing.T) {
 		EncHeight:              -1,
 		EncWidth:               -1,
 		ExtractImageIntervalTs: -1,
+		ExtractImagesTs:        ts,
 		GPUIndex:               -1,
 		SampleRate:             -1,
 		SegDuration:            "30",
@@ -3220,6 +3220,15 @@ func TestExtractImagesInterval(t *testing.T) {
 		DebugFrameLevel:        debugFrameLevel,
 	}
 	setFastEncodeParams(params, true)
+	return params
+}
+
+func TestExtractImagesInterval(t *testing.T) {
+	url := videoBigBuckBunnyPath
+	checkFileExists(t, url)
+
+	outPath := path.Join(baseOutPath, fn())
+	params := extractImagesParams(url, nil)
 
 	xcTest2(t, outPath, params, nil)
 
@@ -3240,33 +3249,7 @@ func TestExtractImagesList(t *testing.T) {
 	checkFileExists(t, url)
 
 	outPath := path.Join(baseOutPath, fn())
-	params := &goavpipe.XcParams{
-		Format:                 "image2",
-		AudioBitrate:           128000,
-		AudioSegDurationTs:     -1,
-		BitDepth:               8,
-		CrfStr:                 "23",
-		DurationTs:             -1,
-		Ecodec:                 "mjpeg",
-		Ecodec2:                "aac",
-		EncHeight:              -1,
-		EncWidth:               -1,
-		ExtractImageIntervalTs: -1,
-		GPUIndex:               -1,
-		SampleRate:             -1,
-		SegDuration:            "30",
-		StartFragmentIndex:     1,
-		StartSegmentStr:        "1",
-		StreamId:               -1,
-		SyncAudioToStreamId:    -1,
-		VideoBitrate:           -1,
-		VideoSegDurationTs:     -1,
-		XcType:                 goavpipe.XcExtractImages,
-		Url:                    url,
-		DebugFrameLevel:        debugFrameLevel,
-	}
-	params.ExtractImagesTs = []int64{1980, 2980, 72980, 169980, 339980}
-	setFastEncodeParams(params, true)
+	params := extractImagesParams(url, []int64{1980, 2980, 72980, 169980, 339980})
 
 	xcTest2(t, outPath, params, nil)
 
@@ -3282,6 +3265,132 @@ func TestExtractImagesList(t *testing.T) {
 	assert.Equal(t, 1980+2980+72980+169980+339980, sum)
 }
 
+// TestMVHEVC_ExtractImages checks that image extraction decodes MV-HEVC (base
+// view) and writes real JPEGs, rather than inheriting the MV-HEVC forced bypass
+// and writing compressed HEVC packets as "<pts>.jpeg".
+func TestMVHEVC_ExtractImages(t *testing.T) {
+	cases := map[string]struct {
+		src     string
+		layout  goavpipe.VideoLayout
+		ts      []int64
+		wantPts []int64 // pts of the frame actually extracted for each ts
+	}{
+		"SDR": {
+			src:     "./media/tos_720_mvhevc_sdr.mp4", // time base 1/600
+			layout:  goavpipe.VideoLayoutMVHEVC,       // as content-fabric sets it
+			ts:      []int64{0, 250, 2500, 10000, 25000},
+			wantPts: []int64{0, 250, 2503, 10010, 25000},
+		},
+		"HDR10": {
+			src:     "./media/sample_mvhevc_2560x1440@8.50.mp4",
+			layout:  goavpipe.VideoLayoutMVHEVC,
+			ts:      []int64{0, 10, 100, 400, 1000},
+			wantPts: []int64{0, 25, 100, 400, 1000},
+		},
+		// Image extraction must not depend on video_layout: a caller that
+		// leaves it unset still gets decoded base-view JPEGs.
+		"SDR_LayoutUnset": {
+			src:     "./media/tos_720_mvhevc_sdr.mp4",
+			ts:      []int64{0, 250, 2500, 10000, 25000},
+			wantPts: []int64{0, 250, 2503, 10010, 25000},
+		},
+	}
+	for name, c := range cases {
+		t.Run(name, func(t *testing.T) {
+			checkFileExists(t, c.src)
+			outPath := path.Join(baseOutPath, fn(), name)
+
+			params := extractImagesParams(c.src, c.ts)
+			params.VideoLayout = int32(c.layout)
+			xcTest2(t, outPath, params, nil)
+
+			assert.Equal(t, c.wantPts, extractedJPEGPts(t, outPath))
+		})
+	}
+}
+
+// TestMVHEVC_ExtractAllImages checks that extract-all-images decodes MV-HEVC
+// too: one JPEG per base-view frame, not one "<pts>.jpeg" per compressed packet.
+func TestMVHEVC_ExtractAllImages(t *testing.T) {
+	url := "./media/tos_720_mvhevc_sdr.mp4" // 1607 frames, time base 1/600
+	checkFileExists(t, url)
+	outPath := path.Join(baseOutPath, fn())
+
+	params := extractImagesParams(url, nil)
+	params.XcType = goavpipe.XcExtractAllImages
+	params.VideoLayout = int32(goavpipe.VideoLayoutMVHEVC) // as content-fabric sets it
+	xcTest2(t, outPath, params, nil)
+
+	gotPts := extractedJPEGPts(t, outPath)
+	require.Len(t, gotPts, 1607)
+	assert.Equal(t, int64(0), gotPts[0])
+}
+
+// extractedJPEGPts asserts that every file in outPath is a JPEG and returns
+// the pts encoded in the file names, sorted.
+func extractedJPEGPts(t *testing.T, outPath string) []int64 {
+	files, err := os.ReadDir(outPath)
+	failNowOnError(t, err)
+	var pts []int64
+	for _, f := range files {
+		p, err := strconv.ParseInt(strings.Split(f.Name(), ".")[0], 10, 64)
+		assert.NoError(t, err)
+		pts = append(pts, p)
+
+		b, err := os.ReadFile(path.Join(outPath, f.Name()))
+		failNowOnError(t, err)
+		assert.True(t, len(b) > 2 && b[0] == 0xFF && b[1] == 0xD8,
+			"%s is not a JPEG (starts with % x)", f.Name(), b[:min(len(b), 8)])
+	}
+	slices.Sort(pts)
+	return pts
+}
+
+// TestDOVI20_MVHEVC_ExtractImagesFails documents that Dolby Vision profile 20
+// (IPT-C2 base layer, no compatible signal) cannot be converted to JPEG without
+// applying the RPU, and that extraction fails instead of writing junk images.
+func TestDOVI20_MVHEVC_ExtractImagesFails(t *testing.T) {
+	url := "./media/3d_test_reel_2024_dovi_mvhevc.mp4"
+	checkFileExists(t, url)
+	outPath := path.Join(baseOutPath, fn())
+	boilerplate(t, outPath, url)
+
+	params := extractImagesParams(url, []int64{0, 10, 100})
+	params.VideoLayout = int32(goavpipe.VideoLayoutMVHEVC)
+	handle, err := avpipe.XcInit(params)
+	failNowOnError(t, err)
+	runErr := avpipe.XcRun(handle)
+	_ = avpipe.XcFini(handle)
+	assert.Error(t, runErr)
+
+	files, err := os.ReadDir(outPath)
+	failNowOnError(t, err)
+	assert.Zero(t, len(files), "files written")
+}
+
+// TestExtractImagesBypassFails checks that avpipe rejects image extraction with
+// bypass set, before writing any output, instead of writing compressed packets
+// as "<pts>.jpeg".
+func TestExtractImagesBypassFails(t *testing.T) {
+	url := videoBigBuckBunnyPath
+	checkFileExists(t, url)
+	outPath := path.Join(baseOutPath, fn())
+	boilerplate(t, outPath, url)
+
+	params := extractImagesParams(url, []int64{1980, 2980})
+	params.BypassTranscoding = true
+	handle, err := avpipe.XcInit(params)
+	if err == nil {
+		err = avpipe.XcRun(handle)
+		_ = avpipe.XcFini(handle)
+	}
+	assert.Error(t, err)
+
+	files, err := os.ReadDir(outPath)
+	failNowOnError(t, err)
+	assert.Zero(t, len(files), "files written")
+}
+
 // Should exit after extracting the first frame
 func TestExtractImagesListFast(t *testing.T) {
 	url := videoBigBuckBunnyPath
@@ -3289,33 +3398,7 @@ func TestExtractImagesListFast(t *testing.T) {
 
 	outPath := path.Join(baseOutPath, fn())
 
-	params := &goavpipe.XcParams{
-		Format:                 "image2",
-		AudioBitrate:           128000,
-		AudioSegDurationTs:     -1,
-		BitDepth:               8,
-		CrfStr:                 "23",
-		DurationTs:             -1,
-		Ecodec:                 "mjpeg",
-		Ecodec2:                "aac",
-		EncHeight:              -1,
-		EncWidth:               -1,
-		ExtractImageIntervalTs: -1,
-		GPUIndex:               -1,
-		SampleRate:             -1,
-		SegDuration:            "30",
-		StartFragmentIndex:     1,
-		StartSegmentStr:        "1",
-		StreamId:               -1,
-		SyncAudioToStreamId:    -1,
-		VideoBitrate:           -1,
-		VideoSegDurationTs:     -1,
-		XcType:                 goavpipe.XcExtractImages,
-		Url:                    url,
-		DebugFrameLevel:        debugFrameLevel,
-	}
-	params.ExtractImagesTs = []int64{1980}
-	setFastEncodeParams(params, true)
+	params := extractImagesParams(url, []int64{1980})
 
 	xcTest2(t, outPath, params, nil)
 
