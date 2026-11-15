@@ -23,6 +23,62 @@ func (i deinterlaceInput) Open(fd int64, _ string) (goavpipe.InputHandler, error
 	return (&xc.FileInputOpener{}).Open(fd, i.source)
 }
 
+func TestDeinterlaceInputValidation(t *testing.T) {
+	ffmpeg, err := exec.LookPath("ffmpeg")
+	if err != nil {
+		t.Skip("ffmpeg is required to generate test media")
+	}
+	previousInput, previousOutput := goavpipe.GetGlobalInputOpener(), goavpipe.GetGlobalOutputOpener()
+	t.Cleanup(func() { goavpipe.InitIOHandler(previousInput, previousOutput) })
+	dir, err := os.MkdirTemp(".", "deinterlace-validation-")
+	require.NoError(t, err)
+	t.Cleanup(func() { os.RemoveAll(dir) })
+	for _, scan := range []string{"progressive", "tff", "bff"} {
+		source := filepath.Join(dir, scan+".ts")
+		filter := "testsrc2=size=320x180:rate=50"
+		args := []string{"-hide_banner", "-loglevel", "error", "-f", "lavfi"}
+		if scan != "progressive" {
+			filter += ",interlace=scan=" + scan
+		}
+		args = append(args, "-i", filter, "-frames:v", "8", "-c:v", "mpeg2video", "-bf", "0")
+		if scan != "progressive" {
+			top := "1"
+			if scan == "bff" {
+				top = "0"
+			}
+			args = append(args, "-flags", "+ilme+ildct", "-top", top)
+		}
+		output, err := exec.Command(ffmpeg, append(args, "-f", "mpegts", source)...).CombinedOutput()
+		require.NoError(t, err, "%s", output)
+		for _, live := range []bool{false, true} {
+			for _, mode := range []int{0, 1, 2} {
+				t.Run(fmt.Sprintf("%s/live=%t/mode=%d", scan, live, mode), func(t *testing.T) {
+					outputDir, err := os.MkdirTemp(dir, "output-")
+					require.NoError(t, err)
+					params := goavpipe.NewXcParams()
+					params.Url, params.Format, params.XcType = source, "fmp4-segment", goavpipe.XcVideo
+					params.Deinterlace, params.Preset = mode, "ultrafast"
+					if live {
+						params.Url = "udp://deinterlace-test:1234"
+						params.Seekable = false
+						params.InputCfg.BypassLibavReader = true
+					}
+					goavpipe.InitIOHandler(deinterlaceInput{source}, &xc.FileOutputOpener{Dir: outputDir})
+					err = avpipe.Xc(params)
+					if scan == "progressive" && mode != 0 {
+						require.ErrorIs(t, err, avpipe.EAV_PARAM)
+						entries, err := os.ReadDir(outputDir)
+						require.NoError(t, err)
+						require.Empty(t, entries, "validation must fail before creating output")
+					} else {
+						require.NoError(t, err)
+					}
+				})
+			}
+		}
+	}
+}
+
 func TestDeinterlaceMez(t *testing.T) {
 	ffmpeg, err := exec.LookPath("ffmpeg")
 	if err != nil {

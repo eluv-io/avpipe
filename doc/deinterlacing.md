@@ -7,6 +7,10 @@ Use `--deinterlace 1` to select `bwdif` in `send_field` mode. Each interlaced
 input frame produces two  output frames: 25 fps becomes 50 fps, and
 30000/1001 fps (29.97) becomes 60000/1001 fps (59.94).
 
+Both deinterlacing modes (`--deinterlace 1` and `2`) require the selected video
+stream to have an interlaced field order after probing. Progressive or unknown
+field order fails with `EAV_PARAM` before transcoding starts.
+
 - `--force-keyint` counts output frames
 - timestamp durations use the output timescale
 - `--video-time-base` specifies the timescale denominator, so `60000` means a timebase of `1/60000`. Use an explicit timescale of at least 10000 to avoid the ffmpeg muxer implicit timescale adjustment.

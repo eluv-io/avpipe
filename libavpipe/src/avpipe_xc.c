@@ -185,6 +185,26 @@ check_input_stream(
             // Nothing to check
             break;
     }
+
+    if (params && params->deinterlace != dif_none &&
+        ((params->xc_type & xc_video) || params->stream_id >= 0)) {
+        for (int i = 0; i < decoder_context->format_context->nb_streams && i < MAX_STREAMS; i++) {
+            AVStream *stream = decoder_context->format_context->streams[i];
+            int stream_id = decoder_context->live_proto == avp_proto_rtmp ? i : stream->id;
+            if (stream->codecpar->codec_type != AVMEDIA_TYPE_VIDEO ||
+                (params->stream_id >= 0 && params->stream_id != stream_id))
+                continue;
+
+            enum AVFieldOrder field_order = stream->codecpar->field_order;
+            if (field_order != AV_FIELD_TT && field_order != AV_FIELD_BB &&
+                field_order != AV_FIELD_TB && field_order != AV_FIELD_BT) {
+                elv_err("Deinterlacing requires interlaced input, stream_index=%d, field_order=%d, url=%s",
+                    i, field_order, params->url);
+                return eav_param;
+            }
+            break;
+        }
+    }
     return eav_success;
 }
 
@@ -2845,6 +2865,32 @@ transcode_audio(
 }
 
 static int
+prep_video_frame_before_encode(
+    coderctx_t *decoder_context,
+    coderctx_t *encoder_context,
+    AVFilterContext *buffersink_ctx,
+    AVFrame *frame,
+    int stream_index,
+    xcparams_t *p)
+{
+    /* Ensure frame timestamp uses encoder timebase (filters may change timebase eg. deinterlacing) */
+    frame_rescale_time_base(frame, av_buffersink_get_time_base(buffersink_ctx),
+        encoder_context->codec_context[stream_index]->time_base);
+
+    /* Ensuer frame DTS is consistent with their new PTS. */
+    frame->pkt_dts = frame->pts;
+
+    /* Reject repeated/backward PTS after rescaling to protect the encoder. */
+    if (frame->pts <= decoder_context->video_duration) {
+        elv_log("ENCODE SKIP video frame pts=%"PRId64", duration=%"PRId64", url=%s",
+            frame->pts, decoder_context->video_duration, p->url);
+        return 0;
+    }
+    decoder_context->video_duration = frame->pts;
+    return 1;
+}
+
+static int
 transcode_video(
     coderctx_t *decoder_context,
     coderctx_t *encoder_context,
@@ -3003,25 +3049,18 @@ transcode_video(
             "frame-filt", codec_context->frame_num);
 #endif
 
-            /* Filters such as bwdif change output timebase. */
-            frame_rescale_time_base(filt_frame,
-                av_buffersink_get_time_base(decoder_context->video_buffersink_ctx),
-                encoder_context->codec_context[stream_index]->time_base);
+            int should_encode = prep_video_frame_before_encode(decoder_context, encoder_context,
+                decoder_context->video_buffersink_ctx, filt_frame, stream_index, p);
             dump_frame(0, stream_index, "FILT ", codec_context->frame_num, filt_frame, debug_frame_level);
-            filt_frame->pkt_dts = filt_frame->pts;
 
             elv_get_time(&tv);
-            if (decoder_context->video_duration < filt_frame->pts) {
-                decoder_context->video_duration = filt_frame->pts;
+            if (should_encode) {
                 ret = encode_frame(decoder_context, encoder_context, filt_frame, stream_index, p, debug_frame_level);
                 if (ret == eav_write_frame) {
                     av_frame_unref(filt_frame);
                     av_frame_unref(frame);
                     return ret;
                 }
-            } else {
-                elv_log("ENCODE SKIP video frame pts=%"PRId64", duration=%"PRId64", url=%s",
-                    filt_frame->pts, decoder_context->video_duration, p->url);
             }
 
             if (do_instrument) {
@@ -3294,9 +3333,11 @@ flush_decoder(
                     return eav_receive_filter_frame;
                 }
 
-                if (i < 0)
-                    frame_rescale_time_base(filt_frame, av_buffersink_get_time_base(buffersink_ctx),
-                        encoder_context->codec_context[stream_index]->time_base);
+                if (i < 0 && !prep_video_frame_before_encode(decoder_context, encoder_context,
+                        buffersink_ctx, filt_frame, stream_index, p)) {
+                    av_frame_unref(filt_frame);
+                    continue;
+                }
 
                 dump_frame(i >= 0, stream_index,
                     "FILT ", codec_context->frame_num, filt_frame, debug_frame_level);
@@ -3318,8 +3359,11 @@ flush_decoder(
         ret = av_buffersrc_add_frame_flags(buffersrc_ctx, NULL, 0);
         if (ret >= 0) {
             while ((ret = av_buffersink_get_frame(buffersink_ctx, filt_frame)) >= 0) {
-                frame_rescale_time_base(filt_frame, av_buffersink_get_time_base(buffersink_ctx),
-                    encoder_context->codec_context[stream_index]->time_base);
+                if (!prep_video_frame_before_encode(decoder_context, encoder_context,
+                        buffersink_ctx, filt_frame, stream_index, p)) {
+                    av_frame_unref(filt_frame);
+                    continue;
+                }
                 ret = encode_frame(decoder_context, encoder_context, filt_frame, stream_index, p, debug_frame_level);
                 av_frame_unref(filt_frame);
                 if (ret != eav_success) {
