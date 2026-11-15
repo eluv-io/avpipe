@@ -197,7 +197,7 @@ func TestProResBT709BadFrameColor(t *testing.T) {
 		ExtractImageIntervalTs: -1,
 		GPUIndex:               -1,
 		SampleRate:             -1,
-		SegDuration:            "30",
+		SegDuration:            "30.03",
 		StartFragmentIndex:     1,
 		StartSegmentStr:        "1",
 		StreamId:               -1,
