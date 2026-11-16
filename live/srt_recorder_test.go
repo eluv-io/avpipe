@@ -278,8 +278,8 @@ func TestSrtToMp4WithCancelling2(t *testing.T) {
 		StartSegmentStr:     "1",
 		AudioBitrate:        384000,   // FS1-19-10-14.ts audio bitrate
 		VideoBitrate:        20000000, // fox stream bitrate
-		ForceKeyInt:         120,      // SRT source is 60.000 fps
-		SegDuration:         "30",     // seconds
+		ForceKeyInt:         60,
+		SegDuration:         "30", // seconds, 15 GOPs of 60 frames at 30 fps (bbb_1080p_30fps_60sec.mp4)
 		Dcodec2:             "ac3",
 		Ecodec2:             "aac",     // "aac"
 		Ecodec:              "libx264", // libx264 software / h264_videotoolbox mac hardware
