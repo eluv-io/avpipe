@@ -2419,6 +2419,12 @@ encode_frame(
             set_idr_frame_key_flag(frame, decoder_context, encoder_context, params, debug_frame_level);
         }
 
+        // Avoid NVENC crash (#248) - remove MAX CLL if 0
+        if (params->xc_type & xc_video &&
+            stream_index == decoder_context->video_stream_index &&
+            params->ecodec && !strcmp(params->ecodec, "hevc_nvenc"))
+            strip_disabled_nvenc_zero_cll(codec_context, frame, params);
+
         // Special case to extract the first frame image
         if (params->xc_type == xc_extract_images &&
             params->extract_images_sz == 0 &&
