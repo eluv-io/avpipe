@@ -42,7 +42,7 @@ func TestUdpToMp4(t *testing.T) {
 		AudioBitrate:        384000,
 		VideoBitrate:        20000000,
 		ForceKeyInt:         120,
-		SegDuration:         "30.03", // seconds
+		SegDuration:         "30", // seconds, 15 GOPs of 120 frames at 60 fps
 		Dcodec2:             "ac3",
 		Ecodec2:             "aac",     // "aac"
 		Ecodec:              "libx264", // libx264 software / h264_videotoolbox mac hardware
@@ -383,7 +383,7 @@ func TestUdpToMp4WithCancelling1(t *testing.T) {
 		AudioBitrate:        384000,
 		VideoBitrate:        20000000,
 		ForceKeyInt:         120,
-		SegDuration:         "30.03", // seconds
+		SegDuration:         "30", // seconds, 15 GOPs of 120 frames at 60 fps
 		Dcodec2:             "ac3",
 		Ecodec2:             "aac",     // "aac"
 		Ecodec:              "libx264", // libx264 software / h264_videotoolbox mac hardware
@@ -446,7 +446,7 @@ func TestUdpToMp4WithCancelling2(t *testing.T) {
 		AudioBitrate:        384000,   // FS1-19-10-14.ts audio bitrate
 		VideoBitrate:        20000000, // fox stream bitrate
 		ForceKeyInt:         120,
-		SegDuration:         "30.03", // seconds
+		SegDuration:         "30", // seconds, 15 GOPs of 120 frames at 60 fps
 		Dcodec2:             "ac3",
 		Ecodec2:             "aac",     // "aac"
 		Ecodec:              "libx264", // libx264 software / h264_videotoolbox mac hardware
@@ -523,7 +523,7 @@ func TestUdpToMp4WithCancelling3(t *testing.T) {
 		AudioBitrate:        384000,
 		VideoBitrate:        20000000,
 		ForceKeyInt:         120,
-		SegDuration:         "30.03", // seconds
+		SegDuration:         "30", // seconds, 15 GOPs of 120 frames at 60 fps
 		Dcodec2:             "ac3",
 		Ecodec2:             "aac",     // "aac"
 		Ecodec:              "libx264", // libx264 software / h264_videotoolbox mac hardware
@@ -595,7 +595,7 @@ func TestUdpToMp4WithCancelling4(t *testing.T) {
 		AudioBitrate:        384000,
 		VideoBitrate:        20000000,
 		ForceKeyInt:         120,
-		SegDuration:         "30.03", // seconds
+		SegDuration:         "30", // seconds, 15 GOPs of 120 frames at 60 fps
 		Dcodec2:             "ac3",
 		Ecodec2:             "aac",     // "aac"
 		Ecodec:              "libx264", // libx264 software / h264_videotoolbox mac hardware
