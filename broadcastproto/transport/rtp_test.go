@@ -39,27 +39,96 @@ func TestRtpHandlerExcludesRTPPadding(t *testing.T) {
 	require.Equal(t, tsPkt, buf[:n], "padding must not be delivered as part of the stripped payload")
 }
 
-func TestRtpHandlerRejectsMalformedPacket(t *testing.T) {
-	rc, port := openRTPHandler(t, RawTs)
-	defer rc.Close()
+func TestRtpHandlerDropsADatagramThatIsNotRTP(t *testing.T) {
+	for _, bad := range [][]byte{
+		{0x01, 0x02, 0x03}, // too short to be a valid RTP header
+		mustRTPDatagram(t, pionrtp.Header{Version: 1, SequenceNumber: 1, Timestamp: 1}, mustTestTSPacket(7)),
+		mustTestTSPacket(7), // plain MPEG-TS
+		mustRTPDatagramWithOversizedExtension(mustTestTSPacket(7)),
+	} {
+		rc, port := openRTPHandler(t, RawTs)
 
-	sendUDPDatagram(t, port, []byte{0x01, 0x02, 0x03}) // too short to be a valid RTP header
+		tsPkt := mustTestTSPacket(42)
+		sendUDPDatagram(t, port, bad)
+		sendUDPDatagram(t, port, mustRTPDatagram(t, pionrtp.Header{Version: 2, SequenceNumber: 2, Timestamp: 2}, tsPkt))
 
-	buf := make([]byte, 1500)
-	_, err := rc.Read(buf)
-	require.Error(t, err)
+		buf := make([]byte, 1500)
+		n, err := rc.Read(buf)
+		require.NoError(t, err)
+		require.Equal(t, tsPkt, buf[:n], "the datagram that is not RTP is dropped, the next one delivered")
+		require.NoError(t, rc.Close())
+	}
 }
 
-func TestRtpHandlerRejectsNonVersion2Packet(t *testing.T) {
+func TestRtpHandlerFailsASourceThatDoesNotSendRTP(t *testing.T) {
+	for name, bad := range map[string][]byte{
+		"plain MPEG-TS": mustTestTSPacket(7),
+		// version 2, but the header extension it announces is longer than the datagram
+		"extension past the end": mustRTPDatagramWithOversizedExtension(mustTestTSPacket(7)),
+	} {
+		for _, packaging := range []TsPackagingMode{RawTs, AtsTs, RtpTs} {
+			t.Run(name+"/"+string(packaging), func(t *testing.T) {
+				rc, port := openRTPHandler(t, packaging)
+				defer rc.Close()
+				rc.(*rtpHandler).guard.max = 3
+
+				for range 3 {
+					sendUDPDatagram(t, port, bad)
+				}
+
+				buf := make([]byte, 1500)
+				if packaging == RtpTs {
+					// RtpTs passes on what it receives, so that the stream's statistics count it, until the guard trips.
+					for range 2 {
+						n, err := rc.Read(buf)
+						require.NoError(t, err)
+						require.Equal(t, bad, buf[:n])
+					}
+				}
+				_, err := rc.Read(buf)
+				require.ErrorIs(t, err, ErrNotRtp)
+			})
+		}
+	}
+}
+
+func TestRtpHandlerResetsTheGuardOnRTP(t *testing.T) {
 	rc, port := openRTPHandler(t, RawTs)
 	defer rc.Close()
+	rc.(*rtpHandler).guard.max = 3
 
+	tsPktNoRtp := mustTestTSPacket(7)
 	tsPkt := mustTestTSPacket(7)
-	sendUDPDatagram(t, port, mustRTPDatagram(t, pionrtp.Header{Version: 1, SequenceNumber: 1, Timestamp: 1}, tsPkt))
+	for i := range 3 {
+		sendUDPDatagram(t, port, tsPktNoRtp)
+		sendUDPDatagram(t, port, tsPktNoRtp)
+		sendUDPDatagram(t, port, mustRTPDatagram(t, pionrtp.Header{Version: 2, SequenceNumber: uint16(i)}, tsPkt))
 
+		buf := make([]byte, 1500)
+		n, err := rc.Read(buf)
+		require.NoError(t, err, "two datagrams that are not RTP stay below the limit, round %d", i)
+		require.Equal(t, tsPkt, buf[:n])
+	}
+}
+
+// TestRtpStrippingAllocatesNothing checks that stripping the RTP header of a datagram, per datagram on the ingest path,
+// allocates nothing in either the RTP handler or the RTP decapsulator.
+func TestRtpStrippingAllocatesNothing(t *testing.T) {
+	datagram := mustRTPDatagram(t, pionrtp.Header{Version: 2, SequenceNumber: 1, Timestamp: 1}, mustTestTSPacket(7))
+
+	h := newTestStripHandler()
+	require.Zero(t, testing.AllocsPerRun(100, func() {
+		h.bufEnd = copy(h.buf, datagram)
+		_, _ = h.prepare()
+	}), "rtpHandler")
+
+	fake := &fakeReadCloser{data: datagram}
+	dec := newTestRtpDecapsulator(fake)
 	buf := make([]byte, 1500)
-	_, err := rc.Read(buf)
-	require.Error(t, err)
+	require.Zero(t, testing.AllocsPerRun(100, func() {
+		fake.read = false
+		_, _ = dec.Read(buf)
+	}), "RtpDecapsulator")
 }
 
 func TestRtpHandlerRtpTsPassthroughDoesNotStrip(t *testing.T) {
@@ -93,6 +162,12 @@ func TestRtpHandlerStripsAcrossRepeatedReads(t *testing.T) {
 	}
 }
 
+// newTestStripHandler returns an rtpHandler that strips the RTP header (RawTs) and has no socket, for driving prepare
+// directly on a datagram copied into its buf.
+func newTestStripHandler() *rtpHandler {
+	return &rtpHandler{buf: make([]byte, maxUDPPacketSize), Mode: RawTs, strip: true}
+}
+
 // openRTPHandler opens an RTP transport listening on a free loopback port with the given output packaging, returning
 // the resulting io.ReadCloser (an *rtpHandler) and the port to send test datagrams to.
 func openRTPHandler(t *testing.T, packaging TsPackagingMode) (io.ReadCloser, int) {
@@ -124,6 +199,18 @@ func mustRTPDatagram(t *testing.T, hdr pionrtp.Header, payload []byte) []byte {
 	data, err := pkt.Marshal()
 	require.NoError(t, err)
 	return data
+}
+
+// mustRTPDatagramWithOversizedExtension returns an RTP version 2 datagram whose header announces an extension of 1020
+// bytes, more than the datagram holds. Its first byte is valid, but its header does not decode.
+func mustRTPDatagramWithOversizedExtension(payload []byte) []byte {
+	datagram := []byte{
+		0x90, 33, 0, 1, // version 2, extension bit, payload type MP2T, sequence 1
+		0, 0, 0, 1, // timestamp
+		0, 0, 0, 1, // SSRC
+		0xbe, 0xde, 0x00, 0xff, // extension profile, length in 32-bit words: 255
+	}
+	return append(datagram, payload...)
 }
 
 // mustTestTSPacket returns a well-formed, single 188-byte TS packet (valid sync byte, given PID, no payload content

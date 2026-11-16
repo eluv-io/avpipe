@@ -237,6 +237,48 @@ func TestNetReader_ConnStats_NoStaleReaderBetweenReconnects(t *testing.T) {
 	}
 }
 
+// TestNetReader_FailsASourceThatDoesNotSendRTP checks that a source that does not send RTP where RTP is expected fails
+// the NetReader instead of re-connecting it to the same non-RTP source.
+func TestNetReader_FailsASourceThatDoesNotSendRTP(t *testing.T) {
+	defer goleak.VerifyNone(t)
+
+	tp := &countingTransport{reader: &errReadCloser{err: fmt.Errorf("read: %w", transport.ErrNotRtp)}}
+	ctx := createNetReader(tp)
+
+	// the consumer channel is closed once the NetReader stops
+	for res := range ctx.consumer.pktChan {
+		res.Release()
+	}
+	running, err := ctx.netReader.Status()
+	require.False(t, running)
+	require.ErrorIs(t, err, transport.ErrNotRtp)
+	require.EqualValues(t, 1, tp.opens.Load(), "not reconnected")
+	ctx.netReader.Cancel()
+}
+
+// countingTransport returns reader from every Open() call and counts the calls.
+type countingTransport struct {
+	reader io.ReadCloser
+	opens  atomic.Int32
+}
+
+func (c *countingTransport) Open() (io.ReadCloser, error) {
+	c.opens.Inc()
+	return c.reader, nil
+}
+
+func (c *countingTransport) URL() string                              { return "mock://counting" }
+func (c *countingTransport) Handler() string                          { return "mock" }
+func (c *countingTransport) PackagingMode() transport.TsPackagingMode { return transport.RawTs }
+
+// errReadCloser fails every Read with err.
+type errReadCloser struct {
+	err error
+}
+
+func (e *errReadCloser) Read([]byte) (int, error) { return 0, e.err }
+func (e *errReadCloser) Close() error             { return nil }
+
 // sequencedTransport returns first on its first Open() call; its second call closes reachedSecond (signaling the
 // test that a reconnect attempt is now in flight) and blocks until proceed is closed, then returns second. Not safe
 // for more than two Open() calls.
