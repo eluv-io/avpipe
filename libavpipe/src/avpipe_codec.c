@@ -313,6 +313,10 @@ is_dovi_hdr10_compatible(
     return dovi->bl_present_flag && dovi->dv_bl_signal_compatibility_id == 1;
 }
 
+/*
+ * Strip MAX CLL if the values are {0, 0}
+ * Necessary to avoid NVENC crash issue 248
+ */
 void
 strip_disabled_nvenc_zero_cll(
     AVCodecContext *ctx,
