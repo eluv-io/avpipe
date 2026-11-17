@@ -17,7 +17,7 @@ LIBS := $(FFMPEG_LIBS) \
 	-L$(TOP_DIR)/lib -lutils
 
 TESTS := test_color_defaults test_hdr_metadata test_pts_unwrap test_fade_filter \
-	test_vertical_crop test_video_timebase
+	test_vertical_crop test_video_timebase test_probed_video
 OUT   := out
 BINS  := $(addprefix $(OUT)/,$(TESTS))
 
@@ -58,6 +58,10 @@ $(OUT)/test_pts_unwrap: test_pts_unwrap.c unity/unity.c \
 
 $(OUT)/test_video_timebase: test_video_timebase.c unity/unity.c \
 		$(SRC_DIR)/avpipe_format.c $(PROD_HDRS) | $(OUT)
+	gcc $(CFLAGS) $< unity/unity.c -o $@ $(LIBS)
+
+$(OUT)/test_probed_video: test_probed_video.c unity/unity.c \
+		$(SRC_DIR)/avpipe_format.c $(SRC_DIR)/avpipe_format.h $(PROD_HDRS) | $(OUT)
 	gcc $(CFLAGS) $< unity/unity.c -o $@ $(LIBS)
 
 $(OUT)/test_fade_filter: test_fade_filter.c unity/unity.c \

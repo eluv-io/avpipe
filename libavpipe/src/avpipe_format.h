@@ -44,6 +44,13 @@ is_live_container_mpegts(
     coderctx_t *ctx
 );
 
+/* Validate the selected video after probing/stream selection and store its nominal framerate */
+int
+validate_probed_video_stream(
+    coderctx_t *decoder_context,
+    const xcparams_t *params
+);
+
 int
 num_audio_output(
     coderctx_t *decoder_context,

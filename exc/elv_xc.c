@@ -1131,6 +1131,11 @@ usage(
         "\t                         Each value is the crop window centre as a fraction of the scaled frame\n"
         "\t                         width, denominator 10000 (0=left, 5000=centre, 10000=right).\n"
         "\t-video-refs :            (optional) Encoder reference frames (verified with libx264/libx265). Default 0 lets the encoder choose.\n"
+        "\t-bframes :               Max consecutive B-frames (0 disables; range 0..16).\n"
+        "\t-cbr :                   0/1 CBR, requires video-bitrate; overrides CRF (x264/x265/NVENC).\n"
+        "\t-weighted-pred-p :       P weighted prediction: 0 preset default, -1 off, 1 on (x264/x265).\n"
+        "\t-weighted-pred-b :       B weighted prediction: 0 preset default, -1 off, 1 on (x264/x265).\n"
+        "\t-closed-gop :            0/1 closed GOP and forced IDR (x264/x265/NVENC).\n"
         "\t-sample-rate :           (optional) Default: -1. For aac output sample rate is set to input sample rate and this parameter is ignored.\n"
         "\t-seekable :              (optional) Seekable stream. Default is 0, must be 0 or 1\n"
         "\t-seg-duration :          (mandatory if format is \"segment\") segment duration secs (positive integer). It is used for making mp4 segments.\n"
@@ -1288,7 +1293,10 @@ main(
             }
             break;
         case 'b':
-            if (!strcmp(argv[i], "-bypass") || !strcmp(argv[i], "-b")) {
+            if (!strcmp(argv[i], "-bframes")) {
+                if (sscanf(argv[i+1], "%d", &p.bframes) != 1)
+                    usage(argv[0], argv[i], EXIT_FAILURE);
+            } else if (!strcmp(argv[i], "-bypass") || !strcmp(argv[i], "-b")) {
                 if (sscanf(argv[i+1], "%d", &bypass_transcoding) != 1) {
                     usage(argv[0], argv[i], EXIT_FAILURE);
                 }
@@ -1306,7 +1314,13 @@ main(
             }
             break;
         case 'c':
-            if (!strcmp(argv[i], "-command")) {
+            if (!strcmp(argv[i], "-cbr")) {
+                if (sscanf(argv[i+1], "%d", &p.cbr) != 1)
+                    usage(argv[0], argv[i], EXIT_FAILURE);
+            } else if (!strcmp(argv[i], "-closed-gop")) {
+                if (sscanf(argv[i+1], "%d", &p.closed_gop) != 1)
+                    usage(argv[0], argv[i], EXIT_FAILURE);
+            } else if (!strcmp(argv[i], "-command")) {
                 command = argv[i+1];
                 if (strcmp(command, "transcode") && strcmp(command, "probe") && strcmp(command, "mux")) {
                     usage(argv[0], argv[i], EXIT_FAILURE);
@@ -1674,7 +1688,13 @@ main(
             }
             break;
         case 'w':
-            if (!strcmp(argv[i], "-wm-text")) {
+            if (!strcmp(argv[i], "-weighted-pred-p")) {
+                if (sscanf(argv[i+1], "%d", &p.weighted_pred_p) != 1)
+                    usage(argv[0], argv[i], EXIT_FAILURE);
+            } else if (!strcmp(argv[i], "-weighted-pred-b")) {
+                if (sscanf(argv[i+1], "%d", &p.weighted_pred_b) != 1)
+                    usage(argv[0], argv[i], EXIT_FAILURE);
+            } else if (!strcmp(argv[i], "-wm-text")) {
                 p.watermark_text = strdup(argv[i+1]);
                 p.watermark_shadow = 1;
             } else if (!strcmp(argv[i], "-wm-timecode")) {

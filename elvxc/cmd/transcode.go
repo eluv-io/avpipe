@@ -391,6 +391,11 @@ func InitTranscode(cmdRoot *cobra.Command) error {
 	cmdTranscode.PersistentFlags().StringP("profile", "", "", "Encoding profile for video. If it is not determined, it will be set automatically.")
 	cmdTranscode.PersistentFlags().Int32("level", 0, "Encoding level for video, as the codec's level_idc (the value probe reports): H.264 is 10x the level number (41 for 4.1), HEVC is 30x (123 for 4.1). If it is not determined, it will be set automatically. Applies to libx264 and libx265.")
 	cmdTranscode.PersistentFlags().Int32("video-refs", 0, "Encoder reference frames (verified with libx264/libx265). Default 0 lets the encoder choose.")
+	cmdTranscode.PersistentFlags().Int("bframes", 0, "Max consecutive B-frames (0 disables, max 16; codec/GPU limits apply)")
+	cmdTranscode.PersistentFlags().Bool("cbr", false, "Enable CBR with video-bitrate (overrides CRF; x264/x265/NVENC)")
+	cmdTranscode.PersistentFlags().Int("weighted-pred-p", 0, "P-frame weighted prediction: 0 preset default, -1 off, 1 on (x264/x265)")
+	cmdTranscode.PersistentFlags().Int("weighted-pred-b", 0, "B-frame weighted prediction: 0 preset default, -1 off, 1 on (x264/x265)")
+	cmdTranscode.PersistentFlags().Bool("closed-gop", false, "Require closed GOP and forced IDR keyframes (x264/x265/NVENC)")
 	cmdTranscode.PersistentFlags().Int32("deinterlace", 0, "Deinterlace filter (values 0 - none, 1 - bwdif_field, 2 - bwdif_frame send_frame).")
 	cmdTranscode.PersistentFlags().Int32("vertical", 0, "Vertical video crop type (0 - none, 1 - 32bpf).")
 	cmdTranscode.PersistentFlags().StringP("vertical-data", "", "", "Path to binary file with per-frame crop data (4 bytes per frame, uint32 LE). Each value is the crop window centre as a fraction of the scaled frame width, denominator 10000 (0=left, 5000=centre, 10000=right).")
@@ -705,6 +710,27 @@ func doTranscode(cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("Invalid level value")
 	}
 
+	bframes, err := cmd.Flags().GetInt("bframes")
+	if err != nil {
+		return err
+	}
+	cbr, err := cmd.Flags().GetBool("cbr")
+	if err != nil {
+		return err
+	}
+	weightedPredP, err := cmd.Flags().GetInt("weighted-pred-p")
+	if err != nil {
+		return err
+	}
+	weightedPredB, err := cmd.Flags().GetInt("weighted-pred-b")
+	if err != nil {
+		return err
+	}
+	closedGOP, err := cmd.Flags().GetBool("closed-gop")
+	if err != nil {
+		return err
+	}
+
 	videoRefs, err := cmd.Flags().GetInt32("video-refs")
 	if err != nil {
 		return fmt.Errorf("Invalid video-refs value")
@@ -895,6 +921,11 @@ func doTranscode(cmd *cobra.Command, args []string) error {
 		Profile:                profile,
 		Level:                  int(level),
 		VideoRefs:              int(videoRefs),
+		BFrames:                bframes,
+		CBR:                    cbr,
+		WeightedPredP:          weightedPredP,
+		WeightedPredB:          weightedPredB,
+		ClosedGOP:              closedGOP,
 		Deinterlace:            int(deinterlace),
 		Vertical:               int(vertical),
 		VerticalData:           verticalData,
