@@ -2,7 +2,8 @@
  * test_vertical_crop.c
  *
  * Verifies that the vertical (9:16) crop window follows the per-frame
- * vertical_data, frame by frame.
+ * vertical_data, frame by frame - from the in-memory buffer and from a streaming
+ * reader (vertical_data_reader), including the hold once the stream ends.
  *
  * Rather than transcoding a fixture, this drives the production filter path
  * directly on synthesized frames:
@@ -34,6 +35,7 @@
 #include "unity/unity.h"
 
 #include <math.h>
+#include <stdint.h>
 #include <string.h>
 #include <libavcodec/avcodec.h>
 #include <libavformat/avformat.h>
@@ -220,19 +222,26 @@ test_crop_width_is_9_16_of_height(void)
     TEST_ASSERT_EQUAL_INT(0, crop_calc_width(1080) % 2);
 }
 
+/* Position the crop should land on for frame n, given the fixture's data source. */
+typedef int (*expected_crop_x_f)(crop_fixture_t *f, int n, int crop_w);
+
 /* Push the gradient through the real filter path once per frame, updating the
- * crop via crop_send_command(), and check the cropped output lands where the
- * frame's vertical_data value asked for. */
-void
-test_crop_tracks_vertical_data_per_frame(void)
+ * crop via crop_send_command(), and collect the per-frame residual between the
+ * measured mean luma and the ramp value at the expected window's midpoint:
+ * its mean and spread over the run, and the largest single-frame deviation.
+ * Returns the number of frames measured. */
+static int
+measure_tracking(
+    crop_fixture_t *f,
+    expected_crop_x_f expected_crop_x,
+    double *mean_out,
+    double *std_out,
+    double *max_abs_out)
 {
-    crop_fixture_t f;
     char filter_str[256];
     AVFrame *src = NULL, *filt = NULL;
     double residuals[N_FRAMES];
     int n_checked = 0;
-
-    fixture_init(&f);
     const int crop_w = crop_calc_width(ENC_H);
 
     /* Mirrors the vertical branch of get_filter_str(). That function is static in
@@ -241,8 +250,8 @@ test_crop_tracks_vertical_data_per_frame(void)
         ENC_H, crop_w);
 
     TEST_ASSERT_EQUAL_INT(0,
-        init_video_filters(filter_str, &f.decoder, &f.encoder, &f.params));
-    TEST_ASSERT_EQUAL_INT(0, crop_get_context(&f.decoder, &f.params));
+        init_video_filters(filter_str, &f->decoder, &f->encoder, &f->params));
+    TEST_ASSERT_EQUAL_INT(0, crop_get_context(&f->decoder, &f->params));
 
     src  = make_gradient_frame();
     filt = av_frame_alloc();
@@ -251,14 +260,15 @@ test_crop_tracks_vertical_data_per_frame(void)
 
     for (int n = 0; n < N_FRAMES; n++) {
         /* The decoder's 1-based frame counter is what crop_send_command() reads. */
-        f.dec_codec.frame_num = n + 1;
-        crop_send_command(&f.decoder, &f.encoder, &f.params);
+        f->dec_codec.frame_num = n + 1;
+        TEST_ASSERT_EQUAL_INT(eav_success,
+            crop_send_command(&f->decoder, &f->encoder, &f->params));
 
         src->pts = n;
         TEST_ASSERT_TRUE(av_buffersrc_add_frame_flags(
-            f.decoder.video_buffersrc_ctx, src, AV_BUFFERSRC_FLAG_KEEP_REF) >= 0);
+            f->decoder.video_buffersrc_ctx, src, AV_BUFFERSRC_FLAG_KEEP_REF) >= 0);
 
-        int ret = av_buffersink_get_frame(f.decoder.video_buffersink_ctx, filt);
+        int ret = av_buffersink_get_frame(f->decoder.video_buffersink_ctx, filt);
         if (ret == AVERROR(EAGAIN))
             continue;
         TEST_ASSERT_TRUE(ret >= 0);
@@ -267,9 +277,7 @@ test_crop_tracks_vertical_data_per_frame(void)
         TEST_ASSERT_EQUAL_INT(ENC_H, filt->height);   /* full height, never cropped */
 
         /* Expected: the ramp value at the crop window's midpoint. */
-        int crop_x = vertical_data_crop_x(f.params.vertical_data,
-            f.params.vertical_data_len, n, SCALED_W, crop_w);
-        double mid  = crop_x + crop_w / 2.0;
+        double mid  = expected_crop_x(f, n, crop_w) + crop_w / 2.0;
         double want = ramp_luma(mid / (SCALED_W - 1));
 
         residuals[n_checked++] = mean_luma(filt) - want;
@@ -278,25 +286,234 @@ test_crop_tracks_vertical_data_per_frame(void)
 
     TEST_ASSERT_GREATER_THAN_INT(N_FRAMES / 2, n_checked);
 
-    double mean = 0, var = 0;
-    for (int i = 0; i < n_checked; i++)
+    double mean = 0, var = 0, max_abs = 0;
+    for (int i = 0; i < n_checked; i++) {
         mean += residuals[i];
+        if (fabs(residuals[i]) > max_abs)
+            max_abs = fabs(residuals[i]);
+    }
     mean /= n_checked;
     for (int i = 0; i < n_checked; i++)
         var += (residuals[i] - mean) * (residuals[i] - mean);
-    double std = sqrt(var / n_checked);
-
-    printf("  crop-tracking residual: mean=%.3f stddev=%.3f over %d frames\n",
-        mean, std, n_checked);
-
-    /* Uncompressed, so the only error is scaler interpolation and integer
-     * rounding in the ramp. A stuck or lagging crop would swing this wildly:
-     * the pan sweeps the window across the full gradient. */
-    TEST_ASSERT_TRUE(std < 2.0);
-    TEST_ASSERT_TRUE(fabs(mean) < 2.0);
+    *mean_out    = mean;
+    *std_out     = sqrt(var / n_checked);
+    *max_abs_out = max_abs;
 
     av_frame_free(&src);
     av_frame_free(&filt);
+    return n_checked;
+}
+
+/* Index crop_send_command() derives for frame n. Mirrors filter_frame_offset()
+ * for this fixture: encoder time_base 1/30000 and no stream, so it assumes 30 fps
+ * and 1000 ticks per frame of start_time_ts. */
+static int
+frame_idx_of(crop_fixture_t *f, int n)
+{
+    return n - (int)(f->params.start_time_ts / 1000);
+}
+
+static int
+expected_from_buffer(crop_fixture_t *f, int n, int crop_w)
+{
+    return vertical_data_crop_x(f->params.vertical_data, f->params.vertical_data_len,
+        frame_idx_of(f, n), SCALED_W, crop_w);
+}
+
+/* Check the cropped output lands where the frame's vertical_data value asked for. */
+void
+test_crop_tracks_vertical_data_per_frame(void)
+{
+    crop_fixture_t f;
+    double mean, std, max_abs;
+
+    fixture_init(&f);
+    int n_checked = measure_tracking(&f, expected_from_buffer, &mean, &std, &max_abs);
+
+    printf("  crop-tracking residual: mean=%.3f stddev=%.3f max=%.3f over %d frames\n",
+        mean, std, max_abs, n_checked);
+
+    /* Uncompressed, so the only error is scaler interpolation and integer
+     * rounding in the ramp. A stuck or lagging crop would swing this wildly:
+     * the pan sweeps the window across the full gradient. The per-frame bound
+     * catches a localised fault the averages would absorb - one frame of lag or
+     * one frame left at the filter's placeholder x is 5 luma or more. */
+    TEST_ASSERT_TRUE(std < 2.0);
+    TEST_ASSERT_TRUE(fabs(mean) < 2.0);
+    TEST_ASSERT_TRUE(max_abs < 2.0);
+
+    fixture_free(&f);
+}
+
+/* ---------------------------------------------------------------------------
+ * Streaming source: stands in for the Go reader behind vertical_data_reader,
+ * serving the same pan pattern one record per call and reporting EOF after
+ * STREAM_RECORDS of them, so the tail of the run exercises the hold.
+ * ---------------------------------------------------------------------------*/
+#define STREAM_RECORDS 120   /* < N_FRAMES: the remaining frames must hold the last value */
+
+typedef struct stream_source_t {
+    int next;      /* index of the next record to serve */
+    int calls;     /* how many times the reader was invoked */
+    int fail_from; /* fail every call from this one on (1-based); 0 never fails */
+} stream_source_t;
+
+static int
+stream_read(uintptr_t handle, uint32_t *value)
+{
+    stream_source_t *s = (stream_source_t *)handle;
+    s->calls++;
+    if (s->fail_from > 0 && s->calls >= s->fail_from)
+        return -1;  /* read error */
+    if (s->next >= STREAM_RECORDS)
+        return 0;   /* EOF */
+    *value = pan_value(s->next++);
+    return 1;
+}
+
+/* Build the production filter graph for a fixture that streams from source. */
+static void
+fixture_stream_graph(crop_fixture_t *f, stream_source_t *source)
+{
+    char filter_str[256];
+    const int crop_w = crop_calc_width(ENC_H);
+
+    f->params.vertical_data               = NULL;
+    f->params.vertical_data_len           = 0;
+    f->params.vertical_data_reader        = stream_read;
+    f->params.vertical_data_reader_handle = (uintptr_t)source;
+
+    snprintf(filter_str, sizeof(filter_str), "scale=-2:%d,crop=%d:ih:200:0", ENC_H, crop_w);
+    TEST_ASSERT_EQUAL_INT(0,
+        init_video_filters(filter_str, &f->decoder, &f->encoder, &f->params));
+    TEST_ASSERT_EQUAL_INT(0, crop_get_context(&f->decoder, &f->params));
+}
+
+/* A reader failure is latched: the failing frame reports the error, and every frame
+ * after it - the flush keeps asking for the frames still in the reorder window -
+ * gets the same error without the dead reader being called again. EOF before any
+ * value latches the same way. */
+void
+test_crop_stream_read_error_is_latched(void)
+{
+    crop_fixture_t f;
+    stream_source_t source = { 0, 0, 3 };   /* the third read fails */
+
+    fixture_init(&f);
+    fixture_stream_graph(&f, &source);
+    f.dec_codec.frame_num = 1;
+    TEST_ASSERT_EQUAL_INT(eav_success, crop_send_command(&f.decoder, &f.encoder, &f.params));
+    f.dec_codec.frame_num = 2;
+    TEST_ASSERT_EQUAL_INT(eav_success, crop_send_command(&f.decoder, &f.encoder, &f.params));
+    f.dec_codec.frame_num = 3;
+    TEST_ASSERT_EQUAL_INT(eav_read_input, crop_send_command(&f.decoder, &f.encoder, &f.params));
+    TEST_ASSERT_EQUAL_INT(3, source.calls);
+    for (int n = 4; n <= 8; n++) {
+        f.dec_codec.frame_num = n;
+        TEST_ASSERT_EQUAL_INT(eav_read_input, crop_send_command(&f.decoder, &f.encoder, &f.params));
+    }
+    TEST_ASSERT_EQUAL_INT(3, source.calls);
+    TEST_ASSERT_EQUAL_INT(1, f.decoder.vertical_data_has_last);   /* the flush can still hold the last value */
+    fixture_free(&f);
+
+    stream_source_t empty = { STREAM_RECORDS, 0, 0 };   /* EOF on the first read */
+    fixture_init(&f);
+    fixture_stream_graph(&f, &empty);
+    f.dec_codec.frame_num = 1;
+    TEST_ASSERT_EQUAL_INT(eav_read_input, crop_send_command(&f.decoder, &f.encoder, &f.params));
+    f.dec_codec.frame_num = 2;
+    TEST_ASSERT_EQUAL_INT(eav_read_input, crop_send_command(&f.decoder, &f.encoder, &f.params));
+    TEST_ASSERT_EQUAL_INT(1, empty.calls);
+    TEST_ASSERT_EQUAL_INT(0, f.decoder.vertical_data_has_last);
+    fixture_free(&f);
+}
+
+static int
+expected_from_stream(crop_fixture_t *f, int n, int crop_w)
+{
+    /* Record n for frame index n; pre-roll frames (negative index) take record 0,
+     * and frames past the end of the stream keep the last value served. */
+    int idx = frame_idx_of(f, n);
+    if (idx < 0)
+        idx = 0;
+    if (idx >= STREAM_RECORDS)
+        idx = STREAM_RECORDS - 1;
+    return vertical_value_crop_x(pan_value(idx), SCALED_W, crop_w);
+}
+
+/* The same measurement over the streaming branch of crop_send_command(): one
+ * record consumed per frame, and the last value held after EOF. */
+void
+test_crop_tracks_streamed_vertical_data(void)
+{
+    crop_fixture_t f;
+    stream_source_t source = { 0, 0 };
+    double mean, std, max_abs;
+
+    fixture_init(&f);
+    /* Swap the buffer for the reader: with both set crop_send_command() uses the buffer. */
+    f.params.vertical_data               = NULL;
+    f.params.vertical_data_len           = 0;
+    f.params.vertical_data_reader        = stream_read;
+    f.params.vertical_data_reader_handle = (uintptr_t)&source;
+
+    int n_checked = measure_tracking(&f, expected_from_stream, &mean, &std, &max_abs);
+
+    printf("  streamed crop-tracking residual: mean=%.3f stddev=%.3f max=%.3f over %d frames\n",
+        mean, std, max_abs, n_checked);
+
+    TEST_ASSERT_TRUE(std < 2.0);
+    TEST_ASSERT_TRUE(fabs(mean) < 2.0);
+    TEST_ASSERT_TRUE(max_abs < 2.0);
+
+    /* Cadence: exactly one read per frame until the EOF read, and none after it. */
+    TEST_ASSERT_EQUAL_INT(STREAM_RECORDS + 1, source.calls);
+    TEST_ASSERT_EQUAL_INT(1, f.decoder.vertical_data_eof);
+    TEST_ASSERT_EQUAL_INT(1, f.decoder.vertical_data_has_last);
+    TEST_ASSERT_EQUAL_UINT32(pan_value(STREAM_RECORDS - 1), f.decoder.vertical_data_last);
+
+    fixture_free(&f);
+}
+
+/* A partial transcode: filter_frame_offset() gives the first PREROLL_FRAMES frames
+ * a negative index. The buffer path clamps them to entry 0; the streaming path
+ * must land on record 0 too - rather than the filter's placeholder x - and must
+ * not consume anything extra for them, so every later frame stays aligned. */
+#define PREROLL_FRAMES 10
+
+void
+test_crop_pre_roll_frames_use_first_record(void)
+{
+    crop_fixture_t f;
+    stream_source_t source = { 0, 0 };
+    double mean, std, max_abs;
+    int n_checked;
+
+    fixture_init(&f);
+    f.params.start_time_ts = PREROLL_FRAMES * 1000;
+    n_checked = measure_tracking(&f, expected_from_buffer, &mean, &std, &max_abs);
+    printf("  buffer pre-roll residual: mean=%.3f stddev=%.3f max=%.3f over %d frames\n",
+        mean, std, max_abs, n_checked);
+    TEST_ASSERT_TRUE(std < 2.0);
+    TEST_ASSERT_TRUE(fabs(mean) < 2.0);
+    TEST_ASSERT_TRUE(max_abs < 2.0);
+    fixture_free(&f);
+
+    fixture_init(&f);
+    f.params.start_time_ts               = PREROLL_FRAMES * 1000;
+    f.params.vertical_data               = NULL;
+    f.params.vertical_data_len           = 0;
+    f.params.vertical_data_reader        = stream_read;
+    f.params.vertical_data_reader_handle = (uintptr_t)&source;
+    n_checked = measure_tracking(&f, expected_from_stream, &mean, &std, &max_abs);
+    printf("  streamed pre-roll residual: mean=%.3f stddev=%.3f max=%.3f over %d frames\n",
+        mean, std, max_abs, n_checked);
+    TEST_ASSERT_TRUE(std < 2.0);
+    TEST_ASSERT_TRUE(fabs(mean) < 2.0);
+    /* The pre-roll frames in particular: left at the placeholder they are 6.5 off. */
+    TEST_ASSERT_TRUE(max_abs < 2.0);
+    /* Record 0 read once for the whole pre-roll, then one per frame, then EOF. */
+    TEST_ASSERT_EQUAL_INT(STREAM_RECORDS + 1, source.calls);
     fixture_free(&f);
 }
 
@@ -310,6 +527,9 @@ main(void)
 
     RUN_TEST(test_crop_width_is_9_16_of_height);
     RUN_TEST(test_crop_tracks_vertical_data_per_frame);
+    RUN_TEST(test_crop_tracks_streamed_vertical_data);
+    RUN_TEST(test_crop_pre_roll_frames_use_first_record);
+    RUN_TEST(test_crop_stream_read_error_is_latched);
 
     return UNITY_END();
 }
