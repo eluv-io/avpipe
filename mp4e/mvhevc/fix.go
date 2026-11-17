@@ -1,13 +1,12 @@
 package mvhevc
 
 import (
+	"bytes"
 	"fmt"
 	"os"
 
 	"github.com/Eyevinn/mp4ff/hevc"
 	"github.com/Eyevinn/mp4ff/mp4"
-
-	"github.com/eluv-io/avpipe/mp4e"
 )
 
 // Fix restores MV-HEVC sample-group and track-group boxes that FFmpeg's
@@ -104,13 +103,21 @@ func fixVideoTrak(trak *mp4.TrakBox, _ *mp4.File) (bool, error) {
 		changed = true
 	}
 	if !hasSgpd(stbl, "oinf") {
-		appendStblSgpd(stbl, "oinf", mp4.BuildOinfFromVPS(vps))
+		oinf, err := mp4.BuildOinfFromVPS(vps)
+		if err != nil {
+			return false, fmt.Errorf("build oinf from VPS: %w", err)
+		}
+		appendStblSgpd(stbl, "oinf", oinf)
 		log.Info("added oinf sgpd", "trackID", trak.Tkhd.TrackID)
 		changed = true
 	}
 	if !hasSgpd(stbl, "linf") {
 		maxTids := make([]byte, vps.GetNumLayers())
-		appendStblSgpd(stbl, "linf", mp4.BuildLinfFromVPS(vps, maxTids))
+		linf, err := mp4.BuildLinfFromVPS(vps, maxTids)
+		if err != nil {
+			return false, fmt.Errorf("build linf from VPS: %w", err)
+		}
+		appendStblSgpd(stbl, "linf", linf)
 		log.Info("added linf sgpd", "trackID", trak.Tkhd.TrackID)
 		changed = true
 	}
@@ -214,28 +221,24 @@ func appendStblSgpd(stbl *mp4.StblBox, groupingType string, entry mp4.SampleGrou
 // FFmpeg uses dvwC for all profiles > 10 (a bug for profile 20), and content
 // tools sometimes mislabel the box. This function re-checks every DV config
 // box and renames it to the spec-correct FourCC if it differs.
+//
+// mp4ff (>= v0.53.0) decodes dvcC/dvvC/dvwC into a typed DoViConfigurationBox
+// that preserves the on-disk FourCC (its Type() returns the name it was decoded
+// with), so a mislabeled box survives a round-trip unchanged. mp4ff's own
+// profile→FourCC mapping also differs from the Dolby spec for profile 20
+// (it emits dvwC, we want dvcC), so we re-wrap the encoded record under the
+// spec-correct FourCC rather than reconstructing the box via mp4ff helpers.
 func fixDVBoxType(vse *mp4.VisualSampleEntryBox, trackID uint32) bool {
 	const op = "mvhevc.fixDVBoxType"
+	const boxHdrSize = 8
 
 	changed := false
 	for i, c := range vse.Children {
-		if !mp4e.IsDOVIBoxType(c.Type()) {
-			continue
-		}
-		// If mp4ff adds support for parsing DOVI, revisit this code
-		ub, ok := c.(*mp4.UnknownBox)
+		dcfg, ok := c.(*mp4.DoViConfigurationBox)
 		if !ok {
-			log.Warn("DV config box has unexpected Go type, skipping",
-				"boxType", c.Type(), "trackID", trackID, "op", op)
 			continue
 		}
-		dovi, err := mp4e.ParseDOVIBox(ub.Payload())
-		if err != nil {
-			log.Warn("failed to parse DV config box payload — skipping",
-				"boxType", c.Type(), "trackID", trackID, "error", err, "op", op)
-			continue
-		}
-		profile := dovi.Profile
+		profile := int(dcfg.DVProfile)
 
 		var want string
 		switch {
@@ -250,8 +253,22 @@ func fixDVBoxType(vse *mp4.VisualSampleEntryBox, trackID uint32) bool {
 		if c.Type() == want {
 			continue
 		}
-		const boxHdrSize = 8
-		payload := ub.Payload()
+
+		// Re-encode the 24-byte DV configuration record and re-wrap it under the
+		// spec-correct FourCC.
+		var buf bytes.Buffer
+		if err := dcfg.Encode(&buf); err != nil {
+			log.Warn("failed to encode DV config box — skipping",
+				"boxType", c.Type(), "trackID", trackID, "error", err, "op", op)
+			continue
+		}
+		body := buf.Bytes()
+		if len(body) <= boxHdrSize {
+			log.Warn("DV config box unexpectedly short — skipping",
+				"boxType", c.Type(), "trackID", trackID, "size", len(body), "op", op)
+			continue
+		}
+		payload := body[boxHdrSize:]
 		vse.Children[i] = mp4.CreateUnknownBox(want, uint64(boxHdrSize+len(payload)), payload)
 		log.Info("corrected DV config box", "from", c.Type(), "to", want, "trackID", trackID, "profile", profile, "op", op)
 		changed = true
