@@ -53,6 +53,13 @@ validate_probed_video_stream(
 );
 
 int
+configure_video_encoder_framerate(
+    AVCodecContext *encoder,
+    const coderctx_t *decoder,
+    const xcparams_t *params
+);
+
+int
 num_audio_output(
     coderctx_t *decoder_context,
     xcparams_t *params
