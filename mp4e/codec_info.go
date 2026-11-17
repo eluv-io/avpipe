@@ -70,7 +70,8 @@ type CodecInfo struct {
 	// Only meaningful for VideoLayout == Mp4VideoLayoutMVHEVC.
 	EnhancementProfileIDC int `json:"enhancement_profile_idc,omitempty"`
 
-	// Refs is the SPS max_num_ref_frames; set for H.264 only.
+	// Refs is the SPS reference count: max_num_ref_frames for H.264,
+	// sps_max_dec_pic_buffering_minus1 of the highest sub-layer for HEVC.
 	Refs int `json:"refs,omitempty"`
 }
 
@@ -360,6 +361,11 @@ func parseVisualSampleEntryBox(se *mp4.VisualSampleEntryBox) (*CodecInfo, error)
 			ProfileIDC:      int(sps.ProfileTierLevel.GeneralProfileIDC),
 			Level:           int(sps.ProfileTierLevel.GeneralLevelIDC),
 			VideoLayout:     Mp4VideoLayoutMono,
+		}
+		// See CodecInfo.Refs. The last entry is always the highest sub-layer: mp4ff
+		// only records the lower ones when sub_layer_ordering_info_present_flag is set.
+		if n := len(sps.SubLayeringOrderingInfos); n > 0 {
+			info.Refs = int(sps.SubLayeringOrderingInfos[n-1].MaxDecPicBufferingMinus1)
 		}
 
 		// Look for Dolby Vision configuration box (dvvC, dvcC, or dvwC) in children.

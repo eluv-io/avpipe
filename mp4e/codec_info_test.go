@@ -154,6 +154,7 @@ func TestExtractCodecInfo(t *testing.T) {
 		require.Equal(t, 120, info.Level)
 		require.Equal(t, Mp4VideoLayoutMono, info.VideoLayout)
 		require.Zero(t, info.EnhancementProfileIDC)
+		require.Equal(t, 3, info.Refs) // sps_max_dec_pic_buffering_minus1
 		//t.Logf("HEVC codec: %s (profile=%d level=%d → %.1f)",
 		//	info.MimeCodecString, info.ProfileIDC, info.Level, float64(info.Level)/30)
 	})
