@@ -44,8 +44,7 @@ is_live_container_mpegts(
     coderctx_t *ctx
 );
 
-/* Validate the selected video after probing/stream selection and save its nominal
- * frame rate. Does not modify FFmpeg stream/codec metadata or timestamps. */
+/* Validate the selected video after probing/stream selection and store its nominal framerate */
 int
 validate_probed_video_stream(
     coderctx_t *decoder_context,

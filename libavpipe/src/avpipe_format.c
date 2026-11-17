@@ -21,8 +21,9 @@
 
 #include <sys/time.h>
 
-/* Product policy for live encoding, not a restriction imposed by MPEG-TS.
- * Keep NTSC rates exact; never round a guessed rate onto this list. */
+/*
+ * List of currently supported frame rates for live (will be updated as needed)
+ */
 static int
 supported_live_frame_rate(AVRational rate)
 {
@@ -87,10 +88,10 @@ validate_probed_video_stream(
         return eav_stream_info;
     }
 
-    /* Use nominal cadence, not a part's measured average. In particular a
-     * 50 fps mezzanine with missing frames can report avg_frame_rate=130/3,
-     * while its VFR SPS exposes decoder framerate=90000/1 (timing resolution).
-     * Neither value may replace the stream's nominal 50/1 here. */
+    /* Deliberately calculate and store input framerate avoiding the cases where the container exposes
+     * its timebase as framerate (eg. MPEGTS 1/90,000) as well as averages which might be skewed
+     * when missing a few frames.
+     */
     av_reduce(&rate.num, &rate.den, rate.num, rate.den, INT_MAX);
     decoder_context->nominal_frame_rate = rate;
     elv_log("Validated nominal video frame rate=%d/%d source=r_frame_rate live=%d "
