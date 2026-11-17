@@ -81,7 +81,8 @@ type StreamInfo struct {
 	// non-video streams. 0 means AV_PIX_FMT_YUV420P.
 	PixFmt *int `json:"pix_fmt,omitempty"` // ffprobe: string value
 
-	// Level is the codec level IDC (e.g. 40 = H.264 level 4.0).
+	// Level is the codec level IDC: H.264 is 10x the level (40 = 4.0), HEVC's
+	// general_level_idc is 30x (120 = 4.0).
 	// 0 (omitted) when FFmpeg reports AV_LEVEL_UNKNOWN.
 	Level int `json:"level,omitempty"`
 
@@ -250,6 +251,13 @@ type MP4Info struct {
 	// EnhancementProfileIDC is the MV-HEVC enhancement-layer general_profile_idc.
 	// Only meaningful for VideoLayout == VideoLayoutMVHEVC.
 	EnhancementProfileIDC int `json:"enhancement_profile_idc,omitempty"`
+
+	// Refs is the reference frame count declared in the SPS, when the SPS is parsed
+	// and carries one: max_num_ref_frames for H.264; for HEVC,
+	// sps_max_dec_pic_buffering_minus1 of the highest sub-layer, since HEVC declares
+	// the decoded picture buffer size (which includes the picture being decoded)
+	// rather than a reference count. Zero otherwise.
+	Refs int `json:"refs,omitempty"`
 }
 
 // SideDataDisplayMatrix holds the display transformation matrix side data

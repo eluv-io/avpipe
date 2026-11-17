@@ -47,10 +47,13 @@ The output is a set of individual frames.
 
 Deinterlacing using the bwdif "field" filter creates two frames for each input frame and requires adjusting the framerate.
 
-When doubling the framerate the timebase (timescale) may not accommodate the new frame duration and it needs to be adjusted as well.
+When doubling the framerate the timebase (timescale) may not accommodate the new frame duration and it needs to be set to a value that works.
 
-For example if the input frame rate is 25 and timebase is 1/25, the input frame duration is 1.  When deinterlacing using the bwdif "field" filter
-we need to change the output timebase to 1/50 and the frame rate becomes 50 fps.
+- specify `video_time_base` when the source time base doesn't accommodate the double frame rate (also use a value over 10,000 to avoid the automatic ffmpeg adjustment)
+- no need to specify `video_frame_duration_ts` (this was necessary in the past) - only specify it if you need all frames to be force-stamped with consecutive timestamps
 
-Note that ffmpeg will force the timebase denominator to be greater than 10,000 and will double our "1/50" timebase until it becomes 1/12800.  The new frame duration,
-for 50 fps, will be 256.
+| Input | Output | `video_time_base` | `video_frame_duration_ts` | `force_keyint` | `video_seg_duration_ts` |
+| --- | --- | --- | --- | --- | --- |
+| 25 interlaced fps | 50 progressive fps | 12800 | 256 | 100 | 384000 (30 seconds) |
+| 30000/1001 interlaced fps | 60000/1001 progressive fps | 60000 | 1001 | 120 | 1801800 (30.03 seconds) |
+

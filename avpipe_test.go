@@ -10,6 +10,7 @@ import (
 	"path"
 	"path/filepath"
 	"runtime"
+	"slices"
 	"strconv"
 	"strings"
 	"testing"
@@ -196,7 +197,7 @@ func TestProResBT709BadFrameColor(t *testing.T) {
 		ExtractImageIntervalTs: -1,
 		GPUIndex:               -1,
 		SampleRate:             -1,
-		SegDuration:            "30",
+		SegDuration:            "30.03",
 		StartFragmentIndex:     1,
 		StartSegmentStr:        "1",
 		StreamId:               -1,
@@ -440,7 +441,7 @@ func TestSingleABRTranscodeWithOverlayWatermark(t *testing.T) {
 // Each variant runs with and without SkipDecoding.
 func TestSingleABRFade(t *testing.T) {
 	url := videoBigBuckBunnyPath
-	checkFileExists(t, url);
+	checkFileExists(t, url)
 
 	fadeVariants := []struct {
 		name           string
@@ -788,6 +789,207 @@ func TestSettingProfileLevel(t *testing.T) {
 		pixelFmt: "yuv420p",
 	}
 	xcTest(t, outputDir, params, xcTestResult, true)
+}
+
+// TestVideoRefsLevelRoundTrip encodes with an explicit VideoRefs and Level and
+// probes the output: MP4.Refs and MP4.Level must come back as the values passed
+// in, in the codec's own units.
+func TestVideoRefsLevelRoundTrip(t *testing.T) {
+	url := videoBigBuckBunnyPath
+	checkFileExists(t, url)
+
+	cases := []struct {
+		name      string
+		ecodec    string
+		refs      int
+		level     int
+		wantRefs  int // in the output SPS
+		wantLevel int
+	}{
+		// 0 leaves the encoder's choice: x264 medium uses 3 refs, and avpipe guesses
+		// level 3.0 for 720x480.
+		{"libx264_defaults", "libx264", 0, 0, 3, 30},
+		// H.264: SPS max_num_ref_frames == refs; level_idc 31 == 3.1.
+		{"libx264", "libx264", 6, 31, 6, 31},
+		// Both ends of the accepted range. x264 writes 16 refs under level 3.1 without
+		// lowering either value: on H.264 the level does not constrain refs.
+		{"libx264_min_refs", "libx264", 1, 31, 1, 31},
+		{"libx264_max_refs", "libx264", 16, 31, 16, 31},
+		// HEVC defaults: x265 medium uses 3 refs and picks level 3.0 (90) for 720x480
+		// at 30 fps - the same level the dropped-level case below ends up with.
+		{"libx265_defaults", "libx265", 0, 0, 3, 90},
+		// HEVC: sps_max_dec_pic_buffering_minus1 == max(numReorderPics+2, refs). avpipe
+		// encodes with bframes=0, so numReorderPics is 0 and refs >= 2 round-trips
+		// exactly; general_level_idc 93 == 3.1.
+		{"libx265", "libx265", 6, 93, 6, 93},
+		// Below that floor, refs 1 comes back as 2.
+		{"libx265_min_refs", "libx265", 1, 93, 2, 93},
+		// Refs and level are coupled in x265. Without a level, more refs push the level
+		// it picks: 8 refs need a 9-picture DPB, more than 3.0 allows at 720x480, so it
+		// declares 3.1. With a level, x265 keeps it and lowers refs to fit: 3.1 allows a
+		// 12-picture DPB at 720x480, so 16 refs become 11.
+		{"libx265_refs_raise_level", "libx265", 8, 0, 8, 93},
+		{"libx265_level_caps_refs", "libx265", 16, 93, 11, 93},
+		// An H.264-style 10x level (what callers sent before libx265 honored the level)
+		// is dropped with a warning and x265 picks the level itself: 3.0 (90) for
+		// 720x480 at 30 fps with a 7-picture DPB.
+		{"libx265_h264_level_ignored", "libx265", 6, 41, 6, 90},
+		// A level the picture cannot satisfy (60 is HEVC 2.0, 352x288 - and what an
+		// H.264-style caller means by 6.0) is dropped the same way instead of making
+		// x265 refuse to open.
+		{"libx265_level_too_small_dropped", "libx265", 6, 60, 6, 90},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			outputDir := path.Join(baseOutPath, strings.ReplaceAll(t.Name(), "/", "_"))
+			boilerplate(t, outputDir, url)
+
+			params := &goavpipe.XcParams{
+				Format:             "fmp4-segment",
+				StartTimeTs:        0,
+				DurationTs:         90000, // 3 s: the SPS is all that is probed
+				StartSegmentStr:    "1",
+				VideoBitrate:       2560000,
+				VideoSegDurationTs: 900000,
+				Ecodec:             c.ecodec,
+				EncHeight:          480,
+				EncWidth:           720,
+				XcType:             goavpipe.XcVideo,
+				StreamId:           -1,
+				Url:                url,
+				DebugFrameLevel:    debugFrameLevel,
+				Level:              c.level,
+				VideoRefs:          c.refs,
+			}
+			boilerXc(t, params)
+
+			// boilerProbe also asserts the FFmpeg-side stream level (same units).
+			probes := boilerProbe(t, &XcTestResult{
+				mezFile: []string{fmt.Sprintf("%s/vsegment-1.mp4", outputDir)},
+				level:   c.wantLevel,
+			})
+			require.Len(t, probes, 1)
+			mp4 := probes[0].Streams[0].MP4
+			require.NotNil(t, mp4, "MP4 codec info must be present for the output mezzanine")
+			assert.Equal(t, c.wantRefs, mp4.Refs, "MP4.Refs must be the expected SPS reference count")
+			assert.Equal(t, c.wantLevel, mp4.Level, "MP4.Level must be the expected output level")
+		})
+	}
+}
+
+// TestVideoRefsLevelParamValidation pins the check_params rejections that came
+// with video_refs and the libx265 level: each fails XcInit with EAV_PARAM before
+// anything is opened. Levels are checked in the encoder's own units: libx264
+// rejects an HEVC-style value, while libx265 drops anything that is not an HEVC
+// level with a warning (see TestVideoRefsLevelRoundTrip) rather than rejecting
+// it. The accepted cases are the positive controls: they initialize, and are
+// cancelled before they run.
+func TestVideoRefsLevelParamValidation(t *testing.T) {
+	url := videoBigBuckBunnyPath
+	checkFileExists(t, url)
+	outputDir := path.Join(baseOutPath, fn())
+	boilerplate(t, outputDir, url)
+
+	base := func() *goavpipe.XcParams {
+		return &goavpipe.XcParams{
+			Format:             "fmp4-segment",
+			DurationTs:         -1,
+			StartSegmentStr:    "1",
+			VideoBitrate:       2560000,
+			VideoSegDurationTs: 900000,
+			Ecodec:             h264Codec,
+			EncHeight:          480,
+			EncWidth:           720,
+			XcType:             goavpipe.XcVideo,
+			StreamId:           -1,
+			Url:                url,
+			DebugFrameLevel:    debugFrameLevel,
+		}
+	}
+
+	rejected := []struct {
+		name string
+		mod  func(p *goavpipe.XcParams)
+	}{
+		{"libx264 rejects an HEVC-style 30x level", func(p *goavpipe.XcParams) { p.Level = 93 }},
+		{"video_refs below the minimum", func(p *goavpipe.XcParams) { p.VideoRefs = -1 }},
+		{"video_refs above the encoder maximum", func(p *goavpipe.XcParams) { p.VideoRefs = 17 }},
+	}
+	for _, c := range rejected {
+		t.Run(c.name, func(t *testing.T) {
+			p := base()
+			c.mod(p)
+			handle, err := avpipe.XcInit(p)
+			assert.ErrorIs(t, err, avpipe.EAV_PARAM)
+			assert.Equal(t, int32(-1), handle)
+		})
+	}
+
+	accepted := []struct {
+		name string
+		mod  func(p *goavpipe.XcParams)
+	}{
+		{"libx264 with the maximum video_refs", func(p *goavpipe.XcParams) { p.VideoRefs = 16 }},
+		{"libx265 with video_refs and an HEVC general_level_idc", func(p *goavpipe.XcParams) { p.Ecodec = "libx265"; p.Level = 93; p.VideoRefs = 3 }},
+		{"libx265 with an H.264-style level that has no HEVC equivalent", func(p *goavpipe.XcParams) { p.Ecodec = "libx265"; p.Level = 32 }},
+		{"libx265 with a level that is no level at all", func(p *goavpipe.XcParams) { p.Ecodec = "libx265"; p.Level = 45 }},
+		{"video_refs with bypass is ignored", func(p *goavpipe.XcParams) { p.VideoRefs = 3; p.BypassTranscoding = true }},
+	}
+	for _, c := range accepted {
+		t.Run(c.name, func(t *testing.T) {
+			p := base()
+			c.mod(p)
+			handle, err := avpipe.XcInit(p)
+			require.NoError(t, err)
+			require.NoError(t, avpipe.XcCancel(handle))
+			runErr := avpipe.XcRun(handle)
+			require.NoError(t, avpipe.XcFini(handle))
+			assert.ErrorIs(t, runErr, avpipe.EAV_CANCELLED)
+		})
+	}
+}
+
+// TestVideoRefsLevelEncoderOpen pins a libx265 combination that passes
+// check_params and then fails when x265 opens, so XcRun returns EAV_OPEN_CODEC:
+// video_refs 16 without a level, where x265 picks the level itself and rejects
+// the reference count as non-compliant instead of lowering it the way it does
+// when a level is given.
+func TestVideoRefsLevelEncoderOpen(t *testing.T) {
+	url := videoBigBuckBunnyPath
+	checkFileExists(t, url)
+	outputDir := path.Join(baseOutPath, fn())
+	boilerplate(t, outputDir, url)
+
+	cases := []struct {
+		name string
+		mod  func(p *goavpipe.XcParams)
+	}{
+		{"video_refs 16 without a level", func(p *goavpipe.XcParams) { p.VideoRefs = 16 }},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			p := &goavpipe.XcParams{
+				Format:             "fmp4-segment",
+				DurationTs:         90000,
+				StartSegmentStr:    "1",
+				VideoBitrate:       2560000,
+				VideoSegDurationTs: 900000,
+				Ecodec:             "libx265",
+				EncHeight:          480,
+				EncWidth:           720,
+				XcType:             goavpipe.XcVideo,
+				StreamId:           -1,
+				Url:                url,
+				DebugFrameLevel:    debugFrameLevel,
+			}
+			c.mod(p)
+			handle, err := avpipe.XcInit(p)
+			require.NoError(t, err)
+			runErr := avpipe.XcRun(handle)
+			require.NoError(t, avpipe.XcFini(handle))
+			assert.ErrorIs(t, runErr, avpipe.EAV_OPEN_CODEC)
+		})
+	}
 }
 
 func TestStartTimeTsWithSkipDecoding(t *testing.T) {
@@ -3058,11 +3260,9 @@ func TestProbeWithData(t *testing.T) {
 	assert.Equal(t, "pcm_s24le", a[2].CodecName)
 }
 
-func TestExtractImagesInterval(t *testing.T) {
-	url := videoBigBuckBunnyPath
-	checkFileExists(t, url)
-
-	outPath := path.Join(baseOutPath, fn())
+// extractImagesParams returns fast-encode mjpeg params that extract the frames
+// at ts from url, or one frame per interval when ts is nil.
+func extractImagesParams(url string, ts []int64) *goavpipe.XcParams {
 	params := &goavpipe.XcParams{
 		Format:                 "image2",
 		AudioBitrate:           128000,
@@ -3075,6 +3275,7 @@ func TestExtractImagesInterval(t *testing.T) {
 		EncHeight:              -1,
 		EncWidth:               -1,
 		ExtractImageIntervalTs: -1,
+		ExtractImagesTs:        ts,
 		GPUIndex:               -1,
 		SampleRate:             -1,
 		SegDuration:            "30",
@@ -3089,6 +3290,15 @@ func TestExtractImagesInterval(t *testing.T) {
 		DebugFrameLevel:        debugFrameLevel,
 	}
 	setFastEncodeParams(params, true)
+	return params
+}
+
+func TestExtractImagesInterval(t *testing.T) {
+	url := videoBigBuckBunnyPath
+	checkFileExists(t, url)
+
+	outPath := path.Join(baseOutPath, fn())
+	params := extractImagesParams(url, nil)
 
 	xcTest2(t, outPath, params, nil)
 
@@ -3109,33 +3319,7 @@ func TestExtractImagesList(t *testing.T) {
 	checkFileExists(t, url)
 
 	outPath := path.Join(baseOutPath, fn())
-	params := &goavpipe.XcParams{
-		Format:                 "image2",
-		AudioBitrate:           128000,
-		AudioSegDurationTs:     -1,
-		BitDepth:               8,
-		CrfStr:                 "23",
-		DurationTs:             -1,
-		Ecodec:                 "mjpeg",
-		Ecodec2:                "aac",
-		EncHeight:              -1,
-		EncWidth:               -1,
-		ExtractImageIntervalTs: -1,
-		GPUIndex:               -1,
-		SampleRate:             -1,
-		SegDuration:            "30",
-		StartFragmentIndex:     1,
-		StartSegmentStr:        "1",
-		StreamId:               -1,
-		SyncAudioToStreamId:    -1,
-		VideoBitrate:           -1,
-		VideoSegDurationTs:     -1,
-		XcType:                 goavpipe.XcExtractImages,
-		Url:                    url,
-		DebugFrameLevel:        debugFrameLevel,
-	}
-	params.ExtractImagesTs = []int64{1980, 2980, 72980, 169980, 339980}
-	setFastEncodeParams(params, true)
+	params := extractImagesParams(url, []int64{1980, 2980, 72980, 169980, 339980})
 
 	xcTest2(t, outPath, params, nil)
 
@@ -3151,6 +3335,132 @@ func TestExtractImagesList(t *testing.T) {
 	assert.Equal(t, 1980+2980+72980+169980+339980, sum)
 }
 
+// TestMVHEVC_ExtractImages checks that image extraction decodes MV-HEVC (base
+// view) and writes real JPEGs, rather than inheriting the MV-HEVC forced bypass
+// and writing compressed HEVC packets as "<pts>.jpeg".
+func TestMVHEVC_ExtractImages(t *testing.T) {
+	cases := map[string]struct {
+		src     string
+		layout  goavpipe.VideoLayout
+		ts      []int64
+		wantPts []int64 // pts of the frame actually extracted for each ts
+	}{
+		"SDR": {
+			src:     "./media/tos_720_mvhevc_sdr.mp4", // time base 1/600
+			layout:  goavpipe.VideoLayoutMVHEVC,       // as content-fabric sets it
+			ts:      []int64{0, 250, 2500, 10000, 25000},
+			wantPts: []int64{0, 250, 2503, 10010, 25000},
+		},
+		"HDR10": {
+			src:     "./media/sample_mvhevc_2560x1440@8.50.mp4",
+			layout:  goavpipe.VideoLayoutMVHEVC,
+			ts:      []int64{0, 10, 100, 400, 1000},
+			wantPts: []int64{0, 25, 100, 400, 1000},
+		},
+		// Image extraction must not depend on video_layout: a caller that
+		// leaves it unset still gets decoded base-view JPEGs.
+		"SDR_LayoutUnset": {
+			src:     "./media/tos_720_mvhevc_sdr.mp4",
+			ts:      []int64{0, 250, 2500, 10000, 25000},
+			wantPts: []int64{0, 250, 2503, 10010, 25000},
+		},
+	}
+	for name, c := range cases {
+		t.Run(name, func(t *testing.T) {
+			checkFileExists(t, c.src)
+			outPath := path.Join(baseOutPath, fn(), name)
+
+			params := extractImagesParams(c.src, c.ts)
+			params.VideoLayout = int32(c.layout)
+			xcTest2(t, outPath, params, nil)
+
+			assert.Equal(t, c.wantPts, extractedJPEGPts(t, outPath))
+		})
+	}
+}
+
+// TestMVHEVC_ExtractAllImages checks that extract-all-images decodes MV-HEVC
+// too: one JPEG per base-view frame, not one "<pts>.jpeg" per compressed packet.
+func TestMVHEVC_ExtractAllImages(t *testing.T) {
+	url := "./media/tos_720_mvhevc_sdr.mp4" // 1607 frames, time base 1/600
+	checkFileExists(t, url)
+	outPath := path.Join(baseOutPath, fn())
+
+	params := extractImagesParams(url, nil)
+	params.XcType = goavpipe.XcExtractAllImages
+	params.VideoLayout = int32(goavpipe.VideoLayoutMVHEVC) // as content-fabric sets it
+	xcTest2(t, outPath, params, nil)
+
+	gotPts := extractedJPEGPts(t, outPath)
+	require.Len(t, gotPts, 1607)
+	assert.Equal(t, int64(0), gotPts[0])
+}
+
+// extractedJPEGPts asserts that every file in outPath is a JPEG and returns
+// the pts encoded in the file names, sorted.
+func extractedJPEGPts(t *testing.T, outPath string) []int64 {
+	files, err := os.ReadDir(outPath)
+	failNowOnError(t, err)
+	var pts []int64
+	for _, f := range files {
+		p, err := strconv.ParseInt(strings.Split(f.Name(), ".")[0], 10, 64)
+		assert.NoError(t, err)
+		pts = append(pts, p)
+
+		b, err := os.ReadFile(path.Join(outPath, f.Name()))
+		failNowOnError(t, err)
+		assert.True(t, len(b) > 2 && b[0] == 0xFF && b[1] == 0xD8,
+			"%s is not a JPEG (starts with % x)", f.Name(), b[:min(len(b), 8)])
+	}
+	slices.Sort(pts)
+	return pts
+}
+
+// TestDOVI20_MVHEVC_ExtractImagesFails documents that Dolby Vision profile 20
+// (IPT-C2 base layer, no compatible signal) cannot be converted to JPEG without
+// applying the RPU, and that extraction fails instead of writing junk images.
+func TestDOVI20_MVHEVC_ExtractImagesFails(t *testing.T) {
+	url := "./media/3d_test_reel_2024_dovi_mvhevc.mp4"
+	checkFileExists(t, url)
+	outPath := path.Join(baseOutPath, fn())
+	boilerplate(t, outPath, url)
+
+	params := extractImagesParams(url, []int64{0, 10, 100})
+	params.VideoLayout = int32(goavpipe.VideoLayoutMVHEVC)
+	handle, err := avpipe.XcInit(params)
+	failNowOnError(t, err)
+	runErr := avpipe.XcRun(handle)
+	_ = avpipe.XcFini(handle)
+	assert.Error(t, runErr)
+
+	files, err := os.ReadDir(outPath)
+	failNowOnError(t, err)
+	assert.Zero(t, len(files), "files written")
+}
+
+// TestExtractImagesBypassFails checks that avpipe rejects image extraction with
+// bypass set, before writing any output, instead of writing compressed packets
+// as "<pts>.jpeg".
+func TestExtractImagesBypassFails(t *testing.T) {
+	url := videoBigBuckBunnyPath
+	checkFileExists(t, url)
+	outPath := path.Join(baseOutPath, fn())
+	boilerplate(t, outPath, url)
+
+	params := extractImagesParams(url, []int64{1980, 2980})
+	params.BypassTranscoding = true
+	handle, err := avpipe.XcInit(params)
+	if err == nil {
+		err = avpipe.XcRun(handle)
+		_ = avpipe.XcFini(handle)
+	}
+	assert.Error(t, err)
+
+	files, err := os.ReadDir(outPath)
+	failNowOnError(t, err)
+	assert.Zero(t, len(files), "files written")
+}
+
 // Should exit after extracting the first frame
 func TestExtractImagesListFast(t *testing.T) {
 	url := videoBigBuckBunnyPath
@@ -3158,33 +3468,7 @@ func TestExtractImagesListFast(t *testing.T) {
 
 	outPath := path.Join(baseOutPath, fn())
 
-	params := &goavpipe.XcParams{
-		Format:                 "image2",
-		AudioBitrate:           128000,
-		AudioSegDurationTs:     -1,
-		BitDepth:               8,
-		CrfStr:                 "23",
-		DurationTs:             -1,
-		Ecodec:                 "mjpeg",
-		Ecodec2:                "aac",
-		EncHeight:              -1,
-		EncWidth:               -1,
-		ExtractImageIntervalTs: -1,
-		GPUIndex:               -1,
-		SampleRate:             -1,
-		SegDuration:            "30",
-		StartFragmentIndex:     1,
-		StartSegmentStr:        "1",
-		StreamId:               -1,
-		SyncAudioToStreamId:    -1,
-		VideoBitrate:           -1,
-		VideoSegDurationTs:     -1,
-		XcType:                 goavpipe.XcExtractImages,
-		Url:                    url,
-		DebugFrameLevel:        debugFrameLevel,
-	}
-	params.ExtractImagesTs = []int64{1980}
-	setFastEncodeParams(params, true)
+	params := extractImagesParams(url, []int64{1980})
 
 	xcTest2(t, outPath, params, nil)
 

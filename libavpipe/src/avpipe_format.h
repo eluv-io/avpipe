@@ -76,6 +76,13 @@ calc_timebase(
 );
 
 int
+check_video_timebase(
+    const AVCodecContext *encoder_codec_context,
+    const coderctx_t *decoder_context,
+    const xcparams_t *params
+);
+
+int
 packet_clone(
     AVPacket *src,
     AVPacket **dst

@@ -69,6 +69,10 @@ type CodecInfo struct {
 	// EnhancementProfileIDC is the enhancement-layer general_profile_idc.
 	// Only meaningful for VideoLayout == Mp4VideoLayoutMVHEVC.
 	EnhancementProfileIDC int `json:"enhancement_profile_idc,omitempty"`
+
+	// Refs is the SPS reference count: max_num_ref_frames for H.264,
+	// sps_max_dec_pic_buffering_minus1 of the highest sub-layer for HEVC.
+	Refs int `json:"refs,omitempty"`
 }
 
 // MarshalJSON adds additional profile_name and level_name fields alongside the
@@ -358,6 +362,11 @@ func parseVisualSampleEntryBox(se *mp4.VisualSampleEntryBox) (*CodecInfo, error)
 			Level:           int(sps.ProfileTierLevel.GeneralLevelIDC),
 			VideoLayout:     Mp4VideoLayoutMono,
 		}
+		// See CodecInfo.Refs. The last entry is always the highest sub-layer: mp4ff
+		// only records the lower ones when sub_layer_ordering_info_present_flag is set.
+		if n := len(sps.SubLayeringOrderingInfos); n > 0 {
+			info.Refs = int(sps.SubLayeringOrderingInfos[n-1].MaxDecPicBufferingMinus1)
+		}
 
 		// Look for Dolby Vision configuration box (dvvC, dvcC, or dvwC) in children.
 		for _, child := range se.Children {
@@ -407,12 +416,14 @@ func parseVisualSampleEntryBox(se *mp4.VisualSampleEntryBox) (*CodecInfo, error)
 		if err != nil {
 			return nil, e(err, "reason", "failed to parse AVC SPS")
 		}
-		return &CodecInfo{
+		info := &CodecInfo{
 			MimeCodecString: avc.CodecString(codecTag, sps),
 			CodecTagString:  codecTag,
 			ProfileIDC:      int(sps.Profile),
 			Level:           int(sps.Level),
-		}, nil
+			Refs:            int(sps.NumRefFrames),
+		}
+		return info, nil
 	default:
 		return &CodecInfo{CodecTagString: codecTag}, nil
 	}
