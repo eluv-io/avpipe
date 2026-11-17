@@ -1319,45 +1319,6 @@ set_pixel_fmt(
     return 0;
 }
 
-/* Keep the decoder's timing clock visible alongside the cadence sent to the
- * encoder. In particular, NVENC consumes AVCodecContext.framerate directly. */
-static void
-log_video_encoder_timing(
-    const char *stage,
-    const coderctx_t *encoder,
-    const coderctx_t *decoder,
-    const xcparams_t *params)
-{
-    int index = decoder->video_stream_index;
-    const AVStream *input = decoder->stream[index];
-    const AVCodecContext *dec = decoder->codec_context[index];
-    const AVCodecContext *enc = encoder->codec_context[index];
-    const AVStream *output = encoder->stream[index];
-    elv_log("VIDEO TIMING stage=%s encoder=%s format=%s stream=%d "
-        "r_frame_rate=%d/%d avg_frame_rate=%d/%d decoder_rate=%d/%d nominal_rate=%d/%d "
-        "encoder_rate=%d/%d input_timebase=%d/%d encoder_timebase=%d/%d "
-        "output_timebase=%d/%d deinterlace=%d extradata_size=%d ffmpeg=%s avcodec=%u url=%s",
-        stage, params->ecodec, params->format, index,
-        input->r_frame_rate.num, input->r_frame_rate.den,
-        input->avg_frame_rate.num, input->avg_frame_rate.den,
-        dec->framerate.num, dec->framerate.den,
-        decoder->nominal_frame_rate.num, decoder->nominal_frame_rate.den,
-        enc->framerate.num, enc->framerate.den,
-        input->time_base.num, input->time_base.den, enc->time_base.num, enc->time_base.den,
-        output->time_base.num, output->time_base.den,
-        params->deinterlace, enc->extradata_size, av_version_info(), avcodec_version(), params->url);
-    /* Compare these encoder-produced SPS/PPS bytes with the init's avcC to
-     * distinguish encoder signaling from any later muxer rewriting. */
-    if (enc->extradata && enc->extradata_size > 0) {
-        char hex[1025];
-        int size = enc->extradata_size < 512 ? enc->extradata_size : 512;
-        for (int i = 0; i < size; i++)
-            snprintf(hex + 2*i, 3, "%02x", enc->extradata[i]);
-        elv_log("VIDEO TIMING extradata stage=%s encoder=%s bytes=%d shown=%d hex=%s url=%s",
-            stage, params->ecodec, enc->extradata_size, size, hex, params->url);
-    }
-}
-
 static int
 prepare_video_encoder(
     coderctx_t *encoder_context,
@@ -1689,14 +1650,11 @@ prepare_video_encoder(
         }
     }
 
-    log_video_encoder_timing("before-open", encoder_context, decoder_context, params);
-
     /* Open video encoder (initialize the encoder codec_context[i] using given codec[i]). */
     if ((rc = avcodec_open2(encoder_context->codec_context[index], encoder_context->codec[index], NULL)) < 0) {
         elv_err("Could not open encoder for video, err=%d", rc);
         return eav_open_codec;
     }
-    log_video_encoder_timing("after-open", encoder_context, decoder_context, params);
 
     /* Set stream parameters after avcodec_open2() */
     if (avcodec_parameters_from_context(
@@ -4098,8 +4056,6 @@ avpipe_xc(
         rc = eav_write_header;
         goto xc_done;
     }
-    if ((params->xc_type & xc_video) && !params->bypass_transcoding)
-        log_video_encoder_timing("after-header", encoder_context, decoder_context, params);
 
     if (params->xc_type & xc_audio) {
         for (int i=0; i<encoder_context->n_audio_output; i++) {
