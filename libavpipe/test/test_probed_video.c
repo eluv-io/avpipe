@@ -165,7 +165,7 @@ static void test_equivalent_rationals_are_normalized(void)
     TEST_ASSERT_EQUAL_INT(1, decoder.nominal_frame_rate.den);
 }
 
-static void test_encoder_uses_nominal_cadence_not_vui_clock_or_average(void)
+static void test_encoder_uses_nominal_framerate(void)
 {
     decoder.live_proto = avp_proto_none;
     decoder.live_container = avp_container_none;
@@ -215,7 +215,7 @@ int main(void)
     RUN_TEST(test_invalid_stream_or_timebase_fails);
     RUN_TEST(test_audio_and_probe_only_do_not_require_video_rate);
     RUN_TEST(test_equivalent_rationals_are_normalized);
-    RUN_TEST(test_encoder_uses_nominal_cadence_not_vui_clock_or_average);
+    RUN_TEST(test_encoder_uses_nominal_framerate);
     RUN_TEST(test_encoder_preserves_ntsc_and_applies_deinterlacing_once);
     return UNITY_END();
 }
