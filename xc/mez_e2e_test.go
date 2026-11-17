@@ -583,9 +583,9 @@ func TestABRCreate(t *testing.T) {
 	runABRCreate(t, mezTestSources, mezDir, segsDir)
 }
 
-// TestABRMezVUITiming guards against passing the VFR SPS timing clock to an
-// encoder as its frame rate. This 30-second mez part has 50 fps sample timing,
-// but its SPS exposes a 90 kHz clock. NVENC previously signaled fixed 29.97 fps.
+// TestABRMezVUITiming guards against using source media timebase (eg MPEGTS 1/90,000) as
+// encoder frame rate. Use a 30.000 sec mez part obtained from a 50 fps MPEGTS input.
+// NVENC ABR init segments previously included an incorrect VUI with 60,000 timescale and 1001 frame duration.
 func TestABRMezVUITiming(t *testing.T) {
 	const source = "../media/PARTS/hqt_BcFhKjte8ymiqaFqCdfPV8KsCWzg4K7ZtMwuSs8V.mp4"
 	skipIfFileMissing(t, source)

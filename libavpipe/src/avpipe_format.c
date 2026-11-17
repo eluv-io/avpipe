@@ -101,6 +101,11 @@ validate_probed_video_stream(
     return eav_success;
 }
 
+/*
+ * Determine the encoder "nominal" framerate
+ * Deliberately avoid some formats exposing timebase as decoder framerate (eg. MPEGTS 1/90,000)
+ * and average frame rates (which will be skewed when missing frames).
+ */
 int
 configure_video_encoder_framerate(
     AVCodecContext *encoder,
@@ -112,9 +117,6 @@ configure_video_encoder_framerate(
         elv_err("Encoder requires validated nominal video frame rate, url=%s", params->url);
         return eav_stream_info;
     }
-    /* A VFR SPS can expose its timing clock (e.g. 90000/1) as the decoder's
-     * framerate. That is not an encoding cadence. Preserve timestamp timebases
-     * independently and pass the validated nominal cadence to the encoder. */
     if (params->deinterlace == dif_bwdif)
         rate = av_mul_q(rate, (AVRational){2, 1});
     encoder->framerate = rate;
