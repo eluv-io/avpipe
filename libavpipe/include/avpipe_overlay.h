@@ -42,6 +42,8 @@ overlay_set_slot(
     float y,
     float size,
     float h,
+    float aspect,
+    int in_slot,
     int align,
     const char *font_file,
     const char *color,

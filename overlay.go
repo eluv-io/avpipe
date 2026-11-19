@@ -21,6 +21,11 @@ import (
 const (
 	overlayImageHidden  = -1 // C OV_IMAGE_HIDDEN
 	overlayImageDefault = -2 // C OV_IMAGE_DEFAULT
+	overlaySlotNone     = -1 // C OV_SLOT_NONE
+
+	// An image slot's aspect, width over height. The bounds only keep the rect's arithmetic sane.
+	overlayMinAspect = 0.01
+	overlayMaxAspect = 100.0
 )
 
 var overlaySlotTypes = map[string]C.int{
@@ -58,6 +63,16 @@ func overlayImageNames(p *goavpipe.OverlayParams) []string {
 	}
 	sort.Strings(names)
 	return names
+}
+
+// overlaySlotIndex returns the position of the slot called name, overlaySlotNone if there is none.
+func overlaySlotIndex(p *goavpipe.OverlayParams, name string) int {
+	for i, s := range p.Slots {
+		if s.Name == name {
+			return i
+		}
+	}
+	return overlaySlotNone
 }
 
 // overlayColorOK accepts ffmpeg colour syntax (names, 0xRRGGBB[AA], @alpha) and nothing the filter graph parser
@@ -114,6 +129,13 @@ func overlayCheckLayout(p *goavpipe.OverlayParams) (map[string]int, error) {
 		images[name] = i
 	}
 
+	// The slot a text or clock slot is placed in may come after it in the list
+	imageSlots := make(map[string]int, len(p.Slots))
+	for i, s := range p.Slots {
+		if s.Type == goavpipe.OverlaySlotImage {
+			imageSlots[s.Name] = i
+		}
+	}
 	seen := make(map[string]bool, len(p.Slots))
 	for i, s := range p.Slots {
 		if s.Name == "" {
@@ -138,15 +160,28 @@ func overlayCheckLayout(p *goavpipe.OverlayParams) (map[string]int, error) {
 		if s.Fade < 0 || s.Fade > math.MaxInt32 {
 			return nil, fmt.Errorf("slot %q: invalid fade %d", s.Name, s.Fade)
 		}
+		if s.Aspect != 0 && (s.Type != goavpipe.OverlaySlotImage || s.Aspect < overlayMinAspect ||
+			s.Aspect > overlayMaxAspect) {
+			return nil, fmt.Errorf("slot %q: aspect is for image slots, within %g..%g", s.Name, overlayMinAspect,
+				overlayMaxAspect)
+		}
 		if s.Type == goavpipe.OverlaySlotImage {
-			if s.H <= 0 || s.H > 1 {
-				return nil, fmt.Errorf("slot %q: an image slot needs h within 0..1", s.Name)
+			if s.H < 0 || s.H > 1 || s.H == 0 && s.Aspect == 0 {
+				return nil, fmt.Errorf("slot %q: an image slot needs h within 0..1, or an aspect", s.Name)
+			}
+			if s.In != "" {
+				return nil, fmt.Errorf("slot %q: an image slot is placed in the frame, not in %q", s.Name, s.In)
 			}
 			if _, ok := images[s.Default]; s.Default != "" && !ok {
 				return nil, fmt.Errorf("slot %q: default image %q is not in the library", s.Name, s.Default)
 			}
-		} else if s.Font == "" {
-			return nil, fmt.Errorf("slot %q: a font is required", s.Name)
+		} else {
+			if s.Font == "" {
+				return nil, fmt.Errorf("slot %q: a font is required", s.Name)
+			}
+			if _, ok := imageSlots[s.In]; s.In != "" && !ok {
+				return nil, fmt.Errorf("slot %q: in names %q, which is not an image slot", s.Name, s.In)
+			}
 		}
 		if !overlayColorOK(s.Color) {
 			return nil, fmt.Errorf("slot %q: invalid color %q", s.Name, s.Color)
@@ -183,9 +218,13 @@ func setCOverlay(cparams *C.xcparams_t, p *goavpipe.OverlayParams) error {
 		if s.Default != "" {
 			defaultImage = images[s.Default]
 		}
+		in := overlaySlotNone
+		if s.In != "" {
+			in = overlaySlotIndex(p, s.In)
+		}
 		rc := C.overlay_set_slot(cparams, C.int(i), overlaySlotTypes[s.Type],
-			C.float(s.X), C.float(s.Y), C.float(s.Size), C.float(s.H), overlayAligns[s.Align], font, color,
-			overlayClockFormats[s.Format], C.int(defaultImage), C.int(s.Fade))
+			C.float(s.X), C.float(s.Y), C.float(s.Size), C.float(s.H), C.float(s.Aspect), C.int(in),
+			overlayAligns[s.Align], font, color, overlayClockFormats[s.Format], C.int(defaultImage), C.int(s.Fade))
 		C.free(unsafe.Pointer(font))
 		C.free(unsafe.Pointer(color))
 		if err := avpipeError(rc); err != nil {

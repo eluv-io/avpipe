@@ -24,23 +24,27 @@ import (
 	"github.com/eluv-io/avpipe/goavpipe"
 )
 
+// overlaySolidPNG is a PNG of one colour.
+func overlaySolidPNG(t *testing.T, w, h int, c color.NRGBA) []byte {
+	t.Helper()
+	img := image.NewNRGBA(image.Rect(0, 0, w, h))
+	for y := 0; y < h; y++ {
+		for x := 0; x < w; x++ {
+			img.SetNRGBA(x, y, c)
+		}
+	}
+	var buf bytes.Buffer
+	if err := png.Encode(&buf, img); err != nil {
+		t.Fatal(err)
+	}
+	return buf.Bytes()
+}
+
 // overlayTestImages makes the image library in the test: a translucent dark bar for the background and two
 // solid squares for a possession marker.
 func overlayTestImages(t *testing.T) map[string][]byte {
 	t.Helper()
-	solid := func(w, h int, c color.NRGBA) []byte {
-		img := image.NewNRGBA(image.Rect(0, 0, w, h))
-		for y := 0; y < h; y++ {
-			for x := 0; x < w; x++ {
-				img.SetNRGBA(x, y, c)
-			}
-		}
-		var buf bytes.Buffer
-		if err := png.Encode(&buf, img); err != nil {
-			t.Fatal(err)
-		}
-		return buf.Bytes()
-	}
+	solid := func(w, h int, c color.NRGBA) []byte { return overlaySolidPNG(t, w, h, c) }
 	// green is taller than the slot it goes into, so it is fitted by height, and than red, so a rect that
 	// depended on the images known at start would differ between jobs
 	return map[string][]byte{
@@ -383,10 +387,16 @@ const (
 // height and covers the left half (the fast encode params shrink the output, so it is measured from the image).
 func overlayMarker(t *testing.T, outPath string, pts int64) color.RGBA {
 	t.Helper()
+	return overlayPixel(overlayFrame(t, outPath, pts), 0.36+0.012, 0.06+0.044)
+}
+
+// overlayFrame reads the frame extracted for pts. Files are named by the output pts; with pts < 0 it is the only
+// frame extracted, whatever its name.
+func overlayFrame(t *testing.T, outPath string, pts int64) image.Image {
+	t.Helper()
 	files, err := os.ReadDir(outPath)
 	require.NoError(t, err)
 	for _, f := range files {
-		// Files are named by the output pts; with pts < 0 take the only frame extracted, whatever its name
 		if pts >= 0 && !strings.HasPrefix(f.Name(), strconv.FormatInt(pts, 10)+".") {
 			continue
 		}
@@ -395,11 +405,16 @@ func overlayMarker(t *testing.T, outPath string, pts int64) color.RGBA {
 		defer fh.Close()
 		img, _, err := image.Decode(fh)
 		require.NoError(t, err)
-		w, h := float64(img.Bounds().Dx()), float64(img.Bounds().Dy())
-		return color.RGBAModel.Convert(img.At(int(0.36*w+0.012*w), int(0.06*h+0.044*h))).(color.RGBA)
+		return img
 	}
 	t.Fatalf("no image for pts %d", pts)
-	return color.RGBA{}
+	return nil
+}
+
+// overlayPixel samples img at fractions of its width and height.
+func overlayPixel(img image.Image, fx, fy float64) color.RGBA {
+	w, h := float64(img.Bounds().Dx()), float64(img.Bounds().Dy())
+	return color.RGBAModel.Convert(img.At(int(fx*w), int(fy*h))).(color.RGBA)
 }
 
 // TestOverlayFadeFrames extracts frames before and halfway through the possession marker's 1 s cross-fade from
@@ -462,6 +477,174 @@ func TestOverlayAlphaBlend(t *testing.T) {
 		want := (int(c.u) + 255) / 2
 		assert.InDelta(t, want, int(c.o), 8, "%s: expected about (%d+255)/2", c.name, c.u)
 	}
+}
+
+// TestOverlayImageAlign: an image slot's align says which edge of the drawn image X anchors, as it does for text.
+// The image is taller than its rect, so it is fitted by height and narrower than the rect: left starts it at X,
+// center puts its middle on X and right ends it at X. In a cross-fade each image keeps its own place.
+func TestOverlayImageAlign(t *testing.T) {
+	url := videoBigBuckBunnyPath
+	checkFileExists(t, url)
+
+	// Magenta, a colour the clip's title card does not have
+	images := map[string][]byte{"tall": overlaySolidPNG(t, 60, 120, color.NRGBA{255, 0, 255, 255})}
+	events := []goavpipe.OverlayEvent{overlayEvent(1, 0, false,
+		map[string]goavpipe.SlotValue{"mark": goavpipe.ImageValue("tall")})}
+	const x, y, size, h = 0.5, 0.4, 0.5, 0.2
+	isMark := func(c color.RGBA) bool { return c.R > 170 && c.B > 170 && c.G < 100 }
+
+	// Probes left and right of X, at 0.3 and 0.8 of the drawn image's width
+	for _, tc := range []struct {
+		align string
+		want  [4]bool // at -0.8, -0.3, +0.3, +0.8
+	}{
+		{"", [4]bool{false, false, true, true}},
+		{"left", [4]bool{false, false, true, true}},
+		{"center", [4]bool{false, true, true, false}},
+		{"right", [4]bool{true, true, false, false}},
+	} {
+		t.Run("align="+tc.align, func(t *testing.T) {
+			overlay := &goavpipe.OverlayParams{
+				Timescale: 30000,
+				Images:    images,
+				Slots: []goavpipe.OverlaySlot{
+					{Name: "mark", Type: goavpipe.OverlaySlotImage, X: x, Y: y, Size: size, H: h, Align: tc.align},
+				},
+			}
+			outPath := path.Join(baseOutPath, fn(), "align-"+tc.align)
+			xcTest2(t, outPath, overlayExtractParams(url, overlay, events, overlayFrame15), nil)
+			img := overlayFrame(t, outPath, overlayFrame15)
+			// The drawn image is h of the frame's height tall and half that wide
+			imgW := h / 2 * float64(img.Bounds().Dy()) / float64(img.Bounds().Dx())
+			for i, off := range []float64{-0.8, -0.3, 0.3, 0.8} {
+				c := overlayPixel(img, x+off*imgW, y+h/2)
+				assert.Equal(t, tc.want[i], isMark(c), "at %+.1f image widths from x: %v", off, c)
+			}
+		})
+	}
+
+	// Halfway through a fade from the tall image to one twice as wide, both centred on X, the pixels they share
+	// are the even mix of the two: magenta and cyan, both opaque, give (127, 127, 255)
+	t.Run("fade", func(t *testing.T) {
+		overlay := &goavpipe.OverlayParams{
+			Timescale: 30000,
+			Images: map[string][]byte{"tall": images["tall"],
+				"square": overlaySolidPNG(t, 120, 120, color.NRGBA{0, 255, 255, 255})},
+			Slots: []goavpipe.OverlaySlot{
+				{Name: "mark", Type: goavpipe.OverlaySlotImage, X: x, Y: y, Size: size, H: h, Align: "center", Fade: 1000},
+			},
+		}
+		fade := append(events[:1:1], overlayEvent(2, 60000, false,
+			map[string]goavpipe.SlotValue{"mark": goavpipe.ImageValue("square")}))
+		outPath := path.Join(baseOutPath, fn(), "fade")
+		xcTest2(t, outPath, overlayExtractParams(url, overlay, fade, overlayFrame25), nil)
+		img := overlayFrame(t, outPath, overlayFrame25)
+		imgW := h / 2 * float64(img.Bounds().Dy()) / float64(img.Bounds().Dx())
+		for _, off := range []float64{-0.3, 0.3} {
+			c := overlayPixel(img, x+off*imgW, y+h/2)
+			assert.InDelta(t, 127, int(c.R), 30, "at %+.1f: %v", off, c)
+			assert.InDelta(t, 127, int(c.G), 30, "at %+.1f: %v", off, c)
+			assert.Greater(t, int(c.B), 200, "at %+.1f: %v", off, c)
+		}
+	})
+
+	// An image whose anchored rect starts left of the frame is cut off there, the job does not fail
+	t.Run("off the frame", func(t *testing.T) {
+		overlay := &goavpipe.OverlayParams{
+			Timescale: 30000,
+			Images:    images,
+			Slots: []goavpipe.OverlaySlot{
+				{Name: "mark", Type: goavpipe.OverlaySlotImage, X: 0.02, Y: y, Size: size, H: h, Align: "right"},
+			},
+		}
+		outPath := path.Join(baseOutPath, fn(), "off-frame")
+		xcTest2(t, outPath, overlayExtractParams(url, overlay, events, overlayFrame15), nil)
+		img := overlayFrame(t, outPath, overlayFrame15)
+		assert.True(t, isMark(overlayPixel(img, 0.01, y+h/2)), "the part inside the frame is drawn")
+		assert.False(t, isMark(overlayPixel(img, 0.04, y+h/2)), "nothing right of x")
+	})
+}
+
+// overlayBounds returns the bounding box of the pixels of img that match.
+func overlayBounds(img image.Image, match func(c color.RGBA) bool) image.Rectangle {
+	var box image.Rectangle
+	b := img.Bounds()
+	for y := b.Min.Y; y < b.Max.Y; y++ {
+		for x := b.Min.X; x < b.Max.X; x++ {
+			r, g, bl, _ := img.At(x, y).RGBA()
+			if match(color.RGBA{uint8(r >> 8), uint8(g >> 8), uint8(bl >> 8), 255}) {
+				box = box.Union(image.Rect(x, y, x+1, y+1))
+			}
+		}
+	}
+	return box
+}
+
+// TestOverlaySlotInImage draws one layout, an image slot with an aspect and a text slot placed in it, on a wide
+// and on a narrow frame. The image slot is limited by its height on the wide frame and by its width on the narrow
+// one, keeps its shape and the middle of the frame, and the text has the same place and size inside it on both.
+func TestOverlaySlotInImage(t *testing.T) {
+	url := videoBigBuckBunnyPath
+	checkFileExists(t, url)
+	font := overlayTestFont(t)
+
+	// Magenta under green text, colours the clip's title card does not have
+	const x, y, size, h, aspect = 0.5, 0.1, 0.9, 0.25, 3.2
+	overlay := &goavpipe.OverlayParams{
+		Timescale: 30000,
+		Images:    map[string][]byte{"board": overlaySolidPNG(t, 320, 100, color.NRGBA{255, 0, 255, 255})},
+		Slots: []goavpipe.OverlaySlot{
+			{Name: "label", Type: goavpipe.OverlaySlotText, In: "board", X: 0.75, Y: 0.25, Size: 0.5, Font: font,
+				Color: "0x00FF00", Align: "center"},
+			{Name: "board", Type: goavpipe.OverlaySlotImage, X: x, Y: y, Size: size, H: h, Aspect: aspect,
+				Align: "center", Default: "board"},
+		},
+	}
+	events := []goavpipe.OverlayEvent{overlayEvent(1, 0, false,
+		map[string]goavpipe.SlotValue{"label": goavpipe.TextValue("HH")})}
+	isBoard := func(c color.RGBA) bool { return c.R > 170 && c.B > 170 && c.G < 100 }
+	isText := func(c color.RGBA) bool { return c.G > 170 && c.R < 100 && c.B < 100 }
+
+	// Where the text is inside the board, as fractions of the board
+	type placement struct{ midX, top, height float64 }
+	draw := func(name string, w, h int) (board image.Rectangle, text placement) {
+		params := overlayExtractParams(url, overlay, events, overlayFrame15)
+		params.EncWidth, params.EncHeight = int32(w), int32(h)
+		outPath := path.Join(baseOutPath, fn(), name)
+		xcTest2(t, outPath, params, nil)
+		img := overlayFrame(t, outPath, overlayFrame15)
+		require.Equal(t, image.Pt(w, h), img.Bounds().Size())
+		board = overlayBounds(img, func(c color.RGBA) bool { return isBoard(c) || isText(c) })
+		label := overlayBounds(img, isText)
+		require.False(t, board.Empty() || label.Empty(), "%s: board %v, text %v", name, board, label)
+		require.True(t, label.In(board), "%s: text %v outside the board %v", name, label, board)
+		bw, bh := float64(board.Dx()), float64(board.Dy())
+		return board, placement{
+			midX:   (float64(label.Min.X+label.Max.X)/2 - float64(board.Min.X)) / bw,
+			top:    float64(label.Min.Y-board.Min.Y) / bh,
+			height: float64(label.Dy()) / bh,
+		}
+	}
+
+	// 640x360: the box is 576x90, so the height limits the board to 288x90
+	wide, inWide := draw("wide", 640, 360)
+	assert.InDelta(t, 288, wide.Dx(), 3)
+	assert.InDelta(t, 90, wide.Dy(), 3)
+	assert.InDelta(t, 320, float64(wide.Min.X+wide.Max.X)/2, 2, "centred on x")
+	assert.InDelta(t, 36, wide.Min.Y, 2)
+
+	// 202x360: the box is 181x90, so the width limits the board to 182x57
+	narrow, inNarrow := draw("narrow", 202, 360)
+	assert.InDelta(t, 182, narrow.Dx(), 3)
+	assert.InDelta(t, 57, narrow.Dy(), 3)
+	assert.InDelta(t, 101, float64(narrow.Min.X+narrow.Max.X)/2, 2, "centred on x")
+	assert.InDelta(t, 36, narrow.Min.Y, 2)
+
+	assert.InDelta(t, 0.75, inWide.midX, 0.03, "the text is centred on its x inside the board")
+	assert.InDelta(t, inWide.midX, inNarrow.midX, 0.03)
+	assert.InDelta(t, inWide.top, inNarrow.top, 0.06)
+	assert.InDelta(t, inWide.height, inNarrow.height, 0.06)
+	assert.Greater(t, inWide.height, 0.25, "the font is sized by the board's height")
 }
 
 // TestOverlayBadEvents checks that an event that does not fit the layout, or an asset that is not a PNG, fails the
@@ -634,22 +817,7 @@ func TestOverlayDefaultBeforeFirstEvent(t *testing.T) {
 // and the text.
 func overlayBar(t *testing.T, outPath string, pts int64) color.RGBA {
 	t.Helper()
-	files, err := os.ReadDir(outPath)
-	require.NoError(t, err)
-	for _, f := range files {
-		if !strings.HasPrefix(f.Name(), strconv.FormatInt(pts, 10)+".") {
-			continue
-		}
-		fh, err := os.Open(path.Join(outPath, f.Name()))
-		require.NoError(t, err)
-		defer fh.Close()
-		img, _, err := image.Decode(fh)
-		require.NoError(t, err)
-		w, h := float64(img.Bounds().Dx()), float64(img.Bounds().Dy())
-		return color.RGBAModel.Convert(img.At(int(0.2*w), int(0.35*h))).(color.RGBA)
-	}
-	t.Fatalf("no image for pts %d", pts)
-	return color.RGBA{}
+	return overlayPixel(overlayFrame(t, outPath, pts), 0.2, 0.35)
 }
 
 // TestOverlayCancelWhileWaiting: XcCancel ends a job that is waiting for an event, with EAV_CANCELLED, well before

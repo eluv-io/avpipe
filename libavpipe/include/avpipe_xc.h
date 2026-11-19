@@ -198,13 +198,21 @@ typedef enum ov_timeout {
     ov_timeout_hold = 1         // The previous event stays in effect
 } ov_timeout;
 
+/*
+ * An image slot is placed in the output frame. size by h is the largest width and height it may take; its rect is
+ * that box, or with an aspect the largest rect of that aspect inside the box (h 0 is the frame's height). A text or
+ * clock slot is placed in the output frame, or with in_slot inside that image slot's rect: x, y and size are then
+ * fractions of the rect.
+ */
 typedef struct ov_slot_t {
     ov_slot_type type;
-    float       x;              // Anchor as a fraction of the output width (which text edge depends on align)
-    float       y;              // Top edge as a fraction of the output height
-    float       size;           // text/clock: font size as a fraction of the output height; image: width fraction
-    float       h;              // image: height as a fraction of the output height; 0 fits the images known at start
-    ov_align    align;
+    float       x;              // Anchor as a fraction of the output width, or of in_slot's rect (the edge depends on align)
+    float       y;              // Top edge as a fraction of the output height, or of in_slot's rect
+    float       size;           // text/clock: font size as a fraction of the output height, or of in_slot's rect; image: width fraction
+    float       h;              // image: height as a fraction of the output height; with an aspect, 0 is the whole height
+    float       aspect;         // image: width over height of the rect, 0 makes the size by h box the rect
+    int         in_slot;        // text/clock: index of the image slot it is placed in, OV_SLOT_NONE for the frame
+    ov_align    align;          // The edge x anchors: of the drawn text, or of the image slot's rect and the image in it
     char        *font_file;     // text/clock
     char        *color;         // text/clock, ffmpeg colour syntax
     ov_clock_format clock_format;
@@ -236,6 +244,7 @@ typedef struct ov_event_t {
     int         *image;         // [nslots] library index per image slot, -1 hidden, -2 the slot's default
 } ov_event_t;
 
+#define OV_SLOT_NONE        (-1)
 #define OV_IMAGE_HIDDEN     (-1)
 #define OV_IMAGE_DEFAULT    (-2)
 
