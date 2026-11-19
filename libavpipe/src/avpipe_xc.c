@@ -610,8 +610,7 @@ prepare_decoder(
 
     dump_decoder(inctx->url, decoder_context);
 
-    /* All stream selection and probing is complete. Validate before preparing
-     * any encoder or writing headers. */
+    /* Probing and stream selection is complete here - validate, calculate and store the nominal input framerate */
     if ((rc = validate_probed_video_stream(decoder_context, params)) != eav_success)
         return rc;
 
