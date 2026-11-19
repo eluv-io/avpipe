@@ -165,6 +165,42 @@ static void test_equivalent_rationals_are_normalized(void)
     TEST_ASSERT_EQUAL_INT(1, decoder.nominal_frame_rate.den);
 }
 
+static void test_encoder_uses_nominal_framerate(void)
+{
+    decoder.live_proto = avp_proto_none;
+    decoder.live_container = avp_container_none;
+    decoder.codec_context[video->index]->framerate = (AVRational){90000, 1};
+    video->avg_frame_rate = (AVRational){130, 3};
+    TEST_ASSERT_EQUAL_INT(eav_success, validate_probed_video_stream(&decoder, &params));
+    AVCodecContext encoder = {.time_base = {1, 90000}};
+    TEST_ASSERT_EQUAL_INT(eav_success, configure_video_encoder_framerate(&encoder, &decoder, &params));
+    TEST_ASSERT_EQUAL_INT(50, encoder.framerate.num);
+    TEST_ASSERT_EQUAL_INT(1, encoder.framerate.den);
+    TEST_ASSERT_EQUAL_INT(90000, encoder.time_base.den);
+    TEST_ASSERT_EQUAL_INT(90000, decoder.codec_context[video->index]->framerate.num);
+    TEST_ASSERT_EQUAL_INT(130, video->avg_frame_rate.num);
+}
+
+static void test_encoder_preserves_ntsc_and_applies_deinterlacing_once(void)
+{
+    video->r_frame_rate = (AVRational){30000, 1001};
+    decoder.codec_context[video->index]->framerate = video->r_frame_rate;
+    TEST_ASSERT_EQUAL_INT(eav_success, validate_probed_video_stream(&decoder, &params));
+    AVCodecContext encoder = {.time_base = {1, 90000}};
+    params.deinterlace = dif_bwdif;
+    for (int i = 0; i < 2; i++) {
+        TEST_ASSERT_EQUAL_INT(eav_success, configure_video_encoder_framerate(&encoder, &decoder, &params));
+        TEST_ASSERT_EQUAL_INT(60000, encoder.framerate.num);
+        TEST_ASSERT_EQUAL_INT(1001, encoder.framerate.den);
+    }
+    params.deinterlace = dif_bwdif_frame;
+    TEST_ASSERT_EQUAL_INT(eav_success, configure_video_encoder_framerate(&encoder, &decoder, &params));
+    TEST_ASSERT_EQUAL_INT(30000, encoder.framerate.num);
+    TEST_ASSERT_EQUAL_INT(1001, encoder.framerate.den);
+    decoder.nominal_frame_rate = (AVRational){0, 1};
+    TEST_ASSERT_EQUAL_INT(eav_stream_info, configure_video_encoder_framerate(&encoder, &decoder, &params));
+}
+
 int main(void)
 {
     UNITY_BEGIN();
@@ -179,5 +215,7 @@ int main(void)
     RUN_TEST(test_invalid_stream_or_timebase_fails);
     RUN_TEST(test_audio_and_probe_only_do_not_require_video_rate);
     RUN_TEST(test_equivalent_rationals_are_normalized);
+    RUN_TEST(test_encoder_uses_nominal_framerate);
+    RUN_TEST(test_encoder_preserves_ntsc_and_applies_deinterlacing_once);
     return UNITY_END();
 }

@@ -102,6 +102,28 @@ validate_probed_video_stream(
     return eav_success;
 }
 
+/*
+ * Determine the encoder "nominal" framerate
+ * Deliberately avoid some formats exposing timebase as decoder framerate (eg. MPEGTS 1/90,000)
+ * and average frame rates (which will be skewed when missing frames).
+ */
+int
+configure_video_encoder_framerate(
+    AVCodecContext *encoder,
+    const coderctx_t *decoder,
+    const xcparams_t *params)
+{
+    AVRational rate = decoder->nominal_frame_rate;
+    if (rate.num <= 0 || rate.den <= 0) {
+        elv_err("Encoder requires validated nominal video frame rate, url=%s", params->url);
+        return eav_stream_info;
+    }
+    if (params->deinterlace == dif_bwdif)
+        rate = av_mul_q(rate, (AVRational){2, 1});
+    encoder->framerate = rate;
+    return eav_success;
+}
+
 
 avp_live_proto_t
 find_live_proto(

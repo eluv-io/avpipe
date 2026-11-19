@@ -19,17 +19,22 @@
 package xc_test
 
 import (
+	"context"
 	"encoding/hex"
 	"flag"
 	"fmt"
 	"math/big"
 	"os"
+	"os/exec"
 	"path"
 	"path/filepath"
+	"runtime"
 	"sort"
 	"strings"
 	"testing"
+	"time"
 
+	"github.com/Eyevinn/mp4ff/avc"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
@@ -576,6 +581,109 @@ func TestABRCreate(t *testing.T) {
 	}
 	t.Skip("run via TestEndToEnd, TestEndToEndSingle, or TestEndToEndBT709Synthesis")
 	runABRCreate(t, mezTestSources, mezDir, segsDir)
+}
+
+// TestABRMezVUITiming guards against using source media timebase (eg MPEGTS 1/90,000) as
+// encoder frame rate. Use a 30.000 sec mez part obtained from a 50 fps MPEGTS input.
+// NVENC ABR init segments previously included an incorrect VUI with 60,000 timescale and 1001 frame duration.
+func TestABRMezVUITiming(t *testing.T) {
+	const source = "../media/PARTS/hqt_BcFhKjte8ymiqaFqCdfPV8KsCWzg4K7ZtMwuSs8V.mp4"
+	skipIfFileMissing(t, source)
+	sourceFrames, _, err := xc.SourceMP4FrameTimings(source)
+	require.NoError(t, err)
+	require.Len(t, sourceFrames, 1500, "expected the complete 30-second, 50 fps incident part")
+	for _, frame := range sourceFrames {
+		require.EqualValues(t, 1800, frame.Duration, "source sample duration")
+	}
+
+	for _, encoder := range []string{"libx264", "h264_nvenc", "h264_videotoolbox"} {
+		t.Run(encoder, func(t *testing.T) {
+			if encoder == "h264_nvenc" && !testutil.NvidiaExist() {
+				t.Skip("NVIDIA GPU unavailable")
+			}
+			if encoder == "h264_videotoolbox" {
+				if runtime.GOOS != "darwin" {
+					t.Skip("VideoToolbox requires macOS")
+				}
+				// Require hardware encoding; a software fallback would hide GPU coverage.
+				ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+				defer cancel()
+				out, err := exec.CommandContext(ctx, "ffmpeg", "-v", "error", "-f", "lavfi", "-i",
+					"color=size=1280x720:rate=50", "-frames:v", "1", "-c:v", encoder,
+					"-allow_sw", "0", "-f", "null", "-").CombinedOutput()
+				if err != nil {
+					t.Skipf("VideoToolbox hardware preflight unavailable: %v: %s", err, out)
+				}
+			}
+			for _, format := range []string{"dash", "hls"} {
+				t.Run(format, func(t *testing.T) {
+					outDir := filepath.Join(testOutBase, "xc_test."+t.Name())
+					resetDir(t, outDir)
+					p := goavpipe.NewXcParams()
+					p.Url, p.Format, p.XcType = source, format, goavpipe.XcVideo
+					p.Ecodec, p.Profile = encoder, "high"
+					p.EncWidth, p.EncHeight, p.VideoBitrate = 1280, 720, 4000000
+					p.CrfStr = ""
+					p.SegDuration, p.VideoSegDurationTs = "2", 180000
+					p.ForceKeyInt = 100 // Two seconds at the source's nominal 50 fps.
+					// Deliberately do not override VideoTimeBase or VideoFrameDurationTs.
+					if encoder == "libx264" {
+						p.Preset = "medium"
+					} else if encoder == "h264_nvenc" {
+						p.GPUIndex, p.Preset = 0, "p4"
+					}
+					goavpipe.InitUrlIOHandler(source, &xc.FileInputOpener{}, &xc.FileOutputOpener{Dir: outDir})
+					require.NoError(t, avpipe.Xc(p))
+
+					initPath := filepath.Join(outDir, "vinit-stream0.m4s")
+					init, err := xc.ValidateInitSegment(initPath)
+					require.NoError(t, err)
+					assert.EqualValues(t, 90000, init.Timescale, "init track timescale")
+					require.NotEmpty(t, init.SPS)
+					for _, nalu := range init.SPS {
+						sps, err := avc.ParseSPSNALUnit(nalu, true)
+						require.NoError(t, err)
+						require.NotNil(t, sps.VUI, "output SPS must contain VUI")
+						vui := sps.VUI
+						require.True(t, vui.TimingInfoPresentFlag, "output SPS must contain timing")
+						require.Positive(t, vui.TimeScale)
+						require.Positive(t, vui.NumUnitsInTick)
+						if encoder == "h264_nvenc" {
+							assert.True(t, vui.FixedFrameRateFlag, "NVENC should signal fixed cadence")
+						}
+						// H.264 fixed cadence is time_scale / (2 * num_units_in_tick).
+						// x264's variable-rate signaling can instead describe clock resolution;
+						// its cadence is verified below using the actual sample timing.
+						if vui.FixedFrameRateFlag {
+							assert.EqualValues(t, 100*vui.NumUnitsInTick, vui.TimeScale, "VUI must signal 50 fps")
+						}
+					}
+					chunks, err := filepath.Glob(filepath.Join(outDir, "vchunk-stream0-*.m4s"))
+					require.NoError(t, err)
+					sort.Strings(chunks)
+					require.NotEmpty(t, chunks)
+					assert.Len(t, chunks, 15, "30-second source must produce fifteen 2-second segments")
+					totalFrames := 0
+					var previousEnd uint64
+					for i, chunk := range chunks {
+						result, err := xc.ValidateABRSegment(chunk)
+						require.NoError(t, err)
+						assert.NoError(t, result.AllErrors(), chunk)
+						assert.EqualValues(t, 1800, result.SampleDur, chunk)
+						assert.Equal(t, previousEnd, result.DtsStart, "segment boundary continuity: %s", chunk)
+						previousEnd = result.DtsEnd
+						if i < len(chunks)-1 {
+							assert.Equal(t, 100, result.FrameCount, "full 2-second segment: %s", chunk)
+							assert.EqualValues(t, 180000, result.DtsEnd-result.DtsStart, chunk)
+						}
+						totalFrames += result.FrameCount
+					}
+					assert.Equal(t, len(sourceFrames), totalFrames, "all source frames must survive")
+					assert.EqualValues(t, 2700000, previousEnd, "output must still span 30 seconds")
+				})
+			}
+		})
+	}
 }
 
 func runABRCreate(t *testing.T, sources []mezTestSource, mezDir, segsDir string) {

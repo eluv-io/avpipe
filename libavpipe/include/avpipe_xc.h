@@ -432,7 +432,7 @@ typedef struct coderctx_t {
     int     is_av_synced;               /* will be set to 1 if audio and video are synced */
     int     frame_duration;             /* Will be > 0 if parameter set_equal_fduration is set and doing mez making */
     int     calculated_frame_duration;  /* Approximate/real frame duration of video stream, will be used to fill video frames */
-    AVRational nominal_frame_rate;      /* Validated input cadence; calculated after probing, not yet used by encoders */
+    AVRational nominal_frame_rate;      /* Validated input framerate (after probing, before deinterlacing adjustment) */
 
     volatile int    cancelled;
     volatile int    stopped;

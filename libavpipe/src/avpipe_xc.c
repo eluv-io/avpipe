@@ -1519,13 +1519,8 @@ prepare_video_encoder(
     if (params->rc_max_rate > 0)
         encoder_codec_context->rc_max_rate = params->rc_max_rate;
 
-    encoder_codec_context->framerate = decoder_context->codec_context[index]->framerate;
-    /* Might be safer to use av_guess_frame_rate when decoder framerate is not explicit:
-     * encoder_codec_context->framerate = av_guess_frame_rate(
-     *     decoder_context->format_context, decoder_context->stream[index], NULL);
-     */
-    if (params->deinterlace == dif_bwdif)
-        encoder_codec_context->framerate = av_mul_q(encoder_codec_context->framerate, (AVRational){2, 1});
+    if ((rc = configure_video_encoder_framerate(encoder_codec_context, decoder_context, params)) != eav_success)
+        return rc;
 
     if ((rc = check_video_timebase(encoder_codec_context, decoder_context, params)) != eav_success)
         return rc;
@@ -1697,9 +1692,7 @@ prepare_video_encoder(
     }
 
     encoder_context->stream[index]->time_base = encoder_codec_context->time_base;
-    encoder_context->stream[index]->avg_frame_rate = decoder_context->stream[decoder_context->video_stream_index]->avg_frame_rate;
-    if (params->deinterlace != dif_none)
-        encoder_context->stream[index]->avg_frame_rate = encoder_codec_context->framerate;
+    encoder_context->stream[index]->avg_frame_rate = encoder_codec_context->framerate;
 
     return 0;
 }
