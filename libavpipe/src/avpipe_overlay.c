@@ -406,7 +406,7 @@ ov_alloc_rgba(
     return f;
 }
 
-/* Convert and scale src to an RGBA frame of w x h */
+/* Convert and scale src to an RGBA frame of w x h. Bicubic: bilinear blurs small text when a picture is shrunk */
 static AVFrame *
 ov_to_rgba(
     const AVFrame *src,
@@ -417,7 +417,7 @@ ov_to_rgba(
     if (!dst)
         return NULL;
     struct SwsContext *sws = sws_getContext(src->width, src->height, src->format,
-        w, h, AV_PIX_FMT_RGBA, SWS_BILINEAR, NULL, NULL, NULL);
+        w, h, AV_PIX_FMT_RGBA, SWS_BICUBIC, NULL, NULL, NULL);
     if (!sws) {
         av_frame_free(&dst);
         return NULL;
