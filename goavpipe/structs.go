@@ -414,18 +414,35 @@ const (
 	OverlaySlotImage = "image" // An image from the overlay's library
 )
 
-// OverlaySlot is one drawable element of an overlay. Positions and sizes are fractions of the output frame, so one
-// layout fits every rendition.
+// OverlaySlot is one drawable element of an overlay. Positions and sizes are fractions, so one layout fits every
+// rendition.
+//
+// An image slot is placed in the output frame. Size and H give the largest width and height it may take, as
+// fractions of the frame's width and height. Without Aspect that box is the slot's rect, and each image is scaled
+// to the largest size that fits inside it, keeping its own aspect. With Aspect the rect is the largest one of that
+// aspect that fits inside the box, so it has the same shape in every frame: in a wide frame H limits it, in a
+// narrow one Size does. H may be left out with Aspect, and the frame's height is then the limit. X anchors the
+// rect's left edge, middle or right edge as Align says, and an image narrower than the rect sits at that same edge
+// of it. With Align center and X 0.5 an image keeps the middle of the frame whatever the frame's aspect.
+//
+// A text or clock slot is placed in the output frame, or with In inside the rect of an image slot: X is then a
+// fraction of that rect's width from its left edge, Y a fraction of its height from its top edge, and Size the font
+// size as a fraction of its height. The text follows the image slot wherever its rect lies and however large it is,
+// so a layout whose image slot has an Aspect draws the same picture in frames of different aspect. The rect comes
+// from the layout alone: the images an event names do not move the text. In names an image slot, never a text or
+// clock slot, and an image slot has no In.
 type OverlaySlot struct {
 	Name    string  `json:"name"`
 	Type    string  `json:"type"`              // OverlaySlotText, OverlaySlotClock or OverlaySlotImage
-	X       float64 `json:"x"`                 // Anchor as a fraction of the output width (0..1); see Align
-	Y       float64 `json:"y"`                 // Top edge as a fraction of the output height (0..1)
-	Size    float64 `json:"size"`              // text/clock: font size as a fraction of the output height; image: width as a fraction of the output width
-	H       float64 `json:"h,omitempty"`       // image: height as a fraction of the output height (required); images are scaled to fit inside the rect, keeping their aspect
+	X       float64 `json:"x"`                 // Anchor as a fraction of the output width, or with In of the image slot's rect (0..1); see Align
+	Y       float64 `json:"y"`                 // Top edge as a fraction of the output height, or with In of the image slot's rect (0..1)
+	Size    float64 `json:"size"`              // text/clock: font size as a fraction of the output height, or with In of the image slot's rect; image: largest width as a fraction of the output width
+	H       float64 `json:"h,omitempty"`       // image: largest height as a fraction of the output height; required unless Aspect is set, which makes it the whole height
+	Aspect  float64 `json:"aspect,omitempty"`  // image: width over height of the slot's rect, for example 3.2 for a 512x160 picture; 0 makes the Size by H box the rect
+	In      string  `json:"in,omitempty"`      // text/clock: name of the image slot whose rect X, Y and Size are fractions of; empty places the slot in the output frame
 	Font    string  `json:"font,omitempty"`    // text/clock: a font file, or when it names no file a fontconfig pattern such as "Arial:bold" (needs an ffmpeg built with fontconfig). fontconfig always answers with some font: a pattern that matches nothing, and a file that is missing, are drawn in its default font without an error
 	Color   string  `json:"color,omitempty"`   // text/clock: ffmpeg colour name or 0xRRGGBB[AA], default white
-	Align   string  `json:"align,omitempty"`   // text/clock: left (default), center or right - which edge of the text X anchors
+	Align   string  `json:"align,omitempty"`   // left (default), center or right - which edge X anchors: of the drawn text, or of an image slot's rect and of the image as drawn in it
 	Format  string  `json:"format,omitempty"`  // clock: mm:ss (default), h:mm:ss, game (m:ss above a minute, s.t below) or shot (s above five seconds, s.t below; a countdown is cut off as a shot clock is, 5.9 s left reads 5 and 4.99 s reads 4.9)
 	Default string  `json:"default,omitempty"` // image: library image shown when no event names one
 	Fade    int64   `json:"fade,omitempty"`    // image: every change of the slot (including to or from hidden) cross-fades over this many ms, timed from the event's pts

@@ -6,6 +6,8 @@
  * - The layout is a list of slots. Image slots are drawn into one RGBA canvas, the bounding box of their rects,
  *   which an overlay filter blends onto the scaled frame. Each text/clock slot becomes a named drawtext filter
  *   after the overlay, created with empty text. So images are always under text.
+ * - Every position comes from the layout and the output size alone, fixed when the job starts. A text/clock slot
+ *   is placed in the frame or inside an image slot's rect, never against the image an event names.
  * - Each event is the complete state of every slot from its pts on. On every decoded frame the latest event with
  *   pts <= frame pts is in effect; a slot whose text differs from the last one sent gets one send_command, and
  *   a change in the images redraws the canvas.
@@ -60,8 +62,10 @@ overlay_alloc(
         overlay_free(&ov);
         return NULL;
     }
-    for (int i = 0; i < nslots; i++)
+    for (int i = 0; i < nslots; i++) {
         ov->slots[i].default_image = OV_IMAGE_HIDDEN;
+        ov->slots[i].in_slot = OV_SLOT_NONE;
+    }
     params->overlay = ov;
     return ov;
 }
@@ -102,6 +106,8 @@ overlay_set_slot(
     float y,
     float size,
     float h,
+    float aspect,
+    int in_slot,
     int align,
     const char *font_file,
     const char *color,
@@ -110,7 +116,7 @@ overlay_set_slot(
     int fade_ms)
 {
     ov_params_t *ov = params->overlay;
-    if (!ov || index < 0 || index >= ov->nslots)
+    if (!ov || index < 0 || index >= ov->nslots || in_slot < OV_SLOT_NONE || in_slot >= ov->nslots)
         return eav_param;
     ov_slot_t *slot = &ov->slots[index];
     slot->type = (ov_slot_type) type;
@@ -118,6 +124,8 @@ overlay_set_slot(
     slot->y = y;
     slot->size = size;
     slot->h = h;
+    slot->aspect = aspect;
+    slot->in_slot = in_slot;
     slot->align = (ov_align) align;
     slot->clock_format = (ov_clock_format) clock_format;
     slot->default_image = default_image;
@@ -398,7 +406,7 @@ ov_alloc_rgba(
     return f;
 }
 
-/* Convert and scale src to an RGBA frame of w x h */
+/* Convert and scale src to an RGBA frame of w x h. Bicubic: bilinear blurs small text when a picture is shrunk */
 static AVFrame *
 ov_to_rgba(
     const AVFrame *src,
@@ -409,7 +417,7 @@ ov_to_rgba(
     if (!dst)
         return NULL;
     struct SwsContext *sws = sws_getContext(src->width, src->height, src->format,
-        w, h, AV_PIX_FMT_RGBA, SWS_BILINEAR, NULL, NULL, NULL);
+        w, h, AV_PIX_FMT_RGBA, SWS_BICUBIC, NULL, NULL, NULL);
     if (!sws) {
         av_frame_free(&dst);
         return NULL;
@@ -507,13 +515,16 @@ ov_blit(
 
 /*
  * Cross-fade: dst = (1 - t) * old + t * new, in premultiplied terms, written back as straight alpha. Either
- * image may be NULL (nothing). Both are placed at the rect's top left; dst is the rect's size and is overwritten.
+ * image may be NULL (nothing). Both are placed at the rect's top, old_x and new_x from its left; dst is the
+ * rect's size and is overwritten.
  */
 static void
 ov_lerp(
     AVFrame *dst,
     const AVFrame *old,
+    int old_x,
     const AVFrame *new,
+    int new_x,
     int t)
 {
     for (int y = 0; y < dst->height; y++) {
@@ -521,18 +532,30 @@ ov_lerp(
         const uint8_t *n = new && y < new->height ? new->data[0] + y * new->linesize[0] : NULL;
         uint8_t *d = dst->data[0] + y * dst->linesize[0];
         for (int x = 0; x < dst->width; x++, d += 4) {
-            int oa = o && x < old->width ? o[x * 4 + 3] * (255 - t) : 0;   // x255
-            int na = n && x < new->width ? n[x * 4 + 3] * t : 0;
+            int xo = x - old_x, xn = x - new_x;
+            int oa = o && xo >= 0 && xo < old->width ? o[xo * 4 + 3] * (255 - t) : 0;   // x255
+            int na = n && xn >= 0 && xn < new->width ? n[xn * 4 + 3] * t : 0;
             int a = oa + na;
             if (a == 0) {
                 memset(d, 0, 4);
                 continue;
             }
             for (int c = 0; c < 3; c++)
-                d[c] = ((oa ? o[x * 4 + c] * oa : 0) + (na ? n[x * 4 + c] * na : 0) + a / 2) / a;
+                d[c] = ((oa ? o[xo * 4 + c] * oa : 0) + (na ? n[xn * 4 + c] * na : 0) + a / 2) / a;
             d[3] = (a + 127) / 255;
         }
     }
+}
+
+/* Where an image fitted to width w starts inside its slot's rect: the slot's align is the edge it keeps */
+static int
+ov_image_x(
+    const ov_slot_t *slot,
+    const int *rect,
+    const AVFrame *img)
+{
+    int room = img ? rect[2] - img->width : 0;
+    return slot->align == ov_align_center ? room / 2 : slot->align == ov_align_right ? room : 0;
 }
 
 /* Scale img to the largest size that fits inside the rect, keeping its aspect ratio */
@@ -598,28 +621,30 @@ ov_draw_canvas(
         AVFrame *new = NULL, *old = NULL;
         if (j >= 0 && !(new = ov_scaled_image(st, ov, i, j, &st->slot_scaled[i], &st->slot_scaled_for[i], url)))
             return eav_overlay;
+        int new_x = ov_image_x(&ov->slots[i], rect, new);
 
         if (st->fade_from[i] != OV_FADE_NONE && ts - st->fade_start[i] < st->fade_ts[i]) {
             int t = (int) ((ts - st->fade_start[i]) * 255 / st->fade_ts[i]);
             if (st->fade_from[i] >= 0 && !(old = ov_scaled_image(st, ov, i, st->fade_from[i],
                     &st->fade_scaled[i], &st->fade_scaled_for[i], url)))
                 return eav_overlay;
+            int old_x = ov_image_x(&ov->slots[i], rect, old);
             if (old && new) {
                 AVFrame *mix = ov_alloc_rgba(rect[2], rect[3]);
                 if (!mix)
                     return eav_mem_alloc;
-                ov_lerp(mix, old, new, t);
+                ov_lerp(mix, old, old_x, new, new_x, t);
                 ov_blit(rgba, mix, x, y, 255);
                 av_frame_free(&mix);
             } else if (old) {
-                ov_blit(rgba, old, x, y, 255 - t);
+                ov_blit(rgba, old, x + old_x, y, 255 - t);
             } else if (new) {
-                ov_blit(rgba, new, x, y, t);
+                ov_blit(rgba, new, x + new_x, y, t);
             }
             continue;
         }
         if (new)
-            ov_blit(rgba, new, x, y, 255);
+            ov_blit(rgba, new, x + new_x, y, 255);
     }
 
     AVFrame *out = av_frame_alloc();
@@ -735,10 +760,28 @@ overlay_prepare(
         rect[1] = (int) (slot->y * enc->height);
         rect[2] = (int) (slot->size * enc->width);
         rect[3] = (int) (slot->h * enc->height);
+        if (slot->aspect > 0) {
+            /* The largest rect of the slot's aspect inside the size by h box: the width limits it, or the height.
+             * Without h the frame's height is the limit. Rounded, so that a box meant to be the picture's own
+             * size does not come out a pixel short and rescale it. */
+            float w = slot->size * enc->width;
+            float h = slot->h > 0 ? slot->h * enc->height : enc->height;
+            if (w / slot->aspect <= h)
+                h = w / slot->aspect;
+            else
+                w = h * slot->aspect;
+            rect[2] = (int) (w + 0.5f);
+            rect[3] = (int) (h + 0.5f);
+        }
         if (rect[2] < 1)
             rect[2] = 1;
         if (rect[3] < 1)
             rect[3] = 1;
+        /* x anchors the rect's left edge, centre or right edge, as it does for text */
+        if (slot->align == ov_align_center)
+            rect[0] -= rect[2] / 2;
+        else if (slot->align == ov_align_right)
+            rect[0] -= rect[2];
         if (rect[0] < x0) x0 = rect[0];
         if (rect[1] < y0) y0 = rect[1];
         if (rect[0] + rect[2] > x1) x1 = rect[0] + rect[2];
@@ -887,6 +930,13 @@ overlay_append_filter(
         int x = (int) (slot->x * enc_w);
         int y = (int) (slot->y * enc_h);
 
+        /* Inside an image slot the same fractions are of that slot's rect, which overlay_prepare laid out */
+        if (slot->in_slot >= 0 && slot->in_slot < ov->nslots && ov->slots[slot->in_slot].type == ov_slot_image) {
+            const int *rect = &st->slot_rect[slot->in_slot * 4];
+            font_size = (int) (slot->size * rect[3]);
+            x = rect[0] + (int) (slot->x * rect[2]);
+            y = rect[1] + (int) (slot->y * rect[3]);
+        }
         if (font_size < 1)
             font_size = 1;
         if (ov_quote(font, sizeof(font), slot->font_file) < 0) {
