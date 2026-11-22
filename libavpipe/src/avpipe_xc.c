@@ -139,12 +139,21 @@ check_stream_index(
     xcparams_t *params,
     coderctx_t *decoder_context)
 {
-    if (selected_audio_index(params, decoder_context->video_stream_index) >= 0)
+    if (selected_audio_index(params, decoder_context->video_stream_index) >= 0) {
+        elv_err("Invalid audio_index=%d: selected stream is video, url=%s",
+            decoder_context->video_stream_index, params->url);
         return eav_param;
-    if (selected_audio_index(params, decoder_context->data_scte35_stream_index) >= 0)
+    }
+    if (selected_audio_index(params, decoder_context->data_scte35_stream_index) >= 0) {
+        elv_err("Invalid audio_index=%d: selected stream is SCTE-35 data, url=%s",
+            decoder_context->data_scte35_stream_index, params->url);
         return eav_param;
-    if (selected_audio_index(params, decoder_context->data_stream_index) >= 0)
+    }
+    if (selected_audio_index(params, decoder_context->data_stream_index) >= 0) {
+        elv_err("Invalid audio_index=%d: selected stream is data, url=%s",
+            decoder_context->data_stream_index, params->url);
         return eav_param;
+    }
 
     return eav_success;
 }
@@ -289,8 +298,8 @@ prepare_decoder(
     }
 
     if (is_live_source(decoder_context)) {
-        av_dict_set(&opts, "probesize", "300M", 0);  // bytes
-        av_dict_set(&opts, "analyzeduration", "30000000", 0);  // microseconds
+        av_dict_set(&opts, "probesize", "50M", 0);  // bytes
+        av_dict_set(&opts, "analyzeduration", "10000000", 0);  // microseconds
     }
 
     /* Allocate AVFormatContext in format_context and find input file format */
@@ -534,6 +543,10 @@ prepare_decoder(
             decoder_context->codec_context[i]->thread_count = MPEGTS_THREAD_COUNT;
         else
             decoder_context->codec_context[i]->thread_count = DEFAULT_THREAD_COUNT;
+
+        /* Packet timestamps must use the demuxed stream timebase.
+         * Must set before avcodec_open2() (CUVID will warn if not set) */
+        decoder_context->codec_context[i]->pkt_timebase = decoder_context->stream[i]->time_base;
 
         /* Open the decoder (initialize the decoder codec_context[i] using given codec[i]).
          * codec[i] is NULL for data streams and for streams without a decoder, so don't open. */
