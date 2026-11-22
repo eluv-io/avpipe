@@ -267,8 +267,6 @@ prepare_decoder(
     prepare_input(in_handlers, inctx, decoder_context, seekable);
 
     AVDictionary *opts = NULL;
-    /* Important for detecting MPEG-TS interlacing (avoids probe from exiting early) */
-     av_dict_set(&opts, "scan_all_pmts", "1", 0);
     if (params && params->listen && is_live_source(decoder_context))
         av_dict_set(&opts, "listen", "1" , 0);
 
@@ -298,7 +296,14 @@ prepare_decoder(
     }
 
     if (is_live_source(decoder_context)) {
-        av_dict_set(&opts, "probesize", "50M", 0);  // bytes
+        if (is_live_source_udp(decoder_context)) {
+            /* For MPEG-TS scan all PMTs (required to determine interlacing). Accommodate high bitrate (UHD,JXS) */
+            av_dict_set(&opts, "scan_all_pmts", "1", 0);
+            av_dict_set(&opts, "probesize", "500M", 0);  // bytes
+        } else {
+            av_dict_set(&opts, "probesize", "50M", 0);  // bytes
+        }
+        /* Limit duration so the first part is not produced two quickly (upstream part rotation expects 10-15 sec between parts) */
         av_dict_set(&opts, "analyzeduration", "10000000", 0);  // microseconds
     }
 
