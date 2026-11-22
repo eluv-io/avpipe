@@ -20,6 +20,43 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
+// This interlaced capture exposes a problem in probing where it exits early
+// and doesn't provide 'filed order' without scan_all_pmts
+func TestDeinterlaceProbeFieldOrder(t *testing.T) {
+	capture := "../media/live_sports_20261106_1080i_5min.cap"
+	skipIfFileMissing(t, capture)
+	input, err := (captureInput{capture}).Open(0, "")
+	require.NoError(t, err)
+	defer input.Close()
+	source := filepath.Join(t.TempDir(), "input.ts")
+	f, err := os.Create(source)
+	require.NoError(t, err)
+	_, copyErr := io.CopyN(f, input, 20*1024*1024)
+	closeErr := f.Close()
+	require.NoError(t, copyErr)
+	require.NoError(t, closeErr)
+
+	previousInput, previousOutput := goavpipe.GetGlobalInputOpener(), goavpipe.GetGlobalOutputOpener()
+	t.Cleanup(func() { goavpipe.InitIOHandler(previousInput, previousOutput) })
+	goavpipe.InitIOHandler(deinterlaceInput{source}, &xc.FileOutputOpener{Dir: t.TempDir()})
+	for _, live := range []bool{false, true} {
+		t.Run(fmt.Sprintf("live=%t", live), func(t *testing.T) {
+			params := goavpipe.NewXcParams()
+			params.Url, params.Seekable = source, !live
+			params.XcType, params.Deinterlace = goavpipe.XcVideo, 1
+			if live {
+				params.Url = "udp://deinterlace-probe-test:1234"
+				params.InputCfg.BypassLibavReader = true
+			}
+			probe, err := avpipe.Probe(params)
+			require.NoError(t, err)
+			video := probe.StreamByCodecType("video")
+			require.NotNil(t, video)
+			require.Equal(t, "tt", video.FieldOrder)
+		})
+	}
+}
+
 // Replay captured TS bytes through custom I/O with a UDP URL.
 func TestDeinterlaceLiveCaptures(t *testing.T) {
 	if testing.Short() {

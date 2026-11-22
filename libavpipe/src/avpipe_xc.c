@@ -258,6 +258,8 @@ prepare_decoder(
     prepare_input(in_handlers, inctx, decoder_context, seekable);
 
     AVDictionary *opts = NULL;
+    /* Important for detecting MPEG-TS interlacing (avoids probe from exiting early) */
+     av_dict_set(&opts, "scan_all_pmts", "1", 0);
     if (params && params->listen && is_live_source(decoder_context))
         av_dict_set(&opts, "listen", "1" , 0);
 
@@ -294,6 +296,7 @@ prepare_decoder(
     /* Allocate AVFormatContext in format_context and find input file format */
     const char *open_url = (inctx->alt_url && inctx->alt_url[0]) ? inctx->alt_url : inctx->url;
     rc = avformat_open_input(&decoder_context->format_context, open_url, NULL, &opts);
+    av_dict_free(&opts);
     if (rc != 0) {
         elv_err("Could not open input file, err=%s (%d), url=%s", av_err2str(rc), rc, url);
         if (rc == AVERROR_EXIT)
