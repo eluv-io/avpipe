@@ -139,12 +139,21 @@ check_stream_index(
     xcparams_t *params,
     coderctx_t *decoder_context)
 {
-    if (selected_audio_index(params, decoder_context->video_stream_index) >= 0)
+    if (selected_audio_index(params, decoder_context->video_stream_index) >= 0) {
+        elv_err("Invalid audio_index=%d: selected stream is video, url=%s",
+            decoder_context->video_stream_index, params->url);
         return eav_param;
-    if (selected_audio_index(params, decoder_context->data_scte35_stream_index) >= 0)
+    }
+    if (selected_audio_index(params, decoder_context->data_scte35_stream_index) >= 0) {
+        elv_err("Invalid audio_index=%d: selected stream is SCTE-35 data, url=%s",
+            decoder_context->data_scte35_stream_index, params->url);
         return eav_param;
-    if (selected_audio_index(params, decoder_context->data_stream_index) >= 0)
+    }
+    if (selected_audio_index(params, decoder_context->data_stream_index) >= 0) {
+        elv_err("Invalid audio_index=%d: selected stream is data, url=%s",
+            decoder_context->data_stream_index, params->url);
         return eav_param;
+    }
 
     return eav_success;
 }
@@ -287,13 +296,21 @@ prepare_decoder(
     }
 
     if (is_live_source(decoder_context)) {
-        av_dict_set(&opts, "probesize", "300M", 0);  // bytes
-        av_dict_set(&opts, "analyzeduration", "30000000", 0);  // microseconds
+        if (is_live_source_udp(decoder_context)) {
+            /* For MPEG-TS scan all PMTs (required to determine interlacing). Accommodate high bitrate (UHD,JXS) */
+            av_dict_set(&opts, "scan_all_pmts", "1", 0);
+            av_dict_set(&opts, "probesize", "500M", 0);  // bytes
+        } else {
+            av_dict_set(&opts, "probesize", "50M", 0);  // bytes
+        }
+        /* Limit duration so the first part is not produced two quickly (upstream part rotation expects 10-15 sec between parts) */
+        av_dict_set(&opts, "analyzeduration", "10000000", 0);  // microseconds
     }
 
     /* Allocate AVFormatContext in format_context and find input file format */
     const char *open_url = (inctx->alt_url && inctx->alt_url[0]) ? inctx->alt_url : inctx->url;
     rc = avformat_open_input(&decoder_context->format_context, open_url, NULL, &opts);
+    av_dict_free(&opts);
     if (rc != 0) {
         elv_err("Could not open input file, err=%s (%d), url=%s", av_err2str(rc), rc, url);
         if (rc == AVERROR_EXIT)
@@ -531,6 +548,10 @@ prepare_decoder(
             decoder_context->codec_context[i]->thread_count = MPEGTS_THREAD_COUNT;
         else
             decoder_context->codec_context[i]->thread_count = DEFAULT_THREAD_COUNT;
+
+        /* Packet timestamps must use the demuxed stream timebase.
+         * Must set before avcodec_open2() (CUVID will warn if not set) */
+        decoder_context->codec_context[i]->pkt_timebase = decoder_context->stream[i]->time_base;
 
         /* Open the decoder (initialize the decoder codec_context[i] using given codec[i]).
          * codec[i] is NULL for data streams and for streams without a decoder, so don't open. */
