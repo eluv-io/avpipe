@@ -1,0 +1,28 @@
+SmartFeed Augmentor ABI 1 (smartfeed-augmentor-v0.1.1-91-g4c3b67f695, CUDA 12.0.140, sm 75,80,86,89,89-virtual, cudart static)
+
+Built 2026-09-25T23:54:14Z from 4c3b67f695cfed4628279dd5c557bc9c538952d2
+CUDA architectures: 75;80;86;89;89-virtual
+CUDA runtime: static
+
+Dynamic dependencies:
+  	linux-vdso.so.1 (0x000072ab69f7b000)
+  	libstdc++.so.6 => /lib/x86_64-linux-gnu/libstdc++.so.6 (0x000072ab69a00000)
+  	libm.so.6 => /lib/x86_64-linux-gnu/libm.so.6 (0x000072ab69cd0000)
+  	libgcc_s.so.1 => /lib/x86_64-linux-gnu/libgcc_s.so.1 (0x000072ab69ca2000)
+  	libc.so.6 => /lib/x86_64-linux-gnu/libc.so.6 (0x000072ab69600000)
+  	/lib64/ld-linux-x86-64.so.2 (0x000072ab69f7d000)
+
+Exported symbols:
+  sfa_abi_version@@SFA_1.0
+  sfa_augment@@SFA_1.0
+  sfa_build_info@@SFA_1.0
+  sfa_destroy@@SFA_1.0
+  sfa_get_stats@@SFA_1.0
+  sfa_init@@SFA_1.0
+  sfa_last_error@@SFA_1.0
+
+sha256:
+  8d75bc964c862c65fb99abe41e5d9eccc894184413b696f958d4b40c949f6338  ./README.md
+  c308c13a74a7dffc178941695d63e8982701cb6a10fe18115e17532ab55c70b2  ./augment_one_frame.c
+  5c149d1967d8542985991220614210f4814989e7c2609c6842129fbd20dae62f  ./libsfa_node.so
+  37a2e6f3b5385d63afe2af95195bca994d564a8a2d7ab19dfe909ecc264fec3b  ./smartfeed_augmentor.h
