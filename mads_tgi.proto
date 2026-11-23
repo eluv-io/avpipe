@@ -1,0 +1,129 @@
+// Payload encoding for TGI metadata streams over MADS.
+// These streams use Time Spec 0x03 (frame_offset).
+// See mads_proto_spec.md, "TGI metadata".
+//
+// The MADS PDU type selects the message:
+//   Program data (0x01)     -> Program
+//   Frame data (0x02)       -> Frame
+//   Change data (0x03)      -> not used in schema version 1; receivers skip it
+//
+// Compatibility: fields are only ever added. Receivers ignore unknown fields.
+// Field numbers are never reused.
+
+syntax = "proto3";
+
+package mads.tgi.v1;
+
+option go_package = "github.com/eluv-io/avpipe/mads/tgi/v1;tgiv1";
+
+// Frames per second as a fraction, for example 60000/1001 for 59.94.
+message Rational {
+  uint32 num = 1;
+  uint32 den = 2;
+}
+
+message Size {
+  uint32 width = 1;
+  uint32 height = 2;
+}
+
+// Format of the video the producer analysed. From TGI's "sourceFormat".
+message SourceFormat {
+  Size size = 1;         // e.g. 1920x1080
+  Rational fps = 2;      // e.g. 60000/1001
+  bool interlaced = 3;
+}
+
+// Pairs one frame-offset time with a media PTS, so the receiver can map
+// the producer's timeline onto the media timeline.
+message PtsAnchor {
+  uint64 time_ns = 1;    // MADS Time (frame offset, ns) of the anchor frame
+  uint64 pts_90k = 2;    // Unwrapped 90 kHz PTS of the same frame
+}
+
+// Sent as MADS program data, first and again whenever a receiver may join
+// the stream. Its MADS Time is the time it was sent (normally the Time of
+// the next Frame); it applies to the whole program regardless.
+message Program {
+  // Producer identity, e.g. "tgi-smartfeed-augmentor-node".
+  string producer = 1;
+  // Producer software version, for diagnostics.
+  string producer_version = 2;
+  // Version of the TGI per-frame JSON document. 1 for the current format.
+  uint32 schema_version = 3;
+
+  // Size of the space that masks and placement corners use (TGI
+  // "processingWidth/Height" and "canvasSize"), e.g. 1280x720.
+  Size processing_size = 4;
+  SourceFormat source_format = 5;
+
+  // Frame rate that defines the MADS Time field for this stream:
+  //   time_ns = round(n * den * 1e9 / num)
+  // Required. Normally equal to source_format.fps.
+  Rational time_rate = 6;
+  // Wall-clock time (Unix epoch, ms) at Time = 0, i.e. at the producer's
+  // origin. Informational; not used to match frames.
+  int64 origin_utc_ms = 7;
+  // Optional mapping onto the media's PTS timeline, if the producer knows it.
+  PtsAnchor pts_anchor = 8;
+
+  // Every placement name the producer may send (TGI placeholder "name",
+  // e.g. "LeftTop", "MidBottomLeft"). Lets the receiver check its configured
+  // creatives before the first frame.
+  repeated string placement_names = 9;
+}
+
+enum MaskEncoding {
+  MASK_ENCODING_UNSPECIFIED = 0;  // Invalid.
+  // Uncompressed GRAY8, row-major, width*height bytes, no row padding.
+  MASK_ENCODING_GRAY8_RAW = 1;
+  // GRAY8 as above, compressed with zlib (RFC 1950): Python zlib.compress,
+  // JavaScript CompressionStream("deflate"), Go compress/zlib.
+  // Receivers must support this encoding. Producers should use it.
+  MASK_ENCODING_GRAY8_ZLIB = 2;
+  // 8-bit grayscale PNG of width x height. Optional for receivers.
+  MASK_ENCODING_PNG = 3;
+}
+
+// One rectangle of the occlusion mask, in processing_size pixel coordinates.
+// Mask values: 255 = draw the ad, 0 = foreground hides the ad; values in
+// between blend.
+message MaskRegion {
+  uint32 x = 1;
+  uint32 y = 2;
+  uint32 width = 3;
+  uint32 height = 4;
+  MaskEncoding encoding = 5;
+  bytes data = 6;
+}
+
+// Sent as MADS frame data.
+message Frame {
+  // TGI's per-frame JSON document (the contents of N.json), UTF-8, passed
+  // unchanged to sfa_augment. Receivers need not parse it.
+  bytes document = 1;
+
+  // Typed copies of document fields, so receivers can decide what to do
+  // without parsing the JSON. Must agree with the document.
+  bool is_live = 2;      // "isLive"
+  bool has_mask = 3;     // "hasMask"
+
+  // The occlusion mask. The receiver builds a processing_size GRAY8 buffer
+  // filled with 0, then copies each region into it in order (later regions
+  // overwrite earlier ones where they overlap). Regions must lie inside
+  // processing_size.
+  //
+  // Producers should send one region per placement, cropped to the
+  // bounding box of its corners. Ads are never drawn outside the
+  // placements, so pixels outside every region do not matter. A producer
+  // with a full-frame mask may send it as one region covering the frame.
+  //
+  // Empty when has_mask is false; the receiver then passes no mask and
+  // the library draws nothing on that frame.
+  repeated MaskRegion mask = 4;
+
+  // Informational copies for logging and drift checks. Not used to match
+  // frames: the MADS Time field does that.
+  int64 utc_ms = 5;      // "UTC-msec": wall-clock processing time
+  string timecode = 6;   // "timecode": producer timecode, 59.94 drop-frame
+}
