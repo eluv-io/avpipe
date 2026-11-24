@@ -40,3 +40,39 @@ func WithBoard(layout *goavpipe.OverlayParams) (*goavpipe.OverlayParams, error) 
 	out.Slots[board].From = &goavpipe.OverlayBinding{Renderer: goavpipe.OverlayRendererTemplate, Keys: BoardKeys}
 	return &out, nil
 }
+
+// InitPicture is the library name WithInit gives the picture of a template before any state.
+const InitPicture = "template:init"
+
+// WithInit returns layout with png as the default picture of every slot bound to a template: png is the template
+// drawn with no state (an empty set of keys), and the slot shows it until an event names a picture, which the
+// stamper's events do from the feed's first value for one of the binding's keys on. So the frames before the
+// first event, and a job whose feed never has a value, show the template's own idea of an empty board, which may
+// be nothing at all. A slot with a default of its own keeps it. The picture goes into the library as InitPicture.
+// The layout given is not modified; without png or without a slot to give it to, it is returned as it is.
+func WithInit(layout *goavpipe.OverlayParams, png []byte) *goavpipe.OverlayParams {
+	if len(png) == 0 {
+		return layout
+	}
+	var out *goavpipe.OverlayParams
+	for i, s := range layout.Slots {
+		if s.From == nil || s.From.Renderer != goavpipe.OverlayRendererTemplate || s.Default != "" {
+			continue
+		}
+		if out == nil {
+			c := *layout
+			out = &c
+			out.Slots = append([]goavpipe.OverlaySlot(nil), layout.Slots...)
+			out.Images = make(map[string][]byte, len(layout.Images)+1)
+			for name, b := range layout.Images {
+				out.Images[name] = b
+			}
+			out.Images[InitPicture] = png
+		}
+		out.Slots[i].Default = InitPicture
+	}
+	if out == nil {
+		return layout
+	}
+	return out
+}

@@ -101,10 +101,66 @@ func TestANCRenderedBoard(t *testing.T) {
 	assert.Equal(t, []string{"clock", "shot"}, bindings.ClockSlots())
 	assert.True(t, bindings.Rendered())
 
-	// Nothing known: no board
+	// Nothing known: the board is left out, so its slot stays on its default picture. The other slots are hidden.
 	empty, err := NewBindings(NewVenueFeed(), boardLayout(t), nil)
 	require.NoError(t, err)
-	assert.True(t, empty.Slots(Keys{}, 0, 1000)["board"].Hide)
+	slots := empty.Slots(Keys{}, 0, 1000)
+	assert.NotContains(t, slots, "board")
+	assert.True(t, slots["clock"].Hide)
+}
+
+// TestBoardBeforeState: until the feed has a value for the board, no event names the board's picture and nothing
+// is rendered, so the slot stays on its default. A template with no keys is never named at all.
+func TestBoardBeforeState(t *testing.T) {
+	log := NewLog()
+	feed := NewVenueFeed()
+	bindings, err := NewBindings(feed, boardLayout(t), nil)
+	require.NoError(t, err)
+	renders := 0
+	bindings.Render = func(string, map[string]any) { renders++ }
+	f := &feeder{a: NewANC(log, 1000, feed, bindings), pts: 1800000000}
+
+	f.frame(ancFrame(venueMessage(1, "30", "12:00", "", "", "0", "0", "1")...))
+	events := log.Events(goavpipe.KindOverlay)
+	require.Len(t, events, 1)
+	ev := events[0].(goavpipe.OverlayEvent)
+	assert.NotContains(t, ev.Slots, "board")
+	require.NotNil(t, ev.Slots["clock"].Clock, "the clock does not wait for the board")
+	assert.Zero(t, renders)
+
+	f.frame(ancFrame(venueMessage(2, "4", "3", "1", "1st")...))
+	events = log.Events(goavpipe.KindOverlay)
+	require.Len(t, events, 2)
+	require.NotNil(t, events[1].(goavpipe.OverlayEvent).Slots["board"].Image)
+	assert.Equal(t, 1, renders)
+
+	still, err := NewBindings(NewVenueFeed(), &goavpipe.OverlayParams{Slots: []goavpipe.OverlaySlot{
+		{Name: "bug", Type: goavpipe.OverlaySlotImage, From: &goavpipe.OverlayBinding{Renderer: goavpipe.OverlayRendererTemplate}},
+	}}, nil)
+	require.NoError(t, err)
+	assert.True(t, still.Rendered())
+	assert.Empty(t, still.Slots(Keys{"home": "HOM", "period": "1st"}, 0, 1000))
+}
+
+// TestWithInit: the picture of the template with no state becomes the default of the template's slot, in a copy.
+func TestWithInit(t *testing.T) {
+	layout := boardLayout(t)
+	png := []byte{1, 2, 3}
+	got := WithInit(layout, png)
+	require.NotSame(t, layout, got)
+	assert.Equal(t, InitPicture, got.Slots[0].Default)
+	assert.Equal(t, png, got.Images[InitPicture])
+	assert.Empty(t, got.Slots[1].Default, "a clock slot has no picture")
+	assert.Empty(t, layout.Slots[0].Default, "the layout given is not modified")
+	assert.Empty(t, layout.Images)
+
+	assert.Same(t, layout, WithInit(layout, nil), "no picture")
+	plain := &goavpipe.OverlayParams{Slots: []goavpipe.OverlaySlot{{Name: "logo", Type: goavpipe.OverlaySlotImage}}}
+	assert.Same(t, plain, WithInit(plain, png), "no template")
+	own := boardLayout(t)
+	own.Images = map[string][]byte{"idle": {9}}
+	own.Slots[0].Default = "idle"
+	assert.Same(t, own, WithInit(own, png), "the slot's own default stays")
 }
 
 // TestRenderClient: a request is one JSON line with the hash and the state; the renderer's answers come back

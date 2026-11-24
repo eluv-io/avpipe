@@ -463,7 +463,10 @@ const OverlayRendererTemplate = "template"
 //   - Key on an image slot: the library image named by the key's value, or with Images the image Images names
 //     for that value. The slot is hidden while the key is unset, and with Images for a value it has no entry for.
 //   - Renderer OverlayRendererTemplate with Keys on an image slot: one picture of those keys, named by the hash
-//     of their values and drawn once per distinct set of values. The slot is hidden while every key is unset.
+//     of their values and drawn once per distinct set of values. While every key is unset no event names a
+//     picture for the slot, so it shows its Default: the picture of the template before any state when whoever
+//     runs the job supplies one, and nothing otherwise. Keys may be empty, for a template that shows no state:
+//     the Default is then all the slot ever shows.
 //
 // A text or clock slot without a binding takes the feed's default for its name, or else the key of its own name
 // when the feed publishes one (a text slot named period shows the key period). An image slot without a binding,

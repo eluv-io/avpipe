@@ -169,9 +169,6 @@ func (s *boundSlot) check(kinds map[string]KeyKind, layout *goavpipe.OverlayPara
 		}
 		return nil
 	case s.typ == goavpipe.OverlaySlotImage && template:
-		if len(s.b.Keys) == 0 {
-			return fmt.Errorf("a template binding lists the keys the picture shows")
-		}
 		for _, key := range s.b.Keys {
 			if err := value(key); err != nil {
 				return err
@@ -221,14 +218,29 @@ func keyText(v any) string {
 }
 
 // Slots is the value of every bound slot for keys at pts: a running timer is carried from its sample to pts, in
-// timescale units. A slot with nothing to show is hidden.
+// timescale units. A slot with nothing to show is hidden. A template's slot is left out while none of its keys
+// has a value: an event that does not name a slot's picture leaves the slot on its default, the picture of the
+// template before any state.
 func (b *Bindings) Slots(keys Keys, pts, timescale int64) map[string]goavpipe.SlotValue {
 	out := make(map[string]goavpipe.SlotValue, len(b.slots))
 	for i := range b.slots {
 		s := &b.slots[i]
+		if s.b.Renderer == goavpipe.OverlayRendererTemplate && !s.hasState(keys) {
+			continue
+		}
 		out[s.name] = b.value(s, keys, pts, timescale)
 	}
 	return out
+}
+
+// hasState reports whether any key of a template binding has a value.
+func (s *boundSlot) hasState(keys Keys) bool {
+	for _, key := range s.b.Keys {
+		if _, ok := keys[key]; ok {
+			return true
+		}
+	}
+	return false
 }
 
 func (b *Bindings) value(s *boundSlot, keys Keys, pts, timescale int64) goavpipe.SlotValue {
@@ -246,9 +258,6 @@ func (b *Bindings) value(s *boundSlot, keys Keys, pts, timescale int64) goavpipe
 			if v, ok := keys[key]; ok {
 				state[key] = v
 			}
-		}
-		if len(state) == 0 {
-			return goavpipe.HideValue()
 		}
 		hash := StateHash(state)
 		b.mu.Lock()
