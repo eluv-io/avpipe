@@ -433,9 +433,10 @@ func TestBindingForms(t *testing.T) {
 		rendered = append(rendered, state)
 	}
 
-	// Nothing published: every slot hidden, nothing rendered
+	// Nothing published: every slot hidden but the template's, which is left on its default; nothing rendered
 	slots := b.Slots(Keys{}, 0, 1000)
-	assert.Len(t, slots, 7)
+	assert.Len(t, slots, 6)
+	assert.NotContains(t, slots, "board")
 	for name, v := range slots {
 		assert.True(t, v.Hide, name)
 	}
@@ -477,7 +478,6 @@ func TestBindingForms(t *testing.T) {
 	bad(goavpipe.OverlaySlotClock, goavpipe.OverlayBinding{Key: "period"}, "does not fit a clock slot")
 	bad(goavpipe.OverlaySlotImage, goavpipe.OverlayBinding{Key: "score_home"}, "not a string")
 	bad(goavpipe.OverlaySlotImage, goavpipe.OverlayBinding{Key: "poss", Images: map[string]string{"home": "nosuch"}}, "library")
-	bad(goavpipe.OverlaySlotImage, goavpipe.OverlayBinding{Renderer: goavpipe.OverlayRendererTemplate}, "lists the keys")
 	bad(goavpipe.OverlaySlotImage, goavpipe.OverlayBinding{Renderer: goavpipe.OverlayRendererTemplate, Keys: []string{"shot"}}, "is a timer")
 	bad(goavpipe.OverlaySlotImage, goavpipe.OverlayBinding{Renderer: "chrome", Keys: []string{"home"}}, "unknown renderer")
 }
